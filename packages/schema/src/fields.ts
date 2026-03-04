@@ -1,4 +1,5 @@
 import type {
+  ArrayFieldMeta,
   DefaultValueDef,
   DecimalFieldMeta,
   EnumFieldMeta,
@@ -69,6 +70,11 @@ interface VectorOpts {
   required?: boolean
 }
 
+interface ArrayOpts {
+  required?: boolean
+  default?: DefaultValueDef
+}
+
 // ─── Internal builder ─────────────────────────────────────────────────────────
 
 function makeField<TOutput>(meta: Field<TOutput>["__meta"]): Field<TOutput> {
@@ -122,6 +128,26 @@ export function integer(opts: NumberOpts = {}): Field<number> | Field<number | n
   return makeField(scalarMeta("integer", "INTEGER", { ...opts, ...(check && { check }) }))
 }
 
+export function smallInt(opts: NumberOpts & { required: true }): Field<number>
+export function smallInt(opts?: NumberOpts): Field<number | null>
+export function smallInt(opts: NumberOpts = {}): Field<number> | Field<number | null> {
+  const checks: string[] = []
+  if (opts.min !== undefined) checks.push(`"{name}" >= ${opts.min}`)
+  if (opts.max !== undefined) checks.push(`"{name}" <= ${opts.max}`)
+  const check = checks.length ? checks.join(" AND ") : undefined
+  return makeField(scalarMeta("smallInt", "SMALLINT", { ...opts, ...(check && { check }) }))
+}
+
+export function serial(opts?: Omit<BaseOpts, "required" | "default">): Field<number>
+export function serial(opts: Omit<BaseOpts, "required" | "default"> = {}): Field<number> {
+  return makeField(scalarMeta("serial", "SERIAL", { ...opts, required: true }))
+}
+
+export function bigSerial(opts?: Omit<BaseOpts, "required" | "default">): Field<string>
+export function bigSerial(opts: Omit<BaseOpts, "required" | "default"> = {}): Field<string> {
+  return makeField(scalarMeta("bigSerial", "BIGSERIAL", { ...opts, required: true }))
+}
+
 export function float(opts: BaseOpts & { required: true }): Field<number>
 export function float(opts?: BaseOpts): Field<number | null>
 export function float(opts: BaseOpts = {}): Field<number> | Field<number | null> {
@@ -132,6 +158,18 @@ export function boolean(opts: BaseOpts & { required: true }): Field<boolean>
 export function boolean(opts?: BaseOpts): Field<boolean | null>
 export function boolean(opts: BaseOpts = {}): Field<boolean> | Field<boolean | null> {
   return makeField(scalarMeta("boolean", "BOOLEAN", opts))
+}
+
+export function date(opts: BaseOpts & { required: true }): Field<string>
+export function date(opts?: BaseOpts): Field<string | null>
+export function date(opts: BaseOpts = {}): Field<string> | Field<string | null> {
+  return makeField(scalarMeta("date", "DATE", opts))
+}
+
+export function timestamp(opts: BaseOpts & { required: true }): Field<string>
+export function timestamp(opts?: BaseOpts): Field<string | null>
+export function timestamp(opts: BaseOpts = {}): Field<string> | Field<string | null> {
+  return makeField(scalarMeta("timestamp", "TIMESTAMP", opts))
 }
 
 export function datetime(opts: BaseOpts & { required: true }): Field<string>
@@ -150,6 +188,66 @@ export function email(opts: BaseOpts & { required: true }): Field<string>
 export function email(opts?: BaseOpts): Field<string | null>
 export function email(opts: BaseOpts = {}): Field<string> | Field<string | null> {
   return makeField(scalarMeta("email", "TEXT", opts))
+}
+
+export function url(opts: BaseOpts & { required: true }): Field<string>
+export function url(opts?: BaseOpts): Field<string | null>
+export function url(opts: BaseOpts = {}): Field<string> | Field<string | null> {
+  return makeField(scalarMeta("url", "TEXT", opts))
+}
+
+export function ip(opts: BaseOpts & { required: true }): Field<string>
+export function ip(opts?: BaseOpts): Field<string | null>
+export function ip(opts: BaseOpts = {}): Field<string> | Field<string | null> {
+  return makeField(scalarMeta("ip", "INET", opts))
+}
+
+export function cidr(opts: BaseOpts & { required: true }): Field<string>
+export function cidr(opts?: BaseOpts): Field<string | null>
+export function cidr(opts: BaseOpts = {}): Field<string> | Field<string | null> {
+  return makeField(scalarMeta("cidr", "CIDR", opts))
+}
+
+export function macaddr(opts: BaseOpts & { required: true }): Field<string>
+export function macaddr(opts?: BaseOpts): Field<string | null>
+export function macaddr(opts: BaseOpts = {}): Field<string> | Field<string | null> {
+  return makeField(scalarMeta("macaddr", "MACADDR", opts))
+}
+
+export function interval(opts: BaseOpts & { required: true }): Field<string>
+export function interval(opts?: BaseOpts): Field<string | null>
+export function interval(opts: BaseOpts = {}): Field<string> | Field<string | null> {
+  return makeField(scalarMeta("interval", "INTERVAL", opts))
+}
+
+export function tsquery(opts: BaseOpts & { required: true }): Field<string>
+export function tsquery(opts?: BaseOpts): Field<string | null>
+export function tsquery(opts: BaseOpts = {}): Field<string> | Field<string | null> {
+  return makeField(scalarMeta("tsquery", "TSQUERY", opts))
+}
+
+export function tsvector(opts: BaseOpts & { required: true }): Field<string>
+export function tsvector(opts?: BaseOpts): Field<string | null>
+export function tsvector(opts: BaseOpts = {}): Field<string> | Field<string | null> {
+  return makeField(scalarMeta("tsvector", "TSVECTOR", opts))
+}
+
+export function bytea(opts: BaseOpts & { required: true }): Field<Uint8Array>
+export function bytea(opts?: BaseOpts): Field<Uint8Array | null>
+export function bytea(opts: BaseOpts = {}): Field<Uint8Array> | Field<Uint8Array | null> {
+  return makeField(scalarMeta("bytea", "BYTEA", opts))
+}
+
+export function money(opts: BaseOpts & { required: true }): Field<string>
+export function money(opts?: BaseOpts): Field<string | null>
+export function money(opts: BaseOpts = {}): Field<string> | Field<string | null> {
+  return makeField(scalarMeta("money", "MONEY", opts))
+}
+
+export function xml(opts: BaseOpts & { required: true }): Field<string>
+export function xml(opts?: BaseOpts): Field<string | null>
+export function xml(opts: BaseOpts = {}): Field<string> | Field<string | null> {
+  return makeField(scalarMeta("xml", "XML", opts))
 }
 
 export function bigInt(opts: BaseOpts & { required: true }): Field<string>
@@ -291,17 +389,47 @@ export function vector(opts: VectorOpts): Field<number[]> | Field<number[] | nul
   return makeField(meta)
 }
 
+// ─── Array ───────────────────────────────────────────────────────────────────
+
+export function arrayOf(elementPgType: string, opts: ArrayOpts & { required: true }): Field<unknown[]>
+export function arrayOf(elementPgType: string, opts?: ArrayOpts): Field<unknown[] | null>
+export function arrayOf(elementPgType: string, opts: ArrayOpts = {}): Field<unknown[]> | Field<unknown[] | null> {
+  const meta: ArrayFieldMeta = {
+    kind: "array",
+    pgType: `${elementPgType}[]`,
+    elementType: elementPgType,
+    required: opts.required ?? false,
+    ...(opts.default !== undefined && { default: opts.default }),
+  }
+  return makeField(meta)
+}
+
 // ─── field namespace ─────────────────────────────────────────────────────────
 
 export const field = {
   text,
   richText,
   integer,
+  smallInt,
+  serial,
+  bigSerial,
   float,
   boolean,
+  date,
+  timestamp,
   datetime,
   uuid,
   email,
+  url,
+  ip,
+  cidr,
+  macaddr,
+  interval,
+  tsquery,
+  tsvector,
+  bytea,
+  money,
+  xml,
   bigInt,
   slug,
   enum: enumField,
@@ -311,4 +439,5 @@ export const field = {
   file,
   geo,
   vector,
+  arrayOf,
 } as const

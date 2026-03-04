@@ -73,6 +73,14 @@ export interface VectorFieldMeta {
   dimensions: number
 }
 
+export interface ArrayFieldMeta {
+  kind: "array"
+  pgType: string
+  elementType: string
+  required: boolean
+  default?: DefaultValueDef
+}
+
 export interface RelationMeta {
   kind: "relation"
   cardinality: RelationCardinality
@@ -131,6 +139,7 @@ export interface Field<TOutput> {
     | StorageFieldMeta
     | GeoFieldMeta
     | VectorFieldMeta
+    | ArrayFieldMeta
     | { kind: CompositeKind }
 }
 
