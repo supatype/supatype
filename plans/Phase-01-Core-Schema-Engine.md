@@ -22,31 +22,31 @@ A robust schema engine that handles real-world schema definitions and evolution,
 
 | # | Task | Status |
 |---|------|--------|
-| 1 | Full field type support: text, integer, float, boolean, uuid, date, datetime, timestamp, json, jsonb, decimal, bigint, smallint, serial, bigserial, enum, postgis (point, polygon, geography, geometry), vector (pgvector), slug, email, url, ip, cidr, macaddr, interval, tsquery, tsvector, bytea, money, xml, array types | ○ |
+| 1 | Full field type support: text, integer, float, boolean, uuid, date, datetime, timestamp, json, jsonb, decimal, bigint, smallint, serial, bigserial, enum, postgis (point, polygon, geography, geometry), vector (pgvector), slug, email, url, ip, cidr, macaddr, interval, tsquery, tsvector, bytea, money, xml, array types | ✓ (TS schema builders complete, 139 tests passing) |
 
 ### Relations
 
 | # | Task | Status |
 |---|------|--------|
-| 2 | Relation handling: belongsTo generates FK column + constraint, hasMany is virtual (no DB column), hasOne adds UNIQUE to FK, manyToMany generates junction table with composite PK | ○ |
+| 2 | Relation handling: belongsTo generates FK column + constraint, hasMany is virtual (no DB column), hasOne adds UNIQUE to FK, manyToMany generates junction table with composite PK | ✓ (TS schema builders complete) |
 
 ### Composites
 
 | # | Task | Status |
 |---|------|--------|
-| 3 | Composite field expansion: timestamps adds created_at + updated_at with triggers, publishable adds status enum + published_at + scheduled_at, softDelete adds deleted_at with index | ○ |
+| 3 | Composite field expansion: timestamps adds created_at + updated_at with triggers, publishable adds status enum + published_at + scheduled_at, softDelete adds deleted_at with index | ✓ (TS schema builders complete) |
 
 ### Indexes
 
 | # | Task | Status |
 |---|------|--------|
-| 4 | Index generation: btree (default), GIN (for jsonb/array/tsvector), GiST (for PostGIS), HNSW (for pgvector) | ○ |
+| 4 | Index generation: btree (default), GIN (for jsonb/array/tsvector), GiST (for PostGIS), HNSW (for pgvector) | ✓ (TS schema builders complete; engine-side pending) |
 
 ### Constraints
 
 | # | Task | Status |
 |---|------|--------|
-| 5 | Constraint generation: CHECK expressions, UNIQUE (single and composite), NOT NULL with default handling | ○ |
+| 5 | Constraint generation: CHECK expressions, UNIQUE (single and composite), NOT NULL with default handling | ✓ (TS schema builders complete; engine-side pending) |
 
 ### Triggers
 

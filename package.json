@@ -14,7 +14,8 @@
   },
   "devDependencies": {
     "turbo": "^2",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.0.18"
   },
   "packageManager": "pnpm@10.6.0"
 }

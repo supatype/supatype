@@ -1,4 +1,4 @@
-export { field, text, richText, integer, float, boolean, datetime, uuid, email, bigInt, slug, decimal, json, image, file, geo, vector, enumField } from "./fields.js"
+export { field, text, richText, integer, smallInt, serial, bigSerial, float, boolean, date, timestamp, datetime, uuid, email, url, ip, cidr, macaddr, interval, tsquery, tsvector, bytea, money, xml, bigInt, slug, decimal, json, image, file, geo, vector, arrayOf, enumField } from "./fields.js"
 export type { StorageReference } from "./fields.js"
 export { relation, belongsTo, hasMany, hasOne, manyToMany } from "./relations.js"
 export { access, publicAccess, privateAccess, owner, role, custom } from "./access.js"
@@ -23,4 +23,6 @@ export type {
   SchemaAst,
   ModelAst,
   FieldAst,
+  ArrayFieldMeta,
+  DefaultValueDef,
 } from "./types.js"

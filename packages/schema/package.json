@@ -16,10 +16,11 @@
     "build": "tsc --project tsconfig.json",
     "dev": "tsc --project tsconfig.json --watch",
     "typecheck": "tsc --project tsconfig.json --noEmit",
-    "test": "node --experimental-vm-modules ../../node_modules/.bin/jest",
+    "test": "vitest run",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "devDependencies": {
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.0.18"
   }
 }
