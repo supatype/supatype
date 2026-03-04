@@ -2,6 +2,44 @@
 
 ---
 
+## 2026-03-04 — Phase 1: full field type coverage & test fixtures
+
+### Changes
+
+#### 1. Added 16 missing field types to `@definatype/schema`
+- **File:** `packages/schema/src/fields.ts`
+- **New types:** `date` (DATE), `timestamp` (TIMESTAMP without TZ), `smallInt` (SMALLINT), `serial` (SERIAL, always required), `bigSerial` (BIGSERIAL), `url` (TEXT), `ip` (INET), `cidr` (CIDR), `macaddr` (MACADDR), `interval` (INTERVAL), `tsquery` (TSQUERY), `tsvector` (TSVECTOR), `bytea` (BYTEA), `money` (MONEY), `xml` (XML), `arrayOf` (element type + `[]`)
+- **New type:** `ArrayFieldMeta` in `types.ts` for array field metadata
+
+#### 2. Created 10 test fixtures
+All fixtures in `packages/schema/tests/fixtures/`:
+- `basic_blog` — Posts, users, categories, comments, tags (manyToMany)
+- `ecommerce` — Products, variants, orders, order items, serial orderNumber
+- `saas_multi_tenant` — Organisations, members, projects, tasks, labels, audit log (IP field)
+- `cms_content` — Pages, blocks, media, folders, versions, nav menus (publishable composite)
+- `geospatial` — Locations (point), regions (polygon), routes (linestring), geofences (interval field)
+- `vector_search` — Documents, chunks (1536-dim embeddings), collections, search queries (tsvector + tsquery)
+- `self_referential` — Categories, employees, nested comments, menu items (all self-referencing)
+- `many_to_many` — Students-courses, clubs, articles-tags, course prerequisites (self-referencing M2M)
+- `soft_delete` — Workspaces, folders, documents, API keys (arrayOf TEXT), notifications
+- `kitchen_sink` — ALL scalar types, ALL relation types, ALL access patterns, ALL composites, ALL index types
+
+#### 3. Test suite
+- Added vitest (replacing Jest placeholder)
+- 4 test files, 139 tests total:
+  - `fields.test.ts` — 47 tests for every field type
+  - `model.test.ts` — 9 tests for model builder
+  - `serialiser.test.ts` — 13 tests for JSON AST serialisation
+  - `fixtures.test.ts` — 70 tests (7 assertions x 10 fixtures)
+
+### Status
+- `pnpm --filter @definatype/schema test`: 139/139 passing
+- `pnpm turbo run typecheck`: all packages clean
+- Phase 1 tasks 1-5 (TS-side) marked complete in plan
+- Tasks 6-13 are engine-side (separate repo)
+
+---
+
 ## 2026-03-04 — Phase 0 integration tests: all passing
 
 ### Context
