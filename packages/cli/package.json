@@ -1,0 +1,31 @@
+{
+  "name": "@definatype/cli",
+  "version": "0.1.0",
+  "description": "Definatype CLI — schema push, introspect, generate",
+  "type": "module",
+  "bin": {
+    "definatype": "./bin/definatype.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "dev": "tsc --project tsconfig.json --watch",
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "postinstall": "node -e \"const f='./dist/scripts/postinstall.js';require('fs').existsSync(f)&&require(f)\"",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@definatype/schema": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5"
+  }
+}

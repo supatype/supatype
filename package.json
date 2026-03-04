@@ -1,0 +1,20 @@
+{
+  "name": "definatype",
+  "private": true,
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "build:engine": "cargo build --workspace",
+    "build:engine:release": "cargo build --workspace --release",
+    "test:engine": "cargo test --workspace",
+    "clean": "turbo run clean && cargo clean"
+  },
+  "devDependencies": {
+    "turbo": "^2",
+    "typescript": "^5"
+  },
+  "packageManager": "pnpm@10.6.0"
+}
