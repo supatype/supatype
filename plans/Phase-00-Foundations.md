@@ -1,6 +1,6 @@
 # Phase 0 — Foundations
 
-> **Definatype** · Weeks 1–4 · March 2026 · Draft
+> **Supatype** · Weeks 1–4 · March 2026 · Draft
 
 ---
 
@@ -34,7 +34,7 @@ A Rust binary that takes a TypeScript schema definition, generates a Postgres mi
 
 | # | Task | Status |
 |---|------|--------|
-| 8 | Set up @definatype/schema package — TypeScript field/model/relation builder functions | ○ |
+| 8 | Set up @supatype/schema package — TypeScript field/model/relation builder functions | ○ |
 | 9 | Implement serialiser — TypeScript runtime objects to JSON AST for engine consumption | ○ |
 
 ### Build
@@ -53,8 +53,8 @@ A Rust binary that takes a TypeScript schema definition, generates a Postgres mi
 
 - The engine is a compiled Rust binary communicating via JSON over stdin/stdout. All commands (parse, introspect, diff, migrate, generate) follow this pattern.
 - Key Rust crates: serde/serde_json (serialisation), tokio-postgres or sqlx (DB access), clap (CLI), similar (string similarity for future rename detection).
-- The Cargo workspace should separate concerns: definatype-ast (types), definatype-introspect (Postgres reader), definatype-diff (differ), definatype-sql (SQL generator), definatype-ts (TypeScript generator), definatype-engine (CLI binary linking all crates).
-- The @definatype/schema TypeScript package uses builder pattern with generic type inference — model() returns a typed builder, field.text() returns a TextFieldBuilder, etc. The serialiser walks the builder graph and emits JSON AST.
+- The Cargo workspace should separate concerns: definatype-ast (types), definatype-introspect (Postgres reader), definatype-diff (differ), definatype-sql (SQL generator), definatype-ts (TypeScript generator), supatype-engine (CLI binary linking all crates).
+- The @supatype/schema TypeScript package uses builder pattern with generic type inference — model() returns a typed builder, field.text() returns a TextFieldBuilder, etc. The serialiser walks the builder graph and emits JSON AST.
 
 ## Risks & Mitigations
 

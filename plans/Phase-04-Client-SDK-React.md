@@ -1,6 +1,6 @@
 # Phase 4 — Client SDK & React
 
-> **Definatype** · Weeks 23–28 · March 2026 · Draft
+> **Supatype** · Weeks 23–28 · March 2026 · Draft
 
 ---
 
@@ -22,22 +22,22 @@ A frontend engineer can npm install the SDK, import generated types, and have fu
 
 | # | Task | Status |
 |---|------|--------|
-| 1 | @definatype/client: query builder — .from('posts').select('id, title, author(name)') wrapping PostgREST query syntax with TypeScript generics | ○ |
-| 2 | @definatype/client: mutation methods — .from('posts').insert({...}), .update({...}).eq('id', x), .delete().eq('id', x), .upsert({...}) | ○ |
-| 3 | @definatype/client: relation embedding — .select('*, comments(*, author(*))') with typed nested responses | ○ |
-| 4 | @definatype/client: filter operators — .eq(), .neq(), .gt(), .lt(), .gte(), .lte(), .like(), .ilike(), .in(), .is(), .contains(), .overlaps() | ○ |
-| 5 | @definatype/client: pagination — .range(0, 9), .limit(10), .offset(20), response headers for total count | ○ |
-| 6 | @definatype/client: ordering — .order('created_at', { ascending: false }), multi-column ordering | ○ |
+| 1 | @supatype/client: query builder — .from('posts').select('id, title, author(name)') wrapping PostgREST query syntax with TypeScript generics | ○ |
+| 2 | @supatype/client: mutation methods — .from('posts').insert({...}), .update({...}).eq('id', x), .delete().eq('id', x), .upsert({...}) | ○ |
+| 3 | @supatype/client: relation embedding — .select('*, comments(*, author(*))') with typed nested responses | ○ |
+| 4 | @supatype/client: filter operators — .eq(), .neq(), .gt(), .lt(), .gte(), .lte(), .like(), .ilike(), .in(), .is(), .contains(), .overlaps() | ○ |
+| 5 | @supatype/client: pagination — .range(0, 9), .limit(10), .offset(20), response headers for total count | ○ |
+| 6 | @supatype/client: ordering — .order('created_at', { ascending: false }), multi-column ordering | ○ |
 
 ### React
 
 | # | Task | Status |
 |---|------|--------|
-| 7 | @definatype/react: DefinatypeProvider context — initialises client, provides to component tree | ○ |
-| 8 | @definatype/react: useQuery hook — fetches data with caching, returns { data, error, loading, refetch } | ○ |
-| 9 | @definatype/react: useMutation hook — returns { mutate, data, error, loading } with optimistic updates | ○ |
-| 10 | @definatype/react: useSubscription hook — placeholder for realtime (Phase 8), returns stale data with flag | ○ |
-| 11 | @definatype/react-auth: pre-built LoginForm and SignUpForm components with sensible defaults and customisation props | ○ |
+| 7 | @supatype/react: SupatypeProvider context — initialises client, provides to component tree | ○ |
+| 8 | @supatype/react: useQuery hook — fetches data with caching, returns { data, error, loading, refetch } | ○ |
+| 9 | @supatype/react: useMutation hook — returns { mutate, data, error, loading } with optimistic updates | ○ |
+| 10 | @supatype/react: useSubscription hook — placeholder for realtime (Phase 8), returns stale data with flag | ○ |
+| 11 | @supatype/react-auth: pre-built LoginForm and SignUpForm components with sensible defaults and customisation props | ○ |
 
 ### Testing
 
@@ -57,7 +57,7 @@ A frontend engineer can npm install the SDK, import generated types, and have fu
 - The query builder doesn't execute queries — it builds a PostgREST URL. The client sends HTTP requests to the Kong gateway which routes to PostgREST.
 - Relation embedding uses PostgREST's resource embedding syntax (?select=*,comments(*)) which uses FK relationships to join data.
 - The React hooks use a simple cache layer (not a full state manager) — SWR-style stale-while-revalidate pattern. No dependency on React Query or SWR libraries.
-- GraphQL is also available via @definatype/client: .graphql() method that sends queries to the pg_graphql endpoint.
+- GraphQL is also available via @supatype/client: .graphql() method that sends queries to the pg_graphql endpoint.
 
 ## Risks & Mitigations
 

@@ -1,12 +1,12 @@
 # Phase 9 — Cloud MVP
 
-> **Definatype** · Weeks 55–68 · March 2026 · Draft
+> **Supatype** · Weeks 55–68 · March 2026 · Draft
 
 ---
 
 ## Overview
 
-Launch the public cloud beta. Developers can sign up, create a project, and deploy their Definatype application to managed infrastructure on Hetzner. Billing, monitoring, and basic operations are functional.
+Launch the public cloud beta. Developers can sign up, create a project, and deploy their Supatype application to managed infrastructure on Hetzner. Billing, monitoring, and basic operations are functional.
 
 ## Dependencies
 
@@ -61,7 +61,7 @@ Cloud beta is live. Developers can sign up, create a project, push their schema,
 
 | # | Task | Status |
 |---|------|--------|
-| 10 | `npx definatype link` and `npx definatype deploy` commands — connect local project to cloud, push schema to remote | ○ |
+| 10 | `npx supatype link` and `npx supatype deploy` commands — connect local project to cloud, push schema to remote | ○ |
 
 ### Networking
 
@@ -120,7 +120,7 @@ Phase 9 is complete when:
 
 - [ ] Developer can sign up and create a project in under 2 minutes
 - [ ] Project provisioning completes in under 60 seconds
-- [ ] `npx definatype deploy` pushes schema to cloud successfully
+- [ ] `npx supatype deploy` pushes schema to cloud successfully
 - [ ] Free tier enforces resource limits correctly
 - [ ] Stripe billing charges correctly for Pro tier
 - [ ] Custom domains work with automatic SSL

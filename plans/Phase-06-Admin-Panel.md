@@ -1,6 +1,6 @@
 # Phase 6 — Admin Panel
 
-> **Definatype** · Weeks 34–42 · March 2026 · Draft
+> **Supatype** · Weeks 34–42 · March 2026 · Draft
 
 ---
 
@@ -14,7 +14,7 @@ Phase 5 complete — storage for image/file uploads.
 
 ## Deliverable
 
-Non-technical users can manage content through an auto-generated admin panel that reflects the schema. Developers can customise the panel via definatype.admin.ts overrides.
+Non-technical users can manage content through an auto-generated admin panel that reflects the schema. Developers can customise the panel via supatype.admin.ts overrides.
 
 ## Task Breakdown
 
@@ -69,14 +69,14 @@ Non-technical users can manage content through an auto-generated admin panel tha
 | # | Task | Status |
 |---|------|--------|
 | 17 | Branding customisation — logo, colours, favicon via configuration | ○ |
-| 18 | definatype.admin.ts override support — custom widgets, field overrides, custom pages, custom actions | ○ |
+| 18 | supatype.admin.ts override support — custom widgets, field overrides, custom pages, custom actions | ○ |
 
 ## Technical Context
 
 - The admin panel is a separate Next.js application served at /admin/* via Kong. It reads configuration JSON from the engine (generated at build time or served from an endpoint).
 - Widget selection is automatic based on field type: text → TextInput, richText → Lexical editor, image → ImageUpload with preview, relation → RelationPicker, enum → Select dropdown.
 - The rich text editor uses Lexical (Meta's open-source editor framework) — same choice as Payload CMS. MIT licensed, extensible, and actively maintained.
-- definatype.admin.ts lets developers override any auto-generated config: hide fields, add custom columns, register custom widgets, add dashboard widgets, define custom bulk actions.
+- supatype.admin.ts lets developers override any auto-generated config: hide fields, add custom columns, register custom widgets, add dashboard widgets, define custom bulk actions.
 
 ## Risks & Mitigations
 
@@ -97,4 +97,4 @@ Phase 6 is complete when:
 - [ ] Relation picker searches and selects related records
 - [ ] Publish flow transitions records between statuses
 - [ ] List view supports search, filter, sort, and pagination
-- [ ] definatype.admin.ts overrides are applied correctly
+- [ ] supatype.admin.ts overrides are applied correctly

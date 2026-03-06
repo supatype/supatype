@@ -2,7 +2,12 @@
   "permissions": {
     "allow": [
       "Bash(pnpm install:*)",
-      "Bash(pnpm turbo:*)"
+      "Bash(pnpm turbo:*)",
+      "Bash(pnpm --filter @definatype/cli typecheck)",
+      "Bash(pnpm --filter @definatype/cli test)",
+      "Bash(for f in *.md)",
+      "Bash(do sed -i 's/@definatype\\\\//@supatype\\\\//g; s/definatype-schema-engine/supatype-schema-engine/g; s/definatype-engine/supatype-engine/g; s/definatype\\\\.config\\\\.ts/supatype.config.ts/g; s/definatype\\\\.admin\\\\.ts/supatype.admin.ts/g; s/npx definatype /npx supatype /g; s/ definatype dev / supatype dev /g; s/ definatype push/ supatype push/g; s/ definatype deploy/ supatype deploy/g; s/ definatype link/ supatype link/g; s/_definatype_migrations/_supatype_migrations/g; s/definatype_auth/supatype_auth/g; s/DefinatypeProvider/SupatypeProvider/g; s/Definatype/Supatype/g; s/definatype /supatype /g' \"$f\")",
+      "Bash(done)"
     ]
   }
 }

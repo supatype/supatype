@@ -1,6 +1,6 @@
 # Phase 5 — Storage
 
-> **Definatype** · Weeks 29–33 · March 2026 · Draft
+> **Supatype** · Weeks 29–33 · March 2026 · Draft
 
 ---
 
@@ -60,7 +60,7 @@ File upload, download, and image transformation work end-to-end. Storage integra
 
 | # | Task | Status |
 |---|------|--------|
-| 9 | @definatype/client: storage module — .storage.from('bucket').upload(file), .download(path), .getPublicUrl(path), .createSignedUrl(path, expiresIn) | ○ |
+| 9 | @supatype/client: storage module — .storage.from('bucket').upload(file), .download(path), .getPublicUrl(path), .createSignedUrl(path, expiresIn) | ○ |
 
 ### Integration
 

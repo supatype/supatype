@@ -1,6 +1,6 @@
 # Phase 10 — Growth
 
-> **Definatype** · Weeks Ongoing · March 2026 · Draft
+> **Supatype** · Weeks Ongoing · March 2026 · Draft
 
 ---
 
@@ -48,10 +48,10 @@ A continuously evolving platform with edge functions, additional framework suppo
 
 | # | Task | Status |
 |---|------|--------|
-| 7 | Vue hooks package — @definatype/vue with composables matching the React hook API | ○ |
-| 8 | Svelte hooks package — @definatype/svelte with stores matching the React hook API | ○ |
-| 9 | React Native SDK — @definatype/react-native with mobile-optimised auth flows and offline support | ○ |
-| 10 | Flutter SDK — @definatype/flutter with Dart client matching the TypeScript SDK API | ○ |
+| 7 | Vue hooks package — @supatype/vue with composables matching the React hook API | ○ |
+| 8 | Svelte hooks package — @supatype/svelte with stores matching the React hook API | ○ |
+| 9 | React Native SDK — @supatype/react-native with mobile-optimised auth flows and offline support | ○ |
+| 10 | Flutter SDK — @supatype/flutter with Dart client matching the TypeScript SDK API | ○ |
 
 ### AI
 
@@ -84,8 +84,8 @@ A continuously evolving platform with edge functions, additional framework suppo
 
 - Edge functions use Deno's isolate model for sandboxed execution — each function runs in its own V8 isolate with configurable memory and CPU limits. TypeScript-native, same as Supabase Edge Functions.
 - The WASM build of the schema engine enables a fully browser-based visual schema designer that can parse, validate, and diff schemas without a server round-trip.
-- The plugin system should be npm-based — developers publish @definatype/plugin-* packages that register custom field types, admin widgets, or auth providers. The engine and admin panel discover plugins from definatype.config.ts.
-- AI schema generation uses an LLM to convert natural language descriptions into Definatype schema TypeScript code. This is a developer convenience, not a core feature.
+- The plugin system should be npm-based — developers publish @supatype/plugin-* packages that register custom field types, admin widgets, or auth providers. The engine and admin panel discover plugins from supatype.config.ts.
+- AI schema generation uses an LLM to convert natural language descriptions into Supatype schema TypeScript code. This is a developer convenience, not a core feature.
 
 ## Risks & Mitigations
 

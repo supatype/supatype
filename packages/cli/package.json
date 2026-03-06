@@ -1,10 +1,10 @@
 {
-  "name": "@definatype/cli",
+  "name": "@supatype/cli",
   "version": "0.1.0",
-  "description": "Definatype CLI — schema push, introspect, generate",
+  "description": "Supatype CLI — schema push, introspect, generate",
   "type": "module",
   "bin": {
-    "definatype": "./bin/definatype.js"
+    "supatype": "./bin/definatype.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -18,14 +18,18 @@
     "build": "tsc --project tsconfig.json",
     "dev": "tsc --project tsconfig.json --watch",
     "typecheck": "tsc --project tsconfig.json --noEmit",
-    "postinstall": "node -e \"const f='./dist/scripts/postinstall.js';require('fs').existsSync(f)&&require(f)\"",
+    "postinstall": "node --input-type=module --eval \"import{existsSync}from'node:fs';import{resolve}from'node:path';import{pathToFileURL}from'node:url';const f=resolve(process.cwd(),'dist/scripts/postinstall.js');if(existsSync(f))await import(pathToFileURL(f).href)\"",
+    "test": "vitest run",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@definatype/schema": "workspace:*"
+    "@supatype/schema": "workspace:*",
+    "commander": "^12.1.0",
+    "tsx": "^4.19.2"
   },
   "devDependencies": {
     "@types/node": "^22",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.0.18"
   }
 }

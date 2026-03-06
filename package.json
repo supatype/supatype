@@ -1,5 +1,5 @@
 {
-  "name": "definatype",
+  "name": "supatype",
   "private": true,
   "scripts": {
     "build": "turbo run build",

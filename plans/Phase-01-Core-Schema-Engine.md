@@ -1,6 +1,6 @@
 # Phase 1 — Core Schema Engine
 
-> **Definatype** · Weeks 5–10 · March 2026 · Draft
+> **Supatype** · Weeks 5–10 · March 2026 · Draft
 
 ---
 
@@ -52,34 +52,34 @@ A robust schema engine that handles real-world schema definitions and evolution,
 
 | # | Task | Status |
 |---|------|--------|
-| 6 | Trigger generation: updated_at auto-update trigger, slug generation from source field | ○ |
+| 6 | Trigger generation: updated_at auto-update trigger, slug generation from source field | ✓ |
 
 ### Differ
 
 | # | Task | Status |
 |---|------|--------|
-| 7 | Rename detection: Levenshtein similarity scoring between dropped and added columns/tables, interactive prompt for confirmation above threshold | ○ |
-| 8 | Risk analysis: classify each diff operation as safe (additive), cautious (may fail on data), or destructive (data loss) | ○ |
-| 9 | Topological sort of operations: dependency ordering so FKs are created after referenced tables | ○ |
+| 7 | Rename detection: Levenshtein similarity scoring between dropped and added columns/tables, interactive prompt for confirmation above threshold | ✓ |
+| 8 | Risk analysis: classify each diff operation as safe (additive), cautious (may fail on data), or destructive (data loss) | ✓ |
+| 9 | Topological sort of operations: dependency ordering so FKs are created after referenced tables | ✓ |
 
 ### Migration
 
 | # | Task | Status |
 |---|------|--------|
-| 10 | Rollback migration generation: generate reverse SQL for every forward operation | ○ |
-| 11 | Migration history tracking: _definatype_migrations table with hash, timestamp, checksum, applied status | ○ |
+| 10 | Rollback migration generation: generate reverse SQL for every forward operation | ✓ |
+| 11 | Migration history tracking: _supatype_migrations table with hash, timestamp, checksum, applied status | ✓ |
 
 ### Performance
 
 | # | Task | Status |
 |---|------|--------|
-| 12 | Schema state caching: store last-known DB state to avoid full introspection on every push | ○ |
+| 12 | Schema state caching: store last-known DB state to avoid full introspection on every push | ✓ |
 
 ### Testing
 
 | # | Task | Status |
 |---|------|--------|
-| 13 | Comprehensive test suite: 10 base fixtures × 20+ evolution scenarios, Postgres 14/15/16 matrix | ○ |
+| 13 | Comprehensive test suite: 10 base fixtures × 20+ evolution scenarios, Postgres 14/15/16 matrix | ✓ |
 
 ## Technical Context
 
@@ -100,9 +100,9 @@ A robust schema engine that handles real-world schema definitions and evolution,
 
 Phase 1 is complete when:
 
-- [ ] All 10 test fixtures pass fresh application (Phase 1 of test pipeline)
-- [ ] All 20+ evolution scenarios pass per fixture (Phase 2 of test pipeline)
-- [ ] Rollback migrations restore original state (Phase 3 of test pipeline)
-- [ ] Idempotency verified — pushing same schema produces empty diff (Phase 4)
-- [ ] Performance benchmarks met on CI for every commit
-- [ ] Tests pass on Postgres 14, 15, and 16
+- [x] All 10 test fixtures pass fresh application (Phase 1 of test pipeline)
+- [x] All 20+ evolution scenarios pass per fixture (Phase 2 of test pipeline)
+- [x] Rollback migrations restore original state (Phase 3 of test pipeline)
+- [x] Idempotency verified — pushing same schema produces empty diff (Phase 4)
+- [x] Performance benchmarks met on CI for every commit
+- [x] Tests pass on Postgres 14, 15, and 16

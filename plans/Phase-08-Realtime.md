@@ -1,6 +1,6 @@
 # Phase 8 — Realtime
 
-> **Definatype** · Weeks 49–54 · March 2026 · Draft
+> **Supatype** · Weeks 49–54 · March 2026 · Draft
 
 ---
 
@@ -41,13 +41,13 @@ Client apps can subscribe to data changes in real-time. The useSubscription Reac
 
 | # | Task | Status |
 |---|------|--------|
-| 5 | @definatype/client: realtime module — .channel('posts').on('INSERT', callback).subscribe(), .removeChannel() | ○ |
+| 5 | @supatype/client: realtime module — .channel('posts').on('INSERT', callback).subscribe(), .removeChannel() | ○ |
 
 ### React
 
 | # | Task | Status |
 |---|------|--------|
-| 6 | @definatype/react: useSubscription hook — replace Phase 4 placeholder with live implementation | ○ |
+| 6 | @supatype/react: useSubscription hook — replace Phase 4 placeholder with live implementation | ○ |
 
 ### Feature
 

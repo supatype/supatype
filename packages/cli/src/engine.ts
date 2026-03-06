@@ -9,14 +9,14 @@ import { ENGINE_VERSION } from "./engine-version.js"
 
 export function getEnginePath(): string {
   const projectRoot = findProjectRoot()
-  const binaryName = process.platform === "win32" ? "definatype-engine.exe" : "definatype-engine"
+  const binaryName = process.platform === "win32" ? "supatype-engine.exe" : "supatype-engine"
   const path = join(projectRoot, ".definatype", "engine", binaryName)
 
   if (!existsSync(path)) {
     throw new Error(
-      `Definatype engine binary not found at ${path}.\n` +
+      `Supatype engine binary not found at ${path}.\n` +
       `Run: npm install  (to trigger postinstall download)\n` +
-      `Or build from source: https://github.com/definatype/definatype-schema-engine`
+      `Or build from source: https://github.com/supatype/supatype-schema-engine`
     )
   }
 

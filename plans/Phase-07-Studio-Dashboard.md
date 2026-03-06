@@ -1,6 +1,6 @@
 # Phase 7 — Studio Dashboard
 
-> **Definatype** · Weeks 43–48 · March 2026 · Draft
+> **Supatype** · Weeks 43–48 · March 2026 · Draft
 
 ---
 
@@ -14,7 +14,7 @@ Phase 6 complete — admin panel provides UI component patterns to reuse.
 
 ## Deliverable
 
-Developer has a web UI for managing all aspects of their Definatype project — data, schema, auth, storage, API docs, and settings.
+Developer has a web UI for managing all aspects of their Supatype project — data, schema, auth, storage, API docs, and settings.
 
 ## Task Breakdown
 

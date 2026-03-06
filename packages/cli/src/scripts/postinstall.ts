@@ -1,6 +1,6 @@
 /**
  * Postinstall script — downloads the correct engine binary for the current
- * platform and stores it at .definatype/engine/definatype-engine[.exe].
+ * platform and stores it at .supatype/engine/definatype-engine[.exe].
  *
  * Pattern: same as Prisma, esbuild, SWC, Turbo.
  */
@@ -14,11 +14,11 @@ import { pipeline } from "node:stream/promises"
 import { ENGINE_DOWNLOAD_BASE, ENGINE_VERSION } from "../engine-version.js"
 
 const PLATFORM_MAP: Record<string, string> = {
-  "darwin-arm64": "definatype-engine-macos-arm64",
-  "darwin-x64": "definatype-engine-macos-x64",
-  "linux-arm64": "definatype-engine-linux-arm64",
-  "linux-x64": "definatype-engine-linux-x64",
-  "win32-x64": "definatype-engine-windows-x64.exe",
+  "darwin-arm64": "supatype-engine-macos-arm64",
+  "darwin-x64": "supatype-engine-macos-x64",
+  "linux-arm64": "supatype-engine-linux-arm64",
+  "linux-x64": "supatype-engine-linux-x64",
+  "win32-x64": "supatype-engine-windows-x64.exe",
 }
 
 async function main(): Promise<void> {
@@ -29,18 +29,18 @@ async function main(): Promise<void> {
 
   if (!artifactName) {
     console.warn(
-      `[definatype] No prebuilt engine binary for ${key}. ` +
+      `[supatype] No prebuilt engine binary for ${key}. ` +
       `Build from source: https://github.com/${ENGINE_DOWNLOAD_BASE}`
     )
     return
   }
 
-  // Destination: <project-root>/.definatype/engine/
+  // Destination: <project-root>/.supatype/engine/
   const projectRoot = findProjectRoot()
   const engineDir = join(projectRoot, ".definatype", "engine")
   mkdirSync(engineDir, { recursive: true })
 
-  const binaryName = platform === "win32" ? "definatype-engine.exe" : "definatype-engine"
+  const binaryName = platform === "win32" ? "supatype-engine.exe" : "supatype-engine"
   const binaryPath = join(engineDir, binaryName)
   const checksumPath = `${binaryPath}.sha256`
 
@@ -49,7 +49,7 @@ async function main(): Promise<void> {
   if (existsSync(versionMarker)) {
     const existing = (await import("node:fs/promises")).readFile(versionMarker, "utf8")
     if ((await existing).trim() === ENGINE_VERSION) {
-      console.log(`[definatype] Engine v${ENGINE_VERSION} already installed.`)
+      console.log(`[supatype] Engine v${ENGINE_VERSION} already installed.`)
       return
     }
   }
@@ -57,7 +57,7 @@ async function main(): Promise<void> {
   const binaryUrl = `${ENGINE_DOWNLOAD_BASE}/${artifactName}`
   const checksumUrl = `${binaryUrl}.sha256`
 
-  console.log(`[definatype] Downloading engine v${ENGINE_VERSION} for ${key}...`)
+  console.log(`[supatype] Downloading engine v${ENGINE_VERSION} for ${key}...`)
 
   await download(binaryUrl, binaryPath)
   await download(checksumUrl, checksumPath)
@@ -71,7 +71,7 @@ async function main(): Promise<void> {
   // Write version marker
   await (await import("node:fs/promises")).writeFile(versionMarker, ENGINE_VERSION)
 
-  console.log(`[definatype] Engine installed at ${binaryPath}`)
+  console.log(`[supatype] Engine installed at ${binaryPath}`)
 }
 
 async function download(url: string, dest: string): Promise<void> {
@@ -117,7 +117,7 @@ function findProjectRoot(): string {
 }
 
 main().catch((err) => {
-  console.error("[definatype] Engine download failed:", err.message)
-  console.error("[definatype] You can still use the CLI if you build the engine from source.")
+  console.error("[supatype] Engine download failed:", err.message)
+  console.error("[supatype] You can still use the CLI if you build the engine from source.")
   // Don't exit(1) — let npm install succeed even if binary download fails.
 })

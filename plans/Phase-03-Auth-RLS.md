@@ -1,6 +1,6 @@
 # Phase 3 — Auth & RLS
 
-> **Definatype** · Weeks 17–22 · March 2026 · Draft
+> **Supatype** · Weeks 17–22 · March 2026 · Draft
 
 ---
 
@@ -50,8 +50,8 @@ Full auth flow works end-to-end. Schema access rules translate to enforced RLS p
 
 | # | Task | Status |
 |---|------|--------|
-| 9 | @definatype/client: auth module — signUp(), signIn(), signOut(), onAuthStateChange(), getSession(), refreshToken() | ○ |
-| 10 | @definatype/react: useAuth hook — returns user, session, signIn, signOut, loading state | ○ |
+| 9 | @supatype/client: auth module — signUp(), signIn(), signOut(), onAuthStateChange(), getSession(), refreshToken() | ○ |
+| 10 | @supatype/react: useAuth hook — returns user, session, signIn, signOut, loading state | ○ |
 
 ### Testing
 
@@ -64,7 +64,7 @@ Full auth flow works end-to-end. Schema access rules translate to enforced RLS p
 - RLS policies map from schema access rules: access.public() → USING (true), access.authenticated() → USING (auth.uid() IS NOT NULL), access.owner('userId') → USING (user_id = auth.uid()), access.role('admin') → USING (auth.role() = 'admin'), access.custom('...sql...') → USING (custom_expression).
 - Each model gets separate policies for SELECT, INSERT, UPDATE, DELETE based on its access.read/create/update/delete rules. ALTER TABLE ... ENABLE ROW LEVEL SECURITY is set on every application table.
 - GoTrue handles: email/password registration, email verification, password reset, JWT issuance and refresh, OAuth providers (future). It writes to the auth schema in Postgres.
-- Auth helper functions are installed as Postgres functions in a definatype_auth schema, callable from RLS policy expressions.
+- Auth helper functions are installed as Postgres functions in a supatype_auth schema, callable from RLS policy expressions.
 
 ## Risks & Mitigations
 

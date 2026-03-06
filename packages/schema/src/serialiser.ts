@@ -10,14 +10,14 @@ import type {
 
 /**
  * Serialise a map of model definitions to the JSON AST consumed by the
- * Definatype engine binary.
+ * Supatype engine binary.
  *
  * @example
  * ```ts
- * import { serialiseSchema } from '@definatype/schema'
+ * import { serialiseSchema } from '@supatype/schema'
  * const ast = serialiseSchema({ User, Post, Category })
  * process.stdout.write(JSON.stringify(ast))
- * // pipe to: definatype-engine parse
+ * // pipe to: supatype-engine parse
  * ```
  */
 export function serialiseSchema(
