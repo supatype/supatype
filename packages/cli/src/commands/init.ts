@@ -123,6 +123,11 @@ SMTP_PORT=
 SMTP_USER=
 SMTP_PASS=
 SMTP_SENDER_NAME=${projectName}
+
+# Storage (MinIO for local dev)
+S3_ENDPOINT=http://localhost:9000
+S3_ACCESS_KEY=supatype
+S3_SECRET_KEY=supatype-secret
 `
 }
 
@@ -203,6 +208,42 @@ function dockerComposeTemplate(projectName: string): string {
       pgbouncer:
         condition: service_healthy
 
+  minio:
+    image: minio/minio:RELEASE.2024-11-07T00-52-20Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: supatype
+      MINIO_ROOT_PASSWORD: supatype-secret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  storage:
+    image: ghcr.io/supatype/storage:latest
+    environment:
+      PORT: 5000
+      DATABASE_URL: "postgresql://postgres:\${POSTGRES_PASSWORD:-postgres}@pgbouncer:6432/\${POSTGRES_DB:-${projectName}}"
+      JWT_SECRET: \${JWT_SECRET:-super-secret-jwt-token-change-in-production}
+      S3_ENDPOINT: http://minio:9000
+      S3_REGION: us-east-1
+      S3_ACCESS_KEY: supatype
+      S3_SECRET_KEY: supatype-secret
+      S3_FORCE_PATH_STYLE: "true"
+    ports:
+      - "5000:5000"
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
   kong:
     image: kong:3.6
     environment:
@@ -219,6 +260,7 @@ function dockerComposeTemplate(projectName: string): string {
     depends_on:
       - postgrest
       - gotrue
+      - storage
 
 ${APP_COMPOSE_MARKER}
   # app:
@@ -240,6 +282,7 @@ ${APP_COMPOSE_MARKER}
 
 volumes:
   db-data:
+  minio-data:
 `
 }
 
@@ -316,6 +359,31 @@ services:
             - Authorization
             - Content-Type
             - apikey
+          credentials: true
+
+  - name: storage-v1
+    url: http://storage:5000
+    routes:
+      - name: storage-v1-all
+        strip_path: true
+        paths:
+          - /storage/v1/
+    plugins:
+      - name: cors
+        config:
+          origins:
+            - "*"
+          methods:
+            - GET
+            - POST
+            - PUT
+            - DELETE
+            - OPTIONS
+          headers:
+            - Authorization
+            - Content-Type
+            - apikey
+            - x-upsert
           credentials: true
 
 ${KONG_APP_MARKER}

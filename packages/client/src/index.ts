@@ -8,6 +8,7 @@ export type { User, Session, AuthChangeEvent, SupatypeError, QueryResult, AnyDat
 export { AuthClient } from "./auth.js"
 export { QueryBuilder, MutationBuilder } from "./query.js"
 export { StorageClient, BucketClient } from "./storage.js"
+export type { StorageObject, TransformOptions } from "./storage.js"
 export { RealtimeClient } from "./realtime.js"
 export type { RealtimeEvent, RealtimePayload } from "./realtime.js"
 
