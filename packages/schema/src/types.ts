@@ -16,6 +16,7 @@ export interface ScalarFieldMeta {
   primaryKey: boolean
   unique: boolean
   index: boolean
+  localized?: boolean
   default?: DefaultValueDef
   check?: string
 }
@@ -49,6 +50,7 @@ export interface JsonFieldMeta {
   kind: "json" | "jsonb" | "richText"
   pgType: "JSONB"
   required: boolean
+  localized?: boolean
 }
 
 export interface StorageFieldMeta {
@@ -120,6 +122,21 @@ export interface AccessDef {
 export interface ModelOptions {
   timestamps?: boolean
   softDelete?: boolean
+  versioning?: boolean
+}
+
+export interface LocaleConfig {
+  locales: string[]
+  defaultLocale: string
+  fallbackChains?: Record<string, string[]>
+}
+
+export interface BlockFieldMeta {
+  kind: "blocks"
+  pgType: "JSONB"
+  required: boolean
+  blockTypes: Array<{ name: string; icon?: string; label?: string; fields: Record<string, unknown> }>
+  maxNestingDepth: number
 }
 
 // ─── Field phantom type ──────────────────────────────────────────────────────
@@ -142,6 +159,7 @@ export interface Field<TOutput> {
     | GeoFieldMeta
     | VectorFieldMeta
     | ArrayFieldMeta
+    | BlockFieldMeta
     | { kind: CompositeKind }
 }
 
@@ -155,6 +173,11 @@ export interface Relation<TOutput> {
 
 export type AnyField = Field<unknown> | Relation<unknown>
 
+export interface HookDef {
+  timing: "beforeChange" | "afterChange" | "beforeRead" | "afterDelete"
+  handler: string
+}
+
 export interface ModelMeta {
   name: string
   tableName: string
@@ -162,6 +185,7 @@ export interface ModelMeta {
   access: AccessDef
   indexes: IndexDef[]
   options: ModelOptions
+  hooks?: HookDef[]
 }
 
 export interface ModelDefinition<TFields extends Record<string, AnyField>> {
@@ -184,6 +208,7 @@ export interface ModelAst {
   access: AccessDef
   indexes: IndexDef[]
   options: ModelOptions
+  hooks?: HookDef[]
 }
 
 export interface SchemaAst {

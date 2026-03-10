@@ -103,6 +103,12 @@ export class QueryBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
     return this
   }
 
+  /** Set the locale for resolving localized fields. */
+  locale(code: string): this {
+    this.headers["Accept-Language"] = code
+    return this
+  }
+
   range(from: number, to: number): this {
     this.headers["Range"] = `${from}-${to}`
     this.headers["Range-Unit"] = "items"

@@ -11,6 +11,7 @@ import type {
   StorageFieldMeta,
   VectorFieldMeta,
 } from "./types.js"
+import { blocks } from "./blocks.js"
 
 // ─── Field option types ───────────────────────────────────────────────────────
 
@@ -19,6 +20,7 @@ interface BaseOpts {
   default?: DefaultValueDef
   unique?: boolean
   index?: boolean
+  localized?: boolean
 }
 
 interface TextOpts extends BaseOpts {
@@ -50,6 +52,7 @@ interface SlugOpts {
 
 interface JsonOpts {
   required?: boolean
+  localized?: boolean
 }
 
 interface StorageOpts {
@@ -95,6 +98,7 @@ function scalarMeta(
     index: opts.index ?? false,
     ...(opts.default !== undefined && { default: opts.default }),
     ...(opts.check !== undefined && { check: opts.check }),
+    ...(opts.localized === true && { localized: true }),
   }
 }
 
@@ -114,7 +118,7 @@ export function text(opts: TextOpts = {}): Field<string> | Field<string | null> 
 export function richText(opts: BaseOpts & { required: true }): Field<Record<string, unknown>>
 export function richText(opts?: BaseOpts): Field<Record<string, unknown> | null>
 export function richText(opts: BaseOpts = {}): Field<Record<string, unknown>> | Field<Record<string, unknown> | null> {
-  const meta: JsonFieldMeta = { kind: "richText", pgType: "JSONB", required: opts.required ?? false }
+  const meta: JsonFieldMeta = { kind: "richText", pgType: "JSONB", required: opts.required ?? false, ...(opts.localized === true && { localized: true }) }
   return makeField(meta)
 }
 
@@ -320,7 +324,7 @@ export function decimal(opts: DecimalOpts = {}): Field<string> | Field<string | 
 export function json<TShape = unknown>(opts: JsonOpts & { required: true }): Field<TShape>
 export function json<TShape = unknown>(opts?: JsonOpts): Field<TShape | null>
 export function json<TShape = unknown>(opts: JsonOpts = {}): Field<TShape> | Field<TShape | null> {
-  const meta: JsonFieldMeta = { kind: "json", pgType: "JSONB", required: opts.required ?? false }
+  const meta: JsonFieldMeta = { kind: "json", pgType: "JSONB", required: opts.required ?? false, ...(opts.localized === true && { localized: true }) }
   return makeField(meta)
 }
 
@@ -440,4 +444,5 @@ export const field = {
   geo,
   vector,
   arrayOf,
+  blocks,
 } as const

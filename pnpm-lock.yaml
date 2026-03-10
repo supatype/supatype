@@ -58,6 +58,28 @@ importers:
         specifier: ^5
         version: 5.9.3
 
+  packages/admin:
+    dependencies:
+      '@supatype/client':
+        specifier: workspace:*
+        version: link:../client
+      react:
+        specifier: ^18.3.0
+        version: 18.3.1
+      react-dom:
+        specifier: ^18.3.0
+        version: 18.3.1(react@18.3.1)
+    devDependencies:
+      '@types/react':
+        specifier: ^18
+        version: 18.3.28
+      '@types/react-dom':
+        specifier: ^18
+        version: 18.3.7(@types/react@18.3.28)
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
   packages/cli:
     dependencies:
       '@supatype/schema':

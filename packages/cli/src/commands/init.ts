@@ -386,6 +386,26 @@ services:
             - x-upsert
           credentials: true
 
+  - name: admin
+    url: http://admin:3001
+    routes:
+      - name: admin-all
+        strip_path: true
+        paths:
+          - /admin/
+    plugins:
+      - name: cors
+        config:
+          origins:
+            - "*"
+          methods:
+            - GET
+            - OPTIONS
+          headers:
+            - Authorization
+            - Content-Type
+          credentials: true
+
 ${KONG_APP_MARKER}
   # - name: app
   #   url: http://app:3000

@@ -6,12 +6,15 @@ import type {
   ModelMeta,
   ModelOptions,
 } from "./types.js"
+import type { HooksDef } from "./hooks.js"
+import { resolveHooks } from "./hooks.js"
 
 interface ModelDefinitionInput<TFields extends Record<string, AnyField>> {
   fields: TFields
   access?: AccessDef
   indexes?: IndexDef[]
   options?: ModelOptions
+  hooks?: HooksDef
   tableName?: string
 }
 
@@ -32,6 +35,10 @@ interface ModelDefinitionInput<TFields extends Record<string, AnyField>> {
  *     update: access.owner('author_id'),
  *     delete: access.role('admin'),
  *   },
+ *   hooks: {
+ *     beforeChange: "./hooks/post-before-change.ts",
+ *     afterChange:  "./hooks/post-after-change.ts",
+ *   },
  *   options: { timestamps: true },
  * })
  * ```
@@ -49,6 +56,7 @@ export function model<TFields extends Record<string, AnyField>>(
     access: definition.access ?? {},
     indexes: definition.indexes ?? [],
     options: definition.options ?? {},
+    ...(definition.hooks !== undefined && { hooks: resolveHooks(definition.hooks) }),
   }
 
   return {
@@ -59,7 +67,7 @@ export function model<TFields extends Record<string, AnyField>>(
 
 function toSnakeCase(s: string): string {
   return s
-    .replace(/([A-Z])/g, (_, c, i) => (i > 0 ? "_" : "") + c.toLowerCase())
+    .replace(/([A-Z])/g, (_, c: string, i: number) => (i > 0 ? "_" : "") + c.toLowerCase())
     .replace(/\s+/g, "_")
     .toLowerCase()
 }

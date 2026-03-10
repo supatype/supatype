@@ -4,7 +4,14 @@ export { relation, belongsTo, hasMany, hasOne, manyToMany } from "./relations.js
 export { access, publicAccess, privateAccess, authenticated, owner, role, custom, any } from "./access.js"
 export { composites, timestamps, publishable, softDelete } from "./composites.js"
 export { model } from "./model.js"
+export { global } from "./globals.js"
+export { block, blocks } from "./blocks.js"
+export { resolveHooks } from "./hooks.js"
 export { serialiseSchema } from "./serialiser.js"
+
+export type { BlockDefinition, BlockData } from "./blocks.js"
+export type { GlobalDefinition, GlobalMeta } from "./globals.js"
+export type { HooksDef, HookTiming } from "./hooks.js"
 
 export type {
   Field,
@@ -18,8 +25,11 @@ export type {
   FieldType,
   AccessDef,
   AccessRuleDef,
+  HookDef,
   IndexDef,
   IndexMethod,
+  LocaleConfig,
+  BlockFieldMeta,
   SchemaAst,
   ModelAst,
   FieldAst,

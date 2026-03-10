@@ -91,10 +91,16 @@ class TableClient<TDef extends TableDef> {
 
 // ─── Main client ──────────────────────────────────────────────────────────────
 
+export interface GlobalClient<TRow extends Record<string, unknown> = Record<string, unknown>> {
+  get(): Promise<{ data: TRow | null; error: SupatypeError | null }>
+  update(data: Partial<TRow>): Promise<{ data: TRow | null; error: SupatypeError | null }>
+}
+
 export interface SupatypeClient<TDatabase extends AnyDatabase = AnyDatabase> {
   from<TTable extends keyof TDatabase["public"]["Tables"] & string>(
     table: TTable,
   ): TableClient<TDatabase["public"]["Tables"][TTable]>
+  global<TRow extends Record<string, unknown> = Record<string, unknown>>(name: string): GlobalClient<TRow>
   auth: AuthClient
   storage: StorageClient
   realtime: RealtimeClient
@@ -129,6 +135,24 @@ export function createClient<TDatabase extends AnyDatabase = AnyDatabase>(
     ): TableClient<TDatabase["public"]["Tables"][TTable]> {
       type TDef = TDatabase["public"]["Tables"][TTable]
       return new TableClient<TDef>(config.url, table, getAuthHeaders())
+    },
+
+    global<TRow extends Record<string, unknown> = Record<string, unknown>>(name: string): GlobalClient<TRow> {
+      const tableName = `_global_${name}`
+      type TDef = { Row: TRow; Insert: TRow; Update: Partial<TRow> }
+      return {
+        async get(): Promise<{ data: TRow | null; error: SupatypeError | null }> {
+          const tc = new TableClient<TDef>(config.url, tableName, getAuthHeaders())
+          const result = await tc.select().limit(1).maybeSingle()
+          return { data: result.data ?? null, error: result.error }
+        },
+        async update(data: Partial<TRow>): Promise<{ data: TRow | null; error: SupatypeError | null }> {
+          const tc = new TableClient<TDef>(config.url, tableName, getAuthHeaders())
+          const result = await tc.upsert(data as TRow)
+          const row = Array.isArray(result.data) ? (result.data[0] as TRow | undefined) ?? null : null
+          return { data: row, error: result.error }
+        },
+      }
     },
 
     auth,
