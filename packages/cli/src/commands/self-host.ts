@@ -23,8 +23,8 @@ export function registerSelfHost(program: Command): void {
     .option("--app-dockerfile <path>", "Path to your app Dockerfile (omit to skip app service)")
     .option("--app-port <port>", "Port your app listens on", "3000")
     .option("--ssl-email <email>", "Email address for Let's Encrypt registration")
-    .action((opts: { domain?: string; appDockerfile?: string; appPort: string; sslEmail?: string }) => {
-      setup(process.cwd(), opts)
+    .action(async (opts: { domain?: string; appDockerfile?: string; appPort: string; sslEmail?: string }) => {
+      await setup(process.cwd(), opts)
     })
 
   selfHostCmd
@@ -71,7 +71,21 @@ interface SetupOpts {
   sslEmail?: string
 }
 
-function setup(cwd: string, opts: SetupOpts): void {
+async function fetchLatestTag(repo: string, fallback: string): Promise<string> {
+  try {
+    const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+      headers: { Accept: "application/vnd.github+json" },
+      signal: AbortSignal.timeout(5000),
+    })
+    if (!res.ok) return fallback
+    const data = await res.json() as { tag_name?: string }
+    return data.tag_name ?? fallback
+  } catch {
+    return fallback
+  }
+}
+
+async function setup(cwd: string, opts: SetupOpts): Promise<void> {
   // Load domain from opts or supatype.config.ts
   const domain = opts.domain ?? loadDomainFromConfig(cwd)
   if (!domain) {
@@ -80,6 +94,14 @@ function setup(cwd: string, opts: SetupOpts): void {
     )
     process.exit(1)
   }
+
+  console.log("Fetching latest image versions...")
+  const [postgresTag, authTag] = await Promise.all([
+    fetchLatestTag("supatype/postgres", "15.8.1.060"),
+    fetchLatestTag("supatype/auth", "v2.164.0"),
+  ])
+  console.log(`  postgres  ghcr.io/supatype/postgres:${postgresTag}`)
+  console.log(`  auth      ghcr.io/supatype/auth:${authTag}`)
 
   const deployDir = resolve(cwd, "deploy")
   mkdirSync(deployDir, { recursive: true })
@@ -102,7 +124,7 @@ function setup(cwd: string, opts: SetupOpts): void {
   console.log("\nGenerating production deployment files...\n")
 
   write(".env.production", envProductionTemplate(domain, pgPassword, jwtSecret, anonKey, serviceKey))
-  write("docker-compose.yml", productionComposeTemplate(domain, opts))
+  write("docker-compose.yml", productionComposeTemplate(domain, opts, postgresTag, authTag))
   write("Caddyfile", caddyfileTemplate(domain, opts.sslEmail))
   write("pgbouncer.ini", productionPgbouncerIni())
   write("userlist.txt", productionUserlist(pgPassword))
@@ -249,7 +271,7 @@ SMTP_SENDER_NAME=Supatype
 `
 }
 
-function productionComposeTemplate(domain: string, opts: SetupOpts): string {
+function productionComposeTemplate(domain: string, opts: SetupOpts, postgresTag: string, authTag: string): string {
   const appService = opts.appDockerfile
     ? `
   app:
@@ -273,7 +295,7 @@ function productionComposeTemplate(domain: string, opts: SetupOpts): string {
 
 services:
   db:
-    image: ghcr.io/supatype/postgres:15.8.1.060
+    image: ghcr.io/supatype/postgres:${postgresTag}
     environment:
       POSTGRES_PASSWORD: \${POSTGRES_PASSWORD}
       POSTGRES_DB: \${POSTGRES_DB:-supatype}
@@ -301,7 +323,7 @@ services:
     restart: unless-stopped
 
   gotrue:
-    image: ghcr.io/supatype/auth:v2.164.0
+    image: ghcr.io/supatype/auth:${authTag}
     environment:
       GOTRUE_API_HOST: 0.0.0.0
       GOTRUE_API_PORT: 9999
