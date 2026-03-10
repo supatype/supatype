@@ -8,11 +8,12 @@ import { registerPull } from "./commands/pull.js"
 import { registerGenerate } from "./commands/generate.js"
 import { registerMigrate } from "./commands/migrate.js"
 import { registerSeed } from "./commands/seed.js"
+import { registerKeys } from "./commands/keys.js"
 
 export function run(): void {
   const program = new Command()
     .name("supatype")
-    .description("Definatype — schema-first Postgres API")
+    .description("Supatype — schema-first Postgres API")
     .version(ENGINE_VERSION)
 
   registerInit(program)
@@ -23,6 +24,7 @@ export function run(): void {
   registerGenerate(program)
   registerMigrate(program)
   registerSeed(program)
+  registerKeys(program)
 
   program.parse()
 }

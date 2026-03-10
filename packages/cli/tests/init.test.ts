@@ -52,6 +52,15 @@ describe("scaffold()", () => {
     expect(content).toContain("service_healthy")
   })
 
+  it("docker-compose.yml includes GoTrue auth service", () => {
+    scaffold(tmpRoot, "shop")
+    const content = readFileSync(join(tmpRoot, "docker-compose.yml"), "utf8")
+    expect(content).toContain("gotrue:")
+    expect(content).toContain("supabase/gotrue")
+    expect(content).toContain("GOTRUE_JWT_SECRET")
+    expect(content).toContain("9999")
+  })
+
   it(".env contains DATABASE_URL, JWT_SECRET, POSTGRES_PASSWORD, POSTGRES_DB", () => {
     scaffold(tmpRoot, "my-app")
     const content = readFileSync(join(tmpRoot, ".env"), "utf8")
@@ -59,6 +68,14 @@ describe("scaffold()", () => {
     expect(content).toContain("JWT_SECRET=")
     expect(content).toContain("POSTGRES_PASSWORD=")
     expect(content).toContain("POSTGRES_DB=")
+  })
+
+  it(".env contains ANON_KEY, SERVICE_ROLE_KEY, and SITE_URL placeholders", () => {
+    scaffold(tmpRoot, "my-app")
+    const content = readFileSync(join(tmpRoot, ".env"), "utf8")
+    expect(content).toContain("ANON_KEY=")
+    expect(content).toContain("SERVICE_ROLE_KEY=")
+    expect(content).toContain("SITE_URL=")
   })
 
   it("schema/index.ts exports a User model with field builders and access rules", () => {
@@ -71,12 +88,14 @@ describe("scaffold()", () => {
     expect(content).toContain("options: { timestamps: true }")
   })
 
-  it(".supatype/kong.yml declares REST and GraphQL routes", () => {
+  it(".supatype/kong.yml declares REST, GraphQL, and auth routes", () => {
     scaffold(tmpRoot, "my-app")
     const content = readFileSync(join(tmpRoot, ".supatype/kong.yml"), "utf8")
     expect(content).toContain("/rest/v1/")
     expect(content).toContain("/graphql/v1")
+    expect(content).toContain("/auth/v1/")
     expect(content).toContain("postgrest")
+    expect(content).toContain("gotrue")
   })
 
   it(".gitignore excludes .env, node_modules, and engine binary", () => {

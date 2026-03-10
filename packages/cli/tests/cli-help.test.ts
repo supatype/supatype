@@ -27,7 +27,7 @@ describe("CLI binary (requires built dist/)", () => {
   it("--help lists all top-level commands", () => {
     const { stdout, exitCode } = runCli(["--help"])
     expect(exitCode).toBe(0)
-    const commands = ["init", "dev", "push", "diff", "pull", "generate", "migrate", "rollback", "reset", "seed"]
+    const commands = ["init", "dev", "push", "diff", "pull", "generate", "migrate", "rollback", "reset", "seed", "keys"]
     for (const cmd of commands) {
       expect(stdout, `Expected '${cmd}' in --help output`).toContain(cmd)
     }
