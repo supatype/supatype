@@ -273,7 +273,7 @@ function productionComposeTemplate(domain: string, opts: SetupOpts): string {
 
 services:
   db:
-    image: supabase/postgres:15.8.1.060
+    image: ghcr.io/supatype/postgres:15.8.1.060
     environment:
       POSTGRES_PASSWORD: \${POSTGRES_PASSWORD}
       POSTGRES_DB: \${POSTGRES_DB:-supatype}
@@ -301,7 +301,7 @@ services:
     restart: unless-stopped
 
   gotrue:
-    image: supabase/gotrue:v2.164.0
+    image: ghcr.io/supatype/auth:v2.164.0
     environment:
       GOTRUE_API_HOST: 0.0.0.0
       GOTRUE_API_PORT: 9999
