@@ -1,0 +1,34 @@
+{
+  "name": "@supatype/react-auth",
+  "version": "0.1.0",
+  "description": "Pre-built authentication UI components for Supatype",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@supatype/client": "workspace:*",
+    "@supatype/react": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "devDependencies": {
+    "@types/react": "^18",
+    "react": "^18",
+    "typescript": "^5",
+    "vitest": "^4.0.18"
+  }
+}

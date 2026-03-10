@@ -104,9 +104,11 @@ export interface IndexDef {
 export type AccessRuleDef =
   | { type: "public" }
   | { type: "private" }
+  | { type: "authenticated" }
   | { type: "owner"; field: string }
   | { type: "role"; roles: string[] }
   | { type: "custom"; expression: string }
+  | { type: "any"; rules: AccessRuleDef[] }
 
 export interface AccessDef {
   read?: AccessRuleDef

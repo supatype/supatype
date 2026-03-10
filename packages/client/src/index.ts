@@ -9,6 +9,7 @@ export { AuthClient } from "./auth.js"
 export { QueryBuilder, MutationBuilder } from "./query.js"
 export { StorageClient, BucketClient } from "./storage.js"
 export { RealtimeClient } from "./realtime.js"
+export type { RealtimeEvent, RealtimePayload } from "./realtime.js"
 
 // ─── Table client ─────────────────────────────────────────────────────────────
 
@@ -29,8 +30,17 @@ class TableClient<TDef extends TableDef> {
     this.headers = headers
   }
 
-  select(columns?: string | undefined): QueryBuilder<TDef["Row"]> {
-    return new QueryBuilder<TDef["Row"]>(this.baseUrl, this.path, this.headers, columns)
+  /**
+   * Start a SELECT query.
+   *
+   * Pass a type parameter to narrow the result when embedding relations:
+   * ```ts
+   * client.from('posts').select<Post & { comments: Comment[] }>('*, comments(*)')
+   * ```
+   * Without a type parameter the full Row type is returned.
+   */
+  select<TResult = TDef["Row"]>(columns?: string | undefined): QueryBuilder<TResult> {
+    return new QueryBuilder<TResult>(this.baseUrl, this.path, this.headers, columns)
   }
 
   insert(

@@ -17,16 +17,27 @@ export const owner = (field: string): AccessRuleDef => ({ type: "owner", field }
  */
 export const role = (...roles: string[]): AccessRuleDef => ({ type: "role", roles })
 
+/** Only authenticated (signed-in) users can perform this action. */
+export const authenticated = (): AccessRuleDef => ({ type: "authenticated" })
+
 /**
  * Custom SQL expression for advanced cases.
  * Use `auth.uid()`, `auth.role()`, `auth.roles()` within the expression.
  */
 export const custom = (expression: string): AccessRuleDef => ({ type: "custom", expression })
 
+/**
+ * Any of the given rules grant access (logical OR).
+ * @example access.any(access.public(), access.role('admin'))
+ */
+export const any = (...rules: AccessRuleDef[]): AccessRuleDef => ({ type: "any", rules })
+
 export const access = {
   public: publicAccess,
   private: privateAccess,
+  authenticated,
   owner,
   role,
   custom,
+  any,
 } as const

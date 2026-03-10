@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "composite": true,
+    "lib": ["ES2022", "DOM"],
+    "jsx": "react-jsx"
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../client" },
+    { "path": "../react" }
+  ]
+}
