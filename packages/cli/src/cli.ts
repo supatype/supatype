@@ -9,6 +9,8 @@ import { registerGenerate } from "./commands/generate.js"
 import { registerMigrate } from "./commands/migrate.js"
 import { registerSeed } from "./commands/seed.js"
 import { registerKeys } from "./commands/keys.js"
+import { registerApp } from "./commands/app.js"
+import { registerSelfHost } from "./commands/self-host.js"
 
 export function run(): void {
   const program = new Command()
@@ -25,6 +27,8 @@ export function run(): void {
   registerMigrate(program)
   registerSeed(program)
   registerKeys(program)
+  registerApp(program)
+  registerSelfHost(program)
 
   program.parse()
 }

@@ -4,6 +4,10 @@ import { resolve, join } from "node:path"
 
 export { scaffold }
 
+// ─── Markers used by `supatype app add / remove` ─────────────────────────────
+export const APP_COMPOSE_MARKER = "  # ─── App service (run: supatype app add) ───"
+export const KONG_APP_MARKER = "  # ─── App fallback route (run: supatype app add) ───"
+
 export function registerInit(program: Command): void {
   program
     .command("init [name]")
@@ -26,7 +30,7 @@ export function registerInit(program: Command): void {
       if (name) console.log(`  cd ${name}`)
       console.log("  pnpm install")
       console.log("  supatype keys       # generate ANON_KEY + SERVICE_ROLE_KEY, add to .env")
-      console.log("  supatype dev        # start local Postgres + GoTrue + PostgREST")
+      console.log("  supatype dev        # start local Postgres + PgBouncer + GoTrue + PostgREST")
       console.log("  supatype push       # apply schema + generate types\n")
     })
 }
@@ -44,6 +48,8 @@ function scaffold(dir: string, projectName: string): void {
   write(".env", envTemplate(projectName))
   write("docker-compose.yml", dockerComposeTemplate(projectName))
   write(".supatype/kong.yml", kongTemplate())
+  write(".supatype/pgbouncer.ini", pgbouncerIniTemplate())
+  write(".supatype/userlist.txt", pgbouncerUserlistTemplate())
   write("seed.ts", seedTemplate(projectName))
   write(".gitignore", gitignoreTemplate())
 }
@@ -62,6 +68,18 @@ export default defineConfig({
     types: "./src/types/supatype.d.ts",
     client: "./src/lib/supatype.ts",
   },
+  // Self-hosted production deployment (run: supatype self-host setup)
+  // selfHost: {
+  //   domain: "${projectName}.example.com",
+  //   app: {
+  //     dockerfile: "./Dockerfile",
+  //     port: 3000,
+  //   },
+  //   ssl: {
+  //     provider: "caddy",
+  //     email: "you@example.com",
+  //   },
+  // },
 })
 `
 }
@@ -117,11 +135,27 @@ function dockerComposeTemplate(projectName: string): string {
       POSTGRES_DB: \${POSTGRES_DB:-${projectName}}
     ports:
       - "5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
       timeout: 5s
       retries: 20
+
+  pgbouncer:
+    image: edoburu/pgbouncer:1.23.1
+    volumes:
+      - ./.supatype/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./.supatype/userlist.txt:/etc/pgbouncer/userlist.txt:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "localhost", "-p", "6432", "-U", "postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   gotrue:
     image: supabase/gotrue:v2.164.0
@@ -129,7 +163,7 @@ function dockerComposeTemplate(projectName: string): string {
       GOTRUE_API_HOST: 0.0.0.0
       GOTRUE_API_PORT: 9999
       GOTRUE_DB_DRIVER: postgres
-      GOTRUE_DB_DATABASE_URL: "postgres://postgres:\${POSTGRES_PASSWORD:-postgres}@db:5432/\${POSTGRES_DB:-${projectName}}?search_path=auth"
+      GOTRUE_DB_DATABASE_URL: "postgres://postgres:\${POSTGRES_PASSWORD:-postgres}@pgbouncer:6432/\${POSTGRES_DB:-${projectName}}?search_path=auth"
       GOTRUE_SITE_URL: \${SITE_URL:-http://localhost:3000}
       GOTRUE_JWT_SECRET: \${JWT_SECRET:-super-secret-jwt-token-change-in-production}
       GOTRUE_JWT_EXP: 3600
@@ -151,21 +185,22 @@ function dockerComposeTemplate(projectName: string): string {
     ports:
       - "9999:9999"
     depends_on:
-      db:
+      pgbouncer:
         condition: service_healthy
 
   postgrest:
     image: postgrest/postgrest:v12.2.8
     environment:
-      PGRST_DB_URI: postgresql://authenticator:\${POSTGRES_PASSWORD:-postgres}@db:5432/\${POSTGRES_DB:-${projectName}}
+      PGRST_DB_URI: postgresql://authenticator:\${POSTGRES_PASSWORD:-postgres}@pgbouncer:6432/\${POSTGRES_DB:-${projectName}}
       PGRST_DB_SCHEMA: public
       PGRST_DB_ANON_ROLE: anon
       PGRST_JWT_SECRET: \${JWT_SECRET:-super-secret-jwt-token-change-in-production}
       PGRST_DB_EXTRA_SEARCH_PATH: public,extensions
+      PGRST_DB_POOL: 3
     ports:
       - "3000:3000"
     depends_on:
-      db:
+      pgbouncer:
         condition: service_healthy
 
   kong:
@@ -184,6 +219,27 @@ function dockerComposeTemplate(projectName: string): string {
     depends_on:
       - postgrest
       - gotrue
+
+${APP_COMPOSE_MARKER}
+  # app:
+  #   build:
+  #     context: .
+  #     dockerfile: ./Dockerfile
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     SUPATYPE_URL: http://kong:8000
+  #     SUPATYPE_ANON_KEY: \${ANON_KEY}
+  #     SUPATYPE_SERVICE_ROLE_KEY: \${SERVICE_ROLE_KEY}
+  #   volumes:
+  #     - .:/app
+  #     - /app/node_modules
+  #   depends_on:
+  #     kong:
+  #       condition: service_healthy
+
+volumes:
+  db-data:
 `
 }
 
@@ -261,6 +317,42 @@ services:
             - Content-Type
             - apikey
           credentials: true
+
+${KONG_APP_MARKER}
+  # - name: app
+  #   url: http://app:3000
+  #   routes:
+  #     - name: app-root
+  #       paths:
+  #         - /
+  #       strip_path: false
+`
+}
+
+function pgbouncerIniTemplate(): string {
+  return `[databases]
+# Forward all databases to Postgres (Docker service name: db)
+* = host=db port=5432
+
+[pgbouncer]
+listen_addr = 0.0.0.0
+listen_port = 6432
+# trust = accept any client on the internal Docker network (safe for local dev)
+auth_type = trust
+auth_file = /etc/pgbouncer/userlist.txt
+pool_mode = transaction
+default_pool_size = 20
+max_db_connections = 60
+max_client_conn = 100
+# Required for PostgREST compatibility
+server_reset_query = DEALLOCATE ALL
+ignore_startup_parameters = extra_float_digits
+`
+}
+
+function pgbouncerUserlistTemplate(): string {
+  return `# PgBouncer userlist — auth_type = trust for local dev, so passwords here are unused.
+# For production, this file is regenerated by: supatype self-host setup
 `
 }
 

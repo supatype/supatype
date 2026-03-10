@@ -25,6 +25,8 @@ describe("scaffold()", () => {
       ".env",
       "docker-compose.yml",
       ".supatype/kong.yml",
+      ".supatype/pgbouncer.ini",
+      ".supatype/userlist.txt",
       "seed.ts",
       ".gitignore",
     ]
@@ -40,6 +42,13 @@ describe("scaffold()", () => {
     expect(content).toContain("defineConfig")
     expect(content).toContain("schema:")
     expect(content).toContain("output:")
+  })
+
+  it("supatype.config.ts contains commented selfHost section", () => {
+    scaffold(tmpRoot, "my-app")
+    const content = readFileSync(join(tmpRoot, "supatype.config.ts"), "utf8")
+    expect(content).toContain("selfHost")
+    expect(content).toContain("domain")
   })
 
   it("docker-compose.yml references project name, correct images, and health check", () => {
@@ -59,6 +68,32 @@ describe("scaffold()", () => {
     expect(content).toContain("supabase/gotrue")
     expect(content).toContain("GOTRUE_JWT_SECRET")
     expect(content).toContain("9999")
+  })
+
+  it("docker-compose.yml includes PgBouncer service connecting services via port 6432", () => {
+    scaffold(tmpRoot, "shop")
+    const content = readFileSync(join(tmpRoot, "docker-compose.yml"), "utf8")
+    expect(content).toContain("pgbouncer:")
+    expect(content).toContain("edoburu/pgbouncer")
+    expect(content).toContain("pgbouncer:6432")
+    expect(content).toContain("PGRST_DB_POOL")
+  })
+
+  it("docker-compose.yml includes commented app service slot", () => {
+    scaffold(tmpRoot, "shop")
+    const content = readFileSync(join(tmpRoot, "docker-compose.yml"), "utf8")
+    expect(content).toContain("supatype app add")
+    expect(content).toContain("SUPATYPE_URL")
+    expect(content).toContain("SUPATYPE_ANON_KEY")
+  })
+
+  it(".supatype/pgbouncer.ini has correct pool settings", () => {
+    scaffold(tmpRoot, "my-app")
+    const content = readFileSync(join(tmpRoot, ".supatype/pgbouncer.ini"), "utf8")
+    expect(content).toContain("pool_mode = transaction")
+    expect(content).toContain("default_pool_size = 20")
+    expect(content).toContain("max_db_connections = 60")
+    expect(content).toContain("listen_port = 6432")
   })
 
   it(".env contains DATABASE_URL, JWT_SECRET, POSTGRES_PASSWORD, POSTGRES_DB", () => {
@@ -96,6 +131,13 @@ describe("scaffold()", () => {
     expect(content).toContain("/auth/v1/")
     expect(content).toContain("postgrest")
     expect(content).toContain("gotrue")
+  })
+
+  it(".supatype/kong.yml contains commented app fallback route", () => {
+    scaffold(tmpRoot, "my-app")
+    const content = readFileSync(join(tmpRoot, ".supatype/kong.yml"), "utf8")
+    expect(content).toContain("supatype app add")
+    expect(content).toContain("app-root")
   })
 
   it(".gitignore excludes .env, node_modules, and engine binary", () => {

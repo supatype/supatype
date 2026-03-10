@@ -1,7 +1,7 @@
 import type { Command } from "commander"
-import { createHmac } from "node:crypto"
 import { readFileSync, existsSync } from "node:fs"
 import { resolve } from "node:path"
+import { signJwt } from "../jwt.js"
 
 export function registerKeys(program: Command): void {
   program
@@ -41,20 +41,7 @@ export function registerKeys(program: Command): void {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function signJwt(payload: Record<string, unknown>, secret: string): string {
-  const header = base64url(JSON.stringify({ alg: "HS256", typ: "JWT" }))
-  const body = base64url(JSON.stringify(payload))
-  const sig = createHmac("sha256", secret)
-    .update(`${header}.${body}`)
-    .digest("base64url")
-  return `${header}.${body}.${sig}`
-}
-
-function base64url(str: string): string {
-  return Buffer.from(str, "utf8").toString("base64url")
-}
-
-function resolveSecret(): string | undefined {
+export function resolveSecret(): string | undefined {
   // 1. Check environment variable
   const fromEnv = process.env["JWT_SECRET"]
   if (fromEnv) return fromEnv

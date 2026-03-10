@@ -2,6 +2,24 @@ import { existsSync } from "node:fs"
 import { resolve } from "node:path"
 import { evalTsSnippet } from "./tsx-runner.js"
 
+export interface SelfHostConfig {
+  /** Production domain (e.g. "api.example.com"). Used by Caddy for HTTPS. */
+  domain: string
+  /** App service to include in the production stack. */
+  app?: {
+    /** Path to the app's Dockerfile, relative to the project root. */
+    dockerfile: string
+    /** Port the app listens on. */
+    port: number
+  }
+  ssl?: {
+    /** SSL provider. "caddy" = automatic Let's Encrypt. "none" = bring your own. */
+    provider: "caddy" | "none"
+    /** Email for Let's Encrypt registration (required when provider = "caddy"). */
+    email?: string
+  }
+}
+
 export interface DefinatypeConfig {
   /** Database connection string. */
   connection: string
@@ -17,6 +35,8 @@ export interface DefinatypeConfig {
     /** Path for generated client helpers. */
     client?: string
   }
+  /** Self-hosted production deployment configuration. */
+  selfHost?: SelfHostConfig
 }
 
 /** Identity helper — provides type inference for config files. */
