@@ -43,7 +43,6 @@ export function PublishWidget({ config, value, onChange, readOnly }: WidgetProps
             <ScheduleInput
               onSchedule={(date) => {
                 onChange("scheduled")
-                // The scheduledAt field is a sibling field — the EditView handles it
               }}
             />
           )}

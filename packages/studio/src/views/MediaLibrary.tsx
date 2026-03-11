@@ -21,12 +21,9 @@ export function MediaLibrary(): React.ReactElement {
   const [uploading, setUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Load buckets
   useEffect(() => {
     void (async () => {
       try {
-        // Bucket list requires service_role — fallback to known buckets from config
-        // For now, fetch from the storage API
         const res = await fetch(`${getStorageUrl(client)}/bucket`, {
           headers: getHeaders(client),
         })
@@ -41,7 +38,6 @@ export function MediaLibrary(): React.ReactElement {
     })()
   }, [client])
 
-  // Load files when bucket/prefix changes
   useEffect(() => {
     if (!currentBucket) return
     void (async () => {
@@ -75,8 +71,7 @@ export function MediaLibrary(): React.ReactElement {
           upsert: true,
         })
       }
-      // Refresh
-      setPrefix(prefix) // trigger re-fetch
+      setPrefix(prefix)
     } finally {
       setUploading(false)
     }
@@ -88,7 +83,6 @@ export function MediaLibrary(): React.ReactElement {
     setFiles((prev) => prev.filter((f) => f.name !== fileName))
   }
 
-  // Breadcrumb
   const breadcrumbs = prefix
     ? prefix.split("/").filter(Boolean).map((part, i, arr) => ({
         label: part,
@@ -141,7 +135,6 @@ export function MediaLibrary(): React.ReactElement {
       />
 
       <div className="st-media-toolbar">
-        {/* Bucket selector */}
         <select
           className="st-select"
           value={currentBucket ?? ""}
@@ -155,7 +148,6 @@ export function MediaLibrary(): React.ReactElement {
           ))}
         </select>
 
-        {/* Breadcrumb */}
         {currentBucket && (
           <nav className="st-media-breadcrumb" aria-label="Folder path">
             <button type="button" onClick={() => { setPrefix("") }} className="st-breadcrumb-link">
@@ -176,7 +168,6 @@ export function MediaLibrary(): React.ReactElement {
           </nav>
         )}
 
-        {/* Search */}
         <input
           type="search"
           className="st-input st-input-sm"
@@ -248,14 +239,11 @@ export function MediaLibrary(): React.ReactElement {
   )
 }
 
-// Helpers to extract storage URL and headers from the client
 function getStorageUrl(client: { storage: { from: (b: string) => { getPublicUrl: (p: string) => { data: { publicUrl: string } } } } }): string {
-  // Derive storage URL from a getPublicUrl call
   const test = client.storage.from("__test__").getPublicUrl("__test__").data.publicUrl
   return test.replace("/object/public/__test__/__test__", "")
 }
 
 function getHeaders(_client: unknown): Record<string, string> {
-  // In a real impl, extract the auth headers from the client
   return { "Content-Type": "application/json" }
 }

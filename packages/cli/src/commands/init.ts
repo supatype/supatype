@@ -244,6 +244,11 @@ function dockerComposeTemplate(projectName: string): string {
       minio:
         condition: service_healthy
 
+  studio:
+    image: ghcr.io/supatype/studio:latest
+    ports:
+      - "3002:3002"
+
   kong:
     image: kong:3.6
     environment:
@@ -261,6 +266,7 @@ function dockerComposeTemplate(projectName: string): string {
       - postgrest
       - gotrue
       - storage
+      - studio
 
 ${APP_COMPOSE_MARKER}
   # app:
@@ -386,13 +392,13 @@ services:
             - x-upsert
           credentials: true
 
-  - name: admin
-    url: http://admin:3001
+  - name: studio
+    url: http://studio:3002
     routes:
-      - name: admin-all
+      - name: studio-all
         strip_path: true
         paths:
-          - /admin/
+          - /studio/
     plugins:
       - name: cors
         config:
@@ -400,6 +406,7 @@ services:
             - "*"
           methods:
             - GET
+            - POST
             - OPTIONS
           headers:
             - Authorization

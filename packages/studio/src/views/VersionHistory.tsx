@@ -27,7 +27,6 @@ export function VersionHistory({ model, recordId, onNavigate }: VersionHistoryPr
     void (async () => {
       setLoading(true)
       try {
-        // Version history is stored in {table}_versions
         const versionsTable = `${model.tableName}_versions`
         const result = await client
           .from(versionsTable as never)
@@ -39,7 +38,6 @@ export function VersionHistory({ model, recordId, onNavigate }: VersionHistoryPr
           setVersions(result.data as unknown as VersionEntry[])
         }
 
-        // Also fetch current record
         const current = await client
           .from(model.tableName as never)
           .select()

@@ -31,7 +31,6 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
       let query = client.from(model.tableName as never).select()
 
       if (search && model.searchFields.length > 0) {
-        // Use ilike on first search field for simplicity
         query = query.ilike(model.searchFields[0]!, `%${search}%`)
       }
 

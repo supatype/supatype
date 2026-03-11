@@ -28,7 +28,6 @@ export function GlobalEditView({ global: globalConfig }: GlobalEditViewProps): R
           .single()
 
         if (result.error) {
-          // Singleton might not exist yet — create on first save
           if (result.error.status === 406) {
             setValues({})
           } else {
@@ -53,7 +52,6 @@ export function GlobalEditView({ global: globalConfig }: GlobalEditViewProps): R
     setSaving(true)
     setError(null)
     try {
-      // Upsert the singleton row
       const result = await client
         .from(globalConfig.tableName as never)
         .upsert(values as never)

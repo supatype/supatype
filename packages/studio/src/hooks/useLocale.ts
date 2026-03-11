@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback } from "react"
 import type React from "react"
-import { useAdminConfig } from "./useAdminConfig.js"
+import type { AdminConfig } from "../config.js"
 
 interface LocaleState {
   currentLocale: string
@@ -19,8 +19,12 @@ export function useLocale(): LocaleState {
   return ctx
 }
 
-export function useLocaleState(): LocaleState {
-  const config = useAdminConfig()
+/**
+ * Initialise locale state from a config object (passed directly to avoid
+ * depending on AdminConfigContext, which isn't available yet when AdminApp
+ * calls this hook before rendering the provider).
+ */
+export function useLocaleState(config: AdminConfig): LocaleState {
   const defaultLocale = config.locale?.defaultLocale ?? "en"
   const [currentLocale, setCurrentLocale] = useState(defaultLocale)
 

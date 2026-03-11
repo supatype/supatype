@@ -1,16 +1,7 @@
 import React from "react"
 import type { WidgetProps } from "./FieldWidget.js"
 
-/**
- * Rich text editor widget.
- *
- * In the full implementation, this would use Lexical (Meta's editor).
- * For now, this renders a structured JSON textarea that stores Lexical-compatible
- * content. The Lexical integration is lazy-loaded to minimize bundle size.
- */
 export function RichTextWidget({ config, value, onChange, readOnly }: WidgetProps): React.ReactElement {
-  // For the initial implementation, render a simple contentEditable-like textarea.
-  // The full Lexical integration requires a separate build step and lazy loading.
   const content = typeof value === "string"
     ? value
     : value !== null && value !== undefined
@@ -25,7 +16,6 @@ export function RichTextWidget({ config, value, onChange, readOnly }: WidgetProp
         value={content}
         onChange={(e) => {
           const text = e.target.value
-          // Try to parse as JSON (Lexical state), fall back to plain string
           try {
             onChange(JSON.parse(text))
           } catch {

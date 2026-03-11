@@ -79,6 +79,16 @@ describe("scaffold()", () => {
     expect(content).toContain("PGRST_DB_POOL")
   })
 
+  it("docker-compose.yml includes studio service (merged admin + studio)", () => {
+    scaffold(tmpRoot, "shop")
+    const content = readFileSync(join(tmpRoot, "docker-compose.yml"), "utf8")
+    expect(content).toContain("studio:")
+    expect(content).toContain("ghcr.io/supatype/studio")
+    expect(content).toContain("3002:3002")
+    // Admin was merged into studio — no separate admin service
+    expect(content).not.toContain("ghcr.io/supatype/admin")
+  })
+
   it("docker-compose.yml includes commented app service slot", () => {
     scaffold(tmpRoot, "shop")
     const content = readFileSync(join(tmpRoot, "docker-compose.yml"), "utf8")

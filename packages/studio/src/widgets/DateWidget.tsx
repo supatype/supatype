@@ -9,7 +9,6 @@ export function DateWidget({ config, value, onChange, readOnly }: WidgetProps): 
   if (value !== null && value !== undefined) {
     const str = String(value)
     if (isDatetime) {
-      // Convert ISO string to datetime-local format
       inputValue = str.slice(0, 16)
     } else {
       inputValue = str.slice(0, 10)

@@ -9,7 +9,7 @@ import { useAdminConfig } from "../hooks/useAdminConfig.js"
 
 interface EditViewProps {
   model: ModelConfig
-  recordId?: string  // undefined = create mode
+  recordId?: string
   onNavigate: (path: string) => void
 }
 
@@ -26,7 +26,6 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
 
   const isCreate = recordId === undefined
 
-  // Fetch existing record
   useEffect(() => {
     if (!recordId) return
     setLoading(true)
@@ -118,7 +117,6 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
     if (!recordId) return
     const duplicateValues = { ...values }
     delete duplicateValues[model.primaryKey]
-    // Clear timestamps
     delete duplicateValues["created_at"]
     delete duplicateValues["updated_at"]
 
