@@ -10,7 +10,7 @@ export { QueryBuilder, MutationBuilder } from "./query.js"
 export { StorageClient, BucketClient } from "./storage.js"
 export type { StorageObject, TransformOptions } from "./storage.js"
 export { RealtimeClient } from "./realtime.js"
-export type { RealtimeEvent, RealtimePayload } from "./realtime.js"
+export type { RealtimeEvent, RealtimePayload, ChannelStatus, PresenceEntry } from "./realtime.js"
 
 // ─── Table client ─────────────────────────────────────────────────────────────
 

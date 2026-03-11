@@ -1,14 +1,8 @@
-import { useEffect, useRef } from "react"
-import type { RealtimeEvent, RealtimePayload } from "@supatype/client"
+import { useEffect, useRef, useState } from "react"
+import type { RealtimeEvent, RealtimePayload, ChannelStatus } from "@supatype/client"
 import { useSupatype } from "./context.js"
 
-export type SubscriptionStatus =
-  | "SUBSCRIBED"
-  | "TIMED_OUT"
-  | "CLOSED"
-  | "CHANNEL_ERROR"
-  /** Placeholder status while real-time WebSocket support is not yet active (Phase 8). */
-  | "STUB"
+export type SubscriptionStatus = ChannelStatus
 
 export interface UseSubscriptionOptions<TRow> {
   /** Postgres event to listen for. Defaults to "*" (all events). */
@@ -24,15 +18,12 @@ export interface UseSubscriptionOptions<TRow> {
 }
 
 export interface UseSubscriptionResult {
-  /** Current subscription status. "STUB" until Phase 8 real-time is active. */
+  /** Current subscription status. */
   status: SubscriptionStatus
 }
 
 /**
  * Subscribe to real-time row changes on a table.
- *
- * **Note:** This is a placeholder until Phase 8 (real-time). The `callback`
- * will not fire and `status` will always be `"STUB"`.
  *
  * @example
  * ```tsx
@@ -48,6 +39,8 @@ export function useSubscription<TRow = Record<string, unknown>>(
   opts: UseSubscriptionOptions<TRow>,
 ): UseSubscriptionResult {
   const client = useSupatype()
+  const [status, setStatus] = useState<SubscriptionStatus>("SUBSCRIBING")
+
   // Stable ref so the effect doesn't re-run when the callback reference changes
   const callbackRef = useRef(opts.callback)
   callbackRef.current = opts.callback
@@ -65,7 +58,7 @@ export function useSubscription<TRow = Record<string, unknown>>(
         },
         (payload) => callbackRef.current(payload),
       )
-      .subscribe()
+      .subscribe((s) => setStatus(s))
 
     return () => {
       channel.unsubscribe()
@@ -73,6 +66,5 @@ export function useSubscription<TRow = Record<string, unknown>>(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, channelName, opts.event, opts.schema, opts.table, opts.filter])
 
-  // Phase 8 will return the real WebSocket status. Until then, always STUB.
-  return { status: "STUB" }
+  return { status }
 }

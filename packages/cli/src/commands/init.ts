@@ -244,6 +244,22 @@ function dockerComposeTemplate(projectName: string): string {
       minio:
         condition: service_healthy
 
+  realtime:
+    image: ghcr.io/supatype/realtime:latest
+    environment:
+      PORT: 4000
+      DATABASE_URL: "postgresql://postgres:\${POSTGRES_PASSWORD:-postgres}@pgbouncer:6432/\${POSTGRES_DB:-${projectName}}"
+      JWT_SECRET: \${JWT_SECRET:-super-secret-jwt-token-change-in-production}
+      REPLICATION_MODE: RLS
+      REPLICATION_POLL_INTERVAL: 100
+      SECURE_CHANNELS: "true"
+      SLOT_NAME: realtime_slot
+    ports:
+      - "4000:4000"
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+
   studio:
     image: ghcr.io/supatype/studio:latest
     ports:
@@ -266,6 +282,7 @@ function dockerComposeTemplate(projectName: string): string {
       - postgrest
       - gotrue
       - storage
+      - realtime
       - studio
 
 ${APP_COMPOSE_MARKER}
@@ -390,6 +407,32 @@ services:
             - Content-Type
             - apikey
             - x-upsert
+          credentials: true
+
+  - name: realtime-v1
+    url: http://realtime:4000
+    routes:
+      - name: realtime-v1-all
+        strip_path: true
+        paths:
+          - /realtime/v1/
+        protocols:
+          - http
+          - https
+          - ws
+          - wss
+    plugins:
+      - name: cors
+        config:
+          origins:
+            - "*"
+          methods:
+            - GET
+            - OPTIONS
+          headers:
+            - Authorization
+            - Content-Type
+            - apikey
           credentials: true
 
   - name: studio

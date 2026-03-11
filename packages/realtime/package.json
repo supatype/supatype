@@ -1,0 +1,33 @@
+{
+  "name": "@supatype/realtime",
+  "version": "0.1.0",
+  "description": "Supatype realtime service — WebSocket server with Postgres logical replication, presence, and broadcast",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "pg": "^8.13.0",
+    "ws": "^8.18.0",
+    "jsonwebtoken": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@types/pg": "^8",
+    "@types/ws": "^8",
+    "@types/jsonwebtoken": "^9",
+    "tsx": "^4",
+    "typescript": "^5"
+  }
+}
