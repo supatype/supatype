@@ -134,7 +134,7 @@ S3_SECRET_KEY=supatype-secret
 function dockerComposeTemplate(projectName: string): string {
   return `services:
   db:
-    image: supabase/postgres:15.8.1.060
+    image: ghcr.io/supatype/postgres:15.8.1.060
     environment:
       POSTGRES_PASSWORD: \${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: \${POSTGRES_DB:-${projectName}}
@@ -163,7 +163,7 @@ function dockerComposeTemplate(projectName: string): string {
       retries: 10
 
   gotrue:
-    image: supabase/gotrue:v2.164.0
+    image: ghcr.io/supatype/auth:v2.164.0
     environment:
       GOTRUE_API_HOST: 0.0.0.0
       GOTRUE_API_PORT: 9999
