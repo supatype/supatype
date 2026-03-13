@@ -100,8 +100,8 @@ async function setup(cwd: string, opts: SetupOpts): Promise<void> {
     fetchLatestTag("supatype/postgres", "15.8.1.060"),
     fetchLatestTag("supatype/auth", "v2.164.0"),
   ])
-  console.log(`  postgres  ghcr.io/supatype/postgres:${postgresTag}`)
-  console.log(`  auth      ghcr.io/supatype/auth:${authTag}`)
+  console.log(`  postgres  supatype/postgres:${postgresTag}`)
+  console.log(`  auth      supatype/auth:${authTag}`)
 
   const deployDir = resolve(cwd, "deploy")
   mkdirSync(deployDir, { recursive: true })
@@ -295,7 +295,7 @@ function productionComposeTemplate(domain: string, opts: SetupOpts, postgresTag:
 
 services:
   db:
-    image: ghcr.io/supatype/postgres:${postgresTag}
+    image: supatype/postgres:${postgresTag}
     environment:
       POSTGRES_PASSWORD: \${POSTGRES_PASSWORD}
       POSTGRES_DB: \${POSTGRES_DB:-supatype}
@@ -323,7 +323,7 @@ services:
     restart: unless-stopped
 
   gotrue:
-    image: ghcr.io/supatype/auth:${authTag}
+    image: supatype/auth:${authTag}
     environment:
       GOTRUE_API_HOST: 0.0.0.0
       GOTRUE_API_PORT: 9999

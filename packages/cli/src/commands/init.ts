@@ -134,7 +134,7 @@ S3_SECRET_KEY=supatype-secret
 function dockerComposeTemplate(projectName: string): string {
   return `services:
   db:
-    image: ghcr.io/supatype/postgres:15.8.1.060
+    image: supatype/postgres:15.8.1.060
     environment:
       POSTGRES_PASSWORD: \${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: \${POSTGRES_DB:-${projectName}}
@@ -163,7 +163,7 @@ function dockerComposeTemplate(projectName: string): string {
       retries: 10
 
   gotrue:
-    image: ghcr.io/supatype/auth:v2.164.0
+    image: supatype/auth:v2.164.0
     environment:
       GOTRUE_API_HOST: 0.0.0.0
       GOTRUE_API_PORT: 9999
@@ -226,7 +226,7 @@ function dockerComposeTemplate(projectName: string): string {
       retries: 10
 
   storage:
-    image: ghcr.io/supatype/storage:latest
+    image: supatype/storage:latest
     environment:
       PORT: 5000
       DATABASE_URL: "postgresql://postgres:\${POSTGRES_PASSWORD:-postgres}@pgbouncer:6432/\${POSTGRES_DB:-${projectName}}"
@@ -245,7 +245,7 @@ function dockerComposeTemplate(projectName: string): string {
         condition: service_healthy
 
   realtime:
-    image: ghcr.io/supatype/realtime:latest
+    image: supatype/realtime:latest
     environment:
       PORT: 4000
       DATABASE_URL: "postgresql://postgres:\${POSTGRES_PASSWORD:-postgres}@pgbouncer:6432/\${POSTGRES_DB:-${projectName}}"
@@ -261,7 +261,7 @@ function dockerComposeTemplate(projectName: string): string {
         condition: service_healthy
 
   studio:
-    image: ghcr.io/supatype/studio:latest
+    image: supatype/studio:latest
     ports:
       - "3002:3002"
 

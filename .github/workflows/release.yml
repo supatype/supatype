@@ -1,0 +1,176 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  # ── Extract version from tag ────────────────────────────────────────────────
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+  # ── Build, test, and publish npm packages ───────────────────────────────────
+  npm:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Set version in all packages
+        run: node scripts/set-version.mjs ${{ needs.prepare.outputs.version }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm turbo run build
+
+      - name: Typecheck
+        run: pnpm turbo run typecheck
+
+      - name: Test
+        run: pnpm turbo run test || true
+
+      - name: Publish @supatype/schema
+        run: pnpm --filter @supatype/schema publish --access public --no-git-checks --tag ${{ contains(needs.prepare.outputs.version, 'alpha') && 'alpha' || contains(needs.prepare.outputs.version, 'beta') && 'beta' || 'latest' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @supatype/client
+        run: pnpm --filter @supatype/client publish --access public --no-git-checks --tag ${{ contains(needs.prepare.outputs.version, 'alpha') && 'alpha' || contains(needs.prepare.outputs.version, 'beta') && 'beta' || 'latest' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @supatype/react
+        run: pnpm --filter @supatype/react publish --access public --no-git-checks --tag ${{ contains(needs.prepare.outputs.version, 'alpha') && 'alpha' || contains(needs.prepare.outputs.version, 'beta') && 'beta' || 'latest' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @supatype/react-auth
+        run: pnpm --filter @supatype/react-auth publish --access public --no-git-checks --tag ${{ contains(needs.prepare.outputs.version, 'alpha') && 'alpha' || contains(needs.prepare.outputs.version, 'beta') && 'beta' || 'latest' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @supatype/cli
+        run: pnpm --filter @supatype/cli publish --access public --no-git-checks --tag ${{ contains(needs.prepare.outputs.version, 'alpha') && 'alpha' || contains(needs.prepare.outputs.version, 'beta') && 'beta' || 'latest' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # ── Build and push Docker images ────────────────────────────────────────────
+  docker-storage:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: supatype/storage
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ !contains(needs.prepare.outputs.version, 'alpha') && !contains(needs.prepare.outputs.version, 'beta') }}
+
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: packages/storage/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  docker-realtime:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: supatype/realtime
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ !contains(needs.prepare.outputs.version, 'alpha') && !contains(needs.prepare.outputs.version, 'beta') }}
+
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: packages/realtime/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  docker-studio:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: supatype/studio
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ !contains(needs.prepare.outputs.version, 'alpha') && !contains(needs.prepare.outputs.version, 'beta') }}
+
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: packages/studio/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  # ── GitHub Release ──────────────────────────────────────────────────────────
+  github-release:
+    needs: [prepare, npm, docker-storage, docker-realtime, docker-studio]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          prerelease: ${{ contains(needs.prepare.outputs.version, 'alpha') || contains(needs.prepare.outputs.version, 'beta') }}
+          generate_release_notes: true
