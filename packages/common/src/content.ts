@@ -1,8 +1,9 @@
 import { createClient } from "@supatype/client"
 
 function getContentEnv(name: string): string {
-  if (typeof process !== "undefined" && process.env?.[name]) {
-    return process.env[name]!
+  const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
+  if (proc?.env?.[name]) {
+    return proc.env[name]!
   }
   if (typeof import.meta !== "undefined") {
     const env = (import.meta as unknown as { env?: Record<string, string> }).env
