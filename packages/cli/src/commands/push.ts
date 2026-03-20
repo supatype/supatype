@@ -3,8 +3,6 @@ import { createInterface } from "node:readline"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { ensureEngine, invokeEngine } from "../engine.js"
 import { promptFirstAdminUser } from "./admin.js"
-import { validateProviders } from "@supatype/plugin-sdk"
-
 interface DiffResult {
   operations: Operation[]
 }
@@ -34,25 +32,6 @@ export function registerPush(program: Command): void {
       const ast = loadSchemaAst(config.schema, cwd)
 
       // Validate configured providers before diffing
-      if (config.plugins && config.plugins.length > 0) {
-        const providers = config.plugins.filter(
-          (p): p is { name: string; config?: Record<string, unknown> | undefined } =>
-            typeof p === "object" && p !== null && "name" in p,
-        )
-        if (providers.length > 0) {
-          const validation = validateProviders(providers)
-          for (const warning of validation.warnings) {
-            console.warn(`[plugins] warning: ${warning}`)
-          }
-          if (!validation.valid) {
-            for (const error of validation.errors) {
-              console.error(`[plugins] error: ${error}`)
-            }
-            process.exit(1)
-          }
-        }
-      }
-
       console.log("Diffing against database...")
       const diffResult = invokeEngine(
         ["diff", "--connection", connection, "--format", "json"],

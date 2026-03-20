@@ -25,11 +25,11 @@ export function registerStatus(program: Command): void {
         { name: "MinIO", container: "supatype-minio", port: 9000 },
         { name: "Realtime", container: "supatype-realtime", port: 4000 },
         { name: "Studio", container: "supatype-studio", port: 3100 },
-      ].map((svc) => ({
-        ...svc,
-        status: getContainerStatus(svc.container),
-        uptime: getContainerUptime(svc.container),
-      }))
+      ].map((svc) => {
+        const status = getContainerStatus(svc.container)
+        const uptime = getContainerUptime(svc.container)
+        return { ...svc, status, ...(uptime !== undefined && { uptime }) }
+      })
 
       console.log("Supatype Local Development Stack\n")
 

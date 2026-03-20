@@ -29,6 +29,7 @@
   },
   "devDependencies": {
     "@types/node": "^22",
+    "@types/pg": "^8",
     "typescript": "^5",
     "vitest": "^4.0.18"
   }
