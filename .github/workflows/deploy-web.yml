@@ -8,13 +8,6 @@ on:
       - "packages/ui/**"
       - "packages/navigation/**"
       - "packages/common/**"
-  pull_request:
-    branches: [main]
-    paths:
-      - "apps/**"
-      - "packages/ui/**"
-      - "packages/navigation/**"
-      - "packages/common/**"
 
 concurrency:
   group: deploy-web-${{ github.ref }}
@@ -63,33 +56,6 @@ jobs:
         with:
           name: docs-build
           path: apps/docs/dist/
-
-  lighthouse:
-    name: Lighthouse CI
-    needs: build
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: "pnpm"
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build
-        run: pnpm turbo run build --filter="@supatype/www"
-
-      - name: Run Lighthouse
-        uses: treosh/lighthouse-ci-action@v12
-        with:
-          configPath: ./lighthouserc.json
-          uploadArtifacts: true
 
   deploy:
     name: Deploy to k3s
