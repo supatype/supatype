@@ -39,4 +39,22 @@ export const config = {
 
   /** Transform cache TTL in seconds (default 1 hour). */
   transformCacheTtl: parseInt(env("TRANSFORM_CACHE_TTL", "3600"), 10),
+
+  /** Project tier — injected at deploy time for per-file and quota enforcement. */
+  projectTier: env("PROJECT_TIER", "free") as "free" | "pro" | "team" | "enterprise",
+
+  /** Per-file upload limit for the current tier (bytes). Overrides maxUploadSize when set. -1 = unlimited. */
+  tierMaxUploadSize: parseInt(env("TIER_MAX_UPLOAD_SIZE", String(50 * 1024 * 1024)), 10),
+
+  /** Total storage quota for this project (bytes). -1 = unlimited. */
+  storageQuota: parseInt(env("STORAGE_QUOTA", String(1024 * 1024 * 1024)), 10),
+
+  /** HMAC secret for pre-signed URL tokens. Falls back to JWT secret. */
+  signedUrlSecret: env("SIGNED_URL_SECRET", env("JWT_SECRET", "super-secret-jwt-token-change-in-production")),
+
+  /** Default pre-signed URL expiry in seconds. */
+  defaultSignedUrlExpiry: parseInt(env("DEFAULT_SIGNED_URL_EXPIRY", "3600"), 10),
+
+  /** Maximum pre-signed URL expiry in seconds (7 days). */
+  maxSignedUrlExpiry: parseInt(env("MAX_SIGNED_URL_EXPIRY", "604800"), 10),
 } as const

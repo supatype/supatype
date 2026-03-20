@@ -1,0 +1,28 @@
+{
+  "name": "@supatype/svelte",
+  "version": "0.1.0",
+  "description": "Svelte stores for Supatype — createQuery, createMutation, createAuth, createSubscription",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "peerDependencies": {
+    "@supatype/client": "workspace:*",
+    "svelte": "^5.0.0"
+  },
+  "devDependencies": {
+    "@supatype/client": "workspace:*",
+    "typescript": "^5",
+    "svelte": "^5.0.0"
+  }
+}

@@ -108,11 +108,13 @@ function serialiseFields(
       const m = meta as EnumFieldMeta
       result[name] = {
         kind: "enum",
-        pgType: "TEXT",
+        pgType: m.nativeType ? (m.nativeTypeName ?? m.pgType) : "TEXT",
         values: [...m.values],
         required: m.required,
         unique: m.unique,
         ...(m.default !== undefined && { default: m.default }),
+        ...(m.nativeType && { nativeType: true }),
+        ...(m.nativeTypeName !== undefined && { nativeTypeName: m.nativeTypeName }),
       }
       continue
     }

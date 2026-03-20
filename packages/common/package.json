@@ -1,0 +1,37 @@
+{
+  "name": "@supatype/common",
+  "version": "0.1.0",
+  "description": "Shared auth, config, and analytics for Supatype web apps",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./auth": {
+      "import": "./dist/auth.js",
+      "types": "./dist/auth.d.ts"
+    },
+    "./config": {
+      "import": "./dist/config.js",
+      "types": "./dist/config.d.ts"
+    },
+    "./analytics": {
+      "import": "./dist/analytics.js",
+      "types": "./dist/analytics.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@supatype/client": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5"
+  }
+}

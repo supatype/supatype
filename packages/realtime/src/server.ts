@@ -15,6 +15,14 @@ import type {
   PresenceEntry,
 } from "./types.js"
 
+/** Cached routing table entry for multi-tenant mode. */
+interface ProjectRoute {
+  ref: string
+  jwtSecret: string
+  tier: string
+  status: string
+}
+
 export class RealtimeServer {
   private env: RealtimeEnv
   private wss: WebSocketServer | null = null
@@ -22,6 +30,10 @@ export class RealtimeServer {
   private replication: ReplicationListener
   private rlsFilter: RlsFilter
   private httpServer: ReturnType<typeof createServer> | null = null
+
+  /** Cached project routes for multi-tenant JWT verification + tier limits. */
+  private projectRoutes = new Map<string, ProjectRoute>()
+  private routingCacheTimer: ReturnType<typeof setInterval> | null = null
 
   constructor(env: RealtimeEnv) {
     this.env = env
@@ -52,6 +64,14 @@ export class RealtimeServer {
       this.handleConnection(ws, req)
     })
 
+    // In multi-tenant mode, start routing table cache refresh
+    if (this.env.multiTenant && this.env.routingTableUrl) {
+      await this.refreshRoutingTable()
+      this.routingCacheTimer = setInterval(() => {
+        void this.refreshRoutingTable()
+      }, this.env.routingTableRefreshMs)
+    }
+
     // Start logical replication
     this.replication.onChange((change) => {
       void this.handleWalChange(change)
@@ -61,13 +81,17 @@ export class RealtimeServer {
     // Listen on configured port
     await new Promise<void>((resolve) => {
       this.httpServer!.listen(this.env.port, () => {
-        console.log(`[realtime] WebSocket server listening on port ${this.env.port}`)
+        console.log(`[realtime] WebSocket server listening on port ${this.env.port}${this.env.multiTenant ? " (multi-tenant)" : ""}`)
         resolve()
       })
     })
   }
 
   async stop(): Promise<void> {
+    if (this.routingCacheTimer) {
+      clearInterval(this.routingCacheTimer)
+      this.routingCacheTimer = null
+    }
     await this.replication.stop()
     await this.rlsFilter.shutdown()
 
@@ -91,14 +115,45 @@ export class RealtimeServer {
   // ─── Connection handling ─────────────────────────────────────────────────
 
   private handleConnection(ws: WebSocket, req: IncomingMessage): void {
-    // Extract JWT from query string (?token=xxx) or Authorization header
-    const claims = this.extractClaims(req)
+    // In multi-tenant mode, extract project ref from header or query param
+    let projectRef: string | null = null
+    if (this.env.multiTenant) {
+      projectRef =
+        (req.headers["x-supatype-project"] as string | undefined) ??
+        new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`).searchParams.get("project") ??
+        null
+
+      if (!projectRef) {
+        ws.close(4400, "Missing X-Supatype-Project header")
+        return
+      }
+
+      // Check project exists and is active
+      const route = this.projectRoutes.get(projectRef)
+      if (!route || route.status !== "active") {
+        ws.close(4404, "Project not found or inactive")
+        return
+      }
+
+      // Check connection limit for this project's tier
+      const limit = this.env.connectionLimits[route.tier] ?? 50
+      const currentCount = this.channels.getProjectConnectionCount(projectRef)
+      if (currentCount >= limit) {
+        ws.close(4429, "Connection limit exceeded")
+        return
+      }
+    }
+
+    // Extract JWT — in multi-tenant mode, verify against per-project secret
+    const claims = this.env.multiTenant && projectRef
+      ? this.extractClaimsMultiTenant(req, projectRef)
+      : this.extractClaims(req)
 
     if (this.env.secureChannels && !claims) {
       // Allow connection but require auth message before subscribing
     }
 
-    const clientId = this.channels.addClient(ws, claims)
+    const clientId = this.channels.addClient(ws, claims, projectRef)
 
     if (claims) {
       this.send(ws, { type: "system", status: "ok", message: "authenticated" })
@@ -301,6 +356,46 @@ export class RealtimeServer {
   // ─── WAL change processing ──────────────────────────────────────────────
 
   private async handleWalChange(change: WalChange): Promise<void> {
+    // In multi-tenant mode, filter WAL changes by project schema
+    if (this.env.multiTenant) {
+      const schema = change.schema
+
+      // Filter out internal schemas: {ref}_auth, {ref}_internal, extensions, pg_*
+      if (
+        schema.endsWith("_auth") ||
+        schema.endsWith("_internal") ||
+        schema === "extensions" ||
+        schema.startsWith("pg_") ||
+        schema === "_platform"
+      ) {
+        return
+      }
+
+      // In developer_only mode, the schema IS the project ref
+      // Only forward to subscribers of that project
+      const projectRef = schema
+      const subscribers = this.channels.getSubscribersForProject(schema, change.table, projectRef)
+      if (subscribers.length === 0) return
+
+      for (const { client, subscription } of subscribers) {
+        if (subscription.event !== "*" && subscription.event !== change.event) continue
+        if (!this.matchesFilter(change, subscription.filter)) continue
+        const canSee = await this.rlsFilter.canSee(client.claims, change)
+        if (!canSee) continue
+
+        const msg: ServerMessage = {
+          type: "change",
+          channel: subscription.channel,
+          event: change.event,
+          payload: { old: change.oldRecord, new: change.newRecord },
+          timestamp: change.commitTimestamp,
+        }
+        this.send(client.ws, msg)
+      }
+      return
+    }
+
+    // Single-tenant mode — original behaviour
     const subscribers = this.channels.getSubscribers(change.schema, change.table)
     if (subscribers.length === 0) return
 
@@ -364,5 +459,52 @@ export class RealtimeServer {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(msg))
     }
+  }
+
+  // ─── Multi-tenant helpers ───────────────────────────────────────────────
+
+  /**
+   * Refresh the local routing table cache from the control plane.
+   * The routing table contains per-project JWT secrets and tier info.
+   */
+  private async refreshRoutingTable(): Promise<void> {
+    if (!this.env.routingTableUrl) return
+
+    try {
+      const res = await fetch(this.env.routingTableUrl)
+      if (!res.ok) {
+        console.error(`[realtime] routing table refresh failed: ${res.status}`)
+        return
+      }
+
+      const data = await res.json() as { routes: ProjectRoute[] }
+      const newRoutes = new Map<string, ProjectRoute>()
+      for (const route of data.routes) {
+        newRoutes.set(route.ref, route)
+      }
+      this.projectRoutes = newRoutes
+    } catch (err) {
+      console.error("[realtime] routing table refresh error:", err)
+    }
+  }
+
+  /**
+   * Extract and verify JWT claims using the per-project secret (multi-tenant mode).
+   */
+  private extractClaimsMultiTenant(req: IncomingMessage, projectRef: string): JwtClaims | null {
+    const route = this.projectRoutes.get(projectRef)
+    if (!route) return null
+
+    // Use the project's JWT secret
+    const secret = route.jwtSecret
+
+    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`)
+    const token = url.searchParams.get("token")
+    if (token) return verifyToken(token, secret)
+
+    const authHeader = req.headers.authorization
+    if (authHeader?.startsWith("Bearer ")) return verifyToken(authHeader.slice(7), secret)
+
+    return null
   }
 }

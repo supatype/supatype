@@ -31,11 +31,19 @@ export interface SlugFieldMeta {
 
 export interface EnumFieldMeta {
   kind: "enum"
-  pgType: "TEXT"
+  pgType: "TEXT" | string
   values: readonly string[]
   required: boolean
   unique: boolean
   default?: string
+  /**
+   * When true, use a native Postgres enum type instead of TEXT + CHECK.
+   * Native enums provide type safety at the database level but are harder
+   * to modify (adding values is easy, removing/reordering requires type recreation).
+   */
+  nativeType?: boolean
+  /** Name of the native Postgres enum type (auto-generated if not specified). */
+  nativeTypeName?: string
 }
 
 export interface DecimalFieldMeta {
@@ -53,11 +61,16 @@ export interface JsonFieldMeta {
   localized?: boolean
 }
 
+export type StorageAccessMode = "public" | "private" | "custom"
+
 export interface StorageFieldMeta {
   kind: "image" | "file"
   pgType: "JSONB"
   required: boolean
   bucket: string
+  maxSize?: number
+  accept?: string[]
+  accessMode?: StorageAccessMode
 }
 
 export interface GeoFieldMeta {

@@ -8,10 +8,31 @@ import type {
   JsonFieldMeta,
   ScalarFieldMeta,
   SlugFieldMeta,
+  StorageAccessMode,
   StorageFieldMeta,
   VectorFieldMeta,
 } from "./types.js"
 import { blocks } from "./blocks.js"
+
+// ─── Size parser ──────────────────────────────────────────────────────────────
+
+const SIZE_UNITS: Record<string, number> = {
+  B: 1,
+  KB: 1024,
+  MB: 1024 * 1024,
+  GB: 1024 * 1024 * 1024,
+}
+
+/**
+ * Parse a human-readable size string ('5MB', '500KB', '1GB') to bytes.
+ * If already a number, returns it as-is.
+ */
+export function parseSize(value: number | string): number {
+  if (typeof value === "number") return value
+  const match = value.trim().toUpperCase().match(/^(\d+(?:\.\d+)?)\s*(B|KB|MB|GB)$/)
+  if (!match) throw new Error(`Invalid size format: "${value}". Use e.g. '5MB', '500KB', '1GB'.`)
+  return Math.floor(parseFloat(match[1]!) * SIZE_UNITS[match[2]!]!)
+}
 
 // ─── Field option types ───────────────────────────────────────────────────────
 
@@ -42,6 +63,14 @@ interface EnumOpts {
   required?: boolean
   default?: string
   unique?: boolean
+  /**
+   * Use a native Postgres enum type instead of TEXT + CHECK.
+   * Native enums are stricter but harder to modify.
+   * Default: false (uses TEXT + CHECK for easier migrations).
+   */
+  nativeType?: boolean
+  /** Custom name for the native Postgres enum type. Auto-generated if not set. */
+  nativeTypeName?: string
 }
 
 interface SlugOpts {
@@ -58,8 +87,14 @@ interface JsonOpts {
 interface StorageOpts {
   required?: boolean
   bucket?: string
-  maxSize?: number
+  /** Max file size. Number = bytes, string = human-readable e.g. '5MB', '500KB', '1GB'. */
+  maxSize?: number | string
+  /** @deprecated Use `accept` instead. */
   allowedFormats?: string[]
+  /** Allowed MIME types, e.g. ['image/jpeg', 'image/png', 'image/*']. */
+  accept?: string[]
+  /** Bucket access mode: 'public' (anyone reads), 'private' (owner only), 'custom' (RLS-like). Defaults to 'public' for image, 'private' for file. */
+  accessMode?: "public" | "private" | "custom"
 }
 
 interface GeoOpts {
@@ -290,13 +325,16 @@ export function enumField<const T extends readonly string[]>(
   values: T,
   opts: EnumOpts = {},
 ): Field<T[number]> | Field<T[number] | null> {
+  const useNative = opts.nativeType ?? false
   const meta: EnumFieldMeta = {
     kind: "enum",
-    pgType: "TEXT",
+    pgType: useNative ? (opts.nativeTypeName ?? "TEXT") : "TEXT",
     values,
     required: opts.required ?? false,
     unique: opts.unique ?? false,
     ...(opts.default !== undefined && { default: opts.default }),
+    ...(useNative && { nativeType: true }),
+    ...(opts.nativeTypeName !== undefined && { nativeTypeName: opts.nativeTypeName }),
   }
   return makeField(meta)
 }
@@ -341,11 +379,15 @@ export interface StorageReference {
 export function image(opts: StorageOpts & { required: true }): Field<StorageReference>
 export function image(opts?: StorageOpts): Field<StorageReference | null>
 export function image(opts: StorageOpts = {}): Field<StorageReference> | Field<StorageReference | null> {
+  const accept = opts.accept ?? opts.allowedFormats
   const meta: StorageFieldMeta = {
     kind: "image",
     pgType: "JSONB",
     required: opts.required ?? false,
     bucket: opts.bucket ?? "images",
+    ...(opts.maxSize !== undefined && { maxSize: parseSize(opts.maxSize) }),
+    ...(accept !== undefined && { accept }),
+    ...(opts.accessMode !== undefined && { accessMode: opts.accessMode }),
   }
   return makeField(meta)
 }
@@ -353,11 +395,15 @@ export function image(opts: StorageOpts = {}): Field<StorageReference> | Field<S
 export function file(opts: StorageOpts & { required: true }): Field<StorageReference>
 export function file(opts?: StorageOpts): Field<StorageReference | null>
 export function file(opts: StorageOpts = {}): Field<StorageReference> | Field<StorageReference | null> {
+  const accept = opts.accept ?? opts.allowedFormats
   const meta: StorageFieldMeta = {
     kind: "file",
     pgType: "JSONB",
     required: opts.required ?? false,
     bucket: opts.bucket ?? "files",
+    ...(opts.maxSize !== undefined && { maxSize: parseSize(opts.maxSize) }),
+    ...(accept !== undefined && { accept }),
+    ...(opts.accessMode !== undefined && { accessMode: opts.accessMode }),
   }
   return makeField(meta)
 }

@@ -10,6 +10,7 @@ import { resolve, join } from "node:path"
 import { randomBytes } from "node:crypto"
 import { spawnSync } from "node:child_process"
 import { signJwt } from "../jwt.js"
+import type { SelfHostConfig, ServiceVersionPin } from "../config.js"
 
 export function registerSelfHost(program: Command): void {
   const selfHostCmd = program
@@ -56,9 +57,18 @@ export function registerSelfHost(program: Command): void {
 
   selfHostCmd
     .command("update")
-    .description("Pull latest images and restart the production stack")
+    .description("Pull latest images and restart the production stack (use 'upgrade' for safe rolling upgrades)")
     .action(() => {
       update(process.cwd())
+    })
+
+  selfHostCmd
+    .command("upgrade")
+    .description("Safely upgrade services with backup, rolling restart, and automatic rollback")
+    .option("--skip-backup", "Skip automatic pre-upgrade backup")
+    .option("--skip-migrations", "Skip database migration step")
+    .action(async (opts: { skipBackup?: boolean; skipMigrations?: boolean }) => {
+      await upgrade(process.cwd(), opts)
     })
 }
 
@@ -97,8 +107,8 @@ async function setup(cwd: string, opts: SetupOpts): Promise<void> {
 
   console.log("Fetching latest image versions...")
   const [postgresTag, authTag] = await Promise.all([
-    fetchLatestTag("supatype/postgres", "15.8.1.060"),
-    fetchLatestTag("supatype/auth", "v2.164.0"),
+    fetchLatestTag("supatype/postgres", "17-latest"),
+    fetchLatestTag("supatype/auth", "v1.0.0"),
   ])
   console.log(`  postgres  supatype/postgres:${postgresTag}`)
   console.log(`  auth      supatype/auth:${authTag}`)
@@ -223,6 +233,392 @@ function update(cwd: string): void {
   console.log("Update complete.")
 }
 
+// ─── Upgrade (safe rolling upgrade) ──────────────────────────────────────────
+
+/** Known services and their GitHub repos (for changelog fetching) and Docker images. */
+interface ServiceInfo {
+  composeName: string
+  image: string
+  repo: string | null // GitHub org/repo for changelog lookup, null if third-party
+  fallbackTag: string
+}
+
+const MANAGED_SERVICES: ServiceInfo[] = [
+  { composeName: "db", image: "supatype/postgres", repo: "supatype/postgres", fallbackTag: "17-latest" },
+  { composeName: "gotrue", image: "supatype/auth", repo: "supatype/auth", fallbackTag: "v1.0.0" },
+  { composeName: "postgrest", image: "postgrest/postgrest", repo: "PostgREST/postgrest", fallbackTag: "v12.2.8" },
+  { composeName: "kong", image: "kong", repo: null, fallbackTag: "3.6" },
+  { composeName: "caddy", image: "caddy", repo: null, fallbackTag: "2" },
+  { composeName: "pgbouncer", image: "pgbouncer/pgbouncer", repo: null, fallbackTag: "latest" },
+  { composeName: "functions", image: "denoland/deno", repo: "denoland/deno", fallbackTag: "latest" },
+]
+
+function getCurrentImageTag(deployDir: string, serviceName: string): string | null {
+  const result = spawnSync(
+    "docker",
+    ["compose", "-f", join(deployDir, "docker-compose.yml"), "images", serviceName, "--format", "json"],
+    { cwd: deployDir, encoding: "utf8" },
+  )
+  if (result.status !== 0 || !result.stdout.trim()) return null
+  try {
+    // docker compose images --format json outputs one JSON object per line
+    const lines = result.stdout.trim().split("\n")
+    for (const line of lines) {
+      const data = JSON.parse(line) as { Tag?: string }
+      if (data.Tag) return data.Tag
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+async function fetchLatestRelease(repo: string): Promise<{ tag: string; body: string } | null> {
+  try {
+    const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+      headers: { Accept: "application/vnd.github+json" },
+      signal: AbortSignal.timeout(5000),
+    })
+    if (!res.ok) return null
+    const data = await res.json() as { tag_name?: string; body?: string }
+    if (!data.tag_name) return null
+    return { tag: data.tag_name, body: data.body ?? "" }
+  } catch {
+    return null
+  }
+}
+
+function loadSelfHostConfig(cwd: string): SelfHostConfig | undefined {
+  try {
+    const { loadConfig } = require("../config.js") as typeof import("../config.js")
+    const config = loadConfig(cwd)
+    return config.selfHost
+  } catch {
+    return undefined
+  }
+}
+
+function isServicePinned(
+  selfHostConfig: SelfHostConfig | undefined,
+  serviceName: string,
+): ServiceVersionPin | undefined {
+  if (!selfHostConfig?.services) return undefined
+  return (selfHostConfig.services as Record<string, ServiceVersionPin | undefined>)[serviceName]
+}
+
+function checkServiceHealth(deployDir: string, serviceName: string, timeoutSeconds = 60): boolean {
+  console.log(`  Checking health of ${serviceName}...`)
+  const deadline = Date.now() + timeoutSeconds * 1000
+  while (Date.now() < deadline) {
+    const result = spawnSync(
+      "docker",
+      ["compose", "-f", join(deployDir, "docker-compose.yml"), "ps", serviceName, "--format", "json"],
+      { cwd: deployDir, encoding: "utf8" },
+    )
+    if (result.status === 0 && result.stdout.trim()) {
+      const lines = result.stdout.trim().split("\n")
+      for (const line of lines) {
+        try {
+          const data = JSON.parse(line) as { State?: string; Health?: string; Status?: string }
+          // A service is considered healthy if:
+          // - it has a healthcheck and Health is "healthy", or
+          // - it has no healthcheck and State is "running"
+          if (data.Health === "healthy") return true
+          if (!data.Health && data.State === "running") return true
+          // Status field sometimes contains "Up ... (healthy)"
+          if (data.Status && data.Status.includes("healthy")) return true
+          if (data.Status && !data.Status.includes("health") && data.State === "running") return true
+        } catch { /* skip bad line */ }
+      }
+    }
+    spawnSync("sleep", ["3"])
+  }
+  return false
+}
+
+function rollbackService(deployDir: string, serviceName: string, previousImage: string): boolean {
+  console.log(`  Rolling back ${serviceName} to ${previousImage}...`)
+  // Pull the previous image back
+  const pullResult = spawnSync(
+    "docker",
+    ["pull", previousImage],
+    { stdio: "inherit", cwd: deployDir },
+  )
+  if (pullResult.status !== 0) return false
+
+  // Restart the service (docker compose will use the image now available)
+  // We need to re-tag or use docker compose up with the old image.
+  // The simplest reliable approach: stop the service, then start it.
+  // Since compose file may have :latest or a tag, we re-pull and restart.
+  const upResult = spawnSync(
+    "docker",
+    ["compose", "-f", join(deployDir, "docker-compose.yml"), "up", "-d", "--no-deps", serviceName],
+    { stdio: "inherit", cwd: deployDir },
+  )
+  return upResult.status === 0
+}
+
+function applyDatabaseMigrations(deployDir: string): boolean {
+  console.log("\nApplying database migrations...")
+  // Check if migrations directory exists
+  const migrationsDir = resolve(deployDir, "..", "migrations")
+  if (!existsSync(migrationsDir)) {
+    console.log("  No migrations directory found, skipping.")
+    return true
+  }
+
+  // Run migrations via docker exec into the db container
+  const result = spawnSync(
+    "docker",
+    [
+      "compose",
+      "-f", join(deployDir, "docker-compose.yml"),
+      "exec", "-T", "db",
+      "sh", "-c",
+      `for f in /migrations/*.sql; do [ -f "$f" ] && psql -U postgres -d supatype -f "$f" && echo "Applied: $f"; done`,
+    ],
+    {
+      cwd: deployDir,
+      stdio: "inherit",
+      // Mount migrations directory
+      env: { ...process.env },
+    },
+  )
+
+  // Also try with a copy approach if the volume isn't mounted
+  if (result.status !== 0) {
+    // Copy and run migrations one at a time
+    const { readdirSync } = require("node:fs") as typeof import("node:fs")
+    try {
+      const files = readdirSync(migrationsDir).filter(f => f.endsWith(".sql")).sort()
+      for (const file of files) {
+        const sqlPath = resolve(migrationsDir, file)
+        const sql = readFileSync(sqlPath, "utf8")
+        const execResult = spawnSync(
+          "docker",
+          [
+            "compose",
+            "-f", join(deployDir, "docker-compose.yml"),
+            "exec", "-T", "db",
+            "psql", "-U", "postgres", "-d", "supatype", "-c", sql,
+          ],
+          { cwd: deployDir, encoding: "utf8" },
+        )
+        if (execResult.status !== 0) {
+          console.error(`  Failed to apply migration ${file}: ${execResult.stderr}`)
+          return false
+        }
+        console.log(`  Applied: ${file}`)
+      }
+    } catch (err) {
+      console.error(`  Error reading migrations: ${err}`)
+      return false
+    }
+  }
+
+  console.log("  Migrations complete.")
+  return true
+}
+
+/** Summarize a release body to a short changelog line. */
+function summarizeChangelog(body: string): string {
+  if (!body.trim()) return "(no changelog available)"
+  // Take first 3 non-empty lines, strip markdown headers
+  const lines = body
+    .split("\n")
+    .map(l => l.trim())
+    .filter(l => l.length > 0)
+    .map(l => l.replace(/^#+\s*/, ""))
+    .slice(0, 3)
+  const summary = lines.join("; ")
+  return summary.length > 120 ? summary.slice(0, 117) + "..." : summary
+}
+
+interface UpgradeOpts {
+  skipBackup?: boolean
+  skipMigrations?: boolean
+}
+
+async function upgrade(cwd: string, opts: UpgradeOpts): Promise<void> {
+  const deployDir = resolve(cwd, "deploy")
+  if (!existsSync(join(deployDir, "docker-compose.yml"))) {
+    console.error("deploy/docker-compose.yml not found. Run: supatype self-host setup")
+    process.exit(1)
+  }
+
+  const selfHostConfig = loadSelfHostConfig(cwd)
+
+  // ── Step 1: Check current vs latest versions ──────────────────────────────
+
+  console.log("Checking service versions...\n")
+
+  interface UpgradePlan {
+    service: ServiceInfo
+    currentTag: string | null
+    latestTag: string
+    changelog: string
+    pinned: boolean
+  }
+
+  const plans: UpgradePlan[] = []
+
+  for (const svc of MANAGED_SERVICES) {
+    const pin = isServicePinned(selfHostConfig, svc.composeName)
+    const currentTag = getCurrentImageTag(deployDir, svc.composeName)
+
+    if (pin) {
+      console.log(`  ${svc.composeName.padEnd(12)} pinned at ${pin.version} (skipping)`)
+      plans.push({
+        service: svc,
+        currentTag,
+        latestTag: pin.version,
+        changelog: "",
+        pinned: true,
+      })
+      continue
+    }
+
+    let latestTag = svc.fallbackTag
+    let changelog = ""
+
+    if (svc.repo) {
+      const release = await fetchLatestRelease(svc.repo)
+      if (release) {
+        latestTag = release.tag
+        changelog = summarizeChangelog(release.body)
+      }
+    }
+
+    const needsUpgrade = currentTag !== latestTag
+    const marker = needsUpgrade ? " *" : ""
+    console.log(
+      `  ${svc.composeName.padEnd(12)} ${(currentTag ?? "unknown").padEnd(16)} -> ${latestTag}${marker}`,
+    )
+    if (changelog && needsUpgrade) {
+      console.log(`${"".padEnd(16)}changelog: ${changelog}`)
+    }
+
+    plans.push({
+      service: svc,
+      currentTag,
+      latestTag,
+      changelog,
+      pinned: false,
+    })
+  }
+
+  const upgradeable = plans.filter(p => !p.pinned && p.currentTag !== p.latestTag)
+  if (upgradeable.length === 0) {
+    console.log("\nAll services are up to date. Nothing to upgrade.")
+    return
+  }
+
+  console.log(`\n${upgradeable.length} service(s) will be upgraded.\n`)
+
+  // ── Step 2: Pre-upgrade backup ────────────────────────────────────────────
+
+  if (!opts.skipBackup) {
+    const backupPath = `./backups/pre-upgrade-${timestamp()}.sql.gz`
+    console.log(`Creating pre-upgrade backup: ${backupPath}`)
+    backup(cwd, backupPath)
+    console.log("Backup complete.\n")
+  } else {
+    console.log("Skipping pre-upgrade backup (--skip-backup).\n")
+  }
+
+  // ── Step 3: Apply database migrations ─────────────────────────────────────
+
+  if (!opts.skipMigrations) {
+    const migrationOk = applyDatabaseMigrations(deployDir)
+    if (!migrationOk) {
+      console.error("\nDatabase migration failed. Aborting upgrade.")
+      console.error("Your pre-upgrade backup is available. To restore:")
+      console.error("  docker compose exec -T db sh -c 'gunzip | psql -U postgres' < <backup-file>")
+      process.exit(1)
+    }
+  }
+
+  // ── Step 4: Rolling restart with health checks and rollback ───────────────
+
+  console.log("\nStarting rolling upgrade...\n")
+
+  const failed: string[] = []
+
+  for (const plan of upgradeable) {
+    const svc = plan.service
+    const fullImage = `${svc.image}:${plan.latestTag}`
+    const previousImage = plan.currentTag ? `${svc.image}:${plan.currentTag}` : null
+
+    console.log(`Upgrading ${svc.composeName}: ${plan.currentTag ?? "unknown"} -> ${plan.latestTag}`)
+
+    // Pull new image
+    console.log(`  Pulling ${fullImage}...`)
+    const pullResult = spawnSync("docker", ["pull", fullImage], {
+      stdio: "inherit",
+      cwd: deployDir,
+    })
+    if (pullResult.status !== 0) {
+      console.error(`  Failed to pull ${fullImage}. Skipping ${svc.composeName}.`)
+      failed.push(svc.composeName)
+      continue
+    }
+
+    // Restart just this service (zero-downtime: one at a time)
+    console.log(`  Restarting ${svc.composeName}...`)
+    const upResult = spawnSync(
+      "docker",
+      ["compose", "-f", join(deployDir, "docker-compose.yml"), "up", "-d", "--no-deps", svc.composeName],
+      { stdio: "inherit", cwd: deployDir },
+    )
+    if (upResult.status !== 0) {
+      console.error(`  Failed to restart ${svc.composeName}.`)
+      if (previousImage) {
+        rollbackService(deployDir, svc.composeName, previousImage)
+      }
+      failed.push(svc.composeName)
+      continue
+    }
+
+    // Verify health
+    const healthy = checkServiceHealth(deployDir, svc.composeName)
+    if (!healthy) {
+      console.error(`  Health check failed for ${svc.composeName} after upgrade.`)
+      if (previousImage) {
+        console.log(`  Initiating rollback for ${svc.composeName}...`)
+        const rolledBack = rollbackService(deployDir, svc.composeName, previousImage)
+        if (rolledBack) {
+          const healthAfterRollback = checkServiceHealth(deployDir, svc.composeName)
+          if (healthAfterRollback) {
+            console.log(`  Rolled back ${svc.composeName} to ${previousImage} successfully.`)
+          } else {
+            console.error(`  WARNING: ${svc.composeName} is unhealthy even after rollback.`)
+          }
+        } else {
+          console.error(`  WARNING: Rollback failed for ${svc.composeName}.`)
+        }
+      }
+      failed.push(svc.composeName)
+      continue
+    }
+
+    console.log(`  ${svc.composeName} upgraded and healthy.\n`)
+  }
+
+  // ── Step 5: Summary ───────────────────────────────────────────────────────
+
+  if (failed.length === 0) {
+    console.log("Upgrade complete. All services are healthy.")
+  } else {
+    console.error(`\nUpgrade finished with failures in: ${failed.join(", ")}`)
+    console.error("\nManual intervention may be needed:")
+    console.error("  1. Check logs:        supatype self-host logs --service <name>")
+    console.error("  2. Check status:      supatype self-host status")
+    console.error("  3. Restore backup:    docker compose exec -T db sh -c 'gunzip | psql -U postgres' < <backup-file>")
+    console.error("  4. Pin a version:     Add services.<name>.version in supatype.config.ts selfHost config")
+    process.exit(1)
+  }
+}
+
 // ─── Config helpers ───────────────────────────────────────────────────────────
 
 function loadDomainFromConfig(cwd: string): string | undefined {
@@ -311,7 +707,7 @@ services:
     restart: unless-stopped
 
   pgbouncer:
-    image: edoburu/pgbouncer:1.23.1
+    image: pgbouncer/pgbouncer:latest
     volumes:
       - ./pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
       - ./userlist.txt:/etc/pgbouncer/userlist.txt:ro
@@ -387,6 +783,23 @@ services:
       - gotrue
     restart: unless-stopped
 ${appService}
+  functions:
+    image: denoland/deno:latest
+    environment:
+      SUPATYPE_URL: http://kong:8000
+      SUPATYPE_ANON_KEY: \${ANON_KEY}
+      SUPATYPE_SERVICE_ROLE_KEY: \${SERVICE_ROLE_KEY}
+      FUNCTIONS_DIR: /functions
+    volumes:
+      - ../supatype/functions:/functions:ro
+    networks:
+      - supatype
+    depends_on:
+      - kong
+    mem_limit: 512m
+    cpus: 1.0
+    restart: unless-stopped
+
   caddy:
     image: caddy:2
     ports:

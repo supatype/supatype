@@ -1,6 +1,6 @@
 import type { Command } from "commander"
 import { loadConfig, loadSchemaAst } from "../config.js"
-import { invokeEngine } from "../engine.js"
+import { ensureEngine, invokeEngine } from "../engine.js"
 
 interface DiffResult {
   operations: Array<{
@@ -15,10 +15,12 @@ export function registerDiff(program: Command): void {
     .command("diff")
     .description("Show planned schema changes without applying them (dry run)")
     .option("--connection <url>", "Database connection URL (overrides config)")
-    .action((opts: { connection?: string }) => {
+    .action(async (opts: { connection?: string }) => {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
       const connection = opts.connection ?? config.connection
+
+      await ensureEngine()
 
       console.log("Loading schema...")
       const ast = loadSchemaAst(config.schema, cwd)

@@ -24,8 +24,8 @@ export function useLocale(): LocaleState {
  * depending on AdminConfigContext, which isn't available yet when AdminApp
  * calls this hook before rendering the provider).
  */
-export function useLocaleState(config: AdminConfig): LocaleState {
-  const defaultLocale = config.locale?.defaultLocale ?? "en"
+export function useLocaleState(config: AdminConfig | null): LocaleState {
+  const defaultLocale = config?.locale?.defaultLocale ?? "en"
   const [currentLocale, setCurrentLocale] = useState(defaultLocale)
 
   const setLocale = useCallback((locale: string) => {
@@ -35,7 +35,7 @@ export function useLocaleState(config: AdminConfig): LocaleState {
   return {
     currentLocale,
     setLocale,
-    locales: config.locale?.locales ?? [{ code: "en", label: "English" }],
+    locales: config?.locale?.locales ?? [{ code: "en", label: "English" }],
     defaultLocale,
   }
 }

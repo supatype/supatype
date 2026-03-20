@@ -4,7 +4,7 @@
   "description": "Supatype CLI — schema push, introspect, generate",
   "type": "module",
   "bin": {
-    "supatype": "./bin/definatype.js"
+    "supatype": "./bin/supatype.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

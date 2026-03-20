@@ -12,7 +12,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const CLI_BIN = resolve(__dirname, "../bin/definatype.js")
+const CLI_BIN = resolve(__dirname, "../bin/supatype.js")
 
 function runCli(
   args: string[],

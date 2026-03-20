@@ -1,7 +1,7 @@
 import type { Command } from "commander"
 import { createInterface } from "node:readline"
 import { loadConfig } from "../config.js"
-import { invokeEngine } from "../engine.js"
+import { ensureEngine, invokeEngine } from "../engine.js"
 
 export function registerMigrate(program: Command): void {
   // migrate — apply all pending migrations
@@ -9,10 +9,11 @@ export function registerMigrate(program: Command): void {
     .command("migrate")
     .description("Apply pending migrations from the migration history")
     .option("--connection <url>", "Database connection URL (overrides config)")
-    .action((opts: { connection?: string }) => {
+    .action(async (opts: { connection?: string }) => {
       const config = loadConfig()
       const connection = opts.connection ?? config.connection
 
+      await ensureEngine()
       const result = invokeEngine(["migrate", "--pending", "--connection", connection])
       if (result.exitCode !== 0) {
         console.error(result.stderr || result.stdout)
@@ -26,10 +27,11 @@ export function registerMigrate(program: Command): void {
     .command("rollback")
     .description("Roll back the last applied migration")
     .option("--connection <url>", "Database connection URL (overrides config)")
-    .action((opts: { connection?: string }) => {
+    .action(async (opts: { connection?: string }) => {
       const config = loadConfig()
       const connection = opts.connection ?? config.connection
 
+      await ensureEngine()
       const result = invokeEngine(["rollback", "--connection", connection])
       if (result.exitCode !== 0) {
         console.error(result.stderr || result.stdout)
@@ -60,6 +62,7 @@ export function registerMigrate(program: Command): void {
       const config = loadConfig()
       const connection = opts.connection ?? config.connection
 
+      await ensureEngine()
       const result = invokeEngine(["reset", "--connection", connection])
       if (result.exitCode !== 0) {
         console.error(result.stderr || result.stdout)

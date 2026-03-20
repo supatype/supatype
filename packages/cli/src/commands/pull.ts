@@ -2,7 +2,7 @@ import type { Command } from "commander"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { loadConfig } from "../config.js"
-import { invokeEngine } from "../engine.js"
+import { ensureEngine, invokeEngine } from "../engine.js"
 import { pgTypeToField, toCamelCase, type ColumnInfo } from "../pull-utils.js"
 
 interface IntrospectResult {
@@ -21,10 +21,11 @@ export function registerPull(program: Command): void {
     )
     .option("--connection <url>", "Database connection URL (overrides config)")
     .option("--output <path>", "Output directory for schema files", "./schema")
-    .action((opts: { connection?: string; output: string }) => {
+    .action(async (opts: { connection?: string; output: string }) => {
       const cwd = process.cwd()
       const connection = opts.connection ?? loadConfig(cwd).connection
 
+      await ensureEngine()
       console.log("Introspecting database...")
       const result = invokeEngine([
         "introspect",

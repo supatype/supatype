@@ -2,6 +2,11 @@ import { existsSync } from "node:fs"
 import { resolve } from "node:path"
 import { evalTsSnippet } from "./tsx-runner.js"
 
+export interface ServiceVersionPin {
+  /** Docker image tag to pin this service to (e.g. "v1.2.3"). When set, `self-host upgrade` skips this service. */
+  version: string
+}
+
 export interface SelfHostConfig {
   /** Production domain (e.g. "api.example.com"). Used by Caddy for HTTPS. */
   domain: string
@@ -18,9 +23,47 @@ export interface SelfHostConfig {
     /** Email for Let's Encrypt registration (required when provider = "caddy"). */
     email?: string
   }
+  /**
+   * Pin specific services to fixed Docker image versions.
+   * When a service is pinned, `self-host upgrade` will skip it.
+   * Omit a service or set to `undefined` to allow automatic upgrades.
+   *
+   * @example
+   * services: {
+   *   db: { version: "17-latest" },
+   *   postgrest: { version: "v12.2.8" },
+   * }
+   */
+  services?: {
+    db?: ServiceVersionPin
+    gotrue?: ServiceVersionPin
+    postgrest?: ServiceVersionPin
+    kong?: ServiceVersionPin
+    caddy?: ServiceVersionPin
+    pgbouncer?: ServiceVersionPin
+  }
 }
 
-export interface DefinatypeConfig {
+export type AppFramework = "nextjs" | "astro" | "vite" | "remix-spa" | "sveltekit" | "nuxt" | "static"
+
+export interface AppConfig {
+  /** Framework name. Auto-detected from package.json if not specified. */
+  framework?: AppFramework
+  /** Path to the app directory (default: "./" or "./apps/web" for monorepos). */
+  directory?: string
+  /** Build command (inferred from framework if not specified). */
+  buildCommand?: string
+  /** Output directory (inferred from framework if not specified). */
+  outputDirectory?: string
+  /** Enable SPA fallback routing (default: true for Vite/CRA, false for SSG frameworks). */
+  spa?: boolean
+  /** Environment variables to inject during build. */
+  env?: Record<string, string>
+  /** Custom response headers for the static site. */
+  headers?: Record<string, string>
+}
+
+export interface SupatypeConfig {
   /** Database connection string. */
   connection: string
   /**
@@ -37,10 +80,34 @@ export interface DefinatypeConfig {
   }
   /** Self-hosted production deployment configuration. */
   selfHost?: SelfHostConfig
+  /** Cloud project reference (set by `supatype link --project <ref>`). */
+  projectRef?: string
+  /** Cloud API URL override. */
+  apiUrl?: string
+  /** Cloud access token (prefer SUPATYPE_ACCESS_TOKEN env var). */
+  accessToken?: string
+  /** CORS configuration. */
+  cors?: {
+    /** Allowed origins. Defaults to ['*'] in development. */
+    allowedOrigins?: string[]
+  }
+  /** Static site hosting configuration. */
+  app?: AppConfig
+  /** Registered plugins (provider, field, composite, widget). */
+  plugins?: Array<unknown> | undefined
+  /** Admin panel configuration (see Gap Appendices tasks 47–50). */
+  admin?: {
+    /**
+     * Roles from {ref}_auth.users that grant admin panel access.
+     * Checked against `app_metadata.role` in the project JWT.
+     * @default ["admin"]
+     */
+    roles?: string[]
+  }
 }
 
 /** Identity helper — provides type inference for config files. */
-export function defineConfig(config: DefinatypeConfig): DefinatypeConfig {
+export function defineConfig(config: SupatypeConfig): SupatypeConfig {
   return config
 }
 
@@ -51,7 +118,7 @@ const CONFIG_CANDIDATES = [
 ]
 
 /** Load and evaluate supatype.config.ts from the given directory. */
-export function loadConfig(cwd: string = process.cwd()): DefinatypeConfig {
+export function loadConfig(cwd: string = process.cwd()): SupatypeConfig {
   for (const candidate of CONFIG_CANDIDATES) {
     const configPath = resolve(cwd, candidate)
     if (!existsSync(configPath)) continue
@@ -74,7 +141,7 @@ process.stdout.write(JSON.stringify(config))
       )
     }
 
-    const parsed = JSON.parse(result.stdout) as DefinatypeConfig
+    const parsed = JSON.parse(result.stdout) as SupatypeConfig
     if (!parsed.connection || !parsed.schema) {
       throw new Error(
         `${candidate} must export { connection, schema } via defineConfig()`,

@@ -1,0 +1,15 @@
+{
+  "name": "@supatype/plugin-seo",
+  "version": "0.1.0",
+  "description": "SEO meta composite with meta title, description, OG image, canonical URL, and no-index toggle",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" } },
+  "keywords": ["supatype", "supatype-plugin"],
+  "supatype": { "pluginApi": 1, "types": ["composite"] },
+  "scripts": { "build": "tsc", "typecheck": "tsc --noEmit" },
+  "dependencies": { "@supatype/plugin-sdk": "workspace:*" },
+  "peerDependencies": { "react": ">=18" },
+  "devDependencies": { "@types/react": "^18", "react": "^18", "typescript": "^5" }
+}

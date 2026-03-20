@@ -8,6 +8,8 @@ export interface ConnectedClient {
   claims: JwtClaims | null
   subscriptions: Map<string, Subscription>
   presence: Map<string, PresenceEntry>
+  /** Project ref this client belongs to (multi-tenant mode). */
+  projectRef: string | null
 }
 
 /**
@@ -19,9 +21,9 @@ export class ChannelManager {
   private nextId = 0
 
   /** Register a new WebSocket connection. Returns a connection ID. */
-  addClient(ws: WebSocket, claims: JwtClaims | null): string {
+  addClient(ws: WebSocket, claims: JwtClaims | null, projectRef?: string | null): string {
     const id = String(++this.nextId)
-    this.clients.set(id, { ws, claims, subscriptions: new Map(), presence: new Map() })
+    this.clients.set(id, { ws, claims, subscriptions: new Map(), presence: new Map(), projectRef: projectRef ?? null })
     return id
   }
 
@@ -127,5 +129,48 @@ export class ChannelManager {
       if (entry) entries.push(entry)
     }
     return entries
+  }
+
+  // ─── Multi-tenant helpers ───────────────────────────────────────────────
+
+  /** Count connections for a specific project (multi-tenant mode). */
+  getProjectConnectionCount(projectRef: string): number {
+    let count = 0
+    for (const client of this.clients.values()) {
+      if (client.projectRef === projectRef) count++
+    }
+    return count
+  }
+
+  /** Set the project ref for a client. */
+  setClientProjectRef(id: string, projectRef: string): void {
+    const client = this.clients.get(id)
+    if (client) client.projectRef = projectRef
+  }
+
+  /**
+   * Get subscribers for a schema.table, optionally scoped to a project ref.
+   * In multi-tenant mode, only returns subscribers whose projectRef matches
+   * the schema prefix of the change.
+   */
+  getSubscribersForProject(
+    schema: string,
+    table: string,
+    projectRef: string | null,
+  ): Array<{ clientId: string; client: ConnectedClient; subscription: Subscription }> {
+    const results: Array<{ clientId: string; client: ConnectedClient; subscription: Subscription }> = []
+
+    for (const [clientId, client] of this.clients) {
+      // In multi-tenant mode, only match clients for this project
+      if (projectRef !== null && client.projectRef !== projectRef) continue
+
+      for (const sub of client.subscriptions.values()) {
+        if (sub.schema === schema && sub.table === table) {
+          results.push({ clientId, client, subscription: sub })
+        }
+      }
+    }
+
+    return results
   }
 }

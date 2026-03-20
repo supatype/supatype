@@ -7,7 +7,12 @@ RUN corepack enable pnpm && pnpm install --frozen-lockfile --filter @supatype/st
 RUN pnpm --filter @supatype/studio build
 
 FROM nginx:alpine
+RUN echo "worker_processes 1;" > /etc/nginx/nginx.conf.d_worker \
+    && sed -i 's/worker_processes.*;/worker_processes 1;/' /etc/nginx/nginx.conf
 COPY --from=builder /build/packages/studio/dist /usr/share/nginx/html
 COPY --from=builder /build/packages/studio/nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 3002
-CMD ["nginx", "-g", "daemon off;"]
+
+# At runtime, write config.js with the cloud config JSON, then start nginx
+ENV SUPATYPE_CLOUD_JSON=""
+CMD ["/bin/sh", "-c", "printf 'window.__SUPATYPE_CLOUD__ = %s;\\n' \"${SUPATYPE_CLOUD_JSON:-undefined}\" > /usr/share/nginx/html/config.js && nginx -g 'daemon off;'"]

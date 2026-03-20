@@ -3,18 +3,22 @@ import { sendJson, readJson } from "../server.js"
 import * as db from "../db.js"
 import { ensureBucket as ensureS3Bucket, deleteBucket as deleteS3Bucket } from "../s3.js"
 
+import type { BucketAccessMode } from "../db.js"
+
 interface CreateBucketBody {
   id?: string
   name: string
   public?: boolean
   file_size_limit?: number
   allowed_mime_types?: string[]
+  access_mode?: BucketAccessMode
 }
 
 interface UpdateBucketBody {
   public?: boolean
   file_size_limit?: number | null
   allowed_mime_types?: string[] | null
+  access_mode?: BucketAccessMode
 }
 
 export async function create(ctx: RequestContext): Promise<void> {
@@ -34,6 +38,7 @@ export async function create(ctx: RequestContext): Promise<void> {
       body.public ?? false,
       body.file_size_limit,
       body.allowed_mime_types,
+      body.access_mode,
     )
     sendJson(ctx.res, 200, { name: bucket.name })
   } catch (err) {

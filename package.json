@@ -4,7 +4,7 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "node --env-file=.env node_modules/.bin/turbo run dev",
-    "supatype": "node packages/cli/bin/definatype.js",
+    "supatype": "tsx packages/cli/bin/dev-entry.ts",
     "test": "turbo run test",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",

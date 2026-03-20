@@ -1,7 +1,9 @@
 import type { Command } from "commander"
 import { createInterface } from "node:readline"
 import { loadConfig, loadSchemaAst } from "../config.js"
-import { invokeEngine } from "../engine.js"
+import { ensureEngine, invokeEngine } from "../engine.js"
+import { promptFirstAdminUser } from "./admin.js"
+import { validateProviders } from "@supatype/plugin-sdk"
 
 interface DiffResult {
   operations: Operation[]
@@ -26,8 +28,30 @@ export function registerPush(program: Command): void {
       const config = loadConfig(cwd)
       const connection = opts.connection ?? config.connection
 
+      await ensureEngine()
+
       console.log("Loading schema...")
       const ast = loadSchemaAst(config.schema, cwd)
+
+      // Validate configured providers before diffing
+      if (config.plugins && config.plugins.length > 0) {
+        const providers = config.plugins.filter(
+          (p): p is { name: string; config?: Record<string, unknown> | undefined } =>
+            typeof p === "object" && p !== null && "name" in p,
+        )
+        if (providers.length > 0) {
+          const validation = validateProviders(providers)
+          for (const warning of validation.warnings) {
+            console.warn(`[plugins] warning: ${warning}`)
+          }
+          if (!validation.valid) {
+            for (const error of validation.errors) {
+              console.error(`[plugins] error: ${error}`)
+            }
+            process.exit(1)
+          }
+        }
+      }
 
       console.log("Diffing against database...")
       const diffResult = invokeEngine(
@@ -70,6 +94,10 @@ export function registerPush(program: Command): void {
         process.exit(1)
       }
       console.log(migrateResult.stdout || "Migration applied.")
+
+      // After migration, check if this is the first push and offer to create an
+      // admin user if none exist (Gap Appendices task 48).
+      await promptFirstAdminUser(connection)
 
       if (config.output?.types ?? config.output?.client) {
         console.log("Generating types...")

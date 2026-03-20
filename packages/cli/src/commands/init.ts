@@ -134,7 +134,7 @@ S3_SECRET_KEY=supatype-secret
 function dockerComposeTemplate(projectName: string): string {
   return `services:
   db:
-    image: supatype/postgres:15.8.1.060
+    image: supatype/postgres:17-latest
     environment:
       POSTGRES_PASSWORD: \${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: \${POSTGRES_DB:-${projectName}}
@@ -149,7 +149,7 @@ function dockerComposeTemplate(projectName: string): string {
       retries: 20
 
   pgbouncer:
-    image: edoburu/pgbouncer:1.23.1
+    image: pgbouncer/pgbouncer:latest
     volumes:
       - ./.supatype/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
       - ./.supatype/userlist.txt:/etc/pgbouncer/userlist.txt:ro
@@ -163,7 +163,7 @@ function dockerComposeTemplate(projectName: string): string {
       retries: 10
 
   gotrue:
-    image: supatype/auth:v2.164.0
+    image: supatype/auth:v1.0.0
     environment:
       GOTRUE_API_HOST: 0.0.0.0
       GOTRUE_API_PORT: 9999

@@ -4,6 +4,10 @@ import * as db from "../db.js"
 import * as s3 from "../s3.js"
 import { parseTransformParams, transformImage } from "../transform.js"
 import { config } from "../env.js"
+import { validateFileSize, validateContentType, validateStorageQuota } from "../middleware/storage-limits.js"
+import { checkReadAccess, checkWriteAccess, checkOverwriteAccess } from "../middleware/access-control.js"
+import { createSignedToken, verifySignedToken } from "../middleware/signed-urls.js"
+import { applyCorsHeaders } from "../middleware/cors.js"
 
 // ─── Upload ─────────────────────────────────────────────────────────────────────
 
@@ -17,35 +21,52 @@ export async function upload(ctx: RequestContext): Promise<void> {
     return
   }
 
-  // Check mime type restrictions
+  // Apply bucket-specific CORS headers
+  applyCorsHeaders(ctx.res, bucket)
+
+  // ── Access control (task 44) ────────────────────────────────────────────────
+  const writeAccess = checkWriteAccess(bucket, ctx.jwt)
+  if (!writeAccess.allowed) {
+    sendJson(ctx.res, writeAccess.status, { error: writeAccess.error })
+    return
+  }
+
+  // ── Content-Type validation (task 43) ───────────────────────────────────────
   const contentType = ctx.req.headers["content-type"] ?? "application/octet-stream"
-  if (bucket.allowed_mime_types && bucket.allowed_mime_types.length > 0) {
-    const allowed = bucket.allowed_mime_types.some((mime) =>
-      mime.endsWith("/*")
-        ? contentType.startsWith(mime.slice(0, -1))
-        : contentType === mime,
-    )
-    if (!allowed) {
-      sendJson(ctx.res, 415, { error: `Content type ${contentType} not allowed for this bucket` })
-      return
-    }
+  const typeError = validateContentType(bucket, contentType)
+  if (typeError) {
+    sendJson(ctx.res, typeError.status, typeError.body)
+    return
   }
 
   const body = await readBody(ctx.req)
 
-  // Check file size
-  if (bucket.file_size_limit !== null && body.length > bucket.file_size_limit) {
-    sendJson(ctx.res, 413, { error: `File exceeds size limit of ${bucket.file_size_limit} bytes` })
+  // ── File size validation (task 41) ──────────────────────────────────────────
+  const sizeError = validateFileSize(bucket, body.length)
+  if (sizeError) {
+    sendJson(ctx.res, sizeError.status, sizeError.body)
     return
   }
-  if (body.length > config.maxUploadSize) {
-    sendJson(ctx.res, 413, { error: `File exceeds maximum upload size of ${config.maxUploadSize} bytes` })
+
+  // ── Storage quota check (task 42) ───────────────────────────────────────────
+  const quotaError = await validateStorageQuota(body.length)
+  if (quotaError) {
+    sendJson(ctx.res, quotaError.status, quotaError.body)
     return
   }
 
   const upsert = ctx.req.headers["x-upsert"] === "true"
 
-  // Check if object exists
+  // ── Overwrite permission check for private buckets (task 44) ────────────────
+  if (upsert && ctx.jwt) {
+    const overwriteAccess = await checkOverwriteAccess(bucket, objectPath, ctx.jwt)
+    if (!overwriteAccess.allowed) {
+      sendJson(ctx.res, overwriteAccess.status, { error: overwriteAccess.error })
+      return
+    }
+  }
+
+  // Check if object exists (when not upserting)
   if (!upsert) {
     const existing = await db.getObject(bucketId, objectPath)
     if (existing) {
@@ -76,7 +97,11 @@ export async function downloadPublic(ctx: RequestContext): Promise<void> {
     sendJson(ctx.res, 404, { error: "Bucket not found" })
     return
   }
-  if (!bucket.public) {
+
+  // Apply bucket-specific CORS headers (task 46)
+  applyCorsHeaders(ctx.res, bucket)
+
+  if (!bucket.public && bucket.access_mode !== "public") {
     sendJson(ctx.res, 403, { error: "Bucket is not public" })
     return
   }
@@ -96,6 +121,16 @@ export async function downloadAuthenticated(ctx: RequestContext): Promise<void> 
     return
   }
 
+  // Apply bucket-specific CORS headers (task 46)
+  applyCorsHeaders(ctx.res, bucket)
+
+  // ── Access control (task 44) ────────────────────────────────────────────────
+  const access = await checkReadAccess(bucket, objectPath, ctx.jwt)
+  if (!access.allowed) {
+    sendJson(ctx.res, access.status, { error: access.error })
+    return
+  }
+
   await serveObject(ctx, bucketId, objectPath)
 }
 
@@ -111,8 +146,29 @@ export async function downloadSigned(ctx: RequestContext): Promise<void> {
     return
   }
 
-  // Token is the S3 pre-signed URL query params — the request was already validated
-  // by the S3 backend when generating the signed URL, so we just proxy to S3.
+  const bucket = await db.getBucket(bucketId)
+  if (!bucket) {
+    sendJson(ctx.res, 404, { error: "Bucket not found" })
+    return
+  }
+
+  // ── Pre-signed URL verification (task 45) ──────────────────────────────────
+  // Try application-level HMAC token first, fall back to S3 pre-signed URL proxy
+  const payload = verifySignedToken(token, bucketId, objectPath)
+  if (!payload) {
+    // The token might be an S3-level pre-signed URL token — check if it looks
+    // like a base64url.base64url pair (our format) vs. S3 query params
+    if (token.includes(".")) {
+      // It was our format but failed verification — reject
+      sendJson(ctx.res, 403, { error: "Invalid or expired signed URL" })
+      return
+    }
+    // Otherwise, treat as S3 pre-signed URL and let S3 validate it
+  }
+
+  // No CORS for private bucket signed URLs (task 46)
+  applyCorsHeaders(ctx.res, bucket)
+
   await serveObject(ctx, bucketId, objectPath)
 }
 
@@ -123,10 +179,25 @@ export async function createSignedUrl(ctx: RequestContext): Promise<void> {
   const objectPath = ctx.params["wildcard"]!
 
   const body = await readJson<{ expiresIn?: number }>(ctx.req)
-  const expiresIn = body.expiresIn ?? 3600
+  const expiresIn = body.expiresIn ?? config.defaultSignedUrlExpiry
 
-  if (expiresIn < 1 || expiresIn > 604800) {
-    sendJson(ctx.res, 400, { error: "expiresIn must be between 1 and 604800 seconds" })
+  if (expiresIn < 1 || expiresIn > config.maxSignedUrlExpiry) {
+    sendJson(ctx.res, 400, {
+      error: `expiresIn must be between 1 and ${config.maxSignedUrlExpiry} seconds`,
+    })
+    return
+  }
+
+  const bucket = await db.getBucket(bucketId)
+  if (!bucket) {
+    sendJson(ctx.res, 404, { error: "Bucket not found" })
+    return
+  }
+
+  // ── Access control: check read permission before signing (task 44) ──────────
+  const access = await checkReadAccess(bucket, objectPath, ctx.jwt)
+  if (!access.allowed) {
+    sendJson(ctx.res, access.status, { error: access.error })
     return
   }
 
@@ -137,8 +208,20 @@ export async function createSignedUrl(ctx: RequestContext): Promise<void> {
     return
   }
 
-  const signedUrl = await s3.createSignedDownloadUrl(bucketId, objectPath, expiresIn)
-  sendJson(ctx.res, 200, { signedURL: signedUrl })
+  // For private buckets, use our HMAC-signed tokens (task 45)
+  // For public buckets, use S3 pre-signed URLs
+  const isPrivate = bucket.access_mode === "private" || (!bucket.public && bucket.access_mode !== "public")
+
+  if (isPrivate) {
+    // Application-level HMAC-SHA256 signed token
+    const token = createSignedToken(bucketId, objectPath, expiresIn)
+    const signedUrl = `/object/sign/${bucketId}/${objectPath}?token=${token}`
+    sendJson(ctx.res, 200, { signedURL: signedUrl })
+  } else {
+    // S3-level pre-signed URL
+    const signedUrl = await s3.createSignedDownloadUrl(bucketId, objectPath, expiresIn)
+    sendJson(ctx.res, 200, { signedURL: signedUrl })
+  }
 }
 
 // ─── Remove objects ─────────────────────────────────────────────────────────────

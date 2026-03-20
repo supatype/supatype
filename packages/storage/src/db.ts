@@ -5,12 +5,15 @@ const pool = new pg.Pool({ connectionString: config.databaseUrl })
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
 
+export type BucketAccessMode = "public" | "private" | "custom"
+
 export interface BucketRow {
   id: string
   name: string
   public: boolean
   file_size_limit: number | null
   allowed_mime_types: string[] | null
+  access_mode: BucketAccessMode
   created_at: string
   updated_at: string
 }
@@ -39,6 +42,7 @@ export async function ensureSchema(): Promise<void> {
       public boolean NOT NULL DEFAULT false,
       file_size_limit bigint,
       allowed_mime_types text[],
+      access_mode text NOT NULL DEFAULT 'public',
       created_at timestamptz NOT NULL DEFAULT now(),
       updated_at timestamptz NOT NULL DEFAULT now()
     );
@@ -57,7 +61,21 @@ export async function ensureSchema(): Promise<void> {
     );
 
     CREATE INDEX IF NOT EXISTS idx_objects_bucket_name ON storage.objects(bucket_id, name);
+
+    -- Add access_mode column if it doesn't exist (migration for existing installs)
+    DO $$ BEGIN
+      ALTER TABLE storage.buckets ADD COLUMN IF NOT EXISTS access_mode text NOT NULL DEFAULT 'public';
+    EXCEPTION WHEN duplicate_column THEN NULL;
+    END $$;
   `)
+}
+
+/** Get total storage usage across all buckets in bytes. */
+export async function getTotalStorageUsage(): Promise<number> {
+  const res = await pool.query<{ total: string }>(
+    `SELECT COALESCE(SUM((metadata->>'size')::bigint), 0) AS total FROM storage.objects`,
+  )
+  return parseInt(res.rows[0]?.total ?? "0", 10)
 }
 
 // ─── Bucket CRUD ────────────────────────────────────────────────────────────────
@@ -68,12 +86,13 @@ export async function createBucket(
   isPublic: boolean,
   fileSizeLimit?: number,
   allowedMimeTypes?: string[],
+  accessMode?: BucketAccessMode,
 ): Promise<BucketRow> {
   const res = await pool.query<BucketRow>(
-    `INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types, access_mode)
+     VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING *`,
-    [id, name, isPublic, fileSizeLimit ?? null, allowedMimeTypes ?? null],
+    [id, name, isPublic, fileSizeLimit ?? null, allowedMimeTypes ?? null, accessMode ?? "public"],
   )
   return res.rows[0]!
 }
@@ -99,6 +118,7 @@ export async function updateBucket(
     public?: boolean
     file_size_limit?: number | null
     allowed_mime_types?: string[] | null
+    access_mode?: BucketAccessMode
   },
 ): Promise<BucketRow | null> {
   const sets: string[] = []
@@ -116,6 +136,10 @@ export async function updateBucket(
   if (updates.allowed_mime_types !== undefined) {
     sets.push(`allowed_mime_types = $${idx++}`)
     values.push(updates.allowed_mime_types)
+  }
+  if (updates.access_mode !== undefined) {
+    sets.push(`access_mode = $${idx++}`)
+    values.push(updates.access_mode)
   }
   if (sets.length === 0) return getBucket(id)
 

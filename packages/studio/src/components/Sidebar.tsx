@@ -1,12 +1,12 @@
 import React, { useState } from "react"
+import { useNavigate, useLocation } from "react-router-dom"
 import type { AdminConfig } from "../config.js"
+import { useCloud } from "../hooks/useCloud.js"
 import { cn } from "../lib/utils.js"
 
 export type StudioMode = "content" | "developer"
 
 interface SidebarProps {
-  currentPath: string
-  onNavigate: (path: string) => void
   config: AdminConfig
   mode: StudioMode
   onModeChange: (mode: StudioMode) => void
@@ -62,6 +62,9 @@ function IconTag({ size = 20 }: { size?: number }): React.ReactElement {
 function IconGlobe({ size = 20 }: { size?: number }): React.ReactElement {
   return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
 }
+function IconRocket({ size = 20 }: { size?: number }): React.ReactElement {
+  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>
+}
 function IconChevronLeft({ size = 20 }: { size?: number }): React.ReactElement {
   return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
 }
@@ -82,6 +85,7 @@ const iconMap: Record<string, (props: { size?: number }) => React.ReactElement> 
   users: IconUsers,
   tag: IconTag,
   globe: IconGlobe,
+  rocket: IconRocket,
   "chevron-left": IconChevronLeft,
 }
 
@@ -105,7 +109,7 @@ interface NavGroup {
   items: NavItem[]
 }
 
-function getNavGroups(mode: StudioMode, config: AdminConfig): NavGroup[] {
+function getNavGroups(mode: StudioMode, config: AdminConfig, isCloudMode?: boolean): NavGroup[] {
   if (mode === "content") {
     const groups: NavGroup[] = [
       {
@@ -169,6 +173,19 @@ function getNavGroups(mode: StudioMode, config: AdminConfig): NavGroup[] {
         { href: "/dev/settings", label: "Settings", icon: "settings" },
       ],
     },
+    ...(isCloudMode ? [{
+      title: "Cloud",
+      items: [
+        { href: "/cloud/projects", label: "Projects", icon: "home" },
+        { href: "/cloud/usage", label: "Usage", icon: "activity" },
+        { href: "/cloud/domains", label: "Domains", icon: "globe" },
+        { href: "/cloud/settings", label: "Project Settings", icon: "settings" },
+        { href: "/cloud/billing", label: "Billing", icon: "credit-card" },
+        { href: "/cloud/org", label: "Organisation", icon: "users" },
+        { href: "/cloud/deployments", label: "Deployments", icon: "rocket" },
+        { href: "/cloud/audit", label: "Audit Log", icon: "shield" },
+      ],
+    }] : []),
   ]
 }
 
@@ -203,13 +220,26 @@ export function getPageTitle(path: string, config: AdminConfig): string {
   if (path === "/dev/api") return "API Docs"
   if (path === "/dev/logs") return "Logs"
   if (path === "/dev/settings") return "Settings"
+  if (path === "/cloud/projects") return "Projects"
+  if (path === "/cloud/projects/create") return "Create Project"
+  if (path === "/cloud/usage") return "Usage"
+  if (path === "/cloud/domains") return "Domains"
+  if (path === "/cloud/settings") return "Project Settings"
+  if (path === "/cloud/billing") return "Billing"
+  if (path === "/cloud/org") return "Organisation"
+  if (path === "/cloud/deployments") return "Deployments"
+  if (path === "/cloud/audit") return "Audit Log"
   return "Studio"
 }
 
 // ─── Sidebar ────────────────────────────────────────────────────────────────
 
-export function Sidebar({ currentPath, onNavigate, config, mode, onModeChange, collapsed, onCollapsedChange, className }: SidebarProps): React.ReactElement {
-  const navGroups = getNavGroups(mode, config)
+export function Sidebar({ config, mode, onModeChange, collapsed, onCollapsedChange, className }: SidebarProps): React.ReactElement {
+  const navigate = useNavigate()
+  const location = useLocation()
+  const cloud = useCloud()
+  const currentPath = location.pathname
+  const navGroups = getNavGroups(mode, config, cloud.mode === "cloud")
 
   return (
     <aside
@@ -243,7 +273,7 @@ export function Sidebar({ currentPath, onNavigate, config, mode, onModeChange, c
             <button
               type="button"
               title="Content"
-              onClick={() => { onModeChange("content"); onNavigate("/") }}
+              onClick={() => { onModeChange("content"); navigate("/") }}
               className={cn(
                 "flex items-center justify-center w-9 h-8 rounded-md text-xs transition-colors",
                 mode === "content"
@@ -256,7 +286,7 @@ export function Sidebar({ currentPath, onNavigate, config, mode, onModeChange, c
             <button
               type="button"
               title="Developer"
-              onClick={() => { onModeChange("developer"); onNavigate("/dev/schema") }}
+              onClick={() => { onModeChange("developer"); navigate("/dev/schema") }}
               className={cn(
                 "flex items-center justify-center w-9 h-8 rounded-md text-xs transition-colors",
                 mode === "developer"
@@ -271,7 +301,7 @@ export function Sidebar({ currentPath, onNavigate, config, mode, onModeChange, c
           <div className="flex p-0.5 rounded-lg bg-muted">
             <button
               type="button"
-              onClick={() => { onModeChange("content"); onNavigate("/") }}
+              onClick={() => { onModeChange("content"); navigate("/") }}
               className={cn(
                 "flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
                 mode === "content"
@@ -284,7 +314,7 @@ export function Sidebar({ currentPath, onNavigate, config, mode, onModeChange, c
             </button>
             <button
               type="button"
-              onClick={() => { onModeChange("developer"); onNavigate("/dev/schema") }}
+              onClick={() => { onModeChange("developer"); navigate("/dev/schema") }}
               className={cn(
                 "flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
                 mode === "developer"
@@ -318,7 +348,7 @@ export function Sidebar({ currentPath, onNavigate, config, mode, onModeChange, c
                     <button
                       type="button"
                       title={collapsed ? item.label : undefined}
-                      onClick={() => onNavigate(item.href)}
+                      onClick={() => navigate(item.href)}
                       aria-current={active ? "page" : undefined}
                       className={cn(
                         "flex items-center gap-2.5 w-full rounded-md text-[13px] transition-colors",

@@ -8,7 +8,7 @@ import { resolve, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const CLI_BIN = resolve(__dirname, "../bin/definatype.js")
+const CLI_BIN = resolve(__dirname, "../bin/supatype.js")
 const DIST_CLI = resolve(__dirname, "../dist/cli.js")
 
 function runCli(args: string[]): { stdout: string; stderr: string; exitCode: number } {

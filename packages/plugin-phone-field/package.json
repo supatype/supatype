@@ -1,0 +1,15 @@
+{
+  "name": "@supatype/plugin-phone-field",
+  "version": "0.1.0",
+  "description": "Phone number field with E.164 validation and country-aware input widget",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" } },
+  "keywords": ["supatype", "supatype-plugin"],
+  "supatype": { "pluginApi": 1, "types": ["field"] },
+  "scripts": { "build": "tsc", "typecheck": "tsc --noEmit" },
+  "dependencies": { "@supatype/plugin-sdk": "workspace:*" },
+  "peerDependencies": { "react": ">=18" },
+  "devDependencies": { "@types/react": "^18", "react": "^18", "typescript": "^5" }
+}

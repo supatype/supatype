@@ -32,6 +32,25 @@ export const custom = (expression: string): AccessRuleDef => ({ type: "custom", 
  */
 export const any = (...rules: AccessRuleDef[]): AccessRuleDef => ({ type: "any", rules })
 
+/**
+ * Require MFA (multi-factor authentication) at assurance level 2 (AAL2).
+ *
+ * Generates an RLS policy checking `auth.jwt()->>'aal' = 'aal2'`.
+ * Use this for sensitive operations that should only be accessible
+ * after the user has completed their second authentication factor.
+ *
+ * @example
+ * access: {
+ *   read: access.authenticated(),
+ *   update: access.mfaRequired(),  // requires TOTP/SMS verification
+ *   delete: access.mfaRequired(),
+ * }
+ */
+export const mfaRequired = (): AccessRuleDef => ({
+  type: "custom",
+  expression: "auth.jwt()->>'aal' = 'aal2'",
+})
+
 export const access = {
   public: publicAccess,
   private: privateAccess,
@@ -40,4 +59,5 @@ export const access = {
   role,
   custom,
   any,
+  mfaRequired,
 } as const

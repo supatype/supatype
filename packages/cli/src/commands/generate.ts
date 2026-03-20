@@ -1,17 +1,18 @@
 import type { Command } from "commander"
 import { loadConfig, loadSchemaAst } from "../config.js"
-import { invokeEngine } from "../engine.js"
+import { ensureEngine, invokeEngine } from "../engine.js"
 
 export function registerGenerate(program: Command): void {
   program
     .command("generate")
     .description("Regenerate TypeScript types without running a migration")
     .option("--connection <url>", "Database connection URL (overrides config)")
-    .action((opts: { connection?: string }) => {
+    .action(async (opts: { connection?: string }) => {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
       const connection = opts.connection ?? config.connection
 
+      await ensureEngine()
       console.log("Loading schema...")
       const ast = loadSchemaAst(config.schema, cwd)
 

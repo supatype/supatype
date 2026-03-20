@@ -3,6 +3,7 @@ import { authenticate, isServiceRole, type JwtPayload } from "./auth.js"
 import { ensureSchema } from "./db.js"
 import * as bucketRoutes from "./routes/buckets.js"
 import * as objectRoutes from "./routes/objects.js"
+import { getDefaultCorsHeaders } from "./middleware/cors.js"
 
 export interface RequestContext {
   req: IncomingMessage
@@ -123,9 +124,11 @@ export function createServer() {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`)
     const method = req.method?.toUpperCase() ?? "GET"
 
-    // CORS preflight
+    // CORS preflight — use default (permissive) headers since we don't
+    // know the bucket yet during OPTIONS. Per-bucket CORS is applied by
+    // each route handler after resolving the bucket.
     if (method === "OPTIONS") {
-      res.writeHead(204, corsHeaders())
+      res.writeHead(204, getDefaultCorsHeaders())
       res.end()
       return
     }
@@ -149,8 +152,9 @@ export function createServer() {
     }
 
     try {
-      // Add CORS headers
-      for (const [k, v] of Object.entries(corsHeaders())) {
+      // Default CORS headers — route handlers may override with
+      // bucket-specific headers via applyCorsHeaders()
+      for (const [k, v] of Object.entries(getDefaultCorsHeaders())) {
         res.setHeader(k, v)
       }
       await matched.handler({ req, res, jwt, params: matched.params, url })
@@ -183,10 +187,5 @@ export async function readJson<T = unknown>(req: IncomingMessage): Promise<T> {
   return JSON.parse(buf.toString("utf8")) as T
 }
 
-function corsHeaders(): Record<string, string> {
-  return {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Authorization, Content-Type, apikey, x-upsert",
-  }
-}
+// CORS headers are now managed by middleware/cors.ts
+// See getDefaultCorsHeaders() and applyCorsHeaders()

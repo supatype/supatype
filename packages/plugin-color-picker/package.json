@@ -1,0 +1,15 @@
+{
+  "name": "@supatype/plugin-color-picker",
+  "version": "0.1.0",
+  "description": "Colour picker widget for text and varchar fields with hex colour validation",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" } },
+  "keywords": ["supatype", "supatype-plugin"],
+  "supatype": { "pluginApi": 1, "types": ["widget"] },
+  "scripts": { "build": "tsc", "typecheck": "tsc --noEmit" },
+  "dependencies": { "@supatype/plugin-sdk": "workspace:*" },
+  "peerDependencies": { "react": ">=18" },
+  "devDependencies": { "@types/react": "^18", "react": "^18", "typescript": "^5" }
+}

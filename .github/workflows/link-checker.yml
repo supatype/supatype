@@ -1,0 +1,37 @@
+name: Link Checker
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Every Monday at 6am
+  workflow_dispatch:
+
+jobs:
+  check-links:
+    name: Check broken links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build www
+        run: pnpm turbo run build --filter="@supatype/www"
+
+      - name: Build docs
+        run: pnpm turbo run build --filter="@supatype/docs"
+
+      - name: Check links
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: --verbose --no-progress "apps/www/dist/**/*.html" "apps/docs/dist/**/*.html"
+          fail: true
