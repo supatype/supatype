@@ -46,4 +46,6 @@ for (const dir of publishable) {
   }
 }
 
+// Examples are private packages — keep workspace:* so the lockfile stays valid.
+
 console.log(`\nSet ${updated} packages to v${version}`)
