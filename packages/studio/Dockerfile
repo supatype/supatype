@@ -3,7 +3,7 @@ WORKDIR /build
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.base.json ./
 COPY packages/studio/ packages/studio/
 COPY packages/client/ packages/client/
-RUN corepack enable pnpm && pnpm install --frozen-lockfile --filter @supatype/studio
+RUN corepack enable pnpm && pnpm install --frozen-lockfile --filter @supatype/client --filter @supatype/studio
 RUN pnpm --filter @supatype/client build && pnpm --filter @supatype/studio build
 
 FROM nginx:alpine
