@@ -4,7 +4,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.base.js
 COPY packages/studio/ packages/studio/
 COPY packages/client/ packages/client/
 RUN corepack enable pnpm && pnpm install --frozen-lockfile --filter @supatype/studio
-RUN pnpm --filter @supatype/studio build
+RUN pnpm --filter ...@supatype/studio build
 
 FROM nginx:alpine
 RUN echo "worker_processes 1;" > /etc/nginx/nginx.conf.d_worker \

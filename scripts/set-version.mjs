@@ -4,9 +4,9 @@
  *
  * Usage: node scripts/set-version.mjs 0.1.0-alpha.1
  *
- * Updates package.json version for all @supatype/* packages and
- * rewrites workspace:* dependencies to the concrete version so
- * npm publish resolves them correctly.
+ * Only updates the "version" field. Internal workspace:* dependencies are left
+ * as-is — pnpm automatically rewrites them to the concrete version at publish
+ * time, so the lockfile stays valid throughout the release CI run.
  */
 import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
@@ -32,42 +32,17 @@ const publishable = [
   "studio",
 ]
 
-// Collect all @supatype package names
-const supatypePackages = new Set()
-for (const dir of publishable) {
-  const pkgPath = join(packagesDir, dir, "package.json")
-  try {
-    const pkg = JSON.parse(readFileSync(pkgPath, "utf8"))
-    supatypePackages.add(pkg.name)
-  } catch {
-    // skip if doesn't exist
-  }
-}
-
-// Update each package
 let updated = 0
 for (const dir of publishable) {
   const pkgPath = join(packagesDir, dir, "package.json")
   try {
     const pkg = JSON.parse(readFileSync(pkgPath, "utf8"))
     pkg.version = version
-
-    // Rewrite workspace:* deps to concrete version
-    for (const depType of ["dependencies", "devDependencies", "peerDependencies"]) {
-      const deps = pkg[depType]
-      if (!deps) continue
-      for (const [name, value] of Object.entries(deps)) {
-        if (supatypePackages.has(name) && String(value).startsWith("workspace:")) {
-          deps[name] = version
-        }
-      }
-    }
-
     writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n", "utf8")
     console.log(`  ${pkg.name} → ${version}`)
     updated++
   } catch {
-    // skip
+    // skip if package doesn't exist
   }
 }
 
