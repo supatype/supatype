@@ -1,6 +1,6 @@
 {
   "name": "@supatype/storage",
-  "version": "0.1.0",
+  "version": "0.1.0-alpha.4",
   "description": "Supatype storage service — file upload, download, and image transformation",
   "type": "module",
   "exports": {
