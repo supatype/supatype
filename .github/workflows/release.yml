@@ -36,6 +36,11 @@ jobs:
       - name: Set version in all packages
         run: node scripts/set-version.mjs ${{ needs.prepare.outputs.version }}
 
+      - name: Authenticate with npm registry
+        run: echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" >> ~/.npmrc
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
