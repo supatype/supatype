@@ -1369,9 +1369,8 @@ supatype/
 │   ├── studio/       Admin UI
 │   ├── common/       Shared utilities
 │   └── plugin-sdk/   Plugin system
-├── examples/
-│   └── blog/         Next.js blog example
-└── plans/            Phase planning docs
+└── examples/
+    └── blog/         Next.js blog example
 ```
 
 ---
