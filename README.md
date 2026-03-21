@@ -928,6 +928,241 @@ export interface Database {
 
 ---
 
+## CMS
+
+Supatype includes a full-featured, schema-driven CMS. The admin UI is auto-generated from your model definitions — no separate content type configuration required.
+
+### Studio
+
+The **Supatype Studio** is the built-in admin interface. It reads your compiled schema and renders a complete content management dashboard:
+
+- **Collections** — paginated list view with search, sort, and filter; full edit form per record
+- **Globals** — singleton editor for site-wide configuration (themes, nav menus, settings)
+- **Media Library** — browse buckets, upload files, generate public/signed URLs, grid and list views
+- **Dashboard** — configurable widgets showing record counts and recently-updated entries
+
+The Studio requires no custom code. Add a model to your schema, push, and it appears in the sidebar.
+
+### Draft / Publish Workflow
+
+Use the `publishable()` composite to add a managed status field to any model:
+
+```typescript
+import { model, field, publishable } from "@supatype/schema"
+
+const Post = model("post", {
+  fields: {
+    title:       field.text({ required: true }),
+    body:        field.richText({ required: true }),
+    publishInfo: publishable(), // Adds status, publishedAt, scheduledAt
+  },
+})
+```
+
+This adds three columns and a **Publish widget** in the Studio:
+
+| Status | Allowed transitions |
+|---|---|
+| `draft` | → `published`, `scheduled` |
+| `published` | → `archived`, `draft` |
+| `scheduled` | → `draft`, `published` |
+| `archived` | → `draft` |
+
+Editors can schedule future publication by picking a date and time. The engine automatically promotes `scheduled` records to `published` at the specified time.
+
+### Versioning
+
+Enable full change history on any model:
+
+```typescript
+const Page = model("page", {
+  fields: { /* ... */ },
+  options: { versioning: true },
+})
+```
+
+The engine creates a `{model}_versions` table capturing a complete snapshot on every save. In the Studio, editors can:
+
+- Browse the full version timeline with timestamps
+- Compare any version to the current state
+- Restore a previous version with one click
+
+### Block / Page Builder
+
+Compose flexible page layouts using typed blocks:
+
+```typescript
+import { model, field, block, access } from "@supatype/schema"
+
+const HeroBlock = block("hero", {
+  label: "Hero Section",
+  icon:  "layout",
+  fields: {
+    heading:  field.text({ required: true }),
+    subtext:  field.text(),
+    image:    field.image(),
+    ctaLabel: field.text(),
+    ctaUrl:   field.url(),
+  },
+})
+
+const RichTextBlock = block("richText", {
+  label:  "Rich Text",
+  icon:   "type",
+  fields: { body: field.richText({ required: true }) },
+})
+
+const Page = model("page", {
+  fields: {
+    title:   field.text({ required: true }),
+    slug:    field.slug({ from: "title" }),
+    content: field.blocks([HeroBlock, RichTextBlock], { maxNestingDepth: 3 }),
+  },
+  access: {
+    read:   access.public(),
+    create: access.role("editor", "admin"),
+    update: access.role("editor", "admin"),
+    delete: access.role("admin"),
+  },
+})
+```
+
+The Studio renders a drag-and-drop block editor — add, reorder, duplicate, and remove blocks, with a dedicated edit form for each block's fields.
+
+### Localization
+
+Mark any text, rich text, or JSON field as localized and Supatype stores a translation per locale:
+
+```typescript
+const Article = model("article", {
+  fields: {
+    title:   field.text({ required: true, localized: true }),
+    body:    field.richText({ required: true, localized: true }),
+    slug:    field.slug({ from: "title" }),       // not localized — one canonical slug
+    author:  relation.belongsTo("user"),
+  },
+})
+```
+
+Configure available locales in your schema config:
+
+```typescript
+// supatype.config.ts
+export default {
+  locales: {
+    locales:       ["en", "fr", "de", "es"],
+    defaultLocale: "en",
+    fallbackChains: {
+      "fr-CA": ["fr", "en"],
+    },
+  },
+}
+```
+
+In the Studio, a locale picker appears in the edit form. Localized fields show one input per locale. The client accepts a `.locale()` modifier to fetch translations:
+
+```typescript
+const { data } = await client
+  .from("articles")
+  .select("title, body")
+  .eq("id", articleId)
+  .locale("fr")
+```
+
+### Live Preview
+
+Configure a preview URL per model and the Studio opens a live iframe that updates on every keystroke:
+
+```typescript
+// supatype.config.ts
+export default {
+  admin: {
+    livePreview: {
+      post: {
+        url:        "https://localhost:3000/blog/{slug}",
+        urlPattern: "/blog/{slug}",
+      },
+    },
+  },
+}
+```
+
+The preview pane syncs form state via `postMessage`. In your frontend, consume it with `useLivePreview`:
+
+```tsx
+import { useLivePreview } from "@supatype/react"
+
+export default function PostPreview({ id }: { id: string }) {
+  const { data: post, loading } = useLivePreview("post", id)
+
+  if (loading) return null
+  return (
+    <article>
+      <h1>{post.title}</h1>
+      <div dangerouslySetInnerHTML={{ __html: post.body }} />
+    </article>
+  )
+}
+```
+
+### Media Library
+
+The Studio includes a full asset manager backed by Supatype Storage. Editors can:
+
+- Upload files via drag-and-drop or file picker
+- Navigate bucket folders with breadcrumb navigation
+- Switch between grid and list views
+- Search and filter by name
+- Delete files and copy public URLs
+
+Image fields in the edit form open the Media Library as a picker, keeping assets organised across all models.
+
+### Globals
+
+Globals are CMS singletons — tables with exactly one row, ideal for site configuration:
+
+```typescript
+import { global, field, access } from "@supatype/schema"
+
+export const SiteSettings = global("siteSettings", {
+  fields: {
+    siteName:      field.text({ required: true }),
+    logo:          field.image({ bucket: "branding" }),
+    footerHtml:    field.richText(),
+    defaultLocale: field.text({ required: true }),
+    maintenance:   field.boolean(),
+  },
+  access: {
+    read:   access.public(),
+    update: access.role("admin"),
+  },
+})
+```
+
+Globals appear in the Studio sidebar under a "Globals" section and render a single edit form (no list view). Query them via the client:
+
+```typescript
+const { data: settings } = await client.global<SiteSettings>("siteSettings").get()
+await client.global("siteSettings").update({ maintenance: true })
+```
+
+### Admin User Management
+
+```bash
+# Create an admin user
+supatype admin create-user \
+  --email admin@example.com \
+  --password hunter2 \
+  --role admin
+
+# Change a user's role
+supatype admin set-role \
+  --email editor@example.com \
+  --role editor
+```
+
+---
+
 ## Framework Integrations
 
 | Package | Status |
