@@ -30,3 +30,41 @@ jobs:
 
       - name: Test
         run: pnpm turbo run test || true
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build storage package
+        run: pnpm --filter @supatype/storage build
+
+      - name: Build docker image — storage
+        uses: docker/build-push-action@v5
+        with:
+          context: packages/storage
+          push: false
+
+      - name: Build docker image — realtime
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: packages/realtime/Dockerfile
+          push: false
+
+      - name: Build docker image — studio
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: packages/studio/Dockerfile
+          push: false
