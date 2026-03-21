@@ -144,15 +144,13 @@ export interface ServerlessDetectionResult {
  * diagnostics or warnings.
  */
 export function detectServerlessEnvironment(): ServerlessDetectionResult {
-  // Guard: `process` may not exist in browser/edge contexts. Access via
-  // globalThis to avoid a TS error when lib doesn't include Node types.
-  const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
-  if (proc === undefined || proc.env === undefined) {
+  // Guard: `process` may not exist in browser/edge contexts.
+  if (typeof process === "undefined" || process.env === undefined) {
     return { detected: false, platform: null }
   }
 
   for (const entry of SERVERLESS_ENV_VARS) {
-    const value = proc.env[entry.envVar]
+    const value = process.env[entry.envVar]
     if (value === undefined) continue
     if (entry.expected === undefined || value === entry.expected) {
       return { detected: true, platform: entry.name }
