@@ -5,8 +5,8 @@
 <h1 align="center">Supatype</h1>
 
 <p align="center">
-  <strong>The TypeScript framework that is both your backend and your CMS.</strong><br/>
-  Define your data models once. Get a typed API, a full content management UI, access control, storage, and realtime — automatically.
+  <strong>Define your types. We generate your backend.</strong><br/>
+  One TypeScript schema. Postgres database, REST + GraphQL API, typed SDK, auth, storage, realtime, and a full CMS admin panel — all generated automatically.
 </p>
 
 <p align="center">
@@ -20,33 +20,116 @@
 
 ## What is Supatype?
 
-Most projects need two things: a backend to store and serve data, and a CMS so non-developers can manage content. Usually that means two separate tools, two sets of types, and two things to keep in sync.
+> Define your types. We generate your backend.
 
-Supatype is both — in one schema.
+### The Problem
 
-You define your models, fields, and access rules in TypeScript once. Supatype generates everything else:
+Building a backend in 2026 still means stitching together the same pieces by hand. You write SQL to create tables. You configure an API layer to expose them. You set up auth and write security policies. You build an admin panel so non-technical people can manage content. You generate TypeScript types so your frontend has type safety. You write migrations when things change. You deploy and manage infrastructure.
 
-**As a backend:**
-- **Database schema** — tables, columns, indexes, and constraints
-- **Row-Level Security (RLS)** — fine-grained access control policies
-- **Typed client SDK** — fully-inferred query, mutation, and realtime APIs
-- **Authentication** — sign-up, sign-in, OAuth, OTP, MFA
-- **Storage** — file uploads with image transforms
-- **Realtime** — WebSocket subscriptions on any table
-- **Edge functions** — deploy server-side logic close to your users
-- **React hooks** — `useQuery`, `useMutation`, `useAuth`, `useSubscription`, and more
+Every one of these steps exists because the tools you use don't talk to each other. Your database doesn't know about your types. Your API doesn't know about your access rules. Your admin panel doesn't know about your schema. Your frontend types don't know about your database columns. You're the glue — manually keeping everything in sync.
 
-**As a CMS:**
-- **Studio** — a full admin UI auto-generated from your schema, zero config
-- **Draft / publish workflow** — status transitions and scheduled publishing
-- **Versioning** — full change history with one-click restore
-- **Block / page builder** — compose flexible layouts from typed blocks
-- **Localization** — per-field translations with locale fallback chains
-- **Live preview** — real-time content preview while editing
-- **Media library** — upload, browse, and pick assets across all models
-- **Globals** — singleton tables for site-wide configuration
+### The Idea
 
-The same model definition that creates your Postgres table also renders the content editor for it. Add a field in code and it immediately appears in both your TypeScript types and the Studio form — no duplication, no drift.
+What if you wrote your data model once, in TypeScript, and everything else was generated?
+
+```typescript
+import { model, field, access, timestamps, publishable } from '@supatype/schema'
+
+export const product = model('product', {
+  fields: {
+    name:        field.text({ required: true, localized: true }),
+    description: field.richText({ localized: true }),
+    price:       field.decimal({ precision: 10, scale: 2 }),
+    image:       field.image({ bucket: 'products' }),
+    category:    relation.belongsTo('category'),
+    seller:      relation.belongsTo('user'),
+  },
+  composites: [timestamps(), publishable()],
+  access: {
+    read:   access.public(),
+    create: access.role('seller'),
+    update: access.owner('seller_id'),
+    delete: access.owner('seller_id'),
+  },
+})
+```
+
+From this one definition, you get:
+
+- **Postgres database** — tables, columns, indexes, constraints, foreign keys. Migrations generated automatically when the schema changes.
+- **REST + GraphQL API** — CRUD endpoints with filtering, pagination, ordering, and relation embedding. No code.
+- **Row-level security** — Postgres RLS policies generated from the `access` rules. `access.owner('seller_id')` becomes a real database policy enforcing data isolation at the row level.
+- **TypeScript SDK** — type-safe client with autocomplete for every table, column, and relation.
+- **Admin panel** — auto-generated content management interface. Non-technical users can create, edit, and publish records without touching code. Rich text editor, media library, localization, publishing workflows — all from the schema definition.
+- **Auth** — email/password, OAuth (GitHub, Google, Apple), MFA, magic links, phone OTP.
+- **Storage** — file uploads, image transformations (resize, crop, format conversion), pre-signed URLs. `field.image()` auto-creates a storage bucket.
+- **Realtime** — WebSocket subscriptions for live data updates, filtered by the same RLS policies.
+- **Edge functions** — serverless TypeScript functions for custom business logic.
+- **Localisation** — `localized: true` on any text field stores content per-locale. The admin panel shows per-locale editing automatically.
+
+One schema. One push. Everything generated.
+
+```bash
+npx supatype push
+```
+
+### How It Works
+
+The core of Supatype is a Rust binary called the schema engine. When you run `supatype push`, it:
+
+1. Loads your TypeScript schema files and serialises them to a JSON AST
+2. Introspects your current Postgres database
+3. Diffs the AST against the database state
+4. Generates a SQL migration (with risk analysis: safe, cautious, or destructive)
+5. Prompts you to confirm destructive changes, then applies the migration
+6. Regenerates TypeScript types, updates the REST/GraphQL API config, rebuilds RLS policies, and refreshes the admin panel schema cache
+
+The engine runs the full pipeline in under 500ms for a typical schema. It handles rename detection, topological dependency ordering, and rollback generation for every migration.
+
+### Self-Host or Cloud
+
+Supatype runs in three modes — and your schema, CLI, SDK, and admin panel are identical in all three:
+
+- **Local dev** — `supatype dev` starts the full stack in Docker Compose. Postgres, the API, auth, storage, and admin panel all running locally. Hot reload on schema changes.
+- **Self-hosted** — `supatype self-host setup` generates a production deployment for any VPS. Docker Compose with automatic HTTPS. Your data stays on your hardware.
+- **Supatype Cloud** — managed infrastructure. Push your schema, get a live project in seconds.
+
+### Who Is It For?
+
+**Developers who think in TypeScript, not SQL.** You know your data shapes. You shouldn't have to mentally translate them into `CREATE TABLE` statements and keep your types, API, and database in sync by hand.
+
+**Teams that need a CMS without adopting a separate CMS.** Your client needs to edit content. You don't want to run Payload or Strapi as a second system alongside your backend. Supatype's admin panel is auto-generated from the same schema that defines your database — one system, not two.
+
+**Solo founders shipping fast.** Auth, database, file uploads, admin panel, REST API — from one schema definition. Deployed this weekend.
+
+**Agencies delivering client projects.** Define the data model, push, hand the admin panel to the client. Same tools and patterns on every project, different schema.
+
+### How Supatype Compares
+
+**vs Supabase** — Supabase starts at the database (SQL first, types generated from it). No admin panel. Supatype starts at the TypeScript schema and generates the database, API, types, RLS policies, and admin panel from it. Both use Postgres under the hood.
+
+**vs Payload CMS** — Payload is the best headless CMS available but it's CMS-first, not backend-first. It doesn't provision databases, manage auth as a service, provide realtime, run edge functions, or handle deployment. Supatype generates an admin panel comparable to Payload's — plus the entire backend.
+
+**vs Convex** — Convex is a reactive TypeScript backend with real-time sync, but it's a proprietary database (not Postgres). No SQL access, no PostGIS, no pgvector, no self-hosting, no admin panel.
+
+**vs Firebase** — Firebase is a document database locked into Google Cloud with unpredictable costs at scale. Supatype is relational (Postgres), open-source core, self-hostable, and includes an admin panel.
+
+### What's Open Source
+
+The CLI, client SDK, React hooks, schema package, plugin SDK, admin panel, auth service, and all self-hosting tooling are MIT-licensed. The Rust schema engine binary is free to use but source-closed. The cloud control plane is proprietary.
+
+### Pricing
+
+|  | Free | Pro (£25/mo) | Team (£399/mo) | Enterprise |
+|--|------|-------------|--------------|------------|
+| Projects | 2 | 10 | Unlimited | Custom |
+| Database | 500MB | 8GB dedicated | 50GB dedicated | Custom |
+| Storage | 1GB | 100GB | 500GB | Custom |
+| Auth MAU | 50,000 | 100,000 | Unlimited | Unlimited |
+| Edge functions | 500K invocations | 2M | 10M | Unlimited |
+| Self-host | Free forever | — | — | — |
+
+---
 
 ---
 
