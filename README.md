@@ -5,8 +5,8 @@
 <h1 align="center">Supatype</h1>
 
 <p align="center">
-  <strong>Schema-first TypeScript framework for building fully-typed Postgres APIs.</strong><br/>
-  Define your data models once. Get a typed client, access control, storage, and realtime — automatically.
+  <strong>The TypeScript framework that is both your backend and your CMS.</strong><br/>
+  Define your data models once. Get a typed API, a full content management UI, access control, storage, and realtime — automatically.
 </p>
 
 <p align="center">
@@ -20,8 +20,13 @@
 
 ## What is Supatype?
 
-Supatype is a schema-first framework that turns TypeScript type definitions into a complete, production-ready Postgres backend. You define your models, fields, and access rules in TypeScript — Supatype handles the rest:
+Most projects need two things: a backend to store and serve data, and a CMS so non-developers can manage content. Usually that means two separate tools, two sets of types, and two things to keep in sync.
 
+Supatype is both — in one schema.
+
+You define your models, fields, and access rules in TypeScript once. Supatype generates everything else:
+
+**As a backend:**
 - **Database schema** — tables, columns, indexes, and constraints
 - **Row-Level Security (RLS)** — fine-grained access control policies
 - **Typed client SDK** — fully-inferred query, mutation, and realtime APIs
@@ -31,7 +36,17 @@ Supatype is a schema-first framework that turns TypeScript type definitions into
 - **Edge functions** — deploy server-side logic close to your users
 - **React hooks** — `useQuery`, `useMutation`, `useAuth`, `useSubscription`, and more
 
-Unlike traditional ORMs that map your TypeScript to a database, Supatype works in both directions — schema changes flow down to your database and back up to your client types, keeping everything in sync.
+**As a CMS:**
+- **Studio** — a full admin UI auto-generated from your schema, zero config
+- **Draft / publish workflow** — status transitions and scheduled publishing
+- **Versioning** — full change history with one-click restore
+- **Block / page builder** — compose flexible layouts from typed blocks
+- **Localization** — per-field translations with locale fallback chains
+- **Live preview** — real-time content preview while editing
+- **Media library** — upload, browse, and pick assets across all models
+- **Globals** — singleton tables for site-wide configuration
+
+The same model definition that creates your Postgres table also renders the content editor for it. Add a field in code and it immediately appears in both your TypeScript types and the Studio form — no duplication, no drift.
 
 ---
 
