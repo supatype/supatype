@@ -8,7 +8,7 @@
  * rewrites workspace:* dependencies to the concrete version so
  * npm publish resolves them correctly.
  */
-import { readFileSync, writeFileSync, readdirSync, statSync } from "node:fs"
+import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 const version = process.argv[2]
@@ -19,7 +19,6 @@ if (!version) {
 
 const root = new URL("..", import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1")
 const packagesDir = join(root, "packages")
-const examplesDir = join(root, "examples")
 
 const publishable = [
   "schema",
@@ -72,29 +71,6 @@ for (const dir of publishable) {
   }
 }
 
-// Also update examples if they exist
-try {
-  for (const dir of readdirSync(examplesDir)) {
-    const pkgPath = join(examplesDir, dir, "package.json")
-    try {
-      if (!statSync(pkgPath).isFile()) continue
-      const pkg = JSON.parse(readFileSync(pkgPath, "utf8"))
-      for (const depType of ["dependencies", "devDependencies"]) {
-        const deps = pkg[depType]
-        if (!deps) continue
-        for (const [name, value] of Object.entries(deps)) {
-          if (supatypePackages.has(name) && String(value).startsWith("workspace:")) {
-            deps[name] = version
-          }
-        }
-      }
-      writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n", "utf8")
-    } catch {
-      // skip
-    }
-  }
-} catch {
-  // no examples dir
-}
+// Examples are private packages — keep workspace:* so the lockfile stays valid.
 
 console.log(`\nSet ${updated} packages to v${version}`)
