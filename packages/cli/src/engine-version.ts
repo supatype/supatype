@@ -19,7 +19,7 @@ export const ENGINE_VERSION = "0.1.0"
  * Primary CDN for engine binary distribution.
  * Hetzner Object Storage behind Cloudflare edge caching.
  */
-export const CDN_BASE_URL = "https://releases.supatype.io/engine"
+export const CDN_BASE_URL = "https://releases.supatype.dev/engine"
 
 /**
  * Fallback: GitHub Releases on the public engine-releases repo.

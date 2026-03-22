@@ -450,7 +450,7 @@ async function deployCloud(cwd: string, fns: DiscoveredFunction[]): Promise<void
   }
 
   console.log(`\nDeployed ${fns.length} function(s)`)
-  console.log(`Invoke: https://${linked.ref}.supatype.io/functions/v1/<name>`)
+  console.log(`Invoke: https://${linked.ref}.supatype.dev/functions/v1/<name>`)
 }
 
 function readFunctionSource(fn: DiscoveredFunction): string {
@@ -642,7 +642,7 @@ async function invoke(
     const { getLinkedProject, getCloudToken } = await loadCloudHelpers()
     const linked = getLinkedProject(cwd)
     if (linked) {
-      url = `https://${linked.ref}.supatype.io/functions/v1/${name}`
+      url = `https://${linked.ref}.supatype.dev/functions/v1/${name}`
       const token = getCloudToken()
       if (token && opts.auth) {
         headers["Authorization"] = `Bearer ${token}`
@@ -913,7 +913,7 @@ async function loadCloudHelpers(): Promise<CloudHelpers> {
     },
 
     getCloudApiUrl(): string {
-      return process.env["SUPATYPE_API_URL"] ?? "https://api.supatype.io"
+      return process.env["SUPATYPE_API_URL"] ?? "https://api.supatype.com"
     },
   }
 }
