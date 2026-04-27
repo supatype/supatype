@@ -7,11 +7,12 @@ import type { Database } from "@/types/database"
 type Post = Database["public"]["Tables"]["posts"]["Row"]
 type Comment = Database["public"]["Tables"]["comments"]["Row"]
 
-export default function PostPage({ params }: { params: { slug: string } }): React.ReactElement {
+export default function PostPage({ params }: { params: Promise<{ slug: string }> }): React.ReactElement {
+  const { slug } = React.use(params)
   const { user } = useAuth()
 
   const { data: posts, loading: postLoading, error: postError } = useQuery<Database, "posts">("posts", {
-    filter: { slug: params.slug, status: "published" },
+    filter: { slug, status: "published" },
     limit: 1,
   })
 

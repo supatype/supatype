@@ -29,7 +29,7 @@ export interface UseAuthReturn {
   signInWithOtp(opts: {
     email: string
     options?: { emailRedirectTo?: string } | undefined
-  }): Promise<{ data: Record<string, never>; error: SupatypeError | null }>
+  }): Promise<{ data: { messageId?: string | undefined }; error: SupatypeError | null }>
   /** Sign out the current user. */
   signOut(): Promise<{ error: SupatypeError | null }>
 }
