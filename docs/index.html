@@ -1,0 +1,907 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Supatype — Define your types. We generate your backend.</title>
+  <meta name="description" content="TypeScript schema as your single source of truth. Supatype generates your Postgres database, REST API, auth, storage, realtime, and admin panel — automatically." />
+  <meta property="og:title" content="Supatype — Define your types. We generate your backend." />
+  <meta property="og:description" content="TypeScript schema as your single source of truth. Postgres, REST API, auth, storage, realtime, and CMS — all generated." />
+  <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:            #0a0a0f;
+      --bg-2:          #0f0f1a;
+      --bg-3:          #13131f;
+      --border:        rgba(255,255,255,0.08);
+      --border-bright: rgba(255,255,255,0.15);
+      --text:          #e8e8f0;
+      --text-muted:    #8888a8;
+      --text-dim:      #55556a;
+      --purple:        #7c3aed;
+      --purple-light:  #a855f7;
+      --purple-glow:   rgba(124,58,237,0.3);
+      --purple-pale:   rgba(124,58,237,0.08);
+      --violet:        #8b5cf6;
+      --green:         #10b981;
+      --red:           #ef4444;
+      --yellow:        #f59e0b;
+      --radius:        10px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .glow-orb {
+      position: fixed;
+      border-radius: 50%;
+      pointer-events: none;
+      filter: blur(120px);
+      opacity: 0.15;
+      z-index: 0;
+    }
+    .glow-1 { width: 600px; height: 600px; background: var(--purple); top: -200px; left: -100px; }
+    .glow-2 { width: 400px; height: 400px; background: #2563eb; bottom: 200px; right: -100px; }
+
+    .container { max-width: 1100px; margin: 0 auto; padding: 0 24px; position: relative; z-index: 1; }
+    section { position: relative; z-index: 1; }
+
+    /* ── Nav ── */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      border-bottom: 1px solid var(--border);
+      background: rgba(10,10,15,0.85);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+    }
+    .nav-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 24px;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .logo { text-decoration: none; display: flex; align-items: center; }
+    .logo img { height: 28px; width: auto; display: block; }
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      list-style: none;
+    }
+    .nav-links a {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 500;
+      padding: 6px 12px;
+      border-radius: 6px;
+      transition: color 0.15s, background 0.15s;
+    }
+    .nav-links a:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+    .nav-cta {
+      background: var(--purple) !important;
+      color: #fff !important;
+      font-weight: 600 !important;
+      padding: 7px 16px !important;
+      border-radius: 7px !important;
+    }
+    .nav-cta:hover { background: var(--purple-light) !important; transform: translateY(-1px); }
+
+    /* ── Hero ── */
+    .hero { padding: 96px 0 80px; text-align: center; }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--purple-pale);
+      border: 1px solid rgba(124,58,237,0.25);
+      color: var(--purple-light);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 5px 12px;
+      border-radius: 100px;
+      margin-bottom: 28px;
+      letter-spacing: 0.01em;
+    }
+    .hero-badge .dot {
+      width: 6px; height: 6px;
+      background: var(--purple-light);
+      border-radius: 50%;
+      animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.5; transform: scale(0.85); }
+    }
+
+    .hero h1 {
+      font-size: clamp(40px, 7vw, 72px);
+      font-weight: 800;
+      line-height: 1.1;
+      letter-spacing: -2px;
+      color: #fff;
+      margin-bottom: 20px;
+    }
+    .hero h1 .gradient {
+      background: linear-gradient(135deg, #a855f7 0%, #6366f1 50%, #38bdf8 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .hero-sub {
+      font-size: clamp(17px, 2.5vw, 20px);
+      color: var(--text-muted);
+      max-width: 580px;
+      margin: 0 auto 40px;
+      line-height: 1.6;
+    }
+    .hero-sub strong { color: var(--text); font-weight: 600; }
+
+    .hero-actions {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 48px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 22px;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.15s;
+      cursor: pointer;
+      border: none;
+      font-family: 'Inter', sans-serif;
+    }
+    .btn-primary {
+      background: var(--purple);
+      color: #fff;
+      box-shadow: 0 0 24px var(--purple-glow);
+    }
+    .btn-primary:hover { background: var(--purple-light); transform: translateY(-2px); box-shadow: 0 4px 32px var(--purple-glow); }
+    .btn-secondary {
+      background: rgba(255,255,255,0.06);
+      color: var(--text);
+      border: 1px solid var(--border-bright);
+    }
+    .btn-secondary:hover { background: rgba(255,255,255,0.1); transform: translateY(-2px); }
+    .btn-ghost {
+      background: transparent;
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+    }
+    .btn-ghost:hover { color: var(--text); border-color: var(--border-bright); }
+
+    .hero-social {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 24px;
+      font-size: 14px;
+      color: var(--text-dim);
+    }
+    .hero-social a { color: var(--text-muted); text-decoration: none; display: flex; align-items: center; gap: 6px; transition: color 0.15s; }
+    .hero-social a:hover { color: var(--text); }
+
+    /* ── Code preview ── */
+    .code-preview-wrap { margin: 64px auto 0; max-width: 900px; }
+    .code-preview-label {
+      text-align: center;
+      font-size: 13px;
+      color: var(--text-dim);
+      margin-bottom: 16px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      font-weight: 600;
+    }
+    .code-cols {
+      display: grid;
+      grid-template-columns: 1fr 48px 1fr;
+      align-items: stretch;
+    }
+    .code-arrow {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--purple-light);
+      font-size: 22px;
+      flex-shrink: 0;
+    }
+    .code-block {
+      background: var(--bg-3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .code-block-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(255,255,255,0.02);
+      flex-shrink: 0;
+    }
+    .dot-r { width: 10px; height: 10px; border-radius: 50%; background: #ef4444; opacity: 0.7; }
+    .dot-y { width: 10px; height: 10px; border-radius: 50%; background: #f59e0b; opacity: 0.7; }
+    .dot-g { width: 10px; height: 10px; border-radius: 50%; background: #10b981; opacity: 0.7; }
+    .code-block-header .filename { font-size: 12px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace; margin-left: 4px; }
+
+    .code-block pre[class*="language-"],
+    .code-block code[class*="language-"] {
+      font-family: 'JetBrains Mono', monospace !important;
+      font-size: 12.5px !important;
+      line-height: 1.75 !important;
+      background: transparent !important;
+      text-shadow: none !important;
+    }
+    .code-block pre[class*="language-"] {
+      padding: 16px 18px !important;
+      margin: 0 !important;
+      flex: 1;
+      overflow: auto;
+    }
+    /* Colour overrides to match page theme */
+    .token.keyword, .token.operator   { color: #c084fc !important; }
+    .token.function                   { color: #60a5fa !important; }
+    .token.string, .token.template-string { color: #34d399 !important; }
+    .token.boolean, .token.number     { color: #fbbf24 !important; }
+    .token.comment                    { color: #55556a !important; }
+    .token.punctuation                { color: #8888a8 !important; }
+    .token.parameter, .token.property { color: #e8e8f0 !important; }
+
+    .generates-list {
+      list-style: none;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      flex: 1;
+    }
+    .generates-list li {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      color: var(--text-muted);
+      padding: 8px 10px;
+      border-radius: 6px;
+      background: rgba(255,255,255,0.02);
+    }
+    .gen-icon {
+      width: 22px; height: 22px;
+      border-radius: 5px;
+      background: var(--purple-pale);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      flex-shrink: 0;
+    }
+
+    /* ── Section header ── */
+    .section-header { text-align: center; margin-bottom: 56px; }
+    .section-label {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--purple-light);
+      margin-bottom: 12px;
+    }
+    .section-header h2 {
+      font-size: clamp(28px, 4vw, 42px);
+      font-weight: 800;
+      letter-spacing: -1px;
+      color: #fff;
+      margin-bottom: 14px;
+      line-height: 1.2;
+    }
+    .section-header p { font-size: 17px; color: var(--text-muted); max-width: 540px; margin: 0 auto; }
+
+    /* ── Positioning ── */
+    .position-section { padding: 100px 0; }
+    .tri-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1px;
+      background: var(--border);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      margin-bottom: 24px;
+    }
+    .tri-card { background: var(--bg-2); padding: 32px 28px; }
+    .tri-card .competitor {
+      font-size: 12px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.1em;
+      color: var(--text-dim); margin-bottom: 10px;
+    }
+    .tri-card h3 { font-size: 18px; font-weight: 700; color: #fff; margin-bottom: 8px; }
+    .tri-card p { font-size: 14px; color: var(--text-muted); line-height: 1.6; margin-bottom: 16px; }
+    .miss-list { display: flex; flex-direction: column; gap: 6px; }
+    .miss-item { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-dim); }
+    .miss-x     { color: var(--red); font-weight: 700; font-size: 12px; }
+    .miss-check { color: var(--green); font-weight: 700; font-size: 12px; }
+
+    .supatype-card {
+      background: var(--bg-2);
+      border: 1px solid rgba(124,58,237,0.35);
+      border-radius: var(--radius);
+      padding: 36px 32px;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+    .supatype-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--purple), var(--violet), transparent);
+    }
+    .supatype-card h3 { font-size: 20px; font-weight: 800; color: #fff; margin-bottom: 10px; }
+    .supatype-card p  { font-size: 16px; color: var(--text-muted); max-width: 620px; margin: 0 auto 24px; }
+    .check-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; text-align: left; }
+    .check-item { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; color: var(--text-muted); }
+    .check-item .tick { color: var(--green); font-weight: 700; flex-shrink: 0; margin-top: 2px; }
+
+    /* ── Features ── */
+    .features-section { padding: 80px 0; background: var(--bg-2); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1px;
+      background: var(--border);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .feature-card { background: var(--bg-2); padding: 28px 24px; transition: background 0.2s; }
+    .feature-card:hover { background: var(--bg-3); }
+    .feature-icon {
+      width: 40px; height: 40px;
+      background: var(--purple-pale);
+      border: 1px solid rgba(124,58,237,0.2);
+      border-radius: 9px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px; margin-bottom: 16px;
+    }
+    .feature-card h3 { font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 8px; }
+    .feature-card p  { font-size: 14px; color: var(--text-muted); line-height: 1.6; }
+    .feature-tag {
+      display: inline-block; margin-top: 10px;
+      font-size: 11px; font-weight: 600;
+      padding: 2px 8px; border-radius: 100px;
+      background: var(--purple-pale); color: var(--purple-light);
+    }
+    .mono { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #c084fc; }
+
+    /* ── Comparison ── */
+    .compare-section { padding: 100px 0; }
+    .table-scroll {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+    .compare-table {
+      width: 100%; border-collapse: collapse;
+      font-size: 14px; min-width: 640px;
+    }
+    .compare-table thead { background: var(--bg-3); }
+    .compare-table th {
+      padding: 16px 20px; text-align: center;
+      font-weight: 700; color: var(--text-muted);
+      font-size: 13px; border-bottom: 1px solid var(--border);
+    }
+    .compare-table th:first-child { text-align: left; color: var(--text-dim); }
+    .compare-table th.col-ours { color: var(--purple-light); position: relative; }
+    .compare-table th.col-ours::after {
+      content: '';
+      position: absolute; top: 0; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--purple), transparent);
+    }
+    .compare-table td {
+      padding: 13px 20px; border-bottom: 1px solid var(--border);
+      text-align: center; color: var(--text-muted); vertical-align: middle;
+    }
+    .compare-table td:first-child { text-align: left; color: var(--text); font-weight: 500; }
+    .compare-table tr:last-child td { border-bottom: none; }
+    .compare-table tr:nth-child(even) td { background: rgba(255,255,255,0.015); }
+    .compare-table td.col-ours { background: rgba(124,58,237,0.04); }
+    .tick-yes     { color: var(--green); font-size: 16px; }
+    .tick-no      { color: var(--red); font-size: 16px; }
+    .tick-partial { color: var(--yellow); font-size: 13px; font-style: italic; }
+
+    /* ── CTA ── */
+    .cta-section { padding: 100px 0; text-align: center; }
+    .cta-box {
+      background: var(--bg-2);
+      border: 1px solid rgba(124,58,237,0.3);
+      border-radius: 16px;
+      padding: 64px 48px;
+      position: relative; overflow: hidden;
+    }
+    .cta-box::before {
+      content: '';
+      position: absolute; top: 0; left: 0; right: 0; height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(168,85,247,0.6), rgba(99,102,241,0.6), transparent);
+    }
+    .cta-box h2 { font-size: clamp(28px, 4vw, 40px); font-weight: 800; letter-spacing: -1px; color: #fff; margin-bottom: 16px; }
+    .cta-box p  { font-size: 17px; color: var(--text-muted); max-width: 460px; margin: 0 auto 36px; }
+    .cta-actions { display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap; }
+
+    /* ── Footer ── */
+    footer { border-top: 1px solid var(--border); padding: 36px 0; }
+    .footer-inner {
+      display: flex; align-items: center;
+      justify-content: space-between; gap: 20px; flex-wrap: wrap;
+    }
+    .footer-logo { text-decoration: none; display: flex; align-items: center; }
+    .footer-logo img { height: 22px; width: auto; display: block; }
+    .footer-left { font-size: 14px; color: var(--text-dim); display: flex; flex-direction: column; gap: 6px; }
+    .footer-right { display: flex; align-items: center; gap: 16px; }
+    .footer-right a { color: var(--text-dim); text-decoration: none; font-size: 14px; transition: color 0.15s; }
+    .footer-right a:hover { color: var(--text); }
+
+    /* ── Responsive ── */
+    @media (max-width: 900px) {
+      .tri-grid { grid-template-columns: 1fr; }
+      .features-grid { grid-template-columns: 1fr 1fr; }
+      .check-grid { grid-template-columns: 1fr 1fr; }
+      .compare-table { font-size: 13px; }
+      .compare-table th, .compare-table td { padding: 10px 10px; }
+      .code-cols { grid-template-columns: 1fr; }
+      .code-arrow { transform: rotate(90deg); padding: 8px 0; }
+    }
+    @media (max-width: 600px) {
+      .features-grid { grid-template-columns: 1fr; }
+      .nav-links { display: none; }
+      .hero { padding: 64px 0 48px; }
+      .check-grid { grid-template-columns: 1fr; }
+      .cta-box { padding: 40px 24px; }
+      /* Drop Convex + Firebase on mobile, leaving 4 cols — table still scrolls if needed */
+      .compare-table th:nth-child(5), .compare-table th:nth-child(6),
+      .compare-table td:nth-child(5), .compare-table td:nth-child(6) { display: none; }
+      .compare-table { font-size: 12px; min-width: 420px; }
+      .compare-table th, .compare-table td { padding: 9px 8px; }
+      .compare-table td:first-child { font-size: 12px; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="glow-orb glow-1"></div>
+<div class="glow-orb glow-2"></div>
+
+<!-- Nav -->
+<nav>
+  <div class="nav-inner">
+    <a href="/" class="logo">
+      <img src="supatype.svg" alt="Supatype" height="28" />
+    </a>
+    <ul class="nav-links">
+      <li><a href="#features">Features</a></li>
+      <li><a href="#compare">Compare</a></li>
+      <li><a href="https://github.com/supatype" target="_blank" rel="noopener">GitHub</a></li>
+      <li><a href="https://discord.gg/yaQrjQD4" target="_blank" rel="noopener" class="nav-cta">Join Discord</a></li>
+    </ul>
+  </div>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="container">
+    <div class="hero-badge">
+      <span class="dot"></span>
+      Now in early development — star us on GitHub
+    </div>
+
+    <h1>
+      Define your types.<br>
+      <span class="gradient">We generate your platform.</span>
+    </h1>
+
+    <p class="hero-sub">
+      Write a TypeScript schema. Supatype generates your <strong>Postgres database</strong>,
+      <strong>REST API</strong>, <strong>auth</strong>, <strong>storage</strong>,
+      <strong>realtime</strong>, and <strong>CMS</strong> — automatically.
+    </p>
+
+    <div class="hero-actions">
+      <a href="https://github.com/supatype" target="_blank" rel="noopener" class="btn btn-primary">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        Star on GitHub
+      </a>
+      <a href="https://discord.gg/yaQrjQD4" target="_blank" rel="noopener" class="btn btn-secondary">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.492c-1.53-.69-3.17-1.2-4.885-1.49a.075.075 0 0 0-.079.036c-.21.369-.444.85-.608 1.23a18.566 18.566 0 0 0-5.487 0 12.36 12.36 0 0 0-.617-1.23A.077.077 0 0 0 8.562 3c-1.714.29-3.354.8-4.885 1.491a.07.07 0 0 0-.032.027C.533 9.093-.32 13.555.099 17.961a.08.08 0 0 0 .031.055 20.03 20.03 0 0 0 5.993 2.98.078.078 0 0 0 .084-.026c.462-.62.874-1.275 1.226-1.963.021-.04.001-.088-.041-.104a13.201 13.201 0 0 1-1.872-.878.075.075 0 0 1-.008-.125c.126-.093.252-.19.372-.287a.075.075 0 0 1 .078-.01c3.927 1.764 8.18 1.764 12.061 0a.075.075 0 0 1 .079.009c.12.098.245.195.372.288a.075.075 0 0 1-.006.125c-.598.344-1.22.635-1.873.877a.075.075 0 0 0-.041.105c.36.687.772 1.341 1.225 1.962a.077.077 0 0 0 .084.028 19.963 19.963 0 0 0 6.002-2.981.076.076 0 0 0 .032-.054c.5-5.094-.838-9.52-3.549-13.442a.06.06 0 0 0-.031-.028z"/></svg>
+        Join Discord
+      </a>
+    </div>
+
+    <div class="hero-social">
+      <a href="https://github.com/supatype" target="_blank" rel="noopener">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        Follow on GitHub
+      </a>
+    </div>
+
+    <!-- Code preview -->
+    <div class="code-preview-wrap">
+      <p class="code-preview-label">One schema. Everything generated.</p>
+      <div class="code-cols">
+
+        <div class="code-block">
+          <div class="code-block-header">
+            <div class="dot-r"></div><div class="dot-y"></div><div class="dot-g"></div>
+            <span class="filename">schema/index.ts</span>
+          </div>
+<pre class="language-typescript"><code class="language-typescript">import { model, field } from '@supatype/schema'
+
+export const Post = model('post', {
+  fields: {
+    title:  field.text({ required: true }),
+    slug:   field.text({ unique: true }),
+    body:   field.richText(),
+    cover:  field.image(),
+    author: field.relation('user'),
+    ...field.timestamps(),
+    ...field.publishable(),
+  },
+  access: {
+    read:  'any',
+    write: 'authenticated',
+  },
+})</code></pre>
+        </div>
+
+        <div class="code-arrow">→</div>
+
+        <div class="code-block">
+          <div class="code-block-header">
+            <div class="dot-r"></div><div class="dot-y"></div><div class="dot-g"></div>
+            <span class="filename">Generated for you</span>
+          </div>
+          <ul class="generates-list">
+            <li><span class="gen-icon">🗄</span> Postgres migration + rollback</li>
+            <li><span class="gen-icon">🔒</span> Row-Level Security policies</li>
+            <li><span class="gen-icon">🌐</span> REST API via PostgREST</li>
+            <li><span class="gen-icon">◈</span> GraphQL via pg_graphql</li>
+            <li><span class="gen-icon">📦</span> S3-compatible storage bucket</li>
+            <li><span class="gen-icon">⚡</span> Realtime subscription trigger</li>
+            <li><span class="gen-icon">🖥</span> Content CMS UI</li>
+            <li><span class="gen-icon">📘</span> TypeScript types + client SDK</li>
+            <li><span class="gen-icon">📖</span> OpenAPI documentation</li>
+          </ul>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Positioning -->
+<section class="position-section" id="features">
+  <div class="container">
+    <div class="section-header">
+      <p class="section-label">Why Supatype</p>
+      <h2>Everything your stack is missing,<br>in one schema.</h2>
+      <p>The tools you're stitching together today each solve one piece of the problem. Supatype solves all of it.</p>
+    </div>
+
+    <div class="tri-grid">
+      <div class="tri-card">
+        <p class="competitor">Supabase</p>
+        <h3>Great infrastructure.<br>No CMS.</h3>
+        <p>Supabase gives you Postgres, auth, and storage — but you still write SQL for every migration and build your own CMS for content editors.</p>
+        <div class="miss-list">
+          <div class="miss-item"><span class="miss-check">✓</span> Auth, storage, realtime</div>
+          <div class="miss-item"><span class="miss-check">✓</span> Database admin panel</div>
+          <div class="miss-item"><span class="miss-x">✗</span> Content CMS for editors</div>
+          <div class="miss-item"><span class="miss-x">✗</span> TypeScript-driven migrations</div>
+          <div class="miss-item"><span class="miss-x">✗</span> Auto-generated RLS</div>
+        </div>
+      </div>
+      <div class="tri-card">
+        <p class="competitor">Payload CMS</p>
+        <h3>Great CMS.<br>No infrastructure.</h3>
+        <p>Schema-driven content management — but you're still integrating your own auth, storage, and realtime from scratch.</p>
+        <div class="miss-list">
+          <div class="miss-item"><span class="miss-check">✓</span> Content CMS, editor UI</div>
+          <div class="miss-item"><span class="miss-x">✗</span> Auth, storage, realtime</div>
+          <div class="miss-item"><span class="miss-x">✗</span> Auto-generated APIs</div>
+          <div class="miss-item"><span class="miss-x">✗</span> Multi-tenancy</div>
+        </div>
+      </div>
+      <div class="tri-card">
+        <p class="competitor">Convex / Firebase</p>
+        <h3>Type-safe.<br>Vendor lock-in.</h3>
+        <p>Reactive and type-safe — but you're on a proprietary database, have no CMS, and your data isn't in Postgres.</p>
+        <div class="miss-list">
+          <div class="miss-item"><span class="miss-check">✓</span> Type safety</div>
+          <div class="miss-item"><span class="miss-x">✗</span> Real Postgres</div>
+          <div class="miss-item"><span class="miss-x">✗</span> Content CMS</div>
+          <div class="miss-item"><span class="miss-x">✗</span> Self-hostable</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="supatype-card">
+      <h3>Supatype = Supabase infrastructure + Payload CMS + end-to-end TypeScript safety</h3>
+      <p>One TypeScript schema. Your database, API, auth, storage, realtime, and CMS — all generated, all in sync, all type-safe.</p>
+      <div class="check-grid">
+        <div class="check-item"><span class="tick">✓</span> Real Postgres, no lock-in</div>
+        <div class="check-item"><span class="tick">✓</span> Auth, storage, realtime built in</div>
+        <div class="check-item"><span class="tick">✓</span> Content CMS auto-generated</div>
+        <div class="check-item"><span class="tick">✓</span> Zero SQL required</div>
+        <div class="check-item"><span class="tick">✓</span> TypeScript end-to-end</div>
+        <div class="check-item"><span class="tick">✓</span> Self-hostable by default</div>
+        <div class="check-item"><span class="tick">✓</span> RLS generated from access rules</div>
+        <div class="check-item"><span class="tick">✓</span> Migration risk analysis</div>
+        <div class="check-item"><span class="tick">✓</span> Multi-tenancy built in</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Features -->
+<section class="features-section">
+  <div class="container">
+    <div class="section-header">
+      <p class="section-label">Platform</p>
+      <h2>Everything your app needs.<br>Nothing you don't.</h2>
+    </div>
+
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">🗄</div>
+        <h3>Schema-first Migrations</h3>
+        <p>TypeScript is your migration file. Push your schema, get forward and rollback SQL with risk analysis showing row-level impact before you apply.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔐</div>
+        <h3>Auth & Row-Level Security</h3>
+        <p>Authentication is built in. Declare <span class="mono">access: { read: 'any', write: 'authenticated' }</span> on a model and Supatype generates the Postgres RLS policies. No SQL.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📦</div>
+        <h3>Storage</h3>
+        <p>Add an <span class="mono">image</span> or <span class="mono">file</span> field and a storage bucket is automatically created with the right permissions. Image transforms included.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">⚡</div>
+        <h3>Realtime</h3>
+        <p>Every model gets a WebSocket subscription generated. React to database changes in your frontend with a single hook — no separate WebSocket infrastructure to operate.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🖥</div>
+        <h3>Content CMS</h3>
+        <p>A full content management UI — list views, edit forms, rich text, media library, version history, scheduled publishing, and live preview — all generated from your schema.</p>
+        <span class="feature-tag">No separate CMS needed</span>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🌐</div>
+        <h3>REST + GraphQL API</h3>
+        <p>PostgREST and pg_graphql are wired up automatically. Your schema defines the API surface with full TypeScript client generation and OpenAPI docs.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🏗</div>
+        <h3>Multi-tenancy</h3>
+        <p>Row-level, schema-level, or database-level isolation — declare the strategy in your config and Supatype generates the isolation logic. No custom boilerplate.</p>
+        <span class="feature-tag">Coming soon</span>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔧</div>
+        <h3>Schema-driven Everything</h3>
+        <p>Webhooks, scheduled jobs, email templates, rate limiting, audit logging, field encryption — all declarative in your schema. One source of truth.</p>
+        <span class="feature-tag">Coming soon</span>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🐳</div>
+        <h3>Self-hostable by Default</h3>
+        <p>The entire platform runs locally via a single binary or on your own infrastructure. Cloud is a convenience, not a requirement. Open-source TypeScript SDK, MIT licensed.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Compare -->
+<section class="compare-section" id="compare">
+  <div class="container">
+    <div class="section-header">
+      <p class="section-label">Comparison</p>
+      <h2>How Supatype stacks up</h2>
+      <p>Assembled alternatives cost 50–60% more and require you to integrate incompatible systems yourself.</p>
+    </div>
+
+    <div class="table-scroll">
+    <table class="compare-table">
+      <thead>
+        <tr>
+          <th>Feature</th>
+          <th class="col-ours">Supatype</th>
+          <th>Supabase</th>
+          <th>Payload CMS</th>
+          <th>Convex</th>
+          <th>Firebase</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>TypeScript schema as source of truth</td>
+          <td class="col-ours"><span class="tick-yes">✓</span></td>
+          <td><span class="tick-no">✗</span></td>
+          <td><span class="tick-yes">✓</span></td>
+          <td><span class="tick-yes">✓</span></td>
+          <td><span class="tick-no">✗</span></td>
+        </tr>
+        <tr>
+          <td>Content CMS for non-technical editors</td>
+          <td class="col-ours"><span class="tick-yes">✓</span></td>
+          <td><span class="tick-no">✗</span></td>
+          <td><span class="tick-yes">✓</span></td>
+          <td><span class="tick-no">✗</span></td>
+          <td><span class="tick-no">✗</span></td>
+        </tr>
+        <tr>
+          <td>Real Postgres</td>
+          <td class="col-ours"><span class="tick-yes">✓</span></td>
+          <td><span class="tick-yes">✓</span></td>
+          <td><span class="tick-yes">✓</span></td>
+          <td><span class="tick-no">✗</span></td>
+          <td><span class="tick-no">✗</span></td>
+        </tr>
+        <tr>
+          <td>Built-in auth</td>
+          <td class="col-ours"><span class="tick-yes">✓</span></td>
+          <td><span class="tick-yes">✓</span></td>
+          <td><span class="tick-partial">Plugin</span></td>
+          <td><span class="tick-yes">✓</span></td>
+          <td><span class="tick-yes">✓</span></td>
+        </tr>
+        <tr>
+          <td>Built-in storage</td>
+          <td class="col-ours"><span class="tick-yes">✓</span></td>
+          <td><span class="tick-yes">✓</span></td>
+          <td><span class="tick-partial">Plugin</span></td>
+          <td><span class="tick-no">✗</span></td>
+          <td><span class="tick-yes">✓</span></td>
+        </tr>
+        <tr>
+          <td>Realtime subscriptions</td>
+          <td class="col-ours"><span class="tick-yes">✓</span></td>
+          <td><span class="tick-yes">✓</span></td>
+          <td><span class="tick-no">✗</span></td>
+          <td><span class="tick-yes">✓</span></td>
+          <td><span class="tick-yes">✓</span></td>
+        </tr>
+        <tr>
+          <td>Auto-generated RLS from access rules</td>
+          <td class="col-ours"><span class="tick-yes">✓</span></td>
+          <td><span class="tick-no">✗</span></td>
+          <td><span class="tick-no">✗</span></td>
+          <td><span class="tick-no">✗</span></td>
+          <td><span class="tick-no">✗</span></td>
+        </tr>
+        <tr>
+          <td>Migration risk analysis</td>
+          <td class="col-ours"><span class="tick-yes">✓</span></td>
+          <td><span class="tick-no">✗</span></td>
+          <td><span class="tick-no">✗</span></td>
+          <td><span class="tick-no">✗</span></td>
+          <td><span class="tick-no">✗</span></td>
+        </tr>
+        <tr>
+          <td>Self-hostable</td>
+          <td class="col-ours"><span class="tick-yes">✓</span></td>
+          <td><span class="tick-yes">✓</span></td>
+          <td><span class="tick-yes">✓</span></td>
+          <td><span class="tick-no">✗</span></td>
+          <td><span class="tick-no">✗</span></td>
+        </tr>
+        <tr>
+          <td>Multi-tenancy from schema config</td>
+          <td class="col-ours"><span class="tick-yes">✓</span></td>
+          <td><span class="tick-no">✗</span></td>
+          <td><span class="tick-no">✗</span></td>
+          <td><span class="tick-no">✗</span></td>
+          <td><span class="tick-no">✗</span></td>
+        </tr>
+        <tr>
+          <td>Schema-driven webhooks &amp; scheduled jobs</td>
+          <td class="col-ours"><span class="tick-yes">✓</span></td>
+          <td><span class="tick-no">✗</span></td>
+          <td><span class="tick-no">✗</span></td>
+          <td><span class="tick-no">✗</span></td>
+          <td><span class="tick-no">✗</span></td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="cta-section">
+  <div class="container">
+    <div class="cta-box">
+      <h2>Be part of what we're building.</h2>
+      <p>Supatype is in active development. Star the repo, join the Discord, and help shape the platform.</p>
+      <div class="cta-actions">
+        <a href="https://github.com/supatype" target="_blank" rel="noopener" class="btn btn-primary">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+          ⭐ Star on GitHub
+        </a>
+        <a href="https://discord.gg/yaQrjQD4" target="_blank" rel="noopener" class="btn btn-secondary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.492c-1.53-.69-3.17-1.2-4.885-1.49a.075.075 0 0 0-.079.036c-.21.369-.444.85-.608 1.23a18.566 18.566 0 0 0-5.487 0 12.36 12.36 0 0 0-.617-1.23A.077.077 0 0 0 8.562 3c-1.714.29-3.354.8-4.885 1.491a.07.07 0 0 0-.032.027C.533 9.093-.32 13.555.099 17.961a.08.08 0 0 0 .031.055 20.03 20.03 0 0 0 5.993 2.98.078.078 0 0 0 .084-.026c.462-.62.874-1.275 1.226-1.963.021-.04.001-.088-.041-.104a13.201 13.201 0 0 1-1.872-.878.075.075 0 0 1-.008-.125c.126-.093.252-.19.372-.287a.075.075 0 0 1 .078-.01c3.927 1.764 8.18 1.764 12.061 0a.075.075 0 0 1 .079.009c.12.098.245.195.372.288a.075.075 0 0 1-.006.125c-.598.344-1.22.635-1.873.877a.075.075 0 0 0-.041.105c.36.687.772 1.341 1.225 1.962a.077.077 0 0 0 .084.028 19.963 19.963 0 0 0 6.002-2.981.076.076 0 0 0 .032-.054c.5-5.094-.838-9.52-3.549-13.442a.06.06 0 0 0-.031-.028z"/></svg>
+          Join Discord
+        </a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer>
+  <div class="container">
+    <div class="footer-inner">
+      <div class="footer-left">
+        <a href="/" class="footer-logo">
+          <img src="supatype.svg" alt="Supatype" />
+        </a>
+        <span>© 2026 Supatype. Open-source TypeScript SDK, MIT licensed.</span>
+      </div>
+      <div class="footer-right">
+        <a href="https://github.com/supatype" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://discord.gg/yaQrjQD4" target="_blank" rel="noopener">Discord</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-core.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-clike.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-javascript.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-typescript.min.js"></script>
+
+</body>
+</html>
