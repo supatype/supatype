@@ -156,6 +156,11 @@ const LEGACY_CANDIDATES = [
   "supatype.config.mjs",
 ]
 
+function normaliseTomlInput(raw: string): string {
+  // Accept CRLF/CR files on all platforms before TOML parsing.
+  return raw.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
+}
+
 /**
  * Load and parse supatype.config.toml from cwd.
  *
@@ -176,7 +181,7 @@ export function loadTomlConfig(cwd: string = process.cwd()): SupatypeTomlConfig 
     const raw = readFileSync(configPath, "utf8")
     let parsed: unknown
     try {
-      parsed = TOML.parse(raw)
+      parsed = TOML.parse(normaliseTomlInput(raw))
     } catch (err) {
       throw new Error(`Failed to parse ${candidate}: ${(err as Error).message}`)
     }
@@ -189,7 +194,7 @@ export function loadTomlConfig(cwd: string = process.cwd()): SupatypeTomlConfig 
       const localRaw = readFileSync(localPath, "utf8")
       let localParsed: unknown
       try {
-        localParsed = TOML.parse(localRaw)
+        localParsed = TOML.parse(normaliseTomlInput(localRaw))
       } catch (err) {
         throw new Error(`Failed to parse ${LOCAL_CONFIG_NAME}: ${(err as Error).message}`)
       }
