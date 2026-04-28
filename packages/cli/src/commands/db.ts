@@ -39,7 +39,7 @@ export function registerDb(program: Command): void {
 
       // If linked to a cloud project, fetch from the API
       if (config.projectRef) {
-        const apiUrl = config.apiUrl || "https://api.supatype.io"
+        const apiUrl = config.apiUrl || "https://api.supatype.com"
         const envName = opts.env || "production"
 
         try {
@@ -107,7 +107,7 @@ export function registerDb(program: Command): void {
         return
       }
 
-      const apiUrl = config.apiUrl || "https://api.supatype.io"
+      const apiUrl = config.apiUrl || "https://api.supatype.com"
       const envName = opts.env || "production"
 
       try {

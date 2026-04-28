@@ -44,11 +44,11 @@ const mockBuckets: Bucket[] = [
 const mockFiles: StorageFile[] = [
   { id: "f1", name: "photos", size: 0, type: "folder", updated_at: "2026-03-01T10:00:00Z", created_at: "2026-01-01T10:00:00Z", is_folder: true, owner_id: null, public_url: null },
   { id: "f2", name: "documents", size: 0, type: "folder", updated_at: "2026-02-15T14:00:00Z", created_at: "2026-01-01T10:00:00Z", is_folder: true, owner_id: null, public_url: null },
-  { id: "f3", name: "profile.jpg", size: 245760, type: "image/jpeg", updated_at: "2026-03-10T08:30:00Z", created_at: "2026-03-10T08:30:00Z", is_folder: false, owner_id: "u1", public_url: "https://storage.supatype.io/avatars/profile.jpg" },
+  { id: "f3", name: "profile.jpg", size: 245760, type: "image/jpeg", updated_at: "2026-03-10T08:30:00Z", created_at: "2026-03-10T08:30:00Z", is_folder: false, owner_id: "u1", public_url: "https://storage.supatype.dev/avatars/profile.jpg" },
   { id: "f4", name: "resume.pdf", size: 1048576, type: "application/pdf", updated_at: "2026-03-05T16:00:00Z", created_at: "2026-03-05T16:00:00Z", is_folder: false, owner_id: "u1", public_url: null },
   { id: "f5", name: "data.json", size: 4096, type: "application/json", updated_at: "2026-03-08T12:00:00Z", created_at: "2026-03-08T12:00:00Z", is_folder: false, owner_id: "u2", public_url: null },
-  { id: "f6", name: "hero-banner.png", size: 2097152, type: "image/png", updated_at: "2026-03-12T10:00:00Z", created_at: "2026-03-12T10:00:00Z", is_folder: false, owner_id: "u1", public_url: "https://storage.supatype.io/avatars/hero-banner.png" },
-  { id: "f7", name: "background.webp", size: 819200, type: "image/webp", updated_at: "2026-03-11T15:00:00Z", created_at: "2026-03-11T15:00:00Z", is_folder: false, owner_id: "u3", public_url: "https://storage.supatype.io/avatars/background.webp" },
+  { id: "f6", name: "hero-banner.png", size: 2097152, type: "image/png", updated_at: "2026-03-12T10:00:00Z", created_at: "2026-03-12T10:00:00Z", is_folder: false, owner_id: "u1", public_url: "https://storage.supatype.dev/avatars/hero-banner.png" },
+  { id: "f7", name: "background.webp", size: 819200, type: "image/webp", updated_at: "2026-03-11T15:00:00Z", created_at: "2026-03-11T15:00:00Z", is_folder: false, owner_id: "u3", public_url: "https://storage.supatype.dev/avatars/background.webp" },
 ]
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -81,7 +81,7 @@ function FilePreview({ file, bucket }: { file: StorageFile; bucket: Bucket }): R
 
   const generateSignedUrl = () => {
     // Mock: in production this would call the storage API
-    setSignedUrl(`https://storage.supatype.io/${bucket.name}/${file.name}?token=mock-signed-url-${Date.now()}&expires=3600`)
+    setSignedUrl(`https://storage.supatype.dev/${bucket.name}/${file.name}?token=mock-signed-url-${Date.now()}&expires=3600`)
   }
 
   return (
@@ -278,7 +278,7 @@ export function StorageBrowser(): React.ReactElement {
         created_at: new Date().toISOString(),
         is_folder: false,
         owner_id: null,
-        public_url: currentBucket?.public ? `https://storage.supatype.io/${selectedBucket}/${path.join("/")}${path.length > 0 ? "/" : ""}${file.name}` : null,
+        public_url: currentBucket?.public ? `https://storage.supatype.dev/${selectedBucket}/${path.join("/")}${path.length > 0 ? "/" : ""}${file.name}` : null,
       }
       setFiles((prev) => [...prev, newFile])
       setUploads((prev) => prev.map((u) =>

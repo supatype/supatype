@@ -59,7 +59,7 @@ export function registerCloud(program: Command): void {
     .command("link")
     .description("Link this local project to a Supatype cloud project")
     .option("--project <slug>", "Project slug to link to")
-    .option("--api-url <url>", "Control plane API URL", "https://api.supatype.io")
+    .option("--api-url <url>", "Control plane API URL", "https://api.supatype.com")
     .option("--token <token>", "Authentication token")
     .action(async (opts: { project?: string; apiUrl: string; token?: string }) => {
       const cwd = process.cwd()
@@ -315,7 +315,7 @@ function getCloudConfigOrExit(): CloudConfig {
   let config = loadCloudConfig(cwd)
   if (!config) {
     const token = process.env["SUPATYPE_TOKEN"]
-    const apiUrl = process.env["SUPATYPE_API_URL"] ?? "https://api.supatype.io"
+    const apiUrl = process.env["SUPATYPE_API_URL"] ?? "https://api.supatype.com"
     if (!token) {
       console.error("Not connected to Supatype Cloud. Run: supatype link, or set SUPATYPE_TOKEN.")
       process.exit(1)

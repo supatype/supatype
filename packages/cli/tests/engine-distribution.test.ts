@@ -59,12 +59,12 @@ describe("CDN URL construction", () => {
     const { getCdnUrl } = await import("../src/engine/platform.js")
 
     const url = getCdnUrl(
-      "https://releases.supatype.io/engine",
+      "https://releases.supatype.dev/engine",
       "0.1.0-alpha.1",
       "supatype-engine-0.1.0-alpha.1-linux-x64",
     )
     expect(url).toBe(
-      "https://releases.supatype.io/engine/v0.1.0-alpha.1/supatype-engine-0.1.0-alpha.1-linux-x64",
+      "https://releases.supatype.dev/engine/v0.1.0-alpha.1/supatype-engine-0.1.0-alpha.1-linux-x64",
     )
   })
 })
@@ -329,7 +329,7 @@ describe("Engine version constants", () => {
     } = await import("../src/engine-version.js")
 
     expect(ENGINE_VERSION).toMatch(/^\d+\.\d+\.\d+/)
-    expect(CDN_BASE_URL).toBe("https://releases.supatype.io/engine")
+    expect(CDN_BASE_URL).toBe("https://releases.supatype.dev/engine")
     expect(ENGINE_RELEASES_REPO).toBe("supatype/engine-releases")
     expect(GITHUB_RELEASES_FALLBACK_URL).toContain("github.com")
   })

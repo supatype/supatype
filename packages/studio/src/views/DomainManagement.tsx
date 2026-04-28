@@ -92,7 +92,7 @@ export function DomainManagement(): React.ReactElement {
             <p className="text-xs text-muted-foreground mt-0.5">Automatically assigned, always active</p>
           </div>
           <code className="text-sm text-primary bg-primary/10 px-2 py-1 rounded">
-            {activeProject.slug}.supatype.io
+            {activeProject.slug}.supatype.dev
           </code>
         </div>
       </div>

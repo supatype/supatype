@@ -373,7 +373,7 @@ function AuthSection(): React.ReactElement {
           </p>
           <CodeBlock className="text-xs">
 {`curl -X GET \\
-  'https://your-project.supatype.io/rest/v1/posts' \\
+  'https://your-project.supatype.dev/rest/v1/posts' \\
   -H 'apikey: YOUR_ANON_KEY' \\
   -H 'Authorization: Bearer YOUR_ANON_KEY'`}
           </CodeBlock>
@@ -386,7 +386,7 @@ function AuthSection(): React.ReactElement {
           </p>
           <CodeBlock className="text-xs">
 {`curl -X GET \\
-  'https://your-project.supatype.io/rest/v1/posts' \\
+  'https://your-project.supatype.dev/rest/v1/posts' \\
   -H 'apikey: YOUR_ANON_KEY' \\
   -H 'Authorization: Bearer USER_ACCESS_TOKEN'`}
           </CodeBlock>
@@ -399,7 +399,7 @@ function AuthSection(): React.ReactElement {
           </p>
           <CodeBlock className="text-xs">
 {`curl -X GET \\
-  'https://your-project.supatype.io/rest/v1/posts' \\
+  'https://your-project.supatype.dev/rest/v1/posts' \\
   -H 'apikey: YOUR_SERVICE_ROLE_KEY' \\
   -H 'Authorization: Bearer YOUR_SERVICE_ROLE_KEY'`}
           </CodeBlock>

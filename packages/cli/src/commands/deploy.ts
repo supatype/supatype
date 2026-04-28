@@ -108,7 +108,7 @@ export function registerDeploy(program: Command): void {
 
           // Inject Supatype URLs if project is linked
           if (config.projectRef) {
-            buildEnv["NEXT_PUBLIC_SUPATYPE_URL"] = config.apiUrl || `https://${config.projectRef}.supatype.io`
+            buildEnv["NEXT_PUBLIC_SUPATYPE_URL"] = config.apiUrl || `https://${config.projectRef}.supatype.dev`
             buildEnv["VITE_SUPATYPE_URL"] = buildEnv["NEXT_PUBLIC_SUPATYPE_URL"]
             buildEnv["PUBLIC_SUPATYPE_URL"] = buildEnv["NEXT_PUBLIC_SUPATYPE_URL"]
             // NEVER inject service_role key — only anon key is safe for client-side
@@ -163,8 +163,8 @@ export function registerDeploy(program: Command): void {
         console.log("\nDeployment complete!")
         if (config.projectRef) {
           const url = opts.preview
-            ? `https://preview-${Date.now().toString(36)}.${config.projectRef}.supatype.io`
-            : `https://${config.projectRef}.supatype.io`
+            ? `https://preview-${Date.now().toString(36)}.${config.projectRef}.supatype.dev`
+            : `https://${config.projectRef}.supatype.dev`
           console.log(`URL: ${url}`)
         }
       }
@@ -181,7 +181,7 @@ export function registerDeploy(program: Command): void {
         process.exit(1)
       }
 
-      const apiUrl = config.apiUrl || "https://api.supatype.io"
+      const apiUrl = config.apiUrl || "https://api.supatype.com"
       const token = config.accessToken || process.env["SUPATYPE_ACCESS_TOKEN"] || ""
 
       const res = await fetch(`${apiUrl}/platform/v1/projects/${config.projectRef}/deployments/rollback`, {
@@ -210,7 +210,7 @@ export function registerDeploy(program: Command): void {
         process.exit(1)
       }
 
-      const apiUrl = config.apiUrl || "https://api.supatype.io"
+      const apiUrl = config.apiUrl || "https://api.supatype.com"
       const token = config.accessToken || process.env["SUPATYPE_ACCESS_TOKEN"] || ""
 
       const res = await fetch(`${apiUrl}/platform/v1/projects/${config.projectRef}/deployments/current`, {
@@ -250,7 +250,7 @@ export function registerDeploy(program: Command): void {
         process.exit(1)
       }
 
-      const apiUrl = config.apiUrl || "https://api.supatype.io"
+      const apiUrl = config.apiUrl || "https://api.supatype.com"
       const token = config.accessToken || process.env["SUPATYPE_ACCESS_TOKEN"] || ""
 
       const versionPath = version ? `/${version}` : "/current"
@@ -273,7 +273,7 @@ async function deployToCloud(
   outputDir: string,
   isPreview: boolean,
 ): Promise<void> {
-  const apiUrl = config.apiUrl || "https://api.supatype.io"
+  const apiUrl = config.apiUrl || "https://api.supatype.com"
   const token = config.accessToken || process.env["SUPATYPE_ACCESS_TOKEN"] || ""
 
   console.log("Uploading build artifacts...")

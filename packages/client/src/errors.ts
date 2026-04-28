@@ -3,7 +3,7 @@
  * Every error has a machine-readable `code` field and optional `helpUrl`.
  */
 
-const DOCS_BASE = "https://docs.supatype.io/errors"
+const DOCS_BASE = "https://docs.supatype.com/errors"
 
 /**
  * Base error class for all Supatype SDK errors.
