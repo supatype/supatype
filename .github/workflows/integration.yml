@@ -1,0 +1,166 @@
+name: Integration Tests
+
+on:
+  pull_request:
+    paths:
+      - "packages/cli/**"
+      - "packages/client/**"
+      - "packages/schema/**"
+      - "tests/integration/**"
+  push:
+    branches: [main]
+    paths:
+      - "packages/cli/**"
+      - "packages/client/**"
+      - "packages/schema/**"
+
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration:
+    name: Integration (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-14]
+
+    steps:
+      # ── Checkout ─────────────────────────────────────────────────────────────
+
+      - uses: actions/checkout@v4
+
+      # ── Node.js + pnpm ───────────────────────────────────────────────────────
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      # ── Rust (for schema engine) ──────────────────────────────────────────────
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust target/
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ../supatype-schema-engine/target
+          key: rust-${{ matrix.os }}-${{ hashFiles('../supatype-schema-engine/Cargo.lock') }}
+          restore-keys: rust-${{ matrix.os }}-
+
+      # ── Go (for supatype-server) ──────────────────────────────────────────────
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: "../supatype-auth/go.sum"
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          key: go-${{ matrix.os }}-${{ hashFiles('../supatype-auth/go.sum') }}
+          restore-keys: go-${{ matrix.os }}-
+
+      # ── Check out private repos ───────────────────────────────────────────────
+      # These steps only run when the PRIVATE_REPO_TOKEN secret is set.
+      # On forks or external PRs they are skipped and cached binaries are used.
+
+      - name: Check out supatype-schema-engine
+        if: ${{ env.PRIVATE_REPO_TOKEN != '' }}
+        uses: actions/checkout@v4
+        with:
+          repository: supatype/supatype-schema-engine
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: ../supatype-schema-engine
+        env:
+          PRIVATE_REPO_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+
+      - name: Check out supatype-auth (server)
+        if: ${{ env.PRIVATE_REPO_TOKEN != '' }}
+        uses: actions/checkout@v4
+        with:
+          repository: supatype/supatype-auth
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: ../supatype-auth
+        env:
+          PRIVATE_REPO_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+
+      # ── Install dependencies ──────────────────────────────────────────────────
+
+      - name: Install npm dependencies
+        run: pnpm install --frozen-lockfile
+
+      # ── Build TypeScript packages ─────────────────────────────────────────────
+
+      - name: Build TypeScript packages
+        run: pnpm build
+
+      # ── Build engine binary ───────────────────────────────────────────────────
+
+      - name: Build schema engine
+        if: ${{ env.PRIVATE_REPO_TOKEN != '' }}
+        working-directory: ../supatype-schema-engine
+        run: cargo build --release --quiet
+        env:
+          PRIVATE_REPO_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+
+      - name: Set SUPATYPE_ENGINE
+        if: ${{ env.PRIVATE_REPO_TOKEN != '' }}
+        run: echo "SUPATYPE_ENGINE=${{ github.workspace }}/../supatype-schema-engine/target/release/supatype-engine" >> $GITHUB_ENV
+
+      # ── Build server binary ───────────────────────────────────────────────────
+
+      - name: Build supatype-server
+        if: ${{ env.PRIVATE_REPO_TOKEN != '' }}
+        working-directory: ../supatype-auth
+        run: |
+          go build -ldflags="-s -w" -o /tmp/supatype-server-ci ./cmd/
+          echo "SUPATYPE_SERVER=/tmp/supatype-server-ci" >> $GITHUB_ENV
+        env:
+          PRIVATE_REPO_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+
+      # ── Download Postgres (if no local build) ─────────────────────────────────
+
+      - name: Install Postgres (macOS)
+        if: matrix.os == 'macos-14'
+        run: |
+          brew install postgresql@17
+          echo "SUPATYPE_POSTGRES_DIR=$(brew --prefix postgresql@17)" >> $GITHUB_ENV
+
+      - name: Install Postgres (Linux)
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get install -y postgresql-17
+          echo "SUPATYPE_POSTGRES_DIR=/usr/lib/postgresql/17" >> $GITHUB_ENV
+
+      # ── Run integration tests ─────────────────────────────────────────────────
+
+      - name: Run integration tests
+        run: bash tests/integration/scripts/integration-test.sh --skip-build
+        env:
+          SUPATYPE_URL: http://localhost:54399
+          SUPATYPE_ANON_KEY: integration-anon-key
+
+      # ── Upload logs on failure ────────────────────────────────────────────────
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-logs-${{ matrix.os }}
+          path: ~/.supatype/projects/supatype-integration/logs/
+          retention-days: 3
