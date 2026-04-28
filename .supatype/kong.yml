@@ -8,6 +8,46 @@ services:
         strip_path: true
         paths:
           - /rest/v1/
+    plugins:
+      - name: cors
+        config:
+          origins:
+            - "*"
+          methods:
+            - GET
+            - POST
+            - PATCH
+            - DELETE
+            - OPTIONS
+          headers:
+            - Authorization
+            - Content-Type
+            - apikey
+            - Prefer
+          credentials: true
+
+  - name: graphql-v1
+    url: http://postgrest:3000/rpc/graphql
+    routes:
+      - name: graphql-v1-all
+        strip_path: true
+        paths:
+          - /graphql/v1
+    plugins:
+      - name: cors
+        config:
+          origins:
+            - "*"
+          methods:
+            - GET
+            - POST
+            - OPTIONS
+          headers:
+            - Authorization
+            - Content-Type
+            - apikey
+          credentials: true
+
   - name: auth-v1
     url: http://gotrue:9999
     routes:
@@ -15,15 +55,50 @@ services:
         strip_path: true
         paths:
           - /auth/v1/
+    plugins:
+      - name: cors
+        config:
+          origins:
+            - "*"
+          methods:
+            - GET
+            - POST
+            - PUT
+            - DELETE
+            - OPTIONS
+          headers:
+            - Authorization
+            - Content-Type
+            - apikey
+          credentials: true
+
   - name: storage-v1
-    url: http://host.docker.internal:5000
+    url: http://storage:5000
     routes:
       - name: storage-v1-all
         strip_path: true
         paths:
           - /storage/v1/
+    plugins:
+      - name: cors
+        config:
+          origins:
+            - "*"
+          methods:
+            - GET
+            - POST
+            - PUT
+            - DELETE
+            - OPTIONS
+          headers:
+            - Authorization
+            - Content-Type
+            - apikey
+            - x-upsert
+          credentials: true
+
   - name: realtime-v1
-    url: http://host.docker.internal:4000
+    url: http://realtime:4000
     routes:
       - name: realtime-v1-all
         strip_path: true
@@ -34,10 +109,46 @@ services:
           - https
           - ws
           - wss
+    plugins:
+      - name: cors
+        config:
+          origins:
+            - "*"
+          methods:
+            - GET
+            - OPTIONS
+          headers:
+            - Authorization
+            - Content-Type
+            - apikey
+          credentials: true
+
   - name: studio
-    url: http://host.docker.internal:3002
+    url: http://studio:3002
     routes:
       - name: studio-all
         strip_path: true
         paths:
           - /studio/
+    plugins:
+      - name: cors
+        config:
+          origins:
+            - "*"
+          methods:
+            - GET
+            - POST
+            - OPTIONS
+          headers:
+            - Authorization
+            - Content-Type
+          credentials: true
+
+  # ─── App fallback route (run: supatype app add) ───
+  # - name: app
+  #   url: http://app:3000
+  #   routes:
+  #     - name: app-root
+  #       paths:
+  #         - /
+  #       strip_path: false

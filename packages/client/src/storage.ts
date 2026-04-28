@@ -19,6 +19,16 @@ export interface TransformOptions {
   resize?: "cover" | "contain" | "fill" | "inside" | "outside" | undefined
 }
 
+export interface StorageBucketMeta {
+  id: string
+  name: string
+  public: boolean
+  file_size_limit: number | null
+  allowed_mime_types: string[] | null
+  created_at: string
+  updated_at: string
+}
+
 export class StorageClient {
   private readonly url: string
   private readonly headers: Record<string, string>
@@ -30,6 +40,47 @@ export class StorageClient {
 
   from(bucket: string): BucketClient {
     return new BucketClient(this.url, bucket, this.headers)
+  }
+
+  async listBuckets(): Promise<{ data: StorageBucketMeta[] | null; error: SupatypeError | null }> {
+    try {
+      const res = await fetch(`${this.url}/bucket`, { headers: this.headers })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: "Error" })) as { message?: string }
+        return { data: null, error: { message: err.message ?? "Failed to list buckets" } }
+      }
+      const data = await res.json() as StorageBucketMeta[]
+      return { data, error: null }
+    } catch (e) {
+      return { data: null, error: { message: e instanceof Error ? e.message : "Network error" } }
+    }
+  }
+
+  async createBucket(
+    name: string,
+    options?: { public?: boolean | undefined; fileSizeLimit?: number | undefined; allowedMimeTypes?: string[] | undefined } | undefined,
+  ): Promise<{ data: { name: string } | null; error: SupatypeError | null }> {
+    try {
+      const body: Record<string, unknown> = {
+        id: name,
+        name,
+        ...(options?.public !== undefined && { public: options.public }),
+        ...(options?.fileSizeLimit !== undefined && { file_size_limit: options.fileSizeLimit }),
+        ...(options?.allowedMimeTypes !== undefined && { allowed_mime_types: options.allowedMimeTypes }),
+      }
+      const res = await fetch(`${this.url}/bucket`, {
+        method: "POST",
+        headers: { ...this.headers, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: "Error" })) as { message?: string }
+        return { data: null, error: { message: err.message ?? "Failed to create bucket" } }
+      }
+      return { data: { name }, error: null }
+    } catch (e) {
+      return { data: null, error: { message: e instanceof Error ? e.message : "Network error" } }
+    }
   }
 }
 
@@ -49,9 +100,10 @@ export class BucketClient {
     file: Blob | File | ArrayBuffer,
     options?: { contentType?: string | undefined; upsert?: boolean | undefined } | undefined,
   ): Promise<{ data: { path: string } | null; error: SupatypeError | null }> {
+    const inferredType = file instanceof File && file.type ? file.type : "application/octet-stream"
     const headers: Record<string, string> = {
       ...this.headers,
-      "Content-Type": options?.contentType ?? "application/octet-stream",
+      "Content-Type": options?.contentType ?? inferredType,
     }
     if (options?.upsert === true) {
       headers["x-upsert"] = "true"
@@ -63,7 +115,7 @@ export class BucketClient {
     })
     if (!res.ok) {
       const err = await res.json().catch(() => ({ message: "Upload failed" })) as Record<string, unknown>
-      return { data: null, error: { message: String(err["message"] ?? "Upload failed"), status: res.status } }
+      return { data: null, error: { message: String(err["message"] ?? err["error"] ?? "Upload failed"), status: res.status } }
     }
     return { data: { path }, error: null }
   }
@@ -76,7 +128,7 @@ export class BucketClient {
     const res = await fetch(url, { headers: this.headers })
     if (!res.ok) {
       const err = await res.json().catch(() => ({ message: "Download failed" })) as Record<string, unknown>
-      return { data: null, error: { message: String(err["message"] ?? "Download failed"), status: res.status } }
+      return { data: null, error: { message: String(err["message"] ?? err["error"] ?? "Download failed"), status: res.status } }
     }
     const blob = await res.blob()
     return { data: blob, error: null }
@@ -101,7 +153,7 @@ export class BucketClient {
     })
     if (!res.ok) {
       const err = await res.json().catch(() => ({ message: "Failed to create signed URL" })) as Record<string, unknown>
-      return { data: null, error: { message: String(err["message"] ?? "Failed to create signed URL"), status: res.status } }
+      return { data: null, error: { message: String(err["message"] ?? err["error"] ?? "Failed to create signed URL"), status: res.status } }
     }
     const json = await res.json() as { signedURL: string }
     return { data: { signedUrl: json.signedURL }, error: null }
@@ -131,7 +183,7 @@ export class BucketClient {
     })
     if (!res.ok) {
       const err = await res.json().catch(() => ({ message: "Delete failed" })) as Record<string, unknown>
-      return { data: null, error: { message: String(err["message"] ?? "Delete failed"), status: res.status } }
+      return { data: null, error: { message: String(err["message"] ?? err["error"] ?? "Delete failed"), status: res.status } }
     }
     const json = await res.json() as StorageObject[]
     return { data: json, error: null }
@@ -153,7 +205,7 @@ export class BucketClient {
     })
     if (!res.ok) {
       const err = await res.json().catch(() => ({ message: "List failed" })) as Record<string, unknown>
-      return { data: null, error: { message: String(err["message"] ?? "List failed"), status: res.status } }
+      return { data: null, error: { message: String(err["message"] ?? err["error"] ?? "List failed"), status: res.status } }
     }
     const json = await res.json() as StorageObject[]
     return { data: json, error: null }

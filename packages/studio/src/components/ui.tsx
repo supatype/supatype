@@ -62,7 +62,7 @@ export function Button({
 } & Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "className">): React.ReactElement {
   return (
     <button
-      className={cn("inline-flex items-center gap-1.5 rounded-md font-medium transition-colors", buttonSizes[size], buttonVariants[variant], className)}
+      className={cn("inline-flex items-center gap-1.5 rounded-md font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:pointer-events-none", buttonSizes[size], buttonVariants[variant], className)}
       {...props}
     >
       {children}

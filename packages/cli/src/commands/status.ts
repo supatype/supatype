@@ -3,6 +3,7 @@
  */
 import type { Command } from "commander"
 import { spawnSync } from "node:child_process"
+import { LOCAL_KONG_HOST_PORT, localKongBaseUrl } from "../local-gateway.js"
 
 interface ServiceStatus {
   name: string
@@ -21,7 +22,7 @@ export function registerStatus(program: Command): void {
         { name: "Postgres", container: "supatype-postgres", port: 5432 },
         { name: "PostgREST", container: "supatype-postgrest", port: 3000 },
         { name: "GoTrue", container: "supatype-gotrue", port: 9999 },
-        { name: "Kong", container: "supatype-kong", port: 8000 },
+        { name: "Kong", container: "supatype-kong", port: LOCAL_KONG_HOST_PORT },
         { name: "MinIO", container: "supatype-minio", port: 9000 },
         { name: "Realtime", container: "supatype-realtime", port: 4000 },
         { name: "Studio", container: "supatype-studio", port: 3100 },
@@ -46,9 +47,9 @@ export function registerStatus(program: Command): void {
       console.log(`\n${running.length}/${services.length} services running`)
 
       if (running.length > 0) {
-        console.log(`\nAPI URL:    http://localhost:8000`)
+        console.log(`\nAPI URL:    ${localKongBaseUrl()}`)
         console.log(`Studio:     http://localhost:3100`)
-        console.log(`Database:   postgresql://postgres:postgres@localhost:5432/postgres`)
+        console.log(`Database:   postgresql://supatype_admin:postgres@localhost:5432/postgres`)
       }
     })
 }

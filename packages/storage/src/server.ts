@@ -82,16 +82,14 @@ route("PUT", "/bucket/:id", bucketRoutes.update, { requireServiceRole: true })
 route("DELETE", "/bucket/:id", bucketRoutes.remove, { requireServiceRole: true })
 route("POST", "/bucket/:id/empty", bucketRoutes.empty, { requireServiceRole: true })
 
-// Object routes
+// Object routes — specific patterns must be registered before the wildcard upload route
+route("POST", "/object/list/:bucket", objectRoutes.listObjects, { requireAuth: true })
+route("POST", "/object/sign/:bucket/**", objectRoutes.createSignedUrl, { requireAuth: true })
 route("POST", "/object/:bucket/**", objectRoutes.upload, { requireAuth: true })
 route("GET", "/object/public/:bucket/**", objectRoutes.downloadPublic)
 route("GET", "/object/authenticated/:bucket/**", objectRoutes.downloadAuthenticated, { requireAuth: true })
 route("GET", "/object/sign/:bucket/**", objectRoutes.downloadSigned)
 route("DELETE", "/object/:bucket", objectRoutes.removeObjects, { requireAuth: true })
-route("POST", "/object/list/:bucket", objectRoutes.listObjects, { requireAuth: true })
-
-// Pre-signed URL
-route("POST", "/object/sign/:bucket/**", objectRoutes.createSignedUrl, { requireAuth: true })
 
 // ─── Server ─────────────────────────────────────────────────────────────────────
 

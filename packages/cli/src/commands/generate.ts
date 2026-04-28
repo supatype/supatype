@@ -1,6 +1,7 @@
 import type { Command } from "commander"
 import { loadConfig, loadSchemaAst } from "../config.js"
-import { ensureEngine, invokeEngine } from "../engine.js"
+import { connectionString, schemaPathFromToml } from "../config-toml.js"
+import { ensureEngine, engineRequest } from "../engine-client.js"
 
 export function registerGenerate(program: Command): void {
   program
@@ -10,22 +11,17 @@ export function registerGenerate(program: Command): void {
     .action(async (opts: { connection?: string }) => {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
-      const connection = opts.connection ?? config.connection
+      const connection = opts.connection ?? connectionString(config)
 
       await ensureEngine()
       console.log("Loading schema...")
-      const ast = loadSchemaAst(config.schema, cwd)
+      const ast = loadSchemaAst(schemaPathFromToml(config, cwd), cwd)
 
-      const args = ["generate", "--connection", connection]
-      if (config.output?.types) args.push("--types", config.output.types)
-      if (config.output?.client) args.push("--client", config.output.client)
+      const body: Record<string, unknown> = { ast, lang: "typescript", database_url: connection }
+      if (config.output?.types) body["types_path"] = config.output.types
+      if (config.output?.client) body["client_path"] = config.output.client
 
-      const result = invokeEngine(args, JSON.stringify(ast))
-      if (result.exitCode !== 0) {
-        console.error(result.stderr || result.stdout)
-        process.exit(1)
-      }
-
-      console.log(result.stdout || "Types generated.")
+      const result = await engineRequest<{ code?: string; message?: string }>("/generate", body)
+      console.log(result.message ?? "Types generated.")
     })
 }

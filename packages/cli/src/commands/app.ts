@@ -1,6 +1,7 @@
 import type { Command } from "commander"
 import { readFileSync, writeFileSync, existsSync } from "node:fs"
 import { resolve } from "node:path"
+import { localKongBaseUrl } from "../local-gateway.js"
 import { APP_COMPOSE_MARKER, KONG_APP_MARKER } from "./init.js"
 
 export function registerApp(program: Command): void {
@@ -59,7 +60,7 @@ function addApp(cwd: string, dockerfile: string, port: string): void {
     }
   }
 
-  console.log(`\nApp service added (port ${port}). Your app will be available at http://localhost:8000/\n`)
+  console.log(`\nApp service added (port ${port}). Your app will be available at ${localKongBaseUrl()}/\n`)
   console.log("Run: supatype dev")
 }
 

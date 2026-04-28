@@ -37,7 +37,7 @@ interface TestDB {
   }
 }
 
-const client = createClient<TestDB>({ url: "http://localhost:8000", anonKey: "test" })
+const client = createClient<TestDB>({ url: "http://localhost:18473", anonKey: "test" })
 
 // ─── from() ───────────────────────────────────────────────────────────────────
 

@@ -83,7 +83,7 @@ describe("scaffold()", () => {
     scaffold(tmpRoot, "shop")
     const content = readFileSync(join(tmpRoot, "docker-compose.yml"), "utf8")
     expect(content).toContain("studio:")
-    expect(content).toContain("ghcr.io/supatype/studio")
+    expect(content).toContain("supatype/studio")
     expect(content).toContain("3002:3002")
     // Admin was merged into studio — no separate admin service
     expect(content).not.toContain("ghcr.io/supatype/admin")
@@ -106,11 +106,12 @@ describe("scaffold()", () => {
     expect(content).toContain("listen_port = 6432")
   })
 
-  it(".env contains DATABASE_URL, JWT_SECRET, POSTGRES_PASSWORD, POSTGRES_DB", () => {
+  it(".env contains DATABASE_URL, JWT_SECRET, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB", () => {
     scaffold(tmpRoot, "my-app")
     const content = readFileSync(join(tmpRoot, ".env"), "utf8")
     expect(content).toContain("DATABASE_URL=")
     expect(content).toContain("JWT_SECRET=")
+    expect(content).toContain("POSTGRES_USER=")
     expect(content).toContain("POSTGRES_PASSWORD=")
     expect(content).toContain("POSTGRES_DB=")
   })

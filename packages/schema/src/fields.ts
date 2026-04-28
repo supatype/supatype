@@ -1,5 +1,6 @@
 import type {
   ArrayFieldMeta,
+  BucketDef,
   DefaultValueDef,
   DecimalFieldMeta,
   EnumFieldMeta,
@@ -84,17 +85,49 @@ interface JsonOpts {
   localized?: boolean
 }
 
+// ─── Bucket ───────────────────────────────────────────────────────────────────
+
+export interface BucketOptions {
+  /** Defaults to 'private'. */
+  accessMode?: StorageAccessMode
+  /** Max object size for the entire bucket. Field-level maxSize overrides this. */
+  maxSize?: number | string
+  /** Allowed MIME types for the entire bucket. Field-level accept overrides this. */
+  accept?: string[]
+  /** Allowed CORS origins. */
+  corsOrigins?: string[]
+}
+
+const DEFAULT_IMAGE_BUCKET: BucketDef = { _tag: "bucket", name: "images", accessMode: "public" }
+const DEFAULT_FILE_BUCKET: BucketDef = { _tag: "bucket", name: "files", accessMode: "private" }
+
+export function bucket(name: string, opts: BucketOptions = {}): BucketDef {
+  return {
+    _tag: "bucket",
+    name,
+    accessMode: opts.accessMode ?? "private",
+    ...(opts.maxSize !== undefined && { maxSize: parseSize(opts.maxSize) }),
+    ...(opts.accept !== undefined && { accept: opts.accept }),
+    ...(opts.corsOrigins !== undefined && { corsOrigins: opts.corsOrigins }),
+  }
+}
+
 interface StorageOpts {
   required?: boolean
-  bucket?: string
-  /** Max file size. Number = bytes, string = human-readable e.g. '5MB', '500KB', '1GB'. */
+  /** Bucket definition created with bucket(). Defaults to a public 'images' or private 'files' bucket. */
+  bucket?: BucketDef
+  /** Max file size override for this field. Overrides the bucket's maxSize. */
   maxSize?: number | string
   /** @deprecated Use `accept` instead. */
   allowedFormats?: string[]
-  /** Allowed MIME types, e.g. ['image/jpeg', 'image/png', 'image/*']. */
+  /** MIME type filter for this field. Overrides the bucket's accept list. */
   accept?: string[]
-  /** Bucket access mode: 'public' (anyone reads), 'private' (owner only), 'custom' (RLS-like). Defaults to 'public' for image, 'private' for file. */
-  accessMode?: "public" | "private" | "custom"
+  /**
+   * Seconds for signed URL generation when reading this field.
+   * Works even in a private bucket — the client SDK will auto-generate a
+   * time-limited signed URL instead of a raw storage path.
+   */
+  signedUrlExpiry?: number
 }
 
 interface GeoOpts {
@@ -262,19 +295,19 @@ export function interval(opts: BaseOpts = {}): Field<string> | Field<string | nu
 export function tsquery(opts: BaseOpts & { required: true }): Field<string>
 export function tsquery(opts?: BaseOpts): Field<string | null>
 export function tsquery(opts: BaseOpts = {}): Field<string> | Field<string | null> {
-  return makeField(scalarMeta("tsquery", "TSQUERY", opts))
+  return makeField(scalarMeta("tsQuery", "TSQUERY", opts))
 }
 
 export function tsvector(opts: BaseOpts & { required: true }): Field<string>
 export function tsvector(opts?: BaseOpts): Field<string | null>
 export function tsvector(opts: BaseOpts = {}): Field<string> | Field<string | null> {
-  return makeField(scalarMeta("tsvector", "TSVECTOR", opts))
+  return makeField(scalarMeta("tsVector", "TSVECTOR", opts))
 }
 
 export function bytea(opts: BaseOpts & { required: true }): Field<Uint8Array>
 export function bytea(opts?: BaseOpts): Field<Uint8Array | null>
 export function bytea(opts: BaseOpts = {}): Field<Uint8Array> | Field<Uint8Array | null> {
-  return makeField(scalarMeta("bytea", "BYTEA", opts))
+  return makeField(scalarMeta("bytes", "BYTEA", opts))
 }
 
 export function money(opts: BaseOpts & { required: true }): Field<string>
@@ -287,6 +320,12 @@ export function xml(opts: BaseOpts & { required: true }): Field<string>
 export function xml(opts?: BaseOpts): Field<string | null>
 export function xml(opts: BaseOpts = {}): Field<string> | Field<string | null> {
   return makeField(scalarMeta("xml", "XML", opts))
+}
+
+export function color(opts: BaseOpts & { required: true }): Field<string>
+export function color(opts?: BaseOpts): Field<string | null>
+export function color(opts: BaseOpts = {}): Field<string> | Field<string | null> {
+  return makeField(scalarMeta("color", "TEXT", opts))
 }
 
 export function bigInt(opts: BaseOpts & { required: true }): Field<string>
@@ -379,15 +418,19 @@ export interface StorageReference {
 export function image(opts: StorageOpts & { required: true }): Field<StorageReference>
 export function image(opts?: StorageOpts): Field<StorageReference | null>
 export function image(opts: StorageOpts = {}): Field<StorageReference> | Field<StorageReference | null> {
-  const accept = opts.accept ?? opts.allowedFormats
+  const bucketDef = opts.bucket ?? DEFAULT_IMAGE_BUCKET
+  const fieldAccept = opts.accept ?? opts.allowedFormats ?? bucketDef.accept
+  const fieldMaxSize = opts.maxSize !== undefined ? parseSize(opts.maxSize) : bucketDef.maxSize
   const meta: StorageFieldMeta = {
     kind: "image",
     pgType: "JSONB",
     required: opts.required ?? false,
-    bucket: opts.bucket ?? "images",
-    ...(opts.maxSize !== undefined && { maxSize: parseSize(opts.maxSize) }),
-    ...(accept !== undefined && { accept }),
-    ...(opts.accessMode !== undefined && { accessMode: opts.accessMode }),
+    bucket: bucketDef.name,
+    bucketDef,
+    accessMode: bucketDef.accessMode,
+    ...(fieldMaxSize !== undefined && { maxSize: fieldMaxSize }),
+    ...(fieldAccept !== undefined && { accept: fieldAccept }),
+    ...(opts.signedUrlExpiry !== undefined && { signedUrlExpiry: opts.signedUrlExpiry }),
   }
   return makeField(meta)
 }
@@ -395,15 +438,19 @@ export function image(opts: StorageOpts = {}): Field<StorageReference> | Field<S
 export function file(opts: StorageOpts & { required: true }): Field<StorageReference>
 export function file(opts?: StorageOpts): Field<StorageReference | null>
 export function file(opts: StorageOpts = {}): Field<StorageReference> | Field<StorageReference | null> {
-  const accept = opts.accept ?? opts.allowedFormats
+  const bucketDef = opts.bucket ?? DEFAULT_FILE_BUCKET
+  const fieldAccept = opts.accept ?? opts.allowedFormats ?? bucketDef.accept
+  const fieldMaxSize = opts.maxSize !== undefined ? parseSize(opts.maxSize) : bucketDef.maxSize
   const meta: StorageFieldMeta = {
     kind: "file",
     pgType: "JSONB",
     required: opts.required ?? false,
-    bucket: opts.bucket ?? "files",
-    ...(opts.maxSize !== undefined && { maxSize: parseSize(opts.maxSize) }),
-    ...(accept !== undefined && { accept }),
-    ...(opts.accessMode !== undefined && { accessMode: opts.accessMode }),
+    bucket: bucketDef.name,
+    bucketDef,
+    accessMode: bucketDef.accessMode,
+    ...(fieldMaxSize !== undefined && { maxSize: fieldMaxSize }),
+    ...(fieldAccept !== undefined && { accept: fieldAccept }),
+    ...(opts.signedUrlExpiry !== undefined && { signedUrlExpiry: opts.signedUrlExpiry }),
   }
   return makeField(meta)
 }
@@ -481,6 +528,7 @@ export const field = {
   money,
   xml,
   bigInt,
+  color,
   slug,
   enum: enumField,
   decimal,

@@ -1,5 +1,8 @@
-import React, { useState, useRef, useCallback, useMemo } from "react"
-import { useStudioClient } from "../StudioApp.js"
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
+import { useStudioClient } from "../StudioCore.js"
+import { useApiQuery } from "../hooks/useApiQuery.js"
+import { EmptyState } from "../components/EmptyState.js"
+import { ErrorBanner } from "../components/ErrorBanner.js"
 import { cn } from "../lib/utils.js"
 import { Badge, Button, Card, Input, Select, Th, Td } from "../components/ui.js"
 
@@ -18,12 +21,13 @@ interface StorageFile {
 }
 
 interface Bucket {
+  id: string
   name: string
   public: boolean
-  file_count: number
-  size_bytes: number
+  file_size_limit: number | null
   allowed_mime_types: string[] | null
-  max_file_size: number | null
+  created_at: string
+  updated_at: string
 }
 
 interface UploadProgress {
@@ -32,24 +36,6 @@ interface UploadProgress {
   error: string | null
   done: boolean
 }
-
-// ─── Mock Data ────────────────────────────────────────────────────────────────
-
-const mockBuckets: Bucket[] = [
-  { name: "avatars", public: true, file_count: 42, size_bytes: 15728640, allowed_mime_types: ["image/jpeg", "image/png", "image/webp"], max_file_size: 5242880 },
-  { name: "uploads", public: false, file_count: 156, size_bytes: 524288000, allowed_mime_types: null, max_file_size: 52428800 },
-  { name: "media", public: true, file_count: 89, size_bytes: 104857600, allowed_mime_types: ["image/*", "video/*", "audio/*"], max_file_size: 104857600 },
-]
-
-const mockFiles: StorageFile[] = [
-  { id: "f1", name: "photos", size: 0, type: "folder", updated_at: "2026-03-01T10:00:00Z", created_at: "2026-01-01T10:00:00Z", is_folder: true, owner_id: null, public_url: null },
-  { id: "f2", name: "documents", size: 0, type: "folder", updated_at: "2026-02-15T14:00:00Z", created_at: "2026-01-01T10:00:00Z", is_folder: true, owner_id: null, public_url: null },
-  { id: "f3", name: "profile.jpg", size: 245760, type: "image/jpeg", updated_at: "2026-03-10T08:30:00Z", created_at: "2026-03-10T08:30:00Z", is_folder: false, owner_id: "u1", public_url: "https://storage.supatype.io/avatars/profile.jpg" },
-  { id: "f4", name: "resume.pdf", size: 1048576, type: "application/pdf", updated_at: "2026-03-05T16:00:00Z", created_at: "2026-03-05T16:00:00Z", is_folder: false, owner_id: "u1", public_url: null },
-  { id: "f5", name: "data.json", size: 4096, type: "application/json", updated_at: "2026-03-08T12:00:00Z", created_at: "2026-03-08T12:00:00Z", is_folder: false, owner_id: "u2", public_url: null },
-  { id: "f6", name: "hero-banner.png", size: 2097152, type: "image/png", updated_at: "2026-03-12T10:00:00Z", created_at: "2026-03-12T10:00:00Z", is_folder: false, owner_id: "u1", public_url: "https://storage.supatype.io/avatars/hero-banner.png" },
-  { id: "f7", name: "background.webp", size: 819200, type: "image/webp", updated_at: "2026-03-11T15:00:00Z", created_at: "2026-03-11T15:00:00Z", is_folder: false, owner_id: "u3", public_url: "https://storage.supatype.io/avatars/background.webp" },
-]
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -74,14 +60,52 @@ function isPreviewable(type: string): boolean {
   return type.startsWith("image/") || type === "application/pdf"
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapStorageFiles(data: any[]): StorageFile[] {
+  return (data ?? [])
+    .filter((item: any) => item.name !== ".emptyFolderPlaceholder")
+    .map((item: any) => ({
+      id: item.id ?? `folder-${item.name}`,
+      name: item.name as string,
+      size: (item.metadata?.size as number) ?? 0,
+      type: (item.metadata?.mimetype as string) ?? (item.id === null ? "folder" : "application/octet-stream"),
+      updated_at: (item.updated_at as string) ?? new Date().toISOString(),
+      created_at: (item.created_at as string) ?? new Date().toISOString(),
+      is_folder: item.id === null && item.metadata === null,
+      owner_id: (item.owner as string) ?? null,
+      public_url: null,
+    }))
+}
+
 // ─── File Preview Panel ───────────────────────────────────────────────────────
 
-function FilePreview({ file, bucket }: { file: StorageFile; bucket: Bucket }): React.ReactElement {
+function FilePreview({
+  file,
+  bucket,
+  client,
+  currentPath,
+}: {
+  file: StorageFile
+  bucket: Bucket
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  client: any
+  currentPath: string[]
+}): React.ReactElement {
   const [signedUrl, setSignedUrl] = useState<string | null>(null)
+  const [signedUrlError, setSignedUrlError] = useState<string | null>(null)
 
-  const generateSignedUrl = () => {
-    // Mock: in production this would call the storage API
-    setSignedUrl(`https://storage.supatype.io/${bucket.name}/${file.name}?token=mock-signed-url-${Date.now()}&expires=3600`)
+  const filePath = [...currentPath, file.name].join("/")
+
+  const publicUrl = useMemo(() => {
+    if (!bucket.public || file.is_folder) return null
+    return client.storage.from(bucket.name).getPublicUrl(filePath).data.publicUrl as string
+  }, [bucket, file, filePath, client])
+
+  const generateSignedUrl = async () => {
+    setSignedUrlError(null)
+    const { data, error } = await client.storage.from(bucket.name).createSignedUrl(filePath, 3600)
+    if (error) { setSignedUrlError(error.message); return }
+    setSignedUrl(data.signedUrl)
   }
 
   return (
@@ -131,10 +155,10 @@ function FilePreview({ file, bucket }: { file: StorageFile; bucket: Bucket }): R
       </div>
 
       {/* Public URL */}
-      {file.public_url ? (
+      {publicUrl ? (
         <div className="mt-3">
           <label className="block text-[0.7rem] text-muted-foreground uppercase mb-1">Public URL</label>
-          <Input value={file.public_url} readOnly className="font-mono text-xs" />
+          <Input value={publicUrl} readOnly className="font-mono text-xs" />
         </div>
       ) : null}
 
@@ -145,10 +169,52 @@ function FilePreview({ file, bucket }: { file: StorageFile; bucket: Bucket }): R
           {signedUrl ? (
             <Input value={signedUrl} readOnly className="font-mono text-xs" />
           ) : (
-            <Button size="xs" onClick={generateSignedUrl}>Generate Signed URL (1h)</Button>
+            <>
+              <Button size="xs" onClick={() => void generateSignedUrl()}>Generate Signed URL (1h)</Button>
+              {signedUrlError ? <p className="text-xs text-destructive mt-1">{signedUrlError}</p> : null}
+            </>
           )}
         </div>
       ) : null}
+    </div>
+  )
+}
+
+// ─── Create Bucket Dialog ─────────────────────────────────────────────────────
+
+function CreateBucketDialog({
+  onConfirm,
+  onCancel,
+}: {
+  onConfirm: (name: string, isPublic: boolean) => void
+  onCancel: () => void
+}): React.ReactElement {
+  const [name, setName] = useState("")
+  const [isPublic, setIsPublic] = useState(false)
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <Card className="p-6 max-w-[400px] w-full">
+        <h3 className="m-0 mb-3">New Bucket</h3>
+        <Input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Bucket name..."
+          autoFocus
+          onKeyDown={(e) => { if (e.key === "Enter" && name.trim()) onConfirm(name.trim(), isPublic) }}
+        />
+        <label className="flex items-center gap-2 mt-3 text-sm cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={isPublic}
+            onChange={(e) => setIsPublic(e.target.checked)}
+          />
+          Public bucket (files accessible without authentication)
+        </label>
+        <div className="flex gap-2 justify-end mt-4">
+          <Button onClick={onCancel}>Cancel</Button>
+          <Button variant="primary" onClick={() => { if (name.trim()) onConfirm(name.trim(), isPublic) }}>Create</Button>
+        </div>
+      </Card>
     </div>
   )
 }
@@ -189,12 +255,45 @@ export function StorageBrowser(): React.ReactElement {
   const client = useStudioClient()
 
   // Bucket state
-  const [buckets] = useState<Bucket[]>(mockBuckets)
-  const [selectedBucket, setSelectedBucket] = useState(mockBuckets[0]?.name ?? "")
+  const { data: buckets, loading: bucketsLoading, error: bucketsError, refetch: refetchBuckets } = useApiQuery(
+    async () => {
+      const { data, error } = await client.storage.listBuckets()
+      if (error) throw new Error(error.message)
+      return data as Bucket[]
+    },
+    [],
+  )
+  const [selectedBucket, setSelectedBucket] = useState("")
+
+  useEffect(() => {
+    if (buckets && buckets.length > 0 && !selectedBucket) {
+      setSelectedBucket(buckets[0]?.name ?? "")
+    }
+  }, [buckets, selectedBucket])
 
   // Files state
-  const [files, setFiles] = useState<StorageFile[]>(mockFiles)
+  const [files, setFiles] = useState<StorageFile[]>([])
+  const [filesLoading, setFilesLoading] = useState(false)
+  const [filesError, setFilesError] = useState<string | null>(null)
   const [path, setPath] = useState<string[]>([])
+
+  const fetchFiles = useCallback(async () => {
+    if (!selectedBucket) return
+    setFilesLoading(true)
+    setFilesError(null)
+    try {
+      const pathStr = path.join("/")
+      const { data, error } = await client.storage.from(selectedBucket).list(pathStr || undefined)
+      if (error) throw new Error(error.message)
+      setFiles(mapStorageFiles(data ?? []))
+    } catch (err: unknown) {
+      setFilesError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setFilesLoading(false)
+    }
+  }, [selectedBucket, path, client])
+
+  useEffect(() => { void fetchFiles() }, [fetchFiles])
 
   // View mode
   const [viewMode, setViewMode] = useState<"list" | "grid">("list")
@@ -212,11 +311,24 @@ export function StorageBrowser(): React.ReactElement {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Dialogs
+  const [showCreateBucket, setShowCreateBucket] = useState(false)
   const [showCreateFolder, setShowCreateFolder] = useState(false)
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [pendingDeleteIds, setPendingDeleteIds] = useState<Set<string> | null>(null)
 
-  const currentBucket = buckets.find((b) => b.name === selectedBucket)
-  const breadcrumb = [selectedBucket, ...path]
+  const handleCreateBucket = async (name: string, isPublic: boolean) => {
+    const { error } = await client.storage.createBucket(name, { public: isPublic })
+    if (error) {
+      setFilesError(error.message)
+      return
+    }
+    setShowCreateBucket(false)
+    await refetchBuckets()
+    setSelectedBucket(name)
+    setPath([])
+  }
+
+  const currentBucket = (buckets ?? []).find((b) => b.name === selectedBucket)
+  const breadcrumb = selectedBucket ? [selectedBucket, ...path] : []
 
   // Filtered files
   const filteredFiles = useMemo(() => {
@@ -259,34 +371,25 @@ export function StorageBrowser(): React.ReactElement {
     }))
     setUploads((prev) => [...prev, ...newUploads])
 
-    // Mock upload progress
     for (let i = 0; i < newUploads.length; i++) {
       const file = fileList[i]!
-      for (let p = 0; p <= 100; p += 20) {
-        await new Promise((r) => setTimeout(r, 100))
+      const filePath = [...path, file.name].join("/")
+      setUploads((prev) => prev.map((u) =>
+        u.fileName === file.name ? { ...u, progress: 50 } : u
+      ))
+      const { error } = await client.storage.from(selectedBucket).upload(filePath, file)
+      if (error) {
         setUploads((prev) => prev.map((u) =>
-          u.fileName === file.name ? { ...u, progress: p } : u
+          u.fileName === file.name ? { ...u, error: error.message, progress: 100, done: true } : u
+        ))
+      } else {
+        setUploads((prev) => prev.map((u) =>
+          u.fileName === file.name ? { ...u, done: true, progress: 100 } : u
         ))
       }
-      // Add the file to the list
-      const newFile: StorageFile = {
-        id: `f-${Date.now()}-${i}`,
-        name: file.name,
-        size: file.size,
-        type: file.type || "application/octet-stream",
-        updated_at: new Date().toISOString(),
-        created_at: new Date().toISOString(),
-        is_folder: false,
-        owner_id: null,
-        public_url: currentBucket?.public ? `https://storage.supatype.io/${selectedBucket}/${path.join("/")}${path.length > 0 ? "/" : ""}${file.name}` : null,
-      }
-      setFiles((prev) => [...prev, newFile])
-      setUploads((prev) => prev.map((u) =>
-        u.fileName === file.name ? { ...u, done: true, progress: 100 } : u
-      ))
     }
 
-    // Clear completed uploads after a delay
+    void fetchFiles()
     setTimeout(() => {
       setUploads((prev) => prev.filter((u) => !u.done))
     }, 2000)
@@ -311,27 +414,36 @@ export function StorageBrowser(): React.ReactElement {
   }
 
   // File operations
-  const handleDelete = (ids: Set<string>) => {
-    setFiles((prev) => prev.filter((f) => !ids.has(f.id)))
-    setSelectedIds(new Set())
-    setSelectedFile(null)
-    setShowDeleteConfirm(false)
+  const requestDelete = (ids: Set<string>) => {
+    setPendingDeleteIds(ids)
   }
 
-  const handleCreateFolder = (name: string) => {
-    const newFolder: StorageFile = {
-      id: `f-${Date.now()}`,
-      name,
-      size: 0,
-      type: "folder",
-      updated_at: new Date().toISOString(),
-      created_at: new Date().toISOString(),
-      is_folder: true,
-      owner_id: null,
-      public_url: null,
+  const handleDelete = async () => {
+    if (!pendingDeleteIds) return
+    const toDelete = files.filter((f) => pendingDeleteIds.has(f.id))
+    const pathStr = path.join("/")
+    const filePaths = toDelete.map((f) => pathStr ? `${pathStr}/${f.name}` : f.name)
+    const { error } = await client.storage.from(selectedBucket).remove(filePaths)
+    if (error) {
+      setFilesError(error.message)
+      setPendingDeleteIds(null)
+      return
     }
-    setFiles((prev) => [newFolder, ...prev])
+    setSelectedIds(new Set())
+    setSelectedFile(null)
+    setPendingDeleteIds(null)
+    void fetchFiles()
+  }
+
+  const handleCreateFolder = async (name: string) => {
+    const filePath = [...path, name, ".emptyFolderPlaceholder"].join("/")
+    const { error } = await client.storage.from(selectedBucket).upload(filePath, new Blob([""]))
+    if (error) {
+      setFilesError(error.message)
+      return
+    }
     setShowCreateFolder(false)
+    void fetchFiles()
   }
 
   // Bulk selection
@@ -399,7 +511,7 @@ export function StorageBrowser(): React.ReactElement {
         </Button>
 
         {selectedIds.size > 0 ? (
-          <Button variant="destructive" size="sm" onClick={() => setShowDeleteConfirm(true)}>
+          <Button variant="destructive" size="sm" onClick={() => requestDelete(selectedIds)}>
             Delete {selectedIds.size} selected
           </Button>
         ) : null}
@@ -418,8 +530,21 @@ export function StorageBrowser(): React.ReactElement {
       <div className="flex gap-4 h-full">
         {/* Bucket list sidebar */}
         <div className="w-[200px] flex-shrink-0">
+          <div className="flex items-center justify-between mb-1.5 px-0.5">
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Buckets</span>
+            <Button size="xs" onClick={() => setShowCreateBucket(true)}>+ New</Button>
+          </div>
           <Card className="p-1.5 flex flex-col gap-0.5">
-            {buckets.map((b) => (
+            {bucketsLoading ? (
+              <div className="px-3 py-4 text-xs text-muted-foreground text-center">Loading buckets…</div>
+            ) : bucketsError ? (
+              <ErrorBanner message={bucketsError} onRetry={refetchBuckets} />
+            ) : !buckets || buckets.length === 0 ? (
+              <div className="px-3 py-4 text-xs text-muted-foreground text-center">
+                No buckets yet.{" "}
+                <button className="text-primary underline" onClick={() => setShowCreateBucket(true)}>Create one</button>
+              </div>
+            ) : buckets.map((b) => (
               <button
                 key={b.name}
                 className={cn(
@@ -431,7 +556,6 @@ export function StorageBrowser(): React.ReactElement {
                 <span className="truncate">{b.name}</span>
                 <span className="ml-auto flex gap-1.5 items-center flex-shrink-0">
                   {b.public ? <Badge className="text-[0.55rem] px-1">pub</Badge> : null}
-                  <span className="text-zinc-600 text-[0.7rem]">{b.file_count}</span>
                 </span>
               </button>
             ))}
@@ -439,8 +563,7 @@ export function StorageBrowser(): React.ReactElement {
           {/* Bucket info */}
           {currentBucket ? (
             <div className="mt-2 text-xs text-muted-foreground px-2">
-              <div>Size: {formatBytes(currentBucket.size_bytes)}</div>
-              {currentBucket.max_file_size ? <div>Max file: {formatBytes(currentBucket.max_file_size)}</div> : null}
+              {currentBucket.file_size_limit ? <div>Max file: {formatBytes(currentBucket.file_size_limit)}</div> : null}
               {currentBucket.allowed_mime_types ? <div>Types: {currentBucket.allowed_mime_types.join(", ")}</div> : null}
             </div>
           ) : null}
@@ -470,7 +593,24 @@ export function StorageBrowser(): React.ReactElement {
             ))}
           </div>
 
-          {isDragOver ? (
+          {filesError && selectedBucket ? (
+            <div className="mb-3">
+              <ErrorBanner message={filesError} onRetry={fetchFiles} />
+            </div>
+          ) : null}
+
+          {!selectedBucket ? (
+            <EmptyState
+              title="No bucket selected"
+              description="Select a bucket from the sidebar or create a new one to get started."
+              action={() => setShowCreateBucket(true)}
+              actionLabel="New Bucket"
+            />
+          ) : filesLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <span className="text-sm text-muted-foreground">Loading files…</span>
+            </div>
+          ) : isDragOver ? (
             <div className="border-2 border-dashed border-primary rounded-lg p-12 text-center">
               <p className="text-primary text-sm font-medium">Drop files here to upload</p>
               <p className="text-xs text-muted-foreground mt-1">Files will be uploaded to {breadcrumb.join("/")}</p>
@@ -549,7 +689,7 @@ export function StorageBrowser(): React.ReactElement {
                           <div className="flex gap-1">
                             <Button size="xs" onClick={() => setSelectedFile(f)}>Details</Button>
                             <Button size="xs">Download</Button>
-                            <Button size="xs" variant="destructive" onClick={() => handleDelete(new Set([f.id]))}>
+                            <Button size="xs" variant="destructive" onClick={() => requestDelete(new Set([f.id]))}>
                               Delete
                             </Button>
                           </div>
@@ -559,8 +699,13 @@ export function StorageBrowser(): React.ReactElement {
                   ))}
                   {filteredFiles.length === 0 && path.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="text-center py-8 text-muted-foreground text-sm">
-                        This bucket is empty. Upload files or drag and drop.
+                      <td colSpan={7}>
+                        <EmptyState
+                          title="This bucket is empty"
+                          description="Upload files or drag and drop to get started."
+                          action={handleUpload}
+                          actionLabel="Upload Files"
+                        />
                       </td>
                     </tr>
                   ) : null}
@@ -612,6 +757,16 @@ export function StorageBrowser(): React.ReactElement {
                   ) : null}
                 </Card>
               ))}
+              {filteredFiles.length === 0 && path.length === 0 ? (
+                <div className="col-span-full">
+                  <EmptyState
+                    title="This bucket is empty"
+                    description="Upload files or drag and drop to get started."
+                    action={handleUpload}
+                    actionLabel="Upload Files"
+                  />
+                </div>
+              ) : null}
             </div>
           )}
         </div>
@@ -624,10 +779,10 @@ export function StorageBrowser(): React.ReactElement {
                 <h4 className="m-0 truncate">{selectedFile.name}</h4>
                 <Button size="xs" onClick={() => setSelectedFile(null)}>Close</Button>
               </div>
-              <FilePreview file={selectedFile} bucket={currentBucket} />
+              <FilePreview file={selectedFile} bucket={currentBucket} client={client} currentPath={path} />
               <div className="flex gap-2 mt-4">
                 <Button size="xs">Download</Button>
-                <Button size="xs" variant="destructive" onClick={() => handleDelete(new Set([selectedFile.id]))}>
+                <Button size="xs" variant="destructive" onClick={() => requestDelete(new Set([selectedFile.id]))}>
                   Delete
                 </Button>
               </div>
@@ -635,6 +790,14 @@ export function StorageBrowser(): React.ReactElement {
           </div>
         ) : null}
       </div>
+
+      {/* Create bucket dialog */}
+      {showCreateBucket ? (
+        <CreateBucketDialog
+          onConfirm={(name, isPublic) => { void handleCreateBucket(name, isPublic) }}
+          onCancel={() => setShowCreateBucket(false)}
+        />
+      ) : null}
 
       {/* Create folder dialog */}
       {showCreateFolder ? (
@@ -645,16 +808,16 @@ export function StorageBrowser(): React.ReactElement {
       ) : null}
 
       {/* Delete confirmation */}
-      {showDeleteConfirm ? (
+      {pendingDeleteIds ? (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <Card className="p-6 max-w-[400px]">
             <h3 className="text-red-400 m-0 mb-2">Delete Files</h3>
             <p className="text-sm text-muted-foreground mb-4">
-              Delete {selectedIds.size} selected {selectedIds.size === 1 ? "item" : "items"}? This cannot be undone.
+              Delete {pendingDeleteIds.size} {pendingDeleteIds.size === 1 ? "item" : "items"}? This cannot be undone.
             </p>
             <div className="flex gap-2 justify-end">
-              <Button onClick={() => setShowDeleteConfirm(false)}>Cancel</Button>
-              <Button variant="destructive" onClick={() => handleDelete(selectedIds)}>Delete</Button>
+              <Button onClick={() => setPendingDeleteIds(null)}>Cancel</Button>
+              <Button variant="destructive" onClick={() => { void handleDelete() }}>Delete</Button>
             </div>
           </Card>
         </div>

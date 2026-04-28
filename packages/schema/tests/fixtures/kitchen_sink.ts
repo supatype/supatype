@@ -1,4 +1,7 @@
-import { model, field, relation, access, timestamps, publishable, softDelete } from "../../src/index.js"
+import { model, field, bucket, relation, access, timestamps, publishable, softDelete } from "../../src/index.js"
+
+const testImages = bucket("test-images", { accessMode: "public" })
+const testFiles  = bucket("test-files",  { accessMode: "private" })
 
 export const AllScalarTypes = model("allScalarTypes", {
   tableName: "all_scalar_types",
@@ -34,8 +37,8 @@ export const AllScalarTypes = model("allScalarTypes", {
     enumField: field.enum(["a", "b", "c", "d"] as const, { default: "a" }),
     decimalField: field.decimal({ precision: 18, scale: 6 }),
     jsonField: field.json<{ nested: { value: number } }>(),
-    imageField: field.image({ bucket: "test-images" }),
-    fileField: field.file({ bucket: "test-files" }),
+    imageField: field.image({ bucket: testImages }),
+    fileField: field.file({ bucket: testFiles }),
     geoPointField: field.geo({ type: "point" }),
     geoPolygonField: field.geo({ type: "polygon" }),
     geoLinestringField: field.geo({ type: "linestring", srid: 3857 }),

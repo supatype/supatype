@@ -63,6 +63,23 @@ export interface JsonFieldMeta {
 
 export type StorageAccessMode = "public" | "private" | "custom"
 
+export interface BucketDef {
+  readonly _tag: "bucket"
+  readonly name: string
+  readonly accessMode: StorageAccessMode
+  readonly maxSize?: number
+  readonly accept?: string[]
+  readonly corsOrigins?: string[]
+}
+
+/** Matches the engine's StorageBucketAst (camelCase JSON). */
+export interface BucketAst {
+  id: string
+  public: boolean
+  allowedMimeTypes?: string[]
+  fileSizeLimit?: number
+}
+
 export interface StorageFieldMeta {
   kind: "image" | "file"
   pgType: "JSONB"
@@ -70,7 +87,11 @@ export interface StorageFieldMeta {
   bucket: string
   maxSize?: number
   accept?: string[]
-  accessMode?: StorageAccessMode
+  accessMode: StorageAccessMode
+  /** Seconds for signed URL generation on read. Works even on private buckets. */
+  signedUrlExpiry?: number
+  /** @internal Stripped from engine AST; used by serialiser to emit SchemaAst.buckets. */
+  bucketDef: BucketDef
 }
 
 export interface GeoFieldMeta {
@@ -182,6 +203,22 @@ export interface Relation<TOutput> {
   readonly __meta: RelationMeta
 }
 
+/**
+ * A typed reference to a Supatype-managed system table.
+ *
+ * The engine resolves the system token to the correct schema-qualified table
+ * at deploy time, handling differences between local dev, free cloud (shared
+ * Postgres), and paid cloud (dedicated Postgres) automatically.
+ *
+ * Use the `supatype` namespace to obtain these — do not construct directly.
+ */
+export interface SystemModelRef<TRow> {
+  /** @internal Engine resolution token, e.g. "supatype:user" */
+  readonly __systemToken: string
+  /** @internal Phantom type — never set at runtime */
+  readonly __rowType: TRow
+}
+
 // ─── Model definition ────────────────────────────────────────────────────────
 
 export type AnyField = Field<unknown> | Relation<unknown>
@@ -226,6 +263,10 @@ export interface ModelAst {
 
 export interface SchemaAst {
   models: ModelAst[]
+  /** Bucket definitions forwarded to the engine for bucket creation. */
+  storageBuckets?: BucketAst[]
+  locales?: string[]
+  defaultLocale?: string
 }
 
 // ─── TypeScript inference helpers ────────────────────────────────────────────

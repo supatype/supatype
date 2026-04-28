@@ -1,5 +1,10 @@
-import React, { useState, useCallback, useEffect, useMemo, useRef } from "react"
-import { useStudioClient } from "../StudioApp.js"
+import React, { useState, useCallback, useEffect, useMemo } from "react"
+import { useStudioClient } from "../StudioCore.js"
+import { useProjectProxy } from "../hooks/useProjectProxy.js"
+import { useApiQuery } from "../hooks/useApiQuery.js"
+import { EmptyState } from "../components/EmptyState.js"
+import { ErrorBanner } from "../components/ErrorBanner.js"
+import { SlidePanel } from "../components/SlidePanel.js"
 import { cn } from "../lib/utils.js"
 import { Badge, Button, Card, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
 
@@ -40,66 +45,6 @@ interface BulkAction {
   type: "delete"
   ids: string[]
 }
-
-// ─── Mock Data ────────────────────────────────────────────────────────────────
-
-const mockTables: TableInfo[] = [
-  {
-    name: "users",
-    schema: "public",
-    row_count: 42,
-    columns: [
-      { name: "id", type: "uuid", nullable: false, is_primary: true, is_foreign_key: false, references: null, default_value: "gen_random_uuid()", enum_values: null },
-      { name: "email", type: "text", nullable: false, is_primary: false, is_foreign_key: false, references: null, default_value: null, enum_values: null },
-      { name: "name", type: "text", nullable: false, is_primary: false, is_foreign_key: false, references: null, default_value: null, enum_values: null },
-      { name: "avatar_url", type: "text", nullable: true, is_primary: false, is_foreign_key: false, references: null, default_value: null, enum_values: null },
-      { name: "created_at", type: "timestamptz", nullable: false, is_primary: false, is_foreign_key: false, references: null, default_value: "now()", enum_values: null },
-    ],
-  },
-  {
-    name: "posts",
-    schema: "public",
-    row_count: 156,
-    columns: [
-      { name: "id", type: "uuid", nullable: false, is_primary: true, is_foreign_key: false, references: null, default_value: "gen_random_uuid()", enum_values: null },
-      { name: "title", type: "text", nullable: false, is_primary: false, is_foreign_key: false, references: null, default_value: null, enum_values: null },
-      { name: "slug", type: "text", nullable: false, is_primary: false, is_foreign_key: false, references: null, default_value: null, enum_values: null },
-      { name: "content", type: "text", nullable: true, is_primary: false, is_foreign_key: false, references: null, default_value: null, enum_values: null },
-      { name: "author_id", type: "uuid", nullable: false, is_primary: false, is_foreign_key: true, references: "users.id", default_value: null, enum_values: null },
-      { name: "status", type: "text", nullable: false, is_primary: false, is_foreign_key: false, references: null, default_value: "'draft'", enum_values: ["draft", "published", "archived"] },
-      { name: "metadata", type: "jsonb", nullable: true, is_primary: false, is_foreign_key: false, references: null, default_value: null, enum_values: null },
-      { name: "created_at", type: "timestamptz", nullable: false, is_primary: false, is_foreign_key: false, references: null, default_value: "now()", enum_values: null },
-      { name: "updated_at", type: "timestamptz", nullable: false, is_primary: false, is_foreign_key: false, references: null, default_value: "now()", enum_values: null },
-    ],
-  },
-  {
-    name: "tags",
-    schema: "public",
-    row_count: 12,
-    columns: [
-      { name: "id", type: "uuid", nullable: false, is_primary: true, is_foreign_key: false, references: null, default_value: "gen_random_uuid()", enum_values: null },
-      { name: "name", type: "text", nullable: false, is_primary: false, is_foreign_key: false, references: null, default_value: null, enum_values: null },
-      { name: "slug", type: "text", nullable: false, is_primary: false, is_foreign_key: false, references: null, default_value: null, enum_values: null },
-    ],
-  },
-  {
-    name: "post_tags",
-    schema: "public",
-    row_count: 89,
-    columns: [
-      { name: "post_id", type: "uuid", nullable: false, is_primary: true, is_foreign_key: true, references: "posts.id", default_value: null, enum_values: null },
-      { name: "tag_id", type: "uuid", nullable: false, is_primary: true, is_foreign_key: true, references: "tags.id", default_value: null, enum_values: null },
-    ],
-  },
-]
-
-const mockRows: Record<string, unknown>[] = [
-  { id: "a1b2c3d4", email: "alice@example.com", name: "Alice", avatar_url: "https://i.pravatar.cc/40?u=alice", created_at: "2026-01-15T10:30:00Z" },
-  { id: "d4e5f6g7", email: "bob@example.com", name: "Bob", avatar_url: null, created_at: "2026-02-01T14:20:00Z" },
-  { id: "g7h8i9j0", email: "carol@example.com", name: "Carol", avatar_url: "https://i.pravatar.cc/40?u=carol", created_at: "2026-02-14T09:15:00Z" },
-  { id: "j0k1l2m3", email: "dave@example.com", name: "Dave", avatar_url: null, created_at: "2026-03-01T16:45:00Z" },
-  { id: "m3n4o5p6", email: "eve@example.com", name: "Eve", avatar_url: "https://i.pravatar.cc/40?u=eve", created_at: "2026-03-10T11:00:00Z" },
-]
 
 const FILTER_OPERATORS: Array<{ value: FilterOperator; label: string }> = [
   { value: "eq", label: "equals" },
@@ -451,18 +396,24 @@ function CellValue({
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export function DataExplorer(): React.ReactElement {
+export function DataExplorer({ initialTable }: { initialTable?: string }): React.ReactElement {
   const client = useStudioClient()
+  const proxy = useProjectProxy()
+
+  const { data: tables, loading: tablesLoading, error: tablesError, refetch: refetchTables } = useApiQuery(
+    () => proxy.introspect(),
+    [proxy],
+  )
 
   // Table list state
-  const [tables] = useState<TableInfo[]>(mockTables)
   const [tableSearch, setTableSearch] = useState("")
-  const [selectedTable, setSelectedTable] = useState<string>(mockTables[0]?.name ?? "")
+  const [selectedTable, setSelectedTable] = useState<string>(initialTable ?? "")
 
   // Row data state
-  const [rows, setRows] = useState<Record<string, unknown>[]>(mockRows)
-  const [totalCount, setTotalCount] = useState(mockRows.length)
+  const [rows, setRows] = useState<Record<string, unknown>[]>([])
+  const [totalCount, setTotalCount] = useState(0)
   const [loading, setLoading] = useState(false)
+  const [rowsError, setRowsError] = useState<string | null>(null)
 
   // Pagination
   const [page, setPage] = useState(0)
@@ -492,60 +443,83 @@ export function DataExplorer(): React.ReactElement {
   // Record inspector
   const [inspectedRow, setInspectedRow] = useState<Record<string, unknown> | null>(null)
 
+  // Auto-select first table when tables load (skip if a specific table was requested)
+  useEffect(() => {
+    if (tables && tables.length > 0 && !selectedTable && !initialTable) {
+      setSelectedTable(tables[0]!.name)
+    }
+  }, [tables, selectedTable, initialTable])
+
   // Current table info
-  const currentTable = useMemo(() => tables.find((t) => t.name === selectedTable), [tables, selectedTable])
+  const currentTable = useMemo(() => (tables ?? []).find((t) => t.name === selectedTable), [tables, selectedTable])
   const columns = currentTable?.columns ?? []
 
   // Filtered tables
   const filteredTables = tableSearch
-    ? tables.filter((t) => t.name.toLowerCase().includes(tableSearch.toLowerCase()))
-    : tables
-
-  // Client-side sort (mock — in production, server-side via PostgREST order param)
-  const sortedRows = useMemo(() => {
-    if (sorts.length === 0) return rows
-    return [...rows].sort((a, b) => {
-      for (const sort of sorts) {
-        const va = String(a[sort.column] ?? "")
-        const vb = String(b[sort.column] ?? "")
-        const cmp = va.localeCompare(vb)
-        if (cmp !== 0) return sort.ascending ? cmp : -cmp
-      }
-      return 0
-    })
-  }, [rows, sorts])
-
-  // Client-side filter (mock — in production, server-side via PostgREST filters)
-  const filteredRows = useMemo(() => {
-    if (filters.length === 0) return sortedRows
-    return sortedRows.filter((row) => {
-      return filters.every((f) => {
-        const val = row[f.column]
-        const strVal = String(val ?? "").toLowerCase()
-        switch (f.operator) {
-          case "eq": return strVal === f.value.toLowerCase()
-          case "neq": return strVal !== f.value.toLowerCase()
-          case "gt": return strVal > f.value.toLowerCase()
-          case "gte": return strVal >= f.value.toLowerCase()
-          case "lt": return strVal < f.value.toLowerCase()
-          case "lte": return strVal <= f.value.toLowerCase()
-          case "like": return strVal.includes(f.value.toLowerCase())
-          case "ilike": return strVal.includes(f.value.toLowerCase())
-          case "is_null": return val === null || val === undefined
-          case "is_not_null": return val !== null && val !== undefined
-          case "in": return f.value.split(",").map((s) => s.trim().toLowerCase()).includes(strVal)
-          default: return true
-        }
-      })
-    })
-  }, [sortedRows, filters])
-
-  // Pagination
-  const pagedRows = filteredRows.slice(page * pageSize, (page + 1) * pageSize)
-  const totalPages = Math.ceil(filteredRows.length / pageSize)
+    ? (tables ?? []).filter((t) => t.name.toLowerCase().includes(tableSearch.toLowerCase()))
+    : (tables ?? [])
 
   // Primary key column name
   const pkColumn = columns.find((c) => c.is_primary)?.name ?? "id"
+
+  // Fetch rows from server with sorting, filtering, and pagination
+  const fetchRows = useCallback(async () => {
+    if (!selectedTable) return
+    setLoading(true)
+    setRowsError(null)
+    try {
+      const from = page * pageSize
+      const to = from + pageSize - 1
+
+      let query = client.from(selectedTable).select("*")
+
+      for (const f of filters) {
+        switch (f.operator) {
+          case "eq": query = query.eq(f.column, f.value); break
+          case "neq": query = query.neq(f.column, f.value); break
+          case "gt": query = query.gt(f.column, f.value); break
+          case "gte": query = query.gte(f.column, f.value); break
+          case "lt": query = query.lt(f.column, f.value); break
+          case "lte": query = query.lte(f.column, f.value); break
+          case "like": query = query.like(f.column, `%${f.value}%`); break
+          case "ilike": query = query.ilike(f.column, `%${f.value}%`); break
+          case "is_null": query = query.is(f.column, null); break
+          case "is_not_null": query = query.not(f.column, "is", null); break
+          case "in": query = query.in(f.column, f.value.split(",").map((s) => s.trim())); break
+        }
+      }
+
+      for (const s of sorts) {
+        query = query.order(s.column, { ascending: s.ascending })
+      }
+
+      query = query.range(from, to)
+
+      const { data, error } = await query
+
+      if (error) {
+        setRowsError(error.message)
+        return
+      }
+
+      setRows(data ?? [])
+      if ((data?.length ?? 0) < pageSize) {
+        setTotalCount(from + (data?.length ?? 0))
+      } else if (filters.length === 0) {
+        setTotalCount(currentTable?.row_count ?? 0)
+      }
+    } catch (err) {
+      setRowsError(err instanceof Error ? err.message : "Failed to fetch rows")
+    } finally {
+      setLoading(false)
+    }
+  }, [client, selectedTable, page, pageSize, sorts, filters, currentTable?.row_count])
+
+  useEffect(() => {
+    void fetchRows()
+  }, [fetchRows])
+
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
 
   // Sort handler — shift-click for multi-column
   const handleSort = useCallback((col: string, shiftKey: boolean) => {
@@ -565,37 +539,44 @@ export function DataExplorer(): React.ReactElement {
       }
       return [{ column: col, ascending: true }]
     })
+    setPage(0)
   }, [])
 
   // Cell editing
   const handleCellEdit = (rowIdx: number, col: string) => {
-    const row = pagedRows[rowIdx]
+    const row = rows[rowIdx]
     if (!row) return
     setEditingCell({ rowIdx, col })
     setEditValue(String(row[col] ?? ""))
   }
 
-  const handleCellSave = () => {
+  const handleCellSave = async () => {
     if (!editingCell) return
-    const row = pagedRows[editingCell.rowIdx]
+    const row = rows[editingCell.rowIdx]
     if (!row) { setEditingCell(null); return }
-    // In production: PATCH to PostgREST
-    const newRows = rows.map((r) => {
-      if (r[pkColumn] === row[pkColumn]) {
-        return { ...r, [editingCell.col]: editValue === "NULL" ? null : editValue }
-      }
-      return r
-    })
-    setRows(newRows)
+    const newValue = editValue === "NULL" ? null : editValue
+    const { error } = await client
+      .from(selectedTable)
+      .update({ [editingCell.col]: newValue })
+      .eq(pkColumn, row[pkColumn])
+    if (error) {
+      setRowsError(error.message)
+    } else {
+      setRows((prev) =>
+        prev.map((r) =>
+          r[pkColumn] === row[pkColumn] ? { ...r, [editingCell.col]: newValue } : r
+        )
+      )
+    }
     setEditingCell(null)
   }
 
   // Bulk selection
   const toggleSelectAll = () => {
-    if (selectedIds.size === pagedRows.length) {
+    if (selectedIds.size === rows.length) {
       setSelectedIds(new Set())
     } else {
-      setSelectedIds(new Set(pagedRows.map((r) => String(r[pkColumn]))))
+      setSelectedIds(new Set(rows.map((r) => String(r[pkColumn]))))
     }
   }
 
@@ -608,21 +589,48 @@ export function DataExplorer(): React.ReactElement {
     })
   }
 
-  const handleBulkDelete = () => {
-    setRows((prev) => prev.filter((r) => !selectedIds.has(String(r[pkColumn]))))
-    setSelectedIds(new Set())
+  const handleBulkDelete = async () => {
+    const ids = Array.from(selectedIds)
+    const { error } = await client
+      .from(selectedTable)
+      .delete()
+      .in(pkColumn, ids)
+    if (error) {
+      setRowsError(error.message)
+    } else {
+      setSelectedIds(new Set())
+      void fetchRows()
+      refetchTables()
+    }
     setShowDeleteConfirm(false)
   }
 
   // Single row delete
-  const handleDeleteRow = (id: string) => {
-    setRows((prev) => prev.filter((r) => String(r[pkColumn]) !== id))
+  const handleDeleteRow = async (id: string) => {
+    const { error } = await client
+      .from(selectedTable)
+      .delete()
+      .eq(pkColumn, id)
+    if (error) {
+      setRowsError(error.message)
+    } else {
+      void fetchRows()
+      refetchTables()
+    }
   }
 
   // New record
-  const handleNewRecord = (record: Record<string, unknown>) => {
-    setRows((prev) => [...prev, { [pkColumn]: `new-${Date.now()}`, ...record }])
-    setShowNewRecord(false)
+  const handleNewRecord = async (record: Record<string, unknown>) => {
+    const { error } = await client
+      .from(selectedTable)
+      .insert(record)
+    if (error) {
+      setRowsError(error.message)
+    } else {
+      setShowNewRecord(false)
+      void fetchRows()
+      refetchTables()
+    }
   }
 
   // Relation navigation
@@ -643,7 +651,6 @@ export function DataExplorer(): React.ReactElement {
     setInspectedRow(null)
     setEditingCell(null)
     setShowNewRecord(false)
-    // In production: fetch rows from PostgREST
   }
 
   // Sort indicator
@@ -655,32 +662,59 @@ export function DataExplorer(): React.ReactElement {
     return sorts.length > 1 ? `${arrow}${idx + 1}` : arrow
   }
 
+  if (tablesLoading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />
+      </div>
+    )
+  }
+
+  if (tablesError) {
+    return (
+      <div className="p-4">
+        <ErrorBanner message={tablesError} onRetry={refetchTables} />
+      </div>
+    )
+  }
+
+  if (!tables || tables.length === 0) {
+    return (
+      <EmptyState
+        title="No tables found"
+        description="This project doesn't have any tables yet. Create a table in your database to get started."
+      />
+    )
+  }
+
   return (
     <div className="flex gap-4 h-full">
-      {/* Table selector sidebar */}
-      <div className="w-[220px] flex-shrink-0">
-        <Input
-          placeholder="Search tables..."
-          value={tableSearch}
-          onChange={(e) => setTableSearch(e.target.value)}
-          className="mb-2"
-        />
-        <Card className="p-1.5 flex flex-col gap-0.5 max-h-[calc(100vh-200px)] overflow-y-auto">
-          {filteredTables.map((t) => (
-            <button
-              key={t.name}
-              className={cn(
-                "flex items-center gap-2 w-full px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground rounded-md transition-colors",
-                t.name === selectedTable && "bg-accent text-foreground font-medium"
-              )}
-              onClick={() => handleSelectTable(t.name)}
-            >
-              <span className="truncate">{t.name}</span>
-              <span className="ml-auto text-zinc-600 text-[0.7rem] flex-shrink-0">{t.row_count}</span>
-            </button>
-          ))}
-        </Card>
-      </div>
+      {/* Table selector sidebar — hidden when a specific table is already in the path */}
+      {!initialTable && (
+        <div className="w-[220px] flex-shrink-0">
+          <Input
+            placeholder="Search tables..."
+            value={tableSearch}
+            onChange={(e) => setTableSearch(e.target.value)}
+            className="mb-2"
+          />
+          <Card className="p-1.5 flex flex-col gap-0.5 max-h-[calc(100vh-200px)] overflow-y-auto">
+            {filteredTables.map((t) => (
+              <button
+                key={t.name}
+                className={cn(
+                  "flex items-center gap-2 w-full px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground rounded-md transition-colors",
+                  t.name === selectedTable && "bg-accent text-foreground font-medium"
+                )}
+                onClick={() => handleSelectTable(t.name)}
+              >
+                <span className="truncate">{t.name}</span>
+                <span className="ml-auto text-zinc-600 text-[0.7rem] flex-shrink-0">{t.row_count}</span>
+              </button>
+            ))}
+          </Card>
+        </div>
+      )}
 
       {/* Main data area */}
       <div className="flex-1 min-w-0">
@@ -780,8 +814,19 @@ export function DataExplorer(): React.ReactElement {
           </div>
         ) : null}
 
+        {/* Row-level errors */}
+        {rowsError ? (
+          <div className="mb-3">
+            <ErrorBanner message={rowsError} onRetry={fetchRows} />
+          </div>
+        ) : null}
+
         {/* Data display */}
-        {viewMode === "table" ? (
+        {loading ? (
+          <div className="flex items-center justify-center py-8">
+            <div className="animate-spin rounded-full h-6 w-6 border-2 border-primary border-t-transparent" />
+          </div>
+        ) : viewMode === "table" ? (
           <Card className="overflow-auto">
             <table className="w-full">
               <thead>
@@ -789,7 +834,7 @@ export function DataExplorer(): React.ReactElement {
                   <Th className="w-8">
                     <input
                       type="checkbox"
-                      checked={selectedIds.size === pagedRows.length && pagedRows.length > 0}
+                      checked={selectedIds.size === rows.length && rows.length > 0}
                       onChange={toggleSelectAll}
                       className="rounded border-border"
                     />
@@ -813,7 +858,7 @@ export function DataExplorer(): React.ReactElement {
                 </tr>
               </thead>
               <tbody>
-                {pagedRows.map((row, rowIdx) => {
+                {rows.map((row, rowIdx) => {
                   const rowId = String(row[pkColumn])
                   return (
                     <tr
@@ -894,7 +939,7 @@ export function DataExplorer(): React.ReactElement {
                     </tr>
                   )
                 })}
-                {pagedRows.length === 0 ? (
+                {rows.length === 0 ? (
                   <tr>
                     <td colSpan={columns.length + 2} className="text-center py-8 text-muted-foreground text-sm">
                       No records found
@@ -905,7 +950,7 @@ export function DataExplorer(): React.ReactElement {
             </table>
           </Card>
         ) : (
-          <CodeBlock>{JSON.stringify(pagedRows, null, 2)}</CodeBlock>
+          <CodeBlock>{JSON.stringify(rows, null, 2)}</CodeBlock>
         )}
 
         {/* Pagination */}
@@ -913,24 +958,25 @@ export function DataExplorer(): React.ReactElement {
           <Button size="sm" onClick={() => setPage(0)} disabled={page === 0}>First</Button>
           <Button size="sm" onClick={() => setPage(Math.max(0, page - 1))} disabled={page === 0}>Prev</Button>
           <span className="text-[0.8rem] text-muted-foreground">
-            Page {page + 1} of {Math.max(1, totalPages)} ({filteredRows.length} rows)
+            Page {page + 1} of {totalPages} ({totalCount} rows)
           </span>
           <Button size="sm" onClick={() => setPage(Math.min(totalPages - 1, page + 1))} disabled={page >= totalPages - 1}>Next</Button>
           <Button size="sm" onClick={() => setPage(totalPages - 1)} disabled={page >= totalPages - 1}>Last</Button>
         </div>
 
-        {/* Record inspector */}
-        {inspectedRow ? (
-          <Card className="p-4 mt-4">
-            <div className="flex justify-between items-center mb-3">
-              <h3 className="m-0">Record Inspector</h3>
-              <Button onClick={() => setInspectedRow(null)}>Close</Button>
-            </div>
+        <SlidePanel
+          open={inspectedRow !== null}
+          onClose={() => setInspectedRow(null)}
+          title="Record Inspector"
+          subtitle={selectedTable ?? undefined}
+          width="max-w-[500px]"
+        >
+          {inspectedRow && (
             <div className="font-mono text-sm">
               <JsonTreeNode data={inspectedRow} />
             </div>
-          </Card>
-        ) : null}
+          )}
+        </SlidePanel>
       </div>
 
       {/* Delete confirmation modal */}

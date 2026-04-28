@@ -6,6 +6,8 @@
 
 import type { Command } from "commander"
 import { loadConfig } from "../config.js"
+import { connectionString } from "../config-toml.js"
+import { loadCloudConfig } from "./cloud.js"
 
 export function registerDb(program: Command): void {
   const db = program
@@ -21,16 +23,13 @@ export function registerDb(program: Command): void {
     .action(async (opts: { transaction?: boolean; env?: string }) => {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
+      const cloudCfg = loadCloudConfig(cwd)
+      const localConn = connectionString(config)
 
-      // The connection string is stored in the project config or fetched from cloud
-      if (config.connection) {
-        if (opts.transaction) {
-          // Convert session URL to transaction pool URL (port 6432)
-          const txUrl = config.connection.replace(/:5432\//, ":6432/")
-          console.log(txUrl)
-        } else {
-          console.log(config.connection)
-        }
+      // If no cloud project linked, show the local connection string.
+      if (!cloudCfg?.projectSlug) {
+        const connStr = opts.transaction ? localConn.replace(/:5432\//, ":6432/") : localConn
+        console.log(connStr)
         console.log()
         console.log("Session mode (port 5432): for interactive tools (psql, DataGrip, TablePlus)")
         console.log("Transaction mode (port 6432): for application servers and serverless functions")
@@ -38,58 +37,49 @@ export function registerDb(program: Command): void {
       }
 
       // If linked to a cloud project, fetch from the API
-      if (config.projectRef) {
-        const apiUrl = config.apiUrl || "https://api.supatype.io"
-        const envName = opts.env || "production"
+      const apiUrl = cloudCfg.apiUrl || "https://api.supatype.io"
+      const token = cloudCfg.token || process.env["SUPATYPE_ACCESS_TOKEN"] || ""
+      const envName = opts.env || "production"
 
-        try {
-          const res = await fetch(
-            `${apiUrl}/platform/v1/projects/${config.projectRef}/environments`,
-            {
-              headers: {
-                Authorization: `Bearer ${config.accessToken || process.env["SUPATYPE_ACCESS_TOKEN"] || ""}`,
-              },
+      try {
+        const res = await fetch(
+          `${apiUrl}/platform/v1/projects/${cloudCfg.projectSlug}/environments`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
             },
-          )
+          },
+        )
 
-          if (!res.ok) {
-            console.error(`Failed to fetch project info: ${res.status}`)
-            process.exitCode = 1
-            return
-          }
-
-          const { data } = (await res.json()) as { data: Array<{ name: string; databaseUrl?: string }> }
-          const env = data.find((e) => e.name === envName)
-
-          if (!env) {
-            console.error(`Environment "${envName}" not found`)
-            process.exitCode = 1
-            return
-          }
-
-          const connStr = env.databaseUrl || "Connection string not available"
-          if (opts.transaction) {
-            console.log(connStr.replace(/:5432\//, ":6432/"))
-          } else {
-            console.log(connStr)
-          }
-
-          console.log()
-          console.log("Session mode (port 5432): for interactive tools (psql, DataGrip, TablePlus)")
-          console.log("Transaction mode (port 6432): for application servers and serverless functions")
-        } catch (err) {
-          console.error("Failed to fetch connection string:", (err as Error).message)
+        if (!res.ok) {
+          console.error(`Failed to fetch project info: ${res.status}`)
           process.exitCode = 1
+          return
         }
-        return
-      }
 
-      console.error(
-        "No connection configured. Either:\n" +
-        "  • Set 'connection' in supatype.config.ts\n" +
-        "  • Link to a cloud project: npx supatype link --project <ref>",
-      )
-      process.exitCode = 1
+        const { data } = (await res.json()) as { data: Array<{ name: string; databaseUrl?: string }> }
+        const env = data.find((e) => e.name === envName)
+
+        if (!env) {
+          console.error(`Environment "${envName}" not found`)
+          process.exitCode = 1
+          return
+        }
+
+        const connStr = env.databaseUrl || "Connection string not available"
+        if (opts.transaction) {
+          console.log(connStr.replace(/:5432\//, ":6432/"))
+        } else {
+          console.log(connStr)
+        }
+
+        console.log()
+        console.log("Session mode (port 5432): for interactive tools (psql, DataGrip, TablePlus)")
+        console.log("Transaction mode (port 6432): for application servers and serverless functions")
+      } catch (err) {
+        console.error("Failed to fetch connection string:", (err as Error).message)
+        process.exitCode = 1
+      }
     })
 
   // supatype db reset-password
@@ -99,24 +89,25 @@ export function registerDb(program: Command): void {
     .option("--env <name>", "Environment name", "production")
     .action(async (opts: { env?: string }) => {
       const cwd = process.cwd()
-      const config = loadConfig(cwd)
+      const cloudCfg = loadCloudConfig(cwd)
 
-      if (!config.projectRef) {
-        console.error("Not linked to a cloud project. Run: npx supatype link --project <ref>")
+      if (!cloudCfg?.projectSlug) {
+        console.error("Not linked to a cloud project. Run: supatype link --project <ref>")
         process.exitCode = 1
         return
       }
 
-      const apiUrl = config.apiUrl || "https://api.supatype.io"
+      const apiUrl = cloudCfg.apiUrl || "https://api.supatype.io"
+      const token = cloudCfg.token || process.env["SUPATYPE_ACCESS_TOKEN"] || ""
       const envName = opts.env || "production"
 
       try {
         const res = await fetch(
-          `${apiUrl}/platform/v1/projects/${config.projectRef}/environments/${envName}/reset-db-password`,
+          `${apiUrl}/platform/v1/projects/${cloudCfg.projectSlug}/environments/${envName}/reset-db-password`,
           {
             method: "POST",
             headers: {
-              Authorization: `Bearer ${config.accessToken || process.env["SUPATYPE_ACCESS_TOKEN"] || ""}`,
+              Authorization: `Bearer ${token}`,
               "Content-Type": "application/json",
             },
           },

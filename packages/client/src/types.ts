@@ -161,10 +161,16 @@ export interface AnyDatabase {
 // ─── Client config ────────────────────────────────────────────────────────────
 
 export interface SupatypeClientConfig {
-  /** Base URL of the Supatype gateway (e.g. http://localhost:8000) */
+  /** Base URL of the Supatype gateway (e.g. http://localhost:18473) */
   url: string
   /** Anon JWT key */
   anonKey: string
+  /**
+   * Service role key — bypasses row-level security.
+   * Only set this in trusted server-side or developer-tool contexts.
+   * Never expose to end-user clients.
+   */
+  serviceRoleKey?: string | undefined
   auth?: {
     /** Persist session across page reloads (browser only). Default: true */
     persistSession?: boolean | undefined
@@ -181,4 +187,10 @@ export interface SupatypeClientConfig {
    * Applied to every HTTP request made by the client.
    */
   timeout?: number | undefined
+  /**
+   * Pre-load a session at construction time (SSR use case).
+   * Used by `@supatype/ssr` to inject a cookie-parsed session into the client
+   * before any requests are made.
+   */
+  initialSession?: Session | undefined
 }

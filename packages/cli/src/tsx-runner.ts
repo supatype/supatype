@@ -7,10 +7,15 @@ import { spawnSync, type SpawnSyncOptions } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
 import { resolve, dirname } from "node:path"
 import { createRequire } from "node:module"
+import { fileURLToPath } from "node:url"
 import { writeFileSync, unlinkSync } from "node:fs"
 import { tmpdir } from "node:os"
 
 const _require = createRequire(import.meta.url)
+
+// The CLI's own source directory — workspace packages like @supatype/schema are
+// resolvable from here. Eval snippets are written here so ESM resolution finds them.
+const CLI_SRC_DIR = dirname(fileURLToPath(import.meta.url))
 
 /**
  * Resolve the absolute path to the tsx CLI entry point.
@@ -33,6 +38,7 @@ function findTsxBin(): string {
 }
 
 const TSX_BIN = findTsxBin()
+
 
 export interface RunResult {
   stdout: string
@@ -65,7 +71,11 @@ export function evalTsSnippet(
   snippet: string,
   opts: SpawnSyncOptions = {},
 ): RunResult {
-  const tmpFile = resolve(tmpdir(), `supatype-eval-${Date.now()}.mts`)
+  // Always write the temp file into the CLI's source directory so that ESM
+  // resolution can find workspace packages (@supatype/schema etc.) from there.
+  // The subprocess CWD is kept as opts.cwd (the user's project dir) so that
+  // any relative paths in the snippet resolve correctly.
+  const tmpFile = resolve(CLI_SRC_DIR, `supatype-eval-${Date.now()}.mts`)
   writeFileSync(tmpFile, snippet, "utf8")
   try {
     return runTsFile(tmpFile, opts)

@@ -9,7 +9,7 @@ interface CloudConfig {
   projectSlug?: string
 }
 
-function loadCloudConfig(cwd: string): CloudConfig | null {
+export function loadCloudConfig(cwd: string): CloudConfig | null {
   const configPath = resolve(cwd, ".supatype/cloud.json")
   if (!existsSync(configPath)) return null
   return JSON.parse(readFileSync(configPath, "utf8")) as CloudConfig
@@ -39,6 +39,49 @@ async function cloudFetch<T>(config: CloudConfig, method: string, path: string, 
     throw new Error(json.message ?? json.error ?? `API error: ${res.status}`)
   }
   return json.data as T
+}
+
+/**
+ * Push schema AST to the linked cloud project (control plane `/api/v1/.../deploy`).
+ * Invoked by `supatype deploy` by default when `.supatype/cloud.json` is present.
+ */
+export async function deploySchemaToLinkedProject(
+  cwd: string,
+  environment: string,
+): Promise<void> {
+  const config = loadCloudConfig(cwd)
+  if (!config?.projectSlug) {
+    console.error("Not linked to a cloud project. Run: supatype link")
+    process.exit(1)
+  }
+
+  console.log(`Deploying schema to ${config.projectSlug} (${environment})...`)
+
+  const { loadConfig: loadAppConfig, loadSchemaAst } = await import("../config.js")
+  const { schemaPathFromToml } = await import("../config-toml.js")
+
+  const appConfig = loadAppConfig(cwd)
+  const ast = loadSchemaAst(schemaPathFromToml(appConfig, cwd), cwd)
+
+  const { createHash } = await import("node:crypto")
+  const schemaHash = createHash("sha256").update(JSON.stringify(ast)).digest("hex").slice(0, 16)
+
+  const deployment = await cloudFetch<{
+    id: string; status: string; errorMessage?: string
+  }>(config, "POST", `/projects/${config.projectSlug}/deploy`, {
+    environment,
+    schemaHash,
+    ast,
+  })
+
+  if (deployment.status === "success") {
+    console.log(`\nDeployment successful (${deployment.id})`)
+  } else if (deployment.status === "failed") {
+    console.error(`\nDeployment failed: ${deployment.errorMessage}`)
+    process.exit(1)
+  } else {
+    console.log(`\nDeployment ${deployment.status} (${deployment.id})`)
+  }
 }
 
 function prompt(question: string): Promise<string> {
@@ -100,60 +143,6 @@ export function registerCloud(program: Command): void {
       saveCloudConfig(cwd, config)
       console.log(`\nLinked to project: ${config.projectSlug}`)
       console.log(`Config saved to .supatype/cloud.json\n`)
-    })
-
-  // ── Deploy ─────────────────────────────────────────────────────────────────
-  program
-    .command("deploy")
-    .description("Deploy schema to the linked cloud project")
-    .option("--environment <name>", "Target environment", "production")
-    .action(async (opts: { environment: string }) => {
-      const cwd = process.cwd()
-      const config = loadCloudConfig(cwd)
-      if (!config?.projectSlug) {
-        console.error("Not linked to a cloud project. Run: supatype link")
-        process.exit(1)
-      }
-
-      console.log(`Deploying to ${config.projectSlug} (${opts.environment})...`)
-
-      // Load schema AST
-      const { loadConfig: loadAppConfig, loadSchemaAst } = await import("../config.js")
-      const { ensureEngine, invokeEngine } = await import("../engine.js")
-
-      const appConfig = loadAppConfig(cwd)
-      const ast = loadSchemaAst(appConfig.schema, cwd)
-
-      // Generate migration SQL locally using the engine
-      await ensureEngine()
-      const migrateResult = invokeEngine(
-        ["migrate", "--format", "sql"],
-        JSON.stringify(ast),
-      )
-      if (migrateResult.exitCode !== 0) {
-        console.error("Failed to generate migration:", migrateResult.stderr || migrateResult.stdout)
-        process.exit(1)
-      }
-
-      const { createHash } = await import("node:crypto")
-      const schemaHash = createHash("sha256").update(JSON.stringify(ast)).digest("hex").slice(0, 16)
-
-      const deployment = await cloudFetch<{
-        id: string; status: string; errorMessage?: string
-      }>(config, "POST", `/projects/${config.projectSlug}/deploy`, {
-        environment: opts.environment,
-        schemaHash,
-        migrationSql: migrateResult.stdout,
-      })
-
-      if (deployment.status === "success") {
-        console.log(`\nDeployment successful (${deployment.id})`)
-      } else if (deployment.status === "failed") {
-        console.error(`\nDeployment failed: ${deployment.errorMessage}`)
-        process.exit(1)
-      } else {
-        console.log(`\nDeployment ${deployment.status} (${deployment.id})`)
-      }
     })
 
   // ── Projects ───────────────────────────────────────────────────────────────

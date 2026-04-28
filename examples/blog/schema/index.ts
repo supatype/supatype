@@ -1,9 +1,12 @@
-import { model, field, access, publishable } from "@supatype/schema"
+import { model, field, bucket, access, publishable } from "@supatype/schema"
+
+export const avatars    = bucket("avatars",      { accessMode: "public" })
+export const postImages = bucket("post-images",  { accessMode: "public" })
 
 export const User = model("user", {
   fields: {
     name: field.text({ required: true }),
-    avatarUrl: field.image({ bucket: "avatars", required: false }),
+    avatarUrl: field.image({ bucket: avatars }),
   },
   access: {
     read: access.authenticated(),
@@ -19,7 +22,7 @@ export const Post = model("post", {
     title: field.text({ required: true }),
     slug: field.slug({ from: "title" }),
     body: field.richText({ required: true }),
-    coverImage: field.image({ bucket: "post-images", required: false }),
+    coverImage: field.image({ bucket: postImages }),
     authorId: field.uuid({ required: true }),
     publishInfo: publishable(),
   },

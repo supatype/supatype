@@ -1,7 +1,11 @@
 import React, { useState, useCallback } from "react"
-import { useStudioClient } from "../StudioApp.js"
+import { useStudioClient } from "../StudioCore.js"
+import { useAdminConfig } from "../hooks/useAdminConfig.js"
+import { useApiQuery } from "../hooks/useApiQuery.js"
+import { useProjectProxy } from "../hooks/useProjectProxy.js"
 import { cn } from "../lib/utils.js"
 import { Badge, Button, Card, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
+import { EmptyState } from "../components/EmptyState.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -35,64 +39,18 @@ interface AuthProviderConfig {
   scopes: string
 }
 
-type SettingsTab = "general" | "keys" | "env" | "cors" | "auth" | "danger"
-
-// ─── Mock Data ────────────────────────────────────────────────────────────────
-
-const mockApiKeys: ApiKey[] = [
-  {
-    id: "k1",
-    name: "anon (public)",
-    role: "anon",
-    key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlhdCI6MTcwMDAwMDAwMCwiZXhwIjoxODAwMDAwMDAwfQ.anon-key",
-    created_at: "2026-01-01T00:00:00Z",
-    last_used: "2026-03-10T10:30:00Z",
-  },
-  {
-    id: "k2",
-    name: "service_role (secret)",
-    role: "service_role",
-    key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaWF0IjoxNzAwMDAwMDAwLCJleHAiOjE4MDAwMDAwMDB9.service-key",
-    created_at: "2026-01-01T00:00:00Z",
-    last_used: "2026-03-10T09:15:00Z",
-  },
-]
-
-const mockEnvVars: EnvVar[] = [
-  { key: "DATABASE_URL", value: "postgresql://postgres:postgres@localhost:5432/my-project", sensitive: true, source: "env" },
-  { key: "JWT_SECRET", value: "super-secret-jwt-token-change-in-production", sensitive: true, source: "env" },
-  { key: "SITE_URL", value: "http://localhost:3000", sensitive: false, source: "config" },
-  { key: "GOTRUE_MAILER_AUTOCONFIRM", value: "true", sensitive: false, source: "config" },
-  { key: "S3_ENDPOINT", value: "http://localhost:9000", sensitive: false, source: "env" },
-  { key: "S3_ACCESS_KEY", value: "supatype", sensitive: true, source: "env" },
-  { key: "S3_SECRET_KEY", value: "supatype-secret", sensitive: true, source: "env" },
-  { key: "SMTP_HOST", value: "smtp.mailtrap.io", sensitive: false, source: "config" },
-  { key: "SMTP_PORT", value: "587", sensitive: false, source: "config" },
-  { key: "SMTP_USER", value: "mailtrap-user", sensitive: true, source: "config" },
-  { key: "SMTP_PASS", value: "mailtrap-pass", sensitive: true, source: "config" },
-]
-
-const mockCorsOrigins: CorsOrigin[] = [
-  { id: "c1", origin: "http://localhost:3000", created_at: "2026-01-01T00:00:00Z" },
-  { id: "c2", origin: "http://localhost:5173", created_at: "2026-01-01T00:00:00Z" },
-  { id: "c3", origin: "https://my-app.com", created_at: "2026-02-15T10:00:00Z" },
-]
-
-const mockAuthProviders: AuthProviderConfig[] = [
-  { provider: "email", enabled: true, client_id: "", client_secret_set: false, scopes: "" },
-  { provider: "github", enabled: true, client_id: "gh-client-id-xxx", client_secret_set: true, scopes: "user:email" },
-  { provider: "google", enabled: false, client_id: "", client_secret_set: false, scopes: "openid email profile" },
-  { provider: "apple", enabled: false, client_id: "", client_secret_set: false, scopes: "email name" },
-]
+type SettingsTab = "general" | "keys" | "env" | "cors" | "database" | "integrations" | "danger"
 
 // ─── General Settings Tab ─────────────────────────────────────────────────────
 
 function GeneralSettings(): React.ReactElement {
-  const [projectName, setProjectName] = useState("my-project")
-  const [siteUrl, setSiteUrl] = useState("http://localhost:3000")
-  const [dbUrl] = useState("postgresql://postgres:postgres@localhost:5432/my-project")
-  const [apiUrl] = useState("http://localhost:54321")
-  const [region] = useState("us-east-1")
+  const client = useStudioClient()
+  const adminConfig = useAdminConfig()
+  const [projectName, setProjectName] = useState(adminConfig.branding?.appName ?? "")
+  const [siteUrl, setSiteUrl] = useState("")
+  const [dbUrl] = useState(client.url.replace(/\/rest\/v1\/?$/, ""))
+  const [apiUrl] = useState(client.url)
+  const [region] = useState("")
   const [saved, setSaved] = useState(false)
 
   const handleSave = () => {
@@ -138,7 +96,7 @@ function GeneralSettings(): React.ReactElement {
 // ─── API Keys Tab ─────────────────────────────────────────────────────────────
 
 function ApiKeysSettings(): React.ReactElement {
-  const [keys, setKeys] = useState<ApiKey[]>(mockApiKeys)
+  const [keys, setKeys] = useState<ApiKey[]>([])
   const [showKeys, setShowKeys] = useState(false)
   const [showNewKeyForm, setShowNewKeyForm] = useState(false)
   const [newKeyName, setNewKeyName] = useState("")
@@ -209,7 +167,12 @@ function ApiKeysSettings(): React.ReactElement {
 
       {/* Key list */}
       <div className="flex flex-col gap-4">
-        {keys.map((k) => (
+        {keys.length === 0 ? (
+          <EmptyState
+            title="API keys are managed via the cloud dashboard"
+            description="Live API key management will be available in a future release."
+          />
+        ) : keys.map((k) => (
           <div key={k.id} className="border border-border rounded-md p-4">
             <div className="flex justify-between items-start mb-2">
               <div>
@@ -263,7 +226,7 @@ function ApiKeysSettings(): React.ReactElement {
 // ─── Environment Variables Tab ────────────────────────────────────────────────
 
 function EnvSettings(): React.ReactElement {
-  const [envVars, setEnvVars] = useState<EnvVar[]>(mockEnvVars)
+  const [envVars, setEnvVars] = useState<EnvVar[]>([])
   const [editingKey, setEditingKey] = useState<string | null>(null)
   const [editValue, setEditValue] = useState("")
   const [showAddForm, setShowAddForm] = useState(false)
@@ -339,65 +302,72 @@ function EnvSettings(): React.ReactElement {
         </Card>
       ) : null}
 
-      <Card className="overflow-auto">
-        <table className="w-full">
-          <thead>
-            <tr className="border-b border-border">
-              <Th>Key</Th>
-              <Th>Value</Th>
-              <Th>Source</Th>
-              <Th>Actions</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {envVars.map((v) => (
-              <tr key={v.key} className="border-b border-border hover:bg-accent/50">
-                <td className="px-3 py-2 text-sm">
-                  <code className="text-primary">{v.key}</code>
-                  {v.sensitive ? <Badge variant="red" className="ml-1.5 text-[0.5rem]">secret</Badge> : null}
-                </td>
-                <td className="px-3 py-2">
-                  {editingKey === v.key ? (
-                    <div className="flex gap-1">
-                      <Input
-                        className="flex-1 font-mono text-xs"
-                        value={editValue}
-                        onChange={(e) => setEditValue(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === "Enter") handleEditSave(); if (e.key === "Escape") setEditingKey(null) }}
-                        autoFocus
-                      />
-                      <Button size="xs" onClick={handleEditSave}>Save</Button>
-                      <Button size="xs" onClick={() => setEditingKey(null)}>Cancel</Button>
-                    </div>
-                  ) : (
-                    <code className="font-mono text-xs">
-                      {v.sensitive && !revealedKeys.has(v.key) ? "\u2022".repeat(20) : v.value}
-                    </code>
-                  )}
-                </td>
-                <td className="px-3 py-2">
-                  <Badge variant={v.source === "env" ? "blue" : v.source === "config" ? "green" : "yellow"} className="text-[0.6rem]">
-                    {v.source}
-                  </Badge>
-                </td>
-                <td className="px-3 py-2">
-                  <div className="flex gap-1">
-                    {v.sensitive ? (
-                      <Button size="xs" onClick={() => toggleReveal(v.key)}>
-                        {revealedKeys.has(v.key) ? "Hide" : "Show"}
-                      </Button>
-                    ) : null}
-                    <Button size="xs" onClick={() => handleEditStart(v)}>Edit</Button>
-                    {v.source === "override" ? (
-                      <Button size="xs" variant="destructive" onClick={() => handleDelete(v.key)}>Remove</Button>
-                    ) : null}
-                  </div>
-                </td>
+      {envVars.length === 0 ? (
+        <EmptyState
+          title="Environment variables are managed via the cloud dashboard or CLI"
+          description="Live configuration management will be available in a future release."
+        />
+      ) : (
+        <Card className="overflow-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border">
+                <Th>Key</Th>
+                <Th>Value</Th>
+                <Th>Source</Th>
+                <Th>Actions</Th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </Card>
+            </thead>
+            <tbody>
+              {envVars.map((v) => (
+                <tr key={v.key} className="border-b border-border hover:bg-accent/50">
+                  <td className="px-3 py-2 text-sm">
+                    <code className="text-primary">{v.key}</code>
+                    {v.sensitive ? <Badge variant="red" className="ml-1.5 text-[0.5rem]">secret</Badge> : null}
+                  </td>
+                  <td className="px-3 py-2">
+                    {editingKey === v.key ? (
+                      <div className="flex gap-1">
+                        <Input
+                          className="flex-1 font-mono text-xs"
+                          value={editValue}
+                          onChange={(e) => setEditValue(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") handleEditSave(); if (e.key === "Escape") setEditingKey(null) }}
+                          autoFocus
+                        />
+                        <Button size="xs" onClick={handleEditSave}>Save</Button>
+                        <Button size="xs" onClick={() => setEditingKey(null)}>Cancel</Button>
+                      </div>
+                    ) : (
+                      <code className="font-mono text-xs">
+                        {v.sensitive && !revealedKeys.has(v.key) ? "\u2022".repeat(20) : v.value}
+                      </code>
+                    )}
+                  </td>
+                  <td className="px-3 py-2">
+                    <Badge variant={v.source === "env" ? "blue" : v.source === "config" ? "green" : "yellow"} className="text-[0.6rem]">
+                      {v.source}
+                    </Badge>
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="flex gap-1">
+                      {v.sensitive ? (
+                        <Button size="xs" onClick={() => toggleReveal(v.key)}>
+                          {revealedKeys.has(v.key) ? "Hide" : "Show"}
+                        </Button>
+                      ) : null}
+                      <Button size="xs" onClick={() => handleEditStart(v)}>Edit</Button>
+                      {v.source === "override" ? (
+                        <Button size="xs" variant="destructive" onClick={() => handleDelete(v.key)}>Remove</Button>
+                      ) : null}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
     </Card>
   )
 }
@@ -405,7 +375,7 @@ function EnvSettings(): React.ReactElement {
 // ─── CORS Origins Tab ─────────────────────────────────────────────────────────
 
 function CorsSettings(): React.ReactElement {
-  const [origins, setOrigins] = useState<CorsOrigin[]>(mockCorsOrigins)
+  const [origins, setOrigins] = useState<CorsOrigin[]>([])
   const [newOrigin, setNewOrigin] = useState("")
   const [error, setError] = useState<string | null>(null)
 
@@ -461,7 +431,10 @@ function CorsSettings(): React.ReactElement {
           </div>
         ))}
         {origins.length === 0 ? (
-          <p className="text-sm text-muted-foreground py-4 text-center">No CORS origins configured. API requests from browsers will be blocked.</p>
+          <EmptyState
+            title="No CORS origins configured"
+            description="Browser API requests will be blocked. Live configuration management will be available in a future release."
+          />
         ) : null}
       </div>
     </Card>
@@ -471,17 +444,17 @@ function CorsSettings(): React.ReactElement {
 // ─── Auth Settings Tab ────────────────────────────────────────────────────────
 
 function AuthSettings(): React.ReactElement {
-  const [providers, setProviders] = useState<AuthProviderConfig[]>(mockAuthProviders)
+  const [providers, setProviders] = useState<AuthProviderConfig[]>([])
   const [editingProvider, setEditingProvider] = useState<string | null>(null)
   const [editClientId, setEditClientId] = useState("")
   const [editSecret, setEditSecret] = useState("")
   const [editScopes, setEditScopes] = useState("")
 
   // Auth config
-  const [emailConfirmation, setEmailConfirmation] = useState(true)
-  const [autoConfirmDev, setAutoConfirmDev] = useState(true)
-  const [jwtExpiry, setJwtExpiry] = useState(3600)
-  const [redirectUrls, setRedirectUrls] = useState("http://localhost:3000/auth/callback\nhttps://my-app.com/auth/callback")
+  const [emailConfirmation, setEmailConfirmation] = useState(false)
+  const [autoConfirmDev, setAutoConfirmDev] = useState(false)
+  const [jwtExpiry, setJwtExpiry] = useState(0)
+  const [redirectUrls, setRedirectUrls] = useState("")
 
   const toggleProvider = (provider: string) => {
     setProviders((prev) => prev.map((p) => p.provider === provider ? { ...p, enabled: !p.enabled } : p))
@@ -513,6 +486,12 @@ function AuthSettings(): React.ReactElement {
       <Card className="p-4">
         <h3>Authentication Providers</h3>
         <div className="flex flex-col gap-3 mt-4">
+          {providers.length === 0 ? (
+            <EmptyState
+              title="No authentication providers configured"
+              description="Live provider management will be available in a future release."
+            />
+          ) : null}
           {providers.map((p) => (
             <div key={p.provider} className="border border-border rounded-md p-3">
               <div className="flex items-center justify-between">
@@ -691,6 +670,59 @@ function DangerZone(): React.ReactElement {
   )
 }
 
+// ─── Database Settings Tab ────────────────────────────────────────────────────
+
+function DatabaseSettings({ client }: { client: ReturnType<typeof useStudioClient> }): React.ReactElement {
+  const proxy = useProjectProxy()
+  const { data: maxConns } = useApiQuery(() => proxy.sql("SHOW max_connections").then((r) => r.rows[0]?.["max_connections"] as string ?? "—"), [proxy])
+  const { data: stmtTimeout } = useApiQuery(() => proxy.sql("SHOW statement_timeout").then((r) => r.rows[0]?.["statement_timeout"] as string ?? "—"), [proxy])
+
+  const dbUrl = client.url.replace(/\/rest\/v1\/?$/, "")
+  const connStr = dbUrl ? `postgres://postgres:[password]@${new URL(dbUrl).host}/postgres` : "—"
+  const poolStr = dbUrl ? `postgres://postgres:[password]@${new URL(dbUrl).host}:5432/postgres?pgbouncer=true` : "—"
+
+  return (
+    <Card className="p-4 space-y-4 max-w-[600px]">
+      <h3>Database</h3>
+      <div className="space-y-3">
+        {[
+          { label: "Connection String", value: connStr },
+          { label: "Pooler Connection String (PgBouncer)", value: poolStr },
+          { label: "Max Connections", value: maxConns ?? "…" },
+          { label: "Statement Timeout", value: stmtTimeout ?? "…" },
+        ].map(({ label, value }) => (
+          <div key={label}>
+            <label className="block text-[0.8rem] text-muted-foreground mb-1">{label}</label>
+            <Input className="text-muted-foreground font-mono text-xs" value={value} readOnly />
+          </div>
+        ))}
+      </div>
+    </Card>
+  )
+}
+
+// ─── Integrations Tab ─────────────────────────────────────────────────────────
+
+function IntegrationsSettings(): React.ReactElement {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
+      {[
+        { name: "GitHub", desc: "Connect GitHub to enable CI/CD deployments and preview environments.", phase: "Phase 25" },
+        { name: "Vercel", desc: "Sync preview deployments with Vercel for automatic branch previews.", phase: "Phase 25" },
+      ].map(({ name, desc, phase }) => (
+        <Card key={name} className="p-4 space-y-2">
+          <div className="flex items-center justify-between">
+            <h3 className="font-medium text-foreground">{name}</h3>
+            <Badge variant="yellow">{phase}</Badge>
+          </div>
+          <p className="text-sm text-muted-foreground">{desc}</p>
+          <Button disabled>Coming Soon</Button>
+        </Card>
+      ))}
+    </div>
+  )
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export function Settings(): React.ReactElement {
@@ -702,7 +734,8 @@ export function Settings(): React.ReactElement {
     { key: "keys", label: "API Keys" },
     { key: "env", label: "Environment" },
     { key: "cors", label: "CORS" },
-    { key: "auth", label: "Auth Settings" },
+    { key: "database", label: "Database" },
+    { key: "integrations", label: "Integrations" },
     { key: "danger", label: "Danger Zone" },
   ]
 
@@ -729,7 +762,8 @@ export function Settings(): React.ReactElement {
       {activeTab === "keys" ? <ApiKeysSettings /> : null}
       {activeTab === "env" ? <EnvSettings /> : null}
       {activeTab === "cors" ? <CorsSettings /> : null}
-      {activeTab === "auth" ? <AuthSettings /> : null}
+      {activeTab === "database" ? <DatabaseSettings client={client} /> : null}
+      {activeTab === "integrations" ? <IntegrationsSettings /> : null}
       {activeTab === "danger" ? <DangerZone /> : null}
     </>
   )

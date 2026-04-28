@@ -1,5 +1,10 @@
 import React, { useState, useCallback, useRef, useEffect } from "react"
-import { useStudioClient } from "../StudioApp.js"
+import { EditorView, basicSetup } from "codemirror"
+import { EditorState, Compartment } from "@codemirror/state"
+import { keymap } from "@codemirror/view"
+import { sql as sqlLang, PostgreSQL } from "@codemirror/lang-sql"
+import { useStudioClient } from "../StudioCore.js"
+import { useProjectProxy } from "../hooks/useProjectProxy.js"
 import { cn } from "../lib/utils.js"
 import { Badge, Button, Card, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
 
@@ -38,52 +43,6 @@ interface ExplainNode {
   "Actual Loops"?: number
   Plans?: ExplainNode[]
   [key: string]: unknown
-}
-
-// ─── SQL Keywords for Syntax Hints ────────────────────────────────────────────
-
-const SQL_KEYWORDS = [
-  "SELECT", "FROM", "WHERE", "INSERT", "INTO", "VALUES", "UPDATE", "SET",
-  "DELETE", "CREATE", "ALTER", "DROP", "TABLE", "INDEX", "VIEW", "FUNCTION",
-  "JOIN", "LEFT", "RIGHT", "INNER", "OUTER", "CROSS", "FULL", "ON",
-  "AND", "OR", "NOT", "IN", "EXISTS", "BETWEEN", "LIKE", "ILIKE",
-  "ORDER", "BY", "ASC", "DESC", "LIMIT", "OFFSET", "GROUP", "HAVING",
-  "DISTINCT", "AS", "CASE", "WHEN", "THEN", "ELSE", "END",
-  "NULL", "TRUE", "FALSE", "IS", "COALESCE", "NULLIF",
-  "COUNT", "SUM", "AVG", "MIN", "MAX", "ARRAY_AGG", "STRING_AGG",
-  "WITH", "RECURSIVE", "RETURNING", "EXPLAIN", "ANALYZE",
-  "BEGIN", "COMMIT", "ROLLBACK", "GRANT", "REVOKE",
-  "PRIMARY", "KEY", "FOREIGN", "REFERENCES", "UNIQUE", "CHECK", "DEFAULT",
-  "CONSTRAINT", "CASCADE", "RESTRICT", "ENABLE", "DISABLE", "ROW", "LEVEL", "SECURITY",
-  "POLICY", "USING", "TRIGGER", "BEFORE", "AFTER", "FOR", "EACH", "EXECUTE", "PROCEDURE",
-]
-
-// ─── Mock Explain Plan ────────────────────────────────────────────────────────
-
-const mockExplainPlan: ExplainNode = {
-  "Node Type": "Limit",
-  "Startup Cost": 0.00,
-  "Total Cost": 1.24,
-  "Plan Rows": 10,
-  "Plan Width": 128,
-  "Actual Startup Time": 0.012,
-  "Actual Total Time": 0.054,
-  "Actual Rows": 2,
-  "Actual Loops": 1,
-  Plans: [
-    {
-      "Node Type": "Seq Scan",
-      "Relation Name": "users",
-      "Startup Cost": 0.00,
-      "Total Cost": 1.42,
-      "Plan Rows": 42,
-      "Plan Width": 128,
-      "Actual Startup Time": 0.010,
-      "Actual Total Time": 0.048,
-      "Actual Rows": 2,
-      "Actual Loops": 1,
-    },
-  ],
 }
 
 // ─── Explain Plan Visualization ───────────────────────────────────────────────
@@ -147,66 +106,128 @@ function ExplainPlanTree({
   )
 }
 
-// ─── SQL Editor with Syntax Hints ─────────────────────────────────────────────
+// ─── CodeMirror theme ─────────────────────────────────────────────────────────
+
+const studioSqlTheme = EditorView.theme({
+  "&": {
+    backgroundColor: "transparent",
+    color: "hsl(var(--foreground))",
+    fontSize: "0.8125rem",
+    fontFamily: "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace",
+  },
+  ".cm-scroller": { minHeight: "140px", overflowY: "auto" },
+  ".cm-content": { padding: "12px 16px", caretColor: "hsl(var(--primary))" },
+  ".cm-cursor": { borderLeftColor: "hsl(var(--primary))" },
+  "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
+    backgroundColor: "hsl(var(--accent))",
+  },
+  ".cm-activeLine": { backgroundColor: "rgba(255,255,255,0.04)" },
+  ".cm-gutters": {
+    backgroundColor: "hsl(var(--accent) / 0.3)",
+    color: "hsl(var(--muted-foreground))",
+    borderRight: "1px solid hsl(var(--border))",
+    fontSize: "0.7rem",
+    minWidth: "2.5rem",
+  },
+  ".cm-lineNumbers .cm-gutterElement": { padding: "0 8px 0 4px" },
+  ".cm-activeLineGutter": { backgroundColor: "transparent" },
+  "&.cm-focused": { outline: "none" },
+  ".cm-tooltip": {
+    backgroundColor: "hsl(var(--popover))",
+    border: "1px solid hsl(var(--border))",
+    borderRadius: "6px",
+    color: "hsl(var(--popover-foreground))",
+  },
+  ".cm-tooltip.cm-tooltip-autocomplete > ul": { maxHeight: "14em" },
+  ".cm-tooltip-autocomplete ul li[aria-selected]": {
+    backgroundColor: "hsl(var(--accent))",
+    color: "hsl(var(--accent-foreground))",
+  },
+  ".cm-completionLabel": { color: "hsl(var(--foreground))" },
+  ".cm-completionDetail": {
+    color: "hsl(var(--muted-foreground))",
+    fontStyle: "italic",
+    marginLeft: "0.5em",
+  },
+  ".cm-completionIcon": { opacity: "0.6" },
+}, { dark: true })
+
+// ─── SQL Editor ───────────────────────────────────────────────────────────────
 
 function SqlEditor({
   value,
   onChange,
   onRun,
+  schema,
 }: {
   value: string
   onChange: (v: string) => void
   onRun: () => void
+  schema: Record<string, string[]>
 }): React.ReactElement {
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const [lineCount, setLineCount] = useState(1)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const viewRef = useRef<EditorView | null>(null)
+  const onRunRef = useRef(onRun)
+  const onChangeRef = useRef(onChange)
+  const schemaCompartment = useRef(new Compartment())
 
+  useEffect(() => { onRunRef.current = onRun }, [onRun])
+  useEffect(() => { onChangeRef.current = onChange }, [onChange])
+
+  // Create the editor once on mount
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    setLineCount(value.split("\n").length)
+    if (!containerRef.current) return
+    const view = new EditorView({
+      state: EditorState.create({
+        doc: value,
+        extensions: [
+          basicSetup,
+          studioSqlTheme,
+          schemaCompartment.current.of(
+            sqlLang({ dialect: PostgreSQL, schema: {}, defaultSchema: "public" })
+          ),
+          keymap.of([{
+            key: "Mod-Enter",
+            run: () => { onRunRef.current(); return true },
+          }]),
+          EditorView.updateListener.of((update) => {
+            if (update.docChanged) onChangeRef.current(update.state.doc.toString())
+          }),
+        ],
+      }),
+      parent: containerRef.current,
+    })
+    viewRef.current = view
+    return () => { view.destroy(); viewRef.current = null }
+  }, []) // intentionally empty — editor created once
+
+  // Sync value changes from outside (e.g. loading from history)
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+    const current = view.state.doc.toString()
+    if (current !== value) {
+      view.dispatch({ changes: { from: 0, to: current.length, insert: value } })
+    }
   }, [value])
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // Cmd/Ctrl+Enter to run
-    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-      e.preventDefault()
-      onRun()
-      return
-    }
-
-    // Tab to indent
-    if (e.key === "Tab") {
-      e.preventDefault()
-      const textarea = e.currentTarget
-      const start = textarea.selectionStart
-      const end = textarea.selectionEnd
-      const newValue = value.substring(0, start) + "  " + value.substring(end)
-      onChange(newValue)
-      requestAnimationFrame(() => {
-        textarea.selectionStart = textarea.selectionEnd = start + 2
-      })
-    }
-  }
+  // Reconfigure schema autocomplete when schema data arrives
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+    view.dispatch({
+      effects: schemaCompartment.current.reconfigure(
+        sqlLang({ dialect: PostgreSQL, schema, defaultSchema: "public" })
+      ),
+    })
+  }, [schema])
 
   return (
-    <div className="flex rounded-md border border-border bg-background overflow-hidden font-mono text-sm">
-      {/* Line numbers */}
-      <div className="bg-accent/30 text-zinc-600 text-right px-2 py-3 select-none border-r border-border text-[0.75rem] leading-[1.5rem]">
-        {Array.from({ length: lineCount }, (_, i) => (
-          <div key={i}>{i + 1}</div>
-        ))}
-      </div>
-
-      {/* Editor */}
-      <textarea
-        ref={textareaRef}
-        className="flex-1 px-3 py-3 bg-transparent text-foreground focus:outline-none resize-y min-h-[140px] leading-[1.5rem]"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={handleKeyDown}
-        placeholder="Enter SQL query..."
-        spellCheck={false}
-      />
-    </div>
+    <div
+      ref={containerRef}
+      className="rounded-md border border-border bg-background overflow-hidden"
+    />
   )
 }
 
@@ -250,9 +271,11 @@ function exportJson(rows: Record<string, unknown>[]): void {
 
 export function SqlRunner(): React.ReactElement {
   const client = useStudioClient()
+  const { sql, introspect } = useProjectProxy()
 
-  const [query, setQuery] = useState("SELECT * FROM users LIMIT 10;")
+  const [query, setQuery] = useState("SELECT * FROM auth.users LIMIT 10;")
   const [running, setRunning] = useState(false)
+  const [sqlSchema, setSqlSchema] = useState<Record<string, string[]>>({})
 
   // Result tabs
   const [tabs, setTabs] = useState<ResultTab[]>([])
@@ -271,38 +294,65 @@ export function SqlRunner(): React.ReactElement {
     ? history.filter((h) => h.query.toLowerCase().includes(historySearch.toLowerCase()))
     : history
 
+  // Load schema for autocomplete (public + auth schemas)
+  useEffect(() => {
+    void (async () => {
+      try {
+        const [publicTables, authTables] = await Promise.all([
+          introspect("public"),
+          introspect("auth").catch(() => []),
+        ])
+        const map: Record<string, string[]> = {}
+        for (const t of [...publicTables, ...authTables]) {
+          const cols = t.columns.map((c) => c.name)
+          map[t.name] = cols
+          map[`${t.schema}.${t.name}`] = cols
+        }
+        setSqlSchema(map)
+      } catch {
+        // editor works fine without schema — autocomplete just shows keywords
+      }
+    })()
+  }, [introspect])
+
   const handleRun = useCallback(async () => {
     if (!query.trim() || running) return
     setRunning(true)
     const start = performance.now()
 
     try {
-      // TODO: Replace with actual PostgREST SQL execution via admin client
-      await new Promise((r) => setTimeout(r, 200))
+      const result = await sql(query)
       const elapsed = Math.round(performance.now() - start)
 
-      const mockResult = [
-        { id: "a1b2c3", email: "alice@example.com", name: "Alice", created_at: "2026-01-15T10:30:00Z" },
-        { id: "d4e5f6", email: "bob@example.com", name: "Bob", created_at: "2026-02-01T14:20:00Z" },
-      ]
+      const rows = result.rows
+      const columns = rows.length > 0 ? Object.keys(rows[0]!) : []
+
+      let explainPlan: ExplainNode | null = null
+      if (query.trim().toUpperCase().startsWith("EXPLAIN")) {
+        const planRow = rows[0] as Record<string, unknown> | undefined
+        if (planRow && "QUERY PLAN" in planRow) {
+          const raw = planRow["QUERY PLAN"]
+          const parsed = typeof raw === "string" ? JSON.parse(raw) : raw
+          explainPlan = Array.isArray(parsed) ? (parsed[0] as { Plan: ExplainNode }).Plan : parsed as ExplainNode
+        }
+      }
 
       const tabId = `tab-${Date.now()}`
-      const columns = mockResult.length > 0 ? Object.keys(mockResult[0]!) : []
       const newTab: ResultTab = {
         id: tabId,
         label: query.trim().slice(0, 30) + (query.trim().length > 30 ? "..." : ""),
         query: query.trim(),
         columns,
-        rows: mockResult,
+        rows,
         duration: elapsed,
         error: null,
-        explainPlan: query.trim().toUpperCase().startsWith("EXPLAIN") ? mockExplainPlan : null,
+        explainPlan,
       }
 
       setTabs((prev) => [...prev, newTab])
       setActiveTabId(tabId)
       setHistory((prev) => [
-        { id: `h-${Date.now()}`, query: query.trim(), timestamp: Date.now(), duration: elapsed, rows: mockResult.length, error: null },
+        { id: `h-${Date.now()}`, query: query.trim(), timestamp: Date.now(), duration: elapsed, rows: rows.length, error: null },
         ...prev.slice(0, 49),
       ])
     } catch (err) {
@@ -328,7 +378,7 @@ export function SqlRunner(): React.ReactElement {
     } finally {
       setRunning(false)
     }
-  }, [query, running])
+  }, [query, running, sql])
 
   const closeTab = (tabId: string) => {
     setTabs((prev) => prev.filter((t) => t.id !== tabId))
@@ -380,11 +430,16 @@ export function SqlRunner(): React.ReactElement {
       <div className="flex-1 min-w-0 flex flex-col gap-4">
         {/* SQL Editor */}
         <Card className="p-4">
-          <SqlEditor value={query} onChange={setQuery} onRun={() => void handleRun()} />
+          <SqlEditor
+            value={query}
+            onChange={setQuery}
+            onRun={() => void handleRun()}
+            schema={sqlSchema}
+          />
 
           <div className="flex justify-between items-center mt-3">
             <span className="text-xs text-zinc-600">
-              {navigator.platform.includes("Mac") ? "Cmd" : "Ctrl"}+Enter to run
+              {navigator.platform.includes("Mac") ? "⌘↵" : "Ctrl+Enter"} to run
             </span>
             <div className="flex gap-2">
               <Button size="sm" onClick={() => setShowHistory(!showHistory)}>

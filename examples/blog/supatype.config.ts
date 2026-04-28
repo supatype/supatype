@@ -1,7 +1,7 @@
 import { defineConfig } from "@supatype/cli"
 
 export default defineConfig({
-  connection: "postgresql://postgres:postgres@localhost:5432/blog",
+  connection: "postgresql://supatype_admin:postgres@localhost:5432/blog",
   schema: "./schema/index.ts",
   output: {
     types: "./types/database.ts",

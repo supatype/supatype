@@ -1,5 +1,7 @@
 import { createClient } from "@supatype/client"
 
+declare const process: { env?: Record<string, string | undefined> } | undefined
+
 function getContentEnv(name: string): string {
   const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
   if (proc?.env?.[name]) {

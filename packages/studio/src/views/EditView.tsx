@@ -62,9 +62,11 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
     setError(null)
     try {
       if (isCreate) {
+        // Strip the primary key — the database generates it automatically.
+        const { [model.primaryKey]: _pk, ...insertValues } = values
         const result = await client
           .from(model.tableName as never)
-          .insert(values as never)
+          .insert(insertValues as never)
 
         if (result.error) {
           setError(result.error.message)
@@ -74,12 +76,14 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
           const newId = data ? String(data[model.primaryKey]) : undefined
           if (!newId) { setError("No data returned"); setSaving(false); return }
           isDirty.current = false
-          onNavigate(`/collections/${model.name}/${newId}`)
+          onNavigate(`/models/${model.name}/${newId}`)
         }
       } else {
+        // Strip the primary key — it's the WHERE target, not an updatable column.
+        const { [model.primaryKey]: _pk, ...updateValues } = values
         const result = await client
           .from(model.tableName as never)
-          .update(values as never)
+          .update(updateValues as never)
           .eq(model.primaryKey, recordId!)
 
         if (result.error) {
@@ -107,7 +111,7 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
         .delete()
         .eq(model.primaryKey, recordId)
 
-      onNavigate(`/collections/${model.name}`)
+      onNavigate(`/models/${model.name}`)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete")
     }
@@ -130,7 +134,7 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
       } else if (result.data) {
         const rows = result.data as Record<string, unknown>[]
         const data = rows[0]
-        if (data) onNavigate(`/collections/${model.name}/${String(data[model.primaryKey])}`)
+        if (data) onNavigate(`/models/${model.name}/${String(data[model.primaryKey])}`)
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to duplicate")
@@ -138,7 +142,12 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
   }
 
   const visibleFields = model.fields
-    .filter((f) => !f.hidden)
+    .filter((f) => {
+      if (f.hidden) return false
+      // Primary key is auto-generated on create — hide it entirely.
+      if (isCreate && f.name === model.primaryKey) return false
+      return true
+    })
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
 
   const livePreviewConfig = config.livePreview?.[model.name]
@@ -198,7 +207,7 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
                   handleChange(fieldConfig.name, val)
                 }
               }}
-              readOnly={fieldConfig.readOnly ?? false}
+              readOnly={fieldConfig.readOnly ?? fieldConfig.name === model.primaryKey}
             />
           ))}
         </form>

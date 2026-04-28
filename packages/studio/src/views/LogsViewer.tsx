@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useMemo } from "react"
-import { useStudioClient } from "../StudioApp.js"
+import React, { useState, useMemo } from "react"
 import { cn } from "../lib/utils.js"
-import { Badge, Button, Card, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
+import { Card, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
+import { EmptyState } from "../components/EmptyState.js"
+import { SlidePanel } from "../components/SlidePanel.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -21,120 +22,6 @@ interface LogEntry {
   response_body: string | null
   query_plan: string | null
 }
-
-interface LogFilter {
-  method: string
-  statusGroup: string
-  pathPrefix: string
-  timeFrom: string
-  timeTo: string
-  search: string
-}
-
-// ─── Mock Data ────────────────────────────────────────────────────────────────
-
-const mockLogs: LogEntry[] = [
-  {
-    id: "l1", timestamp: "2026-03-10T10:30:15.123Z", method: "GET",
-    path: "/rest/v1/posts?select=*,author:users(name)&status=eq.published&limit=25",
-    status: 200, duration: 12, user_id: "u1", ip: "192.168.1.10", request_id: "req-001",
-    response_size: 4520,
-    request_headers: { "authorization": "Bearer eyJ...abc", "apikey": "anon-key", "accept": "application/json", "x-client-info": "supatype-js/0.1.0" },
-    request_body: null,
-    response_body: '[{"id":"p1","title":"Hello World","author":{"name":"Alice"}}]',
-    query_plan: "Limit  (cost=0.00..1.24 rows=10 width=128)\n  ->  Seq Scan on posts  (cost=0.00..1.42 rows=42 width=128)\n        Filter: (status = 'published'::text)",
-  },
-  {
-    id: "l2", timestamp: "2026-03-10T10:30:14.456Z", method: "POST",
-    path: "/auth/v1/token?grant_type=password",
-    status: 200, duration: 85, user_id: null, ip: "192.168.1.10", request_id: "req-002",
-    response_size: 1240,
-    request_headers: { "content-type": "application/json", "apikey": "anon-key" },
-    request_body: '{"email":"alice@example.com","password":"***"}',
-    response_body: '{"access_token":"eyJ...","token_type":"bearer","expires_in":3600}',
-    query_plan: null,
-  },
-  {
-    id: "l3", timestamp: "2026-03-10T10:30:10.789Z", method: "PATCH",
-    path: "/rest/v1/users?id=eq.u1",
-    status: 200, duration: 18, user_id: "u1", ip: "192.168.1.10", request_id: "req-003",
-    response_size: 320,
-    request_headers: { "authorization": "Bearer eyJ...abc", "apikey": "anon-key", "content-type": "application/json", "prefer": "return=representation" },
-    request_body: '{"name":"Alice Updated"}',
-    response_body: '{"id":"u1","email":"alice@example.com","name":"Alice Updated"}',
-    query_plan: null,
-  },
-  {
-    id: "l4", timestamp: "2026-03-10T10:30:05.012Z", method: "GET",
-    path: "/rest/v1/tags",
-    status: 200, duration: 5, user_id: "u1", ip: "192.168.1.10", request_id: "req-004",
-    response_size: 890,
-    request_headers: { "authorization": "Bearer eyJ...abc", "apikey": "anon-key" },
-    request_body: null,
-    response_body: '[{"id":"t1","name":"TypeScript","slug":"typescript"}]',
-    query_plan: "Seq Scan on tags  (cost=0.00..1.12 rows=12 width=64)",
-  },
-  {
-    id: "l5", timestamp: "2026-03-10T10:30:00.345Z", method: "POST",
-    path: "/rest/v1/posts",
-    status: 401, duration: 3, user_id: null, ip: "192.168.1.50", request_id: "req-005",
-    response_size: 128,
-    request_headers: { "content-type": "application/json" },
-    request_body: '{"title":"Unauthorized post"}',
-    response_body: '{"message":"JWT token is missing","hint":"No Authorization header found"}',
-    query_plan: null,
-  },
-  {
-    id: "l6", timestamp: "2026-03-10T10:29:55.678Z", method: "DELETE",
-    path: "/rest/v1/posts?id=eq.p5",
-    status: 204, duration: 22, user_id: "u3", ip: "192.168.1.20", request_id: "req-006",
-    response_size: 0,
-    request_headers: { "authorization": "Bearer eyJ...xyz", "apikey": "anon-key" },
-    request_body: null,
-    response_body: null,
-    query_plan: null,
-  },
-  {
-    id: "l7", timestamp: "2026-03-10T10:29:50.901Z", method: "GET",
-    path: "/storage/v1/object/avatars/profile.jpg",
-    status: 200, duration: 45, user_id: "u2", ip: "192.168.1.15", request_id: "req-007",
-    response_size: 245760,
-    request_headers: { "authorization": "Bearer eyJ...def" },
-    request_body: null,
-    response_body: "[binary image data]",
-    query_plan: null,
-  },
-  {
-    id: "l8", timestamp: "2026-03-10T10:29:45.234Z", method: "POST",
-    path: "/storage/v1/object/uploads/doc.pdf",
-    status: 200, duration: 320, user_id: "u1", ip: "192.168.1.10", request_id: "req-008",
-    response_size: 64,
-    request_headers: { "authorization": "Bearer eyJ...abc", "content-type": "application/pdf", "content-length": "1048576" },
-    request_body: "[binary PDF data]",
-    response_body: '{"Key":"uploads/doc.pdf"}',
-    query_plan: null,
-  },
-  {
-    id: "l9", timestamp: "2026-03-10T10:29:40.567Z", method: "GET",
-    path: "/rest/v1/posts?select=count",
-    status: 500, duration: 2500, user_id: "u1", ip: "192.168.1.10", request_id: "req-009",
-    response_size: 256,
-    request_headers: { "authorization": "Bearer eyJ...abc", "apikey": "anon-key" },
-    request_body: null,
-    response_body: '{"message":"connection to server at \\"localhost\\" failed: timeout expired","code":"PGRST301"}',
-    query_plan: null,
-  },
-  {
-    id: "l10", timestamp: "2026-03-10T10:29:35.890Z", method: "GET",
-    path: "/rest/v1/users?select=id,email&order=created_at.desc&limit=50",
-    status: 200, duration: 8, user_id: "u3", ip: "192.168.1.20", request_id: "req-010",
-    response_size: 3200,
-    request_headers: { "authorization": "Bearer eyJ...xyz", "apikey": "service-role-key" },
-    request_body: null,
-    response_body: '[{"id":"u1","email":"alice@example.com"},{"id":"u2","email":"bob@example.com"}]',
-    query_plan: "Limit  (cost=1.14..1.17 rows=12 width=64)\n  ->  Sort  (cost=1.14..1.17 rows=12 width=64)\n        Sort Key: created_at DESC",
-  },
-]
 
 const methodColorClass: Record<string, string> = {
   GET: "text-green-400",
@@ -161,16 +48,13 @@ function formatBytes(bytes: number): string {
 
 // ─── Expanded Log Detail ──────────────────────────────────────────────────────
 
-function LogDetail({ log, onClose }: { log: LogEntry; onClose: () => void }): React.ReactElement {
+function LogDetail({ log }: { log: LogEntry }): React.ReactElement {
   return (
-    <Card className="p-4 mt-3">
-      <div className="flex justify-between items-start mb-4">
-        <div className="flex items-center gap-2">
-          <span className={cn("font-mono font-bold", methodColorClass[log.method] ?? "text-foreground")}>{log.method}</span>
-          <code className="text-sm">{log.path}</code>
-          <span className={cn("font-mono font-bold", statusColorClass(log.status))}>{log.status}</span>
-        </div>
-        <Button size="xs" onClick={onClose}>Close</Button>
+    <div>
+      <div className="flex items-center gap-2 mb-4 font-mono">
+        <span className={cn("font-bold text-sm", methodColorClass[log.method] ?? "text-foreground")}>{log.method}</span>
+        <code className="text-sm text-foreground/80 truncate">{log.path}</code>
+        <span className={cn("font-bold text-sm ml-auto shrink-0", statusColorClass(log.status))}>{log.status}</span>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
@@ -248,63 +132,22 @@ function LogDetail({ log, onClose }: { log: LogEntry; onClose: () => void }): Re
           <CodeBlock className="text-xs">{log.query_plan}</CodeBlock>
         </div>
       ) : null}
-    </Card>
+    </div>
   )
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export function LogsViewer(): React.ReactElement {
-  const client = useStudioClient()
-
-  const [logs, setLogs] = useState<LogEntry[]>(mockLogs)
-  const [expandedLog, setExpandedLog] = useState<string | null>(null)
-  const [paused, setPaused] = useState(false)
+  const [logs] = useState<LogEntry[]>([])
+  const [selectedLog, setSelectedLog] = useState<LogEntry | null>(null)
 
   // Filters
   const [filterMethod, setFilterMethod] = useState("all")
   const [filterStatus, setFilterStatus] = useState("all")
   const [filterPath, setFilterPath] = useState("")
-  const [filterTimeFrom, setFilterTimeFrom] = useState("")
-  const [filterTimeTo, setFilterTimeTo] = useState("")
   const [search, setSearch] = useState("")
 
-  // Simulated real-time log streaming
-  useEffect(() => {
-    if (paused) return
-
-    const interval = setInterval(() => {
-      const methods = ["GET", "POST", "PATCH", "DELETE"]
-      const paths = ["/rest/v1/posts", "/rest/v1/users", "/auth/v1/token", "/storage/v1/object/avatars/img.png"]
-      const statuses = [200, 200, 200, 201, 204, 401, 404, 500]
-      const method = methods[Math.floor(Math.random() * methods.length)]!
-      const path = paths[Math.floor(Math.random() * paths.length)]!
-      const status = statuses[Math.floor(Math.random() * statuses.length)]!
-
-      const newLog: LogEntry = {
-        id: `l-${Date.now()}`,
-        timestamp: new Date().toISOString(),
-        method,
-        path,
-        status,
-        duration: Math.floor(Math.random() * 300) + 1,
-        user_id: Math.random() > 0.3 ? `u${Math.floor(Math.random() * 5) + 1}` : null,
-        ip: "192.168.1." + Math.floor(Math.random() * 50 + 1),
-        request_id: `req-${Date.now()}`,
-        response_size: Math.floor(Math.random() * 10000),
-        request_headers: { "content-type": "application/json" },
-        request_body: method === "POST" || method === "PATCH" ? '{"data":"..."}' : null,
-        response_body: status < 300 ? '{"ok":true}' : '{"error":"..."}',
-        query_plan: null,
-      }
-
-      setLogs((prev) => [newLog, ...prev.slice(0, 199)])
-    }, 3000)
-
-    return () => clearInterval(interval)
-  }, [paused])
-
-  // Filtered logs
   const filtered = useMemo(() => {
     return logs.filter((l) => {
       if (filterMethod !== "all" && l.method !== filterMethod) return false
@@ -320,6 +163,18 @@ export function LogsViewer(): React.ReactElement {
 
   return (
     <>
+      {/* Info banner */}
+      <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-4 py-3 flex items-center gap-3 mb-4">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-400 shrink-0">
+          <circle cx="12" cy="12" r="10" />
+          <line x1="12" y1="16" x2="12" y2="12" />
+          <line x1="12" y1="8" x2="12.01" y2="8" />
+        </svg>
+        <span className="text-sm text-blue-400">
+          Request logging is not yet available for this project. This feature is coming soon.
+        </span>
+      </div>
+
       {/* Toolbar */}
       <div className="flex items-center gap-2 mb-4 flex-wrap">
         <Input
@@ -349,106 +204,103 @@ export function LogsViewer(): React.ReactElement {
           value={filterPath}
           onChange={(e) => setFilterPath(e.target.value)}
         />
-
-        <div className="flex-1" />
-
-        <div className="flex items-center gap-2">
-          {!paused ? (
-            <Badge variant="green" className="animate-pulse">Live</Badge>
-          ) : (
-            <Badge variant="yellow">Paused</Badge>
-          )}
-          <Button size="sm" onClick={() => setPaused(!paused)}>
-            {paused ? "Resume" : "Pause"}
-          </Button>
-          <Button size="sm" onClick={() => setLogs([])}>
-            Clear
-          </Button>
-        </div>
       </div>
 
-      {/* Log table */}
-      <Card className="overflow-auto">
-        <table className="w-full">
-          <thead>
-            <tr className="border-b border-border">
-              <Th>Time</Th>
-              <Th>Method</Th>
-              <Th>Path</Th>
-              <Th>Status</Th>
-              <Th>Duration</Th>
-              <Th>Size</Th>
-              <Th>User</Th>
-              <Th>IP</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((l) => (
-              <React.Fragment key={l.id}>
-                <tr
-                  className={cn(
-                    "border-b border-border hover:bg-accent/50 cursor-pointer",
-                    expandedLog === l.id && "bg-primary/5",
-                    l.status >= 500 && "bg-red-500/5",
-                    l.status >= 400 && l.status < 500 && "bg-orange-500/5"
-                  )}
-                  onClick={() => setExpandedLog(expandedLog === l.id ? null : l.id)}
-                >
-                  <Td className="text-xs text-muted-foreground font-mono whitespace-nowrap">
-                    {new Date(l.timestamp).toLocaleTimeString(undefined, { hour12: false, fractionalSecondDigits: 3 } as Intl.DateTimeFormatOptions)}
-                  </Td>
-                  <Td>
-                    <span className={cn("font-mono font-semibold text-xs", methodColorClass[l.method] ?? "text-foreground")}>
-                      {l.method}
-                    </span>
-                  </Td>
-                  <Td className="max-w-[400px]">
-                    <code className="text-xs break-all">{l.path}</code>
-                  </Td>
-                  <Td>
-                    <span className={cn("font-mono font-semibold", statusColorClass(l.status))}>
-                      {l.status}
-                    </span>
-                  </Td>
-                  <Td className={cn(
-                    "text-xs font-mono",
-                    l.duration > 1000 ? "text-red-400" :
-                    l.duration > 100 ? "text-yellow-400" :
-                    "text-muted-foreground"
-                  )}>
-                    {l.duration}ms
-                  </Td>
-                  <Td className="text-xs text-muted-foreground">
-                    {formatBytes(l.response_size)}
-                  </Td>
-                  <Td className="text-xs text-muted-foreground">
-                    {l.user_id ?? <span className="italic">anon</span>}
-                  </Td>
-                  <Td className="text-xs text-zinc-600 font-mono">{l.ip}</Td>
+      {/* Main content */}
+      {logs.length === 0 ? (
+        <Card className="overflow-auto">
+          <EmptyState
+            title="No request logs available yet"
+            description="Logs will appear here as requests are made to your project API."
+          />
+        </Card>
+      ) : (
+        <>
+          <Card className="overflow-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-border">
+                  <Th>Time</Th>
+                  <Th>Method</Th>
+                  <Th>Path</Th>
+                  <Th>Status</Th>
+                  <Th>Duration</Th>
+                  <Th>Size</Th>
+                  <Th>User</Th>
+                  <Th>IP</Th>
                 </tr>
-                {expandedLog === l.id ? (
+              </thead>
+              <tbody>
+                {filtered.map((l) => (
+                  <tr
+                    key={l.id}
+                    className={cn(
+                      "border-b border-border hover:bg-accent/50 cursor-pointer",
+                      selectedLog?.id === l.id && "bg-primary/5",
+                      l.status >= 500 && "bg-red-500/5",
+                      l.status >= 400 && l.status < 500 && "bg-orange-500/5"
+                    )}
+                    onClick={() => setSelectedLog(l)}
+                  >
+                    <Td className="text-xs text-muted-foreground font-mono whitespace-nowrap">
+                      {new Date(l.timestamp).toLocaleTimeString(undefined, { hour12: false, fractionalSecondDigits: 3 } as Intl.DateTimeFormatOptions)}
+                    </Td>
+                    <Td>
+                      <span className={cn("font-mono font-semibold text-xs", methodColorClass[l.method] ?? "text-foreground")}>
+                        {l.method}
+                      </span>
+                    </Td>
+                    <Td className="max-w-[400px]">
+                      <code className="text-xs break-all">{l.path}</code>
+                    </Td>
+                    <Td>
+                      <span className={cn("font-mono font-semibold", statusColorClass(l.status))}>
+                        {l.status}
+                      </span>
+                    </Td>
+                    <Td className={cn(
+                      "text-xs font-mono",
+                      l.duration > 1000 ? "text-red-400" :
+                      l.duration > 100 ? "text-yellow-400" :
+                      "text-muted-foreground"
+                    )}>
+                      {l.duration}ms
+                    </Td>
+                    <Td className="text-xs text-muted-foreground">
+                      {formatBytes(l.response_size)}
+                    </Td>
+                    <Td className="text-xs text-muted-foreground">
+                      {l.user_id ?? <span className="italic">anon</span>}
+                    </Td>
+                    <Td className="text-xs text-zinc-600 font-mono">{l.ip}</Td>
+                  </tr>
+                ))}
+                {filtered.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="p-0">
-                      <LogDetail log={l} onClose={() => setExpandedLog(null)} />
+                    <td colSpan={8} className="text-center py-8 text-muted-foreground text-sm">
+                      No logs match your filters
                     </td>
                   </tr>
                 ) : null}
-              </React.Fragment>
-            ))}
-            {filtered.length === 0 ? (
-              <tr>
-                <td colSpan={8} className="text-center py-8 text-muted-foreground text-sm">
-                  No logs match your filters
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </Card>
+              </tbody>
+            </table>
+          </Card>
 
-      <div className="text-xs text-muted-foreground mt-2">
-        {filtered.length} logs displayed ({logs.length} total)
-      </div>
+          <div className="text-xs text-muted-foreground mt-2">
+            {filtered.length} logs displayed ({logs.length} total)
+          </div>
+        </>
+      )}
+
+      <SlidePanel
+        open={selectedLog !== null}
+        onClose={() => setSelectedLog(null)}
+        title={selectedLog ? `${selectedLog.method} ${selectedLog.path}` : ""}
+        subtitle={selectedLog ? `${selectedLog.status} · ${selectedLog.duration}ms · ${new Date(selectedLog.timestamp).toLocaleString()}` : undefined}
+        width="max-w-[560px]"
+      >
+        {selectedLog && <LogDetail log={selectedLog} />}
+      </SlidePanel>
     </>
   )
 }

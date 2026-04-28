@@ -9,6 +9,8 @@ import {
   CreateBucketCommand,
   DeleteBucketCommand,
   HeadBucketCommand,
+  PutBucketPolicyCommand,
+  PutPublicAccessBlockCommand,
 } from "@aws-sdk/client-s3"
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 import { config } from "./env.js"
@@ -35,6 +37,49 @@ export async function ensureBucket(name: string): Promise<void> {
 
 export async function deleteBucket(name: string): Promise<void> {
   await s3.send(new DeleteBucketCommand({ Bucket: name }))
+}
+
+/**
+ * Apply a public-read bucket policy so objects are directly accessible
+ * at the S3/MinIO URL without going through the storage proxy.
+ * Called when a bucket is created or updated with public: true.
+ */
+export async function applyPublicPolicy(name: string): Promise<void> {
+  // AWS requires BlockPublicPolicy/RestrictPublicBuckets to be off before a
+  // public bucket policy can be applied. MinIO ignores this call safely.
+  try {
+    await s3.send(new PutPublicAccessBlockCommand({
+      Bucket: name,
+      PublicAccessBlockConfiguration: {
+        BlockPublicAcls: false,
+        IgnorePublicAcls: false,
+        BlockPublicPolicy: false,
+        RestrictPublicBuckets: false,
+      },
+    }))
+  } catch { /* not supported by all S3-compatible backends — safe to ignore */ }
+
+  await s3.send(new PutBucketPolicyCommand({
+    Bucket: name,
+    Policy: JSON.stringify({
+      Version: "2012-10-17",
+      Statement: [{
+        Sid: "PublicReadGetObject",
+        Effect: "Allow",
+        Principal: "*",
+        Action: "s3:GetObject",
+        Resource: `arn:aws:s3:::${name}/*`,
+      }],
+    }),
+  }))
+}
+
+/** Build the direct S3/CDN URL for a public object (path-style or virtual-hosted). */
+export function publicObjectUrl(bucket: string, key: string): string {
+  const base = config.s3PublicUrl.replace(/\/$/, "")
+  return config.s3ForcePathStyle
+    ? `${base}/${bucket}/${key}`
+    : `${base}/${key}`
 }
 
 // ─── Object operations ─────────────────────────────────────────────────────────

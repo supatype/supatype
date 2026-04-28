@@ -78,6 +78,11 @@ export class QueryBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
     return this
   }
 
+  not(column: string, op: string, value: unknown): this {
+    this.params.append(column, `not.${op}.${String(value)}`)
+    return this
+  }
+
   contains(column: string, value: unknown): this {
     this.params.append(column, `cs.${JSON.stringify(value)}`)
     return this
@@ -224,6 +229,11 @@ export class MutationBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
 
   neq(column: string, value: unknown): this {
     this.params.append(column, `neq.${String(value)}`)
+    return this
+  }
+
+  in(column: string, values: unknown[]): this {
+    this.params.append(column, `in.(${values.map(String).join(",")})`)
     return this
   }
 

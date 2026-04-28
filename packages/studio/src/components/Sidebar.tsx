@@ -1,404 +1,427 @@
+"use client"
+
 import React, { useState } from "react"
 import { useNavigate, useLocation } from "react-router-dom"
 import type { AdminConfig } from "../config.js"
-import { useCloud } from "../hooks/useCloud.js"
+import type { SidebarSection } from "../types.js"
 import { cn } from "../lib/utils.js"
 
-export type StudioMode = "content" | "developer"
+// ─── SVG Icons ────────────────────────────────────────────────────────────────
 
-interface SidebarProps {
-  config: AdminConfig
-  mode: StudioMode
-  onModeChange: (mode: StudioMode) => void
-  collapsed: boolean
-  onCollapsedChange: (collapsed: boolean) => void
-  className?: string
-}
-
-// ─── SVG Icons ──────────────────────────────────────────────────────────────
-
-function IconHome({ size = 20 }: { size?: number }): React.ReactElement {
+function IconHome({ size = 16 }: { size?: number }): React.ReactElement {
   return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
 }
-function IconFileText({ size = 20 }: { size?: number }): React.ReactElement {
-  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+function IconGrid({ size = 16 }: { size?: number }): React.ReactElement {
+  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
 }
-function IconImage({ size = 20 }: { size?: number }): React.ReactElement {
-  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-}
-function IconDatabase({ size = 20 }: { size?: number }): React.ReactElement {
+function IconDatabase({ size = 16 }: { size?: number }): React.ReactElement {
   return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
 }
-function IconShield({ size = 20 }: { size?: number }): React.ReactElement {
-  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+function IconImage({ size = 16 }: { size?: number }): React.ReactElement {
+  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
 }
-function IconHardDrive({ size = 20 }: { size?: number }): React.ReactElement {
-  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="12" x2="2" y2="12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" y1="16" x2="6.01" y2="16"/><line x1="10" y1="16" x2="10.01" y2="16"/></svg>
-}
-function IconBook({ size = 20 }: { size?: number }): React.ReactElement {
-  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
-}
-function IconSettings({ size = 20 }: { size?: number }): React.ReactElement {
-  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-}
-function IconTable({ size = 20 }: { size?: number }): React.ReactElement {
-  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2V9M9 21H5a2 2 0 0 1-2-2V9m0 0h18"/></svg>
-}
-function IconTerminal({ size = 20 }: { size?: number }): React.ReactElement {
-  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-}
-function IconGit({ size = 20 }: { size?: number }): React.ReactElement {
-  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></svg>
-}
-function IconActivity({ size = 20 }: { size?: number }): React.ReactElement {
-  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-}
-function IconUsers({ size = 20 }: { size?: number }): React.ReactElement {
+function IconUsers({ size = 16 }: { size?: number }): React.ReactElement {
   return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
 }
-function IconTag({ size = 20 }: { size?: number }): React.ReactElement {
-  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+function IconMail({ size = 16 }: { size?: number }): React.ReactElement {
+  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
 }
-function IconGlobe({ size = 20 }: { size?: number }): React.ReactElement {
+function IconZap({ size = 16 }: { size?: number }): React.ReactElement {
+  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+}
+function IconRadio({ size = 16 }: { size?: number }): React.ReactElement {
+  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 6l11 6L1 18V6z"/><path d="M23 6l-11 6 11 6V6z"/></svg>
+}
+function IconPlug({ size = 16 }: { size?: number }): React.ReactElement {
+  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18"/><path d="M7 17l-4 4"/><path d="M17 7l4-4"/><path d="M10 3l1 1-7 7-1-1a4 4 0 0 1 7-7z"/><path d="M14 21l-1-1 7-7 1 1a4 4 0 0 1-7 7z"/></svg>
+}
+function IconLightbulb({ size = 16 }: { size?: number }): React.ReactElement {
+  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="9" y1="18" x2="15" y2="18"/><line x1="10" y1="22" x2="14" y2="22"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"/></svg>
+}
+function IconEye({ size = 16 }: { size?: number }): React.ReactElement {
+  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+}
+function IconList({ size = 16 }: { size?: number }): React.ReactElement {
+  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+}
+function IconBook({ size = 16 }: { size?: number }): React.ReactElement {
+  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+}
+function IconGlobe({ size = 16 }: { size?: number }): React.ReactElement {
   return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
 }
-function IconRocket({ size = 20 }: { size?: number }): React.ReactElement {
-  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>
+function IconClock({ size = 16 }: { size?: number }): React.ReactElement {
+  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
 }
-function IconChevronLeft({ size = 20 }: { size?: number }): React.ReactElement {
-  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+function IconCpu({ size = 16 }: { size?: number }): React.ReactElement {
+  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></svg>
+}
+function IconShoppingCart({ size = 16 }: { size?: number }): React.ReactElement {
+  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+}
+function IconBarChart2({ size = 16 }: { size?: number }): React.ReactElement {
+  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+}
+function IconGitBranch({ size = 16 }: { size?: number }): React.ReactElement {
+  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+}
+function IconLink({ size = 16 }: { size?: number }): React.ReactElement {
+  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+}
+function IconBot({ size = 16 }: { size?: number }): React.ReactElement {
+  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M12 11V8"/><circle cx="12" cy="6" r="2"/><line x1="3" y1="16" x2="1" y2="16"/><line x1="23" y1="16" x2="21" y2="16"/><circle cx="9" cy="16" r="1"/><circle cx="15" cy="16" r="1"/></svg>
+}
+function IconSettings({ size = 16 }: { size?: number }): React.ReactElement {
+  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+}
+function IconChevronRight({ size = 13 }: { size?: number }): React.ReactElement {
+  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
 }
 
-const iconMap: Record<string, (props: { size?: number }) => React.ReactElement> = {
+// ─── Icon lookup ──────────────────────────────────────────────────────────────
+
+const ICON_MAP: Record<string, (props: { size?: number }) => React.ReactElement> = {
   home: IconHome,
-  "file-text": IconFileText,
-  image: IconImage,
+  grid: IconGrid,
   database: IconDatabase,
-  shield: IconShield,
-  "hard-drive": IconHardDrive,
+  image: IconImage,
+  users: IconUsers,
+  mail: IconMail,
+  zap: IconZap,
+  radio: IconRadio,
+  plug: IconPlug,
+  lightbulb: IconLightbulb,
+  eye: IconEye,
+  list: IconList,
   book: IconBook,
   settings: IconSettings,
-  table: IconTable,
-  terminal: IconTerminal,
-  git: IconGit,
-  activity: IconActivity,
-  users: IconUsers,
-  tag: IconTag,
   globe: IconGlobe,
-  rocket: IconRocket,
-  "chevron-left": IconChevronLeft,
+  clock: IconClock,
+  cpu: IconCpu,
+  cart: IconShoppingCart,
+  barchart: IconBarChart2,
+  branch: IconGitBranch,
+  link: IconLink,
+  bot: IconBot,
 }
 
 export function Icon({ name, size = 16 }: { name: string | undefined; size?: number }): React.ReactElement | null {
   if (!name) return null
-  const Comp = iconMap[name]
+  const Comp = ICON_MAP[name]
   if (!Comp) return null
   return <Comp size={size} />
 }
 
-// ─── Nav data ────────────────────────────────────────────────────────────────
+// ─── Nav definition ───────────────────────────────────────────────────────────
 
-interface NavItem {
-  href: string
+interface NavItemDef {
+  id: string
   label: string
-  icon?: string
+  icon: string
+  href: string
 }
 
-interface NavGroup {
-  title: string
-  items: NavItem[]
+type NavEntry = NavItemDef | "separator"
+
+const NAV_ENTRIES: NavEntry[] = [
+  { id: "dashboard",     label: "Dashboard",        icon: "home",      href: "/" },
+  { id: "models",        label: "Models",            icon: "grid",      href: "/models" },
+  { id: "database",      label: "Database",          icon: "database",  href: "/database/overview" },
+  { id: "media",         label: "Media & Storage",   icon: "image",     href: "/media-storage" },
+  "separator",
+  { id: "auth",          label: "Authentication",    icon: "users",     href: "/authentication/users" },
+  { id: "email",         label: "Email",             icon: "mail",      href: "/email" },
+  "separator",
+  { id: "functions",     label: "Edge Functions",    icon: "zap",       href: "/edge-functions" },
+  { id: "realtime",      label: "Realtime",          icon: "radio",     href: "/realtime" },
+  { id: "webhooks",      label: "Webhooks",          icon: "globe",     href: "/webhooks" },
+  { id: "jobs",          label: "Scheduled Jobs",    icon: "clock",     href: "/jobs" },
+  "separator",
+  { id: "ai",            label: "Intelligence",      icon: "cpu",       href: "/ai/usage" },
+  { id: "commerce",      label: "Commerce",          icon: "cart",      href: "/commerce" },
+  { id: "analytics",     label: "Analytics",         icon: "barchart",  href: "/analytics" },
+  "separator",
+  { id: "plugins",       label: "Plugins",           icon: "plug",      href: "/plugins" },
+  { id: "branching",     label: "Branching",         icon: "branch",    href: "/branching" },
+  { id: "integrations",  label: "Integrations",      icon: "link",      href: "/integrations" },
+  "separator",
+  { id: "observability", label: "Observability",     icon: "eye",       href: "/observability" },
+]
+
+// ─── Sidebar props ────────────────────────────────────────────────────────────
+
+interface SidebarProps {
+  config: AdminConfig
+  extraSections?: SidebarSection[] | undefined
+  className?: string | undefined
+  /** @deprecated No longer used */
+  collapsed?: boolean | undefined
+  /** @deprecated No longer used */
+  onCollapsedChange?: ((collapsed: boolean) => void) | undefined
 }
 
-function getNavGroups(mode: StudioMode, config: AdminConfig, isCloudMode?: boolean): NavGroup[] {
-  if (mode === "content") {
-    const groups: NavGroup[] = [
-      {
-        title: "General",
-        items: [
-          { href: "/", label: "Dashboard", icon: "home" },
-          { href: "/media", label: "Media Library", icon: "image" },
-        ],
-      },
-    ]
+// ─── Sidebar ──────────────────────────────────────────────────────────────────
 
-    const modelItems = config.models.map((m) => ({
-      href: `/collections/${m.name}`,
-      label: m.labelPlural,
-      icon: m.name === "post" ? "file-text" : m.name === "author" ? "users" : m.name === "tag" ? "tag" : "file-text",
-    }))
-    if (modelItems.length > 0) {
-      groups.push({ title: "Collections", items: modelItems })
+export function Sidebar({ extraSections, className }: SidebarProps): React.ReactElement {
+  const navigate = useNavigate()
+  const location = useLocation()
+  const path = location.pathname
+  const [expanded, setExpanded] = useState(false)
+
+  function isActive(item: NavItemDef): boolean {
+    switch (item.id) {
+      case "dashboard":
+        return path === "/" || path === ""
+      case "models":
+        return path === "/models" || path.startsWith("/models/")
+      case "database":
+        return path.startsWith("/database")
+      case "auth":
+        return path.startsWith("/authentication")
+      case "observability":
+        return path.startsWith("/observability")
+      case "ai":
+        return path.startsWith("/ai")
+      default:
+        if (item.href === "/") return path === "/" || path === ""
+        return path === item.href || path.startsWith(`${item.href}/`)
     }
-
-    const globalItems = config.globals.map((g) => ({
-      href: `/globals/${g.name}`,
-      label: g.label,
-      icon: "globe",
-    }))
-    if (globalItems.length > 0) {
-      groups.push({ title: "Globals", items: globalItems })
-    }
-
-    return groups
   }
 
-  // Developer mode
-  return [
-    {
-      title: "Database",
-      items: [
-        { href: "/dev/schema", label: "Schema", icon: "database" },
-        { href: "/dev/data", label: "Data Explorer", icon: "table" },
-        { href: "/dev/sql", label: "SQL Runner", icon: "terminal" },
-        { href: "/dev/migrations", label: "Migrations", icon: "git" },
-      ],
-    },
-    {
-      title: "Services",
-      items: [
-        { href: "/dev/auth", label: "Authentication", icon: "shield" },
-        { href: "/dev/storage", label: "Storage", icon: "hard-drive" },
-      ],
-    },
-    {
-      title: "API",
-      items: [
-        { href: "/dev/api", label: "API Docs", icon: "book" },
-        { href: "/dev/logs", label: "Logs", icon: "activity" },
-      ],
-    },
-    {
-      title: "Configuration",
-      items: [
-        { href: "/dev/settings", label: "Settings", icon: "settings" },
-      ],
-    },
-    ...(isCloudMode ? [{
-      title: "Cloud",
-      items: [
-        { href: "/cloud/projects", label: "Projects", icon: "home" },
-        { href: "/cloud/usage", label: "Usage", icon: "activity" },
-        { href: "/cloud/domains", label: "Domains", icon: "globe" },
-        { href: "/cloud/settings", label: "Project Settings", icon: "settings" },
-        { href: "/cloud/billing", label: "Billing", icon: "credit-card" },
-        { href: "/cloud/org", label: "Organisation", icon: "users" },
-        { href: "/cloud/deployments", label: "Deployments", icon: "rocket" },
-        { href: "/cloud/audit", label: "Audit Log", icon: "shield" },
-      ],
-    }] : []),
-  ]
+  const extraItems: { label: string; href: string; icon?: string }[] = []
+  if (extraSections) {
+    for (const section of extraSections) {
+      for (const item of section.items) {
+        extraItems.push(item)
+      }
+    }
+  }
+
+  const settingsActive = path === "/settings" || path.startsWith("/settings/") || path.startsWith("/api")
+
+  function NavItem({ icon, label, href, active }: {
+    icon: string | undefined
+    label: string
+    href: string
+    active: boolean
+  }): React.ReactElement {
+    return (
+      <div className="px-1">
+        <button
+          type="button"
+          title={!expanded ? label : undefined}
+          onClick={() => { navigate(href); setExpanded(false) }}
+          aria-current={active ? "page" : undefined}
+          className={cn(
+            "flex items-center w-full rounded-md transition-colors border-l-2",
+            "hover:bg-accent hover:text-accent-foreground",
+            expanded ? "gap-2.5 px-2 py-1.5" : "justify-center p-2",
+            active
+              ? "bg-accent text-foreground border-l-primary"
+              : "text-muted-foreground border-l-transparent",
+          )}
+        >
+          <span className={cn("shrink-0", active ? "opacity-100" : "opacity-60")}>
+            <Icon name={icon} size={16} />
+          </span>
+          {expanded && (
+            <>
+              <span className="flex-1 text-left text-[13px] truncate">{label}</span>
+              <span className="shrink-0 opacity-30"><IconChevronRight /></span>
+            </>
+          )}
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    // Reserve 52px in the layout — panel floats over content when expanded
+    <aside
+      className={cn("relative shrink-0 w-[52px] h-full", className)}
+      role="navigation"
+      aria-label="Studio navigation"
+    >
+      {/* Floating panel — always 52px, expands to 220px on hover, overlays content */}
+      <div
+        onMouseEnter={() => setExpanded(true)}
+        onMouseLeave={() => setExpanded(false)}
+        className={cn(
+          "absolute top-0 left-0 h-full flex flex-col bg-background border-r border-border/80 z-50",
+          "transition-[width] duration-200 ease-in-out overflow-hidden",
+          expanded ? "w-[220px] shadow-xl shadow-black/10" : "w-[52px]",
+        )}
+      >
+        <div className="flex-1 overflow-y-auto py-2" style={{ scrollbarWidth: "none" }}>
+          {NAV_ENTRIES.map((entry, i) => {
+            if (entry === "separator") {
+              return <div key={`sep-${i}`} className="my-1 mx-3 border-t border-border/50" />
+            }
+            return (
+              <NavItem
+                key={entry.id}
+                icon={entry.icon}
+                label={entry.label}
+                href={entry.href}
+                active={isActive(entry)}
+              />
+            )
+          })}
+
+          {extraItems.length > 0 && (
+            <>
+              <div className="my-1 mx-3 border-t border-border/50" />
+              {extraItems.map((item) => (
+                <NavItem
+                  key={item.href}
+                  icon={item.icon}
+                  label={item.label}
+                  href={item.href}
+                  active={path === item.href || path.startsWith(`${item.href}/`)}
+                />
+              ))}
+            </>
+          )}
+        </div>
+
+        {/* Pinned: Settings */}
+        <div className="border-t border-border shrink-0">
+          <div className="px-1 py-2">
+            <button
+              type="button"
+              title={!expanded ? "Settings" : undefined}
+              onClick={() => { navigate("/settings"); setExpanded(false) }}
+              aria-current={settingsActive ? "page" : undefined}
+              className={cn(
+                "flex items-center w-full rounded-md transition-colors",
+                "hover:bg-accent hover:text-accent-foreground",
+                expanded ? "gap-2.5 px-2 py-1.5" : "justify-center p-2",
+                settingsActive
+                  ? "bg-accent text-foreground"
+                  : "text-muted-foreground",
+              )}
+            >
+              <span className={cn("shrink-0", settingsActive ? "opacity-100" : "opacity-60")}>
+                <IconSettings size={16} />
+              </span>
+              {expanded && (
+                <>
+                  <span className="flex-1 text-left text-[13px] truncate">Settings</span>
+                  <span className="shrink-0 opacity-30"><IconChevronRight /></span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    </aside>
+  )
 }
 
-/** Get page title from path */
+// ─── getPageTitle (used by TopBar) ────────────────────────────────────────────
+
 export function getPageTitle(path: string, config: AdminConfig): string {
   if (path === "/" || path === "") return "Dashboard"
-  if (path === "/media") return "Media Library"
 
-  const collMatch = path.match(/^\/collections\/([^/]+)/)
+  const collMatch = path.match(/^\/models\/([^/]+)/)
   if (collMatch) {
     const model = config.models.find((m) => m.name === collMatch[1])
     if (model) {
       if (path.endsWith("/create")) return `Create ${model.label}`
       if (path.endsWith("/versions")) return "Version History"
-      if (path.match(/\/collections\/[^/]+\/[^/]+$/)) return `Edit ${model.label}`
+      if (path.endsWith("/api")) return `${model.label} — REST API`
+      if (path.endsWith("/graphql")) return `${model.label} — GraphQL`
+      if (path.match(/\/models\/[^/]+\/[^/]+$/)) return `Edit ${model.label}`
       return model.labelPlural
     }
   }
+  if (path === "/models") return "Models"
 
   const globalMatch = path.match(/^\/globals\/([^/]+)/)
   if (globalMatch) {
-    const global = config.globals.find((g) => g.name === globalMatch[1])
-    if (global) return global.label
+    const g = config.globals.find((g) => g.name === globalMatch[1])
+    if (g) return g.label
   }
 
-  if (path === "/dev/schema") return "Schema"
-  if (path === "/dev/data") return "Data Explorer"
-  if (path === "/dev/sql") return "SQL Runner"
-  if (path === "/dev/migrations") return "Migrations"
-  if (path === "/dev/auth") return "Authentication"
-  if (path === "/dev/storage") return "Storage"
-  if (path === "/dev/api") return "API Docs"
-  if (path === "/dev/logs") return "Logs"
-  if (path === "/dev/settings") return "Settings"
-  if (path === "/cloud/projects") return "Projects"
-  if (path === "/cloud/projects/create") return "Create Project"
-  if (path === "/cloud/usage") return "Usage"
-  if (path === "/cloud/domains") return "Domains"
-  if (path === "/cloud/settings") return "Project Settings"
-  if (path === "/cloud/billing") return "Billing"
-  if (path === "/cloud/org") return "Organisation"
-  if (path === "/cloud/deployments") return "Deployments"
-  if (path === "/cloud/audit") return "Audit Log"
-  return "Studio"
+  const titles: Record<string, string> = {
+    "/database":             "Database",
+    "/database/overview":    "Overview",
+    "/database/sql":         "SQL Runner",
+    "/database/migrations":  "Migrations",
+    "/media-storage":        "Media & Storage",
+    "/authentication":       "Authentication",
+    "/email":                "Email",
+    "/edge-functions":       "Edge Functions",
+    "/realtime":             "Realtime",
+    "/plugins":              "Plugins",
+    "/observability":              "Observability",
+    "/observability/logs":         "Logs",
+    "/observability/logs/api":     "API Logs",
+    "/observability/logs/auth":    "Auth Logs",
+    "/observability/logs/storage": "Storage Logs",
+    "/observability/logs/functions": "Edge Function Logs",
+    "/observability/logs/realtime":  "Realtime Logs",
+    "/observability/logs/postgres":  "Postgres Logs",
+    "/observability/metrics":      "Metrics",
+    "/observability/advisors":     "Advisors",
+    "/api/rest":             "REST API",
+    "/api/rest/settings":    "REST API Settings",
+    "/api/graphql":          "GraphQL",
+    "/api/graphql/settings": "GraphQL Settings",
+    "/settings":             "Settings",
+  }
+  return titles[path] ?? "Studio"
 }
 
-// ─── Sidebar ────────────────────────────────────────────────────────────────
+export function getPageBreadcrumbs(path: string, config: AdminConfig): string[] {
+  if (path === "/" || path === "") return ["Dashboard"]
 
-export function Sidebar({ config, mode, onModeChange, collapsed, onCollapsedChange, className }: SidebarProps): React.ReactElement {
-  const navigate = useNavigate()
-  const location = useLocation()
-  const cloud = useCloud()
-  const currentPath = location.pathname
-  const navGroups = getNavGroups(mode, config, cloud.mode === "cloud")
+  const collMatch = path.match(/^\/models\/([^/]+)/)
+  if (collMatch) {
+    const model = config.models.find((m) => m.name === collMatch[1])
+    if (model) {
+      if (path.endsWith("/create")) return ["Models", model.labelPlural, `Create ${model.label}`]
+      if (path.endsWith("/versions")) return ["Models", model.labelPlural, "Version History"]
+      if (path.endsWith("/api")) return ["Models", model.labelPlural, "REST API"]
+      if (path.endsWith("/graphql")) return ["Models", model.labelPlural, "GraphQL"]
+      if (path.match(/\/models\/[^/]+\/[^/]+$/)) return ["Models", model.labelPlural, `Edit ${model.label}`]
+      return ["Models", model.labelPlural]
+    }
+  }
+  if (path === "/models") return ["Models"]
 
-  return (
-    <aside
-      className={cn(
-        "flex flex-col bg-card border-r border-border shrink-0 h-full transition-[width] duration-200 overflow-hidden",
-        collapsed ? "w-[60px]" : "w-[260px]",
-        className,
-      )}
-      role="navigation"
-      aria-label="Studio navigation"
-    >
-      {/* Header: Logo + project name */}
-      <div className="flex items-center gap-3 px-4 h-14 border-b border-border shrink-0">
-        <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary text-primary-foreground shrink-0">
-          <span className="text-sm font-bold">S</span>
-        </div>
-        {!collapsed && (
-          <div className="flex flex-col min-w-0">
-            <span className="text-sm font-semibold text-foreground truncate">
-              {config.branding?.appName ?? "Supatype"}
-            </span>
-            <span className="text-[11px] text-muted-foreground">Studio</span>
-          </div>
-        )}
-      </div>
+  const globalMatch = path.match(/^\/globals\/([^/]+)/)
+  if (globalMatch) {
+    const g = config.globals.find((g) => g.name === globalMatch[1])
+    if (g) return ["Globals", g.label]
+  }
 
-      {/* Mode toggle */}
-      <div className={cn("px-3 pt-3 pb-1 shrink-0", collapsed && "px-1.5")}>
-        {collapsed ? (
-          <div className="flex flex-col gap-1 items-center">
-            <button
-              type="button"
-              title="Content"
-              onClick={() => { onModeChange("content"); navigate("/") }}
-              className={cn(
-                "flex items-center justify-center w-9 h-8 rounded-md text-xs transition-colors",
-                mode === "content"
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
-              )}
-            >
-              <Icon name="file-text" size={14} />
-            </button>
-            <button
-              type="button"
-              title="Developer"
-              onClick={() => { onModeChange("developer"); navigate("/dev/schema") }}
-              className={cn(
-                "flex items-center justify-center w-9 h-8 rounded-md text-xs transition-colors",
-                mode === "developer"
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
-              )}
-            >
-              <Icon name="terminal" size={14} />
-            </button>
-          </div>
-        ) : (
-          <div className="flex p-0.5 rounded-lg bg-muted">
-            <button
-              type="button"
-              onClick={() => { onModeChange("content"); navigate("/") }}
-              className={cn(
-                "flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
-                mode === "content"
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <Icon name="file-text" size={12} />
-              Content
-            </button>
-            <button
-              type="button"
-              onClick={() => { onModeChange("developer"); navigate("/dev/schema") }}
-              className={cn(
-                "flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
-                mode === "developer"
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <Icon name="terminal" size={12} />
-              Developer
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Nav groups */}
-      <div className="flex-1 overflow-y-auto py-2 px-3" style={{ scrollbarWidth: "none" }}>
-        {navGroups.map((group) => (
-          <div key={group.title} className="mb-4">
-            {!collapsed && (
-              <h3 className="px-2 mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                {group.title}
-              </h3>
-            )}
-            <ul className="flex flex-col gap-0.5">
-              {group.items.map((item) => {
-                const active = item.href === "/"
-                  ? currentPath === "/" || currentPath === ""
-                  : currentPath === item.href || currentPath.startsWith(`${item.href}/`)
-                return (
-                  <li key={item.href}>
-                    <button
-                      type="button"
-                      title={collapsed ? item.label : undefined}
-                      onClick={() => navigate(item.href)}
-                      aria-current={active ? "page" : undefined}
-                      className={cn(
-                        "flex items-center gap-2.5 w-full rounded-md text-[13px] transition-colors",
-                        collapsed ? "justify-center px-0 py-2" : "px-2 py-1.5",
-                        "hover:bg-accent hover:text-accent-foreground",
-                        active
-                          ? "bg-accent text-foreground font-medium"
-                          : "text-muted-foreground",
-                      )}
-                    >
-                      <span className={cn("shrink-0", active ? "opacity-100" : "opacity-60")}>
-                        <Icon name={item.icon} size={16} />
-                      </span>
-                      {!collapsed && item.label}
-                    </button>
-                  </li>
-                )
-              })}
-            </ul>
-          </div>
-        ))}
-      </div>
-
-      {/* Footer: collapse toggle + user */}
-      <div className="border-t border-border px-3 py-2 shrink-0">
-        {/* Collapse toggle */}
-        <button
-          type="button"
-          onClick={() => onCollapsedChange(!collapsed)}
-          className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-[13px] text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-        >
-          <span className={cn("shrink-0 transition-transform", collapsed && "rotate-180")}>
-            <Icon name="chevron-left" size={16} />
-          </span>
-          {!collapsed && "Collapse"}
-        </button>
-
-        {/* User */}
-        <div className={cn("flex items-center gap-2.5 mt-1 px-2 py-1.5 rounded-md", collapsed && "justify-center px-0")}>
-          <div className="flex items-center justify-center w-7 h-7 rounded-full bg-primary/20 text-primary text-xs font-semibold shrink-0">
-            U
-          </div>
-          {!collapsed && (
-            <div className="flex flex-col min-w-0">
-              <span className="text-[13px] font-medium text-foreground truncate">User</span>
-              <span className="text-[11px] text-muted-foreground truncate">admin@example.com</span>
-            </div>
-          )}
-        </div>
-      </div>
-    </aside>
-  )
+  const breadcrumbs: Record<string, string[]> = {
+    "/database":             ["Database"],
+    "/database/overview":    ["Database", "Overview"],
+    "/database/sql":         ["Database", "SQL Runner"],
+    "/database/migrations":  ["Database", "Migrations"],
+    "/media-storage":        ["Media & Storage"],
+    "/authentication":       ["Authentication"],
+    "/email":                ["Email"],
+    "/edge-functions":       ["Edge Functions"],
+    "/realtime":             ["Realtime"],
+    "/plugins":              ["Plugins"],
+    "/observability":                  ["Observability"],
+    "/observability/logs":             ["Observability", "Logs"],
+    "/observability/logs/api":         ["Observability", "Logs", "API"],
+    "/observability/logs/auth":        ["Observability", "Logs", "Auth"],
+    "/observability/logs/storage":     ["Observability", "Logs", "Storage"],
+    "/observability/logs/functions":   ["Observability", "Logs", "Edge Functions"],
+    "/observability/logs/realtime":    ["Observability", "Logs", "Realtime"],
+    "/observability/logs/postgres":    ["Observability", "Logs", "Postgres"],
+    "/observability/metrics":          ["Observability", "Metrics"],
+    "/observability/advisors":         ["Observability", "Advisors"],
+    "/api/rest":             ["API", "REST"],
+    "/api/rest/settings":    ["API", "REST", "Settings"],
+    "/api/graphql":          ["API", "GraphQL"],
+    "/api/graphql/settings": ["API", "GraphQL", "Settings"],
+    "/settings":             ["Settings"],
+  }
+  return breadcrumbs[path] ?? ["Studio"]
 }

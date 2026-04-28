@@ -10,7 +10,7 @@ export const config = {
   /** Postgres connection string for the storage metadata tables. */
   databaseUrl: env(
     "DATABASE_URL",
-    "postgresql://postgres:postgres@localhost:5432/postgres",
+    "postgresql://supatype_admin:postgres@localhost:5432/postgres",
   ),
 
   /** JWT secret shared with GoTrue / Kong. */
@@ -33,6 +33,14 @@ export const config = {
 
   /** Whether to force path-style access (required for MinIO). */
   s3ForcePathStyle: env("S3_FORCE_PATH_STYLE", "true") === "true",
+
+  /**
+   * Publicly reachable base URL for S3 objects in public buckets.
+   * For MinIO in local dev this is the same as S3_ENDPOINT (e.g. http://localhost:9000).
+   * For AWS set this to your CloudFront domain or the bucket's public S3 URL.
+   * Defaults to S3_ENDPOINT.
+   */
+  s3PublicUrl: env("S3_PUBLIC_URL", env("S3_ENDPOINT", "http://localhost:9000")),
 
   /** Maximum upload size in bytes (default 50 MB). */
   maxUploadSize: parseInt(env("MAX_UPLOAD_SIZE", String(50 * 1024 * 1024)), 10),

@@ -245,6 +245,9 @@ class FunctionsClient {
 }
 
 export interface SupatypeClient<TDatabase extends AnyDatabase = AnyDatabase> {
+  url: string
+  /** Service role key, if provided at construction time. Used by developer tools for admin API calls. */
+  serviceRoleKey: string | undefined
   from<TTable extends keyof TDatabase["public"]["Tables"] & string>(
     table: TTable,
   ): TableClient<TDatabase["public"]["Tables"][TTable]>
@@ -285,6 +288,7 @@ export function createClient<TDatabase extends AnyDatabase = AnyDatabase>(
 
   const baseHeaders: Record<string, string> = {
     apikey: config.anonKey,
+    Authorization: `Bearer ${config.anonKey}`,
     "Content-Type": "application/json",
   }
 
@@ -294,19 +298,23 @@ export function createClient<TDatabase extends AnyDatabase = AnyDatabase>(
     timeout: config.timeout,
   })
 
-  const auth = new AuthClient(`${config.url}/auth/v1`, baseHeaders)
+  const auth = new AuthClient(`${config.url}/auth/v1`, baseHeaders, config.initialSession)
   const storage = new StorageClient(`${config.url}/storage/v1`, baseHeaders)
   const realtime = new RealtimeClient(`${config.url}/realtime/v1`, baseHeaders)
   const functions = new FunctionsClient(config.url, baseHeaders, doFetch)
 
   const getAuthHeaders = (): Record<string, string> => {
-    // The auth headers are merged dynamically so callers pick up fresh JWTs
-    // after sign-in. Internal reference to auth._setSession isn't exposed;
-    // instead we read currentSession via a closure.
+    const token = auth.currentAccessToken
+    if (token !== null) {
+      return { ...baseHeaders, Authorization: `Bearer ${token}` }
+    }
     return baseHeaders
   }
 
   return {
+    url: config.url,
+    serviceRoleKey: config.serviceRoleKey,
+
     from<TTable extends keyof TDatabase["public"]["Tables"] & string>(
       table: TTable,
     ): TableClient<TDatabase["public"]["Tables"][TTable]> {
@@ -355,7 +363,12 @@ export function createClient<TDatabase extends AnyDatabase = AnyDatabase>(
       } catch (e) {
         return { data: null, error: { message: e instanceof Error ? e.message : "Network error" } }
       }
-      const json = await res.json() as Record<string, unknown>
+      let json: Record<string, unknown>
+      try {
+        json = await res.json() as Record<string, unknown>
+      } catch {
+        return { data: null, error: { message: `GraphQL endpoint returned a non-JSON response (HTTP ${res.status} ${res.statusText})` } }
+      }
       if (json["errors"] !== undefined) {
         const errors = json["errors"] as Array<{ message: string }>
         return { data: json["data"] ?? null, error: { message: (errors[0]?.message ?? "GraphQL error") } }

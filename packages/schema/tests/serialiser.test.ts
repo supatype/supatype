@@ -5,6 +5,7 @@ import { text, integer, uuid, enumField, decimal, json, image, geo, vector, slug
 import { belongsTo, hasMany, manyToMany } from "../src/relations.js"
 import { publicAccess, role, owner } from "../src/access.js"
 import { timestamps, publishable, softDelete } from "../src/composites.js"
+import { supatype } from "../src/system.js"
 
 describe("serialiseSchema()", () => {
   it("serialises a simple model", () => {
@@ -37,7 +38,7 @@ describe("serialiseSchema()", () => {
     expect(m.options.timestamps).toBe(true)
   })
 
-  it("serialises relations", () => {
+  it("serialises relations (string targets)", () => {
     const Post = model("post", {
       fields: {
         id: uuid({ required: true }),
@@ -62,6 +63,49 @@ describe("serialiseSchema()", () => {
     expect(fields.tags.kind).toBe("relation")
     expect(fields.tags.cardinality).toBe("manyToMany")
     expect(fields.tags.through).toBe("post_tags")
+  })
+
+  it("serialises relations (model definition targets)", () => {
+    const User = model("user", {
+      fields: { id: uuid({ required: true }), name: text({ required: true }) },
+    })
+    const Comment = model("comment", {
+      fields: { id: uuid({ required: true }), body: text({ required: true }) },
+    })
+    const Post = model("post", {
+      fields: {
+        id: uuid({ required: true }),
+        author: belongsTo(User, { onDelete: "cascade" }),
+        comments: hasMany(Comment),
+      },
+    })
+
+    const ast = serialiseSchema({ User, Comment, Post })
+    const fields = ast.models.find(m => m.name === "post")!.fields
+
+    // target should be the model name, not the variable name
+    expect(fields.author.target).toBe("user")
+    expect(fields.author.cardinality).toBe("belongsTo")
+    expect(fields.author.onDelete).toBe("cascade")
+    expect(fields.comments.target).toBe("comment")
+    expect(fields.comments.cardinality).toBe("hasMany")
+  })
+
+  it("serialises relations (supatype system model targets)", () => {
+    const Post = model("post", {
+      fields: {
+        id: uuid({ required: true }),
+        author: belongsTo(supatype.user, { onDelete: "cascade" }),
+      },
+    })
+
+    const ast = serialiseSchema({ Post })
+    const fields = ast.models[0]!.fields
+
+    // target must be the system token — the engine resolves it at deploy time
+    expect(fields.author.target).toBe("supatype:user")
+    expect(fields.author.cardinality).toBe("belongsTo")
+    expect(fields.author.onDelete).toBe("cascade")
   })
 
   it("serialises composites", () => {

@@ -1,7 +1,10 @@
 import React, { useState, useCallback } from "react"
-import { useStudioClient } from "../StudioApp.js"
-import { cn } from "../lib/utils.js"
+import { useStudioClient } from "../StudioCore.js"
+import { useApiQuery } from "../hooks/useApiQuery.js"
 import { Badge, Button, Card, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
+import { EmptyState } from "../components/EmptyState.js"
+import { ErrorBanner } from "../components/ErrorBanner.js"
+import { SlidePanel } from "../components/SlidePanel.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -42,65 +45,6 @@ interface AuthSession {
   last_active: string
   created_at: string
 }
-
-// ─── Mock Data ────────────────────────────────────────────────────────────────
-
-const mockUsers: AuthUser[] = [
-  {
-    id: "u1", email: "alice@example.com", phone: "+44 7700 900123", role: "authenticated",
-    confirmed: true, disabled: false, last_sign_in: "2026-03-10T08:00:00Z",
-    created_at: "2026-01-15T10:30:00Z", updated_at: "2026-03-10T08:00:00Z",
-    metadata: { full_name: "Alice Johnson", avatar_url: "https://i.pravatar.cc/40?u=alice" },
-    providers: [
-      { provider: "email", provider_id: "alice@example.com", linked_at: "2026-01-15T10:30:00Z" },
-      { provider: "github", provider_id: "alice-gh", linked_at: "2026-02-01T09:00:00Z" },
-    ],
-    mfa_factors: [
-      { id: "f1", type: "totp", friendly_name: "Authenticator", created_at: "2026-02-15T10:00:00Z", verified: true },
-    ],
-  },
-  {
-    id: "u2", email: "bob@example.com", phone: null, role: "authenticated",
-    confirmed: true, disabled: false, last_sign_in: "2026-03-09T14:20:00Z",
-    created_at: "2026-02-01T14:20:00Z", updated_at: "2026-03-09T14:20:00Z",
-    metadata: { full_name: "Bob Smith" },
-    providers: [{ provider: "email", provider_id: "bob@example.com", linked_at: "2026-02-01T14:20:00Z" }],
-    mfa_factors: [],
-  },
-  {
-    id: "u3", email: "carol@example.com", phone: null, role: "admin",
-    confirmed: true, disabled: false, last_sign_in: "2026-03-10T09:15:00Z",
-    created_at: "2026-02-14T09:15:00Z", updated_at: "2026-03-10T09:15:00Z",
-    metadata: { full_name: "Carol Davis" },
-    providers: [
-      { provider: "email", provider_id: "carol@example.com", linked_at: "2026-02-14T09:15:00Z" },
-      { provider: "google", provider_id: "carol-google", linked_at: "2026-02-20T11:00:00Z" },
-    ],
-    mfa_factors: [],
-  },
-  {
-    id: "u4", email: "dave@example.com", phone: null, role: "authenticated",
-    confirmed: false, disabled: false, last_sign_in: null,
-    created_at: "2026-03-01T16:45:00Z", updated_at: "2026-03-01T16:45:00Z",
-    metadata: {},
-    providers: [{ provider: "email", provider_id: "dave@example.com", linked_at: "2026-03-01T16:45:00Z" }],
-    mfa_factors: [],
-  },
-  {
-    id: "u5", email: "eve@example.com", phone: "+1 555 0100", role: "authenticated",
-    confirmed: true, disabled: true, last_sign_in: "2026-02-20T11:00:00Z",
-    created_at: "2026-01-20T12:00:00Z", updated_at: "2026-02-25T10:00:00Z",
-    metadata: { full_name: "Eve Wilson" },
-    providers: [{ provider: "email", provider_id: "eve@example.com", linked_at: "2026-01-20T12:00:00Z" }],
-    mfa_factors: [],
-  },
-]
-
-const mockSessions: AuthSession[] = [
-  { id: "s1", user_id: "u1", ip: "192.168.1.10", user_agent: "Chrome/120.0 (macOS)", last_active: "2026-03-10T08:00:00Z", created_at: "2026-03-10T07:30:00Z" },
-  { id: "s2", user_id: "u1", ip: "10.0.0.5", user_agent: "Safari/17.3 (iOS)", last_active: "2026-03-09T22:15:00Z", created_at: "2026-03-09T20:00:00Z" },
-  { id: "s3", user_id: "u3", ip: "192.168.1.20", user_agent: "Firefox/122.0 (Windows)", last_active: "2026-03-10T09:15:00Z", created_at: "2026-03-10T09:00:00Z" },
-]
 
 const availableRoles = ["authenticated", "admin", "moderator", "editor"]
 const providerFilters = ["all", "email", "github", "google", "apple"]
@@ -144,8 +88,7 @@ function UserForm({
   }
 
   return (
-    <Card className="p-4">
-      <h3 className="m-0 mb-4">{user ? "Edit User" : "Create User"}</h3>
+    <div>
       <div className="grid grid-cols-1 gap-3 max-w-[500px]">
         <div>
           <label className="block text-[0.8rem] text-muted-foreground mb-1">Email <span className="text-red-400">*</span></label>
@@ -177,7 +120,7 @@ function UserForm({
           <Button onClick={onCancel}>Cancel</Button>
         </div>
       </div>
-    </Card>
+    </div>
   )
 }
 
@@ -186,7 +129,6 @@ function UserForm({
 function UserDetail({
   user,
   sessions,
-  onClose,
   onToggleDisable,
   onImpersonate,
   onEdit,
@@ -195,7 +137,6 @@ function UserDetail({
 }: {
   user: AuthUser
   sessions: AuthSession[]
-  onClose: () => void
   onToggleDisable: () => void
   onImpersonate: () => void
   onEdit: () => void
@@ -207,15 +148,7 @@ function UserDetail({
   const userSessions = sessions.filter((s) => s.user_id === user.id)
 
   return (
-    <Card className="p-4">
-      <div className="flex justify-between items-start mb-4">
-        <div>
-          <h3 className="m-0">{user.email}</h3>
-          <code className="text-[0.7rem] text-zinc-600">{user.id}</code>
-        </div>
-        <Button onClick={onClose}>Close</Button>
-      </div>
-
+    <div className="space-y-6">
       {/* Profile info */}
       <div className="grid grid-cols-2 gap-4 mb-6">
         <div>
@@ -338,7 +271,7 @@ function UserDetail({
             </table>
           </Card>
         ) : (
-          <p className="text-xs text-zinc-600">No active sessions</p>
+          <p className="text-xs text-zinc-600">Session management not available</p>
         )}
       </div>
 
@@ -377,7 +310,7 @@ function UserDetail({
           <Button size="xs" className="mt-2" onClick={() => setShowImpersonateInfo(false)}>Dismiss</Button>
         </div>
       ) : null}
-    </Card>
+    </div>
   )
 }
 
@@ -394,9 +327,8 @@ function InviteUserForm({
   const [role, setRole] = useState("authenticated")
 
   return (
-    <Card className="p-4">
-      <h3 className="m-0 mb-3">Invite User</h3>
-      <p className="text-xs text-muted-foreground mb-3">
+    <div>
+      <p className="text-xs text-muted-foreground mb-4">
         An invitation email will be sent to the user with a magic link to confirm their account.
       </p>
       <div className="flex gap-2 items-end max-w-[500px]">
@@ -415,17 +347,76 @@ function InviteUserForm({
         </Button>
         <Button onClick={onCancel}>Cancel</Button>
       </div>
-    </Card>
+    </div>
   )
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapGoTrueUser(raw: any): AuthUser {
+  return {
+    id: raw.id,
+    email: raw.email ?? "",
+    phone: raw.phone || null,
+    role: raw.role ?? "authenticated",
+    confirmed: raw.email_confirmed_at != null,
+    disabled: raw.banned_until != null,
+    last_sign_in: raw.last_sign_in_at ?? null,
+    created_at: raw.created_at,
+    updated_at: raw.updated_at,
+    metadata: raw.user_metadata ?? {},
+    providers: Array.isArray(raw.identities)
+      ? raw.identities.map((i: any) => ({
+          provider: i.provider,
+          provider_id: i.identity_id ?? i.id,
+          linked_at: i.created_at,
+        }))
+      : [],
+    mfa_factors: Array.isArray(raw.factors)
+      ? raw.factors.map((f: any) => ({
+          id: f.id,
+          type: f.factor_type ?? f.type ?? "totp",
+          friendly_name: f.friendly_name ?? null,
+          created_at: f.created_at,
+          verified: f.status === "verified",
+        }))
+      : [],
+  }
+}
+
 export function AuthManagement(): React.ReactElement {
   const client = useStudioClient()
 
-  const [users, setUsers] = useState<AuthUser[]>(mockUsers)
-  const [sessions, setSessions] = useState<AuthSession[]>(mockSessions)
+  // All auth admin calls go through the project proxy (client.url), which
+  // is the Next.js control-plane proxy server-side. The proxy attaches the
+  // service role key and enforces project scoping — the key never reaches
+  // the browser, and only users belonging to this project are returned.
+  const authAdminFetch = useCallback(async (path: string, options?: RequestInit) => {
+    const res = await fetch(`${client.url}/auth/v1/admin${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(client.serviceRoleKey && { Authorization: `Bearer ${client.serviceRoleKey}` }),
+        ...options?.headers,
+      },
+      credentials: "include",
+    })
+    const json = await res.json()
+    if (!res.ok) throw new Error(json.msg ?? json.message ?? "Auth API error")
+    return json
+  }, [client.url, client.serviceRoleKey])
+
+  const { data: usersData, loading, error, refetch } = useApiQuery(
+    async () => {
+      const json = await authAdminFetch("/users?page=1&per_page=50")
+      return (json.users as any[]).map(mapGoTrueUser)
+    },
+    [authAdminFetch],
+  )
+
+  const users = usersData ?? []
+  const sessions: AuthSession[] = []
 
   // Filters
   const [search, setSearch] = useState("")
@@ -455,115 +446,106 @@ export function AuthManagement(): React.ReactElement {
     return true
   })
 
-  const handleToggleDisable = (userId: string) => {
-    setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, disabled: !u.disabled } : u))
-    if (selectedUser?.id === userId) {
-      setSelectedUser((prev) => prev ? { ...prev, disabled: !prev.disabled } : null)
-    }
-  }
-
-  const handleDeleteUser = (userId: string) => {
-    setUsers((prev) => prev.filter((u) => u.id !== userId))
-    setSessions((prev) => prev.filter((s) => s.user_id !== userId))
+  const handleToggleDisable = useCallback(async (userId: string) => {
+    const user = users.find((u) => u.id === userId)
+    if (!user) return
+    const ban_duration = user.disabled ? "none" : "876000h"
+    await authAdminFetch(`/users/${userId}`, {
+      method: "PUT",
+      body: JSON.stringify({ ban_duration }),
+    })
+    refetch()
     setSelectedUser(null)
-  }
+  }, [users, authAdminFetch, refetch])
 
-  const handleCreateUser = (data: { email: string; role: string; password?: string; metadata: Record<string, unknown> }) => {
-    const newUser: AuthUser = {
-      id: `u${Date.now()}`,
-      email: data.email,
-      phone: null,
-      role: data.role,
-      confirmed: false,
-      disabled: false,
-      last_sign_in: null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      metadata: data.metadata,
-      providers: [{ provider: "email", provider_id: data.email, linked_at: new Date().toISOString() }],
-      mfa_factors: [],
-    }
-    setUsers((prev) => [newUser, ...prev])
+  const handleDeleteUser = useCallback(async (userId: string) => {
+    await authAdminFetch(`/users/${userId}`, { method: "DELETE" })
+    refetch()
+    setSelectedUser(null)
+  }, [authAdminFetch, refetch])
+
+  const handleCreateUser = useCallback(async (data: { email: string; role: string; password?: string; metadata: Record<string, unknown> }) => {
+    await authAdminFetch("/users", {
+      method: "POST",
+      body: JSON.stringify({
+        email: data.email,
+        password: data.password,
+        user_metadata: data.metadata,
+        role: data.role,
+      }),
+    })
+    refetch()
     setShowCreateForm(false)
-  }
+  }, [authAdminFetch, refetch])
 
-  const handleEditUser = (data: { email: string; role: string; password?: string; metadata: Record<string, unknown> }) => {
+  const handleEditUser = useCallback(async (data: { email: string; role: string; password?: string; metadata: Record<string, unknown> }) => {
     if (!editingUser) return
-    setUsers((prev) => prev.map((u) => u.id === editingUser.id ? { ...u, email: data.email, role: data.role, metadata: data.metadata, updated_at: new Date().toISOString() } : u))
+    await authAdminFetch(`/users/${editingUser.id}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        email: data.email,
+        role: data.role,
+        user_metadata: data.metadata,
+        ...(data.password ? { password: data.password } : {}),
+      }),
+    })
+    refetch()
     setEditingUser(null)
     setSelectedUser(null)
+  }, [editingUser, authAdminFetch, refetch])
+
+  const handleInviteUser = useCallback(async (email: string, role: string) => {
+    await authAdminFetch("/users", {
+      method: "POST",
+      body: JSON.stringify({ email, role }),
+    })
+    refetch()
+    setShowInviteForm(false)
+  }, [authAdminFetch, refetch])
+
+  const handleRevokeSession = useCallback((_sessionId: string) => {
+    // Session management not available via GoTrue admin API
+  }, [])
+
+  const handleImpersonate = useCallback((_userId: string) => {
+    // Impersonation placeholder — shown in detail view
+  }, [])
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12 text-muted-foreground text-sm">
+        Loading users…
+      </div>
+    )
   }
 
-  const handleInviteUser = (email: string, role: string) => {
-    // In production: POST to auth invite endpoint
-    const newUser: AuthUser = {
-      id: `u${Date.now()}`,
-      email,
-      phone: null,
-      role,
-      confirmed: false,
-      disabled: false,
-      last_sign_in: null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      metadata: {},
-      providers: [{ provider: "email", provider_id: email, linked_at: new Date().toISOString() }],
-      mfa_factors: [],
-    }
-    setUsers((prev) => [newUser, ...prev])
+  if (error) {
+    return <ErrorBanner message={error} onRetry={refetch} />
+  }
+
+  const panelOpen = selectedUser !== null || editingUser !== null || showCreateForm || showInviteForm
+  const panelTitle = editingUser ? "Edit User"
+    : showCreateForm ? "Create User"
+    : showInviteForm ? "Invite User"
+    : selectedUser?.email ?? ""
+  const panelSubtitle = !editingUser && !showCreateForm && !showInviteForm
+    ? selectedUser?.id
+    : undefined
+
+  function closePanel() {
+    setSelectedUser(null)
+    setEditingUser(null)
+    setShowCreateForm(false)
     setShowInviteForm(false)
   }
 
-  const handleRevokeSession = (sessionId: string) => {
-    setSessions((prev) => prev.filter((s) => s.id !== sessionId))
-  }
-
-  const handleImpersonate = (userId: string) => {
-    // In production: generate short-lived JWT via admin API
-    // For now, just show info in the detail view
-  }
-
-  // Show detail view or form
-  if (selectedUser && !editingUser) {
+  if (users.length === 0 && !panelOpen) {
     return (
-      <UserDetail
-        user={selectedUser}
-        sessions={sessions}
-        onClose={() => setSelectedUser(null)}
-        onToggleDisable={() => handleToggleDisable(selectedUser.id)}
-        onImpersonate={() => handleImpersonate(selectedUser.id)}
-        onEdit={() => setEditingUser(selectedUser)}
-        onDelete={() => handleDeleteUser(selectedUser.id)}
-        onRevokeSession={handleRevokeSession}
-      />
-    )
-  }
-
-  if (editingUser) {
-    return (
-      <UserForm
-        user={editingUser}
-        onSave={handleEditUser}
-        onCancel={() => setEditingUser(null)}
-      />
-    )
-  }
-
-  if (showCreateForm) {
-    return (
-      <UserForm
-        user={null}
-        onSave={handleCreateUser}
-        onCancel={() => setShowCreateForm(false)}
-      />
-    )
-  }
-
-  if (showInviteForm) {
-    return (
-      <InviteUserForm
-        onInvite={handleInviteUser}
-        onCancel={() => setShowInviteForm(false)}
+      <EmptyState
+        title="No users registered yet."
+        description="Create a user to get started with authentication."
+        action={() => setShowCreateForm(true)}
+        actionLabel="Create User"
       />
     )
   }
@@ -651,7 +633,7 @@ export function AuthManagement(): React.ReactElement {
                 <Td className="text-xs text-muted-foreground">{new Date(u.created_at).toLocaleDateString()}</Td>
                 <Td>
                   <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-                    <Button size="xs" onClick={() => handleToggleDisable(u.id)}>
+                    <Button size="xs" onClick={() => { void handleToggleDisable(u.id) }}>
                       {u.disabled ? "Enable" : "Disable"}
                     </Button>
                     <Button size="xs" onClick={() => { setSelectedUser(u) }} title="View details + impersonate">
@@ -675,6 +657,46 @@ export function AuthManagement(): React.ReactElement {
       <div className="text-xs text-muted-foreground mt-2">
         {filtered.length} of {users.length} users shown
       </div>
+
+      <SlidePanel
+        open={panelOpen}
+        onClose={closePanel}
+        title={panelTitle}
+        subtitle={panelSubtitle}
+        width="max-w-[560px]"
+      >
+        {selectedUser && !editingUser && !showCreateForm && !showInviteForm && (
+          <UserDetail
+            user={selectedUser}
+            sessions={sessions}
+            onToggleDisable={() => { void handleToggleDisable(selectedUser.id) }}
+            onImpersonate={() => handleImpersonate(selectedUser.id)}
+            onEdit={() => setEditingUser(selectedUser)}
+            onDelete={() => { void handleDeleteUser(selectedUser.id) }}
+            onRevokeSession={handleRevokeSession}
+          />
+        )}
+        {editingUser && (
+          <UserForm
+            user={editingUser}
+            onSave={(data) => { void handleEditUser(data) }}
+            onCancel={() => setEditingUser(null)}
+          />
+        )}
+        {showCreateForm && (
+          <UserForm
+            user={null}
+            onSave={(data) => { void handleCreateUser(data) }}
+            onCancel={() => setShowCreateForm(false)}
+          />
+        )}
+        {showInviteForm && (
+          <InviteUserForm
+            onInvite={(email, role) => { void handleInviteUser(email, role) }}
+            onCancel={() => setShowInviteForm(false)}
+          />
+        )}
+      </SlidePanel>
     </>
   )
 }

@@ -9,7 +9,7 @@ import { StorageClient } from "../src/storage.js"
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const STORAGE_URL = "http://localhost:8000/storage/v1"
+const STORAGE_URL = "http://localhost:18473/storage/v1"
 const HEADERS = { apikey: "test-anon-key", Authorization: "Bearer test-token" }
 
 function freshClient(): StorageClient {

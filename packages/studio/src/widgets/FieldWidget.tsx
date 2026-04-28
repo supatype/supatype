@@ -12,6 +12,8 @@ import { RichTextWidget } from "./RichTextWidget.js"
 import { JsonWidget } from "./JsonWidget.js"
 import { BlocksWidget } from "./BlocksWidget.js"
 import { PublishWidget } from "./PublishWidget.js"
+import { ColorWidget } from "./ColorWidget.js"
+import { XmlWidget } from "./XmlWidget.js"
 
 export interface WidgetProps {
   config: FieldConfig
@@ -71,6 +73,10 @@ function WidgetRenderer(props: WidgetProps): React.ReactElement {
       return <BlocksWidget {...props} />
     case "publish":
       return <PublishWidget {...props} />
+    case "color":
+      return <ColorWidget {...props} />
+    case "xml":
+      return <XmlWidget {...props} />
     default:
       return <TextWidget {...props} />
   }

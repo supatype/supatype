@@ -10,6 +10,7 @@ import {
 } from "node:fs"
 import { resolve, join, basename, relative } from "node:path"
 import { spawnSync, execSync } from "node:child_process"
+import { localKongBaseUrl } from "../local-gateway.js"
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -255,7 +256,7 @@ function serve(cwd: string, opts: { port: string; envFile: string }): void {
       env: {
         ...process.env,
         PORT: opts.port,
-        SUPATYPE_URL: process.env["SUPATYPE_URL"] ?? `http://localhost:8000`,
+        SUPATYPE_URL: process.env["SUPATYPE_URL"] ?? localKongBaseUrl(),
         SUPATYPE_ANON_KEY: process.env["SUPATYPE_ANON_KEY"] ?? "",
         SUPATYPE_SERVICE_ROLE_KEY: process.env["SUPATYPE_SERVICE_ROLE_KEY"] ?? "",
       },

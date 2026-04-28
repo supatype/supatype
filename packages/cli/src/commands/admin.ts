@@ -8,6 +8,7 @@ import { createInterface } from "node:readline"
 import { randomBytes, scrypt } from "node:crypto"
 import { promisify } from "node:util"
 import { loadConfig } from "../config.js"
+import { connectionString } from "../config-toml.js"
 import { signJwt } from "../jwt.js"
 
 const scryptAsync = promisify(scrypt)
@@ -33,7 +34,7 @@ export function registerAdmin(program: Command): void {
       }) => {
         const cwd = process.cwd()
         const config = loadConfig(cwd)
-        const connection = opts.connection ?? config.connection
+        const connection = opts.connection ?? connectionString(config)
 
         const email = opts.email ?? (await prompt("Admin email: "))
         if (!email || !email.includes("@")) {
@@ -146,7 +147,7 @@ export function registerAdmin(program: Command): void {
       async (opts: { email: string; role: string; connection?: string }) => {
         const cwd = process.cwd()
         const config = loadConfig(cwd)
-        const connection = opts.connection ?? config.connection
+        const connection = opts.connection ?? connectionString(config)
 
         const pg = await importPg()
         const pool = new pg.Pool({ connectionString: connection, max: 2 })
@@ -194,7 +195,7 @@ export function registerAdmin(program: Command): void {
     .action(async (opts: { connection?: string }) => {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
-      const connection = opts.connection ?? config.connection
+      const connection = opts.connection ?? connectionString(config)
 
       const pg = await importPg()
       const pool = new pg.Pool({ connectionString: connection, max: 2 })

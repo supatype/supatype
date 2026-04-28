@@ -3,7 +3,7 @@ import { QueryBuilder, MutationBuilder } from "../src/query.js"
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const BASE = "http://localhost:8000"
+const BASE = "http://localhost:18473"
 const PATH = "/rest/v1/posts"
 const HEADERS: Record<string, string> = { apikey: "anon-key", "Content-Type": "application/json" }
 

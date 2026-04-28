@@ -19,9 +19,12 @@ export class AuthClient {
   private readonly listeners = new Map<string, AuthListener>()
   private listenerIdCounter = 0
 
-  constructor(url: string, baseHeaders: Record<string, string>) {
+  constructor(url: string, baseHeaders: Record<string, string>, initialSession?: Session | undefined) {
     this.url = url
     this.baseHeaders = baseHeaders
+    if (initialSession !== undefined) {
+      this.currentSession = initialSession
+    }
   }
 
   async signUp(credentials: {
@@ -616,6 +619,11 @@ export class AuthClient {
   }
 
   // ─── Internal ────────────────────────────────────────────────────────────────
+
+  /** Returns the current session's access token, or null when signed out. */
+  get currentAccessToken(): string | null {
+    return this.currentSession?.accessToken ?? null
+  }
 
   _setSession(session: Session | null): void {
     const prev = this.currentSession

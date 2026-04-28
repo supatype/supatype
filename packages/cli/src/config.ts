@@ -1,6 +1,10 @@
 import { existsSync } from "node:fs"
 import { resolve } from "node:path"
 import { evalTsSnippet } from "./tsx-runner.js"
+import { loadTomlConfig, type SupatypeTomlConfig } from "./config-toml.js"
+
+// Re-export so callers can import from either module.
+export type { SupatypeTomlConfig }
 
 export interface ServiceVersionPin {
   /** Docker image tag to pin this service to (e.g. "v1.2.3"). When set, `self-host upgrade` skips this service. */
@@ -111,24 +115,58 @@ export function defineConfig(config: SupatypeConfig): SupatypeConfig {
   return config
 }
 
-const CONFIG_CANDIDATES = [
+const TOML_CONFIG_FILE = "supatype.config.toml"
+
+const LEGACY_CONFIG_CANDIDATES = [
   "supatype.config.ts",
   "supatype.config.js",
   "supatype.config.mjs",
 ]
 
-/** Load and evaluate supatype.config.ts from the given directory. */
-export function loadConfig(cwd: string = process.cwd()): SupatypeConfig {
-  for (const candidate of CONFIG_CANDIDATES) {
+/**
+ * Load project config — TOML-first.
+ *
+ * Tries supatype.config.toml first. If found, delegates to loadTomlConfig.
+ * If only a legacy .ts config is found, throws with a migration notice.
+ * This overload is for commands that need the full project config (dev, init, etc.).
+ */
+export function loadConfig(cwd: string = process.cwd()): SupatypeTomlConfig {
+  if (existsSync(resolve(cwd, TOML_CONFIG_FILE))) {
+    return loadTomlConfig(cwd)
+  }
+
+  // Legacy config detected — print migration notice.
+  for (const candidate of LEGACY_CONFIG_CANDIDATES) {
+    if (existsSync(resolve(cwd, candidate))) {
+      throw new Error(
+        `Found ${candidate} but supatype now uses supatype.config.toml.\n` +
+          "Run: supatype init --migrate  to convert your existing config.\n" +
+          "See: https://docs.supatype.io/migration/toml-config",
+      )
+    }
+  }
+
+  throw new Error(
+    "No supatype.config.toml found in the current directory.\n" +
+      "Run: supatype init",
+  )
+}
+
+/**
+ * Load the legacy .ts config for commands that only need the schema path
+ * (e.g. generate, diff) and want to support both TOML and .ts configs
+ * during the transition period.
+ *
+ * Returns null if neither config format is found.
+ * @internal
+ */
+export function loadLegacyTsConfig(cwd: string = process.cwd()): SupatypeConfig | null {
+  for (const candidate of LEGACY_CONFIG_CANDIDATES) {
     const configPath = resolve(cwd, candidate)
     if (!existsSync(configPath)) continue
 
     const urlPath = "file:///" + configPath.replace(/\\/g, "/")
 
-    // Use dynamic import so we can always access .default —
-    // files without a parent package.json are treated as CJS by tsx,
-    // meaning export default becomes module.exports.default rather than
-    // the namespace default. Dynamic import + fallback handles both.
     const snippet = `
 const mod = await import(${JSON.stringify(urlPath)})
 const config = mod.default ?? mod
@@ -149,11 +187,7 @@ process.stdout.write(JSON.stringify(config))
     }
     return parsed
   }
-
-  throw new Error(
-    "No supatype.config.ts found in the current directory.\n" +
-      "Run: supatype init",
-  )
+  return null
 }
 
 /** Load schema AST by evaluating the user's schema entry point via tsx. */
@@ -172,12 +206,24 @@ export function loadSchemaAst(
 import { serialiseSchema } from "@supatype/schema"
 const mod = await import(${JSON.stringify(urlPath)})
 const { default: _default, ...named } = mod
+const entries = Object.entries(named)
 const models = Object.fromEntries(
-  Object.entries(named).filter(([, v]) =>
-    v != null && typeof v === "object" && "__modelMeta" in (v as object)
-  )
+  entries.filter(([, v]) => v != null && typeof v === "object" && "__modelMeta" in (v as object))
 )
-process.stdout.write(JSON.stringify(serialiseSchema(models)))
+const globals = Object.fromEntries(
+  entries.filter(([, v]) => v != null && typeof v === "object" && "__globalMeta" in (v as object))
+)
+const buckets = Object.fromEntries(
+  entries.filter(([, v]) => v != null && typeof v === "object" && (v as { _tag?: string })._tag === "bucket")
+)
+const localeEntry = entries.find(([, v]) => v != null && typeof v === "object" && "__localeMeta" in (v as object))
+const locale = localeEntry ? (localeEntry[1] as { __localeMeta: unknown }).__localeMeta : undefined
+process.stdout.write(JSON.stringify(serialiseSchema(
+  models,
+  Object.keys(globals).length > 0 ? globals : undefined,
+  locale as { locales: string[]; defaultLocale: string } | undefined,
+  Object.keys(buckets).length > 0 ? buckets : undefined,
+)))
 `
   const result = evalTsSnippet(snippet, { cwd })
   if (result.exitCode !== 0) {

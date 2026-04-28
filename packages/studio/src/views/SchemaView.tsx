@@ -1,7 +1,27 @@
-import React, { useState, useMemo, useCallback } from "react"
-import { useStudioClient } from "../StudioApp.js"
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react"
+import {
+  ReactFlow,
+  Background,
+  Controls,
+  MiniMap,
+  useNodesState,
+  useEdgesState,
+  type Node,
+  type Edge,
+  type NodeProps,
+  Handle,
+  Position,
+  BackgroundVariant,
+  Panel,
+} from "@xyflow/react"
+import "@xyflow/react/dist/style.css"
+import dagre from "@dagrejs/dagre"
 import { cn } from "../lib/utils.js"
-import { Badge, Button, Card, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
+import { Badge, Button, Card, Th, Td } from "../components/ui.js"
+import { useProjectProxy, type SchemaTable } from "../hooks/useProjectProxy.js"
+import { useApiQuery } from "../hooks/useApiQuery.js"
+import { EmptyState } from "../components/EmptyState.js"
+import { ErrorBanner } from "../components/ErrorBanner.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -14,247 +34,346 @@ interface FieldMeta {
   is_unique: boolean
   is_indexed: boolean
   references: string | null
+  is_foreign_key: boolean
 }
 
 interface RelationMeta {
   name: string
   type: "belongsTo" | "hasMany" | "manyToMany"
-  from_model: string
+  from_table: string
   from_field: string
-  to_model: string
+  to_schema: string
+  to_table: string
   to_field: string
-  through_table?: string
 }
 
-interface ModelMeta {
+interface TableMeta {
   name: string
-  table_name: string
+  schema: string
   fields: FieldMeta[]
   relations: RelationMeta[]
-  timestamps: boolean
-  publishable: boolean
-  softDelete: boolean
 }
 
-type SupportedFieldType =
-  | "text" | "integer" | "bigint" | "boolean" | "uuid" | "timestamptz"
-  | "timestamp" | "date" | "float" | "decimal" | "jsonb" | "json"
-  | "serial" | "bytea" | "inet" | "cidr" | "macaddr"
+// ─── Data mapping ─────────────────────────────────────────────────────────────
 
-// ─── Mock Data ────────────────────────────────────────────────────────────────
+function mapToTableMeta(table: SchemaTable, schema: string): TableMeta {
+  const fields: FieldMeta[] = table.columns.map(col => ({
+    name: col.name,
+    type: col.type,
+    nullable: col.nullable,
+    default_value: col.default_value,
+    is_primary: col.is_primary,
+    is_unique: col.is_unique,
+    is_indexed: col.is_indexed,
+    references: col.references ?? null,
+    is_foreign_key: col.is_foreign_key ?? false,
+  }))
 
-const mockModels: ModelMeta[] = [
-  {
-    name: "User",
-    table_name: "users",
-    timestamps: true,
-    publishable: false,
-    softDelete: false,
-    fields: [
-      { name: "id", type: "uuid", nullable: false, default_value: "gen_random_uuid()", is_primary: true, is_unique: true, is_indexed: true, references: null },
-      { name: "email", type: "text", nullable: false, default_value: null, is_primary: false, is_unique: true, is_indexed: true, references: null },
-      { name: "name", type: "text", nullable: false, default_value: null, is_primary: false, is_unique: false, is_indexed: false, references: null },
-      { name: "avatar_url", type: "text", nullable: true, default_value: null, is_primary: false, is_unique: false, is_indexed: false, references: null },
-      { name: "created_at", type: "timestamptz", nullable: false, default_value: "now()", is_primary: false, is_unique: false, is_indexed: false, references: null },
-      { name: "updated_at", type: "timestamptz", nullable: false, default_value: "now()", is_primary: false, is_unique: false, is_indexed: false, references: null },
-    ],
-    relations: [],
-  },
-  {
-    name: "Post",
-    table_name: "posts",
-    timestamps: true,
-    publishable: true,
-    softDelete: false,
-    fields: [
-      { name: "id", type: "uuid", nullable: false, default_value: "gen_random_uuid()", is_primary: true, is_unique: true, is_indexed: true, references: null },
-      { name: "title", type: "text", nullable: false, default_value: null, is_primary: false, is_unique: false, is_indexed: false, references: null },
-      { name: "slug", type: "text", nullable: false, default_value: null, is_primary: false, is_unique: true, is_indexed: true, references: null },
-      { name: "content", type: "text", nullable: true, default_value: null, is_primary: false, is_unique: false, is_indexed: false, references: null },
-      { name: "author_id", type: "uuid", nullable: false, default_value: null, is_primary: false, is_unique: false, is_indexed: true, references: "users.id" },
-      { name: "status", type: "text", nullable: false, default_value: "'draft'", is_primary: false, is_unique: false, is_indexed: true, references: null },
-      { name: "metadata", type: "jsonb", nullable: true, default_value: null, is_primary: false, is_unique: false, is_indexed: false, references: null },
-      { name: "created_at", type: "timestamptz", nullable: false, default_value: "now()", is_primary: false, is_unique: false, is_indexed: false, references: null },
-      { name: "updated_at", type: "timestamptz", nullable: false, default_value: "now()", is_primary: false, is_unique: false, is_indexed: false, references: null },
-    ],
-    relations: [
-      { name: "author", type: "belongsTo", from_model: "Post", from_field: "author_id", to_model: "User", to_field: "id" },
-      { name: "tags", type: "manyToMany", from_model: "Post", from_field: "id", to_model: "Tag", to_field: "id", through_table: "post_tags" },
-    ],
-  },
-  {
-    name: "Tag",
-    table_name: "tags",
-    timestamps: false,
-    publishable: false,
-    softDelete: false,
-    fields: [
-      { name: "id", type: "uuid", nullable: false, default_value: "gen_random_uuid()", is_primary: true, is_unique: true, is_indexed: true, references: null },
-      { name: "name", type: "text", nullable: false, default_value: null, is_primary: false, is_unique: true, is_indexed: true, references: null },
-      { name: "slug", type: "text", nullable: false, default_value: null, is_primary: false, is_unique: true, is_indexed: true, references: null },
-    ],
-    relations: [
-      { name: "posts", type: "manyToMany", from_model: "Tag", from_field: "id", to_model: "Post", to_field: "id", through_table: "post_tags" },
-    ],
-  },
-]
-
-const FIELD_TYPES: SupportedFieldType[] = [
-  "text", "integer", "bigint", "boolean", "uuid", "timestamptz",
-  "timestamp", "date", "float", "decimal", "jsonb", "json", "serial", "bytea",
-]
-
-// ─── ERD Diagram (simplified) ─────────────────────────────────────────────────
-
-function ErdDiagram({ models }: { models: ModelMeta[] }): React.ReactElement {
-  // Collect all relations across all models
-  const allRelations = useMemo(() => {
-    const seen = new Set<string>()
-    const relations: RelationMeta[] = []
-    for (const model of models) {
-      for (const rel of model.relations) {
-        const key = [rel.from_model, rel.to_model].sort().join("-") + rel.name
-        if (!seen.has(key)) {
-          seen.add(key)
-          relations.push(rel)
-        }
+  const relations: RelationMeta[] = table.columns
+    .filter(col => col.is_foreign_key && col.references)
+    .map(col => {
+      // references_col is now always schema.table.column (3 parts)
+      const parts = col.references!.split(".")
+      let toSchema: string, toTable: string, toField: string
+      if (parts.length >= 3) {
+        toSchema = parts[0]!
+        toTable = parts[1]!
+        toField = parts[2] ?? "id"
+      } else {
+        toSchema = schema
+        toTable = parts[0] ?? ""
+        toField = parts[1] ?? "id"
       }
-    }
-    return relations
-  }, [models])
-
-  // Layout: position models in a grid
-  const cols = Math.ceil(Math.sqrt(models.length))
-  const modelPositions = useMemo(() => {
-    const positions: Record<string, { x: number; y: number }> = {}
-    models.forEach((m, i) => {
-      const col = i % cols
-      const row = Math.floor(i / cols)
-      positions[m.name] = { x: col * 280 + 20, y: row * 240 + 20 }
+      return {
+        name: col.name.replace(/_id$/, ""),
+        type: "belongsTo" as const,
+        from_table: table.name,
+        from_field: col.name,
+        to_schema: toSchema,
+        to_table: toTable,
+        to_field: toField,
+      }
     })
-    return positions
-  }, [models, cols])
 
-  const svgWidth = (cols * 280) + 40
-  const svgHeight = (Math.ceil(models.length / cols) * 240) + 40
+  return { name: table.name, schema, fields, relations }
+}
 
+// ─── Auto-layout with dagre ───────────────────────────────────────────────────
+
+const NODE_WIDTH = 240
+const NODE_HEADER = 36
+const FIELD_HEIGHT = 22
+const CROSS_REF_WIDTH = 160
+const CROSS_REF_HEIGHT = 28
+
+function getNodeHeight(fields: FieldMeta[]): number {
+  return NODE_HEADER + fields.length * FIELD_HEIGHT + 8
+}
+
+function applyDagreLayout(
+  nodes: Node[],
+  edges: Edge[],
+  direction: "TB" | "LR" = "LR",
+): Node[] {
+  const g = new dagre.graphlib.Graph()
+  g.setDefaultEdgeLabel(() => ({}))
+  g.setGraph({ rankdir: direction, nodesep: 40, ranksep: 80 })
+
+  for (const node of nodes) {
+    const isCrossRef = node.type === "crossSchemaRef"
+    g.setNode(node.id, {
+      width: node.measured?.width ?? (isCrossRef ? CROSS_REF_WIDTH : NODE_WIDTH),
+      height: node.measured?.height ?? (isCrossRef
+        ? CROSS_REF_HEIGHT
+        : (node.data as { table?: { fields: FieldMeta[] } }).table
+          ? getNodeHeight((node.data as { table: { fields: FieldMeta[] } }).table.fields)
+          : 200),
+    })
+  }
+  for (const edge of edges) {
+    g.setEdge(edge.source, edge.target)
+  }
+
+  dagre.layout(g)
+
+  return nodes.map(node => {
+    const pos = g.node(node.id)
+    const w = node.measured?.width ?? NODE_WIDTH
+    const h = node.measured?.height ?? 200
+    return { ...node, position: { x: pos.x - w / 2, y: pos.y - h / 2 } }
+  })
+}
+
+// ─── Table node ───────────────────────────────────────────────────────────────
+
+interface TableNodeData {
+  table: TableMeta
+  [key: string]: unknown
+}
+
+function TableNode({ data }: NodeProps<Node<TableNodeData>>) {
+  const { table } = data
   return (
-    <Card className="overflow-auto bg-background">
-      <svg width={svgWidth} height={svgHeight} className="min-w-full">
-        {/* Relation lines */}
-        {allRelations.map((rel, i) => {
-          const fromPos = modelPositions[rel.from_model]
-          const toPos = modelPositions[rel.to_model]
-          if (!fromPos || !toPos) return null
-          const x1 = fromPos.x + 120
-          const y1 = fromPos.y + 80
-          const x2 = toPos.x + 120
-          const y2 = toPos.y + 80
-          const midX = (x1 + x2) / 2
-          const midY = (y1 + y2) / 2
+    <div
+      className="rounded-lg border border-border bg-card shadow-md overflow-hidden"
+      style={{ minWidth: NODE_WIDTH, fontSize: 12 }}
+    >
+      {/* Header */}
+      <div className="flex items-center gap-2 px-3 py-2 bg-accent/80 border-b border-border">
+        <span className="font-semibold text-foreground truncate">{table.name}</span>
+        <span className="ml-auto text-[10px] text-muted-foreground shrink-0">{table.schema}</span>
+      </div>
 
-          const relLabel = rel.type === "belongsTo" ? "1:N" : rel.type === "hasMany" ? "N:1" : "M:N"
+      {/* Fields */}
+      {table.fields.map((field, i) => (
+        <div
+          key={field.name}
+          className={cn(
+            "flex items-center gap-2 px-3",
+            i < table.fields.length - 1 && "border-b border-border/40",
+          )}
+          style={{ height: FIELD_HEIGHT }}
+        >
+          {/* Source handle for FK edges leaving this field */}
+          {field.is_foreign_key && (
+            <Handle
+              type="source"
+              position={Position.Right}
+              id={`${table.name}-${field.name}-src`}
+              style={{ top: NODE_HEADER + i * FIELD_HEIGHT + FIELD_HEIGHT / 2 }}
+            />
+          )}
+          {/* Target handle for FK edges arriving at this field */}
+          {field.is_primary && (
+            <Handle
+              type="target"
+              position={Position.Left}
+              id={`${table.name}-${field.name}-tgt`}
+              style={{ top: NODE_HEADER + i * FIELD_HEIGHT + FIELD_HEIGHT / 2 }}
+            />
+          )}
 
-          return (
-            <g key={i}>
-              <line
-                x1={x1} y1={y1} x2={x2} y2={y2}
-                stroke="currentColor"
-                strokeOpacity={0.3}
-                strokeWidth={1.5}
-                strokeDasharray={rel.type === "manyToMany" ? "4,4" : undefined}
-              />
-              <text
-                x={midX}
-                y={midY - 6}
-                textAnchor="middle"
-                className="fill-muted-foreground text-[0.6rem]"
-              >
-                {rel.name} ({relLabel})
-              </text>
-            </g>
-          )
-        })}
-
-        {/* Model boxes */}
-        {models.map((model) => {
-          const pos = modelPositions[model.name]
-          if (!pos) return null
-          const boxHeight = 30 + model.fields.length * 18 + 10
-          return (
-            <g key={model.name}>
-              <rect
-                x={pos.x}
-                y={pos.y}
-                width={240}
-                height={boxHeight}
-                rx={6}
-                className="fill-card stroke-border"
-                strokeWidth={1}
-              />
-              {/* Model header */}
-              <rect
-                x={pos.x}
-                y={pos.y}
-                width={240}
-                height={28}
-                rx={6}
-                className="fill-accent"
-              />
-              <text
-                x={pos.x + 12}
-                y={pos.y + 18}
-                className="fill-foreground text-[0.75rem] font-semibold"
-              >
-                {model.name}
-              </text>
-              <text
-                x={pos.x + 228}
-                y={pos.y + 18}
-                textAnchor="end"
-                className="fill-muted-foreground text-[0.55rem]"
-              >
-                {model.table_name}
-              </text>
-              {/* Fields */}
-              {model.fields.map((field, fi) => {
-                const fieldY = pos.y + 38 + fi * 18
-                return (
-                  <g key={field.name}>
-                    <text
-                      x={pos.x + 12}
-                      y={fieldY + 10}
-                      className={cn("text-[0.65rem]", field.is_primary ? "fill-primary font-semibold" : "fill-foreground")}
-                    >
-                      {field.is_primary ? "PK " : field.references ? "FK " : "   "}
-                      {field.name}
-                    </text>
-                    <text
-                      x={pos.x + 228}
-                      y={fieldY + 10}
-                      textAnchor="end"
-                      className="fill-muted-foreground text-[0.6rem]"
-                    >
-                      {field.type}{field.nullable ? "?" : ""}
-                    </text>
-                  </g>
-                )
-              })}
-            </g>
-          )
-        })}
-      </svg>
-    </Card>
+          <span className={cn(
+            "w-6 text-[10px] shrink-0",
+            field.is_primary ? "text-amber-400 font-bold" : field.is_foreign_key ? "text-blue-400" : "text-muted-foreground/40"
+          )}>
+            {field.is_primary ? "PK" : field.is_foreign_key ? "FK" : ""}
+          </span>
+          <span className={cn(
+            "truncate flex-1",
+            field.is_primary ? "text-foreground font-medium" : "text-foreground/80"
+          )}>
+            {field.name}
+          </span>
+          <span className="text-[10px] text-muted-foreground shrink-0">{field.type}{field.nullable ? "?" : ""}</span>
+        </div>
+      ))}
+    </div>
   )
 }
 
-// ─── Field Form (read-only info in v1) ────────────────────────────────────────
+// ─── Cross-schema reference node (ghost node for external FKs) ───────────────
 
-function FieldDetailPanel({ field, model }: { field: FieldMeta; model: ModelMeta }): React.ReactElement {
+interface CrossSchemaRefNodeData {
+  label: string   // e.g. "auth.users.id"
+  [key: string]: unknown
+}
+
+function CrossSchemaRefNode({ data }: NodeProps<Node<CrossSchemaRefNodeData>>) {
+  return (
+    <div
+      className="rounded border border-dashed border-muted-foreground/40 bg-card/80 px-2.5 py-1.5 flex items-center gap-1.5"
+      style={{ fontSize: 11 }}
+    >
+      <Handle type="target" position={Position.Left} />
+      <span className="text-muted-foreground/60 select-none">↗</span>
+      <span className="font-mono text-muted-foreground">{data.label}</span>
+    </div>
+  )
+}
+
+const nodeTypes = {
+  table: TableNode,
+  crossSchemaRef: CrossSchemaRefNode,
+}
+
+// ─── Build React Flow graph from tables ───────────────────────────────────────
+
+function buildGraph(
+  tables: TableMeta[],
+  activeSchema: string,
+): { nodes: Node[]; edges: Edge[] } {
+  const tableNames = new Set(tables.map(t => t.name))
+
+  const nodes: Node[] = tables.map(table => ({
+    id: table.name,
+    type: "table",
+    position: { x: 0, y: 0 },
+    data: { table },
+    draggable: true,
+  }))
+
+  const edges: Edge[] = []
+  const seen = new Set<string>()
+  const crossSchemaRefs = new Map<string, string>()   // nodeId → label
+
+  for (const table of tables) {
+    for (const rel of table.relations) {
+      const isCrossSchema = rel.to_schema !== activeSchema
+      const key = `${rel.from_table}.${rel.from_field}->${rel.to_schema}.${rel.to_table}.${rel.to_field}`
+      if (seen.has(key)) continue
+      seen.add(key)
+
+      if (isCrossSchema) {
+        const refLabel = `${rel.to_schema}.${rel.to_table}.${rel.to_field}`
+        const refNodeId = `__ref__${refLabel}`
+        if (!crossSchemaRefs.has(refNodeId)) {
+          crossSchemaRefs.set(refNodeId, refLabel)
+        }
+        edges.push({
+          id: key,
+          source: rel.from_table,
+          sourceHandle: `${rel.from_table}-${rel.from_field}-src`,
+          target: refNodeId,
+          type: "smoothstep",
+          animated: false,
+          style: {
+            stroke: "hsl(var(--border))",
+            strokeWidth: 1.5,
+            strokeDasharray: "5 3",
+          },
+        })
+      } else if (tableNames.has(rel.to_table)) {
+        edges.push({
+          id: key,
+          source: rel.from_table,
+          sourceHandle: `${rel.from_table}-${rel.from_field}-src`,
+          target: rel.to_table,
+          targetHandle: `${rel.to_table}-${rel.to_field}-tgt`,
+          type: "smoothstep",
+          animated: false,
+          style: { stroke: "hsl(var(--border))", strokeWidth: 1.5 },
+        })
+      }
+    }
+  }
+
+  // Add ghost nodes for cross-schema references
+  for (const [id, label] of crossSchemaRefs) {
+    nodes.push({
+      id,
+      type: "crossSchemaRef",
+      position: { x: 0, y: 0 },
+      data: { label },
+      draggable: true,
+    })
+  }
+
+  return { nodes, edges }
+}
+
+// ─── ERD view ─────────────────────────────────────────────────────────────────
+
+function ErdFlow({
+  tables,
+  activeSchema,
+}: {
+  tables: TableMeta[]
+  activeSchema: string
+}): React.ReactElement {
+  const { nodes: initialNodes, edges: initialEdges } = useMemo(
+    () => buildGraph(tables, activeSchema),
+    [tables, activeSchema],
+  )
+
+  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
+  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
+
+  // Re-sync when tables or schema changes
+  useEffect(() => {
+    const { nodes: n, edges: e } = buildGraph(tables, activeSchema)
+    const laid = applyDagreLayout(n, e)
+    setNodes(laid)
+    setEdges(e)
+  }, [tables, activeSchema])
+
+  const runLayout = useCallback(() => {
+    setNodes(current => applyDagreLayout(current, edges))
+  }, [edges])
+
+  return (
+    <div style={{ width: "100%", height: "100%" }}>
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        nodeTypes={nodeTypes}
+        fitView
+        fitViewOptions={{ padding: 0.15 }}
+        minZoom={0.1}
+        attributionPosition="bottom-right"
+      >
+        <Background variant={BackgroundVariant.Dots} gap={20} size={1} className="opacity-30" />
+        <Controls />
+        <MiniMap nodeColor={() => "hsl(var(--accent))"} maskColor="hsl(var(--background) / 0.7)" />
+        <Panel position="top-right">
+          <Button size="sm" variant="secondary" onClick={runLayout}>
+            Auto layout
+          </Button>
+        </Panel>
+      </ReactFlow>
+    </div>
+  )
+}
+
+// ─── Field detail (Fields view) ───────────────────────────────────────────────
+
+function FieldDetailPanel({ field, table }: { field: FieldMeta; table: TableMeta }): React.ReactElement {
   return (
     <Card className="p-4">
       <h4 className="m-0 mb-3">
-        <code className="text-primary">{model.name}.{field.name}</code>
+        <code className="text-primary">{table.name}.{field.name}</code>
       </h4>
       <div className="grid grid-cols-2 gap-3 text-sm">
         <div>
@@ -284,100 +403,187 @@ function FieldDetailPanel({ field, model }: { field: FieldMeta; model: ModelMeta
           </div>
         ) : null}
       </div>
-      <div className="mt-3 p-2 bg-accent/30 rounded text-xs text-muted-foreground">
-        Read-only in v1. Modify your TypeScript schema to change field definitions.
-      </div>
     </Card>
   )
 }
 
-// ─── Relation Form (read-only) ────────────────────────────────────────────────
+// ─── Schema selector ──────────────────────────────────────────────────────────
 
-function RelationDetailPanel({ relation }: { relation: RelationMeta }): React.ReactElement {
-  const typeLabel = relation.type === "belongsTo" ? "Belongs To" : relation.type === "hasMany" ? "Has Many" : "Many to Many"
+function SchemaSelector({
+  schemas,
+  value,
+  onChange,
+}: {
+  schemas: string[]
+  value: string
+  onChange: (schema: string) => void
+}): React.ReactElement {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState("")
+  const wrapperRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as globalThis.Node | null)) {
+        setOpen(false)
+        setSearch("")
+      }
+    }
+    document.addEventListener("mousedown", handler)
+    return () => document.removeEventListener("mousedown", handler)
+  }, [open])
+
+  const filtered = schemas.filter(s =>
+    s.toLowerCase().includes(search.toLowerCase()),
+  )
+
   return (
-    <Card className="p-4">
-      <h4 className="m-0 mb-3">
-        Relation: <code className="text-primary">{relation.name}</code>
-      </h4>
-      <div className="grid grid-cols-2 gap-3 text-sm">
-        <div>
-          <label className="block text-[0.7rem] text-muted-foreground uppercase mb-0.5">Type</label>
-          <Badge variant="indigo">{typeLabel}</Badge>
-        </div>
-        <div>
-          <label className="block text-[0.7rem] text-muted-foreground uppercase mb-0.5">From</label>
-          <code>{relation.from_model}.{relation.from_field}</code>
-        </div>
-        <div>
-          <label className="block text-[0.7rem] text-muted-foreground uppercase mb-0.5">To</label>
-          <code>{relation.to_model}.{relation.to_field}</code>
-        </div>
-        {relation.through_table ? (
-          <div>
-            <label className="block text-[0.7rem] text-muted-foreground uppercase mb-0.5">Through</label>
-            <code>{relation.through_table}</code>
+    <div ref={wrapperRef} style={{ position: "relative", minWidth: 160, zIndex: 50 }}>
+      {/* Trigger */}
+      <button
+        onClick={() => { setOpen(o => !o); setSearch("") }}
+        className={cn(
+          "flex items-center gap-2 px-3 py-1.5 rounded border text-sm font-medium transition-colors w-full",
+          "border-border bg-card hover:bg-accent text-foreground",
+          open && "border-primary/50 ring-1 ring-primary/30",
+        )}
+      >
+        <span className="text-muted-foreground text-xs shrink-0">schema</span>
+        <span className="font-semibold flex-1 text-left truncate">{value}</span>
+        <svg
+          className={cn("w-3.5 h-3.5 text-muted-foreground shrink-0 transition-transform", open && "rotate-180")}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {/* Dropdown — absolutely positioned, escapes parent clip via z-index */}
+      {open && (
+        <div
+          className="rounded-lg border border-border bg-popover shadow-xl"
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            left: 0,
+            minWidth: "100%",
+            zIndex: 9999,
+            overflow: "hidden",
+          }}
+        >
+          {/* Search */}
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-border">
+            <svg className="w-3.5 h-3.5 text-muted-foreground shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+            </svg>
+            <input
+              autoFocus
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Find schema..."
+              className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/60 outline-none"
+            />
           </div>
-        ) : null}
-      </div>
-    </Card>
+
+          {/* List */}
+          <div className="max-h-[240px] overflow-y-auto py-1">
+            {filtered.length === 0 ? (
+              <p className="px-3 py-2 text-xs text-muted-foreground">No schemas found</p>
+            ) : (
+              filtered.map(s => (
+                <button
+                  key={s}
+                  className={cn(
+                    "flex items-center gap-2 w-full px-3 py-2 text-sm text-left transition-colors",
+                    s === value
+                      ? "text-foreground font-medium"
+                      : "text-foreground/80 hover:bg-accent",
+                  )}
+                  onClick={() => { onChange(s); setOpen(false); setSearch("") }}
+                >
+                  <span className="flex-1 truncate">{s}</span>
+                  {s === value && (
+                    <svg className="w-3.5 h-3.5 text-primary shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
+// ─── Main view ────────────────────────────────────────────────────────────────
 
 export function SchemaView(): React.ReactElement {
-  const [models] = useState<ModelMeta[]>(mockModels)
-  const [selected, setSelected] = useState<string>(mockModels[0]?.name ?? "")
-  const [modelSearch, setModelSearch] = useState("")
-  const [viewMode, setViewMode] = useState<"table" | "erd">("table")
+  const proxy = useProjectProxy()
+  const [activeSchema, setActiveSchema] = useState<string>("public")
+  const [viewMode, setViewMode] = useState<"fields" | "erd">("erd")
+  const [selectedTable, setSelectedTable] = useState<string>("")
   const [selectedField, setSelectedField] = useState<FieldMeta | null>(null)
-  const [selectedRelation, setSelectedRelation] = useState<RelationMeta | null>(null)
 
-  const current = models.find((m) => m.name === selected) ?? null
+  const { data: availableSchemas } = useApiQuery(
+    async () => proxy.schemas(),
+    [proxy],
+  )
 
-  const filteredModels = modelSearch
-    ? models.filter((m) =>
-        m.name.toLowerCase().includes(modelSearch.toLowerCase()) ||
-        m.table_name.toLowerCase().includes(modelSearch.toLowerCase())
-      )
-    : models
+  const { data: tableData, loading, error, refetch } = useApiQuery(
+    async () => {
+      const tables = await proxy.introspect(activeSchema)
+      return tables.map(t => mapToTableMeta(t, activeSchema))
+    },
+    [proxy, activeSchema],
+  )
+  const tables = tableData ?? []
+
+  useEffect(() => {
+    if (tables.length > 0 && !selectedTable) {
+      setSelectedTable(tables[0]?.name ?? "")
+    }
+  }, [tables])
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      </div>
+    )
+  }
+
+  if (error) return <ErrorBanner message={error} onRetry={refetch} />
+
+  if (tables.length === 0) {
+    return (
+      <EmptyState
+        title="No tables found"
+        description="Push your schema to see it here."
+      />
+    )
+  }
+
+  const currentTable = tables.find(t => t.name === selectedTable) ?? null
 
   return (
-    <div className="flex gap-4 h-full">
-      {/* Model list sidebar */}
-      <div className="w-[240px] flex-shrink-0">
-        <Input
-          placeholder="Search models..."
-          value={modelSearch}
-          onChange={(e) => setModelSearch(e.target.value)}
-          className="mb-2"
+    <div className="flex flex-col h-full gap-0" style={{ overflow: "visible" }}>
+      {/* Toolbar */}
+      <div className="flex items-center gap-2 mb-3 flex-shrink-0" style={{ overflow: "visible", position: "relative", zIndex: 50 }}>
+        {/* Schema selector */}
+        <SchemaSelector
+          schemas={availableSchemas ?? ["public"]}
+          value={activeSchema}
+          onChange={s => { setActiveSchema(s); setSelectedTable(""); setSelectedField(null) }}
         />
-        <Card className="p-1.5 flex flex-col gap-0.5 max-h-[calc(100vh-200px)] overflow-y-auto">
-          {filteredModels.map((m) => (
-            <button
-              key={m.name}
-              className={cn(
-                "flex items-center gap-2 w-full px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground rounded-md transition-colors",
-                m.name === selected && "bg-accent text-foreground font-medium"
-              )}
-              onClick={() => { setSelected(m.name); setSelectedField(null); setSelectedRelation(null) }}
-            >
-              <span>{m.name}</span>
-              <span className="ml-auto text-zinc-600 text-[0.7rem]">{m.table_name}</span>
-            </button>
-          ))}
-        </Card>
-      </div>
 
-      {/* Main view */}
-      <div className="flex-1 min-w-0">
-        {/* View mode toggle */}
-        <div className="flex gap-2 mb-4">
+        <div className="flex gap-2 ml-auto">
           <Button
-            variant={viewMode === "table" ? "primary" : "secondary"}
+            variant={viewMode === "fields" ? "primary" : "secondary"}
             size="sm"
-            onClick={() => setViewMode("table")}
+            onClick={() => setViewMode("fields")}
           >
             Fields
           </Button>
@@ -389,130 +595,90 @@ export function SchemaView(): React.ReactElement {
             ERD Diagram
           </Button>
         </div>
+      </div>
 
-        {viewMode === "erd" ? (
-          <ErdDiagram models={models} />
-        ) : current ? (
-          <div className="flex gap-4">
-            {/* Fields + Relations */}
-            <div className="flex-1 min-w-0">
-              {/* Model header */}
-              <div className="flex items-center gap-3 mb-3">
-                <h3 className="m-0">{current.name}</h3>
-                <code className="text-zinc-600 text-sm">{current.table_name}</code>
-                <div className="flex gap-1 ml-auto">
-                  {current.timestamps ? <Badge variant="blue">timestamps</Badge> : null}
-                  {current.publishable ? <Badge variant="green">publishable</Badge> : null}
-                  {current.softDelete ? <Badge variant="yellow">soft delete</Badge> : null}
-                </div>
-              </div>
+      {/* Content */}
+      {viewMode === "erd" ? (
+        <div className="flex-1 min-h-0 rounded-lg border border-border overflow-hidden">
+          <ErdFlow tables={tables} activeSchema={activeSchema} />
+        </div>
+      ) : (
+        /* Fields view — table list + detail */
+        <div className="flex gap-4 flex-1 min-h-0">
+          {/* Table list */}
+          <div className="w-[200px] flex-shrink-0 overflow-y-auto">
+            <Card className="p-1 flex flex-col gap-0.5">
+              {tables.map(t => (
+                <button
+                  key={t.name}
+                  className={cn(
+                    "flex items-center gap-2 w-full px-3 py-2 text-sm rounded-md transition-colors text-left",
+                    t.name === selectedTable
+                      ? "bg-accent text-foreground font-medium"
+                      : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                  )}
+                  onClick={() => { setSelectedTable(t.name); setSelectedField(null) }}
+                >
+                  {t.name}
+                </button>
+              ))}
+            </Card>
+          </div>
 
-              {/* Fields table */}
-              <Card className="overflow-auto mb-4">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-border">
-                      <Th>Field</Th>
-                      <Th>Type</Th>
-                      <Th>Nullable</Th>
-                      <Th>Default</Th>
-                      <Th>Constraints</Th>
-                      <Th>References</Th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {current.fields.map((f) => (
-                      <tr
-                        key={f.name}
-                        className={cn(
-                          "border-b border-border hover:bg-accent/50 cursor-pointer",
-                          selectedField?.name === f.name && "bg-primary/5"
-                        )}
-                        onClick={() => { setSelectedField(f); setSelectedRelation(null) }}
-                      >
-                        <Td className={f.is_primary ? "font-semibold" : ""}>
-                          {f.name}
-                        </Td>
-                        <Td><code className="text-primary text-xs">{f.type}</code></Td>
-                        <Td>{f.nullable ? "yes" : "no"}</Td>
-                        <Td className="text-xs text-muted-foreground">{f.default_value ?? "\u2014"}</Td>
-                        <Td>
-                          <div className="flex gap-1">
-                            {f.is_primary ? <Badge variant="indigo">PK</Badge> : null}
-                            {f.is_unique && !f.is_primary ? <Badge variant="green">UQ</Badge> : null}
-                            {f.is_indexed ? <Badge variant="blue">IDX</Badge> : null}
-                          </div>
-                        </Td>
-                        <Td className="text-xs text-muted-foreground">{f.references ?? "\u2014"}</Td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </Card>
-
-              {/* Relations */}
-              {current.relations.length > 0 ? (
-                <>
-                  <h4 className="text-sm text-muted-foreground mb-2">Relations</h4>
+          {/* Table detail */}
+          <div className="flex-1 min-w-0 overflow-y-auto">
+            {currentTable ? (
+              <div className="flex gap-4">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-3">
+                    <h3 className="m-0 text-base">{currentTable.name}</h3>
+                    <code className="text-xs text-muted-foreground">{currentTable.schema}.{currentTable.name}</code>
+                  </div>
                   <Card className="overflow-auto">
-                    <table className="w-full">
+                    <table className="w-full text-sm">
                       <thead>
                         <tr className="border-b border-border">
-                          <Th>Name</Th>
-                          <Th>Type</Th>
-                          <Th>Target</Th>
-                          <Th>Through</Th>
+                          <Th>Field</Th><Th>Type</Th><Th>Nullable</Th><Th>Default</Th><Th>Constraints</Th><Th>References</Th>
                         </tr>
                       </thead>
                       <tbody>
-                        {current.relations.map((rel) => (
+                        {currentTable.fields.map(f => (
                           <tr
-                            key={rel.name}
+                            key={f.name}
                             className={cn(
                               "border-b border-border hover:bg-accent/50 cursor-pointer",
-                              selectedRelation?.name === rel.name && "bg-primary/5"
+                              selectedField?.name === f.name && "bg-primary/5",
                             )}
-                            onClick={() => { setSelectedRelation(rel); setSelectedField(null) }}
+                            onClick={() => setSelectedField(f)}
                           >
-                            <Td className="font-medium">{rel.name}</Td>
+                            <Td className={f.is_primary ? "font-semibold" : ""}>{f.name}</Td>
+                            <Td><code className="text-primary text-xs">{f.type}</code></Td>
+                            <Td>{f.nullable ? "yes" : "no"}</Td>
+                            <Td className="text-xs text-muted-foreground">{f.default_value ?? "—"}</Td>
                             <Td>
-                              <Badge variant={
-                                rel.type === "belongsTo" ? "indigo" :
-                                rel.type === "hasMany" ? "green" : "yellow"
-                              }>
-                                {rel.type}
-                              </Badge>
+                              <div className="flex gap-1">
+                                {f.is_primary ? <Badge variant="indigo">PK</Badge> : null}
+                                {f.is_unique && !f.is_primary ? <Badge variant="green">UQ</Badge> : null}
+                                {f.is_indexed ? <Badge variant="blue">IDX</Badge> : null}
+                              </div>
                             </Td>
-                            <Td>
-                              <code className="text-primary text-xs">{rel.to_model}.{rel.to_field}</code>
-                            </Td>
-                            <Td className="text-xs text-muted-foreground">
-                              {rel.through_table ?? "\u2014"}
-                            </Td>
+                            <Td className="text-xs text-muted-foreground">{f.references ?? "—"}</Td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </Card>
-                </>
-              ) : null}
-            </div>
-
-            {/* Detail panel */}
-            {selectedField ? (
-              <div className="w-[300px] flex-shrink-0">
-                <FieldDetailPanel field={selectedField} model={current} />
-              </div>
-            ) : selectedRelation ? (
-              <div className="w-[300px] flex-shrink-0">
-                <RelationDetailPanel relation={selectedRelation} />
+                </div>
+                {selectedField ? (
+                  <div className="w-[280px] flex-shrink-0">
+                    <FieldDetailPanel field={selectedField} table={currentTable} />
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </div>
-        ) : (
-          <div className="text-muted-foreground text-sm">Select a model to view its schema</div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   )
 }

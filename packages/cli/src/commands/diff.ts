@@ -1,14 +1,7 @@
 import type { Command } from "commander"
 import { loadConfig, loadSchemaAst } from "../config.js"
-import { ensureEngine, invokeEngine } from "../engine.js"
-
-interface DiffResult {
-  operations: Array<{
-    kind: string
-    risk: "safe" | "cautious" | "destructive"
-    description: string
-  }>
-}
+import { connectionString, schemaPathFromToml } from "../config-toml.js"
+import { ensureEngine, engineRequest, type DiffResult } from "../engine-client.js"
 
 export function registerDiff(program: Command): void {
   program
@@ -18,23 +11,19 @@ export function registerDiff(program: Command): void {
     .action(async (opts: { connection?: string }) => {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
-      const connection = opts.connection ?? config.connection
+      const connection = opts.connection ?? connectionString(config)
 
       await ensureEngine()
 
       console.log("Loading schema...")
-      const ast = loadSchemaAst(config.schema, cwd)
+      const ast = loadSchemaAst(schemaPathFromToml(config, cwd), cwd)
 
-      const result = invokeEngine(
-        ["diff", "--connection", connection, "--format", "json"],
-        JSON.stringify(ast),
-      )
-      if (result.exitCode !== 0) {
-        console.error(result.stderr || result.stdout)
-        process.exit(1)
-      }
+      const diff = await engineRequest<DiffResult>("/diff", {
+        ast,
+        database_url: connection,
+        schema: "public",
+      })
 
-      const diff = JSON.parse(result.stdout) as DiffResult
       const ops = diff.operations ?? []
 
       if (ops.length === 0) {
@@ -42,19 +31,22 @@ export function registerDiff(program: Command): void {
         return
       }
 
-      const symbol = { safe: "+", cautious: "~", destructive: "!" }
-      const legend = { safe: "safe", cautious: "cautious", destructive: "DESTRUCTIVE" }
+      const symbol: Record<NonNullable<DiffResult["operations"][number]["risk"]>, string> = {
+        safe: "+",
+        warn: "~",
+        danger: "!",
+      }
+      const legend: typeof symbol = { safe: "safe", warn: "caution", danger: "DANGER" }
 
       console.log(`\n${ops.length} change(s):\n`)
       for (const op of ops) {
-        console.log(
-          `  [${symbol[op.risk]}] ${op.description}  (${legend[op.risk]})`,
-        )
+        const r = op.risk ?? "safe"
+        console.log(`  [${symbol[r]}] ${op.description}  (${legend[r]})`)
       }
 
-      const destructive = ops.filter((o) => o.risk === "destructive").length
-      if (destructive > 0) {
-        console.log(`\n  ${destructive} destructive operation(s). Run with --yes to skip confirmation.`)
+      const dangerous = ops.filter((o) => o.risk === "danger").length
+      if (dangerous > 0) {
+        console.log(`\n  ${dangerous} dangerous operation(s). Review before pushing.`)
       }
       console.log()
     })

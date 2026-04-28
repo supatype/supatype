@@ -1,4 +1,5 @@
 import React from "react"
+import { SupatypeWordmark } from "@supatype/studio"
 
 const FOOTER_SECTIONS = [
   {
@@ -70,12 +71,8 @@ export const Footer: React.FC = () => {
         </div>
 
         <div className="mt-12 flex flex-col items-center justify-between gap-4 border-t border-neutral-200 pt-8 dark:border-neutral-800 md:flex-row">
-          <div className="flex items-center gap-2 text-sm text-neutral-600 dark:text-neutral-400">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" className="text-purple-600">
-              <rect width="24" height="24" rx="6" fill="currentColor" />
-              <path d="M7 8h10M7 12h7M7 16h10" stroke="white" strokeWidth="2" strokeLinecap="round" />
-            </svg>
-            Supatype
+          <div className="flex items-center text-sm text-neutral-600 dark:text-neutral-400">
+            <SupatypeWordmark size={20} />
           </div>
           <p className="text-sm text-neutral-500 dark:text-neutral-500">
             &copy; {new Date().getFullYear()} Supatype Ltd. All rights reserved.

@@ -1,4 +1,4 @@
-{
+                              {
   "name": "@supatype/cli",
   "version": "0.1.0-alpha.4",
   "description": "Supatype CLI — schema push, introspect, generate",
@@ -23,6 +23,7 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
+    "@iarna/toml": "^3.0.0",
     "@supatype/schema": "workspace:*",
     "commander": "^12.1.0",
     "tsx": "^4.19.2"

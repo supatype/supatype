@@ -1,7 +1,8 @@
 import type { Command } from "commander"
 import { createInterface } from "node:readline"
 import { loadConfig } from "../config.js"
-import { ensureEngine, invokeEngine } from "../engine.js"
+import { connectionString } from "../config-toml.js"
+import { ensureEngine, engineRequest } from "../engine-client.js"
 
 export function registerMigrate(program: Command): void {
   // migrate — apply all pending migrations
@@ -11,15 +12,15 @@ export function registerMigrate(program: Command): void {
     .option("--connection <url>", "Database connection URL (overrides config)")
     .action(async (opts: { connection?: string }) => {
       const config = loadConfig()
-      const connection = opts.connection ?? config.connection
+      const connection = opts.connection ?? connectionString(config)
 
       await ensureEngine()
-      const result = invokeEngine(["migrate", "--pending", "--connection", connection])
-      if (result.exitCode !== 0) {
-        console.error(result.stderr || result.stdout)
-        process.exit(1)
-      }
-      console.log(result.stdout || "Migrations applied.")
+      const result = await engineRequest<{ message?: string }>("/migrations", {
+        database_url: connection,
+        schema: "public",
+        action: "pending",
+      })
+      console.log(result.message ?? "Migrations applied.")
     })
 
   // rollback — undo the last applied migration
@@ -29,15 +30,15 @@ export function registerMigrate(program: Command): void {
     .option("--connection <url>", "Database connection URL (overrides config)")
     .action(async (opts: { connection?: string }) => {
       const config = loadConfig()
-      const connection = opts.connection ?? config.connection
+      const connection = opts.connection ?? connectionString(config)
 
       await ensureEngine()
-      const result = invokeEngine(["rollback", "--connection", connection])
-      if (result.exitCode !== 0) {
-        console.error(result.stderr || result.stdout)
-        process.exit(1)
-      }
-      console.log(result.stdout || "Rolled back.")
+      const result = await engineRequest<{ message?: string }>("/migrations", {
+        database_url: connection,
+        schema: "public",
+        action: "rollback",
+      })
+      console.log(result.message ?? "Rolled back.")
     })
 
   // reset — drop all tables and re-apply from scratch
@@ -60,15 +61,15 @@ export function registerMigrate(program: Command): void {
       }
 
       const config = loadConfig()
-      const connection = opts.connection ?? config.connection
+      const connection = opts.connection ?? connectionString(config)
 
       await ensureEngine()
-      const result = invokeEngine(["reset", "--connection", connection])
-      if (result.exitCode !== 0) {
-        console.error(result.stderr || result.stdout)
-        process.exit(1)
-      }
-      console.log(result.stdout || "Reset complete.")
+      const result = await engineRequest<{ message?: string }>("/migrations", {
+        database_url: connection,
+        schema: "public",
+        action: "reset",
+      })
+      console.log(result.message ?? "Reset complete.")
     })
 }
 

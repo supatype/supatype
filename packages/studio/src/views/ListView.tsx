@@ -104,7 +104,7 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
           <button
             type="button"
             className="st-btn st-btn-primary"
-            onClick={() => { onNavigate(`/collections/${model.name}/create`) }}
+            onClick={() => { onNavigate(`/models/${model.name}/create`) }}
           >
             Create {model.label}
           </button>
@@ -183,7 +183,7 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
                   <tr
                     key={id}
                     className={`st-table-row${selected.has(id) ? " st-table-row--selected" : ""}`}
-                    onClick={() => { onNavigate(`/collections/${model.name}/${id}`) }}
+                    onClick={() => { onNavigate(`/models/${model.name}/${id}`) }}
                   >
                     <td className="st-table-check" onClick={(e) => { e.stopPropagation() }}>
                       <input

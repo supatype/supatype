@@ -1,7 +1,10 @@
-import React, { useState, useCallback, useMemo } from "react"
-import { useStudioClient } from "../StudioApp.js"
+import React, { useState, useContext, useCallback, useMemo } from "react"
+import { useStudioClient } from "../StudioCore.js"
+import { AdminConfigContext } from "../hooks/useAdminConfig.js"
+import { EmptyState } from "../components/EmptyState.js"
 import { cn } from "../lib/utils.js"
 import { Badge, Button, Card, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
+import type { ModelConfig, FieldConfig, WidgetType } from "../config.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -37,182 +40,250 @@ interface TryItResponse {
   duration: number
 }
 
-// ─── Mock Data ────────────────────────────────────────────────────────────────
+// ─── Endpoint Generation Helpers ──────────────────────────────────────────────
 
-const mockEndpoints: ApiEndpoint[] = [
-  {
-    method: "GET",
-    path: "/rest/v1/users",
-    summary: "List users",
-    description: "List all users with optional filtering, sorting, and pagination. Supports PostgREST query syntax.",
-    table: "users",
-    category: "rest",
-    params: [
-      { name: "select", type: "string", required: false, description: "Comma-separated list of columns to return. Supports nested selects.", location: "query", example: "*,posts(title)" },
-      { name: "order", type: "string", required: false, description: "Column to sort by (e.g. name.asc, created_at.desc)", location: "query", example: "created_at.desc" },
-      { name: "limit", type: "integer", required: false, description: "Maximum number of rows to return", location: "query", example: "25" },
-      { name: "offset", type: "integer", required: false, description: "Number of rows to skip", location: "query", example: "0" },
-      { name: "id", type: "uuid", required: false, description: "Filter by ID (eq, neq, in, gt, lt, gte, lte)", location: "query", example: "eq.a1b2c3d4" },
-      { name: "email", type: "string", required: false, description: "Filter by email", location: "query", example: "eq.alice@example.com" },
-    ],
-    response_example: `[\n  {\n    "id": "a1b2c3d4",\n    "email": "alice@example.com",\n    "name": "Alice",\n    "created_at": "2026-01-15T10:30:00Z"\n  }\n]`,
-    response_type: "User[]",
-  },
-  {
-    method: "POST",
-    path: "/rest/v1/users",
-    summary: "Create user",
-    description: "Create a new user record. Returns the created record by default.",
-    table: "users",
-    category: "rest",
-    params: [
-      { name: "email", type: "string", required: true, description: "User email address", location: "body" },
-      { name: "name", type: "string", required: true, description: "User display name", location: "body" },
-      { name: "Prefer", type: "string", required: false, description: "Set to 'return=representation' to return created record", location: "header", example: "return=representation" },
-    ],
-    request_body_example: `{\n  "email": "new@example.com",\n  "name": "New User"\n}`,
-    response_example: `{\n  "id": "new-uuid",\n  "email": "new@example.com",\n  "name": "New User",\n  "created_at": "2026-03-17T10:00:00Z"\n}`,
-    response_type: "User",
-  },
-  {
-    method: "PATCH",
-    path: "/rest/v1/users",
-    summary: "Update users",
-    description: "Update users matching the filter. Use query parameters to filter which rows to update.",
-    table: "users",
-    category: "rest",
-    params: [
-      { name: "id", type: "uuid", required: false, description: "Filter by user ID", location: "query", example: "eq.a1b2c3d4" },
-      { name: "name", type: "string", required: false, description: "New name value", location: "body" },
-    ],
-    request_body_example: `{\n  "name": "Updated Name"\n}`,
-  },
-  {
-    method: "DELETE",
-    path: "/rest/v1/users",
-    summary: "Delete users",
-    description: "Delete users matching the filter. Always filter to avoid deleting all rows.",
-    table: "users",
-    category: "rest",
-    params: [
-      { name: "id", type: "uuid", required: true, description: "Filter by user ID", location: "query", example: "eq.a1b2c3d4" },
-    ],
-  },
-  {
-    method: "GET",
-    path: "/rest/v1/posts",
-    summary: "List posts",
-    description: "List all posts with optional filtering. Supports embedding related records.",
-    table: "posts",
-    category: "rest",
-    params: [
-      { name: "select", type: "string", required: false, description: "Columns and nested relations", location: "query", example: "*,author:users(name)" },
-      { name: "status", type: "string", required: false, description: "Filter by status", location: "query", example: "eq.published" },
-    ],
-    response_example: `[\n  {\n    "id": "post-1",\n    "title": "Hello World",\n    "slug": "hello-world",\n    "status": "published",\n    "author": { "name": "Alice" }\n  }\n]`,
-    response_type: "Post[]",
-  },
-  {
-    method: "POST",
-    path: "/rest/v1/posts",
-    summary: "Create post",
-    description: "Create a new post record.",
-    table: "posts",
-    category: "rest",
-    params: [
-      { name: "title", type: "string", required: true, description: "Post title", location: "body" },
-      { name: "slug", type: "string", required: true, description: "URL slug", location: "body" },
-      { name: "content", type: "string", required: false, description: "Post content", location: "body" },
-      { name: "author_id", type: "uuid", required: true, description: "Author user ID", location: "body" },
-    ],
-    request_body_example: `{\n  "title": "New Post",\n  "slug": "new-post",\n  "content": "Hello!",\n  "author_id": "a1b2c3d4"\n}`,
-  },
-  {
-    method: "GET",
-    path: "/rest/v1/tags",
-    summary: "List tags",
-    description: "List all tags.",
-    table: "tags",
-    category: "rest",
-    params: [],
-  },
-  // Auth endpoints
-  {
-    method: "POST",
-    path: "/auth/v1/signup",
-    summary: "Sign up",
-    description: "Register a new user account. Sends a confirmation email if email confirmation is enabled.",
-    table: "auth",
-    category: "auth",
-    params: [
-      { name: "email", type: "string", required: true, description: "Email address", location: "body" },
-      { name: "password", type: "string", required: true, description: "Password (min 6 characters)", location: "body" },
-      { name: "data", type: "object", required: false, description: "User metadata object", location: "body" },
-    ],
-    request_body_example: `{\n  "email": "user@example.com",\n  "password": "securepassword"\n}`,
-    response_example: `{\n  "access_token": "eyJ...",\n  "token_type": "bearer",\n  "expires_in": 3600,\n  "user": { "id": "uuid", "email": "user@example.com" }\n}`,
-  },
-  {
-    method: "POST",
-    path: "/auth/v1/token?grant_type=password",
-    summary: "Sign in with password",
-    description: "Authenticate with email and password. Returns access and refresh tokens.",
-    table: "auth",
-    category: "auth",
-    params: [
-      { name: "email", type: "string", required: true, description: "Email address", location: "body" },
-      { name: "password", type: "string", required: true, description: "Password", location: "body" },
-    ],
-    request_body_example: `{\n  "email": "user@example.com",\n  "password": "securepassword"\n}`,
-    response_example: `{\n  "access_token": "eyJ...",\n  "token_type": "bearer",\n  "expires_in": 3600,\n  "refresh_token": "abc123"\n}`,
-  },
-  {
-    method: "POST",
-    path: "/auth/v1/token?grant_type=refresh_token",
-    summary: "Refresh token",
-    description: "Exchange a refresh token for a new access token.",
-    table: "auth",
-    category: "auth",
-    params: [
-      { name: "refresh_token", type: "string", required: true, description: "Refresh token from sign-in", location: "body" },
-    ],
-  },
-  {
-    method: "POST",
-    path: "/auth/v1/logout",
-    summary: "Sign out",
-    description: "Invalidate the current session. Requires Authorization header.",
-    table: "auth",
-    category: "auth",
-    params: [],
-  },
-  // Storage endpoints
-  {
-    method: "POST",
-    path: "/storage/v1/object/{bucket}/{path}",
-    summary: "Upload file",
-    description: "Upload a file to a storage bucket.",
-    table: "storage",
-    category: "storage",
-    params: [
-      { name: "bucket", type: "string", required: true, description: "Bucket name", location: "path" },
-      { name: "path", type: "string", required: true, description: "File path within the bucket", location: "path" },
-      { name: "Content-Type", type: "string", required: true, description: "MIME type of the file", location: "header" },
-    ],
-  },
-  {
-    method: "GET",
-    path: "/storage/v1/object/{bucket}/{path}",
-    summary: "Download file",
-    description: "Download a file from a storage bucket. Public buckets allow unauthenticated access.",
-    table: "storage",
-    category: "storage",
-    params: [
-      { name: "bucket", type: "string", required: true, description: "Bucket name", location: "path" },
-      { name: "path", type: "string", required: true, description: "File path within the bucket", location: "path" },
-    ],
-  },
-]
+function widgetToApiType(widget: WidgetType): string {
+  switch (widget) {
+    case "uuid": return "uuid"
+    case "number": return "number"
+    case "boolean": case "publish": return "boolean"
+    case "datetime": return "string (ISO 8601)"
+    case "date": return "string (date)"
+    case "json": case "blocks": return "object"
+    case "relation": case "multirelation": return "uuid"
+    default: return "string"
+  }
+}
+
+function exampleForField(f: FieldConfig): string {
+  switch (f.widget) {
+    case "uuid": case "relation": case "multirelation": return "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+    case "number": return "1"
+    case "boolean": case "publish": return "true"
+    case "datetime": return "2026-01-15T10:30:00Z"
+    case "date": return "2026-01-15"
+    case "json": case "blocks": return "{}"
+    case "select": {
+      const values = (f.options?.["values"] as string[] | undefined)
+      return values?.[0] ?? "value"
+    }
+    default: return `example_${f.name}`
+  }
+}
+
+function exampleValueForField(f: FieldConfig): unknown {
+  switch (f.widget) {
+    case "uuid": case "relation": case "multirelation": return "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+    case "number": return 1
+    case "boolean": case "publish": return true
+    case "datetime": return "2026-01-15T10:30:00Z"
+    case "date": return "2026-01-15"
+    case "json": case "blocks": return {}
+    default: return `example_${f.name}`
+  }
+}
+
+function buildEndpointsFromModels(models?: ModelConfig[]): ApiEndpoint[] {
+  const endpoints: ApiEndpoint[] = []
+
+  for (const model of models ?? []) {
+    const pkName = model.primaryKey || "id"
+    const pkField = model.fields.find((f) => f.name === pkName)
+    const pkType = pkField ? widgetToApiType(pkField.widget) : "uuid"
+    const pkExample = pkField ? exampleForField(pkField) : "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+
+    // Fields that can be set on insert (exclude auto-generated pk and timestamps)
+    const AUTO = new Set(["created_at", "updated_at", "deleted_at"])
+    const insertFields = model.fields.filter(
+      (f) => f.name !== pkName && !AUTO.has(f.name),
+    )
+    const updateFields = model.fields.filter(
+      (f) => f.name !== pkName && !AUTO.has(f.name),
+    )
+
+    const bodyExample = (fields: FieldConfig[]) => {
+      const obj: Record<string, unknown> = {}
+      for (const f of fields) obj[f.name] = exampleValueForField(f)
+      return JSON.stringify(obj, null, 2)
+    }
+    const responseExample = (single = false) => {
+      const obj: Record<string, unknown> = {}
+      for (const f of model.fields) obj[f.name] = exampleValueForField(f)
+      return single ? JSON.stringify(obj, null, 2) : JSON.stringify([obj], null, 2)
+    }
+
+    // GET — List all rows
+    endpoints.push({
+      method: "GET",
+      path: `/rest/v1/${model.tableName}`,
+      summary: `List all ${model.labelPlural}`,
+      description: `List all ${model.labelPlural} with optional filtering, sorting, and pagination.`,
+      table: model.tableName,
+      category: "rest",
+      params: [
+        { name: "select", type: "string", required: false, description: "Comma-separated columns to return. Use * for all.", location: "query", example: "*" },
+        { name: "order", type: "string", required: false, description: "Sort column (e.g. created_at.desc)", location: "query", example: `${pkName}.desc` },
+        { name: "limit", type: "integer", required: false, description: "Max rows to return", location: "query", example: "25" },
+        { name: "offset", type: "integer", required: false, description: "Rows to skip", location: "query", example: "0" },
+      ],
+      response_example: responseExample(),
+      response_type: `${model.tableName}[]`,
+    })
+
+    // GET — Single row
+    endpoints.push({
+      method: "GET",
+      path: `/rest/v1/${model.tableName}?${pkName}=eq.{${pkName}}`,
+      summary: `Get ${model.label}`,
+      description: `Get a single ${model.label} by ${pkName}.`,
+      table: model.tableName,
+      category: "rest",
+      params: [
+        { name: pkName, type: pkType, required: true, description: `Filter by ${pkName}`, location: "query", example: `eq.${pkExample}` },
+      ],
+      response_example: responseExample(true),
+      response_type: model.tableName,
+    })
+
+    // POST — Insert
+    endpoints.push({
+      method: "POST",
+      path: `/rest/v1/${model.tableName}`,
+      summary: `Create ${model.label}`,
+      description: `Insert a new ${model.label}.`,
+      table: model.tableName,
+      category: "rest",
+      params: [
+        ...insertFields.map((f) => ({
+          name: f.name,
+          type: widgetToApiType(f.widget),
+          required: f.required,
+          description: f.label || f.name,
+          location: "body" as const,
+          example: exampleForField(f),
+        })),
+        { name: "Prefer", type: "string", required: false, description: "Return=representation to get created record", location: "header", example: "return=representation" },
+      ],
+      request_body_example: bodyExample(insertFields),
+    })
+
+    // PATCH — Update
+    endpoints.push({
+      method: "PATCH",
+      path: `/rest/v1/${model.tableName}?${pkName}=eq.{${pkName}}`,
+      summary: `Update ${model.label}`,
+      description: `Update a ${model.label} matching the filter.`,
+      table: model.tableName,
+      category: "rest",
+      params: [
+        { name: pkName, type: pkType, required: true, description: `Filter by ${pkName}`, location: "query", example: `eq.${pkExample}` },
+        ...updateFields.map((f) => ({
+          name: f.name,
+          type: widgetToApiType(f.widget),
+          required: false,
+          description: f.label || f.name,
+          location: "body" as const,
+          example: exampleForField(f),
+        })),
+      ],
+      request_body_example: bodyExample(updateFields),
+    })
+
+    // DELETE — Delete
+    endpoints.push({
+      method: "DELETE",
+      path: `/rest/v1/${model.tableName}?${pkName}=eq.{${pkName}}`,
+      summary: `Delete ${model.label}`,
+      description: `Delete a ${model.label} matching the filter.`,
+      table: model.tableName,
+      category: "rest",
+      params: [
+        { name: pkName, type: pkType, required: true, description: `Filter by ${pkName}`, location: "query", example: `eq.${pkExample}` },
+      ],
+    })
+  }
+
+  // ── Auth endpoints ──
+  endpoints.push(
+    {
+      method: "POST", path: "/auth/v1/signup", summary: "Sign up",
+      description: "Register a new user account. Sends a confirmation email if email confirmation is enabled.",
+      table: "auth", category: "auth",
+      params: [
+        { name: "email", type: "string", required: true, description: "Email address", location: "body" },
+        { name: "password", type: "string", required: true, description: "Password (min 6 characters)", location: "body" },
+        { name: "data", type: "object", required: false, description: "User metadata object", location: "body" },
+      ],
+      request_body_example: `{\n  "email": "user@example.com",\n  "password": "securepassword"\n}`,
+      response_example: `{\n  "access_token": "eyJ...",\n  "token_type": "bearer",\n  "expires_in": 3600,\n  "user": { "id": "uuid", "email": "user@example.com" }\n}`,
+    },
+    {
+      method: "POST", path: "/auth/v1/token?grant_type=password", summary: "Sign in",
+      description: "Authenticate with email and password. Returns access and refresh tokens.",
+      table: "auth", category: "auth",
+      params: [
+        { name: "email", type: "string", required: true, description: "Email address", location: "body" },
+        { name: "password", type: "string", required: true, description: "Password", location: "body" },
+      ],
+      request_body_example: `{\n  "email": "user@example.com",\n  "password": "securepassword"\n}`,
+      response_example: `{\n  "access_token": "eyJ...",\n  "token_type": "bearer",\n  "expires_in": 3600,\n  "refresh_token": "abc123"\n}`,
+    },
+    {
+      method: "POST", path: "/auth/v1/logout", summary: "Sign out",
+      description: "Invalidate the current session. Requires Authorization header.",
+      table: "auth", category: "auth",
+      params: [],
+    },
+    {
+      method: "GET", path: "/auth/v1/user", summary: "Get current user",
+      description: "Get the currently authenticated user. Requires Authorization header.",
+      table: "auth", category: "auth",
+      params: [],
+      response_example: `{\n  "id": "uuid",\n  "email": "user@example.com",\n  "role": "authenticated"\n}`,
+    },
+  )
+
+  // ── Storage endpoints ──
+  endpoints.push(
+    {
+      method: "GET", path: "/storage/v1/bucket", summary: "List buckets",
+      description: "List all storage buckets.",
+      table: "storage", category: "storage",
+      params: [],
+      response_example: `[\n  { "id": "avatars", "name": "avatars", "public": true }\n]`,
+    },
+    {
+      method: "POST", path: "/storage/v1/object/{bucket}/{path}", summary: "Upload file",
+      description: "Upload a file to a storage bucket.",
+      table: "storage", category: "storage",
+      params: [
+        { name: "bucket", type: "string", required: true, description: "Bucket name", location: "path" },
+        { name: "path", type: "string", required: true, description: "File path within the bucket", location: "path" },
+        { name: "Content-Type", type: "string", required: true, description: "MIME type of the file", location: "header" },
+      ],
+    },
+    {
+      method: "GET", path: "/storage/v1/object/{bucket}/{path}", summary: "Download file",
+      description: "Download a file from a storage bucket. Public buckets allow unauthenticated access.",
+      table: "storage", category: "storage",
+      params: [
+        { name: "bucket", type: "string", required: true, description: "Bucket name", location: "path" },
+        { name: "path", type: "string", required: true, description: "File path within the bucket", location: "path" },
+      ],
+    },
+    {
+      method: "DELETE", path: "/storage/v1/object/{bucket}/{path}", summary: "Delete file",
+      description: "Delete a file from a storage bucket.",
+      table: "storage", category: "storage",
+      params: [
+        { name: "bucket", type: "string", required: true, description: "Bucket name", location: "path" },
+        { name: "path", type: "string", required: true, description: "File path within the bucket", location: "path" },
+      ],
+    },
+  )
+
+  return endpoints
+}
 
 const methodColorClass: Record<string, string> = {
   GET: "text-green-400",
@@ -242,9 +313,11 @@ const categories = [
 
 function TryItPanel({
   endpoint,
+  baseUrl,
   onClose,
 }: {
   endpoint: ApiEndpoint
+  baseUrl: string
   onClose: () => void
 }): React.ReactElement {
   const [paramValues, setParamValues] = useState<Record<string, string>>(() => {
@@ -261,19 +334,73 @@ function TryItPanel({
 
   const handleExecute = async () => {
     setLoading(true)
+    setResponse(null)
     const start = performance.now()
 
-    // Mock response
-    await new Promise((r) => setTimeout(r, 300))
+    try {
+      const splitPath = endpoint.path.split("?")
+      const basePath = splitPath[0] ?? endpoint.path
+      const templateQuery = splitPath[1]
 
-    setResponse({
-      status: 200,
-      statusText: "OK",
-      headers: { "content-type": "application/json", "x-request-id": "mock-req-id" },
-      body: endpoint.response_example ?? '{"success": true}',
-      duration: Math.round(performance.now() - start),
-    })
-    setLoading(false)
+      let resolvedPath = basePath
+      for (const p of endpoint.params.filter((p) => p.location === "path")) {
+        resolvedPath = resolvedPath.replaceAll(`{${p.name}}`, encodeURIComponent(paramValues[p.name] ?? ""))
+      }
+
+      const queryParts: string[] = []
+      if (templateQuery) {
+        for (const part of templateQuery.split("&")) {
+          if (!part.includes("{")) queryParts.push(part)
+        }
+      }
+      for (const p of endpoint.params.filter((p) => p.location === "query")) {
+        const v = paramValues[p.name]
+        if (v) {
+          queryParts.push(`${encodeURIComponent(p.name)}=${encodeURIComponent(v)}`)
+        }
+      }
+
+      const qs = queryParts.length > 0 ? "?" + queryParts.join("&") : ""
+      const url = `${baseUrl}${resolvedPath}${qs}`
+
+      const headers: Record<string, string> = { "Content-Type": "application/json" }
+      if (authToken) headers["Authorization"] = `Bearer ${authToken}`
+      for (const p of endpoint.params.filter((p) => p.location === "header")) {
+        const v = paramValues[p.name]
+        if (v) headers[p.name] = v
+      }
+
+      const fetchOpts: RequestInit = { method: endpoint.method, headers, credentials: "include" }
+      if (requestBody && endpoint.method !== "GET" && endpoint.method !== "DELETE") {
+        fetchOpts.body = requestBody
+      }
+
+      const res = await fetch(url, fetchOpts)
+      const duration = Math.round(performance.now() - start)
+
+      const responseHeaders: Record<string, string> = {}
+      res.headers.forEach((v, k) => { responseHeaders[k] = v })
+
+      let body: string
+      const ct = res.headers.get("content-type") ?? ""
+      if (ct.includes("application/json")) {
+        body = JSON.stringify(await res.json(), null, 2)
+      } else {
+        body = await res.text()
+      }
+
+      setResponse({ status: res.status, statusText: res.statusText, headers: responseHeaders, body, duration })
+    } catch (err) {
+      setResponse({
+        status: 0,
+        statusText: "Network Error",
+        headers: {},
+        body: err instanceof Error ? err.message : "Request failed",
+        duration: Math.round(performance.now() - start),
+      })
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -409,82 +536,26 @@ function AuthSection(): React.ReactElement {
   )
 }
 
-// ─── GraphQL Playground Tab ───────────────────────────────────────────────────
-
-function GraphQLPlayground(): React.ReactElement {
-  const [query, setQuery] = useState(
-`{
-  users(first: 10) {
-    id
-    email
-    name
-    posts {
-      title
-      status
-    }
-  }
-}`
-  )
-  const [result, setResult] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-
-  const handleRun = async () => {
-    setLoading(true)
-    await new Promise((r) => setTimeout(r, 300))
-    setResult(JSON.stringify({
-      data: {
-        users: [
-          { id: "a1b2c3d4", email: "alice@example.com", name: "Alice", posts: [{ title: "Hello World", status: "published" }] },
-        ],
-      },
-    }, null, 2))
-    setLoading(false)
-  }
-
-  return (
-    <div className="grid grid-cols-2 gap-4">
-      <div>
-        <label className="block text-xs text-muted-foreground uppercase mb-1">Query</label>
-        <textarea
-          className="w-full px-3 py-2 rounded-md border border-border bg-background text-foreground text-sm font-mono focus:outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 min-h-[300px] resize-y"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          spellCheck={false}
-        />
-        <div className="flex justify-end mt-2">
-          <Button variant="primary" size="sm" onClick={() => void handleRun()} disabled={loading}>
-            {loading ? "Running..." : "Run Query"}
-          </Button>
-        </div>
-      </div>
-      <div>
-        <label className="block text-xs text-muted-foreground uppercase mb-1">Result</label>
-        {result ? (
-          <CodeBlock className="min-h-[300px]">{result}</CodeBlock>
-        ) : (
-          <div className="min-h-[300px] rounded-md border border-border bg-background p-4 text-sm text-muted-foreground">
-            Run a query to see results here
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export function ApiDocs(): React.ReactElement {
   const client = useStudioClient()
+  const config = useContext(AdminConfigContext)
 
-  const [endpoints] = useState<ApiEndpoint[]>(mockEndpoints)
-  const [activeTab, setActiveTab] = useState<"rest" | "graphql">("rest")
+  // Endpoints are built from the admin config (user models + hardcoded auth/storage).
+  // No DB introspection needed — that prevents GoTrue internal tables from leaking in.
+  const endpoints = useMemo(
+    () => buildEndpointsFromModels(config?.models),
+    [config],
+  )
+
   const [expanded, setExpanded] = useState<string | null>(null)
   const [tryItEndpoint, setTryItEndpoint] = useState<string | null>(null)
   const [filterCategory, setFilterCategory] = useState("all")
   const [filterTable, setFilterTable] = useState("all")
   const [search, setSearch] = useState("")
 
-  const tables = useMemo(() => [...new Set(endpoints.map((e) => e.table))], [endpoints])
+  const tableNames = useMemo(() => [...new Set(endpoints.map((e) => e.table))], [endpoints])
 
   const filtered = useMemo(() => {
     return endpoints.filter((e) => {
@@ -505,35 +576,18 @@ export function ApiDocs(): React.ReactElement {
 
   return (
     <>
-      {/* Tab bar */}
-      <div className="flex border-b border-border mb-4">
-        <button
-          className={cn(
-            "px-4 py-2 text-sm border-b-2 transition-colors",
-            activeTab === "rest" ? "text-primary border-primary" : "text-muted-foreground border-transparent hover:text-foreground"
-          )}
-          onClick={() => setActiveTab("rest")}
-        >
-          REST API
-        </button>
-        <button
-          className={cn(
-            "px-4 py-2 text-sm border-b-2 transition-colors",
-            activeTab === "graphql" ? "text-primary border-primary" : "text-muted-foreground border-transparent hover:text-foreground"
-          )}
-          onClick={() => setActiveTab("graphql")}
-        >
-          GraphQL Playground
-        </button>
-      </div>
+      {/* Auth section */}
+      <AuthSection />
 
-      {activeTab === "graphql" ? (
-        <GraphQLPlayground />
+      {!config ? (
+        <div className="text-center py-12 text-muted-foreground text-sm">Loading API endpoints…</div>
+      ) : !config.models?.length ? (
+        <EmptyState
+          title="No model endpoints yet"
+          description="Push a schema first — define models in your supatype config and run `supatype push`."
+        />
       ) : (
         <>
-          {/* Auth section */}
-          <AuthSection />
-
           {/* Filters */}
           <div className="flex items-center gap-2 mb-4 flex-wrap">
             <Input
@@ -547,7 +601,7 @@ export function ApiDocs(): React.ReactElement {
             </Select>
             <Select className="w-[130px]" value={filterTable} onChange={(e) => setFilterTable(e.target.value)}>
               <option value="all">All tables</option>
-              {tables.map((t) => <option key={t} value={t}>{t}</option>)}
+              {tableNames.map((t) => <option key={t} value={t}>{t}</option>)}
             </Select>
           </div>
 
@@ -646,6 +700,7 @@ export function ApiDocs(): React.ReactElement {
                       {isTryingIt ? (
                         <TryItPanel
                           endpoint={ep}
+                          baseUrl={client.url}
                           onClose={() => setTryItEndpoint(null)}
                         />
                       ) : null}

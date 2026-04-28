@@ -1,7 +1,7 @@
 import type { RequestContext } from "../server.js"
 import { sendJson, readJson } from "../server.js"
 import * as db from "../db.js"
-import { ensureBucket as ensureS3Bucket, deleteBucket as deleteS3Bucket } from "../s3.js"
+import { ensureBucket as ensureS3Bucket, deleteBucket as deleteS3Bucket, applyPublicPolicy } from "../s3.js"
 
 import type { BucketAccessMode } from "../db.js"
 
@@ -32,6 +32,7 @@ export async function create(ctx: RequestContext): Promise<void> {
   const id = body.id ?? body.name
   try {
     await ensureS3Bucket(id)
+    if (body.public) await applyPublicPolicy(id)
     const bucket = await db.createBucket(
       id,
       body.name,
@@ -67,7 +68,9 @@ export async function get(ctx: RequestContext): Promise<void> {
 
 export async function update(ctx: RequestContext): Promise<void> {
   const body = await readJson<UpdateBucketBody>(ctx.req)
-  const bucket = await db.updateBucket(ctx.params["id"]!, body)
+  const id = ctx.params["id"]!
+  if (body.public) await applyPublicPolicy(id)
+  const bucket = await db.updateBucket(id, body)
   if (!bucket) {
     sendJson(ctx.res, 404, { error: "Bucket not found" })
     return

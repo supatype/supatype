@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react"
 import { Button } from "@supatype/ui"
+import { SupatypeWordmark } from "@supatype/studio"
 import { clsx } from "clsx"
 
 interface PlatformUser {
@@ -46,12 +47,8 @@ export const Header: React.FC<{ currentPath?: string }> = ({ currentPath }) => {
     <header className="sticky top-0 z-50 border-b border-neutral-200 bg-white/80 backdrop-blur-md dark:border-neutral-800 dark:bg-neutral-950/80">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         {/* Logo */}
-        <a href="/" className="flex items-center gap-2 text-lg font-bold text-neutral-900 dark:text-white">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" className="text-purple-600">
-            <rect width="24" height="24" rx="6" fill="currentColor" />
-            <path d="M7 8h10M7 12h7M7 16h10" stroke="white" strokeWidth="2" strokeLinecap="round" />
-          </svg>
-          Supatype
+        <a href="/" className="flex items-center">
+          <SupatypeWordmark size={28} />
         </a>
 
         {/* Desktop nav */}

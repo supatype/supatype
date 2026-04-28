@@ -9,11 +9,32 @@ import { checkReadAccess, checkWriteAccess, checkOverwriteAccess } from "../midd
 import { createSignedToken, verifySignedToken } from "../middleware/signed-urls.js"
 import { applyCorsHeaders } from "../middleware/cors.js"
 
+// ─── MIME type inference ─────────────────────────────────────────────────────────
+
+const MIME_MAP: Record<string, string> = {
+  ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+  ".gif": "image/gif", ".webp": "image/webp", ".avif": "image/avif",
+  ".svg": "image/svg+xml", ".ico": "image/x-icon", ".bmp": "image/bmp",
+  ".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime",
+  ".mp3": "audio/mpeg", ".wav": "audio/wav", ".ogg": "audio/ogg",
+  ".pdf": "application/pdf", ".zip": "application/zip",
+  ".json": "application/json", ".xml": "application/xml",
+  ".txt": "text/plain", ".csv": "text/csv",
+  ".html": "text/html", ".css": "text/css", ".js": "application/javascript",
+}
+
+function inferMime(path: string, headerValue: string): string {
+  if (headerValue && headerValue !== "application/octet-stream") return headerValue
+  const dot = path.lastIndexOf(".")
+  const ext = dot !== -1 ? path.slice(dot).toLowerCase() : ""
+  return MIME_MAP[ext] ?? "application/octet-stream"
+}
+
 // ─── Upload ─────────────────────────────────────────────────────────────────────
 
 export async function upload(ctx: RequestContext): Promise<void> {
   const bucketId = ctx.params["bucket"]!
-  const objectPath = ctx.params["wildcard"]!
+  const objectPath = decodeURIComponent(ctx.params["wildcard"]!)
 
   const bucket = await db.getBucket(bucketId)
   if (!bucket) {
@@ -32,7 +53,7 @@ export async function upload(ctx: RequestContext): Promise<void> {
   }
 
   // ── Content-Type validation (task 43) ───────────────────────────────────────
-  const contentType = ctx.req.headers["content-type"] ?? "application/octet-stream"
+  const contentType = inferMime(objectPath, ctx.req.headers["content-type"] ?? "")
   const typeError = validateContentType(bucket, contentType)
   if (typeError) {
     sendJson(ctx.res, typeError.status, typeError.body)
@@ -254,7 +275,12 @@ export async function listObjects(ctx: RequestContext): Promise<void> {
     body.offset ?? 0,
   )
 
-  sendJson(ctx.res, 200, rows)
+  sendJson(ctx.res, 200, rows.map(({ metadata, ...row }) => ({
+    ...row,
+    size: (metadata as Record<string, unknown> | null)?.["size"] ?? null,
+    mimetype: (metadata as Record<string, unknown> | null)?.["mimetype"] ?? null,
+    metadata,
+  })))
 }
 
 // ─── Shared: serve an object with optional transforms ───────────────────────────

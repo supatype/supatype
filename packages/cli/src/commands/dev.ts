@@ -1,327 +1,726 @@
-import type { Command } from "commander"
-import { spawnSync, spawn, type ChildProcess } from "node:child_process"
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { resolve } from "node:path"
-import { loadConfig } from "../config.js"
-import { ensureEngine, invokeEngine } from "../engine.js"
+/**
+ * supatype dev — start local Postgres, apply schema, run supatype-server.
+ *
+ * Supports two database providers (set in supatype.config.toml):
+ *   provider = "docker"  — runs supatype/postgres via Docker (default; includes all extensions)
+ *   provider = "native"  — manages a native Postgres binary from the supatype cache
+ */
 
-const POSTGREST_URL = "http://localhost:3000"
-const HEALTH_TIMEOUT_MS = 60_000
-const HEALTH_POLL_MS = 2_000
+import type { Command } from "commander"
+import { spawnSync } from "node:child_process"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { homedir } from "node:os"
+import { join, resolve } from "node:path"
+import { loadConfig } from "../config.js"
+import { signJwt } from "../jwt.js"
+import { resolveBinary, normalisePlatformPath, cachePath, currentPlatform } from "../binary-cache.js"
+import { ProcessManager } from "../process-manager.js"
+import { localStorageEnv } from "../local-storage.js"
+import { initdb, start as pgStart, stop as pgStop, waitReady as pgWaitReady, isPortInUse } from "../postgres-ctl.js"
+import {
+  dockerPgStart,
+  dockerPgStop,
+  dockerPgWaitReady,
+  dockerDbUrl,
+} from "../docker-postgres.js"
+
+const DEFAULT_DOCKER_IMAGE = "supatype/postgres:17-latest"
 
 export function registerDev(program: Command): void {
   program
     .command("dev")
-    .description(
-      "Start local Postgres, PostgREST, and Kong via Docker Compose, then watch for schema changes",
-    )
+    .description("Start local Postgres, apply schema, and run supatype-server")
     .option("--no-watch", "Start services but do not watch for schema changes")
-    .option("--local", "Run storage, realtime, and studio from source (monorepo dev)")
-    .action(async (opts: { watch: boolean; local: boolean }) => {
+    .option("--port <port>", "Port for supatype-server (overrides config)", String)
+    .action(async (opts: { watch: boolean; port?: string }) => {
       const cwd = process.cwd()
 
-      // Generate .env with local defaults if missing
-      ensureDevEnv(cwd)
+      // ── 1. Load TOML config ──────────────────────────────────────────────
+      const config = loadConfig(cwd)
+      const projectName = config.project.name
+      const serverPort = opts.port ?? String(config.server.port ?? 54321)
+      const provider = config.database.provider ?? "docker"
 
-      if (opts.local) {
-        // Monorepo dev — generate an infra-only compose if needed, then start
-        const composePath = resolve(cwd, "docker-compose.yml")
-        if (!existsSync(composePath)) {
-          ensureInfraCompose(cwd)
-        }
-        console.log("Starting infra services...")
-        const up = spawnSync(
-          "docker",
-          ["compose", "up", "-d", "--wait", "db", "pgbouncer", "gotrue", "postgrest", "minio", "kong"],
-          { cwd, stdio: "inherit" },
+      // ── 2. Resolve engine + server binaries ──────────────────────────────
+      console.log(`[supatype] Resolving component binaries for "${projectName}"...`)
+      const [engineBin, serverBin] = await Promise.all([
+        resolveBinary("engine", config),
+        resolveBinary("server", config),
+      ])
+
+      // ── 3. Per-project state directories ─────────────────────────────────
+      const stateRoot = join(homedir(), ".supatype", "projects", projectName)
+      const pidDir = join(stateRoot, "pid")
+      const logsDir = join(stateRoot, "logs")
+      const tmpDir = join(stateRoot, "tmp")
+
+      for (const d of [pidDir, logsDir, tmpDir]) {
+        mkdirSync(d, { recursive: true })
+      }
+
+      // ── 4. Port collision check ───────────────────────────────────────────
+      const pgPort = 5432
+      if (await isPortInUse(pgPort)) {
+        console.error(
+          `[supatype] Port ${pgPort} is already in use. Another Postgres instance may be running.\n` +
+            `  Check: lsof -i :${pgPort}`,
         )
-        if (up.status !== 0) {
-          console.error("docker compose up failed.")
-          process.exit(1)
-        }
+        process.exit(1)
+      }
+      if (await isPortInUse(Number(serverPort))) {
+        console.error(
+          `[supatype] Port ${serverPort} is already in use. Another supatype-server may be running.\n` +
+            `  Check: lsof -i :${serverPort}`,
+        )
+        process.exit(1)
+      }
+
+      // ── 5–7. Start Postgres ───────────────────────────────────────────────
+      let dbURL: string
+      let stopPostgres: () => void | Promise<void>
+      // pgBinDir is set on the native path and used to add DLL search path for
+      // PostgREST on Windows (PostgREST links against libpq + SSL from MinGW).
+      let pgBinDir: string | null = null
+
+      if (provider === "docker") {
+        const image = config.database.image ?? DEFAULT_DOCKER_IMAGE
+        console.log(`[supatype] Starting Postgres via Docker (${image})...`)
+        dockerPgStart({ image, projectName, port: pgPort })
+        await dockerPgWaitReady(projectName, 30_000)
+        console.log("[supatype] Postgres is ready.")
+        dbURL = dockerDbUrl(projectName, pgPort)
+        stopPostgres = () => dockerPgStop(projectName)
       } else {
-        if (!existsSync(resolve(cwd, "docker-compose.yml"))) {
-          console.error(
-            "docker-compose.yml not found. Run: supatype init",
+        // native — resolve pg bin dir and manage with pg_ctl
+        pgBinDir = await resolvePgBinDir(config)
+        const dataDir = config.database.data_dir ?? join(stateRoot, "data")
+        mkdirSync(dataDir, { recursive: true })
+        const pgOpts = { pgBinDir, dataDir, port: pgPort, logPath: join(logsDir, "postgres.log") }
+
+        console.log("[supatype] Initialising Postgres data directory...")
+        initdb(pgOpts)
+        console.log("[supatype] Starting Postgres...")
+        pgStart(pgOpts)
+        await pgWaitReady(pgOpts, 15_000)
+        console.log("[supatype] Postgres is ready.")
+        dbURL = `postgres://postgres:postgres@127.0.0.1:${pgPort}/${projectName}`
+        stopPostgres = () => pgStop(pgOpts)
+
+        // Create project database if it doesn't exist.
+        const psqlBin    = join(pgBinDir, process.platform === "win32" ? "psql.exe"    : "psql")
+        const createdbBin = join(pgBinDir, process.platform === "win32" ? "createdb.exe" : "createdb")
+        const pgConnArgs = ["-h", "127.0.0.1", "-p", String(pgPort), "-U", "postgres"]
+        const createDbResult = spawnSync(
+          createdbBin,
+          [...pgConnArgs, projectName],
+          { stdio: "pipe", encoding: "utf8" },
+        )
+        if (createDbResult.status !== 0) {
+          const stderr = createDbResult.stderr ?? ""
+          if (!stderr.includes("already exists")) {
+            throw new Error(`Failed to create database "${projectName}": ${stderr}`)
+          }
+        } else {
+          console.log(`[supatype] Created database "${projectName}".`)
+        }
+
+        // Create roles required by PostgREST and grant them to postgres so
+        // PostgREST can SET ROLE when processing requests.
+        //   anon          – unauthenticated requests (RLS enforced)
+        //   authenticated – signed-in user requests  (RLS enforced)
+        //   service_role  – developer/admin bypass   (BYPASSRLS)
+        const rolesSql = `
+CREATE SCHEMA IF NOT EXISTS auth;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'anon')
+    THEN CREATE ROLE anon NOLOGIN; END IF;
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticated')
+    THEN CREATE ROLE authenticated NOLOGIN; END IF;
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'service_role')
+    THEN CREATE ROLE service_role NOLOGIN BYPASSRLS; END IF;
+END $$;
+GRANT anon, authenticated, service_role TO postgres;
+GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+-- Table-level privileges (RLS restricts rows; roles still need table access)
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO service_role;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO authenticated, service_role;
+-- Default privileges so tables created by the engine push inherit these grants
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO anon;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO authenticated;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticated, service_role;
+`
+        spawnSync(psqlBin, [...pgConnArgs, "-d", projectName, "-c", rolesSql],
+          { stdio: "pipe", encoding: "utf8" })
+      }
+
+      // ── 8. Engine: apply schema ───────────────────────────────────────────
+      const schemaPath = config.schema?.path ?? "schema/index.ts"
+      const supatypeDir = join(cwd, ".supatype")
+      const manifestPath = join(supatypeDir, "manifest.json")
+      const adminConfigPath = join(supatypeDir, "admin-config.json")
+      mkdirSync(supatypeDir, { recursive: true })
+
+      const localStoragePath = config.storage?.provider !== "s3" ? join(stateRoot, "storage") : undefined
+      // Native Postgres builds don't include PostGIS — skip geo fields rather than failing.
+      const skipFieldKinds: ReadonlySet<string> = provider === "native" ? new Set(["geo", "vector"]) : new Set()
+
+      await runSchemaPush(cwd, engineBin, schemaPath, dbURL, manifestPath, adminConfigPath, localStoragePath, skipFieldKinds).catch(
+        (e: unknown) => console.error("[supatype] Initial schema push failed:", (e as Error).message),
+      )
+
+      // ── 9. Spawn supatype-server ──────────────────────────────────────────
+      // GoTrue creates its auth schema in the project database so that auth.users
+      // is co-located with public.* tables and visible from the SQL runner.
+      // GoTrue migrations create tables with unqualified names and rely on
+      // search_path=auth to resolve them into the auth schema.
+      const authDbURL = dbURL.includes("?") ? `${dbURL}&search_path=auth` : `${dbURL}?search_path=auth`
+
+      // Resolve edge functions config: only enable Deno if a functions dir exists.
+      const functionsDir = resolve(cwd, "functions")
+      const hasFunctionsDir = existsSync(functionsDir)
+      let denoFunctionsDir = ""
+      if (hasFunctionsDir) {
+        const denoAvailable = spawnSync(
+          process.platform === "win32" ? "where" : "which",
+          [process.platform === "win32" ? "deno.exe" : "deno"],
+          { stdio: "pipe" },
+        ).status === 0
+        if (denoAvailable) {
+          denoFunctionsDir = functionsDir
+          console.log(`[supatype] Edge functions enabled (${functionsDir})`)
+        } else {
+          console.warn(
+            `[supatype] ⚠  Found ${functionsDir} but Deno is not installed — edge functions will not run.\n` +
+              "  Install Deno: https://docs.deno.com/runtime/getting_started/installation/",
           )
-          process.exit(1)
-        }
-        console.log("Starting services...")
-        const up = spawnSync(
-          "docker",
-          ["compose", "up", "-d", "--wait"],
-          { cwd, stdio: "inherit" },
-        )
-        if (up.status !== 0) {
-          console.error("docker compose up failed.")
-          process.exit(1)
         }
       }
 
-      console.log("Waiting for PostgREST to be ready...")
-      await waitForPostgREST()
+      const LOCAL_JWT_SECRET = "super-secret-jwt-token-with-at-least-32-characters-long"
+      const now = Math.floor(Date.now() / 1000)
+      const jwtBase = { iss: "supatype", iat: now, exp: now + 315_360_000 }
+      const anonKey        = signJwt({ ...jwtBase, role: "anon" },         LOCAL_JWT_SECRET)
+      const serviceRoleKey = signJwt({ ...jwtBase, role: "service_role" }, LOCAL_JWT_SECRET)
 
-      const children: ChildProcess[] = []
 
-      if (opts.local) {
-        console.log("\nStarting local services from source...")
-        children.push(
-          ...startLocalServices(cwd),
-        )
+      const serverEnv: Record<string, string> = {
+        // supatype-server outer layer
+        SUPATYPE_MODE: config.server.mode ?? "dev",
+        SUPATYPE_MANIFEST_PATH: manifestPath,
+        SUPATYPE_ADMIN_CONFIG_PATH: adminConfigPath,
+        SUPATYPE_POSTGREST_URL: "http://127.0.0.1:3000",
+        SUPATYPE_DENO_FUNCTIONS_DIR: denoFunctionsDir,
+        SUPATYPE_ANON_KEY: anonKey,
+        SUPATYPE_SERVICE_ROLE_KEY: serviceRoleKey,
+        PORT: serverPort,
+        // GoTrue required fields (sensible local-dev defaults)
+        DATABASE_URL: authDbURL,
+        SUPATYPE_SQL_DATABASE_URL: dbURL,
+        GOTRUE_DB_DRIVER: "postgres",
+        GOTRUE_JWT_SECRET: LOCAL_JWT_SECRET,
+        GOTRUE_JWT_EXP: "3600",
+        GOTRUE_JWT_AUD: "authenticated",
+        GOTRUE_JWT_ADMIN_ROLES: "supatype_admin,service_role",
+        API_EXTERNAL_URL: `http://localhost:${serverPort}/auth/v1`,
+        GOTRUE_API_HOST: "localhost",
+        GOTRUE_SITE_URL: `http://localhost:${serverPort}`,
+        GOTRUE_MAILER_AUTOCONFIRM: "true",
+        GOTRUE_LOG_LEVEL: "info",
+        GOTRUE_DISABLE_SIGNUP: "false",
+        ...(config.storage?.provider !== "s3" ? localStorageEnv(stateRoot) : {}),
+        ...loadDotEnv(cwd),
       }
 
-      console.log("\nServices running:")
-      console.log("  Postgres    postgresql://localhost:5432")
-      console.log("  PostgREST   http://localhost:3000")
-      console.log("  Kong        http://localhost:8000")
-      console.log("    REST API  http://localhost:8000/rest/v1/")
-      console.log("    GraphQL   http://localhost:8000/graphql/v1")
-      if (opts.local) {
-        console.log("  Storage     http://localhost:5000  (from source)")
-        console.log("  Realtime    http://localhost:4000  (from source)")
-        console.log("  Studio      http://localhost:3002  (from source)")
-      }
-      console.log()
+      const serverProc = new ProcessManager(serverBin, [], {
+        label: "server",
+        pidDir,
+        colour: "\x1b[32m",
+        env: serverEnv,
+      })
+      serverProc.start()
 
-      // Clean shutdown on Ctrl+C
-      const cleanup = () => {
-        for (const child of children) {
-          child.kill()
+      // ── 9b. PostgREST ────────────────────────────────────────────────────
+      let postgrestProc: ProcessManager | null = null
+      const postgrestBin = await resolvePostgrestBin(config.overrides?.postgrest)
+      if (postgrestBin) {
+        postgrestProc = new ProcessManager(postgrestBin, [], {
+          label: "postgrest",
+          pidDir,
+          colour: "\x1b[36m",
+          env: {
+            PGRST_DB_URI: dbURL,
+            PGRST_DB_SCHEMA: "public, supatype",
+            PGRST_DB_ANON_ROLE: "anon",
+            PGRST_SERVER_PORT: "3000",
+            PGRST_SERVER_HOST: "127.0.0.1",
+            PGRST_JWT_SECRET: serverEnv["GOTRUE_JWT_SECRET"] ?? "",
+            PGRST_LOG_LEVEL: "warn",
+            // On Windows, PostgREST (MinGW/GHC binary) needs libpq.dll and
+            // OpenSSL DLLs. Prepend the native Postgres bin dir which bundles
+            // all required MinGW runtime DLLs.
+            ...(process.platform === "win32" && pgBinDir !== null
+              ? { PATH: `${pgBinDir};${process.env["PATH"] ?? ""}` }
+              : {}),
+          },
+        })
+        postgrestProc.start()
+      }
+
+      // ── 9d. Studio (optional) ─────────────────────────────────────────────
+      const studioPort = 3002
+      let studioProc: ProcessManager | null = null
+
+      const studioOverride = config.overrides?.studio
+      if (studioOverride) {
+        const studioDir = resolve(cwd, studioOverride)
+        // Run vite's JS entry directly via node — avoids .cmd/.sh wrapper spawn issues on Windows.
+        const viteJs = join(studioDir, "node_modules", "vite", "bin", "vite.js")
+        if (existsSync(viteJs)) {
+          studioProc = new ProcessManager(
+            process.execPath,
+            [viteJs, "--port", String(studioPort), "--strictPort"],
+            {
+              label: "studio",
+              pidDir,
+              cwd: studioDir,
+              colour: "\x1b[35m",
+              env: {
+                // Point the studio at the Vite dev server (same origin as the
+                // browser) so all API requests are same-origin — CORS never fires.
+                // Vite's dev proxy (configured via SUPATYPE_PROXY_TARGET) then
+                // forwards those requests server-side to the actual backend.
+                VITE_SUPATYPE_URL: `http://localhost:${studioPort}`,
+                SUPATYPE_PROXY_TARGET: `http://localhost:${serverPort}`,
+                // Studio is a developer tool — use service_role key to bypass
+                // RLS so all tables and rows are visible regardless of policies.
+                VITE_SUPATYPE_ANON_KEY: serviceRoleKey,
+                VITE_SUPATYPE_SERVICE_ROLE_KEY: serviceRoleKey,
+                VITE_BASE_PATH: "/",
+              },
+            },
+          )
+          studioProc.start()
+        } else {
+          console.warn(`[supatype] ⚠  Studio override set but vite not found at ${viteJs}. Run: pnpm install`)
         }
+      }
+
+      // ── Print status ──────────────────────────────────────────────────────
+      console.log(`
+[supatype] Services running:
+  Postgres         ${dbURL}
+  supatype-server  http://localhost:${serverPort}
+    REST API       http://localhost:${serverPort}/rest/v1/
+    Auth           http://localhost:${serverPort}/auth/v1/
+    Storage        http://localhost:${serverPort}/storage/v1/
+    Realtime       ws://localhost:${serverPort}/realtime/v1/${studioProc ? `\n  Studio           http://localhost:${studioPort}` : ""}
+
+  API keys (local dev only):
+    anon key       ${anonKey}
+    service_role   ${serviceRoleKey}
+
+  JWT secret: ${LOCAL_JWT_SECRET}
+
+  Press Ctrl+C to stop.
+`)
+
+
+      // ── Shutdown handler ──────────────────────────────────────────────────
+      const cleanup = async () => {
+        console.log("\n[supatype] Shutting down...")
+        await Promise.all([
+          serverProc.stop(),
+          postgrestProc?.stop(),
+          studioProc?.stop(),
+        ])
+        await stopPostgres()
         process.exit(0)
       }
-      process.on("SIGINT", cleanup)
-      process.on("SIGTERM", cleanup)
+      process.once("SIGINT", cleanup)
+      process.once("SIGTERM", cleanup)
 
+      // ── 10. Schema watch ──────────────────────────────────────────────────
       if (opts.watch) {
-        await watchAndPush(cwd)
+        const schemaDir = resolve(cwd, schemaPath, "..")
+        console.log(`[supatype] Watching ${schemaDir} for changes...`)
+
+        const { watch } = await import("node:fs")
+        // Debounce: Windows fs.watch fires multiple events per save.
+        // Wait 300 ms after the last event before pushing.
+        let debounceTimer: ReturnType<typeof setTimeout> | null = null
+        watch(schemaDir, { recursive: true }, (_eventType, filename) => {
+          if (!filename?.endsWith(".ts")) return
+          if (debounceTimer) clearTimeout(debounceTimer)
+          debounceTimer = setTimeout(() => {
+            debounceTimer = null
+            console.log(`\n[supatype] Change detected in ${filename}, checking schema...`)
+            runSchemaPush(cwd, engineBin, schemaPath, dbURL, manifestPath, adminConfigPath, localStoragePath, skipFieldKinds).catch((e: unknown) =>
+              console.error("[supatype] Schema push failed:", (e as Error).message),
+            )
+          }, 300)
+        })
       }
+
+      // Block until killed.
+      await new Promise<never>(() => undefined)
     })
 }
 
-function ensureInfraCompose(cwd: string): void {
-  const projectName = resolve(cwd).split(/[\\/]/).pop() ?? "supatype"
-  const content = `# Generated by supatype dev --local — infra services only
-services:
-  db:
-    image: supatype/postgres:17-latest
-    environment:
-      POSTGRES_PASSWORD: \${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: \${POSTGRES_DB:-${projectName}}
-    ports:
-      - "5432:5432"
-    volumes:
-      - db-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
+// ---------------------------------------------------------------------------
+// Schema push (engine subprocess)
+// ---------------------------------------------------------------------------
 
-  pgbouncer:
-    image: pgbouncer/pgbouncer:latest
-    volumes:
-      - ./.supatype/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
-      - ./.supatype/userlist.txt:/etc/pgbouncer/userlist.txt:ro
-    depends_on:
-      db:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "pg_isready", "-h", "localhost", "-p", "6432", "-U", "postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
+// Last successfully-pushed AST JSON — used to skip no-op re-fires.
+let _lastPushedAst: string | null = null
+// AST that failed on its last attempt — always retried even if content is unchanged.
+let _lastFailedAst: string | null = null
 
-  gotrue:
-    image: supatype/auth:v1.0.0
-    environment:
-      GOTRUE_API_HOST: 0.0.0.0
-      GOTRUE_API_PORT: 9999
-      GOTRUE_DB_DRIVER: postgres
-      GOTRUE_DB_DATABASE_URL: "postgres://postgres:\${POSTGRES_PASSWORD:-postgres}@pgbouncer:6432/\${POSTGRES_DB:-${projectName}}?search_path=auth"
-      GOTRUE_SITE_URL: \${SITE_URL:-http://localhost:3000}
-      GOTRUE_JWT_SECRET: \${JWT_SECRET:-super-secret-jwt-token-change-in-production}
-      GOTRUE_JWT_EXP: 3600
-      GOTRUE_JWT_AUD: authenticated
-      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
-      GOTRUE_JWT_ADMIN_ROLES: service_role
-      GOTRUE_MAILER_AUTOCONFIRM: \${GOTRUE_MAILER_AUTOCONFIRM:-true}
-      GOTRUE_DISABLE_SIGNUP: \${DISABLE_SIGNUP:-false}
-    ports:
-      - "9999:9999"
-    depends_on:
-      pgbouncer:
-        condition: service_healthy
+async function runSchemaPush(
+  cwd: string,
+  engineBin: string,
+  schemaPath: string,
+  dbURL: string,
+  manifestPath: string,
+  adminConfigPath?: string,
+  storagePath?: string,
+  skipFieldKinds?: ReadonlySet<string>,
+): Promise<void> {
+  // Build AST JSON from schema file.
+  const { loadSchemaAst } = await import("../config.js")
+  let ast = loadSchemaAst(schemaPath, cwd)
 
-  postgrest:
-    image: postgrest/postgrest:v12.2.8
-    environment:
-      PGRST_DB_URI: postgresql://authenticator:\${POSTGRES_PASSWORD:-postgres}@pgbouncer:6432/\${POSTGRES_DB:-${projectName}}
-      PGRST_DB_SCHEMA: public
-      PGRST_DB_ANON_ROLE: anon
-      PGRST_JWT_SECRET: \${JWT_SECRET:-super-secret-jwt-token-change-in-production}
-      PGRST_DB_EXTRA_SEARCH_PATH: public,extensions
-      PGRST_DB_POOL: 3
-    ports:
-      - "3000:3000"
-    depends_on:
-      pgbouncer:
-        condition: service_healthy
-
-  minio:
-    image: minio/minio:RELEASE.2024-11-07T00-52-20Z
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: supatype
-      MINIO_ROOT_PASSWORD: supatype-secret
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - minio-data:/data
-    healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
-  kong:
-    image: kong:3.6
-    environment:
-      KONG_DATABASE: "off"
-      KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
-      KONG_PROXY_ACCESS_LOG: /dev/stdout
-      KONG_ADMIN_ACCESS_LOG: /dev/stdout
-      KONG_PROXY_ERROR_LOG: /dev/stderr
-      KONG_ADMIN_ERROR_LOG: /dev/stderr
-    volumes:
-      - ./.supatype/kong.yml:/etc/kong/kong.yml:ro
-    ports:
-      - "8000:8000"
-    depends_on:
-      - postgrest
-      - gotrue
-
-volumes:
-  db-data:
-  minio-data:
-`
-  writeFileSync(resolve(cwd, "docker-compose.yml"), content, "utf8")
-  console.log("  created  docker-compose.yml (infra only)\n")
-
-  // Also ensure pgbouncer config exists
-  const supatypeDir = resolve(cwd, ".supatype")
-  mkdirSync(supatypeDir, { recursive: true })
-
-  if (!existsSync(resolve(supatypeDir, "pgbouncer.ini"))) {
-    writeFileSync(resolve(supatypeDir, "pgbouncer.ini"), `[databases]
-* = host=db port=5432
-
-[pgbouncer]
-listen_addr = 0.0.0.0
-listen_port = 6432
-auth_type = trust
-auth_file = /etc/pgbouncer/userlist.txt
-pool_mode = transaction
-default_pool_size = 20
-max_db_connections = 60
-max_client_conn = 100
-server_reset_query = DEALLOCATE ALL
-ignore_startup_parameters = extra_float_digits
-`, "utf8")
+  // Strip fields whose kind requires an unavailable Postgres extension.
+  if (skipFieldKinds && skipFieldKinds.size > 0) {
+    const { filtered, adapted } = adaptUnsupportedKinds(ast, skipFieldKinds)
+    ast = filtered
+    if (adapted.length > 0) {
+      console.warn(
+        `[supatype] ⚠  ${adapted.length} field(s) replaced with JSONB — required extensions not available:\n` +
+        adapted.map((s: string) => `    ${s}`).join("\n"),
+      )
+    }
   }
 
-  if (!existsSync(resolve(supatypeDir, "userlist.txt"))) {
-    writeFileSync(resolve(supatypeDir, "userlist.txt"), "", "utf8")
+  const astJson = JSON.stringify(ast)
+
+  // Skip only when the last push of this exact AST succeeded.
+  // If it previously failed we always retry so the user can trigger a re-run
+  // by simply saving the file again without needing to make a content change.
+  if (astJson === _lastPushedAst && astJson !== _lastFailedAst) {
+    return
   }
 
-  if (!existsSync(resolve(supatypeDir, "kong.yml"))) {
-    writeFileSync(resolve(supatypeDir, "kong.yml"), `_format_version: "3.0"
+  const astPath = join(cwd, ".supatype", "schema.ast.json")
+  writeFileSync(astPath, astJson)
 
-services:
-  - name: rest-v1
-    url: http://postgrest:3000
-    routes:
-      - name: rest-v1-all
-        strip_path: true
-        paths:
-          - /rest/v1/
-  - name: auth-v1
-    url: http://gotrue:9999
-    routes:
-      - name: auth-v1-all
-        strip_path: true
-        paths:
-          - /auth/v1/
-  - name: storage-v1
-    url: http://host.docker.internal:5000
-    routes:
-      - name: storage-v1-all
-        strip_path: true
-        paths:
-          - /storage/v1/
-  - name: realtime-v1
-    url: http://host.docker.internal:4000
-    routes:
-      - name: realtime-v1-all
-        strip_path: true
-        paths:
-          - /realtime/v1/
-        protocols:
-          - http
-          - https
-          - ws
-          - wss
-  - name: functions-v1
-    url: http://host.docker.internal:54321
-    routes:
-      - name: functions-v1-all
-        strip_path: false
-        paths:
-          - /functions/v1/
-  - name: studio
-    url: http://host.docker.internal:3002
-    routes:
-      - name: studio-all
-        strip_path: true
-        paths:
-          - /studio/
-`, "utf8")
+  // Push schema.
+  console.log("[supatype] Applying schema...")
+  const pushResult = spawnSync(
+    engineBin,
+    ["push", "-i", astPath, "--database-url", dbURL, "--force"],
+    { cwd, stdio: "inherit", encoding: "utf8" },
+  )
+  if (pushResult.status !== 0) {
+    _lastFailedAst = astJson
+    throw new Error(`Engine schema push failed (exit ${pushResult.status})`)
+  }
+  _lastPushedAst = astJson
+  _lastFailedAst = null
+
+  // Provision storage buckets declared in the schema.
+  if (storagePath) {
+    const parseResult = spawnSync(engineBin, ["parse", "-i", astPath], { cwd, stdio: "pipe", encoding: "utf8" })
+    if (parseResult.status === 0 && parseResult.stdout) {
+      try {
+        const resolvedAst = JSON.parse(parseResult.stdout) as { storageBuckets?: Array<{ id: string; public: boolean }> }
+        if (resolvedAst.storageBuckets && resolvedAst.storageBuckets.length > 0) {
+          provisionStorageBuckets(resolvedAst.storageBuckets, storagePath)
+        }
+      } catch { /* ignore parse errors */ }
+    }
+  }
+
+  // Generate manifest.
+  const genResult = spawnSync(
+    engineBin,
+    ["generate", "-i", astPath, "-o", manifestPath],
+    { cwd, stdio: "pipe", encoding: "utf8" },
+  )
+  if (genResult.status !== 0) {
+    console.warn("[supatype] Manifest generation failed — server routing may be stale.")
+  }
+
+  // Generate admin config (for Studio). Engine writes to stdout.
+  if (adminConfigPath) {
+    const adminResult = spawnSync(
+      engineBin,
+      ["admin", "-i", astPath],
+      { cwd, stdio: "pipe", encoding: "utf8" },
+    )
+    if (adminResult.status === 0 && adminResult.stdout) {
+      writeFileSync(adminConfigPath, adminResult.stdout)
+    }
+  }
+
+  console.log("[supatype] Schema applied.")
+}
+
+// ---------------------------------------------------------------------------
+// Storage bucket provisioning (local dev only)
+// ---------------------------------------------------------------------------
+
+function provisionStorageBuckets(
+  declared: Array<{ id: string; public: boolean }>,
+  storagePath: string,
+): void {
+  const bucketsDir = join(storagePath, ".supatype")
+  const bucketsFile = join(bucketsDir, "buckets.json")
+  mkdirSync(bucketsDir, { recursive: true })
+
+  let existing: Array<Record<string, unknown>> = []
+  try {
+    existing = JSON.parse(readFileSync(bucketsFile, "utf8")) as Array<Record<string, unknown>>
+  } catch { /* file doesn't exist yet */ }
+
+  const existingIds = new Set(existing.map((b) => b["id"] as string))
+  let added = 0
+
+  for (const bucket of declared) {
+    if (existingIds.has(bucket.id)) continue
+    const now = new Date().toISOString()
+    existing.push({ id: bucket.id, name: bucket.id, public: bucket.public, file_size_limit: null, allowed_mime_types: null, created_at: now, updated_at: now })
+    mkdirSync(join(storagePath, bucket.id), { recursive: true })
+    added++
+  }
+
+  if (added > 0) {
+    writeFileSync(bucketsFile, JSON.stringify(existing, null, 2))
+    console.log(`[supatype] Storage: provisioned ${added} bucket(s).`)
   }
 }
 
-function ensureDevEnv(cwd: string): void {
-  const envPath = resolve(cwd, ".env")
-  if (existsSync(envPath)) return
+// ---------------------------------------------------------------------------
+// Resolve Postgres bin dir
+// ---------------------------------------------------------------------------
 
-  const projectName = resolve(cwd).split(/[\\/]/).pop() ?? "supatype"
-  const content = `# Generated by supatype dev — all defaults for local development
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/${projectName}
-POSTGRES_PASSWORD=postgres
-POSTGRES_DB=${projectName}
+async function resolvePgBinDir(config: Awaited<ReturnType<typeof loadConfig>>): Promise<string> {
+  const override = config.overrides?.postgres_dir
+  if (override) {
+    // Normalize Git Bash (/c/Users/...) paths to Win32 form (C:\Users\...) on Windows.
+    const normalised = normalisePlatformPath(override)
+    const resolved = resolve(process.cwd(), normalised)
+    const binDir = join(resolved, "bin")
+    if (!existsSync(binDir)) {
+      throw new Error(`[overrides] postgres_dir does not contain a bin/ directory: ${resolved}`)
+    }
+    console.warn(`\u26a0  Using local Postgres build: ${resolved}`)
+    return binDir
+  }
 
-JWT_SECRET=super-secret-jwt-token-change-in-production
-ANON_KEY=
-SERVICE_ROLE_KEY=
+  // Locate cached Postgres archive.
+  const { cachePath } = await import("../binary-cache.js")
+  const version = config.versions.postgres
+  const { currentPlatform } = await import("../binary-cache.js")
+  const platform = currentPlatform()
 
-SITE_URL=http://localhost:3000
+  const pgCacheDir = cachePath("postgres", version)
+  const extractedDir = join(pgCacheDir, `pg-${version}`)
 
-# Storage (MinIO)
-S3_ENDPOINT=http://localhost:9000
-S3_REGION=us-east-1
-S3_ACCESS_KEY=supatype
-S3_SECRET_KEY=supatype-secret
-S3_FORCE_PATH_STYLE=true
+  const pgCtlName = platform.os === "windows" ? "pg_ctl.exe" : "pg_ctl"
+  if (!existsSync(join(extractedDir, "bin", pgCtlName))) {
+    // Try to extract the cached archive.
+    await extractPostgresArchive(pgCacheDir, version, platform, extractedDir)
+  }
 
-# SMTP — leave empty for email autoconfirm in dev
-SMTP_HOST=
-SMTP_PORT=
-SMTP_USER=
-SMTP_PASS=
-`
-  writeFileSync(envPath, content, "utf8")
-  console.log("  created  .env (local dev defaults)\n")
+  return join(extractedDir, "bin")
 }
+
+async function extractPostgresArchive(
+  pgCacheDir: string,
+  version: string,
+  platform: { os: string; arch: string },
+  extractDir: string,
+): Promise<void> {
+  const ext = platform.os === "windows" ? ".zip" : ".tar.gz"
+  const archiveName = `supatype-pg-${version}-${platform.os}-${platform.arch}${ext}`
+  const archivePath = join(pgCacheDir, archiveName)
+
+  if (!existsSync(archivePath)) {
+    throw new Error(
+      `Postgres ${version} archive not found. Run: supatype update`,
+    )
+  }
+
+  mkdirSync(extractDir, { recursive: true })
+
+  // On Windows, Git Bash tar is typically first in PATH and chokes on drive-letter
+  // paths (C:\...). Use PowerShell's Expand-Archive instead, which handles Windows
+  // paths natively. On Linux/macOS, use tar as normal.
+  const result = platform.os === "windows"
+    ? spawnSync(
+        "powershell.exe",
+        ["-NoProfile", "-Command", `Expand-Archive -Path '${archivePath}' -DestinationPath '${extractDir}' -Force`],
+        { stdio: "inherit" },
+      )
+    : spawnSync("tar", ["-xzf", archivePath, "-C", extractDir], { stdio: "inherit" })
+
+  if (result.status !== 0) {
+    throw new Error(`Failed to extract Postgres archive: ${archivePath}`)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// PostgREST resolver — downloads from GitHub releases if not cached
+// ---------------------------------------------------------------------------
+
+const POSTGREST_DEFAULT_VERSION = "12.2.3"
+const POSTGREST_GITHUB = "https://github.com/PostgREST/postgrest/releases/download"
+
+async function resolvePostgrestBin(overridePath?: string): Promise<string | null> {
+  // Honour local override (same pattern as engine/server).
+  if (overridePath) {
+    let p = resolve(process.cwd(), normalisePlatformPath(overridePath))
+    if (process.platform === "win32" && !p.endsWith(".exe") && !existsSync(p)) {
+      const withExe = p + ".exe"
+      if (existsSync(withExe)) p = withExe
+    }
+    if (existsSync(p)) return p
+    console.warn(`[supatype] ⚠  PostgREST override not found at ${p}`)
+    return null
+  }
+
+  const version = POSTGREST_DEFAULT_VERSION
+  const platform = currentPlatform()
+  const binName = platform.os === "windows" ? "postgrest.exe" : "postgrest"
+  const cacheDir = cachePath("postgres", version).replace(/postgres/, "postgrest")
+  const binPath = join(cacheDir, binName)
+
+  if (existsSync(binPath)) return binPath
+
+  // Download from GitHub releases.
+  const arch = platform.arch === "arm64" ? "aarch64" : "x86_64"
+  const archiveName = platform.os === "windows"
+    ? `postgrest-v${version}-windows-x64.zip`
+    : platform.os === "darwin"
+      ? `postgrest-v${version}-macos-${arch}.tar.xz`
+      : `postgrest-v${version}-linux-static-${arch}.tar.xz`
+
+  const url = `${POSTGREST_GITHUB}/v${version}/${archiveName}`
+  const archivePath = join(cacheDir, archiveName)
+
+  console.log(`[supatype] Downloading PostgREST v${version}...`)
+  mkdirSync(cacheDir, { recursive: true })
+
+  let resp: Response
+  try {
+    resp = await fetch(url)
+  } catch (e) {
+    console.warn(
+      `[supatype] ⚠  Could not download PostgREST (${(e as Error).message}).\n` +
+      `  REST API (/rest/v1/) will be unavailable until the download succeeds.\n` +
+      `  Re-run 'supatype dev' once network access to github.com:443 is restored.`,
+    )
+    return null
+  }
+  if (!resp.ok) {
+    console.warn(`[supatype] ⚠  Could not download PostgREST: HTTP ${resp.status}. REST API will be unavailable.`)
+    return null
+  }
+
+  const buf = Buffer.from(await resp.arrayBuffer())
+  writeFileSync(archivePath, buf)
+
+  // Extract. The Windows zip may nest postgrest.exe inside a subdirectory, so
+  // after Expand-Archive we do a recursive search and copy to binPath.
+  if (platform.os === "windows") {
+    const r = spawnSync(
+      "powershell.exe",
+      [
+        "-NoProfile", "-Command",
+        `Expand-Archive -Path '${archivePath}' -DestinationPath '${cacheDir}' -Force; ` +
+        `$exe = Get-ChildItem -Path '${cacheDir}' -Recurse -Filter 'postgrest.exe' | Select-Object -First 1; ` +
+        `if ($exe) { Copy-Item -Path $exe.FullName -Destination '${binPath}' -Force }`,
+      ],
+      { stdio: "pipe", encoding: "utf8" },
+    )
+    if (r.status !== 0) {
+      console.warn(`[supatype] ⚠  PostgREST extraction failed: ${r.stderr?.trim() ?? "unknown error"}. REST API will be unavailable.`)
+      return null
+    }
+  } else {
+    const r = spawnSync("tar", ["-xJf", archivePath, "-C", cacheDir], { stdio: "pipe" })
+    if (r.status !== 0) {
+      console.warn("[supatype] ⚠  PostgREST extraction failed. REST API will be unavailable.")
+      return null
+    }
+  }
+
+  if (!existsSync(binPath)) {
+    console.warn("[supatype] ⚠  PostgREST binary not found after extraction. REST API will be unavailable.")
+    return null
+  }
+
+  if (platform.os !== "windows") {
+    const { chmod } = await import("node:fs/promises")
+    await chmod(binPath, 0o755)
+  }
+
+  console.log(`[supatype] PostgREST v${version} ready.`)
+  return binPath
+}
+
+// ---------------------------------------------------------------------------
+// Local-dev JWT generator (no external dep — pure crypto)
+// ---------------------------------------------------------------------------
+
+
+// ---------------------------------------------------------------------------
+// AST adaptation — replace extension-dependent fields with JSONB fallbacks
+// ---------------------------------------------------------------------------
+
+interface AstField { kind: string; required?: boolean; [k: string]: unknown }
+interface AstModel { name: string; fields?: Record<string, AstField> }
+interface AstSchema { models?: AstModel[] }
+
+// Field kinds that require Postgres extensions not available in all builds.
+// Maps kind → { extension name, JSONB fallback AST }
+const EXTENSION_FIELDS: Record<string, { ext: string; fallback: AstField }> = {
+  geo:    { ext: "PostGIS",  fallback: { kind: "json", pgType: "JSONB" } },
+  vector: { ext: "pgvector", fallback: { kind: "json", pgType: "JSONB" } },
+}
+
+function adaptUnsupportedKinds(
+  ast: unknown,
+  skipKinds: ReadonlySet<string>,
+): { filtered: unknown; adapted: string[] } {
+  const adapted: string[] = []
+  if (!ast || typeof ast !== "object") return { filtered: ast, adapted }
+  const schema = ast as AstSchema
+  if (!Array.isArray(schema.models)) return { filtered: ast, adapted }
+
+  const models = schema.models.map((model) => {
+    const fields: Record<string, AstField> = {}
+    for (const [name, field] of Object.entries(model.fields ?? {})) {
+      const info = skipKinds.has(field.kind) ? EXTENSION_FIELDS[field.kind] : undefined
+      if (info) {
+        fields[name] = { ...info.fallback, required: field.required ?? false }
+        adapted.push(`${model.name}.${name} (${info.ext} → JSONB)`)
+      } else {
+        fields[name] = field
+      }
+    }
+    return { ...model, fields }
+  })
+
+  return { filtered: { ...schema, models }, adapted }
+}
+
+// ---------------------------------------------------------------------------
+// .env loader
+// ---------------------------------------------------------------------------
 
 function loadDotEnv(cwd: string): Record<string, string> {
   const envPath = resolve(cwd, ".env")
@@ -332,146 +731,7 @@ function loadDotEnv(cwd: string): Record<string, string> {
     if (!trimmed || trimmed.startsWith("#")) continue
     const eq = trimmed.indexOf("=")
     if (eq === -1) continue
-    const key = trimmed.slice(0, eq)
-    const value = trimmed.slice(eq + 1)
-    vars[key] = value
+    vars[trimmed.slice(0, eq)] = trimmed.slice(eq + 1)
   }
   return vars
-}
-
-function localDevDefaults(cwd: string): Record<string, string> {
-  const projectName = resolve(cwd).split(/[\\/]/).pop() ?? "supatype"
-  // Known defaults that match docker-compose local dev setup
-  const defaults: Record<string, string> = {
-    DATABASE_URL: `postgresql://postgres:postgres@localhost:5432/${projectName}`,
-    POSTGRES_PASSWORD: "postgres",
-    POSTGRES_DB: projectName,
-    JWT_SECRET: "super-secret-jwt-token-change-in-production",
-    SITE_URL: "http://localhost:3000",
-    S3_ENDPOINT: "http://localhost:9000",
-    S3_REGION: "us-east-1",
-    S3_ACCESS_KEY: "supatype",
-    S3_SECRET_KEY: "supatype-secret",
-    S3_FORCE_PATH_STYLE: "true",
-    SLOT_NAME: "realtime_slot",
-    REPLICATION_POLL_INTERVAL: "100",
-    SECURE_CHANNELS: "true",
-  }
-  // .env file values override defaults
-  const dotEnv = loadDotEnv(cwd)
-  return { ...defaults, ...dotEnv }
-}
-
-function startLocalServices(cwd: string): ChildProcess[] {
-  const children: ChildProcess[] = []
-  const devEnv = localDevDefaults(cwd)
-
-  const services = [
-    { name: "storage", filter: "@supatype/storage", color: "\x1b[34m" },
-    { name: "realtime", filter: "@supatype/realtime", color: "\x1b[35m" },
-    { name: "studio", filter: "@supatype/studio", color: "\x1b[36m" },
-  ]
-
-  for (const svc of services) {
-    const pkgDir = resolve(cwd, "..", "packages", svc.name)
-
-    if (!existsSync(resolve(pkgDir, "package.json"))) {
-      console.warn(`  Skipping ${svc.name} — not found at ${pkgDir}`)
-      continue
-    }
-
-    const reset = "\x1b[0m"
-    const prefix = `${svc.color}[${svc.name}]${reset}`
-
-    const child = spawn("pnpm", ["dev"], {
-      cwd: pkgDir,
-      stdio: ["ignore", "pipe", "pipe"],
-      shell: true,
-      env: {
-        ...process.env,
-        ...devEnv,
-        PORT: svc.name === "storage" ? "5000" : svc.name === "realtime" ? "4000" : "3002",
-      },
-    })
-
-    child.stdout?.on("data", (data: Buffer) => {
-      for (const line of data.toString().trimEnd().split("\n")) {
-        console.log(`${prefix} ${line}`)
-      }
-    })
-    child.stderr?.on("data", (data: Buffer) => {
-      for (const line of data.toString().trimEnd().split("\n")) {
-        console.error(`${prefix} ${line}`)
-      }
-    })
-    child.on("exit", (code) => {
-      if (code !== 0 && code !== null) {
-        console.error(`${prefix} exited with code ${code}`)
-      }
-    })
-
-    children.push(child)
-    console.log(`  ${prefix} started (pnpm dev)`)
-  }
-
-  return children
-}
-
-async function waitForPostgREST(): Promise<void> {
-  const deadline = Date.now() + HEALTH_TIMEOUT_MS
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetch(POSTGREST_URL, { signal: AbortSignal.timeout(2000) })
-      if (res.ok || res.status === 401) return // 401 = JWT required = server up
-    } catch {
-      // not ready yet
-    }
-    await sleep(HEALTH_POLL_MS)
-  }
-  throw new Error(
-    `PostgREST did not become healthy within ${HEALTH_TIMEOUT_MS / 1000}s.\n` +
-      "Check: docker compose logs postgrest",
-  )
-}
-
-async function watchAndPush(cwd: string): Promise<void> {
-  const config = loadConfig(cwd)
-  const schemaDir = resolve(cwd, config.schema, "..")
-
-  console.log(`Watching ${schemaDir} for changes... (Ctrl+C to stop)\n`)
-
-  // Initial push on start
-  await runPush(cwd)
-
-  const { watch } = await import("node:fs")
-  watch(schemaDir, { recursive: true }, (eventType, filename) => {
-    if (!filename?.endsWith(".ts")) return
-    console.log(`\nChange detected in ${filename}, pushing...`)
-    runPush(cwd).catch((e: unknown) =>
-      console.error("Push failed:", (e as Error).message),
-    )
-  })
-
-  // Block forever
-  await new Promise<never>(() => undefined)
-}
-
-async function runPush(cwd: string): Promise<void> {
-  const { loadConfig, loadSchemaAst } = await import("../config.js")
-  const config = loadConfig(cwd)
-  const ast = loadSchemaAst(config.schema, cwd)
-  await ensureEngine()
-  const result = invokeEngine(
-    ["migrate", "--connection", config.connection],
-    JSON.stringify(ast),
-  )
-  if (result.exitCode !== 0) {
-    console.error(result.stderr || result.stdout)
-    return
-  }
-  console.log(result.stdout || "Schema up to date.")
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms))
 }

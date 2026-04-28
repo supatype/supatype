@@ -1,0 +1,8 @@
+{
+  "name": "supatype-integration",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@supatype/schema": "workspace:*"
+  }
+}

@@ -1,40 +1,49 @@
 /**
- * Postinstall script — downloads the correct engine binary for the current
- * platform and caches it at ~/.supatype/engine/{version}/supatype-engine[.exe].
+ * Postinstall script — downloads component binaries on first install.
  *
- * Pattern: same as Prisma, esbuild, SWC, Turbo.
+ * Components: supatype-engine, supatype-server, supatype-pg (Postgres), deno.
+ * Binaries are cached in ~/.supatype/cache/{component}/{version}/.
  *
- * The binary is verified via:
- * 1. Minisign signature on checksums.sha256 (proves checksum file is authentic)
- * 2. SHA256 checksum of binary (proves binary matches signed checksum)
+ * Failures are non-fatal: an installation message is printed and the user
+ * can run `supatype update` manually to retry.
  */
 
-import { ENGINE_VERSION } from "../engine-version.js"
-import { detectPlatform } from "../engine/platform.js"
-import { hasCachedBinary } from "../engine/cache.js"
-import { resolveEngine } from "../engine/resolve.js"
+import { download, currentPlatform, type Component } from "../binary-cache.js"
 
-async function main(): Promise<void> {
-  const platform = detectPlatform()
+// Default versions downloaded on fresh install.
+// Updated by `supatype update` when new versions are released.
+const DEFAULT_VERSIONS: Record<Component, string> = {
+  engine: "0.4.2",
+  server: "0.1.0",
+  postgres: "17.2",
+  deno: "2.2.0",
+}
 
-  // Skip if already cached at the right version
-  if (hasCachedBinary(ENGINE_VERSION, platform)) {
-    console.log(`[supatype] Engine v${ENGINE_VERSION} already cached.`)
-    return
+async function main() {
+  const platform = currentPlatform()
+  console.log(`[supatype] Downloading component binaries for ${platform.os}/${platform.arch}...`)
+
+  const components = Object.entries(DEFAULT_VERSIONS) as [Component, string][]
+
+  let anyFailed = false
+  for (const [component, version] of components) {
+    try {
+      await download(component, version, platform)
+    } catch (err) {
+      console.error(`[supatype] Failed to download ${component} v${version}: ${(err as Error).message}`)
+      anyFailed = true
+    }
   }
 
-  console.log(
-    `[supatype] Downloading engine v${ENGINE_VERSION} for ${platform.os}-${platform.arch}...`,
-  )
-
-  const result = await resolveEngine(ENGINE_VERSION)
-  console.log(`[supatype] Engine installed at ${result.binaryPath}`)
+  if (anyFailed) {
+    console.error("[supatype] Some downloads failed. Run 'supatype update' to retry.")
+  } else {
+    console.log("[supatype] All component binaries downloaded successfully.")
+  }
 }
 
 main().catch((err) => {
-  console.error("[supatype] Engine download failed:", err.message)
-  console.error(
-    "[supatype] You can still use the CLI — the engine will be downloaded on first use.",
-  )
-  // Don't exit(1) — let npm install succeed even if binary download fails.
+  // Non-fatal — postinstall failures should not break npm install.
+  console.error("[supatype] Postinstall failed:", err)
+  process.exit(0)
 })

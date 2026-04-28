@@ -1,6 +1,7 @@
 /**
  * Deploy commands:
- *   supatype deploy              — push schema + build & deploy static site
+ *   supatype deploy              — Supatype Cloud by default (linked via supatype link), else platform projectRef; use --local for engine + DB
+ *   supatype deploy --local      — push schema via local engine + optional static app to .supatype/static
  *   supatype deploy --app-only   — only build & deploy the static site
  *   supatype deploy --schema-only — only push schema changes
  *   supatype deploy --skip-build — deploy existing build output (no build step)
@@ -14,7 +15,9 @@ import type { Command } from "commander"
 import { existsSync, readdirSync, statSync, createReadStream } from "node:fs"
 import { join } from "node:path"
 import { loadConfig, loadSchemaAst } from "../config.js"
-import { ensureEngine, invokeEngine } from "../engine.js"
+import { connectionString, schemaPathFromToml } from "../config-toml.js"
+import { deploySchemaToLinkedProject, loadCloudConfig } from "./cloud.js"
+import { ensureEngine, engineRequest, type DiffResult } from "../engine-client.js"
 import { resolveAppConfig, validateStaticMode, validateBuildOutput, detectPackageManager } from "../app/framework.js"
 import { TIER_LIMITS, type Tier } from "./deploy-types.js"
 import { spawnSync } from "node:child_process"
@@ -22,13 +25,19 @@ import { spawnSync } from "node:child_process"
 export function registerDeploy(program: Command): void {
   const deploy = program
     .command("deploy")
-    .description("Build and deploy your application")
+    .description(
+      "Deploy schema and app — Supatype Cloud by default when linked (`supatype link`); pass --local for engine + your database",
+    )
+    .option("--local", "Use local schema engine and database_url from config (skip cloud control plane)")
+    .option("--environment <name>", "Cloud environment when using linked project", "production")
     .option("--app-only", "Skip schema push, only deploy the static site")
     .option("--schema-only", "Skip app build, only push schema changes")
     .option("--skip-build", "Deploy existing build output without building")
     .option("--preview", "Deploy to a temporary preview URL")
     .option("--yes", "Skip confirmation prompts")
     .action(async (opts: {
+      local?: boolean
+      environment?: string
       appOnly?: boolean
       schemaOnly?: boolean
       skipBuild?: boolean
@@ -37,54 +46,92 @@ export function registerDeploy(program: Command): void {
     }) => {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
+      const cloudCfg = loadCloudConfig(cwd)
 
-      // Step 1: Schema push (unless --app-only or --skip-build)
-      if (!opts.appOnly && !opts.skipBuild) {
-        console.log("=== Schema Push ===")
-        await ensureEngine()
+      let schemaDone = false
 
-        const ast = loadSchemaAst(config.schema, cwd)
-        const diffResult = invokeEngine(
-          ["diff", "--connection", config.connection, "--format", "json"],
-          JSON.stringify(ast),
-        )
-        if (diffResult.exitCode !== 0) {
-          console.error("Schema diff failed:", diffResult.stderr || diffResult.stdout)
-          process.exit(1)
+      // Default: cloud — .supatype/cloud.json → control plane schema deploy
+      if (
+        !opts.local &&
+        cloudCfg?.projectSlug &&
+        !opts.appOnly &&
+        !opts.skipBuild
+      ) {
+        await deploySchemaToLinkedProject(cwd, opts.environment ?? "production")
+        schemaDone = true
+        if (opts.schemaOnly) {
+          return
         }
+      }
 
-        const diff = JSON.parse(diffResult.stdout)
-        const ops = diff.operations ?? []
+      // Step 1: Schema push (unless --app-only or --skip-build, or already done via cloud.json)
+      if (!opts.appOnly && !opts.skipBuild && !schemaDone) {
+        const ast = loadSchemaAst(schemaPathFromToml(config, cwd), cwd)
 
-        if (ops.length > 0) {
-          console.log(`${ops.length} schema change(s) to apply.`)
-          const migrateResult = invokeEngine(
-            ["migrate", "--connection", config.connection],
-            JSON.stringify(ast),
-          )
-          if (migrateResult.exitCode !== 0) {
-            console.error("Migration failed:", migrateResult.stderr)
+        if (opts.local) {
+          console.log("=== Schema Push (local) ===")
+          await ensureEngine()
+
+          const diff = await engineRequest<DiffResult>("/diff", {
+            ast,
+            database_url: connectionString(config),
+            schema: "public",
+          })
+
+          const ops = diff.operations ?? []
+
+          if (ops.length > 0) {
+            console.log(`${ops.length} schema change(s) to apply.`)
+            await engineRequest("/push", {
+              ast,
+              database_url: connectionString(config),
+              schema: "public",
+              force: true,
+            })
+            console.log("Schema changes applied.")
+          } else {
+            console.log("Schema is up to date.")
+          }
+        } else if (cloudCfg?.projectSlug) {
+          console.log("=== Schema Push ===")
+          // Platform API — no local Docker needed
+          const apiUrl = cloudCfg.apiUrl || "https://api.supatype.io"
+          const token = cloudCfg.token || process.env["SUPATYPE_ACCESS_TOKEN"] || ""
+
+          const res = await fetch(`${apiUrl}/platform/v1/projects/${cloudCfg.projectSlug}/schema/push`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ ast }),
+          })
+          if (!res.ok) {
+            const body = await res.text()
+            console.error(`Schema push failed: ${res.status} ${body}`)
             process.exit(1)
           }
-          console.log("Schema changes applied.")
+          const pushData = await res.json() as { operations?: unknown[]; message?: string }
+          console.log(pushData.message ?? `Schema changes applied (${pushData.operations?.length ?? 0} operations).`)
         } else {
-          console.log("Schema is up to date.")
+          console.error(
+            "Not linked to Supatype Cloud. Run: supatype link\n" +
+              "Or deploy against your own database: supatype deploy --local",
+          )
+          process.exit(1)
         }
       }
 
       // Step 2: App build & deploy (unless --schema-only)
       if (!opts.schemaOnly) {
-        if (!config.app) {
+        if (!config.build) {
           if (opts.appOnly) {
-            console.error("No app configuration found in supatype.config.ts")
+            console.error("No [build] section found in supatype.config.toml")
             process.exit(1)
           }
-          // No app config — just skip app deployment silently
+          // No build config — skip app deployment silently
           return
         }
 
         console.log("\n=== App Build & Deploy ===")
-        const appConfig = resolveAppConfig(config.app, cwd)
+        const appConfig = resolveAppConfig(config.build, cwd)
 
         // Validate static mode
         const staticError = validateStaticMode(appConfig.framework, appConfig.directory)
@@ -107,10 +154,10 @@ export function registerDeploy(program: Command): void {
           }
 
           // Inject Supatype URLs if project is linked
-          if (config.projectRef) {
-            buildEnv["NEXT_PUBLIC_SUPATYPE_URL"] = config.apiUrl || `https://${config.projectRef}.supatype.io`
-            buildEnv["VITE_SUPATYPE_URL"] = buildEnv["NEXT_PUBLIC_SUPATYPE_URL"]
-            buildEnv["PUBLIC_SUPATYPE_URL"] = buildEnv["NEXT_PUBLIC_SUPATYPE_URL"]
+          if (cloudCfg?.projectSlug) {
+            buildEnv["NEXT_PUBLIC_SUPATYPE_URL"] = cloudCfg.apiUrl || `https://${cloudCfg.projectSlug}.supatype.io`
+            buildEnv["VITE_SUPATYPE_URL"] = buildEnv["NEXT_PUBLIC_SUPATYPE_URL"]!
+            buildEnv["PUBLIC_SUPATYPE_URL"] = buildEnv["NEXT_PUBLIC_SUPATYPE_URL"]!
             // NEVER inject service_role key — only anon key is safe for client-side
           }
 
@@ -151,20 +198,22 @@ export function registerDeploy(program: Command): void {
           process.exit(1)
         }
 
-        // Deploy
-        if (config.projectRef) {
-          // Cloud deployment — upload to API
-          await deployToCloud(config, appConfig.outputDirectory, opts.preview ?? false)
+        // Deploy (--local never uploads to cloud, even if linked)
+        if (cloudCfg?.projectSlug && !opts.local) {
+          await deployToCloud(
+            { projectRef: cloudCfg.projectSlug, apiUrl: cloudCfg.apiUrl, accessToken: cloudCfg.token },
+            appConfig.outputDirectory,
+            opts.preview ?? false,
+          )
         } else {
-          // Self-host — copy to serving directory
           deploySelfHost(appConfig.outputDirectory, cwd)
         }
 
         console.log("\nDeployment complete!")
-        if (config.projectRef) {
+        if (cloudCfg?.projectSlug && !opts.local) {
           const url = opts.preview
-            ? `https://preview-${Date.now().toString(36)}.${config.projectRef}.supatype.io`
-            : `https://${config.projectRef}.supatype.io`
+            ? `https://preview-${Date.now().toString(36)}.${cloudCfg.projectSlug}.supatype.io`
+            : `https://${cloudCfg.projectSlug}.supatype.io`
           console.log(`URL: ${url}`)
         }
       }
@@ -175,16 +224,16 @@ export function registerDeploy(program: Command): void {
     .command("rollback")
     .description("Roll back to the previous static site deployment")
     .action(async () => {
-      const config = loadConfig(process.cwd())
-      if (!config.projectRef) {
+      const cloudCfg = loadCloudConfig(process.cwd())
+      if (!cloudCfg?.projectSlug) {
         console.error("Not linked to a cloud project. Rollback is only available for cloud deployments.")
         process.exit(1)
       }
 
-      const apiUrl = config.apiUrl || "https://api.supatype.io"
-      const token = config.accessToken || process.env["SUPATYPE_ACCESS_TOKEN"] || ""
+      const apiUrl = cloudCfg.apiUrl || "https://api.supatype.io"
+      const token = cloudCfg.token || process.env["SUPATYPE_ACCESS_TOKEN"] || ""
 
-      const res = await fetch(`${apiUrl}/platform/v1/projects/${config.projectRef}/deployments/rollback`, {
+      const res = await fetch(`${apiUrl}/platform/v1/projects/${cloudCfg.projectSlug}/deployments/rollback`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       })
@@ -204,16 +253,16 @@ export function registerDeploy(program: Command): void {
     .command("status")
     .description("Show current deployment status")
     .action(async () => {
-      const config = loadConfig(process.cwd())
-      if (!config.projectRef) {
+      const cloudCfg = loadCloudConfig(process.cwd())
+      if (!cloudCfg?.projectSlug) {
         console.error("Not linked to a cloud project.")
         process.exit(1)
       }
 
-      const apiUrl = config.apiUrl || "https://api.supatype.io"
-      const token = config.accessToken || process.env["SUPATYPE_ACCESS_TOKEN"] || ""
+      const apiUrl = cloudCfg.apiUrl || "https://api.supatype.io"
+      const token = cloudCfg.token || process.env["SUPATYPE_ACCESS_TOKEN"] || ""
 
-      const res = await fetch(`${apiUrl}/platform/v1/projects/${config.projectRef}/deployments/current`, {
+      const res = await fetch(`${apiUrl}/platform/v1/projects/${cloudCfg.projectSlug}/deployments/current`, {
         headers: { Authorization: `Bearer ${token}` },
       })
 
@@ -244,17 +293,17 @@ export function registerDeploy(program: Command): void {
     .command("logs [version]")
     .description("Show build logs for a deployment")
     .action(async (version?: string) => {
-      const config = loadConfig(process.cwd())
-      if (!config.projectRef) {
+      const cloudCfg = loadCloudConfig(process.cwd())
+      if (!cloudCfg?.projectSlug) {
         console.error("Not linked to a cloud project.")
         process.exit(1)
       }
 
-      const apiUrl = config.apiUrl || "https://api.supatype.io"
-      const token = config.accessToken || process.env["SUPATYPE_ACCESS_TOKEN"] || ""
+      const apiUrl = cloudCfg.apiUrl || "https://api.supatype.io"
+      const token = cloudCfg.token || process.env["SUPATYPE_ACCESS_TOKEN"] || ""
 
       const versionPath = version ? `/${version}` : "/current"
-      const res = await fetch(`${apiUrl}/platform/v1/projects/${config.projectRef}/deployments${versionPath}/logs`, {
+      const res = await fetch(`${apiUrl}/platform/v1/projects/${cloudCfg.projectSlug}/deployments${versionPath}/logs`, {
         headers: { Authorization: `Bearer ${token}` },
       })
 

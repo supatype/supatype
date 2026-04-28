@@ -62,7 +62,7 @@ export function VersionHistory({ model, recordId, onNavigate }: VersionHistoryPr
         .update(version.data as never)
         .eq(model.primaryKey, recordId)
 
-      onNavigate(`/collections/${model.name}/${recordId}`)
+      onNavigate(`/models/${model.name}/${recordId}`)
     } catch (err) {
       console.error("Failed to restore version:", err)
     }
@@ -80,7 +80,7 @@ export function VersionHistory({ model, recordId, onNavigate }: VersionHistoryPr
           <button
             type="button"
             className="st-btn"
-            onClick={() => { onNavigate(`/collections/${model.name}/${recordId}`) }}
+            onClick={() => { onNavigate(`/models/${model.name}/${recordId}`) }}
           >
             Back to edit
           </button>

@@ -2,16 +2,9 @@ import type { Command } from "commander"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { loadConfig } from "../config.js"
-import { ensureEngine, invokeEngine } from "../engine.js"
-import { pgTypeToField, toCamelCase, type ColumnInfo } from "../pull-utils.js"
-
-interface IntrospectResult {
-  models: Array<{
-    name: string
-    tableName: string
-    columns: ColumnInfo[]
-  }>
-}
+import { connectionString } from "../config-toml.js"
+import { ensureEngine, engineRequest, type IntrospectResult } from "../engine-client.js"
+import { introspectColumnToColumnInfo, pgTypeToField, toCamelCase } from "../pull-utils.js"
 
 export function registerPull(program: Command): void {
   program
@@ -23,23 +16,16 @@ export function registerPull(program: Command): void {
     .option("--output <path>", "Output directory for schema files", "./schema")
     .action(async (opts: { connection?: string; output: string }) => {
       const cwd = process.cwd()
-      const connection = opts.connection ?? loadConfig(cwd).connection
+      const connection = opts.connection ?? connectionString(loadConfig(cwd))
 
       await ensureEngine()
       console.log("Introspecting database...")
-      const result = invokeEngine([
-        "introspect",
-        "--connection",
-        connection,
-        "--format",
-        "json",
-      ])
-      if (result.exitCode !== 0) {
-        console.error(result.stderr || result.stdout)
-        process.exit(1)
-      }
 
-      const introspected = JSON.parse(result.stdout) as IntrospectResult
+      const introspected = await engineRequest<IntrospectResult>("/introspect", {
+        database_url: connection,
+        schema: "public",
+      })
+
       const models = introspected.models ?? []
 
       if (models.length === 0) {
@@ -68,14 +54,14 @@ export function registerPull(program: Command): void {
 
 function generateModelFile(model: IntrospectResult["models"][number]): string {
   const fieldLines = model.columns
-    .map((col) => `    ${col.name}: ${pgTypeToField(col)},`)
+    .map((col) => `    ${col.name}: ${pgTypeToField(introspectColumnToColumnInfo(col))},`)
     .join("\n")
 
   return `import { model, field, access } from "@supatype/schema"
 
 // TODO: review access rules — all operations default to authenticated
 export const ${toCamelCase(model.name)} = model(${JSON.stringify(model.name)}, {
-  tableName: ${JSON.stringify(model.tableName)},
+  tableName: ${JSON.stringify(model.table)},
   fields: {
 ${fieldLines}
   },

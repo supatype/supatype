@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest"
-import { pgTypeToField, toCamelCase, type ColumnInfo } from "../src/pull-utils.js"
+import {
+  introspectColumnToColumnInfo,
+  pgTypeToField,
+  toCamelCase,
+  type ColumnInfo,
+} from "../src/pull-utils.js"
 
 function col(overrides: Partial<ColumnInfo> & { pgType: string }): ColumnInfo {
   return {
@@ -97,6 +102,36 @@ describe("pgTypeToField()", () => {
   it("plain json column does not include jsonb spread", () => {
     const result = pgTypeToField(col({ pgType: "json" }))
     expect(result).not.toContain("jsonb")
+  })
+})
+
+describe("introspectColumnToColumnInfo()", () => {
+  it("maps engine type → pgType and flags", () => {
+    const out = introspectColumnToColumnInfo({
+      name: "id",
+      type: "uuid",
+      nullable: false,
+      primaryKey: true,
+      default: "gen_random_uuid()",
+    })
+    expect(out).toEqual({
+      name: "id",
+      pgType: "uuid",
+      nullable: false,
+      isPrimary: true,
+      isUnique: false,
+      hasDefault: true,
+    })
+  })
+
+  it("treats empty default as no default", () => {
+    const out = introspectColumnToColumnInfo({
+      name: "x",
+      type: "text",
+      nullable: true,
+      default: "",
+    })
+    expect(out.hasDefault).toBe(false)
   })
 })
 

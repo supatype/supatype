@@ -1,7 +1,9 @@
 import { Command } from "commander"
-import { ENGINE_VERSION } from "./engine-version.js"
 import { registerInit } from "./commands/init.js"
 import { registerDev } from "./commands/dev.js"
+import { registerCache } from "./commands/cache.js"
+import { registerUpdate } from "./commands/update.js"
+import { registerPg } from "./commands/pg.js"
 import { registerPush } from "./commands/push.js"
 import { registerDiff } from "./commands/diff.js"
 import { registerPull } from "./commands/pull.js"
@@ -20,16 +22,18 @@ import { registerLogs } from "./commands/logs.js"
 import { registerAdmin } from "./commands/admin.js"
 import { registerFunctions } from "./commands/functions.js"
 import { registerPlugins } from "./commands/plugins.js"
-import { showUpdateNotification } from "./engine/update-notify.js"
 
 export function run(): void {
   const program = new Command()
     .name("supatype")
     .description("Supatype — schema-first Postgres API")
-    .version(ENGINE_VERSION)
+    .version("0.1.0")
 
   registerInit(program)
   registerDev(program)
+  registerCache(program)
+  registerUpdate(program)
+  registerPg(program)
   registerPush(program)
   registerDiff(program)
   registerPull(program)
@@ -48,11 +52,6 @@ export function run(): void {
   registerAdmin(program)
   registerFunctions(program)
   registerPlugins(program)
-
-  // After command execution, show update notification (non-blocking)
-  program.hook("postAction", async () => {
-    await showUpdateNotification()
-  })
 
   program.parse()
 }

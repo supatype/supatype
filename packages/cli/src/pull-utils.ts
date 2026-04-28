@@ -11,6 +11,30 @@ export interface ColumnInfo {
   hasDefault: boolean
 }
 
+/** Engine `/introspect` column shape (see {@link IntrospectResult} in engine-client). */
+export interface IntrospectColumn {
+  name: string
+  type: string
+  nullable: boolean
+  default?: string
+  primaryKey?: boolean
+  unique?: boolean
+  references?: { table: string; column: string }
+}
+
+/** Map engine introspection JSON to {@link ColumnInfo} for {@link pgTypeToField}. */
+export function introspectColumnToColumnInfo(col: IntrospectColumn): ColumnInfo {
+  const def = col.default
+  return {
+    name: col.name,
+    pgType: col.type,
+    nullable: col.nullable,
+    isPrimary: col.primaryKey ?? false,
+    isUnique: col.unique ?? false,
+    hasDefault: def !== undefined && def !== "",
+  }
+}
+
 /** Map a Postgres column type to the corresponding field.X() call string. */
 export function pgTypeToField(col: ColumnInfo): string {
   const opts: Record<string, unknown> = { required: !col.nullable }
