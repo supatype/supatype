@@ -575,23 +575,21 @@
             <div class="dot-r"></div><div class="dot-y"></div><div class="dot-g"></div>
             <span class="filename">schema/index.ts</span>
           </div>
-<pre class="language-typescript"><code class="language-typescript">import { model, field } from '@supatype/schema'
+<pre class="language-typescript"><code class="language-typescript">import type { Model, UUID, Slug, RichText, RelatedTo, Public, LoggedIn, Owner } from '@supatype/types'
 
-export const Post = model('post', {
-  fields: {
-    title:  field.text({ required: true }),
-    slug:   field.text({ unique: true }),
-    body:   field.richText(),
-    cover:  field.image(),
-    author: field.relation('user'),
-    ...field.timestamps(),
-    ...field.publishable(),
-  },
+export type Post = Model&lt;{
+  id: UUID
+  title: string
+  slug: Slug
+  body: RichText
+  author: RelatedTo&lt;User&gt;
+}, {
   access: {
-    read:  'any',
-    write: 'authenticated',
-  },
-})</code></pre>
+    read: Public
+    create: LoggedIn
+    update: Owner&lt;'authorId'&gt;
+  }
+}&gt;</code></pre>
         </div>
 
         <div class="code-arrow">→</div>

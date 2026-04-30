@@ -1,1 +1,0 @@
-{"root":["./src/auth.ts","./src/db.ts","./src/env.ts","./src/index.ts","./src/s3.ts","./src/server.ts","./src/transform.ts","./src/middleware/access-control.ts","./src/middleware/cors.ts","./src/middleware/signed-urls.ts","./src/middleware/storage-limits.ts","./src/routes/buckets.ts","./src/routes/objects.ts"],"version":"5.9.3"}
