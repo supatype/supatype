@@ -11,6 +11,8 @@ export interface BucketSpec {
   public: boolean
   allowed_mime_types?: string[] | null
   file_size_limit?: number | null
+  access_mode?: "public" | "private" | "custom"
+  s3_bucket_policy?: string | null
 }
 
 /**
@@ -38,6 +40,9 @@ export async function provisionBuckets(
       public: bucket.public,
       ...(bucket.allowed_mime_types != null && { allowed_mime_types: bucket.allowed_mime_types }),
       ...(bucket.file_size_limit != null && { file_size_limit: bucket.file_size_limit }),
+      ...(bucket.access_mode != null && { access_mode: bucket.access_mode }),
+      ...(bucket.s3_bucket_policy != null &&
+        bucket.s3_bucket_policy !== "" && { s3_bucket_policy: bucket.s3_bucket_policy }),
     })
 
     const res = await fetch(`${base}/bucket`, { method: "POST", headers, body })

@@ -1,7 +1,7 @@
 /**
  * supatype dev — start local Postgres, apply schema, run supatype-server.
  *
- * Supports two database providers (set in supatype.config.toml):
+ * Supports two database providers (set in supatype.config.ts):
  *   provider = "docker"  — runs supatype/postgres via Docker (default; includes all extensions)
  *   provider = "native"  — manages a native Postgres binary from the supatype cache
  */
@@ -35,7 +35,7 @@ export function registerDev(program: Command): void {
     .action(async (opts: { watch: boolean; port?: string }) => {
       const cwd = process.cwd()
 
-      // ── 1. Load TOML config ──────────────────────────────────────────────
+      // ── 1. Load project config ─────────────────────────────────────────────
       const config = loadConfig(cwd)
       const projectName = config.project.name
       const serverPort = opts.port ?? String(config.server.port ?? 54321)
@@ -435,7 +435,16 @@ async function runSchemaPush(
     const parseResult = spawnSync(engineBin, ["parse", "-i", astPath], { cwd, stdio: "pipe", encoding: "utf8" })
     if (parseResult.status === 0 && parseResult.stdout) {
       try {
-        const resolvedAst = JSON.parse(parseResult.stdout) as { storageBuckets?: Array<{ id: string; public: boolean }> }
+        const resolvedAst = JSON.parse(parseResult.stdout) as {
+          storageBuckets?: Array<{
+            id: string
+            public: boolean
+            allowedMimeTypes?: string[]
+            fileSizeLimit?: number
+            accessMode?: string
+            s3BucketPolicy?: string | null
+          }>
+        }
         if (resolvedAst.storageBuckets && resolvedAst.storageBuckets.length > 0) {
           provisionStorageBuckets(resolvedAst.storageBuckets, storagePath)
         }
@@ -473,7 +482,14 @@ async function runSchemaPush(
 // ---------------------------------------------------------------------------
 
 function provisionStorageBuckets(
-  declared: Array<{ id: string; public: boolean }>,
+  declared: Array<{
+    id: string
+    public: boolean
+    allowedMimeTypes?: string[]
+    fileSizeLimit?: number
+    accessMode?: string
+    s3BucketPolicy?: string | null
+  }>,
   storagePath: string,
 ): void {
   const bucketsDir = join(storagePath, ".supatype")
@@ -491,7 +507,18 @@ function provisionStorageBuckets(
   for (const bucket of declared) {
     if (existingIds.has(bucket.id)) continue
     const now = new Date().toISOString()
-    existing.push({ id: bucket.id, name: bucket.id, public: bucket.public, file_size_limit: null, allowed_mime_types: null, created_at: now, updated_at: now })
+    existing.push({
+      id: bucket.id,
+      name: bucket.id,
+      public: bucket.public,
+      file_size_limit: bucket.fileSizeLimit ?? null,
+      allowed_mime_types: bucket.allowedMimeTypes ?? null,
+      access_mode:
+        bucket.accessMode ?? (bucket.public ? "public" : "private"),
+      s3_bucket_policy: bucket.s3BucketPolicy ?? null,
+      created_at: now,
+      updated_at: now,
+    })
     mkdirSync(join(storagePath, bucket.id), { recursive: true })
     added++
   }

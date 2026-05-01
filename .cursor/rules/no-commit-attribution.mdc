@@ -1,0 +1,10 @@
+---
+description: Prevent commit attribution/footer text in messages
+alwaysApply: true
+---
+
+# Commit Attribution Policy
+
+- Do not add attribution/footer lines to commit messages.
+- Specifically forbid lines like `Made-with: Cursor`.
+- Use plain, repository-style commit messages only.

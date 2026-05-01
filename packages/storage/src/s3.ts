@@ -44,6 +44,26 @@ export async function deleteBucket(name: string): Promise<void> {
  * at the S3/MinIO URL without going through the storage proxy.
  * Called when a bucket is created or updated with public: true.
  */
+/** Apply a caller-supplied bucket policy document (must be valid IAM JSON). */
+export async function applyRawBucketPolicy(name: string, policyJson: string): Promise<void> {
+  try {
+    await s3.send(new PutPublicAccessBlockCommand({
+      Bucket: name,
+      PublicAccessBlockConfiguration: {
+        BlockPublicAcls: false,
+        IgnorePublicAcls: false,
+        BlockPublicPolicy: false,
+        RestrictPublicBuckets: false,
+      },
+    }))
+  } catch { /* backends may not implement this */ }
+
+  await s3.send(new PutBucketPolicyCommand({
+    Bucket: name,
+    Policy: policyJson,
+  }))
+}
+
 export async function applyPublicPolicy(name: string): Promise<void> {
   // AWS requires BlockPublicPolicy/RestrictPublicBuckets to be off before a
   // public bucket policy can be applied. MinIO ignores this call safely.
@@ -72,6 +92,21 @@ export async function applyPublicPolicy(name: string): Promise<void> {
       }],
     }),
   }))
+}
+
+/**
+ * Choose S3 policy application: custom JSON wins; else default public-read when `public`.
+ */
+export async function applyBucketPolicyFromConfig(
+  name: string,
+  opts: { public: boolean; s3BucketPolicy?: string | null },
+): Promise<void> {
+  const raw = opts.s3BucketPolicy
+  if (raw !== undefined && raw !== null && raw.trim() !== "") {
+    await applyRawBucketPolicy(name, raw)
+    return
+  }
+  if (opts.public) await applyPublicPolicy(name)
 }
 
 /** Build the direct S3/CDN URL for a public object (path-style or virtual-hosted). */

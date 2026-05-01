@@ -14,6 +14,8 @@ export interface BucketRow {
   file_size_limit: number | null
   allowed_mime_types: string[] | null
   access_mode: BucketAccessMode
+  /** Optional raw S3 bucket policy JSON from schema / API. */
+  s3_bucket_policy: string | null
   created_at: string
   updated_at: string
 }
@@ -42,7 +44,8 @@ export async function ensureSchema(): Promise<void> {
       public boolean NOT NULL DEFAULT false,
       file_size_limit bigint,
       allowed_mime_types text[],
-      access_mode text NOT NULL DEFAULT 'public',
+      access_mode text NOT NULL DEFAULT 'private',
+      s3_bucket_policy text,
       created_at timestamptz NOT NULL DEFAULT now(),
       updated_at timestamptz NOT NULL DEFAULT now()
     );
@@ -62,11 +65,8 @@ export async function ensureSchema(): Promise<void> {
 
     CREATE INDEX IF NOT EXISTS idx_objects_bucket_name ON storage.objects(bucket_id, name);
 
-    -- Add access_mode column if it doesn't exist (migration for existing installs)
-    DO $$ BEGIN
-      ALTER TABLE storage.buckets ADD COLUMN IF NOT EXISTS access_mode text NOT NULL DEFAULT 'public';
-    EXCEPTION WHEN duplicate_column THEN NULL;
-    END $$;
+    ALTER TABLE storage.buckets ADD COLUMN IF NOT EXISTS access_mode text NOT NULL DEFAULT 'private';
+    ALTER TABLE storage.buckets ADD COLUMN IF NOT EXISTS s3_bucket_policy text;
   `)
 }
 
@@ -87,12 +87,23 @@ export async function createBucket(
   fileSizeLimit?: number,
   allowedMimeTypes?: string[],
   accessMode?: BucketAccessMode,
+  s3BucketPolicy?: string | null,
 ): Promise<BucketRow> {
+  const mode: BucketAccessMode =
+    accessMode ?? (isPublic ? "public" : "private")
   const res = await pool.query<BucketRow>(
-    `INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types, access_mode)
-     VALUES ($1, $2, $3, $4, $5, $6)
+    `INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types, access_mode, s3_bucket_policy)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      RETURNING *`,
-    [id, name, isPublic, fileSizeLimit ?? null, allowedMimeTypes ?? null, accessMode ?? "public"],
+    [
+      id,
+      name,
+      isPublic,
+      fileSizeLimit ?? null,
+      allowedMimeTypes ?? null,
+      mode,
+      s3BucketPolicy ?? null,
+    ],
   )
   return res.rows[0]!
 }
@@ -119,6 +130,7 @@ export async function updateBucket(
     file_size_limit?: number | null
     allowed_mime_types?: string[] | null
     access_mode?: BucketAccessMode
+    s3_bucket_policy?: string | null
   },
 ): Promise<BucketRow | null> {
   const sets: string[] = []
@@ -140,6 +152,10 @@ export async function updateBucket(
   if (updates.access_mode !== undefined) {
     sets.push(`access_mode = $${idx++}`)
     values.push(updates.access_mode)
+  }
+  if (updates.s3_bucket_policy !== undefined) {
+    sets.push(`s3_bucket_policy = $${idx++}`)
+    values.push(updates.s3_bucket_policy)
   }
   if (sets.length === 0) return getBucket(id)
 

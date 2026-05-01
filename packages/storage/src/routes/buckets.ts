@@ -1,7 +1,11 @@
 import type { RequestContext } from "../server.js"
 import { sendJson, readJson } from "../server.js"
 import * as db from "../db.js"
-import { ensureBucket as ensureS3Bucket, deleteBucket as deleteS3Bucket, applyPublicPolicy } from "../s3.js"
+import {
+  ensureBucket as ensureS3Bucket,
+  deleteBucket as deleteS3Bucket,
+  applyBucketPolicyFromConfig,
+} from "../s3.js"
 
 import type { BucketAccessMode } from "../db.js"
 
@@ -12,6 +16,7 @@ interface CreateBucketBody {
   file_size_limit?: number
   allowed_mime_types?: string[]
   access_mode?: BucketAccessMode
+  s3_bucket_policy?: string | null
 }
 
 interface UpdateBucketBody {
@@ -19,6 +24,7 @@ interface UpdateBucketBody {
   file_size_limit?: number | null
   allowed_mime_types?: string[] | null
   access_mode?: BucketAccessMode
+  s3_bucket_policy?: string | null
 }
 
 export async function create(ctx: RequestContext): Promise<void> {
@@ -30,16 +36,22 @@ export async function create(ctx: RequestContext): Promise<void> {
   }
 
   const id = body.id ?? body.name
+  const accessMode: BucketAccessMode =
+    body.access_mode ?? (body.public ? "public" : "private")
   try {
     await ensureS3Bucket(id)
-    if (body.public) await applyPublicPolicy(id)
+    await applyBucketPolicyFromConfig(id, {
+      public: body.public ?? false,
+      ...(body.s3_bucket_policy !== undefined && { s3BucketPolicy: body.s3_bucket_policy }),
+    })
     const bucket = await db.createBucket(
       id,
       body.name,
       body.public ?? false,
       body.file_size_limit,
       body.allowed_mime_types,
-      body.access_mode,
+      accessMode,
+      body.s3_bucket_policy,
     )
     sendJson(ctx.res, 200, { name: bucket.name })
   } catch (err) {
@@ -69,7 +81,16 @@ export async function get(ctx: RequestContext): Promise<void> {
 export async function update(ctx: RequestContext): Promise<void> {
   const body = await readJson<UpdateBucketBody>(ctx.req)
   const id = ctx.params["id"]!
-  if (body.public) await applyPublicPolicy(id)
+  const existing = await db.getBucket(id)
+  if (body.public !== undefined || body.s3_bucket_policy !== undefined) {
+    const nextPublic = body.public ?? existing?.public ?? false
+    const nextPolicy =
+      body.s3_bucket_policy !== undefined ? body.s3_bucket_policy : existing?.s3_bucket_policy
+    await applyBucketPolicyFromConfig(id, {
+      public: nextPublic,
+      ...(nextPolicy !== undefined && { s3BucketPolicy: nextPolicy }),
+    })
+  }
   const bucket = await db.updateBucket(id, body)
   if (!bucket) {
     sendJson(ctx.res, 404, { error: "Bucket not found" })
