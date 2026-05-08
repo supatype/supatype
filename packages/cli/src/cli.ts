@@ -22,6 +22,8 @@ import { registerLogs } from "./commands/logs.js"
 import { registerAdmin } from "./commands/admin.js"
 import { registerFunctions } from "./commands/functions.js"
 import { registerPlugins } from "./commands/plugins.js"
+import { registerTypes } from "./commands/types.js"
+import { registerMigrateFromV1 } from "./commands/migrate-from-v1.js"
 
 export function run(): void {
   const program = new Command()
@@ -52,6 +54,8 @@ export function run(): void {
   registerAdmin(program)
   registerFunctions(program)
   registerPlugins(program)
+  registerTypes(program)
+  registerMigrateFromV1(program)
 
   program.parse()
 }

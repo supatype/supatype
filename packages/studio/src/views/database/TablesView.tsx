@@ -1,5 +1,7 @@
-import React, { useState } from "react"
+import React, { useCallback, useState } from "react"
 import { useNavigate } from "react-router-dom"
+import type { AdminConfig } from "../../config.js"
+import { useAdminConfig } from "../../hooks/useAdminConfig.js"
 import { useProjectProxy } from "../../hooks/useProjectProxy.js"
 import { useApiQuery } from "../../hooks/useApiQuery.js"
 import { Button, Card } from "../../components/ui.js"
@@ -10,7 +12,7 @@ import { SlidePanel } from "../../components/SlidePanel.js"
 const LIST_QUERY = (schema: string) => `
   SELECT
     t.table_name,
-    c.reltuples::bigint AS row_estimate,
+    GREATEST(c.reltuples::bigint, 0) AS row_estimate,
     pg_total_relation_size(quote_ident('${schema}') || '.' || quote_ident(t.table_name))::bigint AS bytes
   FROM information_schema.tables t
   JOIN pg_class c ON c.relname = t.table_name
@@ -32,7 +34,19 @@ function formatBytes(b: number): string {
   return `${(b / (1024 * 1024)).toFixed(1)} MB`
 }
 
+/** Resolve schema config model name from a physical table name (handles qualified `schema.table`). */
+function modelNameForTable(admin: AdminConfig, physicalTable: string): string | null {
+  const m = admin.models.find((mo) => {
+    const t = mo.tableName
+    if (t === physicalTable) return true
+    const dot = t.lastIndexOf(".")
+    return dot !== -1 && t.slice(dot + 1) === physicalTable
+  })
+  return m?.name ?? null
+}
+
 export function TablesView(): React.ReactElement {
+  const admin = useAdminConfig()
   const proxy = useProjectProxy()
   const navigate = useNavigate()
   const [schema, setSchema] = useState("public")
@@ -50,6 +64,14 @@ export function TablesView(): React.ReactElement {
   const { data: columns } = useApiQuery(
     () => selectedTable ? proxy.sql(COLUMNS_QUERY(schema, selectedTable)).then((r) => r.rows) : Promise.resolve([]),
     [proxy, schema, selectedTable],
+  )
+
+  const browseDataPath = useCallback(
+    (physicalTable: string) => {
+      const modelName = modelNameForTable(admin, physicalTable)
+      return modelName !== null ? `/models/${modelName}/data` : `/data?table=${encodeURIComponent(physicalTable)}`
+    },
+    [admin],
   )
 
   async function runSql() {
@@ -122,7 +144,7 @@ export function TablesView(): React.ReactElement {
                   <td className="px-4 py-3 text-muted-foreground">{formatBytes(row["bytes"] as number)}</td>
                   <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                     <span className="flex items-center justify-end gap-3">
-                      <button type="button" className="text-xs text-primary hover:underline" onClick={() => navigate(`/data?table=${row["table_name"] as string}`)}>Browse data</button>
+                      <button type="button" className="text-xs text-primary hover:underline" onClick={() => navigate(browseDataPath(row["table_name"] as string))}>Browse data</button>
                       <button type="button" className="text-xs text-destructive hover:underline" onClick={() => { setSqlText(`DROP TABLE ${schema}.${row["table_name"] as string};`); setSqlModal({ mode: "drop", table: row["table_name"] as string }) }}>Drop</button>
                     </span>
                   </td>

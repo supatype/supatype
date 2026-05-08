@@ -1,14 +1,17 @@
 "use client"
 
-import React, { useState, useEffect } from "react"
+import React, { useState } from "react"
 import { useLocation } from "react-router-dom"
 import type { AdminConfig } from "../config.js"
-import { getPageTitle } from "./Sidebar.js"
 import { LocaleSwitcher } from "./LocaleSwitcher.js"
 import { SupatypeIcon } from "./SupatypeLogo.js"
 import { Badge } from "./ui/badge.js"
 import { ConnectModal } from "./ConnectModal.js"
 import { JumpToSearch } from "./JumpToSearch.js"
+import { UserAccountMenu } from "./UserAccountMenu.js"
+
+const FEEDBACK_URL = "https://github.com/supatype/supatype/issues/new/choose"
+const DOCS_URL = "https://supatype.com/docs"
 
 interface TopBarProps {
   config: AdminConfig | null
@@ -32,29 +35,6 @@ function BranchPill(): React.ReactElement {
       </svg>
       Main
     </span>
-  )
-}
-
-function getUserInitial(): string {
-  if (typeof document === "undefined") return "U"
-  try {
-    const match = document.cookie.match(/(?:^|;\s*)st-platform-user=([^;]*)/)
-    if (!match) return "U"
-    const user = JSON.parse(decodeURIComponent(match[1]!)) as { name?: string; email?: string }
-    const name = user.name || user.email || ""
-    return name.charAt(0).toUpperCase() || "U"
-  } catch {
-    return "U"
-  }
-}
-
-function UserAvatar(): React.ReactElement {
-  const [initial, setInitial] = useState("U")
-  useEffect(() => { setInitial(getUserInitial()) }, [])
-  return (
-    <div className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/20 text-primary text-xs font-semibold shrink-0 cursor-pointer hover:bg-primary/30 transition-colors">
-      {initial}
-    </div>
   )
 }
 
@@ -174,23 +154,26 @@ export function TopBar({ config, leftItems, extraItems, demoMode, onToggleSideba
 
       {/* Feedback link */}
       <a
-        href="#feedback"
+        href={FEEDBACK_URL}
+        target="_blank"
+        rel="noreferrer"
         className="hidden sm:block text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0"
       >
         Feedback
       </a>
 
-      {/* Help */}
-      <button
-        type="button"
+      {/* Help — docs */}
+      <a
+        href={DOCS_URL}
+        target="_blank"
+        rel="noreferrer"
         className="flex items-center justify-center w-7 h-7 rounded-full border border-border text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors shrink-0"
-        aria-label="Help"
+        aria-label="Documentation"
       >
         <HelpIcon />
-      </button>
+      </a>
 
-      {/* Avatar */}
-      <UserAvatar />
+      <UserAccountMenu demoMode={demoMode} />
 
       <ConnectModal open={connectOpen} onClose={() => setConnectOpen(false)} />
     </header>

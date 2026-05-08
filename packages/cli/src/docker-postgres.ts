@@ -105,7 +105,8 @@ export async function dockerPgWaitReady(
 
 /** Connection string for the Docker container (local dev credentials). */
 export function dockerDbUrl(projectName: string, port: number): string {
-  return `postgres://${PG_USER}:postgres@127.0.0.1:${port}/${projectName}`
+  // Local image has no TLS; sqlx/libpq default "prefer" can mis-handle the SSLRequest on some hosts.
+  return `postgres://${PG_USER}:postgres@127.0.0.1:${port}/${projectName}?sslmode=disable`
 }
 
 function sleep(ms: number): Promise<void> {

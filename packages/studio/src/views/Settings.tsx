@@ -1,6 +1,8 @@
-import React, { useState, useCallback } from "react"
+import React, { useState, useCallback, useEffect } from "react"
 import { useStudioClient } from "../StudioCore.js"
 import { useAdminConfig } from "../hooks/useAdminConfig.js"
+import { usePlatformFetch, usePlatform } from "../hooks/usePlatform.js"
+import { CloudUpsell } from "./CloudUpsell.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import { useProjectProxy } from "../hooks/useProjectProxy.js"
 import { cn } from "../lib/utils.js"
@@ -374,10 +376,98 @@ function EnvSettings(): React.ReactElement {
 
 // ─── CORS Origins Tab ─────────────────────────────────────────────────────────
 
-function CorsSettings(): React.ReactElement {
+const CORS_OPEN_BANNER_LS_PREFIX = "supatype-studio:cors-open-banner-dismissed"
+
+function corsOpenBannerStorageKey(projectRef: string): string {
+  return `${CORS_OPEN_BANNER_LS_PREFIX}:${projectRef}`
+}
+
+function CorsSettings({ demoMode }: { demoMode: boolean }): React.ReactElement {
+  const pf = usePlatformFetch()
+  const { projectRef } = usePlatform()
   const [origins, setOrigins] = useState<CorsOrigin[]>([])
   const [newOrigin, setNewOrigin] = useState("")
   const [error, setError] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle")
+  /** Raw value from GET config — undefined cors key means platform permissive default */
+  const [serverAllowedSnapshot, setServerAllowedSnapshot] = useState<string[] | undefined>(undefined)
+  const [configReady, setConfigReady] = useState(false)
+  const [bannerDismissed, setBannerDismissed] = useState(false)
+
+  const refKey = typeof projectRef === "string" && projectRef.length > 0 ? projectRef : ""
+
+  useEffect(() => {
+    if (!refKey || typeof window === "undefined") return
+    try {
+      setBannerDismissed(localStorage.getItem(corsOpenBannerStorageKey(refKey)) === "1")
+    } catch {
+      setBannerDismissed(false)
+    }
+  }, [refKey])
+
+  const loadConfig = useCallback(async () => {
+    if (!pf || !projectRef) return
+    setLoading(true)
+    setLoadError(null)
+    setConfigReady(false)
+    try {
+      const res = await pf(`projects/${projectRef}/config`)
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`)
+      }
+      const json = (await res.json()) as { data?: Record<string, unknown> }
+      const data = json.data ?? {}
+      const corsVal = data["cors"] as { allowedOrigins?: unknown } | undefined
+      const raw = corsVal?.allowedOrigins
+      const allowedList =
+        raw === undefined ? undefined : Array.isArray(raw) && raw.every((x) => typeof x === "string")
+          ? (raw as string[])
+          : []
+
+      setServerAllowedSnapshot(allowedList)
+
+      const list =
+        allowedList ??
+        ([] as string[]) // permissive unset: show empty editable list locally
+      setOrigins(
+        list.map((origin, idx) => ({
+          id: `c-${origin}-${idx}`,
+          origin,
+          created_at: new Date().toISOString(),
+        })),
+      )
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Failed to load CORS configuration")
+    } finally {
+      setLoading(false)
+      setConfigReady(true)
+    }
+  }, [pf, projectRef])
+
+  useEffect(() => {
+    void loadConfig()
+  }, [loadConfig])
+
+  const permissiveUnset = serverAllowedSnapshot === undefined
+  const savedListHasStar =
+    Array.isArray(serverAllowedSnapshot) && serverAllowedSnapshot.includes("*")
+  const showOpenBanner =
+    configReady &&
+    !bannerDismissed &&
+    (permissiveUnset || savedListHasStar)
+
+  const dismissBanner = useCallback(() => {
+    setBannerDismissed(true)
+    if (refKey && typeof window !== "undefined") {
+      try {
+        localStorage.setItem(corsOpenBannerStorageKey(refKey), "1")
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [refKey])
 
   const handleAdd = () => {
     const trimmed = newOrigin.trim()
@@ -401,43 +491,112 @@ function CorsSettings(): React.ReactElement {
     setOrigins((prev) => prev.filter((o) => o.id !== id))
   }
 
+  const handleSave = async () => {
+    if (!pf || !projectRef) return
+    setSaveState("saving")
+    setError(null)
+    try {
+      const allowedOrigins = origins.map((o) => o.origin)
+      const res = await pf(`projects/${projectRef}/config`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cors: { allowedOrigins } }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({})) as { message?: string }
+        throw new Error(body.message ?? `Save failed (${res.status})`)
+      }
+      await loadConfig()
+      setSaveState("saved")
+      setTimeout(() => { setSaveState("idle") }, 2000)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Save failed")
+      setSaveState("idle")
+    }
+  }
+
+  if (demoMode || !pf || !projectRef) {
+    return (
+      <CloudUpsell
+        title="CORS configuration"
+        description="Save allowed browser origins for your project API so production web apps and embedded UIs tighten cross-origin access. Changes sync to Kong and the Studio proxy."
+        features={[
+          "Persisted in project config — survives schema pushes",
+          "Wildcard or explicit HTTPS origins — JWT / RLS still apply",
+          "Native iOS/Android clients are not affected by CORS (browser-only policy)",
+          "Dismissable reminder when origins are unrestricted",
+        ]}
+      />
+    )
+  }
+
   return (
-    <Card className="p-4">
-      <h3>CORS Allowed Origins</h3>
-      <p className="text-[0.8rem] text-muted-foreground mb-4">
-        Configure which origins can make requests to your API. Use * for development only.
-      </p>
+    <div className="space-y-4">
+      {showOpenBanner ? (
+        <div className="rounded-md border border-amber-900/60 bg-amber-950/30 px-4 py-3 text-sm text-foreground">
+          <div className="font-medium text-amber-300 mb-2">Browsers may call your API from any web origin</div>
+          <p className="text-muted-foreground text-[0.85rem] leading-relaxed mb-2">
+            {permissiveUnset && !savedListHasStar
+              ? "No explicit allow-list is saved yet — the platform uses a permissive default so front-end builds are not silently blocked."
+              : "Your allow-list includes * — every website can initiate cross-origin browser requests to your project URLs."}
+            {" "}Authentication (JWT/session) and Row Level Security still apply — this setting does not bypass them.
+            {" "}Native apps (Kotlin, Swift, URLSession, OkHttp, etc.) are not gated by CORS.
+          </p>
+          <p className="text-muted-foreground text-[0.85rem] leading-relaxed mb-3">
+            Add specific HTTPS origins below to restrict which sites can run browser-side JavaScript against your API host.
+          </p>
+          <Button size="xs" onClick={dismissBanner}>Dismiss</Button>
+        </div>
+      ) : null}
 
-      <div className="flex gap-2 mb-4">
-        <Input
-          className="flex-1"
-          value={newOrigin}
-          onChange={(e) => { setNewOrigin(e.target.value); setError(null) }}
-          placeholder="https://my-app.com"
-          onKeyDown={(e) => { if (e.key === "Enter") handleAdd() }}
-        />
-        <Button variant="primary" onClick={handleAdd}>Add Origin</Button>
-      </div>
-      {error ? <p className="text-red-400 text-xs mb-3">{error}</p> : null}
+      <Card className="p-4">
+        <h3>CORS allowed origins</h3>
+        <p className="text-[0.8rem] text-muted-foreground mb-4">
+          Only applies to browsers. Use * only when you fully understand exposure. Leave empty and save only if you intentionally want strict lock-down (explicit empty list — browser requests with Origin may fail).
+        </p>
 
-      <div className="flex flex-col gap-2">
-        {origins.map((o) => (
-          <div key={o.id} className="flex items-center justify-between px-3 py-2 border border-border rounded-md">
-            <div>
-              <code className="text-sm text-primary">{o.origin}</code>
-              <span className="text-xs text-zinc-600 ml-2">added {new Date(o.created_at).toLocaleDateString()}</span>
-            </div>
-            <Button size="xs" variant="destructive" onClick={() => handleRemove(o.id)}>Remove</Button>
-          </div>
-        ))}
-        {origins.length === 0 ? (
-          <EmptyState
-            title="No CORS origins configured"
-            description="Browser API requests will be blocked. Live configuration management will be available in a future release."
+        {loadError ? <p className="text-red-400 text-xs mb-3">{loadError}</p> : null}
+        {loading ? <p className="text-muted-foreground text-xs mb-3">Loading…</p> : null}
+
+        <div className="flex gap-2 mb-4">
+          <Input
+            className="flex-1"
+            value={newOrigin}
+            onChange={(e) => { setNewOrigin(e.target.value); setError(null) }}
+            placeholder="https://my-app.com"
+            disabled={loading}
+            onKeyDown={(e) => { if (e.key === "Enter") handleAdd() }}
           />
-        ) : null}
-      </div>
-    </Card>
+          <Button variant="primary" onClick={handleAdd} disabled={loading}>Add origin</Button>
+          <Button
+            variant="primary"
+            onClick={() => void handleSave()}
+            disabled={loading || saveState === "saving"}
+          >
+            {saveState === "saving" ? "Saving…" : "Save"}
+          </Button>
+        </div>
+        {saveState === "saved" ? <p className="text-green-400 text-xs mb-3">Saved</p> : null}
+        {error ? <p className="text-red-400 text-xs mb-3">{error}</p> : null}
+
+        <div className="flex flex-col gap-2">
+          {origins.map((o) => (
+            <div key={o.id} className="flex items-center justify-between px-3 py-2 border border-border rounded-md">
+              <div>
+                <code className="text-sm text-primary">{o.origin}</code>
+              </div>
+              <Button size="xs" variant="destructive" onClick={() => handleRemove(o.id)}>Remove</Button>
+            </div>
+          ))}
+          {origins.length === 0 ? (
+            <EmptyState
+              title="No explicit origins in this editor"
+              description="Saving with an empty list stores an explicit lock-down policy. Omitting origins in config is permissive until you save a list."
+            />
+          ) : null}
+        </div>
+      </Card>
+    </div>
   )
 }
 
@@ -676,10 +835,84 @@ function DatabaseSettings({ client }: { client: ReturnType<typeof useStudioClien
   const proxy = useProjectProxy()
   const { data: maxConns } = useApiQuery(() => proxy.sql("SHOW max_connections").then((r) => r.rows[0]?.["max_connections"] as string ?? "—"), [proxy])
   const { data: stmtTimeout } = useApiQuery(() => proxy.sql("SHOW statement_timeout").then((r) => r.rows[0]?.["statement_timeout"] as string ?? "—"), [proxy])
+  const [credStatus, setCredStatus] = useState<{ mode: string; password_status: string; can_reveal: boolean; generation: number; message?: string } | null>(null)
+  const [credLoading, setCredLoading] = useState(false)
+  const [credError, setCredError] = useState<string | null>(null)
+  const [revealedPassword, setRevealedPassword] = useState<string | null>(null)
+  const [credActionLoading, setCredActionLoading] = useState(false)
 
   const dbUrl = client.url.replace(/\/rest\/v1\/?$/, "")
   const connStr = dbUrl ? `postgres://postgres:[password]@${new URL(dbUrl).host}/postgres` : "—"
   const poolStr = dbUrl ? `postgres://postgres:[password]@${new URL(dbUrl).host}:5432/postgres?pgbouncer=true` : "—"
+
+  const authHeaders = client.serviceRoleKey
+    ? { Authorization: `Bearer ${client.serviceRoleKey}` }
+    : {}
+
+  const loadCredentialStatus = useCallback(async () => {
+    setCredLoading(true)
+    setCredError(null)
+    try {
+      const res = await fetch(`${client.url}/admin/v1/database/credentials/status`, {
+        headers: authHeaders,
+        credentials: "include",
+      })
+      if (!res.ok) throw new Error(`status request failed (${res.status})`)
+      const data = await res.json() as { mode: string; password_status: string; can_reveal: boolean; generation: number; message?: string }
+      setCredStatus(data)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to load credential status"
+      setCredError(msg)
+    } finally {
+      setCredLoading(false)
+    }
+  }, [client.url, client.serviceRoleKey])
+
+  useEffect(() => {
+    void loadCredentialStatus()
+  }, [loadCredentialStatus])
+
+  const handleFirstView = useCallback(async () => {
+    setCredActionLoading(true)
+    setCredError(null)
+    try {
+      const res = await fetch(`${client.url}/admin/v1/database/credentials/first-view`, {
+        method: "POST",
+        headers: authHeaders,
+        credentials: "include",
+      })
+      const data = await res.json() as { password?: string; error?: string }
+      if (!res.ok || !data.password) throw new Error(data.error ?? `first-view failed (${res.status})`)
+      setRevealedPassword(data.password)
+      await loadCredentialStatus()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to reveal password"
+      setCredError(msg)
+    } finally {
+      setCredActionLoading(false)
+    }
+  }, [client.url, client.serviceRoleKey, loadCredentialStatus])
+
+  const handleRotate = useCallback(async () => {
+    setCredActionLoading(true)
+    setCredError(null)
+    setRevealedPassword(null)
+    try {
+      const res = await fetch(`${client.url}/admin/v1/database/credentials/rotate`, {
+        method: "POST",
+        headers: authHeaders,
+        credentials: "include",
+      })
+      const data = await res.json() as { error?: string }
+      if (!res.ok) throw new Error(data.error ?? `rotate failed (${res.status})`)
+      await loadCredentialStatus()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to rotate password"
+      setCredError(msg)
+    } finally {
+      setCredActionLoading(false)
+    }
+  }, [client.url, client.serviceRoleKey, loadCredentialStatus])
 
   return (
     <Card className="p-4 space-y-4 max-w-[600px]">
@@ -696,6 +929,43 @@ function DatabaseSettings({ client }: { client: ReturnType<typeof useStudioClien
             <Input className="text-muted-foreground font-mono text-xs" value={value} readOnly />
           </div>
         ))}
+      </div>
+      <div className="rounded-md border border-border p-3 space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-sm font-medium text-foreground">Credentials</p>
+          <Button size="xs" onClick={() => void loadCredentialStatus()} disabled={credLoading || credActionLoading}>
+            Refresh
+          </Button>
+        </div>
+        {credLoading ? (
+          <p className="text-xs text-muted-foreground">Loading credential status...</p>
+        ) : credStatus ? (
+          <div className="space-y-1 text-xs text-muted-foreground">
+            <p>Mode: <span className="text-foreground">{credStatus.mode}</span></p>
+            <p>Status: <span className="text-foreground">{credStatus.password_status}</span></p>
+            <p>Generation: <span className="text-foreground">{credStatus.generation}</span></p>
+            {credStatus.message ? <p>{credStatus.message}</p> : null}
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">No credential status available.</p>
+        )}
+        <div className="flex gap-2">
+          <Button
+            size="xs"
+            variant="primary"
+            onClick={() => void handleFirstView()}
+            disabled={credActionLoading || !credStatus?.can_reveal}
+          >
+            View Password
+          </Button>
+          <Button size="xs" onClick={() => void handleRotate()} disabled={credActionLoading}>
+            Rotate Password
+          </Button>
+        </div>
+        {revealedPassword ? (
+          <CodeBlock className="text-xs">{revealedPassword}</CodeBlock>
+        ) : null}
+        {credError ? <p className="text-xs text-red-400">{credError}</p> : null}
       </div>
     </Card>
   )
@@ -725,7 +995,11 @@ function IntegrationsSettings(): React.ReactElement {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export function Settings(): React.ReactElement {
+export interface SettingsProps {
+  demoMode?: boolean | undefined
+}
+
+export function Settings({ demoMode = false }: SettingsProps): React.ReactElement {
   const client = useStudioClient()
   const [activeTab, setActiveTab] = useState<SettingsTab>("general")
 
@@ -761,7 +1035,7 @@ export function Settings(): React.ReactElement {
       {activeTab === "general" ? <GeneralSettings /> : null}
       {activeTab === "keys" ? <ApiKeysSettings /> : null}
       {activeTab === "env" ? <EnvSettings /> : null}
-      {activeTab === "cors" ? <CorsSettings /> : null}
+      {activeTab === "cors" ? <CorsSettings demoMode={demoMode} /> : null}
       {activeTab === "database" ? <DatabaseSettings client={client} /> : null}
       {activeTab === "integrations" ? <IntegrationsSettings /> : null}
       {activeTab === "danger" ? <DangerZone /> : null}

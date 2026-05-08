@@ -11,6 +11,12 @@ type NavGroup = { label?: string; items: NavItem[] }
 
 // ─── Tertiary tab groups per route ────────────────────────────────────────────
 
+function edgeFunctionsBaseFromPath(path: string): string | null {
+  const match = path.match(/^\/edge-functions\/([^/]+)/)
+  if (!match) return null
+  return `/edge-functions/${match[1]}`
+}
+
 function getTertiaryGroups(path: string): NavGroup[] | null {
   // Observability — Logs
   if (path === "/observability/logs" || path.startsWith("/observability/logs/")) {
@@ -42,6 +48,36 @@ function getTertiaryGroups(path: string): NavGroup[] | null {
       items: [
         { label: "Docs",     href: "/api/graphql" },
         { label: "Settings", href: "/api/graphql/settings" },
+      ],
+    }]
+  }
+
+  // Edge Functions
+  if (path === "/edge-functions" || path.startsWith("/edge-functions/")) {
+    const base = edgeFunctionsBaseFromPath(path)
+    if (!base) return null
+    return [{
+      items: [
+        {
+          label: "Invoke",
+          href: `${base}/invoke`,
+          activeWhen: (p) => p.startsWith(base) && !p.endsWith("/logs") && !p.endsWith("/env"),
+        },
+        { label: "Logs", href: `${base}/logs`, activeWhen: (p) => p === `${base}/logs` },
+        { label: "Environment Variables", href: `${base}/env`, activeWhen: (p) => p === `${base}/env` },
+      ],
+    }]
+  }
+
+  const storageMatch = path.match(/^\/media-storage\/([^/]+)\/(files|policies)$/)
+  if (storageMatch) {
+    const bucketSegment = storageMatch[1]
+    const filesHref = `/media-storage/${bucketSegment}/files`
+    const policiesHref = `/media-storage/${bucketSegment}/policies`
+    return [{
+      items: [
+        { label: "Files", href: filesHref, activeWhen: (p) => p === filesHref },
+        { label: "Policies", href: policiesHref, activeWhen: (p) => p === policiesHref },
       ],
     }]
   }

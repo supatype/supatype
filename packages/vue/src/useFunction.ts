@@ -40,14 +40,14 @@ export function useFunction<
     loading.value = true
     error.value = null
 
-    const result = await client.functions.invoke<TResponse>(functionName, {
+    const result = await client.functions.invoke(functionName, {
       ...(body !== undefined ? { body } : {}),
     })
 
     loading.value = false
-    data.value = result.data
+    data.value = result.data as TResponse | null
     if (result.error) error.value = result.error
-    return result
+    return result as { data: TResponse | null; error: SupatypeError | null }
   }
 
   return { invoke, data, error, loading }

@@ -150,6 +150,9 @@
 
 /* Widgets */
 .st-char-count { font-size: 0.7rem; color: hsl(var(--muted-foreground)); float: right; margin-top: 0.25rem; }
+.st-widget-slug-row { display: flex; align-items: center; gap: 0.5rem; width: 100%; }
+.st-widget-slug-input { flex: 1; min-width: 0; }
+.st-slug-refresh { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
 
 /* Toggle */
 .st-toggle { display: inline-flex; align-items: center; gap: 0.5rem; cursor: pointer; }

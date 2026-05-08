@@ -58,10 +58,10 @@ describe("CLI binary (requires built dist/)", () => {
     expect(stdout).toContain("dry run")
   })
 
-  it("pull --help shows --output option", () => {
+  it("pull --help describes deprecated pull command", () => {
     const { stdout, exitCode } = runCli(["pull", "--help"])
     expect(exitCode).toBe(0)
-    expect(stdout).toContain("--output")
+    expect(stdout).toContain("deprecated")
   })
 
   it("reset --help shows --yes flag", () => {
@@ -87,17 +87,22 @@ describe("CLI binary (requires built dist/)", () => {
   it("self-host --help describes the self-host command", () => {
     const { stdout, exitCode } = runCli(["self-host", "--help"])
     expect(exitCode).toBe(0)
-    expect(stdout).toContain("setup")
+    expect(stdout).toContain("compose")
+    expect(stdout).toContain("install-service")
+    expect(stdout).toContain("serve")
     expect(stdout).toContain("status")
     expect(stdout).toContain("logs")
     expect(stdout).toContain("backup")
-    expect(stdout).toContain("update")
   })
 
-  it("self-host setup --help shows --domain option", () => {
-    const { stdout, exitCode } = runCli(["self-host", "setup", "--help"])
+  it("self-host compose --help shows compose subcommands", () => {
+    const { stdout, exitCode } = runCli(["self-host", "compose", "--help"])
     expect(exitCode).toBe(0)
-    expect(stdout).toContain("--domain")
+    expect(stdout).toContain("render")
+    expect(stdout).toContain("up")
+    expect(stdout).toContain("down")
+    expect(stdout).toContain("status")
+    expect(stdout).toContain("logs")
   })
 
   it("unknown command exits non-zero", () => {

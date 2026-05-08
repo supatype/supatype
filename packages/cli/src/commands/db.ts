@@ -6,7 +6,7 @@
 
 import type { Command } from "commander"
 import { loadConfig } from "../config.js"
-import { connectionString } from "../config-toml.js"
+import { connectionString } from "../project-config.js"
 import { loadCloudConfig } from "./cloud.js"
 
 export function registerDb(program: Command): void {

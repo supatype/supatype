@@ -6,6 +6,6 @@
 
 export { ensureEngine, engineRequest, engineHealth, EngineError } from "./engine-client.js"
 export type { EngineResult, DiffResult, Operation, IntrospectResult } from "./engine-client.js"
-export { defineConfig, loadConfig, loadSchemaAst, loadLegacyTsConfig } from "./config.js"
-export type { SupatypeConfig, SupatypeTomlConfig } from "./config.js"
-export { loadTomlConfig, schemaPathFromToml, localDSN } from "./config-toml.js"
+export { defineConfig, loadConfig, loadSchemaAst } from "./config.js"
+export type { SupatypeConfig, SupatypeProjectConfig } from "./config.js"
+export { schemaPathFromProject, localDSN, connectionString, serverBaseUrl } from "./project-config.js"

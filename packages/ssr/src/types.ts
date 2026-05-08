@@ -14,6 +14,6 @@ export interface CookieAdapter {
 
 export interface ServerClientOptions {
   cookies: CookieAdapter
-  /** Cookie name prefix. Default: "sb". GoTrue sets cookies as `sb-<ref>-auth-token`. */
+  /** Cookie name prefix. Default: "st". Supatype sets cookies as `st-<ref>-auth-token`. */
   cookiePrefix?: string | undefined
 }

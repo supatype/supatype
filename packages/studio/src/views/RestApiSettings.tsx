@@ -11,10 +11,7 @@ export function RestApiSettings(): React.ReactElement {
   const config = useAdminConfig()
   const client = useStudioClient()
 
-  const apiBase =
-    typeof window !== "undefined"
-      ? `${window.location.origin}/rest/v1`
-      : "/rest/v1"
+  const apiBase = `${client.url.replace(/\/+$/, "")}/rest/v1`
 
   const [schema, setSchema] = useState("public")
   const [maxRows, setMaxRows] = useState("1000")

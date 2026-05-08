@@ -26,7 +26,7 @@ import {
 import { chmod } from "node:fs/promises"
 import { homedir } from "node:os"
 import { basename, join, resolve, isAbsolute } from "node:path"
-import type { SupatypeTomlConfig } from "./config-toml.js"
+import type { SupatypeProjectConfig } from "./project-config.js"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -128,7 +128,7 @@ export function currentPlatform(): PlatformId {
  */
 export async function resolveBinary(
   component: Component,
-  config: SupatypeTomlConfig,
+  config: SupatypeProjectConfig,
 ): Promise<string> {
   const overridePath = config.overrides?.[component === "postgres" ? "postgres_dir" : component]
 
@@ -478,7 +478,7 @@ export function normalisePlatformPath(p: string): string {
   return result
 }
 
-function versionFor(component: Component, config: SupatypeTomlConfig): string {
+function versionFor(component: Component, config: SupatypeProjectConfig): string {
   switch (component) {
     case "engine":   return config.versions.engine
     case "server":   return config.versions.server
@@ -497,12 +497,12 @@ function versionFor(component: Component, config: SupatypeTomlConfig): string {
  * Fails gracefully when graceful=true (suitable for postinstall).
  */
 export async function downloadAll(
-  versions: SupatypeTomlConfig["versions"],
+  versions: SupatypeProjectConfig["versions"],
   graceful = false,
 ): Promise<void> {
   const platform = currentPlatform()
   const components: Component[] = ["engine", "server", "postgres", "deno"]
-  const fakeConfig = { versions } as SupatypeTomlConfig
+  const fakeConfig = { versions } as SupatypeProjectConfig
 
   for (const component of components) {
     const version = versionFor(component, fakeConfig)

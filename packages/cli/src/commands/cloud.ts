@@ -58,10 +58,10 @@ export async function deploySchemaToLinkedProject(
   console.log(`Deploying schema to ${config.projectSlug} (${environment})...`)
 
   const { loadConfig: loadAppConfig, loadSchemaAst } = await import("../config.js")
-  const { schemaPathFromToml } = await import("../config-toml.js")
+  const { schemaPathFromProject } = await import("../project-config.js")
 
   const appConfig = loadAppConfig(cwd)
-  const ast = loadSchemaAst(schemaPathFromToml(appConfig, cwd), cwd)
+  const ast = loadSchemaAst(schemaPathFromProject(appConfig, cwd), cwd)
 
   const { createHash } = await import("node:crypto")
   const schemaHash = createHash("sha256").update(JSON.stringify(ast)).digest("hex").slice(0, 16)

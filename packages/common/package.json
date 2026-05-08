@@ -21,6 +21,10 @@
     "./analytics": {
       "import": "./dist/analytics.js",
       "types": "./dist/analytics.d.ts"
+    },
+    "./richtext": {
+      "import": "./dist/richtext.js",
+      "types": "./dist/richtext.d.ts"
     }
   },
   "scripts": {

@@ -138,8 +138,69 @@ export interface RpcResult<TData> {
 
 export interface TableDef {
   Row: Record<string, unknown>
+  /**
+   * Columns the database fills (`gen_random_uuid()`, `now()`, sequences, etc.)
+   * are optional here even when required on {@link TableDef.Row}.
+   */
   Insert: Record<string, unknown>
   Update: Record<string, unknown>
+}
+
+/**
+ * Module augmentation anchors used by generated `supatype` types output.
+ *
+ * Example generated output:
+ * declare module "@supatype/client" {
+ *   interface SupatypeModels {
+ *     post: { Row: PostRow; Insert: PostInsert; Update: PostUpdate }
+ *   }
+ * }
+ */
+export interface SupatypeModels {}
+export interface SupatypeBuckets {}
+export interface SupatypeFunctions {}
+
+/**
+ * Insert payload for an augmented table name (from generated `supatype` output).
+ *
+ * For inserts from plain objects, prefer this over re-stating column unions.
+ */
+export type TableInsert<TTable extends keyof SupatypeModels & string> =
+  [keyof SupatypeModels] extends [never]
+    ? Record<string, unknown>
+    : TTable extends keyof SupatypeModels
+      ? SupatypeModels[TTable] extends { Insert: infer I }
+        ? I
+        : Record<string, unknown>
+      : Record<string, unknown>
+
+type ModelDefFromAugmented<T> =
+  T extends TableDef
+    ? T
+    : T extends Record<string, unknown>
+      ? { Row: T; Insert: Partial<T>; Update: Partial<T> }
+      : TableDef
+
+export type AugmentedTables =
+  [keyof SupatypeModels] extends [never]
+    ? Record<string, TableDef>
+    : {
+        [K in keyof SupatypeModels & string]: ModelDefFromAugmented<SupatypeModels[K]>
+      }
+
+export type AugmentedFunctions =
+  [keyof SupatypeFunctions] extends [never]
+    ? Record<string, FunctionDef>
+    : {
+        [K in keyof SupatypeFunctions & string]:
+          SupatypeFunctions[K] extends FunctionDef ? SupatypeFunctions[K] : FunctionDef
+      }
+
+export interface AugmentedDatabase {
+  public: {
+    Tables: AugmentedTables
+    Functions?: AugmentedFunctions | undefined
+  }
 }
 
 /**
@@ -176,6 +237,12 @@ export interface SupatypeClientConfig {
     persistSession?: boolean | undefined
     /** localStorage key to use for session storage. Default: "supatype.auth.session" */
     storageKey?: string | undefined
+    /**
+     * Cookie prefix used for browser-written auth cookie.
+     * `@supatype/ssr` reads `<prefix>-auth-token` (and `<prefix>-*-auth-token` forms).
+     * Default: `"st"`.
+     */
+    cookiePrefix?: string | undefined
   } | undefined
   /**
    * Disable automatic retry for transient errors.

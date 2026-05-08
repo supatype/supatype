@@ -15,3 +15,8 @@ export type { BadgeProps } from "./Badge.js"
 export { Skeleton } from "./Skeleton.js"
 
 export { ThemeProvider, useTheme } from "./ThemeProvider.js"
+
+export { RichTextEditor } from "./RichTextEditor.js"
+export type { RichTextEditorProps } from "./RichTextEditor.js"
+export { emptyRichTextDocument, richTextIsEmpty } from "./richtext-utils.js"
+export type { SerializedEditorState, SerializedLexicalNode } from "@supatype/types/lexical"

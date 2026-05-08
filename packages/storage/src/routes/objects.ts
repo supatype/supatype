@@ -250,6 +250,17 @@ export async function createSignedUrl(ctx: RequestContext): Promise<void> {
 export async function removeObjects(ctx: RequestContext): Promise<void> {
   const bucketId = ctx.params["bucket"]!
   const body = await readJson<{ prefixes: string[] }>(ctx.req)
+  const bucket = await db.getBucket(bucketId)
+  if (!bucket) {
+    sendJson(ctx.res, 404, { error: "Bucket not found" })
+    return
+  }
+
+  const writeAccess = checkWriteAccess(bucket, ctx.jwt)
+  if (!writeAccess.allowed) {
+    sendJson(ctx.res, writeAccess.status, { error: writeAccess.error })
+    return
+  }
 
   if (!Array.isArray(body.prefixes) || body.prefixes.length === 0) {
     sendJson(ctx.res, 400, { error: "prefixes array is required" })
@@ -267,6 +278,17 @@ export async function removeObjects(ctx: RequestContext): Promise<void> {
 export async function listObjects(ctx: RequestContext): Promise<void> {
   const bucketId = ctx.params["bucket"]!
   const body = await readJson<{ prefix?: string; limit?: number; offset?: number }>(ctx.req)
+  const bucket = await db.getBucket(bucketId)
+  if (!bucket) {
+    sendJson(ctx.res, 404, { error: "Bucket not found" })
+    return
+  }
+
+  const readAccess = await checkReadAccess(bucket, body.prefix ?? "", ctx.jwt)
+  if (!readAccess.allowed) {
+    sendJson(ctx.res, readAccess.status, { error: readAccess.error })
+    return
+  }
 
   const rows = await db.listObjectRows(
     bucketId,

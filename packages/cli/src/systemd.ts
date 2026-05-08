@@ -9,7 +9,7 @@
 import { writeFileSync, mkdirSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { homedir } from "node:os"
-import type { SupatypeTomlConfig } from "./config-toml.js"
+import type { SupatypeProjectConfig } from "./project-config.js"
 
 export interface SystemdOptions {
   /** Directory where unit files are written. Defaults to .supatype/systemd/. */
@@ -30,7 +30,7 @@ export interface SystemdOptions {
  * Returns the paths of the written files.
  */
 export function generateUnits(
-  config: SupatypeTomlConfig,
+  config: SupatypeProjectConfig,
   projectDir: string,
   opts: SystemdOptions = {},
 ): { postgres: string; server: string } {
@@ -55,7 +55,7 @@ export function generateUnits(
 // ---------------------------------------------------------------------------
 
 function postgresUnit(
-  config: SupatypeTomlConfig,
+  config: SupatypeProjectConfig,
   stateDir: string,
   user: string,
   envFile: string,
@@ -94,7 +94,7 @@ WantedBy=multi-user.target
 }
 
 function serverUnit(
-  config: SupatypeTomlConfig,
+  config: SupatypeProjectConfig,
   stateDir: string,
   user: string,
   envFile: string,

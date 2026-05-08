@@ -23,8 +23,34 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const isDirty = useRef(false)
+  const createTimestampDefaultsApplied = useRef(false)
 
   const isCreate = recordId === undefined
+
+  useEffect(() => {
+    if (recordId !== undefined) {
+      createTimestampDefaultsApplied.current = false
+      return
+    }
+    if (createTimestampDefaultsApplied.current) return
+    createTimestampDefaultsApplied.current = true
+    setValues((prev) => {
+      let next = prev
+      for (const f of model.fields) {
+        if (f.hidden || f.readOnly || f.name === model.primaryKey) continue
+        const already = prev[f.name]
+        if (already !== undefined && already !== null) continue
+        if (
+          (f.widget === "datetime" || f.widget === "date") &&
+          f.options?.["studioTimestampDefault"] === "now"
+        ) {
+          if (next === prev) next = { ...prev }
+          next[f.name] = new Date().toISOString()
+        }
+      }
+      return next
+    })
+  }, [recordId, model.fields, model.primaryKey])
 
   useEffect(() => {
     if (!recordId) return
@@ -208,6 +234,11 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
                 }
               }}
               readOnly={fieldConfig.readOnly ?? fieldConfig.name === model.primaryKey}
+              record={values}
+              currentLocale={currentLocale}
+              defaultLocale={defaultLocale}
+              recordSyncKey={recordId ?? "__create__"}
+              slugFollowSource={recordId === undefined}
             />
           ))}
         </form>

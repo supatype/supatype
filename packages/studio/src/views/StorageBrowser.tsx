@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { useStudioClient } from "../StudioCore.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { cn } from "../lib/utils.js"
-import { Badge, Button, Card, Input, Select, Th, Td } from "../components/ui.js"
+import { Button, Card, Input, Select, Th, Td } from "../components/ui.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -47,6 +48,19 @@ function formatBytes(bytes: number): string {
   return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`
 }
 
+function decodeStorageName(name: string): string {
+  return name
+    .split("/")
+    .map((segment) => {
+      try {
+        return decodeURIComponent(segment)
+      } catch {
+        return segment
+      }
+    })
+    .join("/")
+}
+
 function fileIconText(file: StorageFile): string {
   if (file.is_folder) return "folder"
   if (file.type.startsWith("image/")) return "image"
@@ -58,6 +72,94 @@ function fileIconText(file: StorageFile): string {
 
 function isPreviewable(type: string): boolean {
   return type.startsWith("image/") || type === "application/pdf"
+}
+
+function normalizeStoragePublicUrl(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  client: any,
+  rawUrl: string,
+): string {
+  if (!rawUrl) return rawUrl
+  try {
+    const parsed = new URL(rawUrl)
+    const apiOrigin = typeof client?.url === "string" ? new URL(client.url).origin : null
+    if (apiOrigin && parsed.origin !== apiOrigin && parsed.pathname.startsWith("/storage/v1/")) {
+      return `${apiOrigin}${parsed.pathname}${parsed.search}`
+    }
+    return rawUrl
+  } catch {
+    return rawUrl
+  }
+}
+
+function storageObjectPath(prefix: string[], name: string): string {
+  const pathStr = prefix.join("/")
+  return pathStr ? `${pathStr}/${name}` : name
+}
+
+/** Thumbnail for storage image files (public URL or short-lived signed URL for private buckets). */
+function StorageImageThumbnail({
+  bucketName,
+  bucketPublic,
+  pathPrefix,
+  fileName,
+  alt,
+  client,
+  sizeClassName,
+}: {
+  bucketName: string
+  bucketPublic: boolean
+  pathPrefix: string[]
+  fileName: string
+  alt: string
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  client: any
+  sizeClassName: string
+}): React.ReactElement {
+  const filePath = useMemo(() => storageObjectPath(pathPrefix, fileName), [pathPrefix, fileName])
+
+  const publicUrl = useMemo(() => {
+    if (!bucketPublic) return null
+    const raw = client.storage.from(bucketName).getPublicUrl(filePath).data.publicUrl as string
+    return normalizeStoragePublicUrl(client, raw)
+  }, [bucketPublic, bucketName, filePath, client])
+
+  const [signedUrl, setSignedUrl] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (bucketPublic) {
+      setSignedUrl(null)
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      const { data, error } = await client.storage.from(bucketName).createSignedUrl(filePath, 3600)
+      if (cancelled || error || !data?.signedUrl) return
+      setSignedUrl(normalizeStoragePublicUrl(client, data.signedUrl))
+    })()
+    return () => { cancelled = true }
+  }, [bucketPublic, bucketName, filePath, client])
+
+  const src = publicUrl ?? signedUrl
+  const [broken, setBroken] = useState(false)
+
+  if (broken || !src) {
+    return (
+      <div className={cn("bg-accent rounded flex shrink-0 items-center justify-center", sizeClassName)}>
+        <span className="text-[0.65rem] text-muted-foreground">IMG</span>
+      </div>
+    )
+  }
+
+  return (
+    <img
+      src={src}
+      alt={alt}
+      className={cn("rounded object-cover bg-border/50 shrink-0", sizeClassName)}
+      loading="lazy"
+      onError={() => { setBroken(true) }}
+    />
+  )
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -94,12 +196,16 @@ function FilePreview({
   const [signedUrl, setSignedUrl] = useState<string | null>(null)
   const [signedUrlError, setSignedUrlError] = useState<string | null>(null)
 
-  const filePath = [...currentPath, file.name].join("/")
+  const filePath = storageObjectPath(currentPath, file.name)
 
   const publicUrl = useMemo(() => {
     if (!bucket.public || file.is_folder) return null
-    return client.storage.from(bucket.name).getPublicUrl(filePath).data.publicUrl as string
+    return normalizeStoragePublicUrl(
+      client,
+      client.storage.from(bucket.name).getPublicUrl(filePath).data.publicUrl as string,
+    )
   }, [bucket, file, filePath, client])
+  const previewUrl = publicUrl ?? signedUrl
 
   const generateSignedUrl = async () => {
     setSignedUrlError(null)
@@ -112,13 +218,21 @@ function FilePreview({
     <div>
       {file.type.startsWith("image/") ? (
         <div className="bg-accent/30 rounded-md p-4 flex items-center justify-center mb-3">
-          <div className="w-full max-w-[300px] aspect-video bg-border/50 rounded flex items-center justify-center text-muted-foreground text-sm">
-            [Image preview: {file.name}]
-          </div>
+          {previewUrl ? (
+            <img
+              src={previewUrl}
+              alt={file.name}
+              className="w-full max-w-[300px] aspect-video object-contain bg-border/50 rounded"
+            />
+          ) : (
+            <div className="w-full max-w-[300px] aspect-video bg-border/50 rounded flex items-center justify-center text-muted-foreground text-sm">
+              Preview unavailable
+            </div>
+          )}
         </div>
       ) : file.type === "application/pdf" ? (
         <div className="bg-accent/30 rounded-md p-4 flex items-center justify-center mb-3 min-h-[200px]">
-          <span className="text-muted-foreground text-sm">PDF preview: {file.name}</span>
+          <span className="text-muted-foreground text-sm">PDF preview: {decodeStorageName(file.name)}</span>
         </div>
       ) : (
         <div className="bg-accent/30 rounded-md p-4 flex items-center justify-center mb-3">
@@ -130,7 +244,7 @@ function FilePreview({
       <div className="grid grid-cols-2 gap-2 text-sm">
         <div>
           <label className="block text-[0.7rem] text-muted-foreground uppercase">Name</label>
-          <span className="break-all">{file.name}</span>
+          <span className="break-all">{decodeStorageName(file.name)}</span>
         </div>
         <div>
           <label className="block text-[0.7rem] text-muted-foreground uppercase">Size</label>
@@ -253,6 +367,17 @@ function CreateFolderDialog({
 
 export function StorageBrowser(): React.ReactElement {
   const client = useStudioClient()
+  const location = useLocation()
+  const navigate = useNavigate()
+  const params = useParams<{ bucket?: string }>()
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  const syncStorageUrl = useCallback((bucketName: string, segments: string[]) => {
+    const query = new URLSearchParams()
+    if (segments.length > 0) query.set("prefix", segments.join("/"))
+    const qs = query.toString()
+    navigate(`/media-storage/${encodeURIComponent(bucketName)}/files${qs ? `?${qs}` : ""}`)
+  }, [navigate])
 
   // Bucket state
   const { data: buckets, loading: bucketsLoading, error: bucketsError, refetch: refetchBuckets } = useApiQuery(
@@ -264,18 +389,33 @@ export function StorageBrowser(): React.ReactElement {
     [],
   )
   const [selectedBucket, setSelectedBucket] = useState("")
+  const [path, setPath] = useState<string[]>([])
 
+  // Hydrate from URL and keep folder depth in sync with the history stack (browser back/forward).
   useEffect(() => {
-    if (buckets && buckets.length > 0 && !selectedBucket) {
-      setSelectedBucket(buckets[0]?.name ?? "")
+    if (!buckets || buckets.length === 0) return
+    const urlBucket = params.bucket ? decodeURIComponent(params.bucket) : null
+    const pref = searchParams.get("prefix") ?? ""
+    const segments = pref.split("/").filter(Boolean)
+
+    if (urlBucket && buckets.some((b) => b.name === urlBucket)) {
+      setSelectedBucket(urlBucket)
+      setPath(segments)
+      return
     }
-  }, [buckets, selectedBucket])
+
+    setSelectedBucket((prev) => (prev !== "" ? prev : (buckets[0]?.name ?? "")))
+    setPath([])
+    const fallback = buckets[0]?.name ?? ""
+    if (fallback) {
+      syncStorageUrl(fallback, [])
+    }
+  }, [buckets, params.bucket, searchParams, syncStorageUrl])
 
   // Files state
   const [files, setFiles] = useState<StorageFile[]>([])
   const [filesLoading, setFilesLoading] = useState(false)
   const [filesError, setFilesError] = useState<string | null>(null)
-  const [path, setPath] = useState<string[]>([])
 
   const fetchFiles = useCallback(async () => {
     if (!selectedBucket) return
@@ -312,8 +452,16 @@ export function StorageBrowser(): React.ReactElement {
 
   // Dialogs
   const [showCreateBucket, setShowCreateBucket] = useState(false)
+  const [showCreateBucketWarning, setShowCreateBucketWarning] = useState(false)
   const [showCreateFolder, setShowCreateFolder] = useState(false)
   const [pendingDeleteIds, setPendingDeleteIds] = useState<Set<string> | null>(null)
+
+  useEffect(() => {
+    const navState = location.state as { openCreateBucket?: boolean } | null
+    if (!navState?.openCreateBucket) return
+    setShowCreateBucketWarning(true)
+    navigate(`${location.pathname}${location.search}`, { replace: true, state: {} })
+  }, [location.pathname, location.search, location.state, navigate])
 
   const handleCreateBucket = async (name: string, isPublic: boolean) => {
     const { error } = await client.storage.createBucket(name, { public: isPublic })
@@ -325,6 +473,7 @@ export function StorageBrowser(): React.ReactElement {
     await refetchBuckets()
     setSelectedBucket(name)
     setPath([])
+    syncStorageUrl(name, [])
   }
 
   const currentBucket = (buckets ?? []).find((b) => b.name === selectedBucket)
@@ -334,27 +483,39 @@ export function StorageBrowser(): React.ReactElement {
   const filteredFiles = useMemo(() => {
     let result = files
     if (search) {
-      result = result.filter((f) => f.name.toLowerCase().includes(search.toLowerCase()))
+      const needle = search.toLowerCase()
+      result = result.filter((f) => {
+        const raw = f.name.toLowerCase()
+        const decoded = decodeStorageName(f.name).toLowerCase()
+        return raw.includes(needle) || decoded.includes(needle)
+      })
     }
     return result
   }, [files, search])
 
   // Navigation
   const navigateToFolder = (folderName: string) => {
-    setPath((prev) => [...prev, folderName])
+    const newPath = [...path, folderName]
+    setPath(newPath)
     setSelectedFile(null)
     setSelectedIds(new Set())
+    if (selectedBucket) syncStorageUrl(selectedBucket, newPath)
   }
 
   const navigateUp = () => {
-    setPath((prev) => prev.slice(0, -1))
+    const newPath = path.slice(0, -1)
+    setPath(newPath)
     setSelectedFile(null)
+    setSelectedIds(new Set())
+    if (selectedBucket) syncStorageUrl(selectedBucket, newPath)
   }
 
   const navigateToBreadcrumb = (index: number) => {
-    if (index === 0) setPath([])
-    else setPath(path.slice(0, index))
+    const newPath = index === 0 ? [] : path.slice(0, index)
+    setPath(newPath)
     setSelectedFile(null)
+    setSelectedIds(new Set())
+    if (selectedBucket) syncStorageUrl(selectedBucket, newPath)
   }
 
   // Upload handling
@@ -446,6 +607,32 @@ export function StorageBrowser(): React.ReactElement {
     void fetchFiles()
   }
 
+  const getFilePath = useCallback((file: StorageFile): string => {
+    return storageObjectPath(path, file.name)
+  }, [path])
+
+  const handleDownload = useCallback(async (file: StorageFile) => {
+    if (!selectedBucket || file.is_folder) return
+    const filePath = getFilePath(file)
+    let url: string | null = null
+    if (currentBucket?.public) {
+      url = normalizeStoragePublicUrl(
+        client,
+        client.storage.from(selectedBucket).getPublicUrl(filePath).data.publicUrl as string,
+      )
+    } else {
+      const { data, error } = await client.storage.from(selectedBucket).createSignedUrl(filePath, 60)
+      if (error) {
+        setFilesError(error.message)
+        return
+      }
+      url = data?.signedUrl ?? null
+    }
+    if (url) {
+      window.open(url, "_blank", "noopener,noreferrer")
+    }
+  }, [client, currentBucket?.public, getFilePath, selectedBucket])
+
   // Bulk selection
   const toggleSelectAll = () => {
     if (selectedIds.size === filteredFiles.length) {
@@ -527,48 +714,7 @@ export function StorageBrowser(): React.ReactElement {
         />
       </div>
 
-      <div className="flex gap-4 h-full">
-        {/* Bucket list sidebar */}
-        <div className="w-[200px] flex-shrink-0">
-          <div className="flex items-center justify-between mb-1.5 px-0.5">
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Buckets</span>
-            <Button size="xs" onClick={() => setShowCreateBucket(true)}>+ New</Button>
-          </div>
-          <Card className="p-1.5 flex flex-col gap-0.5">
-            {bucketsLoading ? (
-              <div className="px-3 py-4 text-xs text-muted-foreground text-center">Loading buckets…</div>
-            ) : bucketsError ? (
-              <ErrorBanner message={bucketsError} onRetry={refetchBuckets} />
-            ) : !buckets || buckets.length === 0 ? (
-              <div className="px-3 py-4 text-xs text-muted-foreground text-center">
-                No buckets yet.{" "}
-                <button className="text-primary underline" onClick={() => setShowCreateBucket(true)}>Create one</button>
-              </div>
-            ) : buckets.map((b) => (
-              <button
-                key={b.name}
-                className={cn(
-                  "flex items-center gap-2 w-full px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground rounded-md transition-colors",
-                  b.name === selectedBucket && "bg-accent text-foreground font-medium"
-                )}
-                onClick={() => { setSelectedBucket(b.name); setPath([]); setSelectedFile(null); setSelectedIds(new Set()) }}
-              >
-                <span className="truncate">{b.name}</span>
-                <span className="ml-auto flex gap-1.5 items-center flex-shrink-0">
-                  {b.public ? <Badge className="text-[0.55rem] px-1">pub</Badge> : null}
-                </span>
-              </button>
-            ))}
-          </Card>
-          {/* Bucket info */}
-          {currentBucket ? (
-            <div className="mt-2 text-xs text-muted-foreground px-2">
-              {currentBucket.file_size_limit ? <div>Max file: {formatBytes(currentBucket.file_size_limit)}</div> : null}
-              {currentBucket.allowed_mime_types ? <div>Types: {currentBucket.allowed_mime_types.join(", ")}</div> : null}
-            </div>
-          ) : null}
-        </div>
-
+      <div className="h-full">
         {/* File browser */}
         <div
           className={cn("flex-1 min-w-0", isDragOver && "ring-2 ring-primary ring-offset-2 rounded-lg")}
@@ -599,12 +745,25 @@ export function StorageBrowser(): React.ReactElement {
             </div>
           ) : null}
 
-          {!selectedBucket ? (
+          {bucketsLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <span className="text-sm text-muted-foreground">Loading buckets…</span>
+            </div>
+          ) : bucketsError ? (
+            <ErrorBanner message={bucketsError} onRetry={refetchBuckets} />
+          ) : !buckets || buckets.length === 0 ? (
+            <EmptyState
+              title="No buckets yet"
+              description="Create your first storage bucket to start uploading files."
+              action={() => setShowCreateBucketWarning(true)}
+              actionLabel="Create Bucket"
+            />
+          ) : !selectedBucket ? (
             <EmptyState
               title="No bucket selected"
-              description="Select a bucket from the sidebar or create a new one to get started."
-              action={() => setShowCreateBucket(true)}
-              actionLabel="New Bucket"
+              description="Select a bucket from the secondary navigation."
+              action={() => setShowCreateBucketWarning(true)}
+              actionLabel="Create Bucket"
             />
           ) : filesLoading ? (
             <div className="flex items-center justify-center py-12">
@@ -669,14 +828,27 @@ export function StorageBrowser(): React.ReactElement {
                             className="font-medium text-primary hover:underline flex items-center gap-1.5"
                             onClick={() => navigateToFolder(f.name)}
                           >
-                            <span className="text-muted-foreground">[dir]</span> {f.name}
+                            <span className="text-muted-foreground">[dir]</span> {decodeStorageName(f.name)}
                           </button>
                         ) : (
                           <button
-                            className="hover:text-primary flex items-center gap-1.5"
+                            className="hover:text-primary flex items-center gap-2 text-left min-w-0"
                             onClick={() => setSelectedFile(f)}
                           >
-                            <span className="text-muted-foreground text-xs">[{fileIconText(f)}]</span> {f.name}
+                            {f.type.startsWith("image/") && currentBucket ? (
+                              <StorageImageThumbnail
+                                bucketName={selectedBucket}
+                                bucketPublic={currentBucket.public}
+                                pathPrefix={path}
+                                fileName={f.name}
+                                alt={f.name}
+                                client={client}
+                                sizeClassName="h-9 w-9"
+                              />
+                            ) : (
+                              <span className="text-muted-foreground text-xs shrink-0">[{fileIconText(f)}]</span>
+                            )}
+                            <span className="truncate">{decodeStorageName(f.name)}</span>
                           </button>
                         )}
                       </Td>
@@ -688,7 +860,7 @@ export function StorageBrowser(): React.ReactElement {
                         {!f.is_folder ? (
                           <div className="flex gap-1">
                             <Button size="xs" onClick={() => setSelectedFile(f)}>Details</Button>
-                            <Button size="xs">Download</Button>
+                            <Button size="xs" onClick={() => { void handleDownload(f) }}>Download</Button>
                             <Button size="xs" variant="destructive" onClick={() => requestDelete(new Set([f.id]))}>
                               Delete
                             </Button>
@@ -742,16 +914,24 @@ export function StorageBrowser(): React.ReactElement {
                   />
                   {f.is_folder ? (
                     <div className="text-3xl text-muted-foreground mb-1">[dir]</div>
-                  ) : f.type.startsWith("image/") ? (
-                    <div className="w-16 h-16 bg-accent rounded flex items-center justify-center mb-1">
-                      <span className="text-xs text-muted-foreground">IMG</span>
+                  ) : f.type.startsWith("image/") && currentBucket ? (
+                    <div className="mb-1 h-20 w-full max-w-[120px] flex items-center justify-center">
+                      <StorageImageThumbnail
+                        bucketName={selectedBucket}
+                        bucketPublic={currentBucket.public}
+                        pathPrefix={path}
+                        fileName={f.name}
+                        alt={f.name}
+                        client={client}
+                        sizeClassName="h-20 w-full max-w-[120px]"
+                      />
                     </div>
                   ) : (
                     <div className="w-16 h-16 bg-accent rounded flex items-center justify-center mb-1">
                       <span className="text-xs text-muted-foreground">{fileIconText(f).toUpperCase()}</span>
                     </div>
                   )}
-                  <span className="text-xs text-center truncate w-full">{f.name}</span>
+                  <span className="text-xs text-center truncate w-full">{decodeStorageName(f.name)}</span>
                   {!f.is_folder ? (
                     <span className="text-[0.65rem] text-zinc-600">{formatBytes(f.size)}</span>
                   ) : null}
@@ -776,12 +956,12 @@ export function StorageBrowser(): React.ReactElement {
           <div className="w-[300px] flex-shrink-0">
             <Card className="p-4">
               <div className="flex justify-between items-center mb-3">
-                <h4 className="m-0 truncate">{selectedFile.name}</h4>
+                <h4 className="m-0 truncate">{decodeStorageName(selectedFile.name)}</h4>
                 <Button size="xs" onClick={() => setSelectedFile(null)}>Close</Button>
               </div>
               <FilePreview file={selectedFile} bucket={currentBucket} client={client} currentPath={path} />
               <div className="flex gap-2 mt-4">
-                <Button size="xs">Download</Button>
+                <Button size="xs" onClick={() => { void handleDownload(selectedFile) }}>Download</Button>
                 <Button size="xs" variant="destructive" onClick={() => requestDelete(new Set([selectedFile.id]))}>
                   Delete
                 </Button>
@@ -797,6 +977,33 @@ export function StorageBrowser(): React.ReactElement {
           onConfirm={(name, isPublic) => { void handleCreateBucket(name, isPublic) }}
           onCancel={() => setShowCreateBucket(false)}
         />
+      ) : null}
+
+      {/* Pre-create recommendation */}
+      {showCreateBucketWarning ? (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <Card className="p-6 max-w-[560px] w-full">
+            <h3 className="m-0 mb-2">Create bucket in Studio?</h3>
+            <p className="text-sm text-muted-foreground mb-2">
+              It is recommended to create storage buckets via your schema so bucket configuration is versioned and reproducible in migrations.
+            </p>
+            <p className="text-sm text-muted-foreground mb-4">
+              Continue only if you intentionally want a manual bucket.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <Button onClick={() => setShowCreateBucketWarning(false)}>Cancel</Button>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  setShowCreateBucketWarning(false)
+                  setShowCreateBucket(true)
+                }}
+              >
+                I understand, continue
+              </Button>
+            </div>
+          </Card>
+        </div>
       ) : null}
 
       {/* Create folder dialog */}

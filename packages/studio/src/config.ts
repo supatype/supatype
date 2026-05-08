@@ -32,6 +32,7 @@ export type WidgetType =
   | "blocks"
   | "publish"
   | "slug"
+  | "derivedText"
   | "email"
   | "url"
   | "uuid"

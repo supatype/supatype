@@ -15,10 +15,7 @@ export function GraphQLSettings(): React.ReactElement {
   const config = useAdminConfig()
   const client = useStudioClient()
 
-  const endpoint =
-    typeof window !== "undefined"
-      ? `${window.location.origin}/graphql/v1`
-      : "/graphql/v1"
+  const endpoint = `${client.url.replace(/\/+$/, "")}/graphql/v1`
 
   const [introspection, setIntrospection] = useState(true)
   const [maxQueryDepth, setMaxQueryDepth] = useState("10")

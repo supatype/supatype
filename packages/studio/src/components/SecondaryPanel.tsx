@@ -3,14 +3,25 @@
 import React from "react"
 import { useNavigate, useLocation } from "react-router-dom"
 import { AdminConfigContext } from "../hooks/useAdminConfig.js"
+import { useStudioClient } from "../StudioCore.js"
+import { useApiQuery } from "../hooks/useApiQuery.js"
 import type { AdminConfig } from "../config.js"
 import { cn } from "../lib/utils.js"
+import { Button } from "./ui.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type NavItem = { label: string; href: string }
+type NavItem = { label: string; href: string; activeWhen?: (path: string, search: string) => boolean }
 type NavGroup = { label?: string; items: NavItem[] }
 type SectionDef = { title: string; groups: NavGroup[] }
+interface FunctionMeta {
+  name: string
+}
+interface StorageBucketMeta {
+  id: string
+  name: string
+  public: boolean
+}
 
 // ─── Static section definitions ───────────────────────────────────────────────
 
@@ -89,12 +100,7 @@ const STATIC_SECTIONS: Record<string, SectionDef> = {
   },
   storage: {
     title: "Media & Storage",
-    groups: [{
-      items: [
-        { label: "Files",    href: "/media-storage" },
-        { label: "Policies", href: "/media-storage/policies" },
-      ],
-    }],
+    groups: [{ items: [] }],
   },
   observability: {
     title: "Observability",
@@ -117,6 +123,16 @@ const STATIC_SECTIONS: Record<string, SectionDef> = {
       ],
     }],
   },
+  functions: {
+    title: "Edge Functions",
+    groups: [
+      {
+        items: [
+          { label: "Functions", href: "/edge-functions" },
+        ],
+      },
+    ],
+  },
 }
 
 // ─── Section detection ────────────────────────────────────────────────────────
@@ -129,6 +145,7 @@ function getSectionId(path: string): string | null {
   if (path.startsWith("/media-storage")) return "storage"
   if (path.startsWith("/observability")) return "observability"
   if (path.startsWith("/ai")) return "ai"
+  if (path.startsWith("/edge-functions")) return "functions"
   return null
 }
 
@@ -137,13 +154,61 @@ function getSectionId(path: string): string | null {
 export function SecondaryPanel(): React.ReactElement | null {
   const location = useLocation()
   const navigate = useNavigate()
+  const client = useStudioClient()
   const config = React.useContext(AdminConfigContext)
   const path = location.pathname
+  const search = location.search
 
   const sectionId = getSectionId(path)
+
+  const adminFetch = React.useCallback(
+    (adminPath: string, init?: RequestInit) =>
+      fetch(`${client.url}/functions/v1/admin${adminPath}`, {
+        ...init,
+        headers: {
+          "Content-Type": "application/json",
+          ...(client.serviceRoleKey && { Authorization: `Bearer ${client.serviceRoleKey}` }),
+          ...init?.headers,
+        },
+      }),
+    [client.url, client.serviceRoleKey],
+  )
+
+  const { data: functionsData } = useApiQuery<FunctionMeta[]>(
+    async () => {
+      if (sectionId !== "functions") return []
+      const res = await adminFetch("/list")
+      if (!res.ok) return []
+      const json = await res.json() as { data: FunctionMeta[] }
+      return json.data ?? []
+    },
+    [sectionId, adminFetch],
+  )
+  const { data: storageBuckets } = useApiQuery<StorageBucketMeta[]>(
+    async () => {
+      if (sectionId !== "storage") return []
+      const { data, error } = await client.storage.listBuckets()
+      if (error) return []
+      return (data ?? []) as StorageBucketMeta[]
+    },
+    [sectionId, client],
+  )
+
   if (!sectionId) return null
 
   let section: SectionDef
+  const storageMatch = path.match(/^\/media-storage\/([^/]+)\/(files|policies)$/)
+  const selectedStorageBucket = storageMatch ? decodeURIComponent(storageMatch[1] ?? "") : null
+  const selectedStorageTab = storageMatch?.[2] === "policies" ? "policies" : "files"
+
+  const openCreateBucketFromSecondaryNav = () => {
+    const fallbackBucket = selectedStorageBucket ?? storageBuckets?.[0]?.name
+    const targetPath = fallbackBucket
+      ? `/media-storage/${encodeURIComponent(fallbackBucket)}/${selectedStorageTab}`
+      : "/media-storage/default/files"
+    navigate(targetPath, { state: { openCreateBucket: true } })
+  }
+
   if (sectionId === "models") {
     const items = (config?.models ?? []).map((m) => ({
       label: m.labelPlural,
@@ -155,16 +220,64 @@ export function SecondaryPanel(): React.ReactElement | null {
         ? [{ items }]
         : [{ items: [{ label: "No models yet", href: "/models" }] }],
     }
+  } else if (sectionId === "functions") {
+    const edgeMatch = path.match(/^\/edge-functions\/([^/]+)(?:\/([^/]+))?/)
+    const selectedFnSlug = edgeMatch?.[1]
+    const tab = edgeMatch?.[2] === "logs"
+      ? "logs"
+      : edgeMatch?.[2] === "env"
+        ? "env"
+        : "invoke"
+    const items = (functionsData ?? []).map((fn) => ({
+      label: fn.name,
+      href: `/edge-functions/${encodeURIComponent(fn.name)}/${tab}`,
+      activeWhen: (currentPath: string) => {
+        const m = currentPath.match(/^\/edge-functions\/([^/]+)/)
+        return decodeURIComponent(m?.[1] ?? "") === fn.name
+      },
+    }))
+    section = {
+      title: "Edge Functions",
+      groups: items.length > 0
+        ? [{ items }]
+        : [{ items: [{ label: "No functions yet", href: "/edge-functions" }] }],
+    }
+    if (!selectedFnSlug && items.length > 0) {
+      // Keep panel highlight stable until view syncs URL.
+      section.groups[0]!.items[0] = {
+        ...section.groups[0]!.items[0]!,
+        activeWhen: () => true,
+      }
+    }
+  } else if (sectionId === "storage") {
+    const tabItems = (storageBuckets ?? []).map((bucket) => ({
+      label: bucket.name,
+      href: `/media-storage/${encodeURIComponent(bucket.name)}/${selectedStorageTab}`,
+      activeWhen: (currentPath: string) => {
+        const current = currentPath.match(/^\/media-storage\/([^/]+)\/(?:files|policies)$/)
+        const currentBucket = current ? decodeURIComponent(current[1] ?? "") : null
+        return currentBucket === bucket.name || (!currentBucket && selectedStorageBucket === null && (storageBuckets?.[0]?.name === bucket.name))
+      },
+    }))
+    section = {
+      title: "Media & Storage",
+      groups: tabItems.length > 0
+        ? [{ items: tabItems }]
+        : [{ items: [{ label: "No buckets yet", href: "/media-storage" }] }],
+    }
   } else {
     section = STATIC_SECTIONS[sectionId] ?? { title: "", groups: [] }
   }
 
   return (
     <div className="w-[200px] shrink-0 border-r border-border/80 bg-background flex flex-col h-full overflow-hidden">
-      <div className="px-4 pt-4 pb-2.5 border-b border-border/50">
+      <div className="px-4 pt-4 pb-2.5 border-b border-border/50 flex items-center justify-between gap-2">
         <h2 className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground/80">
           {section.title}
         </h2>
+        {sectionId === "storage" ? (
+          <Button size="xs" onClick={openCreateBucketFromSecondaryNav}>New</Button>
+        ) : null}
       </div>
       <nav className="flex-1 overflow-y-auto py-2" style={{ scrollbarWidth: "none" }}>
         {section.groups.map((group, gi) => (
@@ -178,10 +291,13 @@ export function SecondaryPanel(): React.ReactElement | null {
               // An item is active if the path matches or starts with it,
               // but for model items we exclude the /schema sub-route so
               // the Editor tab (not Schema tab) stays highlighted here.
-              const active =
-                path === item.href ||
-                path.startsWith(item.href + "/") ||
-                path.startsWith(item.href + "?")
+              const active = item.activeWhen
+                ? item.activeWhen(path, search)
+                : (
+                  path === item.href ||
+                  path.startsWith(item.href + "/") ||
+                  path.startsWith(item.href + "?")
+                )
               return (
                 <button
                   key={item.href}

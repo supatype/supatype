@@ -26,7 +26,7 @@ export function Dashboard(): React.ReactElement {
   // When active view changes (or first load with no saved views), sync draft layout
   useEffect(() => {
     if (activeView) {
-      setDraftLayout(activeView.layout)
+      setDraftLayout(normalizeLayout(activeView.layout, config.models))
     } else if (!loading) {
       setDraftLayout(generateDefaultBlocks(config.models))
     }
@@ -56,7 +56,8 @@ export function Dashboard(): React.ReactElement {
     setEditMode(false)
   }, [draftLayout, saveName, saveView])
 
-  const visibleBlocks = editMode ? draftLayout : draftLayout.filter((b) => b.visible)
+  const safeDraftLayout = normalizeLayout(draftLayout, config.models)
+  const visibleBlocks = editMode ? safeDraftLayout : safeDraftLayout.filter((b) => b.visible)
   const limit = DASHBOARD_VIEW_LIMITS[tier]
   const limitLabel = limit === -1 ? "Unlimited" : String(limit)
 
@@ -189,9 +190,9 @@ export function Dashboard(): React.ReactElement {
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {(editMode ? draftLayout : visibleBlocks).map((block) => (
+          {(editMode ? safeDraftLayout : visibleBlocks).map((block, index) => (
             <DashboardBlockCard
-              key={block.id}
+              key={`${block.id}-${index}`}
               block={block}
               editMode={editMode}
               onToggle={toggleBlock}
@@ -638,4 +639,41 @@ function generateDefaultBlocks(models: ModelConfig[]): DashboardBlock[] {
     blocks.push({ id: `block-recent-${m.tableName}`, type: "recent", title: `Recent ${m.labelPlural}`, visible: true, model: m.tableName })
   }
   return blocks
+}
+
+function normalizeLayout(layout: unknown, models: ModelConfig[]): DashboardBlock[] {
+  if (!Array.isArray(layout)) return generateDefaultBlocks(models)
+  const modelNames = new Set(models.map((m) => m.tableName))
+  const result: DashboardBlock[] = []
+
+  for (let i = 0; i < layout.length; i += 1) {
+    const item = layout[i]
+    if (!item || typeof item !== "object") continue
+
+    const candidate = item as Partial<DashboardBlock>
+    const fallbackType: DashboardBlock["type"] = "custom"
+    const type = typeof candidate.type === "string"
+      ? candidate.type as DashboardBlock["type"]
+      : fallbackType
+    const title = typeof candidate.title === "string" && candidate.title.length > 0
+      ? candidate.title
+      : "Untitled Block"
+    const visible = typeof candidate.visible === "boolean" ? candidate.visible : true
+    const id = typeof candidate.id === "string" && candidate.id.length > 0
+      ? candidate.id
+      : `block-${type}-${i}`
+    const model = typeof candidate.model === "string" && modelNames.has(candidate.model)
+      ? candidate.model
+      : undefined
+
+    result.push({
+      id,
+      type,
+      title,
+      visible,
+      ...(model !== undefined && { model }),
+    })
+  }
+
+  return result.length > 0 ? result : generateDefaultBlocks(models)
 }

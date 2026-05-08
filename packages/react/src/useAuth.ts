@@ -1,3 +1,5 @@
+"use client"
+
 import { useState, useEffect } from "react"
 import type { Session, User, AuthChangeEvent, SupatypeError } from "@supatype/client"
 import { useSupatype } from "./context.js"

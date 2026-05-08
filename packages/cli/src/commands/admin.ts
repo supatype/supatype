@@ -8,7 +8,7 @@ import { createInterface } from "node:readline"
 import { randomBytes, scrypt } from "node:crypto"
 import { promisify } from "node:util"
 import { loadConfig } from "../config.js"
-import { connectionString } from "../config-toml.js"
+import { connectionString } from "../project-config.js"
 import { signJwt } from "../jwt.js"
 
 const scryptAsync = promisify(scrypt)

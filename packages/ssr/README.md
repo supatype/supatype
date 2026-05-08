@@ -74,7 +74,7 @@ interface CookieAdapter {
 
 ### Cookie prefix
 
-Auth tokens are stored under `sb-<project-ref>-auth-token` by default. If you've configured a custom prefix, pass it via `cookiePrefix`:
+Auth tokens are stored under `st-<project-ref>-auth-token` by default. If you've configured a custom prefix, pass it via `cookiePrefix`:
 
 ```ts
 createServerClient(url, anonKey, {
@@ -100,4 +100,4 @@ Returns a fully-typed `SupatypeClient` pre-loaded with the user's session from c
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `cookies` | `CookieAdapter` | required | Read/write cookie adapter |
-| `cookiePrefix` | `string` | `"sb"` | Cookie name prefix |
+| `cookiePrefix` | `string` | `"st"` | Cookie name prefix |

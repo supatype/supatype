@@ -46,10 +46,7 @@ export function GraphQLExplorer(): React.ReactElement {
     }
   }
 
-  const endpoint =
-    typeof window !== "undefined"
-      ? `${window.location.origin}/graphql/v1`
-      : "/graphql/v1"
+  const endpoint = `${client.url.replace(/\/+$/, "")}/graphql/v1`
 
   return (
     <div className="flex gap-4 h-full min-h-0" style={{ height: "calc(100vh - 120px)" }}>

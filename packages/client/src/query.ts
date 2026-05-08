@@ -1,5 +1,27 @@
 import type { QueryResult, SupatypeError } from "./types.js"
 
+const DEBUG_AUTH =
+  (typeof process !== "undefined" && process.env["NEXT_PUBLIC_SUPATYPE_DEBUG_AUTH"] === "1") ||
+  (typeof process !== "undefined" && process.env["SUPATYPE_DEBUG_AUTH"] === "1")
+
+function decodeJwtRoleFromAuthHeader(headers: Record<string, string>): string | null {
+  const auth = headers["Authorization"] ?? headers["authorization"]
+  if (auth === undefined || !auth.startsWith("Bearer ")) return null
+  const token = auth.slice("Bearer ".length)
+  const parts = token.split(".")
+  if (parts.length !== 3) return null
+  try {
+    const payloadJson =
+      typeof atob === "function"
+        ? atob(parts[1] ?? "")
+        : Buffer.from(parts[1] ?? "", "base64").toString("utf-8")
+    const payload = JSON.parse(payloadJson) as Record<string, unknown>
+    return typeof payload["role"] === "string" ? payload["role"] : null
+  } catch {
+    return null
+  }
+}
+
 // ─── QueryBuilder ─────────────────────────────────────────────────────────────
 
 export class QueryBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
@@ -169,6 +191,15 @@ export class QueryBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({ message: "Error" })) as Record<string, unknown>
+      if (DEBUG_AUTH) {
+        console.log("[supatype:query] request failed", {
+          url,
+          status: res.status,
+          role: decodeJwtRoleFromAuthHeader(headers),
+          message: String(err["message"] ?? err["hint"] ?? "Request failed"),
+          code: typeof err["code"] === "string" ? err["code"] : null,
+        })
+      }
       return {
         data: null,
         error: {
@@ -264,6 +295,16 @@ export class MutationBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({ message: "Error" })) as Record<string, unknown>
+      if (DEBUG_AUTH) {
+        console.log("[supatype:mutation] request failed", {
+          url,
+          method: this.method,
+          status: res.status,
+          role: decodeJwtRoleFromAuthHeader(this.headers),
+          message: String(err["message"] ?? err["hint"] ?? "Request failed"),
+          code: typeof err["code"] === "string" ? err["code"] : null,
+        })
+      }
       return {
         data: null,
         error: {

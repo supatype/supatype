@@ -9,6 +9,23 @@ interface MediaFile extends StorageObject {
   publicUrl?: string
 }
 
+function normalizeStoragePublicUrl(
+  client: { url?: string },
+  rawUrl: string,
+): string {
+  if (!rawUrl) return rawUrl
+  try {
+    const parsed = new URL(rawUrl)
+    const apiOrigin = client.url ? new URL(client.url).origin : null
+    if (apiOrigin && parsed.origin !== apiOrigin && parsed.pathname.startsWith("/storage/v1/")) {
+      return `${apiOrigin}${parsed.pathname}${parsed.search}`
+    }
+    return rawUrl
+  } catch {
+    return rawUrl
+  }
+}
+
 export function MediaLibrary(): React.ReactElement {
   const client = useAdminClient()
   const [buckets, setBuckets] = useState<Array<{ id: string; name: string; public: boolean }>>([])
@@ -47,7 +64,10 @@ export function MediaLibrary(): React.ReactElement {
         if (result.data) {
           const mapped: MediaFile[] = result.data.map((obj) => ({
             ...obj,
-            publicUrl: client.storage.from(currentBucket).getPublicUrl(obj.name).data.publicUrl,
+            publicUrl: normalizeStoragePublicUrl(
+              client as { url?: string },
+              client.storage.from(currentBucket).getPublicUrl(obj.name).data.publicUrl,
+            ),
           }))
           setFiles(mapped)
         }

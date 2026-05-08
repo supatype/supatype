@@ -1,12 +1,12 @@
 /**
- * supatype update — bump component versions in supatype.config.toml
+ * supatype update — bump component versions in supatype.config.ts
  * and download the new binaries.
  */
 
 import type { Command } from "commander"
-import { readFileSync, writeFileSync } from "node:fs"
-import { resolve } from "node:path"
-import { loadTomlConfig } from "../config-toml.js"
+import { existsSync, readFileSync, writeFileSync } from "node:fs"
+import { basename, resolve } from "node:path"
+import { loadConfig } from "../config.js"
 import { download, currentPlatform, type Component } from "../binary-cache.js"
 
 // Canonical latest versions — bumped on each release.
@@ -17,16 +17,26 @@ const LATEST_VERSIONS: Record<Component, string> = {
   deno: "2.2.0",
 }
 
+const CONFIG_CANDIDATES = ["supatype.config.ts", "supatype.config.js", "supatype.config.mjs"]
+
+function resolveConfigFile(cwd: string): string | null {
+  for (const name of CONFIG_CANDIDATES) {
+    const p = resolve(cwd, name)
+    if (existsSync(p)) return p
+  }
+  return null
+}
+
 export function registerUpdate(program: Command): void {
   program
     .command("update")
     .description(
-      "Download the latest component binaries and update [versions] in supatype.config.toml",
+      "Download the latest component binaries and update versions in supatype.config.ts",
     )
     .option("--check", "Print available updates without downloading", false)
     .action(async (opts: { check: boolean }) => {
       const cwd = process.cwd()
-      const config = loadTomlConfig(cwd)
+      const config = loadConfig(cwd)
       const platform = currentPlatform()
 
       const components: Component[] = ["engine", "server", "postgres", "deno"]
@@ -64,20 +74,23 @@ export function registerUpdate(program: Command): void {
         console.log(`  ${component} v${to} downloaded.`)
       }
 
-      // Patch [versions] in supatype.config.toml.
-      const tomlPath = resolve(cwd, "supatype.config.toml")
-      let toml = readFileSync(tomlPath, "utf8")
+      const configPath = resolveConfigFile(cwd)
+      if (configPath === null) {
+        console.error("No supatype.config.ts (or .js/.mjs) found to patch versions.")
+        process.exit(1)
+      }
 
+      let text = readFileSync(configPath, "utf8")
       for (const { component, to } of updates) {
-        // Replace: engine   = "0.4.1" → engine   = "0.4.2"
-        const key = component === "postgres" ? "postgres" : component
-        toml = toml.replace(
-          new RegExp(`(${key}\\s*=\\s*)"[^"]*"`),
-          `$1"${to}"`,
+        const key = component
+        // engine: "0.4.1"  or  engine: '0.4.1'
+        text = text.replace(
+          new RegExp(`(${key}\\s*:\\s*['"])[^'"]*(['"])`),
+          `$1${to}$2`,
         )
       }
 
-      writeFileSync(tomlPath, toml, "utf8")
-      console.log("\nsupatype.config.toml updated.")
+      writeFileSync(configPath, text, "utf8")
+      console.log(`\n${basename(configPath)} updated.`)
     })
 }

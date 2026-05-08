@@ -10,8 +10,10 @@ import type { Command } from "commander"
 import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
-import { join, resolve } from "node:path"
+import { isAbsolute, join, relative, resolve } from "node:path"
 import { loadConfig } from "../config.js"
+import { functionsPathCandidatesFromProject, schemaPathFromProject } from "../project-config.js"
+import { discoverTsFunctionsInDir, writeDevFunctionsRouter } from "../functions-router-gen.js"
 import { signJwt } from "../jwt.js"
 import { resolveBinary, normalisePlatformPath, cachePath, currentPlatform } from "../binary-cache.js"
 import { ProcessManager } from "../process-manager.js"
@@ -26,6 +28,52 @@ import {
 
 const DEFAULT_DOCKER_IMAGE = "supatype/postgres:17-latest"
 
+/**
+ * Resolve Deno robustly on Windows + Unix.
+ * - Respects config.overrides.deno when provided
+ * - Tries common command variants (`deno`, `deno.cmd`, `deno.exe`)
+ * - Falls back to `cmd /c deno --version` on Windows PATH edge-cases
+ */
+function detectDenoBinary(
+  cwd: string,
+  overridePath: string | undefined,
+): { available: boolean; command?: string; argsPrefix?: string[] } {
+  const candidates: Array<{ command: string; argsPrefix: string[]; runtimeCommand?: string }> = []
+
+  if (overridePath && overridePath.trim().length > 0) {
+    const raw = overridePath.trim()
+    const cmd = isAbsolute(raw) ? raw : resolve(cwd, raw)
+    candidates.push({ command: cmd, argsPrefix: [], runtimeCommand: cmd })
+  }
+
+  candidates.push(
+    { command: "deno", argsPrefix: [], runtimeCommand: "deno" },
+    { command: "deno.cmd", argsPrefix: [], runtimeCommand: "deno.cmd" },
+    { command: "deno.exe", argsPrefix: [], runtimeCommand: "deno.exe" },
+  )
+
+  if (process.platform === "win32") {
+    // Probe PATH via cmd, but runtime should still invoke `deno` directly.
+    candidates.push({
+      command: "cmd.exe",
+      argsPrefix: ["/d", "/s", "/c", "deno"],
+      runtimeCommand: "deno",
+    })
+  }
+
+  for (const c of candidates) {
+    const res = spawnSync(c.command, [...c.argsPrefix, "--version"], {
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    })
+    if (res.status === 0) {
+      return { available: true, command: c.runtimeCommand ?? c.command, argsPrefix: c.argsPrefix }
+    }
+  }
+
+  return { available: false }
+}
+
 export function registerDev(program: Command): void {
   program
     .command("dev")
@@ -39,6 +87,7 @@ export function registerDev(program: Command): void {
       const config = loadConfig(cwd)
       const projectName = config.project.name
       const serverPort = opts.port ?? String(config.server.port ?? 54321)
+      const postgrestPort = String(config.server.postgrestPort ?? 3001)
       const provider = config.database.provider ?? "docker"
 
       // ── 2. Resolve engine + server binaries ──────────────────────────────
@@ -74,6 +123,13 @@ export function registerDev(program: Command): void {
         )
         process.exit(1)
       }
+      if (await isPortInUse(Number(postgrestPort))) {
+        console.error(
+          `[supatype] Port ${postgrestPort} is already in use. Another service may be running.\n` +
+            `  Check: lsof -i :${postgrestPort}`,
+        )
+        process.exit(1)
+      }
 
       // ── 5–7. Start Postgres ───────────────────────────────────────────────
       let dbURL: string
@@ -103,7 +159,7 @@ export function registerDev(program: Command): void {
         pgStart(pgOpts)
         await pgWaitReady(pgOpts, 15_000)
         console.log("[supatype] Postgres is ready.")
-        dbURL = `postgres://postgres:postgres@127.0.0.1:${pgPort}/${projectName}`
+        dbURL = `postgres://postgres:postgres@127.0.0.1:${pgPort}/${projectName}?sslmode=disable`
         stopPostgres = () => pgStop(pgOpts)
 
         // Create project database if it doesn't exist.
@@ -157,7 +213,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
       }
 
       // ── 8. Engine: apply schema ───────────────────────────────────────────
-      const schemaPath = config.schema?.path ?? "schema/index.ts"
+      const schemaPath = schemaPathFromProject(config, cwd)
       const supatypeDir = join(cwd, ".supatype")
       const manifestPath = join(supatypeDir, "manifest.json")
       const adminConfigPath = join(supatypeDir, "admin-config.json")
@@ -179,22 +235,41 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
       const authDbURL = dbURL.includes("?") ? `${dbURL}&search_path=auth` : `${dbURL}?search_path=auth`
 
       // Resolve edge functions config: only enable Deno if a functions dir exists.
-      const functionsDir = resolve(cwd, "functions")
-      const hasFunctionsDir = existsSync(functionsDir)
-      let denoFunctionsDir = ""
+      const functionsDir = functionsPathCandidatesFromProject(config, cwd).find(dir => existsSync(dir))
+      const hasFunctionsDir = functionsDir !== undefined
+      /** Always set when a functions dir exists so Studio admin API can list functions; Deno runtime is separate. */
+      const denoFunctionsDir = hasFunctionsDir ? functionsDir : ""
+      const functionRoutes = hasFunctionsDir && functionsDir !== undefined
+        ? discoverTsFunctionsInDir(functionsDir)
+        : []
+      const denoServeScriptAbs = hasFunctionsDir && functionsDir !== undefined
+        ? (writeDevFunctionsRouter(cwd, functionsDir, functionRoutes) ?? "")
+        : ""
+
+      let denoRuntimeAvailable = false
+      let detectedDenoCommand: string | undefined
       if (hasFunctionsDir) {
-        const denoAvailable = spawnSync(
-          process.platform === "win32" ? "where" : "which",
-          [process.platform === "win32" ? "deno.exe" : "deno"],
-          { stdio: "pipe" },
-        ).status === 0
-        if (denoAvailable) {
-          denoFunctionsDir = functionsDir
+        const denoDetection = detectDenoBinary(cwd, config.overrides?.deno)
+        denoRuntimeAvailable = denoDetection.available
+        detectedDenoCommand = denoDetection.command
+        if (denoRuntimeAvailable) {
           console.log(`[supatype] Edge functions enabled (${functionsDir})`)
+          if (detectedDenoCommand) {
+            console.log(`[supatype] Deno runtime: ${detectedDenoCommand}`)
+          }
+          if (functionRoutes.length > 0) {
+            console.log(
+              `[supatype] Edge functions router: ${relative(cwd, denoServeScriptAbs) || ".supatype/functions-router.ts"} ` +
+                `(${functionRoutes.length} function(s): ${functionRoutes.map(fn => fn.name).join(", ")})`,
+            )
+          } else {
+            console.log("[supatype] Edge functions router not generated (no handler files discovered yet)")
+          }
         } else {
           console.warn(
             `[supatype] ⚠  Found ${functionsDir} but Deno is not installed — edge functions will not run.\n` +
-              "  Install Deno: https://docs.deno.com/runtime/getting_started/installation/",
+              "  Install Deno: https://docs.deno.com/runtime/getting_started/installation/\n" +
+              "  (Functions still appear in Studio; invocations need Deno.)",
           )
         }
       }
@@ -211,8 +286,14 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
         SUPATYPE_MODE: config.server.mode ?? "dev",
         SUPATYPE_MANIFEST_PATH: manifestPath,
         SUPATYPE_ADMIN_CONFIG_PATH: adminConfigPath,
-        SUPATYPE_POSTGREST_URL: "http://127.0.0.1:3000",
+        SUPATYPE_POSTGREST_URL: `http://127.0.0.1:${postgrestPort}`,
         SUPATYPE_DENO_FUNCTIONS_DIR: denoFunctionsDir,
+        ...(denoFunctionsDir !== "" ? { SUPATYPE_SHARED_ENV_FILE: resolve(denoFunctionsDir, ".env.local") } : {}),
+        ...(detectedDenoCommand !== undefined ? { SUPATYPE_DENO_PATH: detectedDenoCommand } : {}),
+        ...(denoServeScriptAbs !== ""
+          ? { SUPATYPE_DENO_SERVE_SCRIPT: denoServeScriptAbs }
+          : {}),
+        SUPATYPE_URL: `http://localhost:${serverPort}`,
         SUPATYPE_ANON_KEY: anonKey,
         SUPATYPE_SERVICE_ROLE_KEY: serviceRoleKey,
         PORT: serverPort,
@@ -246,27 +327,59 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
       let postgrestProc: ProcessManager | null = null
       const postgrestBin = await resolvePostgrestBin(config.overrides?.postgrest)
       if (postgrestBin) {
+        // Windows PostgREST builds are dynamically linked and require libpq/OpenSSL
+        // DLLs from a Postgres bin directory, even when the database runs in Docker.
+        let postgrestRuntimeBinDir = pgBinDir
+        if (process.platform === "win32" && postgrestRuntimeBinDir === null) {
+          try {
+            postgrestRuntimeBinDir = await resolvePgBinDir(config)
+          } catch (error) {
+            console.warn(
+              `[supatype] ⚠  Could not resolve Postgres runtime DLL directory for PostgREST: ${(error as Error).message}\n` +
+                "  PostgREST may fail to start on Windows until Postgres binaries are available locally.",
+            )
+          }
+        }
+
+        const postgrestEnv: Record<string, string> = {
+          PGRST_DB_URI: dbURL,
+          PGRST_DB_SCHEMA: "public, supatype",
+          PGRST_DB_ANON_ROLE: "anon",
+          PGRST_SERVER_PORT: postgrestPort,
+          PGRST_SERVER_HOST: "127.0.0.1",
+          PGRST_JWT_SECRET: serverEnv["GOTRUE_JWT_SECRET"] ?? "",
+          PGRST_LOG_LEVEL: "warn",
+          // On Windows, PostgREST (MinGW/GHC binary) needs libpq.dll and
+          // OpenSSL DLLs. Prepend a Postgres bin dir which bundles these
+          // runtime dependencies.
+          ...(process.platform === "win32" && postgrestRuntimeBinDir !== null
+            ? { PATH: `${postgrestRuntimeBinDir};${process.env["PATH"] ?? ""}` }
+            : {}),
+        }
+
+        const preflight = spawnSync(
+          postgrestBin,
+          ["--help"],
+          { env: { ...process.env, ...postgrestEnv }, stdio: "pipe", encoding: "utf8" },
+        )
+        if (preflight.status !== 0) {
+          const detail = (preflight.stderr || preflight.stdout || "").trim()
+          console.warn(
+            `[supatype] ⚠  PostgREST failed preflight (exit ${preflight.status}). ` +
+              "Skipping /rest/v1 startup to avoid crash loop.",
+          )
+          if (detail) {
+            console.warn(`[supatype] PostgREST preflight output:\n${detail}`)
+          }
+        } else {
         postgrestProc = new ProcessManager(postgrestBin, [], {
           label: "postgrest",
           pidDir,
           colour: "\x1b[36m",
-          env: {
-            PGRST_DB_URI: dbURL,
-            PGRST_DB_SCHEMA: "public, supatype",
-            PGRST_DB_ANON_ROLE: "anon",
-            PGRST_SERVER_PORT: "3000",
-            PGRST_SERVER_HOST: "127.0.0.1",
-            PGRST_JWT_SECRET: serverEnv["GOTRUE_JWT_SECRET"] ?? "",
-            PGRST_LOG_LEVEL: "warn",
-            // On Windows, PostgREST (MinGW/GHC binary) needs libpq.dll and
-            // OpenSSL DLLs. Prepend the native Postgres bin dir which bundles
-            // all required MinGW runtime DLLs.
-            ...(process.platform === "win32" && pgBinDir !== null
-              ? { PATH: `${pgBinDir};${process.env["PATH"] ?? ""}` }
-              : {}),
-          },
+          env: postgrestEnv,
         })
         postgrestProc.start()
+        }
       }
 
       // ── 9d. Studio (optional) ─────────────────────────────────────────────
@@ -621,22 +734,31 @@ async function resolvePostgrestBin(overridePath?: string): Promise<string | null
 
   const version = POSTGREST_DEFAULT_VERSION
   const platform = currentPlatform()
+  const arch = platform.arch === "arm64" ? "aarch64" : "x86_64"
   const binName = platform.os === "windows" ? "postgrest.exe" : "postgrest"
   const cacheDir = cachePath("postgres", version).replace(/postgres/, "postgrest")
   const binPath = join(cacheDir, binName)
-
-  if (existsSync(binPath)) return binPath
-
-  // Download from GitHub releases.
-  const arch = platform.arch === "arm64" ? "aarch64" : "x86_64"
   const archiveName = platform.os === "windows"
     ? `postgrest-v${version}-windows-x64.zip`
     : platform.os === "darwin"
       ? `postgrest-v${version}-macos-${arch}.tar.xz`
       : `postgrest-v${version}-linux-static-${arch}.tar.xz`
-
-  const url = `${POSTGREST_GITHUB}/v${version}/${archiveName}`
   const archivePath = join(cacheDir, archiveName)
+
+  if (existsSync(binPath)) {
+    // Backfill DLLs for older cached Windows installs where only postgrest.exe
+    // was copied from the release archive.
+    if (platform.os === "windows" && !hasLikelyWindowsRuntimeDlls(cacheDir) && existsSync(archivePath)) {
+      const repaired = repairWindowsPostgrestRuntime(cacheDir, archivePath, binPath)
+      if (!repaired) {
+        console.warn("[supatype] ⚠  PostgREST runtime DLL repair failed; REST API may be unavailable.")
+      }
+    }
+    return binPath
+  }
+
+  // Download from GitHub releases.
+  const url = `${POSTGREST_GITHUB}/v${version}/${archiveName}`
 
   console.log(`[supatype] Downloading PostgREST v${version}...`)
   mkdirSync(cacheDir, { recursive: true })
@@ -661,7 +783,7 @@ async function resolvePostgrestBin(overridePath?: string): Promise<string | null
   writeFileSync(archivePath, buf)
 
   // Extract. The Windows zip may nest postgrest.exe inside a subdirectory, so
-  // after Expand-Archive we do a recursive search and copy to binPath.
+  // after Expand-Archive we copy postgrest.exe and sibling DLLs to cacheDir.
   if (platform.os === "windows") {
     const r = spawnSync(
       "powershell.exe",
@@ -669,7 +791,11 @@ async function resolvePostgrestBin(overridePath?: string): Promise<string | null
         "-NoProfile", "-Command",
         `Expand-Archive -Path '${archivePath}' -DestinationPath '${cacheDir}' -Force; ` +
         `$exe = Get-ChildItem -Path '${cacheDir}' -Recurse -Filter 'postgrest.exe' | Select-Object -First 1; ` +
-        `if ($exe) { Copy-Item -Path $exe.FullName -Destination '${binPath}' -Force }`,
+        `if ($exe) { ` +
+        `  Copy-Item -Path $exe.FullName -Destination '${binPath}' -Force; ` +
+        `  Get-ChildItem -Path $exe.Directory.FullName -Filter '*.dll' | ` +
+        `    ForEach-Object { Copy-Item -Path $_.FullName -Destination '${cacheDir}' -Force }; ` +
+        `}`,
       ],
       { stdio: "pipe", encoding: "utf8" },
     )
@@ -697,6 +823,34 @@ async function resolvePostgrestBin(overridePath?: string): Promise<string | null
 
   console.log(`[supatype] PostgREST v${version} ready.`)
   return binPath
+}
+
+function hasLikelyWindowsRuntimeDlls(dir: string): boolean {
+  if (process.platform !== "win32") return true
+  return (
+    existsSync(join(dir, "libpq.dll")) ||
+    existsSync(join(dir, "libpq-5.dll")) ||
+    existsSync(join(dir, "libssl-3-x64.dll"))
+  )
+}
+
+function repairWindowsPostgrestRuntime(cacheDir: string, archivePath: string, binPath: string): boolean {
+  const r = spawnSync(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-Command",
+      `Expand-Archive -Path '${archivePath}' -DestinationPath '${cacheDir}' -Force; ` +
+      `$exe = Get-ChildItem -Path '${cacheDir}' -Recurse -Filter 'postgrest.exe' | Select-Object -First 1; ` +
+      `if ($exe) { ` +
+      `  Copy-Item -Path $exe.FullName -Destination '${binPath}' -Force; ` +
+      `  Get-ChildItem -Path $exe.Directory.FullName -Filter '*.dll' | ` +
+      `    ForEach-Object { Copy-Item -Path $_.FullName -Destination '${cacheDir}' -Force }; ` +
+      `}`,
+    ],
+    { stdio: "pipe", encoding: "utf8" },
+  )
+  return r.status === 0
 }
 
 // ---------------------------------------------------------------------------
@@ -750,15 +904,17 @@ function adaptUnsupportedKinds(
 // ---------------------------------------------------------------------------
 
 function loadDotEnv(cwd: string): Record<string, string> {
-  const envPath = resolve(cwd, ".env")
-  if (!existsSync(envPath)) return {}
+  const candidates = [resolve(cwd, ".env"), resolve(cwd, ".env.local")]
   const vars: Record<string, string> = {}
-  for (const line of readFileSync(envPath, "utf8").split("\n")) {
-    const trimmed = line.trim()
-    if (!trimmed || trimmed.startsWith("#")) continue
-    const eq = trimmed.indexOf("=")
-    if (eq === -1) continue
-    vars[trimmed.slice(0, eq)] = trimmed.slice(eq + 1)
+  for (const envPath of candidates) {
+    if (!existsSync(envPath)) continue
+    for (const line of readFileSync(envPath, "utf8").split("\n")) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith("#")) continue
+      const eq = trimmed.indexOf("=")
+      if (eq === -1) continue
+      vars[trimmed.slice(0, eq)] = trimmed.slice(eq + 1)
+    }
   }
   return vars
 }

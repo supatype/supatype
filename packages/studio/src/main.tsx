@@ -10,6 +10,13 @@ import type { AdminConfig, FieldConfig, GlobalConfig, NavGroup } from "./config.
 import "./globals.css"
 import { studioGatewayHeaders } from "./lib/studio-gateway-headers.js"
 
+/** Match Vite `base` / `import.meta.env.BASE_URL` so Router history URLs include the subpath when hosted under a prefix. */
+function studioBasename(): string | undefined {
+  const base = import.meta.env.BASE_URL
+  if (base === "/" || base === "") return undefined
+  return base.endsWith("/") ? base.slice(0, -1) : base
+}
+
 const DEMO_SESSION_KEY = "supatype_studio_demo"
 
 const client = createClient({
@@ -35,6 +42,13 @@ function pluralize(word: string): string {
   return word + "s"
 }
 
+/** Map engine `widget` strings to `WidgetType`. Most are lowercase; `derivedText` stays camelCase to match `FieldWidget`. */
+function normalizeStudioWidget(widget: unknown): FieldConfig["widget"] {
+  const raw = String(widget ?? "text")
+  if (raw.toLowerCase() === "derivedtext") return "derivedText"
+  return raw.toLowerCase() as FieldConfig["widget"]
+}
+
 function normalizeAdminConfig(raw: unknown): AdminConfig {
   const r = raw as Record<string, unknown>
 
@@ -47,8 +61,7 @@ function normalizeAdminConfig(raw: unknown): AdminConfig {
       return {
         name: String(fi["name"] ?? ""),
         label: String(fi["label"] ?? humanize(String(fi["name"] ?? ""))),
-        // Engine may use camelCase widget names (e.g. "richText") — normalise to lowercase.
-        widget: (String(fi["widget"] ?? "text").toLowerCase() as FieldConfig["widget"]),
+        widget: normalizeStudioWidget(fi["widget"]),
         required: Boolean(fi["required"] ?? false),
         localized: Boolean(fi["localized"] ?? false),
         // engine uses showInList; studio uses listColumn
@@ -262,8 +275,9 @@ function App(): React.ReactElement {
     )
   }
 
+  const basename = studioBasename()
   return (
-    <BrowserRouter>
+    <BrowserRouter {...(basename !== undefined ? { basename } : {})}>
       <StudioCore config={config} client={client} demoMode={demoMode} />
     </BrowserRouter>
   )

@@ -24,14 +24,14 @@ export function createFunction<
     loading.set(true)
     error.set(null)
 
-    const result = await client.functions.invoke<TResponse>(functionName, {
+    const result = await client.functions.invoke(functionName, {
       ...(body !== undefined ? { body } : {}),
     })
 
     loading.set(false)
-    data.set(result.data)
+    data.set(result.data as TResponse | null)
     if (result.error) error.set(result.error)
-    return result
+    return result as { data: TResponse | null; error: SupatypeError | null }
   }
 
   return {

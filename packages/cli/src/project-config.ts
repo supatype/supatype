@@ -1,0 +1,305 @@
+import { existsSync } from "node:fs"
+import { resolve } from "node:path"
+
+// ---------------------------------------------------------------------------
+// Config schema (single canonical shape; loaded from supatype.config.ts)
+// ---------------------------------------------------------------------------
+
+export interface SupatypeProjectConfig {
+  supatype?: {
+    /**
+     * Base directory for Supatype project assets (schema, functions, etc).
+     * "." means the current working directory (default).
+     */
+    root?: string
+  }
+  project: {
+    /** Project name — used for per-project state dirs and logging. */
+    name: string
+    /** Cloud project reference (set by `supatype link`). */
+    ref?: string
+  }
+  database: {
+    /**
+     * Database backend.
+     * "native" = supatype manages a native Postgres binary (downloaded from CDN).
+     * "docker" = supatype runs supatype/postgres via Docker (includes all extensions).
+     */
+    provider: "native" | "docker"
+    /**
+     * Directory where Postgres stores its data files (provider=native).
+     * Defaults to ~/.supatype/projects/{name}/data when omitted.
+     */
+    data_dir?: string
+    /**
+     * Docker image to use (provider=docker).
+     * Defaults to supatype/postgres:17-latest.
+     * Override in supatype.local.config.ts for local builds.
+     */
+    image?: string
+  }
+  server: {
+    /**
+     * Server mode.
+     * "dev"        = no TLS, permissive CORS, Vite HMR proxy
+     * "standalone" = ACME TLS (Let's Encrypt)
+     * "managed"    = cloud-managed, HMAC tenant verification
+     */
+    mode: "dev" | "standalone" | "managed"
+    /** Port supatype-server listens on (default: 54321). */
+    port?: number
+    /** Port PostgREST listens on in local dev (default: 3001). */
+    postgrestPort?: number
+    /** Domain for ACME TLS certificate (mode=standalone). */
+    domain?: string
+  }
+  app: {
+    /**
+     * How the root path "/" is handled by supatype-server.
+     * "none"   = 404
+     * "static" = serve files from static_dir
+     * "proxy"  = reverse-proxy to upstream
+     */
+    mode: "none" | "static" | "proxy"
+    /** Directory to serve static files from (mode=static). */
+    static_dir?: string
+    /** Upstream URL to proxy to (mode=proxy). */
+    upstream?: string
+  }
+  versions: {
+    /** Supatype schema engine binary version (e.g. "0.4.2"). */
+    engine: string
+    /** supatype-server binary version (e.g. "0.1.0"). */
+    server: string
+    /** Native Postgres archive version (e.g. "17.2"). */
+    postgres: string
+    /** Deno binary version (e.g. "2.2.0"). */
+    deno: string
+  }
+  /**
+   * Override component binaries with local build paths.
+   * Intended for supatype contributors testing local changes.
+   * Cannot be combined with a linked cloud project (hard error).
+   */
+  overrides?: {
+    /** Path to local engine binary. */
+    engine?: string
+    /** Path to local supatype-server binary. */
+    server?: string
+    /** Path to a directory containing a local Postgres installation. */
+    postgres_dir?: string
+    /** Path to a local deno binary. */
+    deno?: string
+    /** Path to the @supatype/studio package directory (starts Vite dev server). */
+    studio?: string
+    /** Path to a local PostgREST binary. */
+    postgrest?: string
+  }
+  email?: {
+    /**
+     * Email delivery provider.
+     * "console" = log to stdout (default for dev)
+     * "smtp"    = SMTP via env SMTP_* vars
+     * "resend"  = Resend API (requires RESEND_API_KEY, RESEND_FROM)
+     * "ses"     = AWS SES v2 (ambient credentials, requires SES_FROM)
+     */
+    provider: "console" | "smtp" | "resend" | "ses"
+    /** Resend API key (provider=resend, or set RESEND_API_KEY env var). */
+    resend_api_key?: string
+  }
+  storage?: {
+    /**
+     * Storage backend.
+     * "local" = files on disk (LocalStoragePath required)
+     * "s3"    = AWS S3 or compatible (ambient credentials)
+     */
+    provider: "local" | "s3"
+    /** Local directory to store objects in (provider=local). */
+    local_path?: string
+  }
+  schema?: {
+    /** Path (or glob) to the schema entry point. Defaults to "schema/index.ts". */
+    path?: string
+    /** Postgres schema name. Defaults to "public". */
+    pg_schema?: string
+  }
+  functions?: {
+    /** Path to edge functions directory, relative to `supatype.root` when not absolute. */
+    path?: string
+  }
+  output?: {
+    /** Path for generated TypeScript types. */
+    types?: string
+    /** Path for generated client helpers. */
+    client?: string
+  }
+  /**
+   * App build configuration for `supatype deploy`.
+   * Separate from `app` which controls how supatype-server serves at runtime.
+   */
+  build?: {
+    /** Framework name. Auto-detected from package.json when omitted. */
+    framework?: "nextjs" | "astro" | "vite" | "remix-spa" | "sveltekit" | "nuxt" | "static"
+    /** Path to the app directory. Defaults to cwd. */
+    directory?: string
+    /** Build command. Inferred from framework when omitted. */
+    buildCommand?: string
+    /** Build output directory. Inferred from framework when omitted. */
+    outputDirectory?: string
+    /** Enable SPA fallback routing. */
+    spa?: boolean
+    /** Environment variables injected at build time. */
+    env?: Record<string, string>
+    /** Custom response headers for the deployed static site. */
+    headers?: Record<string, string>
+  }
+  /**
+   * Optional Postgres URL for CLI commands that talk to the DB (`push`, `migrate`, …).
+   * When omitted, `DATABASE_URL` from the environment is used, then a local default DSN.
+   */
+  connection?: string
+}
+
+// ---------------------------------------------------------------------------
+// Merge + validate
+// ---------------------------------------------------------------------------
+
+/**
+ * Merge each top-level section from `override` on top of `base`.
+ * Within each section, override values win. New optional sections in override are added.
+ */
+export function mergeProjectConfig(
+  base: SupatypeProjectConfig,
+  override: Partial<SupatypeProjectConfig>,
+): SupatypeProjectConfig {
+  return {
+    ...(base.supatype !== undefined || override.supatype !== undefined
+      ? { supatype: { ...base.supatype, ...override.supatype } as NonNullable<SupatypeProjectConfig["supatype"]> }
+      : {}),
+    project: { ...base.project, ...override.project },
+    database: { ...base.database, ...override.database },
+    server: { ...base.server, ...override.server },
+    app: { ...base.app, ...override.app },
+    versions: { ...base.versions, ...override.versions },
+    ...(base.overrides !== undefined || override.overrides !== undefined
+      ? {
+          overrides: {
+            ...base.overrides,
+            ...override.overrides,
+          } as NonNullable<SupatypeProjectConfig["overrides"]>,
+        }
+      : {}),
+    ...(base.email !== undefined || override.email !== undefined
+      ? { email: { ...base.email, ...override.email } as NonNullable<SupatypeProjectConfig["email"]> }
+      : {}),
+    ...(base.storage !== undefined || override.storage !== undefined
+      ? {
+          storage: {
+            ...base.storage,
+            ...override.storage,
+          } as NonNullable<SupatypeProjectConfig["storage"]>,
+        }
+      : {}),
+    ...(base.schema !== undefined || override.schema !== undefined
+      ? { schema: { ...base.schema, ...override.schema } as NonNullable<SupatypeProjectConfig["schema"]> }
+      : {}),
+    ...(base.functions !== undefined || override.functions !== undefined
+      ? { functions: { ...base.functions, ...override.functions } as NonNullable<SupatypeProjectConfig["functions"]> }
+      : {}),
+    ...(base.output !== undefined || override.output !== undefined
+      ? { output: { ...base.output, ...override.output } as NonNullable<SupatypeProjectConfig["output"]> }
+      : {}),
+    ...(base.build !== undefined || override.build !== undefined
+      ? { build: { ...base.build, ...override.build } as NonNullable<SupatypeProjectConfig["build"]> }
+      : {}),
+    ...(base.connection !== undefined || override.connection !== undefined
+      ? { connection: override.connection ?? base.connection }
+      : {}),
+  }
+}
+
+export function validateProjectConfig(raw: unknown, filename: string): SupatypeProjectConfig {
+  if (typeof raw !== "object" || raw === null) {
+    throw new Error(`${filename}: expected a config object at the root`)
+  }
+
+  const cfg = raw as Record<string, unknown>
+
+  if (!cfg["project"] || typeof (cfg["project"] as Record<string, unknown>)["name"] !== "string") {
+    throw new Error(`${filename}: project.name is required`)
+  }
+  if (!cfg["database"]) {
+    throw new Error(`${filename}: database section is required`)
+  }
+  if (!cfg["server"]) {
+    throw new Error(`${filename}: server section is required`)
+  }
+  if (!cfg["app"]) {
+    throw new Error(`${filename}: app section is required`)
+  }
+  if (!cfg["versions"]) {
+    throw new Error(`${filename}: versions section is required`)
+  }
+
+  return raw as SupatypeProjectConfig
+}
+
+/** Schema entry path (with fallback). */
+export function schemaPathFromProject(cfg: SupatypeProjectConfig, cwd: string): string {
+  return resolve(projectRootFromConfig(cfg, cwd), cfg.schema?.path ?? "schema/index.ts")
+}
+
+/** Resolve project root for schema/functions defaults. */
+export function projectRootFromConfig(cfg: SupatypeProjectConfig, cwd: string): string {
+  return resolve(cwd, cfg.supatype?.root ?? ".")
+}
+
+/** Candidate functions directories in lookup order. */
+export function functionsPathCandidatesFromProject(cfg: SupatypeProjectConfig, cwd: string): string[] {
+  const root = projectRootFromConfig(cfg, cwd)
+  if (cfg.functions?.path) {
+    return [resolve(root, cfg.functions.path)]
+  }
+  // Prefer modern default, but keep legacy fallback for compatibility.
+  return [resolve(root, "functions"), resolve(root, "supatype/functions")]
+}
+
+/** Preferred default functions path (used when creating new functions). */
+export function preferredFunctionsPathFromProject(cfg: SupatypeProjectConfig, cwd: string): string {
+  const candidates = functionsPathCandidatesFromProject(cfg, cwd)
+  for (const dir of candidates) {
+    if (existsSync(dir)) return dir
+  }
+  return candidates[0] ?? resolve(projectRootFromConfig(cfg, cwd), "functions")
+}
+
+/**
+ * Derive the supatype-server base URL from the project config.
+ * Returns undefined if the mode is "managed" (cloud controls the URL).
+ */
+export function serverBaseUrl(cfg: SupatypeProjectConfig): string | undefined {
+  const port = cfg.server.port ?? 54321
+  switch (cfg.server.mode) {
+    case "dev":
+    case "standalone":
+      return cfg.server.domain
+        ? `https://${cfg.server.domain}`
+        : `http://localhost:${port}`
+    case "managed":
+      return undefined
+  }
+}
+
+/** The local Postgres DSN derived from project name (dev default). */
+export function localDSN(cfg: SupatypeProjectConfig): string {
+  const port = 5432 // standard; per-project state dir isolates data dirs
+  return `postgres://postgres:postgres@127.0.0.1:${port}/${cfg.project.name}?sslmode=disable`
+}
+
+/**
+ * Resolve the database connection string.
+ * Prefers optional `connection` in config, then `DATABASE_URL` env, then a local default DSN.
+ */
+export function connectionString(cfg: SupatypeProjectConfig): string {
+  return cfg.connection ?? process.env["DATABASE_URL"] ?? localDSN(cfg)
+}

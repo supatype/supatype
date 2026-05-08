@@ -570,7 +570,8 @@ function DirectContent() {
         <CodeBlock code={`psql '${conn}'`} filename="terminal" />
       </Step>
       <div className="rounded-lg border border-border bg-secondary/20 px-3 py-2.5 text-xs text-muted-foreground">
-        Find your host and password in <span className="text-foreground font-medium">Settings → Database</span>.
+        Find your host and credential flow in <span className="text-foreground font-medium">Settings → Database</span>.
+        In managed cloud, the password is shown once and then hidden until rotation.
         For app integrations, the <span className="text-primary font-medium">SDK</span> tab gives you type-safe queries with no SQL.
       </div>
     </div>

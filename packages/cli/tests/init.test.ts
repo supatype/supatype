@@ -23,10 +23,6 @@ describe("scaffold()", () => {
       "supatype.config.ts",
       "schema/index.ts",
       ".env",
-      "docker-compose.yml",
-      ".supatype/kong.yml",
-      ".supatype/pgbouncer.ini",
-      ".supatype/userlist.txt",
       "seed.ts",
       ".gitignore",
     ]
@@ -41,69 +37,13 @@ describe("scaffold()", () => {
     expect(content).toContain("blog-app")
     expect(content).toContain("defineConfig")
     expect(content).toContain("schema:")
-    expect(content).toContain("output:")
+    expect(content).toContain("versions:")
   })
 
-  it("supatype.config.ts contains commented selfHost section", () => {
+  it("supatype.config.ts documents self-host workflow", () => {
     scaffold(tmpRoot, "my-app")
     const content = readFileSync(join(tmpRoot, "supatype.config.ts"), "utf8")
-    expect(content).toContain("selfHost")
-    expect(content).toContain("domain")
-  })
-
-  it("docker-compose.yml references project name, correct images, and health check", () => {
-    scaffold(tmpRoot, "shop")
-    const content = readFileSync(join(tmpRoot, "docker-compose.yml"), "utf8")
-    expect(content).toContain("shop")
-    expect(content).toContain("supatype/postgres")
-    expect(content).toContain("postgrest/postgrest")
-    expect(content).toContain("kong:")
-    expect(content).toContain("service_healthy")
-  })
-
-  it("docker-compose.yml includes GoTrue auth service", () => {
-    scaffold(tmpRoot, "shop")
-    const content = readFileSync(join(tmpRoot, "docker-compose.yml"), "utf8")
-    expect(content).toContain("gotrue:")
-    expect(content).toContain("supatype/auth")
-    expect(content).toContain("GOTRUE_JWT_SECRET")
-    expect(content).toContain("9999")
-  })
-
-  it("docker-compose.yml includes PgBouncer service connecting services via port 6432", () => {
-    scaffold(tmpRoot, "shop")
-    const content = readFileSync(join(tmpRoot, "docker-compose.yml"), "utf8")
-    expect(content).toContain("pgbouncer:")
-    expect(content).toContain("pgbouncer/pgbouncer")
-    expect(content).toContain("pgbouncer:6432")
-    expect(content).toContain("PGRST_DB_POOL")
-  })
-
-  it("docker-compose.yml includes studio service (merged admin + studio)", () => {
-    scaffold(tmpRoot, "shop")
-    const content = readFileSync(join(tmpRoot, "docker-compose.yml"), "utf8")
-    expect(content).toContain("studio:")
-    expect(content).toContain("supatype/studio")
-    expect(content).toContain("3002:3002")
-    // Admin was merged into studio — no separate admin service
-    expect(content).not.toContain("ghcr.io/supatype/admin")
-  })
-
-  it("docker-compose.yml includes commented app service slot", () => {
-    scaffold(tmpRoot, "shop")
-    const content = readFileSync(join(tmpRoot, "docker-compose.yml"), "utf8")
-    expect(content).toContain("supatype app add")
-    expect(content).toContain("SUPATYPE_URL")
-    expect(content).toContain("SUPATYPE_ANON_KEY")
-  })
-
-  it(".supatype/pgbouncer.ini has correct pool settings", () => {
-    scaffold(tmpRoot, "my-app")
-    const content = readFileSync(join(tmpRoot, ".supatype/pgbouncer.ini"), "utf8")
-    expect(content).toContain("pool_mode = transaction")
-    expect(content).toContain("default_pool_size = 20")
-    expect(content).toContain("max_db_connections = 60")
-    expect(content).toContain("listen_port = 6432")
+    expect(content).toContain("self-host")
   })
 
   it(".env contains DATABASE_URL, JWT_SECRET, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB", () => {
@@ -124,31 +64,12 @@ describe("scaffold()", () => {
     expect(content).toContain("SITE_URL=")
   })
 
-  it("schema/index.ts exports a User model with field builders and access rules", () => {
+  it("schema/index.ts exports a User model using RFC v2 Model<>", () => {
     scaffold(tmpRoot, "my-app")
     const content = readFileSync(join(tmpRoot, "schema/index.ts"), "utf8")
-    expect(content).toContain("export const User")
-    expect(content).toContain("model(")
-    expect(content).toContain("field.")
-    expect(content).toContain("access.")
-    expect(content).toContain("options: { timestamps: true }")
-  })
-
-  it(".supatype/kong.yml declares REST, GraphQL, and auth routes", () => {
-    scaffold(tmpRoot, "my-app")
-    const content = readFileSync(join(tmpRoot, ".supatype/kong.yml"), "utf8")
-    expect(content).toContain("/rest/v1/")
-    expect(content).toContain("/graphql/v1")
-    expect(content).toContain("/auth/v1/")
-    expect(content).toContain("postgrest")
-    expect(content).toContain("gotrue")
-  })
-
-  it(".supatype/kong.yml contains commented app fallback route", () => {
-    scaffold(tmpRoot, "my-app")
-    const content = readFileSync(join(tmpRoot, ".supatype/kong.yml"), "utf8")
-    expect(content).toContain("supatype app add")
-    expect(content).toContain("app-root")
+    expect(content).toContain("export type User")
+    expect(content).toContain("Model<")
+    expect(content).toContain("access:")
   })
 
   it(".gitignore excludes .env, node_modules, and engine binary", () => {
@@ -157,6 +78,7 @@ describe("scaffold()", () => {
     expect(content).toContain(".env")
     expect(content).toContain("node_modules/")
     expect(content).toContain(".supatype/engine/")
+    expect(content).toContain("supatype.local.config.ts")
   })
 
   it("seed.ts references the project name", () => {
@@ -165,7 +87,7 @@ describe("scaffold()", () => {
     expect(content).toContain("acme")
   })
 
-  it("different project names produce different connection strings", () => {
+  it("different project names produce different config bodies", () => {
     scaffold(tmpRoot, "alpha")
     const alpha = readFileSync(join(tmpRoot, "supatype.config.ts"), "utf8")
 

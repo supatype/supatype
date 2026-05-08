@@ -1,3 +1,5 @@
+"use client"
+
 import { useEffect, useRef, useState } from "react"
 import type { RealtimeEvent, RealtimePayload, ChannelStatus } from "@supatype/client"
 import { useSupatype } from "./context.js"

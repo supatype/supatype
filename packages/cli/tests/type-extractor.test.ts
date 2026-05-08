@@ -65,6 +65,89 @@ export type Comment = Model<{
     expect(post?.access["delete"]).toEqual({ type: "owner", field: "author_id" })
   })
 
+  it("emits DEFAULT now for created_at / updated_at timestamp columns", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-types-audit-ts-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, UUID, Timestamp } from "@supatype/types"
+
+export type Entry = Model<{ id: UUID; created_at: Timestamp; updated_at: Timestamp }>
+`,
+      "utf8",
+    )
+
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const entry = ast?.models.find((m) => m.name === "Entry")
+    expect(entry?.fields["created_at"]).toMatchObject({
+      kind: "datetime",
+      serverGenerated: true,
+      default: { kind: "now" },
+    })
+    expect(entry?.fields["updated_at"]).toMatchObject({
+      kind: "datetime",
+      serverGenerated: true,
+      default: { kind: "now" },
+    })
+  })
+
+  it("extracts Owner<Model, Key> using the key argument", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-types-owner-model-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, UUID, Public, Owner } from "@supatype/types"
+
+export type User = Model<{
+  id: UUID
+}, {
+  access: { read: Public; update: Owner<User, "id">; delete: Owner<User, "id"> }
+}>
+`,
+      "utf8",
+    )
+
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const user = ast?.models.find((m) => m.name === "User")
+    expect(user?.access["update"]).toEqual({ type: "owner", field: "id" })
+    expect(user?.access["delete"]).toEqual({ type: "owner", field: "id" })
+  })
+
+  it("maps SupatypeAuthUser relations and OwnerFrom relation keys", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-types-auth-owner-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, UUID, RelatedTo, SupatypeAuthUser, OwnerFrom, LoggedIn } from "@supatype/types"
+
+export type Post = Model<{
+  id: UUID
+  authUser: RelatedTo<SupatypeAuthUser>
+}, {
+  access: { create: LoggedIn; update: OwnerFrom<"authUser">; delete: OwnerFrom<"authUser"> }
+}>
+`,
+      "utf8",
+    )
+
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const post = ast?.models.find((m) => m.name === "Post")
+    expect(post?.fields["authUser"]).toMatchObject({
+      kind: "relation",
+      cardinality: "belongsTo",
+      target: "supatype:user",
+      foreignKey: "auth_user_id",
+    })
+    expect(post?.access["update"]).toEqual({ type: "owner", field: "auth_user_id" })
+    expect(post?.access["delete"]).toEqual({ type: "owner", field: "auth_user_id" })
+  })
+
   it("unwraps Default<> so boolean fields stay boolean in the AST", () => {
     const dir = mkdtempSync(join(tmpdir(), "supatype-types-"))
     dirs.push(dir)
@@ -172,5 +255,147 @@ export type Article = Model<{
     )
     const ast = extractSchemaAstFromTypes(schemaPath, dir)
     expect(ast?.models[0]?.fields["slug"]).toMatchObject({ kind: "slug", from: "name" })
+  })
+
+  it("normalizes RelatedTo foreign keys for fields ending in Id/ID", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-types-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, UUID, RelatedTo } from "@supatype/types"
+
+export type Author = Model<{ id: UUID }>
+
+export type Comment = Model<{
+  id: UUID
+  author: RelatedTo<Author>
+  userId: RelatedTo<Author>
+  customerID: RelatedTo<Author>
+}>
+`,
+      "utf8",
+    )
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const comment = ast?.models.find((m) => m.name === "Comment")
+    expect(comment?.fields["author"]).toMatchObject({ foreignKey: "author_id" })
+    expect(comment?.fields["userId"]).toMatchObject({ foreignKey: "user_id" })
+    expect(comment?.fields["customerID"]).toMatchObject({ foreignKey: "customer_id" })
+  })
+
+  it("extracts EditorReadOnly wrapper as readOnly field metadata", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-types-readonly-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, UUID, EditorReadOnly, RelatedTo } from "@supatype/types"
+
+export type User = Model<{ id: UUID }>
+
+export type Doc = Model<{
+  id: UUID
+  title: EditorReadOnly<string>
+  owner: EditorReadOnly<RelatedTo<User>>
+}>
+`,
+      "utf8",
+    )
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const doc = ast?.models.find((m) => m.name === "Doc")
+    expect(doc?.fields["title"]).toMatchObject({ kind: "text", readOnly: true })
+    expect(doc?.fields["owner"]).toMatchObject({ kind: "relation", readOnly: true })
+  })
+
+  it("extracts Computed wrapper as readOnly + serverGenerated metadata", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-types-computed-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, UUID, Computed, Optional } from "@supatype/types"
+
+export type Doc = Model<{
+  id: UUID
+  summary: Computed<Optional<string>>
+}>
+`,
+      "utf8",
+    )
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const doc = ast?.models.find((m) => m.name === "Doc")
+    expect(doc?.fields["summary"]).toMatchObject({
+      kind: "text",
+      required: false,
+      readOnly: true,
+      serverGenerated: true,
+    })
+  })
+
+  it("extracts ComputedFrom sources on text (single + tuple)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-types-computed-from-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, UUID, ComputedFrom, Optional } from "@supatype/types"
+
+export type Article = Model<{
+  id: UUID
+  title: string
+  subtitle: string
+  excerpt: Optional<ComputedFrom<string, "title">>
+  teaser: Optional<ComputedFrom<string, readonly ["title", "subtitle"]>>
+}>
+`,
+      "utf8",
+    )
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const article = ast?.models.find((m) => m.name === "Article")
+    expect(article?.fields["excerpt"]).toMatchObject({
+      kind: "text",
+      required: false,
+      sources: ["title"],
+    })
+    expect(article?.fields["teaser"]).toMatchObject({
+      kind: "text",
+      required: false,
+      sources: ["title", "subtitle"],
+    })
+  })
+
+  it("extracts ComputedFrom template string and inferred sources", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-types-computed-tpl-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, UUID, ComputedFrom, Optional } from "@supatype/types"
+
+export type Note = Model<{
+  id: UUID
+  title: string
+  author: string
+  published_at: string
+  description: string
+  summary: Optional<ComputedFrom<string, "Author: {author} | Date: {published_at}\\n{truncate(description, 100)}">>
+}>
+`,
+      "utf8",
+    )
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const note = ast?.models.find((m) => m.name === "Note")
+    const summary = note?.fields["summary"] as { sources?: string[]; template?: string } | undefined
+    expect(summary).toMatchObject({
+      kind: "text",
+      required: false,
+      template: "Author: {author} | Date: {published_at}\n{truncate(description, 100)}",
+    })
+    expect(new Set(summary?.sources ?? [])).toEqual(new Set(["author", "published_at", "description"]))
   })
 })

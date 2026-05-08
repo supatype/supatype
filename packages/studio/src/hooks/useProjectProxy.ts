@@ -51,17 +51,30 @@ export function useProjectProxy(): ProjectProxy {
       if (!client.url) {
         throw new Error("SQL proxy URL is not configured — client URL is missing")
       }
+      if (!client.serviceRoleKey) {
+        throw new Error("SQL proxy requires a service role key")
+      }
       const res = await fetch(`${client.url}/sql`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...studioGatewayHeaders() },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${client.serviceRoleKey}`,
+          ...studioGatewayHeaders(),
+        },
         credentials: "include",
         body: JSON.stringify({ query, ...(schema !== undefined && { schema }) }),
       })
       const json = (await res.json()) as SqlResult & { error?: string; message?: string }
       if (!res.ok) throw new Error(json.message ?? json.error ?? "SQL execution failed")
-      return { rows: json.rows, rowCount: json.rowCount, ...(json.schema !== undefined && { schema: json.schema }) }
+      const rowsRaw = json.rows
+      const rows = Array.isArray(rowsRaw) ? rowsRaw : []
+      return {
+        rows,
+        rowCount: json.rowCount ?? rows.length,
+        ...(json.schema !== undefined && { schema: json.schema }),
+      }
     },
-    [client.url],
+    [client.url, client.serviceRoleKey],
   )
 
   // The introspection SQL uses current_schema() — the server resolves the
@@ -103,7 +116,7 @@ export function useProjectProxy(): ProjectProxy {
         FROM pg_indexes WHERE schemaname = '${s}'
       ),
       row_counts AS (
-        SELECT relname AS table_name, reltuples::bigint AS row_count
+        SELECT relname AS table_name, GREATEST(reltuples::bigint, 0) AS row_count
         FROM pg_class
         JOIN pg_namespace ON pg_namespace.oid = pg_class.relnamespace
         WHERE pg_namespace.nspname = '${s}' AND relkind = 'r'

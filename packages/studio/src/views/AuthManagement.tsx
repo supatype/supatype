@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from "react"
 import { useStudioClient } from "../StudioCore.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
+import { useProjectProxy } from "../hooks/useProjectProxy.js"
 import { Badge, Button, Card, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
@@ -42,11 +43,11 @@ interface AuthSession {
   user_id: string
   ip: string
   user_agent: string
-  last_active: string
   created_at: string
+  updated_at: string
 }
 
-const availableRoles = ["authenticated", "admin", "moderator", "editor"]
+const availableRoles = ["authenticated"]
 const providerFilters = ["all", "email", "github", "google", "apple"]
 const statusFilters = ["all", "active", "disabled", "unconfirmed"]
 
@@ -62,7 +63,7 @@ function UserForm({
   onCancel: () => void
 }): React.ReactElement {
   const [email, setEmail] = useState(user?.email ?? "")
-  const [role, setRole] = useState(user?.role ?? "authenticated")
+  const role = user?.role ?? "authenticated"
   const [password, setPassword] = useState("")
   const [metadataJson, setMetadataJson] = useState(JSON.stringify(user?.metadata ?? {}, null, 2))
   const [error, setError] = useState<string | null>(null)
@@ -102,9 +103,10 @@ function UserForm({
         </div>
         <div>
           <label className="block text-[0.8rem] text-muted-foreground mb-1">Role</label>
-          <Select className="w-full" value={role} onChange={(e) => setRole(e.target.value)}>
-            {availableRoles.map((r) => <option key={r} value={r}>{r}</option>)}
-          </Select>
+          <Input value={role} disabled />
+          <p className="text-[0.75rem] text-muted-foreground mt-1">
+            Project users are always provisioned as <code>authenticated</code>.
+          </p>
         </div>
         <div>
           <label className="block text-[0.8rem] text-muted-foreground mb-1">User Metadata (JSON)</label>
@@ -257,9 +259,9 @@ function UserDetail({
               <tbody>
                 {userSessions.map((s) => (
                   <tr key={s.id} className="border-b border-border">
-                    <Td className="text-xs">{s.user_agent}</Td>
-                    <Td className="font-mono text-xs">{s.ip}</Td>
-                    <Td className="text-xs text-muted-foreground">{new Date(s.last_active).toLocaleString()}</Td>
+                    <Td className="text-xs">{s.user_agent || <span className="text-zinc-600">Unknown</span>}</Td>
+                    <Td className="font-mono text-xs">{s.ip || "—"}</Td>
+                    <Td className="text-xs text-muted-foreground">{new Date(s.updated_at).toLocaleString()}</Td>
                     <Td>
                       <Button size="xs" variant="destructive" onClick={() => onRevokeSession(s.id)}>
                         Revoke
@@ -271,7 +273,7 @@ function UserDetail({
             </table>
           </Card>
         ) : (
-          <p className="text-xs text-zinc-600">Session management not available</p>
+          <p className="text-xs text-zinc-600">No active sessions</p>
         )}
       </div>
 
@@ -324,7 +326,7 @@ function InviteUserForm({
   onCancel: () => void
 }): React.ReactElement {
   const [email, setEmail] = useState("")
-  const [role, setRole] = useState("authenticated")
+  const role = "authenticated"
 
   return (
     <div>
@@ -338,9 +340,7 @@ function InviteUserForm({
         </div>
         <div className="w-[140px]">
           <label className="block text-[0.8rem] text-muted-foreground mb-1">Role</label>
-          <Select className="w-full" value={role} onChange={(e) => setRole(e.target.value)}>
-            {availableRoles.map((r) => <option key={r} value={r}>{r}</option>)}
-          </Select>
+          <Input value={role} disabled />
         </div>
         <Button variant="primary" onClick={() => { if (email.trim()) onInvite(email.trim(), role) }}>
           Send Invite
@@ -387,11 +387,8 @@ function mapGoTrueUser(raw: any): AuthUser {
 
 export function AuthManagement(): React.ReactElement {
   const client = useStudioClient()
+  const proxy = useProjectProxy()
 
-  // All auth admin calls go through the project proxy (client.url), which
-  // is the Next.js control-plane proxy server-side. The proxy attaches the
-  // service role key and enforces project scoping — the key never reaches
-  // the browser, and only users belonging to this project are returned.
   const authAdminFetch = useCallback(async (path: string, options?: RequestInit) => {
     const res = await fetch(`${client.url}/auth/v1/admin${path}`, {
       ...options,
@@ -415,8 +412,29 @@ export function AuthManagement(): React.ReactElement {
     [authAdminFetch],
   )
 
+  const { data: sessionsData, refetch: refetchSessions } = useApiQuery(
+    async () => {
+      const result = await proxy.sql(
+        `SELECT id, user_id, ip::text, user_agent, created_at, updated_at
+         FROM auth.sessions
+         WHERE not_after IS NULL OR not_after > now()
+         ORDER BY updated_at DESC`,
+        "auth",
+      )
+      return result.rows.map((r): AuthSession => ({
+        id: String(r["id"] ?? ""),
+        user_id: String(r["user_id"] ?? ""),
+        ip: String(r["ip"] ?? ""),
+        user_agent: String(r["user_agent"] ?? ""),
+        created_at: String(r["created_at"] ?? ""),
+        updated_at: String(r["updated_at"] ?? ""),
+      }))
+    },
+    [proxy],
+  )
+
   const users = usersData ?? []
-  const sessions: AuthSession[] = []
+  const sessions = sessionsData ?? []
 
   // Filters
   const [search, setSearch] = useState("")
@@ -503,9 +521,13 @@ export function AuthManagement(): React.ReactElement {
     setShowInviteForm(false)
   }, [authAdminFetch, refetch])
 
-  const handleRevokeSession = useCallback((_sessionId: string) => {
-    // Session management not available via GoTrue admin API
-  }, [])
+  const handleRevokeSession = useCallback(async (sessionId: string) => {
+    await proxy.sql(
+      `DELETE FROM auth.sessions WHERE id = '${sessionId.replace(/'/g, "''")}'`,
+      "auth",
+    )
+    refetchSessions()
+  }, [proxy, refetchSessions])
 
   const handleImpersonate = useCallback((_userId: string) => {
     // Impersonation placeholder — shown in detail view
@@ -673,7 +695,7 @@ export function AuthManagement(): React.ReactElement {
             onImpersonate={() => handleImpersonate(selectedUser.id)}
             onEdit={() => setEditingUser(selectedUser)}
             onDelete={() => { void handleDeleteUser(selectedUser.id) }}
-            onRevokeSession={handleRevokeSession}
+            onRevokeSession={(id) => { void handleRevokeSession(id) }}
           />
         )}
         {editingUser && (

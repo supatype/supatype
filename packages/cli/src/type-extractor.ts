@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs"
-import { resolve } from "node:path"
+import { dirname, isAbsolute, resolve } from "node:path"
 import ts from "typescript"
 
 type FieldAst = Record<string, unknown> & { kind: string }
@@ -47,45 +47,70 @@ export function extractSchemaAstFromTypes(
     throw new Error(`Schema file not found: ${absPath}`)
   }
 
-  const sourceText = readFileSync(absPath, "utf8")
-  const sourceFile = ts.createSourceFile(absPath, sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
-  const { aliases: bucketAliases, bucketsById } = collectBucketContext(sourceFile)
-  const blockAliases = collectBlockAliases(sourceFile, bucketAliases, bucketsById)
+  const sourceFiles = loadSchemaSourceFiles(absPath)
+  const bucketAliases = new Map<string, string>()
+  const bucketsById = new Map<string, ExtractedStorageBucketAst>()
+  for (const sourceFile of sourceFiles) {
+    const bucketContext = collectBucketContext(sourceFile)
+    for (const [alias, bucketId] of bucketContext.aliases) {
+      bucketAliases.set(alias, bucketId)
+    }
+    for (const [bucketId, bucket] of bucketContext.bucketsById) {
+      const existing = bucketsById.get(bucketId)
+      if (existing !== undefined && !bucketsEqual(existing, bucket)) {
+        throw new Error(
+          `Conflicting Bucket<> declarations for id "${bucketId}". Use a single export per bucket id.`,
+        )
+      }
+      bucketsById.set(bucketId, bucket)
+    }
+  }
+
+  const blockAliases = new Map<string, BlockDefinitionAst>()
+  for (const sourceFile of sourceFiles) {
+    const next = collectBlockAliases(sourceFile, bucketAliases, bucketsById)
+    for (const [name, block] of next) {
+      blockAliases.set(name, block)
+    }
+  }
+
   const models: ModelAst[] = []
 
-  for (const stmt of sourceFile.statements) {
-    if (!ts.isTypeAliasDeclaration(stmt)) continue
-    if (!hasExportModifier(stmt)) continue
-    if (!ts.isTypeReferenceNode(stmt.type)) continue
-    if (stmt.type.typeName.getText(sourceFile) !== "Model") continue
-    const [fieldsArg, metaArg] = stmt.type.typeArguments ?? []
-    if (!fieldsArg) continue
-    const fieldsLiteral = unwrapModelFields(fieldsArg)
-    if (!fieldsLiteral) continue
+  for (const sourceFile of sourceFiles) {
+    for (const stmt of sourceFile.statements) {
+      if (!ts.isTypeAliasDeclaration(stmt)) continue
+      if (!hasExportModifier(stmt)) continue
+      if (!ts.isTypeReferenceNode(stmt.type)) continue
+      if (stmt.type.typeName.getText(sourceFile) !== "Model") continue
+      const [fieldsArg, metaArg] = stmt.type.typeArguments ?? []
+      if (!fieldsArg) continue
+      const fieldsLiteral = unwrapModelFields(fieldsArg)
+      if (!fieldsLiteral) continue
 
-    const fields: Record<string, FieldAst> = {}
-    for (const member of fieldsLiteral.members) {
-      if (!ts.isPropertySignature(member) || !member.type) continue
-      const name = getPropertyName(member.name)
-      if (!name) continue
-      fields[name] = parseFieldType(
-        name,
-        member.type,
-        sourceFile,
-        blockAliases,
-        bucketAliases,
-        bucketsById,
-      )
+      const fields: Record<string, FieldAst> = {}
+      for (const member of fieldsLiteral.members) {
+        if (!ts.isPropertySignature(member) || !member.type) continue
+        const name = getPropertyName(member.name)
+        if (!name) continue
+        fields[name] = parseFieldType(
+          name,
+          member.type,
+          sourceFile,
+          blockAliases,
+          bucketAliases,
+          bucketsById,
+        )
+      }
+
+      models.push({
+        name: stmt.name.text,
+        tableName: toSnakeCase(stmt.name.text),
+        fields,
+        access: parseModelAccess(metaArg, sourceFile),
+        indexes: [],
+        options: {},
+      })
     }
-
-    models.push({
-      name: stmt.name.text,
-      tableName: toSnakeCase(stmt.name.text),
-      fields,
-      access: parseModelAccess(metaArg, sourceFile),
-      indexes: [],
-      options: {},
-    })
   }
 
   if (models.length === 0) return null
@@ -97,6 +122,60 @@ export function extractSchemaAstFromTypes(
     models,
     ...(storageBuckets !== undefined && storageBuckets.length > 0 && { storageBuckets }),
   }
+}
+
+function loadSchemaSourceFiles(entryPath: string): ts.SourceFile[] {
+  const visited = new Set<string>()
+  const sourceFiles: ts.SourceFile[] = []
+  const queue: string[] = [entryPath]
+
+  while (queue.length > 0) {
+    const currentPath = queue.shift()
+    if (!currentPath) continue
+    if (visited.has(currentPath)) continue
+    visited.add(currentPath)
+
+    if (!existsSync(currentPath)) continue
+    const sourceText = readFileSync(currentPath, "utf8")
+    const sourceFile = ts.createSourceFile(currentPath, sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+    sourceFiles.push(sourceFile)
+
+    const baseDir = dirname(currentPath)
+    for (const stmt of sourceFile.statements) {
+      if (!ts.isExportDeclaration(stmt)) continue
+      if (!stmt.moduleSpecifier || !ts.isStringLiteral(stmt.moduleSpecifier)) continue
+      const nextPath = resolveTypeModulePath(baseDir, stmt.moduleSpecifier.text)
+      if (!nextPath) continue
+      if (!visited.has(nextPath)) queue.push(nextPath)
+    }
+  }
+
+  return sourceFiles
+}
+
+function resolveTypeModulePath(fromDir: string, specifier: string): string | null {
+  const basePath = isAbsolute(specifier) ? specifier : resolve(fromDir, specifier)
+  const candidates = specifier.endsWith(".js")
+    ? [
+        basePath,
+        basePath.replace(/\.js$/i, ".ts"),
+        basePath.replace(/\.js$/i, ".tsx"),
+        basePath.replace(/\.js$/i, ".d.ts"),
+      ]
+    : [
+        basePath,
+        `${basePath}.ts`,
+        `${basePath}.tsx`,
+        `${basePath}.d.ts`,
+        resolve(basePath, "index.ts"),
+        resolve(basePath, "index.tsx"),
+        resolve(basePath, "index.d.ts"),
+      ]
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate
+  }
+  return null
 }
 
 function hasExportModifier(node: ts.Node): boolean {
@@ -144,6 +223,11 @@ function parseFieldType(
     autoIncrement: false,
     relationCardinality: undefined as "one" | "many" | undefined,
     relationTarget: undefined as string | undefined,
+    editorReadOnly: false,
+    /** When set from `ComputedFrom`, Studio previews from these sources until edited on create */
+    computedFromSources: undefined as string[] | undefined,
+    /** When set, second arg was a template literal with `{field}` / `{truncate(f, n)}` */
+    computedFromTemplate: undefined as string | undefined,
   }
 
   let current = typeNode
@@ -184,6 +268,28 @@ function parseFieldType(
       case "Searchable":
         current = current.typeArguments?.[0] ?? current
         continue
+      case "EditorReadOnly":
+        flags.editorReadOnly = true
+        current = current.typeArguments?.[0] ?? current
+        continue
+      case "Computed":
+        flags.editorReadOnly = true
+        flags.serverGenerated = true
+        current = current.typeArguments?.[0] ?? current
+        continue
+      case "ComputedFrom": {
+        const valueArg = current.typeArguments?.[0]
+        const sourcesArg = current.typeArguments?.[1]
+        const parsed = parseComputedFromSecondArg(sourcesArg, sourceFile)
+        if (parsed) {
+          flags.computedFromSources = parsed.sources
+          flags.computedFromTemplate = parsed.template
+        } else {
+          flags.computedFromSources = ["title"]
+        }
+        current = valueArg ?? current
+        continue
+      }
       case "MaxLength":
       case "MinLength":
       case "Between":
@@ -191,23 +297,35 @@ function parseFieldType(
         continue
       case "RelatedTo":
         flags.relationCardinality = "one"
-        flags.relationTarget = current.typeArguments?.[0]?.getText(sourceFile).replace(/\W/g, "") ?? "unknown"
+        flags.relationTarget = relationTargetFromTypeArg(current.typeArguments?.[0], sourceFile)
         // `target` must match `ModelAst.name` to satisfy validator resolution.
+        // FK column follows the field name (two relations to the same model need distinct columns).
         return {
           kind: "relation",
           cardinality: "belongsTo",
           target: flags.relationTarget,
-          foreignKey: `${toSnakeCase(flags.relationTarget)}_id`,
+          foreignKey: relationForeignKeyFromField(fieldName),
+          ...(flags.editorReadOnly && { readOnly: true }),
         }
       case "HasOne":
         flags.relationCardinality = "one"
         flags.relationTarget = current.typeArguments?.[0]?.getText(sourceFile).replace(/\W/g, "") ?? "unknown"
-        return { kind: "relation", cardinality: "hasOne", target: flags.relationTarget }
+        return {
+          kind: "relation",
+          cardinality: "hasOne",
+          target: flags.relationTarget,
+          ...(flags.editorReadOnly && { readOnly: true }),
+        }
       case "HasMany":
       case "ManyToMany":
         flags.relationCardinality = "many"
         flags.relationTarget = current.typeArguments?.[0]?.getText(sourceFile).replace(/\W/g, "") ?? "unknown"
-        return { kind: "relation", cardinality: "hasMany", target: flags.relationTarget }
+        return {
+          kind: "relation",
+          cardinality: "hasMany",
+          target: flags.relationTarget,
+          ...(flags.editorReadOnly && { readOnly: true }),
+        }
       default:
         break
     }
@@ -221,6 +339,7 @@ function parseFieldType(
     unique: flags.unique,
     index: flags.index,
     ...(flags.primaryKey && { primaryKey: true }),
+    ...(flags.editorReadOnly && { readOnly: true }),
   }
 
   if (flags.autoIncrement && parsed.kind === "integer") {
@@ -251,7 +370,7 @@ function parseFieldType(
     parsed.serverGenerated = true
   }
 
-  // Convention: standard audit columns are filled by the DB on insert.
+  // Convention: standard audit columns are filled by the DB on insert/update.
   const auditTs =
     fieldName === "created_at" ||
     fieldName === "updated_at" ||
@@ -259,6 +378,31 @@ function parseFieldType(
     fieldName === "updatedAt"
   if (auditTs) {
     parsed.serverGenerated = true
+    if (
+      (parsed.kind === "datetime" || parsed.kind === "date") &&
+      parsed.default === undefined
+    ) {
+      parsed.default = { kind: "now" }
+    }
+  }
+
+  // `ServerDefault<Date>` etc. → DEFAULT NOW() for column types Postgres handles with NOW().
+  if (
+    flags.serverGenerated &&
+    (parsed.kind === "datetime" || parsed.kind === "date") &&
+    parsed.default === undefined
+  ) {
+    parsed.default = { kind: "now" }
+  }
+
+  const hasCfTemplate = flags.computedFromTemplate !== undefined
+  const hasCfSources = Boolean(flags.computedFromSources && flags.computedFromSources.length > 0)
+  if (parsed.kind === "text" && (hasCfTemplate || hasCfSources)) {
+    return {
+      ...parsed,
+      ...(hasCfSources && { sources: flags.computedFromSources! }),
+      ...(hasCfTemplate && { template: flags.computedFromTemplate }),
+    }
   }
 
   return parsed
@@ -299,6 +443,7 @@ function parseScalarType(
     const ref = typeNode.typeName.getText(sourceFile)
     switch (ref) {
       case "UUID":
+      case "SupatypeAuthUserId":
         return { kind: "uuid", pgType: "UUID" }
       case "RichText":
         return { kind: "richText", pgType: "JSONB" }
@@ -336,6 +481,7 @@ function parseScalarType(
         return { kind: "decimal", pgType: "TEXT" }
       case "DateOnly":
         return { kind: "date", pgType: "DATE" }
+      case "Date":
       case "DateTime":
       case "Timestamp":
         return { kind: "datetime", pgType: "TIMESTAMP WITH TIME ZONE" }
@@ -707,6 +853,74 @@ function literalStringType(typeNode: ts.TypeNode | undefined): string | null {
   return null
 }
 
+/** Field names referenced in `{name}` and `{truncate(name, n)}` (case-sensitive, same as model fields). */
+function fieldNamesInComputedTemplate(template: string): string[] {
+  const fields = new Set<string>()
+  const reTrunc = /\{truncate\s*\(\s*([a-zA-Z_]\w*)\s*,\s*(\d+)\s*\)\}/gi
+  let m: RegExpExecArray | null
+  while ((m = reTrunc.exec(template)) !== null) {
+    const ref = m[1]
+    if (ref) fields.add(ref)
+  }
+  const reSimple = /\{([a-zA-Z_]\w*)\}/g
+  while ((m = reSimple.exec(template)) !== null) {
+    const ref = m[1]
+    if (ref) fields.add(ref)
+  }
+  return [...fields]
+}
+
+function looksLikeComputedTemplateLiteral(lit: string): boolean {
+  return /\{truncate\s*\(/i.test(lit) || /\{[a-zA-Z_]\w*\}/g.test(lit)
+}
+
+/** Resolves second type arg of `ComputedFrom<Value, Sources>` — tuple concat, single field, or template literal. */
+function parseComputedFromSecondArg(
+  sourcesArg: ts.TypeNode | undefined,
+  sourceFile: ts.SourceFile,
+): { sources: string[]; template?: string } | null {
+  if (!sourcesArg) return null
+  const single = literalStringType(sourcesArg)
+  if (single) {
+    if (looksLikeComputedTemplateLiteral(single)) {
+      return { sources: fieldNamesInComputedTemplate(single), template: single }
+    }
+    return { sources: [single] }
+  }
+
+  const elemsFromTupleType = (tuple: ts.TupleTypeNode): ts.TypeNode[] | null => {
+    const nodes: ts.TypeNode[] = []
+    for (const el of tuple.elements) {
+      if (ts.isNamedTupleMember(el)) {
+        if (!el.type) return null
+        nodes.push(el.type)
+        continue
+      }
+      nodes.push(el as ts.TypeNode)
+    }
+    return nodes
+  }
+
+  const tupleElems = (): ts.TypeNode[] | null => {
+    if (ts.isTupleTypeNode(sourcesArg)) return elemsFromTupleType(sourcesArg)
+    if (ts.isTypeOperatorNode(sourcesArg) && sourcesArg.operator === ts.SyntaxKind.ReadonlyKeyword) {
+      const inner = sourcesArg.type
+      if (inner && ts.isTupleTypeNode(inner)) return elemsFromTupleType(inner)
+    }
+    return null
+  }
+
+  const elems = tupleElems()
+  if (!elems || elems.length === 0) return null
+  const keys: string[] = []
+  for (const node of elems) {
+    const k = literalStringType(node)
+    if (!k) return null
+    keys.push(k)
+  }
+  return { sources: keys }
+}
+
 function resolveBucketName(
   typeArg: ts.TypeNode | undefined,
   sourceFile: ts.SourceFile,
@@ -747,17 +961,32 @@ function parseAccessRule(typeNode: ts.TypeNode, sourceFile: ts.SourceFile): Reco
   const ref = typeNode.typeName.getText(sourceFile)
   switch (ref) {
     case "Public":
+    case "BucketPublic":
       return { type: "public" }
     case "LoggedIn":
+    case "BucketLoggedIn":
       return { type: "authenticated" }
     case "Private":
+    case "BucketPrivate":
       return { type: "private" }
+    case "BucketOwner":
+      return { type: "owner", field: "owner_id" }
     case "Owner": {
-      const keyArg = typeNode.typeArguments?.[0]
+      const args = typeNode.typeArguments ?? []
+      const keyArg = args.length >= 2 ? args[1] : args[0]
       // Must match engine `AccessRule::Owner { field }` (see supatype-schema-engine parser/ast.rs).
       return { type: "owner", field: keyArg?.getText(sourceFile).replace(/['"]/g, "") ?? "user_id" }
     }
+    case "OwnerFrom": {
+      const relationArg = typeNode.typeArguments?.[0]
+      const relationField = relationArg?.getText(sourceFile).replace(/['"]/g, "") ?? "owner"
+      return { type: "owner", field: relationForeignKeyFromField(relationField) }
+    }
     case "Role": {
+      const roleArg = typeNode.typeArguments?.[0]
+      return { type: "role", roles: [roleArg?.getText(sourceFile).replace(/['"]/g, "") ?? "admin"] }
+    }
+    case "BucketRole": {
       const roleArg = typeNode.typeArguments?.[0]
       return { type: "role", roles: [roleArg?.getText(sourceFile).replace(/['"]/g, "") ?? "admin"] }
     }
@@ -766,6 +995,22 @@ function parseAccessRule(typeNode: ts.TypeNode, sourceFile: ts.SourceFile): Reco
   }
 }
 
+function relationTargetFromTypeArg(typeArg: ts.TypeNode | undefined, sourceFile: ts.SourceFile): string {
+  if (!typeArg) return "unknown"
+  const raw = typeArg.getText(sourceFile).replace(/\s/g, "")
+  if (raw === "SupatypeAuthUser") return "supatype:user"
+  return raw.replace(/\W/g, "")
+}
+
 function toSnakeCase(s: string): string {
   return s.replace(/([A-Z])/g, "_$1").replace(/^_/, "").toLowerCase()
+}
+
+function relationForeignKeyFromField(fieldName: string): string {
+  const snake = fieldName
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2")
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .toLowerCase()
+  const base = snake.replace(/_id$/i, "")
+  return `${base}_id`
 }

@@ -1,6 +1,6 @@
 import type { Command } from "commander"
 import { loadConfig, loadSchemaAst } from "../config.js"
-import { connectionString, schemaPathFromToml } from "../config-toml.js"
+import { connectionString, schemaPathFromProject } from "../project-config.js"
 import { ensureEngine, engineRequest, type DiffResult } from "../engine-client.js"
 
 export function registerDiff(program: Command): void {
@@ -16,7 +16,7 @@ export function registerDiff(program: Command): void {
       await ensureEngine()
 
       console.log("Loading schema...")
-      const ast = loadSchemaAst(schemaPathFromToml(config, cwd), cwd)
+      const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
 
       const diff = await engineRequest<DiffResult>("/diff", {
         ast,

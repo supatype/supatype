@@ -1,3 +1,5 @@
+"use client"
+
 import { useState, useCallback } from "react"
 import type { AnyDatabase, SupatypeError } from "@supatype/client"
 import { useSupatype } from "./context.js"

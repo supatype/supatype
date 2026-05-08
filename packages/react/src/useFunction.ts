@@ -1,3 +1,5 @@
+"use client"
+
 import { useState, useCallback } from "react"
 import type { AnyDatabase, SupatypeError } from "@supatype/client"
 import { useSupatype } from "./context.js"
@@ -52,15 +54,15 @@ export function useFunction<
       setLoading(true)
       setError(null)
 
-      const result = await client.functions.invoke<TResponse>(functionName, {
+      const result = await client.functions.invoke(functionName, {
         ...options,
         ...(body !== undefined ? { body } : {}),
       })
 
       setLoading(false)
-      setData(result.data)
+      setData(result.data as TResponse | null)
       if (result.error !== null) setError(result.error)
-      return result
+      return result as { data: TResponse | null; error: SupatypeError | null }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [client, functionName],

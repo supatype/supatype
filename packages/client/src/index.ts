@@ -5,7 +5,15 @@ import { RealtimeClient } from "./realtime.js"
 import { PostgrestError } from "./errors.js"
 import { createRetryFetch } from "./retry.js"
 import { warnIfServerlessDirectConnection } from "./fetch-with-retry.js"
-import type { AnyDatabase, FunctionDef, RpcResult, SupatypeClientConfig, SupatypeError } from "./types.js"
+import type {
+  AnyDatabase,
+  AugmentedDatabase,
+  FunctionDef,
+  RpcResult,
+  SupatypeFunctions,
+  SupatypeClientConfig,
+  SupatypeError,
+} from "./types.js"
 
 export type {
   User,
@@ -18,6 +26,11 @@ export type {
   SupatypeClientConfig,
   FunctionDef,
   TableDef,
+  TableInsert,
+  SupatypeModels,
+  SupatypeBuckets,
+  SupatypeFunctions,
+  AugmentedDatabase,
 } from "./types.js"
 export { AuthClient } from "./auth.js"
 export { QueryBuilder, MutationBuilder } from "./query.js"
@@ -119,6 +132,21 @@ export interface GlobalClient<TRow extends Record<string, unknown> = Record<stri
   update(data: Partial<TRow>): Promise<{ data: TRow | null; error: SupatypeError | null }>
 }
 
+function jwtRole(token: string): string | null {
+  const parts = token.split(".")
+  if (parts.length !== 3) return null
+  try {
+    const payloadJson =
+      typeof atob === "function"
+        ? atob(parts[1] ?? "")
+        : Buffer.from(parts[1] ?? "", "base64").toString("utf-8")
+    const payload = JSON.parse(payloadJson) as Record<string, unknown>
+    return typeof payload["role"] === "string" ? payload["role"] : null
+  } catch {
+    return null
+  }
+}
+
 /**
  * Helper type: extract function names from a database type.
  * Falls back to `string` when Functions is not defined.
@@ -156,6 +184,29 @@ type FunctionReturns<TDatabase extends AnyDatabase, TFn extends string> =
       : unknown
     : unknown
 
+type EdgeFunctionNames =
+  [keyof SupatypeFunctions] extends [never]
+    ? string
+    : keyof SupatypeFunctions & string
+
+type EdgeFunctionArgs<TFn extends string> =
+  [keyof SupatypeFunctions] extends [never]
+    ? unknown
+    : TFn extends keyof SupatypeFunctions
+      ? SupatypeFunctions[TFn] extends FunctionDef
+        ? SupatypeFunctions[TFn]["Args"]
+        : unknown
+      : unknown
+
+type EdgeFunctionReturns<TFn extends string> =
+  [keyof SupatypeFunctions] extends [never]
+    ? unknown
+    : TFn extends keyof SupatypeFunctions
+      ? SupatypeFunctions[TFn] extends FunctionDef
+        ? SupatypeFunctions[TFn]["Returns"]
+        : unknown
+      : unknown
+
 // ─── Functions client ─────────────────────────────────────────────────────────
 
 export interface FunctionInvokeOptions {
@@ -189,10 +240,10 @@ class FunctionsClient {
    *
    * The current user's JWT is automatically included in the Authorization header.
    */
-  async invoke<TResponse = unknown>(
-    functionName: string,
-    options?: FunctionInvokeOptions | undefined,
-  ): Promise<{ data: TResponse | null; error: SupatypeError | null }> {
+  async invoke<TFn extends EdgeFunctionNames>(
+    functionName: TFn,
+    options?: (Omit<FunctionInvokeOptions, "body"> & { body?: EdgeFunctionArgs<TFn> | undefined }) | undefined,
+  ): Promise<{ data: EdgeFunctionReturns<TFn> | null; error: SupatypeError | null }> {
     const method = options?.method ?? "POST"
     const mergedHeaders: Record<string, string> = {
       ...this.headers,
@@ -228,13 +279,13 @@ class FunctionsClient {
 
       const contentType = res.headers.get("content-type") ?? ""
       if (contentType.includes("application/json")) {
-        const data = await res.json() as TResponse
+        const data = await res.json() as EdgeFunctionReturns<TFn>
         return { data, error: null }
       }
 
       // Return text for non-JSON responses
       const text = await res.text()
-      return { data: text as unknown as TResponse, error: null }
+      return { data: text as unknown as EdgeFunctionReturns<TFn>, error: null }
     } catch (e) {
       return {
         data: null,
@@ -244,7 +295,7 @@ class FunctionsClient {
   }
 }
 
-export interface SupatypeClient<TDatabase extends AnyDatabase = AnyDatabase> {
+export interface SupatypeClient<TDatabase extends AnyDatabase = AugmentedDatabase> {
   url: string
   /** Service role key, if provided at construction time. Used by developer tools for admin API calls. */
   serviceRoleKey: string | undefined
@@ -280,7 +331,7 @@ export interface SupatypeClient<TDatabase extends AnyDatabase = AnyDatabase> {
   ): Promise<RpcResult<FunctionReturns<TDatabase, TFn>>>
 }
 
-export function createClient<TDatabase extends AnyDatabase = AnyDatabase>(
+export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
   config: SupatypeClientConfig,
 ): SupatypeClient<TDatabase> {
   // Warn early if a direct Postgres URL is used in a serverless environment
@@ -298,7 +349,12 @@ export function createClient<TDatabase extends AnyDatabase = AnyDatabase>(
     timeout: config.timeout,
   })
 
-  const auth = new AuthClient(`${config.url}/auth/v1`, baseHeaders, config.initialSession)
+  const auth = new AuthClient(`${config.url}/auth/v1`, baseHeaders, {
+    initialSession: config.initialSession,
+    persistSession: config.auth?.persistSession,
+    storageKey: config.auth?.storageKey,
+    cookiePrefix: config.auth?.cookiePrefix,
+  })
   const storage = new StorageClient(`${config.url}/storage/v1`, baseHeaders)
   const realtime = new RealtimeClient(`${config.url}/realtime/v1`, baseHeaders)
   const functions = new FunctionsClient(config.url, baseHeaders, doFetch)
@@ -306,7 +362,12 @@ export function createClient<TDatabase extends AnyDatabase = AnyDatabase>(
   const getAuthHeaders = (): Record<string, string> => {
     const token = auth.currentAccessToken
     if (token !== null) {
-      return { ...baseHeaders, Authorization: `Bearer ${token}` }
+      const role = jwtRole(token)
+      // Guardrail: malformed sessions can carry a JWT with empty role, which
+      // PostgREST rejects ("role \"\" does not exist"). Fall back to anon.
+      if (role !== null && role.trim().length > 0) {
+        return { ...baseHeaders, Authorization: `Bearer ${token}` }
+      }
     }
     return baseHeaders
   }

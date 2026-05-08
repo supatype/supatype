@@ -1,4 +1,5 @@
 import React, { useState } from "react"
+import { useParams } from "react-router-dom"
 import { useProjectProxy } from "../../hooks/useProjectProxy.js"
 import { useApiQuery } from "../../hooks/useApiQuery.js"
 import { Badge, Button, Card } from "../../components/ui.js"
@@ -23,7 +24,9 @@ const RLS_STATUS_QUERY = `
 
 export function StoragePoliciesView(): React.ReactElement {
   const proxy = useProjectProxy()
+  const params = useParams<{ bucket?: string }>()
   const [sqlModal, setSqlModal] = useState(false)
+  const [manualPolicyWarningOpen, setManualPolicyWarningOpen] = useState(false)
   const [sqlText, setSqlText] = useState("")
   const [runError, setRunError] = useState<string | null>(null)
   const [runBusy, setRunBusy] = useState(false)
@@ -40,7 +43,15 @@ export function StoragePoliciesView(): React.ReactElement {
   const rlsMap = new Map((rlsStatus ?? []).map((r) => [r["tablename"] as string, r["rls_enabled"] as boolean]))
 
   const grouped = new Map<string, typeof policies>()
-  for (const p of policies ?? []) {
+  const selectedBucket = params.bucket ? decodeURIComponent(params.bucket) : null
+  const bucketNeedle = selectedBucket ? `'${selectedBucket.replace(/'/g, "''")}'` : null
+  const filteredPolicies = (policies ?? []).filter((p) => {
+    if (!bucketNeedle) return true
+    const qual = (p["qual"] as string | null) ?? ""
+    const withCheck = (p["with_check"] as string | null) ?? ""
+    return qual.includes(bucketNeedle) || withCheck.includes(bucketNeedle)
+  })
+  for (const p of filteredPolicies) {
     const t = p["tablename"] as string
     if (!grouped.has(t)) grouped.set(t, [])
     grouped.get(t)!.push(p)
@@ -74,8 +85,7 @@ export function StoragePoliciesView(): React.ReactElement {
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold text-foreground">Storage Policies</h1>
         <Button variant="primary" onClick={() => {
-          setSqlText(`CREATE POLICY allow_public_read ON storage.objects\n  FOR SELECT\n  USING (bucket_id = 'public');`)
-          setSqlModal(true)
+          setManualPolicyWarningOpen(true)
         }}>
           Create policy
         </Button>
@@ -85,8 +95,15 @@ export function StoragePoliciesView(): React.ReactElement {
 
       {loading ? (
         <div className="space-y-2">{[1, 2].map((i) => <div key={i} className="h-10 rounded-md bg-muted animate-pulse" />)}</div>
-      ) : policies?.length === 0 ? (
-        <EmptyState title="No storage policies" description="No RLS policies found on storage tables." />
+      ) : filteredPolicies.length === 0 ? (
+        <EmptyState
+          title="No storage policies"
+          description={
+            selectedBucket
+              ? `No RLS policies matched bucket '${selectedBucket}'.`
+              : "No RLS policies found on storage tables."
+          }
+        />
       ) : (
         <div className="space-y-4">
           {Array.from(grouped.entries()).map(([tableName, tablePolicies]) => {
@@ -108,20 +125,32 @@ export function StoragePoliciesView(): React.ReactElement {
                       <th className="text-left px-4 py-2 text-xs font-medium text-muted-foreground">Policy</th>
                       <th className="text-left px-4 py-2 text-xs font-medium text-muted-foreground">Command</th>
                       <th className="text-left px-4 py-2 text-xs font-medium text-muted-foreground">Permissive</th>
+                      <th className="text-left px-4 py-2 text-xs font-medium text-muted-foreground">Expression</th>
                       <th className="px-4 py-2" />
                     </tr>
                   </thead>
                   <tbody>
-                    {tablePolicies?.map((p) => (
+                    {tablePolicies?.map((p) => {
+                      const qual = p["qual"] as string | null
+                      const withCheck = p["with_check"] as string | null
+                      const exprLabel = withCheck ? "WITH CHECK" : "USING"
+                      const expr = withCheck ?? qual ?? "(none)"
+                      return (
                       <tr key={p["policyname"] as string} className="border-b border-border last:border-0">
                         <td className="px-4 py-2.5 font-mono text-xs text-foreground">{p["policyname"] as string}</td>
                         <td className="px-4 py-2.5"><Badge variant="blue">{p["cmd"] as string}</Badge></td>
                         <td className="px-4 py-2.5"><Badge variant={(p["permissive"] as string) === "PERMISSIVE" ? "green" : "yellow"}>{p["permissive"] as string}</Badge></td>
+                        <td className="px-4 py-2.5">
+                          <div className="inline-flex items-center gap-2">
+                            <Badge variant="blue">{exprLabel}</Badge>
+                            <code className="text-xs text-foreground">{expr}</code>
+                          </div>
+                        </td>
                         <td className="px-4 py-2.5 text-right">
                           <button type="button" className="text-xs text-destructive hover:underline" onClick={() => { setSqlText(`DROP POLICY ${p["policyname"] as string} ON storage.${tableName};`); setSqlModal(true) }}>Drop</button>
                         </td>
                       </tr>
-                    ))}
+                    )})}
                   </tbody>
                 </table>
               </Card>
@@ -139,6 +168,35 @@ export function StoragePoliciesView(): React.ReactElement {
             <div className="flex justify-end gap-2">
               <Button onClick={() => { setSqlModal(false); setRunError(null) }}>Cancel</Button>
               <Button variant="primary" disabled={runBusy} onClick={() => { void runSql() }}>{runBusy ? "Running…" : "Run SQL"}</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {manualPolicyWarningOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-card border border-border rounded-lg p-6 w-full max-w-xl space-y-4 shadow-xl">
+            <h2 className="text-base font-semibold text-foreground">Manual policy warning</h2>
+            <p className="text-sm text-muted-foreground">
+              It is strongly recommended to define storage access policies in your schema so migrations
+              remain reproducible and reviewable.
+            </p>
+            <p className="text-sm text-muted-foreground">
+              If you create policies manually in Studio, you do so at your own risk. Manual policies may
+              interact with generated policies in unexpected ways.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button onClick={() => setManualPolicyWarningOpen(false)}>Cancel</Button>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  setManualPolicyWarningOpen(false)
+                  setSqlText(`CREATE POLICY allow_public_read ON storage.objects\n  FOR SELECT\n  USING (bucket_id = 'public');`)
+                  setSqlModal(true)
+                }}
+              >
+                I understand, continue
+              </Button>
             </div>
           </div>
         </div>

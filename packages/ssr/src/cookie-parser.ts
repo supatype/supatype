@@ -2,15 +2,27 @@ import type { Session, User } from "@supatype/client"
 
 export function parseSessionFromCookies(
   cookies: Array<{ name: string; value: string }>,
-  prefix: string = "sb",
+  prefix: string = "st",
 ): Session | null {
-  const authCookie = cookies.find(
+  const candidates = cookies.filter(
     (c) =>
       c.name === `${prefix}-auth-token` ||
       (c.name.startsWith(`${prefix}-`) && c.name.endsWith("-auth-token")),
   )
-  if (authCookie === undefined) return null
-  return parseSessionValue(authCookie.value)
+  if (candidates.length === 0) return null
+
+  // Prefer the canonical cookie name written by @supatype/client.
+  candidates.sort((a, b) => {
+    const aExact = a.name === `${prefix}-auth-token` ? 1 : 0
+    const bExact = b.name === `${prefix}-auth-token` ? 1 : 0
+    return bExact - aExact
+  })
+
+  for (const cookie of candidates) {
+    const parsed = parseSessionValue(cookie.value)
+    if (parsed !== null) return parsed
+  }
+  return null
 }
 
 function parseSessionValue(value: string): Session | null {

@@ -12,18 +12,61 @@ import type {
 
 type AuthListener = (event: AuthChangeEvent, session: Session | null) => void
 
+interface AuthStorageAdapter {
+  getItem(key: string): string | null
+  setItem(key: string, value: string): void
+  removeItem(key: string): void
+}
+
+interface AuthClientOptions {
+  initialSession?: Session | undefined
+  persistSession?: boolean | undefined
+  storageKey?: string | undefined
+  cookiePrefix?: string | undefined
+}
+
+const DEFAULT_STORAGE_KEY = "supatype.auth.session"
+const DEFAULT_COOKIE_PREFIX = "st"
+const DEBUG_AUTH = typeof process !== "undefined" && process.env["NEXT_PUBLIC_SUPATYPE_DEBUG_AUTH"] === "1"
+
 export class AuthClient {
   private readonly url: string
   private readonly baseHeaders: Record<string, string>
   private currentSession: Session | null = null
   private readonly listeners = new Map<string, AuthListener>()
   private listenerIdCounter = 0
+  private readonly persistSession: boolean
+  private readonly storageKey: string
+  private readonly cookieName: string
+  private readonly storage: AuthStorageAdapter | null
 
-  constructor(url: string, baseHeaders: Record<string, string>, initialSession?: Session | undefined) {
+  constructor(url: string, baseHeaders: Record<string, string>, opts: AuthClientOptions = {}) {
     this.url = url
     this.baseHeaders = baseHeaders
-    if (initialSession !== undefined) {
-      this.currentSession = initialSession
+    this.persistSession = opts.persistSession ?? true
+    this.storageKey = opts.storageKey ?? DEFAULT_STORAGE_KEY
+    const cookiePrefix = opts.cookiePrefix ?? DEFAULT_COOKIE_PREFIX
+    this.cookieName = `${cookiePrefix}-auth-token`
+    this.storage = this.getBrowserStorage()
+
+    if (opts.initialSession !== undefined) {
+      this.currentSession = opts.initialSession
+      if (DEBUG_AUTH) {
+        console.debug("[supatype:auth] constructor initialSession provided", {
+          hasSession: true,
+          userId: opts.initialSession.user.id,
+        })
+      }
+    } else if (this.persistSession) {
+      this.currentSession = this.loadPersistedSession()
+      if (DEBUG_AUTH) {
+        console.debug("[supatype:auth] constructor loaded persisted session", {
+          hasSession: this.currentSession !== null,
+          userId: this.currentSession?.user.id ?? null,
+          storageKey: this.storageKey,
+          cookieName: this.cookieName,
+        })
+      }
     }
   }
 
@@ -625,9 +668,208 @@ export class AuthClient {
     return this.currentSession?.accessToken ?? null
   }
 
+  private getBrowserStorage(): AuthStorageAdapter | null {
+    if (typeof window === "undefined") return null
+    try {
+      return window.localStorage
+    } catch {
+      return null
+    }
+  }
+
+  private loadPersistedSession(): Session | null {
+    const fromStorage = this.storage?.getItem(this.storageKey) ?? null
+    if (fromStorage !== null) {
+      const parsed = this.parsePersistedSession(fromStorage)
+      if (DEBUG_AUTH) {
+        console.debug("[supatype:auth] loadPersistedSession localStorage", {
+          found: true,
+          parsed: parsed !== null,
+        })
+      }
+      if (parsed !== null) return parsed
+    }
+    if (typeof document !== "undefined") {
+      const fromCookie = this.readCookie(this.cookieName)
+      if (fromCookie !== null) {
+        const parsed = this.parsePersistedSession(fromCookie)
+        if (DEBUG_AUTH) {
+          console.debug("[supatype:auth] loadPersistedSession cookie", {
+            found: true,
+            parsed: parsed !== null,
+            cookieName: this.cookieName,
+          })
+        }
+        if (parsed !== null) return parsed
+      }
+    }
+    return null
+  }
+
+  private parsePersistedSession(raw: string): Session | null {
+    try {
+      const parsed = JSON.parse(raw) as unknown
+      return this.normalizePersistedSession(parsed)
+    } catch {
+      return null
+    }
+  }
+
+  private normalizePersistedSession(raw: unknown): Session | null {
+    if (typeof raw !== "object" || raw === null) return null
+    const r = raw as Record<string, unknown>
+    const accessToken =
+      typeof r["accessToken"] === "string"
+        ? r["accessToken"]
+        : typeof r["access_token"] === "string"
+          ? r["access_token"]
+          : null
+    if (accessToken === null) return null
+    const refreshToken =
+      typeof r["refreshToken"] === "string"
+        ? r["refreshToken"]
+        : typeof r["refresh_token"] === "string"
+          ? r["refresh_token"]
+          : ""
+    const tokenType =
+      typeof r["tokenType"] === "string"
+        ? r["tokenType"]
+        : typeof r["token_type"] === "string"
+          ? r["token_type"]
+          : "bearer"
+    const expiresIn =
+      typeof r["expiresIn"] === "number"
+        ? r["expiresIn"]
+        : typeof r["expires_in"] === "number"
+          ? r["expires_in"]
+          : 3600
+    const userRaw =
+      typeof r["user"] === "object" && r["user"] !== null
+        ? (r["user"] as Record<string, unknown>)
+        : null
+    if (userRaw === null) return null
+    const normalizedUserRaw: Record<string, unknown> = {
+      ...userRaw,
+      ...(userRaw["app_metadata"] === undefined &&
+        userRaw["appMetadata"] !== undefined && { app_metadata: userRaw["appMetadata"] }),
+      ...(userRaw["user_metadata"] === undefined &&
+        userRaw["userMetadata"] !== undefined && { user_metadata: userRaw["userMetadata"] }),
+      ...(userRaw["created_at"] === undefined &&
+        userRaw["createdAt"] !== undefined && { created_at: userRaw["createdAt"] }),
+      ...(userRaw["updated_at"] === undefined &&
+        userRaw["updatedAt"] !== undefined && { updated_at: userRaw["updatedAt"] }),
+    }
+    const session: Session = {
+      accessToken,
+      refreshToken,
+      tokenType,
+      expiresIn,
+      user: this._parseUser(normalizedUserRaw),
+      ...(typeof r["expiresAt"] === "number"
+        ? { expiresAt: r["expiresAt"] }
+        : typeof r["expires_at"] === "number"
+          ? { expiresAt: r["expires_at"] }
+          : {}),
+    }
+    return session
+  }
+
+  private syncPersistedSession(session: Session | null): void {
+    if (!this.persistSession) return
+    const storage = this.storage
+    const cookieExpires = session?.expiresAt
+    if (session === null) {
+      try {
+        storage?.removeItem(this.storageKey)
+      } catch {
+        // Ignore storage write failures.
+      }
+      this.writeCookie(this.cookieName, "", -1)
+      if (DEBUG_AUTH) {
+        console.debug("[supatype:auth] cleared persisted session", {
+          storageKey: this.storageKey,
+          cookieName: this.cookieName,
+        })
+      }
+      return
+    }
+
+    const json = JSON.stringify(session)
+    const cookiePayload = JSON.stringify({
+      access_token: session.accessToken,
+      refresh_token: session.refreshToken,
+      token_type: session.tokenType,
+      expires_in: session.expiresIn,
+      ...(session.expiresAt !== undefined && { expires_at: session.expiresAt }),
+      user: this.serializeUserForCookie(session.user),
+    })
+    try {
+      storage?.setItem(this.storageKey, json)
+    } catch {
+      // Ignore storage write failures.
+    }
+    this.writeCookie(this.cookieName, cookiePayload, cookieExpires)
+    if (DEBUG_AUTH) {
+      console.debug("[supatype:auth] persisted session", {
+        userId: session.user.id,
+        storageKey: this.storageKey,
+        cookieName: this.cookieName,
+        hasExpiresAt: session.expiresAt !== undefined,
+      })
+    }
+  }
+
+  private serializeUserForCookie(user: User): Record<string, unknown> {
+    return {
+      id: user.id,
+      ...(user.email !== undefined && { email: user.email }),
+      ...(user.phone !== undefined && { phone: user.phone }),
+      ...(user.role !== undefined && { role: user.role }),
+      app_metadata: user.appMetadata,
+      user_metadata: user.userMetadata,
+      created_at: user.createdAt,
+      updated_at: user.updatedAt,
+    }
+  }
+
+  private readCookie(name: string): string | null {
+    if (typeof document === "undefined") return null
+    const all = document.cookie ? document.cookie.split("; ") : []
+    for (const item of all) {
+      const idx = item.indexOf("=")
+      if (idx <= 0) continue
+      const key = item.slice(0, idx)
+      if (key !== name) continue
+      const value = item.slice(idx + 1)
+      try {
+        return decodeURIComponent(value)
+      } catch {
+        return value
+      }
+    }
+    return null
+  }
+
+  private writeCookie(name: string, value: string, expiresAtSeconds?: number): void {
+    if (typeof document === "undefined") return
+    const secure = typeof window !== "undefined" && window.location.protocol === "https:"
+    const attrs = [
+      `Path=/`,
+      "SameSite=Lax",
+      ...(secure ? ["Secure"] : []),
+    ]
+    if (expiresAtSeconds !== undefined) {
+      attrs.push(`Expires=${new Date(expiresAtSeconds * 1000).toUTCString()}`)
+    } else if (value === "") {
+      attrs.push("Expires=Thu, 01 Jan 1970 00:00:00 GMT")
+    }
+    document.cookie = `${name}=${encodeURIComponent(value)}; ${attrs.join("; ")}`
+  }
+
   _setSession(session: Session | null): void {
     const prev = this.currentSession
     this.currentSession = session
+    this.syncPersistedSession(session)
     const event: AuthChangeEvent =
       session !== null
         ? prev !== null

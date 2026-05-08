@@ -18,7 +18,8 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@supatype/client": "workspace:*"
+    "@supatype/client": "workspace:*",
+    "@supatype/common": "workspace:*"
   },
   "peerDependencies": {
     "react": ">=18"

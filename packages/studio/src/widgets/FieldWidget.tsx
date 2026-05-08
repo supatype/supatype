@@ -14,16 +14,56 @@ import { BlocksWidget } from "./BlocksWidget.js"
 import { PublishWidget } from "./PublishWidget.js"
 import { ColorWidget } from "./ColorWidget.js"
 import { XmlWidget } from "./XmlWidget.js"
+import { SlugWidget } from "./SlugWidget.js"
+import { DerivedTextWidget } from "./DerivedTextWidget.js"
 
 export interface WidgetProps {
   config: FieldConfig
   value: unknown
   onChange: (value: unknown) => void
   readOnly: boolean
+  /** Full record for cross-field widgets (e.g. slug from title). */
+  record?: Record<string, unknown>
+  currentLocale?: string
+  defaultLocale?: string
+  /** Bumps when the loaded row changes so slug auto/manual state re-initialises. */
+  recordSyncKey?: string
+  /**
+   * When true (new record, not yet persisted), slug tracks the source field as you type.
+   * When false (loaded row), only the refresh control copies source → slug.
+   */
+  slugFollowSource?: boolean
+}
+
+/**
+ * Engine admin JSON declares `derivedText`; older bundles may still expose `sources`/`template`
+ * on `widget: "text"` — route those to DerivedTextWidget so previews track like slug.
+ */
+export function normalizeDerivedPreviewFieldConfig(config: FieldConfig): FieldConfig {
+  if (config.widget === "derivedText") return config
+  const baseOk = config.widget === "text" || config.widget === "textarea"
+  if (!baseOk) return config
+
+  const raw = config.options?.["sources"]
+  const sources = Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : []
+  const template =
+    typeof config.options?.["template"] === "string" ? config.options["template"].trim() : ""
+  if (sources.length === 0 && template.length === 0) return config
+
+  const explicitMultiline = config.options?.["multiline"] === true
+  return {
+    ...config,
+    widget: "derivedText",
+    options: {
+      ...(config.options ?? {}),
+      ...(config.widget === "textarea" || explicitMultiline ? { multiline: true } : {}),
+    },
+  }
 }
 
 export function FieldWidget(props: WidgetProps): React.ReactElement {
-  const { config } = props
+  const config = normalizeDerivedPreviewFieldConfig(props.config)
+  const next = { ...props, config }
 
   return (
     <div className={`st-field st-field--${config.widget}${config.required ? " st-field--required" : ""}`}>
@@ -33,7 +73,7 @@ export function FieldWidget(props: WidgetProps): React.ReactElement {
         {config.localized && <span className="st-field-localized" title="This field is translated"> L</span>}
       </label>
       <div className="st-field-input">
-        <WidgetRenderer {...props} />
+        <WidgetRenderer {...next} />
       </div>
     </div>
   )
@@ -44,9 +84,12 @@ function WidgetRenderer(props: WidgetProps): React.ReactElement {
     case "text":
     case "email":
     case "url":
-    case "slug":
     case "uuid":
       return <TextWidget {...props} />
+    case "slug":
+      return <SlugWidget {...props} />
+    case "derivedText":
+      return <DerivedTextWidget {...props} />
     case "textarea":
       return <TextWidget {...props} multiline />
     case "number":

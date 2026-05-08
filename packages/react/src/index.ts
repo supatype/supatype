@@ -18,3 +18,6 @@ export type { UseLivePreviewOptions, UseLivePreviewResult } from "./useLivePrevi
 
 export { useFunction } from "./useFunction.js"
 export type { UseFunctionResult } from "./useFunction.js"
+
+export { RichText } from "./RichText.js"
+export type { RichTextProps } from "./RichText.js"

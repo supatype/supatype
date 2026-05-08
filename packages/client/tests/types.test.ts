@@ -39,9 +39,23 @@ interface TestDB {
 
 const client = createClient<TestDB>({ url: "http://localhost:18473", anonKey: "test" })
 
+declare module "../src/types.js" {
+  interface SupatypeModels {
+    posts: { Row: Post; Insert: PostInsert; Update: Partial<PostInsert> }
+    comments: { Row: Comment; Insert: Omit<Comment, "id">; Update: Partial<Comment> }
+  }
+}
+
+const augmentedClient = createClient({ url: "http://localhost:18473", anonKey: "test" })
+
 // ─── from() ───────────────────────────────────────────────────────────────────
 
 describe("createClient type inference", () => {
+  it("from() infers augmented table types without call-site generics", () => {
+    const q = augmentedClient.from("posts").select()
+    expectTypeOf(q).toMatchTypeOf<QueryBuilder<Post>>()
+  })
+
   it("from() .select() returns QueryBuilder typed to the table's Row", () => {
     const q = client.from("posts").select()
     expectTypeOf(q).toMatchTypeOf<QueryBuilder<Post>>()

@@ -1,7 +1,7 @@
 import type { Command } from "commander"
 import { createInterface } from "node:readline"
-import { loadConfig } from "../config.js"
-import { connectionString } from "../config-toml.js"
+import { loadConfig, loadSchemaAst } from "../config.js"
+import { connectionString, schemaPathFromProject } from "../project-config.js"
 import { ensureEngine, engineRequest } from "../engine-client.js"
 
 export function registerMigrate(program: Command): void {
@@ -62,12 +62,15 @@ export function registerMigrate(program: Command): void {
 
       const config = loadConfig()
       const connection = opts.connection ?? connectionString(config)
+      const cwd = process.cwd()
 
       await ensureEngine()
-      const result = await engineRequest<{ message?: string }>("/migrations", {
+      const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
+      const result = await engineRequest<{ message?: string }>("/push", {
+        ast,
         database_url: connection,
         schema: "public",
-        action: "reset",
+        force: true,
       })
       console.log(result.message ?? "Reset complete.")
     })

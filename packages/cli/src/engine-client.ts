@@ -12,7 +12,7 @@ import { spawnSync } from "node:child_process"
 import { mkdirSync, writeFileSync, unlinkSync, existsSync } from "node:fs"
 import { tmpdir, homedir } from "node:os"
 import { join } from "node:path"
-import { loadTomlConfig } from "./config-toml.js"
+import { loadConfig } from "./config.js"
 import { resolveBinary, currentPlatform, cachePath } from "./binary-cache.js"
 
 // ---------------------------------------------------------------------------
@@ -76,13 +76,14 @@ let _engineBin: string | null = null
 async function getEngineBin(): Promise<string> {
   if (_engineBin) return _engineBin
 
-  // Try TOML config overrides first.
+  const cwd = process.cwd()
+
   try {
-    const config = loadTomlConfig(process.cwd())
+    const config = loadConfig(cwd)
     _engineBin = await resolveBinary("engine", config)
     return _engineBin
   } catch {
-    // Fall through to cache path.
+    // No valid project config — fall through to default cache path.
   }
 
   // Fall back to default cached version.
@@ -132,6 +133,7 @@ export async function engineHealth(): Promise<boolean> {
  *   /migrations  → engine migrations
  *   /introspect  → engine introspect
  *   /validate    → engine validate
+ *   /admin       → engine admin (admin-config JSON on stdout)
  */
 export async function engineRequest<T = unknown>(
   endpoint: string,
@@ -140,10 +142,13 @@ export async function engineRequest<T = unknown>(
   const bin = await getEngineBin()
 
   // Write request to a temp file.
+  // For CLI-mode endpoints the engine reads the input file as a raw SchemaAst,
+  // so we extract the `ast` field when present, otherwise write the full body.
   const tmpDir = join(tmpdir(), "supatype-engine")
   mkdirSync(tmpDir, { recursive: true })
   const reqFile = join(tmpDir, `req-${Date.now()}.json`)
-  writeFileSync(reqFile, JSON.stringify(body))
+  const inputPayload = body["ast"] !== undefined ? body["ast"] : body
+  writeFileSync(reqFile, JSON.stringify(inputPayload))
 
   const args = endpointToArgs(endpoint, body, reqFile)
 
@@ -192,29 +197,33 @@ function endpointToArgs(
 
   switch (endpoint) {
     case "/diff":
-      return ["diff", "--request-file", reqFile, "--database-url", dbUrl, "--schema", schema]
+      return ["diff", "--input", reqFile, "--database-url", dbUrl, "--schema", schema]
 
     case "/push":
-      return ["push", "--request-file", reqFile, "--database-url", dbUrl, "--schema", schema, ...force]
+      return ["push", "--input", reqFile, "--database-url", dbUrl, "--schema", schema, ...force]
 
     case "/parse":
-      return ["parse", "--request-file", reqFile]
+      return ["parse", "--input", reqFile]
 
-    case "/generate":
-      return ["generate", "--request-file", reqFile]
+    case "/generate": {
+      const lang = (body["lang"] as string | undefined) ?? "typescript"
+      return ["generate", "--input", reqFile, "--lang", lang]
+    }
 
     case "/introspect":
       return ["introspect", "--database-url", dbUrl, "--schema", schema]
 
     case "/validate":
-      return ["validate", "--request-file", reqFile]
+      return ["validate", "--input", reqFile]
+
+    case "/admin":
+      return ["admin", "--input", reqFile]
 
     default:
       if (endpoint.startsWith("/migrations")) {
         const action = (body["action"] as string | undefined) ?? "list"
         return ["migrations", action, "--database-url", dbUrl]
       }
-      // Generic fallback: pass endpoint as subcommand.
-      return [endpoint.replace(/^\//, ""), "--request-file", reqFile]
+      return [endpoint.replace(/^\//, ""), "--input", reqFile]
   }
 }

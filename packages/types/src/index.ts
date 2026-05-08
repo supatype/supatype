@@ -47,19 +47,28 @@ export type Code<Lang extends string = string> = Primitive<"Code", { lang: Lang;
 export type Duration = Primitive<"Duration", { ms: number }>
 export type GeoPoint = Primitive<"GeoPoint", { lat: number; lng: number }>
 export type Currency<Code extends string = string> = Primitive<"Currency", { amount: bigint; code: Code }>
-export type RichText = Primitive<"RichText", SerializedEditorState>
+/** Lexical JSON in DB/UI; **`string`** is allowed in TS for seeds and incremental Lexical adoption. */
+export type RichText = Primitive<"RichText", SerializedEditorState | string>
 
 /** Visibility / S3 coupling for a storage bucket (`storage.buckets` + optional `PutBucketPolicy`). */
 export type BucketAccessMode = "public" | "private" | "custom"
+export type BucketPublic = Access<"BucketPublic">
+export type BucketPrivate = Access<"BucketPrivate">
+export type BucketLoggedIn = Access<"BucketLoggedIn">
+export type BucketOwner = Access<"BucketOwner">
+export type BucketRole<R extends string = string> = Access<"BucketRole", {
+  readonly kind: "BucketRole"
+  readonly role: R
+}>
 
 /**
  * Storage RLS subset: same primitives as {@link ModelMeta.access} (`read`, `create`, …) but typically
  * only `read` / `create` / `delete` are used for `storage.objects` policies when set on the bucket.
  */
 export type BucketStorageAccess = {
-  read?: Public | Private | LoggedIn | Owner<string> | Role<string>
-  create?: Public | Private | LoggedIn | Owner<string> | Role<string>
-  delete?: Public | Private | LoggedIn | Owner<string> | Role<string>
+  read?: BucketPublic | BucketPrivate | BucketLoggedIn | BucketOwner | BucketRole<string>
+  create?: BucketPublic | BucketPrivate | BucketLoggedIn | BucketOwner | BucketRole<string>
+  delete?: BucketPublic | BucketPrivate | BucketLoggedIn | BucketOwner | BucketRole<string>
 }
 
 /**
@@ -112,10 +121,43 @@ export type Block<
 > = Primitive<`Block:${TName}`, { type: TName; meta?: TMeta } & TFields>
 export type Blocks<TBlock extends Block = Block> = Primitive<"Blocks", TBlock[]>
 
+/**
+ * Nullable column (`T | null` in Postgres). **`Model`** flattens this to an optional property
+ * **`key?: T | null`** on the inferred row shape so literals and seeds omit `coverImage`-style keys
+ * without casts.
+ */
 export type Optional<T> = Modifier<"Optional", T | null>
 export type Unique<T> = Modifier<"Unique", T>
 export type Indexed<T> = Modifier<"Indexed", T>
 export type Searchable<T> = Modifier<"Searchable", T>
+export type EditorReadOnly<T> = Modifier<"EditorReadOnly", T>
+/**
+ * DB / trigger maintained only: Studio treats as read-only + server-generated on insert.
+ * There is **no** live preview or “follow title until edited” UX — declare dependencies with
+ * {@link ComputedFrom} instead if you want slug-like preview in Studio.
+ */
+export type Computed<T> = Modifier<"Computed", T>
+/**
+ * Plain-text column with Studio preview built from `sources` until the author edits the field
+ * on create (same UX as {@link Slug}). Database column is ordinary TEXT; optional overrides are persisted.
+ *
+ * Use `Optional<ComputedFrom<…>>` when the field may be null.
+ *
+ * **Second type argument — three shapes:**
+ * - **One field** (concat preview): `ComputedFrom<string, "title">`
+ * - **Several fields** (join with spaces, then truncate): `ComputedFrom<string, readonly ["title", "subtitle"]>`
+ * - **Template string** (placeholders + optional `truncate`): a string literal containing `{fieldName}` and/or
+ *   `{truncate(fieldName, maxChars)}`. Dependencies are inferred for validation and Studio.
+ *
+ * Template examples (single string literal type; use real `\n` in the string when you want a newline):
+ * - `ComputedFrom<string, "Author: {authorProfile} | {created_at}">`
+ * - `ComputedFrom<string, "{truncate(body, 100)}">`
+ * - `ComputedFrom<string, "Author: {authorProfile} | Date: {created_at}\n{truncate(body, 100)}">`
+ */
+export type ComputedFrom<
+  TValue,
+  TSources extends string | readonly string[] = "title",
+> = Modifier<"ComputedFrom", TValue>
 export type PrimaryKey<T> = Modifier<"PrimaryKey", T>
 export type AutoIncrement<T extends number | bigint> = Modifier<"AutoIncrement", T>
 /**
@@ -127,6 +169,15 @@ export type Default<T, V> = Modifier<`Default:${Extract<V, string | number | boo
 export type MaxLength<T, N extends number> = Modifier<`MaxLength:${N}`, T>
 export type MinLength<T, N extends number> = Modifier<`MinLength:${N}`, T>
 export type Between<T, Min extends number, Max extends number> = Modifier<`Between:${Min}:${Max}`, T>
+/**
+ * Built-in audit pair: expands to columns with DB `DEFAULT NOW()` and Studio prefill on create.
+ *
+ * Equivalent manual fields: naming columns `created_at` / `updated_at` plus `Timestamp` / `ServerDefault<DateTime>`
+ * wires the same defaults in the extractor; you don’t need this mixin unless you prefer the shorthand.
+ *
+ * Arbitrary timestamps use `ServerDefault<DateTime>` (or `@default`/`Expression` via engine fixtures) —
+ * those are configurable; only the **names** above get the convention treatment without extra wrappers.
+ */
 export type Timestamps = {
   created_at: ServerDefault<Date>
   updated_at: ServerDefault<Date>
@@ -149,37 +200,171 @@ export type RelationOptions = {
 }
 export type RelatedTo<T, TOptions extends RelationOptions = {}> = Relation<"RelatedTo", T> & {
   readonly __relationOptions?: TOptions
+  readonly __relationKind: "relatedTo"
 }
 export type HasMany<T, TOptions extends RelationOptions = {}> = Relation<"HasMany", T[]> & {
   readonly __relationOptions?: TOptions
+  readonly __relationKind: "hasMany"
 }
 export type HasOne<T, TOptions extends RelationOptions = {}> = Relation<"HasOne", T | null> & {
   readonly __relationOptions?: TOptions
+  readonly __relationKind: "hasOne"
 }
 export type ManyToMany<T, TOptions extends RelationOptions = {}> = Relation<"ManyToMany", T[]> & {
   readonly __relationOptions?: TOptions
+  readonly __relationKind: "manyToMany"
 }
 
 export type Public = Access<"Public">
 export type Private = Access<"Private">
 export type LoggedIn = Access<"LoggedIn">
-export type Owner<K extends string> = Access<"Owner", { readonly kind: "Owner"; readonly key: K }>
-export type Role<R extends string = string> = Access<"Role", { readonly kind: "Role"; readonly role: R }>
+export type SupatypeAuthUser = Primitive<"SupatypeAuthUser", { readonly system: "supatype:user" }>
+export type SupatypeAuthUserId = Primitive<"SupatypeAuthUserId", string>
+type ModelFieldKeys<TModel> =
+  TModel extends { readonly [SUPATYPE_MODEL]?: { readonly fields: infer TFields } }
+    ? Extract<keyof TFields, string>
+    : never
+type RelationFieldKeys<TFields extends Record<string, unknown>> = Extract<{
+  [K in keyof TFields]-?: K extends string
+    ? TFields[K] extends { readonly __relationKind: "relatedTo" }
+      ? K
+      : never
+    : never
+}[keyof TFields], string>
+type RelationOwnerKeys<TFields extends Record<string, unknown>> = Extract<{
+  [K in keyof TFields]-?: K extends string
+    ? TFields[K] extends { readonly __relationKind: "relatedTo" }
+      ? `${K}_id`
+      : never
+    : never
+}[keyof TFields], string>
+type SelfOwnerKey<TFields extends Record<string, unknown>> =
+  "id" extends keyof TFields
+    ? TFields["id"] extends SupatypeAuthUserId
+      ? "id"
+      : never
+    : never
+type OwnerEligibleFieldKeys<TFields extends Record<string, unknown>> =
+  RelationOwnerKeys<TFields> | SelfOwnerKey<TFields>
+type ModelRelationFieldKeys<TModel> =
+  TModel extends { readonly [SUPATYPE_MODEL]?: { readonly fields: infer TFields } }
+    ? TFields extends Record<string, unknown>
+      ? OwnerEligibleFieldKeys<TFields>
+      : never
+    : never
+type AnySupatypeModel = {
+  readonly [SUPATYPE_MODEL]?: {
+    readonly fields: Record<string, unknown>
+    readonly meta: unknown
+  }
+}
 
-export type ModelMeta = {
+/**
+ * Ownership access rule.
+ *
+ * Backward-compatible form:
+ *   Owner<"author_id">
+ *
+ * Typed model form (preferred, autocomplete + validation):
+ *   Owner<Post, "author_id">
+ */
+export type Owner<
+  TModelOrKey extends string | AnySupatypeModel,
+  TKey extends TModelOrKey extends string ? string : ModelRelationFieldKeys<TModelOrKey> = TModelOrKey extends string
+    ? TModelOrKey
+    : never,
+> = Access<"Owner", {
+  readonly kind: "Owner"
+  readonly key: TKey
+  readonly __ownerModel?: TModelOrKey extends string ? never : TModelOrKey
+}>
+export type OwnerKey<TModel extends AnySupatypeModel> =
+  ModelRelationFieldKeys<TModel>
+export type OwnerOf<
+  TModel extends AnySupatypeModel,
+  TKey extends OwnerKey<TModel>,
+> = Owner<TModel, TKey>
+export type OwnerFrom<TRelationField extends string> = Access<"OwnerFrom", {
+  readonly kind: "OwnerFrom"
+  readonly relation: TRelationField
+}>
+export type Role<R extends string = string> = Access<"Role", { readonly kind: "Role"; readonly role: R }>
+type BoundOwnerForFields<TFields extends Record<string, unknown>> = Access<"Owner", {
+  readonly kind: "Owner"
+  readonly key: OwnerEligibleFieldKeys<TFields>
+  readonly __ownerModel?: Model<TFields, any>
+}>
+type BoundOwnerFromForFields<TFields extends Record<string, unknown>> = Access<"OwnerFrom", {
+  readonly kind: "OwnerFrom"
+  readonly relation: RelationFieldKeys<TFields>
+}>
+
+/** `Optional<…>` wraps `Modifier<"Optional", …>` (detect structurally — do not inspect `[SUPATYPE_TYPE]`; primitives under `Optional` add their own tags and tag intersections are unreliable). */
+type IsModifierOptional<V> = [V] extends [Modifier<"Optional", infer _>] ? true : false
+
+type InferOptionalInner<V> = V extends Modifier<"Optional", infer Inner> ? Inner : never
+
+/** Row shape from `TFields`: `Optional<…>` → `key?: Inner` (`Inner` includes `null`). */
+export type SpreadOptionalModelFields<TFields extends Record<string, unknown>> =
+  keyof TFields extends never
+    ? {}
+    : {
+        [K in keyof TFields as IsModifierOptional<TFields[K]> extends true ? never : K]: TFields[K]
+      } & {
+        [K in keyof TFields as IsModifierOptional<TFields[K]> extends true
+          ? K extends keyof TFields & (string | number)
+            ? K
+            : never
+          : never]?: InferOptionalInner<TFields[K]>
+      }
+
+export type ModelMeta<TFields extends Record<string, unknown>> = {
   access?: {
-    read?: Public | Private | LoggedIn | Owner<string> | Role<string>
-    create?: Public | Private | LoggedIn | Owner<string> | Role<string>
-    update?: Public | Private | LoggedIn | Owner<string> | Role<string>
-    delete?: Public | Private | LoggedIn | Owner<string> | Role<string>
+    read?:
+      | Public
+      | Private
+      | LoggedIn
+      | Owner<OwnerEligibleFieldKeys<TFields>>
+      | OwnerFrom<RelationFieldKeys<TFields>>
+      | BoundOwnerForFields<TFields>
+      | BoundOwnerFromForFields<TFields>
+      | Role<string>
+    create?:
+      | Public
+      | Private
+      | LoggedIn
+      | Owner<OwnerEligibleFieldKeys<TFields>>
+      | OwnerFrom<RelationFieldKeys<TFields>>
+      | BoundOwnerForFields<TFields>
+      | BoundOwnerFromForFields<TFields>
+      | Role<string>
+    update?:
+      | Public
+      | Private
+      | LoggedIn
+      | Owner<OwnerEligibleFieldKeys<TFields>>
+      | OwnerFrom<RelationFieldKeys<TFields>>
+      | BoundOwnerForFields<TFields>
+      | BoundOwnerFromForFields<TFields>
+      | Role<string>
+    delete?:
+      | Public
+      | Private
+      | LoggedIn
+      | Owner<OwnerEligibleFieldKeys<TFields>>
+      | OwnerFrom<RelationFieldKeys<TFields>>
+      | BoundOwnerForFields<TFields>
+      | BoundOwnerFromForFields<TFields>
+      | Role<string>
   }
   tableName?: string
   searchable?: readonly string[]
 }
 
-export type Model<TFields extends Record<string, unknown>, TMeta extends ModelMeta = {}> = TFields & {
-  readonly [SUPATYPE_MODEL]?: {
-    readonly fields: TFields
-    readonly meta: TMeta
+export type Model<TFields extends Record<string, unknown>, TMeta extends ModelMeta<TFields> = {}> =
+  SpreadOptionalModelFields<TFields> & {
+    readonly [SUPATYPE_MODEL]?: {
+      readonly fields: TFields
+      readonly meta: TMeta
+    }
   }
-}

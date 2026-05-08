@@ -8,13 +8,21 @@ import {
   writeFileSync,
   unlinkSync,
 } from "node:fs"
-import { resolve, join, basename, relative } from "node:path"
+import { resolve, join, basename, relative, isAbsolute } from "node:path"
 import { spawnSync, execSync } from "node:child_process"
 import { localKongBaseUrl } from "../local-gateway.js"
+import { loadConfig } from "../config.js"
+import {
+  functionsPathCandidatesFromProject,
+  preferredFunctionsPathFromProject,
+} from "../project-config.js"
+import {
+  discoverTsFunctionsInDir,
+  generateFunctionsRouterSource,
+} from "../functions-router-gen.js"
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const FUNCTIONS_DIR = "supatype/functions"
 const SHARED_DIR = "_shared"
 const ENV_LOCAL = ".env.local"
 const ENV_PRODUCTION = ".env.production"
@@ -37,7 +45,7 @@ export function registerFunctions(program: Command): void {
     .command("serve")
     .description("Start a local Deno server that serves all functions with hot reload")
     .option("--port <port>", "Port to serve on", "54321")
-    .option("--env-file <path>", "Path to env file", `${FUNCTIONS_DIR}/${ENV_LOCAL}`)
+    .option("--env-file <path>", "Path to env file", ENV_LOCAL)
     .action((opts: { port: string; envFile: string }) => {
       serve(process.cwd(), opts)
     })
@@ -112,7 +120,8 @@ export function registerFunctions(program: Command): void {
 // ─── Scaffold ────────────────────────────────────────────────────────────────
 
 function scaffoldFunction(cwd: string, name: string): void {
-  const fnDir = resolve(cwd, FUNCTIONS_DIR, name)
+  const functionsDir = resolveFunctionsDir(cwd, "write")
+  const fnDir = resolve(functionsDir, name)
   if (existsSync(fnDir)) {
     console.error(`Function "${name}" already exists at ${relative(cwd, fnDir)}`)
     process.exit(1)
@@ -145,7 +154,7 @@ export default async function handler(req: Request): Promise<Response> {
   writeFileSync(join(fnDir, "index.ts"), indexContent, "utf8")
 
   // Ensure _shared directory exists
-  const sharedDir = resolve(cwd, FUNCTIONS_DIR, SHARED_DIR)
+  const sharedDir = resolve(functionsDir, SHARED_DIR)
   if (!existsSync(sharedDir)) {
     mkdirSync(sharedDir, { recursive: true })
     writeFileSync(
@@ -156,7 +165,7 @@ export default async function handler(req: Request): Promise<Response> {
   }
 
   // Ensure .env.local exists
-  const envLocalPath = resolve(cwd, FUNCTIONS_DIR, ENV_LOCAL)
+  const envLocalPath = resolve(functionsDir, ENV_LOCAL)
   if (!existsSync(envLocalPath)) {
     writeFileSync(
       envLocalPath,
@@ -165,7 +174,8 @@ export default async function handler(req: Request): Promise<Response> {
     )
   }
 
-  console.log(`Created function: ${FUNCTIONS_DIR}/${name}/index.ts`)
+  const functionsDirLabel = relativeFunctionsDir(cwd, functionsDir)
+  console.log(`Created function: ${functionsDirLabel}/${name}/index.ts`)
   console.log()
   console.log("  Local dev:    npx supatype functions serve")
   console.log(`  Invoke:       npx supatype functions invoke ${name}`)
@@ -180,8 +190,36 @@ interface DiscoveredFunction {
   absPath: string
 }
 
+function resolveFunctionsDir(cwd: string, mode: "read" | "write"): string {
+  try {
+    const cfg = loadConfig(cwd)
+    if (mode === "write") {
+      return preferredFunctionsPathFromProject(cfg, cwd)
+    }
+    const candidates = functionsPathCandidatesFromProject(cfg, cwd)
+    return candidates.find(dir => existsSync(dir)) ?? candidates[0] ?? resolve(cwd, "functions")
+  } catch {
+    // Keep commands usable even if config cannot be loaded yet.
+    const modern = resolve(cwd, "functions")
+    const legacy = resolve(cwd, "supatype/functions")
+    if (mode === "write") return existsSync(legacy) ? legacy : modern
+    return existsSync(modern) ? modern : legacy
+  }
+}
+
+function relativeFunctionsDir(cwd: string, functionsDir: string): string {
+  const rel = relative(cwd, functionsDir)
+  return rel.length > 0 ? rel : "."
+}
+
+function resolveEnvFilePath(cwd: string, functionsDir: string, envFile: string): string {
+  if (isAbsolute(envFile)) return envFile
+  if (envFile.includes("/") || envFile.includes("\\")) return resolve(cwd, envFile)
+  return resolve(functionsDir, envFile)
+}
+
 function discoverFunctions(cwd: string): DiscoveredFunction[] {
-  const functionsDir = resolve(cwd, FUNCTIONS_DIR)
+  const functionsDir = resolveFunctionsDir(cwd, "read")
   if (!existsSync(functionsDir)) return []
 
   const entries = readdirSync(functionsDir)
@@ -212,25 +250,27 @@ function discoverFunctions(cwd: string): DiscoveredFunction[] {
 // ─── Serve (local dev) ──────────────────────────────────────────────────────
 
 function serve(cwd: string, opts: { port: string; envFile: string }): void {
-  const fns = discoverFunctions(cwd)
-  if (fns.length === 0) {
-    console.error(`No functions found in ${FUNCTIONS_DIR}/`)
+  const functionsDir = resolveFunctionsDir(cwd, "read")
+  const functionsDirLabel = relativeFunctionsDir(cwd, functionsDir)
+  const routes = discoverTsFunctionsInDir(functionsDir)
+  if (routes.length === 0) {
+    console.error(`No functions found in ${functionsDirLabel}/`)
     console.error("Create one with: npx supatype functions new <name>")
     process.exit(1)
   }
 
-  console.log(`Discovered ${fns.length} function(s):`)
-  for (const fn of fns) {
+  console.log(`Discovered ${routes.length} function(s):`)
+  for (const fn of routes) {
     console.log(`  /${fn.name}  →  ${relative(cwd, fn.entrypoint)}`)
   }
   console.log()
 
   // Generate a Deno entry script that routes requests to the correct function
-  const routerScript = generateLocalRouter(fns, cwd)
-  const routerPath = resolve(cwd, FUNCTIONS_DIR, ".serve-router.ts")
+  const routerPath = resolve(functionsDir, ".serve-router.ts")
+  const routerScript = generateFunctionsRouterSource(routerPath, routes)
   writeFileSync(routerPath, routerScript, "utf8")
 
-  const envFilePath = resolve(cwd, opts.envFile)
+  const envFilePath = resolveEnvFilePath(cwd, functionsDir, opts.envFile)
   const envArgs: string[] = []
   if (existsSync(envFilePath)) {
     envArgs.push("--env-file", envFilePath)
@@ -256,6 +296,8 @@ function serve(cwd: string, opts: { port: string; envFile: string }): void {
       env: {
         ...process.env,
         PORT: opts.port,
+        SUPATYPE_DENO_FUNCTIONS_DIR: functionsDir,
+        SUPATYPE_SHARED_ENV_FILE: resolve(functionsDir, ENV_LOCAL),
         SUPATYPE_URL: process.env["SUPATYPE_URL"] ?? localKongBaseUrl(),
         SUPATYPE_ANON_KEY: process.env["SUPATYPE_ANON_KEY"] ?? "",
         SUPATYPE_SERVICE_ROLE_KEY: process.env["SUPATYPE_SERVICE_ROLE_KEY"] ?? "",
@@ -273,56 +315,6 @@ function serve(cwd: string, opts: { port: string; envFile: string }): void {
   }
 }
 
-function generateLocalRouter(fns: DiscoveredFunction[], cwd: string): string {
-  const imports = fns.map(
-    (fn, i) => `import handler_${i} from "./${relative(resolve(cwd, FUNCTIONS_DIR), fn.entrypoint).replace(/\\/g, "/")}"`,
-  )
-
-  const routes = fns.map(
-    (fn, i) => `  "${fn.name}": handler_${i},`,
-  )
-
-  return `// Auto-generated local function router — do not edit
-${imports.join("\n")}
-
-const handlers: Record<string, (req: Request) => Response | Promise<Response>> = {
-${routes.join("\n")}
-}
-
-const port = parseInt(Deno.env.get("PORT") ?? "54321", 10)
-
-Deno.serve({ port }, async (req: Request): Promise<Response> => {
-  const url = new URL(req.url)
-  const pathParts = url.pathname.replace(/^\\/functions\\/v1\\//, "").split("/")
-  const fnName = pathParts[0] ?? ""
-
-  if (!fnName || !handlers[fnName]) {
-    return new Response(JSON.stringify({
-      error: "not_found",
-      message: fnName ? \`Function "\${fnName}" not found\` : "No function specified",
-      available: Object.keys(handlers),
-    }), { status: 404, headers: { "Content-Type": "application/json" } })
-  }
-
-  try {
-    const start = performance.now()
-    const response = await handlers[fnName]!(req)
-    const duration = (performance.now() - start).toFixed(1)
-    console.log(\`\${req.method} /functions/v1/\${fnName} → \${response.status} (\${duration}ms)\`)
-    return response
-  } catch (err) {
-    console.error(\`Error in function "\${fnName}":\`, err)
-    return new Response(JSON.stringify({
-      error: "function_error",
-      message: err instanceof Error ? err.message : "Unknown error",
-    }), { status: 500, headers: { "Content-Type": "application/json" } })
-  }
-})
-
-console.log(\`Edge function server running on http://localhost:\${port}/functions/v1/\`)
-`
-}
-
 // ─── Deploy ──────────────────────────────────────────────────────────────────
 
 async function deploy(cwd: string, opts: { only?: string; dryRun?: boolean }): Promise<void> {
@@ -332,10 +324,12 @@ async function deploy(cwd: string, opts: { only?: string; dryRun?: boolean }): P
     : allFns
 
   if (fns.length === 0) {
+    const functionsDir = resolveFunctionsDir(cwd, "read")
+    const functionsDirLabel = relativeFunctionsDir(cwd, functionsDir)
     if (opts.only) {
-      console.error(`Function "${opts.only}" not found in ${FUNCTIONS_DIR}/`)
+      console.error(`Function "${opts.only}" not found in ${functionsDirLabel}/`)
     } else {
-      console.error(`No functions found in ${FUNCTIONS_DIR}/`)
+      console.error(`No functions found in ${functionsDirLabel}/`)
     }
     process.exit(1)
   }
@@ -709,7 +703,7 @@ async function envList(cwd: string): Promise<void> {
 
   if (!linked) {
     // Show local env vars
-    const envPath = resolve(cwd, FUNCTIONS_DIR, ENV_LOCAL)
+    const envPath = resolve(resolveFunctionsDir(cwd, "read"), ENV_LOCAL)
     if (!existsSync(envPath)) {
       console.log("No environment variables configured.")
       return
@@ -781,7 +775,7 @@ async function envSet(cwd: string, keyvalue: string): Promise<void> {
 
   if (!linked) {
     // Set in local env file
-    const envPath = resolve(cwd, FUNCTIONS_DIR, ENV_LOCAL)
+    const envPath = resolve(resolveFunctionsDir(cwd, "write"), ENV_LOCAL)
     let content = existsSync(envPath) ? readFileSync(envPath, "utf8") : ""
 
     // Replace existing or append
@@ -833,7 +827,7 @@ async function envUnset(cwd: string, key: string): Promise<void> {
   const linked = getLinkedProject(cwd)
 
   if (!linked) {
-    const envPath = resolve(cwd, FUNCTIONS_DIR, ENV_LOCAL)
+    const envPath = resolve(resolveFunctionsDir(cwd, "read"), ENV_LOCAL)
     if (!existsSync(envPath)) {
       console.error("No local env file found.")
       process.exit(1)

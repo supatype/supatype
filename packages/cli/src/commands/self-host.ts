@@ -1,30 +1,90 @@
 /**
- * self-host commands — manage native (non-Docker) self-hosted deployments.
+ * self-host commands — manage self-hosted deployments.
  *
- *   supatype self-host install-service   — install systemd units
- *   supatype self-host serve             — run server in foreground
- *   supatype self-host reload            — SIGHUP the running server
- *   supatype self-host status            — show process / service health
- *   supatype self-host logs              — tail log files
- *   supatype self-host backup            — create pg_dump
+ * Compose-based commands are the canonical path.
+ * Native/systemd commands are kept temporarily for migration compatibility.
  */
 
 import type { Command } from "commander"
-import { existsSync, readFileSync, mkdirSync, copyFileSync } from "node:fs"
+import { existsSync, readFileSync, mkdirSync, copyFileSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { homedir } from "node:os"
-import { spawnSync, execFileSync } from "node:child_process"
+import { spawnSync } from "node:child_process"
+import { gzipSync } from "node:zlib"
 import { loadConfig } from "../config.js"
-import { connectionString } from "../config-toml.js"
+import { connectionString } from "../project-config.js"
 import { resolveBinary } from "../binary-cache.js"
 import { generateUnits } from "../systemd.js"
 import { readPid } from "../process-manager.js"
 import { localStorageEnv } from "../local-storage.js"
+import { runDockerCompose, writeSelfHostCompose } from "../self-host-compose.js"
 
 export function registerSelfHost(program: Command): void {
   const selfHostCmd = program
     .command("self-host")
-    .description("Manage native self-hosted deployments")
+    .description("Manage self-hosted deployments (compose-first)")
+
+  const composeCmd = selfHostCmd
+    .command("compose")
+    .description("Manage compose-based self-host runtime")
+
+  composeCmd
+    .command("render")
+    .description("Render deterministic self-host compose artifacts")
+    .action(() => {
+      const cwd = process.cwd()
+      const config = loadConfig(cwd)
+      const out = writeSelfHostCompose(cwd, config)
+      console.log(`Wrote ${out.composePath}`)
+      console.log(`Wrote ${out.kongPath}`)
+    })
+
+  composeCmd
+    .command("up")
+    .description("Render and start compose services")
+    .option("-d, --detach", "Start in detached mode", true)
+    .action((opts: { detach?: boolean }) => {
+      const cwd = process.cwd()
+      const config = loadConfig(cwd)
+      const out = writeSelfHostCompose(cwd, config)
+      const status = runDockerCompose(out.composePath, opts.detach ? ["up", "-d"] : ["up"], cwd)
+      process.exitCode = status
+    })
+
+  composeCmd
+    .command("down")
+    .description("Stop compose services")
+    .action(() => {
+      const cwd = process.cwd()
+      const config = loadConfig(cwd)
+      const out = writeSelfHostCompose(cwd, config)
+      process.exitCode = runDockerCompose(out.composePath, ["down"], cwd)
+    })
+
+  composeCmd
+    .command("status")
+    .description("Show compose service status")
+    .action(() => {
+      const cwd = process.cwd()
+      const config = loadConfig(cwd)
+      const out = writeSelfHostCompose(cwd, config)
+      process.exitCode = runDockerCompose(out.composePath, ["ps"], cwd)
+    })
+
+  composeCmd
+    .command("logs")
+    .description("Tail compose logs")
+    .option("--service <name>", "Filter to one service")
+    .option("-f, --follow", "Follow log output", true)
+    .action((opts: { service?: string; follow?: boolean }) => {
+      const cwd = process.cwd()
+      const config = loadConfig(cwd)
+      const out = writeSelfHostCompose(cwd, config)
+      const args = ["logs"]
+      if (opts.follow) args.push("-f")
+      if (opts.service) args.push(opts.service)
+      process.exitCode = runDockerCompose(out.composePath, args, cwd)
+    })
 
   // ── install-service ────────────────────────────────────────────────────────
 
@@ -42,6 +102,7 @@ export function registerSelfHost(program: Command): void {
         user?: string
         enable: boolean
       }) => {
+        logLegacyWarning("install-service")
         const cwd = process.cwd()
         const config = loadConfig(cwd)
 
@@ -112,6 +173,7 @@ export function registerSelfHost(program: Command): void {
     .description("Start supatype-server in the foreground (for standalone mode)")
     .option("--port <port>", "Override port from config")
     .action(async (opts: { port?: string }) => {
+      logLegacyWarning("serve")
       const cwd = process.cwd()
       const config = loadConfig(cwd)
 
@@ -142,6 +204,7 @@ export function registerSelfHost(program: Command): void {
     .command("reload")
     .description("Reload the running supatype-server (SIGHUP for config reload)")
     .action(() => {
+      logLegacyWarning("reload")
       const cwd = process.cwd()
       const config = loadConfig(cwd)
       const stateDir = join(homedir(), ".supatype", "projects", config.project.name)
@@ -174,6 +237,7 @@ export function registerSelfHost(program: Command): void {
     .command("status")
     .description("Show running status of supatype services")
     .action(() => {
+      logLegacyWarning("status")
       const cwd = process.cwd()
       const config = loadConfig(cwd)
       const stateDir = join(homedir(), ".supatype", "projects", config.project.name)
@@ -212,6 +276,7 @@ export function registerSelfHost(program: Command): void {
     .option("--lines <n>", "Number of lines to show", "50")
     .option("-f, --follow", "Follow log output")
     .action((opts: { service?: string; lines: string; follow?: boolean }) => {
+      logLegacyWarning("logs")
       const cwd = process.cwd()
       const config = loadConfig(cwd)
       const stateDir = join(homedir(), ".supatype", "projects", config.project.name)
@@ -260,6 +325,7 @@ export function registerSelfHost(program: Command): void {
     .option("--output <path>", "Output file path (default: ./backups/backup-<timestamp>.sql.gz)")
     .option("--connection <url>", "Database connection URL (overrides config)")
     .action((opts: { output?: string; connection?: string }) => {
+      logLegacyWarning("backup")
       const cwd = process.cwd()
       const config = loadConfig(cwd)
       const conn = opts.connection ?? connectionString(config)
@@ -273,16 +339,28 @@ export function registerSelfHost(program: Command): void {
 
       console.log(`Backing up database to ${outFile}...`)
       try {
-        // pg_dump | gzip > outFile
-        execFileSync(
-          "sh",
-          ["-c", `pg_dump "${conn}" | gzip > "${outFile}"`],
-          { stdio: ["ignore", "inherit", "inherit"] },
-        )
+        // Avoid shell interpolation of user-supplied values.
+        const pgDump = spawnSync("pg_dump", [conn], {
+          stdio: ["ignore", "pipe", "pipe"],
+        })
+        if (pgDump.status !== 0) {
+          const stderr = pgDump.stderr?.toString("utf8") ?? ""
+          throw new Error(stderr.trim() || "pg_dump failed")
+        }
+
+        const compressed = gzipSync(pgDump.stdout)
+        writeFileSync(outFile, compressed)
         console.log("Backup complete.")
       } catch (err) {
         console.error("Backup failed:", (err as Error).message)
         process.exit(1)
       }
     })
+}
+
+function logLegacyWarning(cmd: string): void {
+  console.warn(
+    `[supatype] self-host ${cmd} (native/systemd) is deprecated. ` +
+      "Use `supatype self-host compose` commands instead.",
+  )
 }

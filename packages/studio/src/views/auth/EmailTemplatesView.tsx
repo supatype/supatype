@@ -37,7 +37,10 @@ export function EmailTemplatesView(): React.ReactElement {
     setLoading(true)
     setError(null)
     fetch(`${client.url}/auth/v1/admin/template/${selected}`, {
-      headers: { ...studioGatewayHeaders() },
+      headers: {
+        ...studioGatewayHeaders(),
+        ...(client.serviceRoleKey && { Authorization: `Bearer ${client.serviceRoleKey}` }),
+      },
       credentials: "include",
     })
       .then(async (res) => {
@@ -48,7 +51,7 @@ export function EmailTemplatesView(): React.ReactElement {
       })
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false))
-  }, [client.url, selected])
+  }, [client.url, client.serviceRoleKey, selected])
 
   async function handleSave() {
     setSaving(true)
@@ -56,7 +59,11 @@ export function EmailTemplatesView(): React.ReactElement {
     try {
       const res = await fetch(`${client.url}/auth/v1/admin/template/${selected}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", ...studioGatewayHeaders() },
+        headers: {
+          "Content-Type": "application/json",
+          ...studioGatewayHeaders(),
+          ...(client.serviceRoleKey && { Authorization: `Bearer ${client.serviceRoleKey}` }),
+        },
         credentials: "include",
         body: JSON.stringify({ subject, content }),
       })

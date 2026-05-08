@@ -15,7 +15,7 @@ import type { Command } from "commander"
 import { existsSync, readdirSync, statSync, createReadStream } from "node:fs"
 import { join } from "node:path"
 import { loadConfig, loadSchemaAst } from "../config.js"
-import { connectionString, schemaPathFromToml } from "../config-toml.js"
+import { connectionString, schemaPathFromProject } from "../project-config.js"
 import { deploySchemaToLinkedProject, loadCloudConfig } from "./cloud.js"
 import { ensureEngine, engineRequest, type DiffResult } from "../engine-client.js"
 import { resolveAppConfig, validateStaticMode, validateBuildOutput, detectPackageManager } from "../app/framework.js"
@@ -66,7 +66,7 @@ export function registerDeploy(program: Command): void {
 
       // Step 1: Schema push (unless --app-only or --skip-build, or already done via cloud.json)
       if (!opts.appOnly && !opts.skipBuild && !schemaDone) {
-        const ast = loadSchemaAst(schemaPathFromToml(config, cwd), cwd)
+        const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
 
         if (opts.local) {
           console.log("=== Schema Push (local) ===")
@@ -123,7 +123,7 @@ export function registerDeploy(program: Command): void {
       if (!opts.schemaOnly) {
         if (!config.build) {
           if (opts.appOnly) {
-            console.error("No [build] section found in supatype.config.toml")
+            console.error("No build section found in supatype.config.ts")
             process.exit(1)
           }
           // No build config — skip app deployment silently

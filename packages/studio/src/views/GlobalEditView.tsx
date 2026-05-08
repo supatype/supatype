@@ -105,6 +105,11 @@ export function GlobalEditView({ global: globalConfig }: GlobalEditViewProps): R
               }
             }}
             readOnly={fieldConfig.readOnly ?? false}
+            record={values}
+            currentLocale={currentLocale}
+            defaultLocale={defaultLocale}
+            recordSyncKey="global"
+            slugFollowSource={false}
           />
         ))}
       </form>

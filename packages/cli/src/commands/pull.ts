@@ -1,82 +1,17 @@
 import type { Command } from "commander"
-import { mkdirSync, writeFileSync } from "node:fs"
-import { resolve } from "node:path"
-import { loadConfig } from "../config.js"
-import { connectionString } from "../config-toml.js"
-import { ensureEngine, engineRequest, type IntrospectResult } from "../engine-client.js"
-import { introspectColumnToColumnInfo, pgTypeToField, toCamelCase } from "../pull-utils.js"
+import { ensureEngine } from "../engine-client.js"
 
 export function registerPull(program: Command): void {
   program
     .command("pull")
     .description(
-      "Introspect an existing Postgres database and generate TypeScript schema files",
+      "Introspect an existing Postgres database (deprecated in type-first mode)",
     )
-    .option("--connection <url>", "Database connection URL (overrides config)")
-    .option("--output <path>", "Output directory for schema files", "./schema")
-    .action(async (opts: { connection?: string; output: string }) => {
-      const cwd = process.cwd()
-      const connection = opts.connection ?? connectionString(loadConfig(cwd))
-
+    .action(async () => {
       await ensureEngine()
-      console.log("Introspecting database...")
-
-      const introspected = await engineRequest<IntrospectResult>("/introspect", {
-        database_url: connection,
-        schema: "public",
-      })
-
-      const models = introspected.models ?? []
-
-      if (models.length === 0) {
-        console.log("No tables found in the database.")
-        return
-      }
-
-      const outputDir = resolve(cwd, opts.output)
-      mkdirSync(outputDir, { recursive: true })
-
-      for (const model of models) {
-        const content = generateModelFile(model)
-        writeFileSync(resolve(outputDir, `${model.name}.ts`), content, "utf8")
-        console.log(`  wrote  ${opts.output}/${model.name}.ts`)
-      }
-
-      const indexContent = generateIndexFile(models.map((m) => m.name))
-      writeFileSync(resolve(outputDir, "index.ts"), indexContent, "utf8")
-      console.log(`  wrote  ${opts.output}/index.ts`)
-
-      console.log(
-        `\nPulled ${models.length} model(s). Review TODO comments before running supatype push.\n`,
+      throw new Error(
+        "The legacy `supatype pull` schema generator has been removed.\n" +
+          "Use type-based models with @supatype/types and run `supatype generate`.",
       )
     })
-}
-
-function generateModelFile(model: IntrospectResult["models"][number]): string {
-  const fieldLines = model.columns
-    .map((col) => `    ${col.name}: ${pgTypeToField(introspectColumnToColumnInfo(col))},`)
-    .join("\n")
-
-  return `import { model, field, access } from "@supatype/schema"
-
-// TODO: review access rules — all operations default to authenticated
-export const ${toCamelCase(model.name)} = model(${JSON.stringify(model.name)}, {
-  tableName: ${JSON.stringify(model.table)},
-  fields: {
-${fieldLines}
-  },
-  access: {
-    read: access.role("authenticated"),
-    create: access.role("authenticated"),
-    update: access.role("authenticated"),
-    delete: access.role("authenticated"),
-  },
-})
-`
-}
-
-function generateIndexFile(names: string[]): string {
-  return names
-    .map((n) => `export { ${toCamelCase(n)} } from "./${n}.js"`)
-    .join("\n") + "\n"
 }

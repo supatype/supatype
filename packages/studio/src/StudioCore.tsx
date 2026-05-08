@@ -289,8 +289,11 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
               <Route path="data" element={<DataExplorer />} />
 
               {/* Media & Storage */}
-              <Route path="media-storage"           element={<StorageBrowser />} />
-              <Route path="media-storage/policies"  element={<StoragePoliciesView />} />
+              <Route path="media-storage" element={<Navigate to="/media-storage/default/files" replace />} />
+              <Route path="media-storage/:bucket" element={<Navigate to="files" replace />} />
+              <Route path="media-storage/:bucket/files" element={<StorageBrowser />} />
+              <Route path="media-storage/:bucket/policies" element={<StoragePoliciesView />} />
+              <Route path="media-storage/policies" element={<Navigate to="/media-storage/default/policies" replace />} />
 
               {/* Authentication */}
               <Route path="authentication" element={<Navigate to="/authentication/users" replace />} />
@@ -327,11 +330,13 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
               <Route path="logs/postgres"  element={<Navigate to="/observability/logs/postgres"  replace />} />
 
               {/* Settings */}
-              <Route path="settings"       element={<Settings />} />
+              <Route path="settings"       element={<Settings demoMode={demoMode ?? false} />} />
 
               {/* Platform features */}
               <Route path="email"          element={<ComingSoon title="Email" description="Configure transactional email providers, templates, and delivery settings." />} />
               <Route path="edge-functions" element={<EdgeFunctions />} />
+              <Route path="edge-functions/:functionSlug" element={<EdgeFunctions />} />
+              <Route path="edge-functions/:functionSlug/:tab" element={<EdgeFunctions />} />
               <Route path="realtime"       element={<RealtimeInspector />} />
               <Route path="plugins"        element={<PluginsMarketplace />} />
               <Route path="webhooks"       element={<ComingSoon title="Webhooks" description="Schema-driven webhooks that fire on record create/update/delete. Configure endpoints, retry policies, and delivery history. Coming in Phase 17." />} />
