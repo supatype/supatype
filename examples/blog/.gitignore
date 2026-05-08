@@ -1,3 +1,5 @@
 .next/
 out/
 node_modules/
+supatype.local.config.ts
+supatype

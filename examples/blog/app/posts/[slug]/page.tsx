@@ -1,9 +1,10 @@
 import React from "react"
 import { createClient } from "@/lib/supatype-server"
+import { RichText } from "@supatype/react"
 import { CommentsSection } from "./comments"
-import type { Database } from "@/types/database"
+import type { AugmentedDatabase } from "@supatype/client"
 
-type Post = Database["public"]["Tables"]["posts"]["Row"]
+type Post = AugmentedDatabase["public"]["Tables"]["post"]["Row"]
 
 type Props = {
   params: Promise<{ slug: string }>
@@ -13,25 +14,29 @@ export default async function PostPage({ params }: Props): Promise<React.ReactEl
   const { slug } = await params
   const supatype = await createClient()
   const { data: posts, error } = await supatype
-    .from("posts")
+    .from("post")
     .select()
     .eq("slug", slug)
     .eq("status", "published")
     .limit(1)
 
-  if (error !== null) return <p>Error: {error.message}</p>
+  if (error !== null) return <p className="error">Error: {error.message}</p>
   const post: Post | null = posts?.[0] ?? null
-  if (post === null) return <p>Post not found.</p>
+  if (post === null) return <p className="empty">Post not found.</p>
 
   return (
     <article>
       <h1>{post.title}</h1>
       {post.published_at !== null && (
-        <p style={{ color: "#666" }}>{new Date(post.published_at).toLocaleDateString()}</p>
+        <p className="article-meta">
+          {new Date(post.published_at).toLocaleDateString("en-GB", {
+            day: "numeric",
+            month: "long",
+            year: "numeric",
+          })}
+        </p>
       )}
-      <div style={{ lineHeight: 1.7, margin: "2rem 0" }}>
-        {post.body}
-      </div>
+      <RichText content={post.body as any} className="richtext" />
       <CommentsSection postId={post.id} />
     </article>
   )

@@ -1,0 +1,14 @@
+import type { SupatypeProjectConfig } from "@supatype/cli"
+
+/**
+ * Copy to `supatype.local.config.ts` (gitignored). Merged on top of `supatype.config.ts`.
+ */
+const local: Partial<SupatypeProjectConfig> = {
+  overrides: {
+    engine: "C:/path/to/supatype-schema-engine/target/release/supatype-engine",
+    server: "C:/path/to/supatype-auth/supatype-server",
+    studio: "../../packages/studio",
+  },
+}
+
+export default local

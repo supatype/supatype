@@ -1,16 +1,8 @@
 import { defineConfig } from "@supatype/cli"
 
-/**
- * Blog example — full project config in one file.
- *
- * `supatype generate` does not need `connection` if you only emit types; set
- * `connection` or `DATABASE_URL` for `push` / `migrate`.
- *
- * Machine-local binary paths: copy `supatype.local.config.ts.example` to
- * `supatype.local.config.ts` (gitignored) and add `overrides` / `versions` there.
- */
+/** Integration test project; `supatype generate` does not require `connection`. */
 export default defineConfig({
-  project: { name: "blog" },
+  project: { name: "supatype-integration" },
   database: { provider: "docker" },
   server: { mode: "dev", port: 54399 },
   app: { mode: "none" },

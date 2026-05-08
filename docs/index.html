@@ -575,19 +575,19 @@
             <div class="dot-r"></div><div class="dot-y"></div><div class="dot-g"></div>
             <span class="filename">schema/index.ts</span>
           </div>
-<pre class="language-typescript"><code class="language-typescript">import type { Model, UUID, Slug, RichText, RelatedTo, Public, LoggedIn, Owner } from '@supatype/types'
+<pre class="language-typescript"><code class="language-typescript">import type { Model, UUID, Slug, RichText, RelatedTo, Public, LoggedIn, OwnerFrom, SupatypeAuthUser } from '@supatype/types'
 
 export type Post = Model&lt;{
   id: UUID
   title: string
   slug: Slug
   body: RichText
-  author: RelatedTo&lt;User&gt;
+  authUser: RelatedTo&lt;SupatypeAuthUser&gt;
 }, {
   access: {
     read: Public
     create: LoggedIn
-    update: Owner&lt;'authorId'&gt;
+    update: OwnerFrom&lt;'authUser'&gt;
   }
 }&gt;</code></pre>
         </div>
@@ -698,7 +698,7 @@ export type Post = Model&lt;{
       <div class="feature-card">
         <div class="feature-icon">🔐</div>
         <h3>Auth & Row-Level Security</h3>
-        <p>Authentication is built in. Declare <span class="mono">access: { read: 'any', write: 'authenticated' }</span> on a model and Supatype generates the Postgres RLS policies. No SQL.</p>
+        <p>Authentication is built in. Declare <span class="mono">access: { read: Public, create: LoggedIn, update: OwnerFrom&lt;'authUser'&gt; }</span> on a model and Supatype generates the Postgres RLS policies. No SQL.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">📦</div>

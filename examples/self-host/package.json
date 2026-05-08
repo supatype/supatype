@@ -1,0 +1,19 @@
+{
+  "name": "@supatype/example-self-host",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Compose-first self-host Supatype example",
+  "scripts": {
+    "selfhost:render": "supatype self-host compose render",
+    "selfhost:up": "supatype self-host compose up",
+    "selfhost:down": "supatype self-host compose down",
+    "selfhost:status": "supatype self-host compose status",
+    "selfhost:logs": "supatype self-host compose logs",
+    "push": "supatype push --yes",
+    "studio": "echo Studio: http://localhost:3002 and http://localhost:18473/studio/"
+  },
+  "dependencies": {
+    "@supatype/cli": "workspace:*",
+    "@supatype/types": "workspace:*"
+  }
+}

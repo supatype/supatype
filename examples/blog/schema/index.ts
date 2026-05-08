@@ -1,51 +1,125 @@
-import { model, field, bucket, access, publishable } from "@supatype/schema"
+import type {
+  BucketLoggedIn,
+  BucketOwner,
+  BucketPublic,
+  Bucket,
+  ComputedFrom,
+  FileAsset,
+  ImageAsset,
+  LoggedIn,
+  MaxLength,
+  Model,
+  Optional,
+  Owner,
+  OwnerFrom,
+  Public,
+  RelatedTo,
+  RichText,
+  Slug,
+  SupatypeAuthUser,
+  SupatypeAuthUserId,
+  Timestamp,
+  UUID,
+  Unique
+} from "@supatype/types"
 
-export const avatars    = bucket("avatars",      { accessMode: "public" })
-export const postImages = bucket("post-images",  { accessMode: "public" })
-
-export const User = model("user", {
-  fields: {
-    name: field.text({ required: true }),
-    avatarUrl: field.image({ bucket: avatars }),
-  },
+export type userAvatars = Bucket<"user-avatars", {
+  accessMode: "public"
+  accept: ["image/png", "image/jpeg", "image/webp"]
+  maxSize: "5MB"
   access: {
-    read: access.authenticated(),
-    create: access.authenticated(),
-    update: access.owner("user_id"),
-    delete: access.owner("user_id"),
-  },
-  options: { timestamps: true },
-})
+    read: BucketPublic
+    create: BucketLoggedIn
+    delete: BucketOwner
+  }
+}>
 
-export const Post = model("post", {
-  fields: {
-    title: field.text({ required: true }),
-    slug: field.slug({ from: "title" }),
-    body: field.richText({ required: true }),
-    coverImage: field.image({ bucket: postImages }),
-    authorId: field.uuid({ required: true }),
-    publishInfo: publishable(),
-  },
+export type postCovers = Bucket<"post-covers", {
+  accessMode: "public"
+  accept: ["image/png", "image/jpeg", "image/webp"]
+  maxSize: "10MB"
   access: {
-    read: access.public(),
-    create: access.authenticated(),
-    update: access.owner("author_id"),
-    delete: access.owner("author_id"),
-  },
-  options: { timestamps: true },
-})
+    read: BucketPublic
+    create: BucketLoggedIn
+    delete: BucketOwner
+  }
+}>
 
-export const Comment = model("comment", {
-  fields: {
-    postId: field.uuid({ required: true }),
-    authorId: field.uuid({ required: true }),
-    body: field.text({ required: true }),
-  },
+export type postAttachments = Bucket<"post-attachments", {
+  accessMode: "private"
+  maxSize: "50MB"
   access: {
-    read: access.public(),
-    create: access.authenticated(),
-    update: access.owner("author_id"),
-    delete: access.owner("author_id"),
-  },
-  options: { timestamps: true },
-})
+    read: BucketLoggedIn
+    create: BucketLoggedIn
+    delete: BucketOwner
+  }
+}>
+
+export type User = Model<{
+  id: SupatypeAuthUserId
+  name: string
+  avatarUrl: Optional<ImageAsset<userAvatars>>
+  created_at: Timestamp
+  updated_at: Timestamp
+}, {
+  access: {
+    read: LoggedIn
+    create: LoggedIn
+    update: Owner<"id">
+    delete: Owner<User, "id">
+  }
+}>
+
+/**
+ * Derived vs server-only vs audit:
+ * - `ComputedFrom` — Studio **derivedText** preview tracks sources like {@link Slug}; regenerate admin after schema changes.
+ * - `Computed` — server/DB only, **no** Studio preview wiring (read-only in the editor).
+ * - `created_at` / `updated_at` — by **column name**, extractor adds `DEFAULT NOW()` + Studio prefill (`Timestamp` columns); optional `Timestamps` mixin matches that pair.
+ *
+ * Templates: `{field}`, `{truncate(field, n)}`, `\n` in the string literal for newlines.
+ */
+export type Post = Model<{
+  id: UUID
+  title: string
+  slug: Optional<Unique<Slug<"title">>>
+  /** Single-line listing blurb: mirrors `title` until you type something else on create. */
+  teaser: Optional<ComputedFrom<string, "title">>
+  /** Card / SEO text: built from title + lexical plain text from `body` until you edit on create. */
+  excerpt: Optional<MaxLength<ComputedFrom<string, readonly ["title", "body"]>, 320>>
+  /** Sharing line: illustrates `{field}`, `{truncate(…)}`, and `\n` in the format string. */
+  feedCaption: Optional<ComputedFrom<string, "Post: {title} | {published_at}\n{truncate(body, 80)}">>
+  body: RichText
+  coverImage: Optional<ImageAsset<postCovers>>
+  attachment: Optional<FileAsset<postAttachments>>
+  authUser: RelatedTo<SupatypeAuthUser>
+  authorProfile: RelatedTo<User>
+  status: "draft" | "published" | "scheduled" | "archived"
+  published_at: Optional<string>
+  scheduled_at: Optional<string>
+  created_at: Timestamp
+  updated_at: Timestamp
+}, {
+  access: {
+    read: Public
+    create: LoggedIn
+    update: OwnerFrom<"authUser">
+    delete: OwnerFrom<"authUser">
+  }
+}>
+
+export type Comment = Model<{
+  id: UUID
+  authUser: RelatedTo<SupatypeAuthUser>
+  authorProfile: RelatedTo<User>
+  body: string
+  post: RelatedTo<Post>
+  created_at: Timestamp
+  updated_at: Timestamp
+}, {
+  access: {
+    read: Public
+    create: LoggedIn
+    update: OwnerFrom<"authUser">
+    delete: OwnerFrom<"authUser">
+  }
+}>

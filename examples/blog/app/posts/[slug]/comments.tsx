@@ -2,56 +2,57 @@
 
 import React, { useState } from "react"
 import { useAuth, useQuery, useMutation } from "@supatype/react"
-import type { Database } from "@/types/database"
+import type { AugmentedDatabase } from "@supatype/client"
 
-type Comment = Database["public"]["Tables"]["comments"]["Row"]
+type Comment = AugmentedDatabase["public"]["Tables"]["comment"]["Row"]
 
 export function CommentsSection({ postId }: { postId: string }): React.ReactElement {
   const { user } = useAuth()
   const [commentBody, setCommentBody] = useState("")
 
-  const { data: comments, loading, refetch } = useQuery<Database, "comments">("comments", {
-    filter: { post_id: postId },
+  const { data: comments, loading, refetch } = useQuery<AugmentedDatabase, "comment">("comment", {
+    filter: { postId },
     order: { column: "created_at", ascending: true },
   })
 
-  const { mutate: addComment, loading: commenting } = useMutation<Database, "comments">("comments", "insert")
+  const { mutate: addComment, loading: commenting } = useMutation<AugmentedDatabase, "comment">("comment", "insert")
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>): Promise<void> {
     e.preventDefault()
     if (user === null) return
-    await addComment({ post_id: postId, author_id: user.id, body: commentBody })
+    await addComment({ postId, authorId: user.id, body: commentBody })
     setCommentBody("")
     void refetch()
   }
 
   return (
-    <section>
+    <section className="comments">
       <h2>Comments</h2>
-      {loading && <p>Loading comments…</p>}
+
+      {loading && <p className="text-muted">Loading comments…</p>}
+
       {comments !== null && comments.length > 0 ? (
-        <ul style={{ listStyle: "none", padding: 0 }}>
+        <ul className="comment-list">
           {comments.map((comment: Comment) => (
-            <li key={comment.id} style={{ borderBottom: "1px solid #eee", padding: "0.75rem 0" }}>
-              {comment.body}
-            </li>
+            <li key={comment.id}>{comment.body}</li>
           ))}
         </ul>
       ) : (
-        !loading && <p>No comments yet.</p>
+        !loading && <p className="empty">No comments yet.</p>
       )}
 
       {user !== null && (
         <form onSubmit={(e) => { void handleSubmit(e) }} style={{ marginTop: "1.5rem" }}>
-          <textarea
-            value={commentBody}
-            onChange={(e) => setCommentBody(e.target.value)}
-            required
-            placeholder="Add a comment…"
-            rows={3}
-            style={{ width: "100%", padding: "0.5rem", fontFamily: "inherit" }}
-          />
-          <button type="submit" disabled={commenting} style={{ marginTop: "0.5rem" }}>
+          <div className="form-group">
+            <textarea
+              value={commentBody}
+              onChange={(e) => setCommentBody(e.target.value)}
+              required
+              placeholder="Add a comment…"
+              rows={3}
+            />
+          </div>
+          <button type="submit" disabled={commenting}>
             {commenting ? "Posting…" : "Post comment"}
           </button>
         </form>

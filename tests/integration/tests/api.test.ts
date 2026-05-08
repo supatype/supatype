@@ -145,3 +145,72 @@ describe("storage", () => {
     assert.ok(typeof publicUrl === "string" && publicUrl.length > 0)
   })
 })
+
+// ── Edge Functions ─────────────────────────────────────────────────────────────
+
+describe("edge functions", () => {
+  test("invoke ping function", async () => {
+    const res = await fetch(`${BASE_URL}/functions/v1/ping`)
+    assert.equal(res.status, 200)
+
+    const body = await res.json() as {
+      ok: boolean
+      function: string
+      method: string
+    }
+    assert.equal(body.ok, true)
+    assert.equal(body.function, "ping")
+    assert.equal(body.method, "GET")
+  })
+
+  test("invoke echo function with JSON payload", async () => {
+    const payload = { source: "integration", value: 42 }
+    const res = await fetch(`${BASE_URL}/functions/v1/echo`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+    assert.equal(res.status, 200)
+
+    const body = await res.json() as {
+      ok: boolean
+      function: string
+      body: { source: string; value: number }
+    }
+    assert.equal(body.ok, true)
+    assert.equal(body.function, "echo")
+    assert.deepEqual(body.body, payload)
+  })
+
+  test("auth-required rejects missing authorization header", async () => {
+    const res = await fetch(`${BASE_URL}/functions/v1/auth-required`)
+    assert.equal(res.status, 401)
+  })
+
+  test("auth-required accepts Bearer authorization header", async () => {
+    const res = await fetch(`${BASE_URL}/functions/v1/auth-required`, {
+      headers: {
+        Authorization: "Bearer integration-test-token",
+      },
+    })
+    assert.equal(res.status, 200)
+    const body = await res.json() as { ok: boolean; function: string }
+    assert.equal(body.ok, true)
+    assert.equal(body.function, "auth-required")
+  })
+
+  test("env-check has runtime Supatype environment variables", async () => {
+    const res = await fetch(`${BASE_URL}/functions/v1/env-check`)
+    assert.equal(res.status, 200)
+    const body = await res.json() as {
+      ok: boolean
+      hasSupatypeUrl: boolean
+      hasAnonKey: boolean
+      hasServiceRoleKey: boolean
+    }
+    assert.equal(body.ok, true)
+    assert.equal(body.hasSupatypeUrl, true)
+    assert.equal(body.hasAnonKey, true)
+    assert.equal(body.hasServiceRoleKey, true)
+  })
+})

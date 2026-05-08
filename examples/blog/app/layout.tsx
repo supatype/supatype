@@ -1,23 +1,42 @@
 "use client"
 
 import React from "react"
-import { SupatypeProvider } from "@supatype/react"
+import { SupatypeProvider, useAuth } from "@supatype/react"
+import Link from "next/link"
 import { supatype } from "@/lib/supatype"
+import "./globals.css"
+
+function SiteNav(): React.ReactElement {
+  const { user, loading, signOut } = useAuth()
+
+  return (
+    <nav>
+      {!loading && user !== null ? (
+        <>
+          <span className="nav-user">{user.email}</span>
+          <Link href="/posts/new">New post</Link>
+          <button onClick={() => { void signOut() }} className="nav-link-btn">Sign out</button>
+        </>
+      ) : (
+        <>
+          <Link href="/login">Sign in</Link>
+          <Link href="/signup">Sign up</Link>
+        </>
+      )}
+    </nav>
+  )
+}
 
 export default function RootLayout({ children }: { children: React.ReactNode }): React.ReactElement {
   return (
     <html lang="en">
       <body>
         <SupatypeProvider client={supatype}>
-          <header style={{ padding: "1rem 2rem", borderBottom: "1px solid #eee", display: "flex", gap: "1rem", alignItems: "center" }}>
-            <a href="/" style={{ fontWeight: "bold", textDecoration: "none", color: "inherit" }}>Supatype Blog</a>
-            <nav style={{ marginLeft: "auto", display: "flex", gap: "1rem" }}>
-              <a href="/login">Sign in</a>
-              <a href="/signup">Sign up</a>
-              <a href="/posts/new">New post</a>
-            </nav>
+          <header className="site-header">
+            <Link href="/" className="logo">Supatype Blog</Link>
+            <SiteNav />
           </header>
-          <main style={{ maxWidth: "800px", margin: "2rem auto", padding: "0 1rem" }}>
+          <main className="site-main">
             {children}
           </main>
         </SupatypeProvider>

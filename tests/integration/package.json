@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@supatype/schema": "workspace:*"
+    "@supatype/cli": "workspace:*",
+    "@supatype/types": "workspace:*"
   }
 }

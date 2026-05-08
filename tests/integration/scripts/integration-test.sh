@@ -56,30 +56,11 @@ if [[ "$SKIP_BUILD" != "--skip-build" ]]; then
   cd "$INTEGRATION_DIR"
 fi
 
-# ── Step 2: Write [overrides] into TOML config ────────────────────────────────
+# ── Step 2: Write supatype.local.config.ts (binary overrides) ─────────────────
 
 echo "==> Configuring integration project"
 
-TOML_CONFIG="$INTEGRATION_DIR/supatype.config.toml"
-
-# Strip everything from [overrides] to EOF, then rewrite the section cleanly.
-# [overrides] must be the last section in the file (see supatype.config.toml comment).
-tmpfile=$(mktemp)
-awk '/^\[overrides\]/{exit} {print}' "$TOML_CONFIG" > "$tmpfile"
-
-printf '\n[overrides]\n' >> "$tmpfile"
-if [[ -n "${SUPATYPE_ENGINE:-}" && -x "$SUPATYPE_ENGINE" ]]; then
-  printf 'engine = "%s"\n' "$(cd "$(dirname "$SUPATYPE_ENGINE")" && pwd)/$(basename "$SUPATYPE_ENGINE")" >> "$tmpfile"
-fi
-if [[ -n "${SUPATYPE_SERVER:-}" && -x "$SUPATYPE_SERVER" ]]; then
-  printf 'server = "%s"\n' "$(cd "$(dirname "$SUPATYPE_SERVER")" && pwd)/$(basename "$SUPATYPE_SERVER")" >> "$tmpfile"
-fi
-if [[ -n "${SUPATYPE_POSTGRES_DIR:-}" && -d "$SUPATYPE_POSTGRES_DIR" ]]; then
-  printf 'postgres_dir = "%s"\n' "$(cd "$SUPATYPE_POSTGRES_DIR" && pwd)" >> "$tmpfile"
-fi
-
-cp "$tmpfile" "$TOML_CONFIG"
-rm "$tmpfile"
+node "$SCRIPT_DIR/write-local-config.mjs" "$INTEGRATION_DIR/supatype.local.config.ts"
 
 # ── Step 3: Start supatype dev ────────────────────────────────────────────────
 
