@@ -51,12 +51,7 @@ jobs:
         run: pnpm turbo run typecheck
 
       - name: Test
-        run: pnpm turbo run test || true
-
-      - name: Publish @supatype/schema
-        run: pnpm --filter @supatype/schema publish --access public --no-git-checks --tag ${{ contains(needs.prepare.outputs.version, 'alpha') && 'alpha' || contains(needs.prepare.outputs.version, 'beta') && 'beta' || 'latest' }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: pnpm turbo run test
 
       - name: Publish @supatype/client
         run: pnpm --filter @supatype/client publish --access public --no-git-checks --tag ${{ contains(needs.prepare.outputs.version, 'alpha') && 'alpha' || contains(needs.prepare.outputs.version, 'beta') && 'beta' || 'latest' }}

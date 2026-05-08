@@ -5,14 +5,12 @@ on:
     paths:
       - "packages/cli/**"
       - "packages/client/**"
-      - "packages/schema/**"
       - "tests/integration/**"
   push:
     branches: [main]
     paths:
       - "packages/cli/**"
       - "packages/client/**"
-      - "packages/schema/**"
 
 concurrency:
   group: integration-${{ github.ref }}
@@ -154,6 +152,8 @@ jobs:
         env:
           SUPATYPE_URL: http://localhost:54399
           SUPATYPE_ANON_KEY: integration-anon-key
+          # GitHub-hosted macOS has no Docker daemon; keep native Postgres there.
+          SUPATYPE_DATABASE_PROVIDER: ${{ matrix.os == 'macos-14' && 'native' || '' }}
 
       # ── Upload logs on failure ────────────────────────────────────────────────
 

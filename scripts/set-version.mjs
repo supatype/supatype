@@ -21,7 +21,6 @@ const root = new URL("..", import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1"
 const packagesDir = join(root, "packages")
 
 const publishable = [
-  "schema",
   "client",
   "react",
   "react-auth",

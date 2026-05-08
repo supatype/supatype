@@ -9,7 +9,7 @@ Available plans: Phase-00 through Phase-24 plus deep-architecture-spec.md.
 ## Project structure
 
 - Turborepo + pnpm workspaces
-- `packages/schema` — `@supatype/schema` builder API
+- `packages/types` — `@supatype/types` source-of-truth type primitives
 - `packages/client` — `@supatype/client` typed HTTP client
 - `packages/react` — `@supatype/react` React hooks
 - `packages/cli` — `@supatype/cli` CLI binary

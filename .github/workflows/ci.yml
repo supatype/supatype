@@ -28,8 +28,19 @@ jobs:
       - name: Typecheck
         run: pnpm turbo run typecheck
 
+      - name: RFC v2 migration checks
+        run: |
+          pnpm --filter @supatype/types build
+          pnpm --filter @supatype/types test
+          pnpm --filter @supatype/client build
+          pnpm --filter @supatype/client test -- tests/types.test.ts
+          pnpm --filter @supatype/cli exec vitest run tests/augmentation-generator.test.ts tests/migrate-from-v1.test.ts tests/type-extractor.test.ts
+
+      - name: Runtime contract conformance
+        run: pnpm --filter @supatype/cli exec vitest run tests/runtime-contract.test.ts
+
       - name: Test
-        run: pnpm turbo run test || true
+        run: pnpm turbo run test
 
   docker:
     runs-on: ubuntu-latest

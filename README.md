@@ -8,7 +8,7 @@ Supatype is a schema-first Postgres backend. You define your database schema in 
 - **pnpm** 10+ (`npm i -g pnpm`)
 - **Docker** (default Postgres provider — Docker Desktop or equivalent)
 
-> If you prefer a native Postgres binary instead of Docker, set `provider = "native"` in `supatype.config.toml`. The CLI will download and manage the binary for you.
+> If you prefer a native Postgres binary instead of Docker, set `database.provider` to `"native"` in `supatype.config.ts`. The CLI will download and manage the binary for you.
 
 ---
 
@@ -29,7 +29,7 @@ pnpm supatype init my-app
 
 | File | Purpose |
 |---|---|
-| `supatype.config.toml` | Project config (DB provider, server port, versions) |
+| `supatype.config.ts` | Project config (DB provider, server port, versions) |
 | `schema/index.ts` | Your schema entry point |
 | `.env` | Local secrets (DB URL, JWT keys, SMTP) |
 | `seed.ts` | Seed script |
@@ -130,7 +130,7 @@ Generates `ANON_KEY` and `SERVICE_ROLE_KEY` for your `.env`. Run this once after
 
 ## Postgres management (native provider only)
 
-When `provider = "native"` in config:
+When `database.provider` is `"native"` in config:
 
 ```sh
 supatype pg start         # Start Postgres
@@ -146,7 +146,7 @@ supatype pg psql          # Open a psql shell
 The CLI downloads engine, server, Postgres, and Deno binaries and caches them in `~/.supatype/`.
 
 ```sh
-supatype update           # Download latest versions defined in supatype.config.toml
+supatype update           # Download latest versions defined in supatype.config.ts
 supatype cache list       # Show cached binaries
 supatype cache clean      # Remove all cached binaries
 ```
@@ -155,14 +155,19 @@ supatype cache clean      # Remove all cached binaries
 
 ## Local binary overrides (dev on this repo)
 
-To point the CLI at local builds (e.g. when working on `supatype-schema-engine`), create `supatype.local.config.toml` alongside your `supatype.config.toml`. This file is gitignored.
+To point the CLI at local builds (e.g. when working on `supatype-schema-engine`), create `supatype.local.config.ts` alongside your `supatype.config.ts`. This file is gitignored.
 
-```toml
-# supatype.local.config.toml
-[overrides]
-engine = "/path/to/supatype-schema-engine/target/release/supatype-engine"
-server = "/path/to/supatype-auth/supatype-server"
-# postgres_dir = "/path/to/local/pg"  # optional
+```ts
+// supatype.local.config.ts
+import type { SupatypeProjectConfig } from "@supatype/cli"
+const local: Partial<SupatypeProjectConfig> = {
+  overrides: {
+    engine: "/path/to/supatype-schema-engine/target/release/supatype-engine",
+    server: "/path/to/supatype-auth/supatype-server",
+    // postgres_dir: "/path/to/local/pg",
+  },
+}
+export default local
 ```
 
 When an override is set, the corresponding CDN version is ignored entirely. Setting both a version pin and an override for the same binary is an error.
