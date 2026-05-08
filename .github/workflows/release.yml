@@ -19,6 +19,44 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
+  # ── Docker Hub: move `latest` only for stable tags, unless no stable tag exists yet ──
+  docker-latest-policy:
+    runs-on: ubuntu-latest
+    needs: prepare
+    outputs:
+      docker_push_latest: ${{ steps.policy.outputs.docker_push_latest }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether to update Docker Hub latest tag
+        id: policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION='${{ needs.prepare.outputs.version }}'
+          VERSION_LC=$(echo "$VERSION" | tr '[:upper:]' '[:lower:]')
+          IS_PRE=false
+          case "$VERSION_LC" in
+            *alpha*|*beta*|*-rc*|*.rc.*|*preview*) IS_PRE=true ;;
+          esac
+
+          HAS_STABLE=false
+          while IFS= read -r t; do
+            [[ -z "${t:-}" ]] && continue
+            rest="${t#v}"
+            [[ "$rest" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
+            HAS_STABLE=true
+            break
+          done < <(git tag -l 'v[0-9]*')
+
+          if [[ "$IS_PRE" != true ]] || [[ "$HAS_STABLE" != true ]]; then
+            echo "docker_push_latest=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "docker_push_latest=false" >> "$GITHUB_OUTPUT"
+          fi
+
   # ── Build, test, and publish npm packages ───────────────────────────────────
   npm:
     needs: prepare
@@ -75,7 +113,7 @@ jobs:
 
   # ── Build and push Docker images ────────────────────────────────────────────
   docker-storage:
-    needs: prepare
+    needs: [prepare, docker-latest-policy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -104,7 +142,7 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ !contains(needs.prepare.outputs.version, 'alpha') && !contains(needs.prepare.outputs.version, 'beta') }}
+            type=raw,value=latest,enable=${{ needs.docker-latest-policy.outputs.docker_push_latest == 'true' }}
 
       - uses: docker/build-push-action@v5
         with:
@@ -114,7 +152,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
 
   docker-realtime:
-    needs: prepare
+    needs: [prepare, docker-latest-policy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -131,7 +169,7 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ !contains(needs.prepare.outputs.version, 'alpha') && !contains(needs.prepare.outputs.version, 'beta') }}
+            type=raw,value=latest,enable=${{ needs.docker-latest-policy.outputs.docker_push_latest == 'true' }}
 
       - uses: docker/build-push-action@v5
         with:
@@ -142,7 +180,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
 
   docker-studio:
-    needs: prepare
+    needs: [prepare, docker-latest-policy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -159,7 +197,7 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ !contains(needs.prepare.outputs.version, 'alpha') && !contains(needs.prepare.outputs.version, 'beta') }}
+            type=raw,value=latest,enable=${{ needs.docker-latest-policy.outputs.docker_push_latest == 'true' }}
 
       - uses: docker/build-push-action@v5
         with:
@@ -181,5 +219,5 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
-          prerelease: ${{ contains(needs.prepare.outputs.version, 'alpha') || contains(needs.prepare.outputs.version, 'beta') }}
+          prerelease: ${{ contains(needs.prepare.outputs.version, 'alpha') || contains(needs.prepare.outputs.version, 'beta') || contains(needs.prepare.outputs.version, 'rc') }}
           generate_release_notes: true
