@@ -1,10 +1,20 @@
-# Supatype — Local Development
+<p align="center">
+   <img src="https://raw.githubusercontent.com/supatype/.github/refs/heads/main/profile/supatype-icon.svg" width="80" alt="Supatype" />
+</p>
 
-Supatype is a schema-first Postgres backend. You define your database schema in TypeScript, and the CLI manages migrations, generates types, and runs all the local services.
+# Supatype — Local development
+
+**Supatype** is a schema-first backend for **PostgreSQL**. You describe tables, relations, access rules, and storage in **TypeScript** (`@supatype/types`); the **schema engine** turns that into migrations, RLS, triggers, and admin metadata; the **`supatype` CLI** wires local dev, binary downloads, and project config.
+
+In production and in local dev, **`supatype-server`** is the **unified HTTP gateway**: it fronts **PostgREST** (`/rest/v1/`), **authentication** (`/auth/v1/`), **storage** (`/storage/v1/`), **Realtime** (`/realtime/v1/`), and related APIs on one port. You do not run a separate “auth service” binary for normal development—the paths stay familiar, but the process you run and ship is **supatype-server**.
+
+This repository is the **open-source monorepo** (`@supatype/cli`, `@supatype/client`, `@supatype/react`, Studio, storage, realtime, etc.). Use the sections below to hack on the toolchain or to bootstrap a new app from `supatype init`.
+
+---
 
 ## Prerequisites
 
-- **Node.js** 20+
+- **Node.js** 22+ (matches CI; older LTS may work but is not what we test against)
 - **pnpm** 10+ (`npm i -g pnpm`)
 - **Docker** (default Postgres provider — Docker Desktop or equivalent)
 
@@ -35,6 +45,8 @@ pnpm supatype init my-app
 | `seed.ts` | Seed script |
 | `.gitignore` | Pre-configured to exclude `.env`, binaries, generated files |
 
+`supatype init` does **not** write a `package.json`. In a new folder you still need one (with `@supatype/cli`, and `@supatype/types` for schema authoring) before `pnpm install` / `pnpm supatype dev` will work. Cloning the monorepo or copying an example app already satisfies that.
+
 ---
 
 ## Starting local dev
@@ -48,17 +60,18 @@ This single command:
 2. Downloads the **engine** and **server** binaries if not cached
 3. Applies your **schema** to the database
 4. Starts **supatype-server** (the unified API gateway)
-5. Watches `schema/` for changes and re-applies automatically
+5. Watches the **directory containing your schema entry** (default: `schema/`) for `.ts` changes and re-applies automatically
 
-Once running, your local services are available at:
+Once running, **HTTP and WebSocket routes below share one process: `supatype-server`** (default `http://localhost:54321`; change with `supatype dev --port`).
 
-| Service | URL |
+| Route / capability | URL |
 |---|---|
-| REST API (PostgREST) | `http://localhost:54321/rest/v1/` |
-| Auth (GoTrue) | `http://localhost:54321/auth/v1/` |
+| REST (PostgREST) | `http://localhost:54321/rest/v1/` |
+| Authentication | `http://localhost:54321/auth/v1/` |
 | Storage | `http://localhost:54321/storage/v1/` |
 | Realtime | `ws://localhost:54321/realtime/v1/` |
-| Postgres | `postgresql://postgres:postgres@localhost:5432/<project>` |
+| Postgres (default **docker** image) | `postgresql://supatype_admin:postgres@localhost:5432/<project>` (same as `.env` from `supatype init`) |
+| Postgres (**native** `database.provider`) | `postgresql://postgres:postgres@127.0.0.1:5432/<project>` |
 
 Press `Ctrl+C` to stop everything cleanly.
 
