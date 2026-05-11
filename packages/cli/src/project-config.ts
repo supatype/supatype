@@ -67,13 +67,16 @@ export interface SupatypeProjectConfig {
     upstream?: string
   }
   versions: {
-    /** Supatype schema engine binary version (e.g. "0.4.2"). */
+    /**
+     * Schema engine version (semver) or **`"local"`** when using **`overrides.engine`** only
+     * (Phase 10.7 — avoids duplicating the path).
+     */
     engine: string
-    /** supatype-server binary version (e.g. "0.1.0"). */
+    /** supatype-server version or **`"local"`** with **`overrides.server`**. */
     server: string
-    /** Native Postgres archive version (e.g. "17.2"). */
+    /** Postgres archive version or **`"local"`** with **`overrides.postgres_dir`**. */
     postgres: string
-    /** Deno binary version (e.g. "2.2.0"). */
+    /** Deno version or **`"local"`** with **`overrides.deno`**. */
     deno: string
   }
   /**

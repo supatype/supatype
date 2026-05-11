@@ -44,6 +44,7 @@ export function registerUpdate(program: Command): void {
 
       for (const component of components) {
         const current = config.versions[component]
+        if (current === "local") continue
         const latest = LATEST_VERSIONS[component]
         if (current !== latest) {
           updates.push({ component, from: current, to: latest })

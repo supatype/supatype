@@ -15,7 +15,14 @@ import { loadConfig } from "../config.js"
 import { functionsPathCandidatesFromProject, schemaPathFromProject } from "../project-config.js"
 import { discoverTsFunctionsInDir, writeDevFunctionsRouter } from "../functions-router-gen.js"
 import { signJwt } from "../jwt.js"
-import { resolveBinary, normalisePlatformPath, cachePath, currentPlatform } from "../binary-cache.js"
+import {
+  resolveBinary,
+  normalisePlatformPath,
+  cachePath,
+  currentPlatform,
+  hasMeaningfulOverrides,
+  describeActiveOverrides,
+} from "../binary-cache.js"
 import { ProcessManager } from "../process-manager.js"
 import { localStorageEnv } from "../local-storage.js"
 import { initdb, start as pgStart, stop as pgStop, waitReady as pgWaitReady, isPortInUse } from "../postgres-ctl.js"
@@ -85,6 +92,13 @@ export function registerDev(program: Command): void {
 
       // ── 1. Load project config ─────────────────────────────────────────────
       const config = loadConfig(cwd)
+      if (hasMeaningfulOverrides(config)) {
+        console.warn("[supatype] Local binary overrides active:")
+        for (const line of describeActiveOverrides(config)) {
+          console.warn(line)
+        }
+        console.warn("")
+      }
       const projectName = config.project.name
       const serverPort = opts.port ?? String(config.server.port ?? 54321)
       const postgrestPort = String(config.server.postgrestPort ?? 3001)

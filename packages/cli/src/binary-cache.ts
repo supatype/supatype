@@ -28,6 +28,68 @@ import { homedir } from "node:os"
 import { basename, join, resolve, isAbsolute } from "node:path"
 import type { SupatypeProjectConfig } from "./project-config.js"
 
+/**
+ * Set `versions.{engine|server|postgres|deno}: VERSION_PIN_LOCAL` to mean “use `overrides.*` only”
+ * without duplicating the path string (Phase 10.7). Requires the matching `overrides` entry.
+ */
+export const VERSION_PIN_LOCAL = "local"
+
+/** True if `overrides` contains any non-empty string path (contributor local builds). */
+export function hasMeaningfulOverrides(config: SupatypeProjectConfig): boolean {
+  const o = config.overrides
+  if (!o) return false
+  for (const v of Object.values(o)) {
+    if (typeof v === "string" && v.trim() !== "") return true
+  }
+  return false
+}
+
+/** Lines for a startup banner — non-empty override paths only. */
+export function describeActiveOverrides(config: SupatypeProjectConfig): string[] {
+  const o = config.overrides
+  if (!o) return []
+  const lines: string[] = []
+  const add = (label: string, v: string | undefined) => {
+    if (typeof v === "string" && v.trim() !== "") {
+      lines.push(`  ${label.padEnd(12)} → ${v.trim()}`)
+    }
+  }
+  add("engine", o.engine)
+  add("server", o.server)
+  add("postgres_dir", o.postgres_dir)
+  add("deno", o.deno)
+  add("studio", o.studio)
+  add("postgrest", o.postgrest)
+  return lines
+}
+
+/**
+ * True when this working tree is associated with a remote Supatype Cloud project:
+ * `project.ref`, `.supatype/cloud.json` (schema deploy link), or `.supatype/linked.json` (functions link).
+ */
+export function isLinkedToCloudProject(cwd: string, config: SupatypeProjectConfig): boolean {
+  const ref = config.project.ref
+  if (typeof ref === "string" && ref.trim() !== "") return true
+
+  const linkedPath = join(cwd, ".supatype", "linked.json")
+  if (existsSync(linkedPath)) {
+    try {
+      const data = JSON.parse(readFileSync(linkedPath, "utf8")) as Record<string, unknown>
+      if (typeof data["ref"] === "string" && (data["ref"] as string).trim() !== "") return true
+    } catch { /* ignore */ }
+  }
+
+  const cloudPath = join(cwd, ".supatype", "cloud.json")
+  if (existsSync(cloudPath)) {
+    try {
+      const data = JSON.parse(readFileSync(cloudPath, "utf8")) as { projectSlug?: string }
+      if (typeof data.projectSlug === "string" && data.projectSlug.trim() !== "") return true
+    } catch { /* ignore */ }
+  }
+
+  return false
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -124,13 +186,32 @@ export function currentPlatform(): PlatformId {
  * 2. Cached binary at ~/.supatype/cache/{component}/{version}/
  * 3. Throws — caller should call download() first.
  *
- * Hard error if both [overrides] and config.project.ref are set.
+ * Hard error if any meaningful `overrides` entry is set while the project is linked to cloud
+ * (`project.ref`, `.supatype/cloud.json`, or `.supatype/linked.json`).
  */
 export async function resolveBinary(
   component: Component,
   config: SupatypeProjectConfig,
 ): Promise<string> {
+  const cwd = process.cwd()
+  if (hasMeaningfulOverrides(config) && isLinkedToCloudProject(cwd, config)) {
+    throw new Error(
+      "[overrides] cannot be used while this project is linked to Supatype Cloud " +
+        "(project.ref, .supatype/cloud.json, or .supatype/linked.json).\n" +
+        "Remove overrides from supatype.config.ts / supatype.local.config.ts, or remove the cloud link files / clear project.ref.",
+    )
+  }
+
   const overridePath = config.overrides?.[component === "postgres" ? "postgres_dir" : component]
+  const version = versionFor(component, config)
+
+  if (version === VERSION_PIN_LOCAL && !overridePath) {
+    const key = component === "postgres" ? "postgres_dir" : component
+    throw new Error(
+      `[versions] versions.${component} is "${VERSION_PIN_LOCAL}" but overrides.${key} is not set. ` +
+        `Set overrides.${key} to your local build path, or pin a semver in versions.${component}.`,
+    )
+  }
 
   if (overridePath) {
     const normalised = normalisePlatformPath(overridePath)
@@ -156,13 +237,6 @@ export async function resolveBinary(
       resolvedOverride = withExe
     }
 
-    if (config.project.ref) {
-      throw new Error(
-        `[overrides] cannot be used when project.ref is set (linked to cloud project ${config.project.ref}).\n` +
-          "Unlink the project first: supatype unlink",
-      )
-    }
-
     if (!existsSync(resolvedOverride)) {
       throw new Error(`[overrides] ${component} path does not exist: ${resolvedOverride}`)
     }
@@ -172,11 +246,9 @@ export async function resolveBinary(
       throw new Error(`[overrides] ${component} path is not a file or directory: ${resolvedOverride}`)
     }
 
-    console.warn(`\u26a0  Using local build for ${component}: ${resolvedOverride}`)
     return resolvedOverride
   }
 
-  const version = versionFor(component, config)
   const platform = currentPlatform()
   const binPath = cachedBinaryPath(component, version, platform)
 
@@ -202,6 +274,12 @@ export async function download(
   version: string,
   platform: PlatformId,
 ): Promise<string> {
+  if (version === VERSION_PIN_LOCAL) {
+    throw new Error(
+      `cannot download CDN binary when version is "${VERSION_PIN_LOCAL}" — set overrides.${component === "postgres" ? "postgres_dir" : component} or pin a semver`,
+    )
+  }
+
   const dir = cachePath(component, version)
   mkdirSync(dir, { recursive: true })
 
@@ -506,6 +584,7 @@ export async function downloadAll(
 
   for (const component of components) {
     const version = versionFor(component, fakeConfig)
+    if (version === VERSION_PIN_LOCAL) continue
     try {
       await download(component, version, platform)
     } catch (err) {
