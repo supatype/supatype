@@ -8,3 +8,4 @@ alwaysApply: true
 - **`../plans/ENGINEERING-STATUS.md`** is the rollup for phase completion.
 - Prefer finishing **Phase 10.6** (Architecture overhaul) before broad **Phase 10.7** (internal DX) work, unless the user explicitly asks for a specific exception slice.
 - When landing an exception slice (e.g. a small 10.7 helper), note it in the commit message and return to the open phase.
+- Within **Phase 10.6**, walk **`Phase-10.6-Architecture-Overhaul.md`** tasks in **strict ID order** (**A1→A27**, then **B**, **C**, …); see **`phase106-alphabetical-tasks.mdc`** in this folder.

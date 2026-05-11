@@ -1,0 +1,15 @@
+---
+description: Phase 10.6 task order — strict alphabetical by task ID (A6 before A7 before B1…)
+alwaysApply: true
+---
+
+# Phase 10.6 — alphabetical task order
+
+When planning or implementing **Phase 10.6** work (`plans/Phase-10.6-Architecture-Overhaul.md`):
+
+1. Walk tasks in **strict ID order**: **A1 → A2 → … → A27**, then **B1 → …**, then **C1 → …**, then **D**, **E**, **F**, **G**.
+2. Skip rows that are fully **✓** (with verified note where used).
+3. For **Partial** rows, finish remaining scope **before** advancing to the next ID (e.g. complete **A6** edge cases before **A7**).
+4. Do not jump to later letters (e.g. **C19**) while an earlier letter still has open **○** or unfinished Partial gaps—unless the user explicitly overrides.
+
+Cross-repo order still respects this ID sequence (pick the repo that owns the next open row).
