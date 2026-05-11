@@ -333,6 +333,16 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
         ...(config.email?.resend_api_key !== undefined && config.email.resend_api_key !== ""
           ? { RESEND_API_KEY: config.email.resend_api_key }
           : {}),
+        ...(gotrueMailerProvider === "resend" &&
+        config.email?.resend_from !== undefined &&
+        config.email.resend_from.trim() !== ""
+          ? { RESEND_FROM: config.email.resend_from.trim() }
+          : {}),
+        ...(gotrueMailerProvider === "ses" &&
+        config.email?.ses_from !== undefined &&
+        config.email.ses_from.trim() !== ""
+          ? { SES_FROM: config.email.ses_from.trim() }
+          : {}),
         ...(config.email?.send_email_hook === true
           ? {
               GOTRUE_HOOK_SEND_EMAIL_ENABLED: "true",

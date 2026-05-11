@@ -106,6 +106,10 @@ export interface SupatypeProjectConfig {
     provider: "console" | "smtp" | "resend" | "ses"
     /** Resend API key (provider=resend, or set RESEND_API_KEY env var). */
     resend_api_key?: string
+    /** From address for Resend (provider=resend, or set RESEND_FROM env var). */
+    resend_from?: string
+    /** From address for SES (provider=ses, or set SES_FROM env var). */
+    ses_from?: string
     /**
      * When true, `supatype dev` enables the GoTrue send-email HTTP hook pointing at this
      * server's POST `/internal/v0hooks/send-email` (signed delivery, dev-only secret).
