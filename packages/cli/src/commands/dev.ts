@@ -2,8 +2,8 @@
  * supatype dev — start local Postgres, apply schema, run supatype-server.
  *
  * Supports two database providers (set in supatype.config.ts):
- *   provider = "docker"  — runs supatype/postgres via Docker (default; includes all extensions)
- *   provider = "native"  — manages a native Postgres binary from the supatype cache
+ *   provider = "native" — manages a native Postgres binary from the supatype cache (default when omitted)
+ *   provider = "docker" — runs supatype/postgres via Docker (includes all extensions)
  */
 
 import type { Command } from "commander"
@@ -88,7 +88,7 @@ export function registerDev(program: Command): void {
       const projectName = config.project.name
       const serverPort = opts.port ?? String(config.server.port ?? 54321)
       const postgrestPort = String(config.server.postgrestPort ?? 3001)
-      const provider = config.database.provider ?? "docker"
+      const provider = config.database.provider ?? "native"
 
       // ── 2. Resolve engine + server binaries ──────────────────────────────
       console.log(`[supatype] Resolving component binaries for "${projectName}"...`)
@@ -139,6 +139,10 @@ export function registerDev(program: Command): void {
       let pgBinDir: string | null = null
 
       if (provider === "docker") {
+        console.warn(
+          "[supatype] database.provider \"docker\" is a compatibility fallback (Phase 10.6). " +
+            "Prefer \"native\" for the default zero-Docker path. Docker support may be removed later.",
+        )
         const image = config.database.image ?? DEFAULT_DOCKER_IMAGE
         console.log(`[supatype] Starting Postgres via Docker (${image})...`)
         dockerPgStart({ image, projectName, port: pgPort })
@@ -275,11 +279,25 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
       }
 
       const LOCAL_JWT_SECRET = "super-secret-jwt-token-with-at-least-32-characters-long"
+
+      // Matches GOTRUE_HOOK_SEND_EMAIL_SECRETS symmetric format (dev only). Override via .env.
+      const LOCAL_SEND_EMAIL_HOOK_SECRETS =
+        "v1,whsec_abcdefghijklmnopqrstuvwxyz01234567"
       const now = Math.floor(Date.now() / 1000)
       const jwtBase = { iss: "supatype", iat: now, exp: now + 315_360_000 }
       const anonKey        = signJwt({ ...jwtBase, role: "anon" },         LOCAL_JWT_SECRET)
       const serviceRoleKey = signJwt({ ...jwtBase, role: "service_role" }, LOCAL_JWT_SECRET)
 
+
+      const emailProvider = config.email?.provider ?? "console"
+      const gotrueMailerProvider =
+        emailProvider === "console"
+          ? "console"
+          : emailProvider === "resend"
+            ? "resend"
+            : emailProvider === "ses"
+              ? "ses"
+              : "smtp"
 
       const serverEnv: Record<string, string> = {
         // supatype-server outer layer
@@ -308,9 +326,20 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
         API_EXTERNAL_URL: `http://localhost:${serverPort}/auth/v1`,
         GOTRUE_API_HOST: "localhost",
         GOTRUE_SITE_URL: `http://localhost:${serverPort}`,
+        GOTRUE_MAILER_MAILER_PROVIDER: gotrueMailerProvider,
         GOTRUE_MAILER_AUTOCONFIRM: "true",
         GOTRUE_LOG_LEVEL: "info",
         GOTRUE_DISABLE_SIGNUP: "false",
+        ...(config.email?.resend_api_key !== undefined && config.email.resend_api_key !== ""
+          ? { RESEND_API_KEY: config.email.resend_api_key }
+          : {}),
+        ...(config.email?.send_email_hook === true
+          ? {
+              GOTRUE_HOOK_SEND_EMAIL_ENABLED: "true",
+              GOTRUE_HOOK_SEND_EMAIL_URI: `http://127.0.0.1:${serverPort}/internal/v0hooks/send-email`,
+              GOTRUE_HOOK_SEND_EMAIL_SECRETS: LOCAL_SEND_EMAIL_HOOK_SECRETS,
+            }
+          : {}),
         ...(config.storage?.provider !== "s3" ? localStorageEnv(stateRoot) : {}),
         ...loadDotEnv(cwd),
       }

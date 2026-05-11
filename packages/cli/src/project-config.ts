@@ -79,7 +79,7 @@ export interface SupatypeProjectConfig {
   /**
    * Override component binaries with local build paths.
    * Intended for supatype contributors testing local changes.
-   * Cannot be combined with a linked cloud project (hard error).
+   * Cannot be combined with a linked cloud project (`project.ref`, `.supatype/cloud.json`, or `.supatype/linked.json`; hard error in `resolveBinary`).
    */
   overrides?: {
     /** Path to local engine binary. */
@@ -106,6 +106,12 @@ export interface SupatypeProjectConfig {
     provider: "console" | "smtp" | "resend" | "ses"
     /** Resend API key (provider=resend, or set RESEND_API_KEY env var). */
     resend_api_key?: string
+    /**
+     * When true, `supatype dev` enables the GoTrue send-email HTTP hook pointing at this
+     * server's POST `/internal/v0hooks/send-email` (signed delivery, dev-only secret).
+     * Override `GOTRUE_HOOK_SEND_EMAIL_*` in `.env` if needed.
+     */
+    send_email_hook?: boolean
   }
   storage?: {
     /**
