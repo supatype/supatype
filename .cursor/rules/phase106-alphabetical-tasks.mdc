@@ -9,7 +9,7 @@ When planning or implementing **Phase 10.6** work (`plans/Phase-10.6-Architectur
 
 1. Walk tasks in **strict ID order**: **A1 → A2 → … → A27**, then **B1 → …**, then **C1 → …**, then **D**, **E**, **F**, **G**.
 2. Skip rows that are fully **✓** (with verified note where used).
-3. For **Partial** rows, finish remaining scope **before** advancing to the next ID (e.g. complete **A6** edge cases before **A7**).
-4. Do not jump to later letters (e.g. **C19**) while an earlier letter still has open **○** or unfinished Partial gaps—unless the user explicitly overrides.
+3. **Finish the current row completely** (Status is **✓** with verified date, and behaviour matches the task text) **before** starting the next ID. Treat **Partial** as **not done**: do not open **A7** while **A6** is Partial, do not start **B** while any **A** row is still open, and so on—unless the user explicitly overrides in chat.
+4. Do not jump to later letters (e.g. **C19**) while an earlier letter still has any row that is not **✓**.
 
 Cross-repo order still respects this ID sequence (pick the repo that owns the next open row).
