@@ -193,6 +193,19 @@ describe("mergeProjectConfig()", () => {
     expect(merged.email?.smtp?.pass).toBe("x")
   })
 
+  it("merges send_email_hook fields from local", () => {
+    const base = defineConfig({
+      ...minimalProject("p"),
+      email: { provider: "console", send_email_hook: true, send_email_hook_uri: "http://old/hook" },
+    })
+    const merged = mergeProjectConfig(base, {
+      email: { send_email_hook_secrets: "v1,whsec_customsecret0000000000000000" },
+    })
+    expect(merged.email?.send_email_hook).toBe(true)
+    expect(merged.email?.send_email_hook_uri).toBe("http://old/hook")
+    expect(merged.email?.send_email_hook_secrets).toBe("v1,whsec_customsecret0000000000000000")
+  })
+
   it("overrides app.vite_dev_url from local", () => {
     const base = defineConfig({
       ...minimalProject("p"),

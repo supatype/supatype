@@ -137,6 +137,16 @@ export interface SupatypeProjectConfig {
      * Override `GOTRUE_HOOK_SEND_EMAIL_*` in `.env` if needed.
      */
     send_email_hook?: boolean
+    /**
+     * Override hook target URL when `send_email_hook` is true (e.g. HTTPS tunnel or Edge URL).
+     * Default: `http://127.0.0.1:<serverPort>/internal/v0hooks/send-email`.
+     */
+    send_email_hook_uri?: string
+    /**
+     * Standard Webhooks v1 secrets for the send-email hook (`v1,whsec_...`, pipe-separated for rotation).
+     * Default in dev: a fixed local secret; override for team-shared dev or CI.
+     */
+    send_email_hook_secrets?: string
   }
   storage?: {
     /**

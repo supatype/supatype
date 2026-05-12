@@ -386,8 +386,16 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
         ...(config.email?.send_email_hook === true
           ? {
               GOTRUE_HOOK_SEND_EMAIL_ENABLED: "true",
-              GOTRUE_HOOK_SEND_EMAIL_URI: `http://127.0.0.1:${serverPort}/internal/v0hooks/send-email`,
-              GOTRUE_HOOK_SEND_EMAIL_SECRETS: LOCAL_SEND_EMAIL_HOOK_SECRETS,
+              GOTRUE_HOOK_SEND_EMAIL_URI:
+                config.email?.send_email_hook_uri !== undefined &&
+                config.email.send_email_hook_uri.trim() !== ""
+                  ? config.email.send_email_hook_uri.trim()
+                  : `http://127.0.0.1:${serverPort}/internal/v0hooks/send-email`,
+              GOTRUE_HOOK_SEND_EMAIL_SECRETS:
+                config.email?.send_email_hook_secrets !== undefined &&
+                config.email.send_email_hook_secrets.trim() !== ""
+                  ? config.email.send_email_hook_secrets.trim()
+                  : LOCAL_SEND_EMAIL_HOOK_SECRETS,
             }
           : {}),
         ...(config.storage?.provider !== "s3" ? localStorageEnv(stateRoot) : {}),
