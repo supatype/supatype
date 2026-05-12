@@ -108,11 +108,23 @@ export interface SupatypeProjectConfig {
     /**
      * Email delivery provider.
      * "console" = log to stdout (default for dev)
-     * "smtp"    = SMTP via env SMTP_* vars
+     * "smtp"    = SMTP (set `smtp` below and/or GOTRUE_SMTP_* in `.env`)
      * "resend"  = Resend API (requires RESEND_API_KEY, RESEND_FROM)
      * "ses"     = AWS SES v2 (ambient credentials, requires SES_FROM)
      */
     provider: "console" | "smtp" | "resend" | "ses"
+    /**
+     * SMTP settings for provider=smtp (merged into process env as GOTRUE_SMTP_*).
+     * Omitted keys can still be set via `.env` / shell.
+     */
+    smtp?: {
+      host?: string
+      port?: number
+      user?: string
+      pass?: string
+      admin_email?: string
+      sender_name?: string
+    }
     /** Resend API key (provider=resend, or set RESEND_API_KEY env var). */
     resend_api_key?: string
     /** From address for Resend (provider=resend, or set RESEND_FROM env var). */
@@ -209,7 +221,21 @@ export function mergeProjectConfig(
         }
       : {}),
     ...(base.email !== undefined || override.email !== undefined
-      ? { email: { ...base.email, ...override.email } as NonNullable<SupatypeProjectConfig["email"]> }
+      ? (() => {
+          const b = base.email
+          const o = override.email
+          const mergedSmtp =
+            b?.smtp !== undefined || o?.smtp !== undefined
+              ? { ...(b?.smtp ?? {}), ...(o?.smtp ?? {}) }
+              : undefined
+          return {
+            email: {
+              ...b,
+              ...o,
+              ...(mergedSmtp !== undefined ? { smtp: mergedSmtp } : {}),
+            } as NonNullable<SupatypeProjectConfig["email"]>,
+          }
+        })()
       : {}),
     ...(base.storage !== undefined || override.storage !== undefined
       ? {

@@ -180,6 +180,19 @@ describe("loadConfig()", () => {
 })
 
 describe("mergeProjectConfig()", () => {
+  it("deep-merges email.smtp between base and local", () => {
+    const base = defineConfig({
+      ...minimalProject("p"),
+      email: { provider: "smtp", smtp: { host: "h1", port: 587, user: "u0" } },
+    })
+    const merged = mergeProjectConfig(base, { email: { smtp: { host: "h2", pass: "x" } } })
+    expect(merged.email?.provider).toBe("smtp")
+    expect(merged.email?.smtp?.host).toBe("h2")
+    expect(merged.email?.smtp?.port).toBe(587)
+    expect(merged.email?.smtp?.user).toBe("u0")
+    expect(merged.email?.smtp?.pass).toBe("x")
+  })
+
   it("overrides app.vite_dev_url from local", () => {
     const base = defineConfig({
       ...minimalProject("p"),

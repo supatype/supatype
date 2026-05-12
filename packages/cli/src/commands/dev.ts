@@ -12,7 +12,11 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { isAbsolute, join, relative, resolve } from "node:path"
 import { loadConfig } from "../config.js"
-import { functionsPathCandidatesFromProject, schemaPathFromProject } from "../project-config.js"
+import {
+  functionsPathCandidatesFromProject,
+  schemaPathFromProject,
+  type SupatypeProjectConfig,
+} from "../project-config.js"
 import { discoverTsFunctionsInDir, writeDevFunctionsRouter } from "../functions-router-gen.js"
 import { signJwt } from "../jwt.js"
 import {
@@ -79,6 +83,24 @@ function detectDenoBinary(
   }
 
   return { available: false }
+}
+
+/** Map `email.smtp` from supatype.config.ts into GOTRUE_SMTP_* for the embedded GoTrue process. */
+function gotrueSMTPFromEmailConfig(email: SupatypeProjectConfig["email"] | undefined): Record<string, string> {
+  const s = email?.smtp
+  if (!s) return {}
+  const out: Record<string, string> = {}
+  const host = s.host?.trim()
+  if (host) out.GOTRUE_SMTP_HOST = host
+  if (s.port !== undefined) out.GOTRUE_SMTP_PORT = String(s.port)
+  const user = s.user?.trim()
+  if (user) out.GOTRUE_SMTP_USER = user
+  if (s.pass !== undefined && s.pass !== "") out.GOTRUE_SMTP_PASS = s.pass
+  const admin = s.admin_email?.trim()
+  if (admin) out.GOTRUE_SMTP_ADMIN_EMAIL = admin
+  const sender = s.sender_name?.trim()
+  if (sender) out.GOTRUE_SMTP_SENDER_NAME = sender
+  return out
 }
 
 export function registerDev(program: Command): void {
@@ -360,6 +382,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
         config.email.ses_from.trim() !== ""
           ? { SES_FROM: config.email.ses_from.trim() }
           : {}),
+        ...(gotrueMailerProvider === "smtp" ? gotrueSMTPFromEmailConfig(config.email) : {}),
         ...(config.email?.send_email_hook === true
           ? {
               GOTRUE_HOOK_SEND_EMAIL_ENABLED: "true",
