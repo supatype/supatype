@@ -1,6 +1,6 @@
 /**
- * Generates a Deno router entrypoint so `deno run` can serve multiple handlers
- * (same routing contract as `supatype functions serve`).
+ * Generates a Deno router entrypoint so `deno run` (optionally `deno run --watch` in dev)
+ * can serve multiple handlers (same routing contract as `supatype functions serve`).
  */
 import {
   basename,
