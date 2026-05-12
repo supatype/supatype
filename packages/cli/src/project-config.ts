@@ -65,6 +65,12 @@ export interface SupatypeProjectConfig {
     static_dir?: string
     /** Upstream URL to proxy to (mode=proxy). */
     upstream?: string
+    /**
+     * Vite dev server base URL for HMR (`/_vite/*`) when `server.mode` is dev.
+     * Example: `http://127.0.0.1:5173`. Sets `SUPATYPE_VITE_DEV_URL` for supatype-server.
+     * When omitted, dev still falls back to `SUPATYPE_APP_UPSTREAM` for non-proxy app modes.
+     */
+    vite_dev_url?: string
   }
   versions: {
     /**

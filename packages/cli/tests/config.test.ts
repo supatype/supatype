@@ -3,7 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { defineConfig, loadConfig } from "../src/config.js"
-import type { SupatypeProjectConfig } from "../src/project-config.js"
+import { mergeProjectConfig, type SupatypeProjectConfig } from "../src/project-config.js"
 
 let counter = 0
 let tmpDir: string
@@ -176,5 +176,18 @@ describe("loadConfig()", () => {
     const cfg = loadConfig(tmpDir)
     expect(cfg.versions.engine).toBe("0.4.2")
     expect(cfg.schema?.path).toBe("./a.ts")
+  })
+})
+
+describe("mergeProjectConfig()", () => {
+  it("overrides app.vite_dev_url from local", () => {
+    const base = defineConfig({
+      ...minimalProject("p"),
+      app: { mode: "static", static_dir: "./dist", vite_dev_url: "http://127.0.0.1:1111" },
+    })
+    const merged = mergeProjectConfig(base, { app: { vite_dev_url: "http://127.0.0.1:5173" } })
+    expect(merged.app.vite_dev_url).toBe("http://127.0.0.1:5173")
+    expect(merged.app.mode).toBe("static")
+    expect(merged.app.static_dir).toBe("./dist")
   })
 })

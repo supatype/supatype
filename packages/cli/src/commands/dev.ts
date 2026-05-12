@@ -329,6 +329,9 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
         SUPATYPE_ANON_KEY: anonKey,
         SUPATYPE_SERVICE_ROLE_KEY: serviceRoleKey,
         PORT: serverPort,
+        ...(config.app.vite_dev_url !== undefined && config.app.vite_dev_url.trim() !== ""
+          ? { SUPATYPE_VITE_DEV_URL: config.app.vite_dev_url.trim() }
+          : {}),
         // GoTrue required fields (sensible local-dev defaults)
         DATABASE_URL: authDbURL,
         SUPATYPE_SQL_DATABASE_URL: dbURL,

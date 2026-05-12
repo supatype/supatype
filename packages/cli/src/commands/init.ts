@@ -53,6 +53,7 @@ function scaffold(dir: string, projectName: string, mode: "dev" | "standalone" =
   write("schema/index.ts", schemaTemplate())
   write(".env", envTemplate(projectName))
   write("seed.ts", seedTemplate(projectName))
+  write("seeds/.gitkeep", "")
   write(".gitignore", gitignoreTemplate())
 }
 
@@ -68,8 +69,8 @@ function tsConfigTemplate(projectName: string, mode: "dev" | "standalone"): stri
 export default defineConfig({
   project: { name: "${projectName}" },
   database: {
-    provider: "docker",
-    // image: "supatype/postgres:17-latest"  // override in supatype.local.config.ts
+    provider: "native",
+    // provider: "docker", image: "supatype/postgres:17-latest"  // full extensions stack via Docker
   },
   server: {
     mode: "${mode}",
@@ -79,6 +80,7 @@ ${domainField}  },
     mode: "none",
     // mode: "static", static_dir: "./dist",
     // mode: "proxy", upstream: "http://localhost:3000",
+    // vite_dev_url: "http://127.0.0.1:5173",  // dev HMR at /_vite (when using a separate Vite server)
   },
   versions: {
     engine: "0.4.2",
