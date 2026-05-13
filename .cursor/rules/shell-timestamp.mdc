@@ -1,0 +1,14 @@
+---
+description: Print wall time before invoking the shell tool (not inside the command)
+alwaysApply: true
+---
+
+# Shell commands and timestamps
+
+When you are about to run a **long or potentially slow** shell command (for example `cargo build`, `cargo test`, `pnpm install`, migrations, docker pulls):
+
+1. **In your assistant message**, on a line by itself **immediately before** the tool call, print an ISO-like timestamp so the user knows when the run started, for example: `Shell run started: 2026-05-13T22:15:00Z` (UTC is fine; match the session’s “today” if the user prefers local time—state which you used).
+2. **Do not** embed `date`, `printf`, or similar **only** to print the time **inside** the same shell command string as the real work (e.g. avoid `date && cargo build` as the primary pattern for this). The timestamp belongs in the **chat**, not as a wrapper around the command.
+3. After the tool returns, you may briefly note duration or outcome in prose if helpful; optional.
+
+Short commands (e.g. `git status`, `ls`) do not need a timestamp unless the user is debugging hangs.
