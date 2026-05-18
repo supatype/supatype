@@ -9,7 +9,7 @@ RUN pnpm --filter @supatype/client build && pnpm --filter @supatype/studio build
 FROM nginx:alpine
 RUN echo "worker_processes 1;" > /etc/nginx/nginx.conf.d_worker \
     && sed -i 's/worker_processes.*;/worker_processes 1;/' /etc/nginx/nginx.conf
-COPY --from=builder /build/packages/studio/dist /usr/share/nginx/html
+COPY --from=builder /build/packages/studio/dist-app /usr/share/nginx/html
 COPY --from=builder /build/packages/studio/nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 3002
 

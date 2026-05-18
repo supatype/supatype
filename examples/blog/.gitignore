@@ -2,4 +2,5 @@
 out/
 node_modules/
 supatype.local.config.ts
-supatype
+# Engine-generated row types (regenerate with `supatype generate`)
+supatype/generated/database.ts

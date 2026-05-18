@@ -37,7 +37,7 @@ export function NewPostForm({ userId }: NewPostFormProps): React.ReactElement {
     const payload = {
       title,
       body,
-      authorId: userId,
+      authUser: { id: userId },
       status: "draft" as const,
     } satisfies TableInsert<"post">
     const result = await mutate(payload)
