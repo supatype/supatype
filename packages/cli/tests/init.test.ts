@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
-import { mkdirSync, rmSync, existsSync, readFileSync } from "node:fs"
+import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { scaffold } from "../src/commands/init.js"
@@ -20,10 +20,13 @@ describe("scaffold()", () => {
     scaffold(tmpRoot, "my-app")
 
     const expected = [
+      "package.json",
       "supatype.config.ts",
       "schema/index.ts",
       ".env",
       "seed.ts",
+      "seeds/.gitkeep",
+      "public/.gitkeep",
       ".gitignore",
     ]
     for (const rel of expected) {
@@ -36,8 +39,24 @@ describe("scaffold()", () => {
     const content = readFileSync(join(tmpRoot, "supatype.config.ts"), "utf8")
     expect(content).toContain("blog-app")
     expect(content).toContain("defineConfig")
+    expect(content).toContain('provider: "native"')
     expect(content).toContain("schema:")
     expect(content).toContain("versions:")
+  })
+
+  it("package.json includes @supatype/cli and @supatype/types", () => {
+    scaffold(tmpRoot, "pkg-app")
+    const content = readFileSync(join(tmpRoot, "package.json"), "utf8")
+    expect(content).toContain("@supatype/cli")
+    expect(content).toContain("@supatype/types")
+    expect(content).toContain("pkg-app")
+  })
+
+  it("skips package.json when it already exists", () => {
+    const pkgPath = join(tmpRoot, "package.json")
+    writeFileSync(pkgPath, '{"name":"existing"}', "utf8")
+    scaffold(tmpRoot, "my-app")
+    expect(readFileSync(pkgPath, "utf8")).toBe('{"name":"existing"}')
   })
 
   it("supatype.config.ts documents self-host workflow", () => {

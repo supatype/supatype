@@ -39,6 +39,18 @@ describe("runtime contract", () => {
     expect(paths).toContain("/")
   })
 
+  it("self-host kong uses unified supatype-server gateway", () => {
+    const kong = buildKongDeclarative({ unifiedGateway: true })
+    expect(kong).toContain("http://server:9999")
+    expect(kong).toContain("/rest/v1/")
+    expect(kong).toContain("/auth/v1/")
+    expect(kong).toContain("/storage/v1/")
+    expect(kong).toContain("/realtime/v1/")
+    expect(kong).toContain("/functions/v1/")
+    expect(kong).not.toContain("http://postgrest:3000")
+    expect(kong).not.toContain("http://storage:5000")
+  })
+
   it("kong declarative output contains route contract paths", () => {
     const kong = buildKongDeclarative({ appUpstream: "http://app:3000" })
     expect(kong).toContain("/rest/v1/")
@@ -61,11 +73,11 @@ describe("runtime contract", () => {
     expect(compose).not.toContain("\n  app:\n")
   })
 
-  it("self-host compose adds static service in static mode", () => {
+  it("self-host compose configures static app on supatype-server", () => {
     const compose = renderSelfHostCompose({ ...baseConfig, app: { mode: "static", static_dir: "./public" } })
-    expect(compose).toContain("static-app:")
-    expect(compose).toContain("../../public:/usr/share/nginx/html:ro")
-    expect(compose).toContain("./nginx.conf:/etc/nginx/conf.d/default.conf:ro")
+    expect(compose).toContain('SUPATYPE_APP_MODE: static')
+    expect(compose).toContain("SUPATYPE_APP_STATIC_DIR: /project/public")
+    expect(compose).not.toContain("static-app:")
   })
 
   it("app config updater writes proxy mode intent", () => {
@@ -187,26 +199,26 @@ export default defineConfig({
       expect(readFileSync(out.kongPath, "utf8")).toContain("/rest/v1/")
       const compose = readFileSync(out.composePath, "utf8")
       expect(compose).toContain("${SUPATYPE_POSTGRES_IMAGE:-supatype/postgres:17-latest}")
-      expect(compose).toContain("${SUPATYPE_SERVER_IMAGE:-${SUPATYPE_AUTH_IMAGE:-supatype/auth:v1.0.0}}")
+      expect(compose).toContain("${SUPATYPE_SERVER_IMAGE:-${SUPATYPE_AUTH_IMAGE:-supatype/server:latest}}")
       expect(compose).toContain("${SUPATYPE_STORAGE_IMAGE:-supatype/storage:latest}")
-      expect(compose).toContain("${SUPATYPE_REALTIME_IMAGE:-supatype/realtime:latest}")
       expect(compose).toContain("${SUPATYPE_STUDIO_IMAGE:-supatype/studio:latest}")
-      expect(compose).toContain("${SUPATYPE_SCHEMA_ENGINE_IMAGE:-supatype/schema-engine:v0.1.0-alpha.3}")
+      expect(compose).toContain("SUPATYPE_POSTGREST_URL: http://postgrest:3000")
+      expect(compose).toContain("unified gateway")
+      const kong = readFileSync(out.kongPath, "utf8")
+      expect(kong).toContain("http://server:9999")
+      expect(kong).not.toContain("http://postgrest:3000")
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
   })
 
-  it("writes nginx config for static mode", () => {
-    const dir = mkdtempSync(join(tmpdir(), "supatype-static-"))
+  it("writes default manifest when missing for compose", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-manifest-"))
     try {
-      const out = writeSelfHostCompose(dir, {
-        ...baseConfig,
-        app: { mode: "static", static_dir: "./public" },
-      })
-      expect(readFileSync(out.composePath, "utf8")).toContain("static-app:")
-      expect(readFileSync(out.kongPath, "utf8")).toContain("http://static-app:8080")
-      expect(readFileSync(out.nginxPath, "utf8")).toContain("try_files $uri $uri/ /index.html;")
+      writeSelfHostCompose(dir, { ...baseConfig, app: { mode: "none" } })
+      const manifest = readFileSync(join(dir, ".supatype", "manifest.json"), "utf8")
+      expect(manifest).toContain("postgrest_url")
+      expect(manifest).toContain("http://postgrest:3000")
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

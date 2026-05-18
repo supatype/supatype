@@ -1,0 +1,22 @@
+---
+description: Keep ../plans/ENGINEERING-STATUS.md authoritative when work maps to phases or multiple repos
+alwaysApply: true
+---
+
+# Plans & ENGINEERING-STATUS
+
+Plans directory: **`C:\Users\Nic_J\Documents\NJ\plans\`** (sibling of this monorepo), especially **`ENGINEERING-STATUS.md`**.
+
+## After meaningful work
+
+1. **Read** `../plans/ENGINEERING-STATUS.md` before large changes that touch phase-shaped scope (engine, CLI, `supatype-auth` / supatype-server, cloud, Studio).
+2. **When a milestone merges** (vertical slice shipped): update `../plans/ENGINEERING-STATUS.md`:
+   - Bump **“Last reconciled”** date near the top.
+   - Adjust **§3** phase rollup (Shipped / Partial / Planned) and **§4** checkboxes to match **main branch** reality.
+3. **Phase-*.md** rows: set **✓** only for tasks you **verified** against code (or production for ops tasks). Optionally append `(verified YYYY-MM-DD)` in the task cell.
+4. **Do not** mark whole phases ✓ from assumption. **Do not** leave `ENGINEERING-STATUS.md` stale after claiming a phase or sub-phase is “done”.
+5. **Phase 10.6:** `Phase-10.6-Architecture-Overhaul.md` still has many **○** while `supatype-auth` already implements **parts** of A/E — reconcile that file after substantive server/CLI changes, or extend **ENGINEERING-STATUS §8** with a short “partial in code” note.
+
+## Canonical config
+
+Project config is **`supatype.config.ts`** + **`defineConfig`** (`@supatype/cli`) — not TOML. See `../plans/Manual-Release-Readiness-Checklist.md` and phase docs for release vs product checklists.

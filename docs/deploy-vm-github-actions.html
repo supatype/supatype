@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Deploy to a VM with GitHub Actions — Supatype</title>
+  <meta name="description" content="End-to-end example: scaffold a Supatype project locally, self-host on a VM with Docker Compose, and deploy updates via GitHub Actions over SSH." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0a0a0f;
+      --bg-3: #13131f;
+      --border: rgba(255,255,255,0.08);
+      --border-bright: rgba(255,255,255,0.15);
+      --text: #e8e8f0;
+      --text-muted: #8888a8;
+      --text-dim: #55556a;
+      --purple: #7c3aed;
+      --purple-light: #a855f7;
+      --radius: 10px;
+    }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    .container { max-width: 760px; margin: 0 auto; padding: 0 24px; }
+    nav {
+      position: sticky; top: 0; z-index: 100;
+      border-bottom: 1px solid var(--border);
+      background: rgba(10,10,15,0.9);
+      backdrop-filter: blur(16px);
+    }
+    .nav-inner {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 24px; max-width: 1100px; margin: 0 auto;
+    }
+    .logo img { height: 28px; width: auto; display: block; }
+    .nav-links { display: flex; gap: 8px; list-style: none; flex-wrap: wrap; }
+    .nav-links a {
+      color: var(--text-muted); text-decoration: none; font-size: 14px; font-weight: 500;
+      padding: 6px 12px; border-radius: 6px;
+    }
+    .nav-links a:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+    .page-header { padding: 56px 0 32px; }
+    .page-header h1 {
+      font-size: clamp(28px, 5vw, 36px); font-weight: 800; color: #fff;
+      letter-spacing: -0.5px; margin-bottom: 12px;
+    }
+    .page-header p { color: var(--text-muted); font-size: 16px; }
+    .page-header a { color: var(--purple-light); }
+    article { padding-bottom: 80px; }
+    .guide-step { margin-bottom: 32px; }
+    .guide-step h2 {
+      font-size: 18px; font-weight: 800; color: #fff; margin-bottom: 10px;
+    }
+    .guide-step h3 {
+      font-size: 14px; font-weight: 700; color: var(--purple-light);
+      margin: 16px 0 8px; text-transform: uppercase; letter-spacing: 0.06em;
+    }
+    .guide-step p, .guide-step li {
+      font-size: 14px; color: var(--text-muted); margin-bottom: 10px; line-height: 1.55;
+    }
+    .guide-step ul { margin: 0 0 12px 1.2rem; }
+    .guide-pre {
+      background: var(--bg-3); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 14px 16px; font-family: 'JetBrains Mono', monospace; font-size: 12px;
+      line-height: 1.6; color: #c4b5fd; overflow-x: auto; white-space: pre-wrap; margin: 8px 0 12px;
+    }
+    .guide-note {
+      font-size: 13px; color: var(--text-dim); border-left: 2px solid var(--purple);
+      padding-left: 12px; margin-top: 12px;
+    }
+    code {
+      font-family: 'JetBrains Mono', monospace; font-size: 0.9em;
+      background: rgba(124,58,237,0.12); padding: 2px 6px; border-radius: 4px;
+    }
+    footer {
+      border-top: 1px solid var(--border); padding: 32px 0;
+      font-size: 14px; color: var(--text-dim);
+    }
+    footer a { color: var(--text-muted); text-decoration: none; margin-right: 16px; }
+    footer a:hover { color: var(--text); }
+  </style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-inner">
+    <a href="index.html" class="logo"><img src="supatype.svg" alt="Supatype" /></a>
+    <ul class="nav-links">
+      <li><a href="index.html#local-dev">Docs home</a></li>
+      <li><a href="index.html#deploy-changes">Deploy changes</a></li>
+      <li><a href="https://github.com/supatype" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </div>
+</nav>
+
+<header class="page-header">
+  <div class="container">
+    <p style="margin-bottom:8px;font-size:14px;"><a href="index.html">Docs</a> / Guides</p>
+    <h1>Deploy to a VM with GitHub Actions</h1>
+    <p>
+      Create a Supatype project on your laptop, push it to GitHub, run the stack on a VM with
+      <strong>Docker Compose</strong>, then ship schema and frontend updates automatically on every
+      <code>main</code> push.
+    </p>
+  </div>
+</header>
+
+<article class="container">
+
+  <section class="guide-step">
+    <h2>What you will have</h2>
+    <ul>
+      <li>One git repo with <code>supatype.config.ts</code> (shared by local dev and the VM).</li>
+      <li>A VM running <code>supatype self-host compose</code> (Kong gateway on port <code>18473</code>).</li>
+      <li>A GitHub Action that SSHs into the VM, pulls, migrates, rebuilds static files, and restarts Compose.</li>
+    </ul>
+    <p class="guide-note">
+      This guide is for <strong>self-host</strong> only. Supatype Cloud (managed Kubernetes) is a separate product and not covered here.
+    </p>
+  </section>
+
+  <section class="guide-step">
+    <h2>1 · Create the project locally</h2>
+    <p>On your machine (Node.js 22+):</p>
+    <pre class="guide-pre">npm install -g @supatype/cli
+
+mkdir my-blog &amp;&amp; cd my-blog
+supatype init
+npm install
+supatype keys</pre>
+    <p>Copy the printed <code>ANON_KEY</code> and <code>SERVICE_ROLE_KEY</code> into <code>.env</code> for local dev.</p>
+
+    <h3>Static frontend (one-time)</h3>
+    <pre class="guide-pre">supatype app add --static ./public
+# Add a build step to package.json, e.g. Vite → public/
+npm install -D vite
+# "build": "vite build"  (outputDir: public)</pre>
+    <p>Commit <code>supatype.config.ts</code> — do <strong>not</strong> run <code>app add</code> again on the server.</p>
+
+    <h3>Develop locally</h3>
+    <pre class="guide-pre">supatype dev
+supatype push</pre>
+    <p>Optional: <code>supatype.local.config.ts</code> on your laptop only (proxy to Vite) while production stays <code>static</code> in the main config. See <a href="index.html#deploy-changes">Deploy changes</a>.</p>
+
+    <pre class="guide-pre">git init
+git add .
+git commit -m "Initial Supatype project"
+git branch -M main
+git remote add origin git@github.com:YOUR_USER/my-blog.git
+git push -u origin main</pre>
+  </section>
+
+  <section class="guide-step">
+    <h2>2 · Prepare the VM (one-time)</h2>
+    <p>Ubuntu 22.04+ (or similar) with SSH access. Install Docker, Compose v2, Node 22, and the CLI:</p>
+    <pre class="guide-pre"># Docker — see https://docs.docker.com/engine/install/ubuntu/
+sudo apt update &amp;&amp; sudo apt install -y git nodejs npm
+sudo npm install -g @supatype/cli
+
+sudo mkdir -p /opt/my-blog
+sudo chown "$USER":"$USER" /opt/my-blog
+cd /opt/my-blog
+git clone git@github.com:YOUR_USER/my-blog.git .</pre>
+
+    <h3>Production secrets on the VM</h3>
+    <p>Create <code>/opt/my-blog/.env</code> on the server (never commit this file). Use strong values and your public URL:</p>
+    <pre class="guide-pre">DATABASE_URL=postgresql://supatype_admin:CHANGE_ME@localhost:5432/my-blog
+POSTGRES_USER=supatype_admin
+POSTGRES_PASSWORD=CHANGE_ME
+POSTGRES_DB=my-blog
+JWT_SECRET=CHANGE_ME-long-random-string
+ANON_KEY=eyJ...   # from supatype keys on first setup
+SERVICE_ROLE_KEY=eyJ...
+API_EXTERNAL_URL=https://api.example.com
+SITE_URL=https://example.com</pre>
+
+    <h3>First boot on the VM</h3>
+    <pre class="guide-pre">cd /opt/my-blog
+npm install
+supatype self-host compose render
+supatype self-host compose up -d
+supatype push
+npm run build
+supatype self-host compose render
+supatype self-host compose up -d</pre>
+    <p>Open <code>http://YOUR_VM_IP:18473</code> (put Nginx/Caddy in front for HTTPS). Studio: <code>/studio/</code>.</p>
+  </section>
+
+  <section class="guide-step">
+    <h2>3 · GitHub repository secrets</h2>
+    <p>In your repo: <strong>Settings → Secrets and variables → Actions</strong>. Add:</p>
+    <ul>
+      <li><code>VM_HOST</code> — public IP or hostname of the VM</li>
+      <li><code>VM_USER</code> — SSH user (e.g. <code>ubuntu</code>)</li>
+      <li><code>VM_SSH_KEY</code> — private key (PEM) that can log in as <code>VM_USER</code></li>
+      <li><code>DEPLOY_PATH</code> — <code>/opt/my-blog</code> (project directory on the VM)</li>
+    </ul>
+    <p class="guide-note">The workflow does not upload <code>.env</code>; production secrets stay only on the VM.</p>
+  </section>
+
+  <section class="guide-step">
+    <h2>4 · GitHub Actions workflow</h2>
+    <p>Add <code>.github/workflows/deploy-self-host.yml</code> to your repo:</p>
+    <pre class="guide-pre">name: Deploy self-host
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+            cd "${{ secrets.DEPLOY_PATH }}"
+            git fetch origin main
+            git reset --hard origin/main
+            npm ci
+            supatype push
+            npm run build
+            supatype self-host compose render
+            supatype self-host compose up -d</pre>
+    <p>On every push to <code>main</code>, the VM pulls latest code, applies schema migrations, rebuilds <code>public/</code>, and refreshes Compose.</p>
+    <p class="guide-note">
+      <code>supatype push</code> uses <code>DATABASE_URL</code> from the VM’s <code>.env</code> (Postgres exposed on <code>localhost:5432</code> by Compose).
+      Install <code>@supatype/cli</code> globally on the VM, or change the script to <code>npx supatype@latest</code>.
+    </p>
+  </section>
+
+  <section class="guide-step">
+    <h2>5 · Verify the pipeline</h2>
+    <pre class="guide-pre"># Local: change schema or frontend, then
+git add .
+git commit -m "Add posts table and update landing page"
+git push origin main</pre>
+    <p>Watch the Action in GitHub → <strong>Actions</strong>. On success, hit your gateway URL and confirm schema + static files updated.</p>
+    <h3>Troubleshooting</h3>
+    <ul>
+      <li><strong>SSH fails</strong> — check security group / firewall allows port 22; verify <code>VM_SSH_KEY</code> matches the VM’s <code>authorized_keys</code>.</li>
+      <li><strong><code>supatype push</code> fails</strong> — ensure Compose is up and <code>DATABASE_URL</code> points at <code>localhost:5432</code>.</li>
+      <li><strong>Site unchanged</strong> — confirm <code>npm run build</code> writes into the directory set by <code>app.static_dir</code> (e.g. <code>./public</code>), then re-run <code>compose render</code> + <code>up -d</code>.</li>
+    </ul>
+  </section>
+
+  <section class="guide-step">
+    <h2>Related docs</h2>
+    <p>
+      <a href="index.html#local-dev">Local development</a> ·
+      <a href="index.html#self-host">Self-host</a> ·
+      <a href="index.html#deploy-changes">Deploy changes</a>
+    </p>
+  </section>
+
+</article>
+
+<footer>
+  <div class="container">
+    <a href="index.html">← Back to docs</a>
+    <a href="https://github.com/supatype" target="_blank" rel="noopener">GitHub</a>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -49,7 +49,7 @@ export interface StudioCoreProps {
   /** Self-host: user chose "Explore with sample data" — show a demo badge in the shell. */
   demoMode?: boolean
   /**
-   * Base URL of the cloud control plane (e.g. https://api.supatype.io).
+   * Base URL of the cloud control plane (e.g. https://api.supatype.com).
    * Undefined in self-hosted / local dev mode. Views that require cloud
    * infrastructure use this to detect mode and show an upsell when absent.
    */
@@ -60,7 +60,7 @@ export interface StudioCoreProps {
    */
   projectRef?: string
   /**
-   * Marketing URL for the Supatype Cloud offering (e.g. https://supatype.io).
+   * Marketing URL for the Supatype Cloud offering (e.g. https://supatype.com).
    * When set, cloud-upsell screens show a CTA button linking here.
    */
   cloudUrl?: string

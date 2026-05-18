@@ -1,4 +1,6 @@
-# Self-Host Example
+# Self-Host Example (maintainer fixture)
+
+> **End users:** follow [supatype.github.io/supatype/#self-host](https://supatype.github.io/supatype/#self-host) in your own project — this directory is a maintainer fixture only.
 
 This example shows the compose-first self-host flow for Supatype.
 

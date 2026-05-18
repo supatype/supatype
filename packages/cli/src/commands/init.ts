@@ -1,6 +1,7 @@
 import type { Command } from "commander"
-import { existsSync, mkdirSync, writeFileSync } from "node:fs"
-import { resolve, join } from "node:path"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { resolve, join, dirname } from "node:path"
+import { fileURLToPath } from "node:url"
 
 export { scaffold }
 
@@ -8,11 +9,31 @@ export { scaffold }
 export const APP_COMPOSE_MARKER = "  # ─── App service (run: supatype app add) ───"
 export const KONG_APP_MARKER = "  # ─── App fallback route (run: supatype app add) ───"
 
+const CLI_PACKAGE_JSON = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  "package.json",
+)
+
+function cliPackageVersion(): string {
+  try {
+    const pkg = JSON.parse(readFileSync(CLI_PACKAGE_JSON, "utf8")) as { version?: string }
+    return pkg.version ?? "0.1.0"
+  } catch {
+    return "0.1.0"
+  }
+}
+
 export function registerInit(program: Command): void {
   program
     .command("init [name]")
     .description("Scaffold a new Supatype project")
-    .option("--mode <mode>", "Server mode: dev (default) | standalone (ACME TLS)", "dev")
+    .option(
+      "--mode <mode>",
+      "Server mode in supatype.config.ts: dev (default) | standalone (native ACME — not Compose self-host)",
+      "dev",
+    )
     .action((name?: string, opts: { mode: string } = { mode: "dev" }) => {
       const projectName = name ?? "my-project"
       const dir = name ? resolve(process.cwd(), name) : process.cwd()
@@ -29,13 +50,18 @@ export function registerInit(program: Command): void {
       console.log(`\nSupatype project ready${name ? ` in ${name}/` : ""}.\n`)
       console.log("Next steps:")
       if (name) console.log(`  cd ${name}`)
-      console.log("  pnpm install")
-      console.log("  supatype dev        # start local Postgres + supatype-server")
-      console.log("  supatype push       # apply schema + generate types")
+      console.log("  npm install")
+      console.log("  supatype keys")
+      console.log("  supatype dev          # native Postgres + supatype-server")
+      console.log("  supatype push         # apply schema + generate types")
+      console.log("\nStatic frontend (self-host):")
+      console.log("  supatype app add --static ./public")
+      console.log("  npm run build         # write files into public/")
+      console.log("  supatype self-host compose up -d")
       if (opts.mode === "standalone") {
-        console.log("\nFor standalone (ACME TLS):")
-        console.log("  Edit supatype.config.ts and set server.domain")
-        console.log("  supatype install-service   # install systemd units")
+        console.log("\nStandalone (native TLS with ACME):")
+        console.log("  Edit supatype.config.ts — set server.domain")
+        console.log("  supatype dev          # or run supatype-server with your TLS setup")
       }
       console.log()
     })
@@ -49,15 +75,45 @@ function scaffold(dir: string, projectName: string, mode: "dev" | "standalone" =
     console.log(`  created  ${rel}`)
   }
 
+  const pkgPath = join(dir, "package.json")
+  if (!existsSync(pkgPath)) {
+    write("package.json", packageJsonTemplate(projectName, cliPackageVersion()))
+  } else {
+    console.log("  skipped  package.json (already exists)")
+  }
+
   write("supatype.config.ts", tsConfigTemplate(projectName, mode))
   write("schema/index.ts", schemaTemplate())
   write(".env", envTemplate(projectName))
   write("seed.ts", seedTemplate(projectName))
   write("seeds/.gitkeep", "")
+  write("public/.gitkeep", "")
   write(".gitignore", gitignoreTemplate())
 }
 
 // ─── Templates ───────────────────────────────────────────────────────────────
+
+function packageJsonTemplate(projectName: string, cliVersion: string): string {
+  return `{
+  "name": "${projectName}",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "supatype dev",
+    "push": "supatype push",
+    "seed": "tsx seed.ts"
+  },
+  "dependencies": {
+    "@supatype/cli": "^${cliVersion}",
+    "@supatype/types": "^${cliVersion}"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5"
+  }
+}
+`
+}
 
 function tsConfigTemplate(projectName: string, mode: "dev" | "standalone"): string {
   const domainField =
@@ -78,7 +134,7 @@ export default defineConfig({
 ${domainField}  },
   app: {
     mode: "none",
-    // mode: "static", static_dir: "./dist",
+    // mode: "static", static_dir: "./public",  // supatype app add --static ./public
     // mode: "proxy", upstream: "http://localhost:3000",
     // vite_dev_url: "http://127.0.0.1:5173",  // dev HMR at /_vite (when using a separate Vite server)
   },
@@ -91,7 +147,7 @@ ${domainField}  },
   email: { provider: "console" },
   storage: { provider: "local", local_path: ".supatype/storage" },
   schema: { path: "schema/index.ts", pg_schema: "public" },
-  // Native stack: supatype self-host install-service (set server.mode = "standalone" + server.domain first).
+  // Self-host production: supatype self-host compose (Docker only). Standalone + domain = native ACME dev.
 })
 `
 }
@@ -141,6 +197,8 @@ SMTP_SENDER_NAME=${projectName}
 S3_ENDPOINT=http://localhost:9000
 S3_ACCESS_KEY=supatype
 S3_SECRET_KEY=supatype-secret
+
+# Self-host compose uses the same DATABASE_URL when Postgres is published on localhost:5432
 `
 }
 

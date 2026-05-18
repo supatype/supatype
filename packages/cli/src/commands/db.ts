@@ -37,7 +37,7 @@ export function registerDb(program: Command): void {
       }
 
       // If linked to a cloud project, fetch from the API
-      const apiUrl = cloudCfg.apiUrl || "https://api.supatype.io"
+      const apiUrl = cloudCfg.apiUrl || "https://api.supatype.com"
       const token = cloudCfg.token || process.env["SUPATYPE_ACCESS_TOKEN"] || ""
       const envName = opts.env || "production"
 
@@ -97,7 +97,7 @@ export function registerDb(program: Command): void {
         return
       }
 
-      const apiUrl = cloudCfg.apiUrl || "https://api.supatype.io"
+      const apiUrl = cloudCfg.apiUrl || "https://api.supatype.com"
       const token = cloudCfg.token || process.env["SUPATYPE_ACCESS_TOKEN"] || ""
       const envName = opts.env || "production"
 

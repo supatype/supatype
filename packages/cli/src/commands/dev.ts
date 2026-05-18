@@ -175,9 +175,8 @@ export function registerDev(program: Command): void {
       let pgBinDir: string | null = null
 
       if (provider === "docker") {
-        console.warn(
-          "[supatype] database.provider \"docker\" is a compatibility fallback (Phase 10.6). " +
-            "Prefer \"native\" for the default zero-Docker path. Docker support may be removed later.",
+        console.log(
+          "[supatype] database.provider \"docker\" — Postgres runs in Docker; engine and supatype-server stay native.",
         )
         const image = config.database.image ?? DEFAULT_DOCKER_IMAGE
         console.log(`[supatype] Starting Postgres via Docker (${image})...`)
@@ -351,6 +350,13 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
         SUPATYPE_ANON_KEY: anonKey,
         SUPATYPE_SERVICE_ROLE_KEY: serviceRoleKey,
         PORT: serverPort,
+        SUPATYPE_APP_MODE: config.app.mode ?? "none",
+        ...(config.app.mode === "static" && config.app.static_dir?.trim()
+          ? { SUPATYPE_APP_STATIC_DIR: resolve(cwd, config.app.static_dir.trim()) }
+          : {}),
+        ...(config.app.mode === "proxy" && config.app.upstream?.trim()
+          ? { SUPATYPE_APP_UPSTREAM: config.app.upstream.trim() }
+          : {}),
         ...(config.app.vite_dev_url !== undefined && config.app.vite_dev_url.trim() !== ""
           ? { SUPATYPE_VITE_DEV_URL: config.app.vite_dev_url.trim() }
           : {}),

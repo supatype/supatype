@@ -4,6 +4,8 @@
 
 Always look for active plan files in `C:\Users\Nic_J\Documents\NJ\plans\` (one directory above this repo root: `../plans` relative to `definatype/`). Before starting any implementation work, check that directory for an existing plan file that applies to the current task and follow it.
 
+**Where we are (cross-repo):** read **`../plans/ENGINEERING-STATUS.md`** first — it is the authoritative shipped/partial/planned rollup. Individual **Phase-*.md** files are specifications; their per-row ✓/○ may lag git unless reconciled.
+
 Available plans: Phase-00 through Phase-24 plus deep-architecture-spec.md.
 
 ## Project structure

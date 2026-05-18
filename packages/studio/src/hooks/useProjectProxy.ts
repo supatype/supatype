@@ -38,6 +38,11 @@ export interface ProjectProxy {
   schemas: () => Promise<string[]>
 }
 
+/** Cloud Studio: `/api/control-plane/.../proxy` with session cookies, no browser service role. */
+function usesSessionProxy(client: { url: string; serviceRoleKey?: string | undefined }): boolean {
+  return !client.serviceRoleKey && client.url.includes("/proxy")
+}
+
 /**
  * Wraps raw fetch calls to the project proxy for SQL execution and schema
  * introspection. Schema routing is enforced server-side from the JWT role
@@ -45,22 +50,26 @@ export interface ProjectProxy {
  */
 export function useProjectProxy(): ProjectProxy {
   const client = useAdminClient()
+  const sessionProxy = usesSessionProxy(client)
 
   const sql = useCallback(
     async (query: string, schema?: string): Promise<SqlResult> => {
       if (!client.url) {
         throw new Error("SQL proxy URL is not configured — client URL is missing")
       }
-      if (!client.serviceRoleKey) {
+      if (!client.serviceRoleKey && !sessionProxy) {
         throw new Error("SQL proxy requires a service role key")
+      }
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        ...studioGatewayHeaders(),
+      }
+      if (client.serviceRoleKey) {
+        headers.Authorization = `Bearer ${client.serviceRoleKey}`
       }
       const res = await fetch(`${client.url}/sql`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${client.serviceRoleKey}`,
-          ...studioGatewayHeaders(),
-        },
+        headers,
         credentials: "include",
         body: JSON.stringify({ query, ...(schema !== undefined && { schema }) }),
       })
@@ -74,7 +83,7 @@ export function useProjectProxy(): ProjectProxy {
         ...(json.schema !== undefined && { schema: json.schema }),
       }
     },
-    [client.url, client.serviceRoleKey],
+    [client.url, client.serviceRoleKey, sessionProxy],
   )
 
   // The introspection SQL uses current_schema() — the server resolves the

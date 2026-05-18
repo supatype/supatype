@@ -1,0 +1,25 @@
+---
+description: Before any code edits, explain the planned work in detail to the user
+alwaysApply: true
+---
+
+# Pre-change plan (required)
+
+Before **any** code changes (edits, new files, deletes, refactors), you must **first** tell the user in **detail** what you are about to do. Do not apply patches or run write/delete tools until that explanation is complete in the same turn (or the user has already approved an explicit plan in this conversation).
+
+## What to include
+
+1. **Goal** — What outcome this serves and how it maps to their request.
+2. **Files and scope** — Exact paths (or globs) you intend to touch, create, or remove; repos if multi-root.
+3. **Steps** — Ordered list of concrete changes (logic, APIs, types, tests, config).
+4. **Risks / trade-offs** — Anything that could break callers, CI, or behavior; assumptions you are making.
+5. **Verification** — How you will confirm correctness (tests run, manual checks), if applicable.
+
+Keep the plan proportional to the size of the change: a one-line fix still needs a short but specific preface (file + change), not a novel.
+
+## Exceptions
+
+- **Read-only** work (search, read, explain, run read-only commands) does not require this preamble.
+- If the user **explicitly** says to proceed without a plan for this message, follow their instruction for that turn only.
+
+After the plan is stated, proceed with implementation unless the user asked you to wait for confirmation.

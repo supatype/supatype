@@ -2,7 +2,7 @@
 # Supatype CLI installer — curl | bash
 #
 # Usage:
-#   curl -fsSL https://releases.supatype.io/install.sh | bash
+#   curl -fsSL https://releases.supatype.com/install.sh | bash
 #
 # Environment overrides:
 #   SUPATYPE_VERSION     — install a specific version (default: latest)
@@ -12,7 +12,7 @@ set -euo pipefail
 
 VERSION="${SUPATYPE_VERSION:-latest}"
 INSTALL_DIR="${SUPATYPE_INSTALL_DIR:-$HOME/.supatype/bin}"
-CDN="https://releases.supatype.io/cli"
+CDN="https://releases.supatype.com/cli"
 
 # ── Detect platform ────────────────────────────────────────────────────────────
 

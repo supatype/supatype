@@ -27,7 +27,22 @@ describe("CLI binary (requires built dist/)", () => {
   it("--help lists all top-level commands", () => {
     const { stdout, exitCode } = runCli(["--help"])
     expect(exitCode).toBe(0)
-    const commands = ["init", "dev", "push", "diff", "pull", "generate", "migrate", "rollback", "reset", "seed", "keys", "app", "self-host"]
+    const commands = [
+      "init",
+      "dev",
+      "push",
+      "diff",
+      "pull",
+      "generate",
+      "migrate",
+      "rollback",
+      "reset",
+      "seed",
+      "keys",
+      "app",
+      "self-host",
+      "self-update",
+    ]
     for (const cmd of commands) {
       expect(stdout, `Expected '${cmd}' in --help output`).toContain(cmd)
     }
@@ -37,6 +52,12 @@ describe("CLI binary (requires built dist/)", () => {
     const { stdout, exitCode } = runCli(["--version"])
     expect(exitCode).toBe(0)
     expect(stdout.trim()).toMatch(/^\d+\.\d+\.\d+/)
+  })
+
+  it("self-update --help describes the command", () => {
+    const { stdout, exitCode } = runCli(["self-update", "--help"])
+    expect(exitCode).toBe(0)
+    expect(stdout.toLowerCase()).toMatch(/npm|update/)
   })
 
   it("init --help describes the init command", () => {
@@ -77,22 +98,22 @@ describe("CLI binary (requires built dist/)", () => {
     expect(stdout).toContain("remove")
   })
 
-  it("app add --help shows --dockerfile and --port options", () => {
+  it("app add --help shows --static and --port options", () => {
     const { stdout, exitCode } = runCli(["app", "add", "--help"])
     expect(exitCode).toBe(0)
-    expect(stdout).toContain("--dockerfile")
+    expect(stdout).toContain("--static")
     expect(stdout).toContain("--port")
   })
 
-  it("self-host --help describes the self-host command", () => {
+  it("self-host --help shows compose only (legacy commands hidden)", () => {
     const { stdout, exitCode } = runCli(["self-host", "--help"])
     expect(exitCode).toBe(0)
-    expect(stdout).toContain("compose")
-    expect(stdout).toContain("install-service")
-    expect(stdout).toContain("serve")
-    expect(stdout).toContain("status")
-    expect(stdout).toContain("logs")
-    expect(stdout).toContain("backup")
+    const commandsSection = stdout.split("Commands:")[1] ?? ""
+    expect(commandsSection).toContain("compose")
+    expect(commandsSection).not.toContain("install-service")
+    expect(commandsSection).not.toContain("native")
+    expect(commandsSection).not.toContain("backup")
+    expect(stdout).not.toContain("--output-dir")
   })
 
   it("self-host compose --help shows compose subcommands", () => {

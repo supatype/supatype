@@ -5,7 +5,7 @@
  * Native/systemd commands are kept temporarily for migration compatibility.
  */
 
-import type { Command } from "commander"
+import { Command } from "commander"
 import { existsSync, readFileSync, mkdirSync, copyFileSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { homedir } from "node:os"
@@ -22,7 +22,7 @@ import { runDockerCompose, writeSelfHostCompose } from "../self-host-compose.js"
 export function registerSelfHost(program: Command): void {
   const selfHostCmd = program
     .command("self-host")
-    .description("Manage self-hosted deployments (compose-first)")
+    .description("Manage self-hosted deployments (Docker Compose only)")
 
   const composeCmd = selfHostCmd
     .command("compose")
@@ -86,11 +86,14 @@ export function registerSelfHost(program: Command): void {
       process.exitCode = runDockerCompose(out.composePath, args, cwd)
     })
 
-  // ── install-service ────────────────────────────────────────────────────────
+  // ── Legacy native/systemd helpers (hidden; use compose for self-host) ─────
 
-  selfHostCmd
-    .command("install-service")
-    .description(
+  const legacyCmd = new Command("native")
+  selfHostCmd.addCommand(legacyCmd, { hidden: true })
+
+  legacyCmd
+    .command(
+      "install-service",
       "Generate systemd unit files and (on Linux) install + enable them",
     )
     .option("--output-dir <path>", "Write unit files here instead of /etc/systemd/system/")
@@ -168,9 +171,8 @@ export function registerSelfHost(program: Command): void {
 
   // ── serve ──────────────────────────────────────────────────────────────────
 
-  selfHostCmd
-    .command("serve")
-    .description("Start supatype-server in the foreground (for standalone mode)")
+  legacyCmd
+    .command("serve", "Start supatype-server in the foreground (for standalone mode)")
     .option("--port <port>", "Override port from config")
     .action(async (opts: { port?: string }) => {
       logLegacyWarning("serve")
@@ -200,9 +202,8 @@ export function registerSelfHost(program: Command): void {
 
   // ── reload ─────────────────────────────────────────────────────────────────
 
-  selfHostCmd
-    .command("reload")
-    .description("Reload the running supatype-server (SIGHUP for config reload)")
+  legacyCmd
+    .command("reload", "Reload the running supatype-server (SIGHUP for config reload)")
     .action(() => {
       logLegacyWarning("reload")
       const cwd = process.cwd()
@@ -233,9 +234,8 @@ export function registerSelfHost(program: Command): void {
 
   // ── status ─────────────────────────────────────────────────────────────────
 
-  selfHostCmd
-    .command("status")
-    .description("Show running status of supatype services")
+  legacyCmd
+    .command("status", "Show running status of supatype services")
     .action(() => {
       logLegacyWarning("status")
       const cwd = process.cwd()
@@ -270,8 +270,7 @@ export function registerSelfHost(program: Command): void {
   // ── logs ───────────────────────────────────────────────────────────────────
 
   selfHostCmd
-    .command("logs")
-    .description("Tail supatype service logs")
+    .command("logs", "Tail supatype service logs", { hidden: true })
     .option("--service <name>", "Show logs for: postgres | server")
     .option("--lines <n>", "Number of lines to show", "50")
     .option("-f, --follow", "Follow log output")
@@ -319,9 +318,8 @@ export function registerSelfHost(program: Command): void {
 
   // ── backup ─────────────────────────────────────────────────────────────────
 
-  selfHostCmd
-    .command("backup")
-    .description("Create a Postgres dump of the project database")
+  legacyCmd
+    .command("backup", "Create a Postgres dump of the project database")
     .option("--output <path>", "Output file path (default: ./backups/backup-<timestamp>.sql.gz)")
     .option("--connection <url>", "Database connection URL (overrides config)")
     .action((opts: { output?: string; connection?: string }) => {
@@ -360,7 +358,7 @@ export function registerSelfHost(program: Command): void {
 
 function logLegacyWarning(cmd: string): void {
   console.warn(
-    `[supatype] self-host ${cmd} (native/systemd) is deprecated. ` +
+    `[supatype] self-host native ${cmd} is deprecated. ` +
       "Use `supatype self-host compose` commands instead.",
   )
 }

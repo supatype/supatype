@@ -1,0 +1,17 @@
+---
+description: Read every CLAUDE.md from repo root down to the working directory before substantive work
+alwaysApply: true
+---
+
+# Read CLAUDE.md along the path from root to task
+
+Before starting **non-trivial** work in a repo (implementation, refactors, answering repo-specific architecture questions):
+
+1. **Identify the repo root** for the task (the git root of the project you are editing, e.g. `supatype/`, `supatype-cloud/`, `supatype-schema-engine/`).
+2. **Walk directories from that root** toward the file or package you are changing (each path segment: root → `packages/` → `cli/` …).
+3. **Read every `CLAUDE.md`** (or `CLAUDE.md` case variants if the filesystem differs) that exists in any of those directories, **starting at the root**. Do not skip the root file when working deep in a subtree.
+4. If the workspace has **multiple repo roots** (multi-root Cursor) and the task touches more than one, repeat for each affected root.
+
+**Scope:** This applies to **this monorepo and sibling repos** that use `CLAUDE.md` for agent instructions. General one-line questions do not require reading the full chain.
+
+**Rationale:** Root `CLAUDE.md` files carry plans pointers, TypeScript conventions, and commands; nested files (e.g. `supatype-schema-engine/CLAUDE.md`) carry repo-specific rules. Reading the chain avoids violating project policy or duplicating known constraints.

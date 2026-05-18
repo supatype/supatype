@@ -1,0 +1,14 @@
+---
+description: Verify implementation in the repo before answering factual questions about behaviour, deployment, or CLI
+alwaysApply: true
+---
+
+# Verify code before repo-specific facts
+
+When the user (or you) asks how something **actually works in this codebase** — for example: what runs in-cluster vs on the host, what Pulumi or Tilt deploys, which env var or URL is used, how the CLI chooses a database URL, or whether a service exists in production YAML — **do not answer from memory or assumption**.
+
+1. **Search or read** the relevant paths first (`Tiltfile`, `infra/pulumi/**`, `infra/k8s/**`, `packages/cli/**`, `supatype-cloud/src/**`, etc.) until you can cite what the code or manifests do.
+2. If you already stated something and then find contradictory evidence, **correct yourself** and point to the files.
+3. Short conceptual answers are fine for general CS topics; **repo-shaped claims** need evidence from the tree.
+
+This avoids misleading answers about deployment (e.g. `local_resource` vs `Deployment`) and integration (e.g. pgbouncer vs direct Postgres).

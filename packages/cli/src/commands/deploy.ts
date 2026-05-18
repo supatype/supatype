@@ -95,7 +95,7 @@ export function registerDeploy(program: Command): void {
         } else if (cloudCfg?.projectSlug) {
           console.log("=== Schema Push ===")
           // Platform API — no local Docker needed
-          const apiUrl = cloudCfg.apiUrl || "https://api.supatype.io"
+          const apiUrl = cloudCfg.apiUrl || "https://api.supatype.com"
           const token = cloudCfg.token || process.env["SUPATYPE_ACCESS_TOKEN"] || ""
 
           const res = await fetch(`${apiUrl}/platform/v1/projects/${cloudCfg.projectSlug}/schema/push`, {
@@ -155,7 +155,7 @@ export function registerDeploy(program: Command): void {
 
           // Inject Supatype URLs if project is linked
           if (cloudCfg?.projectSlug) {
-            buildEnv["NEXT_PUBLIC_SUPATYPE_URL"] = cloudCfg.apiUrl || `https://${cloudCfg.projectSlug}.supatype.io`
+            buildEnv["NEXT_PUBLIC_SUPATYPE_URL"] = cloudCfg.apiUrl || `https://${cloudCfg.projectSlug}.supatype.dev`
             buildEnv["VITE_SUPATYPE_URL"] = buildEnv["NEXT_PUBLIC_SUPATYPE_URL"]!
             buildEnv["PUBLIC_SUPATYPE_URL"] = buildEnv["NEXT_PUBLIC_SUPATYPE_URL"]!
             // NEVER inject service_role key — only anon key is safe for client-side
@@ -212,8 +212,8 @@ export function registerDeploy(program: Command): void {
         console.log("\nDeployment complete!")
         if (cloudCfg?.projectSlug && !opts.local) {
           const url = opts.preview
-            ? `https://preview-${Date.now().toString(36)}.${cloudCfg.projectSlug}.supatype.io`
-            : `https://${cloudCfg.projectSlug}.supatype.io`
+            ? `https://preview-${Date.now().toString(36)}.${cloudCfg.projectSlug}.supatype.dev`
+            : `https://${cloudCfg.projectSlug}.supatype.dev`
           console.log(`URL: ${url}`)
         }
       }
@@ -230,7 +230,7 @@ export function registerDeploy(program: Command): void {
         process.exit(1)
       }
 
-      const apiUrl = cloudCfg.apiUrl || "https://api.supatype.io"
+      const apiUrl = cloudCfg.apiUrl || "https://api.supatype.com"
       const token = cloudCfg.token || process.env["SUPATYPE_ACCESS_TOKEN"] || ""
 
       const res = await fetch(`${apiUrl}/platform/v1/projects/${cloudCfg.projectSlug}/deployments/rollback`, {
@@ -259,7 +259,7 @@ export function registerDeploy(program: Command): void {
         process.exit(1)
       }
 
-      const apiUrl = cloudCfg.apiUrl || "https://api.supatype.io"
+      const apiUrl = cloudCfg.apiUrl || "https://api.supatype.com"
       const token = cloudCfg.token || process.env["SUPATYPE_ACCESS_TOKEN"] || ""
 
       const res = await fetch(`${apiUrl}/platform/v1/projects/${cloudCfg.projectSlug}/deployments/current`, {
@@ -299,7 +299,7 @@ export function registerDeploy(program: Command): void {
         process.exit(1)
       }
 
-      const apiUrl = cloudCfg.apiUrl || "https://api.supatype.io"
+      const apiUrl = cloudCfg.apiUrl || "https://api.supatype.com"
       const token = cloudCfg.token || process.env["SUPATYPE_ACCESS_TOKEN"] || ""
 
       const versionPath = version ? `/${version}` : "/current"
@@ -322,7 +322,7 @@ async function deployToCloud(
   outputDir: string,
   isPreview: boolean,
 ): Promise<void> {
-  const apiUrl = config.apiUrl || "https://api.supatype.io"
+  const apiUrl = config.apiUrl || "https://api.supatype.com"
   const token = config.accessToken || process.env["SUPATYPE_ACCESS_TOKEN"] || ""
 
   console.log("Uploading build artifacts...")

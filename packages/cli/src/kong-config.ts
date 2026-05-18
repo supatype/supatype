@@ -11,6 +11,9 @@ export interface KongDeclarativeOptions {
   engineGatewayKey?: string | undefined
   appUpstream?: string | undefined
   staticAppServiceUrl?: string | undefined
+  functionsServiceUrl?: string | undefined
+  /** Self-host: route API paths through supatype-server (see runtime-routes). */
+  unifiedGateway?: boolean | undefined
 }
 
 /** Escape a string for use inside YAML double quotes. */
@@ -27,8 +30,11 @@ export function buildKongDeclarative(opts: KongDeclarativeOptions = {}): string 
   const gatewayKey = opts.engineGatewayKey?.trim()
   const secured = Boolean(gatewayKey)
   const routes = runtimeRouteSpec({
-    ...(opts.appUpstream !== undefined && { appUpstream: opts.appUpstream }),
-    ...(opts.staticAppServiceUrl !== undefined && { staticAppServiceUrl: opts.staticAppServiceUrl }),
+    ...(opts.unifiedGateway === true && { unifiedGateway: true }),
+    ...(opts.unifiedGateway !== true && opts.appUpstream !== undefined && { appUpstream: opts.appUpstream }),
+    ...(opts.unifiedGateway !== true &&
+      opts.staticAppServiceUrl !== undefined && { staticAppServiceUrl: opts.staticAppServiceUrl }),
+    ...(opts.functionsServiceUrl !== undefined && { functionsServiceUrl: opts.functionsServiceUrl }),
   })
 
   const consumersBlock = secured

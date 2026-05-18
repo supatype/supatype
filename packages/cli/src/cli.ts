@@ -24,6 +24,7 @@ import { registerFunctions } from "./commands/functions.js"
 import { registerPlugins } from "./commands/plugins.js"
 import { registerTypes } from "./commands/types.js"
 import { registerMigrateFromV1 } from "./commands/migrate-from-v1.js"
+import { registerSelfUpdate } from "./commands/self-update.js"
 
 export function run(): void {
   const program = new Command()
@@ -34,6 +35,7 @@ export function run(): void {
   registerInit(program)
   registerDev(program)
   registerCache(program)
+  registerSelfUpdate(program)
   registerUpdate(program)
   registerPg(program)
   registerPush(program)

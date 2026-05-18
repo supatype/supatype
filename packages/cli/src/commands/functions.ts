@@ -130,7 +130,7 @@ function scaffoldFunction(cwd: string, name: string): void {
   mkdirSync(fnDir, { recursive: true })
 
   const indexContent = `// ${name} — Supatype Edge Function
-// Docs: https://supatype.dev/docs/edge-functions
+// Docs: https://supatype.com/docs/edge-functions
 
 export default async function handler(req: Request): Promise<Response> {
   const { method, url } = req
@@ -445,7 +445,7 @@ async function deployCloud(cwd: string, fns: DiscoveredFunction[]): Promise<void
   }
 
   console.log(`\nDeployed ${fns.length} function(s)`)
-  console.log(`Invoke: https://${linked.ref}.supatype.io/functions/v1/<name>`)
+  console.log(`Invoke: https://${linked.ref}.supatype.dev/functions/v1/<name>`)
 }
 
 function readFunctionSource(fn: DiscoveredFunction): string {
@@ -637,7 +637,7 @@ async function invoke(
     const { getLinkedProject, getCloudToken } = await loadCloudHelpers()
     const linked = getLinkedProject(cwd)
     if (linked) {
-      url = `https://${linked.ref}.supatype.io/functions/v1/${name}`
+      url = `https://${linked.ref}.supatype.dev/functions/v1/${name}`
       const token = getCloudToken()
       if (token && opts.auth) {
         headers["Authorization"] = `Bearer ${token}`
@@ -908,7 +908,7 @@ async function loadCloudHelpers(): Promise<CloudHelpers> {
     },
 
     getCloudApiUrl(): string {
-      return process.env["SUPATYPE_API_URL"] ?? "https://api.supatype.io"
+      return process.env["SUPATYPE_API_URL"] ?? "https://api.supatype.com"
     },
   }
 }

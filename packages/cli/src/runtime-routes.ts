@@ -11,12 +11,108 @@ export interface RuntimeRoute {
 export interface RuntimeRouteOptions {
   appUpstream?: string
   staticAppServiceUrl?: string
+  /** Compose self-host: supatype-server container (functions proxy). */
+  functionsServiceUrl?: string
+  /**
+   * Self-host Compose: Kong forwards API traffic to supatype-server (unified gateway),
+   * which proxies to internal services — same model as `supatype dev`.
+   */
+  unifiedGateway?: boolean
+}
+
+const SERVER_GATEWAY = "http://server:9999"
+
+/**
+ * Kong routes when self-host uses supatype-server as the single API gateway.
+ */
+function runtimeRouteSpecUnified(): RuntimeRoute[] {
+  return [
+    {
+      name: "rest-v1",
+      serviceName: "supatype-server-rest",
+      serviceUrl: SERVER_GATEWAY,
+      paths: ["/rest/v1/"],
+      stripPath: false,
+    },
+    {
+      name: "auth-v1",
+      serviceName: "supatype-server-auth",
+      serviceUrl: SERVER_GATEWAY,
+      paths: ["/auth/v1/"],
+      stripPath: false,
+    },
+    {
+      name: "admin-v1",
+      serviceName: "supatype-server-admin",
+      serviceUrl: SERVER_GATEWAY,
+      paths: ["/admin/v1/"],
+      stripPath: false,
+    },
+    {
+      name: "storage-v1",
+      serviceName: "supatype-server-storage",
+      serviceUrl: SERVER_GATEWAY,
+      paths: ["/storage/v1/"],
+      stripPath: false,
+    },
+    {
+      name: "realtime-v1",
+      serviceName: "supatype-server-realtime",
+      serviceUrl: SERVER_GATEWAY,
+      paths: ["/realtime/v1/"],
+      stripPath: false,
+      protocols: ["http", "https", "ws", "wss"],
+    },
+    {
+      name: "functions-v1",
+      serviceName: "supatype-server-functions",
+      serviceUrl: SERVER_GATEWAY,
+      paths: ["/functions/v1/"],
+      stripPath: false,
+    },
+    {
+      name: "graphql-v1",
+      serviceName: "supatype-server-graphql",
+      serviceUrl: SERVER_GATEWAY,
+      paths: ["/graphql/v1/"],
+      stripPath: false,
+    },
+    {
+      name: "studio-config-route",
+      serviceName: "supatype-server-studio-config",
+      serviceUrl: SERVER_GATEWAY,
+      paths: ["/studio-config"],
+      stripPath: false,
+    },
+    {
+      name: "sql-route",
+      serviceName: "supatype-server-sql",
+      serviceUrl: SERVER_GATEWAY,
+      paths: ["/sql"],
+      stripPath: false,
+    },
+    {
+      name: "studio",
+      serviceName: "studio",
+      serviceUrl: "http://studio:3002",
+      paths: ["/studio/"],
+      stripPath: true,
+    },
+    {
+      name: "app-root",
+      serviceName: "supatype-server-app",
+      serviceUrl: SERVER_GATEWAY,
+      paths: ["/"],
+      stripPath: false,
+    },
+  ]
 }
 
 /**
- * Shared route contract used by local/self-host renderers.
+ * Legacy split-stack routes (PostgREST/storage/realtime directly from Kong).
+ * Kept for tests or explicit opt-out only — self-host uses unifiedGateway.
  */
-export function runtimeRouteSpec(opts: RuntimeRouteOptions = {}): RuntimeRoute[] {
+function runtimeRouteSpecSplit(opts: RuntimeRouteOptions): RuntimeRoute[] {
   const routes: RuntimeRoute[] = [
     {
       name: "rest-v1",
@@ -57,7 +153,7 @@ export function runtimeRouteSpec(opts: RuntimeRouteOptions = {}): RuntimeRoute[]
     {
       name: "functions-v1",
       serviceName: "functions-v1",
-      serviceUrl: "http://host.docker.internal:54321",
+      serviceUrl: opts.functionsServiceUrl?.trim() || "http://server:9999",
       paths: ["/functions/v1/"],
       stripPath: false,
     },
@@ -107,4 +203,14 @@ export function runtimeRouteSpec(opts: RuntimeRouteOptions = {}): RuntimeRoute[]
   }
 
   return routes
+}
+
+/**
+ * Shared route contract used by local/self-host renderers.
+ */
+export function runtimeRouteSpec(opts: RuntimeRouteOptions = {}): RuntimeRoute[] {
+  if (opts.unifiedGateway) {
+    return runtimeRouteSpecUnified()
+  }
+  return runtimeRouteSpecSplit(opts)
 }

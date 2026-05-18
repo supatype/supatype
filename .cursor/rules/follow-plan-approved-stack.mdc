@@ -1,0 +1,13 @@
+---
+description: Follow the active user plan; do not introduce unlisted tech without asking
+alwaysApply: true
+---
+
+# Follow the plan; ask before new tech
+
+1. When the user attaches a **plan** (Cursor plan, Phase doc, or explicit checklist), **implement that plan in order** unless the user reprioritises in the same thread.
+2. **Do not add technologies, ingress controllers, charts, databases, or SaaS** that the plan does **not** mention — even if they are common defaults (e.g. another ingress, a second mesh, an extra observability vendor).
+3. If something **seems** necessary but is **not** in the plan, **ask the user first** with a one-line trade-off (why, alternative that stays within the plan).
+4. **Edge stack default for Supatype Cloud:** **Kong** + **cert-manager** as in repo manifests — do not substitute **Traefik**, **nginx-ingress**, **Cilium Gateway**, etc., unless the user or the plan explicitly says so.
+
+This keeps diffs aligned with agreed architecture and avoids “helpful” stack drift.

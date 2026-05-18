@@ -27,6 +27,7 @@ import { chmod } from "node:fs/promises"
 import { homedir } from "node:os"
 import { basename, join, resolve, isAbsolute } from "node:path"
 import type { SupatypeProjectConfig } from "./project-config.js"
+import { releasePublicKey } from "./release-public-key.js"
 
 /**
  * Set `versions.{engine|server|postgres|deno}: VERSION_PIN_LOCAL` to mean “use `overrides.*` only”
@@ -105,7 +106,7 @@ export interface PlatformId {
 // CDN base URL + release signing public key
 // ---------------------------------------------------------------------------
 
-const CDN_BASE = "https://releases.supatype.io"
+const CDN_BASE = "https://releases.supatype.com"
 
 /**
  * Supatype release signing public key (minisign format).
@@ -339,7 +340,8 @@ async function fetchChecksums(
   }
   const checksumsText = await csResp.text()
 
-  if (SUPATYPE_RELEASE_PUBLIC_KEY) {
+  const pubKey = releasePublicKey()
+  if (pubKey) {
     // Minisign signature is required when a public key is embedded.
     const sigResp = await fetch(minisigUrl)
     if (!sigResp.ok) {
@@ -349,7 +351,7 @@ async function fetchChecksums(
       )
     }
     const sigText = await sigResp.text()
-    verifyMinisign(Buffer.from(checksumsText, "utf8"), sigText, SUPATYPE_RELEASE_PUBLIC_KEY)
+    verifyMinisign(Buffer.from(checksumsText, "utf8"), sigText, pubKey)
   } else {
     console.warn(
       "[supatype] \u26a0  Minisign public key not configured — " +

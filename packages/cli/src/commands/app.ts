@@ -1,4 +1,6 @@
 import type { Command } from "commander"
+import { existsSync, mkdirSync } from "node:fs"
+import { resolve } from "node:path"
 import { localKongBaseUrl } from "../local-gateway.js"
 import { updateAppConfigInProject } from "../app-config.js"
 
@@ -8,14 +10,32 @@ export function registerApp(program: Command): void {
     .description("Manage application routing intent in supatype.config.ts")
 
   appCmd
-    .command("add")
-    .description("Set app.mode=proxy and route / to your app upstream")
-    .option("--dockerfile <path>", "Path to your Dockerfile", "./Dockerfile")
-    .option("--port <port>", "Port your app listens on", "3000")
-    .option("--upstream <url>", "Explicit upstream URL (defaults to localhost:<port>)")
-    .action((opts: { dockerfile: string; port: string; upstream?: string }) => {
-      addApp(process.cwd(), opts.port, opts.upstream)
-    })
+    .command("add [dir]")
+    .description("Configure app routing: --static for a built site, or proxy to a dev server")
+    .option("--static", "Serve a static directory at / (default: ./public, or [dir] argument)")
+    .option("--port <port>", "Port your app listens on (proxy mode)", "3000")
+    .option("--upstream <url>", "Explicit upstream URL (proxy mode; defaults to localhost:<port>)")
+    .option("--dockerfile <path>", "(deprecated) ignored — use supatype.config.ts")
+    .action(
+      (
+        dir: string | undefined,
+        opts: {
+          static?: boolean
+          port: string
+          upstream?: string
+          dockerfile?: string
+        },
+      ) => {
+        if (opts.static) {
+          addStaticApp(process.cwd(), resolveStaticDir(dir))
+          return
+        }
+        if (opts.dockerfile) {
+          console.warn("[supatype] --dockerfile is deprecated and ignored.")
+        }
+        addProxyApp(process.cwd(), opts.port, opts.upstream)
+      },
+    )
 
   appCmd
     .command("remove")
@@ -27,11 +47,32 @@ export function registerApp(program: Command): void {
 
 // ─── Implementation ───────────────────────────────────────────────────────────
 
-function addApp(cwd: string, port: string, upstream?: string): void {
-  console.warn(
-    "[supatype] `app add --dockerfile` is deprecated. " +
-      "App onboarding is now config-first via supatype.config.ts.",
-  )
+function resolveStaticDir(dir?: string): string {
+  const trimmed = dir?.trim()
+  return trimmed && trimmed.length > 0 ? trimmed : "./public"
+}
+
+function addStaticApp(cwd: string, staticDir: string): void {
+  const abs = resolve(cwd, staticDir)
+  if (!existsSync(abs)) {
+    mkdirSync(abs, { recursive: true })
+    console.log(`  created  ${staticDir}/`)
+  }
+  try {
+    const configPath = updateAppConfigInProject(cwd, { mode: "static", staticDir })
+    console.log(`  updated  ${configPath}`)
+    console.log(`\nStatic app directory: ${staticDir}`)
+    console.log(`Build your frontend into ${staticDir}/, then:`)
+    console.log(`  supatype self-host compose render`)
+    console.log(`  supatype self-host compose up -d`)
+    console.log(`\nYour app will be served at ${localKongBaseUrl()}/\n`)
+  } catch (err) {
+    console.error((err as Error).message)
+    process.exit(1)
+  }
+}
+
+function addProxyApp(cwd: string, port: string, upstream?: string): void {
   const upstreamUrl = upstream?.trim() || `http://localhost:${port}`
   try {
     const configPath = updateAppConfigInProject(cwd, { mode: "proxy", upstream: upstreamUrl })
