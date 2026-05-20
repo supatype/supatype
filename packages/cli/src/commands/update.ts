@@ -7,16 +7,7 @@ import type { Command } from "commander"
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { basename, resolve } from "node:path"
 import { loadConfig } from "../config.js"
-import { download, currentPlatform, type Component } from "../binary-cache.js"
-import { DENO_RELEASE_PIN } from "../release-pins.js"
-
-// Canonical latest versions — bumped on each release.
-const LATEST_VERSIONS: Record<Component, string> = {
-  engine: "0.4.2",
-  server: "0.1.0",
-  postgres: "17.2",
-  deno: DENO_RELEASE_PIN,
-}
+import { download, currentPlatform, fetchAllLatestVersions, type Component } from "../binary-cache.js"
 
 const CONFIG_CANDIDATES = ["supatype.config.ts", "supatype.config.js", "supatype.config.mjs"]
 
@@ -43,10 +34,13 @@ export function registerUpdate(program: Command): void {
       const components: Component[] = ["engine", "server", "postgres", "deno"]
       const updates: Array<{ component: Component; from: string; to: string }> = []
 
+      console.log("Fetching latest component versions from CDN...")
+      const latestVersions = await fetchAllLatestVersions()
+
       for (const component of components) {
         const current = config.versions[component]
         if (current === "local") continue
-        const latest = LATEST_VERSIONS[component]
+        const latest = latestVersions[component]
         if (current !== latest) {
           updates.push({ component, from: current, to: latest })
         }

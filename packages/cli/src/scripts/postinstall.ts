@@ -8,23 +8,24 @@
  * can run `supatype update` manually to retry.
  */
 
-import { download, currentPlatform, type Component } from "../binary-cache.js"
-import { DENO_RELEASE_PIN } from "../release-pins.js"
-
-// Default versions downloaded on fresh install.
-// Updated by `supatype update` when new versions are released.
-const DEFAULT_VERSIONS: Record<Component, string> = {
-  engine: "0.4.2",
-  server: "0.1.0",
-  postgres: "17.2",
-  deno: DENO_RELEASE_PIN,
-}
+import { download, currentPlatform, fetchAllLatestVersions, type Component } from "../binary-cache.js"
 
 async function main() {
   const platform = currentPlatform()
+
+  let versions: Record<Component, string>
+  try {
+    console.log("[supatype] Fetching latest component versions...")
+    versions = await fetchAllLatestVersions()
+  } catch (err) {
+    console.error(`[supatype] Failed to fetch latest versions: ${(err as Error).message}`)
+    console.error("[supatype] Run 'supatype update' to download component binaries.")
+    return
+  }
+
   console.log(`[supatype] Downloading component binaries for ${platform.os}/${platform.arch}...`)
 
-  const components = Object.entries(DEFAULT_VERSIONS) as [Component, string][]
+  const components = Object.entries(versions) as [Component, string][]
 
   let anyFailed = false
   for (const [component, version] of components) {

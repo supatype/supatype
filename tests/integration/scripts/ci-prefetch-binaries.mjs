@@ -1,16 +1,37 @@
 #!/usr/bin/env node
 /**
- * Download engine/server/postgres/deno binaries for tests/integration/supatype.config.ts.
+ * Download engine/server/postgres/deno binaries for integration tests.
+ * Fetches the latest available version for each component from the CDN's
+ * `latest.json` manifest, then patches tests/integration/supatype.config.ts
+ * so the integration tests resolve the same cached binaries.
+ *
  * Run after `pnpm build` (needs packages/cli/dist).
  */
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
-import { downloadAll } from "../../../packages/cli/dist/binary-cache.js"
-import { loadConfig } from "../../../packages/cli/dist/config.js"
+import { readFileSync, writeFileSync } from "node:fs"
+import { fetchAllLatestVersions, downloadAll } from "../../../packages/cli/dist/binary-cache.js"
 
 const integrationDir = resolve(dirname(fileURLToPath(import.meta.url)), "..")
-const config = loadConfig(integrationDir)
+const configPath = resolve(integrationDir, "supatype.config.ts")
+
+console.log("[ci] Fetching latest component versions from CDN...")
+const versions = await fetchAllLatestVersions()
+console.log(
+  "[ci] Resolved versions:",
+  Object.entries(versions).map(([k, v]) => `${k}@${v}`).join(", "),
+)
+
+// Patch the integration test config so tests resolve the same cached binaries.
+let config = readFileSync(configPath, "utf8")
+for (const [component, version] of Object.entries(versions)) {
+  config = config.replace(
+    new RegExp(`(${component}\\s*:\\s*['"])[^'"]*(['"])`),
+    `$1${version}$2`,
+  )
+}
+writeFileSync(configPath, config, "utf8")
 
 console.log("[ci] Prefetching component binaries...")
-await downloadAll(config.versions, false)
+await downloadAll(versions, false)
 console.log("[ci] Done.")

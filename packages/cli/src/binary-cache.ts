@@ -569,6 +569,35 @@ export function versionFor(component: Component, config: SupatypeProjectConfig):
 }
 
 // ---------------------------------------------------------------------------
+// Latest version resolution from CDN
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetch the latest available version for a component.
+ * Each component directory on the CDN exposes `latest.json` → `{"version":"x.y.z"}`.
+ */
+export async function fetchLatestVersion(component: Component): Promise<string> {
+  const url = `${CDN_BASE}/${component}/latest.json`
+  const resp = await fetch(url)
+  if (!resp.ok) {
+    throw new Error(`Failed to fetch latest version for ${component} from ${url}: HTTP ${resp.status}`)
+  }
+  const data = await resp.json() as { version?: unknown }
+  if (typeof data.version !== "string" || data.version.trim() === "") {
+    throw new Error(`Invalid latest.json for ${component}: missing "version" field`)
+  }
+  return data.version.trim()
+}
+
+/** Fetch the latest version for all components concurrently. */
+export async function fetchAllLatestVersions(): Promise<Record<Component, string>> {
+  const results = await Promise.all(
+    BINARY_COMPONENTS.map(async (c) => [c, await fetchLatestVersion(c)] as const),
+  )
+  return Object.fromEntries(results) as Record<Component, string>
+}
+
+// ---------------------------------------------------------------------------
 // Download all components (used by postinstall + supatype update)
 // ---------------------------------------------------------------------------
 

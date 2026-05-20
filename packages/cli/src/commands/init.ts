@@ -2,7 +2,7 @@ import type { Command } from "commander"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { resolve, join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
-import { DENO_RELEASE_PIN } from "../release-pins.js"
+import { fetchAllLatestVersions } from "../binary-cache.js"
 
 export { scaffold }
 
@@ -35,7 +35,7 @@ export function registerInit(program: Command): void {
       "Server mode in supatype.config.ts: dev (default) | standalone (native ACME — not Compose self-host)",
       "dev",
     )
-    .action((name?: string, opts: { mode: string } = { mode: "dev" }) => {
+    .action(async (name?: string, opts: { mode: string } = { mode: "dev" }) => {
       const projectName = name ?? "my-project"
       const dir = name ? resolve(process.cwd(), name) : process.cwd()
 
@@ -46,7 +46,15 @@ export function registerInit(program: Command): void {
 
       if (name) mkdirSync(dir, { recursive: true })
 
-      scaffold(dir, projectName, opts.mode as "dev" | "standalone")
+      let versions: Record<string, string> = {}
+      try {
+        console.log("Fetching latest component versions from CDN...")
+        versions = await fetchAllLatestVersions()
+      } catch {
+        // Non-fatal: scaffold with placeholder versions; user can run `supatype update`.
+      }
+
+      scaffold(dir, projectName, opts.mode as "dev" | "standalone", versions)
 
       console.log(`\nSupatype project ready${name ? ` in ${name}/` : ""}.\n`)
       console.log("Next steps:")
@@ -68,7 +76,7 @@ export function registerInit(program: Command): void {
     })
 }
 
-function scaffold(dir: string, projectName: string, mode: "dev" | "standalone" = "dev"): void {
+function scaffold(dir: string, projectName: string, mode: "dev" | "standalone" = "dev", versions: Record<string, string> = {}): void {
   const write = (rel: string, content: string) => {
     const full = join(dir, rel)
     mkdirSync(resolve(full, ".."), { recursive: true })
@@ -83,7 +91,7 @@ function scaffold(dir: string, projectName: string, mode: "dev" | "standalone" =
     console.log("  skipped  package.json (already exists)")
   }
 
-  write("supatype.config.ts", tsConfigTemplate(projectName, mode))
+  write("supatype.config.ts", tsConfigTemplate(projectName, mode, versions))
   write("schema/index.ts", schemaTemplate())
   write(".env", envTemplate(projectName))
   write("seed.ts", seedTemplate(projectName))
@@ -116,11 +124,12 @@ function packageJsonTemplate(projectName: string, cliVersion: string): string {
 `
 }
 
-function tsConfigTemplate(projectName: string, mode: "dev" | "standalone"): string {
+function tsConfigTemplate(projectName: string, mode: "dev" | "standalone", versions: Record<string, string> = {}): string {
   const domainField =
     mode === "standalone"
       ? `    domain: "",  // e.g. "api.example.com" for ACME TLS\n`
       : ""
+  const v = (key: string, fallback: string) => versions[key] ?? fallback
   return `import { defineConfig } from "@supatype/cli"
 
 export default defineConfig({
@@ -140,10 +149,10 @@ ${domainField}  },
     // vite_dev_url: "http://127.0.0.1:5173",  // dev HMR at /_vite (when using a separate Vite server)
   },
   versions: {
-    engine: "0.4.2",
-    server: "0.1.0",
-    postgres: "17.2",
-    deno: "${DENO_RELEASE_PIN}",
+    engine: "${v("engine", "latest")}",
+    server: "${v("server", "latest")}",
+    postgres: "${v("postgres", "latest")}",
+    deno: "${v("deno", "latest")}",
   },
   email: { provider: "console" },
   storage: { provider: "local", local_path: ".supatype/storage" },

@@ -9,7 +9,7 @@
  */
 
 import { spawnSync } from "node:child_process"
-import { mkdirSync, writeFileSync, unlinkSync, existsSync } from "node:fs"
+import { mkdirSync, writeFileSync, unlinkSync, existsSync, readdirSync } from "node:fs"
 import { tmpdir, homedir } from "node:os"
 import { join } from "node:path"
 import { loadConfig } from "./config.js"
@@ -86,17 +86,19 @@ async function getEngineBin(): Promise<string> {
     // No valid project config — fall through to default cache path.
   }
 
-  // Fall back to default cached version.
-  const DEFAULT_ENGINE_VERSION = "0.4.2"
+  // No config found — scan the cache for any available engine binary.
   const platform = currentPlatform()
-  const bin = join(
-    cachePath("engine", DEFAULT_ENGINE_VERSION),
-    `supatype-engine-${platform.os}-${platform.arch}`,
-  )
-  if (existsSync(bin)) {
-    _engineBin = bin
-    return _engineBin
-  }
+  const engineCacheDir = join(homedir(), ".supatype", "cache", "engine")
+  try {
+    const cachedVersions = readdirSync(engineCacheDir).sort()
+    for (const version of cachedVersions.reverse()) {
+      const bin = join(cachePath("engine", version), `supatype-engine-${platform.os}-${platform.arch}`)
+      if (existsSync(bin)) {
+        _engineBin = bin
+        return _engineBin
+      }
+    }
+  } catch { /* cache dir doesn't exist */ }
 
   throw new Error(
     "Engine binary not found. Run: supatype update",
