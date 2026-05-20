@@ -2,6 +2,7 @@ import type { Command } from "commander"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { resolve, join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
+import { DENO_RELEASE_PIN } from "../release-pins.js"
 
 export { scaffold }
 
@@ -142,7 +143,7 @@ ${domainField}  },
     engine: "0.4.2",
     server: "0.1.0",
     postgres: "17.2",
-    deno: "2.2.0",
+    deno: "${DENO_RELEASE_PIN}",
   },
   email: { provider: "console" },
   storage: { provider: "local", local_path: ".supatype/storage" },

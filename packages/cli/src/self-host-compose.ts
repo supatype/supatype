@@ -109,6 +109,23 @@ services:
       db:
         condition: service_healthy
 
+  functions-worker:
+    image: \${SUPATYPE_FUNCTIONS_WORKER_IMAGE:-supatype/functions-worker:latest}
+    expose:
+      - "8001"
+    volumes:
+      - ${projectMount}:/project:ro
+    environment:
+      SUPATYPE_FUNCTIONS_ROOT: /project/functions
+      SUPATYPE_DENO_FUNCTIONS_DIR: /project/functions
+      PORT: "8001"
+      SUPATYPE_URL: \${API_EXTERNAL_URL:-http://localhost:18473}
+      SUPATYPE_ANON_KEY: \${ANON_KEY:-}
+      SUPATYPE_SERVICE_ROLE_KEY: \${SERVICE_ROLE_KEY:-}
+    depends_on:
+      db:
+        condition: service_healthy
+
   server:
     image: \${SUPATYPE_SERVER_IMAGE:-\${SUPATYPE_AUTH_IMAGE:-supatype/server:latest}}
     ports:
@@ -129,6 +146,7 @@ services:
       SUPATYPE_SERVICE_ROLE_KEY: \${SERVICE_ROLE_KEY:-}
       SUPATYPE_SQL_DATABASE_URL: "postgresql://\${POSTGRES_USER:-supatype_admin}:\${POSTGRES_PASSWORD:-postgres}@db:5432/\${POSTGRES_DB:-supatype}"
       SUPATYPE_DENO_FUNCTIONS_DIR: /project/functions
+      SUPATYPE_FUNCTIONS_WORKER_URL: http://functions-worker:8001
 ${appEnv}
       GOTRUE_API_HOST: 0.0.0.0
       GOTRUE_API_PORT: 9999
@@ -150,6 +168,8 @@ ${appEnv}
       postgrest:
         condition: service_started
       storage:
+        condition: service_started
+      functions-worker:
         condition: service_started
 
   minio:

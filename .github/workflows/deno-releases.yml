@@ -1,0 +1,145 @@
+# Mirror pinned Deno runtime to Hetzner Object Storage (releases.supatype.io/deno/v{version}/).
+# Trigger: merge to main that changes packages/cli/releases/deno/VERSION (no extra git tags).
+name: Deno CDN mirror
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - packages/cli/releases/deno/VERSION
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Re-upload even if checksums already exist on CDN
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  mirror:
+    name: Mirror Deno to CDN
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.CDN_AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.CDN_AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ${{ secrets.CDN_AWS_REGION }}
+      AWS_EC2_METADATA_DISABLED: "true"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read pinned Deno version
+        id: pin
+        run: |
+          set -euo pipefail
+          VERSION="$(tr -d '[:space:]' < packages/cli/releases/deno/VERSION)"
+          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            echo "::error::Invalid packages/cli/releases/deno/VERSION: ${VERSION}"
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Deno pin: ${VERSION}"
+
+      - name: Skip if already published
+        id: skip
+        env:
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force }}
+        run: |
+          set -euo pipefail
+          if [[ "${FORCE}" == "true" ]]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "Force re-publish requested."
+            exit 0
+          fi
+
+          EP="${{ secrets.CDN_ENDPOINT }}"
+          EP="${EP%/}"
+          BUCKET="${{ secrets.CDN_BUCKET }}"
+          VERSION="${{ steps.pin.outputs.version }}"
+          KEY="s3://${BUCKET}/deno/v${VERSION}/checksums.sha256.minisig"
+
+          aws configure set default.s3.addressing_style path >/dev/null
+          aws configure set default.s3.signature_version s3v4 >/dev/null
+
+          if aws s3 ls "${KEY}" --endpoint-url "${EP}" >/dev/null 2>&1; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "Already on CDN: deno/v${VERSION}/ — skipping (use workflow_dispatch + force to re-upload)."
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "Not on CDN yet — will mirror deno/v${VERSION}/."
+          fi
+
+      - name: Download and package Deno binaries
+        if: steps.skip.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y unzip
+          chmod +x packages/cli/scripts/mirror-deno-release.sh
+          packages/cli/scripts/mirror-deno-release.sh "${RUNNER_TEMP}/deno-mirror"
+
+      - name: Sign checksums.sha256
+        if: steps.skip.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          cd "${RUNNER_TEMP}/deno-mirror"
+          sudo apt-get install -y minisign
+          printf '%s' "${{ secrets.MINISIGN_PRIVATE_KEY }}" > /tmp/minisign.key
+          echo "${{ secrets.MINISIGN_PASSWORD }}" | minisign \
+            -S -s /tmp/minisign.key \
+            -m checksums.sha256 \
+            -t "supatype deno releases v${{ steps.pin.outputs.version }}"
+          rm -f /tmp/minisign.key
+
+      - name: Upload to CDN
+        if: steps.skip.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          cd "${RUNNER_TEMP}/deno-mirror"
+
+          EP="${{ secrets.CDN_ENDPOINT }}"
+          EP="${EP%/}"
+          BUCKET="${{ secrets.CDN_BUCKET }}"
+          VERSION="${{ steps.pin.outputs.version }}"
+          BASE="s3://${BUCKET}/deno/v${VERSION}"
+          CACHE_IMMUTABLE="public, max-age=31536000, immutable"
+
+          if [[ "${EP}" == *"/${BUCKET}"* ]] || [[ "${EP}" == *"/${BUCKET}/"* ]]; then
+            echo "::error::CDN_ENDPOINT must be the regional host only, not include the bucket."
+            exit 1
+          fi
+
+          export AWS_RETRY_MODE=standard
+          export AWS_MAX_ATTEMPTS=10
+          aws configure set default.s3.addressing_style path
+          aws configure set default.s3.signature_version s3v4
+
+          echo "Preflight: list bucket"
+          aws s3 ls "s3://${BUCKET}/" --endpoint-url "${EP}"
+
+          for f in deno-*; do
+            [[ -f "${f}" ]] || continue
+            echo "Upload ${f}"
+            aws s3 cp "${f}" "${BASE}/${f}" \
+              --endpoint-url "${EP}" \
+              --cache-control "${CACHE_IMMUTABLE}" \
+              --no-progress
+          done
+
+          for f in checksums.sha256 checksums.sha256.minisig; do
+            aws s3 cp "${f}" "${BASE}/${f}" \
+              --endpoint-url "${EP}" \
+              --cache-control "${CACHE_IMMUTABLE}" \
+              --no-progress
+          done
+
+          printf '{"version":"%s","date":"%s","checksums_url":"https://releases.supatype.io/deno/v%s/checksums.sha256"}\n' \
+            "${VERSION}" "$(date -u +%Y-%m-%d)" "${VERSION}" > latest.json
+          aws s3 cp latest.json "s3://${BUCKET}/deno/latest.json" \
+            --endpoint-url "${EP}" \
+            --cache-control "no-cache, no-store, must-revalidate" \
+            --no-progress
+
+          echo "Published deno/v${VERSION}/ to CDN."

@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs"
 import { resolve } from "node:path"
+import type { ComponentVersions } from "./components.js"
 
 // ---------------------------------------------------------------------------
 // Config schema (single canonical shape; loaded from supatype.config.ts)
@@ -72,19 +73,11 @@ export interface SupatypeProjectConfig {
      */
     vite_dev_url?: string
   }
-  versions: {
-    /**
-     * Schema engine version (semver) or **`"local"`** when using **`overrides.engine`** only
-     * (Phase 10.7 — avoids duplicating the path).
-     */
-    engine: string
-    /** supatype-server version or **`"local"`** with **`overrides.server`**. */
-    server: string
-    /** Postgres archive version or **`"local"`** with **`overrides.postgres_dir`**. */
-    postgres: string
-    /** Deno version or **`"local"`** with **`overrides.deno`**. */
-    deno: string
-  }
+  /**
+   * Pinned binary versions per component. Use **`"local"`** with the matching **`overrides.*`**
+   * entry when testing a local build (Phase 10.7).
+   */
+  versions: ComponentVersions
   /**
    * Override component binaries with local build paths.
    * Intended for supatype contributors testing local changes.

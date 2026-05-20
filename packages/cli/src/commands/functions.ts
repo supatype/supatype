@@ -12,6 +12,7 @@ import { resolve, join, basename, relative, isAbsolute } from "node:path"
 import { spawnSync, execSync } from "node:child_process"
 import { localKongBaseUrl } from "../local-gateway.js"
 import { loadConfig } from "../config.js"
+import { ensureBinary } from "../ensure-binary.js"
 import {
   functionsPathCandidatesFromProject,
   preferredFunctionsPathFromProject,
@@ -20,6 +21,7 @@ import {
   discoverTsFunctionsInDir,
   generateFunctionsRouterSource,
 } from "../functions-router-gen.js"
+import { selfHostComposePaths } from "../self-host-compose.js"
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -46,8 +48,8 @@ export function registerFunctions(program: Command): void {
     .description("Start a local Deno server that serves all functions with hot reload")
     .option("--port <port>", "Port to serve on", "54321")
     .option("--env-file <path>", "Path to env file", ENV_LOCAL)
-    .action((opts: { port: string; envFile: string }) => {
-      serve(process.cwd(), opts)
+    .action(async (opts: { port: string; envFile: string }) => {
+      await serve(process.cwd(), opts)
     })
 
   fnCmd
@@ -249,7 +251,8 @@ function discoverFunctions(cwd: string): DiscoveredFunction[] {
 
 // ─── Serve (local dev) ──────────────────────────────────────────────────────
 
-function serve(cwd: string, opts: { port: string; envFile: string }): void {
+async function serve(cwd: string, opts: { port: string; envFile: string }): Promise<void> {
+  const config = loadConfig(cwd)
   const functionsDir = resolveFunctionsDir(cwd, "read")
   const functionsDirLabel = relativeFunctionsDir(cwd, functionsDir)
   const routes = discoverTsFunctionsInDir(functionsDir)
@@ -279,8 +282,16 @@ function serve(cwd: string, opts: { port: string; envFile: string }): void {
   console.log(`Serving functions at http://localhost:${opts.port}/functions/v1/`)
   console.log("Watching for changes...\n")
 
+  let denoBin: string
+  try {
+    denoBin = await ensureBinary("deno", config)
+  } catch (err) {
+    console.error(`[supatype] Could not provision Deno v${config.versions.deno}: ${(err as Error).message}`)
+    process.exit(1)
+  }
+
   const result = spawnSync(
-    "deno",
+    denoBin,
     [
       "run",
       "--allow-net",
@@ -310,7 +321,6 @@ function serve(cwd: string, opts: { port: string; envFile: string }): void {
 
   if (result.status !== 0) {
     console.error("Function server exited with errors.")
-    console.error("Make sure Deno is installed: https://deno.land/manual/getting_started/installation")
     process.exit(result.status ?? 1)
   }
 }
@@ -343,50 +353,27 @@ async function deploy(cwd: string, opts: { only?: string; dryRun?: boolean }): P
     return
   }
 
-  // Check if this is a self-hosted deployment or cloud
-  const isSelfHosted = detectSelfHosted(cwd)
-
-  if (isSelfHosted) {
+  const composePath = selfHostComposePaths(cwd).composePath
+  if (existsSync(composePath)) {
     await deploySelfHosted(cwd, fns)
-  } else {
-    await deployCloud(cwd, fns)
+    return
   }
-}
 
-function detectSelfHosted(cwd: string): boolean {
-  return existsSync(resolve(cwd, "deploy/docker-compose.yml"))
+  await deployCloud(cwd, fns)
 }
 
 async function deploySelfHosted(cwd: string, fns: DiscoveredFunction[]): Promise<void> {
-  console.log("Self-hosted deployment detected.\n")
-  console.log("Bundling functions...\n")
-
-  const bundleDir = resolve(cwd, "deploy/functions")
-  mkdirSync(bundleDir, { recursive: true })
+  console.log("Self-host Compose deployment.\n")
+  console.log("Functions are served from your project functions/ directory (no bundle step).\n")
 
   for (const fn of fns) {
-    const start = Date.now()
-    const outFile = join(bundleDir, `${fn.name}.js`)
-
-    // Bundle with Deno
-    const result = spawnSync("deno", ["bundle", fn.entrypoint, outFile], {
-      stdio: "pipe",
-      cwd,
-    })
-
-    if (result.status !== 0) {
-      const stderr = result.stderr?.toString() ?? ""
-      console.error(`  ${fn.name} ✗ bundle failed`)
-      if (stderr) console.error(`    ${stderr.trim()}`)
-      continue
-    }
-
-    const duration = Date.now() - start
-    console.log(`  ${fn.name} ✓ deployed (${duration}ms)`)
+    console.log(`  ${fn.name}  →  ${relative(cwd, fn.entrypoint)}`)
   }
 
-  console.log(`\nDeployed ${fns.length} function(s) to deploy/functions/`)
-  console.log("The supatype-functions container will pick up changes automatically.")
+  console.log(`\n${fns.length} function(s) ready on disk.`)
+  console.log("Restart the functions-worker container to load changes:")
+  console.log("  supatype self-host compose restart functions-worker")
+  console.log("\nKong → supatype-server → functions-worker (per-project worker).")
 }
 
 async function deployCloud(cwd: string, fns: DiscoveredFunction[]): Promise<void> {

@@ -4,6 +4,10 @@
  * Supports two database providers (set in supatype.config.ts):
  *   provider = "native" — manages a native Postgres binary from the supatype cache (default when omitted)
  *   provider = "docker" — runs supatype/postgres via Docker (includes all extensions)
+ *
+ * Edge functions (when a functions/ dir exists): Deno is resolved from the CDN cache
+ * (auto-download on miss). Self-host/cloud Docker stacks use supatype-server in-container;
+ * Deno is not provisioned by the CLI on those paths.
  */
 
 import type { Command } from "commander"
@@ -20,13 +24,13 @@ import {
 import { discoverTsFunctionsInDir, writeDevFunctionsRouter } from "../functions-router-gen.js"
 import { signJwt } from "../jwt.js"
 import {
-  resolveBinary,
   normalisePlatformPath,
   cachePath,
   currentPlatform,
   hasMeaningfulOverrides,
   describeActiveOverrides,
 } from "../binary-cache.js"
+import { ensureBinary } from "../ensure-binary.js"
 import { ProcessManager } from "../process-manager.js"
 import { localStorageEnv } from "../local-storage.js"
 import { initdb, start as pgStart, stop as pgStop, waitReady as pgWaitReady, isPortInUse } from "../postgres-ctl.js"
@@ -38,52 +42,6 @@ import {
 } from "../docker-postgres.js"
 
 const DEFAULT_DOCKER_IMAGE = "supatype/postgres:17-latest"
-
-/**
- * Resolve Deno robustly on Windows + Unix.
- * - Respects config.overrides.deno when provided
- * - Tries common command variants (`deno`, `deno.cmd`, `deno.exe`)
- * - Falls back to `cmd /c deno --version` on Windows PATH edge-cases
- */
-function detectDenoBinary(
-  cwd: string,
-  overridePath: string | undefined,
-): { available: boolean; command?: string; argsPrefix?: string[] } {
-  const candidates: Array<{ command: string; argsPrefix: string[]; runtimeCommand?: string }> = []
-
-  if (overridePath && overridePath.trim().length > 0) {
-    const raw = overridePath.trim()
-    const cmd = isAbsolute(raw) ? raw : resolve(cwd, raw)
-    candidates.push({ command: cmd, argsPrefix: [], runtimeCommand: cmd })
-  }
-
-  candidates.push(
-    { command: "deno", argsPrefix: [], runtimeCommand: "deno" },
-    { command: "deno.cmd", argsPrefix: [], runtimeCommand: "deno.cmd" },
-    { command: "deno.exe", argsPrefix: [], runtimeCommand: "deno.exe" },
-  )
-
-  if (process.platform === "win32") {
-    // Probe PATH via cmd, but runtime should still invoke `deno` directly.
-    candidates.push({
-      command: "cmd.exe",
-      argsPrefix: ["/d", "/s", "/c", "deno"],
-      runtimeCommand: "deno",
-    })
-  }
-
-  for (const c of candidates) {
-    const res = spawnSync(c.command, [...c.argsPrefix, "--version"], {
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-    })
-    if (res.status === 0) {
-      return { available: true, command: c.runtimeCommand ?? c.command, argsPrefix: c.argsPrefix }
-    }
-  }
-
-  return { available: false }
-}
 
 /** Map `email.smtp` from supatype.config.ts into GOTRUE_SMTP_* for the embedded GoTrue process. */
 function gotrueSMTPFromEmailConfig(email: SupatypeProjectConfig["email"] | undefined): Record<string, string> {
@@ -129,8 +87,8 @@ export function registerDev(program: Command): void {
       // ── 2. Resolve engine + server binaries ──────────────────────────────
       console.log(`[supatype] Resolving component binaries for "${projectName}"...`)
       const [engineBin, serverBin] = await Promise.all([
-        resolveBinary("engine", config),
-        resolveBinary("server", config),
+        ensureBinary("engine", config),
+        ensureBinary("server", config),
       ])
 
       // ── 3. Per-project state directories ─────────────────────────────────
@@ -285,17 +243,12 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
         ? (writeDevFunctionsRouter(cwd, functionsDir, functionRoutes) ?? "")
         : ""
 
-      let denoRuntimeAvailable = false
-      let detectedDenoCommand: string | undefined
+      let denoBinPath: string | undefined
       if (hasFunctionsDir) {
-        const denoDetection = detectDenoBinary(cwd, config.overrides?.deno)
-        denoRuntimeAvailable = denoDetection.available
-        detectedDenoCommand = denoDetection.command
-        if (denoRuntimeAvailable) {
-          console.log(`[supatype] Edge functions enabled (${functionsDir})`)
-          if (detectedDenoCommand) {
-            console.log(`[supatype] Deno runtime: ${detectedDenoCommand}`)
-          }
+        console.log(`[supatype] Edge functions enabled (${functionsDir})`)
+        try {
+          denoBinPath = await ensureBinary("deno", config)
+          console.log(`[supatype] Deno runtime: ${denoBinPath} (v${config.versions.deno})`)
           if (functionRoutes.length > 0) {
             console.log(
               `[supatype] Edge functions router: ${relative(cwd, denoServeScriptAbs) || ".supatype/functions-router.ts"} ` +
@@ -304,10 +257,10 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
           } else {
             console.log("[supatype] Edge functions router not generated (no handler files discovered yet)")
           }
-        } else {
+        } catch (err) {
           console.warn(
-            `[supatype] ⚠  Found ${functionsDir} but Deno is not installed — edge functions will not run.\n` +
-              "  Install Deno: https://docs.deno.com/runtime/getting_started/installation/\n" +
+            `[supatype] ⚠  Found ${functionsDir} but could not provision Deno v${config.versions.deno} — edge functions will not run.\n` +
+              `  ${(err as Error).message}\n` +
               "  (Functions still appear in Studio; invocations need Deno.)",
           )
         }
@@ -342,7 +295,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
         SUPATYPE_POSTGREST_URL: `http://127.0.0.1:${postgrestPort}`,
         SUPATYPE_DENO_FUNCTIONS_DIR: denoFunctionsDir,
         ...(denoFunctionsDir !== "" ? { SUPATYPE_SHARED_ENV_FILE: resolve(denoFunctionsDir, ".env.local") } : {}),
-        ...(detectedDenoCommand !== undefined ? { SUPATYPE_DENO_PATH: detectedDenoCommand } : {}),
+        ...(denoBinPath !== undefined ? { SUPATYPE_DENO_PATH: denoBinPath } : {}),
         ...(denoServeScriptAbs !== ""
           ? { SUPATYPE_DENO_SERVE_SCRIPT: denoServeScriptAbs }
           : {}),

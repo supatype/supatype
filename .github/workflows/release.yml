@@ -184,6 +184,33 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
+  docker-functions-worker:
+    needs: [prepare, docker-latest-policy]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: supatype/functions-worker
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ needs.docker-latest-policy.outputs.docker_push_latest == 'true' }}
+
+      - uses: docker/build-push-action@v5
+        with:
+          context: packages/functions-worker
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
   docker-studio:
     needs: [prepare, docker-latest-policy]
     runs-on: ubuntu-latest
@@ -214,7 +241,7 @@ jobs:
 
   # ── GitHub Release ──────────────────────────────────────────────────────────
   github-release:
-    needs: [prepare, npm, docker-storage, docker-realtime, docker-studio]
+    needs: [prepare, npm, docker-storage, docker-realtime, docker-functions-worker, docker-studio]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

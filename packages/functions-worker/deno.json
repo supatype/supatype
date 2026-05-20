@@ -1,0 +1,8 @@
+{
+  "name": "@supatype/functions-worker",
+  "version": "0.1.0",
+  "exports": "./main.ts",
+  "compilerOptions": {
+    "lib": ["deno.ns", "deno.window", "esnext", "dom"]
+  }
+}

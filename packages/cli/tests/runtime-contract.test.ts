@@ -7,6 +7,7 @@ import { buildKongDeclarative } from "../src/kong-config.js"
 import { renderSelfHostCompose, writeSelfHostCompose } from "../src/self-host-compose.js"
 import { updateAppConfigInProject } from "../src/app-config.js"
 import type { SupatypeProjectConfig } from "../src/project-config.js"
+import { DENO_RELEASE_PIN } from "../src/release-pins.js"
 
 const baseConfig: SupatypeProjectConfig = {
   project: { name: "acme" },
@@ -17,7 +18,7 @@ const baseConfig: SupatypeProjectConfig = {
     engine: "0.4.2",
     server: "0.1.0",
     postgres: "17.2",
-    deno: "2.2.0",
+    deno: DENO_RELEASE_PIN,
   },
 }
 
@@ -78,6 +79,15 @@ describe("runtime contract", () => {
     expect(compose).toContain('SUPATYPE_APP_MODE: static')
     expect(compose).toContain("SUPATYPE_APP_STATIC_DIR: /project/public")
     expect(compose).not.toContain("static-app:")
+  })
+
+  it("self-host compose runs per-project functions-worker and proxies via server", () => {
+    const compose = renderSelfHostCompose(baseConfig)
+    expect(compose).toContain("\n  functions-worker:\n")
+    expect(compose).toContain("SUPATYPE_FUNCTIONS_WORKER_URL: http://functions-worker:8001")
+    expect(compose).toContain("SUPATYPE_FUNCTIONS_ROOT: /project/functions")
+    expect(compose).not.toContain("deploy/functions")
+    expect(compose).not.toContain("supatype-functions")
   })
 
   it("app config updater writes proxy mode intent", () => {

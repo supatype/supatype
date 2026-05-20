@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { defineConfig, loadConfig } from "../src/config.js"
 import { mergeProjectConfig, type SupatypeProjectConfig } from "../src/project-config.js"
+import { DENO_RELEASE_PIN } from "../src/release-pins.js"
 
 let counter = 0
 let tmpDir: string
@@ -17,7 +18,7 @@ const minimalProject = (name: string): SupatypeProjectConfig => ({
     engine: "0.4.2",
     server: "0.1.0",
     postgres: "17.2",
-    deno: "2.2.0",
+    deno: DENO_RELEASE_PIN,
   },
 })
 

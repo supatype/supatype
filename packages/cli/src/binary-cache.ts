@@ -95,7 +95,9 @@ export function isLinkedToCloudProject(cwd: string, config: SupatypeProjectConfi
 // Types
 // ---------------------------------------------------------------------------
 
-export type Component = "engine" | "server" | "postgres" | "deno"
+export type { Component, ComponentVersions } from "./components.js"
+export { BINARY_COMPONENTS } from "./components.js"
+import { BINARY_COMPONENTS, type Component } from "./components.js"
 
 export interface PlatformId {
   os: "linux" | "darwin" | "windows"
@@ -558,13 +560,12 @@ export function normalisePlatformPath(p: string): string {
   return result
 }
 
-function versionFor(component: Component, config: SupatypeProjectConfig): string {
-  switch (component) {
-    case "engine":   return config.versions.engine
-    case "server":   return config.versions.server
-    case "postgres": return config.versions.postgres
-    case "deno":     return config.versions.deno
+export function versionFor(component: Component, config: SupatypeProjectConfig): string {
+  const version = config.versions[component]
+  if (typeof version !== "string" || version.trim() === "") {
+    throw new Error(`[supatype] versions.${component} must be set in supatype.config.ts`)
   }
+  return version
 }
 
 // ---------------------------------------------------------------------------
@@ -581,7 +582,7 @@ export async function downloadAll(
   graceful = false,
 ): Promise<void> {
   const platform = currentPlatform()
-  const components: Component[] = ["engine", "server", "postgres", "deno"]
+  const components: Component[] = [...BINARY_COMPONENTS]
   const fakeConfig = { versions } as SupatypeProjectConfig
 
   for (const component of components) {

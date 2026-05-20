@@ -8,13 +8,14 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { basename, resolve } from "node:path"
 import { loadConfig } from "../config.js"
 import { download, currentPlatform, type Component } from "../binary-cache.js"
+import { DENO_RELEASE_PIN } from "../release-pins.js"
 
 // Canonical latest versions — bumped on each release.
 const LATEST_VERSIONS: Record<Component, string> = {
   engine: "0.4.2",
   server: "0.1.0",
   postgres: "17.2",
-  deno: "2.2.0",
+  deno: DENO_RELEASE_PIN,
 }
 
 const CONFIG_CANDIDATES = ["supatype.config.ts", "supatype.config.js", "supatype.config.mjs"]

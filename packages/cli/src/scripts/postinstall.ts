@@ -9,6 +9,7 @@
  */
 
 import { download, currentPlatform, type Component } from "../binary-cache.js"
+import { DENO_RELEASE_PIN } from "../release-pins.js"
 
 // Default versions downloaded on fresh install.
 // Updated by `supatype update` when new versions are released.
@@ -16,7 +17,7 @@ const DEFAULT_VERSIONS: Record<Component, string> = {
   engine: "0.4.2",
   server: "0.1.0",
   postgres: "17.2",
-  deno: "2.2.0",
+  deno: DENO_RELEASE_PIN,
 }
 
 async function main() {
