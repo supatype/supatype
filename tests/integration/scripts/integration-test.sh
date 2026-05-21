@@ -79,7 +79,7 @@ SUPATYPE_PID=$!
 # ── Step 4: Wait for health ───────────────────────────────────────────────────
 
 BASE_URL="${SUPATYPE_URL:-http://localhost:54399}"
-MAX_WAIT=60
+MAX_WAIT=120
 echo "==> Waiting for $BASE_URL to be ready (up to ${MAX_WAIT}s)..."
 
 for i in $(seq 1 "$MAX_WAIT"); do
@@ -97,13 +97,13 @@ done
 # ── Step 5: Run tests ─────────────────────────────────────────────────────────
 
 echo "==> Running integration tests"
-cd "$ROOT_DIR"
+cd "$INTEGRATION_DIR"
 
 export SUPATYPE_URL="${SUPATYPE_URL:-http://localhost:54399}"
 export SUPATYPE_ANON_KEY="${SUPATYPE_ANON_KEY:-integration-anon-key}"
 
-node --import tsx/esm --test --experimental-test-coverage \
-  tests/integration/tests/api.test.ts
+pnpm exec node --import tsx/esm --test --experimental-test-coverage \
+  tests/api.test.ts
 
 echo ""
 echo "==> All tests passed."

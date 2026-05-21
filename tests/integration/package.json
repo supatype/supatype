@@ -4,6 +4,10 @@
   "type": "module",
   "dependencies": {
     "@supatype/cli": "workspace:*",
+    "@supatype/client": "workspace:*",
     "@supatype/types": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
   }
 }

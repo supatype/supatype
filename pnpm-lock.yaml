@@ -559,9 +559,16 @@ importers:
       '@supatype/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@supatype/client':
+        specifier: workspace:*
+        version: link:../../packages/client
       '@supatype/types':
         specifier: workspace:*
         version: link:../../packages/types
+    devDependencies:
+      tsx:
+        specifier: ^4.19.2
+        version: 4.21.0
 
 packages:
 

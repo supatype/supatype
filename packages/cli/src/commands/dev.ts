@@ -147,7 +147,7 @@ export function registerDev(program: Command): void {
         const image = config.database.image ?? DEFAULT_DOCKER_IMAGE
         console.log(`[supatype] Starting Postgres via Docker (${image})...`)
         dockerPgStart({ image, projectName, port: pgPort })
-        await dockerPgWaitReady(projectName, 30_000)
+        await dockerPgWaitReady(projectName, 90_000)
         console.log("[supatype] Postgres is ready.")
         dbURL = dockerDbUrl(projectName, pgPort)
         stopPostgres = () => dockerPgStop(projectName)
@@ -218,7 +218,16 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
           { stdio: "pipe", encoding: "utf8", env: pgEnv })
       }
 
-      // ── 8. Engine: apply schema ───────────────────────────────────────────
+      const LOCAL_JWT_SECRET = "super-secret-jwt-token-with-at-least-32-characters-long"
+      const authDbURL = dbURL.includes("?")
+        ? `${dbURL}&search_path=auth`
+        : `${dbURL}?search_path=auth`
+
+      // ── 8. GoTrue migrations (auth.users before engine studio SQL) ─────────
+      console.log("[supatype] Running GoTrue migrations...")
+      runGotrueMigrations(serverBin, authDbURL, LOCAL_JWT_SECRET)
+
+      // ── 9. Engine: apply schema ───────────────────────────────────────────
       const schemaPath = schemaPathFromProject(config, cwd)
       const supatypeDir = join(cwd, ".supatype")
       const manifestPath = join(supatypeDir, "manifest.json")
@@ -233,12 +242,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
         (e: unknown) => console.error("[supatype] Initial schema push failed:", (e as Error).message),
       )
 
-      // ── 9. Spawn supatype-server ──────────────────────────────────────────
-      // GoTrue creates its auth schema in the project database so that auth.users
-      // is co-located with public.* tables and visible from the SQL runner.
-      // GoTrue migrations create tables with unqualified names and rely on
-      // search_path=auth to resolve them into the auth schema.
-      const authDbURL = dbURL.includes("?") ? `${dbURL}&search_path=auth` : `${dbURL}?search_path=auth`
+      // ── 10. Spawn supatype-server ─────────────────────────────────────────
 
       // Resolve edge functions config: only enable Deno if a functions dir exists.
       const functionsDir = functionsPathCandidatesFromProject(config, cwd).find(dir => existsSync(dir))
@@ -274,8 +278,6 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
           )
         }
       }
-
-      const LOCAL_JWT_SECRET = "super-secret-jwt-token-with-at-least-32-characters-long"
 
       // Matches GOTRUE_HOOK_SEND_EMAIL_SECRETS symmetric format (dev only). Override via .env.
       const LOCAL_SEND_EMAIL_HOOK_SECRETS =
@@ -957,6 +959,31 @@ function adaptUnsupportedKinds(
 // ---------------------------------------------------------------------------
 // .env loader
 // ---------------------------------------------------------------------------
+
+/** Apply GoTrue DDL (auth.users, etc.) before engine push references auth schema. */
+function runGotrueMigrations(
+  serverBin: string,
+  authDbURL: string,
+  jwtSecret: string,
+): void {
+  const result = spawnSync(serverBin, ["migrate"], {
+    stdio: "pipe",
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      DATABASE_URL: authDbURL,
+      GOTRUE_DB_DRIVER: "postgres",
+      GOTRUE_JWT_SECRET: jwtSecret,
+    },
+  })
+  if (result.status !== 0) {
+    const detail = (result.stderr ?? result.stdout ?? "").trim()
+    throw new Error(
+      `GoTrue migrations failed (exit ${result.status ?? "unknown"})` +
+        (detail ? `:\n${detail}` : ""),
+    )
+  }
+}
 
 function loadDotEnv(cwd: string): Record<string, string> {
   const candidates = [resolve(cwd, ".env"), resolve(cwd, ".env.local")]
