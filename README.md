@@ -10,8 +10,6 @@ This monorepo ships **`@supatype/cli`**, **`@supatype/client`**, **`@supatype/re
 
 **Documentation for users:** [GitHub Pages](https://supatype.github.io/supatype/) — local dev and self-host guides live there (`#local-dev`, `#self-host`).
 
-**Maintainer reference:** [docs/DEPLOYMENT-MODES.md](./docs/DEPLOYMENT-MODES.md) (includes cloud/k8s; not linked from the public site).
-
 ---
 
 ## Deployment modes (summary)
