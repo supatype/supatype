@@ -330,9 +330,9 @@ export async function download(
 
     writeFileSync(destPath, readFileSync(tmpPath))
 
-    if (process.platform !== "win32") {
+    assertArtifactFormat(component, destPath, platform)
+    if (process.platform !== "win32" && EXECUTABLE_COMPONENTS.has(component)) {
       await chmod(destPath, 0o755)
-      assertNativeExecutable(destPath, component)
     }
   } finally {
     if (existsSync(tmpPath)) {
@@ -524,46 +524,130 @@ async function streamToFileWithProgress(url: string, destPath: string): Promise<
 
 const EXECUTABLE_COMPONENTS = new Set<Component>(["engine", "server", "deno"])
 
-/** True when a cached file is safe to run (ELF/Mach-O or gzip archive for postgres). */
+/** True when a cached file matches expected format for the current platform. */
 function cachedArtifactLooksValid(component: Component, filePath: string): boolean {
   try {
     const st = statSync(filePath)
     if (!st.isFile() || st.size < 64) return false
-    if (component === "postgres") {
-      const fd = openSync(filePath, "r")
-      try {
-        const magic = Buffer.alloc(2)
-        readSync(fd, magic, 0, 2, 0)
-        return magic[0] === 0x1f && magic[1] === 0x8b
-      } finally {
-        closeSync(fd)
-      }
-    }
-    if (EXECUTABLE_COMPONENTS.has(component)) {
-      assertNativeExecutable(filePath, component)
-      return true
-    }
-    return false
+    assertArtifactFormat(component, filePath, currentPlatform())
+    return true
   } catch {
     return false
   }
 }
 
-/** Reject HTML/error pages or scripts masquerading as CDN binaries. */
-function assertNativeExecutable(filePath: string, component: Component): void {
+/** Confirm a downloaded/cached artifact matches the expected CDN format (tests, CI). */
+export function validateArtifactFormat(
+  component: Component,
+  filePath: string,
+  platform: PlatformId,
+): void {
+  assertArtifactFormat(component, filePath, platform)
+}
+
+/**
+ * Per-component CDN artifact shapes:
+ *   engine, server, deno — native executable (ELF / Mach-O / PE)
+ *   postgres (unix)      — .tar.gz (gzip)
+ *   postgres (windows)   — .zip
+ */
+function assertArtifactFormat(
+  component: Component,
+  filePath: string,
+  platform: PlatformId,
+): void {
+  if (component === "postgres") {
+    if (platform.os === "windows") assertZipArchive(filePath)
+    else assertGzipArchive(filePath)
+    return
+  }
+  if (EXECUTABLE_COMPONENTS.has(component)) {
+    assertNativeExecutable(filePath, component, platform)
+    return
+  }
+}
+
+/** Reject HTML/error pages or corrupt postgres .tar.gz on CDN. */
+function assertGzipArchive(filePath: string): void {
+  const fd = openSync(filePath, "r")
+  try {
+    const magic = Buffer.alloc(2)
+    readSync(fd, magic, 0, 2, 0)
+    if (magic[0] !== 0x1f || magic[1] !== 0x8b) {
+      throw new Error(
+        "Downloaded postgres file is not a gzip archive (bad magic bytes). " +
+          "The CDN object may be corrupt or cached HTML — delete ~/.supatype/cache and retry.",
+      )
+    }
+  } finally {
+    closeSync(fd)
+  }
+}
+
+/** Reject corrupt postgres .zip on CDN (Windows bundles). */
+function assertZipArchive(filePath: string): void {
   const fd = openSync(filePath, "r")
   try {
     const magic = Buffer.alloc(4)
     readSync(fd, magic, 0, 4, 0)
-    const elf = magic[0] === 0x7f && magic[1] === 0x45 && magic[2] === 0x4c && magic[3] === 0x46
+    if (magic[0] !== 0x50 || magic[1] !== 0x4b) {
+      throw new Error(
+        "Downloaded postgres file is not a zip archive (bad magic bytes). " +
+          "The CDN object may be corrupt or cached HTML — delete ~/.supatype/cache and retry.",
+      )
+    }
+  } finally {
+    closeSync(fd)
+  }
+}
+
+/** Reject HTML/error pages, Go c-archives, or wrong-OS executables on CDN. */
+function assertNativeExecutable(
+  filePath: string,
+  component: Component,
+  platform: PlatformId,
+): void {
+  const fd = openSync(filePath, "r")
+  try {
+    const magic = Buffer.alloc(4)
+    readSync(fd, magic, 0, 4, 0)
+    const goCArchive =
+      magic[0] === 0x21 && magic[1] === 0x3c && magic[2] === 0x61 && magic[3] === 0x72
+    if (goCArchive) {
+      throw new Error(
+        `Downloaded ${component} file is a Go static archive (c-archive), not an executable. ` +
+          "The CDN object may be from a bad release build — delete ~/.supatype/cache and retry.",
+      )
+    }
+    if (platform.os === "windows") {
+      if (magic[0] !== 0x4d || magic[1] !== 0x5a) {
+        throw new Error(
+          `Downloaded ${component} file is not a Windows PE executable (bad magic bytes). ` +
+            "The CDN object may be corrupt or cached HTML — delete ~/.supatype/cache and retry.",
+        )
+      }
+      return
+    }
+    if (platform.os === "linux") {
+      const elf =
+        magic[0] === 0x7f && magic[1] === 0x45 && magic[2] === 0x4c && magic[3] === 0x46
+      if (!elf) {
+        throw new Error(
+          `Downloaded ${component} file is not an ELF executable (bad magic bytes). ` +
+            "The CDN object may be corrupt or cached HTML — delete ~/.supatype/cache and retry.",
+        )
+      }
+      return
+    }
     const macho =
       magic.readUInt32BE(0) === 0xfe_ed_fa_ce ||
       magic.readUInt32BE(0) === 0xfe_ed_fa_cf ||
-      magic.readUInt32LE(0) === 0xce_fa_ed_fe ||
-      magic.readUInt32LE(0) === 0xcf_fa_ed_fe
-    if (!elf && !macho) {
+      magic.readUInt32LE(0) === 0xfe_ed_fa_ce ||
+      magic.readUInt32LE(0) === 0xfe_ed_fa_cf ||
+      magic.readUInt32BE(0) === 0xca_fe_ba_be
+    if (!macho) {
       throw new Error(
-        `Downloaded ${component} file is not a native executable (bad magic bytes). ` +
+        `Downloaded ${component} file is not a Mach-O executable (bad magic bytes). ` +
           "The CDN object may be corrupt or cached HTML — delete ~/.supatype/cache and retry.",
       )
     }
@@ -674,7 +758,7 @@ export async function fetchAllLatestVersions(): Promise<Record<Component, string
  */
 /**
  * Verify all cached binaries for the current platform (used by integration CI).
- * Throws if any engine/server/deno file is missing or not ELF/Mach-O.
+ * Throws if any cached component is missing or fails format checks.
  */
 export function verifyCachedBinaries(versions: SupatypeProjectConfig["versions"]): void {
   const platform = currentPlatform()
