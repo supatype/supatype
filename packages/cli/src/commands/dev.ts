@@ -29,6 +29,7 @@ import {
   currentPlatform,
   hasMeaningfulOverrides,
   describeActiveOverrides,
+  postgresArchiveTag,
 } from "../binary-cache.js"
 import { ensureBinary } from "../ensure-binary.js"
 import { ProcessManager } from "../process-manager.js"
@@ -731,7 +732,7 @@ async function extractPostgresArchive(
   extractDir: string,
 ): Promise<void> {
   const ext = platform.os === "windows" ? ".zip" : ".tar.gz"
-  const archiveName = `supatype-pg-${version}-${platform.os}-${platform.arch}${ext}`
+  const archiveName = `supatype-pg-${postgresArchiveTag(version)}-${platform.os}-${platform.arch}${ext}`
   const archivePath = join(pgCacheDir, archiveName)
 
   if (!existsSync(archivePath)) {

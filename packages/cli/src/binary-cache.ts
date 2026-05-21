@@ -110,6 +110,11 @@ export interface PlatformId {
 
 const CDN_BASE = "https://releases.supatype.com"
 
+/** Postgres CDN archives use PG major in the basename (17.2 → `supatype-pg-17-…`). */
+export function postgresArchiveTag(version: string): string {
+  return version.split(".")[0]!
+}
+
 /**
  * Supatype release signing public key (minisign format).
  * Generated with: minisign -G
@@ -125,7 +130,7 @@ const SUPATYPE_RELEASE_PUBLIC_KEY = ""
 const CDN_PATHS: Record<Component, (version: string, platform: PlatformId) => string> = {
   engine:   (v, p) => `/engine/v${v}/supatype-engine-${p.os}-${p.arch}${p.os === "windows" ? ".exe" : ""}`,
   server:   (v, p) => `/server/v${v}/supatype-server-${p.os}-${p.arch}${p.os === "windows" ? ".exe" : ""}`,
-  postgres: (v, p) => `/postgres/v${v}/supatype-pg-${v}-${p.os}-${p.arch}${p.os === "windows" ? ".zip" : ".tar.gz"}`,
+  postgres: (v, p) => `/postgres/v${v}/supatype-pg-${postgresArchiveTag(v)}-${p.os}-${p.arch}${p.os === "windows" ? ".zip" : ".tar.gz"}`,
   deno:     (v, p) => `/deno/v${v}/deno-${p.os}-${p.arch}${p.os === "windows" ? ".exe" : ""}`,
 }
 
@@ -154,7 +159,7 @@ function binaryName(component: Component, version: string, platform: PlatformId)
   switch (component) {
     case "engine":   return `supatype-engine-${platform.os}-${platform.arch}${win ? ".exe" : ""}`
     case "server":   return `supatype-server-${platform.os}-${platform.arch}${win ? ".exe" : ""}`
-    case "postgres": return `supatype-pg-${version}-${platform.os}-${platform.arch}${win ? ".zip" : ".tar.gz"}`
+    case "postgres": return `supatype-pg-${postgresArchiveTag(version)}-${platform.os}-${platform.arch}${win ? ".zip" : ".tar.gz"}`
     case "deno":     return `deno-${platform.os}-${platform.arch}${win ? ".exe" : ""}`
   }
 }
