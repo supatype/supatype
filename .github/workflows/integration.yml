@@ -45,8 +45,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.supatype/cache
-          key: supatype-binaries-${{ matrix.os }}-${{ hashFiles('tests/integration/supatype.config.ts') }}
-          restore-keys: supatype-binaries-${{ matrix.os }}-
+          key: supatype-binaries-v2-${{ matrix.os }}-${{ hashFiles('packages/cli/src/binary-cache.ts', 'tests/integration/supatype.config.ts') }}
+          restore-keys: supatype-binaries-v2-${{ matrix.os }}-
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

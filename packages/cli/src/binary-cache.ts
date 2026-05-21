@@ -15,12 +15,16 @@
 
 import { createHash, createPublicKey, verify as cryptoVerify } from "node:crypto"
 import {
+  closeSync,
   copyFileSync,
   createWriteStream,
   existsSync,
   mkdirSync,
+  openSync,
   readFileSync,
+  readSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs"
 import { chmod } from "node:fs/promises"
@@ -295,8 +299,14 @@ export async function download(
   const destPath = join(dir, name)
 
   if (existsSync(destPath)) {
-    console.log(`[supatype] ${component} v${version} already cached.`)
-    return destPath
+    if (cachedArtifactLooksValid(component, destPath)) {
+      console.log(`[supatype] ${component} v${version} already cached.`)
+      return destPath
+    }
+    console.warn(
+      `[supatype] ${component} v${version} cache invalid — re-downloading (${destPath}).`,
+    )
+    unlinkSync(destPath)
   }
 
   const binaryUrl = `${CDN_BASE}${CDN_PATHS[component](version, platform)}`
@@ -322,6 +332,7 @@ export async function download(
 
     if (process.platform !== "win32") {
       await chmod(destPath, 0o755)
+      assertNativeExecutable(destPath, component)
     }
   } finally {
     if (existsSync(tmpPath)) {
@@ -511,6 +522,56 @@ async function streamToFileWithProgress(url: string, destPath: string): Promise<
 // SHA256 verification
 // ---------------------------------------------------------------------------
 
+const EXECUTABLE_COMPONENTS = new Set<Component>(["engine", "server", "deno"])
+
+/** True when a cached file is safe to run (ELF/Mach-O or gzip archive for postgres). */
+function cachedArtifactLooksValid(component: Component, filePath: string): boolean {
+  try {
+    const st = statSync(filePath)
+    if (!st.isFile() || st.size < 64) return false
+    if (component === "postgres") {
+      const fd = openSync(filePath, "r")
+      try {
+        const magic = Buffer.alloc(2)
+        readSync(fd, magic, 0, 2, 0)
+        return magic[0] === 0x1f && magic[1] === 0x8b
+      } finally {
+        closeSync(fd)
+      }
+    }
+    if (EXECUTABLE_COMPONENTS.has(component)) {
+      assertNativeExecutable(filePath, component)
+      return true
+    }
+    return false
+  } catch {
+    return false
+  }
+}
+
+/** Reject HTML/error pages or scripts masquerading as CDN binaries. */
+function assertNativeExecutable(filePath: string, component: Component): void {
+  const fd = openSync(filePath, "r")
+  try {
+    const magic = Buffer.alloc(4)
+    readSync(fd, magic, 0, 4, 0)
+    const elf = magic[0] === 0x7f && magic[1] === 0x45 && magic[2] === 0x4c && magic[3] === 0x46
+    const macho =
+      magic.readUInt32BE(0) === 0xfe_ed_fa_ce ||
+      magic.readUInt32BE(0) === 0xfe_ed_fa_cf ||
+      magic.readUInt32LE(0) === 0xce_fa_ed_fe ||
+      magic.readUInt32LE(0) === 0xcf_fa_ed_fe
+    if (!elf && !macho) {
+      throw new Error(
+        `Downloaded ${component} file is not a native executable (bad magic bytes). ` +
+          "The CDN object may be corrupt or cached HTML — delete ~/.supatype/cache and retry.",
+      )
+    }
+  } finally {
+    closeSync(fd)
+  }
+}
+
 async function verifyChecksum(filePath: string, expected: string, component: Component): Promise<void> {
   const data = readFileSync(filePath)
   const actual = createHash("sha256").update(data).digest("hex")
@@ -611,6 +672,27 @@ export async function fetchAllLatestVersions(): Promise<Record<Component, string
  * Skips components that are already cached.
  * Fails gracefully when graceful=true (suitable for postinstall).
  */
+/**
+ * Verify all cached binaries for the current platform (used by integration CI).
+ * Throws if any engine/server/deno file is missing or not ELF/Mach-O.
+ */
+export function verifyCachedBinaries(versions: SupatypeProjectConfig["versions"]): void {
+  const platform = currentPlatform()
+  for (const component of BINARY_COMPONENTS) {
+    const version = versions[component]
+    if (typeof version !== "string" || version.trim() === "") {
+      throw new Error(`[supatype] versions.${component} must be set`)
+    }
+    const destPath = join(cachePath(component, version), binaryName(component, version, platform))
+    if (!cachedArtifactLooksValid(component, destPath)) {
+      throw new Error(
+        `[supatype] Cached ${component} v${version} is missing or invalid at ${destPath}. ` +
+          "Run: supatype update (or delete ~/.supatype/cache and retry).",
+      )
+    }
+  }
+}
+
 export async function downloadAll(
   versions: SupatypeProjectConfig["versions"],
   graceful = false,

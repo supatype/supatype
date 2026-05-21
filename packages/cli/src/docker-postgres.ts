@@ -73,7 +73,9 @@ export function dockerPgStop(projectName: string): void {
 }
 
 /**
- * Poll until the container's pg_isready returns 0, or throw on timeout.
+ * Poll until Postgres accepts connections and the image entrypoint init has
+ * finished (anon/authenticated/service_role come from supatype-postgres
+ * migrations/db/init-scripts/00000000000000-initial-schema.sql via migrate.sh).
  */
 export async function dockerPgWaitReady(
   projectName: string,
@@ -83,21 +85,35 @@ export async function dockerPgWaitReady(
   const deadline = Date.now() + timeoutMs
 
   while (Date.now() < deadline) {
-    const result = spawnSync(
+    const ready = spawnSync(
       "docker",
       ["exec", name, "pg_isready", "-U", PG_USER, "-q"],
       { encoding: "utf8" },
     )
-    if (result.status === 0) return
+    if (ready.status === 0) {
+      const initDone = spawnSync(
+        "docker",
+        [
+          "exec", name,
+          "psql", "-U", PG_USER, "-d", projectName, "-tAc",
+          "SELECT EXISTS (SELECT FROM pg_roles WHERE rolname = 'anon')",
+        ],
+        { encoding: "utf8", stdio: "pipe" },
+      )
+      if (initDone.status === 0 && initDone.stdout?.trim() === "t") return
+    }
     await sleep(300)
   }
 
-  // Capture recent logs to help diagnose startup failures.
-  const logs = spawnSync("docker", ["logs", "--tail", "20", name], {
+  const logs = spawnSync("docker", ["logs", "--tail", "30", name], {
     encoding: "utf8",
   })
   throw new Error(
-    `Docker Postgres "${name}" did not become ready within ${timeoutMs}ms.\n` +
+    `Docker Postgres "${name}" did not finish image init within ${timeoutMs}ms.\n` +
+      "  API roles (anon, authenticated, service_role) are created by the supatype/postgres\n" +
+      "  entrypoint (99-supatype-migrate.sh), not by the CLI.\n" +
+      "  If you upgraded the image, remove the stale volume:\n" +
+      `    docker volume rm ${name}-data\n` +
       (logs.stdout ? `  stdout:\n${indent(logs.stdout)}\n` : "") +
       (logs.stderr ? `  stderr:\n${indent(logs.stderr)}\n` : ""),
   )

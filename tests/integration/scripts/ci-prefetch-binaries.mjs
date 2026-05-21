@@ -10,7 +10,11 @@
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { readFileSync, writeFileSync } from "node:fs"
-import { fetchAllLatestVersions, downloadAll } from "../../../packages/cli/dist/binary-cache.js"
+import {
+  fetchAllLatestVersions,
+  downloadAll,
+  verifyCachedBinaries,
+} from "../../../packages/cli/dist/binary-cache.js"
 
 const integrationDir = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const configPath = resolve(integrationDir, "supatype.config.ts")
@@ -34,4 +38,6 @@ writeFileSync(configPath, config, "utf8")
 
 console.log("[ci] Prefetching component binaries...")
 await downloadAll(versions, false)
+verifyCachedBinaries(versions)
+console.log("[ci] All CDN binaries verified (checksum + ELF/archive magic).")
 console.log("[ci] Done.")

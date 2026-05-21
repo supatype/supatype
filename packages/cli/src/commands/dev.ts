@@ -34,7 +34,14 @@ import {
 import { ensureBinary } from "../ensure-binary.js"
 import { ProcessManager } from "../process-manager.js"
 import { localStorageEnv } from "../local-storage.js"
-import { initdb, start as pgStart, stop as pgStop, waitReady as pgWaitReady, isPortInUse } from "../postgres-ctl.js"
+import {
+  initdb,
+  start as pgStart,
+  stop as pgStop,
+  waitReady as pgWaitReady,
+  isPortInUse,
+  pgSpawnEnv,
+} from "../postgres-ctl.js"
 import {
   dockerPgStart,
   dockerPgStop,
@@ -164,10 +171,11 @@ export function registerDev(program: Command): void {
         const psqlBin    = join(pgBinDir, process.platform === "win32" ? "psql.exe"    : "psql")
         const createdbBin = join(pgBinDir, process.platform === "win32" ? "createdb.exe" : "createdb")
         const pgConnArgs = ["-h", "127.0.0.1", "-p", String(pgPort), "-U", "postgres"]
+        const pgEnv = pgSpawnEnv(pgBinDir)
         const createDbResult = spawnSync(
           createdbBin,
           [...pgConnArgs, projectName],
-          { stdio: "pipe", encoding: "utf8" },
+          { stdio: "pipe", encoding: "utf8", env: pgEnv },
         )
         if (createDbResult.status !== 0) {
           const stderr = createDbResult.stderr ?? ""
@@ -207,7 +215,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO service_role;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticated, service_role;
 `
         spawnSync(psqlBin, [...pgConnArgs, "-d", projectName, "-c", rolesSql],
-          { stdio: "pipe", encoding: "utf8" })
+          { stdio: "pipe", encoding: "utf8", env: pgEnv })
       }
 
       // ── 8. Engine: apply schema ───────────────────────────────────────────

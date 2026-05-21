@@ -5,7 +5,7 @@
 
 import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync } from "node:fs"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 export interface PgOptions {
   /** Absolute path to the directory containing pg_ctl, initdb, psql, etc. */
@@ -16,6 +16,26 @@ export interface PgOptions {
   port: number
   /** Path to write the postgres log file. */
   logPath?: string
+}
+
+/**
+ * Native Postgres bundles are built with prefix /usr/local/supatype-pg; dyld/ld
+ * must load libpq and friends from the extracted lib/ next to bin/.
+ */
+export function pgSpawnEnv(
+  pgBinDir: string,
+  platform: NodeJS.Platform = process.platform,
+): NodeJS.ProcessEnv {
+  const libDir = join(dirname(pgBinDir), "lib")
+  const env = { ...process.env } as NodeJS.ProcessEnv
+  if (platform === "darwin") {
+    const prev = env.DYLD_LIBRARY_PATH ?? ""
+    env.DYLD_LIBRARY_PATH = prev ? `${libDir}:${prev}` : libDir
+  } else if (platform === "linux") {
+    const prev = env.LD_LIBRARY_PATH ?? ""
+    env.LD_LIBRARY_PATH = prev ? `${libDir}:${prev}` : libDir
+  }
+  return env
 }
 
 // ---------------------------------------------------------------------------
@@ -36,6 +56,7 @@ export function initdb(opts: PgOptions): void {
   const result = spawnSync(bin, ["-D", opts.dataDir, "--username", "postgres", "--auth", "trust"], {
     stdio: "inherit",
     encoding: "utf8",
+    env: pgSpawnEnv(opts.pgBinDir),
   })
 
   if (result.status !== 0) {
@@ -63,7 +84,11 @@ export function start(opts: PgOptions): void {
     "--wait",
   ]
 
-  const result = spawnSync(bin, args, { stdio: "inherit", encoding: "utf8" })
+  const result = spawnSync(bin, args, {
+    stdio: "inherit",
+    encoding: "utf8",
+    env: pgSpawnEnv(opts.pgBinDir),
+  })
   if (result.status !== 0) {
     throw new Error(`pg_ctl start failed (exit ${result.status})`)
   }
@@ -77,6 +102,7 @@ export function stop(opts: PgOptions): void {
   const result = spawnSync(bin, ["stop", "-D", opts.dataDir, "-m", "fast", "--wait"], {
     stdio: "inherit",
     encoding: "utf8",
+    env: pgSpawnEnv(opts.pgBinDir),
   })
   // Ignore exit code — Postgres may already be stopped.
   void result
@@ -96,7 +122,10 @@ export async function waitReady(opts: PgOptions, timeoutMs = 10_000): Promise<vo
   const deadline = Date.now() + timeoutMs
 
   while (Date.now() < deadline) {
-    const result = spawnSync(bin, ["-p", String(opts.port), "-q"], { encoding: "utf8" })
+    const result = spawnSync(bin, ["-p", String(opts.port), "-q"], {
+      encoding: "utf8",
+      env: pgSpawnEnv(opts.pgBinDir),
+    })
     if (result.status === 0) return
 
     await sleep(200)
