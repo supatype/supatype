@@ -16,7 +16,7 @@ import { existsSync, readdirSync, statSync, createReadStream } from "node:fs"
 import { join } from "node:path"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { connectionString, schemaPathFromProject } from "../project-config.js"
-import { deploySchemaToLinkedProject, loadCloudConfig } from "./cloud.js"
+import { deploySchemaToLinkedProject, loadCloudConfig, pushSchemaToLinkedProject } from "./cloud.js"
 import { ensureEngine, engineRequest, type DiffResult } from "../engine-client.js"
 import { resolveAppConfig, validateStaticMode, validateBuildOutput, detectPackageManager } from "../app/framework.js"
 import { TIER_LIMITS, type Tier } from "./deploy-types.js"
@@ -93,23 +93,8 @@ export function registerDeploy(program: Command): void {
             console.log("Schema is up to date.")
           }
         } else if (cloudCfg?.projectSlug) {
-          console.log("=== Schema Push ===")
-          // Platform API — no local Docker needed
-          const apiUrl = cloudCfg.apiUrl || "https://api.supatype.com"
-          const token = cloudCfg.token || process.env["SUPATYPE_ACCESS_TOKEN"] || ""
-
-          const res = await fetch(`${apiUrl}/platform/v1/projects/${cloudCfg.projectSlug}/schema/push`, {
-            method: "POST",
-            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-            body: JSON.stringify({ ast }),
-          })
-          if (!res.ok) {
-            const body = await res.text()
-            console.error(`Schema push failed: ${res.status} ${body}`)
-            process.exit(1)
-          }
-          const pushData = await res.json() as { operations?: unknown[]; message?: string }
-          console.log(pushData.message ?? `Schema changes applied (${pushData.operations?.length ?? 0} operations).`)
+          console.log("=== Schema Push (cloud) ===")
+          await pushSchemaToLinkedProject(cwd, { force: opts.yes ?? true })
         } else {
           console.error(
             "Not linked to Supatype Cloud. Run: supatype link\n" +

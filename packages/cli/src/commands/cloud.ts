@@ -7,6 +7,8 @@ interface CloudConfig {
   apiUrl: string
   token: string
   projectSlug?: string
+  /** Organisation UUID — required for schema routes (`X-Org-Id`). */
+  orgId?: string
 }
 
 export function loadCloudConfig(cwd: string): CloudConfig | null {
@@ -25,12 +27,16 @@ function saveCloudConfig(cwd: string, config: CloudConfig): void {
 }
 
 async function cloudFetch<T>(config: CloudConfig, method: string, path: string, body?: unknown): Promise<T> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${config.token}`,
+  }
+  if (config.orgId) {
+    headers["X-Org-Id"] = config.orgId
+  }
   const res = await fetch(`${config.apiUrl}/api/v1${path}`, {
     method,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${config.token}`,
-    },
+    headers,
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   })
 
@@ -41,21 +47,28 @@ async function cloudFetch<T>(config: CloudConfig, method: string, path: string, 
   return json.data as T
 }
 
+/** True when `.supatype/cloud.json` exists with a linked project slug. */
+export function isCloudLinked(cwd: string): boolean {
+  const cfg = loadCloudConfig(cwd)
+  return Boolean(cfg?.projectSlug && cfg.token)
+}
+
 /**
- * Push schema AST to the linked cloud project (control plane `/api/v1/.../deploy`).
- * Invoked by `supatype deploy` by default when `.supatype/cloud.json` is present.
+ * Push schema AST to the linked cloud project (`POST /api/v1/projects/:ref/schema/push`).
+ * Credentials stay server-side; only AST is sent.
  */
-export async function deploySchemaToLinkedProject(
-  cwd: string,
-  environment: string,
-): Promise<void> {
+export async function pushSchemaToLinkedProject(cwd: string, opts?: { force?: boolean }): Promise<void> {
   const config = loadCloudConfig(cwd)
   if (!config?.projectSlug) {
     console.error("Not linked to a cloud project. Run: supatype link")
     process.exit(1)
   }
-
-  console.log(`Deploying schema to ${config.projectSlug} (${environment})...`)
+  if (!config.orgId) {
+    console.error(
+      "Missing orgId in .supatype/cloud.json. Re-run: supatype link --project <slug> (after cloud login).",
+    )
+    process.exit(1)
+  }
 
   const { loadConfig: loadAppConfig, loadSchemaAst } = await import("../config.js")
   const { schemaPathFromProject } = await import("../project-config.js")
@@ -63,25 +76,19 @@ export async function deploySchemaToLinkedProject(
   const appConfig = loadAppConfig(cwd)
   const ast = loadSchemaAst(schemaPathFromProject(appConfig, cwd), cwd)
 
-  const { createHash } = await import("node:crypto")
-  const schemaHash = createHash("sha256").update(JSON.stringify(ast)).digest("hex").slice(0, 16)
+  console.log(`Pushing schema to cloud project ${config.projectSlug}...`)
 
-  const deployment = await cloudFetch<{
-    id: string; status: string; errorMessage?: string
-  }>(config, "POST", `/projects/${config.projectSlug}/deploy`, {
-    environment,
-    schemaHash,
+  const result = await cloudFetch<{ message?: string }>(config, "POST", `/projects/${config.projectSlug}/schema/push`, {
     ast,
+    force: opts?.force ?? true,
   })
 
-  if (deployment.status === "success") {
-    console.log(`\nDeployment successful (${deployment.id})`)
-  } else if (deployment.status === "failed") {
-    console.error(`\nDeployment failed: ${deployment.errorMessage}`)
-    process.exit(1)
-  } else {
-    console.log(`\nDeployment ${deployment.status} (${deployment.id})`)
-  }
+  console.log(result.message ?? "Schema push completed.")
+}
+
+/** @deprecated Use pushSchemaToLinkedProject — kept for deploy command alias */
+export async function deploySchemaToLinkedProject(cwd: string, _environment: string): Promise<void> {
+  await pushSchemaToLinkedProject(cwd)
 }
 
 function prompt(question: string): Promise<string> {
@@ -116,9 +123,10 @@ export function registerCloud(program: Command): void {
 
       if (opts.project) {
         config.projectSlug = opts.project
+        const one = await cloudFetch<{ slug: string; orgId: string }>(config, "GET", `/projects/${opts.project}`)
+        config.orgId = one.orgId
       } else {
-        // List projects and let user choose
-        const projects = await cloudFetch<Array<{ slug: string; name: string; status: string; tier: string }>>(
+        const projects = await cloudFetch<Array<{ slug: string; name: string; status: string; tier: string; orgId: string }>>(
           config, "GET", "/projects",
         )
         if (projects.length === 0) {
@@ -137,7 +145,9 @@ export function registerCloud(program: Command): void {
           console.error("Invalid selection.")
           process.exit(1)
         }
-        config.projectSlug = projects[idx]!.slug
+        const picked = projects[idx]!
+        config.projectSlug = picked.slug
+        config.orgId = picked.orgId
       }
 
       saveCloudConfig(cwd, config)

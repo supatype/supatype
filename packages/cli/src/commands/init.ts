@@ -134,9 +134,10 @@ function tsConfigTemplate(projectName: string, mode: "dev" | "standalone", versi
 
 export default defineConfig({
   project: { name: "${projectName}" },
+  provider: "native",
+  // provider: "docker"  // full self-host Compose stack (Kong :18473)
   database: {
     provider: "native",
-    // provider: "docker", image: "supatype/postgres:17-latest"  // full extensions stack via Docker
   },
   server: {
     mode: "${mode}",

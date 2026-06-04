@@ -91,6 +91,64 @@ importers:
         specifier: workspace:*
         version: link:../../packages/types
 
+  examples/supabucks:
+    dependencies:
+      '@lexical/link':
+        specifier: ^0.43.0
+        version: 0.43.0
+      '@lexical/list':
+        specifier: ^0.43.0
+        version: 0.43.0
+      '@lexical/react':
+        specifier: ^0.43.0
+        version: 0.43.0(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(yjs@13.6.30)
+      '@lexical/rich-text':
+        specifier: ^0.43.0
+        version: 0.43.0
+      '@lexical/selection':
+        specifier: ^0.43.0
+        version: 0.43.0
+      '@supatype/cli':
+        specifier: workspace:*
+        version: link:../../packages/cli
+      '@supatype/client':
+        specifier: workspace:*
+        version: link:../../packages/client
+      '@supatype/types':
+        specifier: workspace:*
+        version: link:../../packages/types
+      '@supatype/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
+      lexical:
+        specifier: ^0.43.0
+        version: 0.43.0
+      react:
+        specifier: ^19.0.0
+        version: 19.2.5
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.2.5(react@19.2.5)
+    devDependencies:
+      '@types/react':
+        specifier: ^19
+        version: 19.2.14
+      '@types/react-dom':
+        specifier: ^19
+        version: 19.2.3(@types/react@19.2.14)
+      '@vitejs/plugin-react':
+        specifier: ^4.3.4
+        version: 4.7.0(vite@6.4.1(@types/node@24.12.0)(jiti@1.21.7)(tsx@4.21.0)(yaml@2.8.2))
+      tsx:
+        specifier: ^4.19.2
+        version: 4.21.0
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vite:
+        specifier: ^6.0.0
+        version: 6.4.1(@types/node@24.12.0)(jiti@1.21.7)(tsx@4.21.0)(yaml@2.8.2)
+
   packages/cli:
     dependencies:
       commander:

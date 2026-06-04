@@ -1,5 +1,9 @@
 FROM node:22-slim AS builder
 WORKDIR /build
+# Self-host serves Studio behind Kong at /studio/, so the SPA must be built with
+# that base path (assets + router base). Override to "/" to serve Studio at root.
+ARG VITE_BASE_PATH=/studio/
+ENV VITE_BASE_PATH=$VITE_BASE_PATH
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.base.json ./
 COPY packages/studio/ packages/studio/
 COPY packages/client/ packages/client/

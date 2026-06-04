@@ -64,8 +64,36 @@ node "$SCRIPT_DIR/write-local-config.mjs" "$INTEGRATION_DIR/supatype.local.confi
 
 # ── Step 3: Start supatype dev ────────────────────────────────────────────────
 
-echo "==> Starting supatype dev (port 54399)"
+# macOS: native host stack (:54399). Linux CI: full compose via Kong (:18473).
+OS_NAME="$(uname -s)"
+if [[ "$OS_NAME" == "Darwin" ]]; then
+  export SUPATYPE_PROVIDER="${SUPATYPE_PROVIDER:-native}"
+  BASE_URL="${SUPATYPE_URL:-http://localhost:54399}"
+else
+  export SUPATYPE_PROVIDER="${SUPATYPE_PROVIDER:-docker}"
+  BASE_URL="${SUPATYPE_URL:-http://localhost:18473}"
+fi
+export SUPATYPE_URL="$BASE_URL"
+
+echo "==> Starting supatype dev (provider=${SUPATYPE_PROVIDER}, url=${BASE_URL})"
 cd "$INTEGRATION_DIR"
+
+if [[ "$SUPATYPE_PROVIDER" == "docker" ]]; then
+  node "$ROOT_DIR/packages/cli/bin/supatype.js" self-host compose down 2>/dev/null || true
+  ENGINE_SRC=""
+  if [[ -d "$ROOT_DIR/../supatype-schema-engine" ]]; then
+    ENGINE_SRC="$ROOT_DIR/../supatype-schema-engine"
+  elif [[ -d "$ROOT_DIR/supatype-schema-engine" ]]; then
+    ENGINE_SRC="$ROOT_DIR/supatype-schema-engine"
+  fi
+  if [[ -n "$ENGINE_SRC" ]]; then
+    echo "==> Building schema-engine image for compose dev"
+    docker build -t "${SUPATYPE_ENGINE_IMAGE:-supatype/schema-engine:ci-dev}" "$ENGINE_SRC"
+    export SUPATYPE_ENGINE_IMAGE="${SUPATYPE_ENGINE_IMAGE:-supatype/schema-engine:ci-dev}"
+  else
+    echo "WARN: supatype-schema-engine source not found — set SUPATYPE_ENGINE_IMAGE or checkout schema-engine"
+  fi
+fi
 
 CLI_BIN="$ROOT_DIR/packages/cli/bin/supatype.js"
 if [[ ! -f "$CLI_BIN" ]]; then
@@ -78,7 +106,6 @@ SUPATYPE_PID=$!
 
 # ── Step 4: Wait for health ───────────────────────────────────────────────────
 
-BASE_URL="${SUPATYPE_URL:-http://localhost:54399}"
 MAX_WAIT=120
 echo "==> Waiting for $BASE_URL to be ready (up to ${MAX_WAIT}s)..."
 

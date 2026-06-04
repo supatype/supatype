@@ -19,11 +19,21 @@ function studioBasename(): string | undefined {
 
 const DEMO_SESSION_KEY = "supatype_studio_demo"
 
+// Runtime config injected by the Docker entrypoint via config.js (window.__SUPATYPE_CLOUD__).
+// Takes precedence over build-time Vite env so one published image works for any
+// self-host project (URL + keys differ per deployment / JWT secret).
+type RuntimeConfig = { url?: string; anonKey?: string; serviceRoleKey?: string }
+const runtimeConfig: RuntimeConfig =
+  (typeof window !== "undefined" &&
+    (window as unknown as { __SUPATYPE_CLOUD__?: RuntimeConfig }).__SUPATYPE_CLOUD__) || {}
+
+const resolvedServiceRoleKey = runtimeConfig.serviceRoleKey ?? import.meta.env.VITE_SUPATYPE_SERVICE_ROLE_KEY
+
 const client = createClient({
-  url: import.meta.env.VITE_SUPATYPE_URL ?? "http://localhost:18473",
-  anonKey: import.meta.env.VITE_SUPATYPE_ANON_KEY ?? "dev-anon-key",
-  ...(import.meta.env.VITE_SUPATYPE_SERVICE_ROLE_KEY !== undefined && {
-    serviceRoleKey: import.meta.env.VITE_SUPATYPE_SERVICE_ROLE_KEY,
+  url: runtimeConfig.url ?? import.meta.env.VITE_SUPATYPE_URL ?? "http://localhost:18473",
+  anonKey: runtimeConfig.anonKey ?? import.meta.env.VITE_SUPATYPE_ANON_KEY ?? "dev-anon-key",
+  ...(resolvedServiceRoleKey !== undefined && {
+    serviceRoleKey: resolvedServiceRoleKey,
   }),
 })
 

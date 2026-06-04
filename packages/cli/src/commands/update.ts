@@ -7,6 +7,8 @@ import type { Command } from "commander"
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { basename, resolve } from "node:path"
 import { loadConfig } from "../config.js"
+import { resolveRuntimeProvider } from "../project-config.js"
+import { runDockerCompose, writeSelfHostCompose } from "../self-host-compose.js"
 import { download, currentPlatform, fetchAllLatestVersions, type Component } from "../binary-cache.js"
 
 const CONFIG_CANDIDATES = ["supatype.config.ts", "supatype.config.js", "supatype.config.mjs"]
@@ -29,6 +31,21 @@ export function registerUpdate(program: Command): void {
     .action(async (opts: { check: boolean }) => {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
+      const provider = resolveRuntimeProvider(config)
+
+      if (provider === "docker") {
+        if (opts.check) {
+          console.log("Docker provider: run without --check to pull compose images (supatype self-host compose pull).")
+          return
+        }
+        const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
+        console.log("Pulling self-host compose images...")
+        const status = runDockerCompose(paths.composePath, ["pull"], cwd)
+        if (status !== 0) process.exit(status)
+        console.log("Compose images updated.")
+        return
+      }
+
       const platform = currentPlatform()
 
       const components: Component[] = ["engine", "server", "postgres", "deno"]

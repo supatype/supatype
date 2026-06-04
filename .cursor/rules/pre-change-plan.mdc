@@ -1,11 +1,13 @@
 ---
-description: Before any code edits, explain the planned work in detail to the user
+description: Before any code edits, explain the plan and wait for user approval
 alwaysApply: true
 ---
 
 # Pre-change plan (required)
 
-Before **any** code changes (edits, new files, deletes, refactors), you must **first** tell the user in **detail** what you are about to do. Do not apply patches or run write/delete tools until that explanation is complete in the same turn (or the user has already approved an explicit plan in this conversation).
+Before **any** code changes (edits, new files, deletes, refactors), you must **first** tell the user in **detail** what you are about to do, and **wait for explicit approval** before applying patches or running write/delete tools.
+
+Do **not** start implementation in the same turn as the plan unless the user has already approved that plan in this conversation (e.g. "go ahead", "implement it", "yes", "apply that", or a scoped instruction like "update the rule").
 
 ## What to include
 
@@ -15,11 +17,17 @@ Before **any** code changes (edits, new files, deletes, refactors), you must **f
 4. **Risks / trade-offs** — Anything that could break callers, CI, or behavior; assumptions you are making.
 5. **Verification** — How you will confirm correctness (tests run, manual checks), if applicable.
 
+End the plan with a clear checkpoint, e.g. **"Proceed with these changes?"** or **"Waiting for your OK before editing."**
+
 Keep the plan proportional to the size of the change: a one-line fix still needs a short but specific preface (file + change), not a novel.
 
 ## Exceptions
 
-- **Read-only** work (search, read, explain, run read-only commands) does not require this preamble.
-- If the user **explicitly** says to proceed without a plan for this message, follow their instruction for that turn only.
+- **Read-only** work (search, read, explain, run read-only commands) does not require approval before continuing.
+- If the user **explicitly** says to proceed without waiting for this message, follow that instruction for that turn only.
+- **Questions-only** turns: answer first; do not edit unless they also ask for a change.
 
-After the plan is stated, proceed with implementation unless the user asked you to wait for confirmation.
+## While implementing
+
+- Do not expand scope beyond the approved plan without a new plan and approval.
+- If you discover the approved approach is wrong, stop, explain, and propose a revised plan before more edits.

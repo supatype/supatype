@@ -1,0 +1,35 @@
+{
+  "name": "@supatype/example-supabucks",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Supabucks — a coffee-shop loyalty app demo built on Supatype (auth, loyalty stars, rewards), served as a static SPA by Supatype itself.",
+  "scripts": {
+    "dev": "supatype dev",
+    "build": "vite build",
+    "push": "supatype push",
+    "seed": "tsx seed.ts"
+  },
+  "dependencies": {
+    "@supatype/cli": "workspace:*",
+    "@supatype/client": "workspace:*",
+    "@supatype/types": "workspace:*",
+    "@supatype/ui": "workspace:*",
+    "@lexical/link": "^0.43.0",
+    "@lexical/list": "^0.43.0",
+    "@lexical/react": "^0.43.0",
+    "@lexical/rich-text": "^0.43.0",
+    "@lexical/selection": "^0.43.0",
+    "lexical": "^0.43.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^4.3.4",
+    "tsx": "^4.19.2",
+    "typescript": "^5",
+    "vite": "^6.0.0"
+  }
+}

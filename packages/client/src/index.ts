@@ -355,7 +355,17 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
     storageKey: config.auth?.storageKey,
     cookiePrefix: config.auth?.cookiePrefix,
   })
-  const storage = new StorageClient(`${config.url}/storage/v1`, baseHeaders)
+  // Storage admin operations (listBuckets, createBucket, etc.) require service_role.
+  // When a service role key is provided (developer tools like Studio), use it for
+  // storage so admin calls are authorised; otherwise fall back to the anon headers.
+  const storageHeaders: Record<string, string> = config.serviceRoleKey
+    ? {
+        apikey: config.serviceRoleKey,
+        Authorization: `Bearer ${config.serviceRoleKey}`,
+        "Content-Type": "application/json",
+      }
+    : baseHeaders
+  const storage = new StorageClient(`${config.url}/storage/v1`, storageHeaders)
   const realtime = new RealtimeClient(`${config.url}/realtime/v1`, baseHeaders)
   const functions = new FunctionsClient(config.url, baseHeaders, doFetch)
 

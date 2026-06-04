@@ -81,6 +81,20 @@ describe("runtime contract", () => {
     expect(compose).not.toContain("static-app:")
   })
 
+  it("self-host compose includes schema-engine tools profile", () => {
+    const compose = renderSelfHostCompose(baseConfig)
+    expect(compose).toContain("\n  schema-engine:\n")
+    expect(compose).toContain('profiles: ["tools"]')
+    expect(compose).toContain("supatype/schema-engine:latest")
+  })
+
+  it("devLocal compose omits host-published db and server ports", () => {
+    const compose = renderSelfHostCompose(baseConfig, process.cwd(), { devLocal: true })
+    expect(compose).not.toContain('"5432:5432"')
+    expect(compose).not.toContain('"9999:9999"')
+    expect(compose).toContain('"18473:8000"')
+  })
+
   it("self-host compose runs per-project functions-worker and proxies via server", () => {
     const compose = renderSelfHostCompose(baseConfig)
     expect(compose).toContain("\n  functions-worker:\n")
@@ -208,7 +222,7 @@ export default defineConfig({
       expect(readFileSync(out.composePath, "utf8")).toContain("services:")
       expect(readFileSync(out.kongPath, "utf8")).toContain("/rest/v1/")
       const compose = readFileSync(out.composePath, "utf8")
-      expect(compose).toContain("${SUPATYPE_POSTGRES_IMAGE:-supatype/postgres:17-latest}")
+      expect(compose).toContain("${SUPATYPE_POSTGRES_IMAGE:-supatype/postgres:latest}")
       expect(compose).toContain("${SUPATYPE_SERVER_IMAGE:-${SUPATYPE_AUTH_IMAGE:-supatype/server:latest}}")
       expect(compose).toContain("${SUPATYPE_STORAGE_IMAGE:-supatype/storage:latest}")
       expect(compose).toContain("${SUPATYPE_STUDIO_IMAGE:-supatype/studio:latest}")

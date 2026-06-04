@@ -3,7 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { defineConfig, loadConfig } from "../src/config.js"
-import { mergeProjectConfig, type SupatypeProjectConfig } from "../src/project-config.js"
+import { mergeProjectConfig, resolveRuntimeProvider, type SupatypeProjectConfig } from "../src/project-config.js"
 import { DENO_RELEASE_PIN } from "../src/release-pins.js"
 
 let counter = 0
@@ -177,6 +177,26 @@ describe("loadConfig()", () => {
     const cfg = loadConfig(tmpDir)
     expect(cfg.versions.engine).toBe("0.4.2")
     expect(cfg.schema?.path).toBe("./a.ts")
+  })
+})
+
+describe("resolveRuntimeProvider()", () => {
+  it("prefers top-level provider over database.provider", () => {
+    const cfg = defineConfig({
+      ...minimalProject("p"),
+      provider: "docker",
+      database: { provider: "native" },
+    })
+    expect(resolveRuntimeProvider(cfg)).toBe("docker")
+  })
+
+  it("falls back to database.provider then native", () => {
+    expect(resolveRuntimeProvider(defineConfig({ ...minimalProject("p"), database: { provider: "docker" } }))).toBe(
+      "docker",
+    )
+    expect(resolveRuntimeProvider(defineConfig({ ...minimalProject("p"), database: { provider: "native" } }))).toBe(
+      "native",
+    )
   })
 })
 

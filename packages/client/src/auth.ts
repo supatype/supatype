@@ -39,6 +39,8 @@ export class AuthClient {
   private readonly storageKey: string
   private readonly cookieName: string
   private readonly storage: AuthStorageAdapter | null
+  /** Pending auto-refresh timer; refreshes the access token shortly before it expires. */
+  private refreshTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(url: string, baseHeaders: Record<string, string>, opts: AuthClientOptions = {}) {
     this.url = url
@@ -68,6 +70,34 @@ export class AuthClient {
         })
       }
     }
+    // Keep the access token fresh while the app is open (and refresh immediately
+    // if a persisted session loaded already expired).
+    this.scheduleAutoRefresh()
+  }
+
+  /** Schedule a token refresh ~60s before the current session expires. */
+  private scheduleAutoRefresh(): void {
+    if (this.refreshTimer !== null) {
+      clearTimeout(this.refreshTimer)
+      this.refreshTimer = null
+    }
+    if (typeof setTimeout === "undefined") return
+    const session = this.currentSession
+    if (session === null || !session.refreshToken) return
+
+    const expiryMs =
+      session.expiresAt !== undefined
+        ? session.expiresAt * 1000
+        : Date.now() + (session.expiresIn || 3600) * 1000
+    const delay = Math.max(0, expiryMs - Date.now() - 60_000)
+
+    this.refreshTimer = setTimeout(() => {
+      this.refreshTimer = null
+      // refreshSession() flows through _setSession on success, which reschedules.
+      void this.refreshSession().catch(() => undefined)
+    }, delay)
+    // Avoid keeping a Node process alive for this timer (no-op in browsers).
+    ;(this.refreshTimer as unknown as { unref?: () => void }).unref?.()
   }
 
   async signUp(credentials: {
@@ -870,6 +900,12 @@ export class AuthClient {
     const prev = this.currentSession
     this.currentSession = session
     this.syncPersistedSession(session)
+    if (session !== null) {
+      this.scheduleAutoRefresh()
+    } else if (this.refreshTimer !== null) {
+      clearTimeout(this.refreshTimer)
+      this.refreshTimer = null
+    }
     const event: AuthChangeEvent =
       session !== null
         ? prev !== null

@@ -1,9 +1,9 @@
 /**
  * supatype dev — start local Postgres, apply schema, run supatype-server.
  *
- * Supports two database providers (set in supatype.config.ts):
- *   provider = "native" — manages a native Postgres binary from the supatype cache (default when omitted)
- *   provider = "docker" — runs supatype/postgres via Docker (includes all extensions)
+ * Runtime provider (top-level `provider` or legacy `database.provider`):
+ *   native — host Postgres + host server + host engine (default)
+ *   docker — full self-host Compose stack (Kong :18473); see dev-compose.ts
  *
  * Edge functions (when a functions/ dir exists): Deno is resolved from the CDN cache
  * (auto-download on miss). Self-host/cloud Docker stacks use supatype-server in-container;
@@ -18,6 +18,7 @@ import { isAbsolute, join, relative, resolve } from "node:path"
 import { loadConfig } from "../config.js"
 import {
   functionsPathCandidatesFromProject,
+  resolveRuntimeProvider,
   schemaPathFromProject,
   type SupatypeProjectConfig,
 } from "../project-config.js"
@@ -42,15 +43,6 @@ import {
   isPortInUse,
   pgSpawnEnv,
 } from "../postgres-ctl.js"
-import {
-  dockerPgStart,
-  dockerPgStop,
-  dockerPgWaitReady,
-  dockerDbUrl,
-} from "../docker-postgres.js"
-
-const DEFAULT_DOCKER_IMAGE = "supatype/postgres:17-latest"
-
 /** Map `email.smtp` from supatype.config.ts into GOTRUE_SMTP_* for the embedded GoTrue process. */
 function gotrueSMTPFromEmailConfig(email: SupatypeProjectConfig["email"] | undefined): Record<string, string> {
   const s = email?.smtp
@@ -90,7 +82,13 @@ export function registerDev(program: Command): void {
       const projectName = config.project.name
       const serverPort = opts.port ?? String(config.server.port ?? 54321)
       const postgrestPort = String(config.server.postgrestPort ?? 3001)
-      const provider = config.database.provider ?? "native"
+      const provider = resolveRuntimeProvider(config)
+
+      if (provider === "docker") {
+        const { runDevCompose } = await import("../dev-compose.js")
+        await runDevCompose(cwd, config, { watch: opts.watch !== false })
+        return
+      }
 
       // ── 2. Resolve engine + server binaries ──────────────────────────────
       console.log(`[supatype] Resolving component binaries for "${projectName}"...`)
@@ -136,22 +134,12 @@ export function registerDev(program: Command): void {
       // ── 5–7. Start Postgres ───────────────────────────────────────────────
       let dbURL: string
       let stopPostgres: () => void | Promise<void>
+      const pgPassword = "postgres"
       // pgBinDir is set on the native path and used to add DLL search path for
       // PostgREST on Windows (PostgREST links against libpq + SSL from MinGW).
       let pgBinDir: string | null = null
 
-      if (provider === "docker") {
-        console.log(
-          "[supatype] database.provider \"docker\" — Postgres runs in Docker; engine and supatype-server stay native.",
-        )
-        const image = config.database.image ?? DEFAULT_DOCKER_IMAGE
-        console.log(`[supatype] Starting Postgres via Docker (${image})...`)
-        dockerPgStart({ image, projectName, port: pgPort })
-        await dockerPgWaitReady(projectName, 90_000)
-        console.log("[supatype] Postgres is ready.")
-        dbURL = dockerDbUrl(projectName, pgPort)
-        stopPostgres = () => dockerPgStop(projectName)
-      } else {
+      {
         // native — resolve pg bin dir and manage with pg_ctl
         pgBinDir = await resolvePgBinDir(config)
         const dataDir = config.database.data_dir ?? join(stateRoot, "data")
@@ -167,7 +155,7 @@ export function registerDev(program: Command): void {
         dbURL = `postgres://postgres:postgres@127.0.0.1:${pgPort}/${projectName}?sslmode=disable`
         stopPostgres = () => pgStop(pgOpts)
 
-        // Create project database if it doesn't exist.
+        // Create project database if it doesn't exist (native only).
         const psqlBin    = join(pgBinDir, process.platform === "win32" ? "psql.exe"    : "psql")
         const createdbBin = join(pgBinDir, process.platform === "win32" ? "createdb.exe" : "createdb")
         const pgConnArgs = ["-h", "127.0.0.1", "-p", String(pgPort), "-U", "postgres"]
@@ -225,7 +213,8 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
 
       // ── 8. GoTrue migrations (auth.users before engine studio SQL) ─────────
       console.log("[supatype] Running GoTrue migrations...")
-      runGotrueMigrations(serverBin, authDbURL, LOCAL_JWT_SECRET)
+      const migrateEnv = gotrueMigrateEnv(serverPort, dbURL, LOCAL_JWT_SECRET)
+      runGotrueMigrations(serverBin, migrateEnv)
 
       // ── 9. Engine: apply schema ───────────────────────────────────────────
       const schemaPath = schemaPathFromProject(config, cwd)
@@ -236,7 +225,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
 
       const localStoragePath = config.storage?.provider !== "s3" ? join(stateRoot, "storage") : undefined
       // Native Postgres builds don't include PostGIS — skip geo fields rather than failing.
-      const skipFieldKinds: ReadonlySet<string> = provider === "native" ? new Set(["geo", "vector"]) : new Set()
+      const skipFieldKinds: ReadonlySet<string> = new Set(["geo", "vector"])
 
       await runSchemaPush(cwd, engineBin, schemaPath, dbURL, manifestPath, adminConfigPath, localStoragePath, skipFieldKinds).catch(
         (e: unknown) => console.error("[supatype] Initial schema push failed:", (e as Error).message),
@@ -325,8 +314,11 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
           ? { SUPATYPE_VITE_DEV_URL: config.app.vite_dev_url.trim() }
           : {}),
         // GoTrue required fields (sensible local-dev defaults)
+        GOTRUE_DB_DATABASE_URL: authDbURL,
         DATABASE_URL: authDbURL,
         SUPATYPE_SQL_DATABASE_URL: dbURL,
+        PGSSLMODE: "disable",
+        GOTRUE_DB_NAMESPACE: "auth",
         GOTRUE_DB_DRIVER: "postgres",
         GOTRUE_JWT_SECRET: LOCAL_JWT_SECRET,
         GOTRUE_JWT_EXP: "3600",
@@ -960,20 +952,39 @@ function adaptUnsupportedKinds(
 // .env loader
 // ---------------------------------------------------------------------------
 
+/** Minimal GoTrue env for `migrate` (matches required fields in serverEnv below). */
+function gotrueMigrateEnv(
+  serverPort: string,
+  sqlDbURL: string,
+  jwtSecret: string,
+): Record<string, string> {
+  const base = `http://localhost:${serverPort}`
+  return {
+    // envconfig: gotrue + DB.DATABASE_URL → GOTRUE_DB_DATABASE_URL
+    GOTRUE_DB_DATABASE_URL: sqlDbURL,
+    DATABASE_URL: sqlDbURL,
+    GOTRUE_DB_DRIVER: "postgres",
+    GOTRUE_DB_NAMESPACE: "auth",
+    PGSSLMODE: "disable",
+    GOTRUE_JWT_SECRET: jwtSecret,
+    API_EXTERNAL_URL: `${base}/auth/v1`,
+    GOTRUE_API_HOST: "localhost",
+    GOTRUE_SITE_URL: base,
+    GOTRUE_MAILER_AUTOCONFIRM: "true",
+  }
+}
+
 /** Apply GoTrue DDL (auth.users, etc.) before engine push references auth schema. */
 function runGotrueMigrations(
   serverBin: string,
-  authDbURL: string,
-  jwtSecret: string,
+  migrateEnv: Record<string, string>,
 ): void {
   const result = spawnSync(serverBin, ["migrate"], {
     stdio: "pipe",
     encoding: "utf8",
     env: {
       ...process.env,
-      DATABASE_URL: authDbURL,
-      GOTRUE_DB_DRIVER: "postgres",
-      GOTRUE_JWT_SECRET: jwtSecret,
+      ...migrateEnv,
     },
   })
   if (result.status !== 0) {

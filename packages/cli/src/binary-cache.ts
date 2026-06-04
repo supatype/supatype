@@ -281,6 +281,15 @@ export async function resolveBinary(
  *   2. If SUPATYPE_RELEASE_PUBLIC_KEY is set: verify minisign signature.
  *   3. Verify SHA256 of downloaded binary against signed checksum.
  */
+/** Download if missing or invalid; return cached path for the given platform. */
+export async function ensureCachedBinary(
+  component: Component,
+  version: string,
+  platform: PlatformId,
+): Promise<string> {
+  return download(component, version, platform)
+}
+
 export async function download(
   component: Component,
   version: string,

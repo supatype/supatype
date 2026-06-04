@@ -61,7 +61,7 @@ function runtimeRouteSpecUnified(): RuntimeRoute[] {
       serviceUrl: SERVER_GATEWAY,
       paths: ["/realtime/v1/"],
       stripPath: false,
-      protocols: ["http", "https", "ws", "wss"],
+      protocols: ["http", "https"],
     },
     {
       name: "functions-v1",
@@ -148,7 +148,7 @@ function runtimeRouteSpecSplit(opts: RuntimeRouteOptions): RuntimeRoute[] {
       serviceUrl: "http://realtime:4000",
       paths: ["/realtime/v1/"],
       stripPath: true,
-      protocols: ["http", "https", "ws", "wss"],
+      protocols: ["http", "https"],
     },
     {
       name: "functions-v1",

@@ -39,16 +39,15 @@ if (pg && existsSync(pg) && statSync(pg).isDirectory()) {
   o["postgres_dir"] = resolve(pg)
 }
 
-const dbp = process.env["SUPATYPE_DATABASE_PROVIDER"]
-const database =
-  dbp === "native" || dbp === "docker" ? { provider: dbp } : undefined
-
+const prov =
+  process.env["SUPATYPE_PROVIDER"] ?? process.env["SUPATYPE_DATABASE_PROVIDER"]
 const partial = {}
 if (Object.keys(o).length > 0) {
   partial.overrides = o
 }
-if (database !== undefined) {
-  partial.database = database
+if (prov === "native" || prov === "docker") {
+  partial.provider = prov
+  partial.database = { provider: prov }
 }
 
 if (Object.keys(partial).length === 0) {

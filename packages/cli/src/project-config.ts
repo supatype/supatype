@@ -7,6 +7,12 @@ import type { ComponentVersions } from "./components.js"
 // ---------------------------------------------------------------------------
 
 export interface SupatypeProjectConfig {
+  /**
+   * Runtime stack for local dev and `supatype update`.
+   * "native" = host binaries (default). "docker" = self-host Compose stack.
+   * Falls back to `database.provider` when omitted (deprecated).
+   */
+  provider?: "native" | "docker"
   supatype?: {
     /**
      * Base directory for Supatype project assets (schema, functions, etc).
@@ -34,7 +40,7 @@ export interface SupatypeProjectConfig {
     data_dir?: string
     /**
      * Docker image to use (provider=docker).
-     * Defaults to supatype/postgres:17-latest.
+     * Defaults to supatype/postgres:latest.
      * Override in supatype.local.config.ts for local builds.
      */
     image?: string
@@ -207,6 +213,9 @@ export function mergeProjectConfig(
   override: Partial<SupatypeProjectConfig>,
 ): SupatypeProjectConfig {
   return {
+    ...(base.provider !== undefined || override.provider !== undefined
+      ? { provider: override.provider ?? base.provider }
+      : {}),
     ...(base.supatype !== undefined || override.supatype !== undefined
       ? { supatype: { ...base.supatype, ...override.supatype } as NonNullable<SupatypeProjectConfig["supatype"]> }
       : {}),
@@ -330,6 +339,9 @@ export function serverBaseUrl(cfg: SupatypeProjectConfig): string | undefined {
   switch (cfg.server.mode) {
     case "dev":
     case "standalone":
+      if (cfg.server.mode === "dev" && resolveRuntimeProvider(cfg) === "docker") {
+        return `http://localhost:${COMPOSE_DEV_KONG_PORT}`
+      }
       return cfg.server.domain
         ? `https://${cfg.server.domain}`
         : `http://localhost:${port}`
@@ -337,6 +349,14 @@ export function serverBaseUrl(cfg: SupatypeProjectConfig): string | undefined {
       return undefined
   }
 }
+
+/** Resolved runtime provider (`config.provider` ?? `database.provider` ?? native). */
+export function resolveRuntimeProvider(cfg: SupatypeProjectConfig): "native" | "docker" {
+  return cfg.provider ?? cfg.database.provider ?? "native"
+}
+
+/** Kong gateway port when `provider: docker` (self-host compose dev). */
+export const COMPOSE_DEV_KONG_PORT = 18473
 
 /** The local Postgres DSN derived from project name (dev default). */
 export function localDSN(cfg: SupatypeProjectConfig): string {

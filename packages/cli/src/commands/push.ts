@@ -3,7 +3,8 @@ import { mkdirSync, writeFileSync } from "node:fs"
 import { createInterface } from "node:readline"
 import { join } from "node:path"
 import { loadConfig, loadSchemaAst } from "../config.js"
-import { connectionString, schemaPathFromProject, serverBaseUrl } from "../project-config.js"
+import { connectionString, resolveRuntimeProvider, schemaPathFromProject, serverBaseUrl } from "../project-config.js"
+import { isCloudLinked, pushSchemaToLinkedProject } from "./cloud.js"
 import { ensureEngine, engineRequest, type DiffResult, type Operation } from "../engine-client.js"
 import { signJwt } from "../jwt.js"
 import { provisionBuckets } from "../storage-provision.js"
@@ -21,7 +22,27 @@ export function registerPush(program: Command): void {
     .option("--connection <url>", "Database connection URL (overrides config)")
     .action(async (opts: { yes?: boolean; connection?: string }) => {
       const cwd = process.cwd()
+
+      if (isCloudLinked(cwd)) {
+        if (opts.connection) {
+          console.error("--connection is not allowed when linked to a cloud project (credentials stay server-side).")
+          process.exit(1)
+        }
+        await pushSchemaToLinkedProject(cwd, { force: opts.yes ?? true })
+        return
+      }
+
       const config = loadConfig(cwd)
+
+      // Docker provider: the compose Postgres isn't published to the host, so
+      // apply the schema through the in-compose schema-engine (unless the user
+      // gave an explicit --connection to a reachable database).
+      if (!opts.connection && resolveRuntimeProvider(config) === "docker") {
+        const { pushSchemaDocker } = await import("../dev-compose.js")
+        await pushSchemaDocker(cwd, config)
+        return
+      }
+
       const connection = opts.connection ?? connectionString(config)
 
       await ensureEngine()

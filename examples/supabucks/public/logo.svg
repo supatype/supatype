@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-label="Supabucks">
+  <circle cx="100" cy="100" r="100" fill="#00684A"/>
+  <circle cx="100" cy="100" r="86" fill="none" stroke="#ffffff" stroke-width="3"/>
+  <circle cx="100" cy="100" r="78" fill="none" stroke="#ffffff" stroke-width="1.5" opacity="0.5"/>
+  <!-- top star -->
+  <path fill="#ffffff" d="M100 26l4.6 9.3 10.3 1.5-7.4 7.3 1.7 10.2L100 59.7l-9.2 4.9 1.7-10.2-7.4-7.3 10.3-1.5z"/>
+  <!-- coffee cup -->
+  <g fill="#ffffff">
+    <path d="M62 84h66a6 6 0 0 1 6 6v8a30 30 0 0 1-30 30H86a30 30 0 0 1-30-30v-8a6 6 0 0 1 6-6z"/>
+    <path d="M134 92h8a16 16 0 0 1 0 32h-3a34 34 0 0 0 3-14v-1h-8z"/>
+  </g>
+  <!-- steam -->
+  <g stroke="#ffffff" stroke-width="4" stroke-linecap="round" fill="none" opacity="0.9">
+    <path d="M84 150c-4 4-4 8 0 12"/>
+    <path d="M100 150c-4 4-4 8 0 12"/>
+    <path d="M116 150c-4 4-4 8 0 12"/>
+  </g>
+</svg>
