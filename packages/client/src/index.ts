@@ -370,6 +370,15 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
   const functions = new FunctionsClient(config.url, baseHeaders, doFetch)
 
   const getAuthHeaders = (): Record<string, string> => {
+    // Studio and other admin tools pass serviceRoleKey — use it for table/RPC/GraphQL
+    // so supatype_admin RLS policies and bypass rules apply (anon would fail).
+    if (config.serviceRoleKey) {
+      return {
+        apikey: config.serviceRoleKey,
+        Authorization: `Bearer ${config.serviceRoleKey}`,
+        "Content-Type": "application/json",
+      }
+    }
     const token = auth.currentAccessToken
     if (token !== null) {
       const role = jwtRole(token)

@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { dirname, join, relative, resolve } from "node:path"
 import { spawnSync } from "node:child_process"
-import type { SupatypeProjectConfig } from "./project-config.js"
+import { preferredFunctionsPathFromProject, type SupatypeProjectConfig } from "./project-config.js"
 import { buildKongDeclarative } from "./kong-config.js"
 
 export interface SelfHostComposePaths {
@@ -146,6 +146,9 @@ ${dbPorts}    volumes:
       SUPATYPE_URL: \${API_EXTERNAL_URL:-http://localhost:18473}
       SUPATYPE_ANON_KEY: \${ANON_KEY:-}
       SUPATYPE_SERVICE_ROLE_KEY: \${SERVICE_ROLE_KEY:-}
+      STRIPE_SECRET_KEY: \${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: \${STRIPE_WEBHOOK_SECRET:-}
+      SITE_URL: \${SITE_URL:-\${API_EXTERNAL_URL:-http://localhost:18473}}
     depends_on:
       db:
         condition: service_healthy
@@ -258,6 +261,10 @@ function ensureComposeManifest(cwd: string): void {
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8")
 }
 
+function ensureProjectFunctionsDir(cwd: string, config: SupatypeProjectConfig): void {
+  mkdirSync(preferredFunctionsPathFromProject(config, cwd), { recursive: true })
+}
+
 export function writeSelfHostCompose(
   cwd: string,
   config: SupatypeProjectConfig,
@@ -265,6 +272,7 @@ export function writeSelfHostCompose(
 ): SelfHostComposePaths {
   const paths = selfHostComposePaths(cwd)
   mkdirSync(paths.dir, { recursive: true })
+  ensureProjectFunctionsDir(cwd, config)
   ensureComposeManifest(cwd)
   writeFileSync(paths.composePath, renderSelfHostCompose(config, cwd, options), "utf8")
   writeFileSync(

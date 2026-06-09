@@ -6,6 +6,7 @@ import { FieldWidget } from "../widgets/FieldWidget.js"
 import { LivePreviewPane } from "../components/LivePreviewPane.js"
 import type { ModelConfig, FieldConfig } from "../config.js"
 import { useAdminConfig } from "../hooks/useAdminConfig.js"
+import { serializeRecordForApi } from "../lib/recordValues.js"
 
 interface EditViewProps {
   model: ModelConfig
@@ -89,7 +90,7 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
     try {
       if (isCreate) {
         // Strip the primary key — the database generates it automatically.
-        const { [model.primaryKey]: _pk, ...insertValues } = values
+        const { [model.primaryKey]: _pk, ...insertValues } = serializeRecordForApi(model, values)
         const result = await client
           .from(model.tableName as never)
           .insert(insertValues as never)
@@ -106,7 +107,7 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
         }
       } else {
         // Strip the primary key — it's the WHERE target, not an updatable column.
-        const { [model.primaryKey]: _pk, ...updateValues } = values
+        const { [model.primaryKey]: _pk, ...updateValues } = serializeRecordForApi(model, values)
         const result = await client
           .from(model.tableName as never)
           .update(updateValues as never)
@@ -145,7 +146,7 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
 
   const handleDuplicate = async () => {
     if (!recordId) return
-    const duplicateValues = { ...values }
+    const duplicateValues = serializeRecordForApi(model, { ...values })
     delete duplicateValues[model.primaryKey]
     delete duplicateValues["created_at"]
     delete duplicateValues["updated_at"]

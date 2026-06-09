@@ -26,7 +26,17 @@ async function discoverRoutes(root: string): Promise<DiscoveredRoute[]> {
   const single = Deno.env.get("SUPATYPE_FUNCTION_NAME")?.trim()
   const out: DiscoveredRoute[] = []
 
-  for await (const entry of Deno.readDir(root)) {
+  let entries: AsyncIterable<Deno.DirEntry>
+  try {
+    entries = Deno.readDir(root)
+  } catch (err) {
+    if (err instanceof Deno.errors.NotFound) {
+      return []
+    }
+    throw err
+  }
+
+  for await (const entry of entries) {
     if (entry.name.startsWith("_") || entry.name.startsWith(".")) continue
 
     const fullPath = `${root}/${entry.name}`
