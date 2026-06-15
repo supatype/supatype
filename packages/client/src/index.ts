@@ -437,7 +437,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
       try {
         res = await doFetch(`${config.url}/graphql/v1`, {
           method: "POST",
-          headers: baseHeaders,
+          headers: getAuthHeaders(),
           body: JSON.stringify(body),
         })
       } catch (e) {
@@ -448,6 +448,13 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
         json = await res.json() as Record<string, unknown>
       } catch {
         return { data: null, error: { message: `GraphQL endpoint returned a non-JSON response (HTTP ${res.status} ${res.statusText})` } }
+      }
+      if (!res.ok) {
+        const message =
+          typeof json["message"] === "string" ? json["message"]
+          : typeof json["error"] === "string" ? json["error"]
+          : `GraphQL request failed (HTTP ${res.status})`
+        return { data: json["data"] ?? null, error: { message, status: res.status } }
       }
       if (json["errors"] !== undefined) {
         const errors = json["errors"] as Array<{ message: string }>

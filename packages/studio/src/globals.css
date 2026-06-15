@@ -93,7 +93,7 @@
 .st-edit-sidebar-title { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: hsl(var(--muted-foreground)); margin-bottom: 0.75rem; }
 .st-edit-sidebar-section { border-bottom: 1px solid hsl(var(--border)); padding-bottom: 0.5rem; }
 .st-edit-sidebar-actions { display: flex; flex-direction: column; gap: 0.5rem; }
-.st-edit-sidebar-save { width: 100%; justify-content: center; }
+.st-edit-sidebar-actions .st-btn { width: 100%; justify-content: center; }
 .st-edit-view--with-preview .st-edit-main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1.5rem; align-items: start; }
 @media (max-width: 1024px) {
   .st-edit-layout { grid-template-columns: 1fr; }

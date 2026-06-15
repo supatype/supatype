@@ -93,7 +93,48 @@ function getTertiaryGroups(path: string): NavGroup[] | null {
     }]
   }
 
-  // Model (extract base route, e.g. /models/post)
+  // Singleton global (e.g. /models/globals/siteSettings)
+  const globalMatch = path.match(/^\/models\/globals\/([^/]+)/)
+  if (globalMatch) {
+    const base = `/models/globals/${globalMatch[1]}`
+    return [{
+      items: [
+        {
+          label: "Editor",
+          href: base,
+          activeWhen: (p) =>
+            p === base ||
+            (p.startsWith(base + "/") &&
+              !p.startsWith(base + "/schema") &&
+              !p.startsWith(base + "/data") &&
+              !p.startsWith(base + "/api") &&
+              !p.startsWith(base + "/graphql")),
+        },
+        {
+          label: "Schema",
+          href: `${base}/schema`,
+          activeWhen: (p) => p === `${base}/schema`,
+        },
+        {
+          label: "Data",
+          href: `${base}/data`,
+          activeWhen: (p) => p === `${base}/data`,
+        },
+        {
+          label: "API",
+          href: `${base}/api`,
+          activeWhen: (p) => p === `${base}/api`,
+        },
+        {
+          label: "GraphQL",
+          href: `${base}/graphql`,
+          activeWhen: (p) => p === `${base}/graphql`,
+        },
+      ],
+    }]
+  }
+
+  // Collection model (extract base route, e.g. /models/post)
   const modelMatch = path.match(/^\/models\/([^/]+)/)
   if (modelMatch) {
     const base = `/models/${modelMatch[1]}`

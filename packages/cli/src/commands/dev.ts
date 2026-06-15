@@ -394,7 +394,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
 
         const postgrestEnv: Record<string, string> = {
           PGRST_DB_URI: dbURL,
-          PGRST_DB_SCHEMA: "public, supatype",
+          PGRST_DB_SCHEMA: "public, supatype, graphql_public",
           PGRST_DB_ANON_ROLE: "anon",
           PGRST_SERVER_PORT: postgrestPort,
           PGRST_SERVER_HOST: "127.0.0.1",

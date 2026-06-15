@@ -179,7 +179,7 @@ ${dbPorts}    volumes:
       - "3000"
     environment:
       PGRST_DB_URI: postgresql://\${POSTGRES_USER:-supatype_admin}:\${POSTGRES_PASSWORD:-postgres}@db:5432/\${POSTGRES_DB:-supatype}
-      PGRST_DB_SCHEMA: "public, supatype"
+      PGRST_DB_SCHEMA: "public, supatype, graphql_public"
       PGRST_DB_ANON_ROLE: anon
       PGRST_JWT_SECRET: \${JWT_SECRET:-super-secret-jwt-token-change-in-production}
       PGRST_DB_EXTRA_SEARCH_PATH: public,extensions

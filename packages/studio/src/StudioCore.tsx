@@ -16,7 +16,7 @@ import { TopBar } from "./components/TopBar.js"
 // Re-export for dev tool views that import useStudioClient
 export const useStudioClient = useAdminClient
 
-// CMS views
+import { globalConfigAsModel } from "./lib/global-model-config.js"
 import { Dashboard } from "./views/Dashboard.js"
 import { ListView } from "./views/ListView.js"
 import { EditView } from "./views/EditView.js"
@@ -254,6 +254,38 @@ function GlobalRoute(): React.ReactElement {
   return <GlobalEditView global={globalConfig} />
 }
 
+function GlobalSchemaRoute(): React.ReactElement {
+  const config = useAdminConfig()
+  const { name } = useParams()
+  const globalConfig = config.globals.find((g) => g.name === name)
+  if (!globalConfig) return <PageError>Global &quot;{name}&quot; not found</PageError>
+  return <ModelSchema model={globalConfigAsModel(globalConfig)} />
+}
+
+function GlobalDataRoute(): React.ReactElement {
+  const config = useAdminConfig()
+  const { name } = useParams()
+  const globalConfig = config.globals.find((g) => g.name === name)
+  if (!globalConfig) return <PageError>Global &quot;{name}&quot; not found</PageError>
+  return <DataExplorer initialTable={globalConfig.tableName} />
+}
+
+function GlobalApiRoute(): React.ReactElement {
+  const config = useAdminConfig()
+  const { name } = useParams()
+  const globalConfig = config.globals.find((g) => g.name === name)
+  if (!globalConfig) return <PageError>Global &quot;{name}&quot; not found</PageError>
+  return <ModelApiDocs model={globalConfigAsModel(globalConfig)} />
+}
+
+function GlobalGraphQLRoute(): React.ReactElement {
+  const config = useAdminConfig()
+  const { name } = useParams()
+  const globalConfig = config.globals.find((g) => g.name === name)
+  if (!globalConfig) return <PageError>Global &quot;{name}&quot; not found</PageError>
+  return <ModelGraphQLDocs model={globalConfigAsModel(globalConfig)} />
+}
+
 // ─── StudioCore ────────────────────────────────────────────────────────────────
 
 export function StudioCore({ config, client, extensions, demoMode, cloudUrl, platformUrl, projectRef }: StudioCoreProps): React.ReactElement {
@@ -272,6 +304,10 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
               <Route path="media" element={<MediaLibrary />} />
               <Route path="models" element={<ModelsOverview />} />
               <Route path="models/globals" element={<GlobalsIndexRoute />} />
+              <Route path="models/globals/:name/schema" element={<GlobalSchemaRoute />} />
+              <Route path="models/globals/:name/data" element={<GlobalDataRoute />} />
+              <Route path="models/globals/:name/api" element={<GlobalApiRoute />} />
+              <Route path="models/globals/:name/graphql" element={<GlobalGraphQLRoute />} />
               <Route path="models/globals/:name" element={<GlobalRoute />} />
               <Route path="models/:model" element={<CollectionListRoute />} />
               <Route path="models/:model/schema"  element={<CollectionSchemaRoute />} />

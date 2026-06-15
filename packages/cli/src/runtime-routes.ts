@@ -6,6 +6,8 @@ export interface RuntimeRoute {
   stripPath?: boolean
   protocols?: string[]
   engineProtected?: boolean
+  /** Route /graphql/v1 to PostgREST /rpc/graphql with graphql_public Content-Profile. */
+  graphqlPostgrest?: boolean
 }
 
 export interface RuntimeRouteOptions {
@@ -92,10 +94,11 @@ function runtimeRouteSpecUnified(opts: RuntimeRouteOptions): RuntimeRoute[] {
     },
     {
       name: "graphql-v1",
-      serviceName: "supatype-server-graphql",
-      serviceUrl: SERVER_GATEWAY,
-      paths: ["/graphql/v1/"],
-      stripPath: false,
+      serviceName: "postgrest-graphql",
+      serviceUrl: "http://postgrest:3000/rpc/graphql",
+      paths: ["/graphql/v1"],
+      stripPath: true,
+      graphqlPostgrest: true,
     },
     {
       name: "studio-config-route",
@@ -199,6 +202,14 @@ function runtimeRouteSpecSplit(opts: RuntimeRouteOptions): RuntimeRoute[] {
       serviceUrl: opts.functionsServiceUrl?.trim() || "http://server:9999",
       paths: ["/functions/v1/"],
       stripPath: false,
+    },
+    {
+      name: "graphql-v1",
+      serviceName: "postgrest-graphql",
+      serviceUrl: "http://postgrest:3000/rpc/graphql",
+      paths: ["/graphql/v1"],
+      stripPath: true,
+      graphqlPostgrest: true,
     },
     {
       name: "studio-auth",

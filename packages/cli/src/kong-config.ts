@@ -66,6 +66,15 @@ consumers:
       ? `        protocols:\n${route.protocols.map((p) => `          - ${p}`).join("\n")}\n`
       : ""
     const stripPath = route.stripPath ?? false
+    const graphqlPlugins = route.graphqlPostgrest
+      ? `        plugins:
+          - name: request-transformer
+            config:
+              add:
+                headers:
+                  - Content-Profile:graphql_public
+`
+      : ""
     return `  - name: ${route.serviceName}
     url: ${route.serviceUrl}
     routes:
@@ -73,7 +82,7 @@ consumers:
         strip_path: ${stripPath}
         paths:
 ${route.paths.map((path) => `          - ${path}`).join("\n")}
-${protocols}${routePlugins}`
+${protocols}${routePlugins}${graphqlPlugins}`
   }).join("\n")
 
   return `_format_version: "3.0"

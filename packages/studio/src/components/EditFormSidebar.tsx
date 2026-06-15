@@ -53,7 +53,7 @@ export function EditFormSidebar({
       <div className="st-edit-sidebar-actions">
         <button
           type="button"
-          className="st-btn st-btn-primary st-edit-sidebar-save"
+          className="st-btn st-btn-primary"
           onClick={onSave}
           disabled={saving}
         >

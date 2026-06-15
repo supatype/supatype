@@ -3,13 +3,16 @@ import type { ModelConfig } from "../config.js"
 import { Button } from "../components/ui.js"
 import { useStudioClient } from "../StudioCore.js"
 import { cn } from "../lib/utils.js"
-
-function cap(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1)
-}
+import {
+  buildGraphqlListQuery,
+  formatGraphqlClientResult,
+  graphqlCollectionField,
+  graphqlEntityName,
+} from "../lib/graphql-query.js"
 
 function buildOperations(model: ModelConfig) {
-  const t = model.tableName
+  const collection = graphqlCollectionField(model.tableName)
+  const entity = graphqlEntityName(model.tableName)
   const pk = model.primaryKey || "id"
   const pkEx = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
   const AUTO = new Set(["created_at", "updated_at", "deleted_at"])
@@ -28,21 +31,13 @@ function buildOperations(model: ModelConfig) {
     {
       label: "List",
       description: `Fetch all ${model.labelPlural}.`,
-      query: `query List${cap(t)} {
-  ${t}Collection {
-    edges {
-      node {
-${fieldLines}
-      }
-    }
-  }
-}`,
+      query: buildGraphqlListQuery(model.tableName, model.fields.slice(0, 6).map((f) => f.name)),
     },
     {
       label: "Get by ID",
       description: `Fetch a single ${model.label} by ${pk}.`,
-      query: `query Get${cap(t)}ById {
-  ${t}Collection(
+      query: `query Get${entity}ById {
+  ${collection}(
     filter: { ${pk}: { eq: "${pkEx}" } }
   ) {
     edges {
@@ -56,8 +51,8 @@ ${fieldLines}
     {
       label: "Insert",
       description: `Create a new ${model.label}.`,
-      query: `mutation Insert${cap(t)} {
-  insertInto${cap(t)}Collection(
+      query: `mutation Insert${entity} {
+  insertInto${entity}Collection(
     objects: [{
 ${insertPairs}
     }]
@@ -71,8 +66,8 @@ ${insertPairs}
     {
       label: "Update",
       description: `Update a ${model.label} by ${pk}.`,
-      query: `mutation Update${cap(t)} {
-  update${cap(t)}Collection(
+      query: `mutation Update${entity} {
+  update${entity}Collection(
     filter: { ${pk}: { eq: "${pkEx}" } }
     set: {
       # fields to update
@@ -87,8 +82,8 @@ ${fieldLines}
     {
       label: "Delete",
       description: `Delete a ${model.label} by ${pk}.`,
-      query: `mutation Delete${cap(t)} {
-  deleteFrom${cap(t)}Collection(
+      query: `mutation Delete${entity} {
+  deleteFrom${entity}Collection(
     filter: { ${pk}: { eq: "${pkEx}" } }
   ) {
     records {
@@ -126,7 +121,9 @@ export function ModelGraphQLDocs({ model }: Props): React.ReactElement {
     setResult("")
     try {
       const res = await client.graphql(query, {})
-      setResult(JSON.stringify(res, null, 2))
+      const formatted = formatGraphqlClientResult(res)
+      setResult(formatted.result)
+      setError(formatted.error)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {

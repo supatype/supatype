@@ -25,7 +25,7 @@ const baseConfig: SupatypeProjectConfig = {
 describe("runtime contract", () => {
   it("includes core route families", () => {
     const paths = runtimeRouteSpec().flatMap((r) => r.paths)
-    for (const path of ["/rest/v1/", "/auth/v1/", "/storage/v1/", "/realtime/v1/", "/functions/v1/"]) {
+    for (const path of ["/rest/v1/", "/auth/v1/", "/storage/v1/", "/realtime/v1/", "/functions/v1/", "/graphql/v1"]) {
       expect(paths).toContain(path)
     }
   })
@@ -48,7 +48,8 @@ describe("runtime contract", () => {
     expect(kong).toContain("/storage/v1/")
     expect(kong).toContain("/realtime/v1/")
     expect(kong).toContain("/functions/v1/")
-    expect(kong).not.toContain("http://postgrest:3000")
+    expect(kong).toContain("http://postgrest:3000/rpc/graphql")
+    expect(kong).toContain("Content-Profile:graphql_public")
     expect(kong).not.toContain("http://storage:5000")
   })
 

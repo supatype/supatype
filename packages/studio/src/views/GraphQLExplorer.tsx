@@ -3,15 +3,9 @@ import { useAdminConfig } from "../hooks/useAdminConfig.js"
 import { useStudioClient } from "../StudioCore.js"
 import { Button, CodeBlock } from "../components/ui.js"
 import { cn } from "../lib/utils.js"
+import { buildGraphqlListQuery, formatGraphqlClientResult } from "../lib/graphql-query.js"
 
-const PLACEHOLDER_QUERY = `query {
-  # Replace with your table name
-  posts {
-    id
-    title
-    created_at
-  }
-}`
+const PLACEHOLDER_QUERY = buildGraphqlListQuery("posts", ["id", "title", "created_at"])
 
 const AUTH_TABLES = [
   { name: "users",      label: "Users",      fields: ["id", "email", "created_at", "updated_at"] },
@@ -25,7 +19,10 @@ export function GraphQLExplorer(): React.ReactElement {
 
   const [query, setQuery] = useState(
     config.models[0]
-      ? buildExampleQuery(config.models[0].tableName, config.models[0].fields.slice(0, 4).map((f) => f.name))
+      ? buildGraphqlListQuery(
+          config.models[0].tableName,
+          config.models[0].fields.slice(0, 4).map((f) => f.name),
+        )
       : PLACEHOLDER_QUERY,
   )
   const [result, setResult] = useState<string>("")
@@ -38,7 +35,9 @@ export function GraphQLExplorer(): React.ReactElement {
     setResult("")
     try {
       const res = await client.graphql(query, {})
-      setResult(JSON.stringify(res, null, 2))
+      const formatted = formatGraphqlClientResult(res)
+      setResult(formatted.result)
+      setError(formatted.error)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -60,7 +59,7 @@ export function GraphQLExplorer(): React.ReactElement {
             key={model.name}
             type="button"
             onClick={() =>
-              setQuery(buildExampleQuery(model.tableName, model.fields.slice(0, 4).map((f) => f.name)))
+              setQuery(buildGraphqlListQuery(model.tableName, model.fields.slice(0, 4).map((f) => f.name)))
             }
             className="text-left px-2 py-1.5 rounded text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors truncate"
           >
@@ -78,7 +77,7 @@ export function GraphQLExplorer(): React.ReactElement {
             <button
               key={t.name}
               type="button"
-              onClick={() => setQuery(buildExampleQuery(t.name, t.fields))}
+              onClick={() => setQuery(buildGraphqlListQuery(t.name, t.fields))}
               className="text-left px-2 py-1.5 rounded text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors truncate w-full"
             >
               {t.label}
@@ -135,7 +134,3 @@ export function GraphQLExplorer(): React.ReactElement {
   )
 }
 
-function buildExampleQuery(tableName: string, fields: string[]): string {
-  const fieldList = fields.length > 0 ? fields.join("\n    ") : "id"
-  return `query {\n  ${tableName} {\n    ${fieldList}\n  }\n}`
-}

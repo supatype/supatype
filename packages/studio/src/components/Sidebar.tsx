@@ -355,7 +355,13 @@ export function getPageTitle(path: string, config: AdminConfig): string {
   const globalMatch = path.match(/^\/models\/globals\/([^/]+)/)
   if (globalMatch) {
     const g = config.globals.find((g) => g.name === globalMatch[1])
-    if (g) return g.label
+    if (g) {
+      if (path.endsWith("/schema")) return `${g.label} — Schema`
+      if (path.endsWith("/data")) return `${g.label} — Data`
+      if (path.endsWith("/api")) return `${g.label} — REST API`
+      if (path.endsWith("/graphql")) return `${g.label} — GraphQL`
+      return g.label
+    }
   }
 
   const titles: Record<string, string> = {
@@ -408,7 +414,13 @@ export function getPageBreadcrumbs(path: string, config: AdminConfig): string[] 
   const globalMatch = path.match(/^\/models\/globals\/([^/]+)/)
   if (globalMatch) {
     const g = config.globals.find((g) => g.name === globalMatch[1])
-    if (g) return ["Models", g.label]
+    if (g) {
+      if (path.endsWith("/schema")) return ["Models", g.label, "Schema"]
+      if (path.endsWith("/data")) return ["Models", g.label, "Data"]
+      if (path.endsWith("/api")) return ["Models", g.label, "REST API"]
+      if (path.endsWith("/graphql")) return ["Models", g.label, "GraphQL"]
+      return ["Models", g.label]
+    }
   }
 
   const breadcrumbs: Record<string, string[]> = {
