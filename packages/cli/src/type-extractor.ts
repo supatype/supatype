@@ -747,6 +747,8 @@ function parseScalarType(
         return scalar("json")
       case "Button":
         return scalar("button", { db: { pgType: "JSONB" } })
+      case "Duration":
+        return scalar("json", { db: { pgType: "JSONB" } })
       case "GeoPoint":
       case "Geo":
         return scalar("geo", { kernel: { geoType: "point", srid: 4326 } })
