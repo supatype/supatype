@@ -138,8 +138,8 @@ export const mockConfig: AdminConfig = {
     {
       label: "Settings",
       items: [
-        { label: "Site Settings", href: "/globals/siteSettings", type: "global", icon: "settings" },
-        { label: "Navigation", href: "/globals/navigation", type: "global", icon: "menu" },
+        { label: "Site Settings", href: "/models/globals/siteSettings", type: "global", icon: "settings" },
+        { label: "Navigation", href: "/models/globals/navigation", type: "global", icon: "menu" },
       ],
     },
   ],

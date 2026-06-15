@@ -1,7 +1,7 @@
-import React, { useState, useMemo } from "react"
+import React, { useState, useMemo, useEffect } from "react"
 import { cn } from "../lib/utils.js"
 import { Badge, Button, Card, Input, Select, Th, Td } from "../components/ui.js"
-import { useProjectProxy } from "../hooks/useProjectProxy.js"
+import { useProjectProxy, type ProjectProxy } from "../hooks/useProjectProxy.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
@@ -52,6 +52,7 @@ interface Migration {
   rolled_back_at: string | null
   engine_version: string
   schema_snapshot: AstSnapshot | null
+  has_sql: boolean
   sql_up: string | null
 }
 
@@ -64,6 +65,11 @@ function mapMigrationRow(row: Record<string, unknown>): Migration {
   let snapshot: AstSnapshot | null = null
   const raw = row["schema_snapshot"]
   if (raw && typeof raw === "object") snapshot = raw as AstSnapshot
+  const legacySql = (row["sql_up"] as string | null) ?? null
+  const hasSql =
+    row["has_sql"] === true ||
+    row["has_sql"] === "t" ||
+    (legacySql?.trim().length ?? 0) > 0
   return {
     id: Number(row["id"] ?? 0),
     name: String(row["name"] ?? ""),
@@ -73,8 +79,87 @@ function mapMigrationRow(row: Record<string, unknown>): Migration {
     rolled_back_at: (row["rolled_back_at"] as string | null) ?? null,
     engine_version: String(row["engine_version"] ?? ""),
     schema_snapshot: snapshot,
-    sql_up: (row["sql_up"] as string | null) ?? null,
+    has_sql: hasSql,
+    sql_up: legacySql,
   }
+}
+
+const MIGRATIONS_LIST_SQL = `SELECT id, name, hash, applied_at::TEXT, rolled_back, rolled_back_at::TEXT,
+       engine_version, schema_snapshot,
+       (sql_up IS NOT NULL AND btrim(sql_up) <> '') AS has_sql
+ FROM _supatype.migrations ORDER BY id ASC`
+
+/** Candidates for display: DDL rows, initial baseline — not legacy admin_refresh noise. */
+function isTrackedMigration(m: Migration): boolean {
+  if (m.name.startsWith("admin_refresh_")) return false
+  if (m.has_sql) return true
+  return m.name.startsWith("initial_")
+}
+
+/** Only show migrations where the schema actually changed vs the previous visible row. */
+function buildVisibleMigrations(tracked: Migration[]): Migration[] {
+  const visible: Migration[] = []
+  for (const m of tracked) {
+    const prev = visible.length > 0 ? visible[visible.length - 1]!.schema_snapshot : null
+    const changes = diffSnapshots(prev, m.schema_snapshot)
+    if (visible.length === 0 || isInitialBaseline(m) || changes.length > 0) {
+      visible.push(m)
+    }
+  }
+  return visible
+}
+
+function useMigrationSql(
+  proxy: ProjectProxy,
+  migrationId: number,
+  hasSql: boolean,
+  enabled: boolean,
+): { sql: string | null; loading: boolean; error: string | null } {
+  const [sql, setSql] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!enabled || !hasSql) {
+      setSql(null)
+      setLoading(false)
+      setError(null)
+      return
+    }
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    void proxy
+      .sql(`SELECT sql_up FROM _supatype.migrations WHERE id = ${migrationId}`)
+      .then((result) => {
+        if (cancelled) return
+        const row = result.rows[0]
+        const value = row?.["sql_up"]
+        setSql(typeof value === "string" ? value : null)
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Failed to load SQL")
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [proxy, migrationId, hasSql, enabled])
+
+  return { sql, loading, error }
+}
+
+function migrationDisplayName(name: string): string {
+  if (name.startsWith("initial_")) return "Initial schema sync"
+  return name
+}
+
+function isInitialBaseline(m: Migration): boolean {
+  return m.name.startsWith("initial_") && !m.has_sql
 }
 
 // ─── Snapshot diff ────────────────────────────────────────────────────────────
@@ -193,18 +278,31 @@ function SqlBlock({ sql }: { sql: string }): React.ReactElement {
 
 // ─── Inline expanded row ──────────────────────────────────────────────────────
 
-function ExpandedRow({ migration, changes, colSpan }: {
+function ExpandedRow({ proxy, migration, changes, colSpan }: {
+  proxy: ProjectProxy
   migration: Migration
   changes: ModelChange[]
   colSpan: number
 }): React.ReactElement {
-  const [tab, setTab] = useState<"changes" | "sql">("changes")
+  const { sql, loading: sqlLoading, error: sqlError } = useMigrationSql(
+    proxy,
+    migration.id,
+    migration.has_sql,
+    true,
+  )
+  const hasSql = migration.has_sql
+  const [tab, setTab] = useState<"changes" | "sql">(hasSql ? "sql" : "changes")
   const hasChanges = changes.length > 0
-  const hasSql = !!migration.sql_up
+  const baseline = isInitialBaseline(migration)
 
   return (
     <tr className="bg-accent/20 border-b border-border">
       <td colSpan={colSpan} className="px-4 py-3">
+        {baseline && (
+          <p className="text-xs text-muted-foreground mb-3">
+            First push recorded the schema baseline. No database DDL was required.
+          </p>
+        )}
         {(hasChanges || hasSql) && (
           <div className="flex gap-3 mb-3 border-b border-border/40 pb-2">
             <button
@@ -224,7 +322,13 @@ function ExpandedRow({ migration, changes, colSpan }: {
           </div>
         )}
         {tab === "changes" && <ChangeList changes={changes} />}
-        {tab === "sql" && migration.sql_up && <SqlBlock sql={migration.sql_up} />}
+        {tab === "sql" && sqlLoading && (
+          <p className="text-xs text-muted-foreground">Loading SQL…</p>
+        )}
+        {tab === "sql" && sqlError && (
+          <p className="text-xs text-red-400">{sqlError}</p>
+        )}
+        {tab === "sql" && sql && <SqlBlock sql={sql} />}
         <div className="mt-3 pt-3 border-t border-border/50 flex items-center gap-4 text-[0.7rem] text-muted-foreground font-mono">
           <span>hash: {migration.hash.slice(0, 16)}…</span>
           {migration.rolled_back_at && (
@@ -238,14 +342,22 @@ function ExpandedRow({ migration, changes, colSpan }: {
 
 // ─── Slide-out panel ──────────────────────────────────────────────────────────
 
-function SlideOutPanel({ migration, changes, onClose }: {
+function SlideOutPanel({ proxy, migration, changes, onClose }: {
+  proxy: ProjectProxy
   migration: Migration
   changes: ModelChange[]
   onClose: () => void
 }): React.ReactElement {
-  const [tab, setTab] = useState<"changes" | "sql">("changes")
+  const { sql, loading: sqlLoading, error: sqlError } = useMigrationSql(
+    proxy,
+    migration.id,
+    migration.has_sql,
+    true,
+  )
+  const hasSql = migration.has_sql
+  const [tab, setTab] = useState<"changes" | "sql">(hasSql ? "sql" : "changes")
   const status: MigrationStatus = migration.rolled_back ? "rolled_back" : "applied"
-  const hasSql = !!migration.sql_up
+  const baseline = isInitialBaseline(migration)
   return (
     <>
       {/* Backdrop */}
@@ -256,9 +368,13 @@ function SlideOutPanel({ migration, changes, onClose }: {
         <div className="flex items-start justify-between px-5 py-4 border-b border-border flex-shrink-0">
           <div>
             <p className="text-xs text-muted-foreground font-mono mb-0.5">Migration #{migration.id}</p>
-            <h3 className="text-sm font-semibold leading-snug break-all">{migration.name}</h3>
+            <h3 className="text-sm font-semibold leading-snug break-all">{migrationDisplayName(migration.name)}</h3>
+            {migration.name !== migrationDisplayName(migration.name) && (
+              <p className="text-[0.65rem] text-muted-foreground font-mono mt-0.5">{migration.name}</p>
+            )}
             <div className="flex items-center gap-2 mt-1.5">
               <Badge variant={statusVariant[status]}>{status.replace("_", " ")}</Badge>
+              {baseline && <Badge variant="yellow">baseline</Badge>}
               <span className="text-xs text-muted-foreground font-mono">{migration.engine_version}</span>
             </div>
           </div>
@@ -309,7 +425,13 @@ function SlideOutPanel({ migration, changes, onClose }: {
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-5 py-4">
           {tab === "changes" && <ChangeList changes={changes} />}
-          {tab === "sql" && migration.sql_up && <SqlBlock sql={migration.sql_up} />}
+          {tab === "sql" && sqlLoading && (
+            <p className="text-xs text-muted-foreground">Loading SQL…</p>
+          )}
+          {tab === "sql" && sqlError && (
+            <p className="text-xs text-red-400">{sqlError}</p>
+          )}
+          {tab === "sql" && sql && <SqlBlock sql={sql} />}
         </div>
       </div>
     </>
@@ -323,28 +445,33 @@ export function MigrationHistory(): React.ReactElement {
 
   const { data: migrationsData, loading, error, refetch } = useApiQuery(
     async () => {
-      const result = await proxy.sql(
-        `SELECT id, name, hash, applied_at::TEXT, rolled_back, rolled_back_at::TEXT,
-                engine_version, schema_snapshot, sql_up
-         FROM _supatype.migrations ORDER BY id ASC`,
-      )
+      const result = await proxy.sql(MIGRATIONS_LIST_SQL)
       return result.rows.map(mapMigrationRow)
     },
     [proxy],
   )
 
   const migrations = migrationsData ?? []
-  const displayMigrations = useMemo(() => [...migrations].reverse(), [migrations])
+  const trackedMigrations = useMemo(
+    () => migrations.filter(isTrackedMigration),
+    [migrations],
+  )
+  const visibleMigrations = useMemo(
+    () => buildVisibleMigrations(trackedMigrations),
+    [trackedMigrations],
+  )
+  const hiddenCount = migrations.length - visibleMigrations.length
+  const displayMigrations = useMemo(() => [...visibleMigrations].reverse(), [visibleMigrations])
 
   const diffs = useMemo(() => {
     const map = new Map<number, ModelChange[]>()
-    for (let i = 0; i < migrations.length; i++) {
-      const curr = migrations[i]!
-      const prev = i > 0 ? migrations[i - 1]!.schema_snapshot : null
+    for (let i = 0; i < visibleMigrations.length; i++) {
+      const curr = visibleMigrations[i]!
+      const prev = i > 0 ? visibleMigrations[i - 1]!.schema_snapshot : null
       map.set(curr.id, diffSnapshots(prev, curr.schema_snapshot))
     }
     return map
-  }, [migrations])
+  }, [visibleMigrations])
 
   // Inline expanded row id
   const [expandedId, setExpandedId] = useState<number | null>(null)
@@ -389,11 +516,15 @@ export function MigrationHistory(): React.ReactElement {
     return <ErrorBanner message={error} onRetry={refetch} />
   }
 
-  if (migrations.length === 0) {
+  if (visibleMigrations.length === 0) {
     return (
       <EmptyState
-        title="No migrations found"
-        description="No migrations have been applied yet."
+        title="No database migrations yet"
+        description={
+          migrations.length > 0
+            ? "Repeated syncs with no schema change are hidden. Run `supatype push` after a schema change to record a new migration."
+            : "Run `supatype push` to apply your schema and start tracking database migrations."
+        }
         action={refetch}
         actionLabel="Refresh"
       />
@@ -458,7 +589,12 @@ export function MigrationHistory(): React.ReactElement {
                       {isExpanded ? "▾" : "▸"}
                     </Td>
                     <Td className="font-mono text-muted-foreground">{m.id}</Td>
-                    <Td className="font-medium">{m.name}</Td>
+                    <Td className="font-medium">
+                      <span title={m.name}>{migrationDisplayName(m.name)}</span>
+                      {isInitialBaseline(m) && (
+                        <Badge variant="yellow" className="ml-2 text-[0.6rem]">baseline</Badge>
+                      )}
+                    </Td>
                     <Td><Badge variant={statusVariant[status]}>{status.replace("_", " ")}</Badge></Td>
                     <Td><ChangeSummaryPills changes={changes} hasSnapshot={m.schema_snapshot !== null} /></Td>
                     <Td className="text-xs text-muted-foreground">{new Date(m.applied_at).toLocaleString()}</Td>
@@ -473,7 +609,7 @@ export function MigrationHistory(): React.ReactElement {
                     </Td>
                   </tr>
                   {isExpanded && (
-                    <ExpandedRow migration={m} changes={changes} colSpan={8} />
+                    <ExpandedRow proxy={proxy} migration={m} changes={changes} colSpan={8} />
                   )}
                 </React.Fragment>
               )
@@ -490,12 +626,14 @@ export function MigrationHistory(): React.ReactElement {
       </Card>
 
       <div className="text-xs text-muted-foreground mt-2">
-        {filtered.length} of {migrations.length} migrations shown
+        {filtered.length} of {visibleMigrations.length} database migration{visibleMigrations.length === 1 ? "" : "s"} shown
+        {hiddenCount > 0 && ` · ${hiddenCount} duplicate or metadata-only sync${hiddenCount === 1 ? "" : "s"} hidden`}
       </div>
 
       {/* Slide-out panel */}
       {slideOut && (
         <SlideOutPanel
+          proxy={proxy}
           migration={slideOut}
           changes={diffs.get(slideOut.id) ?? []}
           onClose={() => setSlideOut(null)}

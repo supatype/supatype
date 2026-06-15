@@ -76,7 +76,7 @@ export function TopBar({ config, leftItems, extraItems, demoMode, onToggleSideba
     location.pathname === "/" ||
     location.pathname.startsWith("/models") ||
     location.pathname.startsWith("/collections") ||
-    location.pathname.startsWith("/globals") ||
+    location.pathname.startsWith("/models/globals") ||
     location.pathname === "/media"
   )
 

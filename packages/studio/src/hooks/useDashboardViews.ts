@@ -2,19 +2,17 @@ import { useState, useEffect, useCallback } from "react"
 import type { SupatypeClient } from "@supatype/client"
 import type { DashboardView, DashboardBlock, Tier } from "../config.js"
 import { DASHBOARD_VIEW_LIMITS } from "../config.js"
+import { studioRestHeaders } from "../lib/studio-auth-headers.js"
 
 // Uses PostgREST multi-schema support: Accept-Profile / Content-Profile: supatype
 // Requires PostgREST config: db-schemas = "public, supatype"
 
 function postgrestHeaders(client: SupatypeClient): Record<string, string> {
-  const key = client.serviceRoleKey ?? ""
-  return {
-    apikey: key,
-    Authorization: `Bearer ${key}`,
+  return studioRestHeaders(client, {
     "Content-Type": "application/json",
     "Accept-Profile": "supatype",
     "Content-Profile": "supatype",
-  }
+  })
 }
 
 async function pgFetch<T>(

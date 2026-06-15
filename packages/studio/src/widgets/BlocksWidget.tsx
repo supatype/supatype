@@ -1,6 +1,7 @@
-import React, { useState, useCallback } from "react"
+import React, { useState } from "react"
 import type { WidgetProps } from "./FieldWidget.js"
 import type { BlockTypeConfig, FieldConfig } from "../config.js"
+import { getLocalizedFieldValue, setLocalizedFieldValue } from "../lib/localized-field.js"
 import { FieldWidget as FieldWidgetComponent } from "./FieldWidget.js"
 
 interface BlockEntry {
@@ -8,31 +9,86 @@ interface BlockEntry {
   data: Record<string, unknown>
 }
 
-export function BlocksWidget({ config, value, onChange, readOnly }: WidgetProps): React.ReactElement {
-  const blocks = (Array.isArray(value) ? value : []) as BlockEntry[]
+function resolveBlockSubFieldValue(
+  blockData: Record<string, unknown>,
+  fieldConfig: FieldConfig,
+  currentLocale: string,
+  defaultLocale: string,
+): unknown {
+  return getLocalizedFieldValue(
+    blockData[fieldConfig.name],
+    fieldConfig.localized,
+    currentLocale,
+    defaultLocale,
+  )
+}
+
+function applyBlockSubFieldChange(
+  blockData: Record<string, unknown>,
+  fieldConfig: FieldConfig,
+  currentLocale: string,
+  value: unknown,
+): Record<string, unknown> {
+  return {
+    ...blockData,
+    [fieldConfig.name]: setLocalizedFieldValue(
+      blockData[fieldConfig.name],
+      fieldConfig.localized,
+      currentLocale,
+      value,
+    ),
+  }
+}
+
+export function BlocksWidget({
+  config,
+  value,
+  onChange,
+  readOnly,
+  currentLocale = "en",
+  defaultLocale = "en",
+}: WidgetProps): React.ReactElement {
+  const blocksValue = getLocalizedFieldValue(
+    value,
+    config.localized,
+    currentLocale,
+    defaultLocale,
+  )
+  const blocks = (Array.isArray(blocksValue) ? blocksValue : []) as BlockEntry[]
   const blockTypes = (config.options?.["blockTypes"] ?? []) as BlockTypeConfig[]
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null)
   const [showPicker, setShowPicker] = useState(false)
 
+  const commitBlocks = (nextBlocks: BlockEntry[]) => {
+    onChange(
+      setLocalizedFieldValue(value, config.localized, currentLocale, nextBlocks),
+    )
+  }
+
   const addBlock = (typeName: string) => {
     const newBlock: BlockEntry = { type: typeName, data: {} }
-    onChange([...blocks, newBlock])
+    commitBlocks([...blocks, newBlock])
     setExpandedIndex(blocks.length)
     setShowPicker(false)
   }
 
   const removeBlock = (index: number) => {
-    const next = blocks.filter((_, i) => i !== index)
-    onChange(next)
+    commitBlocks(blocks.filter((_, i) => i !== index))
     if (expandedIndex === index) setExpandedIndex(null)
   }
 
   const updateBlock = (index: number, fieldName: string, fieldValue: unknown) => {
-    const next = blocks.map((block, i) => {
-      if (i !== index) return block
-      return { ...block, data: { ...block.data, [fieldName]: fieldValue } }
-    })
-    onChange(next)
+    const blockType = blockTypes.find((bt) => bt.name === blocks[index]?.type)
+    const fieldConfig = blockType?.fields.find((f) => f.name === fieldName)
+    commitBlocks(
+      blocks.map((block, i) => {
+        if (i !== index) return block
+        const data = fieldConfig
+          ? applyBlockSubFieldChange(block.data, fieldConfig, currentLocale, fieldValue)
+          : { ...block.data, [fieldName]: fieldValue }
+        return { ...block, data }
+      }),
+    )
   }
 
   const moveBlock = (index: number, direction: -1 | 1) => {
@@ -42,7 +98,7 @@ export function BlocksWidget({ config, value, onChange, readOnly }: WidgetProps)
     const temp = next[index]!
     next[index] = next[target]!
     next[target] = temp
-    onChange(next)
+    commitBlocks(next)
     setExpandedIndex(target)
   }
 
@@ -50,7 +106,7 @@ export function BlocksWidget({ config, value, onChange, readOnly }: WidgetProps)
     const copy = JSON.parse(JSON.stringify(blocks[index])) as BlockEntry
     const next = [...blocks]
     next.splice(index + 1, 0, copy)
-    onChange(next)
+    commitBlocks(next)
     setExpandedIndex(index + 1)
   }
 
@@ -116,11 +172,18 @@ export function BlocksWidget({ config, value, onChange, readOnly }: WidgetProps)
               <div className="st-block-body">
                 {blockType.fields.map((fieldConfig) => (
                   <FieldWidgetComponent
-                    key={fieldConfig.name}
+                    key={`${fieldConfig.name}-${currentLocale}`}
                     config={fieldConfig}
-                    value={block.data[fieldConfig.name] ?? null}
+                    value={resolveBlockSubFieldValue(
+                      block.data,
+                      fieldConfig,
+                      currentLocale,
+                      defaultLocale,
+                    )}
                     onChange={(val) => { updateBlock(index, fieldConfig.name, val) }}
                     readOnly={readOnly}
+                    currentLocale={currentLocale}
+                    defaultLocale={defaultLocale}
                   />
                 ))}
               </div>

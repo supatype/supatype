@@ -1,29 +1,13 @@
-import React, { useState, useEffect, useCallback, useRef } from "react"
+import React, { useState, useEffect, useRef } from "react"
 import { Header } from "../components/Header.js"
 import { useAdminClient } from "../hooks/useAdminClient.js"
 import type { StorageObject } from "@supatype/client"
+import { storagePublicUrl } from "../lib/storage-ref.js"
 
 type ViewMode = "grid" | "list"
 
 interface MediaFile extends StorageObject {
   publicUrl?: string
-}
-
-function normalizeStoragePublicUrl(
-  client: { url?: string },
-  rawUrl: string,
-): string {
-  if (!rawUrl) return rawUrl
-  try {
-    const parsed = new URL(rawUrl)
-    const apiOrigin = client.url ? new URL(client.url).origin : null
-    if (apiOrigin && parsed.origin !== apiOrigin && parsed.pathname.startsWith("/storage/v1/")) {
-      return `${apiOrigin}${parsed.pathname}${parsed.search}`
-    }
-    return rawUrl
-  } catch {
-    return rawUrl
-  }
 }
 
 export function MediaLibrary(): React.ReactElement {
@@ -41,11 +25,9 @@ export function MediaLibrary(): React.ReactElement {
   useEffect(() => {
     void (async () => {
       try {
-        const res = await fetch(`${getStorageUrl(client)}/bucket`, {
-          headers: getHeaders(client),
-        })
-        if (res.ok) {
-          setBuckets(await res.json() as Array<{ id: string; name: string; public: boolean }>)
+        const { data, error } = await client.storage.listBuckets()
+        if (!error && data) {
+          setBuckets(data.map((b) => ({ id: b.id, name: b.name, public: b.public })))
         }
       } catch {
         // Buckets may not be accessible without service_role
@@ -64,10 +46,7 @@ export function MediaLibrary(): React.ReactElement {
         if (result.data) {
           const mapped: MediaFile[] = result.data.map((obj) => ({
             ...obj,
-            publicUrl: normalizeStoragePublicUrl(
-              client as { url?: string },
-              client.storage.from(currentBucket).getPublicUrl(obj.name).data.publicUrl,
-            ),
+            publicUrl: storagePublicUrl(client, { bucket: currentBucket, path: obj.name }),
           }))
           setFiles(mapped)
         }
@@ -257,13 +236,4 @@ export function MediaLibrary(): React.ReactElement {
       )}
     </div>
   )
-}
-
-function getStorageUrl(client: { storage: { from: (b: string) => { getPublicUrl: (p: string) => { data: { publicUrl: string } } } } }): string {
-  const test = client.storage.from("__test__").getPublicUrl("__test__").data.publicUrl
-  return test.replace("/object/public/__test__/__test__", "")
-}
-
-function getHeaders(_client: unknown): Record<string, string> {
-  return { "Content-Type": "application/json" }
 }

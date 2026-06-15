@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef } from "react"
 import { Header } from "../components/Header.js"
+import { EditFormLayout } from "../components/EditFormLayout.js"
 import { useAdminClient } from "../hooks/useAdminClient.js"
 import { useLocale } from "../hooks/useLocale.js"
-import { FieldWidget } from "../widgets/FieldWidget.js"
 import { LivePreviewPane } from "../components/LivePreviewPane.js"
-import type { ModelConfig, FieldConfig } from "../config.js"
+import type { ModelConfig } from "../config.js"
 import { useAdminConfig } from "../hooks/useAdminConfig.js"
+import { splitEditFields } from "../lib/edit-field-layout.js"
 import { serializeRecordForApi } from "../lib/recordValues.js"
 
 interface EditViewProps {
@@ -19,7 +20,6 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
   const config = useAdminConfig()
   const { currentLocale, defaultLocale } = useLocale()
   const [values, setValues] = useState<Record<string, unknown>>({})
-  const [initialValues, setInitialValues] = useState<Record<string, unknown>>({})
   const [loading, setLoading] = useState(!!recordId)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -69,7 +69,6 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
         } else if (result.data) {
           const data = result.data as Record<string, unknown>
           setValues(data)
-          setInitialValues(data)
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load record")
@@ -89,7 +88,6 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
     setError(null)
     try {
       if (isCreate) {
-        // Strip the primary key — the database generates it automatically.
         const { [model.primaryKey]: _pk, ...insertValues } = serializeRecordForApi(model, values)
         const result = await client
           .from(model.tableName as never)
@@ -106,7 +104,6 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
           onNavigate(`/models/${model.name}/${newId}`)
         }
       } else {
-        // Strip the primary key — it's the WHERE target, not an updatable column.
         const { [model.primaryKey]: _pk, ...updateValues } = serializeRecordForApi(model, values)
         const result = await client
           .from(model.tableName as never)
@@ -117,7 +114,6 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
           setError(result.error.message)
         } else {
           isDirty.current = false
-          setInitialValues(values)
         }
       }
     } catch (err) {
@@ -168,14 +164,12 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
     }
   }
 
-  const visibleFields = model.fields
-    .filter((f) => {
-      if (f.hidden) return false
-      // Primary key is auto-generated on create — hide it entirely.
-      if (isCreate && f.name === model.primaryKey) return false
-      return true
-    })
-    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+  const splitCtx = {
+    primaryKey: model.primaryKey,
+    isCreate,
+    timestamps: model.timestamps,
+  }
+  const { mainFields, metaFields } = splitEditFields(model.fields, splitCtx)
 
   const livePreviewConfig = config.livePreview?.[model.name]
 
@@ -185,31 +179,7 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
 
   return (
     <div className={`st-edit-view${livePreviewConfig ? " st-edit-view--with-preview" : ""}`}>
-      <Header
-        title={isCreate ? `Create ${model.label}` : `Edit ${model.label}`}
-        actions={
-          <div className="st-edit-actions">
-            {!isCreate && (
-              <>
-                <button type="button" className="st-btn" onClick={() => { void handleDuplicate() }}>
-                  Duplicate
-                </button>
-                <button type="button" className="st-btn st-btn-danger" onClick={() => { void handleDelete() }}>
-                  Delete
-                </button>
-              </>
-            )}
-            <button
-              type="button"
-              className="st-btn st-btn-primary"
-              onClick={() => { void handleSave() }}
-              disabled={saving}
-            >
-              {saving ? "Saving..." : "Save"}
-            </button>
-          </div>
-        }
-      />
+      <Header title={isCreate ? `Create ${model.label}` : `Edit ${model.label}`} />
 
       {model.hasHooks && (
         <div className="st-hook-indicator">
@@ -219,47 +189,29 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
 
       {error && <div className="st-error" role="alert">{error}</div>}
 
-      <div className="st-edit-content">
-        <form className="st-edit-form" onSubmit={(e) => { e.preventDefault(); void handleSave() }}>
-          {visibleFields.map((fieldConfig) => (
-            <FieldWidget
-              key={`${fieldConfig.name}-${currentLocale}`}
-              config={fieldConfig}
-              value={getLocalizedValue(values, fieldConfig, currentLocale, defaultLocale)}
-              onChange={(val) => {
-                if (fieldConfig.localized) {
-                  const existing = (values[fieldConfig.name] ?? {}) as Record<string, unknown>
-                  handleChange(fieldConfig.name, { ...existing, [currentLocale]: val })
-                } else {
-                  handleChange(fieldConfig.name, val)
-                }
-              }}
-              readOnly={fieldConfig.readOnly ?? fieldConfig.name === model.primaryKey}
-              record={values}
-              currentLocale={currentLocale}
-              defaultLocale={defaultLocale}
-              recordSyncKey={recordId ?? "__create__"}
-              slugFollowSource={recordId === undefined}
-            />
-          ))}
-        </form>
-
-        {livePreviewConfig && (
-          <LivePreviewPane config={livePreviewConfig} values={values} model={model} />
-        )}
-      </div>
+      <EditFormLayout
+        mainFields={mainFields}
+        metaFields={metaFields}
+        values={values}
+        onChange={handleChange}
+        primaryKey={model.primaryKey}
+        currentLocale={currentLocale}
+        defaultLocale={defaultLocale}
+        recordSyncKey={recordId ?? "__create__"}
+        slugFollowSource={recordId === undefined}
+        saving={saving}
+        onSave={() => { void handleSave() }}
+        isCreate={isCreate}
+        {...(!isCreate && {
+          onDuplicate: () => { void handleDuplicate() },
+          onDelete: () => { void handleDelete() },
+        })}
+        preview={
+          livePreviewConfig ? (
+            <LivePreviewPane config={livePreviewConfig} values={values} model={model} />
+          ) : undefined
+        }
+      />
     </div>
   )
-}
-
-function getLocalizedValue(
-  values: Record<string, unknown>,
-  field: FieldConfig,
-  currentLocale: string,
-  defaultLocale: string,
-): unknown {
-  const raw = values[field.name]
-  if (!field.localized || typeof raw !== "object" || raw === null) return raw
-  const locMap = raw as Record<string, unknown>
-  return locMap[currentLocale] ?? locMap[defaultLocale] ?? null
 }

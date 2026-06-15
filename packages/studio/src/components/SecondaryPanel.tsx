@@ -7,6 +7,7 @@ import { useStudioClient } from "../StudioCore.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import type { AdminConfig } from "../config.js"
 import { cn } from "../lib/utils.js"
+import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { Button } from "./ui.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -139,7 +140,13 @@ const STATIC_SECTIONS: Record<string, SectionDef> = {
 
 function getSectionId(path: string): string | null {
   if (path === "/models" || path.startsWith("/models/")) return "models"
-  if (path.startsWith("/api") || path === "/settings" || path.startsWith("/settings/")) return "settings"
+  if (
+    path.startsWith("/api") ||
+    path === "/settings" ||
+    path.startsWith("/settings/")
+  ) {
+    return "settings"
+  }
   if (path.startsWith("/database")) return "database"
   if (path.startsWith("/authentication")) return "auth"
   if (path.startsWith("/media-storage")) return "storage"
@@ -147,6 +154,56 @@ function getSectionId(path: string): string | null {
   if (path.startsWith("/ai")) return "ai"
   if (path.startsWith("/edge-functions")) return "functions"
   return null
+}
+
+function buildSettingsSection(): SectionDef {
+  return {
+    title: "Settings",
+    groups: [
+      {
+        items: [{ label: "General", href: "/settings" }],
+      },
+      {
+        label: "API",
+        items: [
+          { label: "REST", href: "/api/rest" },
+          { label: "GraphQL", href: "/api/graphql" },
+        ],
+      },
+    ],
+  }
+}
+
+function buildModelsSection(config: AdminConfig | null): SectionDef {
+  const modelItems = (config?.models ?? []).map((m) => ({
+    label: m.labelPlural,
+    href: `/models/${m.name}`,
+    activeWhen: (currentPath: string) => {
+      if (currentPath.startsWith("/models/globals")) return false
+      const match = currentPath.match(/^\/models\/([^/]+)/)
+      return match?.[1] === m.name
+    },
+  }))
+  const globalItems = (config?.globals ?? []).map((g) => ({
+    label: g.label,
+    href: `/models/globals/${g.name}`,
+    activeWhen: (currentPath: string) => {
+      const match = currentPath.match(/^\/models\/globals\/([^/]+)/)
+      return match?.[1] === g.name
+    },
+  }))
+  const groups: NavGroup[] = [
+    {
+      label: "Models",
+      items: modelItems.length > 0
+        ? modelItems
+        : [{ label: "No models yet", href: "/models" }],
+    },
+  ]
+  if (globalItems.length > 0) {
+    groups.push({ label: "Globals", items: globalItems })
+  }
+  return { title: "Models", groups }
 }
 
 // ─── SecondaryPanel ───────────────────────────────────────────────────────────
@@ -167,11 +224,11 @@ export function SecondaryPanel(): React.ReactElement | null {
         ...init,
         headers: {
           "Content-Type": "application/json",
-          ...(client.serviceRoleKey && { Authorization: `Bearer ${client.serviceRoleKey}` }),
+          ...studioAuthHeaders(client),
           ...init?.headers,
         },
       }),
-    [client.url, client.serviceRoleKey],
+    [client],
   )
 
   const { data: functionsData } = useApiQuery<FunctionMeta[]>(
@@ -210,16 +267,7 @@ export function SecondaryPanel(): React.ReactElement | null {
   }
 
   if (sectionId === "models") {
-    const items = (config?.models ?? []).map((m) => ({
-      label: m.labelPlural,
-      href: `/models/${m.name}`,
-    }))
-    section = {
-      title: "Models",
-      groups: items.length > 0
-        ? [{ items }]
-        : [{ items: [{ label: "No models yet", href: "/models" }] }],
-    }
+    section = buildModelsSection(config)
   } else if (sectionId === "functions") {
     const edgeMatch = path.match(/^\/edge-functions\/([^/]+)(?:\/([^/]+))?/)
     const selectedFnSlug = edgeMatch?.[1]
@@ -265,6 +313,8 @@ export function SecondaryPanel(): React.ReactElement | null {
         ? [{ items: tabItems }]
         : [{ items: [{ label: "No buckets yet", href: "/media-storage" }] }],
     }
+  } else if (sectionId === "settings") {
+    section = buildSettingsSection()
   } else {
     section = STATIC_SECTIONS[sectionId] ?? { title: "", groups: [] }
   }

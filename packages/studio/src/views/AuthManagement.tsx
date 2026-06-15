@@ -2,6 +2,7 @@ import React, { useState, useCallback } from "react"
 import { useStudioClient } from "../StudioCore.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import { useProjectProxy } from "../hooks/useProjectProxy.js"
+import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { Badge, Button, Card, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
@@ -394,7 +395,7 @@ export function AuthManagement(): React.ReactElement {
       ...options,
       headers: {
         "Content-Type": "application/json",
-        ...(client.serviceRoleKey && { Authorization: `Bearer ${client.serviceRoleKey}` }),
+        ...studioAuthHeaders(client),
         ...options?.headers,
       },
       credentials: "include",
@@ -402,7 +403,7 @@ export function AuthManagement(): React.ReactElement {
     const json = await res.json()
     if (!res.ok) throw new Error(json.msg ?? json.message ?? "Auth API error")
     return json
-  }, [client.url, client.serviceRoleKey])
+  }, [client])
 
   const { data: usersData, loading, error, refetch } = useApiQuery(
     async () => {

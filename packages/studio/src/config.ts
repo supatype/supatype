@@ -38,6 +38,7 @@ export type WidgetType =
   | "uuid"
   | "color"
   | "xml"
+  | "button"
 
 export interface FieldConfig {
   name: string
@@ -154,6 +155,8 @@ export interface AdminConfig {
   dashboard?: DashboardConfig
   /** Current org tier — used to enforce dashboard view limits. */
   tier?: Tier
+  /** Roles allowed to access Studio (from supatype.config.ts admin.roles). */
+  adminRoles?: string[]
 }
 
 export interface DashboardBlock {

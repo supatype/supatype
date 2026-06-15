@@ -1,4 +1,5 @@
 import { useCallback, useMemo } from "react"
+import { studioAuthHeaders, usesSessionProxy } from "../lib/studio-auth-headers.js"
 import { studioGatewayHeaders } from "../lib/studio-gateway-headers.js"
 import { useAdminClient } from "./useAdminClient.js"
 
@@ -38,11 +39,6 @@ export interface ProjectProxy {
   schemas: () => Promise<string[]>
 }
 
-/** Cloud Studio: `/api/control-plane/.../proxy` with session cookies, no browser service role. */
-function usesSessionProxy(client: { url: string; serviceRoleKey?: string | undefined }): boolean {
-  return !client.serviceRoleKey && client.url.includes("/proxy")
-}
-
 /**
  * Wraps raw fetch calls to the project proxy for SQL execution and schema
  * introspection. Schema routing is enforced server-side from the JWT role
@@ -58,14 +54,12 @@ export function useProjectProxy(): ProjectProxy {
         throw new Error("SQL proxy URL is not configured — client URL is missing")
       }
       if (!client.serviceRoleKey && !sessionProxy) {
-        throw new Error("SQL proxy requires a service role key")
+        throw new Error("SQL proxy requires authentication")
       }
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
         ...studioGatewayHeaders(),
-      }
-      if (client.serviceRoleKey) {
-        headers.Authorization = `Bearer ${client.serviceRoleKey}`
+        ...studioAuthHeaders(client),
       }
       const res = await fetch(`${client.url}/sql`, {
         method: "POST",

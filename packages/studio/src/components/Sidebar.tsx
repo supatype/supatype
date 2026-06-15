@@ -123,9 +123,12 @@ interface NavItemDef {
 
 type NavEntry = NavItemDef | "separator"
 
-const NAV_ENTRIES: NavEntry[] = [
+const PRIMARY_NAV_ENTRIES: NavItemDef[] = [
   { id: "dashboard",     label: "Dashboard",        icon: "home",      href: "/" },
   { id: "models",        label: "Models",            icon: "grid",      href: "/models" },
+]
+
+const SECONDARY_NAV_ENTRIES: NavEntry[] = [
   { id: "database",      label: "Database",          icon: "database",  href: "/database/overview" },
   { id: "media",         label: "Media & Storage",   icon: "image",     href: "/media-storage" },
   "separator",
@@ -162,7 +165,7 @@ interface SidebarProps {
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
 
-export function Sidebar({ extraSections, className }: SidebarProps): React.ReactElement {
+export function Sidebar({ config, extraSections, className }: SidebarProps): React.ReactElement {
   const navigate = useNavigate()
   const location = useLocation()
   const path = location.pathname
@@ -188,16 +191,10 @@ export function Sidebar({ extraSections, className }: SidebarProps): React.React
     }
   }
 
-  const extraItems: { label: string; href: string; icon?: string }[] = []
-  if (extraSections) {
-    for (const section of extraSections) {
-      for (const item of section.items) {
-        extraItems.push(item)
-      }
-    }
-  }
-
-  const settingsActive = path === "/settings" || path.startsWith("/settings/") || path.startsWith("/api")
+  const settingsActive =
+    path === "/settings" ||
+    path.startsWith("/settings/") ||
+    path.startsWith("/api")
 
   function NavItem({ icon, label, href, active }: {
     icon: string | undefined
@@ -253,7 +250,16 @@ export function Sidebar({ extraSections, className }: SidebarProps): React.React
         )}
       >
         <div className="flex-1 overflow-y-auto py-2" style={{ scrollbarWidth: "none" }}>
-          {NAV_ENTRIES.map((entry, i) => {
+          {PRIMARY_NAV_ENTRIES.map((entry) => (
+            <NavItem
+              key={entry.id}
+              icon={entry.icon}
+              label={entry.label}
+              href={entry.href}
+              active={isActive(entry)}
+            />
+          ))}
+          {SECONDARY_NAV_ENTRIES.map((entry, i) => {
             if (entry === "separator") {
               return <div key={`sep-${i}`} className="my-1 mx-3 border-t border-border/50" />
             }
@@ -268,17 +274,26 @@ export function Sidebar({ extraSections, className }: SidebarProps): React.React
             )
           })}
 
-          {extraItems.length > 0 && (
+          {extraSections && extraSections.length > 0 && (
             <>
               <div className="my-1 mx-3 border-t border-border/50" />
-              {extraItems.map((item) => (
-                <NavItem
-                  key={item.href}
-                  icon={item.icon}
-                  label={item.label}
-                  href={item.href}
-                  active={path === item.href || path.startsWith(`${item.href}/`)}
-                />
+              {extraSections.map((section) => (
+                <div key={section.title}>
+                  {expanded && (
+                    <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
+                      {section.title}
+                    </div>
+                  )}
+                  {section.items.map((item) => (
+                    <NavItem
+                      key={item.href}
+                      icon={item.icon}
+                      label={item.label}
+                      href={item.href}
+                      active={path === item.href || path.startsWith(`${item.href}/`)}
+                    />
+                  ))}
+                </div>
               ))}
             </>
           )}
@@ -337,7 +352,7 @@ export function getPageTitle(path: string, config: AdminConfig): string {
   }
   if (path === "/models") return "Models"
 
-  const globalMatch = path.match(/^\/globals\/([^/]+)/)
+  const globalMatch = path.match(/^\/models\/globals\/([^/]+)/)
   if (globalMatch) {
     const g = config.globals.find((g) => g.name === globalMatch[1])
     if (g) return g.label
@@ -390,10 +405,10 @@ export function getPageBreadcrumbs(path: string, config: AdminConfig): string[] 
   }
   if (path === "/models") return ["Models"]
 
-  const globalMatch = path.match(/^\/globals\/([^/]+)/)
+  const globalMatch = path.match(/^\/models\/globals\/([^/]+)/)
   if (globalMatch) {
     const g = config.globals.find((g) => g.name === globalMatch[1])
-    if (g) return ["Globals", g.label]
+    if (g) return ["Models", g.label]
   }
 
   const breadcrumbs: Record<string, string[]> = {

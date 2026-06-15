@@ -7,6 +7,7 @@ import { useDashboardViews } from "../hooks/useDashboardViews.js"
 import type { DashboardBlock, ModelConfig } from "../config.js"
 import { DASHBOARD_VIEW_LIMITS } from "../config.js"
 import { JumpToSearch } from "../components/JumpToSearch.js"
+import { studioRestHeaders } from "../lib/studio-auth-headers.js"
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
@@ -268,8 +269,7 @@ function StatsBlock({ block }: { block: DashboardBlock }): React.ReactElement {
       try {
         // Count via PostgREST head request (no data transferred)
         const url = `${client.url}/rest/v1/${block.model}?select=id`
-        const key = client.serviceRoleKey ?? ""
-        const headers = { apikey: key, Authorization: `Bearer ${key}`, Prefer: "count=exact" }
+        const headers = studioRestHeaders(client, { Prefer: "count=exact" })
 
         const [totalRes, weekRes] = await Promise.all([
           fetch(url, { method: "HEAD", headers }),
@@ -366,8 +366,7 @@ function AuthBlock(): React.ReactElement {
   useEffect(() => {
     void (async () => {
       try {
-        const key = client.serviceRoleKey ?? ""
-        const headers = { apikey: key, Authorization: `Bearer ${key}`, Prefer: "count=exact" }
+        const headers = studioRestHeaders(client, { Prefer: "count=exact" })
         const weekAgo = new Date(Date.now() - 7 * 86_400_000).toISOString()
 
         const [totalRes, weekRes] = await Promise.all([
@@ -410,10 +409,13 @@ function StorageBlock(): React.ReactElement {
   useEffect(() => {
     void (async () => {
       try {
-        const key = client.serviceRoleKey ?? ""
         const res = await fetch(`${client.url}/rest/v1/rpc/storage_stats`, {
           method: "POST",
-          headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Profile": "supatype", "Accept-Profile": "supatype", "Content-Type": "application/json" },
+          headers: studioRestHeaders(client, {
+            "Content-Profile": "supatype",
+            "Accept-Profile": "supatype",
+            "Content-Type": "application/json",
+          }),
           body: "{}",
         })
         if (res.ok) {
@@ -449,6 +451,15 @@ function QuickActionsBlock(): React.ReactElement {
     <div className="p-5">
       <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">Quick Actions</h3>
       <div className="flex flex-wrap gap-2">
+        {config.globals.map((g) => (
+          <a
+            key={g.name}
+            href={`/models/globals/${g.name}`}
+            className="text-xs px-2.5 py-1 rounded-md border border-border hover:bg-muted transition-colors text-foreground"
+          >
+            {g.label}
+          </a>
+        ))}
         {config.models.slice(0, 4).map((m) => (
           <a
             key={m.name}
@@ -474,10 +485,9 @@ function SignupsChartBlock(): React.ReactElement {
   useEffect(() => {
     void (async () => {
       try {
-        const key = client.serviceRoleKey ?? ""
         const res = await fetch(
           `${client.url}/rest/v1/rpc/daily_signups?days=30`,
-          { headers: { apikey: key, Authorization: `Bearer ${key}`, "Accept-Profile": "supatype" } },
+          { headers: studioRestHeaders(client, { "Accept-Profile": "supatype" }) },
         )
         if (res.ok) setData((await res.json()) as DailyRow[])
       } catch { /* leave empty */ }
@@ -523,10 +533,17 @@ function DbSizeBlock(): React.ReactElement {
   useEffect(() => {
     void (async () => {
       try {
-        const key = client.serviceRoleKey ?? ""
         const res = await fetch(
           `${client.url}/rest/v1/rpc/db_stats`,
-          { method: "POST", headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Profile": "supatype", "Accept-Profile": "supatype", "Content-Type": "application/json" }, body: "{}" },
+          {
+            method: "POST",
+            headers: studioRestHeaders(client, {
+              "Content-Profile": "supatype",
+              "Accept-Profile": "supatype",
+              "Content-Type": "application/json",
+            }),
+            body: "{}",
+          },
         )
         if (res.ok) {
           const rows = await res.json() as Array<{ db_size_bytes: number; db_size_pretty: string }>
@@ -558,12 +575,15 @@ function ContentChartBlock({ block }: { block: DashboardBlock }): React.ReactEle
     if (!model) return
     void (async () => {
       try {
-        const key = client.serviceRoleKey ?? ""
         const res = await fetch(
           `${client.url}/rest/v1/rpc/daily_content_creates`,
           {
             method: "POST",
-            headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Profile": "supatype", "Accept-Profile": "supatype", "Content-Type": "application/json" },
+            headers: studioRestHeaders(client, {
+              "Content-Profile": "supatype",
+              "Accept-Profile": "supatype",
+              "Content-Type": "application/json",
+            }),
             body: JSON.stringify({ table_name: model, days: 30 }),
           },
         )

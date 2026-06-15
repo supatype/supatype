@@ -4,6 +4,7 @@ import { useAdminClient } from "../hooks/useAdminClient.js"
 import { useAdminConfig } from "../hooks/useAdminConfig.js"
 import type { ModelConfig } from "../config.js"
 import type { SupatypeClient } from "@supatype/client"
+import { studioRestHeaders } from "../lib/studio-auth-headers.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -17,7 +18,7 @@ type SearchItem = {
 
 // ─── Static route index ───────────────────────────────────────────────────────
 
-function buildRouteItems(models: ModelConfig[]): SearchItem[] {
+function buildRouteItems(models: ModelConfig[], globals: { name: string; label: string }[]): SearchItem[] {
   const items: SearchItem[] = [
     { label: "Dashboard",              href: "/",                                  category: "Core",          kind: "route" },
     { label: "Models",                 href: "/models",                            category: "Core",          kind: "route" },
@@ -54,6 +55,16 @@ function buildRouteItems(models: ModelConfig[]): SearchItem[] {
     items.push({ label: `${m.label} Schema`,    href: `/models/${m.name}/schema`, description: m.tableName,                                 category: "Models", kind: "route" })
   }
 
+  for (const g of globals) {
+    items.push({
+      label: g.label,
+      href: `/models/globals/${g.name}`,
+      description: "Global",
+      category: "Globals",
+      kind: "route",
+    })
+  }
+
   return items
 }
 
@@ -72,8 +83,7 @@ async function searchLiveData(
   const query = sanitiseQuery(rawQuery)
   if (!query) return []
 
-  const key = client.serviceRoleKey ?? ""
-  const headers = { apikey: key, Authorization: `Bearer ${key}` }
+  const headers = studioRestHeaders(client)
   const q = query.toLowerCase()
   const results: SearchItem[] = []
 
@@ -149,7 +159,10 @@ export function JumpToSearch({ compact = false }: JumpToSearchProps): React.Reac
   const [searching, setSearching] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  const routeItems = useMemo(() => buildRouteItems(config.models), [config.models])
+  const routeItems = useMemo(
+    () => buildRouteItems(config.models, config.globals),
+    [config.models, config.globals],
+  )
 
   const routeMatches = useMemo((): SearchItem[] => {
     if (!query.trim()) return []

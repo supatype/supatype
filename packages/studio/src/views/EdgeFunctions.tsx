@@ -6,6 +6,8 @@ import { Badge, Button, Card, Input, Th, Td } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { cn } from "../lib/utils.js"
+import { studioAuthHeaders, usesSessionProxy } from "../lib/studio-auth-headers.js"
+import type { SupatypeClient } from "@supatype/client"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -51,18 +53,32 @@ function levelVariant(level: string): "green" | "yellow" | "red" | "blue" {
 
 // ─── Invoke tab ───────────────────────────────────────────────────────────────
 
+function buildFunctionInvokeUrl(clientUrl: string, functionName: string, queryString: string): string {
+  const base = `${clientUrl.replace(/\/$/, "")}/functions/v1/${encodeURIComponent(functionName)}`
+  const raw = queryString.trim()
+  if (!raw) return base
+  const qs = raw.startsWith("?") ? raw.slice(1) : raw
+  return `${base}?${qs}`
+}
+
 function InvokeTab({
   functionName,
   clientUrl,
-  serviceRoleKey,
+  client,
 }: {
   functionName: string
   clientUrl: string
-  serviceRoleKey: string | undefined
+  client: SupatypeClient
 }): React.ReactElement {
   const [method, setMethod] = useState<"GET" | "POST">("POST")
+  const [queryString, setQueryString] = useState("")
   const [body, setBody] = useState("{}")
   const [authMode, setAuthMode] = useState<"none" | "service_role" | "custom">("none")
+  const privilegedAuthLabel = client.serviceRoleKey
+    ? "Service role"
+    : usesSessionProxy(client)
+      ? "Studio session"
+      : "Privileged"
   const [customToken, setCustomToken] = useState("")
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -92,15 +108,17 @@ function InvokeTab({
       }
 
       if (authMode === "service_role") {
-        if (!serviceRoleKey) throw new Error("No service role key available in Studio client")
-        headers["Authorization"] = `Bearer ${serviceRoleKey}`
+        const auth = studioAuthHeaders(client)
+        if (!auth.Authorization) throw new Error("Studio authentication required")
+        Object.assign(headers, auth)
       } else if (authMode === "custom") {
         if (!customToken.trim()) throw new Error("Custom Bearer token is empty")
         headers["Authorization"] = `Bearer ${customToken.trim()}`
       }
 
       const started = performance.now()
-      const res = await fetch(`${clientUrl}/functions/v1/${encodeURIComponent(functionName)}`, opts)
+      const url = buildFunctionInvokeUrl(clientUrl, functionName, queryString)
+      const res = await fetch(url, opts)
       const elapsed = Math.round(performance.now() - started)
       const text = await res.text()
 
@@ -142,9 +160,19 @@ function InvokeTab({
             className="rounded-md border border-border bg-background px-2 py-1 text-xs"
           >
             <option value="none">None</option>
-            <option value="service_role">Service role</option>
+            <option value="service_role">{privilegedAuthLabel}</option>
             <option value="custom">Custom Bearer token</option>
           </select>
+        </div>
+
+        <div>
+          <label className="text-xs text-muted-foreground">Query string</label>
+          <Input
+            placeholder="token=your-export-token"
+            value={queryString}
+            onChange={(e) => setQueryString(e.target.value)}
+            className="font-mono text-xs mt-1"
+          />
         </div>
 
         {authMode === "custom" && (
@@ -531,11 +559,11 @@ export function EdgeFunctions(): React.ReactElement {
         ...init,
         headers: {
           "Content-Type": "application/json",
-          ...(client.serviceRoleKey && { Authorization: `Bearer ${client.serviceRoleKey}` }),
+          ...studioAuthHeaders(client),
           ...init?.headers,
         },
       }),
-    [client.url, client.serviceRoleKey],
+    [client],
   )
 
   const { data, loading, error, refetch } = useApiQuery<FunctionMeta[]>(
@@ -610,9 +638,10 @@ export function EdgeFunctions(): React.ReactElement {
             <div className="flex-1 overflow-auto">
               {activeTab === "invoke" && (
                 <InvokeTab
+                  key={selectedFn.name}
                   functionName={selectedFn.name}
                   clientUrl={client.url}
-                  serviceRoleKey={client.serviceRoleKey}
+                  client={client}
                 />
               )}
               {activeTab === "logs" && (

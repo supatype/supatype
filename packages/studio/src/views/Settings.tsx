@@ -5,6 +5,7 @@ import { usePlatformFetch, usePlatform } from "../hooks/usePlatform.js"
 import { CloudUpsell } from "./CloudUpsell.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import { useProjectProxy } from "../hooks/useProjectProxy.js"
+import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { cn } from "../lib/utils.js"
 import { Badge, Button, Card, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
@@ -845,9 +846,7 @@ function DatabaseSettings({ client }: { client: ReturnType<typeof useStudioClien
   const connStr = dbUrl ? `postgres://postgres:[password]@${new URL(dbUrl).host}/postgres` : "—"
   const poolStr = dbUrl ? `postgres://postgres:[password]@${new URL(dbUrl).host}:5432/postgres?pgbouncer=true` : "—"
 
-  const authHeaders = client.serviceRoleKey
-    ? { Authorization: `Bearer ${client.serviceRoleKey}` }
-    : {}
+  const authHeaders = studioAuthHeaders(client)
 
   const loadCredentialStatus = useCallback(async () => {
     setCredLoading(true)
@@ -866,7 +865,7 @@ function DatabaseSettings({ client }: { client: ReturnType<typeof useStudioClien
     } finally {
       setCredLoading(false)
     }
-  }, [client.url, client.serviceRoleKey])
+  }, [client])
 
   useEffect(() => {
     void loadCredentialStatus()
@@ -891,7 +890,7 @@ function DatabaseSettings({ client }: { client: ReturnType<typeof useStudioClien
     } finally {
       setCredActionLoading(false)
     }
-  }, [client.url, client.serviceRoleKey, loadCredentialStatus])
+  }, [client, loadCredentialStatus])
 
   const handleRotate = useCallback(async () => {
     setCredActionLoading(true)
@@ -912,7 +911,7 @@ function DatabaseSettings({ client }: { client: ReturnType<typeof useStudioClien
     } finally {
       setCredActionLoading(false)
     }
-  }, [client.url, client.serviceRoleKey, loadCredentialStatus])
+  }, [client, loadCredentialStatus])
 
   return (
     <Card className="p-4 space-y-4 max-w-[600px]">

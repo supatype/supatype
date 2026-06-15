@@ -16,6 +16,7 @@ import { ColorWidget } from "./ColorWidget.js"
 import { XmlWidget } from "./XmlWidget.js"
 import { SlugWidget } from "./SlugWidget.js"
 import { DerivedTextWidget } from "./DerivedTextWidget.js"
+import { ButtonWidget } from "./ButtonWidget.js"
 
 export interface WidgetProps {
   config: FieldConfig
@@ -33,6 +34,8 @@ export interface WidgetProps {
    * When false (loaded row), only the refresh control copies source → slug.
    */
   slugFollowSource?: boolean
+  /** Compact read-only styling for the metadata sidebar. */
+  variant?: "default" | "meta"
 }
 
 /**
@@ -64,9 +67,12 @@ export function normalizeDerivedPreviewFieldConfig(config: FieldConfig): FieldCo
 export function FieldWidget(props: WidgetProps): React.ReactElement {
   const config = normalizeDerivedPreviewFieldConfig(props.config)
   const next = { ...props, config }
+  const variant = props.variant ?? "default"
 
   return (
-    <div className={`st-field st-field--${config.widget}${config.required ? " st-field--required" : ""}`}>
+    <div
+      className={`st-field st-field--${config.widget}${config.required ? " st-field--required" : ""}${variant === "meta" ? " st-field--meta" : ""}`}
+    >
       <label className="st-field-label" htmlFor={`field-${config.name}`}>
         {config.label}
         {config.required && <span className="st-field-required" aria-label="required"> *</span>}
@@ -120,6 +126,8 @@ function WidgetRenderer(props: WidgetProps): React.ReactElement {
       return <ColorWidget {...props} />
     case "xml":
       return <XmlWidget {...props} />
+    case "button":
+      return <ButtonWidget {...props} />
     default:
       return <TextWidget {...props} />
   }

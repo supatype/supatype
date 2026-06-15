@@ -3,6 +3,9 @@ import type { SupatypeClient } from "@supatype/client"
 
 export const AdminClientContext = createContext<SupatypeClient | null>(null)
 
+/** Direct API client for auth (not `/studio/proxy`). Set by {@link StudioAccessGate}. */
+export const StudioAuthClientContext = createContext<SupatypeClient | null>(null)
+
 export function useAdminClient(): SupatypeClient {
   const client = useContext(AdminClientContext)
   if (!client) {

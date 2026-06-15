@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react"
 import { useStudioClient } from "../../StudioCore.js"
 import { Button, Card } from "../../components/ui.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
+import { studioAuthHeaders } from "../../lib/studio-auth-headers.js"
 import { studioGatewayHeaders } from "../../lib/studio-gateway-headers.js"
 
 const TEMPLATE_TYPES = [
@@ -39,7 +40,7 @@ export function EmailTemplatesView(): React.ReactElement {
     fetch(`${client.url}/auth/v1/admin/template/${selected}`, {
       headers: {
         ...studioGatewayHeaders(),
-        ...(client.serviceRoleKey && { Authorization: `Bearer ${client.serviceRoleKey}` }),
+        ...studioAuthHeaders(client),
       },
       credentials: "include",
     })
@@ -51,7 +52,7 @@ export function EmailTemplatesView(): React.ReactElement {
       })
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false))
-  }, [client.url, client.serviceRoleKey, selected])
+  }, [client, selected])
 
   async function handleSave() {
     setSaving(true)
@@ -62,7 +63,7 @@ export function EmailTemplatesView(): React.ReactElement {
         headers: {
           "Content-Type": "application/json",
           ...studioGatewayHeaders(),
-          ...(client.serviceRoleKey && { Authorization: `Bearer ${client.serviceRoleKey}` }),
+          ...studioAuthHeaders(client),
         },
         credentials: "include",
         body: JSON.stringify({ subject, content }),

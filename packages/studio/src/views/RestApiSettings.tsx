@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react"
 import { useAdminConfig } from "../hooks/useAdminConfig.js"
 import { useStudioClient } from "../StudioCore.js"
+import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { Button, Card, CodeBlock, Input } from "../components/ui.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { cn } from "../lib/utils.js"
@@ -28,7 +29,7 @@ export function RestApiSettings(): React.ReactElement {
     setLoading(true)
     setLoadError(null)
     fetch(`${client.url}/admin/v1/config/rest`, {
-      headers: client.serviceRoleKey ? { Authorization: `Bearer ${client.serviceRoleKey}` } : {},
+      headers: studioAuthHeaders(client),
       credentials: "include",
     })
       .then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.json() })
@@ -41,7 +42,7 @@ export function RestApiSettings(): React.ReactElement {
       .catch((e: Error) => { if (!cancelled) setLoadError(e.message ?? "Failed to load") })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [client.url, client.serviceRoleKey, retryCount])
+  }, [client, retryCount])
 
   const isDirty = schema !== committed.schema || maxRows !== committed.maxRows
 
@@ -54,7 +55,7 @@ export function RestApiSettings(): React.ReactElement {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          ...(client.serviceRoleKey ? { Authorization: `Bearer ${client.serviceRoleKey}` } : {}),
+          ...studioAuthHeaders(client),
         },
         credentials: "include",
         body: JSON.stringify({ schema, max_rows: parseInt(maxRows, 10) }),

@@ -2,23 +2,27 @@ import React, { useState, useRef, useEffect, useCallback } from "react"
 import { useAdminClient } from "../hooks/useAdminClient.js"
 import type { WidgetProps } from "./FieldWidget.js"
 import type { StorageObject } from "@supatype/client"
-
-interface StorageRef {
-  bucket: string
-  path: string
-  mimeType?: string
-  size?: number
-}
+import {
+  parseStorageRef,
+  resolveStorageObjectPath,
+  storagePublicUrl,
+  type StorageRef,
+} from "../lib/storage-ref.js"
+import { getLocalizedFieldValue, setLocalizedFieldValue } from "../lib/localized-field.js"
 
 const IMAGE_EXTS = new Set(["jpg", "jpeg", "png", "gif", "webp", "avif", "svg"])
 
-function isImageFile(obj: StorageObject): boolean {
-  const ext = obj.name.split(".").pop()?.toLowerCase() ?? ""
-  return obj.metadata !== undefined && IMAGE_EXTS.has(ext)
+function isImageFileName(name: string): boolean {
+  const ext = name.split(".").pop()?.toLowerCase() ?? ""
+  return IMAGE_EXTS.has(ext)
 }
 
 function isFolder(obj: StorageObject): boolean {
-  return obj.metadata === undefined
+  return obj.id === null && obj.metadata == null
+}
+
+function isImageFile(obj: StorageObject): boolean {
+  return !isFolder(obj) && isImageFileName(obj.name)
 }
 
 function BucketPickerModal({
@@ -54,7 +58,7 @@ function BucketPickerModal({
   const handleUpload = async (file: File) => {
     setUploading(true)
     try {
-      const uploadPath = prefix ? `${prefix}/${Date.now()}-${file.name}` : `${Date.now()}-${file.name}`
+      const uploadPath = resolveStorageObjectPath(prefix, `${Date.now()}-${file.name}`)
       const result = await client.storage.from(bucket).upload(uploadPath, file, {
         contentType: file.type,
         upsert: true,
@@ -160,8 +164,8 @@ function BucketPickerModal({
               {images.length > 0 && (
                 <div className="st-bucket-picker-grid">
                   {images.map((f) => {
-                    const fullPath = prefix ? `${prefix}/${f.name}` : f.name
-                    const { data: { publicUrl } } = client.storage.from(bucket).getPublicUrl(fullPath)
+                    const fullPath = resolveStorageObjectPath(prefix, f.name)
+                    const thumbUrl = storagePublicUrl(client, { bucket, path: fullPath })
                     return (
                       <button
                         key={f.name}
@@ -170,7 +174,7 @@ function BucketPickerModal({
                         onClick={() => onSelect({ bucket, path: fullPath })}
                         title={f.name}
                       >
-                        <img src={publicUrl} alt={f.name} className="st-bucket-picker-thumb" />
+                        <img src={thumbUrl} alt={f.name} className="st-bucket-picker-thumb" />
                         <span className="st-bucket-picker-name">{f.name}</span>
                       </button>
                     )
@@ -190,15 +194,63 @@ function BucketPickerModal({
   )
 }
 
-export function ImageWidget({ config, value, onChange, readOnly }: WidgetProps): React.ReactElement {
+export function ImageWidget({
+  config,
+  value,
+  onChange,
+  readOnly,
+  currentLocale = "en",
+  defaultLocale = "en",
+}: WidgetProps): React.ReactElement {
   const client = useAdminClient()
   const fileRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
 
-  const storageRef = value as StorageRef | null
   const bucket = (config.options?.["bucket"] as string) ?? "images"
+  const localeValue = getLocalizedFieldValue(
+    value,
+    config.localized,
+    currentLocale,
+    defaultLocale,
+  )
+  const storageRef = parseStorageRef(localeValue, bucket)
+
+  const commitRef = (ref: StorageRef | null) => {
+    onChange(
+      setLocalizedFieldValue(value, config.localized, currentLocale, ref),
+    )
+  }
+
+  useEffect(() => {
+    if (!storageRef) {
+      setPreviewUrl(null)
+      return
+    }
+
+    let blobUrl: string | null = null
+    let cancelled = false
+
+    void (async () => {
+      const { data, error } = await client.storage.from(storageRef.bucket).download(storageRef.path)
+      if (cancelled) return
+      if (data) {
+        blobUrl = URL.createObjectURL(data)
+        setPreviewUrl(blobUrl)
+        return
+      }
+      if (error) {
+        setPreviewUrl(storagePublicUrl(client, storageRef))
+      }
+    })()
+
+    return () => {
+      cancelled = true
+      if (blobUrl) URL.revokeObjectURL(blobUrl)
+    }
+  }, [client, storageRef?.bucket, storageRef?.path])
 
   const handleUpload = async (file: File) => {
     setUploading(true)
@@ -211,7 +263,7 @@ export function ImageWidget({ config, value, onChange, readOnly }: WidgetProps):
       if (result.error) {
         console.error("Upload failed:", result.error.message)
       } else {
-        onChange({ bucket, path, mimeType: file.type, size: file.size })
+        commitRef({ bucket, path, mimeType: file.type, size: file.size })
       }
     } finally {
       setUploading(false)
@@ -227,9 +279,7 @@ export function ImageWidget({ config, value, onChange, readOnly }: WidgetProps):
     }
   }
 
-  const publicUrl = storageRef
-    ? client.storage.from(storageRef.bucket).getPublicUrl(storageRef.path).data.publicUrl
-    : null
+  const displayUrl = previewUrl ?? (storageRef ? storagePublicUrl(client, storageRef) : null)
 
   return (
     <>
@@ -239,9 +289,9 @@ export function ImageWidget({ config, value, onChange, readOnly }: WidgetProps):
         onDragLeave={() => { setDragOver(false) }}
         onDrop={handleDrop}
       >
-        {storageRef && publicUrl ? (
+        {storageRef && displayUrl ? (
           <div className="st-image-preview">
-            <img src={publicUrl} alt="" className="st-image-thumb" />
+            <img src={displayUrl} alt="" className="st-image-thumb" />
             {!readOnly && (
               <div className="st-image-preview-actions">
                 <button
@@ -254,7 +304,7 @@ export function ImageWidget({ config, value, onChange, readOnly }: WidgetProps):
                 <button
                   type="button"
                   className="st-btn st-btn-sm"
-                  onClick={() => { onChange(null) }}
+                  onClick={() => { commitRef(null) }}
                 >
                   Remove
                 </button>
@@ -303,7 +353,7 @@ export function ImageWidget({ config, value, onChange, readOnly }: WidgetProps):
         <BucketPickerModal
           bucket={bucket}
           onSelect={(ref) => {
-            onChange(ref)
+            commitRef(ref)
             setPickerOpen(false)
           }}
           onClose={() => { setPickerOpen(false) }}

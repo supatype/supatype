@@ -2,7 +2,7 @@
 
 import type { Session, AuthChangeEvent, SupatypeError, User } from "@supatype/client"
 import { useContext, useEffect, useState } from "react"
-import { AdminClientContext } from "./useAdminClient.js"
+import { AdminClientContext, StudioAuthClientContext } from "./useAdminClient.js"
 
 export interface UseStudioAuthReturn {
   user: User | null
@@ -16,7 +16,9 @@ export interface UseStudioAuthReturn {
  * so Studio does not need a second provider for the same client instance.
  */
 export function useStudioAuth(): UseStudioAuthReturn {
-  const client = useContext(AdminClientContext)
+  const authClient = useContext(StudioAuthClientContext)
+  const adminClient = useContext(AdminClientContext)
+  const client = authClient ?? adminClient
   const [user, setUser] = useState<User | null>(null)
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)

@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback } from "react"
 import { Header } from "../components/Header.js"
+import { EditFormLayout } from "../components/EditFormLayout.js"
 import { useAdminClient } from "../hooks/useAdminClient.js"
 import { useLocale } from "../hooks/useLocale.js"
-import { FieldWidget } from "../widgets/FieldWidget.js"
-import type { GlobalConfig, FieldConfig } from "../config.js"
+import type { GlobalConfig } from "../config.js"
+import { splitEditFields } from "../lib/edit-field-layout.js"
 
 interface GlobalEditViewProps {
   global: GlobalConfig
@@ -16,6 +17,9 @@ export function GlobalEditView({ global: globalConfig }: GlobalEditViewProps): R
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const primaryKey = "id"
+  const timestamps = globalConfig.fields.some((f) => f.name === "created_at")
 
   useEffect(() => {
     void (async () => {
@@ -66,7 +70,11 @@ export function GlobalEditView({ global: globalConfig }: GlobalEditViewProps): R
     }
   }
 
-  const visibleFields = globalConfig.fields.filter((f) => !f.hidden)
+  const { mainFields, metaFields } = splitEditFields(globalConfig.fields, {
+    primaryKey,
+    isCreate: false,
+    timestamps,
+  })
 
   if (loading) {
     return <div className="st-global-edit st-edit-loading">Loading...</div>
@@ -74,57 +82,24 @@ export function GlobalEditView({ global: globalConfig }: GlobalEditViewProps): R
 
   return (
     <div className="st-global-edit">
-      <Header
-        title={globalConfig.label}
-        actions={
-          <button
-            type="button"
-            className="st-btn st-btn-primary"
-            onClick={() => { void handleSave() }}
-            disabled={saving}
-          >
-            {saving ? "Saving..." : "Save"}
-          </button>
-        }
-      />
+      <Header title={globalConfig.label} />
 
       {error && <div className="st-error" role="alert">{error}</div>}
 
-      <form className="st-edit-form" onSubmit={(e) => { e.preventDefault(); void handleSave() }}>
-        {visibleFields.map((fieldConfig) => (
-          <FieldWidget
-            key={`${fieldConfig.name}-${currentLocale}`}
-            config={fieldConfig}
-            value={getLocalizedValue(values, fieldConfig, currentLocale, defaultLocale)}
-            onChange={(val) => {
-              if (fieldConfig.localized) {
-                const existing = (values[fieldConfig.name] ?? {}) as Record<string, unknown>
-                handleChange(fieldConfig.name, { ...existing, [currentLocale]: val })
-              } else {
-                handleChange(fieldConfig.name, val)
-              }
-            }}
-            readOnly={fieldConfig.readOnly ?? false}
-            record={values}
-            currentLocale={currentLocale}
-            defaultLocale={defaultLocale}
-            recordSyncKey="global"
-            slugFollowSource={false}
-          />
-        ))}
-      </form>
+      <EditFormLayout
+        mainFields={mainFields}
+        metaFields={metaFields}
+        values={values}
+        onChange={handleChange}
+        primaryKey={primaryKey}
+        currentLocale={currentLocale}
+        defaultLocale={defaultLocale}
+        recordSyncKey="global"
+        slugFollowSource={false}
+        saving={saving}
+        onSave={() => { void handleSave() }}
+        isCreate={false}
+      />
     </div>
   )
-}
-
-function getLocalizedValue(
-  values: Record<string, unknown>,
-  field: FieldConfig,
-  currentLocale: string,
-  defaultLocale: string,
-): unknown {
-  const raw = values[field.name]
-  if (!field.localized || typeof raw !== "object" || raw === null) return raw
-  const locMap = raw as Record<string, unknown>
-  return locMap[currentLocale] ?? locMap[defaultLocale] ?? null
 }

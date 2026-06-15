@@ -5,6 +5,7 @@ import { useApiQuery } from "../hooks/useApiQuery.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { cn } from "../lib/utils.js"
+import { resolveStorageObjectPath } from "../lib/storage-ref.js"
 import { Button, Card, Input, Select, Th, Td } from "../components/ui.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -93,8 +94,7 @@ function normalizeStoragePublicUrl(
 }
 
 function storageObjectPath(prefix: string[], name: string): string {
-  const pathStr = prefix.join("/")
-  return pathStr ? `${pathStr}/${name}` : name
+  return resolveStorageObjectPath(prefix.join("/"), name)
 }
 
 /** Thumbnail for storage image files (public URL or short-lived signed URL for private buckets). */

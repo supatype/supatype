@@ -233,6 +233,19 @@ function CollectionVersionsRoute(): React.ReactElement {
   return <VersionHistory model={model} recordId={recordId} onNavigate={(p) => navigate(p)} />
 }
 
+function GlobalsIndexRoute(): React.ReactElement {
+  const config = useAdminConfig()
+  const first = config.globals[0]
+  if (!first) return <Navigate to="/models" replace />
+  return <Navigate to={`/models/globals/${first.name}`} replace />
+}
+
+function LegacyGlobalRedirect(): React.ReactElement {
+  const { name } = useParams()
+  if (!name) return <Navigate to="/models/globals" replace />
+  return <Navigate to={`/models/globals/${name}`} replace />
+}
+
 function GlobalRoute(): React.ReactElement {
   const config = useAdminConfig()
   const { name } = useParams()
@@ -258,6 +271,8 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
               <Route index element={<Dashboard />} />
               <Route path="media" element={<MediaLibrary />} />
               <Route path="models" element={<ModelsOverview />} />
+              <Route path="models/globals" element={<GlobalsIndexRoute />} />
+              <Route path="models/globals/:name" element={<GlobalRoute />} />
               <Route path="models/:model" element={<CollectionListRoute />} />
               <Route path="models/:model/schema"  element={<CollectionSchemaRoute />} />
               <Route path="models/:model/data"    element={<CollectionDataRoute />} />
@@ -266,7 +281,8 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
               <Route path="models/:model/create"  element={<CollectionCreateRoute />} />
               <Route path="models/:model/:recordId/versions" element={<CollectionVersionsRoute />} />
               <Route path="models/:model/:recordId" element={<CollectionEditRoute />} />
-              <Route path="globals/:name" element={<GlobalRoute />} />
+              <Route path="globals" element={<Navigate to="/models/globals" replace />} />
+              <Route path="globals/:name" element={<LegacyGlobalRedirect />} />
 
               {/* Developer tools — Database */}
               <Route path="database">
