@@ -25,6 +25,8 @@ export interface ProcessOptions {
   maxBackoffMs?: number
   /** Called when the process exits cleanly (code 0). */
   onExit?: () => void
+  /** Use shell to spawn (required for pnpm/npm/yarn .cmd shims on Windows). */
+  shell?: boolean
 }
 
 const RESET = "\x1b[0m"
@@ -47,6 +49,7 @@ export class ProcessManager {
       initialBackoffMs: 1_000,
       maxBackoffMs: 30_000,
       onExit: () => {},
+      shell: false,
       ...opts,
     }
     this.backoffMs = this.opts.initialBackoffMs
@@ -82,7 +85,12 @@ export class ProcessManager {
     if (this.stopped) return
 
     const env = { ...process.env, ...this.opts.env } as NodeJS.ProcessEnv
-    this.child = spawn(this.bin, this.args, { env, cwd: this.opts.cwd, stdio: "pipe" })
+    this.child = spawn(this.bin, this.args, {
+      env,
+      cwd: this.opts.cwd,
+      stdio: "pipe",
+      ...(this.opts.shell ? { shell: true } : {}),
+    })
 
     const pid = this.child.pid
     if (pid) this.writePid(pid)
@@ -101,6 +109,15 @@ export class ProcessManager {
       for (const line of chunk.toString().split("\n")) {
         if (line) process.stderr.write(prefix + line + "\n")
       }
+    })
+
+    this.child.once("error", (err) => {
+      if (this.stopped) return
+      process.stderr.write(`${prefix}failed to start: ${err.message}\n`)
+      setTimeout(() => {
+        this.backoffMs = Math.min(this.backoffMs * 2, this.opts.maxBackoffMs)
+        this.spawn()
+      }, this.backoffMs)
     })
 
     this.child.once("exit", (code, signal) => {

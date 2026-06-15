@@ -21,9 +21,12 @@ import { resolveBinary, currentPlatform, cachePath } from "./binary-cache.js"
 
 export interface Operation {
   kind: "create_table" | "alter_table" | "drop_table" | "create_index" | "drop_index" |
-        "create_policy" | "drop_policy" | "add_column" | "drop_column" | "alter_column"
-  description: string
-  risk?: "safe" | "warn" | "danger"
+        "create_policy" | "drop_policy" | "add_column" | "drop_column" | "alter_column" |
+        "recreate_column"
+  type?: string
+  description?: string
+  risk?: "safe" | "warn" | "danger" | "cautious" | "destructive"
+  warning?: string
   sql?: string
 }
 
@@ -196,13 +199,15 @@ function endpointToArgs(
   const dbUrl = (body["database_url"] as string | undefined) ?? ""
   const schema = (body["schema"] as string | undefined) ?? "public"
   const force = body["force"] ? ["--force"] : []
+  const nonInteractive =
+    body["non_interactive"] === true || body["force"] === true ? ["--non-interactive"] : []
 
   switch (endpoint) {
     case "/diff":
       return ["diff", "--input", reqFile, "--database-url", dbUrl, "--schema", schema]
 
     case "/push":
-      return ["push", "--input", reqFile, "--database-url", dbUrl, "--schema", schema, ...force]
+      return ["push", "--input", reqFile, "--database-url", dbUrl, "--schema", schema, ...force, ...nonInteractive]
 
     case "/parse":
       return ["parse", "--input", reqFile]

@@ -18,6 +18,24 @@ export interface RuntimeRouteOptions {
    * which proxies to internal services — same model as `supatype dev`.
    */
   unifiedGateway?: boolean
+  /** Studio UI upstream (default: in-compose `studio:3002`). */
+  studioServiceUrl?: string
+  /**
+   * Strip `/studio/` before proxying to the Studio upstream.
+   * False for host Vite dev (`host.docker.internal`) where `base` is `/studio/`.
+   */
+  studioStripPath?: boolean
+}
+
+const DEFAULT_STUDIO_SERVICE_URL = "http://studio:3002"
+
+function studioServiceUrl(opts: RuntimeRouteOptions): string {
+  const url = opts.studioServiceUrl?.trim()
+  return url && url.length > 0 ? url : DEFAULT_STUDIO_SERVICE_URL
+}
+
+function studioStripPath(opts: RuntimeRouteOptions): boolean {
+  return opts.studioStripPath !== false
 }
 
 const SERVER_GATEWAY = "http://server:9999"
@@ -25,7 +43,9 @@ const SERVER_GATEWAY = "http://server:9999"
 /**
  * Kong routes when self-host uses supatype-server as the single API gateway.
  */
-function runtimeRouteSpecUnified(): RuntimeRoute[] {
+function runtimeRouteSpecUnified(opts: RuntimeRouteOptions): RuntimeRoute[] {
+  const studioUrl = studioServiceUrl(opts)
+  const stripStudio = studioStripPath(opts)
   return [
     {
       name: "rest-v1",
@@ -92,11 +112,32 @@ function runtimeRouteSpecUnified(): RuntimeRoute[] {
       stripPath: false,
     },
     {
+      name: "studio-auth",
+      serviceName: "supatype-server-studio-auth",
+      serviceUrl: SERVER_GATEWAY,
+      paths: ["/studio/auth/"],
+      stripPath: false,
+    },
+    {
+      name: "studio-proxy",
+      serviceName: "supatype-server-studio-proxy",
+      serviceUrl: SERVER_GATEWAY,
+      paths: ["/studio/proxy/"],
+      stripPath: false,
+    },
+    {
+      name: "studio-exact",
+      serviceName: "studio-exact",
+      serviceUrl: studioUrl,
+      paths: ["~/studio$"],
+      stripPath: stripStudio,
+    },
+    {
       name: "studio",
       serviceName: "studio",
-      serviceUrl: "http://studio:3002",
+      serviceUrl: studioUrl,
       paths: ["/studio/"],
-      stripPath: true,
+      stripPath: stripStudio,
     },
     {
       name: "app-root",
@@ -113,6 +154,8 @@ function runtimeRouteSpecUnified(): RuntimeRoute[] {
  * Kept for tests or explicit opt-out only — self-host uses unifiedGateway.
  */
 function runtimeRouteSpecSplit(opts: RuntimeRouteOptions): RuntimeRoute[] {
+  const studioUrl = studioServiceUrl(opts)
+  const stripStudio = studioStripPath(opts)
   const routes: RuntimeRoute[] = [
     {
       name: "rest-v1",
@@ -158,11 +201,32 @@ function runtimeRouteSpecSplit(opts: RuntimeRouteOptions): RuntimeRoute[] {
       stripPath: false,
     },
     {
+      name: "studio-auth",
+      serviceName: "auth-v1",
+      serviceUrl: "http://server:9999",
+      paths: ["/studio/auth/"],
+      stripPath: false,
+    },
+    {
+      name: "studio-proxy",
+      serviceName: "auth-v1",
+      serviceUrl: "http://server:9999",
+      paths: ["/studio/proxy/"],
+      stripPath: false,
+    },
+    {
+      name: "studio-exact",
+      serviceName: "studio-exact",
+      serviceUrl: studioUrl,
+      paths: ["~/studio$"],
+      stripPath: stripStudio,
+    },
+    {
       name: "studio",
       serviceName: "studio",
-      serviceUrl: "http://studio:3002",
+      serviceUrl: studioUrl,
       paths: ["/studio/"],
-      stripPath: true,
+      stripPath: stripStudio,
     },
     {
       name: "studio-config-route",
@@ -210,7 +274,7 @@ function runtimeRouteSpecSplit(opts: RuntimeRouteOptions): RuntimeRoute[] {
  */
 export function runtimeRouteSpec(opts: RuntimeRouteOptions = {}): RuntimeRoute[] {
   if (opts.unifiedGateway) {
-    return runtimeRouteSpecUnified()
+    return runtimeRouteSpecUnified(opts)
   }
   return runtimeRouteSpecSplit(opts)
 }

@@ -69,6 +69,20 @@ Studio is available at:
 - Direct: `http://localhost:3002`
 - Through gateway: `http://localhost:18473/studio/`
 
+**Authentication (production self-host):** Studio requires an admin login. The browser never receives `service_role`; privileged API calls go through `supatype-server` at `/studio/proxy/*` after your JWT is verified.
+
+1. Create an admin user (first push may prompt, or run explicitly):
+
+```bash
+supatype admin create-user --email admin@example.com --password 'your-secure-password'
+```
+
+2. Open `/studio/` and sign in with that account.
+
+Configure allowed roles in `supatype.config.ts` via `admin.roles` (default: `admin`, `supatype_admin`). Do not expose `/studio/` on the public internet without TLS and authentication.
+
+Local docker dev (`supatype dev` with compose) sets `STUDIO_OPEN_DEV=1` on the server for frictionless iteration only — production compose does not.
+
 If Studio is not loading:
 
 ```bash

@@ -78,6 +78,11 @@ export interface SupatypeProjectConfig {
      * When omitted, dev still falls back to `SUPATYPE_APP_UPSTREAM` for non-proxy app modes.
      */
     vite_dev_url?: string
+    /**
+     * package.json script name for `supatype dev` to run when mode is proxy.
+     * Default: `"start"`. Ignored for static/none modes.
+     */
+    start?: string
   }
   /**
    * Pinned binary versions per component. Use **`"local"`** with the matching **`overrides.*`**
@@ -198,6 +203,11 @@ export interface SupatypeProjectConfig {
    * When omitted, `DATABASE_URL` from the environment is used, then a local default DSN.
    */
   connection?: string
+  /** Studio admin panel access (Gap Appendices task 47). */
+  admin?: {
+    /** JWT `app_metadata.role` values allowed to use Studio. Default: admin, supatype_admin */
+    roles?: string[]
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -271,6 +281,9 @@ export function mergeProjectConfig(
       : {}),
     ...(base.connection !== undefined || override.connection !== undefined
       ? { connection: override.connection ?? base.connection }
+      : {}),
+    ...(base.admin !== undefined || override.admin !== undefined
+      ? { admin: { ...base.admin, ...override.admin } as NonNullable<SupatypeProjectConfig["admin"]> }
       : {}),
   }
 }

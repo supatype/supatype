@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { dirname, join, relative, resolve } from "node:path"
 import { spawnSync } from "node:child_process"
 import { preferredFunctionsPathFromProject, type SupatypeProjectConfig } from "./project-config.js"
+import { hasEngineOverride, hasStudioOverride } from "./binary-cache.js"
 import { buildKongDeclarative } from "./kong-config.js"
 
 export interface SelfHostComposePaths {
@@ -33,23 +34,72 @@ export function staticDirForCompose(config: SupatypeProjectConfig): string | und
   return dir && dir.length > 0 ? dir : "./public"
 }
 
-function projectMountPath(cwd: string): string {
-  const composeDir = resolve(cwd, ".supatype", "self-host")
-  let rel = relative(composeDir, resolve(cwd)).replace(/\\/g, "/")
+/**
+ * Bind-mount source for `/project` in generated compose files.
+ * Paths are resolved from `--project-directory` (always the project root in `runDockerCompose`),
+ * not from the compose file directory — use `.` not `../..`.
+ */
+function projectMountPath(_cwd: string): string {
+  return "."
+}
+
+/** Paths in generated compose are resolved from `--project-directory` (project root). */
+function relativeFromProjectRoot(cwd: string, target: string): string {
+  let rel = relative(resolve(cwd), resolve(target)).replace(/\\/g, "/")
   if (!rel.startsWith(".") && !rel.startsWith("/")) {
     rel = `./${rel}`
   }
-  return rel || "../.."
+  return rel
 }
 
-function serverAppEnvForCompose(config: SupatypeProjectConfig): string {
+function kongMountPath(_cwd: string): string {
+  return ".supatype/self-host/kong.yml"
+}
+
+/** Host Vite dev server as seen from Kong inside Docker Compose. */
+export const COMPOSE_STUDIO_HOST_URL = "http://host.docker.internal:3002"
+
+/** Local monorepo Studio image for `supatype dev` (dogfooding). */
+function studioServiceBlock(cwd: string, devLocal: boolean): string {
+  if (!devLocal) {
+    return `    image: \${SUPATYPE_STUDIO_IMAGE:-supatype/studio:latest}`
+  }
+  const monorepoRoot = resolve(cwd, "..", "supatype")
+  const studioDockerfile = join(monorepoRoot, "packages", "studio", "Dockerfile")
+  if (!existsSync(studioDockerfile) || !existsSync(join(monorepoRoot, "pnpm-workspace.yaml"))) {
+    return `    image: \${SUPATYPE_STUDIO_IMAGE:-supatype/studio:latest}`
+  }
+  const context = relativeFromProjectRoot(cwd, monorepoRoot)
+  return `    build:
+      context: ${context}
+      dockerfile: packages/studio/Dockerfile
+    image: supatype/studio:dev-local`
+}
+
+/** Host dev app (Astro/Vite on the machine) as seen from inside compose services. */
+function proxyUpstreamForCompose(upstream: string, devLocal: boolean): string {
+  const trimmed = upstream.trim()
+  if (!devLocal) return trimmed
+  try {
+    const url = new URL(trimmed)
+    if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
+      url.hostname = "host.docker.internal"
+      return url.toString()
+    }
+  } catch {
+    // keep literal upstream when not a URL
+  }
+  return trimmed
+}
+
+function serverAppEnvForCompose(config: SupatypeProjectConfig, devLocal: boolean): string {
   const mode = config.app.mode ?? "none"
   const lines = [`      SUPATYPE_APP_MODE: ${mode}`]
   if (mode === "static") {
     const dir = staticDirForCompose(config) ?? "./public"
     lines.push(`      SUPATYPE_APP_STATIC_DIR: /project/${dir.replace(/^\.\//, "")}`)
   } else if (mode === "proxy" && config.app.upstream?.trim()) {
-    lines.push(`      SUPATYPE_APP_UPSTREAM: ${config.app.upstream.trim()}`)
+    lines.push(`      SUPATYPE_APP_UPSTREAM: ${proxyUpstreamForCompose(config.app.upstream, devLocal)}`)
   }
   return lines.join("\n")
 }
@@ -65,13 +115,35 @@ export function renderSelfHostCompose(
   options?: SelfHostComposeOptions,
 ): string {
   const projectMount = projectMountPath(cwd)
-  const appEnv = serverAppEnvForCompose(config)
+  const kongMount = kongMountPath(cwd)
   const devLocal = options?.devLocal === true
-  const dbPorts = devLocal
+  const studioHostDev = devLocal && hasStudioOverride(config)
+  const appEnv = serverAppEnvForCompose(config, devLocal)
+  const studioService = studioServiceBlock(cwd, devLocal)
+  const studioBlock = studioHostDev
     ? ""
-    : `    ports:
+    : `
+  studio:
+${studioService}
+    environment:
+      SUPATYPE_CLOUD_JSON: '{"url":"\${API_EXTERNAL_URL:-http://localhost:18473}","anonKey":"\${ANON_KEY:-}"}'
+    expose:
+      - "3002"
+`
+  const kongDependsOn = studioHostDev
+    ? `      - server`
+    : `      - server
+      - studio`
+  const publishDbToHost = !devLocal || hasEngineOverride(config)
+  const dbPorts = publishDbToHost
+    ? devLocal
+      ? `    ports:
+      - "127.0.0.1:\${SUPATYPE_DEV_DB_PORT:-54329}:5432"
+`
+      : `    ports:
       - "5432:5432"
 `
+    : ""
   const serverPorts = devLocal
     ? ""
     : `    ports:
@@ -187,6 +259,7 @@ ${appEnv}
       GOTRUE_JWT_ADMIN_ROLES: service_role,supatype_admin
       GOTRUE_MAILER_AUTOCONFIRM: \${GOTRUE_MAILER_AUTOCONFIRM:-true}
       GOTRUE_DISABLE_SIGNUP: \${DISABLE_SIGNUP:-false}
+${devLocal ? "      STUDIO_OPEN_DEV: \"1\"\n" : ""}
     depends_on:
       db:
         condition: service_healthy
@@ -216,14 +289,7 @@ ${minioPorts}    volumes:
     depends_on:
       db:
         condition: service_healthy
-
-  studio:
-    image: \${SUPATYPE_STUDIO_IMAGE:-supatype/studio:latest}
-    environment:
-      SUPATYPE_CLOUD_JSON: '{"url":"\${API_EXTERNAL_URL:-http://localhost:18473}","anonKey":"\${ANON_KEY:-}","serviceRoleKey":"\${SERVICE_ROLE_KEY:-}"}'
-    expose:
-      - "3002"
-
+${studioBlock}
   kong:
     image: kong:3.6
     environment:
@@ -234,12 +300,11 @@ ${minioPorts}    volumes:
       KONG_PROXY_ERROR_LOG: /dev/stderr
       KONG_ADMIN_ERROR_LOG: /dev/stderr
     volumes:
-      - ./kong.yml:/etc/kong/kong.yml:ro
+      - ${kongMount}:/etc/kong/kong.yml:ro
     ports:
       - "\${SUPATYPE_KONG_PORT:-18473}:8000"
     depends_on:
-      - server
-      - studio
+${kongDependsOn}
 
 volumes:
   db-data:
@@ -275,10 +340,15 @@ export function writeSelfHostCompose(
   ensureProjectFunctionsDir(cwd, config)
   ensureComposeManifest(cwd)
   writeFileSync(paths.composePath, renderSelfHostCompose(config, cwd, options), "utf8")
+  const studioHostDev = options?.devLocal === true && hasStudioOverride(config)
   writeFileSync(
     paths.kongPath,
     buildKongDeclarative({
       unifiedGateway: true,
+      ...(studioHostDev && {
+        studioServiceUrl: COMPOSE_STUDIO_HOST_URL,
+        studioStripPath: false,
+      }),
     }),
     "utf8",
   )
@@ -297,6 +367,8 @@ export function runDockerCompose(
   // projects on one machine never share a database (default would be the
   // ".supatype/self-host" dir name, identical for every project).
   if (composeProject) composeArgs.push("-p", composeProject)
+  // Resolve ${VAR} in compose.yml from the project root .env (not .supatype/self-host/).
+  composeArgs.push("--project-directory", projectRoot)
   composeArgs.push("-f", composePath)
   if (existsSync(envFile)) {
     composeArgs.push("--env-file", envFile)
@@ -305,7 +377,7 @@ export function runDockerCompose(
   const result = spawnSync(
     "docker",
     composeArgs,
-    { stdio: "inherit", cwd: dirname(composePath) },
+    { stdio: "inherit", cwd: projectRoot },
   )
   return result.status ?? 1
 }

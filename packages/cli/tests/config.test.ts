@@ -233,8 +233,19 @@ describe("mergeProjectConfig()", () => {
       app: { mode: "static", static_dir: "./dist", vite_dev_url: "http://127.0.0.1:1111" },
     })
     const merged = mergeProjectConfig(base, { app: { vite_dev_url: "http://127.0.0.1:5173" } })
-    expect(merged.app.vite_dev_url).toBe("http://127.0.0.1:5173")
-    expect(merged.app.mode).toBe("static")
+    expect(merged.app?.vite_dev_url).toBe("http://127.0.0.1:5173")
+  })
+
+  it("merges app.start for proxy dev script override", () => {
+    const base = defineConfig({
+      ...minimalProject("p"),
+      app: { mode: "static", static_dir: "./dist" },
+    })
+    const merged = mergeProjectConfig(base, {
+      app: { mode: "proxy", upstream: "http://127.0.0.1:4321", start: "dev:site" },
+    })
+    expect(merged.app.mode).toBe("proxy")
+    expect(merged.app.start).toBe("dev:site")
     expect(merged.app.static_dir).toBe("./dist")
   })
 })

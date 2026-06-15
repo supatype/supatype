@@ -52,6 +52,26 @@ describe("runtime contract", () => {
     expect(kong).not.toContain("http://storage:5000")
   })
 
+  it("self-host kong routes studio auth and proxy to supatype-server before static studio", () => {
+    const kong = buildKongDeclarative({ unifiedGateway: true })
+    const studioAuthIdx = kong.indexOf("/studio/auth/")
+    const studioProxyIdx = kong.indexOf("/studio/proxy/")
+    const studioStaticIdx = kong.lastIndexOf("/studio/")
+    expect(studioAuthIdx).toBeGreaterThan(-1)
+    expect(studioProxyIdx).toBeGreaterThan(-1)
+    expect(studioAuthIdx).toBeLessThan(studioStaticIdx)
+    expect(studioProxyIdx).toBeLessThan(studioStaticIdx)
+    expect(kong).toContain("name: supatype-server-studio-auth")
+    expect(kong).toContain("name: supatype-server-studio-proxy")
+  })
+
+  it("self-host kong proxies exact /studio to studio UI", () => {
+    const kong = buildKongDeclarative({ unifiedGateway: true })
+    expect(kong).toContain("name: studio-exact")
+    expect(kong).toContain("~/studio$")
+    expect(kong).not.toContain("name: redirect")
+  })
+
   it("kong declarative output contains route contract paths", () => {
     const kong = buildKongDeclarative({ appUpstream: "http://app:3000" })
     expect(kong).toContain("/rest/v1/")
@@ -88,11 +108,90 @@ describe("runtime contract", () => {
     expect(compose).toContain("supatype/schema-engine:latest")
   })
 
+  it("self-host compose mounts project root at /project (project-directory relative)", () => {
+    const compose = renderSelfHostCompose(baseConfig)
+    expect(compose).toContain("- .:/project")
+    expect(compose).not.toMatch(/- \.\.\/\.\.:\/project/)
+  })
+
+  it("self-host compose mounts kong.yml from .supatype/self-host (project-directory relative)", () => {
+    const compose = renderSelfHostCompose(baseConfig)
+    expect(compose).toContain("- .supatype/self-host/kong.yml:/etc/kong/kong.yml:ro")
+    expect(compose).not.toContain("- ./kong.yml:/etc/kong/kong.yml:ro")
+  })
+
   it("devLocal compose omits host-published db and server ports", () => {
     const compose = renderSelfHostCompose(baseConfig, process.cwd(), { devLocal: true })
     expect(compose).not.toContain('"5432:5432"')
     expect(compose).not.toContain('"9999:9999"')
-    expect(compose).toContain('"18473:8000"')
+    expect(compose).toContain("${SUPATYPE_KONG_PORT:-18473}:8000")
+    expect(compose).not.toContain("SUPATYPE_DEV_DB_PORT")
+  })
+
+  it("devLocal compose publishes db to host when overrides.engine is set", () => {
+    const compose = renderSelfHostCompose(
+      { ...baseConfig, overrides: { engine: "/tmp/supatype-engine" } },
+      process.cwd(),
+      { devLocal: true },
+    )
+    expect(compose).toContain("127.0.0.1:${SUPATYPE_DEV_DB_PORT:-54329}:5432")
+    expect(compose).not.toContain('"5432:5432"')
+  })
+
+  it("devLocal proxy upstream rewrites localhost to host.docker.internal", () => {
+    const compose = renderSelfHostCompose(
+      { ...baseConfig, app: { mode: "proxy", upstream: "http://127.0.0.1:4321" } },
+      process.cwd(),
+      { devLocal: true },
+    )
+    expect(compose).toContain("SUPATYPE_APP_UPSTREAM: http://host.docker.internal:4321")
+  })
+
+  it("devLocal compose omits studio container when overrides.studio is set", () => {
+    const compose = renderSelfHostCompose(
+      { ...baseConfig, overrides: { studio: "../supatype/packages/studio" } },
+      process.cwd(),
+      { devLocal: true },
+    )
+    expect(compose).not.toContain("\n  studio:\n")
+    expect(compose).not.toContain("depends_on:\n      - server\n      - studio")
+  })
+
+  it("devLocal kong routes studio to host Vite when overrides.studio is set", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-studio-host-"))
+    try {
+      writeSelfHostCompose(
+        dir,
+        { ...baseConfig, overrides: { studio: "../supatype/packages/studio" } },
+        { devLocal: true },
+      )
+      const kong = readFileSync(join(dir, ".supatype", "self-host", "kong.yml"), "utf8")
+      expect(kong).toContain("http://host.docker.internal:3002")
+      expect(kong).not.toContain("http://studio:3002")
+      expect(kong).toContain("strip_path: false")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("devLocal compose enables STUDIO_OPEN_DEV on supatype-server", () => {
+    const compose = renderSelfHostCompose(baseConfig, process.cwd(), { devLocal: true })
+    expect(compose).toContain('STUDIO_OPEN_DEV: "1"')
+  })
+
+  it("production self-host compose does not enable STUDIO_OPEN_DEV", () => {
+    const compose = renderSelfHostCompose(baseConfig)
+    expect(compose).not.toContain("STUDIO_OPEN_DEV")
+  })
+
+  it("self-host studio SUPATYPE_CLOUD_JSON omits serviceRoleKey", () => {
+    const compose = renderSelfHostCompose(baseConfig)
+    const match = compose.match(/SUPATYPE_CLOUD_JSON: '([^']+)'/)
+    expect(match).not.toBeNull()
+    const parsed = JSON.parse(match![1]!) as Record<string, unknown>
+    expect(parsed).toHaveProperty("url")
+    expect(parsed).toHaveProperty("anonKey")
+    expect(parsed).not.toHaveProperty("serviceRoleKey")
   })
 
   it("self-host compose runs per-project functions-worker and proxies via server", () => {

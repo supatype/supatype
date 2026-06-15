@@ -34,14 +34,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Checkout schema-engine (ubuntu docker dev)
-        if: matrix.os == 'ubuntu-22.04'
-        continue-on-error: true
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ github.repository_owner }}/supatype-schema-engine
-          path: supatype-schema-engine
-
       - uses: pnpm/action-setup@v4
 
       - uses: actions/setup-node@v4
@@ -68,9 +60,10 @@ jobs:
       - name: Run supatype dev integration tests
         run: bash tests/integration/scripts/integration-test.sh --skip-build
         env:
+          SUPATYPE_URL: http://localhost:54399
           SUPATYPE_ANON_KEY: integration-anon-key
-          # macOS: native host stack. Ubuntu: full compose (URL set in integration-test.sh).
-          SUPATYPE_PROVIDER: ${{ matrix.os == 'macos-14' && 'native' || 'docker' }}
+          # GitHub-hosted macOS has no Docker daemon; use native Postgres there.
+          SUPATYPE_DATABASE_PROVIDER: ${{ matrix.os == 'macos-14' && 'native' || '' }}
 
       - name: Upload logs on failure
         if: failure()

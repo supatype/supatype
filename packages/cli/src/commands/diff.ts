@@ -2,6 +2,7 @@ import type { Command } from "commander"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { connectionString, schemaPathFromProject } from "../project-config.js"
 import { ensureEngine, engineRequest, type DiffResult } from "../engine-client.js"
+import { printDiffWarnings } from "../diff-output.js"
 
 export function registerDiff(program: Command): void {
   program
@@ -25,6 +26,7 @@ export function registerDiff(program: Command): void {
       })
 
       const ops = diff.operations ?? []
+      printDiffWarnings(diff)
 
       if (ops.length === 0) {
         console.log("No changes.")
@@ -34,9 +36,17 @@ export function registerDiff(program: Command): void {
       const symbol: Record<NonNullable<DiffResult["operations"][number]["risk"]>, string> = {
         safe: "+",
         warn: "~",
+        cautious: "~",
         danger: "!",
+        destructive: "!",
       }
-      const legend: typeof symbol = { safe: "safe", warn: "caution", danger: "DANGER" }
+      const legend: typeof symbol = {
+        safe: "safe",
+        warn: "caution",
+        cautious: "caution",
+        danger: "DANGER",
+        destructive: "DANGER",
+      }
 
       console.log(`\n${ops.length} change(s):\n`)
       for (const op of ops) {

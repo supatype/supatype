@@ -146,7 +146,7 @@ ${domainField}  },
   app: {
     mode: "none",
     // mode: "static", static_dir: "./public",  // supatype app add --static ./public
-    // mode: "proxy", upstream: "http://localhost:3000",
+    // mode: "proxy", upstream: "http://localhost:3000", start: "dev",
     // vite_dev_url: "http://127.0.0.1:5173",  // dev HMR at /_vite (when using a separate Vite server)
   },
   versions: {
@@ -164,7 +164,7 @@ ${domainField}  },
 }
 
 function schemaTemplate(): string {
-  return `import type { Model, Public, Owner, Role, SupatypeAuthUserId, Unique, Email } from "@supatype/types"
+  return `import type { Model, Public, Owner, Role, SupatypeAuthUserId, Unique, Email, UUID } from "@supatype/types"
 
 export type User = Model<{
   id: SupatypeAuthUserId
@@ -178,6 +178,18 @@ export type User = Model<{
     create: Public
     update: Owner<"id">
     delete: Role<"admin">
+  }
+}>
+
+/** Example singleton global — editable in Studio under Settings. */
+export type SiteSettings = Model<{
+  id: UUID
+  site_name: string
+}, {
+  singleton: true
+  access: {
+    read: Public
+    update: Role<"admin">
   }
 }>
 `

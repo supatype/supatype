@@ -33,7 +33,9 @@ import {
   postgresArchiveTag,
 } from "../binary-cache.js"
 import { ensureBinary } from "../ensure-binary.js"
+import { startProxyDevApp } from "../app/proxy-dev-app.js"
 import { ProcessManager } from "../process-manager.js"
+import { startStudioViteDevServer } from "../studio-dev-server.js"
 import { localStorageEnv } from "../local-storage.js"
 import {
   initdb,
@@ -227,7 +229,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
       // Native Postgres builds don't include PostGIS — skip geo fields rather than failing.
       const skipFieldKinds: ReadonlySet<string> = new Set(["geo", "vector"])
 
-      await runSchemaPush(cwd, engineBin, schemaPath, dbURL, manifestPath, adminConfigPath, localStoragePath, skipFieldKinds).catch(
+      await runSchemaPush(cwd, engineBin, schemaPath, dbURL, manifestPath, adminConfigPath, localStoragePath, skipFieldKinds, config).catch(
         (e: unknown) => console.error("[supatype] Initial schema push failed:", (e as Error).message),
       )
 
@@ -437,38 +439,18 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
 
       const studioOverride = config.overrides?.studio
       if (studioOverride) {
-        const studioDir = resolve(cwd, studioOverride)
-        // Run vite's JS entry directly via node — avoids .cmd/.sh wrapper spawn issues on Windows.
-        const viteJs = join(studioDir, "node_modules", "vite", "bin", "vite.js")
-        if (existsSync(viteJs)) {
-          studioProc = new ProcessManager(
-            process.execPath,
-            [viteJs, "--port", String(studioPort), "--strictPort"],
-            {
-              label: "studio",
-              pidDir,
-              cwd: studioDir,
-              colour: "\x1b[35m",
-              env: {
-                // Point the studio at the Vite dev server (same origin as the
-                // browser) so all API requests are same-origin — CORS never fires.
-                // Vite's dev proxy (configured via SUPATYPE_PROXY_TARGET) then
-                // forwards those requests server-side to the actual backend.
-                VITE_SUPATYPE_URL: `http://localhost:${studioPort}`,
-                SUPATYPE_PROXY_TARGET: `http://localhost:${serverPort}`,
-                // Studio is a developer tool — use service_role key to bypass
-                // RLS so all tables and rows are visible regardless of policies.
-                VITE_SUPATYPE_ANON_KEY: serviceRoleKey,
-                VITE_SUPATYPE_SERVICE_ROLE_KEY: serviceRoleKey,
-                VITE_BASE_PATH: "/",
-              },
-            },
-          )
-          studioProc.start()
-        } else {
-          console.warn(`[supatype] ⚠  Studio override set but vite not found at ${viteJs}. Run: pnpm install`)
-        }
+        studioProc = startStudioViteDevServer({
+          cwd,
+          studioOverride,
+          pidDir,
+          serviceRoleKey,
+          proxyTarget: `http://localhost:${serverPort}`,
+          viteSupatypeUrl: `http://localhost:${studioPort}`,
+        })
+        studioProc?.start()
       }
+
+      const appProc = startProxyDevApp(cwd, config, pidDir)
 
       // ── Print status ──────────────────────────────────────────────────────
       console.log(`
@@ -497,6 +479,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
           serverProc.stop(),
           postgrestProc?.stop(),
           studioProc?.stop(),
+          appProc?.stop(),
         ])
         await stopPostgres()
         process.exit(0)
@@ -519,7 +502,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
           debounceTimer = setTimeout(() => {
             debounceTimer = null
             console.log(`\n[supatype] Change detected in ${filename}, checking schema...`)
-            runSchemaPush(cwd, engineBin, schemaPath, dbURL, manifestPath, adminConfigPath, localStoragePath, skipFieldKinds).catch((e: unknown) =>
+            runSchemaPush(cwd, engineBin, schemaPath, dbURL, manifestPath, adminConfigPath, localStoragePath, skipFieldKinds, config).catch((e: unknown) =>
               console.error("[supatype] Schema push failed:", (e as Error).message),
             )
           }, 300)
@@ -549,6 +532,7 @@ async function runSchemaPush(
   adminConfigPath?: string,
   storagePath?: string,
   skipFieldKinds?: ReadonlySet<string>,
+  config?: import("../project-config.js").SupatypeProjectConfig,
 ): Promise<void> {
   // Build AST JSON from schema file.
   const { loadSchemaAst } = await import("../config.js")
@@ -582,7 +566,7 @@ async function runSchemaPush(
   console.log("[supatype] Applying schema...")
   const pushResult = spawnSync(
     engineBin,
-    ["push", "-i", astPath, "--database-url", dbURL, "--force"],
+    ["push", "-i", astPath, "--database-url", dbURL, "--force", "--non-interactive"],
     { cwd, stdio: "inherit", encoding: "utf8" },
   )
   if (pushResult.status !== 0) {
@@ -632,7 +616,15 @@ async function runSchemaPush(
       { cwd, stdio: "pipe", encoding: "utf8" },
     )
     if (adminResult.status === 0 && adminResult.stdout) {
-      writeFileSync(adminConfigPath, adminResult.stdout)
+      const { withAdminRoles } = await import("../studio-admin-roles.js")
+      let admin: unknown
+      try {
+        admin = JSON.parse(adminResult.stdout) as unknown
+      } catch {
+        admin = adminResult.stdout
+      }
+      const merged = config ? withAdminRoles(admin, config) : admin
+      writeFileSync(adminConfigPath, `${JSON.stringify(merged, null, 2)}\n`)
     }
   }
 

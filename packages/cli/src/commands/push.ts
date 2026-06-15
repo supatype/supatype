@@ -6,9 +6,12 @@ import { loadConfig, loadSchemaAst } from "../config.js"
 import { connectionString, resolveRuntimeProvider, schemaPathFromProject, serverBaseUrl } from "../project-config.js"
 import { isCloudLinked, pushSchemaToLinkedProject } from "./cloud.js"
 import { ensureEngine, engineRequest, type DiffResult, type Operation } from "../engine-client.js"
+import { printDiffWarnings } from "../diff-output.js"
 import { signJwt } from "../jwt.js"
 import { provisionBuckets } from "../storage-provision.js"
 import { promptFirstAdminUser } from "./admin.js"
+import { withAdminRoles } from "../studio-admin-roles.js"
+import type { SupatypeProjectConfig } from "../project-config.js"
 
 const DEV_JWT_SECRET = "super-secret-jwt-token-with-at-least-32-characters-long"
 
@@ -58,18 +61,21 @@ export function registerPush(program: Command): void {
       })
 
       const ops = diff.operations ?? []
+      printDiffWarnings(diff)
 
       if (ops.length === 0) {
         console.log(
-          "Schema matches the database (no DDL). Refreshing admin metadata and local Studio config...",
+          "Schema matches the database (no DDL). Syncing Studio metadata...",
         )
       } else {
         printDiff(ops)
 
-        const destructive = ops.filter((o) => o.risk === "danger")
-        if (destructive.length > 0 && !opts.yes) {
+        const risky = ops.filter(
+          (o) => o.risk === "cautious" || o.risk === "destructive" || o.risk === "warn" || o.risk === "danger",
+        )
+        if (risky.length > 0 && !opts.yes) {
           const confirmed = await confirm(
-            `\n${destructive.length} destructive operation(s) above. Proceed? [y/N] `,
+            `\n${risky.length} risky operation(s) above (type changes or data loss). Proceed? [y/N] `,
           )
           if (!confirmed) {
             console.log("Aborted.")
@@ -92,14 +98,14 @@ export function registerPush(program: Command): void {
       if (pushResult.status === "up_to_date") {
         console.log(
           pushResult.admin_refreshed
-            ? "Admin config updated on the latest migration record (no SQL applied)."
+            ? "Database schema unchanged — Studio metadata synced."
             : "Schema is up to date.",
         )
       } else {
         console.log(pushResult.message ?? "Migration applied.")
       }
 
-      await writeLocalAdminConfig(ast)
+      await writeLocalAdminConfig(ast, config)
 
       // After a DDL migration, check if this is the first push and offer to create an
       // admin user if none exist (Gap Appendices task 48).
@@ -151,20 +157,29 @@ export function registerPush(program: Command): void {
         console.log(genResult.message ?? "Types generated.")
       }
 
-      console.log("\nDone.")
+      const studioBase = baseUrl?.replace(/\/$/, "") ?? ""
+      if (studioBase) {
+        console.log(`\nStudio: ${studioBase}/studio/ — sign in with the admin user you created.`)
+      } else {
+        console.log("\nDone.")
+      }
     })
 }
 
 function printDiff(ops: Operation[]): void {
-  const symbol: Record<NonNullable<Operation["risk"]>, string> = {
+  const symbol: Record<string, string> = {
     safe: "+",
     warn: "~",
+    cautious: "~",
     danger: "!",
+    destructive: "!",
   }
   console.log(`\n${ops.length} change(s) planned:\n`)
   for (const op of ops) {
-    const s = op.risk ? symbol[op.risk] : "?"
-    console.log(`  [${s}] ${formatOperation(op)}`)
+    const riskKey = op.risk ?? "safe"
+    const s = symbol[riskKey] ?? "?"
+    const label = op.warning ?? op.description ?? formatOperation(op)
+    console.log(`  [${s}] ${label}`)
   }
 }
 
@@ -200,10 +215,10 @@ async function confirm(prompt: string): Promise<boolean> {
 }
 
 /** Write `.supatype/admin-config.json` for local Studio (same layout as `supatype dev`). */
-async function writeLocalAdminConfig(ast: unknown): Promise<void> {
+async function writeLocalAdminConfig(ast: unknown, config: SupatypeProjectConfig): Promise<void> {
   const cwd = process.cwd()
   const dir = join(cwd, ".supatype")
   mkdirSync(dir, { recursive: true })
-  const admin = await engineRequest<unknown>("/admin", { ast })
+  const admin = withAdminRoles(await engineRequest<unknown>("/admin", { ast }), config)
   writeFileSync(join(dir, "admin-config.json"), `${JSON.stringify(admin, null, 2)}\n`)
 }

@@ -39,6 +39,17 @@ import { releasePublicKey } from "./release-public-key.js"
  */
 export const VERSION_PIN_LOCAL = "local"
 
+/** True if `overrides.engine` points at a local engine binary (contributor dev). */
+export function hasEngineOverride(config: SupatypeProjectConfig): boolean {
+  const path = config.overrides?.engine
+  return typeof path === "string" && path.trim() !== ""
+}
+
+export function hasStudioOverride(config: SupatypeProjectConfig): boolean {
+  const path = config.overrides?.studio
+  return typeof path === "string" && path.trim() !== ""
+}
+
 /** True if `overrides` contains any non-empty string path (contributor local builds). */
 export function hasMeaningfulOverrides(config: SupatypeProjectConfig): boolean {
   const o = config.overrides

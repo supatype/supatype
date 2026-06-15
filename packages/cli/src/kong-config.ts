@@ -14,6 +14,10 @@ export interface KongDeclarativeOptions {
   functionsServiceUrl?: string | undefined
   /** Self-host: route API paths through supatype-server (see runtime-routes). */
   unifiedGateway?: boolean | undefined
+  /** Studio UI upstream (default: in-compose `studio:3002`). */
+  studioServiceUrl?: string | undefined
+  /** See {@link RuntimeRouteOptions.studioStripPath}. */
+  studioStripPath?: boolean | undefined
 }
 
 /** Escape a string for use inside YAML double quotes. */
@@ -35,6 +39,8 @@ export function buildKongDeclarative(opts: KongDeclarativeOptions = {}): string 
     ...(opts.unifiedGateway !== true &&
       opts.staticAppServiceUrl !== undefined && { staticAppServiceUrl: opts.staticAppServiceUrl }),
     ...(opts.functionsServiceUrl !== undefined && { functionsServiceUrl: opts.functionsServiceUrl }),
+    ...(opts.studioServiceUrl !== undefined && { studioServiceUrl: opts.studioServiceUrl }),
+    ...(opts.studioStripPath === false && { studioStripPath: false }),
   })
 
   const consumersBlock = secured

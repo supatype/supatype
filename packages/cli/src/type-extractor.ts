@@ -1,53 +1,46 @@
 import { existsSync, readFileSync } from "node:fs"
 import { dirname, isAbsolute, resolve } from "node:path"
 import ts from "typescript"
+import {
+  applyImportRename,
+  createResolveContext,
+  needsChecker,
+  resolveTypeNode,
+  tryResolveTypeReference,
+  unknownTypeError,
+  type ResolveContext,
+} from "./type-resolver.js"
 
-type FieldAst = Record<string, unknown> & { kind: string }
-type BlockDefinitionAst = {
-  name: string
-  label?: string
-  icon?: string
-  fields: Record<string, FieldAst>
-}
+import {
+  emitField,
+  emitModel,
+  emitSchema,
+  defaultPgTypeForKind,
+  scalar,
+  type BlockDefinitionAst,
+  type ExtractedSchemaAstV2,
+  type ExtractedStorageBucketAst,
+  type FieldAstV2,
+  type ParsedField,
+} from "./schema-ast-v2.js"
 
-interface ModelAst {
-  name: string
-  tableName: string
-  fields: Record<string, FieldAst>
-  access: Record<string, unknown>
-  indexes: unknown[]
-  options: Record<string, unknown>
-}
+export type { ExtractedSchemaAstV2 as ExtractedSchemaAst, ExtractedStorageBucketAst } from "./schema-ast-v2.js"
 
-/** Resolved row for `storage.buckets` — matches engine `StorageBucketAst` (camelCase JSON). */
-export interface ExtractedStorageBucketAst {
-  id: string
-  public: boolean
-  /** `public` / `private` / `custom` — drives DB `access_mode` and S3 helpers (engine + storage server). */
-  accessMode?: "public" | "private" | "custom"
-  allowedMimeTypes?: string[]
-  fileSizeLimit?: number
-  /** Bucket-scoped `storage.objects` RLS (`read`, `create`, `delete`). */
-  access?: Record<string, unknown>
-  /** Raw S3 bucket policy JSON; overrides default public-read when `public` is true if set. */
-  s3BucketPolicy?: string
-}
-
-export interface ExtractedSchemaAst {
-  models: ModelAst[]
-  storageBuckets?: ExtractedStorageBucketAst[]
+interface FieldParseContext {
+  autoLocalize?: boolean
 }
 
 export function extractSchemaAstFromTypes(
   schemaPath: string,
   cwd: string = process.cwd(),
-): ExtractedSchemaAst | null {
+): ExtractedSchemaAstV2 | null {
   const absPath = resolve(cwd, schemaPath)
   if (!existsSync(absPath)) {
     throw new Error(`Schema file not found: ${absPath}`)
   }
 
   const sourceFiles = loadSchemaSourceFiles(absPath)
+  const resolveCtx = createResolveContext(sourceFiles)
   const bucketAliases = new Map<string, string>()
   const bucketsById = new Map<string, ExtractedStorageBucketAst>()
   for (const sourceFile of sourceFiles) {
@@ -68,26 +61,32 @@ export function extractSchemaAstFromTypes(
 
   const blockAliases = new Map<string, BlockDefinitionAst>()
   for (const sourceFile of sourceFiles) {
-    const next = collectBlockAliases(sourceFile, bucketAliases, bucketsById)
+    const next = collectBlockAliases(sourceFile, bucketAliases, bucketsById, resolveCtx)
     for (const [name, block] of next) {
       blockAliases.set(name, block)
     }
   }
 
-  const models: ModelAst[] = []
+  const models: ExtractedSchemaAstV2["models"] = []
 
   for (const sourceFile of sourceFiles) {
     for (const stmt of sourceFile.statements) {
       if (!ts.isTypeAliasDeclaration(stmt)) continue
       if (!hasExportModifier(stmt)) continue
       if (!ts.isTypeReferenceNode(stmt.type)) continue
-      if (stmt.type.typeName.getText(sourceFile) !== "Model") continue
+      const modelTypeName = stmt.type.typeName.getText(sourceFile)
+      if (modelTypeName !== "Model" && modelTypeName !== "LocalizedModel") continue
       const [fieldsArg, metaArg] = stmt.type.typeArguments ?? []
       if (!fieldsArg) continue
-      const fieldsLiteral = unwrapModelFields(fieldsArg)
+      const fieldsLiteral = unwrapModelFields(fieldsArg, sourceFile, resolveCtx)
       if (!fieldsLiteral) continue
 
-      const fields: Record<string, FieldAst> = {}
+      const metaHints = parseMetaLiteral(metaArg, sourceFile)
+      const fieldContext: FieldParseContext = {
+        autoLocalize: modelTypeName === "LocalizedModel" || metaHints.autoLocalize === true,
+      }
+
+      const fields: Record<string, FieldAstV2> = {}
       for (const member of fieldsLiteral.members) {
         if (!ts.isPropertySignature(member) || !member.type) continue
         const name = getPropertyName(member.name)
@@ -99,17 +98,22 @@ export function extractSchemaAstFromTypes(
           blockAliases,
           bucketAliases,
           bucketsById,
+          fieldContext,
+          resolveCtx,
         )
       }
 
-      models.push({
-        name: stmt.name.text,
-        tableName: toSnakeCase(stmt.name.text),
+      const { tableName, access, options } = parseModelMeta(
+        metaArg,
+        sourceFile,
+        stmt.name.text,
+        fieldsArg,
         fields,
-        access: parseModelAccess(metaArg, sourceFile),
-        indexes: [],
-        options: {},
-      })
+      )
+
+      models.push(
+        emitModel(stmt.name.text, fields, options, tableName, access),
+      )
     }
   }
 
@@ -118,10 +122,25 @@ export function extractSchemaAstFromTypes(
   const storageBuckets =
     bucketsById.size > 0 ? [...bucketsById.values()].sort((a, b) => a.id.localeCompare(b.id)) : undefined
 
-  return {
-    models,
-    ...(storageBuckets !== undefined && storageBuckets.length > 0 && { storageBuckets }),
+  let localeConfig: { locales: string[]; defaultLocale: string } | undefined
+  for (const sourceFile of sourceFiles) {
+    const found = collectLocaleConfig(sourceFile)
+    if (!found) continue
+    if (localeConfig !== undefined) {
+      throw new Error(
+        "Conflicting LocaleConfig declarations. Export at most one `localeConfig` type alias.",
+      )
+    }
+    localeConfig = found
   }
+
+  return emitSchema(models, {
+    ...(storageBuckets !== undefined && storageBuckets.length > 0 && { storageBuckets }),
+    ...(localeConfig !== undefined && {
+      locales: localeConfig.locales,
+      defaultLocale: localeConfig.defaultLocale,
+    }),
+  })
 }
 
 function loadSchemaSourceFiles(entryPath: string): ts.SourceFile[] {
@@ -142,9 +161,18 @@ function loadSchemaSourceFiles(entryPath: string): ts.SourceFile[] {
 
     const baseDir = dirname(currentPath)
     for (const stmt of sourceFile.statements) {
-      if (!ts.isExportDeclaration(stmt)) continue
-      if (!stmt.moduleSpecifier || !ts.isStringLiteral(stmt.moduleSpecifier)) continue
-      const nextPath = resolveTypeModulePath(baseDir, stmt.moduleSpecifier.text)
+      let specifier: string | undefined
+      if (ts.isExportDeclaration(stmt)) {
+        if (!stmt.moduleSpecifier || !ts.isStringLiteral(stmt.moduleSpecifier)) continue
+        specifier = stmt.moduleSpecifier.text
+      } else if (ts.isImportDeclaration(stmt)) {
+        if (!stmt.moduleSpecifier || !ts.isStringLiteral(stmt.moduleSpecifier)) continue
+        specifier = stmt.moduleSpecifier.text
+      } else {
+        continue
+      }
+      if (!specifier.startsWith(".")) continue
+      const nextPath = resolveTypeModulePath(baseDir, specifier)
       if (!nextPath) continue
       if (!visited.has(nextPath)) queue.push(nextPath)
     }
@@ -188,22 +216,67 @@ function getPropertyName(name: ts.PropertyName): string | null {
   return null
 }
 
-function unwrapModelFields(typeNode: ts.TypeNode): ts.TypeLiteralNode | null {
+function unwrapModelFields(
+  typeNode: ts.TypeNode,
+  sourceFile: ts.SourceFile,
+  resolveCtx: ResolveContext,
+  depth = 0,
+): ts.TypeLiteralNode | null {
+  if (depth > 16) return null
   if (ts.isTypeLiteralNode(typeNode)) return typeNode
+
+  if (needsChecker(typeNode)) {
+    const resolved = resolveTypeNode(typeNode, sourceFile, resolveCtx)
+    if (ts.isTypeLiteralNode(resolved)) return resolved
+    return unwrapModelFields(resolved, sourceFile, resolveCtx, depth + 1)
+  }
+
   if (!ts.isTypeReferenceNode(typeNode) || !ts.isIdentifier(typeNode.typeName)) return null
+
+  const typeName = applyImportRename(typeNode.typeName.text, sourceFile, resolveCtx.renameMap)
 
   // Composite helpers in @supatype/types wrap the concrete field object.
   if (
-    typeNode.typeName.text === "WithTimestamps" ||
-    typeNode.typeName.text === "WithSoftDelete" ||
-    typeNode.typeName.text === "WithPublishable"
+    typeName === "WithTimestamps" ||
+    typeName === "WithSoftDelete" ||
+    typeName === "WithPublishable"
   ) {
     const inner = typeNode.typeArguments?.[0]
     if (!inner) return null
-    return unwrapModelFields(inner)
+    return unwrapModelFields(inner, sourceFile, resolveCtx, depth + 1)
+  }
+
+  const expanded = tryResolveTypeReference(typeNode, sourceFile, resolveCtx)
+  if (expanded) {
+    if (ts.isTypeLiteralNode(expanded)) return expanded
+    return unwrapModelFields(expanded, sourceFile, resolveCtx, depth + 1)
   }
 
   return null
+}
+
+/** Parse `Default<T, V>` second type argument into a JSON-serializable literal. */
+function parseDefaultLiteral(
+  node: ts.TypeNode,
+  sourceFile: ts.SourceFile,
+): string | number | boolean | null | undefined {
+  if (ts.isLiteralTypeNode(node)) {
+    const lit = node.literal
+    if (ts.isStringLiteral(lit) || ts.isNoSubstitutionTemplateLiteral(lit)) return lit.text
+    if (ts.isNumericLiteral(lit)) return Number(lit.text)
+    if (lit.kind === ts.SyntaxKind.TrueKeyword) return true
+    if (lit.kind === ts.SyntaxKind.FalseKeyword) return false
+    if (lit.kind === ts.SyntaxKind.NullKeyword) return null
+  }
+  if (node.kind === ts.SyntaxKind.TrueKeyword) return true
+  if (node.kind === ts.SyntaxKind.FalseKeyword) return false
+  if (node.kind === ts.SyntaxKind.NullKeyword) return null
+  // Negative numeric literals appear as PrefixUnaryExpression in some TS versions.
+  if (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.MinusToken) {
+    const inner = parseDefaultLiteral(node.operand as unknown as ts.TypeNode, sourceFile)
+    if (typeof inner === "number") return -inner
+  }
+  return undefined
 }
 
 function parseFieldType(
@@ -213,7 +286,9 @@ function parseFieldType(
   blockAliases: Map<string, BlockDefinitionAst>,
   bucketAliases: Map<string, string>,
   bucketsById: Map<string, ExtractedStorageBucketAst>,
-): FieldAst {
+  context: FieldParseContext = {},
+  resolveCtx: ResolveContext,
+): FieldAstV2 {
   const flags = {
     required: true,
     unique: false,
@@ -224,15 +299,17 @@ function parseFieldType(
     relationCardinality: undefined as "one" | "many" | undefined,
     relationTarget: undefined as string | undefined,
     editorReadOnly: false,
-    /** When set from `ComputedFrom`, Studio previews from these sources until edited on create */
     computedFromSources: undefined as string[] | undefined,
-    /** When set, second arg was a template literal with `{field}` / `{truncate(f, n)}` */
     computedFromTemplate: undefined as string | undefined,
+    fieldDefault: undefined as string | number | boolean | null | undefined,
+    localized: false,
+    notLocalized: false,
   }
 
+  const resolving = new Set<string>()
   let current = typeNode
   while (ts.isTypeReferenceNode(current) && ts.isIdentifier(current.typeName)) {
-    const typeName = current.typeName.text
+    const typeName = applyImportRename(current.typeName.text, sourceFile, resolveCtx.renameMap)
     switch (typeName) {
       case "Optional":
         flags.required = false
@@ -261,10 +338,18 @@ function parseFieldType(
         flags.unique = true
         current = current.typeArguments?.[0] ?? current
         continue
-      case "Default":
-        // Default<T, V> — unwrap to T so `Default<boolean, true>` resolves as boolean, not text.
+      case "Default": {
+        const valueArg = current.typeArguments?.[1]
+        if (valueArg !== undefined) {
+          const literal = parseDefaultLiteral(valueArg, sourceFile)
+          if (literal !== undefined) {
+            flags.fieldDefault = literal
+          }
+        }
+        // Unwrap to T so `Default<boolean, true>` resolves as boolean, not text.
         current = current.typeArguments?.[0] ?? current
         continue
+      }
       case "Searchable":
         current = current.typeArguments?.[0] ?? current
         continue
@@ -295,117 +380,225 @@ function parseFieldType(
       case "Between":
         current = current.typeArguments?.[0] ?? current
         continue
+      case "Localized":
+        flags.localized = true
+        current = current.typeArguments?.[0] ?? current
+        continue
+      case "NotLocalized":
+        flags.notLocalized = true
+        current = current.typeArguments?.[0] ?? current
+        continue
       case "RelatedTo":
         flags.relationCardinality = "one"
         flags.relationTarget = relationTargetFromTypeArg(current.typeArguments?.[0], sourceFile)
         // `target` must match `ModelAst.name` to satisfy validator resolution.
         // FK column follows the field name (two relations to the same model need distinct columns).
-        return {
+        return emitField({
           kind: "relation",
-          cardinality: "belongsTo",
-          target: flags.relationTarget,
-          foreignKey: relationForeignKeyFromField(fieldName),
-          ...(flags.editorReadOnly && { readOnly: true }),
-        }
+          kernel: { cardinality: "belongsTo", target: flags.relationTarget! },
+          db: { foreignKey: relationForeignKeyFromField(fieldName) },
+          platform: flags.editorReadOnly ? { readOnly: true } : {},
+        })
       case "HasOne":
         flags.relationCardinality = "one"
         flags.relationTarget = current.typeArguments?.[0]?.getText(sourceFile).replace(/\W/g, "") ?? "unknown"
-        return {
+        return emitField({
           kind: "relation",
-          cardinality: "hasOne",
-          target: flags.relationTarget,
-          ...(flags.editorReadOnly && { readOnly: true }),
-        }
+          kernel: { cardinality: "hasOne", target: flags.relationTarget },
+          db: {},
+          platform: flags.editorReadOnly ? { readOnly: true } : {},
+        })
       case "HasMany":
       case "ManyToMany":
         flags.relationCardinality = "many"
         flags.relationTarget = current.typeArguments?.[0]?.getText(sourceFile).replace(/\W/g, "") ?? "unknown"
-        return {
+        return emitField({
           kind: "relation",
-          cardinality: "hasMany",
-          target: flags.relationTarget,
-          ...(flags.editorReadOnly && { readOnly: true }),
+          kernel: { cardinality: "hasMany", target: flags.relationTarget },
+          db: {},
+          platform: flags.editorReadOnly ? { readOnly: true } : {},
+        })
+      default: {
+        const resolved = tryResolveTypeReference(current, sourceFile, resolveCtx, { fieldName, resolving })
+        if (resolved) {
+          current = resolved
+          continue
         }
-      default:
         break
+      }
     }
     break
   }
 
-  const scalar = parseScalarType(current, sourceFile, blockAliases, bucketAliases, bucketsById)
-  const parsed: FieldAst = {
-    ...scalar,
-    required: flags.required,
-    unique: flags.unique,
-    index: flags.index,
-    ...(flags.primaryKey && { primaryKey: true }),
-    ...(flags.editorReadOnly && { readOnly: true }),
+  const scalarBase = parseScalarType(
+    current,
+    sourceFile,
+    blockAliases,
+    bucketAliases,
+    bucketsById,
+    context,
+    resolveCtx,
+    fieldName,
+    resolving,
+  )
+
+  let parsed: ParsedField = {
+    kind: scalarBase.kind,
+    kernel: {
+      ...scalarBase.kernel,
+      required: flags.required,
+      ...(flags.primaryKey && { primaryKey: true }),
+    },
+    db: {
+      ...scalarBase.db,
+      unique: flags.unique,
+      index: flags.index,
+    },
+    platform: {
+      ...scalarBase.platform,
+      ...(flags.editorReadOnly && { readOnly: true }),
+    },
   }
 
   if (flags.autoIncrement && parsed.kind === "integer") {
-    parsed.kind = "serial"
-    parsed.pgType = "SERIAL"
+    parsed = { ...parsed, kind: "serial", db: { ...parsed.db, pgType: "SERIAL" } }
   }
 
-  // RFC parity with existing examples: `id: UUID` should be the model PK unless
-  // explicitly overridden via wrappers such as PrimaryKey<> in source types.
-  if (
-    fieldName === "id" &&
-    parsed.kind === "uuid" &&
-    flags.primaryKey === false
+  if (fieldName === "id" && parsed.kind === "uuid" && flags.primaryKey === false) {
+    parsed = {
+      ...parsed,
+      kernel: { ...parsed.kernel, primaryKey: true, required: true },
+      db: { ...parsed.db, unique: true },
+    }
+  }
+
+  if (flags.fieldDefault !== undefined) {
+    if (parsed.kernel.default !== undefined) {
+      throw new Error(
+        `Field "${fieldName}": use either Default<…> or an inline type default (e.g. RichText<"…">), not both.`,
+      )
+    }
+    parsed = {
+      ...parsed,
+      kernel: { ...parsed.kernel, default: { kind: "value", value: flags.fieldDefault } },
+    }
+  }
+
+  if (parsed.kernel.primaryKey === true && parsed.kind === "uuid" && parsed.kernel.default === undefined) {
+    parsed = {
+      ...parsed,
+      kernel: { ...parsed.kernel, default: { kind: "genRandomUuid" } },
+    }
+  } else if (
+    parsed.kernel.primaryKey === true &&
+    (parsed.kind === "serial" || parsed.kind === "bigSerial")
   ) {
-    parsed.primaryKey = true
-    parsed.unique = true
-    parsed.required = true
-  }
-
-  // Align with engine fixtures: PK UUID is created by the database unless the author supplies one.
-  if (parsed.primaryKey === true && parsed.kind === "uuid") {
-    parsed.default = { kind: "genRandomUuid" }
-  } else if (parsed.primaryKey === true && (parsed.kind === "serial" || parsed.kind === "bigSerial")) {
     flags.serverGenerated = true
   }
 
   if (flags.serverGenerated === true) {
-    parsed.serverGenerated = true
+    parsed = { ...parsed, db: { ...parsed.db, serverGenerated: true } }
   }
 
-  // Convention: standard audit columns are filled by the DB on insert/update.
   const auditTs =
     fieldName === "created_at" ||
     fieldName === "updated_at" ||
     fieldName === "createdAt" ||
     fieldName === "updatedAt"
   if (auditTs) {
-    parsed.serverGenerated = true
+    parsed = { ...parsed, db: { ...parsed.db, serverGenerated: true } }
     if (
       (parsed.kind === "datetime" || parsed.kind === "date") &&
-      parsed.default === undefined
+      parsed.kernel.default === undefined
     ) {
-      parsed.default = { kind: "now" }
+      parsed = { ...parsed, kernel: { ...parsed.kernel, default: { kind: "now" } } }
     }
   }
 
-  // `ServerDefault<Date>` etc. → DEFAULT NOW() for column types Postgres handles with NOW().
   if (
     flags.serverGenerated &&
     (parsed.kind === "datetime" || parsed.kind === "date") &&
-    parsed.default === undefined
+    parsed.kernel.default === undefined
   ) {
-    parsed.default = { kind: "now" }
+    parsed = { ...parsed, kernel: { ...parsed.kernel, default: { kind: "now" } } }
   }
 
   const hasCfTemplate = flags.computedFromTemplate !== undefined
   const hasCfSources = Boolean(flags.computedFromSources && flags.computedFromSources.length > 0)
   if (parsed.kind === "text" && (hasCfTemplate || hasCfSources)) {
+    const kernel: ParsedField["kernel"] = { ...parsed.kernel }
+    if (hasCfSources && flags.computedFromSources) {
+      kernel.sources = flags.computedFromSources
+    }
+    if (hasCfTemplate && flags.computedFromTemplate !== undefined) {
+      kernel.template = flags.computedFromTemplate
+    }
+    parsed = { ...parsed, kernel }
+  }
+
+  return emitField(finalizeParsedField(parsed, flags, context))
+}
+
+function finalizeParsedField(
+  parsed: ParsedField,
+  flags: { localized: boolean; notLocalized: boolean },
+  context: FieldParseContext,
+): ParsedField {
+  let localized = flags.localized
+
+  if (
+    !localized &&
+    !flags.notLocalized &&
+    context.autoLocalize &&
+    shouldAutoLocalizeFieldKind(parsed.kind)
+  ) {
+    localized = true
+  }
+
+  if (parsed.kind === "blocks" && parsed.kernel.blocks && context.autoLocalize && !localized) {
     return {
       ...parsed,
-      ...(hasCfSources && { sources: flags.computedFromSources! }),
-      ...(hasCfTemplate && { template: flags.computedFromTemplate }),
+      kernel: {
+        ...parsed.kernel,
+        blocks: parsed.kernel.blocks.map((blockDef) => ({
+          ...blockDef,
+          fields: Object.fromEntries(
+            Object.entries(blockDef.fields).map(([name, fieldWire]) => [
+              name,
+              localizeFieldWire(fieldWire),
+            ]),
+          ),
+        })),
+      },
     }
   }
 
+  if (localized) {
+    return {
+      ...parsed,
+      kernel: { ...parsed.kernel, localized: true },
+      db: { ...parsed.db, pgType: "JSONB" },
+    }
+  }
   return parsed
+}
+
+function shouldAutoLocalizeFieldKind(kind: unknown): boolean {
+  return kind === "text" || kind === "richText"
+}
+
+function localizeFieldWire(field: FieldAstV2): FieldAstV2 {
+  if (field.localized === true) return field
+  if (!shouldAutoLocalizeFieldKind(field.kind)) return field
+  const annotations = (field.annotations ?? {}) as { db?: Record<string, unknown>; platform?: Record<string, unknown> }
+  return {
+    ...field,
+    localized: true,
+    annotations: {
+      ...annotations,
+      db: { ...annotations.db, pgType: "JSONB" },
+    },
+  }
 }
 
 function parseScalarType(
@@ -414,132 +607,209 @@ function parseScalarType(
   blockAliases: Map<string, BlockDefinitionAst>,
   bucketAliases: Map<string, string>,
   bucketsById: Map<string, ExtractedStorageBucketAst>,
-): FieldAst {
+  context: FieldParseContext = {},
+  resolveCtx: ResolveContext,
+  fieldName = "?",
+  resolving: Set<string> = new Set(),
+): ParsedField {
   if (ts.isArrayTypeNode(typeNode)) {
-    const element = parseScalarType(typeNode.elementType, sourceFile, blockAliases, bucketAliases, bucketsById)
-    const elementKind = typeof element.kind === "string" ? element.kind : "text"
-    // Keep arrays as native SQL arrays (old `arrayOf(...)` parity), not JSONB.
-    return {
-      kind: "array",
-      pgType: "ARRAY",
-      elementType: elementKind,
-    }
+    const element = parseScalarType(
+      typeNode.elementType,
+      sourceFile,
+      blockAliases,
+      bucketAliases,
+      bucketsById,
+      context,
+      resolveCtx,
+      fieldName,
+      resolving,
+    )
+    return scalar("array", {
+      db: { elementType: defaultPgTypeForKind(element.kind) },
+    })
   }
 
   if (ts.isUnionTypeNode(typeNode)) {
     const literals = typeNode.types.filter(ts.isLiteralTypeNode)
     if (literals.length === typeNode.types.length && literals.every((lit) => ts.isStringLiteral(lit.literal))) {
-      return {
-        kind: "enum",
-        pgType: "TEXT",
-        values: literals.map((lit) => (lit.literal as ts.StringLiteral).text),
-      }
+      return scalar("enum", {
+        kernel: {
+          values: literals.map((lit) => (lit.literal as ts.StringLiteral).text),
+        },
+      })
     }
     const nonNull = typeNode.types.find((t) => t.kind !== ts.SyntaxKind.NullKeyword)
-    if (nonNull) return parseScalarType(nonNull, sourceFile, blockAliases, bucketAliases, bucketsById)
+    if (nonNull) {
+      return parseScalarType(
+        nonNull,
+        sourceFile,
+        blockAliases,
+        bucketAliases,
+        bucketsById,
+        context,
+        resolveCtx,
+        fieldName,
+        resolving,
+      )
+    }
+  }
+
+  if (ts.isTypeReferenceNode(typeNode) && ts.isIdentifier(typeNode.typeName)) {
+    const resolved = tryResolveTypeReference(typeNode, sourceFile, resolveCtx, { fieldName, resolving })
+    if (resolved) {
+      return parseScalarType(
+        resolved,
+        sourceFile,
+        blockAliases,
+        bucketAliases,
+        bucketsById,
+        context,
+        resolveCtx,
+        fieldName,
+        resolving,
+      )
+    }
   }
 
   if (ts.isTypeReferenceNode(typeNode)) {
-    const ref = typeNode.typeName.getText(sourceFile)
+    const ref = ts.isIdentifier(typeNode.typeName)
+      ? applyImportRename(typeNode.typeName.text, sourceFile, resolveCtx.renameMap)
+      : typeNode.typeName.getText(sourceFile)
     switch (ref) {
       case "UUID":
       case "SupatypeAuthUserId":
-        return { kind: "uuid", pgType: "UUID" }
-      case "RichText":
-        return { kind: "richText", pgType: "JSONB" }
+        return scalar("uuid")
+      case "RichText": {
+        const defaultArg = typeNode.typeArguments?.[0]
+        if (!defaultArg) return scalar("richText")
+        const literal = parseDefaultLiteral(defaultArg, sourceFile)
+        if (literal === undefined) {
+          throw new Error(
+            `RichText default must be a string literal (plain text or Lexical JSON string), not HTML.`,
+          )
+        }
+        if (typeof literal !== "string") {
+          throw new Error(
+            `RichText<…> default must be a string literal (plain text or Lexical JSON string).`,
+          )
+        }
+        return scalar("richText", {
+          kernel: { default: { kind: "value", value: literal } },
+        })
+      }
       case "Slug": {
         const fromArg = typeNode.typeArguments?.[0]
         const fromLiteral = fromArg ? literalStringType(fromArg) : null
-        const from = fromLiteral ?? "title"
-        return { kind: "slug", pgType: "TEXT", from }
+        return scalar("slug", { kernel: { from: fromLiteral ?? "title" } })
       }
       case "Email":
-        return { kind: "email", pgType: "TEXT" }
+        return scalar("email")
       case "URL":
-        return { kind: "url", pgType: "TEXT" }
+        return scalar("url")
       case "Markdown":
-        return { kind: "text", pgType: "TEXT" }
-      case "Color":
-        return { kind: "color", pgType: "TEXT" }
       case "PhoneNumber":
-        return { kind: "text", pgType: "TEXT" }
+        return scalar("text")
+      case "Color":
+        return scalar("color")
       case "IPAddress":
-        return { kind: "ip", pgType: "TEXT" }
+        return scalar("ip")
       case "CIDR":
-        return { kind: "cidr", pgType: "TEXT" }
+        return scalar("cidr")
       case "MacAddress":
-        return { kind: "macaddr", pgType: "TEXT" }
+        return scalar("macaddr")
       case "XML":
-        return { kind: "xml", pgType: "TEXT" }
+        return scalar("xml")
       case "TSQuery":
-        return { kind: "tsQuery", pgType: "TEXT" }
+        return scalar("tsQuery")
       case "TSVector":
-        return { kind: "tsVector", pgType: "TEXT" }
+        return scalar("tsVector")
       case "Money":
-        return { kind: "money", pgType: "TEXT" }
+        return scalar("money")
       case "Decimal":
-        return { kind: "decimal", pgType: "TEXT" }
+        return scalar("decimal")
       case "DateOnly":
-        return { kind: "date", pgType: "DATE" }
+        return scalar("date")
       case "Date":
       case "DateTime":
       case "Timestamp":
-        return { kind: "datetime", pgType: "TIMESTAMP WITH TIME ZONE" }
+        return scalar("datetime", { db: { pgType: "TIMESTAMP WITH TIME ZONE" } })
       case "Int":
-        return { kind: "integer", pgType: "INTEGER" }
+        return scalar("integer")
       case "SmallInt":
-        return { kind: "smallInt", pgType: "SMALLINT" }
+        return scalar("smallInt")
       case "BigInt":
-        return { kind: "bigInt", pgType: "BIGINT" }
+        return scalar("bigInt")
       case "Float":
-        return { kind: "float", pgType: "DOUBLE PRECISION" }
+        return scalar("float")
       case "Bytea":
-        return { kind: "bytes", pgType: "BYTEA" }
+        return scalar("bytes")
       case "JSON":
-        return { kind: "json", pgType: "JSONB" }
+        return scalar("json")
+      case "Button":
+        return scalar("button", { db: { pgType: "JSONB" } })
       case "GeoPoint":
-        return { kind: "geo", pgType: "GEOGRAPHY", geoType: "point", srid: 4326 }
       case "Geo":
-        return { kind: "geo", pgType: "GEOGRAPHY", geoType: "point", srid: 4326 }
+        return scalar("geo", { kernel: { geoType: "point", srid: 4326 } })
       case "Asset":
       case "FileAsset": {
         const bucket = resolveBucketName(typeNode.typeArguments?.[0], sourceFile, bucketAliases, "assets")
-        return attachStorageFieldMeta({ kind: "file", pgType: "TEXT", bucket }, bucket, bucketsById)
+        const assetOpts = parseAssetFieldOptions(typeNode.typeArguments?.[1], sourceFile)
+        return attachStorageFieldMeta(
+          scalar("file", {
+            db: { pgType: "TEXT" },
+            kernel: { bucket, ...(assetOpts.localized && { localized: true }) },
+          }),
+          bucket,
+          bucketsById,
+        )
       }
       case "ImageAsset": {
         const bucket = resolveBucketName(typeNode.typeArguments?.[0], sourceFile, bucketAliases, "images")
-        return attachStorageFieldMeta({ kind: "image", pgType: "TEXT", bucket }, bucket, bucketsById)
+        const assetOpts = parseAssetFieldOptions(typeNode.typeArguments?.[1], sourceFile)
+        return attachStorageFieldMeta(
+          scalar("image", {
+            db: { pgType: "TEXT" },
+            kernel: { bucket, ...(assetOpts.localized && { localized: true }) },
+          }),
+          bucket,
+          bucketsById,
+        )
       }
       case "Blocks":
-        return {
-          kind: "blocks",
-          pgType: "JSONB",
-          blocks: parseBlocksTypeDefinitions(
-            typeNode.typeArguments?.[0],
-            sourceFile,
-            blockAliases,
-            bucketAliases,
-            bucketsById,
-          ),
-        }
+        return scalar("blocks", {
+          kernel: {
+            index: true,
+            blocks: parseBlocksTypeDefinitions(
+              typeNode.typeArguments?.[0],
+              sourceFile,
+              blockAliases,
+              bucketAliases,
+              bucketsById,
+              context,
+              resolveCtx,
+            ),
+          },
+        })
       case "Vector": {
         const dimensions = typeNode.typeArguments?.[0]?.getText(sourceFile)
-        return { kind: "vector", pgType: "VECTOR", dimensions: Number(dimensions ?? "1536") }
+        return scalar("vector", {
+          kernel: { dimensions: Number(dimensions ?? "1536") },
+        })
       }
       default:
-        return { kind: "text", pgType: "TEXT" }
+        throw unknownTypeError(ref, fieldName)
     }
   }
 
   switch (typeNode.kind) {
     case ts.SyntaxKind.StringKeyword:
-      return { kind: "text", pgType: "TEXT" }
+      return scalar("text")
     case ts.SyntaxKind.NumberKeyword:
-      return { kind: "float", pgType: "DOUBLE PRECISION" }
+      return scalar("float")
     case ts.SyntaxKind.BooleanKeyword:
-      return { kind: "boolean", pgType: "BOOLEAN" }
+      return scalar("boolean")
     default:
-      return { kind: "json", pgType: "JSONB" }
+      return scalar("json")
   }
 }
 
@@ -547,17 +817,69 @@ function collectBlockAliases(
   sourceFile: ts.SourceFile,
   bucketAliases: Map<string, string>,
   bucketsById: Map<string, ExtractedStorageBucketAst>,
+  resolveCtx: ResolveContext,
 ): Map<string, BlockDefinitionAst> {
   const blocks = new Map<string, BlockDefinitionAst>()
   for (const stmt of sourceFile.statements) {
     if (!ts.isTypeAliasDeclaration(stmt)) continue
     if (!ts.isTypeReferenceNode(stmt.type)) continue
     if (!ts.isIdentifier(stmt.type.typeName) || stmt.type.typeName.text !== "Block") continue
-    const block = parseInlineBlockDefinition(stmt.type, sourceFile, new Map(), bucketAliases, bucketsById)
+    const block = parseInlineBlockDefinition(
+      stmt.type,
+      sourceFile,
+      new Map(),
+      bucketAliases,
+      bucketsById,
+      {},
+      resolveCtx,
+    )
     if (!block) continue
     blocks.set(stmt.name.text, block)
   }
   return blocks
+}
+
+function collectLocaleConfig(
+  sourceFile: ts.SourceFile,
+): { locales: string[]; defaultLocale: string } | undefined {
+  for (const stmt of sourceFile.statements) {
+    if (!ts.isTypeAliasDeclaration(stmt)) continue
+    if (!hasExportModifier(stmt)) continue
+    if (!ts.isTypeReferenceNode(stmt.type)) continue
+    if (stmt.type.typeName.getText(sourceFile) !== "LocaleConfig") continue
+    const parsed = parseLocaleConfigTypeRef(stmt.type, sourceFile)
+    if (parsed) return parsed
+  }
+  return undefined
+}
+
+function parseLocaleConfigTypeRef(
+  typeRef: ts.TypeReferenceNode,
+  sourceFile: ts.SourceFile,
+): { locales: string[]; defaultLocale: string } | null {
+  const [localesArg, defaultArg] = typeRef.typeArguments ?? []
+  if (!localesArg || !defaultArg) return null
+
+  const locales = parseStringLiteralTuple(localesArg, sourceFile)
+  const defaultLocale = literalStringType(defaultArg)
+  if (!locales || locales.length === 0 || !defaultLocale) return null
+  if (!locales.includes(defaultLocale)) {
+    throw new Error(
+      `LocaleConfig defaultLocale "${defaultLocale}" must be one of: ${locales.join(", ")}`,
+    )
+  }
+  return { locales, defaultLocale }
+}
+
+function parseStringLiteralTuple(node: ts.TypeNode, sourceFile: ts.SourceFile): string[] | null {
+  if (!ts.isTupleTypeNode(node)) return null
+  const out: string[] = []
+  for (const el of node.elements) {
+    const lit = literalStringType(el)
+    if (!lit) return null
+    out.push(lit)
+  }
+  return out
 }
 
 function collectBucketContext(sourceFile: ts.SourceFile): {
@@ -761,15 +1083,15 @@ function bucketsEqual(a: ExtractedStorageBucketAst, b: ExtractedStorageBucketAst
 }
 
 function attachStorageFieldMeta(
-  field: FieldAst,
+  field: ParsedField,
   bucketId: string,
   bucketsById: Map<string, ExtractedStorageBucketAst>,
-): FieldAst {
+): ParsedField {
   const cfg = bucketsById.get(bucketId)
   if (cfg?.accessMode !== undefined) {
     return {
       ...field,
-      ...(cfg.accessMode !== undefined && { accessMode: cfg.accessMode }),
+      kernel: { ...field.kernel, accessMode: cfg.accessMode },
     }
   }
   return field
@@ -781,6 +1103,8 @@ function parseBlocksTypeDefinitions(
   blockAliases: Map<string, BlockDefinitionAst>,
   bucketAliases: Map<string, string>,
   bucketsById: Map<string, ExtractedStorageBucketAst>,
+  context: FieldParseContext = {},
+  resolveCtx: ResolveContext,
 ): BlockDefinitionAst[] {
   if (!blocksArg) return []
   const parts = ts.isUnionTypeNode(blocksArg) ? blocksArg.types : [blocksArg]
@@ -788,7 +1112,15 @@ function parseBlocksTypeDefinitions(
   for (const part of parts) {
     if (ts.isTypeReferenceNode(part) && ts.isIdentifier(part.typeName)) {
       if (part.typeName.text === "Block") {
-        const inline = parseInlineBlockDefinition(part, sourceFile, blockAliases, bucketAliases, bucketsById)
+        const inline = parseInlineBlockDefinition(
+          part,
+          sourceFile,
+          blockAliases,
+          bucketAliases,
+          bucketsById,
+          context,
+          resolveCtx,
+        )
         if (inline) out.push(inline)
         continue
       }
@@ -805,12 +1137,14 @@ function parseInlineBlockDefinition(
   blockAliases: Map<string, BlockDefinitionAst>,
   bucketAliases: Map<string, string>,
   bucketsById: Map<string, ExtractedStorageBucketAst>,
+  context: FieldParseContext = {},
+  resolveCtx: ResolveContext,
 ): BlockDefinitionAst | null {
   const [nameArg, fieldsArg, metaArg] = ref.typeArguments ?? []
   const name = literalStringType(nameArg)
   if (!name || !fieldsArg || !ts.isTypeLiteralNode(fieldsArg)) return null
 
-  const fields: Record<string, FieldAst> = {}
+  const fields: Record<string, FieldAstV2> = {}
   for (const member of fieldsArg.members) {
     if (!ts.isPropertySignature(member) || !member.type) continue
     const fieldName = getPropertyName(member.name)
@@ -822,6 +1156,8 @@ function parseInlineBlockDefinition(
       blockAliases,
       bucketAliases,
       bucketsById,
+      context,
+      resolveCtx,
     )
   }
 
@@ -937,6 +1273,131 @@ function resolveBucketName(
   return typeArg.getText(sourceFile).replace(/^['"]|['"]$/g, "") || fallback
 }
 
+function isBooleanLiteralType(typeNode: ts.TypeNode, value: boolean): boolean {
+  if (value) {
+    if (typeNode.kind === ts.SyntaxKind.TrueKeyword) return true
+    if (ts.isLiteralTypeNode(typeNode) && typeNode.literal.kind === ts.SyntaxKind.TrueKeyword) {
+      return true
+    }
+    return false
+  }
+  if (typeNode.kind === ts.SyntaxKind.FalseKeyword) return true
+  if (ts.isLiteralTypeNode(typeNode) && typeNode.literal.kind === ts.SyntaxKind.FalseKeyword) {
+    return true
+  }
+  return false
+}
+
+function parseAssetFieldOptions(
+  optionsArg: ts.TypeNode | undefined,
+  sourceFile: ts.SourceFile,
+): { localized: boolean } {
+  if (!optionsArg || !ts.isTypeLiteralNode(optionsArg)) return { localized: false }
+  for (const member of optionsArg.members) {
+    if (!ts.isPropertySignature(member) || !member.type) continue
+    const key = getPropertyName(member.name)
+    if (key === "localized" && isBooleanLiteralType(member.type, true)) {
+      return { localized: true }
+    }
+  }
+  return { localized: false }
+}
+
+function parseMetaLiteral(
+  metaArg: ts.TypeNode | undefined,
+  sourceFile: ts.SourceFile,
+): {
+  tableName?: string
+  singleton?: boolean
+  timestamps?: boolean
+  softDelete?: boolean
+  autoLocalize?: boolean
+} {
+  const result: {
+    tableName?: string
+    singleton?: boolean
+    timestamps?: boolean
+    softDelete?: boolean
+    autoLocalize?: boolean
+  } = {}
+
+  if (!metaArg || !ts.isTypeLiteralNode(metaArg)) return result
+
+  for (const member of metaArg.members) {
+    if (!ts.isPropertySignature(member) || !member.type) continue
+    const key = getPropertyName(member.name)
+    if (!key) continue
+
+    if (key === "singleton" && isBooleanLiteralType(member.type, true)) {
+      result.singleton = true
+    } else if (key === "timestamps") {
+      if (isBooleanLiteralType(member.type, true)) result.timestamps = true
+      if (isBooleanLiteralType(member.type, false)) result.timestamps = false
+    } else if (key === "softDelete") {
+      if (isBooleanLiteralType(member.type, true)) result.softDelete = true
+      if (isBooleanLiteralType(member.type, false)) result.softDelete = false
+    } else if (key === "autoLocalize" && isBooleanLiteralType(member.type, true)) {
+      result.autoLocalize = true
+    } else if (
+      key === "tableName" &&
+      ts.isLiteralTypeNode(member.type) &&
+      ts.isStringLiteral(member.type.literal)
+    ) {
+      result.tableName = member.type.literal.text
+    }
+  }
+
+  return result
+}
+
+function hasCompositeWrapper(typeNode: ts.TypeNode, wrapperName: string): boolean {
+  if (!ts.isTypeReferenceNode(typeNode) || !ts.isIdentifier(typeNode.typeName)) return false
+  if (typeNode.typeName.text === wrapperName) return true
+  if (
+    typeNode.typeName.text === "WithTimestamps" ||
+    typeNode.typeName.text === "WithSoftDelete" ||
+    typeNode.typeName.text === "WithPublishable"
+  ) {
+    const inner = typeNode.typeArguments?.[0]
+    if (inner) return hasCompositeWrapper(inner, wrapperName)
+  }
+  return false
+}
+
+function parseModelMeta(
+  metaArg: ts.TypeNode | undefined,
+  sourceFile: ts.SourceFile,
+  modelName: string,
+  fieldsArg: ts.TypeNode,
+  fields: Record<string, FieldAstV2>,
+): { tableName: string; access: Record<string, unknown>; options: Record<string, unknown> } {
+  const literal = parseMetaLiteral(metaArg, sourceFile)
+  const singleton = literal.singleton === true
+  const tableName =
+    literal.tableName ?? (singleton ? `_global_${toSnakeCase(modelName)}` : toSnakeCase(modelName))
+
+  const timestamps =
+    literal.timestamps ??
+    (hasCompositeWrapper(fieldsArg, "WithTimestamps") ||
+      (fields["created_at"] !== undefined && fields["updated_at"] !== undefined))
+
+  const softDelete =
+    literal.softDelete ??
+    (hasCompositeWrapper(fieldsArg, "WithSoftDelete") || fields["deleted_at"] !== undefined)
+
+  const options: Record<string, unknown> = {}
+  if (singleton) options.singleton = true
+  if (timestamps) options.timestamps = true
+  if (softDelete) options.softDelete = true
+  if (literal.autoLocalize === true) options.autoLocalize = true
+
+  return {
+    tableName,
+    access: parseModelAccess(metaArg, sourceFile),
+    options,
+  }
+}
+
 function parseModelAccess(metaArg: ts.TypeNode | undefined, sourceFile: ts.SourceFile): Record<string, unknown> {
   if (!metaArg || !ts.isTypeLiteralNode(metaArg)) return {}
   const accessProp = metaArg.members.find(
@@ -980,7 +1441,7 @@ function parseAccessRule(typeNode: ts.TypeNode, sourceFile: ts.SourceFile): Reco
     case "OwnerFrom": {
       const relationArg = typeNode.typeArguments?.[0]
       const relationField = relationArg?.getText(sourceFile).replace(/['"]/g, "") ?? "owner"
-      return { type: "owner", field: relationForeignKeyFromField(relationField) }
+      return { type: "owner", field: relationField }
     }
     case "Role": {
       const roleArg = typeNode.typeArguments?.[0]
