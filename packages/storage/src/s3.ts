@@ -138,12 +138,13 @@ export async function putObject(
 export async function getObject(
   bucket: string,
   key: string,
-): Promise<{ body: ReadableStream; contentType: string; contentLength: number }> {
+): Promise<{ body: Buffer; contentType: string; contentLength: number }> {
   const res = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }))
+  const body = Buffer.from(await res.Body!.transformToByteArray())
   return {
-    body: res.Body!.transformToWebStream(),
+    body,
     contentType: res.ContentType ?? "application/octet-stream",
-    contentLength: res.ContentLength ?? 0,
+    contentLength: body.length,
   }
 }
 

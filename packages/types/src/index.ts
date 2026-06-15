@@ -47,8 +47,32 @@ export type Code<Lang extends string = string> = Primitive<"Code", { lang: Lang;
 export type Duration = Primitive<"Duration", { ms: number }>
 export type GeoPoint = Primitive<"GeoPoint", { lat: number; lng: number }>
 export type Currency<Code extends string = string> = Primitive<"Currency", { amount: bigint; code: Code }>
-/** Lexical JSON in DB/UI; **`string`** is allowed in TS for seeds and incremental Lexical adoption. */
-export type RichText = Primitive<"RichText", SerializedEditorState | string>
+
+/** Link target for {@link Button}. */
+export type ButtonTarget = "_self" | "_blank"
+
+/** CMS button / CTA — label, href, optional aria-label and target (stored as JSONB). */
+export type ButtonValue = {
+  label: string
+  href: string
+  ariaLabel?: string
+  target?: ButtonTarget
+}
+
+export type Button = Primitive<"Button", ButtonValue>
+/**
+ * Lexical JSON in DB/UI.
+ * **`string`** is allowed in TS for defaults, seeds, and incremental adoption (plain text or Lexical JSON string — not HTML).
+ *
+ * Schema defaults:
+ * - `RichText<"Your sentence">` — plain-text default (sugar)
+ * - `Default<RichText, "Your sentence">` — same, composes with modifiers
+ * - Lexical document: pass a JSON string literal or use `Default<RichText, '{"root":…}'>`
+ */
+export type RichText<D extends string = never> = Primitive<
+  D extends never ? "RichText" : `RichText:${D}`,
+  SerializedEditorState | string
+>
 
 /** Visibility / S3 coupling for a storage bucket (`storage.buckets` + optional `PutBucketPolicy`). */
 export type BucketAccessMode = "public" | "private" | "custom"
@@ -104,16 +128,38 @@ export type Asset<TBucket extends Bucket = Bucket> = Primitive<"Asset", {
   mimeType?: string
   size?: number
 }>
-export type ImageAsset<TBucket extends Bucket = Bucket> = Primitive<"ImageAsset", Asset<TBucket> & {
+/** Second generic on {@link ImageAsset} / {@link FileAsset} — parsed by CLI only. */
+export type AssetFieldOptions = {
+  /** When true, stored as JSONB locale map of storage refs. Default false. */
+  localized?: boolean
+}
+
+export type ImageAsset<
+  TBucket extends Bucket = Bucket,
+  TOptions extends AssetFieldOptions = {},
+> = Primitive<"ImageAsset", Asset<TBucket> & {
   width?: number
   height?: number
+  config?: TOptions
 }>
-export type FileAsset<TBucket extends Bucket = Bucket> = Primitive<"FileAsset", Asset<TBucket>>
+export type FileAsset<
+  TBucket extends Bucket = Bucket,
+  TOptions extends AssetFieldOptions = {},
+> = Primitive<"FileAsset", Asset<TBucket> & { config?: TOptions }>
 
 export type LocaleConfig<
   TLocales extends readonly string[] = readonly string[],
   TDefault extends TLocales[number] = TLocales[number],
 > = Primitive<"LocaleConfig", { locales: TLocales; defaultLocale: TDefault }>
+/**
+ * Translatable field — stored as JSONB with locale keys in Postgres,
+ * e.g. `{ "en": "Hello", "de": "Hallo" }`. Configure locales with {@link LocaleConfig}.
+ *
+ * Use `Optional<Localized<string>>` when the field may be null.
+ */
+export type Localized<T> = Modifier<"Localized", Record<string, T>>
+/** Opt out of {@link LocalizedModel} auto-localization for a copy-like field. */
+export type NotLocalized<T> = Modifier<"NotLocalized", T>
 export type Block<
   TName extends string = string,
   TFields extends Record<string, unknown> = Record<string, unknown>,
@@ -304,18 +350,70 @@ type IsModifierOptional<V> = [V] extends [Modifier<"Optional", infer _>] ? true 
 
 type InferOptionalInner<V> = V extends Modifier<"Optional", infer Inner> ? Inner : never
 
+type IsModifierLocalized<V> = [V] extends [Modifier<"Localized", infer _>] ? true : false
+
+type InferLocalizedInner<V> = V extends Modifier<"Localized", infer Inner> ? Inner : never
+
+type IsModifierNotLocalized<V> = [V] extends [Modifier<"NotLocalized", infer _>] ? true : false
+
+type InferNotLocalizedInner<V> = V extends Modifier<"NotLocalized", infer Inner> ? Inner : never
+
+type ImageAssetLocalizedOption<V> =
+  V extends ImageAsset<infer _B, infer O> ? (O extends { localized: true } ? true : false) : false
+
+type FileAssetLocalizedOption<V> =
+  V extends FileAsset<infer _B, infer O> ? (O extends { localized: true } ? true : false) : false
+
+/** Apply default localization to copy-like fields (used by {@link LocalizedModel}). */
+type ApplyAutoLocalizedField<V> =
+  IsModifierOptional<V> extends true
+    ? Optional<ApplyAutoLocalizedField<InferOptionalInner<V>>>
+    : IsModifierNotLocalized<V> extends true
+      ? InferNotLocalizedInner<V>
+      : IsModifierLocalized<V> extends true
+        ? V
+        : V extends string
+          ? Localized<string>
+          : V extends RichText
+            ? Localized<RichText>
+            : V extends Markdown
+              ? Localized<Markdown>
+              : V extends Button
+                ? Localized<Button>
+                : ImageAssetLocalizedOption<V> extends true
+                ? Localized<V>
+                : FileAssetLocalizedOption<V> extends true
+                  ? Localized<V>
+                  : V
+
+type ApplyAutoLocalizedFields<TFields extends Record<string, unknown>> = {
+  [K in keyof TFields]: ApplyAutoLocalizedField<TFields[K]>
+}
+
+/** Strip `Optional` / `Localized` / `NotLocalized` wrappers for inferred row shapes. */
+type UnwrapModelFieldType<V> =
+  IsModifierOptional<V> extends true
+    ? UnwrapModelFieldType<InferOptionalInner<V>>
+    : IsModifierNotLocalized<V> extends true
+      ? UnwrapModelFieldType<InferNotLocalizedInner<V>>
+      : IsModifierLocalized<V> extends true
+        ? InferLocalizedInner<V>
+        : V
+
 /** Row shape from `TFields`: `Optional<…>` → `key?: Inner` (`Inner` includes `null`). */
 export type SpreadOptionalModelFields<TFields extends Record<string, unknown>> =
   keyof TFields extends never
     ? {}
     : {
-        [K in keyof TFields as IsModifierOptional<TFields[K]> extends true ? never : K]: TFields[K]
+        [K in keyof TFields as IsModifierOptional<TFields[K]> extends true ? never : K]: UnwrapModelFieldType<
+          TFields[K]
+        >
       } & {
         [K in keyof TFields as IsModifierOptional<TFields[K]> extends true
           ? K extends keyof TFields & (string | number)
             ? K
             : never
-          : never]?: InferOptionalInner<TFields[K]>
+          : never]?: UnwrapModelFieldType<TFields[K]>
       }
 
 export type ModelMeta<TFields extends Record<string, unknown>> = {
@@ -359,6 +457,25 @@ export type ModelMeta<TFields extends Record<string, unknown>> = {
   }
   tableName?: string
   searchable?: readonly string[]
+  /** Exactly one row — Studio Globals, singleton partial unique index in Postgres. */
+  singleton?: true
+  /** When omitted, the CLI infers from `WithTimestamps` or `created_at` / `updated_at` fields. */
+  timestamps?: boolean
+  /** When omitted, the CLI infers from `WithSoftDelete` or `deleted_at`. */
+  softDelete?: boolean
+  /** When true, copy-like fields default to localized (same as {@link LocalizedModel}). */
+  autoLocalize?: true
+}
+
+/** Shorthand for singleton globals — `Model<Fields, GlobalMeta<Fields>>`. */
+export type GlobalMeta<TFields extends Record<string, unknown>> = ModelMeta<TFields> & {
+  singleton: true
+}
+
+export type LocalizedModelMeta<TFields extends Record<string, unknown>> = ModelMeta<
+  ApplyAutoLocalizedFields<TFields>
+> & {
+  autoLocalize?: true
 }
 
 export type Model<TFields extends Record<string, unknown>, TMeta extends ModelMeta<TFields> = {}> =
@@ -368,3 +485,12 @@ export type Model<TFields extends Record<string, unknown>, TMeta extends ModelMe
       readonly meta: TMeta
     }
   }
+
+/**
+ * CMS-oriented model: plain `string` / `RichText` fields become localized automatically.
+ * Use {@link NotLocalized} to opt out; {@link ImageAsset}<Bucket, { localized: true }> to opt in for images.
+ */
+export type LocalizedModel<
+  TFields extends Record<string, unknown>,
+  TMeta extends LocalizedModelMeta<TFields> = {},
+> = Model<ApplyAutoLocalizedFields<TFields>, TMeta>

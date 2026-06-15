@@ -3,7 +3,10 @@ import type {
   Bucket,
   FileAsset,
   ImageAsset,
+  Localized,
+  LocalizedModel,
   Model,
+  NotLocalized,
   Optional,
   SpreadOptionalModelFields,
   UUID,
@@ -41,5 +44,29 @@ describe("SpreadOptionalModelFields", () => {
     }>
     const _: Row = {}
     expectTypeOf(_.attachment).toEqualTypeOf<FileAsset<AttachmentBucket> | null | undefined>()
+  })
+
+  it("unwraps Localized fields to locale-keyed records", () => {
+    type Row = SpreadOptionalModelFields<{
+      title: Localized<string>
+      subtitle: Optional<Localized<string>>
+    }>
+
+    expectTypeOf<Row>().toMatchTypeOf<{
+      title: Record<string, string>
+      subtitle?: Record<string, string> | null
+    }>()
+  })
+
+  it("LocalizedModel infers localized copy fields", () => {
+    type Row = LocalizedModel<{
+      hero_title: string
+      map_url: NotLocalized<string>
+    }>
+
+    expectTypeOf<Row>().toMatchTypeOf<{
+      hero_title: Record<string, string>
+      map_url: string
+    }>()
   })
 })

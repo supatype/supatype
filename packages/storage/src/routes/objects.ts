@@ -317,18 +317,7 @@ async function serveObject(ctx: RequestContext, bucketId: string, objectPath: st
     const obj = await s3.getObject(bucketId, objectPath)
 
     if (transformOpts && obj.contentType.startsWith("image/")) {
-      // Read entire object for transformation
-      const chunks: Uint8Array[] = []
-      const reader = obj.body.getReader()
-      let done = false
-      while (!done) {
-        const result = await reader.read()
-        if (result.value) chunks.push(result.value)
-        done = result.done
-      }
-      const buffer = Buffer.concat(chunks)
-
-      const transformed = await transformImage(buffer, transformOpts)
+      const transformed = await transformImage(obj.body, transformOpts)
       ctx.res.writeHead(200, {
         "Content-Type": transformed.contentType,
         "Content-Length": String(transformed.buffer.length),
@@ -336,20 +325,12 @@ async function serveObject(ctx: RequestContext, bucketId: string, objectPath: st
       })
       ctx.res.end(transformed.buffer)
     } else {
-      // Stream directly
       ctx.res.writeHead(200, {
         "Content-Type": obj.contentType,
-        ...(obj.contentLength > 0 && { "Content-Length": String(obj.contentLength) }),
+        "Content-Length": String(obj.body.length),
         "Cache-Control": "public, max-age=3600",
       })
-      const reader = obj.body.getReader()
-      let done = false
-      while (!done) {
-        const result = await reader.read()
-        if (result.value) ctx.res.write(result.value)
-        done = result.done
-      }
-      ctx.res.end()
+      ctx.res.end(obj.body)
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
