@@ -89,6 +89,75 @@ describe("AuthClient.signUp()", () => {
   })
 })
 
+describe("AuthClient.signInAnonymously()", () => {
+  beforeEach(() => vi.restoreAllMocks())
+
+  const ANON_USER = {
+    ...RAW_USER,
+    email: undefined,
+    is_anonymous: true,
+  }
+
+  const ANON_TOKEN_RESPONSE = {
+    ...TOKEN_RESPONSE,
+    user: ANON_USER,
+  }
+
+  it("sends POST to /signup with no email or password", async () => {
+    const fetch = mockFetch(ANON_TOKEN_RESPONSE)
+    vi.stubGlobal("fetch", fetch)
+
+    const { error } = await freshClient().signInAnonymously()
+
+    expect(error).toBeNull()
+    expect(fetch).toHaveBeenCalledWith(
+      `${GOTRUE_URL}/signup`,
+      expect.objectContaining({ method: "POST" }),
+    )
+    const [, opts] = fetch.mock.calls[0] as [string, RequestInit]
+    const body = JSON.parse(opts.body as string) as Record<string, unknown>
+    expect(body["email"]).toBeUndefined()
+    expect(body["password"]).toBeUndefined()
+  })
+
+  it("includes optional user metadata and captcha token", async () => {
+    const fetch = mockFetch(ANON_TOKEN_RESPONSE)
+    vi.stubGlobal("fetch", fetch)
+
+    await freshClient().signInAnonymously({
+      options: { data: { guest: true }, captchaToken: "captcha-123" },
+    })
+
+    const [, opts] = fetch.mock.calls[0] as [string, RequestInit]
+    const body = JSON.parse(opts.body as string) as Record<string, unknown>
+    expect(body["data"]).toEqual({ guest: true })
+    expect(body["gotrue_meta_security"]).toEqual({ captcha_token: "captcha-123" })
+  })
+
+  it("parses isAnonymous from response", async () => {
+    vi.stubGlobal("fetch", mockFetch(ANON_TOKEN_RESPONSE))
+
+    const { data, error } = await freshClient().signInAnonymously()
+
+    expect(error).toBeNull()
+    expect(data.user?.isAnonymous).toBe(true)
+    expect(data.session?.accessToken).toBe("access-token-123")
+  })
+
+  it("returns error when anonymous sign-ins are disabled", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockFetch({ msg: "Anonymous sign-ins are disabled" }, false, 422),
+    )
+
+    const { data, error } = await freshClient().signInAnonymously()
+
+    expect(data.session).toBeNull()
+    expect(error?.message).toBe("Anonymous sign-ins are disabled")
+    expect(error?.status).toBe(422)
+  })
+})
+
 describe("AuthClient.signInWithPassword()", () => {
   beforeEach(() => vi.restoreAllMocks())
 

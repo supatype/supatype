@@ -141,6 +141,30 @@ export class AuthClient {
     return this._parseAuthResponse(res)
   }
 
+  async signInAnonymously(credentials?: {
+    options?: {
+      data?: Record<string, unknown> | undefined
+      captchaToken?: string | undefined
+    } | undefined
+  }): Promise<{
+    data: { session: Session | null; user: User | null }
+    error: SupatypeError | null
+  }> {
+    const body: Record<string, unknown> = {}
+    if (credentials?.options?.data !== undefined) {
+      body["data"] = credentials.options.data
+    }
+    if (credentials?.options?.captchaToken !== undefined) {
+      body["gotrue_meta_security"] = { captcha_token: credentials.options.captchaToken }
+    }
+    const res = await fetch(`${this.url}/signup`, {
+      method: "POST",
+      headers: this.baseHeaders,
+      body: JSON.stringify(body),
+    })
+    return this._parseAuthResponse(res)
+  }
+
   async signInWithOAuth(opts: {
     provider: string
     options?: { redirectTo?: string | undefined } | undefined
@@ -966,6 +990,7 @@ export class AuthClient {
       ...(raw["email"] !== undefined && { email: String(raw["email"]) }),
       ...(raw["phone"] !== undefined && { phone: String(raw["phone"]) }),
       ...(raw["role"] !== undefined && { role: String(raw["role"]) }),
+      ...(raw["is_anonymous"] !== undefined && { isAnonymous: Boolean(raw["is_anonymous"]) }),
       appMetadata: (raw["app_metadata"] ?? {}) as Record<string, unknown>,
       userMetadata: (raw["user_metadata"] ?? {}) as Record<string, unknown>,
       createdAt: String(raw["created_at"] ?? ""),

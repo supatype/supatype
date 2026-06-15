@@ -26,6 +26,7 @@ export interface User {
   email?: string | undefined
   phone?: string | undefined
   role?: string | undefined
+  isAnonymous?: boolean | undefined
   appMetadata: Record<string, unknown>
   userMetadata: Record<string, unknown>
   identities?: UserIdentity[] | undefined
