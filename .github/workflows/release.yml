@@ -99,25 +99,35 @@ jobs:
       - name: Test
         run: pnpm turbo run test
 
-      - name: Publish @supatype/client
-        run: pnpm --filter @supatype/client publish --access public --no-git-checks --tag ${{ contains(needs.prepare.outputs.version, 'alpha') && 'alpha' || contains(needs.prepare.outputs.version, 'beta') && 'beta' || 'latest' }}
+      - name: Publish npm packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          PACKAGES=(
+            types
+            plugin-sdk
+            client
+            common
+            react
+            react-auth
+            ssr
+            ui
+            plugin-seo
+            plugin-color-picker
+            plugin-phone-field
+            solid
+            svelte
+            vue
+            cli
+          )
+          for pkg in "${PACKAGES[@]}"; do
+            echo "::group::Publish @supatype/${pkg}"
+            pnpm --filter "@supatype/${pkg}" publish --access public --no-git-checks --tag "$NPM_PUBLISH_TAG"
+            echo "::endgroup::"
+          done
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Publish @supatype/react
-        run: pnpm --filter @supatype/react publish --access public --no-git-checks --tag ${{ contains(needs.prepare.outputs.version, 'alpha') && 'alpha' || contains(needs.prepare.outputs.version, 'beta') && 'beta' || 'latest' }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Publish @supatype/react-auth
-        run: pnpm --filter @supatype/react-auth publish --access public --no-git-checks --tag ${{ contains(needs.prepare.outputs.version, 'alpha') && 'alpha' || contains(needs.prepare.outputs.version, 'beta') && 'beta' || 'latest' }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Publish @supatype/cli
-        run: pnpm --filter @supatype/cli publish --access public --no-git-checks --tag ${{ contains(needs.prepare.outputs.version, 'alpha') && 'alpha' || contains(needs.prepare.outputs.version, 'beta') && 'beta' || 'latest' }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_PUBLISH_TAG: ${{ contains(needs.prepare.outputs.version, 'alpha') && 'alpha' || contains(needs.prepare.outputs.version, 'beta') && 'beta' || 'latest' }}
 
   # ── Build and push Docker images ────────────────────────────────────────────
   docker-storage:

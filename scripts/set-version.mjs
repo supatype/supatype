@@ -20,25 +20,51 @@ if (!version) {
 const root = new URL("..", import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1")
 const packagesDir = join(root, "packages")
 
-const publishable = [
+/** Published to npm on monorepo version tags (dependency order in release.yml). */
+const npmPackages = [
+  "types",
+  "plugin-sdk",
   "client",
+  "common",
   "react",
   "react-auth",
+  "ssr",
+  "ui",
+  "plugin-seo",
+  "plugin-color-picker",
+  "plugin-phone-field",
+  "solid",
+  "svelte",
+  "vue",
   "cli",
-  // Services (not published to npm but version is useful in image labels)
-  "storage",
-  "realtime",
-  "studio",
 ]
 
-let updated = 0
-for (const dir of publishable) {
+/** Version-synced for Docker image labels; not published to npm. */
+const dockerVersioned = ["storage", "realtime", "studio"]
+
+function setVersion(dir) {
   const pkgPath = join(packagesDir, dir, "package.json")
+  const pkg = JSON.parse(readFileSync(pkgPath, "utf8"))
+  pkg.version = version
+  writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n", "utf8")
+  console.log(`  ${pkg.name} → ${version}`)
+}
+
+let updated = 0
+console.log("npm packages:")
+for (const dir of npmPackages) {
   try {
-    const pkg = JSON.parse(readFileSync(pkgPath, "utf8"))
-    pkg.version = version
-    writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n", "utf8")
-    console.log(`  ${pkg.name} → ${version}`)
+    setVersion(dir)
+    updated++
+  } catch {
+    // skip if package doesn't exist
+  }
+}
+
+console.log("\nDocker-versioned services:")
+for (const dir of dockerVersioned) {
+  try {
+    setVersion(dir)
     updated++
   } catch {
     // skip if package doesn't exist

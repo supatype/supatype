@@ -163,6 +163,9 @@ importers:
       tsx:
         specifier: ^4.19.2
         version: 4.21.0
+      typescript:
+        specifier: ^5
+        version: 5.9.3
     devDependencies:
       '@types/node':
         specifier: ^22
@@ -170,9 +173,6 @@ importers:
       '@types/pg':
         specifier: ^8
         version: 8.18.0
-      typescript:
-        specifier: ^5
-        version: 5.9.3
       vitest:
         specifier: ^4.0.18
         version: 4.0.18(@types/node@22.19.13)(jiti@1.21.7)(tsx@4.21.0)(yaml@2.8.2)

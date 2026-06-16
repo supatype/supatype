@@ -12,6 +12,10 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./seed": {
+      "import": "./dist/seed.js",
+      "types": "./dist/seed.d.ts"
     }
   },
   "scripts": {
@@ -26,12 +30,12 @@
     "commander": "^12.1.0",
     "pg": "^8.13.0",
     "ts-morph": "^28.0.0",
-    "tsx": "^4.19.2"
+    "tsx": "^4.19.2",
+    "typescript": "^5"
   },
   "devDependencies": {
     "@types/node": "^22",
     "@types/pg": "^8",
-    "typescript": "^5",
     "vitest": "^4.0.18"
   }
 }
