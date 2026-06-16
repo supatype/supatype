@@ -8,7 +8,7 @@ export default defineConfig({
   server: { mode: "dev", port: 54399 },
   app: { mode: "none" },
   versions: {
-    engine: "0.1.2",
+    engine: "0.1.1",
     server: "1.0.5",
     postgres: "17.2",
     deno: "2.2.0",
