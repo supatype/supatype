@@ -41,7 +41,7 @@ export type event = Model<{
   access: {
     read: Public
     create: LoggedIn
-    update: Owner<"organizer_id">
+    update: Owner<"organizer">
     delete: Role<"service_role">
   }
 }>

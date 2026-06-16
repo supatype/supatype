@@ -60,8 +60,6 @@ jobs:
       - name: Run supatype dev integration tests
         run: bash tests/integration/scripts/integration-test.sh --skip-build
         env:
-          SUPATYPE_URL: http://localhost:54399
-          SUPATYPE_ANON_KEY: integration-anon-key
           # GitHub-hosted macOS has no Docker daemon; use native Postgres there.
           SUPATYPE_DATABASE_PROVIDER: ${{ matrix.os == 'macos-14' && 'native' || '' }}
 

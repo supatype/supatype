@@ -7,7 +7,8 @@ INTEGRATION_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ROOT_DIR="$(cd "$INTEGRATION_DIR/../.." && pwd)"
 CLI_BIN="$ROOT_DIR/packages/cli/bin/supatype.js"
 COMPOSE_DIR="$INTEGRATION_DIR/.supatype/self-host"
-BASE_URL="${COMPOSE_SMOKE_URL:-http://localhost:18473}"
+KONG_PORT="${SUPATYPE_KONG_PORT:-18473}"
+BASE_URL="${COMPOSE_SMOKE_URL:-http://localhost:${KONG_PORT}}"
 MAX_WAIT=120
 
 cleanup() {
@@ -21,6 +22,9 @@ if [[ ! -f "$CLI_BIN" ]]; then
   echo "ERROR: CLI not found at $CLI_BIN — run 'pnpm build' first"
   exit 1
 fi
+
+# Standalone compose requires SERVICE_ROLE_KEY; .env is gitignored so seed it for CI.
+node "$SCRIPT_DIR/ensure-compose-env.mjs"
 
 # Defaults match self-host compose (:latest on Docker Hub). Override via SUPATYPE_*_IMAGE to pin a version.
 export SUPATYPE_STORAGE_IMAGE="${SUPATYPE_STORAGE_IMAGE:-supatype/storage:latest}"
@@ -42,6 +46,7 @@ for i in $(seq 1 "$MAX_WAIT"); do
   if [[ "$i" -eq "$MAX_WAIT" ]]; then
     echo "  ERROR: Compose stack did not become ready within ${MAX_WAIT}s"
     docker compose -f "$COMPOSE_DIR/docker-compose.yml" ps || true
+    docker logs integration-server-1 2>&1 | tail -20 || true
     exit 1
   fi
   sleep 1

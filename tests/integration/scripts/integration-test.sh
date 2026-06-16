@@ -71,7 +71,8 @@ if [[ "$OS_NAME" == "Darwin" ]]; then
   BASE_URL="${SUPATYPE_URL:-http://localhost:54399}"
 else
   export SUPATYPE_PROVIDER="${SUPATYPE_PROVIDER:-docker}"
-  BASE_URL="${SUPATYPE_URL:-http://localhost:18473}"
+  # Docker dev always goes through Kong — ignore workflow SUPATYPE_URL=:54399.
+  BASE_URL="http://localhost:${SUPATYPE_KONG_PORT:-18473}"
 fi
 export SUPATYPE_URL="$BASE_URL"
 
@@ -104,7 +105,32 @@ fi
 node "$CLI_BIN" dev &
 SUPATYPE_PID=$!
 
-# ── Step 4: Wait for health ───────────────────────────────────────────────────
+# ── Step 4: Sync URL + anon key from .env (written by supatype dev / ensure-compose-env) ─
+
+ENV_FILE="$INTEGRATION_DIR/.env"
+for _ in $(seq 1 30); do
+  if [[ -f "$ENV_FILE" ]] && grep -q '^ANON_KEY=.' "$ENV_FILE"; then
+    if [[ "$SUPATYPE_PROVIDER" == "docker" ]]; then
+      kport="$(grep '^SUPATYPE_KONG_PORT=' "$ENV_FILE" | cut -d= -f2- || true)"
+      if [[ -n "$kport" ]]; then
+        BASE_URL="http://localhost:${kport}"
+        export SUPATYPE_URL="$BASE_URL"
+      fi
+    fi
+    anon="$(grep '^ANON_KEY=' "$ENV_FILE" | cut -d= -f2-)"
+    if [[ -n "$anon" ]]; then
+      export SUPATYPE_ANON_KEY="$anon"
+    fi
+    service="$(grep '^SERVICE_ROLE_KEY=' "$ENV_FILE" | cut -d= -f2- || true)"
+    if [[ -n "$service" ]]; then
+      export SUPATYPE_SERVICE_ROLE_KEY="$service"
+    fi
+    break
+  fi
+  sleep 1
+done
+
+# ── Step 5: Wait for health ───────────────────────────────────────────────────
 
 MAX_WAIT=120
 echo "==> Waiting for $BASE_URL to be ready (up to ${MAX_WAIT}s)..."
@@ -121,15 +147,15 @@ for i in $(seq 1 "$MAX_WAIT"); do
   sleep 1
 done
 
-# ── Step 5: Run tests ─────────────────────────────────────────────────────────
+# ── Step 6: Run tests ─────────────────────────────────────────────────────────
 
 echo "==> Running integration tests"
 cd "$INTEGRATION_DIR"
 
-export SUPATYPE_URL="${SUPATYPE_URL:-http://localhost:54399}"
 export SUPATYPE_ANON_KEY="${SUPATYPE_ANON_KEY:-integration-anon-key}"
+export SUPATYPE_SERVICE_ROLE_KEY="${SUPATYPE_SERVICE_ROLE_KEY:-}"
 
-pnpm exec node --import tsx/esm --test --experimental-test-coverage \
+pnpm exec node --import tsx/esm --test \
   tests/api.test.ts
 
 echo ""

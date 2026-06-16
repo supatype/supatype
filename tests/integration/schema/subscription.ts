@@ -36,7 +36,7 @@ export type subscription = Model<{
   updated_at: ServerDefault<Date>
 }, {
   access: {
-    read: Owner<"subscriber_id">
+    read: Owner<"subscriber">
     create: Role<"service_role">
     update: Role<"service_role">
     delete: Role<"service_role">
