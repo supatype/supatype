@@ -248,9 +248,9 @@ export function dockerPgLoopbackDbUrl(projectName: string, password = DEFAULT_DE
 
 /**
  * Published Hub tag for local dev when CDN server version is not on Docker Hub yet.
- * Keep in sync with tests/integration/scripts/compose-smoke.sh until release publish aligns.
+ * Keep in sync with tests/integration/scripts/compose-smoke.sh.
  */
-export const DEFAULT_SERVER_DOCKER_IMAGE = "supatype/server:v1.0.4-rc.4"
+export const DEFAULT_SERVER_DOCKER_IMAGE = "supatype/server:latest"
 
 /**
  * Run `supatype-server migrate` on the Postgres container network (loopback trust).

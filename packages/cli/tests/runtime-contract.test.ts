@@ -330,7 +330,8 @@ export default defineConfig({
       expect(compose).toContain("unified gateway")
       const kong = readFileSync(out.kongPath, "utf8")
       expect(kong).toContain("http://server:9999")
-      expect(kong).not.toContain("http://postgrest:3000")
+      expect(kong).toContain("http://postgrest:3000/rpc/graphql")
+      expect(kong).toContain("Content-Profile:graphql_public")
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

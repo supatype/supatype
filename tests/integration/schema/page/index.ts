@@ -28,7 +28,7 @@ export type page = Model<WithPublishable<WithTimestamps<{
   access: {
     read: Public
     create: LoggedIn
-    update: Owner<"author_id">
+    update: Owner<"author">
     delete: Role<"service_role">
   }
 }>

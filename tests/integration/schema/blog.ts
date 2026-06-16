@@ -65,7 +65,7 @@ export type userProfile = Model<WithSoftDelete<WithTimestamps<{
   access: {
     read: Public
     create: LoggedIn
-    update: Owner<"author_id">
+    update: Owner<"author">
     delete: Role<"service_role">
   }
 }>
@@ -121,8 +121,8 @@ export type post = Model<WithPublishable<WithTimestamps<{
   access: {
     read: Public
     create: LoggedIn
-    update: Owner<"author_id">
-    delete: Owner<"author_id">
+    update: Owner<"author">
+    delete: Owner<"author">
   }
 }>
 
@@ -137,7 +137,7 @@ export type comment = Model<WithSoftDelete<WithTimestamps<{
   access: {
     read: Public
     create: LoggedIn
-    update: Owner<"author_id">
-    delete: Owner<"author_id">
+    update: Owner<"author">
+    delete: Owner<"author">
   }
 }>

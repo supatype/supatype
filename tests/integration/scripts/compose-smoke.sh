@@ -22,18 +22,11 @@ if [[ ! -f "$CLI_BIN" ]]; then
   exit 1
 fi
 
-# Pin published Hub tags until the next release.yml run moves :latest (alpha overwrites
-# latest while no stable vX.Y.Z tag exists). Override any variable to test :latest after release.
-COMPOSE_TAG="${COMPOSE_DOCKER_TAG:-0.1.0-alpha.6}"
-export SUPATYPE_STORAGE_IMAGE="${SUPATYPE_STORAGE_IMAGE:-supatype/storage:${COMPOSE_TAG}}"
-export SUPATYPE_STUDIO_IMAGE="${SUPATYPE_STUDIO_IMAGE:-supatype/studio:${COMPOSE_TAG}}"
-export SUPATYPE_SERVER_IMAGE="${SUPATYPE_SERVER_IMAGE:-supatype/server:v1.0.4-rc.4}"
-
-if [[ -z "${SUPATYPE_FUNCTIONS_WORKER_IMAGE:-}" ]]; then
-  echo "==> Building functions-worker image (not published on Docker Hub yet)"
-  docker build -t supatype/functions-worker:ci-smoke "$ROOT_DIR/packages/functions-worker"
-  export SUPATYPE_FUNCTIONS_WORKER_IMAGE=supatype/functions-worker:ci-smoke
-fi
+# Defaults match self-host compose (:latest on Docker Hub). Override via SUPATYPE_*_IMAGE to pin a version.
+export SUPATYPE_STORAGE_IMAGE="${SUPATYPE_STORAGE_IMAGE:-supatype/storage:latest}"
+export SUPATYPE_STUDIO_IMAGE="${SUPATYPE_STUDIO_IMAGE:-supatype/studio:latest}"
+export SUPATYPE_SERVER_IMAGE="${SUPATYPE_SERVER_IMAGE:-supatype/server:latest}"
+export SUPATYPE_FUNCTIONS_WORKER_IMAGE="${SUPATYPE_FUNCTIONS_WORKER_IMAGE:-supatype/functions-worker:latest}"
 
 echo "==> Rendering and starting self-host compose"
 echo "    storage=${SUPATYPE_STORAGE_IMAGE} server=${SUPATYPE_SERVER_IMAGE} worker=${SUPATYPE_FUNCTIONS_WORKER_IMAGE}"
