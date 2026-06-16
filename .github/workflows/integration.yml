@@ -20,16 +20,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Exercises `supatype dev` + @supatype/client against pinned CDN binaries.
+  # Exercises `supatype dev` (Docker compose) + @supatype/client against CDN binaries.
+  # macOS native is disabled until native Postgres ships contrib extensions (pgcrypto).
   dev-integration:
-    name: supatype dev (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: supatype dev (docker)
+    runs-on: ubuntu-22.04
     timeout-minutes: 15
-
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-22.04, macos-14]
 
     steps:
       - uses: actions/checkout@v4
@@ -45,8 +41,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.supatype/cache
-          key: supatype-binaries-v2-${{ matrix.os }}-${{ hashFiles('packages/cli/src/binary-cache.ts', 'tests/integration/supatype.config.ts') }}
-          restore-keys: supatype-binaries-v2-${{ matrix.os }}-
+          key: supatype-binaries-v2-ubuntu-22.04-${{ hashFiles('packages/cli/src/binary-cache.ts', 'tests/integration/supatype.config.ts') }}
+          restore-keys: supatype-binaries-v2-ubuntu-22.04-
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -59,15 +55,12 @@ jobs:
 
       - name: Run supatype dev integration tests
         run: bash tests/integration/scripts/integration-test.sh --skip-build
-        env:
-          # GitHub-hosted macOS has no Docker daemon; use native Postgres there.
-          SUPATYPE_DATABASE_PROVIDER: ${{ matrix.os == 'macos-14' && 'native' || '' }}
 
       - name: Upload logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: dev-integration-logs-${{ matrix.os }}
+          name: dev-integration-logs-ubuntu
           path: ~/.supatype/projects/supatype-integration/logs/
           retention-days: 3
 
