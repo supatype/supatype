@@ -5,6 +5,7 @@
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { detectPackageManager } from "./framework.js"
+import { appendDevTaskLog } from "../dev-session.js"
 import { ProcessManager } from "../process-manager.js"
 import { projectRootFromConfig, type SupatypeProjectConfig } from "../project-config.js"
 
@@ -53,7 +54,7 @@ export function startProxyDevApp(
   // pnpm/npm/yarn are .cmd shims on Windows — spawn via shell so PATH resolution works.
   const useShell = process.platform === "win32"
 
-  console.log(`[supatype] Proxy mode: running ${bin} ${args.join(" ")} (${appDir})`)
+  appendDevTaskLog("app", "app", `Proxy mode: running ${bin} ${args.join(" ")} (${appDir})`)
 
   const manager = new ProcessManager(bin, args, {
     label: "app",

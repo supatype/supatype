@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest"
 import { DevLogBus } from "../src/dev-log-bus.js"
 import { filterDevSubprocessLine, formatConsoleArgs, stripAnsi } from "../src/dev-log-filter.js"
-import { resolveDevUiMode } from "../src/dev-session.js"
+import { appendDevTaskLog, beginDevSession, endDevSession, resolveDevUiMode } from "../src/dev-session.js"
 import {
   layoutLogoBlock,
   logoRowCount,
@@ -61,6 +61,19 @@ describe("DevLogBus", () => {
 describe("resolveDevUiMode()", () => {
   it("honours --stream", () => {
     expect(resolveDevUiMode(true)).toBe("stream")
+  })
+})
+
+describe("appendDevTaskLog()", () => {
+  afterEach(() => {
+    endDevSession()
+  })
+
+  it("routes proxy bootstrap lines to the app task in TUI mode", () => {
+    const session = beginDevSession("tui")
+    appendDevTaskLog("app", "app", "Proxy mode: running npm run vite (/tmp/app)")
+    expect(session.bus.getTask("app")?.lines).toEqual(["Proxy mode: running npm run vite (/tmp/app)"])
+    expect(session.bus.getTask("stack")?.lines ?? []).toEqual([])
   })
 })
 

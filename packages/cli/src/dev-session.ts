@@ -4,7 +4,7 @@
 
 import type { ProcessOptions } from "./process-manager.js"
 import { filterDevSubprocessLine, formatConsoleArgs } from "./dev-log-filter.js"
-import { DevLogBus } from "./dev-log-bus.js"
+import { DevLogBus, type DevLogLevel } from "./dev-log-bus.js"
 import { DevTui } from "./dev-tui.js"
 
 export type DevUiMode = "tui" | "stream"
@@ -35,6 +35,24 @@ export function endDevSession(): void {
 
 export function getActiveDevSession(): DevSession | null {
   return activeSession
+}
+
+/** Log to a TUI task stream, or prefixed console output in stream mode. */
+export function appendDevTaskLog(
+  taskId: string,
+  taskTitle: string,
+  line: string,
+  level: DevLogLevel = "log",
+): void {
+  const session = getActiveDevSession()
+  if (session?.isTui()) {
+    session.bus.ensureTask(taskId, taskTitle)
+    session.bus.append(taskId, line, level)
+    return
+  }
+  const prefix = taskId === "stack" ? "[supatype]" : `[${taskId}]`
+  const write = level === "warn" ? console.warn : level === "error" ? console.error : console.log
+  write(`${prefix} ${line}`)
 }
 
 export class DevSession {
