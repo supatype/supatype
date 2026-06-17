@@ -11,6 +11,7 @@ import { signJwt } from "../jwt.js"
 import { provisionBuckets } from "../storage-provision.js"
 import { promptFirstAdminUser } from "./admin.js"
 import { withAdminRoles } from "../studio-admin-roles.js"
+import { restoreSystemRelationTargets } from "../restore-system-relation-targets.js"
 import type { SupatypeProjectConfig } from "../project-config.js"
 
 const DEV_JWT_SECRET = "super-secret-jwt-token-with-at-least-32-characters-long"
@@ -220,5 +221,6 @@ async function writeLocalAdminConfig(ast: unknown, config: SupatypeProjectConfig
   const dir = join(cwd, ".supatype")
   mkdirSync(dir, { recursive: true })
   const admin = withAdminRoles(await engineRequest<unknown>("/admin", { ast }), config)
+  restoreSystemRelationTargets(admin, ast)
   writeFileSync(join(dir, "admin-config.json"), `${JSON.stringify(admin, null, 2)}\n`)
 }

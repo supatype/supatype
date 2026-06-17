@@ -62,7 +62,7 @@ function postgresUnit(
 ): string {
   const dataDir = config.database.data_dir ?? join(stateDir, "data")
   const logDir = join(stateDir, "logs")
-  const pgBinDir = `%h/.supatype/cache/postgres/${config.versions.postgres}/bin`
+  const pgBinDir = `%h/.supatype/cache/postgres/${config.versions?.postgres ?? "latest"}/bin`
 
   return `[Unit]
 Description=Supatype Postgres (${config.project.name})
@@ -100,7 +100,7 @@ function serverUnit(
   envFile: string,
 ): string {
   const port = config.server.port ?? 54321
-  const serverBin = `%h/.supatype/cache/server/${config.versions.server}/supatype-server`
+  const serverBin = `%h/.supatype/cache/server/${config.versions?.server ?? "latest"}/supatype-server`
   const logDir = join(stateDir, "logs")
 
   const extraArgs: string[] = [`--mode ${config.server.mode}`]

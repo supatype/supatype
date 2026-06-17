@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { runtimeRouteSpec } from "../src/runtime-routes.js"
 import { buildKongDeclarative } from "../src/kong-config.js"
-import { renderSelfHostCompose, writeSelfHostCompose } from "../src/self-host-compose.js"
+import { composeDockerImageEnv, renderSelfHostCompose, writeSelfHostCompose } from "../src/self-host-compose.js"
 import { updateAppConfigInProject } from "../src/app-config.js"
 import type { SupatypeProjectConfig } from "../src/project-config.js"
 import { DENO_RELEASE_PIN } from "../src/release-pins.js"
@@ -107,6 +107,25 @@ describe("runtime contract", () => {
     expect(compose).toContain("\n  schema-engine:\n")
     expect(compose).toContain('profiles: ["tools"]')
     expect(compose).toContain("supatype/schema-engine:latest")
+  })
+
+  it("composeDockerImageEnv maps pinned versions to SUPATYPE_*_IMAGE", () => {
+    expect(composeDockerImageEnv(baseConfig)).toEqual({
+      SUPATYPE_ENGINE_IMAGE: "supatype/schema-engine:v0.4.2",
+      SUPATYPE_SERVER_IMAGE: "supatype/server:v0.1.0",
+      SUPATYPE_POSTGRES_IMAGE: "supatype/postgres:17-latest",
+    })
+    expect(composeDockerImageEnv({ ...baseConfig, versions: undefined })).toEqual({})
+    expect(
+      composeDockerImageEnv({
+        ...baseConfig,
+        database: { provider: "docker", image: "supatype/postgres:custom" },
+      }),
+    ).toEqual({
+      SUPATYPE_ENGINE_IMAGE: "supatype/schema-engine:v0.4.2",
+      SUPATYPE_SERVER_IMAGE: "supatype/server:v0.1.0",
+      SUPATYPE_POSTGRES_IMAGE: "supatype/postgres:custom",
+    })
   })
 
   it("self-host compose mounts project root at /project (project-directory relative)", () => {

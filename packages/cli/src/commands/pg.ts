@@ -118,9 +118,9 @@ async function pgOpts(
   const pgCacheDir = await (async () => {
     const override = config.overrides?.postgres_dir
     if (override) return join(override, "bin")
-    const { cachePath, currentPlatform } = await import("../binary-cache.js")
+    const { cachePath, currentPlatform, resolveVersionFor } = await import("../binary-cache.js")
     const platform = currentPlatform()
-    const version = config.versions.postgres
+    const version = await resolveVersionFor("postgres", config)
     return join(cachePath("postgres", version), `pg-${version}`, "bin")
   })()
 

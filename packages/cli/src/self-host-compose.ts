@@ -2,8 +2,75 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { dirname, join, relative, resolve } from "node:path"
 import { spawnSync } from "node:child_process"
 import { preferredFunctionsPathFromProject, type SupatypeProjectConfig } from "./project-config.js"
-import { hasEngineOverride, hasStudioOverride } from "./binary-cache.js"
+import { hasEngineOverride, hasStudioOverride, pinnedVersion, fetchLatestVersion, VERSION_PIN_LOCAL } from "./binary-cache.js"
 import { buildKongDeclarative } from "./kong-config.js"
+
+/** Env keys written when `versions` pins exist in supatype.config.ts. */
+export const COMPOSE_PINNED_IMAGE_ENV_KEYS = [
+  "SUPATYPE_ENGINE_IMAGE",
+  "SUPATYPE_SERVER_IMAGE",
+  "SUPATYPE_POSTGRES_IMAGE",
+] as const
+
+type DockerPinComponent = "engine" | "server" | "postgres"
+
+/** Map a config version pin to a Docker Hub image reference. */
+export function dockerImageRef(
+  component: DockerPinComponent,
+  version: string,
+  config?: SupatypeProjectConfig,
+): string {
+  const trimmed = version.trim()
+  switch (component) {
+    case "engine":
+      return `supatype/schema-engine:${trimmed.startsWith("v") ? trimmed : `v${trimmed}`}`
+    case "server":
+      return `supatype/server:${trimmed.startsWith("v") ? trimmed : `v${trimmed}`}`
+    case "postgres": {
+      const override = config?.database?.image?.trim()
+      if (override) return override
+      if (trimmed.includes("-latest")) return `supatype/postgres:${trimmed}`
+      const major = trimmed.split(".")[0]
+      return `supatype/postgres:${major}-latest`
+    }
+  }
+}
+
+/**
+ * When the user pins `versions` in config, sync matching SUPATYPE_*_IMAGE vars for Compose.
+ * Unpinned components are omitted so compose falls back to :latest defaults.
+ */
+export function composeDockerImageEnv(config: SupatypeProjectConfig): Record<string, string> {
+  const env: Record<string, string> = {}
+  const versions = config.versions
+  if (!versions) return env
+
+  if (versions.engine && versions.engine !== VERSION_PIN_LOCAL) {
+    env.SUPATYPE_ENGINE_IMAGE = dockerImageRef("engine", versions.engine)
+  }
+  if (versions.server && versions.server !== VERSION_PIN_LOCAL) {
+    env.SUPATYPE_SERVER_IMAGE = dockerImageRef("server", versions.server)
+  }
+  if (versions.postgres && versions.postgres !== VERSION_PIN_LOCAL) {
+    env.SUPATYPE_POSTGRES_IMAGE = dockerImageRef("postgres", versions.postgres, config)
+  }
+  return env
+}
+
+/**
+ * Schema-engine image for a one-off `docker compose run` when pushing schema.
+ * Uses config pin when set; otherwise CDN engine semver (Docker Hub `:latest` can lag).
+ * Does not touch `.env` — server/postgres still use compose `:latest` defaults.
+ */
+export async function schemaEngineImageForPush(
+  config: SupatypeProjectConfig,
+): Promise<string | undefined> {
+  const pinned = pinnedVersion("engine", config)
+  if (pinned === VERSION_PIN_LOCAL) return undefined
+  if (pinned) return dockerImageRef("engine", pinned)
+  const version = await fetchLatestVersion("engine")
+  return dockerImageRef("engine", version)
+}
 
 export interface SelfHostComposePaths {
   dir: string
@@ -59,21 +126,9 @@ function kongMountPath(_cwd: string): string {
 /** Host Vite dev server as seen from Kong inside Docker Compose. */
 export const COMPOSE_STUDIO_HOST_URL = "http://host.docker.internal:3002"
 
-/** Local monorepo Studio image for `supatype dev` (dogfooding). */
-function studioServiceBlock(cwd: string, devLocal: boolean): string {
-  if (!devLocal) {
-    return `    image: \${SUPATYPE_STUDIO_IMAGE:-supatype/studio:latest}`
-  }
-  const monorepoRoot = resolve(cwd, "..", "supatype")
-  const studioDockerfile = join(monorepoRoot, "packages", "studio", "Dockerfile")
-  if (!existsSync(studioDockerfile) || !existsSync(join(monorepoRoot, "pnpm-workspace.yaml"))) {
-    return `    image: \${SUPATYPE_STUDIO_IMAGE:-supatype/studio:latest}`
-  }
-  const context = relativeFromProjectRoot(cwd, monorepoRoot)
-  return `    build:
-      context: ${context}
-      dockerfile: packages/studio/Dockerfile
-    image: supatype/studio:dev-local`
+/** Studio container — always Docker Hub unless SUPATYPE_STUDIO_IMAGE is set in .env. */
+function studioServiceBlock(): string {
+  return `    image: \${SUPATYPE_STUDIO_IMAGE:-supatype/studio:latest}`
 }
 
 /** Host dev app (Astro/Vite on the machine) as seen from inside compose services. */
@@ -119,7 +174,7 @@ export function renderSelfHostCompose(
   const devLocal = options?.devLocal === true
   const studioHostDev = devLocal && hasStudioOverride(config)
   const appEnv = serverAppEnvForCompose(config, devLocal)
-  const studioService = studioServiceBlock(cwd, devLocal)
+  const studioService = studioServiceBlock()
   const studioBlock = studioHostDev
     ? ""
     : `
@@ -179,7 +234,7 @@ ${dbPorts}    volumes:
       - "3000"
     environment:
       PGRST_DB_URI: postgresql://\${POSTGRES_USER:-supatype_admin}:\${POSTGRES_PASSWORD:-postgres}@db:5432/\${POSTGRES_DB:-supatype}
-      PGRST_DB_SCHEMA: "public, supatype, graphql_public"
+      PGRST_DB_SCHEMA: "public, supatype, graphql_public, auth"
       PGRST_DB_ANON_ROLE: anon
       PGRST_JWT_SECRET: \${JWT_SECRET:-super-secret-jwt-token-change-in-production}
       PGRST_DB_EXTRA_SEARCH_PATH: public,extensions
@@ -232,9 +287,9 @@ ${serverPorts}    volumes:
     working_dir: /project
     environment:
       SUPATYPE_MODE: ${devLocal ? "dev" : "standalone"}
-      SUPATYPE_MANIFEST_PATH: /project/.supatype/manifest.json
-      SUPATYPE_ADMIN_CONFIG_PATH: /project/.supatype/admin-config.json
-      SUPATYPE_API_CONFIG_PATH: /project/.supatype/api-config.json
+      SUPATYPE_MANIFEST_PATH: .supatype/manifest.json
+      SUPATYPE_ADMIN_CONFIG_PATH: .supatype/admin-config.json
+      SUPATYPE_API_CONFIG_PATH: .supatype/api-config.json
       SUPATYPE_POSTGREST_URL: http://postgrest:3000
       SUPATYPE_GRAPHQL_URL: http://postgrest:3000
       SUPATYPE_STORAGE_URL: http://storage:5000
@@ -355,14 +410,23 @@ export function writeSelfHostCompose(
   return paths
 }
 
+export interface RunDockerComposeOptions {
+  /** Suppress docker compose progress UI (container status lines). */
+  quiet?: boolean
+}
+
 export function runDockerCompose(
   composePath: string,
   args: string[],
   projectRoot: string = process.cwd(),
   composeProject?: string,
+  options?: RunDockerComposeOptions,
 ): number {
   const envFile = resolve(projectRoot, ".env")
   const composeArgs = ["compose"]
+  if (options?.quiet) {
+    composeArgs.push("--progress", "quiet")
+  }
   // Per-project name isolates containers/volumes/network so multiple Supatype
   // projects on one machine never share a database (default would be the
   // ".supatype/self-host" dir name, identical for every project).
@@ -374,11 +438,10 @@ export function runDockerCompose(
     composeArgs.push("--env-file", envFile)
   }
   composeArgs.push(...args)
-  const result = spawnSync(
-    "docker",
-    composeArgs,
-    { stdio: "inherit", cwd: projectRoot },
-  )
+  const env: NodeJS.ProcessEnv = options?.quiet
+    ? { ...process.env, COMPOSE_PROGRESS: "quiet" }
+    : process.env
+  const result = spawnSync("docker", composeArgs, { stdio: "inherit", cwd: projectRoot, env })
   return result.status ?? 1
 }
 

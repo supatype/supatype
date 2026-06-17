@@ -101,7 +101,7 @@ describe("loadConfig()", () => {
     expect(cfg.connection).toBe("postgresql://localhost/jsdb")
   })
 
-  it("throws if config is missing the versions section", () => {
+  it("loads config without a versions section (latest by default)", () => {
     writeFileSync(
       join(tmpDir, "supatype.config.ts"),
       `export default {
@@ -112,7 +112,8 @@ describe("loadConfig()", () => {
   schema: { path: "./schema/index.ts" },
 }`,
     )
-    expect(() => loadConfig(tmpDir)).toThrow(/versions/)
+    const cfg = loadConfig(tmpDir)
+    expect(cfg.versions).toBeUndefined()
   })
 
   it("prefers supatype.config.ts over supatype.config.js when both exist", () => {

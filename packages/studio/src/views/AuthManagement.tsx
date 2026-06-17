@@ -1,4 +1,5 @@
-import React, { useState, useCallback } from "react"
+import React, { useState, useCallback, useEffect } from "react"
+import { useSearchParams } from "react-router-dom"
 import { useStudioClient } from "../StudioCore.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import { useProjectProxy } from "../hooks/useProjectProxy.js"
@@ -436,6 +437,8 @@ export function AuthManagement(): React.ReactElement {
 
   const users = usersData ?? []
   const sessions = sessionsData ?? []
+  const [searchParams, setSearchParams] = useSearchParams()
+  const userIdParam = searchParams.get("user")
 
   // Filters
   const [search, setSearch] = useState("")
@@ -448,6 +451,29 @@ export function AuthManagement(): React.ReactElement {
   const [editingUser, setEditingUser] = useState<AuthUser | null>(null)
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [showInviteForm, setShowInviteForm] = useState(false)
+
+  const openUser = useCallback((u: AuthUser) => {
+    setSelectedUser(u)
+    setEditingUser(null)
+    setShowCreateForm(false)
+    setShowInviteForm(false)
+    setSearchParams({ user: u.id }, { replace: true })
+  }, [setSearchParams])
+
+  useEffect(() => {
+    if (!userIdParam) return
+    const found = users.find((u) => u.id === userIdParam)
+    if (found) {
+      setSelectedUser(found)
+      return
+    }
+    if (loading) return
+    void authAdminFetch(`/users/${encodeURIComponent(userIdParam)}`)
+      .then((raw) => setSelectedUser(mapGoTrueUser(raw)))
+      .catch(() => {
+        setSearchParams({}, { replace: true })
+      })
+  }, [userIdParam, users, loading, authAdminFetch, setSearchParams])
 
   // Filtering logic
   const filtered = users.filter((u) => {
@@ -560,6 +586,11 @@ export function AuthManagement(): React.ReactElement {
     setEditingUser(null)
     setShowCreateForm(false)
     setShowInviteForm(false)
+    if (searchParams.has("user")) {
+      const next = new URLSearchParams(searchParams)
+      next.delete("user")
+      setSearchParams(next, { replace: true })
+    }
   }
 
   if (users.length === 0 && !panelOpen) {
@@ -620,7 +651,7 @@ export function AuthManagement(): React.ReactElement {
               <tr
                 key={u.id}
                 className="border-b border-border hover:bg-accent/50 cursor-pointer"
-                onClick={() => setSelectedUser(u)}
+                onClick={() => openUser(u)}
               >
                 <Td className="font-medium">{u.email}</Td>
                 <Td>
@@ -659,7 +690,7 @@ export function AuthManagement(): React.ReactElement {
                     <Button size="xs" onClick={() => { void handleToggleDisable(u.id) }}>
                       {u.disabled ? "Enable" : "Disable"}
                     </Button>
-                    <Button size="xs" onClick={() => { setSelectedUser(u) }} title="View details + impersonate">
+                    <Button size="xs" onClick={() => openUser(u)} title="View details + impersonate">
                       View
                     </Button>
                   </div>

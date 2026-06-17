@@ -85,10 +85,13 @@ export interface SupatypeProjectConfig {
     start?: string
   }
   /**
-   * Pinned binary versions per component. Use **`"local"`** with the matching **`overrides.*`**
-   * entry when testing a local build (Phase 10.7).
+   * Optional pins for engine, server, postgres, and deno.
+   * Omitted = resolve latest from CDN at runtime (native) or use Docker :latest.
+   * When set, native binaries cache under ~/.supatype/cache/{component}/{version}/
+   * and Docker image tags are synced to `.env` on `supatype dev` / `supatype push`.
+   * Use **`"local"`** with the matching **`overrides.*`** entry for contributor builds.
    */
-  versions: ComponentVersions
+  versions?: Partial<ComponentVersions>
   /**
    * Override component binaries with local build paths.
    * Intended for supatype contributors testing local changes.
@@ -233,7 +236,9 @@ export function mergeProjectConfig(
     database: { ...base.database, ...override.database },
     server: { ...base.server, ...override.server },
     app: { ...base.app, ...override.app },
-    versions: { ...base.versions, ...override.versions },
+    ...(base.versions !== undefined || override.versions !== undefined
+      ? { versions: { ...base.versions, ...override.versions } }
+      : {}),
     ...(base.overrides !== undefined || override.overrides !== undefined
       ? {
           overrides: {
@@ -306,9 +311,6 @@ export function validateProjectConfig(raw: unknown, filename: string): SupatypeP
   }
   if (!cfg["app"]) {
     throw new Error(`${filename}: app section is required`)
-  }
-  if (!cfg["versions"]) {
-    throw new Error(`${filename}: versions section is required`)
   }
 
   return raw as SupatypeProjectConfig

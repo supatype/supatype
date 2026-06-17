@@ -112,7 +112,7 @@ export function isLinkedToCloudProject(cwd: string, config: SupatypeProjectConfi
 
 export type { Component, ComponentVersions } from "./components.js"
 export { BINARY_COMPONENTS } from "./components.js"
-import { BINARY_COMPONENTS, type Component } from "./components.js"
+import { BINARY_COMPONENTS, type Component, type ComponentVersions } from "./components.js"
 
 export interface PlatformId {
   os: "linux" | "darwin" | "windows"
@@ -226,7 +226,7 @@ export async function resolveBinary(
   }
 
   const overridePath = config.overrides?.[component === "postgres" ? "postgres_dir" : component]
-  const version = versionFor(component, config)
+  const version = await resolveVersionFor(component, config)
 
   if (version === VERSION_PIN_LOCAL && !overridePath) {
     const key = component === "postgres" ? "postgres_dir" : component
@@ -730,10 +730,30 @@ export function normalisePlatformPath(p: string): string {
   return result
 }
 
+export function pinnedVersion(component: Component, config: SupatypeProjectConfig): string | undefined {
+  const version = config.versions?.[component]
+  if (typeof version !== "string") return undefined
+  const trimmed = version.trim()
+  return trimmed === "" ? undefined : trimmed
+}
+
+/** Pinned version from config, or latest from CDN when unset. */
+export async function resolveVersionFor(
+  component: Component,
+  config: SupatypeProjectConfig,
+): Promise<string> {
+  const pinned = pinnedVersion(component, config)
+  if (pinned) return pinned
+  return fetchLatestVersion(component)
+}
+
+/** @deprecated Prefer {@link pinnedVersion} or {@link resolveVersionFor}. */
 export function versionFor(component: Component, config: SupatypeProjectConfig): string {
-  const version = config.versions[component]
-  if (typeof version !== "string" || version.trim() === "") {
-    throw new Error(`[supatype] versions.${component} must be set in supatype.config.ts`)
+  const version = pinnedVersion(component, config)
+  if (!version) {
+    throw new Error(
+      `[supatype] versions.${component} is not pinned in supatype.config.ts (omit versions to use latest)`,
+    )
   }
   return version
 }
@@ -780,7 +800,10 @@ export async function fetchAllLatestVersions(): Promise<Record<Component, string
  * Verify all cached binaries for the current platform (used by integration CI).
  * Throws if any cached component is missing or fails format checks.
  */
-export function verifyCachedBinaries(versions: SupatypeProjectConfig["versions"]): void {
+export function verifyCachedBinaries(versions: Partial<ComponentVersions> | undefined): void {
+  if (!versions) {
+    throw new Error("[supatype] verifyCachedBinaries requires pinned versions")
+  }
   const platform = currentPlatform()
   for (const component of BINARY_COMPONENTS) {
     const version = versions[component]
@@ -798,15 +821,15 @@ export function verifyCachedBinaries(versions: SupatypeProjectConfig["versions"]
 }
 
 export async function downloadAll(
-  versions: SupatypeProjectConfig["versions"],
+  versions: Partial<ComponentVersions> | undefined,
   graceful = false,
 ): Promise<void> {
   const platform = currentPlatform()
   const components: Component[] = [...BINARY_COMPONENTS]
-  const fakeConfig = { versions } as SupatypeProjectConfig
+  const latest = await fetchAllLatestVersions()
 
   for (const component of components) {
-    const version = versionFor(component, fakeConfig)
+    const version = versions?.[component] ?? latest[component]
     if (version === VERSION_PIN_LOCAL) continue
     try {
       await download(component, version, platform)

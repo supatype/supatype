@@ -39,9 +39,10 @@ describe("scaffold()", () => {
     const content = readFileSync(join(tmpRoot, "supatype.config.ts"), "utf8")
     expect(content).toContain("blog-app")
     expect(content).toContain("defineConfig")
-    expect(content).toContain('provider: "native"')
+    expect(content).toContain('provider: "docker"')
     expect(content).toContain("schema:")
-    expect(content).toContain("versions:")
+    expect(content).toContain("Optional: pin component versions")
+    expect(content).not.toMatch(/^\s*versions:\s*\{/m)
   })
 
   it("package.json includes @supatype/cli and @supatype/types", () => {

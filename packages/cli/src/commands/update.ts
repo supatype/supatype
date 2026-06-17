@@ -9,7 +9,8 @@ import { basename, resolve } from "node:path"
 import { loadConfig } from "../config.js"
 import { resolveRuntimeProvider } from "../project-config.js"
 import { runDockerCompose, writeSelfHostCompose } from "../self-host-compose.js"
-import { download, currentPlatform, fetchAllLatestVersions, type Component } from "../binary-cache.js"
+import { syncComposeImagePins } from "../dev-compose.js"
+import { download, currentPlatform, fetchAllLatestVersions, pinnedVersion, type Component } from "../binary-cache.js"
 
 const CONFIG_CANDIDATES = ["supatype.config.ts", "supatype.config.js", "supatype.config.mjs"]
 
@@ -39,6 +40,7 @@ export function registerUpdate(program: Command): void {
           return
         }
         const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
+        syncComposeImagePins(cwd, config)
         console.log("Pulling self-host compose images...")
         const status = runDockerCompose(paths.composePath, ["pull"], cwd)
         if (status !== 0) process.exit(status)
@@ -55,16 +57,30 @@ export function registerUpdate(program: Command): void {
       const latestVersions = await fetchAllLatestVersions()
 
       for (const component of components) {
-        const current = config.versions[component]
-        if (current === "local") continue
         const latest = latestVersions[component]
+        const current = pinnedVersion(component, config)
+        if (!current) {
+          if (opts.check) {
+            console.log(`  ${component}  (latest) → ${latest} on CDN`)
+          } else {
+            console.log(`\nDownloading latest ${component} v${latest}...`)
+            try {
+              await download(component, latest, platform)
+              console.log(`  ${component} v${latest} downloaded.`)
+            } catch (err) {
+              console.error(`  Failed: ${(err as Error).message}`)
+            }
+          }
+          continue
+        }
+        if (current === "local") continue
         if (current !== latest) {
           updates.push({ component, from: current, to: latest })
         }
       }
 
       if (updates.length === 0) {
-        console.log("All components are up to date.")
+        console.log(opts.check ? "All pinned components match CDN latest." : "All components are up to date.")
         return
       }
 
@@ -96,11 +112,22 @@ export function registerUpdate(program: Command): void {
       let text = readFileSync(configPath, "utf8")
       for (const { component, to } of updates) {
         const key = component
-        // engine: "0.4.1"  or  engine: '0.4.1'
-        text = text.replace(
-          new RegExp(`(${key}\\s*:\\s*['"])[^'"]*(['"])`),
-          `$1${to}$2`,
-        )
+        if (text.includes(`${key}:`)) {
+          text = text.replace(
+            new RegExp(`(${key}\\s*:\\s*['"])[^'"]*(['"])`),
+            `$1${to}$2`,
+          )
+        } else if (text.includes("versions:")) {
+          text = text.replace(
+            /(versions:\s*\{[^}]*)(\})/,
+            `$1,\n    ${key}: "${to}"$2`,
+          )
+        } else {
+          text = text.replace(
+            /(\n)(\s*)(email:|schema:|storage:)/,
+            `$1$2versions: {\n$2  ${key}: "${to}",\n$2},\n$2$3`,
+          )
+        }
       }
 
       writeFileSync(configPath, text, "utf8")

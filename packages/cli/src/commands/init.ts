@@ -2,7 +2,6 @@ import type { Command } from "commander"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { resolve, join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
-import { fetchAllLatestVersions } from "../binary-cache.js"
 
 export { scaffold }
 
@@ -46,22 +45,14 @@ export function registerInit(program: Command): void {
 
       if (name) mkdirSync(dir, { recursive: true })
 
-      let versions: Record<string, string> = {}
-      try {
-        console.log("Fetching latest component versions from CDN...")
-        versions = await fetchAllLatestVersions()
-      } catch {
-        // Non-fatal: scaffold with placeholder versions; user can run `supatype update`.
-      }
-
-      scaffold(dir, projectName, opts.mode as "dev" | "standalone", versions)
+      scaffold(dir, projectName, opts.mode as "dev" | "standalone")
 
       console.log(`\nSupatype project ready${name ? ` in ${name}/` : ""}.\n`)
       console.log("Next steps:")
       if (name) console.log(`  cd ${name}`)
       console.log("  npm install")
       console.log("  supatype keys")
-      console.log("  supatype dev          # native Postgres + supatype-server")
+      console.log("  supatype dev          # Docker Compose stack (Kong :18473)")
       console.log("  supatype push         # apply schema + generate types")
       console.log("\nStatic frontend (self-host):")
       console.log("  supatype app add --static ./public")
@@ -76,7 +67,7 @@ export function registerInit(program: Command): void {
     })
 }
 
-function scaffold(dir: string, projectName: string, mode: "dev" | "standalone" = "dev", versions: Record<string, string> = {}): void {
+function scaffold(dir: string, projectName: string, mode: "dev" | "standalone" = "dev"): void {
   const write = (rel: string, content: string) => {
     const full = join(dir, rel)
     mkdirSync(resolve(full, ".."), { recursive: true })
@@ -91,7 +82,7 @@ function scaffold(dir: string, projectName: string, mode: "dev" | "standalone" =
     console.log("  skipped  package.json (already exists)")
   }
 
-  write("supatype.config.ts", tsConfigTemplate(projectName, mode, versions))
+  write("supatype.config.ts", tsConfigTemplate(projectName, mode))
   write("schema/index.ts", schemaTemplate())
   write(".env", envTemplate(projectName))
   write("seed.ts", seedTemplate(projectName))
@@ -124,20 +115,19 @@ function packageJsonTemplate(projectName: string, cliVersion: string): string {
 `
 }
 
-function tsConfigTemplate(projectName: string, mode: "dev" | "standalone", versions: Record<string, string> = {}): string {
+function tsConfigTemplate(projectName: string, mode: "dev" | "standalone"): string {
   const domainField =
     mode === "standalone"
       ? `    domain: "",  // e.g. "api.example.com" for ACME TLS\n`
       : ""
-  const v = (key: string, fallback: string) => versions[key] ?? fallback
   return `import { defineConfig } from "@supatype/cli"
 
 export default defineConfig({
   project: { name: "${projectName}" },
-  provider: "native",
-  // provider: "docker"  // full self-host Compose stack (Kong :18473)
+  provider: "docker",
+  // provider: "native"  // host Postgres + supatype-server binaries (no Docker)
   database: {
-    provider: "native",
+    provider: "docker",
   },
   server: {
     mode: "${mode}",
@@ -149,12 +139,8 @@ ${domainField}  },
     // mode: "proxy", upstream: "http://localhost:3000", start: "dev",
     // vite_dev_url: "http://127.0.0.1:5173",  // dev HMR at /_vite (when using a separate Vite server)
   },
-  versions: {
-    engine: "${v("engine", "latest")}",
-    server: "${v("server", "latest")}",
-    postgres: "${v("postgres", "latest")}",
-    deno: "${v("deno", "latest")}",
-  },
+  // Optional: pin component versions (native cache + Docker images synced to .env on dev/push)
+  // versions: { engine: "0.1.2", server: "1.0.5", postgres: "17.2", deno: "2.2.0" },
   email: { provider: "console" },
   storage: { provider: "local", local_path: ".supatype/storage" },
   schema: { path: "schema/index.ts", pg_schema: "public" },

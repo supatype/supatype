@@ -286,7 +286,7 @@ async function serve(cwd: string, opts: { port: string; envFile: string }): Prom
   try {
     denoBin = await ensureBinary("deno", config)
   } catch (err) {
-    console.error(`[supatype] Could not provision Deno v${config.versions.deno}: ${(err as Error).message}`)
+    console.error(`[supatype] Could not provision Deno: ${(err as Error).message}`)
     process.exit(1)
   }
 

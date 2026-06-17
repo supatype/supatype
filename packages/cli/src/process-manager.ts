@@ -3,10 +3,11 @@
  * colored prefix, and restart on crash with exponential backoff.
  */
 
-import { type ChildProcess, spawn } from "node:child_process"
+import { type ChildProcess, spawn, spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { unlink } from "node:fs/promises"
 import { join } from "node:path"
+import { enhanceProcessOptions } from "./dev-session.js"
 
 export interface ProcessOptions {
   /** Human-readable label (used in log prefix and PID filename). */
@@ -27,6 +28,10 @@ export interface ProcessOptions {
   onExit?: () => void
   /** Use shell to spawn (required for pnpm/npm/yarn .cmd shims on Windows). */
   shell?: boolean
+  /** When set (TUI mode), receive log lines instead of writing to stdout/stderr. */
+  onLine?: (line: string, stream: "stdout" | "stderr") => void
+  /** Return false to drop a line before logging. */
+  shouldLogLine?: (line: string) => boolean
 }
 
 const RESET = "\x1b[0m"
@@ -35,13 +40,24 @@ export class ProcessManager {
   private child: ChildProcess | null = null
   private stopped = false
   private backoffMs: number
-  private opts: Required<ProcessOptions>
+  private opts: ProcessOptions & {
+    colour: string
+    cwd: string
+    env: Record<string, string>
+    initialBackoffMs: number
+    maxBackoffMs: number
+    onExit: () => void
+    shell: boolean
+  }
+  /** Skip immediate duplicate lines (npm prints script banners to both streams). */
+  private lastLoggedLine = ""
 
   constructor(
     private readonly bin: string,
     private readonly args: string[],
     opts: ProcessOptions,
   ) {
+    const merged = enhanceProcessOptions(opts.label, opts)
     this.opts = {
       colour: "\x1b[36m",
       cwd: process.cwd(),
@@ -50,7 +66,7 @@ export class ProcessManager {
       maxBackoffMs: 30_000,
       onExit: () => {},
       shell: false,
-      ...opts,
+      ...merged,
     }
     this.backoffMs = this.opts.initialBackoffMs
   }
@@ -64,7 +80,20 @@ export class ProcessManager {
   /** Stop the process and clear the PID file. */
   async stop(): Promise<void> {
     this.stopped = true
-    if (this.child && !this.child.killed) {
+    if (!this.child || this.child.killed) {
+      await this.clearPid()
+      return
+    }
+
+    const pid = this.child.pid
+    if (process.platform === "win32" && this.opts.shell && pid) {
+      spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" })
+      this.child = null
+      await this.clearPid()
+      return
+    }
+
+    if (!this.child.killed) {
       this.child.kill("SIGTERM")
       // Give it 5s to exit gracefully, then SIGKILL.
       await new Promise<void>((resolve) => {
@@ -99,21 +128,41 @@ export class ProcessManager {
       ? `${this.opts.colour}[${this.opts.label}]${RESET} `
       : `[${this.opts.label}] `
 
+    const logLine = (line: string, stream: NodeJS.WriteStream): void => {
+      if (!line) return
+      if (this.opts.shouldLogLine && !this.opts.shouldLogLine(line)) return
+      if (this.opts.onLine) {
+        if (line !== this.lastLoggedLine) {
+          this.lastLoggedLine = line
+          this.opts.onLine(line, stream === process.stderr ? "stderr" : "stdout")
+        }
+        return
+      }
+      if (line === this.lastLoggedLine) return
+      this.lastLoggedLine = line
+      stream.write(prefix + line + "\n")
+    }
+
     this.child.stdout?.on("data", (chunk: Buffer) => {
       for (const line of chunk.toString().split("\n")) {
-        if (line) process.stdout.write(prefix + line + "\n")
+        logLine(line, process.stdout)
       }
     })
 
     this.child.stderr?.on("data", (chunk: Buffer) => {
       for (const line of chunk.toString().split("\n")) {
-        if (line) process.stderr.write(prefix + line + "\n")
+        logLine(line, process.stderr)
       }
     })
 
     this.child.once("error", (err) => {
       if (this.stopped) return
-      process.stderr.write(`${prefix}failed to start: ${err.message}\n`)
+      const message = `${prefix}failed to start: ${err.message}\n`
+      if (this.opts.onLine) {
+        this.opts.onLine(`failed to start: ${err.message}`, "stderr")
+      } else {
+        process.stderr.write(message)
+      }
       setTimeout(() => {
         this.backoffMs = Math.min(this.backoffMs * 2, this.opts.maxBackoffMs)
         this.spawn()
@@ -129,9 +178,12 @@ export class ProcessManager {
       }
 
       const reason = signal ? `signal ${signal}` : `code ${code}`
-      process.stderr.write(
-        `${prefix}process exited (${reason}), restarting in ${this.backoffMs}ms\n`,
-      )
+      const restartMsg = `${prefix}process exited (${reason}), restarting in ${this.backoffMs}ms\n`
+      if (this.opts.onLine) {
+        this.opts.onLine(`process exited (${reason}), restarting in ${this.backoffMs}ms`, "stderr")
+      } else {
+        process.stderr.write(restartMsg)
+      }
 
       setTimeout(() => {
         this.backoffMs = Math.min(this.backoffMs * 2, this.opts.maxBackoffMs)

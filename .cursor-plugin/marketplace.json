@@ -1,0 +1,26 @@
+{
+  "name": "supatype",
+  "owner": {
+    "name": "Supatype",
+    "email": "hello@supatype.dev"
+  },
+  "metadata": {
+    "description": "Supatype plugins for AI coding assistants",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "supatype",
+      "source": "./",
+      "description": "Work with Supatype: schema, CLI, client integration, and self-host",
+      "version": "0.1.0",
+      "author": {
+        "name": "Supatype"
+      },
+      "homepage": "https://supatype.github.io/supatype/",
+      "repository": "https://github.com/supatype/supatype",
+      "license": "MIT",
+      "keywords": ["supatype", "postgres", "schema", "typescript", "self-host"]
+    }
+  ]
+}

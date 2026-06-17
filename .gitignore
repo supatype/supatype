@@ -13,6 +13,8 @@ dist/
 # Editor
 .vscode/settings.json
 .idea/
+.cursor/skills/
+.claude/skills/
 *.swp
 *.swo
 

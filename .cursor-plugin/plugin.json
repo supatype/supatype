@@ -1,0 +1,14 @@
+{
+  "name": "supatype",
+  "version": "0.1.0",
+  "description": "Work with Supatype: schema, CLI, client integration, and self-host",
+  "skills": "skills",
+  "author": {
+    "name": "Supatype",
+    "email": "hello@supatype.dev"
+  },
+  "homepage": "https://supatype.github.io/supatype/",
+  "repository": "https://github.com/supatype/supatype",
+  "license": "MIT",
+  "keywords": ["supatype", "postgres", "schema", "typescript", "self-host"]
+}

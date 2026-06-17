@@ -19,7 +19,7 @@
     }
   },
   "scripts": {
-    "build": "tsc --project tsconfig.json",
+    "build": "tsc --project tsconfig.json && node --input-type=module -e \"import{cpSync,mkdirSync}from'node:fs';const a='dist/assets';mkdirSync(a,{recursive:true});cpSync('assets/supatype-logo-wordmark.ascii.txt',a+'/supatype-logo-wordmark.ascii.txt')\"",
     "dev": "tsc --project tsconfig.json --watch",
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "postinstall": "node --input-type=module --eval \"import{existsSync}from'node:fs';import{resolve}from'node:path';import{pathToFileURL}from'node:url';const f=resolve(process.cwd(),'dist/scripts/postinstall.js');if(existsSync(f))await import(pathToFileURL(f).href)\"",

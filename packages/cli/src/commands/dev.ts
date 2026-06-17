@@ -36,7 +36,10 @@ import { ensureBinary } from "../ensure-binary.js"
 import { startProxyDevApp } from "../app/proxy-dev-app.js"
 import { ProcessManager } from "../process-manager.js"
 import { startStudioViteDevServer } from "../studio-dev-server.js"
+import { restoreSystemRelationTargets } from "../restore-system-relation-targets.js"
 import { localStorageEnv } from "../local-storage.js"
+import { beginDevSession, endDevSession, resolveDevUiMode, startDevSession } from "../dev-session.js"
+import { registerDevShutdown } from "../dev-shutdown.js"
 import {
   initdb,
   start as pgStart,
@@ -68,12 +71,16 @@ export function registerDev(program: Command): void {
     .command("dev")
     .description("Start local Postgres, apply schema, and run supatype-server")
     .option("--no-watch", "Start services but do not watch for schema changes")
+    .option("--stream", "Print interleaved logs instead of the interactive TUI")
     .option("--port <port>", "Port for supatype-server (overrides config)", String)
-    .action(async (opts: { watch: boolean; port?: string }) => {
+    .action(async (opts: { watch: boolean; stream?: boolean; port?: string }) => {
       const cwd = process.cwd()
+      beginDevSession(resolveDevUiMode(opts.stream === true))
 
       // ── 1. Load project config ─────────────────────────────────────────────
       const config = loadConfig(cwd)
+
+      startDevSession()
       if (hasMeaningfulOverrides(config)) {
         console.warn("[supatype] Local binary overrides active:")
         for (const line of describeActiveOverrides(config)) {
@@ -116,6 +123,7 @@ export function registerDev(program: Command): void {
           `[supatype] Port ${pgPort} is already in use. Another Postgres instance may be running.\n` +
             `  Check: lsof -i :${pgPort}`,
         )
+        endDevSession()
         process.exit(1)
       }
       if (await isPortInUse(Number(serverPort))) {
@@ -123,6 +131,7 @@ export function registerDev(program: Command): void {
           `[supatype] Port ${serverPort} is already in use. Another supatype-server may be running.\n` +
             `  Check: lsof -i :${serverPort}`,
         )
+        endDevSession()
         process.exit(1)
       }
       if (await isPortInUse(Number(postgrestPort))) {
@@ -130,6 +139,7 @@ export function registerDev(program: Command): void {
           `[supatype] Port ${postgrestPort} is already in use. Another service may be running.\n` +
             `  Check: lsof -i :${postgrestPort}`,
         )
+        endDevSession()
         process.exit(1)
       }
 
@@ -252,7 +262,8 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
         console.log(`[supatype] Edge functions enabled (${functionsDir})`)
         try {
           denoBinPath = await ensureBinary("deno", config)
-          console.log(`[supatype] Deno runtime: ${denoBinPath} (v${config.versions.deno})`)
+          const denoVersion = await (await import("../binary-cache.js")).resolveVersionFor("deno", config)
+          console.log(`[supatype] Deno runtime: ${denoBinPath} (v${denoVersion})`)
           if (functionRoutes.length > 0) {
             console.log(
               `[supatype] Edge functions router: ${relative(cwd, denoServeScriptAbs) || ".supatype/functions-router.ts"} ` +
@@ -263,7 +274,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
           }
         } catch (err) {
           console.warn(
-            `[supatype] ⚠  Found ${functionsDir} but could not provision Deno v${config.versions.deno} — edge functions will not run.\n` +
+            `[supatype] ⚠  Found ${functionsDir} but could not provision Deno — edge functions will not run.\n` +
               `  ${(err as Error).message}\n` +
               "  (Functions still appear in Studio; invocations need Deno.)",
           )
@@ -473,8 +484,8 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
 
 
       // ── Shutdown handler ──────────────────────────────────────────────────
-      const cleanup = async () => {
-        console.log("\n[supatype] Shutting down...")
+      registerDevShutdown(async () => {
+        console.log("[supatype] Shutting down...")
         await Promise.all([
           serverProc.stop(),
           postgrestProc?.stop(),
@@ -482,10 +493,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
           appProc?.stop(),
         ])
         await stopPostgres()
-        process.exit(0)
-      }
-      process.once("SIGINT", cleanup)
-      process.once("SIGTERM", cleanup)
+      })
 
       // ── 10. Schema watch ──────────────────────────────────────────────────
       if (opts.watch) {
@@ -623,6 +631,7 @@ async function runSchemaPush(
       } catch {
         admin = adminResult.stdout
       }
+      restoreSystemRelationTargets(admin, ast)
       const merged = config ? withAdminRoles(admin, config) : admin
       writeFileSync(adminConfigPath, `${JSON.stringify(merged, null, 2)}\n`)
     }
@@ -630,10 +639,6 @@ async function runSchemaPush(
 
   console.log("[supatype] Schema applied.")
 }
-
-// ---------------------------------------------------------------------------
-// Storage bucket provisioning (local dev only)
-// ---------------------------------------------------------------------------
 
 function provisionStorageBuckets(
   declared: Array<{
@@ -702,10 +707,9 @@ async function resolvePgBinDir(config: Awaited<ReturnType<typeof loadConfig>>): 
   }
 
   // Locate cached Postgres archive.
-  const { cachePath } = await import("../binary-cache.js")
-  const version = config.versions.postgres
-  const { currentPlatform } = await import("../binary-cache.js")
+  const { cachePath, currentPlatform, resolveVersionFor } = await import("../binary-cache.js")
   const platform = currentPlatform()
+  const version = await resolveVersionFor("postgres", config)
 
   const pgCacheDir = cachePath("postgres", version)
   const extractedDir = join(pgCacheDir, `pg-${version}`)

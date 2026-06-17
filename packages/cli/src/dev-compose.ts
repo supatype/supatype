@@ -17,16 +17,39 @@ import {
 } from "./project-config.js"
 import { signJwt } from "./jwt.js"
 import { isPortInUse } from "./postgres-ctl.js"
-import { composeProjectName, runDockerCompose, writeSelfHostCompose, type SelfHostComposePaths } from "./self-host-compose.js"
+import {
+  COMPOSE_PINNED_IMAGE_ENV_KEYS,
+  composeDockerImageEnv,
+  composeProjectName,
+  runDockerCompose,
+  schemaEngineImageForPush,
+  writeSelfHostCompose,
+  type SelfHostComposePaths,
+} from "./self-host-compose.js"
 import { hasEngineOverride } from "./binary-cache.js"
 import { startStudioViteDevServer } from "./studio-dev-server.js"
 import { ensureEngine, engineRequest } from "./engine-client.js"
+import { endDevSession } from "./dev-session.js"
+import { registerDevShutdown } from "./dev-shutdown.js"
+import {
+  filterComposeNoise,
+  formatEnginePushMessage,
+  parseEnginePushOutput,
+} from "./engine-push-output.js"
 import { withAdminRoles } from "./studio-admin-roles.js"
+import { restoreSystemRelationTargets } from "./restore-system-relation-targets.js"
 
 const LOCAL_JWT_SECRET = "super-secret-jwt-token-with-at-least-32-characters-long"
 
 /** Default host port for compose Postgres when `overrides.engine` is set (devLocal). */
 const COMPOSE_DEV_DB_PORT = 54329
+
+/** Sync optional Docker image pins from config into `.env` (no JWT rotation). */
+export function syncComposeImagePins(cwd: string, config: SupatypeProjectConfig): void {
+  const imagePins = composeDockerImageEnv(config)
+  const removeImageKeys = COMPOSE_PINNED_IMAGE_ENV_KEYS.filter((key) => !(key in imagePins))
+  upsertEnvFile(cwd, imagePins, removeImageKeys)
+}
 
 export interface DevComposeOptions {
   watch: boolean
@@ -82,10 +105,14 @@ async function resolveKongPort(cwd: string): Promise<number> {
   return port
 }
 
-function upsertEnvFile(cwd: string, updates: Record<string, string>): void {
+function upsertEnvFile(
+  cwd: string,
+  updates: Record<string, string>,
+  removeKeys: readonly string[] = [],
+): void {
   const envPath = join(cwd, ".env")
   const existing = existsSync(envPath) ? readFileSync(envPath, "utf8") : ""
-  const keys = new Set(Object.keys(updates))
+  const keys = new Set([...Object.keys(updates), ...removeKeys])
   const kept = existing
     .split("\n")
     .filter((line) => {
@@ -96,15 +123,17 @@ function upsertEnvFile(cwd: string, updates: Record<string, string>): void {
   writeFileSync(envPath, `${merged.join("\n").trimEnd()}\n`, "utf8")
 }
 
-/** Keep compose + Studio + Astro on the same freshly signed dev JWTs every `dev` / `push`. */
+/** Keep compose + Studio on the same freshly signed dev JWTs; sync optional image pins from config. */
 function ensureDevComposeEnv(
   cwd: string,
+  config: SupatypeProjectConfig,
   anonKey: string,
   serviceRoleKey: string,
   kongPort: number,
   devDbPort?: number,
 ): void {
   const apiUrl = `http://localhost:${kongPort}`
+  const imagePins = composeDockerImageEnv(config)
   const updates: Record<string, string> = {
     POSTGRES_USER: "supatype_admin",
     POSTGRES_PASSWORD: "postgres",
@@ -118,11 +147,13 @@ function ensureDevComposeEnv(
     API_EXTERNAL_URL: apiUrl,
     SITE_URL: apiUrl,
     GOTRUE_MAILER_AUTOCONFIRM: "true",
+    ...imagePins,
   }
   if (devDbPort !== undefined) {
     updates.SUPATYPE_DEV_DB_PORT = String(devDbPort)
   }
-  upsertEnvFile(cwd, updates)
+  const removeImageKeys = COMPOSE_PINNED_IMAGE_ENV_KEYS.filter((key) => !(key in imagePins))
+  upsertEnvFile(cwd, updates, removeImageKeys)
 }
 
 async function waitComposeHealthy(paths: SelfHostComposePaths, cwd: string, maxMs: number, composeProject: string): Promise<void> {
@@ -160,6 +191,8 @@ async function waitKongReady(kongPort: number, maxSec: number): Promise<void> {
 
 let _lastPushedAst: string | null = null
 let _lastFailedAst: string | null = null
+let _composePushInFlight = false
+let _composePushQueued = false
 
 /**
  * Regenerate admin-config + TypeScript types from the AST using the **host** engine.
@@ -207,6 +240,7 @@ async function refreshSchemaArtifacts(
 
   try {
     const admin = withAdminRoles(await engineRequest<unknown>("/admin", { ast }), config)
+    restoreSystemRelationTargets(admin, ast)
     writeFileSync(adminConfigPath, `${JSON.stringify(admin, null, 2)}\n`)
     console.log("[supatype] Admin config written to .supatype/admin-config.json")
   } catch (err) {
@@ -258,34 +292,64 @@ async function runComposeSchemaPush(
     }
     _lastPushedAst = astJson
     _lastFailedAst = null
+    if (astHasSystemAuthRelation(ast)) {
+      grantAuthSchemaAccess(paths, cwd, composeProject)
+    }
     console.log("[supatype] Schema applied.")
     return
   }
 
   console.log("[supatype] Applying schema via compose schema-engine...")
-  let push = runComposeEnginePush(paths, cwd, composeProject)
+  let push = await runComposeEnginePush(paths, cwd, composeProject, config)
   // Windows Docker bind mounts can lag briefly after the host write.
   if (push.status !== 0) {
     await new Promise((r) => setTimeout(r, 250))
-    push = runComposeEnginePush(paths, cwd, composeProject)
+    push = await runComposeEnginePush(paths, cwd, composeProject, config)
   }
   if (push.status !== 0) {
     _lastFailedAst = astJson
-    throw new Error(push.output || `Engine schema push failed (exit ${push.status})`)
+    const detail = filterComposeNoise(push.output) || push.output
+    throw new Error(detail || `Engine schema push failed (exit ${push.status})`)
   }
   _lastPushedAst = astJson
   _lastFailedAst = null
 
-  console.log("[supatype] Schema applied.")
+  if (astHasSystemAuthRelation(ast)) {
+    grantAuthSchemaAccess(paths, cwd, composeProject)
+  }
 }
 
-function runComposeEnginePush(
+/** Serialize watch-triggered pushes so docker output cannot interleave. */
+async function runComposeSchemaPushQueued(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  paths: SelfHostComposePaths,
+  schemaPath: string,
+  composeProject: string,
+): Promise<void> {
+  if (_composePushInFlight) {
+    _composePushQueued = true
+    return
+  }
+  _composePushInFlight = true
+  try {
+    do {
+      _composePushQueued = false
+      await runComposeSchemaPush(cwd, config, paths, schemaPath, composeProject)
+    } while (_composePushQueued)
+  } finally {
+    _composePushInFlight = false
+  }
+}
+
+async function runComposeEnginePush(
   paths: SelfHostComposePaths,
   cwd: string,
   composeProject: string,
-): { status: number; output: string } {
+  config: SupatypeProjectConfig,
+): Promise<{ status: number; output: string }> {
   const envFile = resolve(cwd, ".env")
-  const composeArgs = ["compose"]
+  const composeArgs = ["compose", "--progress", "quiet"]
   if (composeProject) composeArgs.push("-p", composeProject)
   composeArgs.push("--project-directory", cwd)
   composeArgs.push("-f", paths.composePath)
@@ -306,16 +370,33 @@ function runComposeEnginePush(
     "--force",
     "--non-interactive",
   )
+  const pushEnv: NodeJS.ProcessEnv = {
+    ...process.env,
+    COMPOSE_PROGRESS: "quiet",
+  }
+  const engineImage = await schemaEngineImageForPush(config)
+  if (engineImage) {
+    pushEnv.SUPATYPE_ENGINE_IMAGE = engineImage
+  }
   const result = spawnSync("docker", composeArgs, {
     cwd,
     encoding: "utf8",
     maxBuffer: 10 * 1024 * 1024,
+    env: pushEnv,
   })
   const output = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim()
-  if (output.length > 0) {
-    console.error(output)
+  const exitStatus = result.status ?? 1
+  const pushResult = parseEnginePushOutput(output)
+
+  if (exitStatus === 0) {
+    if (pushResult) {
+      console.log(`[supatype] ${formatEnginePushMessage(pushResult)}`)
+    } else {
+      console.log("[supatype] Schema applied.")
+    }
   }
-  return { status: result.status ?? 1, output }
+
+  return { status: exitStatus, output }
 }
 
 /**
@@ -335,12 +416,12 @@ export async function pushSchemaDocker(cwd: string, config: SupatypeProjectConfi
   const jwtBase = { iss: "supatype", iat: now, exp: now + 315_360_000 }
   const anonKey = signJwt({ ...jwtBase, role: "anon" }, LOCAL_JWT_SECRET)
   const serviceRoleKey = signJwt({ ...jwtBase, role: "service_role" }, LOCAL_JWT_SECRET)
-  ensureDevComposeEnv(cwd, anonKey, serviceRoleKey, kongPort, devDbPort)
+  ensureDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, devDbPort)
 
   const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
 
   console.log(`[supatype] provider: docker — applying schema via compose (project ${project})...`)
-  const up = runDockerCompose(paths.composePath, ["up", "-d", "db"], cwd, project)
+  const up = runDockerCompose(paths.composePath, ["up", "-d", "db"], cwd, project, { quiet: true })
   if (up !== 0) process.exit(up)
   await waitComposeHealthy(paths, cwd, 120_000, project)
 
@@ -365,13 +446,16 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   const anonKey = signJwt({ ...jwtBase, role: "anon" }, LOCAL_JWT_SECRET)
   const serviceRoleKey = signJwt({ ...jwtBase, role: "service_role" }, LOCAL_JWT_SECRET)
 
-  ensureDevComposeEnv(cwd, anonKey, serviceRoleKey, kongPort, devDbPort)
+  ensureDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, devDbPort)
 
   console.log(`[supatype] provider: docker — starting self-host Compose stack (project ${project}, gateway :${kongPort})...`)
   const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
 
-  const upStatus = runDockerCompose(paths.composePath, ["up", "-d"], cwd, project)
-  if (upStatus !== 0) process.exit(upStatus)
+  const upStatus = runDockerCompose(paths.composePath, ["up", "-d"], cwd, project, { quiet: true })
+  if (upStatus !== 0) {
+    endDevSession()
+    process.exit(upStatus)
+  }
 
   console.log("[supatype] Waiting for Postgres (compose)...")
   await waitComposeHealthy(paths, cwd, 180_000, project)
@@ -423,28 +507,38 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
 
   const appProc = startProxyDevApp(cwd, config, pidDir)
 
-  const cleanup = async () => {
-    console.log("\n[supatype] Shutting down compose...")
+  let schemaWatcher: import("node:fs").FSWatcher | null = null
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null
+
+  registerDevShutdown(async () => {
+    schemaWatcher?.close()
+    schemaWatcher = null
+    if (debounceTimer) {
+      clearTimeout(debounceTimer)
+      debounceTimer = null
+    }
+    console.log("[supatype] Shutting down compose...")
     await studioProc?.stop()
     await appProc?.stop()
-    runDockerCompose(paths.composePath, ["down"], cwd, project)
-    process.exit(0)
-  }
-  process.once("SIGINT", () => void cleanup())
-  process.once("SIGTERM", () => void cleanup())
+    const downStatus = runDockerCompose(paths.composePath, ["down"], cwd, project, { quiet: true })
+    if (downStatus === 0) {
+      console.log("[supatype] Compose stack stopped.")
+    } else {
+      console.warn(`[supatype] Compose down exited with status ${downStatus}.`)
+    }
+  })
 
   if (opts.watch) {
     const schemaDir = join(projectRootFromConfig(config, cwd), config.schema?.path ?? "schema/index.ts", "..")
     console.log(`[supatype] Watching ${schemaDir} for changes...`)
     const { watch } = await import("node:fs")
-    let debounceTimer: ReturnType<typeof setTimeout> | null = null
-    watch(schemaDir, { recursive: true }, (_eventType, filename) => {
+    schemaWatcher = watch(schemaDir, { recursive: true }, (_eventType, filename) => {
       if (!filename?.endsWith(".ts")) return
       if (debounceTimer) clearTimeout(debounceTimer)
       debounceTimer = setTimeout(() => {
         debounceTimer = null
         console.log(`\n[supatype] Change detected in ${filename}, pushing schema...`)
-        runComposeSchemaPush(cwd, config, paths, schemaPath, project).catch((e: unknown) =>
+        runComposeSchemaPushQueued(cwd, config, paths, schemaPath, project).catch((e: unknown) =>
           console.error("[supatype] Schema push failed:", (e as Error).message),
         )
       }, 300)
@@ -452,4 +546,38 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   }
 
   await new Promise<never>(() => undefined)
+}
+
+function astHasSystemAuthRelation(ast: unknown): boolean {
+  const obj = ast as { models?: Array<{ fields?: Record<string, { kind?: string; target?: string }> }> }
+  if (!obj?.models) return false
+  for (const model of obj.models) {
+    if (!model.fields) continue
+    for (const field of Object.values(model.fields)) {
+      if (field.kind === "relation" && field.target === "supatype:user") return true
+    }
+  }
+  return false
+}
+
+function grantAuthSchemaAccess(
+  paths: SelfHostComposePaths,
+  cwd: string,
+  composeProject: string,
+): void {
+  const composeDir = dirname(paths.composePath)
+  const baseArgs = [
+    "compose", "-p", composeProject,
+    "-f", paths.composePath,
+  ]
+  const sql = "GRANT USAGE ON SCHEMA auth TO service_role; GRANT SELECT ON auth.users TO service_role;"
+  const result = spawnSync(
+    "docker",
+    [...baseArgs, "exec", "-T", "-e", "PGPASSWORD=postgres", "db",
+     "psql", "-U", "supatype_admin", "-d", "supatype", "-c", sql],
+    { cwd: composeDir, encoding: "utf8", timeout: 10_000 },
+  )
+  if (result.status !== 0) {
+    console.warn("[supatype] Could not grant service_role access to auth.users — Studio relation preview may fail.")
+  }
 }

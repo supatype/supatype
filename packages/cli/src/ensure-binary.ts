@@ -6,7 +6,7 @@ import {
   resolveBinary,
   download,
   currentPlatform,
-  versionFor,
+  resolveVersionFor,
   type Component,
 } from "./binary-cache.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
@@ -24,5 +24,5 @@ export async function ensureBinary(
     }
   }
 
-  return download(component, versionFor(component, config), currentPlatform())
+  return download(component, await resolveVersionFor(component, config), currentPlatform())
 }
