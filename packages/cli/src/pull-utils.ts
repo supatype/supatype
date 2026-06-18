@@ -1,6 +1,48 @@
 /**
- * Utilities for the `pull` command — extracted for unit testability.
+ * Utilities for `pull` and `introspect` — map engine DatabaseState to Model<> scaffold.
  */
+
+export interface DbColumnState {
+  name: string
+  dataType: string
+  udtName: string
+  nullable: boolean
+  default?: string | null
+  ordinalPosition?: number
+}
+
+export interface DbTableState {
+  schema?: string
+  name: string
+  columns: DbColumnState[]
+}
+
+export interface DbConstraintState {
+  table: string
+  name: string
+  constraintType: string
+  columns: string[]
+  foreignTable?: string | null
+  foreignColumns?: string[] | null
+  comment?: string | null
+}
+
+export interface DbIndexState {
+  table: string
+  name: string
+  columns: string[]
+  unique: boolean
+  method: string
+  isPrimary: boolean
+  comment?: string | null
+}
+
+export interface DatabaseStateJson {
+  schema?: string
+  tables: DbTableState[]
+  constraints?: DbConstraintState[]
+  indexes?: DbIndexState[]
+}
 
 export interface ColumnInfo {
   name: string
@@ -9,33 +51,187 @@ export interface ColumnInfo {
   isPrimary: boolean
   isUnique: boolean
   hasDefault: boolean
-}
-
-/** Engine `/introspect` column shape (see {@link IntrospectResult} in engine-client). */
-export interface IntrospectColumn {
-  name: string
-  type: string
-  nullable: boolean
-  default?: string
-  primaryKey?: boolean
-  unique?: boolean
   references?: { table: string; column: string }
 }
 
-/** Map engine introspection JSON to {@link ColumnInfo} for {@link pgTypeToField}. */
-export function introspectColumnToColumnInfo(col: IntrospectColumn): ColumnInfo {
-  const def = col.default
+/** Map engine introspection column to {@link ColumnInfo}. */
+export function introspectColumnToColumnInfo(col: DbColumnState): ColumnInfo {
   return {
     name: col.name,
-    pgType: col.type,
+    pgType: col.udtName || col.dataType,
     nullable: col.nullable,
-    isPrimary: col.primaryKey ?? false,
-    isUnique: col.unique ?? false,
-    hasDefault: def !== undefined && def !== "",
+    isPrimary: col.name === "id" && (col.udtName === "uuid" || col.dataType.includes("uuid")),
+    isUnique: false,
+    hasDefault: col.default != null && col.default !== "",
   }
 }
 
-/** Map a Postgres column type to the corresponding field.X() call string. */
+function singleColumnUniques(
+  table: string,
+  constraints: DbConstraintState[] | undefined,
+): Map<string, boolean> {
+  const out = new Map<string, boolean>()
+  for (const c of constraints ?? []) {
+    if (c.table !== table || c.constraintType !== "unique" || c.columns.length !== 1) continue
+    out.set(c.columns[0]!, true)
+  }
+  return out
+}
+
+function compositeIndexes(
+  table: string,
+  indexes: DbIndexState[] | undefined,
+): Array<{ fields: string[]; unique: boolean }> {
+  const out: Array<{ fields: string[]; unique: boolean }> = []
+  for (const idx of indexes ?? []) {
+    if (idx.table !== table || idx.isPrimary || idx.columns.length < 2) continue
+    out.push({ fields: idx.columns, unique: idx.unique })
+  }
+  return out
+}
+
+/** Map a Postgres column to a Model<> field type string (draft). */
+export function pgTypeToModelField(col: ColumnInfo): string {
+  const name = col.name
+  const type = col.pgType.toLowerCase()
+  const optional = col.nullable ? "Optional<" : ""
+  const optionalClose = col.nullable ? ">" : ""
+
+  if (name === "id" && type.includes("uuid")) {
+    return `id: SupatypeAuthUserId`
+  }
+  if (name.endsWith("_id") && type.includes("uuid")) {
+    const base = name.replace(/_id$/, "")
+    const rel = base.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())
+    const relName = rel.charAt(0).toUpperCase() + rel.slice(1)
+    return `${name}: UUID\n  // TODO: relation — RelatedTo<"${relName}">`
+  }
+  if (name === "created_at" || name === "updated_at") {
+    return `${name}: Timestamp`
+  }
+  if (name === "deleted_at") {
+    return `${name}: Optional<Timestamp>`
+  }
+  if (type.includes("timestamptz") || type.includes("timestamp with time zone")) {
+    return `${name}: ${optional}Timestamp${optionalClose}`
+  }
+  if (type.includes("uuid")) {
+    const inner = col.isUnique ? "Unique<UUID>" : "UUID"
+    return `${name}: ${optional}${inner}${optionalClose}`
+  }
+  if (name.includes("email") && (type.includes("text") || type.includes("varchar"))) {
+    const inner = col.isUnique ? "Unique<Email>" : "Email"
+    return `${name}: ${optional}${inner}${optionalClose}`
+  }
+  if (name === "slug" || name.endsWith("_slug")) {
+    return `${name}: Slug<"title">`
+  }
+  if (type.includes("jsonb")) {
+    return `${name}: ${optional}JSON${optionalClose}`
+  }
+  if (type.includes("bool")) {
+    return `${name}: ${optional}boolean${optionalClose}`
+  }
+  if (type.includes("int8") || type.includes("bigint")) {
+    return `${name}: ${optional}BigInt${optionalClose}`
+  }
+  if (type.includes("int")) {
+    return `${name}: ${optional}Int${optionalClose}`
+  }
+  if (type.includes("text") || type.includes("varchar")) {
+    const inner = col.isUnique ? "Unique<string>" : "string"
+    return `${name}: ${optional}${inner}${optionalClose}`
+  }
+
+  return `${name}: string /* TODO: ${col.pgType} */`
+}
+
+/** Convert snake_case table name to PascalCase model export name. */
+export function toModelName(s: string): string {
+  return s
+    .replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())
+    .replace(/^([a-z])/, (c: string) => c.toUpperCase())
+}
+
+/** Generate draft schema/index.ts content from introspected DatabaseState. */
+export function databaseStateToSchemaScaffold(state: DatabaseStateJson): string {
+  const constraints = state.constraints ?? []
+  const indexes = state.indexes ?? []
+  const skipTables = new Set(["spatial_ref_sys", "schema_migrations"])
+
+  const lines: string[] = [
+    "// DRAFT — generated by `supatype pull`. Review access rules, relations, and indexes before push.",
+    'import type { Model, Public, UUID, Timestamp, Optional, Unique, Email, Slug, SupatypeAuthUserId, JSON, Int, BigInt } from "@supatype/types"',
+    "",
+  ]
+
+  for (const table of state.tables) {
+    if (skipTables.has(table.name) || table.name.startsWith("_")) continue
+
+    const modelName = toModelName(table.name)
+    const uniques = singleColumnUniques(table.name, constraints)
+    const modelIndexes = compositeIndexes(table.name, indexes)
+
+    const fieldLines: string[] = []
+    for (const col of table.columns) {
+      if (col.name === "created_at" || col.name === "updated_at") continue
+      const info = introspectColumnToColumnInfo(col)
+      info.isPrimary = col.name === "id"
+      info.isUnique = uniques.get(col.name) ?? false
+      fieldLines.push(`  ${pgTypeToModelField(info)}`)
+    }
+
+    const hasTimestamps = table.columns.some((c) => c.name === "created_at")
+    if (hasTimestamps) {
+      fieldLines.push("  created_at: Timestamp")
+      fieldLines.push("  updated_at: Timestamp")
+    }
+
+    const indexBlock =
+      modelIndexes.length > 0
+        ? `\n  indexes: [\n${modelIndexes
+            .map(
+              (idx) =>
+                `    { fields: [${idx.fields.map((f) => `"${f}"`).join(", ")}]${idx.unique ? ", unique: true" : ""} },`,
+            )
+            .join("\n")}\n  ],`
+        : ""
+
+    lines.push(`export type ${modelName} = Model<{`)
+    lines.push(fieldLines.join("\n"))
+    lines.push(`}, {`)
+    lines.push(`  access: {`)
+    lines.push(`    read: Public`)
+    lines.push(`    create: Public`)
+    lines.push(`    update: Public`)
+    lines.push(`    delete: Public`)
+    lines.push(`  },${indexBlock}`)
+    lines.push(`}>`)
+    lines.push("")
+  }
+
+  return lines.join("\n")
+}
+
+/** Human-readable introspection summary for `supatype introspect`. */
+export function printIntrospectSummary(state: DatabaseStateJson): void {
+  console.log(`Schema: ${state.schema ?? "public"}`)
+  console.log(`Tables: ${state.tables.length}`)
+  for (const table of state.tables) {
+    console.log(`\n  ${table.name} (${table.columns.length} columns)`)
+    for (const col of table.columns) {
+      const nullMark = col.nullable ? "?" : ""
+      console.log(`    ${col.name}${nullMark}: ${col.udtName || col.dataType}`)
+    }
+  }
+  const constraintCount = state.constraints?.length ?? 0
+  const indexCount = state.indexes?.length ?? 0
+  if (constraintCount + indexCount > 0) {
+    console.log(`\nConstraints: ${constraintCount}, Indexes: ${indexCount}`)
+  }
+}
+
+/** @deprecated Legacy pull helper — use {@link pgTypeToModelField}. */
 export function pgTypeToField(col: ColumnInfo): string {
   const opts: Record<string, unknown> = { required: !col.nullable }
   if (col.isPrimary) opts["primaryKey"] = true
@@ -73,9 +269,7 @@ export function pgTypeToField(col: ColumnInfo): string {
   return `field.text({ ...${optsStr} }) /* TODO: ${col.pgType} */`
 }
 
-/** Convert snake_case table name to PascalCase model export name. */
+/** @deprecated Use {@link toModelName}. */
 export function toCamelCase(s: string): string {
-  return s
-    .replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())
-    .replace(/^([a-z])/, (c: string) => c.toUpperCase())
+  return toModelName(s)
 }

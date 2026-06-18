@@ -6,6 +6,10 @@
  * Buckets already registered return 409 Conflict, which is treated as success.
  */
 
+import type { ExtractedSchemaAstV2 } from "./schema-ast-v2.js"
+
+export type { ExtractedStorageBucketAst as SchemaStorageBucketAst } from "./schema-ast-v2.js"
+
 export interface BucketSpec {
   id: string
   public: boolean
@@ -13,6 +17,29 @@ export interface BucketSpec {
   file_size_limit?: number | null
   access_mode?: "public" | "private" | "custom"
   s3_bucket_policy?: string | null
+}
+
+export function bucketSpecsFromAst(ast: Pick<ExtractedSchemaAstV2, "storageBuckets">): BucketSpec[] {
+  return (ast.storageBuckets ?? []).map((b) => ({
+    id: b.id,
+    public: b.public,
+    ...(b.accessMode !== undefined && { access_mode: b.accessMode }),
+    ...(b.allowedMimeTypes != null && { allowed_mime_types: b.allowedMimeTypes }),
+    ...(b.fileSizeLimit != null && { file_size_limit: b.fileSizeLimit }),
+    ...(b.s3BucketPolicy != null &&
+      b.s3BucketPolicy !== "" && { s3_bucket_policy: b.s3BucketPolicy }),
+  }))
+}
+
+export async function provisionBucketsFromAst(
+  ast: Pick<ExtractedSchemaAstV2, "storageBuckets">,
+  storageApiUrl: string,
+  serviceRoleKey: string,
+): Promise<void> {
+  const buckets = bucketSpecsFromAst(ast)
+  if (buckets.length === 0) return
+  console.log("[supatype] Provisioning storage buckets...")
+  await provisionBuckets(storageApiUrl, serviceRoleKey, buckets)
 }
 
 /**
@@ -48,11 +75,16 @@ export async function provisionBuckets(
     const res = await fetch(`${base}/bucket`, { method: "POST", headers, body })
       .catch(() => null)
 
-    if (res === null) continue // server not reachable — skip silently
+    if (res === null) {
+      console.warn(`[storage] Storage API unreachable — skipped bucket "${bucket.id}"`)
+      continue
+    }
     if (res.status === 409) continue // already exists — fine
     if (!res.ok) {
       const msg = await res.text().catch(() => res.statusText)
       console.warn(`[storage] Failed to provision bucket "${bucket.id}": ${msg}`)
+      continue
     }
+    console.log(`[supatype] Storage bucket "${bucket.id}" ready.`)
   }
 }

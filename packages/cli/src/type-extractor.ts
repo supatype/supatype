@@ -103,7 +103,7 @@ export function extractSchemaAstFromTypes(
         )
       }
 
-      const { tableName, access, options } = parseModelMeta(
+      const { tableName, access, options, indexes } = parseModelMeta(
         metaArg,
         sourceFile,
         stmt.name.text,
@@ -112,7 +112,7 @@ export function extractSchemaAstFromTypes(
       )
 
       models.push(
-        emitModel(stmt.name.text, fields, options, tableName, access),
+        emitModel(stmt.name.text, fields, options, tableName, access, indexes),
       )
     }
   }
@@ -1372,7 +1372,12 @@ function parseModelMeta(
   modelName: string,
   fieldsArg: ts.TypeNode,
   fields: Record<string, FieldAstV2>,
-): { tableName: string; access: Record<string, unknown>; options: Record<string, unknown> } {
+): {
+  tableName: string
+  access: Record<string, unknown>
+  options: Record<string, unknown>
+  indexes: unknown[]
+} {
   const literal = parseMetaLiteral(metaArg, sourceFile)
   const singleton = literal.singleton === true
   const tableName =
@@ -1397,7 +1402,66 @@ function parseModelMeta(
     tableName,
     access: parseModelAccess(metaArg, sourceFile),
     options,
+    indexes: parseModelIndexes(metaArg, sourceFile, fields),
   }
+}
+
+function parseModelIndexes(
+  metaArg: ts.TypeNode | undefined,
+  sourceFile: ts.SourceFile,
+  fields: Record<string, FieldAstV2>,
+): unknown[] {
+  if (!metaArg || !ts.isTypeLiteralNode(metaArg)) return []
+
+  const indexesProp = metaArg.members.find(
+    (member) => ts.isPropertySignature(member) && getPropertyName(member.name) === "indexes",
+  )
+  if (
+    !indexesProp ||
+    !ts.isPropertySignature(indexesProp) ||
+    !indexesProp.type ||
+    !ts.isTupleTypeNode(indexesProp.type)
+  ) {
+    return []
+  }
+
+  const indexes: unknown[] = []
+  for (const element of indexesProp.type.elements) {
+    if (!ts.isTypeLiteralNode(element)) continue
+    const indexDef: Record<string, unknown> = { using: "btree" }
+    for (const member of element.members) {
+      if (!ts.isPropertySignature(member) || !member.type) continue
+      const key = getPropertyName(member.name)
+      if (!key) continue
+      if (key === "name" && ts.isLiteralTypeNode(member.type) && ts.isStringLiteral(member.type.literal)) {
+        indexDef.name = member.type.literal.text
+      } else if (key === "unique" && isBooleanLiteralType(member.type, true)) {
+        indexDef.unique = true
+      } else if (key === "fields" && ts.isTupleTypeNode(member.type)) {
+        indexDef.fields = member.type.elements
+          .map((fieldNode) => {
+            if (!ts.isLiteralTypeNode(fieldNode) || !ts.isStringLiteral(fieldNode.literal)) return null
+            return resolveIndexFieldName(fieldNode.literal.text, fields)
+          })
+          .filter((field): field is string => field !== null)
+      }
+    }
+    if (Array.isArray(indexDef.fields) && indexDef.fields.length > 0) {
+      indexes.push(indexDef)
+    }
+  }
+  return indexes
+}
+
+function resolveIndexFieldName(fieldName: string, fields: Record<string, FieldAstV2>): string | null {
+  if (fields[fieldName] !== undefined) {
+    const field = fields[fieldName]
+    if (field.kind === "relation" && field.annotations?.db?.foreignKey) {
+      return field.annotations.db.foreignKey as string
+    }
+    return fieldName
+  }
+  return fieldName
 }
 
 function parseModelAccess(metaArg: ts.TypeNode | undefined, sourceFile: ts.SourceFile): Record<string, unknown> {

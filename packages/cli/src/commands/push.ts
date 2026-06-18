@@ -5,10 +5,11 @@ import { join } from "node:path"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { connectionString, resolveRuntimeProvider, schemaPathFromProject, serverBaseUrl } from "../project-config.js"
 import { isCloudLinked, pushSchemaToLinkedProject } from "./cloud.js"
-import { ensureEngine, engineRequest, type DiffResult, type Operation } from "../engine-client.js"
-import { printDiffWarnings } from "../diff-output.js"
+import { ensureEngine, engineRequest, type DiffResult } from "../engine-client.js"
+import { printDiffOperations, printDiffWarnings } from "../diff-output.js"
 import { signJwt } from "../jwt.js"
-import { provisionBuckets } from "../storage-provision.js"
+import { provisionBucketsFromAst } from "../storage-provision.js"
+import type { ExtractedSchemaAstV2 } from "../schema-ast-v2.js"
 import { promptFirstAdminUser } from "./admin.js"
 import { withAdminRoles } from "../studio-admin-roles.js"
 import { restoreSystemRelationTargets } from "../restore-system-relation-targets.js"
@@ -69,7 +70,7 @@ export function registerPush(program: Command): void {
           "Schema matches the database (no DDL). Syncing Studio metadata...",
         )
       } else {
-        printDiff(ops)
+        printDiffOperations({ operations: ops })
 
         const risky = ops.filter(
           (o) => o.risk === "cautious" || o.risk === "destructive" || o.risk === "warn" || o.risk === "danger",
@@ -123,29 +124,11 @@ export function registerPush(program: Command): void {
           : undefined)
 
       if (baseUrl && serviceRoleKey) {
-        const parsedAst = await engineRequest<{
-          storageBuckets?: Array<{
-            id: string
-            public: boolean
-            accessMode?: "public" | "private" | "custom"
-            allowedMimeTypes?: string[]
-            fileSizeLimit?: number
-            s3BucketPolicy?: string
-          }>
-        }>("/parse", { ast })
-        const buckets = (parsedAst.storageBuckets ?? []).map((b) => ({
-          id: b.id,
-          public: b.public,
-          ...(b.accessMode !== undefined && { access_mode: b.accessMode }),
-          ...(b.allowedMimeTypes != null && { allowed_mime_types: b.allowedMimeTypes }),
-          ...(b.fileSizeLimit != null && { file_size_limit: b.fileSizeLimit }),
-          ...(b.s3BucketPolicy != null &&
-            b.s3BucketPolicy !== "" && { s3_bucket_policy: b.s3BucketPolicy }),
-        }))
-        if (buckets.length > 0) {
-          console.log("Provisioning storage buckets...")
-          await provisionBuckets(`${baseUrl}/storage/v1`, serviceRoleKey, buckets)
-        }
+        const parsedAst = await engineRequest<Pick<ExtractedSchemaAstV2, "storageBuckets">>(
+          "/parse",
+          { ast },
+        )
+        await provisionBucketsFromAst(parsedAst, `${baseUrl}/storage/v1`, serviceRoleKey)
       }
 
       if (config.output?.types ?? config.output?.client) {
@@ -165,44 +148,6 @@ export function registerPush(program: Command): void {
         console.log("\nDone.")
       }
     })
-}
-
-function printDiff(ops: Operation[]): void {
-  const symbol: Record<string, string> = {
-    safe: "+",
-    warn: "~",
-    cautious: "~",
-    danger: "!",
-    destructive: "!",
-  }
-  console.log(`\n${ops.length} change(s) planned:\n`)
-  for (const op of ops) {
-    const riskKey = op.risk ?? "safe"
-    const s = symbol[riskKey] ?? "?"
-    const label = op.warning ?? op.description ?? formatOperation(op)
-    console.log(`  [${s}] ${label}`)
-  }
-}
-
-function formatOperation(op: Operation): string {
-  if (typeof op.description === "string" && op.description.trim().length > 0) {
-    return op.description
-  }
-
-  const kind = typeof op.kind === "string" ? op.kind : "operation"
-  const raw = op as unknown as Record<string, unknown>
-  const table = raw["table"]
-  const column = raw["column"]
-
-  if (typeof table === "string" && typeof column === "string") {
-    return `${kind} ${table}.${column}`
-  }
-  if (typeof table === "string") {
-    return `${kind} ${table}`
-  }
-
-  // Last resort: show operation kind with compact payload.
-  return `${kind} ${JSON.stringify(op)}`
 }
 
 async function confirm(prompt: string): Promise<boolean> {

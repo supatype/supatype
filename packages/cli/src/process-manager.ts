@@ -32,6 +32,8 @@ export interface ProcessOptions {
   onLine?: (line: string, stream: "stdout" | "stderr") => void
   /** Return false to drop a line before logging. */
   shouldLogLine?: (line: string) => boolean
+  /** Called before auto-restart after a non-zero exit (e.g. free a stale port). */
+  beforeRestart?: () => void
 }
 
 const RESET = "\x1b[0m"
@@ -164,6 +166,7 @@ export class ProcessManager {
         process.stderr.write(message)
       }
       setTimeout(() => {
+        this.opts.beforeRestart?.()
         this.backoffMs = Math.min(this.backoffMs * 2, this.opts.maxBackoffMs)
         this.spawn()
       }, this.backoffMs)
@@ -186,6 +189,7 @@ export class ProcessManager {
       }
 
       setTimeout(() => {
+        this.opts.beforeRestart?.()
         this.backoffMs = Math.min(this.backoffMs * 2, this.opts.maxBackoffMs)
         this.spawn()
       }, this.backoffMs)

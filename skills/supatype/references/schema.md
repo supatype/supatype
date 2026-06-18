@@ -116,10 +116,36 @@ After `push`, import updated types in app code. Never edit the generated output 
 
 ## Adopting an existing database
 
-`supatype pull` is removed in type-first mode. Instead:
+For databases created before Supatype managed-object stamping:
 
-1. Write models in `schema/index.ts` matching the existing tables
-2. Run `supatype diff` to see drift
-3. Use `supatype push` carefully: review destructive changes
+1. **Scaffold** (optional): `supatype introspect` or `supatype pull --dry-run` to draft `schema/index.ts`
+2. **Align**: edit models until `supatype diff` shows only expected changes
+3. **Adopt**: `supatype adopt` stamps `supatype:managed` comments on matching constraints/indexes (no DDL)
+4. **Push**: `supatype push` can then create/drop stamped objects safely
 
-For greenfield tables, define models first then push.
+### Managed object tiers
+
+| Tier | Meaning | Push behavior |
+|------|---------|---------------|
+| **Expected** | Declared in `schema/index.ts` | Create or drop (with validation) |
+| **Managed-stale** | Stamped, not in AST | Drop only after doctor review |
+| **Unmanaged** | In DB, no stamp, not in AST | Never auto-dropped |
+| **Out of scope** | `auth.*`, `_supatype.*`, extension tables | Ignored |
+
+### Commands
+
+```bash
+supatype introspect          # JSON or table summary from live DB
+supatype pull --dry-run      # draft Model<> scaffold (stdout)
+supatype doctor              # missing / stale / unmanaged drift report
+supatype doctor --strict     # CI: fail on missing or stale managed
+supatype adopt               # preview stamps; adopt --yes to apply
+supatype diff                # preview operations
+supatype push                # apply migration
+```
+
+`supatype pull` produces a **starting point** — types still flow from schema → `supatype generate`, not from the DB directly.
+
+Removing a column `Unique<>` emits `DropUniqueConstraint` only when the constraint has a `supatype:managed` comment (or was created by Supatype). Pre-existing constraints without stamps are reported by `supatype doctor` as unmanaged drift.
+
+For greenfield tables, define models first then push — all created constraints and indexes are stamped automatically.

@@ -20,14 +20,17 @@ import { resolveBinary, currentPlatform, cachePath } from "./binary-cache.js"
 // ---------------------------------------------------------------------------
 
 export interface Operation {
-  kind: "create_table" | "alter_table" | "drop_table" | "create_index" | "drop_index" |
-        "create_policy" | "drop_policy" | "add_column" | "drop_column" | "alter_column" |
-        "recreate_column"
   type?: string
+  kind?: string
   description?: string
   risk?: "safe" | "warn" | "danger" | "cautious" | "destructive"
   warning?: string
   sql?: string
+  table?: string
+  column?: string
+  constraint?: string
+  index_name?: string
+  index?: { fields?: string[]; name?: string; unique?: boolean }
 }
 
 export interface DiffResult {
@@ -219,6 +222,18 @@ function endpointToArgs(
 
     case "/introspect":
       return ["introspect", "--database-url", dbUrl, "--schema", schema]
+
+    case "/doctor": {
+      const strict = body["strict"] ? ["--strict"] : []
+      const noCache = body["no_cache"] ? ["--no-cache"] : []
+      return ["doctor", "--input", reqFile, "--database-url", dbUrl, "--schema", schema, ...strict, ...noCache]
+    }
+
+    case "/adopt": {
+      const yes = body["yes"] ? ["--yes"] : []
+      const noCache = body["no_cache"] ? ["--no-cache"] : []
+      return ["adopt", "--input", reqFile, "--database-url", dbUrl, "--schema", schema, ...yes, ...noCache]
+    }
 
     case "/validate":
       return ["validate", "--input", reqFile]

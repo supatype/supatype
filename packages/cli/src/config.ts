@@ -9,6 +9,7 @@ import {
   type SupatypeProjectConfig,
 } from "./project-config.js"
 import { extractSchemaAstFromTypes } from "./type-extractor.js"
+import type { ExtractedSchemaAstV2 } from "./schema-ast-v2.js"
 
 export type { SupatypeProjectConfig } from "./project-config.js"
 
@@ -206,7 +207,7 @@ process.stdout.write(JSON.stringify(config))
 export function loadSchemaAst(
   schemaPath: string,
   cwd: string = process.cwd(),
-): unknown {
+): ExtractedSchemaAstV2 {
   const extracted = extractSchemaAstFromTypes(schemaPath, cwd)
   if (extracted !== null) return extracted
 

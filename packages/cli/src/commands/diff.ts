@@ -1,8 +1,8 @@
 import type { Command } from "commander"
 import { loadConfig, loadSchemaAst } from "../config.js"
-import { connectionString, schemaPathFromProject } from "../project-config.js"
+import { connectionString, resolveRuntimeProvider, schemaPathFromProject } from "../project-config.js"
 import { ensureEngine, engineRequest, type DiffResult } from "../engine-client.js"
-import { printDiffWarnings } from "../diff-output.js"
+import { printDiffOperations, printDiffWarnings } from "../diff-output.js"
 
 export function registerDiff(program: Command): void {
   program
@@ -12,7 +12,23 @@ export function registerDiff(program: Command): void {
     .action(async (opts: { connection?: string }) => {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
+
+      // Docker provider: use compose unless a remote connection is configured.
+      if (
+        !opts.connection &&
+        !config.connection?.trim() &&
+        resolveRuntimeProvider(config) === "docker"
+      ) {
+        const { diffSchemaDocker } = await import("../dev-compose.js")
+        console.log("Loading schema...")
+        const diff = await diffSchemaDocker(cwd, config)
+        printDiffWarnings(diff)
+        printDiffOperations(diff)
+        return
+      }
+
       const connection = opts.connection ?? connectionString(config)
+      const pgSchema = config.schema?.pg_schema ?? "public"
 
       await ensureEngine()
 
@@ -22,42 +38,10 @@ export function registerDiff(program: Command): void {
       const diff = await engineRequest<DiffResult>("/diff", {
         ast,
         database_url: connection,
-        schema: "public",
+        schema: pgSchema,
       })
 
-      const ops = diff.operations ?? []
       printDiffWarnings(diff)
-
-      if (ops.length === 0) {
-        console.log("No changes.")
-        return
-      }
-
-      const symbol: Record<NonNullable<DiffResult["operations"][number]["risk"]>, string> = {
-        safe: "+",
-        warn: "~",
-        cautious: "~",
-        danger: "!",
-        destructive: "!",
-      }
-      const legend: typeof symbol = {
-        safe: "safe",
-        warn: "caution",
-        cautious: "caution",
-        danger: "DANGER",
-        destructive: "DANGER",
-      }
-
-      console.log(`\n${ops.length} change(s):\n`)
-      for (const op of ops) {
-        const r = op.risk ?? "safe"
-        console.log(`  [${symbol[r]}] ${op.description}  (${legend[r]})`)
-      }
-
-      const dangerous = ops.filter((o) => o.risk === "danger").length
-      if (dangerous > 0) {
-        console.log(`\n  ${dangerous} dangerous operation(s). Review before pushing.`)
-      }
-      console.log()
+      printDiffOperations(diff)
     })
 }

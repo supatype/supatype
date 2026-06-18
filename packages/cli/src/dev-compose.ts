@@ -10,6 +10,7 @@ import { startProxyDevApp } from "./app/proxy-dev-app.js"
 import { loadSchemaAst } from "./config.js"
 import {
   COMPOSE_DEV_KONG_PORT,
+  connectionString,
   projectRootFromConfig,
   resolveRuntimeProvider,
   schemaPathFromProject,
@@ -28,16 +29,19 @@ import {
 } from "./self-host-compose.js"
 import { hasEngineOverride } from "./binary-cache.js"
 import { startStudioViteDevServer } from "./studio-dev-server.js"
-import { ensureEngine, engineRequest } from "./engine-client.js"
+import { ensureEngine, engineRequest, type DiffResult } from "./engine-client.js"
 import { endDevSession } from "./dev-session.js"
 import { registerDevShutdown } from "./dev-shutdown.js"
 import {
   filterComposeNoise,
   formatEnginePushMessage,
+  parseEngineJsonOutput,
   parseEnginePushOutput,
 } from "./engine-push-output.js"
 import { withAdminRoles } from "./studio-admin-roles.js"
 import { restoreSystemRelationTargets } from "./restore-system-relation-targets.js"
+import { provisionBucketsFromAst } from "./storage-provision.js"
+import type { ExtractedSchemaAstV2 } from "./schema-ast-v2.js"
 
 const LOCAL_JWT_SECRET = "super-secret-jwt-token-with-at-least-32-characters-long"
 
@@ -92,6 +96,72 @@ function hostComposeDbUrl(cwd: string): string {
   const pass = readEnvValue(cwd, "POSTGRES_PASSWORD", "postgres")
   const db = readEnvValue(cwd, "POSTGRES_DB", "supatype")
   return `postgresql://${user}:${pass}@127.0.0.1:${port}/${db}?sslmode=disable`
+}
+
+/**
+ * When `provider: docker` and `overrides.engine` is set, ensure Postgres is published
+ * on the host (SUPATYPE_DEV_DB_PORT) so the local engine binary can connect.
+ */
+export async function ensureDockerDbPublishedForHostEngine(
+  cwd: string,
+  config: SupatypeProjectConfig,
+): Promise<void> {
+  if (resolveRuntimeProvider(config) !== "docker") {
+    throw new Error("ensureDockerDbPublishedForHostEngine requires provider: docker")
+  }
+  if (!hasEngineOverride(config)) {
+    throw new Error(
+      "Docker Postgres is not published to the host without overrides.engine. " +
+        "Set overrides.engine in supatype.local.config.ts or pass --connection.",
+    )
+  }
+
+  const project = composeProjectName(config.project.name)
+  const kongPort = await resolveKongPort(cwd)
+  const devDbPort = await resolveDevDbPort(cwd)
+
+  const now = Math.floor(Date.now() / 1000)
+  const jwtBase = { iss: "supatype", iat: now, exp: now + 315_360_000 }
+  const anonKey = signJwt({ ...jwtBase, role: "anon" }, LOCAL_JWT_SECRET)
+  const serviceRoleKey = signJwt({ ...jwtBase, role: "service_role" }, LOCAL_JWT_SECRET)
+  ensureDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, devDbPort)
+
+  const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
+  const up = runDockerCompose(paths.composePath, ["up", "-d", "db"], cwd, project, { quiet: true })
+  if (up !== 0) process.exit(up)
+  await waitComposeHealthy(paths, cwd, 120_000, project)
+}
+
+/**
+ * True when CLI should publish local Compose Postgres for the host-side engine
+ * (local dev with overrides.engine). False for remote DB URLs via config or --connection.
+ */
+export function usesLocalDockerEngineDb(
+  config: SupatypeProjectConfig,
+  explicitConnection?: string,
+): boolean {
+  if (explicitConnection?.trim()) return false
+  if (config.connection?.trim()) return false
+  return resolveRuntimeProvider(config) === "docker" && hasEngineOverride(config)
+}
+
+/**
+ * Resolve a Postgres URL reachable from the host-side engine binary.
+ * Local docker + overrides.engine → SUPATYPE_DEV_DB_PORT on localhost.
+ * Remote self-host → set `connection` in config or pass `--connection`.
+ */
+export async function resolveHostEngineDatabaseUrl(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  explicit?: string,
+): Promise<string> {
+  if (explicit?.trim()) return explicit
+  if (config.connection?.trim()) return config.connection
+  if (usesLocalDockerEngineDb(config)) {
+    await ensureDockerDbPublishedForHostEngine(cwd, config)
+    return hostComposeDbUrl(cwd)
+  }
+  return connectionString(config)
 }
 
 async function resolveKongPort(cwd: string): Promise<number> {
@@ -187,6 +257,14 @@ async function waitKongReady(kongPort: number, maxSec: number): Promise<void> {
     await new Promise((r) => setTimeout(r, 1000))
   }
   throw new Error(`Kong gateway at ${base} did not become ready within ${maxSec}s`)
+}
+
+async function provisionDockerStorageBuckets(
+  ast: ExtractedSchemaAstV2,
+  kongPort: number,
+  serviceRoleKey: string,
+): Promise<void> {
+  await provisionBucketsFromAst(ast, `http://localhost:${kongPort}/storage/v1`, serviceRoleKey)
 }
 
 let _lastPushedAst: string | null = null
@@ -399,6 +477,117 @@ async function runComposeEnginePush(
   return { status: exitStatus, output }
 }
 
+async function runComposeEngineDiff(
+  paths: SelfHostComposePaths,
+  cwd: string,
+  composeProject: string,
+  config: SupatypeProjectConfig,
+  pgSchema: string,
+): Promise<{ status: number; output: string; diff: DiffResult | null }> {
+  const envFile = resolve(cwd, ".env")
+  const composeArgs = ["compose", "--progress", "quiet"]
+  if (composeProject) composeArgs.push("-p", composeProject)
+  composeArgs.push("--project-directory", cwd)
+  composeArgs.push("-f", paths.composePath)
+  if (existsSync(envFile)) {
+    composeArgs.push("--env-file", envFile)
+  }
+  composeArgs.push(
+    "--profile",
+    "tools",
+    "run",
+    "--rm",
+    "schema-engine",
+    "diff",
+    "-i",
+    "/project/.supatype/schema.ast.json",
+    "--database-url",
+    composeDbUrl(),
+    "--schema",
+    pgSchema,
+  )
+  const diffEnv: NodeJS.ProcessEnv = {
+    ...process.env,
+    COMPOSE_PROGRESS: "quiet",
+  }
+  const engineImage = await schemaEngineImageForPush(config)
+  if (engineImage) {
+    diffEnv.SUPATYPE_ENGINE_IMAGE = engineImage
+  }
+  const result = spawnSync("docker", composeArgs, {
+    cwd,
+    encoding: "utf8",
+    maxBuffer: 10 * 1024 * 1024,
+    env: diffEnv,
+  })
+  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim()
+  const exitStatus = result.status ?? 1
+  const diff = parseEngineJsonOutput<DiffResult>(output)
+
+  return { status: exitStatus, output, diff }
+}
+
+/**
+ * `supatype diff` when `provider: docker`. Uses in-compose schema-engine unless
+ * `overrides.engine` is set — then Postgres is published to the host and diff runs
+ * through the local engine binary.
+ */
+export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfig): Promise<DiffResult> {
+  if (resolveRuntimeProvider(config) !== "docker") {
+    throw new Error("diffSchemaDocker requires provider: docker")
+  }
+  const project = composeProjectName(config.project.name)
+  const pgSchema = config.schema?.pg_schema ?? "public"
+
+  if (hasEngineOverride(config)) {
+    await ensureDockerDbPublishedForHostEngine(cwd, config)
+    const schemaPath = schemaPathFromProject(config, cwd)
+    const ast = loadSchemaAst(schemaPath, cwd)
+    await ensureEngine()
+    return engineRequest<DiffResult>("/diff", {
+      ast,
+      database_url: hostComposeDbUrl(cwd),
+      schema: pgSchema,
+    })
+  }
+
+  const kongPort = await resolveKongPort(cwd)
+  const now = Math.floor(Date.now() / 1000)
+  const jwtBase = { iss: "supatype", iat: now, exp: now + 315_360_000 }
+  const anonKey = signJwt({ ...jwtBase, role: "anon" }, LOCAL_JWT_SECRET)
+  const serviceRoleKey = signJwt({ ...jwtBase, role: "service_role" }, LOCAL_JWT_SECRET)
+  ensureDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, undefined)
+
+  const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
+
+  const up = runDockerCompose(paths.composePath, ["up", "-d", "db"], cwd, project, { quiet: true })
+  if (up !== 0) process.exit(up)
+  await waitComposeHealthy(paths, cwd, 120_000, project)
+
+  const schemaPath = schemaPathFromProject(config, cwd)
+  const ast = loadSchemaAst(schemaPath, cwd)
+
+  const supatypeDir = join(cwd, ".supatype")
+  mkdirSync(supatypeDir, { recursive: true })
+  const astPath = join(supatypeDir, "schema.ast.json")
+  writeFileSync(astPath, JSON.stringify(ast))
+
+  let result = await runComposeEngineDiff(paths, cwd, project, config, pgSchema)
+  // Windows Docker bind mounts can lag briefly after the host write.
+  if (result.status !== 0) {
+    await new Promise((r) => setTimeout(r, 250))
+    result = await runComposeEngineDiff(paths, cwd, project, config, pgSchema)
+  }
+  if (result.status !== 0) {
+    const detail = filterComposeNoise(result.output) || result.output
+    throw new Error(detail || `Engine schema diff failed (exit ${result.status})`)
+  }
+  if (!result.diff) {
+    throw new Error("Engine diff returned no result")
+  }
+  return result.diff
+}
+
 /**
  * `supatype push` when `provider: docker`. Uses in-compose schema-engine unless
  * `overrides.engine` is set — then Postgres is published to the host and push runs
@@ -426,7 +615,14 @@ export async function pushSchemaDocker(cwd: string, config: SupatypeProjectConfi
   await waitComposeHealthy(paths, cwd, 120_000, project)
 
   const schemaPath = schemaPathFromProject(config, cwd)
+  const ast = loadSchemaAst(schemaPath, cwd)
   await runComposeSchemaPush(cwd, config, paths, schemaPath, project)
+
+  const upGateway = runDockerCompose(paths.composePath, ["up", "-d"], cwd, project, { quiet: true })
+  if (upGateway !== 0) process.exit(upGateway)
+  await waitKongReady(kongPort, 120)
+  await provisionDockerStorageBuckets(ast, kongPort, serviceRoleKey)
+
   console.log("[supatype] Schema pushed.")
 }
 
@@ -467,6 +663,9 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
 
   console.log("[supatype] Waiting for API gateway...")
   await waitKongReady(kongPort, 120)
+
+  const ast = loadSchemaAst(schemaPath, cwd)
+  await provisionDockerStorageBuckets(ast, kongPort, serviceRoleKey)
 
   const pidDir = join(homedir(), ".supatype", "projects", config.project.name, "pid")
   mkdirSync(pidDir, { recursive: true })
@@ -538,9 +737,14 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
       debounceTimer = setTimeout(() => {
         debounceTimer = null
         console.log(`\n[supatype] Change detected in ${filename}, pushing schema...`)
-        runComposeSchemaPushQueued(cwd, config, paths, schemaPath, project).catch((e: unknown) =>
-          console.error("[supatype] Schema push failed:", (e as Error).message),
-        )
+        runComposeSchemaPushQueued(cwd, config, paths, schemaPath, project)
+          .then(async () => {
+            const updatedAst = loadSchemaAst(schemaPath, cwd)
+            await provisionDockerStorageBuckets(updatedAst, kongPort, serviceRoleKey)
+          })
+          .catch((e: unknown) =>
+            console.error("[supatype] Schema push failed:", (e as Error).message),
+          )
       }, 300)
     })
   }

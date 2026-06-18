@@ -33,6 +33,9 @@ describe("CLI binary (requires built dist/)", () => {
       "push",
       "diff",
       "pull",
+      "doctor",
+      "introspect",
+      "adopt",
       "generate",
       "migrate",
       "rollback",
@@ -79,10 +82,32 @@ describe("CLI binary (requires built dist/)", () => {
     expect(stdout).toContain("dry run")
   })
 
-  it("pull --help describes deprecated pull command", () => {
+  it("pull --help describes scaffold pull command", () => {
     const { stdout, exitCode } = runCli(["pull", "--help"])
     expect(exitCode).toBe(0)
-    expect(stdout).toContain("deprecated")
+    expect(stdout).toContain("Scaffold")
+    expect(stdout).toContain("--dry-run")
+  })
+
+  it("doctor --help describes drift report command", () => {
+    const { stdout, exitCode } = runCli(["doctor", "--help"])
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain("drift")
+    expect(stdout).toContain("--strict")
+  })
+
+  it("introspect --help describes database introspection command", () => {
+    const { stdout, exitCode } = runCli(["introspect", "--help"])
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain("Introspect")
+    expect(stdout).toContain("--json")
+  })
+
+  it("adopt --help describes adoption ceremony command", () => {
+    const { stdout, exitCode } = runCli(["adopt", "--help"])
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain("adopt")
+    expect(stdout).toContain("--yes")
   })
 
   it("reset --help shows --yes flag", () => {

@@ -67,6 +67,7 @@ export async function ensureSchema(): Promise<void> {
 
     ALTER TABLE storage.buckets ADD COLUMN IF NOT EXISTS access_mode text NOT NULL DEFAULT 'private';
     ALTER TABLE storage.buckets ADD COLUMN IF NOT EXISTS s3_bucket_policy text;
+    ALTER TABLE storage.objects ADD COLUMN IF NOT EXISTS last_accessed_at timestamptz NOT NULL DEFAULT now();
   `)
 }
 

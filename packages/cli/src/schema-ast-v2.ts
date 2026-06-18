@@ -293,13 +293,14 @@ export function emitModel(
   options: Record<string, unknown>,
   tableName: string,
   access: Record<string, unknown>,
+  indexes: unknown[] = [],
 ): ModelAstV2 {
   return {
     name,
     fields,
     options,
     annotations: {
-      db: { tableName, indexes: [] },
+      db: { tableName, indexes },
       platform: { access },
     },
   }

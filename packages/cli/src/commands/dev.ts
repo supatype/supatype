@@ -16,6 +16,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { isAbsolute, join, relative, resolve } from "node:path"
 import { loadConfig } from "../config.js"
+import type { ExtractedSchemaAstV2 } from "../schema-ast-v2.js"
 import {
   functionsPathCandidatesFromProject,
   resolveRuntimeProvider,
@@ -919,9 +920,9 @@ const EXTENSION_FIELDS: Record<string, { ext: string; fallback: AstField }> = {
 }
 
 function adaptUnsupportedKinds(
-  ast: unknown,
+  ast: ExtractedSchemaAstV2,
   skipKinds: ReadonlySet<string>,
-): { filtered: unknown; adapted: string[] } {
+): { filtered: ExtractedSchemaAstV2; adapted: string[] } {
   const adapted: string[] = []
   if (!ast || typeof ast !== "object") return { filtered: ast, adapted }
   const schema = ast as AstSchema
@@ -941,7 +942,7 @@ function adaptUnsupportedKinds(
     return { ...model, fields }
   })
 
-  return { filtered: { ...schema, models }, adapted }
+  return { filtered: { ...schema, models } as ExtractedSchemaAstV2, adapted }
 }
 
 // ---------------------------------------------------------------------------

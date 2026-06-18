@@ -7,6 +7,9 @@ import { registerPg } from "./commands/pg.js"
 import { registerPush } from "./commands/push.js"
 import { registerDiff } from "./commands/diff.js"
 import { registerPull } from "./commands/pull.js"
+import { registerDoctor } from "./commands/doctor.js"
+import { registerIntrospect } from "./commands/introspect.js"
+import { registerAdopt } from "./commands/adopt.js"
 import { registerGenerate } from "./commands/generate.js"
 import { registerMigrate } from "./commands/migrate.js"
 import { registerSeed } from "./commands/seed.js"
@@ -41,6 +44,9 @@ export function run(): void {
   registerPush(program)
   registerDiff(program)
   registerPull(program)
+  registerDoctor(program)
+  registerIntrospect(program)
+  registerAdopt(program)
   registerGenerate(program)
   registerMigrate(program)
   registerSeed(program)

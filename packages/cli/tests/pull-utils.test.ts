@@ -106,12 +106,12 @@ describe("pgTypeToField()", () => {
 })
 
 describe("introspectColumnToColumnInfo()", () => {
-  it("maps engine type → pgType and flags", () => {
+  it("maps engine column → pgType and flags", () => {
     const out = introspectColumnToColumnInfo({
       name: "id",
-      type: "uuid",
+      dataType: "uuid",
+      udtName: "uuid",
       nullable: false,
-      primaryKey: true,
       default: "gen_random_uuid()",
     })
     expect(out).toEqual({
@@ -127,7 +127,8 @@ describe("introspectColumnToColumnInfo()", () => {
   it("treats empty default as no default", () => {
     const out = introspectColumnToColumnInfo({
       name: "x",
-      type: "text",
+      dataType: "text",
+      udtName: "text",
       nullable: true,
       default: "",
     })

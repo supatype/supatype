@@ -416,6 +416,12 @@ export type SpreadOptionalModelFields<TFields extends Record<string, unknown>> =
           : never]?: UnwrapModelFieldType<TFields[K]>
       }
 
+export type ModelIndex = {
+  name?: string
+  fields: readonly string[]
+  unique?: true
+}
+
 export type ModelMeta<TFields extends Record<string, unknown>> = {
   access?: {
     read?:
@@ -457,6 +463,8 @@ export type ModelMeta<TFields extends Record<string, unknown>> = {
   }
   tableName?: string
   searchable?: readonly string[]
+  /** Composite or single-column indexes — emitted to Postgres via the schema engine. */
+  indexes?: readonly ModelIndex[]
   /** Exactly one row — Studio Globals, singleton partial unique index in Postgres. */
   singleton?: true
   /** When omitted, the CLI infers from `WithTimestamps` or `created_at` / `updated_at` fields. */

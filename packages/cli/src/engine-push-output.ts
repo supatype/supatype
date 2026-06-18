@@ -10,7 +10,7 @@ export interface EnginePushResult {
 }
 
 /** Extract the engine JSON object from mixed docker compose stdout/stderr. */
-export function parseEnginePushOutput(output: string): EnginePushResult | null {
+export function parseEngineJsonOutput<T>(output: string): T | null {
   const trimmed = output.trim()
   if (!trimmed) return null
 
@@ -18,7 +18,7 @@ export function parseEnginePushOutput(output: string): EnginePushResult | null {
     const candidate = line.trim()
     if (!candidate.startsWith("{") || !candidate.endsWith("}")) continue
     try {
-      return JSON.parse(candidate) as EnginePushResult
+      return JSON.parse(candidate) as T
     } catch {
       /* try next line */
     }
@@ -26,13 +26,17 @@ export function parseEnginePushOutput(output: string): EnginePushResult | null {
 
   if (trimmed.startsWith("{")) {
     try {
-      return JSON.parse(trimmed) as EnginePushResult
+      return JSON.parse(trimmed) as T
     } catch {
       return null
     }
   }
 
   return null
+}
+
+export function parseEnginePushOutput(output: string): EnginePushResult | null {
+  return parseEngineJsonOutput<EnginePushResult>(output)
 }
 
 /** Human-readable one-liner for successful push (matches `supatype push` tone). */
