@@ -79,3 +79,15 @@ jobs:
           context: .
           file: packages/studio/Dockerfile
           push: false
+
+      - name: Build self-host-control package
+        run: pnpm --filter @supatype/self-host-control build
+
+      - name: Build docker image — control-plane
+        uses: docker/build-push-action@v5
+        with:
+          context: packages/self-host-control
+          file: packages/self-host-control/Dockerfile
+          push: false
+          build-args: |
+            ENGINE_IMAGE=supatype/schema-engine:latest

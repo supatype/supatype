@@ -21,7 +21,9 @@ import {
   discoverTsFunctionsInDir,
   generateFunctionsRouterSource,
 } from "../functions-router-gen.js"
-import { selfHostComposePaths } from "../self-host-compose.js"
+import { loadProjectLink } from "../link.js"
+import { resolveTarget } from "../resolve-target.js"
+import { targetFetch } from "../target-client.js"
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -56,8 +58,9 @@ export function registerFunctions(program: Command): void {
     .command("deploy")
     .description("Deploy all functions (or --only <name> for one) to the linked project")
     .option("--only <name>", "Deploy a single function")
+    .option("--env <name>", "Target environment when linked")
     .option("--dry-run", "Show what would be deployed without deploying")
-    .action(async (opts: { only?: string; dryRun?: boolean }) => {
+    .action(async (opts: { only?: string; env?: string; dryRun?: boolean }) => {
       await deploy(process.cwd(), opts)
     })
 
@@ -327,7 +330,7 @@ async function serve(cwd: string, opts: { port: string; envFile: string }): Prom
 
 // ─── Deploy ──────────────────────────────────────────────────────────────────
 
-async function deploy(cwd: string, opts: { only?: string; dryRun?: boolean }): Promise<void> {
+async function deploy(cwd: string, opts: { only?: string; env?: string; dryRun?: boolean }): Promise<void> {
   const allFns = discoverFunctions(cwd)
   const fns = opts.only
     ? allFns.filter(f => f.name === opts.only)
@@ -353,13 +356,27 @@ async function deploy(cwd: string, opts: { only?: string; dryRun?: boolean }): P
     return
   }
 
+  const link = loadProjectLink(cwd)
+  if (link) {
+    try {
+      const target = resolveTarget(cwd, { env: opts.env })
+      if (target.mode !== "direct" && target.token) {
+        await deployViaTarget(cwd, target, fns)
+        return
+      }
+    } catch {
+      /* fall through to compose/local */
+    }
+  }
+
+  const { selfHostComposePaths } = await import("../self-host-compose.js")
   const composePath = selfHostComposePaths(cwd).composePath
   if (existsSync(composePath)) {
     await deploySelfHosted(cwd, fns)
     return
   }
 
-  await deployCloud(cwd, fns)
+  await deployCloud(cwd, fns, opts.env)
 }
 
 async function deploySelfHosted(cwd: string, fns: DiscoveredFunction[]): Promise<void> {
@@ -376,7 +393,49 @@ async function deploySelfHosted(cwd: string, fns: DiscoveredFunction[]): Promise
   console.log("\nKong → supatype-server → functions-worker (per-project worker).")
 }
 
-async function deployCloud(cwd: string, fns: DiscoveredFunction[]): Promise<void> {
+async function deployViaTarget(
+  cwd: string,
+  target: ReturnType<typeof resolveTarget>,
+  fns: DiscoveredFunction[],
+): Promise<void> {
+  console.log(`Deploying to ${target.mode} project: ${target.projectRef} (${target.environment})\n`)
+
+  for (const fn of fns) {
+    const start = Date.now()
+    const source = readFunctionSource(fn)
+
+    try {
+      await targetFetch(
+        target.apiBaseUrl,
+        target.apiPrefix,
+        {
+          method: "POST",
+          path: `/projects/${target.projectRef}/functions/deploy`,
+          body: {
+            functions: [{
+              name: fn.name,
+              source,
+              entrypoint: `${fn.name}/index.ts`,
+            }],
+          },
+          token: target.token!,
+          orgId: target.orgId,
+          environment: target.mode === "cloud" ? target.environment : undefined,
+        },
+      )
+
+      const duration = Date.now() - start
+      console.log(`  ${fn.name} ✓ deployed (${duration}ms)`)
+    } catch (err) {
+      console.error(`  ${fn.name} ✗ ${err instanceof Error ? err.message : "unknown error"}`)
+    }
+  }
+
+  console.log(`\nDeployed ${fns.length} function(s)`)
+  void cwd
+}
+
+async function deployCloud(cwd: string, fns: DiscoveredFunction[], env?: string): Promise<void> {
   const { getLinkedProject, getCloudToken, getCloudApiUrl } = await loadCloudHelpers()
   const linked = getLinkedProject(cwd)
 
@@ -385,13 +444,13 @@ async function deployCloud(cwd: string, fns: DiscoveredFunction[]): Promise<void
     process.exit(1)
   }
 
-  const token = getCloudToken()
+  const token = getCloudToken(cwd)
   if (!token) {
     console.error("Not logged in. Run: npx supatype cloud login")
     process.exit(1)
   }
 
-  const apiUrl = getCloudApiUrl()
+  const apiUrl = getCloudApiUrl(cwd)
   console.log(`Deploying to project: ${linked.ref}\n`)
 
   for (const fn of fns) {
@@ -473,14 +532,14 @@ async function listFunctions(cwd: string): Promise<void> {
     return
   }
 
-  const token = getCloudToken()
+  const token = getCloudToken(cwd)
   if (!token) {
     console.error("Not logged in. Run: npx supatype cloud login")
     process.exit(1)
   }
 
   try {
-    const res = await fetch(`${getCloudApiUrl()}/api/v1/projects/${linked.ref}/functions`, {
+    const res = await fetch(`${getCloudApiUrl(cwd)}/api/v1/projects/${linked.ref}/functions`, {
       headers: {
         Authorization: `Bearer ${token}`,
         "X-Org-Id": linked.orgId ?? "",
@@ -527,14 +586,14 @@ async function deleteFunction(cwd: string, name: string): Promise<void> {
     process.exit(1)
   }
 
-  const token = getCloudToken()
+  const token = getCloudToken(cwd)
   if (!token) {
     console.error("Not logged in. Run: npx supatype cloud login")
     process.exit(1)
   }
 
   try {
-    const res = await fetch(`${getCloudApiUrl()}/api/v1/projects/${linked.ref}/functions/${name}`, {
+    const res = await fetch(`${getCloudApiUrl(cwd)}/api/v1/projects/${linked.ref}/functions/${name}`, {
       method: "DELETE",
       headers: {
         Authorization: `Bearer ${token}`,
@@ -567,7 +626,7 @@ async function functionLogs(cwd: string, name: string, opts: { since: string }):
     process.exit(1)
   }
 
-  const token = getCloudToken()
+  const token = getCloudToken(cwd)
   if (!token) {
     console.error("Not logged in. Run: npx supatype cloud login")
     process.exit(1)
@@ -575,7 +634,7 @@ async function functionLogs(cwd: string, name: string, opts: { since: string }):
 
   try {
     const res = await fetch(
-      `${getCloudApiUrl()}/api/v1/projects/${linked.ref}/functions/${name}/logs?since=${opts.since}`,
+      `${getCloudApiUrl(cwd)}/api/v1/projects/${linked.ref}/functions/${name}/logs?since=${opts.since}`,
       {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -625,7 +684,7 @@ async function invoke(
     const linked = getLinkedProject(cwd)
     if (linked) {
       url = `https://${linked.ref}.supatype.dev/functions/v1/${name}`
-      const token = getCloudToken()
+      const token = getCloudToken(cwd)
       if (token && opts.auth) {
         headers["Authorization"] = `Bearer ${token}`
       }
@@ -710,14 +769,14 @@ async function envList(cwd: string): Promise<void> {
     return
   }
 
-  const token = getCloudToken()
+  const token = getCloudToken(cwd)
   if (!token) {
     console.error("Not logged in. Run: npx supatype cloud login")
     process.exit(1)
   }
 
   try {
-    const res = await fetch(`${getCloudApiUrl()}/api/v1/projects/${linked.ref}/functions/env`, {
+    const res = await fetch(`${getCloudApiUrl(cwd)}/api/v1/projects/${linked.ref}/functions/env`, {
       headers: {
         Authorization: `Bearer ${token}`,
         "X-Org-Id": linked.orgId ?? "",
@@ -778,14 +837,14 @@ async function envSet(cwd: string, keyvalue: string): Promise<void> {
     return
   }
 
-  const token = getCloudToken()
+  const token = getCloudToken(cwd)
   if (!token) {
     console.error("Not logged in. Run: npx supatype cloud login")
     process.exit(1)
   }
 
   try {
-    const res = await fetch(`${getCloudApiUrl()}/api/v1/projects/${linked.ref}/functions/env`, {
+    const res = await fetch(`${getCloudApiUrl(cwd)}/api/v1/projects/${linked.ref}/functions/env`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
@@ -828,14 +887,14 @@ async function envUnset(cwd: string, key: string): Promise<void> {
     return
   }
 
-  const token = getCloudToken()
+  const token = getCloudToken(cwd)
   if (!token) {
     console.error("Not logged in. Run: npx supatype cloud login")
     process.exit(1)
   }
 
   try {
-    const res = await fetch(`${getCloudApiUrl()}/api/v1/projects/${linked.ref}/functions/env/${key}`, {
+    const res = await fetch(`${getCloudApiUrl(cwd)}/api/v1/projects/${linked.ref}/functions/env/${key}`, {
       method: "DELETE",
       headers: {
         Authorization: `Bearer ${token}`,
@@ -860,32 +919,29 @@ async function envUnset(cwd: string, key: string): Promise<void> {
 // ─── Cloud helpers (lazy loaded) ─────────────────────────────────────────────
 
 interface CloudHelpers {
-  getLinkedProject(cwd: string): { ref: string; orgId?: string } | null
-  getCloudToken(): string | null
-  getCloudApiUrl(): string
+  getLinkedProject(cwd: string): { ref: string; orgId?: string | undefined; kind?: string } | null
+  getCloudToken(cwd: string): string | null
+  getCloudApiUrl(cwd: string): string
 }
 
 async function loadCloudHelpers(): Promise<CloudHelpers> {
-  // These helpers read the local .supatype/linked.json and auth token
   return {
-    getLinkedProject(cwd: string): { ref: string; orgId?: string } | null {
-      const linkedPath = resolve(cwd, ".supatype/linked.json")
-      if (!existsSync(linkedPath)) return null
-      try {
-        const data = JSON.parse(readFileSync(linkedPath, "utf8")) as Record<string, string>
-        const ref = data["ref"]
-        const orgId = data["orgId"]
-        return ref ? { ref, ...(orgId !== undefined ? { orgId } : {}) } : null
-      } catch {
-        return null
+  getLinkedProject(cwd: string): { ref: string; orgId?: string | undefined; kind?: string } | null {
+      const link = loadProjectLink(cwd)
+      if (!link?.projectRef) return null
+      return {
+        ref: link.projectRef,
+        kind: link.kind,
+        ...(link.orgId !== undefined ? { orgId: link.orgId } : {}),
       }
     },
 
-    getCloudToken(): string | null {
-      // Check env first, then config file
+    getCloudToken(cwd: string): string | null {
       if (process.env["SUPATYPE_ACCESS_TOKEN"]) {
         return process.env["SUPATYPE_ACCESS_TOKEN"]
       }
+      const link = loadProjectLink(cwd)
+      if (link?.token) return link.token
       const tokenPath = resolve(
         process.env["HOME"] ?? process.env["USERPROFILE"] ?? "~",
         ".supatype/token",
@@ -894,7 +950,9 @@ async function loadCloudHelpers(): Promise<CloudHelpers> {
       return readFileSync(tokenPath, "utf8").trim() || null
     },
 
-    getCloudApiUrl(): string {
+    getCloudApiUrl(cwd: string): string {
+      const link = loadProjectLink(cwd)
+      if (link?.cloudApiUrl) return link.cloudApiUrl
       return process.env["SUPATYPE_API_URL"] ?? "https://api.supatype.com"
     },
   }

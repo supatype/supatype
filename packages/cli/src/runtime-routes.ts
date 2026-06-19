@@ -93,6 +93,13 @@ function runtimeRouteSpecUnified(opts: RuntimeRouteOptions): RuntimeRoute[] {
       stripPath: false,
     },
     {
+      name: "platform-v1",
+      serviceName: "supatype-server-platform",
+      serviceUrl: SERVER_GATEWAY,
+      paths: ["/platform/v1/"],
+      stripPath: false,
+    },
+    {
       name: "graphql-v1",
       serviceName: "postgrest-graphql",
       serviceUrl: "http://postgrest:3000/rpc/graphql",

@@ -1,7 +1,8 @@
 import type { Command } from "commander"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { schemaPathFromProject } from "../project-config.js"
-import { ensureEngine, engineRequest } from "../engine-client.js"
+import { resolveTarget, targetSchemaDoctor, schemaPgSchema } from "../resolve-target.js"
+import { loadProjectLink } from "../link.js"
 import { resolveHostEngineDatabaseUrl } from "../dev-compose.js"
 
 interface DoctorItem {
@@ -33,25 +34,52 @@ export function registerDoctor(program: Command): void {
     .command("doctor")
     .description("Report schema drift between schema/index.ts and the live database")
     .option("--connection <url>", "Database connection URL (overrides config)")
+    .option("--env <name>", "Target environment when linked")
     .option("--strict", "Exit non-zero when missing or stale managed drift exists")
     .option("--no-cache", "Force full database introspection")
-    .action(async (opts: { connection?: string; strict?: boolean; noCache?: boolean }) => {
+    .option("--direct", "Use local engine subprocess")
+    .action(async (opts: {
+      connection?: string
+      env?: string
+      strict?: boolean
+      noCache?: boolean
+      direct?: boolean
+    }) => {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
-      const connection = await resolveHostEngineDatabaseUrl(cwd, config, opts.connection)
-      const pgSchema = config.schema?.pg_schema ?? "public"
-
-      await ensureEngine()
+      const pgSchema = schemaPgSchema(cwd)
 
       console.log("Loading schema...")
       const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
 
-      const report = await engineRequest<DoctorReport>("/doctor", {
-        ast,
-        database_url: connection,
-        schema: pgSchema,
-        no_cache: opts.noCache ?? false,
-      })
+      let report: DoctorReport
+
+      const linked = loadProjectLink(cwd)
+      if (linked && !opts.direct && !opts.connection) {
+        const target = resolveTarget(cwd, { env: opts.env })
+        report = (await targetSchemaDoctor(target, ast, {
+          noCache: opts.noCache,
+          schema: pgSchema,
+        })) as DoctorReport
+      } else if (!opts.direct && !opts.connection) {
+        const connection = await resolveHostEngineDatabaseUrl(cwd, config, opts.connection)
+        const target = resolveTarget(cwd, { direct: true, connection })
+        report = (await targetSchemaDoctor(target, ast, {
+          noCache: opts.noCache,
+          schema: pgSchema,
+        })) as DoctorReport
+        void connection
+      } else {
+        const target = resolveTarget(cwd, {
+          env: opts.env,
+          direct: true,
+          connection: opts.connection,
+        })
+        report = (await targetSchemaDoctor(target, ast, {
+          noCache: opts.noCache,
+          schema: pgSchema,
+        })) as DoctorReport
+      }
 
       printSection("Missing (in AST, not in DB)", report.missing ?? [])
       printSection("Stale managed (stamped, not in AST)", report.staleManaged ?? [])

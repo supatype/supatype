@@ -149,24 +149,40 @@ export async function engineRequest<T = unknown>(
 ): Promise<T> {
   const bin = await getEngineBin()
 
-  // Write request to a temp file.
-  // For CLI-mode endpoints the engine reads the input file as a raw SchemaAst,
-  // so we extract the `ast` field when present, otherwise write the full body.
   const tmpDir = join(tmpdir(), "supatype-engine")
   mkdirSync(tmpDir, { recursive: true })
+  const cleanup: string[] = []
   const reqFile = join(tmpDir, `req-${Date.now()}.json`)
   const inputPayload = body["ast"] !== undefined ? body["ast"] : body
   writeFileSync(reqFile, JSON.stringify(inputPayload))
+  cleanup.push(reqFile)
 
-  const args = endpointToArgs(endpoint, body, reqFile)
+  let gzPath: string | undefined
+  let manifestPath: string | undefined
+  if (typeof body["schema_sources_gz_base64"] === "string") {
+    gzPath = join(tmpDir, `sources-${Date.now()}.gz`)
+    writeFileSync(gzPath, Buffer.from(body["schema_sources_gz_base64"], "base64"))
+    cleanup.push(gzPath)
+  }
+  if (body["schema_sources_manifest"] !== undefined) {
+    manifestPath = join(tmpDir, `manifest-${Date.now()}.json`)
+    writeFileSync(manifestPath, JSON.stringify(body["schema_sources_manifest"]))
+    cleanup.push(manifestPath)
+  }
+
+  const args = endpointToArgs(endpoint, body, reqFile, {
+    ...(gzPath !== undefined ? { gzPath } : {}),
+    ...(manifestPath !== undefined ? { manifestPath } : {}),
+  })
 
   const result = spawnSync(bin, args, {
     encoding: "utf8",
     cwd: process.cwd(),
   })
 
-  // Clean up temp file.
-  try { unlinkSync(reqFile) } catch { /* ignore */ }
+  for (const f of cleanup) {
+    try { unlinkSync(f) } catch { /* ignore */ }
+  }
 
   if (result.status !== 0) {
     const stderr = result.stderr?.trim() || "(no output)"
@@ -198,6 +214,7 @@ function endpointToArgs(
   endpoint: string,
   body: Record<string, unknown>,
   reqFile: string,
+  sources?: { gzPath?: string; manifestPath?: string },
 ): string[] {
   const dbUrl = (body["database_url"] as string | undefined) ?? ""
   const schema = (body["schema"] as string | undefined) ?? "public"
@@ -209,8 +226,26 @@ function endpointToArgs(
     case "/diff":
       return ["diff", "--input", reqFile, "--database-url", dbUrl, "--schema", schema]
 
-    case "/push":
-      return ["push", "--input", reqFile, "--database-url", dbUrl, "--schema", schema, ...force, ...nonInteractive]
+    case "/push": {
+      const sourceArgs: string[] = []
+      if (sources?.gzPath) sourceArgs.push("--schema-sources-gz", sources.gzPath)
+      if (sources?.manifestPath) sourceArgs.push("--schema-sources-manifest", sources.manifestPath)
+      return [
+        "push",
+        "--input",
+        reqFile,
+        "--database-url",
+        dbUrl,
+        "--schema",
+        schema,
+        ...force,
+        ...nonInteractive,
+        ...sourceArgs,
+      ]
+    }
+
+    case "/rollback":
+      return ["rollback", "--database-url", dbUrl, "--schema", schema]
 
     case "/parse":
       return ["parse", "--input", reqFile]
@@ -242,9 +277,16 @@ function endpointToArgs(
       return ["admin", "--input", reqFile]
 
     default:
-      if (endpoint.startsWith("/migrations")) {
+      if (endpoint === "/migrations" || endpoint.startsWith("/migrations")) {
         const action = (body["action"] as string | undefined) ?? "list"
-        return ["migrations", action, "--database-url", dbUrl]
+        if (action === "rollback") {
+          return ["rollback", "--database-url", dbUrl, "--schema", schema]
+        }
+        const name = body["name"] as string | undefined
+        if (name) {
+          return ["migrations", "--database-url", dbUrl, "--name", name]
+        }
+        return ["migrations", "--database-url", dbUrl]
       }
       return [endpoint.replace(/^\//, ""), "--input", reqFile]
   }

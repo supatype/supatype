@@ -202,6 +202,14 @@ export interface SupatypeProjectConfig {
     headers?: Record<string, string>
   }
   /**
+   * Persistent environment defaults for `resolveTarget()` when `--env` is omitted.
+   * Ephemeral schema branches (Phase 22) use `.supatype/branch.json`, not this block.
+   */
+  environments?: {
+    default?: string
+    branchDefaults?: Record<string, string>
+  }
+  /**
    * Optional Postgres URL for CLI commands that talk to the DB (`push`, `migrate`, …).
    * When omitted, `DATABASE_URL` from the environment is used, then a local default DSN.
    */

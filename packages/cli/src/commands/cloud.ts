@@ -2,19 +2,35 @@ import type { Command } from "commander"
 import { readFileSync, writeFileSync, existsSync } from "node:fs"
 import { resolve } from "node:path"
 import { createInterface } from "node:readline"
+import { loadProjectLink, migrateLegacyLinkFiles } from "../link.js"
+import { targetFetch } from "../target-client.js"
+import { registerEnvs, registerLinkOptions, runLinkAction } from "./link-helpers.js"
+import { resolveTarget, targetSchemaPush, schemaPgSchema } from "../resolve-target.js"
+import { loadConfig, loadSchemaAst } from "../config.js"
+import { schemaPathFromProject } from "../project-config.js"
 
 interface CloudConfig {
   apiUrl: string
   token: string
   projectSlug?: string
-  /** Organisation UUID — required for schema routes (`X-Org-Id`). */
-  orgId?: string
+  orgId?: string | undefined
 }
 
+/** @deprecated Prefer loadProjectLink */
 export function loadCloudConfig(cwd: string): CloudConfig | null {
-  const configPath = resolve(cwd, ".supatype/cloud.json")
-  if (!existsSync(configPath)) return null
-  return JSON.parse(readFileSync(configPath, "utf8")) as CloudConfig
+  migrateLegacyLinkFiles(cwd)
+  const link = loadProjectLink(cwd)
+  if (!link || link.kind !== "cloud") return null
+  const legacyPath = resolve(cwd, ".supatype/cloud.json")
+  if (existsSync(legacyPath)) {
+    return JSON.parse(readFileSync(legacyPath, "utf8")) as CloudConfig
+  }
+  return {
+    apiUrl: link.cloudApiUrl ?? "https://api.supatype.com",
+    token: link.token ?? "",
+    projectSlug: link.projectRef,
+    ...(link.orgId !== undefined ? { orgId: link.orgId } : {}),
+  }
 }
 
 function saveCloudConfig(cwd: string, config: CloudConfig): void {
@@ -27,135 +43,76 @@ function saveCloudConfig(cwd: string, config: CloudConfig): void {
 }
 
 async function cloudFetch<T>(config: CloudConfig, method: string, path: string, body?: unknown): Promise<T> {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${config.token}`,
-  }
-  if (config.orgId) {
-    headers["X-Org-Id"] = config.orgId
-  }
-  const res = await fetch(`${config.apiUrl}/api/v1${path}`, {
+  return targetFetch<T>(config.apiUrl, "/api/v1", {
     method,
-    headers,
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    path,
+    body,
+    token: config.token,
+    orgId: config.orgId,
   })
-
-  const json = await res.json() as { data?: T; error?: string; message?: string }
-  if (!res.ok) {
-    throw new Error(json.message ?? json.error ?? `API error: ${res.status}`)
-  }
-  return json.data as T
 }
 
-/** True when `.supatype/cloud.json` exists with a linked project slug. */
 export function isCloudLinked(cwd: string): boolean {
-  const cfg = loadCloudConfig(cwd)
-  return Boolean(cfg?.projectSlug && cfg.token)
+  migrateLegacyLinkFiles(cwd)
+  const link = loadProjectLink(cwd)
+  return Boolean(link?.kind === "cloud" && link.projectRef && link.token)
 }
 
-/**
- * Push schema AST to the linked cloud project (`POST /api/v1/projects/:ref/schema/push`).
- * Credentials stay server-side; only AST is sent.
- */
-export async function pushSchemaToLinkedProject(cwd: string, opts?: { force?: boolean }): Promise<void> {
-  const config = loadCloudConfig(cwd)
-  if (!config?.projectSlug) {
-    console.error("Not linked to a cloud project. Run: supatype link")
-    process.exit(1)
-  }
-  if (!config.orgId) {
-    console.error(
-      "Missing orgId in .supatype/cloud.json. Re-run: supatype link --project <slug> (after cloud login).",
-    )
+export async function pushSchemaToLinkedProject(
+  cwd: string,
+  opts?: { force?: boolean; env?: string },
+): Promise<void> {
+  const config = loadConfig(cwd)
+  const target = resolveTarget(cwd, { env: opts?.env })
+  if (target.mode !== "cloud") {
+    console.error("Not linked to a cloud project. Run: supatype link --project <slug>")
     process.exit(1)
   }
 
-  const { loadConfig: loadAppConfig, loadSchemaAst } = await import("../config.js")
-  const { schemaPathFromProject } = await import("../project-config.js")
+  const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
+  console.log(`Pushing schema to ${target.mode} project ${target.projectRef} (${target.environment})...`)
 
-  const appConfig = loadAppConfig(cwd)
-  const ast = loadSchemaAst(schemaPathFromProject(appConfig, cwd), cwd)
-
-  console.log(`Pushing schema to cloud project ${config.projectSlug}...`)
-
-  const result = await cloudFetch<{ message?: string }>(config, "POST", `/projects/${config.projectSlug}/schema/push`, {
-    ast,
+  const result = await targetSchemaPush(target, ast, {
     force: opts?.force ?? true,
+    schema: schemaPgSchema(cwd),
   })
 
-  console.log(result.message ?? "Schema push completed.")
+  console.log((result as { message?: string }).message ?? "Schema push completed.")
 }
 
-/** @deprecated Use pushSchemaToLinkedProject — kept for deploy command alias */
-export async function deploySchemaToLinkedProject(cwd: string, _environment: string): Promise<void> {
-  await pushSchemaToLinkedProject(cwd)
+export async function deploySchemaToLinkedProject(cwd: string, environment: string): Promise<void> {
+  await pushSchemaToLinkedProject(cwd, { force: true, env: environment })
 }
 
 function prompt(question: string): Promise<string> {
   const rl = createInterface({ input: process.stdin, output: process.stdout })
-  return new Promise((resolve) => {
+  return new Promise((resolvePrompt) => {
     rl.question(question, (answer) => {
       rl.close()
-      resolve(answer.trim())
+      resolvePrompt(answer.trim())
     })
   })
 }
 
-// ─── Registration ──────────────────────────────────────────────────────────────
-
 export function registerCloud(program: Command): void {
-  // ── Link ───────────────────────────────────────────────────────────────────
-  program
+  registerEnvs(program)
+
+  const linkCmd = program
     .command("link")
-    .description("Link this local project to a Supatype cloud project")
-    .option("--project <slug>", "Project slug to link to")
-    .option("--api-url <url>", "Control plane API URL", "https://api.supatype.com")
-    .option("--token <token>", "Authentication token")
-    .action(async (opts: { project?: string; apiUrl: string; token?: string }) => {
-      const cwd = process.cwd()
-      const token = opts.token ?? process.env["SUPATYPE_TOKEN"]
-      if (!token) {
-        console.error("Authentication required. Set SUPATYPE_TOKEN or pass --token.")
-        process.exit(1)
-      }
+    .description("Link this project to cloud or self-host (unified .supatype/link.json)")
+  registerLinkOptions(linkCmd)
+  linkCmd.action(async (opts: {
+    project?: string
+    url?: string
+    apiUrl: string
+    token?: string
+    serviceRoleKey?: string
+    env?: string
+    fixGitignore?: boolean
+  }) => {
+    await runLinkAction(opts)
+  })
 
-      const config: CloudConfig = { apiUrl: opts.apiUrl, token }
-
-      if (opts.project) {
-        config.projectSlug = opts.project
-        const one = await cloudFetch<{ slug: string; orgId: string }>(config, "GET", `/projects/${opts.project}`)
-        config.orgId = one.orgId
-      } else {
-        const projects = await cloudFetch<Array<{ slug: string; name: string; status: string; tier: string; orgId: string }>>(
-          config, "GET", "/projects",
-        )
-        if (projects.length === 0) {
-          console.error("No projects found. Create one with: supatype projects create <name>")
-          process.exit(1)
-        }
-
-        console.log("\nAvailable projects:\n")
-        projects.forEach((p, i) => {
-          console.log(`  ${i + 1}. ${p.name} (${p.slug}) [${p.tier}] — ${p.status}`)
-        })
-
-        const answer = await prompt(`\nSelect project (1-${projects.length}): `)
-        const idx = parseInt(answer, 10) - 1
-        if (isNaN(idx) || idx < 0 || idx >= projects.length) {
-          console.error("Invalid selection.")
-          process.exit(1)
-        }
-        const picked = projects[idx]!
-        config.projectSlug = picked.slug
-        config.orgId = picked.orgId
-      }
-
-      saveCloudConfig(cwd, config)
-      console.log(`\nLinked to project: ${config.projectSlug}`)
-      console.log(`Config saved to .supatype/cloud.json\n`)
-    })
-
-  // ── Projects ───────────────────────────────────────────────────────────────
   const projectsCmd = program
     .command("projects")
     .description("Manage cloud projects")
@@ -223,7 +180,6 @@ export function registerCloud(program: Command): void {
       console.log(`Project ${slug} resumed.`)
     })
 
-  // ── Domains ────────────────────────────────────────────────────────────────
   const domainsCmd = program
     .command("domains")
     .description("Manage custom domains for a project")
@@ -313,10 +269,12 @@ function getCloudConfigOrExit(): CloudConfig {
   const cwd = process.cwd()
   let config = loadCloudConfig(cwd)
   if (!config) {
-    const token = process.env["SUPATYPE_TOKEN"]
+    const token =
+      process.env["SUPATYPE_ACCESS_TOKEN"] ??
+      process.env["SUPATYPE_TOKEN"]
     const apiUrl = process.env["SUPATYPE_API_URL"] ?? "https://api.supatype.com"
     if (!token) {
-      console.error("Not connected to Supatype Cloud. Run: supatype link, or set SUPATYPE_TOKEN.")
+      console.error("Not connected to Supatype Cloud. Run: supatype link, or set SUPATYPE_ACCESS_TOKEN.")
       process.exit(1)
     }
     config = { apiUrl, token }

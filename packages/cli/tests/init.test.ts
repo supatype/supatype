@@ -97,7 +97,7 @@ describe("scaffold()", () => {
     const content = readFileSync(join(tmpRoot, ".gitignore"), "utf8")
     expect(content).toContain(".env")
     expect(content).toContain("node_modules/")
-    expect(content).toContain(".supatype/engine/")
+    expect(content).toContain(".supatype/")
     expect(content).toContain("supatype.local.config.ts")
   })
 

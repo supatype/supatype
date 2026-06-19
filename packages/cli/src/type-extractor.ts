@@ -1,5 +1,6 @@
-import { existsSync, readFileSync } from "node:fs"
-import { dirname, isAbsolute, resolve } from "node:path"
+import { existsSync, readFileSync, realpathSync } from "node:fs"
+import { createHash } from "node:crypto"
+import { dirname, isAbsolute, relative, resolve } from "node:path"
 import ts from "typescript"
 import {
   applyImportRename,
@@ -143,9 +144,51 @@ export function extractSchemaAstFromTypes(
   })
 }
 
-function loadSchemaSourceFiles(entryPath: string): ts.SourceFile[] {
+export interface SchemaSourceFile {
+  relativePath: string
+  absolutePath: string
+  sha256: string
+  bytes: number
+}
+
+export interface SchemaSourceGraph {
+  entryPoint: string
+  files: SchemaSourceFile[]
+}
+
+export function collectSchemaSourcePaths(entryAbsPath: string, projectRoot: string): SchemaSourceGraph {
+  const root = resolve(projectRoot)
+  const entryReal = realpathSync(entryAbsPath)
+  const entryPoint = relative(root, entryReal).replace(/\\/g, "/")
+  if (entryPoint.startsWith("..")) {
+    throw new Error(`Schema entry must be under project root: ${entryAbsPath}`)
+  }
+
+  const absolutePaths = walkSchemaSourceAbsPaths(entryReal)
+  const files: SchemaSourceFile[] = []
+
+  for (const abs of absolutePaths) {
+    const real = realpathSync(abs)
+    const rel = relative(root, real).replace(/\\/g, "/")
+    if (rel.startsWith("..")) {
+      throw new Error(`Schema source escapes project root: ${abs}`)
+    }
+    const content = readFileSync(real)
+    files.push({
+      relativePath: rel,
+      absolutePath: real,
+      sha256: createHash("sha256").update(content).digest("hex"),
+      bytes: content.length,
+    })
+  }
+
+  files.sort((a, b) => a.relativePath.localeCompare(b.relativePath))
+  return { entryPoint, files }
+}
+
+function walkSchemaSourceAbsPaths(entryPath: string): string[] {
   const visited = new Set<string>()
-  const sourceFiles: ts.SourceFile[] = []
+  const paths: string[] = []
   const queue: string[] = [entryPath]
 
   while (queue.length > 0) {
@@ -153,12 +196,11 @@ function loadSchemaSourceFiles(entryPath: string): ts.SourceFile[] {
     if (!currentPath) continue
     if (visited.has(currentPath)) continue
     visited.add(currentPath)
-
     if (!existsSync(currentPath)) continue
+    paths.push(currentPath)
+
     const sourceText = readFileSync(currentPath, "utf8")
     const sourceFile = ts.createSourceFile(currentPath, sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
-    sourceFiles.push(sourceFile)
-
     const baseDir = dirname(currentPath)
     for (const stmt of sourceFile.statements) {
       let specifier: string | undefined
@@ -178,7 +220,14 @@ function loadSchemaSourceFiles(entryPath: string): ts.SourceFile[] {
     }
   }
 
-  return sourceFiles
+  return paths
+}
+
+function loadSchemaSourceFiles(entryPath: string): ts.SourceFile[] {
+  return walkSchemaSourceAbsPaths(entryPath).map((abs) => {
+    const sourceText = readFileSync(abs, "utf8")
+    return ts.createSourceFile(abs, sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  })
 }
 
 function resolveTypeModulePath(fromDir: string, specifier: string): string | null {

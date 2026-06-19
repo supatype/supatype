@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { runtimeRouteSpec } from "../src/runtime-routes.js"
 import { buildKongDeclarative } from "../src/kong-config.js"
-import { composeDockerImageEnv, renderSelfHostCompose, writeSelfHostCompose } from "../src/self-host-compose.js"
+import { composeDockerImageEnv, composePullNeedsIgnoreFailures, hasLocalVersionPins, isRegistryPullableImageRef, renderSelfHostCompose, writeSelfHostCompose } from "../src/self-host-compose.js"
 import { updateAppConfigInProject } from "../src/app-config.js"
 import type { SupatypeProjectConfig } from "../src/project-config.js"
 import { DENO_RELEASE_PIN } from "../src/release-pins.js"
@@ -126,6 +126,49 @@ describe("runtime contract", () => {
       SUPATYPE_SERVER_IMAGE: "supatype/server:v0.1.0",
       SUPATYPE_POSTGRES_IMAGE: "supatype/postgres:custom",
     })
+  })
+
+  it("isRegistryPullableImageRef accepts semver and latest tags", () => {
+    expect(isRegistryPullableImageRef("supatype/server:latest")).toBe(true)
+    expect(isRegistryPullableImageRef("supatype/schema-engine:v0.4.2")).toBe(true)
+    expect(isRegistryPullableImageRef("supatype/postgres:17-latest")).toBe(true)
+    expect(isRegistryPullableImageRef("supatype/control-plane:local")).toBe(false)
+    expect(isRegistryPullableImageRef("supatype/server:keepsake-local")).toBe(false)
+  })
+
+  it("composePullNeedsIgnoreFailures is false for semver pins only", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "supatype-pull-"))
+    try {
+      writeFileSync(
+        join(cwd, ".env"),
+        "SUPATYPE_ENGINE_IMAGE=supatype/schema-engine:v0.4.2\n",
+        "utf8",
+      )
+      expect(hasLocalVersionPins(baseConfig)).toBe(false)
+      expect(composePullNeedsIgnoreFailures(baseConfig, cwd)).toBe(false)
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it("composePullNeedsIgnoreFailures is true for versions.local or custom tags", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "supatype-pull-local-"))
+    try {
+      writeFileSync(
+        join(cwd, ".env"),
+        "SUPATYPE_CONTROL_PLANE_IMAGE=supatype/control-plane:local\n",
+        "utf8",
+      )
+      expect(
+        composePullNeedsIgnoreFailures(
+          { ...baseConfig, versions: { engine: "local" } },
+          cwd,
+        ),
+      ).toBe(true)
+      expect(composePullNeedsIgnoreFailures(baseConfig, cwd)).toBe(true)
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
   })
 
   it("self-host compose mounts project root at /project (project-directory relative)", () => {

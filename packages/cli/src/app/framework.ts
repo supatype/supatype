@@ -4,7 +4,7 @@
  * build command, output directory, and SPA mode defaults.
  */
 
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs"
 import { join, resolve } from "node:path"
 import type { AppConfig, AppFramework } from "../config.js"
 
@@ -227,7 +227,6 @@ export function validateBuildOutput(outputDir: string, maxSizeMb: number): strin
 }
 
 function findHtmlFile(dir: string): boolean {
-  const { readdirSync, statSync } = require("node:fs") as typeof import("node:fs")
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (entry.isFile() && entry.name.endsWith(".html")) return true
     if (entry.isDirectory()) {
@@ -238,7 +237,6 @@ function findHtmlFile(dir: string): boolean {
 }
 
 function getDirSizeMb(dir: string): number {
-  const { readdirSync, statSync } = require("node:fs") as typeof import("node:fs")
   let size = 0
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const path = join(dir, entry.name)

@@ -12,11 +12,14 @@
  */
 
 import type { Command } from "commander"
-import { existsSync, readdirSync, statSync, createReadStream } from "node:fs"
-import { join } from "node:path"
+import { existsSync, readdirSync, statSync, createReadStream, mkdirSync, cpSync } from "node:fs"
+import { join, relative } from "node:path"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { connectionString, schemaPathFromProject } from "../project-config.js"
 import { deploySchemaToLinkedProject, loadCloudConfig, pushSchemaToLinkedProject } from "./cloud.js"
+import { loadProjectLink } from "../link.js"
+import { resolveTarget } from "../resolve-target.js"
+import { targetFetch } from "../target-client.js"
 import { ensureEngine, engineRequest, type DiffResult } from "../engine-client.js"
 import { resolveAppConfig, validateStaticMode, validateBuildOutput, detectPackageManager } from "../app/framework.js"
 import { TIER_LIMITS, type Tier } from "./deploy-types.js"
@@ -29,7 +32,8 @@ export function registerDeploy(program: Command): void {
       "Deploy schema and app — Supatype Cloud by default when linked (`supatype link`); pass --local for engine + your database",
     )
     .option("--local", "Use local schema engine and database_url from config (skip cloud control plane)")
-    .option("--environment <name>", "Cloud environment when using linked project", "production")
+    .option("--environment <name>", "Target environment when linked", "production")
+    .option("--env <name>", "Alias for --environment")
     .option("--app-only", "Skip schema push, only deploy the static site")
     .option("--schema-only", "Skip app build, only push schema changes")
     .option("--skip-build", "Deploy existing build output without building")
@@ -38,6 +42,7 @@ export function registerDeploy(program: Command): void {
     .action(async (opts: {
       local?: boolean
       environment?: string
+      env?: string
       appOnly?: boolean
       schemaOnly?: boolean
       skipBuild?: boolean
@@ -46,18 +51,19 @@ export function registerDeploy(program: Command): void {
     }) => {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
+      const link = loadProjectLink(cwd)
       const cloudCfg = loadCloudConfig(cwd)
+      const envName = opts.env ?? opts.environment ?? "production"
 
       let schemaDone = false
 
-      // Default: cloud — .supatype/cloud.json → control plane schema deploy
       if (
         !opts.local &&
-        cloudCfg?.projectSlug &&
+        link &&
         !opts.appOnly &&
         !opts.skipBuild
       ) {
-        await deploySchemaToLinkedProject(cwd, opts.environment ?? "production")
+        await deploySchemaToLinkedProject(cwd, envName)
         schemaDone = true
         if (opts.schemaOnly) {
           return
@@ -92,9 +98,9 @@ export function registerDeploy(program: Command): void {
           } else {
             console.log("Schema is up to date.")
           }
-        } else if (cloudCfg?.projectSlug) {
-          console.log("=== Schema Push (cloud) ===")
-          await pushSchemaToLinkedProject(cwd, { force: opts.yes ?? true })
+        } else if (link) {
+          console.log("=== Schema Push (linked) ===")
+          await pushSchemaToLinkedProject(cwd, { force: opts.yes ?? true, env: envName })
         } else {
           console.error(
             "Not linked to Supatype Cloud. Run: supatype link\n" +
@@ -184,21 +190,21 @@ export function registerDeploy(program: Command): void {
         }
 
         // Deploy (--local never uploads to cloud, even if linked)
-        if (cloudCfg?.projectSlug && !opts.local) {
-          await deployToCloud(
-            { projectRef: cloudCfg.projectSlug, apiUrl: cloudCfg.apiUrl, accessToken: cloudCfg.token },
-            appConfig.outputDirectory,
-            opts.preview ?? false,
-          )
+        if (link && !opts.local) {
+          await deployStaticSite(cwd, appConfig.outputDirectory, {
+            preview: opts.preview ?? false,
+            env: envName,
+          })
         } else {
           deploySelfHost(appConfig.outputDirectory, cwd)
         }
 
         console.log("\nDeployment complete!")
-        if (cloudCfg?.projectSlug && !opts.local) {
+        if (link && !opts.local) {
+          const target = resolveTarget(cwd, { env: envName })
           const url = opts.preview
-            ? `https://preview-${Date.now().toString(36)}.${cloudCfg.projectSlug}.supatype.dev`
-            : `https://${cloudCfg.projectSlug}.supatype.dev`
+            ? `${target.apiBaseUrl}/preview`
+            : target.apiBaseUrl
           console.log(`URL: ${url}`)
         }
       }
@@ -208,123 +214,174 @@ export function registerDeploy(program: Command): void {
   deploy
     .command("rollback")
     .description("Roll back to the previous static site deployment")
-    .action(async () => {
-      const cloudCfg = loadCloudConfig(process.cwd())
-      if (!cloudCfg?.projectSlug) {
-        console.error("Not linked to a cloud project. Rollback is only available for cloud deployments.")
+    .option("--env <name>", "Target environment when linked")
+    .option("--to <id>", "Roll back to a specific deployment id or version")
+    .action(async (opts: { env?: string; to?: string }) => {
+      const cwd = process.cwd()
+      const link = loadProjectLink(cwd)
+      if (!link) {
+        console.error("Not linked to a project. Rollback requires a linked target.")
         process.exit(1)
       }
 
-      const apiUrl = cloudCfg.apiUrl || "https://api.supatype.com"
-      const token = cloudCfg.token || process.env["SUPATYPE_ACCESS_TOKEN"] || ""
+      const target = resolveTarget(cwd, { env: opts.env })
+      const body = opts.to ? { to: opts.to } : undefined
+      const data = await targetFetch<{ version: string; message: string }>(
+        target.apiBaseUrl,
+        target.apiPrefix,
+        {
+          method: "POST",
+          path: `/projects/${target.projectRef}/deployments/rollback`,
+          body,
+          token: target.token!,
+          orgId: target.orgId,
+          environment: target.mode === "cloud" ? target.environment : undefined,
+        },
+      )
 
-      const res = await fetch(`${apiUrl}/platform/v1/projects/${cloudCfg.projectSlug}/deployments/rollback`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      })
-
-      if (!res.ok) {
-        const body = await res.text()
-        console.error(`Rollback failed: ${res.status} ${body}`)
-        process.exit(1)
-      }
-
-      const { data } = await res.json() as { data: { version: string; message: string } }
-      console.log(`Rolled back to deployment ${data.version}.`)
+      console.log(`Rolled back to deployment ${data.version ?? "previous"}.`)
     })
 
   // supatype deploy status
   deploy
     .command("status")
     .description("Show current deployment status")
-    .action(async () => {
-      const cloudCfg = loadCloudConfig(process.cwd())
-      if (!cloudCfg?.projectSlug) {
-        console.error("Not linked to a cloud project.")
+    .option("--env <name>", "Target environment when linked")
+    .action(async (opts: { env?: string }) => {
+      const cwd = process.cwd()
+      const link = loadProjectLink(cwd)
+      if (!link) {
+        console.error("Not linked to a project.")
         process.exit(1)
       }
 
-      const apiUrl = cloudCfg.apiUrl || "https://api.supatype.com"
-      const token = cloudCfg.token || process.env["SUPATYPE_ACCESS_TOKEN"] || ""
+      const target = resolveTarget(cwd, { env: opts.env })
+      const data = await targetFetch<{
+        version?: string
+        id?: string
+        timestamp?: string
+        createdAt?: string
+        size?: number
+        buildDuration?: number
+        url?: string
+        status?: string
+      } | null>(
+        target.apiBaseUrl,
+        target.apiPrefix,
+        {
+          method: "GET",
+          path: `/projects/${target.projectRef}/deployments/current`,
+          token: target.token!,
+          orgId: target.orgId,
+          environment: target.mode === "cloud" ? target.environment : undefined,
+        },
+      )
 
-      const res = await fetch(`${apiUrl}/platform/v1/projects/${cloudCfg.projectSlug}/deployments/current`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-
-      if (!res.ok) {
-        console.error("No active deployment found.")
+      if (!data) {
+        console.log("No active deployment found.")
         return
       }
 
-      const { data } = await res.json() as { data: {
-        version: string
-        timestamp: string
-        size: number
-        buildDuration: number
-        url: string
-        status: string
-      }}
-
-      console.log(`Deployment: ${data.version}`)
-      console.log(`Status: ${data.status}`)
-      console.log(`Deployed: ${data.timestamp}`)
-      console.log(`Size: ${(data.size / (1024 * 1024)).toFixed(1)}MB`)
-      console.log(`Build duration: ${data.buildDuration}s`)
-      console.log(`URL: ${data.url}`)
+      console.log(`Deployment: ${data.version ?? data.id ?? "unknown"}`)
+      console.log(`Status: ${data.status ?? "live"}`)
+      if (data.timestamp ?? data.createdAt) {
+        console.log(`Deployed: ${data.timestamp ?? data.createdAt}`)
+      }
+      if (data.size) console.log(`Size: ${(data.size / (1024 * 1024)).toFixed(1)}MB`)
+      if (data.buildDuration) console.log(`Build duration: ${data.buildDuration}s`)
+      if (data.url) console.log(`URL: ${data.url}`)
     })
 
   // supatype deploy logs <version>
   deploy
     .command("logs [version]")
     .description("Show build logs for a deployment")
-    .action(async (version?: string) => {
-      const cloudCfg = loadCloudConfig(process.cwd())
-      if (!cloudCfg?.projectSlug) {
-        console.error("Not linked to a cloud project.")
+    .option("--env <name>", "Target environment when linked")
+    .action(async (version: string | undefined, opts: { env?: string }) => {
+      const cwd = process.cwd()
+      const link = loadProjectLink(cwd)
+      if (!link) {
+        console.error("Not linked to a project.")
         process.exit(1)
       }
 
-      const apiUrl = cloudCfg.apiUrl || "https://api.supatype.com"
-      const token = cloudCfg.token || process.env["SUPATYPE_ACCESS_TOKEN"] || ""
-
+      const target = resolveTarget(cwd, { env: opts.env })
       const versionPath = version ? `/${version}` : "/current"
-      const res = await fetch(`${apiUrl}/platform/v1/projects/${cloudCfg.projectSlug}/deployments${versionPath}/logs`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
+      const data = await targetFetch<{ logs: string }>(
+        target.apiBaseUrl,
+        target.apiPrefix,
+        {
+          method: "GET",
+          path: `/projects/${target.projectRef}/deployments${versionPath}/logs`,
+          token: target.token!,
+          orgId: target.orgId,
+          environment: target.mode === "cloud" ? target.environment : undefined,
+        },
+      )
 
-      if (!res.ok) {
-        console.error("Logs not found.")
-        process.exit(1)
-      }
-
-      const { data } = await res.json() as { data: { logs: string } }
-      console.log(data.logs)
+      console.log(data.logs ?? "(no logs)")
     })
 }
 
-async function deployToCloud(
-  config: { projectRef?: string; apiUrl?: string; accessToken?: string },
+async function deployStaticSite(
+  cwd: string,
   outputDir: string,
-  isPreview: boolean,
+  opts: { preview?: boolean; env?: string },
 ): Promise<void> {
-  const apiUrl = config.apiUrl || "https://api.supatype.com"
-  const token = config.accessToken || process.env["SUPATYPE_ACCESS_TOKEN"] || ""
+  const target = resolveTarget(cwd, { env: opts.env })
+  const token = target.token
+  if (!token) {
+    throw new Error("No token for linked target. Re-run supatype link --token ...")
+  }
 
   console.log("Uploading build artifacts...")
-
-  // Collect files from output directory
   const files = collectFiles(outputDir, outputDir)
   console.log(`${files.length} files to upload (${formatSize(files.reduce((s, f) => s + f.size, 0))})`)
 
-  // Create deployment
-  const createRes = await fetch(`${apiUrl}/platform/v1/projects/${config.projectRef}/deployments`, {
+  const { readFileSync } = await import("node:fs")
+
+  if (target.apiPrefix === "/platform/v1") {
+    const filePayload = files.map((f) => ({
+      path: f.relativePath,
+      content: readFileSync(f.absolutePath).toString("base64"),
+      encoding: "base64",
+    }))
+
+    const created = await targetFetch<{ id: string }>(
+      target.apiBaseUrl,
+      target.apiPrefix,
+      {
+        method: "POST",
+        path: `/projects/${target.projectRef}/deployments`,
+        body: { preview: opts.preview ?? false, files: filePayload },
+        token,
+        orgId: target.orgId,
+      },
+    )
+
+    await targetFetch(
+      target.apiBaseUrl,
+      target.apiPrefix,
+      {
+        method: "POST",
+        path: `/projects/${target.projectRef}/deployments/${created.id}/finalize`,
+        token,
+        orgId: target.orgId,
+      },
+    )
+    return
+  }
+
+  const createRes = await fetch(`${target.apiBaseUrl}/api/v1/projects/${target.projectRef}/deployments`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
+      ...(target.orgId ? { "X-Org-Id": target.orgId } : {}),
+      ...(target.environment ? { "X-Supatype-Environment": target.environment } : {}),
     },
     body: JSON.stringify({
-      preview: isPreview,
+      preview: opts.preview ?? false,
       fileCount: files.length,
       totalSize: files.reduce((s, f) => s + f.size, 0),
       files: files.map((f) => ({ path: f.relativePath, size: f.size })),
@@ -338,9 +395,8 @@ async function deployToCloud(
 
   const { data } = await createRes.json() as { data: { deploymentId: string; uploadUrl: string } }
 
-  // Upload files (simplified — in production, use multipart or presigned URLs)
   for (const file of files) {
-    const content = require("node:fs").readFileSync(file.absolutePath)
+    const content = readFileSync(file.absolutePath)
     await fetch(`${data.uploadUrl}/${file.relativePath}`, {
       method: "PUT",
       headers: {
@@ -352,16 +408,20 @@ async function deployToCloud(
     })
   }
 
-  // Finalize deployment
-  await fetch(`${apiUrl}/platform/v1/projects/${config.projectRef}/deployments/${data.deploymentId}/finalize`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
-  })
+  await fetch(
+    `${target.apiBaseUrl}/api/v1/projects/${target.projectRef}/deployments/${data.deploymentId}/finalize`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(target.orgId ? { "X-Org-Id": target.orgId } : {}),
+      },
+    },
+  )
 }
 
 function deploySelfHost(outputDir: string, cwd: string): void {
   const servingDir = join(cwd, ".supatype", "static")
-  const { mkdirSync, cpSync } = require("node:fs") as typeof import("node:fs")
   mkdirSync(servingDir, { recursive: true })
   cpSync(outputDir, servingDir, { recursive: true })
   console.log(`Static files deployed to ${servingDir}`)
@@ -375,8 +435,6 @@ interface FileEntry {
 
 function collectFiles(dir: string, baseDir: string): FileEntry[] {
   const files: FileEntry[] = []
-  const { readdirSync, statSync } = require("node:fs") as typeof import("node:fs")
-  const { relative } = require("node:path") as typeof import("node:path")
 
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const fullPath = join(dir, entry.name)

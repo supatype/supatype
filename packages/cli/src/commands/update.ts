@@ -8,7 +8,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { basename, resolve } from "node:path"
 import { loadConfig } from "../config.js"
 import { resolveRuntimeProvider } from "../project-config.js"
-import { runDockerCompose, writeSelfHostCompose } from "../self-host-compose.js"
+import { runDockerCompose, writeSelfHostCompose, composePullNeedsIgnoreFailures } from "../self-host-compose.js"
 import { syncComposeImagePins } from "../dev-compose.js"
 import { download, currentPlatform, fetchAllLatestVersions, pinnedVersion, type Component } from "../binary-cache.js"
 
@@ -42,7 +42,11 @@ export function registerUpdate(program: Command): void {
         const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
         syncComposeImagePins(cwd, config)
         console.log("Pulling self-host compose images...")
-        const status = runDockerCompose(paths.composePath, ["pull"], cwd)
+        const pullArgs = ["pull"]
+        if (composePullNeedsIgnoreFailures(config, cwd)) {
+          pullArgs.push("--ignore-pull-failures")
+        }
+        const status = runDockerCompose(paths.composePath, pullArgs, cwd)
         if (status !== 0) process.exit(status)
         console.log("Compose images updated.")
         return

@@ -31,6 +31,7 @@ import { chmod } from "node:fs/promises"
 import { homedir } from "node:os"
 import { basename, join, resolve, isAbsolute } from "node:path"
 import type { SupatypeProjectConfig } from "./project-config.js"
+import { loadProjectLink, migrateLegacyLinkFiles } from "./link.js"
 import { releasePublicKey } from "./release-public-key.js"
 
 /**
@@ -81,11 +82,15 @@ export function describeActiveOverrides(config: SupatypeProjectConfig): string[]
 
 /**
  * True when this working tree is associated with a remote Supatype Cloud project:
- * `project.ref`, `.supatype/cloud.json` (schema deploy link), or `.supatype/linked.json` (functions link).
+ * `project.ref` or `.supatype/link.json` (cloud kind).
  */
 export function isLinkedToCloudProject(cwd: string, config: SupatypeProjectConfig): boolean {
   const ref = config.project.ref
   if (typeof ref === "string" && ref.trim() !== "") return true
+
+  migrateLegacyLinkFiles(cwd)
+  const link = loadProjectLink(cwd)
+  if (link?.kind === "cloud" && link.projectRef.trim() !== "") return true
 
   const linkedPath = join(cwd, ".supatype", "linked.json")
   if (existsSync(linkedPath)) {

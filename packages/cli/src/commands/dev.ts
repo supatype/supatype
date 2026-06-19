@@ -573,14 +573,27 @@ async function runSchemaPush(
 
   // Push schema.
   console.log("[supatype] Applying schema...")
-  const pushResult = spawnSync(
-    engineBin,
-    ["push", "-i", astPath, "--database-url", dbURL, "--force", "--non-interactive"],
-    { cwd, stdio: "inherit", encoding: "utf8" },
-  )
-  if (pushResult.status !== 0) {
+  const { ensureEngine, engineRequest } = await import("../engine-client.js")
+  const { writeSchemaSourcePushArtifacts } = await import("../schema-sources.js")
+  await ensureEngine()
+  const pgSchema = config?.schema?.pg_schema ?? "public"
+  const sources = writeSchemaSourcePushArtifacts(cwd)
+  try {
+    await engineRequest("/push", {
+      ast,
+      database_url: dbURL,
+      schema: pgSchema,
+      force: true,
+      ...(sources
+        ? {
+            schema_sources_gz_base64: sources.payload.dataBase64,
+            schema_sources_manifest: sources.payload.manifest,
+          }
+        : {}),
+    })
+  } catch (err) {
     _lastFailedAst = astJson
-    throw new Error(`Engine schema push failed (exit ${pushResult.status})`)
+    throw err
   }
   _lastPushedAst = astJson
   _lastFailedAst = null

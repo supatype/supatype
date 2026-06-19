@@ -252,9 +252,48 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
+  docker-control-plane:
+    needs: [prepare, docker-latest-policy]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build self-host-control
+        run: pnpm install --frozen-lockfile && pnpm --filter @supatype/self-host-control build
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: supatype/control-plane
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ needs.docker-latest-policy.outputs.docker_push_latest == 'true' }}
+
+      - uses: docker/build-push-action@v5
+        with:
+          context: packages/self-host-control
+          file: packages/self-host-control/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            ENGINE_IMAGE=supatype/schema-engine:${{ needs.prepare.outputs.version }}
+
   # ── GitHub Release ──────────────────────────────────────────────────────────
   github-release:
-    needs: [prepare, npm, docker-storage, docker-realtime, docker-functions-worker, docker-studio]
+    needs: [prepare, npm, docker-storage, docker-realtime, docker-functions-worker, docker-studio, docker-control-plane]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -48,12 +48,31 @@ export default defineConfig({
 DATABASE_URL=postgresql://supatype_admin:postgres@localhost:5432/my-project
 JWT_SECRET=super-secret-jwt-token-change-in-production
 ANON_KEY=           # from: supatype keys
-SERVICE_ROLE_KEY=   # from: supatype keys
+SERVICE_ROLE_KEY=   # from: supatype keys — also used as self-host control-plane token
 SITE_URL=http://localhost:3000
 
 # Written by supatype dev (docker):
 # SUPATYPE_KONG_PORT=18473
 # SUPATYPE_DEV_DB_PORT=54329
+```
+
+## Link and environment files
+
+| File | Purpose |
+|------|---------|
+| `.supatype/link.json` | Unified link state: cloud or self-host targets, tokens, environments map |
+| `.supatype/environment.json` | Written by `supatype dev` — local Kong URL, DB URL, project ref |
+| `.supatype/branch.json` | Phase 22 hook for ephemeral branch targets (not active in v1) |
+
+Add `.supatype/` to `.gitignore` (done by `supatype init`; use `supatype link --fix-gitignore` if missing). Never commit `link.json` — it contains tokens.
+
+`supatype.config.ts` supports optional multi-env defaults:
+
+```typescript
+environments: {
+  default: "production",
+  branchDefaults: { "feature/foo": "staging" },
+},
 ```
 
 For Docker dev, `supatype dev` may rewrite `DATABASE_URL` to the host-published compose Postgres port when using a local engine override.

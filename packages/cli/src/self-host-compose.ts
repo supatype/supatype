@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join, relative, resolve } from "node:path"
 import { spawnSync } from "node:child_process"
 import { preferredFunctionsPathFromProject, type SupatypeProjectConfig } from "./project-config.js"
@@ -10,6 +10,16 @@ export const COMPOSE_PINNED_IMAGE_ENV_KEYS = [
   "SUPATYPE_ENGINE_IMAGE",
   "SUPATYPE_SERVER_IMAGE",
   "SUPATYPE_POSTGRES_IMAGE",
+] as const
+
+/** Compose image env vars that may be overridden manually in `.env`. */
+export const COMPOSE_IMAGE_ENV_KEYS = [
+  ...COMPOSE_PINNED_IMAGE_ENV_KEYS,
+  "SUPATYPE_CONTROL_PLANE_IMAGE",
+  "SUPATYPE_AUTH_IMAGE",
+  "SUPATYPE_STUDIO_IMAGE",
+  "SUPATYPE_STORAGE_IMAGE",
+  "SUPATYPE_FUNCTIONS_WORKER_IMAGE",
 ] as const
 
 type DockerPinComponent = "engine" | "server" | "postgres"
@@ -55,6 +65,52 @@ export function composeDockerImageEnv(config: SupatypeProjectConfig): Record<str
     env.SUPATYPE_POSTGRES_IMAGE = dockerImageRef("postgres", versions.postgres, config)
   }
   return env
+}
+
+/** True when a Docker image tag is a semver/latest ref we expect `docker pull` to resolve. */
+export function isRegistryPullableImageRef(ref: string): boolean {
+  const trimmed = ref.trim()
+  if (!trimmed) return true
+  const tag = trimmed.includes(":") ? trimmed.slice(trimmed.lastIndexOf(":") + 1) : "latest"
+  if (tag === "latest") return true
+  if (/^v?\d+\.\d+/.test(tag)) return true
+  if (/^\d+-latest$/.test(tag)) return true
+  return false
+}
+
+export function hasLocalVersionPins(config: SupatypeProjectConfig): boolean {
+  const versions = config.versions
+  if (!versions) return false
+  return (
+    versions.engine === VERSION_PIN_LOCAL ||
+    versions.server === VERSION_PIN_LOCAL ||
+    versions.postgres === VERSION_PIN_LOCAL ||
+    versions.deno === VERSION_PIN_LOCAL
+  )
+}
+
+function readComposeImageEnvValues(cwd: string): string[] {
+  const envPath = resolve(cwd, ".env")
+  if (!existsSync(envPath)) return []
+  const text = readFileSync(envPath, "utf8")
+  const values: string[] = []
+  for (const key of COMPOSE_IMAGE_ENV_KEYS) {
+    const match = text.match(new RegExp(`^${key}=(.+)$`, "m"))
+    if (match?.[1]) values.push(match[1].trim())
+  }
+  return values
+}
+
+/**
+ * Use `docker compose pull --ignore-pull-failures` only when the project may
+ * reference local-only images (config `versions: local` or custom `.env` tags).
+ */
+export function composePullNeedsIgnoreFailures(
+  config: SupatypeProjectConfig,
+  cwd: string = process.cwd(),
+): boolean {
+  if (hasLocalVersionPins(config)) return true
+  return readComposeImageEnvValues(cwd).some((ref) => !isRegistryPullableImageRef(ref))
 }
 
 /**
@@ -174,6 +230,8 @@ export function renderSelfHostCompose(
   const devLocal = options?.devLocal === true
   const studioHostDev = devLocal && hasStudioOverride(config)
   const appEnv = serverAppEnvForCompose(config, devLocal)
+  const staticDir = staticDirForCompose(config) ?? "./dist"
+  const composeProject = composeProjectName(config.project.name)
   const studioService = studioServiceBlock()
   const studioBlock = studioHostDev
     ? ""
@@ -186,9 +244,11 @@ ${studioService}
       - "3002"
 `
   const kongDependsOn = studioHostDev
-    ? `      - server`
+    ? `      - server
+      - control-plane`
     : `      - server
-      - studio`
+      - studio
+      - control-plane`
   const publishDbToHost = !devLocal || hasEngineOverride(config)
   const dbPorts = publishDbToHost
     ? devLocal
@@ -280,6 +340,27 @@ ${dbPorts}    volumes:
       db:
         condition: service_healthy
 
+  control-plane:
+    image: \${SUPATYPE_CONTROL_PLANE_IMAGE:-supatype/control-plane:latest}
+    expose:
+      - "8080"
+    volumes:
+      - ${projectMount}:/project
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      PORT: "8080"
+      SUPATYPE_PROJECT_REF: ${JSON.stringify(config.project.name)}
+      SUPATYPE_PROJECT_ROOT: /project
+      DATABASE_URL: "postgresql://\${POSTGRES_USER:-supatype_admin}:\${POSTGRES_PASSWORD:-postgres}@db:5432/\${POSTGRES_DB:-supatype}"
+      SUPATYPE_FUNCTIONS_ROOT: /project/functions
+      SUPATYPE_STATIC_ROOT: /project/${staticDir.replace(/^\.\//, "")}
+      SUPATYPE_DEPLOYMENTS_DIR: /project/.supatype/deployments
+      COMPOSE_PROJECT_NAME: ${composeProject}
+      SUPATYPE_ENGINE_BIN: supatype-engine
+    depends_on:
+      db:
+        condition: service_healthy
+
   server:
     image: \${SUPATYPE_SERVER_IMAGE:-\${SUPATYPE_AUTH_IMAGE:-supatype/server:latest}}
 ${serverPorts}    volumes:
@@ -299,6 +380,7 @@ ${serverPorts}    volumes:
       SUPATYPE_SQL_DATABASE_URL: "postgresql://\${POSTGRES_USER:-supatype_admin}:\${POSTGRES_PASSWORD:-postgres}@db:5432/\${POSTGRES_DB:-supatype}"
       SUPATYPE_DENO_FUNCTIONS_DIR: /project/functions
       SUPATYPE_FUNCTIONS_WORKER_URL: http://functions-worker:8001
+      SUPATYPE_CONTROL_PLANE_URL: http://control-plane:8080
 ${appEnv}
       GOTRUE_API_HOST: 0.0.0.0
       GOTRUE_API_PORT: 9999
@@ -323,6 +405,8 @@ ${devLocal ? "      STUDIO_OPEN_DEV: \"1\"\n" : ""}
       storage:
         condition: service_started
       functions-worker:
+        condition: service_started
+      control-plane:
         condition: service_started
 
   minio:

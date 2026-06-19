@@ -2,8 +2,8 @@ import type { Command } from "commander"
 import { createInterface } from "node:readline"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { schemaPathFromProject } from "../project-config.js"
-import { ensureEngine, engineRequest } from "../engine-client.js"
-import { resolveHostEngineDatabaseUrl } from "../dev-compose.js"
+import { loadProjectLink } from "../link.js"
+import { resolveTarget, targetSchemaAdopt, schemaPgSchema } from "../resolve-target.js"
 
 interface AdoptPreview {
   status: string
@@ -20,26 +20,34 @@ export function registerAdopt(program: Command): void {
     .command("adopt")
     .description("Stamp Supatype-managed comments on DB objects matching the schema (adoption ceremony)")
     .option("--connection <url>", "Database connection URL (overrides config)")
+    .option("--env <name>", "Target environment when linked")
+    .option("--direct", "Use local engine subprocess")
     .option("--yes", "Apply stamps without interactive confirmation")
     .option("--no-cache", "Force full database introspection")
-    .action(async (opts: { connection?: string; yes?: boolean; noCache?: boolean }) => {
+    .action(async (opts: {
+      connection?: string
+      env?: string
+      direct?: boolean
+      yes?: boolean
+      noCache?: boolean
+    }) => {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
-      const connection = await resolveHostEngineDatabaseUrl(cwd, config, opts.connection)
-      const pgSchema = config.schema?.pg_schema ?? "public"
-
-      await ensureEngine()
+      const pgSchema = schemaPgSchema(cwd)
 
       console.log("Loading schema...")
       const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
 
-      const preview = await engineRequest<AdoptPreview>("/adopt", {
-        ast,
-        database_url: connection,
+      const linked = loadProjectLink(cwd)
+      const target = linked && !opts.direct && !opts.connection
+        ? resolveTarget(cwd, { env: opts.env })
+        : resolveTarget(cwd, { env: opts.env, direct: true, connection: opts.connection })
+
+      const preview = (await targetSchemaAdopt(target, ast, {
         schema: pgSchema,
-        no_cache: opts.noCache ?? false,
+        noCache: opts.noCache ?? false,
         yes: false,
-      })
+      })) as AdoptPreview
 
       const statements = preview.stampStatements ?? []
       if (statements.length === 0) {
@@ -64,16 +72,11 @@ export function registerAdopt(program: Command): void {
         }
       }
 
-      const result = await engineRequest<{ status: string; stamped?: number; name?: string }>(
-        "/adopt",
-        {
-          ast,
-          database_url: connection,
-          schema: pgSchema,
-          no_cache: opts.noCache ?? false,
-          yes: true,
-        },
-      )
+      const result = (await targetSchemaAdopt(target, ast, {
+        schema: pgSchema,
+        noCache: opts.noCache ?? false,
+        yes: true,
+      })) as { status: string; stamped?: number; name?: string }
 
       console.log(`\nAdopted: ${result.stamped ?? 0} object(s) stamped (${result.name ?? "ok"}).`)
     })

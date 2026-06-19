@@ -5,6 +5,7 @@ on:
     paths:
       - "packages/cli/**"
       - "packages/client/**"
+      - "packages/self-host-control/**"
       - "tests/integration/**"
       - ".github/workflows/integration.yml"
   push:
@@ -12,6 +13,7 @@ on:
     paths:
       - "packages/cli/**"
       - "packages/client/**"
+      - "packages/self-host-control/**"
       - "tests/integration/**"
       - ".github/workflows/integration.yml"
 
@@ -89,8 +91,18 @@ jobs:
       - name: Build TypeScript packages
         run: pnpm build
 
+      - name: Build control-plane image for compose smoke
+        run: |
+          docker build \
+            --build-arg ENGINE_IMAGE=supatype/schema-engine:latest \
+            -t supatype/control-plane:ci \
+            -f packages/self-host-control/Dockerfile \
+            packages/self-host-control
+
       - name: Run compose image smoke test
         run: bash tests/integration/scripts/compose-smoke.sh
+        env:
+          SUPATYPE_CONTROL_PLANE_IMAGE: supatype/control-plane:ci
 
       - name: Upload compose logs on failure
         if: failure()

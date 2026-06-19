@@ -30,7 +30,9 @@ import {
 import { hasEngineOverride } from "./binary-cache.js"
 import { startStudioViteDevServer } from "./studio-dev-server.js"
 import { ensureEngine, engineRequest, type DiffResult } from "./engine-client.js"
+import { writeSchemaSourcePushArtifacts, type SchemaSourcePushArtifacts } from "./schema-sources.js"
 import { endDevSession } from "./dev-session.js"
+import { writeLocalEnvironment } from "./link.js"
 import { registerDevShutdown } from "./dev-shutdown.js"
 import {
   filterComposeNoise,
@@ -221,6 +223,8 @@ function ensureDevComposeEnv(
   }
   if (devDbPort !== undefined) {
     updates.SUPATYPE_DEV_DB_PORT = String(devDbPort)
+    updates.DATABASE_URL =
+      `postgresql://supatype_admin:postgres@localhost:${devDbPort}/supatype?sslmode=disable`
   }
   const removeImageKeys = COMPOSE_PINNED_IMAGE_ENV_KEYS.filter((key) => !(key in imagePins))
   upsertEnvFile(cwd, updates, removeImageKeys)
@@ -357,12 +361,19 @@ async function runComposeSchemaPush(
     console.log("[supatype] Applying schema via local engine (overrides.engine)...")
     await ensureEngine()
     const pgSchema = config.schema?.pg_schema ?? "public"
+    const sources = writeSchemaSourcePushArtifacts(cwd)
     try {
       await engineRequest("/push", {
         ast,
         database_url: hostComposeDbUrl(cwd),
         schema: pgSchema,
         force: true,
+        ...(sources
+          ? {
+              schema_sources_gz_base64: sources.payload.dataBase64,
+              schema_sources_manifest: sources.payload.manifest,
+            }
+          : {}),
       })
     } catch (err) {
       _lastFailedAst = astJson
@@ -378,11 +389,12 @@ async function runComposeSchemaPush(
   }
 
   console.log("[supatype] Applying schema via compose schema-engine...")
-  let push = await runComposeEnginePush(paths, cwd, composeProject, config)
+  const sources = writeSchemaSourcePushArtifacts(cwd)
+  let push = await runComposeEnginePush(paths, cwd, composeProject, config, sources)
   // Windows Docker bind mounts can lag briefly after the host write.
   if (push.status !== 0) {
     await new Promise((r) => setTimeout(r, 250))
-    push = await runComposeEnginePush(paths, cwd, composeProject, config)
+    push = await runComposeEnginePush(paths, cwd, composeProject, config, sources)
   }
   if (push.status !== 0) {
     _lastFailedAst = astJson
@@ -425,6 +437,7 @@ async function runComposeEnginePush(
   cwd: string,
   composeProject: string,
   config: SupatypeProjectConfig,
+  sources?: SchemaSourcePushArtifacts | null,
 ): Promise<{ status: number; output: string }> {
   const envFile = resolve(cwd, ".env")
   const composeArgs = ["compose", "--progress", "quiet"]
@@ -448,6 +461,14 @@ async function runComposeEnginePush(
     "--force",
     "--non-interactive",
   )
+  if (sources) {
+    composeArgs.push(
+      "--schema-sources-gz",
+      sources.dockerGzPath,
+      "--schema-sources-manifest",
+      sources.dockerManifestPath,
+    )
+  }
   const pushEnv: NodeJS.ProcessEnv = {
     ...process.env,
     COMPOSE_PROGRESS: "quiet",
@@ -663,6 +684,15 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
 
   console.log("[supatype] Waiting for API gateway...")
   await waitKongReady(kongPort, 120)
+
+  writeLocalEnvironment(cwd, {
+    target: "local",
+    apiUrl: `http://localhost:${kongPort}`,
+    databaseUrl: hasEngineOverride(config) ? hostComposeDbUrl(cwd) : composeDbUrl(),
+    projectRef: config.project.name,
+    kongPort,
+    provider: "docker",
+  })
 
   const ast = loadSchemaAst(schemaPath, cwd)
   await provisionDockerStorageBuckets(ast, kongPort, serviceRoleKey)
