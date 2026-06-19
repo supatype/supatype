@@ -1,4 +1,4 @@
-# Mirror pinned Deno runtime to Hetzner Object Storage (releases.supatype.io/deno/v{version}/).
+# Mirror pinned Deno runtime to Hetzner Object Storage (releases.supatype.com/deno/v{version}/).
 # Trigger: merge to main that changes packages/cli/releases/deno/VERSION (no extra git tags).
 name: Deno CDN mirror
 
@@ -135,7 +135,7 @@ jobs:
               --no-progress
           done
 
-          printf '{"version":"%s","date":"%s","checksums_url":"https://releases.supatype.io/deno/v%s/checksums.sha256"}\n' \
+          printf '{"version":"%s","date":"%s","checksums_url":"https://releases.supatype.com/deno/v%s/checksums.sha256"}\n' \
             "${VERSION}" "$(date -u +%Y-%m-%d)" "${VERSION}" > latest.json
           aws s3 cp latest.json "s3://${BUCKET}/deno/latest.json" \
             --endpoint-url "${EP}" \

@@ -85,7 +85,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Embed release public key (optional)
+      - name: Embed release public key (required)
         run: node scripts/embed-release-pubkey.mjs
         env:
           MINISIGN_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}

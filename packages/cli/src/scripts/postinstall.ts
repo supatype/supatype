@@ -38,7 +38,13 @@ async function main() {
   }
 
   if (anyFailed) {
-    console.error("[supatype] Some downloads failed. Run 'supatype update' to retry.")
+    // npm hides postinstall output unless --foreground-scripts, so don't rely on
+    // this being seen: the CLI re-attempts the download (with retry) on first use.
+    console.error(
+      "[supatype] Some component binaries failed to download. " +
+        "They will be re-downloaded automatically on first use; " +
+        "run 'supatype update' to retry now.",
+    )
   } else {
     console.log("[supatype] All component binaries downloaded successfully.")
   }
