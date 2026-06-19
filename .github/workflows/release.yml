@@ -281,6 +281,8 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable=${{ needs.docker-latest-policy.outputs.docker_push_latest == 'true' }}
 
+      # schema-engine is a separate repo with independent versioning, so the
+      # engine image tag is NOT the monorepo version — always use :latest.
       - uses: docker/build-push-action@v5
         with:
           context: packages/self-host-control
@@ -289,7 +291,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            ENGINE_IMAGE=supatype/schema-engine:${{ needs.prepare.outputs.version }}
+            ENGINE_IMAGE=supatype/schema-engine:latest
 
   # ── GitHub Release ──────────────────────────────────────────────────────────
   github-release:
