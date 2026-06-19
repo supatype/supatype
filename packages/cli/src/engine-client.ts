@@ -13,7 +13,8 @@ import { mkdirSync, writeFileSync, unlinkSync, existsSync, readdirSync } from "n
 import { tmpdir, homedir } from "node:os"
 import { join } from "node:path"
 import { loadConfig } from "./config.js"
-import { resolveBinary, currentPlatform, cachePath } from "./binary-cache.js"
+import { currentPlatform, cachePath } from "./binary-cache.js"
+import { ensureBinary } from "./ensure-binary.js"
 
 // ---------------------------------------------------------------------------
 // Types (kept for backward compatibility with existing callers)
@@ -86,10 +87,16 @@ async function getEngineBin(): Promise<string> {
 
   try {
     const config = loadConfig(cwd)
-    _engineBin = await resolveBinary("engine", config)
+    // Download-on-miss (with retry) so a fresh machine or a failed postinstall
+    // self-heals on first use instead of silently skipping type/admin refresh.
+    _engineBin = await ensureBinary("engine", config)
     return _engineBin
-  } catch {
-    // No valid project config — fall through to default cache path.
+  } catch (err) {
+    // A real download/verification failure must surface, not fall back to a
+    // possibly-stale cached binary from a different version.
+    const message = err instanceof Error ? err.message : String(err)
+    if (message.includes("Failed to download")) throw err
+    // Otherwise (no valid project config) fall through to default cache scan.
   }
 
   // No config found — scan the cache for any available engine binary.

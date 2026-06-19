@@ -7,10 +7,13 @@
  *
  * Security model:
  *   1. Download checksums.sha256 + checksums.sha256.minisig from CDN.
- *   2. Verify Ed25519 minisign signature on the checksum file using the
- *      embedded public key (SUPATYPE_RELEASE_PUBLIC_KEY).
+ *   2. Verify the Ed25519 minisign signature on the checksum file using the
+ *      release public key (embedded at publish, overridable via
+ *      SUPATYPE_RELEASE_PUBLIC_KEY).
  *   3. Verify SHA256 of the downloaded binary against the signed checksum.
- *   Both checks are mandatory when SUPATYPE_RELEASE_PUBLIC_KEY is set.
+ *   Verification is mandatory and fails closed: if no public key is configured,
+ *   the download errors out rather than silently degrading to SHA256-only.
+ *   The only escape hatch is the explicit SUPATYPE_ALLOW_UNVERIFIED_DOWNLOADS=1.
  */
 
 import { createHash, createPublicKey, verify as cryptoVerify } from "node:crypto"
@@ -23,6 +26,7 @@ import {
   openSync,
   readFileSync,
   readSync,
+  rmdirSync,
   statSync,
   unlinkSync,
   writeFileSync,
@@ -134,17 +138,6 @@ const CDN_BASE = "https://releases.supatype.com"
 export function postgresArchiveTag(version: string): string {
   return version.split(".")[0]!
 }
-
-/**
- * Supatype release signing public key (minisign format).
- * Generated with: minisign -G
- * Rotate by: generating a new pair, updating this constant, and updating
- * the MINISIGN_PRIVATE_KEY GitHub Actions secret.
- *
- * ⚠ PLACEHOLDER — replace with actual public key before first release.
- * When empty, minisign verification is skipped with a warning (SHA256 only).
- */
-const SUPATYPE_RELEASE_PUBLIC_KEY = ""
 
 // CDN path templates per component.
 const CDN_PATHS: Record<Component, (version: string, platform: PlatformId) => string> = {
@@ -340,14 +333,14 @@ export async function download(
 
   console.log(`[supatype] Downloading ${component} v${version} (${platform.os}/${platform.arch})...`)
 
-  // ── Fetch checksums + optional minisig ────────────────────────────────────
-  const expectedChecksum = await withRetry(() =>
-    fetchChecksums(checksumsUrl, minisigUrl, name),
-  )
-
-  // ── Stream-download binary with progress ─────────────────────────────────
   const tmpPath = destPath + ".tmp"
   try {
+    // ── Fetch checksums + optional minisig (retried on transient failures) ───
+    const expectedChecksum = await withRetry(() =>
+      fetchChecksums(checksumsUrl, minisigUrl, name),
+    )
+
+    // ── Stream-download binary with progress (retried on transient failures) ─
     await withRetry(() => streamToFileWithProgress(binaryUrl, tmpPath))
 
     // ── Verify SHA256 ────────────────────────────────────────────────────────
@@ -359,9 +352,17 @@ export async function download(
     if (process.platform !== "win32" && EXECUTABLE_COMPONENTS.has(component)) {
       await chmod(destPath, 0o755)
     }
+  } catch (err) {
+    // Never leave a partial binary or an empty version directory behind: a stale
+    // empty dir makes the next resolve look fine while silently lacking a binary.
+    try { if (existsSync(destPath)) unlinkSync(destPath) } catch { /* ignore */ }
+    try { rmdirSync(dir) } catch { /* dir not empty or already removed */ }
+    throw new Error(
+      `Failed to download ${component} v${version} from ${CDN_BASE}: ${(err as Error).message}`,
+    )
   } finally {
     if (existsSync(tmpPath)) {
-      try { require("node:fs").unlinkSync(tmpPath) } catch { /* ignore */ }
+      try { unlinkSync(tmpPath) } catch { /* ignore */ }
     }
   }
 
@@ -384,23 +385,35 @@ async function fetchChecksums(
   const checksumsText = await csResp.text()
 
   const pubKey = releasePublicKey()
-  if (pubKey) {
-    // Minisign signature is required when a public key is embedded.
-    const sigResp = await fetch(minisigUrl)
-    if (!sigResp.ok) {
-      throw new Error(
-        `Failed to fetch checksum signature from ${minisigUrl}: HTTP ${sigResp.status}\n` +
-          "Cannot verify release integrity. Aborting download.",
+  if (!pubKey) {
+    // Fail closed: a missing public key means we cannot verify authenticity, only
+    // integrity (SHA256). Published builds always embed the key, so this only
+    // happens in source/contributor builds — never silently downgrade.
+    if (process.env["SUPATYPE_ALLOW_UNVERIFIED_DOWNLOADS"] === "1") {
+      console.warn(
+        "[supatype] \u26a0  SUPATYPE_ALLOW_UNVERIFIED_DOWNLOADS=1 — no minisign public " +
+          "key configured; verifying SHA256 only (authenticity NOT checked).",
       )
+      return extractChecksum(checksumsText, binaryFilename)
     }
-    const sigText = await sigResp.text()
-    verifyMinisign(Buffer.from(checksumsText, "utf8"), sigText, pubKey)
-  } else {
-    console.warn(
-      "[supatype] \u26a0  Minisign public key not configured — " +
-        "skipping signature verification (SHA256 only).",
+    throw new Error(
+      "No minisign public key configured — cannot verify release authenticity.\n" +
+        "Published @supatype/cli builds embed the key automatically; if you are building " +
+        "from source, set SUPATYPE_RELEASE_PUBLIC_KEY to the release public key, or set " +
+        "SUPATYPE_ALLOW_UNVERIFIED_DOWNLOADS=1 to download with SHA256-only verification (unsafe).",
     )
   }
+
+  // Minisign signature is mandatory when a public key is configured.
+  const sigResp = await fetch(minisigUrl)
+  if (!sigResp.ok) {
+    throw new Error(
+      `Failed to fetch checksum signature from ${minisigUrl}: HTTP ${sigResp.status}\n` +
+        "Cannot verify release integrity. Aborting download.",
+    )
+  }
+  const sigText = await sigResp.text()
+  verifyMinisign(Buffer.from(checksumsText, "utf8"), sigText, pubKey)
 
   return extractChecksum(checksumsText, binaryFilename)
 }
@@ -425,10 +438,10 @@ async function fetchChecksums(
 const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex")
 
 /**
- * Verify a minisign signature (Ed25519 legacy mode, algorithm bytes "Ed").
- * Throws if verification fails.
+ * Verify a minisign signature. Supports both Ed25519 legacy mode ("Ed", over the
+ * raw file) and prehashed mode ("ED", over BLAKE2b-512(file)). Throws if invalid.
  */
-function verifyMinisign(fileBytes: Buffer, sigFileContent: string, pubKeyStr: string): void {
+export function verifyMinisign(fileBytes: Buffer, sigFileContent: string, pubKeyStr: string): void {
   // Parse public key: [2 algo][8 keyId][32 ed25519 key]
   const pkLines = pubKeyStr.trim().split("\n")
   const pkBytes = Buffer.from(pkLines[pkLines.length - 1]!.trim(), "base64")
@@ -450,14 +463,17 @@ function verifyMinisign(fileBytes: Buffer, sigFileContent: string, pubKeyStr: st
   const sigKeyId = sigBytes.subarray(2, 10)
   const signature = sigBytes.subarray(10, 74)
 
-  // Only Ed25519 legacy mode ("Ed" = 0x45, 0x64) is supported.
-  // Hashed mode ("ED") requires BLAKE2b prehashing — not implemented.
-  if (algo[0] !== 0x45 || algo[1] !== 0x64) {
+  // Both Ed25519 modes are supported:
+  //   "Ed" (0x45, 0x64) — legacy: signature is over the raw file bytes.
+  //   "ED" (0x45, 0x44) — prehashed: signature is over BLAKE2b-512(file).
+  // Modern minisign (and our release pipeline) default to prehashed mode.
+  if (algo[0] !== 0x45 || (algo[1] !== 0x64 && algo[1] !== 0x44)) {
     throw new Error(
-      "Unsupported minisign algorithm — only Ed25519 legacy mode supported.\n" +
+      "Unsupported minisign algorithm — expected Ed25519 ('Ed' legacy or 'ED' prehashed).\n" +
         `Got: 0x${algo[0]?.toString(16)}${algo[1]?.toString(16)}`,
     )
   }
+  const prehashed = algo[1] === 0x44
 
   if (!sigKeyId.equals(pkKeyId)) {
     throw new Error(
@@ -469,7 +485,13 @@ function verifyMinisign(fileBytes: Buffer, sigFileContent: string, pubKeyStr: st
   const spkiDer = Buffer.concat([ED25519_SPKI_PREFIX, pkEd25519])
   const keyObject = createPublicKey({ key: spkiDer, format: "der", type: "spki" })
 
-  const valid = cryptoVerify(null, fileBytes, keyObject, signature)
+  // Pure Ed25519 (PureEdDSA) verifies over the message directly; for prehashed
+  // minisign the "message" is the BLAKE2b-512 digest of the file.
+  const signedData = prehashed
+    ? createHash("blake2b512").update(fileBytes).digest()
+    : fileBytes
+
+  const valid = cryptoVerify(null, signedData, keyObject, signature)
   if (!valid) {
     throw new Error(
       "Minisign signature verification FAILED — the checksum file may have been tampered with.\n" +

@@ -10,8 +10,13 @@ import { fileURLToPath } from "node:url"
 
 const key = (process.argv[2] ?? process.env["MINISIGN_PUBLIC_KEY"] ?? "").trim()
 if (!key) {
-  console.log("embed-release-pubkey: no key provided — skipping")
-  process.exit(0)
+  // Fail closed: publishing without the embedded public key would ship a CLI that
+  // cannot verify release authenticity. Never publish in that state silently.
+  console.error(
+    "embed-release-pubkey: no key provided. Set the MINISIGN_PUBLIC_KEY secret " +
+      "(or pass the key as an argument) before building for publish.",
+  )
+  process.exit(1)
 }
 
 const target = resolve(
