@@ -79,4 +79,4 @@ Set `server.domain` in config. Uses host binaries, not Docker Compose.
 
 ## Maintainer example
 
-See `examples/self-host/` in the supatype monorepo for a compose-first fixture with proxy app mode.
+See the `examples/self-host/` directory in the Supatype repository (https://github.com/supatype/supatype) for a compose-first fixture with proxy app mode.
