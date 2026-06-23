@@ -249,4 +249,30 @@ describe("mergeProjectConfig()", () => {
     expect(merged.app.start).toBe("dev:site")
     expect(merged.app.static_dir).toBe("./dist")
   })
+
+  it("preserves base environments when a local override sets only server.mode", () => {
+    const base = defineConfig({
+      ...minimalProject("p"),
+      server: { mode: "standalone", domain: "api.example.com" },
+      environments: { default: "production" },
+    })
+    const merged = mergeProjectConfig(base, { server: { mode: "dev" } })
+    expect(merged.server.mode).toBe("dev")
+    expect(merged.environments?.default).toBe("production")
+  })
+
+  it("deep-merges environments.branchDefaults across base and override", () => {
+    const base = defineConfig({
+      ...minimalProject("p"),
+      environments: { default: "production", branchDefaults: { main: "production" } },
+    })
+    const merged = mergeProjectConfig(base, {
+      environments: { branchDefaults: { staging: "preview" } },
+    })
+    expect(merged.environments?.default).toBe("production")
+    expect(merged.environments?.branchDefaults).toEqual({
+      main: "production",
+      staging: "preview",
+    })
+  })
 })

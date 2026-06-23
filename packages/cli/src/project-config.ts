@@ -59,6 +59,16 @@ export interface SupatypeProjectConfig {
     postgrestPort?: number
     /** Domain for ACME TLS certificate (mode=standalone). */
     domain?: string
+    /**
+     * TLS for self-host HTTPS (Kong ACME / Let's Encrypt).
+     * Requires `mode: "standalone"` and a non-empty `domain`.
+     */
+    tls?: {
+      /** ACME contact email for Let's Encrypt (required to enable HTTPS). */
+      email?: string
+      /** "kong" (default) = Kong acme plugin; "none" = stay HTTP even with a domain. */
+      provider?: "kong" | "none"
+    }
   }
   app: {
     /**
@@ -298,6 +308,23 @@ export function mergeProjectConfig(
     ...(base.admin !== undefined || override.admin !== undefined
       ? { admin: { ...base.admin, ...override.admin } as NonNullable<SupatypeProjectConfig["admin"]> }
       : {}),
+    ...(base.environments !== undefined || override.environments !== undefined
+      ? (() => {
+          const b = base.environments
+          const o = override.environments
+          const mergedBranchDefaults =
+            b?.branchDefaults !== undefined || o?.branchDefaults !== undefined
+              ? { ...(b?.branchDefaults ?? {}), ...(o?.branchDefaults ?? {}) }
+              : undefined
+          return {
+            environments: {
+              ...b,
+              ...o,
+              ...(mergedBranchDefaults !== undefined ? { branchDefaults: mergedBranchDefaults } : {}),
+            } as NonNullable<SupatypeProjectConfig["environments"]>,
+          }
+        })()
+      : {}),
   }
 }
 
@@ -371,6 +398,24 @@ export function serverBaseUrl(cfg: SupatypeProjectConfig): string | undefined {
     case "managed":
       return undefined
   }
+}
+
+/**
+ * True when `supatype self-host compose` should render Kong ACME TLS (Let's Encrypt).
+ * Gated on a real self-host render (not `supatype dev`), standalone mode, a non-empty
+ * domain, an ACME contact email, and `tls.provider !== "none"`.
+ */
+export function selfHostTlsEnabled(
+  cfg: SupatypeProjectConfig,
+  devLocal = false,
+): boolean {
+  if (devLocal) return false
+  if (cfg.server.mode !== "standalone") return false
+  const domain = cfg.server.domain?.trim()
+  if (!domain) return false
+  const tls = cfg.server.tls
+  if (!tls || tls.provider === "none") return false
+  return Boolean(tls.email?.trim())
 }
 
 /** Resolved runtime provider (`config.provider` ?? `database.provider` ?? native). */

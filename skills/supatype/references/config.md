@@ -31,8 +31,10 @@ export default defineConfig({
 |-------|-------|
 | `provider` | Top-level runtime: `"docker"` (default scaffold) or `"native"` |
 | `database.provider` | Same values; used when `provider` omitted |
-| `server.mode` | `"dev"` or `"standalone"` (native ACME TLS when domain set) |
+| `server.mode` | `"dev"`, `"standalone"` (self-host with HTTPS), or `"managed"` (cloud) |
 | `server.port` | supatype-server port (native dev) |
+| `server.domain` | Custom domain for self-host HTTPS (e.g. `"demo.example.com"`) |
+| `server.tls` | `{ email, provider }` — Let's Encrypt contact email; `provider: "kong"` (default, Kong ACME) or `"none"` (stay HTTP). Set via `supatype add domain` |
 | `app.mode` | `"none"`, `"static"`, or `"proxy"` |
 | `app.static_dir` | Built static assets directory |
 | `app.upstream` | Proxy target for SSR/dev servers |
@@ -76,6 +78,21 @@ environments: {
 ```
 
 For Docker dev, `supatype dev` may rewrite `DATABASE_URL` to the host-published compose Postgres port when using a local engine override.
+
+## Self-host HTTPS (custom domain)
+
+`supatype add domain` writes this block; the self-host compose stack then publishes Kong on `:80`/`:443`, adds a Valkey cert store, and issues a Let's Encrypt certificate automatically:
+
+```typescript
+server: {
+  mode: "standalone",
+  port: 54321,
+  domain: "demo.example.com",
+  tls: { email: "you@example.com", provider: "kong" },
+},
+```
+
+Apply with `supatype self-host compose up -d`. Keep a `supatype.local.config.ts` with `server: { mode: "dev" }` so local `supatype dev` stays on HTTP.
 
 ## Switching to native dev
 

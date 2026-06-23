@@ -18,6 +18,11 @@ export interface KongDeclarativeOptions {
   studioServiceUrl?: string | undefined
   /** See {@link RuntimeRouteOptions.studioStripPath}. */
   studioStripPath?: boolean | undefined
+  /**
+   * When set, append a global Kong `acme` plugin (Let's Encrypt) with Redis/Valkey
+   * storage so the self-host gateway provisions and renews TLS automatically.
+   */
+  acme?: { email: string; domain: string; redisHost: string } | undefined
 }
 
 /** Escape a string for use inside YAML double quotes. */
@@ -85,9 +90,27 @@ ${route.paths.map((path) => `          - ${path}`).join("\n")}
 ${protocols}${routePlugins}${graphqlPlugins}`
   }).join("\n")
 
+  const acme = opts.acme
+  const pluginsBlock = acme
+    ? `
+plugins:
+  - name: acme
+    config:
+      account_email: ${yamlQuotedString(acme.email)}
+      tos_accepted: true
+      domains:
+        - ${yamlQuotedString(acme.domain)}
+      storage: redis
+      storage_config:
+        redis:
+          host: ${yamlQuotedString(acme.redisHost)}
+          port: 6379
+`
+    : ""
+
   return `_format_version: "3.0"
 ${consumersBlock}
 services:
 ${servicesBlock}
-`
+${pluginsBlock}`
 }

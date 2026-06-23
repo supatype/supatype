@@ -15,6 +15,7 @@ import { registerMigrate } from "./commands/migrate.js"
 import { registerSeed } from "./commands/seed.js"
 import { registerKeys } from "./commands/keys.js"
 import { registerApp } from "./commands/app.js"
+import { registerAdd } from "./commands/add.js"
 import { registerSelfHost } from "./commands/self-host.js"
 import { registerCloud } from "./commands/cloud.js"
 import { registerEngine } from "./commands/engine.js"
@@ -52,6 +53,7 @@ export function run(): void {
   registerSeed(program)
   registerKeys(program)
   registerApp(program)
+  registerAdd(program)
   registerSelfHost(program)
   registerCloud(program)
   registerEngine(program)
