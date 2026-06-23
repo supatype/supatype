@@ -54,6 +54,7 @@ Auth flag: `--token` (cloud = platform PAT; self-host = `SERVICE_ROLE_KEY`). `--
 |---------|---------|
 | `supatype app add` | Add static or proxy app to compose (e.g. `--static ./public`) |
 | `supatype app remove` | Remove app from compose |
+| `supatype add domain [domain]` | Add a custom domain with automatic HTTPS (self-host). Interactive, or pass `--email <addr>`. Sets `server.mode=standalone` + `domain` + `tls`; apply with `compose up -d` |
 | `supatype self-host compose render` | Write docker-compose.yml |
 | `supatype self-host compose up -d` | Start production stack |
 | `supatype self-host compose down` | Stop stack |
@@ -117,9 +118,9 @@ supatype rollback --no-sync-schema  # database only
 **Self-host production:**
 ```bash
 npm run build
-supatype self-host compose render
-supatype self-host compose up -d
-supatype link --url https://your-domain --token $SERVICE_ROLE_KEY
+supatype add domain demo.example.com --email you@example.com  # automatic HTTPS (Kong ACME)
+supatype self-host compose up -d                              # publishes :80/:443, issues cert on first hit
+supatype link --url https://demo.example.com --token $SERVICE_ROLE_KEY
 supatype deploy
 ```
 

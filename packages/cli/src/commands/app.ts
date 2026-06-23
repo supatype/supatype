@@ -14,7 +14,7 @@ export function registerApp(program: Command): void {
     .description("Configure app routing: --static for a built site, or proxy to a dev server")
     .option("--static", "Serve a static directory at / (default: ./public, or [dir] argument)")
     .option("--port <port>", "Port your app listens on (proxy mode)", "3000")
-    .option("--upstream <url>", "Explicit upstream URL (proxy mode; defaults to localhost:<port>)")
+    .option("--upstream <url>", "URL of your running dev server (proxy mode; defaults to localhost:<port>)")
     .option("--dockerfile <path>", "(deprecated) ignored — use supatype.config.ts")
     .action(
       (
@@ -77,7 +77,7 @@ function addProxyApp(cwd: string, port: string, upstream?: string): void {
   try {
     const configPath = updateAppConfigInProject(cwd, { mode: "proxy", upstream: upstreamUrl })
     console.log(`  updated  ${configPath}`)
-    console.log(`\nApp upstream set to ${upstreamUrl}. The app will be available at ${localKongBaseUrl()}/\n`)
+    console.log(`\nForwarding requests to your dev server at ${upstreamUrl}. The app will be available at ${localKongBaseUrl()}/\n`)
     console.log("Run: supatype self-host compose render")
   } catch (err) {
     console.error((err as Error).message)

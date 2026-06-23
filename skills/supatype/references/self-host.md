@@ -50,17 +50,46 @@ supatype self-host compose down      # stop
 supatype self-host compose status    # health check
 ```
 
-Configure domain and SSL in `supatype.config.ts` under `selfHost` when ready for HTTPS (Caddy + Let's Encrypt).
+## Custom domain + automatic HTTPS
+
+Add a domain at any time with one command (interactive prompts for the domain and a Let's Encrypt email):
+
+```bash
+supatype add domain                 # prompts for domain + TLS email
+supatype add domain demo.example.com --email you@example.com   # non-interactive
+```
+
+This sets `server.mode = "standalone"`, `server.domain`, and `server.tls` in `supatype.config.ts`:
+
+```typescript
+server: {
+  mode: "standalone",
+  domain: "demo.example.com",
+  tls: { email: "you@example.com", provider: "kong" },
+},
+```
+
+Then bring the stack up — compose and Kong are re-rendered from config on every run:
+
+```bash
+supatype self-host compose up -d
+```
+
+When `mode = "standalone"` + `domain` + `tls.email` are all set, the generated stack:
+
+- publishes **Kong on `:80` and `:443`** (instead of the local `:18473`),
+- adds a **Valkey** service as the ACME cert store (persisted in the `valkey-data` volume),
+- enables Kong's global **`acme`** plugin, which provisions a Let's Encrypt certificate on the first HTTPS request and auto-renews it.
+
+Prerequisites: point the domain's DNS **A record** at the server's public IP and open ports **80** and **443** (HTTP-01 challenge needs `:80`). Everything — your app, REST, Auth, Storage, Realtime, Functions, and Studio — is then served behind `https://<domain>`.
+
+Set `server.tls.provider = "none"` to keep a domain configured but stay on plain HTTP.
+
+> A `supatype.local.config.ts` override with `server: { mode: "dev" }` keeps local `supatype dev` on HTTP. That file is gitignored, so HTTPS still activates on the production server where it does not exist.
 
 ## Standalone mode (native TLS)
 
-For native ACME TLS without Compose:
-
-```bash
-supatype init --mode standalone
-```
-
-Set `server.domain` in config. Uses host binaries, not Docker Compose.
+`mode = "standalone"` also drives the native (non-Compose) path, which serves ACME TLS directly from the host `supatype-server` binary. `supatype init --mode standalone` scaffolds this. Uses host binaries, not Docker Compose.
 
 ## Package.json scripts (typical)
 

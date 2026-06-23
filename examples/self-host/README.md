@@ -107,6 +107,17 @@ pnpm run selfhost:logs -- --service studio
 - Storage: `http://localhost:18473/storage/v1/`
 - Realtime: `ws://localhost:18473/realtime/v1/`
 
+## Going live with a custom domain (HTTPS)
+
+To serve this stack on a real domain with automatic Let's Encrypt TLS:
+
+```bash
+supatype add domain demo.example.com --email you@example.com
+supatype self-host compose up -d
+```
+
+This sets `server.mode = "standalone"` + `server.domain` + `server.tls` in `supatype.config.ts`, then re-renders compose so Kong publishes `:80`/`:443`, a Valkey service stores the certs, and the `acme` plugin issues a certificate on the first HTTPS request. Point the domain's DNS A record at the host and open ports 80 and 443 first.
+
 ## App routing
 
 This example uses:

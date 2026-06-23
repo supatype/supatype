@@ -8,22 +8,20 @@ Do **not** use legacy `@supatype/schema` builder API. Do **not** hand-edit gener
 
 ```typescript
 import type {
-  Model, Public, Private, LoggedIn, Owner, Role,
-  SupatypeAuthUserId, Unique, Email, UUID, Timestamp,
+  Model, LoggedIn, Owner, Public, Role,
+  SupatypeAuthUserId, UUID,
 } from "@supatype/types"
 
-export type User = Model<{
+/** App profile — `id` matches the Supatype auth user id. */
+export type Profile = Model<{
   id: SupatypeAuthUserId
-  email: Unique<Email>
-  name: string
-  created_at: Timestamp
-  updated_at: Timestamp
+  display_name: string
 }, {
   access: {
-    read: Public
-    create: Public
+    read: LoggedIn
+    create: Owner<"id">
     update: Owner<"id">
-    delete: Role<"admin">
+    delete: Owner<"id">
   }
 }>
 ```

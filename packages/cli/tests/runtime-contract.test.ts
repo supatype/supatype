@@ -5,7 +5,7 @@ import { tmpdir } from "node:os"
 import { runtimeRouteSpec } from "../src/runtime-routes.js"
 import { buildKongDeclarative } from "../src/kong-config.js"
 import { composeDockerImageEnv, composePullNeedsIgnoreFailures, hasLocalVersionPins, isRegistryPullableImageRef, renderSelfHostCompose, writeSelfHostCompose } from "../src/self-host-compose.js"
-import { updateAppConfigInProject } from "../src/app-config.js"
+import { updateAppConfigInProject, updateServerConfigInProject } from "../src/app-config.js"
 import type { SupatypeProjectConfig } from "../src/project-config.js"
 import { DENO_RELEASE_PIN } from "../src/release-pins.js"
 
@@ -376,6 +376,60 @@ export default defineConfig({
     }
   })
 
+  it("server config updater sets standalone mode, domain, and tls (preserving other keys)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-server-config-"))
+    try {
+      const configPath = join(dir, "supatype.config.ts")
+      writeFileSync(
+        configPath,
+        `import { defineConfig } from "@supatype/cli"
+
+export default defineConfig({
+  project: { name: "x" },
+  database: { provider: "docker" },
+  server: { mode: "dev", port: 54321 },
+  app: { mode: "none" },
+})
+`,
+        "utf8",
+      )
+      updateServerConfigInProject(dir, { domain: "demo.supatype.com", tlsEmail: "hello@supatype.com" })
+      const next = readFileSync(configPath, "utf8")
+      expect(next).toContain(`mode: "standalone"`)
+      expect(next).toContain(`domain: "demo.supatype.com"`)
+      expect(next).toContain(`tls: { email: "hello@supatype.com", provider: "kong" }`)
+      expect(next).toContain(`port: 54321`)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("server config updater is idempotent and overwrites a prior domain/email", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-server-config-"))
+    try {
+      const configPath = join(dir, "supatype.config.ts")
+      writeFileSync(
+        configPath,
+        `export default {
+  project: { name: "x" },
+  database: { provider: "docker" },
+  server: { mode: "standalone", domain: "old.example.com", tls: { email: "old@example.com", provider: "kong" } },
+  app: { mode: "none" },
+}
+`,
+        "utf8",
+      )
+      updateServerConfigInProject(dir, { domain: "new.supatype.com", tlsEmail: "new@supatype.com" })
+      const next = readFileSync(configPath, "utf8")
+      expect(next).toContain(`domain: "new.supatype.com"`)
+      expect(next).toContain(`email: "new@supatype.com"`)
+      expect(next).not.toContain("old.example.com")
+      expect(next).not.toContain("old@example.com")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it("writes self-host compose artifacts under .supatype/self-host", () => {
     const dir = mkdtempSync(join(tmpdir(), "supatype-compose-"))
     try {
@@ -397,6 +451,62 @@ export default defineConfig({
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+
+  const tlsConfig: SupatypeProjectConfig = {
+    ...baseConfig,
+    server: { mode: "standalone", domain: "api.example.com", tls: { email: "ops@example.com" } },
+  }
+
+  it("self-host compose renders Kong TLS + Valkey when standalone domain + email are set", () => {
+    const compose = renderSelfHostCompose(tlsConfig)
+    expect(compose).toContain("\n  valkey:\n")
+    expect(compose).toContain("valkey/valkey:8-alpine")
+    expect(compose).toContain('- "80:8000"')
+    expect(compose).toContain('- "443:8443"')
+    expect(compose).toContain("KONG_PROXY_LISTEN")
+    expect(compose).toContain("- valkey")
+    expect(compose).toContain("https://api.example.com")
+    expect(compose).toMatch(/^\s{2}valkey-data:/m)
+    expect(compose).not.toContain("HTTPS is off")
+  })
+
+  it("self-host compose stays plain HTTP with a discoverable hint when TLS is off", () => {
+    const compose = renderSelfHostCompose(baseConfig)
+    expect(compose).not.toContain("\n  valkey:\n")
+    expect(compose).not.toContain('- "443:8443"')
+    expect(compose).toContain("${SUPATYPE_KONG_PORT:-18473}:8000")
+    expect(compose).toContain("HTTPS is off")
+  })
+
+  it("self-host compose does not enable TLS for a domain without an ACME email", () => {
+    const compose = renderSelfHostCompose({
+      ...baseConfig,
+      server: { mode: "standalone", domain: "api.example.com" },
+    })
+    expect(compose).not.toContain("\n  valkey:\n")
+    expect(compose).not.toContain('- "443:8443"')
+  })
+
+  it("writeSelfHostCompose emits a Kong acme plugin backed by Valkey when TLS is on", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-tls-"))
+    try {
+      const out = writeSelfHostCompose(dir, tlsConfig)
+      const kong = readFileSync(out.kongPath, "utf8")
+      expect(kong).toContain("name: acme")
+      expect(kong).toContain('account_email: "ops@example.com"')
+      expect(kong).toContain("tos_accepted: true")
+      expect(kong).toContain('- "api.example.com"')
+      expect(kong).toContain("storage: redis")
+      expect(kong).toContain('host: "valkey"')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("kong declarative omits the acme plugin when no acme options are provided", () => {
+    const kong = buildKongDeclarative({ unifiedGateway: true })
+    expect(kong).not.toContain("name: acme")
   })
 
   it("writes default manifest when missing for compose", () => {

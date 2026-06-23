@@ -1,5 +1,5 @@
 import type { Command } from "commander"
-import { readFileSync, existsSync } from "node:fs"
+import { readFileSync, existsSync, writeFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { signJwt } from "../jwt.js"
 
@@ -41,13 +41,58 @@ export function registerKeys(program: Command): void {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-export function resolveSecret(): string | undefined {
+/** Mint a long-lived anon + service_role JWT pair from a secret. */
+export function signKeyPair(
+  secret: string,
+  expYears = 10,
+): { anonKey: string; serviceKey: string } {
+  const now = Math.floor(Date.now() / 1000)
+  const exp = now + expYears * 365 * 24 * 60 * 60
+  return {
+    anonKey: signJwt({ iss: "supatype", role: "anon", iat: now, exp }, secret),
+    serviceKey: signJwt({ iss: "supatype", role: "service_role", iat: now, exp }, secret),
+  }
+}
+
+/**
+ * Generate keys from the JWT_SECRET found in `dir`'s .env (or env var) and
+ * rewrite the ANON_KEY / SERVICE_ROLE_KEY lines in that .env file in place.
+ * Returns the minted pair, or null if no secret could be resolved.
+ */
+export function generateAndWriteKeys(
+  dir: string,
+  expYears = 10,
+): { anonKey: string; serviceKey: string } | null {
+  const secret = resolveSecret(dir)
+  if (!secret) return null
+
+  const { anonKey, serviceKey } = signKeyPair(secret, expYears)
+
+  const envPath = resolve(dir, ".env")
+  if (existsSync(envPath)) {
+    let content = readFileSync(envPath, "utf8")
+    content = upsertEnvVar(content, "ANON_KEY", anonKey)
+    content = upsertEnvVar(content, "SERVICE_ROLE_KEY", serviceKey)
+    writeFileSync(envPath, content, "utf8")
+  }
+
+  return { anonKey, serviceKey }
+}
+
+function upsertEnvVar(content: string, key: string, value: string): string {
+  const re = new RegExp(`^${key}=.*$`, "m")
+  if (re.test(content)) return content.replace(re, `${key}=${value}`)
+  const sep = content.endsWith("\n") || content.length === 0 ? "" : "\n"
+  return `${content}${sep}${key}=${value}\n`
+}
+
+export function resolveSecret(dir: string = process.cwd()): string | undefined {
   // 1. Check environment variable
   const fromEnv = process.env["JWT_SECRET"]
   if (fromEnv) return fromEnv
 
-  // 2. Parse .env file in cwd
-  const envPath = resolve(process.cwd(), ".env")
+  // 2. Parse .env file in the target directory
+  const envPath = resolve(dir, ".env")
   if (!existsSync(envPath)) return undefined
 
   try {

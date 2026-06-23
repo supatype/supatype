@@ -27,6 +27,7 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
+    "@clack/prompts": "^1.6.0",
     "commander": "^12.1.0",
     "pg": "^8.13.0",
     "ts-morph": "^28.0.0",
