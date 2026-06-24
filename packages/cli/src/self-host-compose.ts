@@ -278,6 +278,7 @@ ${studioService}
   const kongTlsEnv = tlsEnabled
     ? `      KONG_PROXY_LISTEN: "0.0.0.0:8000, 0.0.0.0:8443 ssl"
       KONG_LUA_SSL_TRUSTED_CERTIFICATE: system
+      KONG_LUA_SSL_VERIFY_DEPTH: "2"
 `
     : ""
   const kongPorts = tlsEnabled

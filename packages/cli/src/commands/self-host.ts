@@ -17,7 +17,7 @@ import { resolveBinary } from "../binary-cache.js"
 import { generateUnits } from "../systemd.js"
 import { readPid } from "../process-manager.js"
 import { localStorageEnv } from "../local-storage.js"
-import { runDockerCompose, writeSelfHostCompose } from "../self-host-compose.js"
+import { composeProjectName, runDockerCompose, writeSelfHostCompose } from "../self-host-compose.js"
 
 export function registerSelfHost(program: Command): void {
   const selfHostCmd = program
@@ -47,7 +47,12 @@ export function registerSelfHost(program: Command): void {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
       const out = writeSelfHostCompose(cwd, config)
-      const status = runDockerCompose(out.composePath, opts.detach ? ["up", "-d"] : ["up"], cwd)
+      const status = runDockerCompose(
+        out.composePath,
+        opts.detach ? ["up", "-d"] : ["up"],
+        cwd,
+        composeProjectName(config.project.name),
+      )
       process.exitCode = status
     })
 
@@ -58,7 +63,12 @@ export function registerSelfHost(program: Command): void {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
       const out = writeSelfHostCompose(cwd, config)
-      process.exitCode = runDockerCompose(out.composePath, ["down"], cwd)
+      process.exitCode = runDockerCompose(
+        out.composePath,
+        ["down"],
+        cwd,
+        composeProjectName(config.project.name),
+      )
     })
 
   composeCmd
@@ -68,7 +78,12 @@ export function registerSelfHost(program: Command): void {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
       const out = writeSelfHostCompose(cwd, config)
-      process.exitCode = runDockerCompose(out.composePath, ["ps"], cwd)
+      process.exitCode = runDockerCompose(
+        out.composePath,
+        ["ps"],
+        cwd,
+        composeProjectName(config.project.name),
+      )
     })
 
   composeCmd
@@ -83,7 +98,12 @@ export function registerSelfHost(program: Command): void {
       const args = ["logs"]
       if (opts.follow) args.push("-f")
       if (opts.service) args.push(opts.service)
-      process.exitCode = runDockerCompose(out.composePath, args, cwd)
+      process.exitCode = runDockerCompose(
+        out.composePath,
+        args,
+        cwd,
+        composeProjectName(config.project.name),
+      )
     })
 
   // ── Legacy native/systemd helpers (hidden; use compose for self-host) ─────
