@@ -29,8 +29,9 @@ import { registerPlugins } from "./commands/plugins.js"
 import { registerTypes } from "./commands/types.js"
 import { registerMigrateFromV1 } from "./commands/migrate-from-v1.js"
 import { registerSelfUpdate } from "./commands/self-update.js"
+import { reportCliFatal } from "./ui/fatal.js"
 
-export function run(): void {
+export async function run(): Promise<void> {
   const program = new Command()
     .name("supatype")
     .description("Supatype — schema-first Postgres API")
@@ -67,5 +68,10 @@ export function run(): void {
   registerTypes(program)
   registerMigrateFromV1(program)
 
-  program.parse()
+  try {
+    await program.parseAsync(process.argv)
+  } catch (err) {
+    reportCliFatal(err)
+    process.exit(1)
+  }
 }

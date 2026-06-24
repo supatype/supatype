@@ -3,7 +3,9 @@ import * as p from "@clack/prompts"
 import { loadConfig } from "../config.js"
 import { selfHostTlsEnabled } from "../project-config.js"
 import { updateServerConfigInProject } from "../app-config.js"
-import { ensureNotCancelled, printLogo } from "../prompts.js"
+import { ensureNotCancelled, printLogo } from "../ui/prompts.js"
+import { file, error, info, plain } from "../ui/messages.js"
+import { nextSteps } from "../ui/next-steps.js"
 
 export function registerAdd(program: Command): void {
   const addCmd = program
@@ -60,11 +62,11 @@ async function addDomain(domainArg?: string, emailArg?: string): Promise<void> {
     if (interactive) {
       p.outro(`Updated ${configPath}`)
     } else {
-      console.log(`  updated  ${configPath}`)
+      file("updated", configPath)
     }
     printDomainNextSteps(cwd, domain)
   } catch (err) {
-    console.error((err as Error).message)
+    error((err as Error).message)
     process.exit(1)
   }
 }
@@ -77,18 +79,19 @@ function printDomainNextSteps(cwd: string, domain: string): void {
     // config re-load is best-effort for the warning below
   }
 
-  console.log(`\nDomain set to ${domain} with automatic HTTPS.`)
+  info(`Domain set to ${domain} with automatic HTTPS.`)
   if (!tlsActive) {
-    console.log(
+    plain(
       "\nNote: a supatype.local.config.ts override (server.mode=dev) is suppressing HTTPS locally.\n" +
         "That file is gitignored, so HTTPS still activates on your production server.",
     )
   }
-  console.log("\nGo live:")
-  console.log(`  1. Point DNS: an A record for ${domain} -> your server's public IP`)
-  console.log("  2. Open ports 80 and 443 on the server firewall")
-  console.log("  3. supatype self-host compose up -d   # Kong provisions HTTPS automatically")
-  console.log(`\nYour Supatype platform goes live at https://${domain}`)
-  console.log("  Your app, REST, Auth, Storage, Realtime, Functions, and Studio — all behind one HTTPS domain.")
-  console.log("  Certificates persist in the valkey-data volume.\n")
+  nextSteps("Go live:", [
+    `Point DNS: an A record for ${domain} -> your server's public IP`,
+    "Open ports 80 and 443 on the server firewall",
+    "supatype self-host compose up -d   # Kong provisions HTTPS automatically",
+    `Platform URL: https://${domain}`,
+  ])
+  plain("  App, REST, Auth, Storage, Realtime, Functions, and Studio — one HTTPS domain.")
+  plain("  Certificates persist in the valkey-data volume.\n")
 }

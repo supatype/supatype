@@ -28,13 +28,25 @@ Node.js 18+, Docker (default provider), npm/pnpm/yarn.
 ## New project
 
 ```bash
-npx @supatype/cli init <project-name>    # --mode dev (default) | standalone
+npx @supatype/cli init <project-name> --mode standalone  # self-host target
 cd <project-name>
 npm install
 supatype keys                              # → ANON_KEY + SERVICE_ROLE_KEY in .env
-supatype dev                               # Docker Compose; Kong :18473
 supatype push                              # migrate + generate types
+supatype dev                               # terminal 1 — Docker Compose; Kong :18473
+npm run vite                               # terminal 2 — if app.vite_dev_url is set
 ```
+
+Supatype is in **early development**. For now, see what the latest alpha is on npm and install that:
+
+```bash
+npm view @supatype/cli versions   # pick the highest 0.1.0-alpha.*
+npm install @supatype/cli@<version> @supatype/client@<version> @supatype/types@<version>
+```
+
+Omit `versions` in `supatype.config.ts` so Docker pulls `:latest` images.
+
+**Reference app:** `test-app` in the Supatype monorepo — canonical self-host + static + `vite_dev_url` layout. See [references/frontend.md](references/frontend.md).
 
 ## Daily workflow
 

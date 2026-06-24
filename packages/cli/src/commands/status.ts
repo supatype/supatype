@@ -8,6 +8,7 @@ import { resolve } from "node:path"
 import { LOCAL_KONG_HOST_PORT, localKongBaseUrl } from "../local-gateway.js"
 import { loadLocalEnvironment, loadProjectLink } from "../link.js"
 import { resolveTarget, targetStatus } from "../resolve-target.js"
+import { error, info, plain, warn } from "../ui/messages.js"
 
 interface ServiceStatus {
   name: string
@@ -35,7 +36,7 @@ export function registerStatus(program: Command): void {
             return
           }
         } catch (err) {
-          console.error((err as Error).message)
+          error((err as Error).message)
           process.exitCode = 1
           return
         }
@@ -46,28 +47,29 @@ export function registerStatus(program: Command): void {
 }
 
 async function printLinkedStatus(target: ReturnType<typeof resolveTarget>): Promise<void> {
-  console.log(`Target: ${target.mode} (${target.environment})`)
-  console.log(`Project: ${target.projectRef}`)
-  console.log(`API: ${target.apiBaseUrl}${target.apiPrefix}\n`)
+  info(`Target: ${target.mode} (${target.environment})`)
+  info(`Project: ${target.projectRef}`)
+  info(`API: ${target.apiBaseUrl}${target.apiPrefix}`)
+  plain()
 
   try {
     const data = (await targetStatus(target)) as Record<string, unknown>
     if (data.functions && Array.isArray(data.functions)) {
-      console.log(`Functions (${data.functions.length}):`)
+      plain(`Functions (${data.functions.length}):`)
       for (const fn of data.functions as Array<{ name?: string } | string>) {
         const name = typeof fn === "string" ? fn : fn.name
-        if (name) console.log(`  • ${name}`)
+        if (name) plain(`  • ${name}`)
       }
-      console.log()
+      plain()
     }
     if (data.deploymentId) {
-      console.log(`Active deployment: ${data.deploymentId}`)
+      info(`Active deployment: ${data.deploymentId}`)
     }
     if (data.controlPlane) {
-      console.log(`Control plane: ${data.controlPlane}`)
+      info(`Control plane: ${data.controlPlane}`)
     }
   } catch (err) {
-    console.warn(`Could not fetch remote status: ${(err as Error).message}`)
+    warn(`Could not fetch remote status: ${(err as Error).message}`)
   }
 }
 
@@ -90,7 +92,7 @@ function printLocalStackStatus(cwd: string): void {
     return { ...svc, status, ...(uptime !== undefined && { uptime }) }
   })
 
-  console.log("Supatype Local Development Stack\n")
+  plain("Supatype Local Development Stack\n")
 
   const maxName = Math.max(...services.map((s) => s.name.length))
   for (const svc of services) {
@@ -98,26 +100,26 @@ function printLocalStackStatus(cwd: string): void {
     const status = svc.status.padEnd(8)
     const port = svc.port ? `:${svc.port}` : ""
     const uptime = svc.uptime ? ` (${svc.uptime})` : ""
-    console.log(`  ${icon} ${svc.name.padEnd(maxName)}  ${status}  ${port}${uptime}`)
+    plain(`  ${icon} ${svc.name.padEnd(maxName)}  ${status}  ${port}${uptime}`)
   }
 
   const running = services.filter((s) => s.status === "running")
-  console.log(`\n${running.length}/${services.length} services running`)
+  plain(`\n${running.length}/${services.length} services running`)
 
   if (running.length > 0) {
     const apiUrl = localEnv?.apiUrl ?? localKongBaseUrl()
-    console.log(`\nAPI URL:    ${apiUrl}`)
-    console.log(`Studio:     http://localhost:3100`)
+    plain(`\nAPI URL:    ${apiUrl}`)
+    plain(`Studio:     http://localhost:3100`)
     if (localEnv?.databaseUrl) {
-      console.log(`Database:   ${localEnv.databaseUrl}`)
+      plain(`Database:   ${localEnv.databaseUrl}`)
     } else {
-      console.log(`Database:   postgresql://supatype_admin:postgres@localhost:5432/postgres`)
+      plain(`Database:   postgresql://supatype_admin:postgres@localhost:5432/postgres`)
     }
   }
 
   if (existsSync(resolve(cwd, ".supatype/environment.json"))) {
-    console.log("\nLocal environment file: .supatype/environment.json")
-    console.log("Link remote ops: supatype link --url <api> --token $SERVICE_ROLE_KEY")
+    plain("\nLocal environment file: .supatype/environment.json")
+    info("Link remote ops: supatype link --url <api> --token $SERVICE_ROLE_KEY")
   }
 }
 

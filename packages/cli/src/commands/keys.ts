@@ -2,6 +2,7 @@ import type { Command } from "commander"
 import { readFileSync, existsSync, writeFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { signJwt } from "../jwt.js"
+import { error, plain } from "../ui/messages.js"
 
 export function registerKeys(program: Command): void {
   program
@@ -12,15 +13,13 @@ export function registerKeys(program: Command): void {
     .action((opts: { secret?: string; expYears: string }) => {
       const secret = opts.secret ?? resolveSecret()
       if (!secret) {
-        console.error(
-          "Error: JWT_SECRET not found. Set it in .env or pass --secret <value>",
-        )
+        error("JWT_SECRET not found. Set it in .env or pass --secret <value>")
         process.exit(1)
       }
 
       const expYears = parseInt(opts.expYears, 10)
       if (isNaN(expYears) || expYears < 1) {
-        console.error("Error: --exp-years must be a positive integer")
+        error("--exp-years must be a positive integer")
         process.exit(1)
       }
 
@@ -30,12 +29,10 @@ export function registerKeys(program: Command): void {
       const anonKey = signJwt({ iss: "supatype", role: "anon", iat: now, exp }, secret)
       const serviceKey = signJwt({ iss: "supatype", role: "service_role", iat: now, exp }, secret)
 
-      console.log("\nGenerated keys (valid for", expYears, "years):\n")
-      console.log("ANON_KEY=" + anonKey)
-      console.log("SERVICE_ROLE_KEY=" + serviceKey)
-      console.log(
-        "\nAdd these to your .env file. Do not commit .env to source control.",
-      )
+      plain(`\nGenerated keys (valid for ${expYears} years):\n`)
+      plain("ANON_KEY=" + anonKey)
+      plain("SERVICE_ROLE_KEY=" + serviceKey)
+      plain("\nAdd these to your .env file. Do not commit .env to source control.")
     })
 }
 

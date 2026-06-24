@@ -1,6 +1,5 @@
 import type { Command } from "commander"
 import { mkdirSync, writeFileSync } from "node:fs"
-import { createInterface } from "node:readline"
 import { join } from "node:path"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { resolveRuntimeProvider, schemaPathFromProject, serverBaseUrl } from "../project-config.js"
@@ -26,6 +25,10 @@ import {
   cacheSchemaSourcesLocally,
   resolvePushedBy,
 } from "../schema-sources.js"
+import { confirm, logSkippedConfirm } from "../ui/confirm.js"
+import { info, plain } from "../ui/messages.js"
+import { withSpinner } from "../ui/progress.js"
+import { isInteractive } from "../ui/interactive.js"
 
 const DEV_JWT_SECRET = "super-secret-jwt-token-with-at-least-32-characters-long"
 
@@ -68,7 +71,7 @@ export function registerPush(program: Command): void {
           return
         }
         const { pushSchemaDocker } = await import("../dev-compose.js")
-        await pushSchemaDocker(cwd, config)
+        await withSpinner("Applying schema via Docker Compose", () => pushSchemaDocker(cwd, config))
         return
       }
 
@@ -89,41 +92,52 @@ async function pushViaTarget(
   pgSchema: string,
   skipConfirm: boolean,
 ): Promise<void> {
-  console.log("Diffing against database...")
-  const diff = await targetSchemaDiff(target, ast, { schema: pgSchema })
+  const diff = await withSpinner("Diffing against database", () =>
+    targetSchemaDiff(target, ast, { schema: pgSchema }),
+  )
   const ops = diff.operations ?? []
   printDiffWarnings(diff)
 
   if (ops.length === 0) {
-    console.log("Schema matches the database (no DDL). Syncing Studio metadata...")
+    info("Schema matches the database (no DDL). Syncing Studio metadata...")
   } else {
     printDiffOperations({ operations: ops })
     const risky = ops.filter(
       (o) => o.risk === "cautious" || o.risk === "destructive" || o.risk === "warn" || o.risk === "danger",
     )
     if (risky.length > 0 && !skipConfirm) {
+      if (!isInteractive()) {
+        logSkippedConfirm(`${risky.length} risky operation(s) require confirmation`)
+        plain("Aborted.")
+        return
+      }
       const confirmed = await confirm(
-        `\n${risky.length} risky operation(s) above. Proceed? [y/N] `,
+        `${risky.length} risky operation(s) above. Proceed?`,
+        { default: false },
       )
       if (!confirmed) {
-        console.log("Aborted.")
+        plain("Aborted.")
         return
       }
     }
   }
 
-  console.log(ops.length > 0 ? "\nApplying migration..." : "\nSyncing with engine...")
-  const schemaSources = buildSchemaSourcesPayload(cwd, resolvePushedBy())
-  const pushResult = await targetSchemaPush(target, ast, {
-    force: true,
-    schema: pgSchema,
-    schemaSources,
-  })
+  const pushResult = await withSpinner(
+    ops.length > 0 ? "Applying migration" : "Syncing with engine",
+    () =>
+      targetSchemaPush(target, ast, {
+        force: true,
+        schema: pgSchema,
+        schemaSources: buildSchemaSourcesPayload(cwd, resolvePushedBy()),
+      }),
+  )
+
   if ((pushResult as { status?: string }).status === "up_to_date") {
-    console.log("Schema is up to date.")
+    info("Schema is up to date.")
   } else {
-    console.log((pushResult as { message?: string }).message ?? "Migration applied.")
+    info((pushResult as { message?: string }).message ?? "Migration applied.")
     const migrationName = (pushResult as { name?: string }).name
+    const schemaSources = buildSchemaSourcesPayload(cwd, resolvePushedBy())
     if (migrationName && schemaSources) {
       cacheSchemaSourcesLocally(cwd, migrationName, schemaSources.gz)
     }
@@ -137,24 +151,25 @@ async function pushViaTarget(
     await generateTypesLocal(ast, config)
     await provisionLocalStorage(ast, config)
   } else {
-    console.log(`Pushed to ${target.mode} (${target.environment}).`)
+    info(`Pushed to ${target.mode} (${target.environment}).`)
   }
 
   const baseUrl = (serverBaseUrl(config) ?? "").replace(/\/$/, "")
   if (baseUrl) {
-    console.log(`\nStudio: ${baseUrl}/studio/`)
+    plain(`\nStudio: ${baseUrl}/studio/`)
   }
 }
 
 async function generateTypesLocal(ast: unknown, config: SupatypeProjectConfig): Promise<void> {
   if (!config.output?.types && !config.output?.client) return
-  console.log("Generating types...")
-  await ensureEngine()
-  const genBody: Record<string, unknown> = { ast, lang: "typescript" }
-  if (config.output?.types) genBody["types_path"] = config.output.types
-  if (config.output?.client) genBody["client_path"] = config.output.client
-  const genResult = await engineRequest<{ message?: string }>("/generate", genBody)
-  console.log(genResult.message ?? "Types generated.")
+  await withSpinner("Generating types", async () => {
+    await ensureEngine()
+    const genBody: Record<string, unknown> = { ast, lang: "typescript" }
+    if (config.output?.types) genBody["types_path"] = config.output.types
+    if (config.output?.client) genBody["client_path"] = config.output.client
+    const genResult = await engineRequest<{ message?: string }>("/generate", genBody)
+    return genResult.message ?? "Types generated."
+  }).then((msg) => info(msg))
 }
 
 async function provisionLocalStorage(ast: unknown, config: SupatypeProjectConfig): Promise<void> {
@@ -169,16 +184,6 @@ async function provisionLocalStorage(ast: unknown, config: SupatypeProjectConfig
   await ensureEngine()
   const parsedAst = await engineRequest<Pick<ExtractedSchemaAstV2, "storageBuckets">>("/parse", { ast })
   await provisionBucketsFromAst(parsedAst, `${baseUrl}/storage/v1`, serviceRoleKey)
-}
-
-async function confirm(prompt: string): Promise<boolean> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout })
-  return new Promise((resolveConfirm) => {
-    rl.question(prompt, (answer) => {
-      rl.close()
-      resolveConfirm(answer.toLowerCase() === "y")
-    })
-  })
 }
 
 async function writeLocalAdminConfig(ast: unknown, config: SupatypeProjectConfig): Promise<void> {

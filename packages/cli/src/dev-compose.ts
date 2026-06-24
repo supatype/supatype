@@ -22,11 +22,13 @@ import {
   COMPOSE_PINNED_IMAGE_ENV_KEYS,
   composeDockerImageEnv,
   composeProjectName,
+  exitComposeFailed,
   runDockerCompose,
   schemaEngineImageForPush,
   writeSelfHostCompose,
   type SelfHostComposePaths,
 } from "./self-host-compose.js"
+import type { DockerBrandOptions } from "./docker-runtime.js"
 import { hasEngineOverride } from "./binary-cache.js"
 import { startStudioViteDevServer } from "./studio-dev-server.js"
 import { ensureEngine, engineRequest, type DiffResult } from "./engine-client.js"
@@ -107,6 +109,7 @@ function hostComposeDbUrl(cwd: string): string {
 export async function ensureDockerDbPublishedForHostEngine(
   cwd: string,
   config: SupatypeProjectConfig,
+  brand?: DockerBrandOptions,
 ): Promise<void> {
   if (resolveRuntimeProvider(config) !== "docker") {
     throw new Error("ensureDockerDbPublishedForHostEngine requires provider: docker")
@@ -129,8 +132,13 @@ export async function ensureDockerDbPublishedForHostEngine(
   ensureDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, devDbPort)
 
   const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
-  const up = runDockerCompose(paths.composePath, ["up", "-d", "db"], cwd, project, { quiet: true })
-  if (up !== 0) process.exit(up)
+  const up = runDockerCompose(paths.composePath, ["up", "-d", "db"], cwd, project, {
+    quiet: true,
+    ...(brand !== undefined && { brand }),
+  })
+  if (up !== 0) {
+    exitComposeFailed(up, "Could not start Postgres (compose db service).", brand)
+  }
   await waitComposeHealthy(paths, cwd, 120_000, project)
 }
 
@@ -561,7 +569,8 @@ export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfi
   const pgSchema = config.schema?.pg_schema ?? "public"
 
   if (hasEngineOverride(config)) {
-    await ensureDockerDbPublishedForHostEngine(cwd, config)
+    const brand = { intro: "Schema diff" }
+    await ensureDockerDbPublishedForHostEngine(cwd, config, brand)
     const schemaPath = schemaPathFromProject(config, cwd)
     const ast = loadSchemaAst(schemaPath, cwd)
     await ensureEngine()
@@ -580,9 +589,15 @@ export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfi
   ensureDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, undefined)
 
   const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
+  const diffBrand = { intro: "Schema diff" }
 
-  const up = runDockerCompose(paths.composePath, ["up", "-d", "db"], cwd, project, { quiet: true })
-  if (up !== 0) process.exit(up)
+  const up = runDockerCompose(paths.composePath, ["up", "-d", "db"], cwd, project, {
+    quiet: true,
+    brand: diffBrand,
+  })
+  if (up !== 0) {
+    exitComposeFailed(up, "Could not start Postgres (compose db service).", diffBrand)
+  }
   await waitComposeHealthy(paths, cwd, 120_000, project)
 
   const schemaPath = schemaPathFromProject(config, cwd)
@@ -629,18 +644,29 @@ export async function pushSchemaDocker(cwd: string, config: SupatypeProjectConfi
   ensureDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, devDbPort)
 
   const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
+  const pushBrand = { intro: "Push schema" }
 
   console.log(`[supatype] provider: docker — applying schema via compose (project ${project})...`)
-  const up = runDockerCompose(paths.composePath, ["up", "-d", "db"], cwd, project, { quiet: true })
-  if (up !== 0) process.exit(up)
+  const up = runDockerCompose(paths.composePath, ["up", "-d", "db"], cwd, project, {
+    quiet: true,
+    brand: pushBrand,
+  })
+  if (up !== 0) {
+    exitComposeFailed(up, "Could not start Postgres (compose db service).", pushBrand)
+  }
   await waitComposeHealthy(paths, cwd, 120_000, project)
 
   const schemaPath = schemaPathFromProject(config, cwd)
   const ast = loadSchemaAst(schemaPath, cwd)
   await runComposeSchemaPush(cwd, config, paths, schemaPath, project)
 
-  const upGateway = runDockerCompose(paths.composePath, ["up", "-d"], cwd, project, { quiet: true })
-  if (upGateway !== 0) process.exit(upGateway)
+  const upGateway = runDockerCompose(paths.composePath, ["up", "-d"], cwd, project, {
+    quiet: true,
+    brand: pushBrand,
+  })
+  if (upGateway !== 0) {
+    exitComposeFailed(upGateway, "Could not start the Compose gateway stack.", pushBrand)
+  }
   await waitKongReady(kongPort, 120)
   await provisionDockerStorageBuckets(ast, kongPort, serviceRoleKey)
 
@@ -667,11 +693,15 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
 
   console.log(`[supatype] provider: docker — starting self-host Compose stack (project ${project}, gateway :${kongPort})...`)
   const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
+  const devBrand = { intro: "Local development" }
 
-  const upStatus = runDockerCompose(paths.composePath, ["up", "-d"], cwd, project, { quiet: true })
+  const upStatus = runDockerCompose(paths.composePath, ["up", "-d"], cwd, project, {
+    quiet: true,
+    brand: devBrand,
+  })
   if (upStatus !== 0) {
     endDevSession()
-    process.exit(upStatus)
+    exitComposeFailed(upStatus, "Could not start the local Compose stack.", devBrand)
   }
 
   console.log("[supatype] Waiting for Postgres (compose)...")

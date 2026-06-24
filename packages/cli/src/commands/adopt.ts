@@ -1,9 +1,11 @@
 import type { Command } from "commander"
-import { createInterface } from "node:readline"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { schemaPathFromProject } from "../project-config.js"
 import { loadProjectLink } from "../link.js"
 import { resolveTarget, targetSchemaAdopt, schemaPgSchema } from "../resolve-target.js"
+import { confirm } from "../ui/confirm.js"
+import { info, plain } from "../ui/messages.js"
+import { withSpinner } from "../ui/progress.js"
 
 interface AdoptPreview {
   status: string
@@ -35,8 +37,9 @@ export function registerAdopt(program: Command): void {
       const config = loadConfig(cwd)
       const pgSchema = schemaPgSchema(cwd)
 
-      console.log("Loading schema...")
-      const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
+      const ast = await withSpinner("Loading schema", async () =>
+        loadSchemaAst(schemaPathFromProject(config, cwd), cwd),
+      )
 
       const linked = loadProjectLink(cwd)
       const target = linked && !opts.direct && !opts.connection
@@ -51,23 +54,19 @@ export function registerAdopt(program: Command): void {
 
       const statements = preview.stampStatements ?? []
       if (statements.length === 0) {
-        console.log("Nothing to stamp — matching objects are already managed or absent.")
+        info("Nothing to stamp — matching objects are already managed or absent.")
         return
       }
 
-      console.log(`\nWill stamp ${statements.length} object(s):\n`)
+      plain(`\nWill stamp ${statements.length} object(s):\n`)
       for (const sql of statements) {
-        console.log(`  ${sql}`)
+        plain(`  ${sql}`)
       }
 
       if (!opts.yes) {
-        const rl = createInterface({ input: process.stdin, output: process.stdout })
-        const answer = await new Promise<string>((resolve) => {
-          rl.question("\nApply adoption stamps? [y/N] ", resolve)
-        })
-        rl.close()
-        if (!/^y(es)?$/i.test(answer.trim())) {
-          console.log("Adoption cancelled.")
+        const ok = await confirm("Apply adoption stamps?", { default: false })
+        if (!ok) {
+          plain("Adoption cancelled.")
           return
         }
       }
@@ -78,6 +77,6 @@ export function registerAdopt(program: Command): void {
         yes: true,
       })) as { status: string; stamped?: number; name?: string }
 
-      console.log(`\nAdopted: ${result.stamped ?? 0} object(s) stamped (${result.name ?? "ok"}).`)
+      info(`Adopted: ${result.stamped ?? 0} object(s) stamped (${result.name ?? "ok"}).`)
     })
 }

@@ -6,6 +6,7 @@ import type { Command } from "commander"
 import { existsSync, readdirSync, rmSync, statSync } from "node:fs"
 import { join } from "node:path"
 import { cacheRoot, type Component } from "../binary-cache.js"
+import { info, plain } from "../ui/messages.js"
 
 const COMPONENTS: Component[] = ["engine", "server", "postgres", "deno"]
 
@@ -20,7 +21,7 @@ export function registerCache(program: Command): void {
     .action(() => {
       const root = cacheRoot()
       if (!existsSync(root)) {
-        console.log("Cache is empty.")
+        info("Cache is empty.")
         return
       }
 
@@ -39,17 +40,17 @@ export function registerCache(program: Command): void {
           const size = dirSize(vDir)
           totalBytes += size
           found = true
-          console.log(`  ${component}@${version}  ${formatBytes(size)}`)
+          plain(`  ${component}@${version}  ${formatBytes(size)}`)
         }
       }
 
       if (!found) {
-        console.log("Cache is empty.")
+        info("Cache is empty.")
         return
       }
 
-      console.log(`\nTotal: ${formatBytes(totalBytes)}`)
-      console.log(`Cache root: ${root}`)
+      plain(`\nTotal: ${formatBytes(totalBytes)}`)
+      info(`Cache root: ${root}`)
     })
 
   cache
@@ -64,7 +65,7 @@ export function registerCache(program: Command): void {
     .action((component?: string, version?: string) => {
       const root = cacheRoot()
       if (!existsSync(root)) {
-        console.log("Cache is already empty.")
+        info("Cache is already empty.")
         return
       }
 
@@ -77,18 +78,18 @@ export function registerCache(program: Command): void {
         if (version) {
           const vDir = join(compDir, version)
           if (!existsSync(vDir)) {
-            console.log(`  ${comp}@${version} not cached.`)
+            info(`${comp}@${version} not cached.`)
             continue
           }
           rmSync(vDir, { recursive: true, force: true })
-          console.log(`  removed  ${comp}@${version}`)
+          plain(`  removed  ${comp}@${version}`)
         } else {
           rmSync(compDir, { recursive: true, force: true })
-          console.log(`  removed  ${comp} (all versions)`)
+          plain(`  removed  ${comp} (all versions)`)
         }
       }
 
-      console.log("Done.")
+      info("Done.")
     })
 }
 

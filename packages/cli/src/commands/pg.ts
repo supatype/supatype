@@ -11,6 +11,8 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 import { loadConfig } from "../config.js"
 import { resolveBinary } from "../binary-cache.js"
+import { confirm } from "../ui/confirm.js"
+import { info, plain } from "../ui/messages.js"
 import {
   initdb,
   start as pgStart,
@@ -32,9 +34,7 @@ export function registerPg(program: Command): void {
       initdb(opts)
       pgStart(opts)
       await waitReady(opts, 10_000)
-      console.log(
-        `[supatype] Postgres started on port ${opts.port} (data: ${opts.dataDir})`,
-      )
+      info(`Postgres started on port ${opts.port} (data: ${opts.dataDir})`)
     })
 
   // ── stop ─────────────────────────────────────────────────────────────────
@@ -44,7 +44,7 @@ export function registerPg(program: Command): void {
       const config = loadConfig()
       const opts = await pgOpts(config)
       pgStop(opts)
-      console.log("[supatype] Postgres stopped.")
+      info("Postgres stopped.")
     })
 
   // ── reset ─────────────────────────────────────────────────────────────────
@@ -56,17 +56,12 @@ export function registerPg(program: Command): void {
       const pgOpts_ = await pgOpts(config)
 
       if (!opts.force) {
-        const readline = await import("node:readline")
-        const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
-        const answer = await new Promise<string>((resolve) =>
-          rl.question(
-            `This will DELETE all data in ${pgOpts_.dataDir}. Continue? [y/N] `,
-            resolve,
-          ),
+        const ok = await confirm(
+          `This will DELETE all data in ${pgOpts_.dataDir}. Continue?`,
+          { default: false },
         )
-        rl.close()
-        if (answer.toLowerCase() !== "y") {
-          console.log("Aborted.")
+        if (!ok) {
+          plain("Aborted.")
           return
         }
       }
@@ -74,13 +69,13 @@ export function registerPg(program: Command): void {
       pgStop(pgOpts_)
       if (existsSync(pgOpts_.dataDir)) {
         rmSync(pgOpts_.dataDir, { recursive: true, force: true })
-        console.log(`[supatype] Data directory removed: ${pgOpts_.dataDir}`)
+        info(`Data directory removed: ${pgOpts_.dataDir}`)
       }
       mkdirSync(pgOpts_.dataDir, { recursive: true })
       initdb(pgOpts_)
       pgStart(pgOpts_)
       await waitReady(pgOpts_, 10_000)
-      console.log("[supatype] Postgres reset and started.")
+      info("Postgres reset and started.")
     })
 
   // ── psql ─────────────────────────────────────────────────────────────────

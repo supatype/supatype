@@ -2,6 +2,8 @@ import type { Command } from "commander"
 import { existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs"
 import { resolve, join } from "node:path"
 import { spawnSync } from "node:child_process"
+import { error, info, plain, warn } from "../ui/messages.js"
+import { nextSteps } from "../ui/next-steps.js"
 
 // ─── Registration ────────────────────────────────────────────────────────────
 
@@ -61,27 +63,30 @@ function listPlugins(cwd: string): void {
   const plugins = discoverInstalledPlugins(cwd)
 
   if (plugins.length === 0) {
-    console.log("No Supatype plugins installed.")
-    console.log("\nSearch for plugins:  npx supatype plugins search <query>")
-    console.log("Create a plugin:    npx supatype plugins create")
+    info("No Supatype plugins installed.")
+    nextSteps("Try:", [
+      "Search for plugins:  npx supatype plugins search <query>",
+      "Create a plugin:    npx supatype plugins create",
+    ])
     return
   }
 
-  console.log("Installed plugins:\n")
-  console.log(`  ${"Name".padEnd(35)} ${"Type".padEnd(14)} ${"Version".padEnd(12)} Status`)
-  console.log(`  ${"─".repeat(35)} ${"─".repeat(14)} ${"─".repeat(12)} ${"─".repeat(15)}`)
+  plain("Installed plugins:\n")
+  plain(`  ${"Name".padEnd(35)} ${"Type".padEnd(14)} ${"Version".padEnd(12)} Status`)
+  plain(`  ${"─".repeat(35)} ${"─".repeat(14)} ${"─".repeat(12)} ${"─".repeat(15)}`)
 
   for (const p of plugins) {
     const types = p.supatype?.types?.join(", ") ?? "unknown"
     const status = p.compatible ? "active" : "incompatible"
-    console.log(`  ${p.name.padEnd(35)} ${types.padEnd(14)} ${p.version.padEnd(12)} ${status}`)
+    plain(`  ${p.name.padEnd(35)} ${types.padEnd(14)} ${p.version.padEnd(12)} ${status}`)
   }
 }
 
 // ─── Search ──────────────────────────────────────────────────────────────────
 
 async function searchPlugins(query: string): Promise<void> {
-  console.log(`Searching npm for "${query}" supatype plugins...\n`)
+  info(`Searching npm for "${query}" supatype plugins...`)
+  plain()
 
   try {
     const searchUrl = `https://registry.npmjs.org/-/v1/search?text=supatype-plugin+${encodeURIComponent(query)}&size=20`
@@ -90,7 +95,7 @@ async function searchPlugins(query: string): Promise<void> {
     })
 
     if (!res.ok) {
-      console.error(`Search failed: ${res.statusText}`)
+      error(`Search failed: ${res.statusText}`)
       return
     }
 
@@ -107,31 +112,33 @@ async function searchPlugins(query: string): Promise<void> {
     }
 
     if (data.objects.length === 0) {
-      console.log("No plugins found.")
-      console.log("\nTry a different search term, or create your own plugin:")
-      console.log("  npx supatype plugins create")
+      info("No plugins found.")
+      nextSteps("Try:", [
+        "Try a different search term, or create your own plugin:",
+        "  npx supatype plugins create",
+      ])
       return
     }
 
-    console.log(`  ${"Package".padEnd(40)} ${"Version".padEnd(12)} Description`)
-    console.log(`  ${"─".repeat(40)} ${"─".repeat(12)} ${"─".repeat(40)}`)
+    plain(`  ${"Package".padEnd(40)} ${"Version".padEnd(12)} Description`)
+    plain(`  ${"─".repeat(40)} ${"─".repeat(12)} ${"─".repeat(40)}`)
 
     for (const obj of data.objects) {
       const pkg = obj.package
       const desc = (pkg.description ?? "").slice(0, 50)
-      console.log(`  ${pkg.name.padEnd(40)} ${pkg.version.padEnd(12)} ${desc}`)
+      plain(`  ${pkg.name.padEnd(40)} ${pkg.version.padEnd(12)} ${desc}`)
     }
 
-    console.log(`\nInstall: npx supatype plugins add <package-name>`)
+    info("Install: npx supatype plugins add <package-name>")
   } catch (err) {
-    console.error(`Error: ${err instanceof Error ? err.message : "unknown"}`)
+    error(`Error: ${err instanceof Error ? err.message : "unknown"}`)
   }
 }
 
 // ─── Add ─────────────────────────────────────────────────────────────────────
 
 function addPlugin(cwd: string, pkg: string): void {
-  console.log(`Installing ${pkg}...`)
+  info(`Installing ${pkg}...`)
 
   // Detect package manager
   const pm = detectPackageManager(cwd)
@@ -145,7 +152,7 @@ function addPlugin(cwd: string, pkg: string): void {
   })
 
   if (result.status !== 0) {
-    console.error(`Failed to install ${pkg}`)
+    error(`Failed to install ${pkg}`)
     process.exit(1)
   }
 
@@ -158,14 +165,14 @@ function addPlugin(cwd: string, pkg: string): void {
     if (supatype?.["pluginApi"] !== undefined) {
       const pluginApi = supatype["pluginApi"] as number
       if (pluginApi !== 1) {
-        console.warn(`\nWarning: ${pkg} targets plugin API v${pluginApi}, current is v1.`)
-        console.warn("The plugin may not work correctly.")
+        warn(`${pkg} targets plugin API v${pluginApi}, current is v1.`)
+        warn("The plugin may not work correctly.")
       }
     }
   }
 
-  console.log(`\n${pkg} installed and registered.`)
-  console.log("Run 'npx supatype plugins list' to see active plugins.")
+  info(`${pkg} installed and registered.`)
+  info("Run 'npx supatype plugins list' to see active plugins.")
 }
 
 // ─── Remove ──────────────────────────────────────────────────────────────────
@@ -177,12 +184,13 @@ function removePlugin(cwd: string, pkg: string): void {
   for (const file of schemaFiles) {
     const content = readFileSync(file, "utf8")
     if (content.includes(pkg)) {
-      console.warn(`Warning: ${pkg} appears to be referenced in ${file}`)
-      console.warn("Removing it may break your schema. Proceed with caution.\n")
+      warn(`${pkg} appears to be referenced in ${file}`)
+      warn("Removing it may break your schema. Proceed with caution.")
+      plain()
     }
   }
 
-  console.log(`Removing ${pkg}...`)
+  info(`Removing ${pkg}...`)
 
   const pm = detectPackageManager(cwd)
   const removeCmd = pm === "pnpm" ? ["pnpm", "remove", pkg]
@@ -195,11 +203,11 @@ function removePlugin(cwd: string, pkg: string): void {
   })
 
   if (result.status !== 0) {
-    console.error(`Failed to remove ${pkg}`)
+    error(`Failed to remove ${pkg}`)
     process.exit(1)
   }
 
-  console.log(`${pkg} removed.`)
+  info(`${pkg} removed.`)
 }
 
 // ─── Create ──────────────────────────────────────────────────────────────────
@@ -207,7 +215,7 @@ function removePlugin(cwd: string, pkg: string): void {
 function createPlugin(cwd: string, opts: { type: string; name?: string }): void {
   const validTypes = ["field", "composite", "provider", "widget"]
   if (!validTypes.includes(opts.type)) {
-    console.error(`Invalid plugin type "${opts.type}". Must be one of: ${validTypes.join(", ")}`)
+    error(`Invalid plugin type "${opts.type}". Must be one of: ${validTypes.join(", ")}`)
     process.exit(1)
   }
 
@@ -215,7 +223,7 @@ function createPlugin(cwd: string, opts: { type: string; name?: string }): void 
   const pluginDir = resolve(cwd, name)
 
   if (existsSync(pluginDir)) {
-    console.error(`Directory "${name}" already exists.`)
+    error(`Directory "${name}" already exists.`)
     process.exit(1)
   }
 
@@ -273,16 +281,17 @@ function createPlugin(cwd: string, opts: { type: string; name?: string }): void 
   const sourceContent = generatePluginTemplate(opts.type, name)
   writeFileSync(join(pluginDir, "src/index.ts"), sourceContent, "utf8")
 
-  console.log(`\nCreated plugin project: ${name}/\n`)
-  console.log("  Files:")
-  console.log(`    ${name}/package.json`)
-  console.log(`    ${name}/tsconfig.json`)
-  console.log(`    ${name}/src/index.ts`)
-  console.log(`\n  Next steps:`)
-  console.log(`    cd ${name}`)
-  console.log(`    npm install`)
-  console.log(`    npm run build`)
-  console.log(`    npx supatype plugins validate`)
+  info(`Created plugin project: ${name}/`)
+  plain("\n  Files:")
+  plain(`    ${name}/package.json`)
+  plain(`    ${name}/tsconfig.json`)
+  plain(`    ${name}/src/index.ts`)
+  nextSteps("Next steps:", [
+    `cd ${name}`,
+    "npm install",
+    "npm run build",
+    "npx supatype plugins validate",
+  ])
 }
 
 function generatePluginTemplate(type: string, name: string): string {
@@ -375,7 +384,7 @@ function validatePlugins(cwd: string): void {
   const plugins = discoverInstalledPlugins(cwd)
 
   if (plugins.length === 0) {
-    console.log("No plugins to validate.")
+    info("No plugins to validate.")
     return
   }
 
@@ -398,21 +407,21 @@ function validatePlugins(cwd: string): void {
     }
 
     if (issues.length === 0) {
-      console.log(`  ✓ ${p.name} — valid`)
+      plain(`  ✓ ${p.name} — valid`)
     } else {
       hasErrors = true
-      console.log(`  ✗ ${p.name}`)
+      plain(`  ✗ ${p.name}`)
       for (const issue of issues) {
-        console.log(`    - ${issue}`)
+        plain(`    - ${issue}`)
       }
     }
   }
 
   if (hasErrors) {
-    console.log("\nSome plugins have issues. Fix them before deploying.")
+    error("Some plugins have issues. Fix them before deploying.")
     process.exit(1)
   } else {
-    console.log("\nAll plugins are valid.")
+    info("All plugins are valid.")
   }
 }
 

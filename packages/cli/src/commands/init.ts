@@ -4,8 +4,11 @@ import { resolve, join, dirname, basename } from "node:path"
 import { fileURLToPath } from "node:url"
 import { spawnSync } from "node:child_process"
 import * as p from "@clack/prompts"
-import { ensureNotCancelled, printLogo } from "../prompts.js"
+import { ensureNotCancelled, printLogo } from "../ui/prompts.js"
 import { generateAndWriteKeys } from "./keys.js"
+import { file, error, info, plain, warn } from "../ui/messages.js"
+import { nextSteps } from "../ui/next-steps.js"
+import { probeDockerDaemon, reportDockerUnavailable } from "../docker-runtime.js"
 
 export { scaffold }
 
@@ -141,7 +144,7 @@ export function registerInit(program: Command): void {
       const dir = name ? resolve(process.cwd(), name) : process.cwd()
 
       if (name && existsSync(dir)) {
-        console.error(`Directory already exists: ${dir}`)
+        error(`Directory already exists: ${dir}`)
         process.exit(1)
       }
 
@@ -173,6 +176,8 @@ export function registerInit(program: Command): void {
 
       if (doInstall) runInstall(dir, result.packageManager)
       const keysGenerated = doKeys ? writeKeys(dir) : false
+
+      warnDockerUnavailableForProvider(result.provider)
 
       printNextSteps({
         name,
@@ -414,25 +419,21 @@ function detectInvokingPackageManager(): PackageManager {
 }
 
 function runInstall(dir: string, pm: PackageManager): void {
-  console.log(`\nInstalling dependencies with ${pm}...`)
+  info(`Installing dependencies with ${pm}...`)
   const res = spawnSync(pm, ["install"], {
     cwd: dir,
     stdio: "inherit",
     shell: process.platform === "win32",
   })
   if (res.status !== 0 || res.error) {
-    console.warn(
-      `\n[supatype] Dependency install did not complete (run "${pm} install" manually).`,
-    )
+    warn(`Dependency install did not complete (run "${pm} install" manually).`)
   }
 }
 
 function writeKeys(dir: string): boolean {
   const keys = generateAndWriteKeys(dir)
   if (!keys) {
-    console.warn(
-      "\n[supatype] Could not generate keys (JWT_SECRET missing). Run `supatype keys` manually.",
-    )
+    warn("Could not generate keys (JWT_SECRET missing). Run `supatype keys` manually.")
     return false
   }
   return true
@@ -447,30 +448,25 @@ function scaffold(dir: string, optsOrName: ScaffoldOptions | string): void {
     const full = join(dir, rel)
     mkdirSync(resolve(full, ".."), { recursive: true })
     writeFileSync(full, content, "utf8")
-    console.log(`  created  ${rel}`)
+    file("created", rel)
   }
 
   const pkgPath = join(dir, "package.json")
   if (!existsSync(pkgPath)) {
     write("package.json", packageJsonTemplate(opts, cliPackageVersion()))
   } else {
-    console.log("  skipped  package.json (already exists)")
+    file("skipped", "package.json (already exists)")
   }
 
   write("supatype.config.ts", tsConfigTemplate(opts))
   if (opts.productionTarget !== "later") {
-    write("supatype.local.config.ts", localConfigTemplate())
+    write("supatype.local.config.ts", localConfigTemplate(opts.app))
   }
   write(opts.schemaPath, schemaTemplate())
   write(".env", envTemplate(opts))
   write("seed.ts", seedTemplate(opts.projectName))
   write("seeds/.gitkeep", "")
-  if (opts.app.mode === "static") {
-    const staticRel = staticDirRelative(opts.app.staticDir)
-    write(`${staticRel}/.gitkeep`, "")
-  } else {
-    write("public/.gitkeep", "")
-  }
+  scaffoldAppAssets(opts, write)
 
   if (opts.helloFunction) scaffoldHelloFunction(dir, write)
 
@@ -479,9 +475,9 @@ function scaffold(dir: string, optsOrName: ScaffoldOptions | string): void {
     const merged = mergeGitignoreTemplate(readFileSync(gitignorePath, "utf8"))
     if (merged !== readFileSync(gitignorePath, "utf8")) {
       writeFileSync(gitignorePath, merged, "utf8")
-      console.log("  updated  .gitignore (added .supatype/)")
+      file("updated", ".gitignore (added .supatype/)")
     } else {
-      console.log("  skipped  .gitignore (already exists)")
+      file("skipped", ".gitignore (already exists)")
     }
   } else {
     write(".gitignore", gitignoreTemplate())
@@ -491,6 +487,44 @@ function scaffold(dir: string, optsOrName: ScaffoldOptions | string): void {
 function staticDirRelative(staticDir?: string): string {
   const raw = (staticDir ?? "./public").trim()
   return raw.replace(/^\.\//, "").replace(/\/+$/, "") || "public"
+}
+
+function scaffoldAppAssets(
+  opts: ScaffoldOptions,
+  write: (rel: string, content: string) => void,
+): void {
+  const holding = holdingPageTemplate(opts.projectName)
+  const hasVite = Boolean(opts.app.viteDevUrl)
+
+  if (opts.app.mode === "static") {
+    const staticRel = staticDirRelative(opts.app.staticDir)
+    write(`${staticRel}/index.html`, holding)
+    if (hasVite) scaffoldVite(opts, write, holding)
+    return
+  }
+
+  if (opts.app.mode === "proxy" && opts.productionTarget !== "later") {
+    write("dist/index.html", holding)
+    if (hasVite) scaffoldVite(opts, write, holding)
+    return
+  }
+
+  if (opts.app.mode === "proxy" && hasVite) {
+    scaffoldVite(opts, write, holding)
+    return
+  }
+
+  write("public/.gitkeep", "")
+}
+
+function scaffoldVite(
+  opts: ScaffoldOptions,
+  write: (rel: string, content: string) => void,
+  holding: string,
+): void {
+  if (!opts.app.viteDevUrl) return
+  write("index.html", holding)
+  write("vite.config.ts", viteConfigTemplate(opts.app.viteDevUrl))
 }
 
 function scaffoldHelloFunction(
@@ -514,8 +548,15 @@ function packageJsonTemplate(opts: ScaffoldOptions, cliVersion: string): string 
     `    "push": "supatype push"`,
     `    "seed": "tsx seed.ts"`,
   ]
+  if (opts.app.viteDevUrl) {
+    scripts.push(`    "vite": "vite"`)
+  }
   if (opts.helloFunction) {
     scripts.push(`    "functions": "supatype functions serve"`)
+  }
+  const devDeps = [`    "tsx": "^4.19.2"`, `    "typescript": "^5"`]
+  if (opts.app.viteDevUrl) {
+    devDeps.push(`    "vite": "^6"`)
   }
   return `{
   "name": "${opts.projectName}",
@@ -529,8 +570,7 @@ ${scripts.join(",\n")}
     "@supatype/types": "^${cliVersion}"
   },
   "devDependencies": {
-    "tsx": "^4.19.2",
-    "typescript": "^5"
+${devDeps.join(",\n")}
   }
 }
 `
@@ -567,7 +607,7 @@ function tsConfigTemplate(opts: ScaffoldOptions): string {
     }
   }
   lines.push(`  },`)
-  lines.push(...appConfigLines(opts.app))
+  lines.push(...appConfigLines(opts.app, opts.productionTarget))
   if (opts.productionTarget !== "later") {
     lines.push(`  environments: { default: "production" },  // supatype link --env production ...`)
   }
@@ -585,20 +625,28 @@ function tsConfigTemplate(opts: ScaffoldOptions): string {
   return lines.join("\n") + "\n"
 }
 
-function localConfigTemplate(): string {
-  return `import type { SupatypeConfig } from "@supatype/cli"
-
-// Local development overrides — gitignored, deep-merged over supatype.config.ts.
-// Keeps \`supatype dev\` in local mode while the committed config targets production.
-const localConfig: Partial<SupatypeConfig> = {
-  server: { mode: "dev" },
+function localConfigTemplate(app: ScaffoldAppOptions): string {
+  const lines: string[] = [
+    `import type { SupatypeConfig } from "@supatype/cli"`,
+    ``,
+    `// Local development overrides — gitignored, deep-merged over supatype.config.ts.`,
+    `// Keeps \`supatype dev\` in local mode while the committed config targets production.`,
+    `const localConfig: Partial<SupatypeConfig> = {`,
+    `  server: { mode: "dev" },`,
+  ]
+  if (app.mode === "proxy") {
+    lines.push(`  app: {`)
+    lines.push(`    mode: "proxy",`)
+    lines.push(`    upstream: "${app.upstream ?? "http://localhost:3000"}",`)
+    lines.push(`    start: "${app.start ?? "dev"}",`)
+    if (app.viteDevUrl) lines.push(`    vite_dev_url: "${app.viteDevUrl}",`)
+    lines.push(`  },`)
+  }
+  lines.push(`}`, ``, `export default localConfig`, ``)
+  return lines.join("\n")
 }
 
-export default localConfig
-`
-}
-
-function appConfigLines(app: ScaffoldAppOptions): string[] {
+function appConfigLines(app: ScaffoldAppOptions, productionTarget: ProductionTarget): string[] {
   if (app.mode === "static") {
     const out = [
       `  app: {`,
@@ -610,6 +658,14 @@ function appConfigLines(app: ScaffoldAppOptions): string[] {
     return out
   }
   if (app.mode === "proxy") {
+    if (productionTarget !== "later") {
+      return [
+        `  app: {`,
+        `    mode: "static",`,
+        `    static_dir: "./dist",  // production build output`,
+        `  },`,
+      ]
+    }
     const out = [
       `  app: {`,
       `    mode: "proxy",`,
@@ -628,6 +684,167 @@ function appConfigLines(app: ScaffoldAppOptions): string[] {
     `    // vite_dev_url: "http://127.0.0.1:5173",  // live reload from a separate Vite dev server`,
     `  },`,
   ]
+}
+
+const HOLDING_PAGE_LOGO_URL = "https://supatype.github.io/supatype/supatype.svg"
+const HOLDING_PAGE_DOCS_URL = "https://supatype.github.io/supatype/"
+const HOLDING_PAGE_GITHUB_URL = "https://github.com/supatype"
+const HOLDING_PAGE_DISCORD_URL = "https://discord.gg/yaQrjQD4"
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+}
+
+function holdingPageTemplate(projectName: string): string {
+  const name = escapeHtml(projectName)
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>${name} — Supatype</title>
+    <meta name="description" content="A Supatype project. Define your types — we generate your backend." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <style>
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      :root {
+        --bg: #0a0a0f;
+        --border: rgba(255, 255, 255, 0.08);
+        --text: #e8e8f0;
+        --text-muted: #8888a8;
+        --purple: #7c3aed;
+        --purple-light: #a855f7;
+      }
+      body {
+        min-height: 100vh;
+        font-family: Inter, system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.6;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem;
+      }
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        background: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(124, 58, 237, 0.18), transparent);
+        pointer-events: none;
+      }
+      main {
+        position: relative;
+        max-width: 32rem;
+        width: 100%;
+        text-align: center;
+      }
+      .logo {
+        display: block;
+        height: 2rem;
+        width: auto;
+        margin: 0 auto 2rem;
+      }
+      h1 {
+        font-size: 1.5rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        margin-bottom: 0.75rem;
+      }
+      .tagline {
+        color: var(--text-muted);
+        font-size: 1rem;
+        margin-bottom: 2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        justify-content: center;
+        margin-bottom: 2.5rem;
+      }
+      .links a {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.6rem 1.1rem;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        color: var(--text);
+        text-decoration: none;
+        font-size: 0.9rem;
+        font-weight: 500;
+        transition: border-color 0.15s, background 0.15s;
+      }
+      .links a:hover {
+        border-color: rgba(168, 85, 247, 0.45);
+        background: rgba(124, 58, 237, 0.08);
+      }
+      .links a.primary {
+        background: linear-gradient(135deg, var(--purple), var(--purple-light));
+        border-color: transparent;
+        color: #fff;
+      }
+      .links a.primary:hover {
+        opacity: 0.92;
+      }
+      .hint {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+      }
+      .hint code {
+        font-family: ui-monospace, "JetBrains Mono", monospace;
+        font-size: 0.8rem;
+        background: rgba(255, 255, 255, 0.06);
+        padding: 0.15rem 0.4rem;
+        border-radius: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img class="logo" src="${HOLDING_PAGE_LOGO_URL}" alt="Supatype" width="160" height="30" />
+      <h1>${name}</h1>
+      <p class="tagline">Your Supatype project is ready. Replace this page when you build your app.</p>
+      <nav class="links" aria-label="Supatype resources">
+        <a class="primary" href="${HOLDING_PAGE_DOCS_URL}" target="_blank" rel="noopener noreferrer">Documentation</a>
+        <a href="${HOLDING_PAGE_GITHUB_URL}" target="_blank" rel="noopener noreferrer">GitHub</a>
+        <a href="${HOLDING_PAGE_DISCORD_URL}" target="_blank" rel="noopener noreferrer">Discord</a>
+      </nav>
+      <p class="hint">Run <code>supatype dev</code> then open <code>http://localhost:18473/</code></p>
+    </main>
+  </body>
+</html>
+`
+}
+
+function vitePortFromDevUrl(viteDevUrl: string): number {
+  try {
+    const url = new URL(viteDevUrl)
+    if (url.port) return Number.parseInt(url.port, 10)
+    return url.protocol === "https:" ? 443 : 80
+  } catch {
+    return 5173
+  }
+}
+
+function viteConfigTemplate(viteDevUrl: string): string {
+  const port = vitePortFromDevUrl(viteDevUrl)
+  return `import { defineConfig } from "vite"
+
+export default defineConfig({
+  server: {
+    host: "127.0.0.1",
+    port: ${port},
+    strictPort: true,
+  },
+})
+`
 }
 
 function storageConfigLines(
@@ -870,6 +1087,14 @@ export function mergeGitignoreTemplate(existingContent: string): string {
 
 // ─── Next steps ────────────────────────────────────────────────────────────--
 
+function warnDockerUnavailableForProvider(provider: ScaffoldOptions["provider"]): void {
+  if (provider !== "docker") return
+  const probe = probeDockerDaemon()
+  if (probe.ok) return
+  reportDockerUnavailable(probe)
+  plain()
+}
+
 function printNextSteps(args: {
   name: string | undefined
   result: WizardResult
@@ -877,48 +1102,57 @@ function printNextSteps(args: {
   keysGenerated: boolean
 }): void {
   const { name, result, installed, keysGenerated } = args
-  console.log(`\nSupatype project ready${name ? ` in ${name}/` : ""}.\n`)
-  console.log("Next steps:")
-  if (name) console.log(`  cd ${name}`)
-  if (!installed) console.log(`  ${result.packageManager} install`)
-  if (!keysGenerated) console.log("  supatype keys")
-  console.log("  supatype dev          # Docker Compose stack (Kong :18473)")
-  console.log("  supatype push         # apply schema + generate types")
+  const steps: string[] = []
+  if (name) steps.push(`cd ${name}`)
+  if (!installed) steps.push(`${result.packageManager} install`)
+  if (!keysGenerated) steps.push("supatype keys")
+  steps.push("supatype dev          # Docker Compose stack (Kong :18473)")
+  steps.push("supatype push         # apply schema + generate types")
   if (result.helloFunction) {
-    console.log("  supatype functions serve   # run edge functions locally")
+    steps.push("supatype functions serve   # run edge functions locally")
   }
 
+  info(`Supatype project ready${name ? ` in ${name}/` : ""}.`)
+  nextSteps("Next steps:", steps)
+
   if (result.app.mode === "none") {
-    console.log("\nStatic frontend (self-host):")
-    console.log("  supatype app add --static ./public")
-    console.log("  npm run build         # write files into public/")
-    console.log("  supatype self-host compose up -d")
+    nextSteps("Static frontend (self-host):", [
+      "supatype app add --static ./public",
+      "npm run build         # write files into public/",
+      "supatype self-host compose up -d",
+    ])
   }
 
   if (result.productionTarget === "cloud") {
-    console.log("\nDeploy to Supatype Cloud:")
-    console.log("  supatype login")
-    console.log("  supatype link --env production --project <ref>")
-    console.log("  supatype push --env production")
-    console.log("\nsupatype.local.config.ts keeps `supatype dev` local while the committed config targets cloud.")
+    nextSteps("Deploy to Supatype Cloud:", [
+      "supatype login",
+      "supatype link --env production --project <ref>",
+      "supatype push --env production",
+    ])
+    info("supatype.local.config.ts keeps `supatype dev` local while the committed config targets cloud.")
   } else if (result.productionTarget === "self-host") {
-    console.log("\nSelf-host production (your own server):")
+    const selfHostSteps: string[] = []
     const domain = result.domain?.trim()
     if (domain) {
-      console.log(`  1. Point DNS: an A record for ${domain} -> your server's public IP`)
-      console.log("  2. Open ports 80 and 443 on the server firewall")
+      selfHostSteps.push(`1. Point DNS: an A record for ${domain} -> your server's public IP`)
+      selfHostSteps.push("2. Open ports 80 and 443 on the server firewall")
       if (!result.tlsEmail) {
-        console.log("  3. Set server.tls.email in supatype.config.ts (required for HTTPS)")
+        selfHostSteps.push("3. Set server.tls.email in supatype.config.ts (required for HTTPS)")
       }
-      console.log("  supatype self-host compose up -d   # Kong provisions HTTPS automatically")
-      console.log(`  Your Supatype platform goes live at https://${domain}`)
-      console.log("  Your app, REST, Auth, Storage, Realtime, Functions, and Studio — all behind one HTTPS domain (certs persist in valkey-data)")
+      selfHostSteps.push("supatype self-host compose up -d   # Kong provisions HTTPS automatically")
+      selfHostSteps.push(`Your Supatype platform goes live at https://${domain}`)
+      selfHostSteps.push(
+        "Your app, REST, Auth, Storage, Realtime, Functions, and Studio — all behind one HTTPS domain (certs persist in valkey-data)",
+      )
     } else {
-      console.log("  Set server.domain + server.tls.email in supatype.config.ts to enable automatic HTTPS")
-      console.log("  supatype self-host compose up -d   # Docker stack")
+      selfHostSteps.push(
+        "Set server.domain + server.tls.email in supatype.config.ts to enable automatic HTTPS",
+      )
+      selfHostSteps.push("supatype self-host compose up -d   # Docker stack")
     }
-    console.log("  supatype link --env production ... # then: supatype push --env production")
-    console.log("\nsupatype.local.config.ts keeps `supatype dev` local while the committed config targets self-host.")
+    selfHostSteps.push("supatype link --env production ... # then: supatype push --env production")
+    nextSteps("Self-host production (your own server):", selfHostSteps)
+    info("supatype.local.config.ts keeps `supatype dev` local while the committed config targets self-host.")
   }
-  console.log()
+  plain()
 }

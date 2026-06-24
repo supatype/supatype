@@ -3,6 +3,7 @@
  */
 import type { Command } from "commander"
 import { spawn } from "node:child_process"
+import { error } from "../ui/messages.js"
 
 const SERVICES = ["postgres", "postgrest", "gotrue", "kong", "minio", "realtime", "studio"]
 
@@ -19,8 +20,8 @@ export function registerLogs(program: Command): void {
         : SERVICES.map((s) => `supatype-${s}`)
 
       if (opts.service && !SERVICES.includes(opts.service)) {
-        console.error(`Unknown service: ${opts.service}`)
-        console.error(`Available: ${SERVICES.join(", ")}`)
+        error(`Unknown service: ${opts.service}`)
+        error(`Available: ${SERVICES.join(", ")}`)
         process.exit(1)
       }
 
@@ -39,7 +40,7 @@ export function registerLogs(program: Command): void {
 
         const child = spawn("docker", containerArgs, { stdio: "inherit" })
         child.on("error", () => {
-          console.error("Docker not found. Ensure Docker is installed and running.")
+          error("Docker not found. Ensure Docker is installed and running.")
           process.exit(1)
         })
         return
@@ -51,7 +52,7 @@ export function registerLogs(program: Command): void {
         cwd: process.cwd(),
       })
       child.on("error", () => {
-        console.error("Docker not found. Ensure Docker is installed and running.")
+        error("Docker not found. Ensure Docker is installed and running.")
         process.exit(1)
       })
     })

@@ -4,6 +4,7 @@ import { resolveRuntimeProvider, schemaPathFromProject } from "../project-config
 import { printDiffOperations, printDiffWarnings } from "../diff-output.js"
 import { resolveTarget, targetSchemaDiff, schemaPgSchema } from "../resolve-target.js"
 import { loadProjectLink } from "../link.js"
+import { withSpinner } from "../ui/progress.js"
 
 export function registerDiff(program: Command): void {
   program
@@ -17,15 +18,18 @@ export function registerDiff(program: Command): void {
       const config = loadConfig(cwd)
       const pgSchema = schemaPgSchema(cwd)
 
-      console.log("Loading schema...")
-      const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
+      const ast = await withSpinner("Loading schema", async () =>
+        loadSchemaAst(schemaPathFromProject(config, cwd), cwd),
+      )
 
       const linked = loadProjectLink(cwd)
       const useDirect = opts.direct || Boolean(opts.connection)
 
       if (linked && !useDirect && !opts.connection) {
         const target = resolveTarget(cwd, { env: opts.env })
-        const diff = await targetSchemaDiff(target, ast, { schema: pgSchema })
+        const diff = await withSpinner("Computing diff", () =>
+          targetSchemaDiff(target, ast, { schema: pgSchema }),
+        )
         printDiffWarnings(diff)
         printDiffOperations(diff)
         return
@@ -38,13 +42,17 @@ export function registerDiff(program: Command): void {
       ) {
         const localTarget = resolveTarget(cwd, { env: opts.env })
         if (localTarget.mode === "local" && localTarget.token) {
-          const diff = await targetSchemaDiff(localTarget, ast, { schema: pgSchema })
+          const diff = await withSpinner("Computing diff", () =>
+            targetSchemaDiff(localTarget, ast, { schema: pgSchema }),
+          )
           printDiffWarnings(diff)
           printDiffOperations(diff)
           return
         }
         const { diffSchemaDocker } = await import("../dev-compose.js")
-        const diff = await diffSchemaDocker(cwd, config)
+        const diff = await withSpinner("Computing diff via Docker Compose", () =>
+          diffSchemaDocker(cwd, config),
+        )
         printDiffWarnings(diff)
         printDiffOperations(diff)
         return
@@ -55,7 +63,9 @@ export function registerDiff(program: Command): void {
         direct: true,
         connection: opts.connection,
       })
-      const diff = await targetSchemaDiff(target, ast, { schema: pgSchema })
+      const diff = await withSpinner("Computing diff", () =>
+        targetSchemaDiff(target, ast, { schema: pgSchema }),
+      )
       printDiffWarnings(diff)
       printDiffOperations(diff)
     })

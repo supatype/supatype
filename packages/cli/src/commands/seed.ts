@@ -5,6 +5,7 @@ import { isLinkedToCloudProject } from "../binary-cache.js"
 import { loadConfig } from "../config.js"
 import { projectRootFromConfig } from "../project-config.js"
 import { runTsFile } from "../tsx-runner.js"
+import { error, info } from "../ui/messages.js"
 
 const SEED_EXT = /\.(ts|mts|tsx)$/
 
@@ -31,8 +32,8 @@ export function registerSeed(program: Command): void {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
       if (isLinkedToCloudProject(cwd, config) && !opts.force) {
-        console.error(
-          "[supatype] This project is linked to Supatype Cloud. Refusing to run seeds locally.\n" +
+        error(
+          "This project is linked to Supatype Cloud. Refusing to run seeds locally.\n" +
             "  Pass --force only if you intend to target this linked project (advanced).",
         )
         process.exit(1)
@@ -53,12 +54,12 @@ export function registerSeed(program: Command): void {
 
       const missing = paths.filter((p) => !existsSync(p))
       if (missing.length > 0) {
-        console.error(`Seed file(s) not found:\n  ${missing.join("\n  ")}`)
+        error(`Seed file(s) not found:\n  ${missing.join("\n  ")}`)
         process.exit(1)
       }
 
       for (const seedFile of paths) {
-        console.log(`[supatype] Running ${seedFile}...`)
+        info(`Running ${seedFile}...`)
         const result = runTsFile(seedFile, { cwd, stdio: "inherit" })
         if (result.exitCode !== 0) {
           process.exit(result.exitCode)

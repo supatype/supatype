@@ -3,6 +3,8 @@ import { existsSync, mkdirSync } from "node:fs"
 import { resolve } from "node:path"
 import { localKongBaseUrl } from "../local-gateway.js"
 import { updateAppConfigInProject } from "../app-config.js"
+import { error, file, info, warn } from "../ui/messages.js"
+import { nextSteps } from "../ui/next-steps.js"
 
 export function registerApp(program: Command): void {
   const appCmd = program
@@ -31,7 +33,7 @@ export function registerApp(program: Command): void {
           return
         }
         if (opts.dockerfile) {
-          console.warn("[supatype] --dockerfile is deprecated and ignored.")
+          warn("--dockerfile is deprecated and ignored.")
         }
         addProxyApp(process.cwd(), opts.port, opts.upstream)
       },
@@ -56,18 +58,19 @@ function addStaticApp(cwd: string, staticDir: string): void {
   const abs = resolve(cwd, staticDir)
   if (!existsSync(abs)) {
     mkdirSync(abs, { recursive: true })
-    console.log(`  created  ${staticDir}/`)
+    file("created", `${staticDir}/`)
   }
   try {
     const configPath = updateAppConfigInProject(cwd, { mode: "static", staticDir })
-    console.log(`  updated  ${configPath}`)
-    console.log(`\nStatic app directory: ${staticDir}`)
-    console.log(`Build your frontend into ${staticDir}/, then:`)
-    console.log(`  supatype self-host compose render`)
-    console.log(`  supatype self-host compose up -d`)
-    console.log(`\nYour app will be served at ${localKongBaseUrl()}/\n`)
+    file("updated", configPath)
+    info(`Static app directory: ${staticDir}`)
+    nextSteps("Build your frontend, then:", [
+      "supatype self-host compose render",
+      "supatype self-host compose up -d",
+      `App URL: ${localKongBaseUrl()}/`,
+    ])
   } catch (err) {
-    console.error((err as Error).message)
+    error((err as Error).message)
     process.exit(1)
   }
 }
@@ -76,11 +79,11 @@ function addProxyApp(cwd: string, port: string, upstream?: string): void {
   const upstreamUrl = upstream?.trim() || `http://localhost:${port}`
   try {
     const configPath = updateAppConfigInProject(cwd, { mode: "proxy", upstream: upstreamUrl })
-    console.log(`  updated  ${configPath}`)
-    console.log(`\nForwarding requests to your dev server at ${upstreamUrl}. The app will be available at ${localKongBaseUrl()}/\n`)
-    console.log("Run: supatype self-host compose render")
+    file("updated", configPath)
+    info(`Forwarding to ${upstreamUrl} — app at ${localKongBaseUrl()}/`)
+    nextSteps("Next:", ["supatype self-host compose render"])
   } catch (err) {
-    console.error((err as Error).message)
+    error((err as Error).message)
     process.exit(1)
   }
 }
@@ -88,10 +91,10 @@ function addProxyApp(cwd: string, port: string, upstream?: string): void {
 function removeApp(cwd: string): void {
   try {
     const configPath = updateAppConfigInProject(cwd, { mode: "none" })
-    console.log(`  updated  ${configPath}`)
-    console.log("\nApp routing disabled (app.mode=none).\n")
+    file("updated", configPath)
+    info("App routing disabled (app.mode=none).")
   } catch (err) {
-    console.error((err as Error).message)
+    error((err as Error).message)
     process.exit(1)
   }
 }

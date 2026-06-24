@@ -4,12 +4,14 @@
 // {ref}_auth.users table. Used for initial setup and ongoing admin management.
 
 import type { Command } from "commander"
-import { createInterface } from "node:readline"
 import { randomBytes, scrypt } from "node:crypto"
 import { promisify } from "node:util"
 import { loadConfig } from "../config.js"
 import { connectionString } from "../project-config.js"
 import { signJwt } from "../jwt.js"
+import { confirm as uiConfirm } from "../ui/confirm.js"
+import { error, info, plain } from "../ui/messages.js"
+import { promptText } from "../ui/prompts.js"
 
 const scryptAsync = promisify(scrypt)
 
@@ -36,22 +38,22 @@ export function registerAdmin(program: Command): void {
         const config = loadConfig(cwd)
         const connection = opts.connection ?? connectionString(config)
 
-        const email = opts.email ?? (await prompt("Admin email: "))
+        const email = opts.email ?? (await promptText("Admin email"))
         if (!email || !email.includes("@")) {
-          console.error("A valid email address is required.")
+          error("A valid email address is required.")
           process.exit(1)
         }
 
         const password =
-          opts.password ?? (await prompt("Admin password (min 8 chars): "))
+          opts.password ?? (await promptText("Admin password (min 8 chars)"))
         if (!password || password.length < 8) {
-          console.error("Password must be at least 8 characters.")
+          error("Password must be at least 8 characters.")
           process.exit(1)
         }
 
         const role = opts.role
 
-        console.log(`\nCreating admin user: ${email} (role: ${role})...`)
+        info(`Creating admin user: ${email} (role: ${role})...`)
 
         // We use pg directly to insert into the auth.users table
         const pg = await importPg()
@@ -88,12 +90,8 @@ export function registerAdmin(program: Command): void {
           )
 
           if (existing.rows.length > 0) {
-            console.error(
-              `\nUser with email "${email}" already exists.`,
-            )
-            console.log(
-              `To update their role, use: supatype admin set-role --email ${email} --role ${role}`,
-            )
+            error(`User with email "${email}" already exists.`)
+            info(`To update their role, use: supatype admin set-role --email ${email} --role ${role}`)
             process.exit(1)
           }
 
@@ -119,17 +117,15 @@ export function registerAdmin(program: Command): void {
 
           const user = result.rows[0] as { id: string; email: string }
 
-          console.log(`\nAdmin user created successfully.`)
-          console.log(`  ID:    ${user.id}`)
-          console.log(`  Email: ${user.email}`)
-          console.log(`  Role:  ${role}`)
-          console.log(
-            `\nThis user can now log in to the admin panel at /admin\n`,
-          )
+          info("Admin user created successfully.")
+          plain(`  ID:    ${user.id}`)
+          plain(`  Email: ${user.email}`)
+          plain(`  Role:  ${role}`)
+          info("This user can now log in to the admin panel at /admin")
         } catch (err) {
           const message =
             err instanceof Error ? err.message : "Unknown error"
-          console.error(`\nFailed to create admin user: ${message}`)
+          error(`Failed to create admin user: ${message}`)
           process.exit(1)
         } finally {
           await pool.end()
@@ -163,7 +159,7 @@ export function registerAdmin(program: Command): void {
           )
 
           if (result.rows.length === 0) {
-            console.error(`\nNo user found with email "${opts.email}".`)
+            error(`No user found with email "${opts.email}".`)
             process.exit(1)
           }
 
@@ -173,14 +169,14 @@ export function registerAdmin(program: Command): void {
             raw_app_meta_data: Record<string, unknown>
           }
 
-          console.log(`\nRole updated successfully.`)
-          console.log(`  ID:    ${user.id}`)
-          console.log(`  Email: ${user.email}`)
-          console.log(`  Role:  ${opts.role}\n`)
+          info("Role updated successfully.")
+          plain(`  ID:    ${user.id}`)
+          plain(`  Email: ${user.email}`)
+          plain(`  Role:  ${opts.role}`)
         } catch (err) {
           const message =
             err instanceof Error ? err.message : "Unknown error"
-          console.error(`\nFailed to update role: ${message}`)
+          error(`Failed to update role: ${message}`)
           process.exit(1)
         } finally {
           await pool.end()
@@ -210,17 +206,15 @@ export function registerAdmin(program: Command): void {
         )
 
         if (result.rows.length === 0) {
-          console.log("\nNo admin users found.")
-          console.log(
-            "Create one with: supatype admin create-user --email admin@example.com --role admin\n",
-          )
+          info("No admin users found.")
+          info("Create one with: supatype admin create-user --email admin@example.com --role admin")
           return
         }
 
-        console.log(
+        plain(
           "\n  ID                                     Email                          Role         Created",
         )
-        console.log("  " + "-".repeat(100))
+        plain("  " + "-".repeat(100))
         for (const row of result.rows) {
           const r = row as {
             id: string
@@ -229,15 +223,15 @@ export function registerAdmin(program: Command): void {
             created_at: string
           }
           const date = new Date(r.created_at).toISOString().slice(0, 10)
-          console.log(
+          plain(
             `  ${r.id}  ${r.email.padEnd(30)} ${r.role.padEnd(12)} ${date}`,
           )
         }
-        console.log()
+        plain()
       } catch (err) {
         const message =
           err instanceof Error ? err.message : "Unknown error"
-        console.error(`\nFailed to list admin users: ${message}`)
+        error(`Failed to list admin users: ${message}`)
         process.exit(1)
       } finally {
         await pool.end()
@@ -278,30 +272,22 @@ export async function promptFirstAdminUser(
     if (count > 0) return
 
     // No admin users — prompt to create one
-    console.log("\n  No admin users found for the admin panel.")
-    const createAdmin = await confirm(
-      "  Create an admin user now? [y/N] ",
-    )
+    info("No admin users found for the admin panel.")
+    const createAdmin = await uiConfirm("Create an admin user now?")
     if (!createAdmin) {
-      console.log(
-        "  Skipped. You can create one later with: supatype admin create-user\n",
-      )
+      info("Skipped. You can create one later with: supatype admin create-user")
       return
     }
 
-    const email = await prompt("  Admin email: ")
+    const email = await promptText("Admin email")
     if (!email || !email.includes("@")) {
-      console.log("  Invalid email. Skipping admin user creation.\n")
+      info("Invalid email. Skipping admin user creation.")
       return
     }
 
-    const password = await prompt(
-      "  Admin password (min 8 chars): ",
-    )
+    const password = await promptText("Admin password (min 8 chars)")
     if (!password || password.length < 8) {
-      console.log(
-        "  Password too short. Skipping admin user creation.\n",
-      )
+      info("Password too short. Skipping admin user creation.")
       return
     }
 
@@ -325,8 +311,8 @@ export async function promptFirstAdminUser(
       [email.toLowerCase(), passwordHash, appMetadata],
     )
 
-    console.log(`\n  Admin user "${email}" created (role: admin).`)
-    console.log(`  Log in at /admin after starting the dev server.\n`)
+    info(`Admin user "${email}" created (role: admin).`)
+    info("Log in at /admin after starting the dev server.")
   } catch {
     // Non-fatal — if auth schema doesn't exist yet, skip silently
   } finally {
@@ -340,9 +326,7 @@ async function importPg(): Promise<typeof import("pg")> {
   try {
     return await import("pg")
   } catch {
-    console.error(
-      "pg package is required for admin commands. Install it with: pnpm add pg",
-    )
+    error("pg package is required for admin commands. Install it with: pnpm add pg")
     process.exit(1)
   }
 }
@@ -351,22 +335,4 @@ async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16).toString("hex")
   const derived = (await scryptAsync(password, salt, 64)) as Buffer
   return `${salt}:${derived.toString("hex")}`
-}
-
-function prompt(question: string): Promise<string> {
-  const rl = createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  })
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => {
-      rl.close()
-      resolve(answer.trim())
-    })
-  })
-}
-
-async function confirm(question: string): Promise<boolean> {
-  const answer = await prompt(question)
-  return answer.toLowerCase() === "y"
 }
