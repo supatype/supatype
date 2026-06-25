@@ -8,9 +8,10 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { basename, resolve } from "node:path"
 import { loadConfig } from "../config.js"
 import { resolveRuntimeProvider } from "../project-config.js"
-import { runDockerCompose, writeSelfHostCompose, composePullNeedsIgnoreFailures } from "../self-host-compose.js"
+import { runDockerCompose, writeSelfHostCompose, composePullNeedsIgnoreFailures, composeProjectName, exitComposeFailed } from "../self-host-compose.js"
 import { syncComposeImagePins } from "../dev-compose.js"
 import { download, currentPlatform, fetchAllLatestVersions, pinnedVersion, type Component } from "../binary-cache.js"
+import { error, info, plain } from "../ui/messages.js"
 
 const CONFIG_CANDIDATES = ["supatype.config.ts", "supatype.config.js", "supatype.config.mjs"]
 
@@ -36,19 +37,23 @@ export function registerUpdate(program: Command): void {
 
       if (provider === "docker") {
         if (opts.check) {
-          console.log("Docker provider: run without --check to pull compose images (supatype self-host compose pull).")
+          info("Docker provider: run without --check to pull compose images (supatype self-host compose pull).")
           return
         }
         const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
         syncComposeImagePins(cwd, config)
-        console.log("Pulling self-host compose images...")
+        info("Pulling self-host compose images...")
         const pullArgs = ["pull"]
         if (composePullNeedsIgnoreFailures(config, cwd)) {
           pullArgs.push("--ignore-pull-failures")
         }
-        const status = runDockerCompose(paths.composePath, pullArgs, cwd)
-        if (status !== 0) process.exit(status)
-        console.log("Compose images updated.")
+        const brand = { intro: "Update components" }
+        const project = composeProjectName(config.project.name)
+        const status = runDockerCompose(paths.composePath, pullArgs, cwd, project, { brand })
+        if (status !== 0) {
+          exitComposeFailed(status, "Could not pull Compose images.", brand)
+        }
+        info("Compose images updated.")
         return
       }
 
@@ -57,7 +62,7 @@ export function registerUpdate(program: Command): void {
       const components: Component[] = ["engine", "server", "postgres", "deno"]
       const updates: Array<{ component: Component; from: string; to: string }> = []
 
-      console.log("Fetching latest component versions from CDN...")
+      info("Fetching latest component versions from CDN...")
       const latestVersions = await fetchAllLatestVersions()
 
       for (const component of components) {
@@ -65,14 +70,14 @@ export function registerUpdate(program: Command): void {
         const current = pinnedVersion(component, config)
         if (!current) {
           if (opts.check) {
-            console.log(`  ${component}  (latest) → ${latest} on CDN`)
+            plain(`  ${component}  (latest) → ${latest} on CDN`)
           } else {
-            console.log(`\nDownloading latest ${component} v${latest}...`)
+            info(`Downloading latest ${component} v${latest}...`)
             try {
               await download(component, latest, platform)
-              console.log(`  ${component} v${latest} downloaded.`)
+              info(`${component} v${latest} downloaded.`)
             } catch (err) {
-              console.error(`  Failed: ${(err as Error).message}`)
+              error(`Failed: ${(err as Error).message}`)
             }
           }
           continue
@@ -84,32 +89,32 @@ export function registerUpdate(program: Command): void {
       }
 
       if (updates.length === 0) {
-        console.log(opts.check ? "All pinned components match CDN latest." : "All components are up to date.")
+        info(opts.check ? "All pinned components match CDN latest." : "All components are up to date.")
         return
       }
 
-      console.log("Available updates:")
+      plain("Available updates:")
       for (const { component, from, to } of updates) {
-        console.log(`  ${component}  ${from} → ${to}`)
+        plain(`  ${component}  ${from} → ${to}`)
       }
 
       if (opts.check) return
 
       // Download updated binaries.
       for (const { component, to } of updates) {
-        console.log(`\nDownloading ${component} v${to}...`)
+        info(`Downloading ${component} v${to}...`)
         try {
           await download(component, to, platform)
         } catch (err) {
-          console.error(`  Failed: ${(err as Error).message}`)
+          error(`Failed: ${(err as Error).message}`)
           continue
         }
-        console.log(`  ${component} v${to} downloaded.`)
+        info(`${component} v${to} downloaded.`)
       }
 
       const configPath = resolveConfigFile(cwd)
       if (configPath === null) {
-        console.error("No supatype.config.ts (or .js/.mjs) found to patch versions.")
+        error("No supatype.config.ts (or .js/.mjs) found to patch versions.")
         process.exit(1)
       }
 
@@ -135,6 +140,6 @@ export function registerUpdate(program: Command): void {
       }
 
       writeFileSync(configPath, text, "utf8")
-      console.log(`\n${basename(configPath)} updated.`)
+      info(`${basename(configPath)} updated.`)
     })
 }

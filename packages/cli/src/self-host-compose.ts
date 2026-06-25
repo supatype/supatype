@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join, relative, resolve } from "node:path"
 import { spawnSync } from "node:child_process"
+import { requireDockerDaemon, type DockerBrandOptions } from "./docker-runtime.js"
+import { fatalError } from "./ui/fatal.js"
 import { preferredFunctionsPathFromProject, selfHostTlsEnabled, type SupatypeProjectConfig } from "./project-config.js"
 import { hasEngineOverride, hasStudioOverride, pinnedVersion, fetchLatestVersion, VERSION_PIN_LOCAL } from "./binary-cache.js"
 import { buildKongDeclarative } from "./kong-config.js"
@@ -211,6 +213,11 @@ function serverAppEnvForCompose(config: SupatypeProjectConfig, devLocal: boolean
     lines.push(`      SUPATYPE_APP_STATIC_DIR: /project/${dir.replace(/^\.\//, "")}`)
   } else if (mode === "proxy" && config.app.upstream?.trim()) {
     lines.push(`      SUPATYPE_APP_UPSTREAM: ${proxyUpstreamForCompose(config.app.upstream, devLocal)}`)
+  }
+  if (config.app.vite_dev_url?.trim()) {
+    lines.push(
+      `      SUPATYPE_VITE_DEV_URL: ${proxyUpstreamForCompose(config.app.vite_dev_url, devLocal)}`,
+    )
   }
   return lines.join("\n")
 }
@@ -542,6 +549,21 @@ export function writeSelfHostCompose(
 export interface RunDockerComposeOptions {
   /** Suppress docker compose progress UI (container status lines). */
   quiet?: boolean
+  /** Logo + Clack intro when Docker preflight fails (TTY). */
+  brand?: DockerBrandOptions
+}
+
+/** Exit with a friendly compose failure message. */
+export function exitComposeFailed(
+  status: number,
+  context: string,
+  brand?: DockerBrandOptions,
+): never {
+  fatalError(
+    `docker compose failed (exit ${status}).`,
+    [context, "Check logs: supatype self-host compose logs"],
+    { ...(brand !== undefined && { brand }), exitCode: status === 0 ? 1 : status },
+  )
 }
 
 export function runDockerCompose(
@@ -551,6 +573,7 @@ export function runDockerCompose(
   composeProject?: string,
   options?: RunDockerComposeOptions,
 ): number {
+  requireDockerDaemon(options?.brand !== undefined ? { brand: options.brand } : undefined)
   const envFile = resolve(projectRoot, ".env")
   const composeArgs = ["compose"]
   if (options?.quiet) {

@@ -9,6 +9,10 @@ import {
 } from "../link.js"
 import { ensureSupatypeGitignore, warnIfLinkNotGitignored } from "../gitignore.js"
 import { targetFetch } from "../target-client.js"
+import { error, info, plain } from "../ui/messages.js"
+import { nextSteps } from "../ui/next-steps.js"
+import { isInteractive } from "../ui/interactive.js"
+import { ensureNotCancelled, printLogo, clack as p } from "../ui/prompts.js"
 
 function resolveLinkToken(opts: {
   token?: string
@@ -41,16 +45,16 @@ export function registerEnvs(program: Command): void {
       const cwd = process.cwd()
       const link = loadProjectLink(cwd)
       if (!link) {
-        console.log("Not linked. Run: supatype link")
+        info("Not linked. Run: supatype link")
         return
       }
-      console.log(`\nProject: ${link.projectRef} (${link.kind})`)
-      console.log(`Default: ${link.defaultEnvironment}\n`)
+      plain(`\nProject: ${link.projectRef} (${link.kind})`)
+      plain(`Default: ${link.defaultEnvironment}\n`)
       for (const [name, env] of Object.entries(link.environments)) {
         const mark = name === link.defaultEnvironment ? " *" : "  "
-        console.log(`${mark} ${name.padEnd(14)} ${env.apiUrl}`)
+        plain(`${mark} ${name.padEnd(14)} ${env.apiUrl}`)
       }
-      console.log()
+      plain()
     })
 
   envs
@@ -60,12 +64,12 @@ export function registerEnvs(program: Command): void {
       const cwd = process.cwd()
       const link = loadProjectLink(cwd)
       if (!link?.environments[name]) {
-        console.error(`Environment "${name}" is not linked.`)
+        error(`Environment "${name}" is not linked.`)
         process.exit(1)
       }
       link.defaultEnvironment = name
       saveProjectLink(cwd, link)
-      console.log(`Default environment set to "${name}".`)
+      info(`Default environment set to "${name}".`)
     })
 
   envs
@@ -75,11 +79,11 @@ export function registerEnvs(program: Command): void {
       const cwd = process.cwd()
       const link = loadProjectLink(cwd)
       if (!link || link.kind !== "cloud") {
-        console.error("Cloud link required. Run: supatype link --project <slug>")
+        error("Cloud link required. Run: supatype link --project <slug>")
         process.exit(1)
       }
       if (!link.token || !link.cloudApiUrl) {
-        console.error("Missing cloud credentials in link.json")
+        error("Missing cloud credentials in link.json")
         process.exit(1)
       }
       const bodyName = name === "staging" || name === "preview" ? name : "staging"
@@ -109,7 +113,7 @@ export function registerEnvs(program: Command): void {
         ...(link.orgId !== undefined ? { orgId: link.orgId } : {}),
       })
       saveProjectLink(cwd, updated)
-      console.log(`Environment "${bodyName}" created.`)
+      info(`Environment "${bodyName}" created.`)
     })
 }
 
@@ -137,6 +141,41 @@ export async function runLinkAction(opts: {
   const config = loadConfig(cwd)
   const projectRef = config.project?.name ?? "project"
   const envName = opts.env ?? "production"
+  let project = opts.project
+  let url = opts.url
+
+  if (isInteractive() && !project && !url) {
+    printLogo()
+    p.intro("Link this project")
+    const targetKind = ensureNotCancelled(
+      await p.select<"cloud" | "self-host">({
+        message: "Link target",
+        options: [
+          { value: "cloud", label: "Supatype Cloud", hint: "managed project on supatype.com" },
+          { value: "self-host", label: "Self-host", hint: "your Kong gateway URL" },
+        ],
+      }),
+    )
+    if (targetKind === "cloud") {
+      project = ensureNotCancelled(
+        await p.text({
+          message: "Cloud project slug",
+          placeholder: projectRef,
+          defaultValue: projectRef,
+        }),
+      ).trim()
+    } else {
+      url = ensureNotCancelled(
+        await p.text({
+          message: "Kong gateway URL",
+          placeholder: "https://api.example.com",
+          defaultValue: "http://localhost:18473",
+        }),
+      ).trim()
+    }
+    p.outro("Linking...")
+  }
+
   const token = resolveLinkToken(opts)
 
   if (opts.fixGitignore) {
@@ -147,12 +186,12 @@ export async function runLinkAction(opts: {
 
   const existing = loadProjectLink(cwd)
 
-  if (opts.url) {
+  if (url) {
     if (!token) {
-      console.error("Authentication required. Pass --token $SERVICE_ROLE_KEY")
+      error("Authentication required. Pass --token $SERVICE_ROLE_KEY")
       process.exit(1)
     }
-    const apiUrl = opts.url.replace(/\/$/, "")
+    const apiUrl = url.replace(/\/$/, "")
     await probeSelfHostLink(apiUrl, projectRef, token)
     const link = createSelfHostLink({
       projectRef,
@@ -162,22 +201,25 @@ export async function runLinkAction(opts: {
       existing,
     })
     saveProjectLink(cwd, link)
-    console.log(`\nLinked to self-host environment "${envName}" at ${apiUrl}`)
-    console.log(`Config saved to .supatype/link.json\n`)
+    info(`Linked to self-host environment "${envName}" at ${apiUrl}`)
+    nextSteps("Next steps:", [
+      "supatype push --env " + envName,
+      "supatype deploy",
+    ])
     return
   }
 
   if (!token) {
-    console.error("Authentication required. Set SUPATYPE_ACCESS_TOKEN or pass --token.")
+    error("Authentication required. Set SUPATYPE_ACCESS_TOKEN or pass --token.")
     process.exit(1)
   }
 
   const cloudApiUrl = opts.apiUrl.replace(/\/$/, "")
 
-  if (opts.project) {
+  if (project) {
     const one = await targetFetch<{ slug: string; orgId: string }>(cloudApiUrl, "/api/v1", {
       method: "GET",
-      path: `/projects/${opts.project}`,
+      path: `/projects/${project}`,
       token,
     })
     let environments: Array<{ name: string; apiUrl: string }> = [
@@ -189,7 +231,7 @@ export async function runLinkAction(opts: {
         "/api/v1",
         {
           method: "GET",
-          path: `/projects/${opts.project}/environments`,
+          path: `/projects/${project}/environments`,
           token,
           orgId: one.orgId,
         },
@@ -201,7 +243,7 @@ export async function runLinkAction(opts: {
       // environments optional on older control planes
     }
     const link = createCloudLink({
-      projectRef: opts.project,
+      projectRef: project,
       cloudApiUrl,
       token,
       orgId: one.orgId,
@@ -209,19 +251,22 @@ export async function runLinkAction(opts: {
       existing,
     })
     saveProjectLink(cwd, link)
-    console.log(`\nLinked to cloud project: ${opts.project}`)
-    console.log(`Config saved to .supatype/link.json\n`)
+    info(`Linked to cloud project: ${project}`)
+    nextSteps("Next steps:", [
+      "supatype push --env production",
+      "supatype deploy",
+    ])
     return
   }
 
-  console.error("Specify --project <slug> for cloud or --url <kong-url> for self-host.")
+  error("Specify --project <slug> for cloud or --url <kong-url> for self-host.")
   process.exit(1)
 }
 
 export function getLinkOrExit(cwd: string): ProjectLink {
   const link = loadProjectLink(cwd)
   if (!link) {
-    console.error("Not linked. Run: supatype link")
+    error("Not linked. Run: supatype link")
     process.exit(1)
   }
   return link

@@ -7,6 +7,7 @@
 
 import type { Command } from "commander"
 import { sep } from "node:path"
+import { error, plain } from "../ui/messages.js"
 
 function looksLikeNpmOrWorkspaceCLI(): boolean {
   const main = process.argv[1] ?? ""
@@ -27,7 +28,7 @@ export function registerSelfUpdate(program: Command): void {
     )
     .action(() => {
       if (looksLikeNpmOrWorkspaceCLI()) {
-        console.log(
+        plain(
           "This CLI was installed via npm (or runs from the package workspace).\n" +
             "Update with:\n\n  npm update -g @supatype/cli\n\n" +
             "To bump engine/server/postgres/deno pinned in supatype.config.ts, use:\n\n  supatype update\n",
@@ -35,7 +36,7 @@ export function registerSelfUpdate(program: Command): void {
         return
       }
 
-      console.error(
+      error(
         "Standalone CLI self-update (replace binary from CDN) is not published yet.\n\n" +
           "Install or upgrade via npm:\n  npm install -g @supatype/cli\n\n" +
           "Component binaries (engine, server, postgres, deno):\n  supatype update\n",

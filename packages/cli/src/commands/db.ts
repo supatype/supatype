@@ -10,6 +10,7 @@ import { connectionString } from "../project-config.js"
 import { loadProjectLink } from "../link.js"
 import { resolveTarget } from "../resolve-target.js"
 import { targetFetch } from "../target-client.js"
+import { error, info, plain } from "../ui/messages.js"
 
 export function registerDb(program: Command): void {
   const db = program
@@ -29,10 +30,10 @@ export function registerDb(program: Command): void {
 
       if (!link || link.kind !== "cloud") {
         const connStr = opts.transaction ? localConn.replace(/:5432\//, ":6432/") : localConn
-        console.log(connStr)
-        console.log()
-        console.log("Session mode (port 5432): for interactive tools (psql, DataGrip, TablePlus)")
-        console.log("Transaction mode (port 6432): for application servers and serverless functions")
+        plain(connStr)
+        plain()
+        plain("Session mode (port 5432): for interactive tools (psql, DataGrip, TablePlus)")
+        plain("Transaction mode (port 6432): for application servers and serverless functions")
         return
       }
 
@@ -53,18 +54,18 @@ export function registerDb(program: Command): void {
 
         const env = data.find((e) => e.name === envName)
         if (!env) {
-          console.error(`Environment "${envName}" not found`)
+          error(`Environment "${envName}" not found`)
           process.exitCode = 1
           return
         }
 
         const connStr = env.databaseUrl || "Connection string not available"
-        console.log(opts.transaction ? connStr.replace(/:5432\//, ":6432/") : connStr)
-        console.log()
-        console.log("Session mode (port 5432): for interactive tools (psql, DataGrip, TablePlus)")
-        console.log("Transaction mode (port 6432): for application servers and serverless functions")
+        plain(opts.transaction ? connStr.replace(/:5432\//, ":6432/") : connStr)
+        plain()
+        plain("Session mode (port 5432): for interactive tools (psql, DataGrip, TablePlus)")
+        plain("Transaction mode (port 6432): for application servers and serverless functions")
       } catch (err) {
-        console.error("Failed to fetch connection string:", (err as Error).message)
+        error(`Failed to fetch connection string: ${(err as Error).message}`)
         process.exitCode = 1
       }
     })
@@ -78,7 +79,7 @@ export function registerDb(program: Command): void {
       const link = loadProjectLink(cwd)
 
       if (!link || link.kind !== "cloud") {
-        console.error("Not linked to a cloud project. Run: supatype link --project <ref>")
+        error("Not linked to a cloud project. Run: supatype link --project <ref>")
         process.exitCode = 1
         return
       }
@@ -98,14 +99,14 @@ export function registerDb(program: Command): void {
           },
         )
 
-        console.log("Database password reset successfully.")
+        info("Database password reset successfully.")
         if (data.databaseUrl) {
-          console.log(`\nNew connection string:\n${data.databaseUrl}`)
+          plain(`\nNew connection string:\n${data.databaseUrl}`)
         } else if (data.password) {
-          console.log(`\nNew password: ${data.password}`)
+          plain(`\nNew password: ${data.password}`)
         }
       } catch (err) {
-        console.error("Failed to reset password:", (err as Error).message)
+        error(`Failed to reset password: ${(err as Error).message}`)
         process.exitCode = 1
       }
     })

@@ -2,9 +2,9 @@
  * ANSI colours for `supatype dev` TUI task list and log panes.
  */
 
-export const RESET = "\x1b[0m"
-export const DIM = "\x1b[2m"
-export const BOLD = "\x1b[1m"
+import { BOLD, DIM, RESET } from "./ui/brand.js"
+
+export { RESET, DIM, BOLD }
 
 /** Purple for orchestrator logs, green for Vite/app, etc. */
 export function taskColor(taskId: string): string {

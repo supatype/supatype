@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { resolve } from "node:path"
+import { warn } from "./ui/messages.js"
 
 export const LINK_VERSION = 1 as const
 export const LINK_FILE = ".supatype/link.json"
@@ -157,7 +158,7 @@ export function migrateLegacyLinkFiles(cwd: string): void {
 
   if (!migrationWarned) {
     migrationWarned = true
-    console.warn(
+    warn(
       "Migrated .supatype/cloud.json → .supatype/link.json (legacy files kept; remove manually when ready).",
     )
   }

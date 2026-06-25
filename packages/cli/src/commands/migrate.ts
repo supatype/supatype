@@ -1,5 +1,4 @@
 import type { Command } from "commander"
-import { createInterface } from "node:readline"
 import { join } from "node:path"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { connectionString, projectRootFromConfig, schemaPathFromProject } from "../project-config.js"
@@ -18,6 +17,8 @@ import {
   findOrphanSchemaFiles,
   type SchemaSourcesManifest,
 } from "../schema-sources.js"
+import { confirm } from "../ui/confirm.js"
+import { info, plain, warn } from "../ui/messages.js"
 
 export function registerMigrate(program: Command): void {
   const migrations = program
@@ -48,7 +49,7 @@ export function registerMigrate(program: Command): void {
 
       const list = await targetListMigrations(target)
       if (list.length === 0) {
-        console.log("No migrations applied.")
+        info("No migrations applied.")
         return
       }
 
@@ -61,7 +62,7 @@ export function registerMigrate(program: Command): void {
         const files = manifest?.fileCount ?? "—"
         const author = manifest?.pushedBy ?? "—"
         const rolled = m.rolledBack ? " (rolled back)" : ""
-        console.log(
+        plain(
           `${m.name}${rolled}\n  applied: ${m.appliedAt}  status: ${m.status}\n  author: ${author}  files: ${files}  snapshot: ${size}`,
         )
       }
@@ -81,7 +82,7 @@ export function registerMigrate(program: Command): void {
         schema: "public",
         action: "pending",
       })
-      console.log(result.message ?? "Migrations applied.")
+      info(result.message ?? "Migrations applied.")
     })
 
   program
@@ -117,7 +118,7 @@ export function registerMigrate(program: Command): void {
       }
 
       const result = await targetSchemaRollback(target, { schema: pgSchema })
-      console.log(result.message ?? "Rolled back.")
+      info(result.message ?? "Rolled back.")
 
       if (!opts.noSyncSchema) {
         await offerSchemaRestore(cwd, config, target, result, pgSchema, opts.syncSchema ?? false)
@@ -134,10 +135,11 @@ export function registerMigrate(program: Command): void {
     .action(async (opts: { yes?: boolean; connection?: string }) => {
       if (!opts.yes) {
         const confirmed = await confirm(
-          "This will DROP all managed tables and re-apply the schema. Proceed? [y/N] ",
+          "This will DROP all managed tables and re-apply the schema. Proceed?",
+          { default: false },
         )
         if (!confirmed) {
-          console.log("Aborted.")
+          plain("Aborted.")
           return
         }
       }
@@ -154,7 +156,7 @@ export function registerMigrate(program: Command): void {
         schema: "public",
         force: true,
       })
-      console.log(result.message ?? "Reset complete.")
+      info(result.message ?? "Reset complete.")
     })
 }
 
@@ -170,7 +172,7 @@ async function offerSchemaRestore(
   const gzB64 = result.schemaSourcesBase64
 
   if (!gzB64 || !manifest) {
-    console.warn(
+    warn(
       "No schema source snapshot on the restored migration (legacy push). Run `supatype pull` to draft from DB if needed.",
     )
     return
@@ -181,7 +183,7 @@ async function offerSchemaRestore(
   const drift = (diff.operations ?? []).length > 0
 
   if (!drift && !autoSync) {
-    console.log("Schema files match reverted database (no restore needed).")
+    info("Schema files match reverted database (no restore needed).")
     return
   }
 
@@ -192,12 +194,13 @@ async function offerSchemaRestore(
   let proceed = autoSync
   if (!proceed) {
     proceed = await confirm(
-      `\nRolled back migration ${result.name}.\nRestore ${manifest.fileCount} schema files from database snapshot (${sizeKb} KB)?\n  ${fileList}\n  [Y/n] `,
+      `Restore ${manifest.fileCount} schema files from database snapshot (${sizeKb} KB)?\n  ${fileList}`,
+      { default: true },
     )
   }
 
   if (!proceed) {
-    console.log("Skipped schema file restore. Run `supatype diff` to review drift.")
+    info("Skipped schema file restore. Run `supatype diff` to review drift.")
     return
   }
 
@@ -209,27 +212,16 @@ async function offerSchemaRestore(
   const manifestPaths = new Set(manifest.files.map((f) => f.path))
   const orphans = findOrphanSchemaFiles(root, manifest.entryPoint, manifestPaths)
   for (const orphan of orphans) {
-    console.warn(`Warning: ${orphan} not in snapshot — review manually`)
+    warn(`${orphan} not in snapshot — review manually`)
   }
 
-  console.log(`Restored schema files from migration ${label}.`)
-  console.log(`Backup saved to ${backupDir}`)
+  info(`Restored schema files from migration ${label}.`)
+  info(`Backup saved to ${backupDir}`)
 
   const postDiff = await targetSchemaDiff(target, ast, { schema: pgSchema })
   if ((postDiff.operations ?? []).length === 0) {
-    console.log("Schema matches database after restore.")
+    info("Schema matches database after restore.")
   } else {
-    console.log("Run `supatype diff` — schema may still differ from database.")
+    info("Run `supatype diff` — schema may still differ from database.")
   }
-}
-
-async function confirm(prompt: string): Promise<boolean> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout })
-  return new Promise((resolveConfirm) => {
-    rl.question(prompt, (answer) => {
-      rl.close()
-      const trimmed = answer.trim().toLowerCase()
-      resolveConfirm(trimmed === "" || trimmed === "y" || trimmed === "yes")
-    })
-  })
 }

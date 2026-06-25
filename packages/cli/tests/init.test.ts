@@ -178,10 +178,33 @@ describe("scaffold()", () => {
     const content = readFileSync(join(tmpRoot, "supatype.config.ts"), "utf8")
     expect(content).toContain('mode: "static"')
     expect(content).toContain('static_dir: "./dist"')
-    expect(existsSync(join(tmpRoot, "dist/.gitkeep"))).toBe(true)
+    expect(existsSync(join(tmpRoot, "dist/index.html"))).toBe(true)
+    const html = readFileSync(join(tmpRoot, "dist/index.html"), "utf8")
+    expect(html).toContain("Supatype")
+    expect(html).toContain("supatype.github.io/supatype/")
+    expect(html).toContain("github.com/supatype")
   })
 
-  it("proxy app mode writes upstream and start in the config", () => {
+  it("static app mode with Vite scaffolds root index.html and vite.config.ts", () => {
+    scaffold(tmpRoot, {
+      ...defaultScaffoldOptions("my-app"),
+      app: {
+        mode: "static",
+        staticDir: "./public",
+        viteDevUrl: "http://127.0.0.1:5173",
+      },
+    })
+    expect(existsSync(join(tmpRoot, "public/index.html"))).toBe(true)
+    expect(existsSync(join(tmpRoot, "index.html"))).toBe(true)
+    expect(existsSync(join(tmpRoot, "vite.config.ts"))).toBe(true)
+    const pkg = readFileSync(join(tmpRoot, "package.json"), "utf8")
+    expect(pkg).toContain('"vite": "vite"')
+    expect(pkg).toContain('"vite": "^6"')
+    const viteConfig = readFileSync(join(tmpRoot, "vite.config.ts"), "utf8")
+    expect(viteConfig).toContain("port: 5173")
+  })
+
+  it("proxy app mode writes upstream and start in the config when target is later", () => {
     scaffold(tmpRoot, {
       ...defaultScaffoldOptions("my-app"),
       app: { mode: "proxy", upstream: "http://localhost:4000", start: "dev" },
@@ -190,6 +213,48 @@ describe("scaffold()", () => {
     expect(content).toContain('mode: "proxy"')
     expect(content).toContain('upstream: "http://localhost:4000"')
     expect(content).toContain('start: "dev"')
+    expect(existsSync(join(tmpRoot, "supatype.local.config.ts"))).toBe(false)
+  })
+
+  it("proxy app mode with self-host splits static production config and local proxy override", () => {
+    scaffold(tmpRoot, {
+      ...defaultScaffoldOptions("my-app", "self-host"),
+      domain: "api.example.com",
+      app: {
+        mode: "proxy",
+        upstream: "http://127.0.0.1:5173",
+        start: "vite",
+        viteDevUrl: "http://127.0.0.1:5173",
+      },
+    })
+    const committed = readFileSync(join(tmpRoot, "supatype.config.ts"), "utf8")
+    expect(committed).toContain('mode: "static"')
+    expect(committed).toContain('static_dir: "./dist"')
+    expect(committed).not.toContain('mode: "proxy"')
+
+    const local = readFileSync(join(tmpRoot, "supatype.local.config.ts"), "utf8")
+    expect(local).toContain('mode: "dev"')
+    expect(local).toContain('mode: "proxy"')
+    expect(local).toContain('upstream: "http://127.0.0.1:5173"')
+    expect(local).toContain('start: "vite"')
+    expect(local).toContain('vite_dev_url: "http://127.0.0.1:5173"')
+    expect(existsSync(join(tmpRoot, "dist/index.html"))).toBe(true)
+    expect(existsSync(join(tmpRoot, "index.html"))).toBe(true)
+    expect(existsSync(join(tmpRoot, "vite.config.ts"))).toBe(true)
+  })
+
+  it("proxy app mode with cloud target splits static production config and local proxy override", () => {
+    scaffold(tmpRoot, {
+      ...defaultScaffoldOptions("my-app", "cloud"),
+      app: { mode: "proxy", upstream: "http://localhost:3000", start: "dev" },
+    })
+    const committed = readFileSync(join(tmpRoot, "supatype.config.ts"), "utf8")
+    expect(committed).toContain('mode: "static"')
+    expect(committed).not.toContain('mode: "proxy"')
+
+    const local = readFileSync(join(tmpRoot, "supatype.local.config.ts"), "utf8")
+    expect(local).toContain('mode: "proxy"')
+    expect(local).toContain('upstream: "http://localhost:3000"')
   })
 
   it("hello-world function scaffolds function files and a functions script", () => {

@@ -13,16 +13,45 @@ export default defineConfig({
   database: { provider: "docker" },
   server: { mode: "dev", port: 54321 },
   app: { mode: "none" },
-  versions: {
-    engine: "latest",
-    server: "latest",
-    postgres: "latest",
-    deno: "latest",
-  },
   email: { provider: "console" },
   storage: { provider: "local", local_path: ".supatype/storage" },
   schema: { path: "schema/index.ts", pg_schema: "public" },
 })
+```
+
+**Docker images:** omit `versions` so compose defaults to `:latest` (`supatype/server:latest`, `supatype/schema-engine:latest`, etc.). Pin `versions.*` only when you need a specific release.
+
+## Self-host scaffold (`supatype init --mode standalone`)
+
+Matches **`test-app`**:
+
+```typescript
+export default defineConfig({
+  project: { name: "my-project" },
+  provider: "docker",
+  database: { provider: "docker" },
+  server: {
+    mode: "standalone",
+    port: 54321,
+    domain: "demo.supatype.com",
+    tls: { email: "you@example.com", provider: "kong" },
+  },
+  app: {
+    mode: "static",
+    static_dir: "./dist",
+    vite_dev_url: "http://127.0.0.1:5173",
+  },
+  environments: { default: "production" },
+  email: { provider: "console" },
+  storage: { provider: "local", local_path: ".supatype/storage" },
+  schema: { path: "schema/index.ts", pg_schema: "public" },
+})
+```
+
+Keep local HTTP in `supatype.local.config.ts`:
+
+```typescript
+export default { server: { mode: "dev" } }
 ```
 
 ## Key fields
@@ -37,11 +66,12 @@ export default defineConfig({
 | `server.tls` | `{ email, provider }` — Let's Encrypt contact email; `provider: "kong"` (default, Kong ACME) or `"none"` (stay HTTP). Set via `supatype add domain` |
 | `app.mode` | `"none"`, `"static"`, or `"proxy"` |
 | `app.static_dir` | Built static assets directory |
-| `app.upstream` | Proxy target for SSR/dev servers |
-| `app.start` | Command to run app in proxy mode (e.g. `"dev"`) |
+| `app.vite_dev_url` | Vite dev server URL for HMR (`/_vite/*`) when using **static** mode locally — e.g. `http://127.0.0.1:5173`. Sets `SUPATYPE_VITE_DEV_URL` during `supatype dev` |
+| `app.upstream` | Proxy target for SSR/dev servers (proxy mode) |
+| `app.start` | package.json script name to run in proxy mode (e.g. `"vite"`) |
 | `output.types` | Generated TypeScript types path |
-| `build` | Framework build integration (`framework`, `buildCommand`, `outputDirectory`, `env`) |
-| `versions.*` | Pin engine, server, postgres, deno binary/image versions |
+| `build` | Framework build integration for `supatype deploy` (`framework`, `buildCommand`, `outputDirectory`, `env`) |
+| `versions.*` | Optional pin for engine, server, postgres, deno — **omit for Docker `:latest`** |
 | `connection` | Override database URL (else `DATABASE_URL` env) |
 
 ## .env essentials
@@ -51,12 +81,15 @@ DATABASE_URL=postgresql://supatype_admin:postgres@localhost:5432/my-project
 JWT_SECRET=super-secret-jwt-token-change-in-production
 ANON_KEY=           # from: supatype keys
 SERVICE_ROLE_KEY=   # from: supatype keys — also used as self-host control-plane token
-SITE_URL=http://localhost:3000
+SITE_URL=http://localhost:18473
+VITE_SUPATYPE_ANON_KEY=   # copy from ANON_KEY for Vite builds / dev
 
 # Written by supatype dev (docker):
 # SUPATYPE_KONG_PORT=18473
 # SUPATYPE_DEV_DB_PORT=54329
 ```
+
+Do **not** set `SUPATYPE_*_IMAGE` env vars unless overriding — pinned image tags in `.env` override compose `:latest` defaults.
 
 ## Link and environment files
 
@@ -86,13 +119,26 @@ For Docker dev, `supatype dev` may rewrite `DATABASE_URL` to the host-published 
 ```typescript
 server: {
   mode: "standalone",
-  port: 54321,
   domain: "demo.example.com",
   tls: { email: "you@example.com", provider: "kong" },
 },
 ```
 
-Apply with `supatype self-host compose up -d`. Keep a `supatype.local.config.ts` with `server: { mode: "dev" }` so local `supatype dev` stays on HTTP.
+Apply with `supatype self-host compose up -d`. Keep a `supatype.local.config.ts` with `server: { mode: "dev" }` and **app proxy** for Vite local dev:
+
+```typescript
+export default {
+  server: { mode: "dev" },
+  app: {
+    mode: "proxy",
+    upstream: "http://127.0.0.1:5173",
+    start: "vite",
+    vite_dev_url: "http://127.0.0.1:5173",
+  },
+}
+```
+
+Committed `supatype.config.ts` stays `app.mode: "static"` for production.
 
 ## Switching to native dev
 

@@ -4,6 +4,7 @@ import { basename, dirname, extname, join, resolve } from "node:path"
 import ts from "typescript"
 import { loadConfig } from "../config.js"
 import { schemaPathFromProject } from "../project-config.js"
+import { info } from "../ui/messages.js"
 
 export function registerMigrateFromV1(program: Command): void {
   program
@@ -29,9 +30,9 @@ export function registerMigrateFromV1(program: Command): void {
         : join(dirname(schemaPath), basename(schemaPath).replace(extname(schemaPath), ".v2.ts"))
 
       writeFileSync(outPath, output, "utf8")
-      console.log(`v2 schema written to ${outPath}`)
+      info(`v2 schema written to ${outPath}`)
       if (!opts.write) {
-        console.log("Review TODO comments and replace unknown mappings before using this file in production.")
+        info("Review TODO comments and replace unknown mappings before using this file in production.")
       }
     })
 }

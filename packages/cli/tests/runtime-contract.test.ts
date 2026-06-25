@@ -210,6 +210,18 @@ describe("runtime contract", () => {
     expect(compose).toContain("SUPATYPE_APP_UPSTREAM: http://host.docker.internal:4321")
   })
 
+  it("devLocal compose injects SUPATYPE_VITE_DEV_URL when app.vite_dev_url is set", () => {
+    const compose = renderSelfHostCompose(
+      {
+        ...baseConfig,
+        app: { mode: "static", static_dir: "./dist", vite_dev_url: "http://127.0.0.1:5173" },
+      },
+      process.cwd(),
+      { devLocal: true },
+    )
+    expect(compose).toContain("SUPATYPE_VITE_DEV_URL: http://host.docker.internal:5173")
+  })
+
   it("devLocal compose omits studio container when overrides.studio is set", () => {
     const compose = renderSelfHostCompose(
       { ...baseConfig, overrides: { studio: "../supatype/packages/studio" } },

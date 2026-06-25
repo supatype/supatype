@@ -5,6 +5,7 @@ import { schemaPathFromProject } from "../project-config.js"
 import { ensureEngine, engineRequest } from "../engine-client.js"
 import { resolveHostEngineDatabaseUrl } from "../dev-compose.js"
 import { databaseStateToSchemaScaffold, type DatabaseStateJson } from "../pull-utils.js"
+import { info, plain } from "../ui/messages.js"
 
 export function registerPull(program: Command): void {
   program
@@ -21,7 +22,7 @@ export function registerPull(program: Command): void {
 
       await ensureEngine()
 
-      console.error("Introspecting database...")
+      info("Introspecting database...")
       const state = await engineRequest<DatabaseStateJson>("/introspect", {
         database_url: connection,
         schema: pgSchema,
@@ -31,15 +32,15 @@ export function registerPull(program: Command): void {
       const defaultOut = schemaPathFromProject(config, cwd)
 
       if (opts.dryRun || !opts.out) {
-        console.log(scaffold)
+        plain(scaffold)
         if (!opts.dryRun && !opts.out) {
-          console.error("\n(draft printed to stdout — use --out to write a file)")
+          info("(draft printed to stdout — use --out to write a file)")
         }
         return
       }
 
       writeFileSync(opts.out ?? defaultOut, scaffold, "utf8")
-      console.log(`Wrote draft schema to ${opts.out ?? defaultOut}`)
-      console.log("Review access rules and relations, then run `supatype generate`.")
+      info(`Wrote draft schema to ${opts.out ?? defaultOut}`)
+      info("Review access rules and relations, then run `supatype generate`.")
     })
 }

@@ -40,6 +40,8 @@ import { startStudioViteDevServer } from "../studio-dev-server.js"
 import { restoreSystemRelationTargets } from "../restore-system-relation-targets.js"
 import { localStorageEnv } from "../local-storage.js"
 import { beginDevSession, endDevSession, resolveDevUiMode, startDevSession } from "../dev-session.js"
+import { probeDockerDaemon, reportDockerUnavailable } from "../docker-runtime.js"
+import { fatalError } from "../ui/fatal.js"
 import { registerDevShutdown } from "../dev-shutdown.js"
 import {
   initdb,
@@ -67,6 +69,39 @@ function gotrueSMTPFromEmailConfig(email: SupatypeProjectConfig["email"] | undef
   return out
 }
 
+const NATIVE_PG_PORT = 5432
+
+function portCheckCommand(port: number): string {
+  return process.platform === "win32"
+    ? `netstat -ano | findstr :${port}`
+    : `lsof -i :${port}`
+}
+
+async function assertNativeDevPortsFree(serverPort: number, postgrestPort: number): Promise<void> {
+  const brand = { intro: "Local development" }
+  if (await isPortInUse(NATIVE_PG_PORT)) {
+    fatalError(
+      `Port ${NATIVE_PG_PORT} is already in use.`,
+      ["Another Postgres instance may be running.", `Check: ${portCheckCommand(NATIVE_PG_PORT)}`],
+      { brand },
+    )
+  }
+  if (await isPortInUse(serverPort)) {
+    fatalError(
+      `Port ${serverPort} is already in use.`,
+      ["Another supatype-server may be running.", `Check: ${portCheckCommand(serverPort)}`],
+      { brand },
+    )
+  }
+  if (await isPortInUse(postgrestPort)) {
+    fatalError(
+      `Port ${postgrestPort} is already in use.`,
+      ["Another service may be running.", `Check: ${portCheckCommand(postgrestPort)}`],
+      { brand },
+    )
+  }
+}
+
 export function registerDev(program: Command): void {
   program
     .command("dev")
@@ -76,11 +111,28 @@ export function registerDev(program: Command): void {
     .option("--port <port>", "Port for supatype-server (overrides config)", String)
     .action(async (opts: { watch: boolean; stream?: boolean; port?: string }) => {
       const cwd = process.cwd()
-      beginDevSession(resolveDevUiMode(opts.stream === true))
 
-      // ── 1. Load project config ─────────────────────────────────────────────
+      // ── 1. Load project config (before TUI — fatal errors must hit real stderr) ──
       const config = loadConfig(cwd)
+      const provider = resolveRuntimeProvider(config)
 
+      if (provider === "docker") {
+        const probe = probeDockerDaemon()
+        if (!probe.ok) {
+          reportDockerUnavailable(probe, { brand: { intro: "Local development" } })
+          process.exit(1)
+        }
+      }
+
+      const projectName = config.project.name
+      const serverPort = opts.port ?? String(config.server.port ?? 54321)
+      const postgrestPort = String(config.server.postgrestPort ?? 3001)
+
+      if (provider !== "docker") {
+        await assertNativeDevPortsFree(Number(serverPort), Number(postgrestPort))
+      }
+
+      beginDevSession(resolveDevUiMode(opts.stream === true))
       startDevSession()
       if (hasMeaningfulOverrides(config)) {
         console.warn("[supatype] Local binary overrides active:")
@@ -89,10 +141,6 @@ export function registerDev(program: Command): void {
         }
         console.warn("")
       }
-      const projectName = config.project.name
-      const serverPort = opts.port ?? String(config.server.port ?? 54321)
-      const postgrestPort = String(config.server.postgrestPort ?? 3001)
-      const provider = resolveRuntimeProvider(config)
 
       if (provider === "docker") {
         const { runDevCompose } = await import("../dev-compose.js")
@@ -117,36 +165,10 @@ export function registerDev(program: Command): void {
         mkdirSync(d, { recursive: true })
       }
 
-      // ── 4. Port collision check ───────────────────────────────────────────
-      const pgPort = 5432
-      if (await isPortInUse(pgPort)) {
-        console.error(
-          `[supatype] Port ${pgPort} is already in use. Another Postgres instance may be running.\n` +
-            `  Check: lsof -i :${pgPort}`,
-        )
-        endDevSession()
-        process.exit(1)
-      }
-      if (await isPortInUse(Number(serverPort))) {
-        console.error(
-          `[supatype] Port ${serverPort} is already in use. Another supatype-server may be running.\n` +
-            `  Check: lsof -i :${serverPort}`,
-        )
-        endDevSession()
-        process.exit(1)
-      }
-      if (await isPortInUse(Number(postgrestPort))) {
-        console.error(
-          `[supatype] Port ${postgrestPort} is already in use. Another service may be running.\n` +
-            `  Check: lsof -i :${postgrestPort}`,
-        )
-        endDevSession()
-        process.exit(1)
-      }
-
       // ── 5–7. Start Postgres ───────────────────────────────────────────────
       let dbURL: string
       let stopPostgres: () => void | Promise<void>
+      const pgPort = NATIVE_PG_PORT
       const pgPassword = "postgres"
       // pgBinDir is set on the native path and used to add DLL search path for
       // PostgREST on Windows (PostgREST links against libpq + SSL from MinGW).

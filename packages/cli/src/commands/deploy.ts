@@ -24,6 +24,8 @@ import { ensureEngine, engineRequest, type DiffResult } from "../engine-client.j
 import { resolveAppConfig, validateStaticMode, validateBuildOutput, detectPackageManager } from "../app/framework.js"
 import { TIER_LIMITS, type Tier } from "./deploy-types.js"
 import { spawnSync } from "node:child_process"
+import { error, info, plain, step, warn } from "../ui/messages.js"
+import { withSpinner } from "../ui/progress.js"
 
 export function registerDeploy(program: Command): void {
   const deploy = program
@@ -75,7 +77,7 @@ export function registerDeploy(program: Command): void {
         const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
 
         if (opts.local) {
-          console.log("=== Schema Push (local) ===")
+          step("Schema Push (local)")
           await ensureEngine()
 
           const diff = await engineRequest<DiffResult>("/diff", {
@@ -87,22 +89,22 @@ export function registerDeploy(program: Command): void {
           const ops = diff.operations ?? []
 
           if (ops.length > 0) {
-            console.log(`${ops.length} schema change(s) to apply.`)
+            info(`${ops.length} schema change(s) to apply.`)
             await engineRequest("/push", {
               ast,
               database_url: connectionString(config),
               schema: "public",
               force: true,
             })
-            console.log("Schema changes applied.")
+            info("Schema changes applied.")
           } else {
-            console.log("Schema is up to date.")
+            info("Schema is up to date.")
           }
         } else if (link) {
-          console.log("=== Schema Push (linked) ===")
+          step("Schema Push (linked)")
           await pushSchemaToLinkedProject(cwd, { force: opts.yes ?? true, env: envName })
         } else {
-          console.error(
+          error(
             "Not linked to Supatype Cloud. Run: supatype link\n" +
               "Or deploy against your own database: supatype deploy --local",
           )
@@ -114,29 +116,29 @@ export function registerDeploy(program: Command): void {
       if (!opts.schemaOnly) {
         if (!config.build) {
           if (opts.appOnly) {
-            console.error("No build section found in supatype.config.ts")
+            error("No build section found in supatype.config.ts")
             process.exit(1)
           }
           // No build config — skip app deployment silently
           return
         }
 
-        console.log("\n=== App Build & Deploy ===")
+        step("App Build & Deploy")
         const appConfig = resolveAppConfig(config.build, cwd)
 
         // Validate static mode
         const staticError = validateStaticMode(appConfig.framework, appConfig.directory)
         if (staticError) {
-          console.error(staticError)
+          error(staticError)
           process.exit(1)
         }
 
         // Build step
         if (!opts.skipBuild && appConfig.buildCommand) {
-          console.log(`Framework: ${appConfig.framework}`)
-          console.log(`Build command: ${appConfig.buildCommand}`)
-          console.log(`Output directory: ${appConfig.outputDirectory}`)
-          console.log()
+          info(`Framework: ${appConfig.framework}`)
+          info(`Build command: ${appConfig.buildCommand}`)
+          info(`Output directory: ${appConfig.outputDirectory}`)
+          plain()
 
           // Inject environment variables
           const buildEnv: Record<string, string> = {
@@ -154,7 +156,7 @@ export function registerDeploy(program: Command): void {
 
           // Install dependencies
           const pm = detectPackageManager(appConfig.directory)
-          console.log(`Installing dependencies (${pm})...`)
+          info(`Installing dependencies (${pm})...`)
           const installResult = spawnSync(pm, ["install"], {
             cwd: appConfig.directory,
             stdio: "inherit",
@@ -162,12 +164,12 @@ export function registerDeploy(program: Command): void {
             timeout: 5 * 60 * 1000, // 5 minute timeout
           })
           if (installResult.status !== 0) {
-            console.error("Dependency installation failed.")
+            error("Dependency installation failed.")
             process.exit(1)
           }
 
           // Run build
-          console.log("\nBuilding...")
+          plain("\nBuilding...")
           const [buildCmd, ...buildArgs] = appConfig.buildCommand.split(" ")
           const buildResult = spawnSync(buildCmd!, buildArgs, {
             cwd: appConfig.directory,
@@ -176,7 +178,7 @@ export function registerDeploy(program: Command): void {
             timeout: 10 * 60 * 1000, // 10 minute timeout
           })
           if (buildResult.status !== 0) {
-            console.error("Build failed.")
+            error("Build failed.")
             process.exit(1)
           }
         }
@@ -185,7 +187,7 @@ export function registerDeploy(program: Command): void {
         const maxSizeMb = 500 // Default, should be tier-aware in cloud
         const validationError = validateBuildOutput(appConfig.outputDirectory, maxSizeMb)
         if (validationError) {
-          console.error(validationError)
+          error(validationError)
           process.exit(1)
         }
 
@@ -199,13 +201,13 @@ export function registerDeploy(program: Command): void {
           deploySelfHost(appConfig.outputDirectory, cwd)
         }
 
-        console.log("\nDeployment complete!")
+        info("Deployment complete!")
         if (link && !opts.local) {
           const target = resolveTarget(cwd, { env: envName })
           const url = opts.preview
             ? `${target.apiBaseUrl}/preview`
             : target.apiBaseUrl
-          console.log(`URL: ${url}`)
+          info(`URL: ${url}`)
         }
       }
     })
@@ -220,7 +222,7 @@ export function registerDeploy(program: Command): void {
       const cwd = process.cwd()
       const link = loadProjectLink(cwd)
       if (!link) {
-        console.error("Not linked to a project. Rollback requires a linked target.")
+        error("Not linked to a project. Rollback requires a linked target.")
         process.exit(1)
       }
 
@@ -239,7 +241,7 @@ export function registerDeploy(program: Command): void {
         },
       )
 
-      console.log(`Rolled back to deployment ${data.version ?? "previous"}.`)
+      info(`Rolled back to deployment ${data.version ?? "previous"}.`)
     })
 
   // supatype deploy status
@@ -251,7 +253,7 @@ export function registerDeploy(program: Command): void {
       const cwd = process.cwd()
       const link = loadProjectLink(cwd)
       if (!link) {
-        console.error("Not linked to a project.")
+        error("Not linked to a project.")
         process.exit(1)
       }
 
@@ -278,18 +280,18 @@ export function registerDeploy(program: Command): void {
       )
 
       if (!data) {
-        console.log("No active deployment found.")
+        info("No active deployment found.")
         return
       }
 
-      console.log(`Deployment: ${data.version ?? data.id ?? "unknown"}`)
-      console.log(`Status: ${data.status ?? "live"}`)
+      info(`Deployment: ${data.version ?? data.id ?? "unknown"}`)
+      info(`Status: ${data.status ?? "live"}`)
       if (data.timestamp ?? data.createdAt) {
-        console.log(`Deployed: ${data.timestamp ?? data.createdAt}`)
+        info(`Deployed: ${data.timestamp ?? data.createdAt}`)
       }
-      if (data.size) console.log(`Size: ${(data.size / (1024 * 1024)).toFixed(1)}MB`)
-      if (data.buildDuration) console.log(`Build duration: ${data.buildDuration}s`)
-      if (data.url) console.log(`URL: ${data.url}`)
+      if (data.size) info(`Size: ${(data.size / (1024 * 1024)).toFixed(1)}MB`)
+      if (data.buildDuration) info(`Build duration: ${data.buildDuration}s`)
+      if (data.url) info(`URL: ${data.url}`)
     })
 
   // supatype deploy logs <version>
@@ -301,7 +303,7 @@ export function registerDeploy(program: Command): void {
       const cwd = process.cwd()
       const link = loadProjectLink(cwd)
       if (!link) {
-        console.error("Not linked to a project.")
+        error("Not linked to a project.")
         process.exit(1)
       }
 
@@ -319,7 +321,7 @@ export function registerDeploy(program: Command): void {
         },
       )
 
-      console.log(data.logs ?? "(no logs)")
+      plain(data.logs ?? "(no logs)")
     })
 }
 
@@ -334,9 +336,9 @@ async function deployStaticSite(
     throw new Error("No token for linked target. Re-run supatype link --token ...")
   }
 
-  console.log("Uploading build artifacts...")
+  info("Uploading build artifacts...")
   const files = collectFiles(outputDir, outputDir)
-  console.log(`${files.length} files to upload (${formatSize(files.reduce((s, f) => s + f.size, 0))})`)
+  info(`${files.length} files to upload (${formatSize(files.reduce((s, f) => s + f.size, 0))})`)
 
   const { readFileSync } = await import("node:fs")
 
@@ -424,7 +426,7 @@ function deploySelfHost(outputDir: string, cwd: string): void {
   const servingDir = join(cwd, ".supatype", "static")
   mkdirSync(servingDir, { recursive: true })
   cpSync(outputDir, servingDir, { recursive: true })
-  console.log(`Static files deployed to ${servingDir}`)
+  info(`Static files deployed to ${servingDir}`)
 }
 
 interface FileEntry {

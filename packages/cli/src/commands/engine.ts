@@ -5,6 +5,7 @@
 
 import type { Command } from "commander"
 import { engineHealth } from "../engine-client.js"
+import { error, info } from "../ui/messages.js"
 
 export function registerEngine(program: Command): void {
   const engine = program
@@ -16,14 +17,14 @@ export function registerEngine(program: Command): void {
     .description("Check if the schema engine container is reachable")
     .action(async () => {
       const url = process.env["SUPATYPE_ENGINE_URL"] ?? "http://localhost:7500"
-      console.log(`Checking engine at ${url}...`)
+      info(`Checking engine at ${url}...`)
 
       const healthy = await engineHealth()
       if (healthy) {
-        console.log("Engine is reachable and healthy.")
+        info("Engine is reachable and healthy.")
       } else {
-        console.error("Engine is not reachable.")
-        console.error("Make sure the engine container is running (supatype dev or docker compose up).")
+        error("Engine is not reachable.")
+        error("Make sure the engine container is running (supatype dev or docker compose up).")
         process.exitCode = 1
       }
     })

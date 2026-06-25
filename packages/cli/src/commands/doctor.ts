@@ -1,5 +1,6 @@
 import type { Command } from "commander"
 import { loadConfig, loadSchemaAst } from "../config.js"
+import { info, plain } from "../ui/messages.js"
 import { schemaPathFromProject } from "../project-config.js"
 import { resolveTarget, targetSchemaDoctor, schemaPgSchema } from "../resolve-target.js"
 import { loadProjectLink } from "../link.js"
@@ -21,11 +22,11 @@ interface DoctorReport {
 
 function printSection(title: string, items: DoctorItem[]): void {
   if (items.length === 0) return
-  console.log(`\n${title} (${items.length}):\n`)
+  plain(`\n${title} (${items.length}):\n`)
   for (const item of items) {
     const fields = item.fields.length > 0 ? ` (${item.fields.join(", ")})` : ""
-    console.log(`  • ${item.table}.${item.name}${fields}`)
-    console.log(`    ${item.message}`)
+    plain(`  • ${item.table}.${item.name}${fields}`)
+    plain(`    ${item.message}`)
   }
 }
 
@@ -49,7 +50,7 @@ export function registerDoctor(program: Command): void {
       const config = loadConfig(cwd)
       const pgSchema = schemaPgSchema(cwd)
 
-      console.log("Loading schema...")
+      info("Loading schema...")
       const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
 
       let report: DoctorReport
@@ -90,9 +91,9 @@ export function registerDoctor(program: Command): void {
       const unmanaged = report.unmanagedDrift?.length ?? 0
 
       if (missing + stale + unmanaged === 0) {
-        console.log("\nNo drift detected.")
+        info("No drift detected.")
       } else {
-        console.log(`\nSummary: ${missing} missing, ${stale} stale managed, ${unmanaged} unmanaged`)
+        plain(`\nSummary: ${missing} missing, ${stale} stale managed, ${unmanaged} unmanaged`)
       }
 
       if (opts.strict && (missing > 0 || stale > 0)) {

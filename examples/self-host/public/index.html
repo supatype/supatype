@@ -3,14 +3,117 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Supatype Self-Host Static Example</title>
+    <title>Self-Host Example — Supatype</title>
+    <meta name="description" content="A Supatype project. Define your types — we generate your backend." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <style>
-      body { font-family: Arial, sans-serif; margin: 2rem; }
-      code { background: #f4f4f4; padding: 0.15rem 0.35rem; border-radius: 4px; }
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      :root {
+        --bg: #0a0a0f;
+        --border: rgba(255, 255, 255, 0.08);
+        --text: #e8e8f0;
+        --text-muted: #8888a8;
+        --purple: #7c3aed;
+        --purple-light: #a855f7;
+      }
+      body {
+        min-height: 100vh;
+        font-family: Inter, system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.6;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem;
+      }
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        background: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(124, 58, 237, 0.18), transparent);
+        pointer-events: none;
+      }
+      main {
+        position: relative;
+        max-width: 32rem;
+        width: 100%;
+        text-align: center;
+      }
+      .logo {
+        display: block;
+        height: 2rem;
+        width: auto;
+        margin: 0 auto 2rem;
+      }
+      h1 {
+        font-size: 1.5rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        margin-bottom: 0.75rem;
+      }
+      .tagline {
+        color: var(--text-muted);
+        font-size: 1rem;
+        margin-bottom: 2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        justify-content: center;
+        margin-bottom: 2.5rem;
+      }
+      .links a {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.6rem 1.1rem;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        color: var(--text);
+        text-decoration: none;
+        font-size: 0.9rem;
+        font-weight: 500;
+        transition: border-color 0.15s, background 0.15s;
+      }
+      .links a:hover {
+        border-color: rgba(168, 85, 247, 0.45);
+        background: rgba(124, 58, 237, 0.08);
+      }
+      .links a.primary {
+        background: linear-gradient(135deg, var(--purple), var(--purple-light));
+        border-color: transparent;
+        color: #fff;
+      }
+      .links a.primary:hover {
+        opacity: 0.92;
+      }
+      .hint {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+      }
+      .hint code {
+        font-family: ui-monospace, "JetBrains Mono", monospace;
+        font-size: 0.8rem;
+        background: rgba(255, 255, 255, 0.06);
+        padding: 0.15rem 0.4rem;
+        border-radius: 4px;
+      }
     </style>
   </head>
   <body>
-    <h1>Supatype Static App</h1>
-    <p>If you can see this page at <code>http://localhost:18473/</code>, static hosting is working.</p>
+    <main>
+      <img class="logo" src="https://supatype.github.io/supatype/supatype.svg" alt="Supatype" width="160" height="30" />
+      <h1>Self-Host Example</h1>
+      <p class="tagline">Static hosting through Kong. If you see this at <code style="font-family:ui-monospace,monospace;font-size:0.85rem;background:rgba(255,255,255,0.06);padding:0.15rem 0.4rem;border-radius:4px;">http://localhost:18473/</code>, app routing is working.</p>
+      <nav class="links" aria-label="Supatype resources">
+        <a class="primary" href="https://supatype.github.io/supatype/" target="_blank" rel="noopener noreferrer">Documentation</a>
+        <a href="https://github.com/supatype" target="_blank" rel="noopener noreferrer">GitHub</a>
+        <a href="https://discord.gg/yaQrjQD4" target="_blank" rel="noopener noreferrer">Discord</a>
+      </nav>
+      <p class="hint">Run <code>supatype dev</code> then open <code>http://localhost:18473/</code></p>
+    </main>
   </body>
-  </html>
+</html>

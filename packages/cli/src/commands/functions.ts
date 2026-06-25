@@ -24,6 +24,8 @@ import {
 import { loadProjectLink } from "../link.js"
 import { resolveTarget } from "../resolve-target.js"
 import { targetFetch } from "../target-client.js"
+import { error, info, plain } from "../ui/messages.js"
+import { nextSteps } from "../ui/next-steps.js"
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -128,7 +130,7 @@ function scaffoldFunction(cwd: string, name: string): void {
   const functionsDir = resolveFunctionsDir(cwd, "write")
   const fnDir = resolve(functionsDir, name)
   if (existsSync(fnDir)) {
-    console.error(`Function "${name}" already exists at ${relative(cwd, fnDir)}`)
+    error(`Function "${name}" already exists at ${relative(cwd, fnDir)}`)
     process.exit(1)
   }
 
@@ -180,11 +182,12 @@ export default async function handler(req: Request): Promise<Response> {
   }
 
   const functionsDirLabel = relativeFunctionsDir(cwd, functionsDir)
-  console.log(`Created function: ${functionsDirLabel}/${name}/index.ts`)
-  console.log()
-  console.log("  Local dev:    npx supatype functions serve")
-  console.log(`  Invoke:       npx supatype functions invoke ${name}`)
-  console.log("  Deploy:       npx supatype functions deploy")
+  info(`Created function: ${functionsDirLabel}/${name}/index.ts`)
+  nextSteps("Next steps:", [
+    "Local dev:    npx supatype functions serve",
+    `Invoke:       npx supatype functions invoke ${name}`,
+    "Deploy:       npx supatype functions deploy",
+  ])
 }
 
 // ─── Discover functions ──────────────────────────────────────────────────────
@@ -260,16 +263,16 @@ async function serve(cwd: string, opts: { port: string; envFile: string }): Prom
   const functionsDirLabel = relativeFunctionsDir(cwd, functionsDir)
   const routes = discoverTsFunctionsInDir(functionsDir)
   if (routes.length === 0) {
-    console.error(`No functions found in ${functionsDirLabel}/`)
-    console.error("Create one with: npx supatype functions new <name>")
+    error(`No functions found in ${functionsDirLabel}/`)
+    error("Create one with: npx supatype functions new <name>")
     process.exit(1)
   }
 
-  console.log(`Discovered ${routes.length} function(s):`)
+  plain(`Discovered ${routes.length} function(s):`)
   for (const fn of routes) {
-    console.log(`  /${fn.name}  →  ${relative(cwd, fn.entrypoint)}`)
+    plain(`  /${fn.name}  →  ${relative(cwd, fn.entrypoint)}`)
   }
-  console.log()
+  plain()
 
   // Generate a Deno entry script that routes requests to the correct function
   const routerPath = resolve(functionsDir, ".serve-router.ts")
@@ -282,14 +285,15 @@ async function serve(cwd: string, opts: { port: string; envFile: string }): Prom
     envArgs.push("--env-file", envFilePath)
   }
 
-  console.log(`Serving functions at http://localhost:${opts.port}/functions/v1/`)
-  console.log("Watching for changes...\n")
+  info(`Serving functions at http://localhost:${opts.port}/functions/v1/`)
+  info("Watching for changes...")
+  plain()
 
   let denoBin: string
   try {
     denoBin = await ensureBinary("deno", config)
   } catch (err) {
-    console.error(`[supatype] Could not provision Deno: ${(err as Error).message}`)
+    error(`Could not provision Deno: ${(err as Error).message}`)
     process.exit(1)
   }
 
@@ -323,7 +327,7 @@ async function serve(cwd: string, opts: { port: string; envFile: string }): Prom
   try { unlinkSync(routerPath) } catch { /* ignore */ }
 
   if (result.status !== 0) {
-    console.error("Function server exited with errors.")
+    error("Function server exited with errors.")
     process.exit(result.status ?? 1)
   }
 }
@@ -340,19 +344,19 @@ async function deploy(cwd: string, opts: { only?: string; env?: string; dryRun?:
     const functionsDir = resolveFunctionsDir(cwd, "read")
     const functionsDirLabel = relativeFunctionsDir(cwd, functionsDir)
     if (opts.only) {
-      console.error(`Function "${opts.only}" not found in ${functionsDirLabel}/`)
+      error(`Function "${opts.only}" not found in ${functionsDirLabel}/`)
     } else {
-      console.error(`No functions found in ${functionsDirLabel}/`)
+      error(`No functions found in ${functionsDirLabel}/`)
     }
     process.exit(1)
   }
 
   if (opts.dryRun) {
-    console.log("Dry run — the following functions would be deployed:\n")
+    plain("Dry run — the following functions would be deployed:\n")
     for (const fn of fns) {
-      console.log(`  ${fn.name}  →  ${relative(cwd, fn.entrypoint)}`)
+      plain(`  ${fn.name}  →  ${relative(cwd, fn.entrypoint)}`)
     }
-    console.log(`\nTotal: ${fns.length} function(s)`)
+    plain(`\nTotal: ${fns.length} function(s)`)
     return
   }
 
@@ -380,17 +384,17 @@ async function deploy(cwd: string, opts: { only?: string; env?: string; dryRun?:
 }
 
 async function deploySelfHosted(cwd: string, fns: DiscoveredFunction[]): Promise<void> {
-  console.log("Self-host Compose deployment.\n")
-  console.log("Functions are served from your project functions/ directory (no bundle step).\n")
+  info("Self-host Compose deployment.")
+  plain("Functions are served from your project functions/ directory (no bundle step).\n")
 
   for (const fn of fns) {
-    console.log(`  ${fn.name}  →  ${relative(cwd, fn.entrypoint)}`)
+    plain(`  ${fn.name}  →  ${relative(cwd, fn.entrypoint)}`)
   }
 
-  console.log(`\n${fns.length} function(s) ready on disk.`)
-  console.log("Restart the functions-worker container to load changes:")
-  console.log("  supatype self-host compose restart functions-worker")
-  console.log("\nKong → supatype-server → functions-worker (per-project worker).")
+  plain(`\n${fns.length} function(s) ready on disk.`)
+  info("Restart the functions-worker container to load changes:")
+  plain("  supatype self-host compose restart functions-worker")
+  plain("\nKong → supatype-server → functions-worker (per-project worker).")
 }
 
 async function deployViaTarget(
@@ -398,7 +402,8 @@ async function deployViaTarget(
   target: ReturnType<typeof resolveTarget>,
   fns: DiscoveredFunction[],
 ): Promise<void> {
-  console.log(`Deploying to ${target.mode} project: ${target.projectRef} (${target.environment})\n`)
+  info(`Deploying to ${target.mode} project: ${target.projectRef} (${target.environment})`)
+  plain()
 
   for (const fn of fns) {
     const start = Date.now()
@@ -425,13 +430,13 @@ async function deployViaTarget(
       )
 
       const duration = Date.now() - start
-      console.log(`  ${fn.name} ✓ deployed (${duration}ms)`)
+      plain(`  ${fn.name} ✓ deployed (${duration}ms)`)
     } catch (err) {
-      console.error(`  ${fn.name} ✗ ${err instanceof Error ? err.message : "unknown error"}`)
+      plain(`  ${fn.name} ✗ ${err instanceof Error ? err.message : "unknown error"}`)
     }
   }
 
-  console.log(`\nDeployed ${fns.length} function(s)`)
+  info(`Deployed ${fns.length} function(s)`)
   void cwd
 }
 
@@ -440,18 +445,19 @@ async function deployCloud(cwd: string, fns: DiscoveredFunction[], env?: string)
   const linked = getLinkedProject(cwd)
 
   if (!linked) {
-    console.error("No linked project. Run: npx supatype cloud link")
+    error("No linked project. Run: npx supatype cloud link")
     process.exit(1)
   }
 
   const token = getCloudToken(cwd)
   if (!token) {
-    console.error("Not logged in. Run: npx supatype cloud login")
+    error("Not logged in. Run: npx supatype cloud login")
     process.exit(1)
   }
 
   const apiUrl = getCloudApiUrl(cwd)
-  console.log(`Deploying to project: ${linked.ref}\n`)
+  info(`Deploying to project: ${linked.ref}`)
+  plain()
 
   for (const fn of fns) {
     const start = Date.now()
@@ -479,19 +485,19 @@ async function deployCloud(cwd: string, fns: DiscoveredFunction[], env?: string)
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({})) as Record<string, string>
-        console.error(`  ${fn.name} ✗ ${body["message"] ?? res.statusText}`)
+        plain(`  ${fn.name} ✗ ${body["message"] ?? res.statusText}`)
         continue
       }
 
       const duration = Date.now() - start
-      console.log(`  ${fn.name} ✓ deployed (${duration}ms)`)
+      plain(`  ${fn.name} ✓ deployed (${duration}ms)`)
     } catch (err) {
-      console.error(`  ${fn.name} ✗ ${err instanceof Error ? err.message : "unknown error"}`)
+      plain(`  ${fn.name} ✗ ${err instanceof Error ? err.message : "unknown error"}`)
     }
   }
 
-  console.log(`\nDeployed ${fns.length} function(s)`)
-  console.log(`Invoke: https://${linked.ref}.supatype.dev/functions/v1/<name>`)
+  info(`Deployed ${fns.length} function(s)`)
+  info(`Invoke: https://${linked.ref}.supatype.dev/functions/v1/<name>`)
 }
 
 function readFunctionSource(fn: DiscoveredFunction): string {
@@ -522,19 +528,19 @@ async function listFunctions(cwd: string): Promise<void> {
     // Show local functions instead
     const fns = discoverFunctions(cwd)
     if (fns.length === 0) {
-      console.log("No functions found locally or remotely.")
+      info("No functions found locally or remotely.")
       return
     }
-    console.log("Local functions (not linked to a cloud project):\n")
+    plain("Local functions (not linked to a cloud project):\n")
     for (const fn of fns) {
-      console.log(`  ${fn.name.padEnd(30)} ${relative(cwd, fn.entrypoint)}`)
+      plain(`  ${fn.name.padEnd(30)} ${relative(cwd, fn.entrypoint)}`)
     }
     return
   }
 
   const token = getCloudToken(cwd)
   if (!token) {
-    console.error("Not logged in. Run: npx supatype cloud login")
+    error("Not logged in. Run: npx supatype cloud login")
     process.exit(1)
   }
 
@@ -548,29 +554,29 @@ async function listFunctions(cwd: string): Promise<void> {
     })
 
     if (!res.ok) {
-      console.error(`Failed to list functions: ${res.statusText}`)
+      error(`Failed to list functions: ${res.statusText}`)
       process.exit(1)
     }
 
     const { data } = await res.json() as { data: Array<{ name: string; deployedAt: string; invocations24h: number; avgDurationMs: number }> }
 
     if (data.length === 0) {
-      console.log("No deployed functions.")
+      info("No deployed functions.")
       return
     }
 
-    console.log("Deployed functions:\n")
-    console.log(`  ${"Name".padEnd(28)} ${"Last Deployed".padEnd(24)} ${"Invocations (24h)".padEnd(20)} Avg Duration`)
-    console.log(`  ${"─".repeat(28)} ${"─".repeat(24)} ${"─".repeat(20)} ${"─".repeat(12)}`)
+    plain("Deployed functions:\n")
+    plain(`  ${"Name".padEnd(28)} ${"Last Deployed".padEnd(24)} ${"Invocations (24h)".padEnd(20)} Avg Duration`)
+    plain(`  ${"─".repeat(28)} ${"─".repeat(24)} ${"─".repeat(20)} ${"─".repeat(12)}`)
 
     for (const fn of data) {
       const deployed = fn.deployedAt ? new Date(fn.deployedAt).toLocaleString() : "—"
-      console.log(
+      plain(
         `  ${fn.name.padEnd(28)} ${deployed.padEnd(24)} ${String(fn.invocations24h ?? 0).padEnd(20)} ${fn.avgDurationMs ?? 0}ms`,
       )
     }
   } catch (err) {
-    console.error(`Error: ${err instanceof Error ? err.message : "unknown"}`)
+    error(`Error: ${err instanceof Error ? err.message : "unknown"}`)
     process.exit(1)
   }
 }
@@ -582,13 +588,13 @@ async function deleteFunction(cwd: string, name: string): Promise<void> {
   const linked = getLinkedProject(cwd)
 
   if (!linked) {
-    console.error("No linked project. Run: npx supatype cloud link")
+    error("No linked project. Run: npx supatype cloud link")
     process.exit(1)
   }
 
   const token = getCloudToken(cwd)
   if (!token) {
-    console.error("Not logged in. Run: npx supatype cloud login")
+    error("Not logged in. Run: npx supatype cloud login")
     process.exit(1)
   }
 
@@ -604,13 +610,13 @@ async function deleteFunction(cwd: string, name: string): Promise<void> {
 
     if (!res.ok) {
       const body = await res.json().catch(() => ({})) as Record<string, string>
-      console.error(`Failed to delete "${name}": ${body["message"] ?? res.statusText}`)
+      error(`Failed to delete "${name}": ${body["message"] ?? res.statusText}`)
       process.exit(1)
     }
 
-    console.log(`Function "${name}" deleted. It will return 404 immediately.`)
+    info(`Function "${name}" deleted. It will return 404 immediately.`)
   } catch (err) {
-    console.error(`Error: ${err instanceof Error ? err.message : "unknown"}`)
+    error(`Error: ${err instanceof Error ? err.message : "unknown"}`)
     process.exit(1)
   }
 }
@@ -622,13 +628,13 @@ async function functionLogs(cwd: string, name: string, opts: { since: string }):
   const linked = getLinkedProject(cwd)
 
   if (!linked) {
-    console.error("No linked project. Run: npx supatype cloud link")
+    error("No linked project. Run: npx supatype cloud link")
     process.exit(1)
   }
 
   const token = getCloudToken(cwd)
   if (!token) {
-    console.error("Not logged in. Run: npx supatype cloud login")
+    error("Not logged in. Run: npx supatype cloud login")
     process.exit(1)
   }
 
@@ -645,24 +651,24 @@ async function functionLogs(cwd: string, name: string, opts: { since: string }):
     )
 
     if (!res.ok) {
-      console.error(`Failed to fetch logs: ${res.statusText}`)
+      error(`Failed to fetch logs: ${res.statusText}`)
       process.exit(1)
     }
 
     const { data } = await res.json() as { data: Array<{ timestamp: string; level: string; message: string }> }
 
     if (data.length === 0) {
-      console.log(`No logs for "${name}" in the last ${opts.since}.`)
+      info(`No logs for "${name}" in the last ${opts.since}.`)
       return
     }
 
     for (const entry of data) {
       const ts = new Date(entry.timestamp).toISOString().slice(11, 23)
       const level = entry.level.toUpperCase().padEnd(5)
-      console.log(`${ts} [${level}] ${entry.message}`)
+      plain(`${ts} [${level}] ${entry.message}`)
     }
   } catch (err) {
-    console.error(`Error: ${err instanceof Error ? err.message : "unknown"}`)
+    error(`Error: ${err instanceof Error ? err.message : "unknown"}`)
     process.exit(1)
   }
 }
@@ -705,7 +711,7 @@ async function invoke(
       JSON.parse(opts.data)
       body = opts.data
     } catch {
-      console.error("Invalid JSON data. Use --data '{\"key\": \"value\"}'")
+      error("Invalid JSON data. Use --data '{\"key\": \"value\"}'")
       process.exit(1)
     }
 
@@ -720,22 +726,22 @@ async function invoke(
     const duration = Date.now() - start
     const responseBody = await res.text()
 
-    console.log(`Status: ${res.status} (${duration}ms)`)
-    console.log()
+    plain(`Status: ${res.status} (${duration}ms)`)
+    plain()
 
     // Try to pretty-print JSON
     try {
       const json = JSON.parse(responseBody)
-      console.log(JSON.stringify(json, null, 2))
+      plain(JSON.stringify(json, null, 2))
     } catch {
-      console.log(responseBody)
+      plain(responseBody)
     }
   } catch (err) {
     if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
-      console.error(`Cannot reach ${url}`)
-      console.error("Is the function server running? Start it with: npx supatype functions serve")
+      error(`Cannot reach ${url}`)
+      error("Is the function server running? Start it with: npx supatype functions serve")
     } else {
-      console.error(`Error: ${err instanceof Error ? err.message : "unknown"}`)
+      error(`Error: ${err instanceof Error ? err.message : "unknown"}`)
     }
     process.exit(1)
   }
@@ -751,19 +757,19 @@ async function envList(cwd: string): Promise<void> {
     // Show local env vars
     const envPath = resolve(resolveFunctionsDir(cwd, "read"), ENV_LOCAL)
     if (!existsSync(envPath)) {
-      console.log("No environment variables configured.")
+      info("No environment variables configured.")
       return
     }
 
     const lines = readFileSync(envPath, "utf8").split("\n")
-    console.log("Local environment variables:\n")
+    plain("Local environment variables:\n")
     for (const line of lines) {
       const trimmed = line.trim()
       if (!trimmed || trimmed.startsWith("#")) continue
       const eqIdx = trimmed.indexOf("=")
       if (eqIdx > 0) {
         const key = trimmed.slice(0, eqIdx)
-        console.log(`  ${key} = ••••••••`)
+        plain(`  ${key} = ••••••••`)
       }
     }
     return
@@ -771,7 +777,7 @@ async function envList(cwd: string): Promise<void> {
 
   const token = getCloudToken(cwd)
   if (!token) {
-    console.error("Not logged in. Run: npx supatype cloud login")
+    error("Not logged in. Run: npx supatype cloud login")
     process.exit(1)
   }
 
@@ -785,23 +791,23 @@ async function envList(cwd: string): Promise<void> {
     })
 
     if (!res.ok) {
-      console.error(`Failed to list env vars: ${res.statusText}`)
+      error(`Failed to list env vars: ${res.statusText}`)
       process.exit(1)
     }
 
     const { data } = await res.json() as { data: string[] }
 
     if (data.length === 0) {
-      console.log("No environment variables set.")
+      info("No environment variables set.")
       return
     }
 
-    console.log("Environment variables (values masked):\n")
+    plain("Environment variables (values masked):\n")
     for (const key of data) {
-      console.log(`  ${key} = ••••••••`)
+      plain(`  ${key} = ••••••••`)
     }
   } catch (err) {
-    console.error(`Error: ${err instanceof Error ? err.message : "unknown"}`)
+    error(`Error: ${err instanceof Error ? err.message : "unknown"}`)
     process.exit(1)
   }
 }
@@ -809,7 +815,7 @@ async function envList(cwd: string): Promise<void> {
 async function envSet(cwd: string, keyvalue: string): Promise<void> {
   const eqIdx = keyvalue.indexOf("=")
   if (eqIdx <= 0) {
-    console.error("Invalid format. Use: npx supatype functions env set KEY=value")
+    error("Invalid format. Use: npx supatype functions env set KEY=value")
     process.exit(1)
   }
 
@@ -833,13 +839,13 @@ async function envSet(cwd: string, keyvalue: string): Promise<void> {
     }
 
     writeFileSync(envPath, content, "utf8")
-    console.log(`Set ${key} in local env file.`)
+    info(`Set ${key} in local env file.`)
     return
   }
 
   const token = getCloudToken(cwd)
   if (!token) {
-    console.error("Not logged in. Run: npx supatype cloud login")
+    error("Not logged in. Run: npx supatype cloud login")
     process.exit(1)
   }
 
@@ -857,13 +863,13 @@ async function envSet(cwd: string, keyvalue: string): Promise<void> {
 
     if (!res.ok) {
       const body = await res.json().catch(() => ({})) as Record<string, string>
-      console.error(`Failed to set env var: ${body["message"] ?? res.statusText}`)
+      error(`Failed to set env var: ${body["message"] ?? res.statusText}`)
       process.exit(1)
     }
 
-    console.log(`Set ${key} for project ${linked.ref}.`)
+    info(`Set ${key} for project ${linked.ref}.`)
   } catch (err) {
-    console.error(`Error: ${err instanceof Error ? err.message : "unknown"}`)
+    error(`Error: ${err instanceof Error ? err.message : "unknown"}`)
     process.exit(1)
   }
 }
@@ -875,7 +881,7 @@ async function envUnset(cwd: string, key: string): Promise<void> {
   if (!linked) {
     const envPath = resolve(resolveFunctionsDir(cwd, "read"), ENV_LOCAL)
     if (!existsSync(envPath)) {
-      console.error("No local env file found.")
+      error("No local env file found.")
       process.exit(1)
     }
 
@@ -883,13 +889,13 @@ async function envUnset(cwd: string, key: string): Promise<void> {
     const regex = new RegExp(`^${key}=.*\n?`, "m")
     content = content.replace(regex, "")
     writeFileSync(envPath, content, "utf8")
-    console.log(`Removed ${key} from local env file.`)
+    info(`Removed ${key} from local env file.`)
     return
   }
 
   const token = getCloudToken(cwd)
   if (!token) {
-    console.error("Not logged in. Run: npx supatype cloud login")
+    error("Not logged in. Run: npx supatype cloud login")
     process.exit(1)
   }
 
@@ -905,13 +911,13 @@ async function envUnset(cwd: string, key: string): Promise<void> {
 
     if (!res.ok) {
       const body = await res.json().catch(() => ({})) as Record<string, string>
-      console.error(`Failed to unset env var: ${body["message"] ?? res.statusText}`)
+      error(`Failed to unset env var: ${body["message"] ?? res.statusText}`)
       process.exit(1)
     }
 
-    console.log(`Removed ${key} for project ${linked.ref}.`)
+    info(`Removed ${key} for project ${linked.ref}.`)
   } catch (err) {
-    console.error(`Error: ${err instanceof Error ? err.message : "unknown"}`)
+    error(`Error: ${err instanceof Error ? err.message : "unknown"}`)
     process.exit(1)
   }
 }
