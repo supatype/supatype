@@ -83,6 +83,22 @@ Auth flag: `--token` (cloud = platform PAT; self-host = `SERVICE_ROLE_KEY`). `--
 | `supatype cache` | Binary/image cache management |
 | `supatype engine` | Schema engine utilities |
 
+## Local Docker dev — ports, multiple projects, shutdown
+
+**Kong port (`SUPATYPE_KONG_PORT`):**
+- `supatype init` (Docker) prompts for a gateway port; default is `18473` or the next free port.
+- Each project should have a **unique** `SUPATYPE_KONG_PORT` in `.env` so multiple stacks can run concurrently.
+- `supatype dev` re-checks the configured port; if it is taken, you can pick another interactively.
+- Open the URL printed by `supatype dev`, not always `:18473`.
+
+**Stopping the stack:**
+- `supatype dev` runs `docker compose down` on Ctrl+C, terminal close, and as a sync fallback on process exit.
+- `.supatype/dev-session.json` tracks the active dev session; the next `supatype dev` offers to clean up a stack left running after an unclean exit.
+- `supatype push` may start **Postgres only** and leave it running (intentional for prod/self-host workflows). Stop with `supatype self-host compose down`.
+
+**Renaming `project.name`:**
+- Docker compose project slug changes (`supatype-{name}`). On the next `supatype dev`, the CLI detects the rename via `.supatype/environment.json` and offers to stop the old stack (volumes preserved).
+
 ## Typical sequences
 
 **First run:**

@@ -593,7 +593,8 @@ export function runDockerCompose(
   const env: NodeJS.ProcessEnv = options?.quiet
     ? { ...process.env, COMPOSE_PROGRESS: "quiet" }
     : process.env
-  const result = spawnSync("docker", composeArgs, { stdio: "inherit", cwd: projectRoot, env })
+  const stdio = options?.quiet ? "pipe" : "inherit"
+  const result = spawnSync("docker", composeArgs, { stdio, cwd: projectRoot, env })
   return result.status ?? 1
 }
 

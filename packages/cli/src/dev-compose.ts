@@ -2,7 +2,7 @@
  * `supatype dev` when `provider: docker` — full self-host Compose stack (Kong gateway).
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { spawnSync } from "node:child_process"
@@ -17,7 +17,10 @@ import {
   type SupatypeProjectConfig,
 } from "./project-config.js"
 import { signJwt } from "./jwt.js"
-import { isPortInUse } from "./postgres-ctl.js"
+import { ensureDevDbPort, ensureKongPort } from "./dev-ports.js"
+import { handleComposeProjectRename } from "./compose-rename.js"
+import { recoverStaleDevSession, writeDevSessionLock } from "./dev-session-lock.js"
+import { readEnvValue, upsertEnvFile } from "./env-file.js"
 import {
   COMPOSE_PINNED_IMAGE_ENV_KEYS,
   composeDockerImageEnv,
@@ -46,6 +49,7 @@ import { withAdminRoles } from "./studio-admin-roles.js"
 import { restoreSystemRelationTargets } from "./restore-system-relation-targets.js"
 import { provisionBucketsFromAst } from "./storage-provision.js"
 import type { ExtractedSchemaAstV2 } from "./schema-ast-v2.js"
+import { ensureFirstAdminUserForProject } from "./commands/admin.js"
 
 const LOCAL_JWT_SECRET = "super-secret-jwt-token-with-at-least-32-characters-long"
 
@@ -70,30 +74,12 @@ export function composeDbUrl(): string {
 
 /**
  * Resolve the host Kong port for this project. Persisted in `.env` as
- * SUPATYPE_KONG_PORT so re-runs are stable; on first run it picks the default
- * (18473) or the next free port, so multiple projects can run concurrently.
+ * SUPATYPE_KONG_PORT; prompts when the configured port is already taken.
  */
 async function resolveDevDbPort(cwd: string): Promise<number> {
-  const envPath = join(cwd, ".env")
-  if (existsSync(envPath)) {
-    const m = readFileSync(envPath, "utf8").match(/^SUPATYPE_DEV_DB_PORT=(\d+)/m)
-    if (m && m[1]) return Number(m[1])
-  }
-  let port = COMPOSE_DEV_DB_PORT
-  while (await isPortInUse(port)) port++
-  return port
+  return ensureDevDbPort(cwd)
 }
 
-function readEnvValue(cwd: string, key: string, fallback: string): string {
-  const envPath = join(cwd, ".env")
-  if (existsSync(envPath)) {
-    const m = readFileSync(envPath, "utf8").match(new RegExp(`^${key}=(.+)$`, "m"))
-    if (m?.[1]) return m[1].trim()
-  }
-  return fallback
-}
-
-/** Postgres DSN for compose db when published to the host (local engine push). */
 function hostComposeDbUrl(cwd: string): string {
   const port = readEnvValue(cwd, "SUPATYPE_DEV_DB_PORT", String(COMPOSE_DEV_DB_PORT))
   const user = readEnvValue(cwd, "POSTGRES_USER", "supatype_admin")
@@ -175,36 +161,10 @@ export async function resolveHostEngineDatabaseUrl(
 }
 
 async function resolveKongPort(cwd: string): Promise<number> {
-  const envPath = join(cwd, ".env")
-  if (existsSync(envPath)) {
-    const m = readFileSync(envPath, "utf8").match(/^SUPATYPE_KONG_PORT=(\d+)/m)
-    if (m && m[1]) return Number(m[1])
-  }
-  let port = COMPOSE_DEV_KONG_PORT
-  while (await isPortInUse(port)) port++
-  return port
+  return ensureKongPort(cwd, { context: "dev" })
 }
 
-function upsertEnvFile(
-  cwd: string,
-  updates: Record<string, string>,
-  removeKeys: readonly string[] = [],
-): void {
-  const envPath = join(cwd, ".env")
-  const existing = existsSync(envPath) ? readFileSync(envPath, "utf8") : ""
-  const keys = new Set([...Object.keys(updates), ...removeKeys])
-  const kept = existing
-    .split("\n")
-    .filter((line) => {
-      const key = line.split("=")[0]?.trim()
-      return key && line.includes("=") && !keys.has(key)
-    })
-  const merged = [...kept, ...Object.entries(updates).map(([key, value]) => `${key}=${value}`)]
-  writeFileSync(envPath, `${merged.join("\n").trimEnd()}\n`, "utf8")
-}
-
-/** Keep compose + Studio on the same freshly signed dev JWTs; sync optional image pins from config. */
-function ensureDevComposeEnv(
+function upsertDevComposeEnv(
   cwd: string,
   config: SupatypeProjectConfig,
   anonKey: string,
@@ -222,6 +182,7 @@ function ensureDevComposeEnv(
     ANON_KEY: anonKey,
     SERVICE_ROLE_KEY: serviceRoleKey,
     PUBLIC_SUPATYPE_ANON_KEY: anonKey,
+    VITE_SUPATYPE_ANON_KEY: anonKey,
     PUBLIC_SUPATYPE_URL: apiUrl,
     SUPATYPE_KONG_PORT: String(kongPort),
     API_EXTERNAL_URL: apiUrl,
@@ -236,6 +197,18 @@ function ensureDevComposeEnv(
   }
   const removeImageKeys = COMPOSE_PINNED_IMAGE_ENV_KEYS.filter((key) => !(key in imagePins))
   upsertEnvFile(cwd, updates, removeImageKeys)
+}
+
+/** Keep compose + Studio on the same freshly signed dev JWTs; sync optional image pins from config. */
+function ensureDevComposeEnv(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  anonKey: string,
+  serviceRoleKey: string,
+  kongPort: number,
+  devDbPort?: number,
+): void {
+  upsertDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, devDbPort)
 }
 
 async function waitComposeHealthy(paths: SelfHostComposePaths, cwd: string, maxMs: number, composeProject: string): Promise<void> {
@@ -670,6 +643,10 @@ export async function pushSchemaDocker(cwd: string, config: SupatypeProjectConfi
   await waitKongReady(kongPort, 120)
   await provisionDockerStorageBuckets(ast, kongPort, serviceRoleKey)
 
+  await ensureFirstAdminUserForProject(cwd, config, {
+    compose: { project, composePath: paths.composePath },
+  })
+
   console.log("[supatype] Schema pushed.")
 }
 
@@ -693,6 +670,8 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
 
   console.log(`[supatype] provider: docker — starting self-host Compose stack (project ${project}, gateway :${kongPort})...`)
   const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
+  await recoverStaleDevSession(cwd)
+  await handleComposeProjectRename(cwd, config.project.name, paths)
   const devBrand = { intro: "Local development" }
 
   const upStatus = runDockerCompose(paths.composePath, ["up", "-d"], cwd, project, {
@@ -712,6 +691,10 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
     console.error("[supatype] Initial schema push failed:", (e as Error).message),
   )
 
+  await ensureFirstAdminUserForProject(cwd, config, {
+    compose: { project, composePath: paths.composePath },
+  })
+
   console.log("[supatype] Waiting for API gateway...")
   await waitKongReady(kongPort, 120)
 
@@ -722,6 +705,14 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
     projectRef: config.project.name,
     kongPort,
     provider: "docker",
+  })
+
+  writeDevSessionLock(cwd, {
+    composeProject: project,
+    projectRef: config.project.name,
+    composePath: paths.composePath,
+    kongPort,
+    startedAt: new Date().toISOString(),
   })
 
   const ast = loadSchemaAst(schemaPath, cwd)
@@ -785,6 +776,9 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
     } else {
       console.warn(`[supatype] Compose down exited with status ${downStatus}.`)
     }
+  }, {
+    cwd,
+    compose: { cwd, composePath: paths.composePath, composeProject: project },
   })
 
   if (opts.watch) {

@@ -1,4 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest"
+import { mkdtempSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
+import { tmpdir } from "node:os"
 import { DevLogBus } from "../src/dev-log-bus.js"
 import { filterDevSubprocessLine, formatConsoleArgs, stripAnsi } from "../src/dev-log-filter.js"
 import { appendDevTaskLog, beginDevSession, endDevSession, resolveDevUiMode } from "../src/dev-session.js"
@@ -104,9 +107,11 @@ describe("dev-task-colors", () => {
 
 describe("dev-shutdown", () => {
   const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => undefined) as typeof process.exit)
+  const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true)
 
   beforeEach(() => {
     exitSpy.mockClear()
+    stderrSpy.mockClear()
   })
 
   afterEach(() => {
@@ -125,7 +130,7 @@ describe("dev-shutdown", () => {
     expect(ran).toBe(true)
   })
 
-  it("force-exits 130 on second interrupt", async () => {
+  it("warns on second interrupt then force-exits on third", async () => {
     vi.resetModules()
     const { registerDevShutdown, requestDevShutdown } = await import("../src/dev-shutdown.js")
     registerDevShutdown(async () => {
@@ -134,6 +139,24 @@ describe("dev-shutdown", () => {
     requestDevShutdown()
     await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledTimes(0))
     requestDevShutdown()
+    expect(stderrSpy).toHaveBeenCalled()
+    expect(exitSpy).toHaveBeenCalledTimes(0)
+    requestDevShutdown()
     expect(exitSpy).toHaveBeenCalledWith(130)
+  })
+
+  it("registers compose fallback for sync exit cleanup", async () => {
+    vi.resetModules()
+    const { registerDevShutdown, hasComposeShutdownFallback, resetDevShutdownForTests } =
+      await import("../src/dev-shutdown.js")
+    resetDevShutdownForTests()
+    const dir = mkdtempSync(join(tmpdir(), "supatype-shutdown-"))
+    const composePath = join(dir, "docker-compose.yml")
+    writeFileSync(composePath, "services: {}\n", "utf8")
+    registerDevShutdown(async () => undefined, {
+      cwd: dir,
+      compose: { cwd: dir, composePath, composeProject: "supatype-test" },
+    })
+    expect(hasComposeShutdownFallback()).toBe(true)
   })
 })

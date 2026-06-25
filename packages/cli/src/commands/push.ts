@@ -8,7 +8,7 @@ import { printDiffOperations, printDiffWarnings } from "../diff-output.js"
 import { signJwt } from "../jwt.js"
 import { provisionBucketsFromAst } from "../storage-provision.js"
 import type { ExtractedSchemaAstV2 } from "../schema-ast-v2.js"
-import { promptFirstAdminUser } from "./admin.js"
+import { ensureFirstAdminUser } from "./admin.js"
 import { withAdminRoles } from "../studio-admin-roles.js"
 import { restoreSystemRelationTargets } from "../restore-system-relation-targets.js"
 import type { SupatypeProjectConfig } from "../project-config.js"
@@ -145,8 +145,8 @@ async function pushViaTarget(
 
   if (target.mode === "direct" || target.mode === "local") {
     await writeLocalAdminConfig(ast, config)
-    if (ops.length > 0 && target.databaseUrl) {
-      await promptFirstAdminUser(target.databaseUrl)
+    if (target.databaseUrl) {
+      await ensureFirstAdminUser(target.databaseUrl, { cwd })
     }
     await generateTypesLocal(ast, config)
     await provisionLocalStorage(ast, config)

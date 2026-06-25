@@ -86,7 +86,10 @@ Add `@supatype/client` when wiring a frontend. Run `supatype push` after schema 
 | Error | Fix |
 |-------|-----|
 | Docker not running | Start Docker before `supatype dev` |
-| Port in use | Check `SUPATYPE_KONG_PORT`; stop other Supatype projects |
+| Port in use | `supatype dev` prompts for another port, or set a unique `SUPATYPE_KONG_PORT` per project in `.env` |
+| Wrong project / holding page | Another stack may own your Kong port — use the URL from `supatype dev` output |
+| Docker still running after dev | Run `supatype self-host compose down`; check Docker Desktop for orphaned `supatype-*` stacks |
+| Renamed project, old containers | Next `supatype dev` offers to stop the old stack; or `docker compose -p supatype-<old-name> down` |
 | Missing JWT keys | `supatype keys` → update `.env` |
 | No supatype.config.ts | `supatype init` |
 | Types out of sync | `supatype push` or `supatype generate` |
