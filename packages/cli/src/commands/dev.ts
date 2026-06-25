@@ -266,6 +266,9 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
         (e: unknown) => console.error("[supatype] Initial schema push failed:", (e as Error).message),
       )
 
+      const { ensureFirstAdminUser } = await import("./admin.js")
+      await ensureFirstAdminUser(dbURL, { cwd })
+
       // ── 10. Spawn supatype-server ─────────────────────────────────────────
 
       // Resolve edge functions config: only enable Deno if a functions dir exists.

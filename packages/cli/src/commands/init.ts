@@ -52,6 +52,8 @@ export interface ScaffoldOptions {
   projectName: string
   /** Local development runtime (docker recommended). */
   provider: "docker" | "native"
+  /** Host Kong port when provider is docker (unique per project). */
+  kongPort?: number
   productionTarget: ProductionTarget
   domain?: string
   /** ACME contact email for Let's Encrypt HTTPS (self-host + domain). */
@@ -64,6 +66,9 @@ export interface ScaffoldOptions {
   /** Object storage when deployed to production. */
   storageProduction: "local" | "s3"
   helloFunction: boolean
+  /** When set, written to .env for first dev/push to create the admin panel user. */
+  adminEmail?: string
+  adminPassword?: string
 }
 
 type StorageProvider = ScaffoldOptions["storageLocal"]
@@ -126,6 +131,9 @@ interface InitCliOptions {
   defaults?: boolean
   install: boolean
   keys: boolean
+  adminEmail?: string
+  adminPassword?: string
+  admin?: boolean
 }
 
 export function registerInit(program: Command): void {
@@ -140,6 +148,9 @@ export function registerInit(program: Command): void {
     .option("-y, --defaults", "Skip all prompts and use sensible defaults")
     .option("--no-install", "Do not run the package manager install step")
     .option("--no-keys", "Do not generate ANON_KEY / SERVICE_ROLE_KEY")
+    .option("--admin-email <email>", "First admin panel user email (written to .env)")
+    .option("--admin-password <password>", "First admin panel user password (written to .env)")
+    .option("--no-admin", "Do not configure a first admin user")
     .action(async (name: string | undefined, opts: InitCliOptions) => {
       const dir = name ? resolve(process.cwd(), name) : process.cwd()
 
@@ -164,6 +175,23 @@ export function registerInit(program: Command): void {
           install: true,
           generateKeys: true,
         }
+        if (result.provider === "docker") {
+          const { findNextFreePort } = await import("../dev-ports.js")
+          const { COMPOSE_DEV_KONG_PORT } = await import("../project-config.js")
+          result.kongPort = await findNextFreePort(COMPOSE_DEV_KONG_PORT)
+        }
+        if (!opts.admin && opts.adminEmail && opts.adminPassword) {
+          result.adminEmail = opts.adminEmail
+          result.adminPassword = opts.adminPassword
+        }
+      }
+
+      if (opts.admin === false) {
+        delete result.adminEmail
+        delete result.adminPassword
+      } else if (opts.adminEmail && opts.adminPassword) {
+        result.adminEmail = opts.adminEmail
+        result.adminPassword = opts.adminPassword
       }
 
       // CLI flags override wizard / default action choices.
@@ -262,6 +290,12 @@ async function runWizard(
     }),
   )
 
+  let kongPort: number | undefined
+  if (provider === "docker") {
+    const { promptKongPortChoice } = await import("../dev-ports.js")
+    kongPort = await promptKongPortChoice()
+  }
+
   const schemaPath = ensureNotCancelled(
     await p.text({
       message: "Where should your schema live?",
@@ -322,11 +356,43 @@ async function runWizard(
     }),
   )
 
+  let adminEmail: string | undefined
+  let adminPassword: string | undefined
+  const createAdmin = ensureNotCancelled(
+    await p.confirm({
+      message: "Create an admin user for /admin?",
+      initialValue: true,
+    }),
+  )
+  if (createAdmin) {
+    adminEmail =
+      ensureNotCancelled(
+        await p.text({
+          message: "Admin email",
+          placeholder: "you@example.com",
+          defaultValue: "",
+        }),
+      ).trim() || undefined
+    if (adminEmail) {
+      adminPassword =
+        ensureNotCancelled(
+          await p.text({
+            message: "Admin password (min 8 chars)",
+            defaultValue: "",
+          }),
+        ).trim() || undefined
+      if (adminPassword && adminPassword.length < 8) {
+        adminPassword = undefined
+      }
+    }
+  }
+
   p.outro("Setting up your project...")
 
   return {
     projectName,
     provider,
+    ...(kongPort !== undefined ? { kongPort } : {}),
     productionTarget,
     ...(domain !== undefined ? { domain } : {}),
     ...(tlsEmail !== undefined ? { tlsEmail } : {}),
@@ -339,6 +405,7 @@ async function runWizard(
     packageManager,
     install,
     generateKeys,
+    ...(adminEmail && adminPassword ? { adminEmail, adminPassword } : {}),
   }
 }
 
@@ -910,8 +977,26 @@ SERVICE_ROLE_KEY=`)
   sections.push(`# Site URL (used by GoTrue for email redirects)
 SITE_URL=http://localhost:3000`)
 
+  if (opts.provider === "docker" && opts.kongPort !== undefined) {
+    const apiUrl = `http://localhost:${opts.kongPort}`
+    sections.push(
+      `# Local API gateway (Kong) — unique per project so multiple stacks can run concurrently
+SUPATYPE_KONG_PORT=${opts.kongPort}
+PUBLIC_SUPATYPE_URL=${apiUrl}
+API_EXTERNAL_URL=${apiUrl}`,
+    )
+  }
+
   sections.push(emailEnvSection(opts.email, opts.projectName))
   sections.push(storageEnvSections(opts.storageLocal, opts.storageProduction))
+
+  if (opts.adminEmail && opts.adminPassword) {
+    sections.push(
+      `# First admin for /admin — consumed on first supatype dev or push (password removed after use)
+SUPATYPE_ADMIN_EMAIL=${opts.adminEmail}
+SUPATYPE_ADMIN_PASSWORD=${opts.adminPassword}`,
+    )
+  }
 
   sections.push(
     `# Self-host compose uses the same DATABASE_URL when Postgres is published on localhost:5432`,
@@ -1106,8 +1191,15 @@ function printNextSteps(args: {
   if (name) steps.push(`cd ${name}`)
   if (!installed) steps.push(`${result.packageManager} install`)
   if (!keysGenerated) steps.push("supatype keys")
-  steps.push("supatype dev          # Docker Compose stack (Kong :18473)")
+  const kongHint =
+    result.provider === "docker" && result.kongPort !== undefined
+      ? `supatype dev          # Docker Compose stack (Kong :${result.kongPort})`
+      : "supatype dev          # Docker Compose stack (Kong :18473)"
+  steps.push(kongHint)
   steps.push("supatype push         # apply schema + generate types")
+  if (result.adminEmail) {
+    steps.push("                      # first admin user is created on dev or push")
+  }
   if (result.helloFunction) {
     steps.push("supatype functions serve   # run edge functions locally")
   }

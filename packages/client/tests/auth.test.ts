@@ -349,3 +349,70 @@ describe("AuthClient.getSession() / getUser()", () => {
     expect((opts.headers as Record<string, string>)["Authorization"]).toContain("Bearer access-token-123")
   })
 })
+
+describe("AuthClient.refreshSession()", () => {
+  beforeEach(() => vi.restoreAllMocks())
+
+  it("clears session and emits SIGNED_OUT when refresh fails", async () => {
+    const events: string[] = []
+    const client = freshClient()
+    client.onAuthStateChange((event) => events.push(event))
+
+    vi.stubGlobal("fetch", mockFetch(TOKEN_RESPONSE))
+    await client.signInWithPassword({ email: "a@b.com", password: "pass" })
+    events.length = 0
+
+    vi.stubGlobal("fetch", mockFetch({ error_description: "Invalid Refresh Token" }, false, 400))
+    const { data, error } = await client.refreshSession()
+
+    expect(error?.message).toBe("Invalid Refresh Token")
+    expect(data.session).toBeNull()
+    const { data: sessionAfter } = await client.getSession()
+    expect(sessionAfter.session).toBeNull()
+    expect(events).toContain("SIGNED_OUT")
+  })
+})
+
+describe("AuthClient stale persisted session", () => {
+  let store: Map<string, string>
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    store = new Map<string, string>()
+    const localStorage = {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        store.set(key, value)
+      },
+      removeItem: (key: string) => {
+        store.delete(key)
+      },
+    }
+    vi.stubGlobal("localStorage", localStorage)
+    vi.stubGlobal("window", { localStorage, location: { protocol: "http:" } })
+    vi.stubGlobal("document", { cookie: "" })
+  })
+
+  it("getSession clears persisted session when refresh fails for expired token", async () => {
+    const expiredSession = {
+      access_token: "old-access",
+      refresh_token: "old-refresh",
+      token_type: "bearer",
+      expires_in: 3600,
+      expires_at: Math.floor(Date.now() / 1000) - 60,
+      user: RAW_USER,
+    }
+    store.set("supatype.auth.session", JSON.stringify(expiredSession))
+
+    const events: string[] = []
+    const client = new AuthClient(GOTRUE_URL, HEADERS)
+    client.onAuthStateChange((event) => events.push(event))
+
+    vi.stubGlobal("fetch", mockFetch({ error_description: "Invalid Refresh Token" }, false, 400))
+    const { data } = await client.getSession()
+
+    expect(data.session).toBeNull()
+    expect(store.get("supatype.auth.session")).toBeUndefined()
+    expect(events).toContain("SIGNED_OUT")
+  })
+})

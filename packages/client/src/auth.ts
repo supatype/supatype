@@ -41,6 +41,8 @@ export class AuthClient {
   private readonly storage: AuthStorageAdapter | null
   /** Pending auto-refresh timer; refreshes the access token shortly before it expires. */
   private refreshTimer: ReturnType<typeof setTimeout> | null = null
+  /** Dedupes concurrent refresh attempts (getSession + auto-refresh). */
+  private refreshInFlight: Promise<void> | null = null
 
   constructor(url: string, baseHeaders: Record<string, string>, opts: AuthClientOptions = {}) {
     this.url = url
@@ -73,6 +75,58 @@ export class AuthClient {
     // Keep the access token fresh while the app is open (and refresh immediately
     // if a persisted session loaded already expired).
     this.scheduleAutoRefresh()
+    if (this.currentSession !== null && this.isAccessTokenExpired(this.currentSession)) {
+      void this.ensureValidSession()
+    }
+  }
+
+  /** Milliseconds since epoch when the access token expires (with optional skew). */
+  private sessionExpiresAtMs(session: Session): number | null {
+    if (session.expiresAt !== undefined) return session.expiresAt * 1000
+    const exp = this.jwtExpMs(session.accessToken)
+    if (exp !== null) return exp
+    return null
+  }
+
+  private jwtExpMs(accessToken: string): number | null {
+    const parts = accessToken.split(".")
+    if (parts.length !== 3) return null
+    try {
+      const payload = JSON.parse(atob(parts[1]!)) as Record<string, unknown>
+      const exp = payload["exp"]
+      return typeof exp === "number" ? exp * 1000 : null
+    } catch {
+      return null
+    }
+  }
+
+  private isAccessTokenExpired(session: Session, skewMs = 0): boolean {
+    const expiresAtMs = this.sessionExpiresAtMs(session)
+    if (expiresAtMs === null) return false
+    return Date.now() >= expiresAtMs - skewMs
+  }
+
+  /**
+   * Refresh when the access token is expired. Clears the session if refresh fails
+   * so callers never keep using a dead JWT (avoids stuck authenticated UI state).
+   */
+  private async ensureValidSession(): Promise<void> {
+    const session = this.currentSession
+    if (session === null || !this.isAccessTokenExpired(session)) return
+    if (!session.refreshToken?.trim()) {
+      this._setSession(null)
+      return
+    }
+    if (this.refreshInFlight) {
+      await this.refreshInFlight
+      return
+    }
+    this.refreshInFlight = this.refreshSession()
+      .then(() => undefined)
+      .finally(() => {
+        this.refreshInFlight = null
+      })
+    await this.refreshInFlight
   }
 
   /** Schedule a token refresh ~60s before the current session expires. */
@@ -85,16 +139,15 @@ export class AuthClient {
     const session = this.currentSession
     if (session === null || !session.refreshToken) return
 
-    const expiryMs =
-      session.expiresAt !== undefined
-        ? session.expiresAt * 1000
-        : Date.now() + (session.expiresIn || 3600) * 1000
-    const delay = Math.max(0, expiryMs - Date.now() - 60_000)
+    const expiryMs = this.sessionExpiresAtMs(session)
+    const delay =
+      expiryMs === null
+        ? Math.max(0, (session.expiresIn || 3600) * 1000 - 60_000)
+        : Math.max(0, expiryMs - Date.now() - 60_000)
 
     this.refreshTimer = setTimeout(() => {
       this.refreshTimer = null
-      // refreshSession() flows through _setSession on success, which reschedules.
-      void this.refreshSession().catch(() => undefined)
+      void this.ensureValidSession()
     }, delay)
     // Avoid keeping a Node process alive for this timer (no-op in browsers).
     ;(this.refreshTimer as unknown as { unref?: () => void }).unref?.()
@@ -243,6 +296,7 @@ export class AuthClient {
     data: { session: Session | null }
     error: SupatypeError | null
   }> {
+    await this.ensureValidSession()
     return { data: { session: this.currentSession }, error: null }
   }
 
@@ -276,13 +330,27 @@ export class AuthClient {
     if (this.currentSession === null) {
       return { data: { session: null }, error: { message: "No active session" } }
     }
-    const res = await fetch(`${this.url}/token?grant_type=refresh_token`, {
-      method: "POST",
-      headers: this.baseHeaders,
-      body: JSON.stringify({ refresh_token: this.currentSession.refreshToken }),
-    })
-    const result = await this._parseAuthResponse(res)
-    return { data: { session: result.data.session }, error: result.error }
+    if (!this.currentSession.refreshToken?.trim()) {
+      this._setSession(null)
+      return { data: { session: null }, error: { message: "No refresh token" } }
+    }
+    try {
+      const res = await fetch(`${this.url}/token?grant_type=refresh_token`, {
+        method: "POST",
+        headers: this.baseHeaders,
+        body: JSON.stringify({ refresh_token: this.currentSession.refreshToken }),
+      })
+      if (!res.ok) {
+        const error = await this._parseError(res)
+        this._setSession(null)
+        return { data: { session: null }, error }
+      }
+      return await this._parseAuthResponse(res)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Refresh failed"
+      this._setSession(null)
+      return { data: { session: null }, error: { message } }
+    }
   }
 
   async resetPasswordForEmail(
