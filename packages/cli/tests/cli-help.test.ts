@@ -4,12 +4,15 @@
  */
 import { describe, it, expect } from "vitest"
 import { spawnSync } from "node:child_process"
-import { resolve, dirname } from "node:path"
+import { readFileSync } from "node:fs"
+import { resolve, dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const CLI_BIN = resolve(__dirname, "../bin/supatype.js")
-const DIST_CLI = resolve(__dirname, "../dist/cli.js")
+const PACKAGE_VERSION = (
+  JSON.parse(readFileSync(join(__dirname, "../package.json"), "utf8")) as { version: string }
+).version
 
 function runCli(args: string[]): { stdout: string; stderr: string; exitCode: number } {
   const result = spawnSync(process.execPath, [CLI_BIN, ...args], {
@@ -51,10 +54,10 @@ describe("CLI binary (requires built dist/)", () => {
     }
   })
 
-  it("--version prints a semver string", () => {
+  it("--version prints package.json version", () => {
     const { stdout, exitCode } = runCli(["--version"])
     expect(exitCode).toBe(0)
-    expect(stdout.trim()).toMatch(/^\d+\.\d+\.\d+/)
+    expect(stdout.trim()).toBe(PACKAGE_VERSION)
   })
 
   it("self-update --help describes the command", () => {

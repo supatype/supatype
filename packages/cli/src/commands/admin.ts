@@ -19,8 +19,11 @@ import { readEnvValue, upsertEnvFile } from "../env-file.js"
 import { hasEngineOverride } from "../binary-cache.js"
 import { confirm as uiConfirm } from "../ui/confirm.js"
 import { error, info, plain } from "../ui/messages.js"
-import { promptText } from "../ui/prompts.js"
+import { promptPassword, promptText } from "../ui/prompts.js"
 import { isInteractive } from "../ui/interactive.js"
+import {
+  getActiveDevSession,
+} from "../dev-session.js"
 
 export const ADMIN_EMAIL_ENV = "SUPATYPE_ADMIN_EMAIL"
 export const ADMIN_PASSWORD_ENV = "SUPATYPE_ADMIN_PASSWORD"
@@ -284,9 +287,24 @@ async function ensureFirstAdminWithQuery(
   }
 
   const role = options.role ?? "admin"
-  await createAdminUser(query, credentials.email, credentials.password, role, { quiet: true })
+  try {
+    await createAdminUser(query, credentials.email, credentials.password, role, { quiet: true })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    error(`Failed to create admin user: ${message}`)
+    return
+  }
   clearAdminSeedPassword(cwd)
-  info(`Admin user "${credentials.email}" created (role: ${role}).`)
+  logFirstAdminCreated(credentials.email, role)
+}
+
+function logFirstAdminCreated(email: string, role: string): void {
+  if (getActiveDevSession()?.isTui()) {
+    console.log(`Admin user "${email}" created (role: ${role}).`)
+    console.log("Log in at /admin after starting the dev server.")
+    return
+  }
+  info(`Admin user "${email}" created (role: ${role}).`)
   info("Log in at /admin after starting the dev server.")
 }
 
@@ -325,7 +343,7 @@ async function resolveAdminCredentials(
     return null
   }
 
-  const password = await promptText("Admin password (min 8 chars)")
+  const password = await promptPassword("Admin password (min 8 chars)")
   if (!password || password.length < 8) {
     info("Password too short. Skipping admin user creation.")
     return null
@@ -372,11 +390,11 @@ async function createAdminUser(
 
   const result = await query(
     `INSERT INTO auth.users (
-      email, encrypted_password, role, aud,
+      id, email, encrypted_password, role, aud,
       raw_app_meta_data, raw_user_meta_data,
       email_confirmed_at, created_at, updated_at
     ) VALUES (
-      $1, $2, 'authenticated', 'authenticated',
+      gen_random_uuid(), $1, $2, 'authenticated', 'authenticated',
       $3::jsonb, $4::jsonb,
       now(), now(), now()
     ) RETURNING id, email`,

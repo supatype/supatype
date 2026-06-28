@@ -2,9 +2,13 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest"
 import { mkdtempSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
+
+vi.mock("ink", () => ({
+  render: vi.fn(() => ({ unmount: vi.fn() })),
+}))
 import { DevLogBus } from "../src/dev-log-bus.js"
-import { filterDevSubprocessLine, formatConsoleArgs, stripAnsi } from "../src/dev-log-filter.js"
-import { appendDevTaskLog, beginDevSession, endDevSession, resolveDevUiMode } from "../src/dev-session.js"
+import { filterCommandLogLine, filterDevSubprocessLine, filterStackLogLine, formatConsoleArgs, stripAnsi } from "../src/dev-log-filter.js"
+import { appendDevTaskLog, beginDevSession, endDevSession, getActiveDevSession, resolveDevUiMode, withDevSessionSuspended } from "../src/dev-session.js"
 import {
   layoutLogoBlock,
   logoRowCount,
@@ -22,6 +26,28 @@ describe("filterDevSubprocessLine()", () => {
 
   it("does not filter stack logs", () => {
     expect(filterDevSubprocessLine("stack", "> vite")).toBe(true)
+  })
+})
+
+describe("filterStackLogLine()", () => {
+  it("drops docker build progress but keeps supatype messages", () => {
+    expect(filterStackLogLine("#1 [internal] load build definition from Dockerfile")).toBe(false)
+    expect(filterStackLogLine(" Container supatype-demo-db-1 Running")).toBe(false)
+    expect(filterStackLogLine("[supatype] Waiting for Postgres (compose)...")).toBe(true)
+    expect(filterStackLogLine("Services running.")).toBe(true)
+    expect(filterStackLogLine("  API (Kong)       http://localhost:18473")).toBe(true)
+  })
+
+  it("keeps override banner lines", () => {
+    expect(filterStackLogLine("  engine       → ../supatype-schema-engine/bin/engine")).toBe(true)
+  })
+})
+
+describe("filterCommandLogLine()", () => {
+  it("keeps diff output but drops docker container progress", () => {
+    expect(filterCommandLogLine("  [+] add_column users.email")).toBe(true)
+    expect(filterCommandLogLine(" Container supatype-demo-db-1 Running")).toBe(false)
+    expect(filterCommandLogLine("[supatype] Schema pushed.")).toBe(true)
   })
 })
 
@@ -77,6 +103,20 @@ describe("appendDevTaskLog()", () => {
     appendDevTaskLog("app", "app", "Proxy mode: running npm run vite (/tmp/app)")
     expect(session.bus.getTask("app")?.lines).toEqual(["Proxy mode: running npm run vite (/tmp/app)"])
     expect(session.bus.getTask("stack")?.lines ?? []).toEqual([])
+  })
+
+  it("captures console.log to the bus before ink mounts", () => {
+    beginDevSession("tui")
+    console.log("[supatype] bootstrap line")
+    expect(getActiveDevSession()?.bus.getTask("stack")?.lines).toEqual(["bootstrap line"])
+    expect(getActiveDevSession()?.isInkMounted()).toBe(true)
+  })
+
+  it("withDevSessionSuspended is a no-op during bootstrap", async () => {
+    beginDevSession("tui")
+    await withDevSessionSuspended(async () => "ok")
+    expect(getActiveDevSession()?.isConsoleCaptured()).toBe(true)
+    expect(getActiveDevSession()?.isInkMounted()).toBe(true)
   })
 })
 

@@ -109,8 +109,9 @@ export class AuthClient {
   /**
    * Refresh when the access token is expired. Clears the session if refresh fails
    * so callers never keep using a dead JWT (avoids stuck authenticated UI state).
+   * Safe to call before REST/RPC requests; no-op when signed out or token is valid.
    */
-  private async ensureValidSession(): Promise<void> {
+  async ensureValidSession(): Promise<void> {
     const session = this.currentSession
     if (session === null || !this.isAccessTokenExpired(session)) return
     if (!session.refreshToken?.trim()) {

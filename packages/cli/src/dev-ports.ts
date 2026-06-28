@@ -4,7 +4,7 @@
  * availability so multiple projects and port collisions are surfaced clearly.
  */
 
-import * as p from "@clack/prompts"
+import { CLACK_CANCEL, isCancel, p } from "./ui/clack.js"
 import { COMPOSE_DEV_KONG_PORT } from "./project-config.js"
 import { isPortInUse } from "./postgres-ctl.js"
 import { readEnvInt, upsertEnvFile } from "./env-file.js"
@@ -119,7 +119,7 @@ export async function promptKongPortChoice(): Promise<number> {
     },
   })
 
-  if (p.isCancel(value)) {
+  if (isCancel(value)) {
     p.cancel("Cancelled.")
     process.exit(0)
   }
@@ -154,7 +154,7 @@ async function promptPortConflictWithoutPersist(
     ],
   })
 
-  if (p.isCancel(choice) || choice === "cancel") {
+  if (isCancel(choice) || choice === "cancel") {
     p.cancel("Cancelled.")
     process.exit(0)
   }
@@ -171,7 +171,7 @@ async function promptPortConflictWithoutPersist(
     },
   })
 
-  if (p.isCancel(custom)) {
+  if (isCancel(custom)) {
     p.cancel("Cancelled.")
     process.exit(0)
   }
@@ -194,19 +194,30 @@ async function promptPortConflictWithoutPersist(
 
 const COMPOSE_DEV_DB_PORT = 54329
 
+function devDbConnectionUrl(port: number): string {
+  return `postgresql://supatype_admin:postgres@localhost:${port}/supatype?sslmode=disable`
+}
+
 export async function ensureDevDbPort(cwd: string): Promise<number> {
   const persisted = readEnvInt(cwd, "SUPATYPE_DEV_DB_PORT")
+
+  const persist = (port: number): number => {
+    upsertEnvFile(cwd, {
+      SUPATYPE_DEV_DB_PORT: String(port),
+      DATABASE_URL: devDbConnectionUrl(port),
+    })
+    return port
+  }
+
   if (persisted !== null) {
     if (!(await isPortInUse(persisted))) return persisted
     const next = await findNextFreePort(persisted + 1)
-    upsertEnvFile(cwd, {
-      SUPATYPE_DEV_DB_PORT: String(next),
-      DATABASE_URL: `postgresql://supatype_admin:postgres@localhost:${next}/supatype?sslmode=disable`,
-    })
-    return next
+    return persist(next)
   }
 
   let port = COMPOSE_DEV_DB_PORT
-  while (await isPortInUse(port)) port++
-  return port
+  if (await isPortInUse(port)) {
+    port = await findNextFreePort(port + 1)
+  }
+  return persist(port)
 }

@@ -7,7 +7,7 @@ import { platform } from "node:os"
 import { endDevSession, getActiveDevSession } from "./dev-session.js"
 import { isInteractive } from "./ui/interactive.js"
 import { error, plain } from "./ui/messages.js"
-import { clack as p, printLogo } from "./ui/prompts.js"
+import { p, printLogo } from "./ui/prompts.js"
 
 export type DockerDaemonProbe =
   | { ok: true }

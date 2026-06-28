@@ -1,4 +1,4 @@
-export * from "./brand.js"
+export * from "./theme.js"
 export * from "./interactive.js"
 export * from "./messages.js"
 export * from "./fatal.js"

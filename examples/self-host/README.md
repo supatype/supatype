@@ -24,9 +24,10 @@ Supatype image overrides in `.env` let you pin beta tags:
 - `SUPATYPE_POSTGRES_IMAGE`
 - `SUPATYPE_SERVER_IMAGE`
 - `SUPATYPE_STORAGE_IMAGE`
-- `SUPATYPE_REALTIME_IMAGE`
+- `SUPATYPE_FUNCTIONS_WORKER_IMAGE`
+- `SUPATYPE_CONTROL_PLANE_IMAGE`
 - `SUPATYPE_STUDIO_IMAGE`
-- `SUPATYPE_SCHEMA_ENGINE_IMAGE`
+- `SUPATYPE_ENGINE_IMAGE` (schema-engine; compose `tools` profile)
 
 If unset, compose defaults are used.
 

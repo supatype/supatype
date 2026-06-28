@@ -21,8 +21,28 @@ let shuttingDown = false
 let shutdownCompleted = false
 let forceQuitRequested = false
 let hooksRegistered = false
+let ignoreSigintUntil = 0
+
+/** SIGINT/SIGTERM hooks — call as soon as `supatype dev` starts (before compose is up). */
+export function ensureDevShutdownHooks(): void {
+  if (hooksRegistered) return
+  hooksRegistered = true
+
+  process.on("SIGINT", onSignal)
+  process.on("SIGTERM", onSignal)
+  if (process.platform === "win32") {
+    process.on("SIGBREAK", onSignal)
+  }
+  process.on("exit", onProcessExit)
+
+  if (process.stdin.isTTY) {
+    process.stdin.on("end", onStdinClose)
+    process.stdin.on("close", onStdinClose)
+  }
+}
 
 function onSignal(): void {
+  if (Date.now() < ignoreSigintUntil) return
   void runDevShutdown()
 }
 
@@ -66,25 +86,12 @@ export function registerDevShutdown(
   shutdownWork = work
   composeFallback = opts?.compose ?? null
   shutdownCwd = opts?.cwd ?? opts?.compose?.cwd ?? null
-
-  if (hooksRegistered) return
-  hooksRegistered = true
-
-  process.on("SIGINT", onSignal)
-  process.on("SIGTERM", onSignal)
-  if (process.platform === "win32") {
-    process.on("SIGBREAK", onSignal)
-  }
-  process.on("exit", onProcessExit)
-
-  if (process.stdin.isTTY) {
-    process.stdin.on("end", onStdinClose)
-    process.stdin.on("close", onStdinClose)
-  }
+  ensureDevShutdownHooks()
 }
 
 /** TUI Ctrl+C — do not re-emit SIGINT (avoids double-fire on Windows raw mode). */
 export function requestDevShutdown(): void {
+  ignoreSigintUntil = Date.now() + 400
   void runDevShutdown()
 }
 
@@ -101,6 +108,7 @@ export function resetDevShutdownForTests(): void {
   shutdownCompleted = false
   forceQuitRequested = false
   hooksRegistered = false
+  ignoreSigintUntil = 0
 }
 
 async function runDevShutdown(): Promise<void> {
@@ -125,8 +133,12 @@ async function runDevShutdown(): Promise<void> {
 
   try {
     endDevSession()
-    process.stdout.write("\n")
-    await shutdownWork?.()
+    process.stderr.write("\n[supatype] Shutting down…\n")
+    if (!shutdownWork) {
+      if (shutdownCwd) clearDevSessionLock(shutdownCwd)
+      process.exit(130)
+    }
+    await shutdownWork()
     shutdownCompleted = true
     if (shutdownCwd) clearDevSessionLock(shutdownCwd)
     process.exit(0)

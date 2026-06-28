@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" type="image/svg+xml" href="supatype-icon.svg" />
   <link rel="apple-touch-icon" href="supatype-icon.svg" />
-  <title>Supatype — Define your types. We generate your backend.</title>
-  <meta name="description" content="TypeScript schema as your single source of truth. Supatype generates your Postgres database, REST API, auth, storage, realtime, and admin panel — automatically." />
-  <meta property="og:title" content="Supatype — Define your types. We generate your backend." />
-  <meta property="og:description" content="TypeScript schema as your single source of truth. Postgres, REST API, auth, storage, realtime, and CMS — all generated." />
+  <title>Supatype — Define your types. We generate your platform.</title>
+  <meta name="description" content="Type-first platform for PostgreSQL. Define Model types in TypeScript — Supatype generates your database, API, auth, storage, realtime, and Studio CMS." />
+  <meta property="og:title" content="Supatype — Define your types. We generate your platform." />
+  <meta property="og:description" content="Type-first platform for PostgreSQL. Database, API, auth, storage, realtime, and CMS — all generated from your types." />
   <meta property="og:type" content="website" />
   <meta name="twitter:card" content="summary_large_image" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -902,7 +902,7 @@ supatype keys</pre>
 
       <div class="guide-step">
         <h4>3 · Start Compose</h4>
-        <p>Defaults use <code>:latest</code> on Docker Hub (<code>supatype/server</code>, <code>supatype/storage</code>, <code>supatype/realtime</code>, <code>supatype/studio</code>, <code>supatype/schema-engine</code>, <code>supatype/postgres:17-latest</code>). Pin via <code>SUPATYPE_*_IMAGE</code> in <code>.env</code> only if needed.</p>
+        <p>Defaults use <code>:latest</code> on Docker Hub (<code>supatype/postgres:17-latest</code>, <code>supatype/server</code>, <code>supatype/storage</code>, <code>supatype/studio</code>, <code>supatype/schema-engine</code>, <code>supatype/functions-worker</code>, <code>supatype/control-plane</code>). Realtime runs inside <code>supatype/server</code>. Pin via <code>SUPATYPE_*_IMAGE</code> in <code>.env</code> only if needed.</p>
         <pre class="guide-pre">supatype self-host compose render
 supatype self-host compose up -d
 supatype push</pre>

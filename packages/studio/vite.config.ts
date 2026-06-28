@@ -45,6 +45,7 @@ export default defineConfig({
     proxy: process.env.SUPATYPE_PROXY_TARGET
       ? {
           "/studio-config": { target: process.env.SUPATYPE_PROXY_TARGET, changeOrigin: true },
+          "/studio/proxy":  { target: process.env.SUPATYPE_PROXY_TARGET, changeOrigin: true },
           "/auth/":         { target: process.env.SUPATYPE_PROXY_TARGET, changeOrigin: true },
           // Go auth server: REST/GraphQL config + database credential status (Settings → Database)
           "/admin":         { target: process.env.SUPATYPE_PROXY_TARGET, changeOrigin: true },

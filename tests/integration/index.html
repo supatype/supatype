@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Supatype integration demo</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Supatype blog demo</h1>
+        <p class="lede">Public posts loaded via REST with server-side cache.</p>
+      </header>
+      <div class="toolbar">
+        <button type="button" id="reload">Reload posts</button>
+        <span id="cache-status" class="badge">—</span>
+      </div>
+      <ul id="posts"></ul>
+      <p id="error" class="error" hidden></p>
+    </main>
+    <script type="module" src="/main.ts"></script>
+  </body>
+</html>

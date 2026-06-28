@@ -28,7 +28,10 @@ const runtimeConfig: RuntimeConfig =
     (window as unknown as { __SUPATYPE_CLOUD__?: RuntimeConfig }).__SUPATYPE_CLOUD__) || {}
 
 function resolveApiBase(): string {
-  return runtimeConfig.url ?? import.meta.env.VITE_SUPATYPE_URL ?? "http://localhost:18473"
+  if (runtimeConfig.url) return runtimeConfig.url
+  // Same-origin in the browser: works via Vite (:3002) or Kong (/studio/) without CORS.
+  if (typeof window !== "undefined") return window.location.origin
+  return import.meta.env.VITE_SUPATYPE_URL ?? "http://localhost:18473"
 }
 
 function resolveAnonKey(): string {

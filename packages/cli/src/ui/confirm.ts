@@ -1,5 +1,5 @@
-import * as p from "@clack/prompts"
 import { isInteractive } from "./interactive.js"
+import { CLACK_CANCEL, isCancel, p } from "./clack.js"
 import { plain } from "./messages.js"
 
 export interface ConfirmOptions {
@@ -9,7 +9,7 @@ export interface ConfirmOptions {
 }
 
 /**
- * Yes/no confirmation — Clack in TTY, plain prompt or default otherwise.
+ * Yes/no confirmation — Ink overlay in dev, Ink flow in TTY, default otherwise.
  */
 export async function confirm(message: string, opts: ConfirmOptions = {}): Promise<boolean> {
   const fallback = opts.nonInteractive ?? opts.default ?? false
@@ -24,9 +24,8 @@ export async function confirm(message: string, opts: ConfirmOptions = {}): Promi
     initialValue: opts.default ?? false,
   })
 
-  if (p.isCancel(value)) {
+  if (isCancel(value)) {
     p.cancel("Cancelled.")
-    process.exit(0)
   }
 
   return value
@@ -36,3 +35,5 @@ export async function confirm(message: string, opts: ConfirmOptions = {}): Promi
 export function logSkippedConfirm(reason: string): void {
   plain(`${reason} (use --yes to skip confirmation)`)
 }
+
+export { isCancel, CLACK_CANCEL } from "./clack.js"

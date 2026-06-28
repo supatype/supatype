@@ -1,9 +1,9 @@
 import type { Command } from "commander"
-import * as p from "@clack/prompts"
+import { p, runClackFlow } from "../ui/clack.js"
 import { loadConfig } from "../config.js"
 import { selfHostTlsEnabled } from "../project-config.js"
 import { updateServerConfigInProject } from "../app-config.js"
-import { ensureNotCancelled, printLogo } from "../ui/prompts.js"
+import { ensureNotCancelled } from "../ui/prompts.js"
 import { file, error, info, plain } from "../ui/messages.js"
 import { nextSteps } from "../ui/next-steps.js"
 
@@ -49,26 +49,33 @@ async function addDomain(domainArg?: string, emailArg?: string): Promise<void> {
   const cwd = process.cwd()
   const interactive = !domainArg?.trim() || !emailArg?.trim()
 
-  if (interactive) {
-    printLogo()
-    p.intro("Add a custom domain")
-  }
+  const run = async (): Promise<void> => {
+    const domain = await promptDomain(domainArg)
+    const email = await promptEmail(emailArg)
 
-  const domain = await promptDomain(domainArg)
-  const email = await promptEmail(emailArg)
-
-  try {
-    const configPath = updateServerConfigInProject(cwd, { domain, tlsEmail: email })
-    if (interactive) {
-      p.outro(`Updated ${configPath}`)
-    } else {
-      file("updated", configPath)
+    try {
+      const configPath = updateServerConfigInProject(cwd, { domain, tlsEmail: email })
+      if (interactive) {
+        p.outro(`Updated ${configPath}`)
+      } else {
+        file("updated", configPath)
+      }
+      printDomainNextSteps(cwd, domain)
+    } catch (err) {
+      error((err as Error).message)
+      process.exit(1)
     }
-    printDomainNextSteps(cwd, domain)
-  } catch (err) {
-    error((err as Error).message)
-    process.exit(1)
   }
+
+  if (interactive) {
+    await runClackFlow(async () => {
+      p.intro("Add a custom domain")
+      await run()
+    })
+    return
+  }
+
+  await run()
 }
 
 function printDomainNextSteps(cwd: string, domain: string): void {

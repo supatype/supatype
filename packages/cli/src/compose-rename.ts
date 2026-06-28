@@ -4,12 +4,12 @@
 
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
-import * as p from "@clack/prompts"
 import { loadLocalEnvironment } from "./link.js"
 import { composeStackHasContainers } from "./dev-session-lock.js"
 import { composeProjectName, runDockerCompose, type SelfHostComposePaths } from "./self-host-compose.js"
+import { confirm as uiConfirm } from "./ui/confirm.js"
 import { isInteractive } from "./ui/interactive.js"
-import { warn } from "./ui/messages.js"
+import { success, warn } from "./ui/messages.js"
 
 /**
  * When `project.name` changes, the compose project slug changes too (`supatype-{name}`).
@@ -39,19 +39,16 @@ export async function handleComposeProjectRename(
     return
   }
 
-  const stopOld = await p.confirm({
-    message: `${message}\n\nStop the old Docker stack now?`,
-    initialValue: true,
-  })
+  const stopOld = await uiConfirm(`${message}\n\nStop the old Docker stack now?`, { default: true })
 
-  if (p.isCancel(stopOld) || !stopOld) {
+  if (!stopOld) {
     warn(`Leaving "${previousCompose}" running. Stop it with: docker compose -p ${previousCompose} down`)
     return
   }
 
   const status = runDockerCompose(paths.composePath, ["down"], cwd, previousCompose, { quiet: true })
   if (status === 0) {
-    p.log.success(`Stopped old stack "${previousCompose}".`)
+    success(`Stopped old stack "${previousCompose}".`)
     warnIfHardcodedComposeScripts(cwd, previousCompose)
   } else {
     warn(`Could not stop "${previousCompose}" (exit ${status}). Try: docker compose -p ${previousCompose} down`)

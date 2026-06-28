@@ -46,7 +46,7 @@ Auth flag: `--token` (cloud = platform PAT; self-host = `SERVICE_ROLE_KEY`). `--
 | `supatype db connection-string` | Show DB URL (cloud linked projects) |
 | `supatype db reset-password` | Reset cloud project DB password |
 | `supatype pg` | Postgres helpers |
-| `supatype pull` | **Removed**: type-first mode uses `schema/index.ts` as source of truth |
+| `supatype pull` | Draft `schema/index.ts` from live DB introspection (review before push). Flags: `--connection`, `--out`, `--dry-run` |
 
 ## App and deploy
 
@@ -81,6 +81,7 @@ Auth flag: `--token` (cloud = platform PAT; self-host = `SERVICE_ROLE_KEY`). `--
 | `supatype admin` | Admin user provisioning |
 | `supatype update` | Update pinned component versions |
 | `supatype cache` | Binary/image cache management |
+| REST GET cache | See [caching.md](caching.md) — `.cache({ ttl, server })` on queries |
 | `supatype engine` | Schema engine utilities |
 
 ## Local Docker dev — ports, multiple projects, shutdown

@@ -1,8 +1,7 @@
-import * as p from "@clack/prompts"
 import type { DockerBrandOptions } from "../docker-runtime.js"
 import { isInteractive } from "./interactive.js"
 import { error, plain } from "./messages.js"
-import { clack, printLogo } from "./prompts.js"
+import { printLogo } from "./prompts.js"
 
 export type FatalOptions = {
   brand?: DockerBrandOptions
@@ -13,19 +12,15 @@ export type FatalOptions = {
 export function fatalError(message: string, hints: string[] = [], opts?: FatalOptions): never {
   if (opts?.brand && isInteractive()) {
     printLogo()
-    clack.intro(opts.brand.intro)
+    plain(opts.brand.intro)
   }
 
   error(message)
 
   if (hints.length > 0) {
-    if (isInteractive()) {
-      p.note(hints.join("\n\n"))
-    } else {
-      for (const hint of hints) {
-        plain()
-        plain(`  ${hint}`)
-      }
+    for (const hint of hints) {
+      plain()
+      plain(`  ${hint}`)
     }
   }
 

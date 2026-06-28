@@ -23,7 +23,7 @@ export default defineConfig({
 
 ## Self-host scaffold (`supatype init --mode standalone`)
 
-Matches **`test-app`**:
+End-user layout from `supatype init --mode standalone` (maintainer compose fixture: **`examples/self-host/`**):
 
 ```typescript
 export default defineConfig({

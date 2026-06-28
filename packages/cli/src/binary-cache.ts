@@ -37,6 +37,12 @@ import { basename, join, resolve, isAbsolute } from "node:path"
 import type { SupatypeProjectConfig } from "./project-config.js"
 import { loadProjectLink, migrateLegacyLinkFiles } from "./link.js"
 import { releasePublicKey } from "./release-public-key.js"
+import {
+  isDownloadInProgress,
+  releaseDownloadLock,
+  tryAcquireDownloadLock,
+  waitForComponentDownload,
+} from "./binary-download-lock.js"
 
 /**
  * Set `versions.{engine|server|postgres|deno}: VERSION_PIN_LOCAL` to mean “use `overrides.*` only”
@@ -165,6 +171,16 @@ export function cachePath(component: Component, version: string): string {
 
 export function cachedBinaryPath(component: Component, version: string, platform: PlatformId): string {
   return join(cachePath(component, version), binaryName(component, version, platform))
+}
+
+/** True when the platform binary for `version` is present and passes format checks. */
+export function isCachedBinaryReady(
+  component: Component,
+  version: string,
+  platform: PlatformId = currentPlatform(),
+): boolean {
+  const destPath = cachedBinaryPath(component, version, platform)
+  return existsSync(destPath) && cachedArtifactLooksValid(component, destPath)
 }
 
 function binaryName(component: Component, version: string, platform: PlatformId): string {
@@ -299,6 +315,45 @@ export async function ensureCachedBinary(
   return download(component, version, platform)
 }
 
+async function acquireDownloadSlot(
+  component: Component,
+  version: string,
+  platform: PlatformId,
+): Promise<void> {
+  const isReady = () => isCachedBinaryReady(component, version, platform)
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (isReady()) return
+
+    if (tryAcquireDownloadLock(component, version)) return
+
+    if (isDownloadInProgress(component, version)) {
+      console.log(
+        `[supatype] ${component} v${version} is downloading in another process — waiting...`,
+      )
+      const outcome = await waitForComponentDownload(component, version, isReady, (c) => {
+        console.log(`[supatype] Still waiting for ${c} download...`)
+      })
+      if (outcome === "ready") return
+      if (outcome === "timeout") {
+        throw new Error(
+          `Timed out waiting for ${component} v${version} download. Run: supatype update`,
+        )
+      }
+      console.warn(
+        `[supatype] ${component} v${version} download did not finish in the other process — retrying.`,
+      )
+      continue
+    }
+
+    if (tryAcquireDownloadLock(component, version)) return
+  }
+
+  throw new Error(
+    `Could not acquire download lock for ${component} v${version}. Run: supatype update`,
+  )
+}
+
 export async function download(
   component: Component,
   version: string,
@@ -325,6 +380,11 @@ export async function download(
       `[supatype] ${component} v${version} cache invalid — re-downloading (${destPath}).`,
     )
     unlinkSync(destPath)
+  }
+
+  await acquireDownloadSlot(component, version, platform)
+  if (isCachedBinaryReady(component, version, platform)) {
+    return destPath
   }
 
   const binaryUrl = `${CDN_BASE}${CDN_PATHS[component](version, platform)}`
@@ -361,6 +421,7 @@ export async function download(
       `Failed to download ${component} v${version} from ${CDN_BASE}: ${(err as Error).message}`,
     )
   } finally {
+    releaseDownloadLock(component, version)
     if (existsSync(tmpPath)) {
       try { unlinkSync(tmpPath) } catch { /* ignore */ }
     }

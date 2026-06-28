@@ -1,10 +1,18 @@
 import type { SupatypeProjectConfig } from "@supatype/cli"
 
-/** Copy to `supatype.local.config.ts` for local binary paths (merged on top of base config). */
+/**
+ * Copy to `supatype.local.config.ts` (gitignored) or run:
+ *   SUPATYPE_ENGINE=... SUPATYPE_SERVER=... node scripts/write-local-config.mjs ../supatype.local.config.ts
+ */
 const local: Partial<SupatypeProjectConfig> = {
+  versions: {
+    engine: "local",
+    server: "local",
+  },
   overrides: {
-    engine: "/path/to/supatype-schema-engine/target/release/supatype-engine",
-    server: "/path/to/supatype-auth/supatype-server",
+    engine: "C:/path/to/supatype-schema-engine/target/release/supatype-engine.exe",
+    server: "C:/path/to/supatype-auth/supatype-server.exe",
+    studio: "../../packages/studio",
   },
 }
 

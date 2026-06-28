@@ -148,7 +148,8 @@ export async function isPortInUse(port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const server = createServer()
     server.once("error", (err: NodeJS.ErrnoException) => {
-      resolve(err.code === "EADDRINUSE")
+      // EADDRINUSE — something is listening. EACCES — Windows excluded/reserved port range.
+      resolve(err.code === "EADDRINUSE" || err.code === "EACCES")
     })
     server.once("listening", () => {
       server.close(() => resolve(false))

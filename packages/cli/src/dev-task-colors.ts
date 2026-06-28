@@ -41,7 +41,26 @@ export function colorizeLogLine(taskId: string, line: string): string {
   return `${base}${line}${RESET}`
 }
 
-export function colorizeTaskLabel(taskId: string, label: string, focused: boolean): string {
-  const style = focused ? BOLD + taskColor(taskId) : taskColor(taskId)
-  return `${style}${label}${RESET}`
+/** Ink colour names for React components (parallel to ANSI taskColor). */
+export function taskInkColor(taskId: string): string {
+  switch (taskId) {
+    case "stack":
+      return "magenta"
+    case "app":
+      return "green"
+    case "studio":
+      return "cyan"
+    case "server":
+      return "green"
+    case "postgrest":
+      return "blue"
+    default:
+      return "white"
+  }
+}
+
+export function logInkColor(taskId: string, line: string): string {
+  if (line.startsWith("✗ ")) return "red"
+  if (line.startsWith("⚠ ")) return "yellow"
+  return taskInkColor(taskId)
 }

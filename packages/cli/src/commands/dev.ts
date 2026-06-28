@@ -36,13 +36,15 @@ import {
 import { ensureBinary } from "../ensure-binary.js"
 import { startProxyDevApp } from "../app/proxy-dev-app.js"
 import { ProcessManager } from "../process-manager.js"
-import { startStudioViteDevServer } from "../studio-dev-server.js"
+import { STUDIO_DEV_PORT, startStudioViteDevServer } from "../studio-dev-server.js"
 import { restoreSystemRelationTargets } from "../restore-system-relation-targets.js"
 import { localStorageEnv } from "../local-storage.js"
 import { beginDevSession, endDevSession, resolveDevUiMode, startDevSession } from "../dev-session.js"
+import { publishDevReady } from "../dev-ready-panel.js"
 import { probeDockerDaemon, reportDockerUnavailable } from "../docker-runtime.js"
 import { fatalError } from "../ui/fatal.js"
 import { registerDevShutdown } from "../dev-shutdown.js"
+import { ensureValkeySidecar, stopValkeySidecar } from "../valkey-sidecar.js"
 import {
   initdb,
   start as pgStart,
@@ -133,7 +135,6 @@ export function registerDev(program: Command): void {
       }
 
       beginDevSession(resolveDevUiMode(opts.stream === true))
-      startDevSession()
       if (hasMeaningfulOverrides(config)) {
         console.warn("[supatype] Local binary overrides active:")
         for (const line of describeActiveOverrides(config)) {
@@ -326,9 +327,13 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
               ? "ses"
               : "smtp"
 
+      const valkeySidecar = ensureValkeySidecar(projectName)
+
       const serverEnv: Record<string, string> = {
         // supatype-server outer layer
         SUPATYPE_MODE: config.server.mode ?? "dev",
+        ...(valkeySidecar.addr ? { SUPATYPE_VALKEY_ADDR: valkeySidecar.addr } : {}),
+        SUPATYPE_MANAGED_PROJECT_REF: projectName,
         SUPATYPE_MANIFEST_PATH: manifestPath,
         SUPATYPE_ADMIN_CONFIG_PATH: adminConfigPath,
         SUPATYPE_POSTGREST_URL: `http://127.0.0.1:${postgrestPort}`,
@@ -471,7 +476,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
       }
 
       // ── 9d. Studio (optional) ─────────────────────────────────────────────
-      const studioPort = 3002
+      const studioPort = STUDIO_DEV_PORT
       let studioProc: ProcessManager | null = null
 
       const studioOverride = config.overrides?.studio
@@ -489,25 +494,24 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
 
       const appProc = startProxyDevApp(cwd, config, pidDir)
 
-      // ── Print status ──────────────────────────────────────────────────────
-      console.log(`
-[supatype] Services running:
-  Postgres         ${dbURL}
-  supatype-server  http://localhost:${serverPort}
-    REST API       http://localhost:${serverPort}/rest/v1/
-    Auth           http://localhost:${serverPort}/auth/v1/
-    Storage        http://localhost:${serverPort}/storage/v1/
-    Realtime       ws://localhost:${serverPort}/realtime/v1/${studioProc ? `\n  Studio           http://localhost:${studioPort}` : ""}
+      const links = [
+        { label: "API", url: `http://localhost:${serverPort}` },
+        { label: "REST", url: `http://localhost:${serverPort}/rest/v1/` },
+        { label: "Auth", url: `http://localhost:${serverPort}/auth/v1/` },
+        { label: "Storage", url: `http://localhost:${serverPort}/storage/v1/` },
+        { label: "Realtime", url: `ws://localhost:${serverPort}/realtime/v1/` },
+      ]
+      if (studioProc) {
+        links.push({ label: "Studio", url: `http://localhost:${studioPort}` })
+      }
 
-  API keys (local dev only):
-    anon key       ${anonKey}
-    service_role   ${serviceRoleKey}
-
-  JWT secret: ${LOCAL_JWT_SECRET}
-
-  Press Ctrl+C to stop.
-`)
-
+      publishDevReady({
+        title: "Services running",
+        links,
+        anonKey,
+        serviceRoleKey,
+        hints: [`Postgres ${dbURL}`, `JWT secret: ${LOCAL_JWT_SECRET}`],
+      })
 
       // ── Shutdown handler ──────────────────────────────────────────────────
       registerDevShutdown(async () => {
@@ -518,6 +522,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
           studioProc?.stop(),
           appProc?.stop(),
         ])
+        stopValkeySidecar(valkeySidecar.containerName)
         await stopPostgres()
       })
 

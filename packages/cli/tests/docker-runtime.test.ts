@@ -1,9 +1,8 @@
-import { describe, expect, it, vi, beforeEach, afterEach, afterAll } from "vitest"
+import { describe, expect, it, vi, beforeEach, afterEach, afterAll, type MockInstance } from "vitest"
 import type { SpawnSyncReturns } from "node:child_process"
 
 const spawnSyncMock = vi.hoisted(() => vi.fn())
 const isInteractiveMock = vi.hoisted(() => vi.fn(() => false))
-const clackLogErrorMock = vi.hoisted(() => vi.fn())
 const clackNoteMock = vi.hoisted(() => vi.fn())
 const clackIntroMock = vi.hoisted(() => vi.fn())
 const printLogoMock = vi.hoisted(() => vi.fn())
@@ -16,18 +15,12 @@ vi.mock("../src/ui/interactive.js", () => ({
   isInteractive: isInteractiveMock,
 }))
 
-vi.mock("@clack/prompts", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@clack/prompts")>()
-  return {
-    ...original,
+vi.mock("../src/ui/clack.js", () => ({
+  p: {
     intro: clackIntroMock,
     note: clackNoteMock,
-    log: {
-      ...original.log,
-      error: clackLogErrorMock,
-    },
-  }
-})
+  },
+}))
 
 vi.mock("../src/ui/prompts.js", async (importOriginal) => {
   const original = await importOriginal<typeof import("../src/ui/prompts.js")>()
@@ -124,7 +117,6 @@ describe("reportDockerUnavailable", () => {
     isInteractiveMock.mockReturnValue(false)
     errorMock.mockClear()
     logMock.mockClear()
-    clackLogErrorMock.mockClear()
     clackNoteMock.mockClear()
     clackIntroMock.mockClear()
     printLogoMock.mockClear()
@@ -171,7 +163,7 @@ describe("reportDockerUnavailable", () => {
     expect(logMock.mock.calls.some((call) => String(call[0]).includes("docker-desktop"))).toBe(true)
   })
 
-  it("uses Clack log + note in interactive mode", () => {
+  it("uses Ink intro + note and themed error in interactive mode", () => {
     isInteractiveMock.mockReturnValue(true)
 
     reportDockerUnavailable(
@@ -185,20 +177,17 @@ describe("reportDockerUnavailable", () => {
 
     expect(printLogoMock).toHaveBeenCalled()
     expect(clackIntroMock).toHaveBeenCalledWith("Local development")
-    expect(clackLogErrorMock).toHaveBeenCalledWith(
-      "Docker is installed but the daemon is not running.",
-    )
+    expect(logMock.mock.calls.some((call) => String(call[0]).includes("daemon is not running"))).toBe(true)
     expect(clackNoteMock).toHaveBeenCalledWith(
       expect.stringContaining("Unpause Docker Desktop"),
     )
     expect(errorMock).not.toHaveBeenCalled()
-    expect(logMock).not.toHaveBeenCalled()
   })
 })
 
 describe("requireDockerDaemon", () => {
-  let exitMock: ReturnType<typeof vi.spyOn<typeof process, "exit">>
-  let errorMock: ReturnType<typeof vi.spyOn<typeof console, "error">>
+  let exitMock: MockInstance<(code?: string | number | null | undefined) => never>
+  let errorMock: MockInstance<typeof console.error>
 
   beforeEach(() => {
     spawnSyncMock.mockReset()

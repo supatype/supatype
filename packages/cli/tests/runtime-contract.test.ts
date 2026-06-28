@@ -115,7 +115,9 @@ describe("runtime contract", () => {
       SUPATYPE_SERVER_IMAGE: "supatype/server:v0.1.0",
       SUPATYPE_POSTGRES_IMAGE: "supatype/postgres:17-latest",
     })
-    expect(composeDockerImageEnv({ ...baseConfig, versions: undefined })).toEqual({})
+    const withoutVersions = { ...baseConfig }
+    delete withoutVersions.versions
+    expect(composeDockerImageEnv(withoutVersions)).toEqual({})
     expect(
       composeDockerImageEnv({
         ...baseConfig,
@@ -483,9 +485,16 @@ export default defineConfig({
     expect(compose).not.toContain("HTTPS is off")
   })
 
+  it("self-host compose always includes Valkey and SUPATYPE_VALKEY_ADDR on server", () => {
+    const compose = renderSelfHostCompose(baseConfig)
+    expect(compose).toContain("\n  valkey:\n")
+    expect(compose).toContain("valkey/valkey:8-alpine")
+    expect(compose).toContain("SUPATYPE_VALKEY_ADDR: valkey:6379")
+    expect(compose).toMatch(/^\s{2}valkey-data:/m)
+  })
+
   it("self-host compose stays plain HTTP with a discoverable hint when TLS is off", () => {
     const compose = renderSelfHostCompose(baseConfig)
-    expect(compose).not.toContain("\n  valkey:\n")
     expect(compose).not.toContain('- "443:8443"')
     expect(compose).toContain("${SUPATYPE_KONG_PORT:-18473}:8000")
     expect(compose).toContain("HTTPS is off")
@@ -496,7 +505,7 @@ export default defineConfig({
       ...baseConfig,
       server: { mode: "standalone", domain: "api.example.com" },
     })
-    expect(compose).not.toContain("\n  valkey:\n")
+    expect(compose).toContain("\n  valkey:\n")
     expect(compose).not.toContain('- "443:8443"')
   })
 

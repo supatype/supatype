@@ -6,10 +6,10 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { spawnSync } from "node:child_process"
-import * as p from "@clack/prompts"
 import { runDockerCompose } from "./self-host-compose.js"
+import { confirm as uiConfirm } from "./ui/confirm.js"
+import { success, warn } from "./ui/messages.js"
 import { isInteractive } from "./ui/interactive.js"
-import { warn } from "./ui/messages.js"
 
 const LOCK_VERSION = 1 as const
 
@@ -81,12 +81,9 @@ export async function recoverStaleDevSession(cwd: string): Promise<void> {
     return
   }
 
-  const stop = await p.confirm({
-    message: `${message}\n\nStop the orphaned stack before starting?`,
-    initialValue: true,
-  })
+  const stop = await uiConfirm(`${message}\n\nStop the orphaned stack before starting?`, { default: true })
 
-  if (p.isCancel(stop) || !stop) {
+  if (!stop) {
     warn(`Leaving "${lock.composeProject}" running.`)
     return
   }
@@ -94,7 +91,7 @@ export async function recoverStaleDevSession(cwd: string): Promise<void> {
   const status = runDockerCompose(lock.composePath, ["down"], cwd, lock.composeProject, { quiet: true })
   if (status === 0) {
     clearDevSessionLock(cwd)
-    p.log.success(`Stopped orphaned stack "${lock.composeProject}".`)
+    success(`Stopped orphaned stack "${lock.composeProject}".`)
   } else {
     warn(`Could not stop "${lock.composeProject}" (exit ${status}).`)
   }

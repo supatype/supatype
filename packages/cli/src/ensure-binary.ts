@@ -7,8 +7,10 @@ import {
   download,
   currentPlatform,
   resolveVersionFor,
+  isCachedBinaryReady,
   type Component,
 } from "./binary-cache.js"
+import { isDownloadInProgress, waitForComponentDownload } from "./binary-download-lock.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
 
 export async function ensureBinary(
@@ -24,5 +26,23 @@ export async function ensureBinary(
     }
   }
 
-  return download(component, await resolveVersionFor(component, config), currentPlatform())
+  const version = await resolveVersionFor(component, config)
+  const platform = currentPlatform()
+
+  if (isDownloadInProgress(component, version)) {
+    console.log(`[supatype] Waiting for in-progress ${component} download...`)
+    const outcome = await waitForComponentDownload(
+      component,
+      version,
+      () => isCachedBinaryReady(component, version, platform),
+      (c) => {
+        console.log(`[supatype] Still waiting for ${c}...`)
+      },
+    )
+    if (outcome === "ready") {
+      return resolveBinary(component, config)
+    }
+  }
+
+  return download(component, version, platform)
 }

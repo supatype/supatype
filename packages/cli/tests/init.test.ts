@@ -53,11 +53,15 @@ describe("scaffold()", () => {
     expect(content).toContain("pkg-app")
   })
 
-  it("skips package.json when it already exists", () => {
+  it("merges Supatype deps into package.json when it already exists", () => {
     const pkgPath = join(tmpRoot, "package.json")
-    writeFileSync(pkgPath, '{"name":"existing"}', "utf8")
+    writeFileSync(pkgPath, '{"name":"existing","scripts":{"dev":"next dev"}}', "utf8")
     scaffold(tmpRoot, defaultScaffoldOptions("my-app"))
-    expect(readFileSync(pkgPath, "utf8")).toBe('{"name":"existing"}')
+    const content = readFileSync(pkgPath, "utf8")
+    expect(content).toContain("@supatype/cli")
+    expect(content).toContain("@supatype/types")
+    expect(content).toContain("next dev")
+    expect(content).toContain("supatype:dev")
   })
 
   it("supatype.config.ts documents self-host workflow", () => {
@@ -183,6 +187,29 @@ describe("scaffold()", () => {
     expect(html).toContain("Supatype")
     expect(html).toContain("supatype.github.io/supatype/")
     expect(html).toContain("github.com/supatype")
+  })
+
+  it("static app mode with Vite on self-host splits production static and local proxy override", () => {
+    scaffold(tmpRoot, {
+      ...defaultScaffoldOptions("my-app", "self-host"),
+      domain: "api.example.com",
+      app: {
+        mode: "static",
+        staticDir: "./public",
+        viteDevUrl: "http://127.0.0.1:5173",
+      },
+    })
+    const committed = readFileSync(join(tmpRoot, "supatype.config.ts"), "utf8")
+    expect(committed).toContain('mode: "static"')
+    expect(committed).toContain('static_dir: "./dist"')
+    expect(committed).not.toContain("vite_dev_url")
+
+    const local = readFileSync(join(tmpRoot, "supatype.local.config.ts"), "utf8")
+    expect(local).toContain('mode: "proxy"')
+    expect(local).toContain('start: "vite"')
+    expect(local).toContain('vite_dev_url: "http://127.0.0.1:5173"')
+    expect(existsSync(join(tmpRoot, "dist/index.html"))).toBe(true)
+    expect(existsSync(join(tmpRoot, "vite.config.ts"))).toBe(true)
   })
 
   it("static app mode with Vite scaffolds root index.html and vite.config.ts", () => {

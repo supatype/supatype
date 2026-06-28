@@ -59,6 +59,10 @@ export function formatEnginePushMessage(result: EnginePushResult): string {
 const COMPOSE_PROGRESS_LINE =
   /^Container\s+.+\s+(Running|Waiting|Healthy|Created|Starting|Started|Exited|Stopped)\s*$/i
 
+export function isComposeProgressLine(line: string): boolean {
+  return COMPOSE_PROGRESS_LINE.test(line.trim())
+}
+
 /** Drop docker compose progress noise; keep engine JSON and real errors. */
 export function filterComposeNoise(output: string): string {
   return output
@@ -67,7 +71,7 @@ export function filterComposeNoise(output: string): string {
     .filter((line) => {
       const t = line.trim()
       if (!t) return false
-      if (COMPOSE_PROGRESS_LINE.test(t)) return false
+      if (isComposeProgressLine(t)) return false
       return true
     })
     .join("\n")

@@ -1,6 +1,6 @@
 # Frontend integration
 
-Reference layout: **`test-app`** in the Supatype repo (`supatype init --mode standalone` + static site + `vite_dev_url`).
+Reference layout: `supatype init --mode standalone` (static site + `vite_dev_url`). Maintainer fixture: **`examples/self-host/`** in the Supatype repo (compose-first, proxy mode).
 
 ## Add dependencies
 
@@ -9,14 +9,20 @@ npm install @supatype/client @supatype/cli @supatype/types
 npm install -D vite @vitejs/plugin-react typescript  # Vite + React example
 ```
 
-Supatype is in **early development**. For now, see what the latest alpha is on npm and install that:
+Install matching versions from npm:
 
 ```bash
-npm view @supatype/cli versions   # pick the highest 0.1.0-alpha.*
-npm install @supatype/client@<version> @supatype/cli@<version> @supatype/types@<version>
+npm view @supatype/cli dist-tags    # compare latest vs alpha
+npm install @supatype/cli@latest @supatype/client@latest @supatype/types@latest
 ```
 
-Use `file:` links only when developing the CLI itself.
+Use `@alpha` only when the alpha tag is newer than `latest`:
+
+```bash
+npm install @supatype/cli@alpha @supatype/client@alpha @supatype/types@alpha
+```
+
+Pin all `@supatype/*` packages to the **same version**. Use `file:` links only when developing the CLI itself.
 
 ## Self-host + local dev config split
 
@@ -147,7 +153,7 @@ npm run build
 supatype self-host compose up -d
 ```
 
-See `references/self-host.md` and the `test-app/DEPLOY.md` runbook for TLS, DNS, and compose gotchas.
+See [references/self-host.md](references/self-host.md) and `examples/self-host/README.md` for TLS, DNS, and compose.
 
 ## Query patterns
 
@@ -159,3 +165,123 @@ await supatype.from("posts").delete().eq("id", postId)
 ```
 
 Access rules in `schema/index.ts` enforce what each role can do.
+
+## Framework packages (use these instead of hand-rolling)
+
+Supatype ships first-party bindings — prefer them over wiring the raw client by hand:
+
+| Package | What it gives you |
+|---------|-------------------|
+| `@supatype/react` | Provider + hooks: `SupatypeProvider`, `useSupatype`, `useAuth`, `useQuery`, `useMutation`, `useSubscription`, `useFunction`, `useLivePreview`, `RichText` |
+| `@supatype/react-auth` | Prebuilt, accessible auth UI: `LoginForm`, `SignUpForm`, `OAuthButton` |
+| `@supatype/vue` | Composables: `useAuth`, `useQuery`, `useMutation`, `useSubscription` |
+| `@supatype/solid` | Primitives: `createAuth`, `createQuery`, `createMutation`, `createSubscription` |
+| `@supatype/svelte` | Stores: `createAuth`, `createQuery`, `createMutation`, `createSubscription` |
+| `@supatype/ssr` | Cookie-based client for Server Components, Route Handlers, middleware |
+| `@supatype/ui` | Shared React component library (Tailwind + Radix primitives) |
+| `@supatype/navigation` | Shared `Header` / `Footer` components |
+
+> **Don't reimplement auth forms or auth state by hand.** Use `@supatype/react-auth` for the UI and `@supatype/react`'s `useAuth` for state. Drop to the raw client only for app-specific data access not covered by the hooks.
+
+## React integration (`@supatype/react`)
+
+```bash
+npm install @supatype/client @supatype/react @supatype/react-auth
+```
+
+### Provider
+
+Wrap the app once, near the root, with the typed client:
+
+```tsx
+import { SupatypeProvider } from "@supatype/react"
+import { supatype } from "./lib/supatype" // createClient<Database>(...)
+
+export function App() {
+  return (
+    <SupatypeProvider client={supatype}>
+      <Routes />
+    </SupatypeProvider>
+  )
+}
+```
+
+All hooks and `@supatype/react-auth` components must render inside this provider.
+
+### Hooks
+
+```tsx
+import { useAuth, useQuery, useMutation, useSubscription, useSupatype } from "@supatype/react"
+
+const { user, session, loading, signUp, signIn, signInWithOAuth, signInWithOtp, signOut } = useAuth()
+
+const { data, error, loading, refetch } = useQuery("posts", {
+  select: "*",
+  filter: { author_id: userId },
+  order: { column: "created_at", ascending: false },
+  enabled: Boolean(userId),
+})
+
+const { mutate: createPost, loading: saving } = useMutation("posts", "insert")
+await createPost({ title: "Hello", author_id: userId })
+
+useSubscription<Post>("feed", {
+  event: "INSERT",
+  table: "posts",
+  callback: (payload) => append(payload.new),
+})
+
+const client = useSupatype<Database>() // escape hatch
+```
+
+## Auth UI components (`@supatype/react-auth`)
+
+```tsx
+import { LoginForm, SignUpForm, OAuthButton } from "@supatype/react-auth"
+
+<LoginForm
+  className="auth-form"
+  onSuccess={(session) => navigate("/")}
+  onError={(err) => console.error(err.message)}
+/>
+
+<SignUpForm
+  className="auth-form"
+  metadata={{ display_name }}
+  onSuccess={(session) => { if (session) navigate("/onboarding") }}
+/>
+
+<OAuthButton provider="github" redirectTo="/dashboard" />
+```
+
+Form components apply no styles of their own — pass `className` and style descendants. `OAuthButton` has default styles only when no `className` is given.
+
+## Gotcha: keep a single `@supatype/client` version
+
+`@supatype/react` and `@supatype/react-auth` declare their own `@supatype/client` dependency. If your app installs a **newer** client than the one they were published against, TypeScript fails with:
+
+```
+Type 'SupatypeClient<Database>' is not assignable to type 'SupatypeClient<any>'
+```
+
+Force one client version across the tree with an npm `overrides` entry in `package.json`:
+
+```json
+{
+  "overrides": {
+    "@supatype/client": "$@supatype/client"
+  }
+}
+```
+
+`$@supatype/client` pins the transitive copy to whatever version your app's direct dependency resolves to. Run `npm install` afterwards. Pin `@supatype/*` packages to the same release when mixing CLI, client, types, and framework bindings.
+
+## Dev modes summary
+
+| Mode | Config | Use when |
+|------|--------|----------|
+| Static + `vite_dev_url` | `app.mode: "static"`, run Vite in second terminal | Simple SPA; Kong serves built assets in prod |
+| Proxy | `app.mode: "proxy"`, `upstream`, `start: "vite"` | One `supatype dev` command spawns Vite + stack |
+| Static SSG (Astro, etc.) | `build.framework`, `static_dir` | `npm run build` then compose serves `dist/` |
+
+Local dev URL: `http://localhost:18473` (or `SUPATYPE_KONG_PORT` in `.env`).

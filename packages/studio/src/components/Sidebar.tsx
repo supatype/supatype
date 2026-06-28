@@ -346,6 +346,7 @@ export function getPageTitle(path: string, config: AdminConfig): string {
       if (path.endsWith("/versions")) return "Version History"
       if (path.endsWith("/api")) return `${model.label} — REST API`
       if (path.endsWith("/graphql")) return `${model.label} — GraphQL`
+      if (path.endsWith("/cache")) return `${model.label} — Cache`
       if (path.match(/\/models\/[^/]+\/[^/]+$/)) return `Edit ${model.label}`
       return model.labelPlural
     }
@@ -360,6 +361,7 @@ export function getPageTitle(path: string, config: AdminConfig): string {
       if (path.endsWith("/data")) return `${g.label} — Data`
       if (path.endsWith("/api")) return `${g.label} — REST API`
       if (path.endsWith("/graphql")) return `${g.label} — GraphQL`
+      if (path.endsWith("/cache")) return `${g.label} — Cache`
       return g.label
     }
   }
@@ -387,6 +389,7 @@ export function getPageTitle(path: string, config: AdminConfig): string {
     "/observability/advisors":     "Advisors",
     "/api/rest":             "REST API",
     "/api/rest/settings":    "REST API Settings",
+    "/api/rest/cache":       "REST API Cache",
     "/api/graphql":          "GraphQL",
     "/api/graphql/settings": "GraphQL Settings",
     "/settings":             "Settings",
@@ -405,6 +408,7 @@ export function getPageBreadcrumbs(path: string, config: AdminConfig): string[] 
       if (path.endsWith("/versions")) return ["Models", model.labelPlural, "Version History"]
       if (path.endsWith("/api")) return ["Models", model.labelPlural, "REST API"]
       if (path.endsWith("/graphql")) return ["Models", model.labelPlural, "GraphQL"]
+      if (path.endsWith("/cache")) return ["Models", model.labelPlural, "Cache"]
       if (path.match(/\/models\/[^/]+\/[^/]+$/)) return ["Models", model.labelPlural, `Edit ${model.label}`]
       return ["Models", model.labelPlural]
     }
@@ -419,6 +423,7 @@ export function getPageBreadcrumbs(path: string, config: AdminConfig): string[] 
       if (path.endsWith("/data")) return ["Models", g.label, "Data"]
       if (path.endsWith("/api")) return ["Models", g.label, "REST API"]
       if (path.endsWith("/graphql")) return ["Models", g.label, "GraphQL"]
+      if (path.endsWith("/cache")) return ["Models", g.label, "Cache"]
       return ["Models", g.label]
     }
   }
@@ -446,6 +451,7 @@ export function getPageBreadcrumbs(path: string, config: AdminConfig): string[] 
     "/observability/advisors":         ["Observability", "Advisors"],
     "/api/rest":             ["API", "REST"],
     "/api/rest/settings":    ["API", "REST", "Settings"],
+    "/api/rest/cache":       ["API", "REST", "Cache"],
     "/api/graphql":          ["API", "GraphQL"],
     "/api/graphql/settings": ["API", "GraphQL", "Settings"],
     "/settings":             ["Settings"],

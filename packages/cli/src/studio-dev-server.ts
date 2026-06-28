@@ -2,7 +2,8 @@ import { existsSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { ProcessManager } from "./process-manager.js"
 
-const STUDIO_PORT = 3002
+/** Vite dev server port when `overrides.studio` is set. */
+export const STUDIO_DEV_PORT = 3002
 
 export interface StudioDevServerOptions {
   cwd: string
@@ -15,8 +16,8 @@ export interface StudioDevServerOptions {
    */
   proxyTarget: string
   /**
-   * Public Supatype URL the browser uses. Compose dev: Kong on the host.
-   * Native dev: Vite dev server (same origin as Studio).
+   * Browser API base URL. Must match the Vite dev origin (`http://localhost:3002`)
+   * so fetches hit the Vite proxy (SUPATYPE_PROXY_TARGET) and avoid CORS.
    */
   viteSupatypeUrl: string
   /** Vite `base` — `/studio/` when behind Kong at `/studio/`; `/` for native dev on :3002. */
@@ -35,7 +36,7 @@ export function startStudioViteDevServer(opts: StudioDevServerOptions): ProcessM
   const basePath = opts.basePath ?? "/"
   return new ProcessManager(
     process.execPath,
-    [viteJs, "--port", String(STUDIO_PORT), "--strictPort", "--host"],
+    [viteJs, "--port", String(STUDIO_DEV_PORT), "--strictPort", "--host"],
     {
       label: "studio",
       pidDir: opts.pidDir,
