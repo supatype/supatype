@@ -126,6 +126,9 @@ export interface QueryResult<TData> {
   data: TData | null
   error: SupatypeError | null
   count: number | null
+  meta?: {
+    cacheStatus?: "HIT" | "MISS" | "BYPASS" | undefined
+  } | undefined
 }
 
 // ─── RPC result ──────────────────────────────────────────────────────────────
@@ -255,6 +258,10 @@ export interface SupatypeClientConfig {
    * Applied to every HTTP request made by the client.
    */
   timeout?: number | undefined
+  /**
+   * In-memory GET query cache. When omitted, a shared default cache is used.
+   */
+  queryCache?: import("./query-cache.js").QueryCache | undefined
   /**
    * Pre-load a session at construction time (SSR use case).
    * Used by `@supatype/ssr` to inject a cookie-parsed session into the client

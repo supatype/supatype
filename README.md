@@ -4,11 +4,13 @@
 
 # Supatype
 
-**Schema-first backend for PostgreSQL** — TypeScript models, generated migrations, RLS, and a unified API gateway (**supatype-server**).
+**Type-first platform for PostgreSQL** — define `Model<…>` types in TypeScript; migrations, RLS, API, Studio CMS, and client bindings follow.
 
-This monorepo ships **`@supatype/cli`**, **`@supatype/client`**, **`@supatype/react`**, Studio, storage, and realtime packages.
+**Product overview:** [github.com/supatype](https://github.com/supatype) · **Docs:** [supatype.github.io/supatype](https://supatype.github.io/supatype/)
 
-**Documentation for users:** [GitHub Pages](https://supatype.github.io/supatype/) — local dev and self-host guides live there (`#local-dev`, `#self-host`).
+This monorepo ships **`@supatype/cli`**, **`@supatype/types`**, **`@supatype/client`**, **`@supatype/react`**, **`@supatype/studio`**, storage, realtime, and related packages.
+
+User guides: [local dev](https://supatype.github.io/supatype/#local-dev) · [self-host](https://supatype.github.io/supatype/#self-host)
 
 ---
 
@@ -25,17 +27,15 @@ This monorepo ships **`@supatype/cli`**, **`@supatype/client`**, **`@supatype/re
 
 ```bash
 pnpm install
-pnpm supatype init
-pnpm supatype dev
-```
-
-Overrides: `supatype.local.config.ts` beside `supatype.config.ts`.
-
-```bash
+pnpm dev:local    # CLI against tests/integration fixture
 pnpm build
 pnpm turbo run typecheck
 pnpm --filter @supatype/cli test
 ```
+
+For full app fixtures, see `examples/self-host/` or `examples/blog/`.
+
+Overrides: `supatype.local.config.ts` beside `supatype.config.ts` (gitignored, deep-merged for local dev).
 
 ---
 

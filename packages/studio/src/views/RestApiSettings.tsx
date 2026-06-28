@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react"
 import { useAdminConfig } from "../hooks/useAdminConfig.js"
+import { useServerRestCacheOffered } from "../hooks/useServerRestCacheOffered.js"
 import { useStudioClient } from "../StudioCore.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { Button, Card, CodeBlock, Input } from "../components/ui.js"
@@ -11,12 +12,14 @@ const HTTP_METHODS = ["GET", "POST", "PATCH", "DELETE"] as const
 export function RestApiSettings(): React.ReactElement {
   const config = useAdminConfig()
   const client = useStudioClient()
+  const serverCacheOffered = useServerRestCacheOffered()
 
   const apiBase = `${client.url.replace(/\/+$/, "")}/rest/v1`
 
   const [schema, setSchema] = useState("public")
   const [maxRows, setMaxRows] = useState("1000")
-  const [committed, setCommitted] = useState({ schema: "public", maxRows: "1000" })
+  const [cacheMaxTTL, setCacheMaxTTL] = useState("0")
+  const [committed, setCommitted] = useState({ schema: "public", maxRows: "1000", cacheMaxTTL: "0" })
   const [isSaving, setIsSaving] = useState(false)
   const [savedOk, setSavedOk] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -33,18 +36,26 @@ export function RestApiSettings(): React.ReactElement {
       credentials: "include",
     })
       .then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.json() })
-      .then((d: { schema: string; max_rows: number }) => {
+      .then((d: { schema: string; max_rows: number; cache_max_ttl?: number }) => {
         if (cancelled) return
         setSchema(d.schema ?? "public")
         setMaxRows(String(d.max_rows ?? 1000))
-        setCommitted({ schema: d.schema ?? "public", maxRows: String(d.max_rows ?? 1000) })
+        setCacheMaxTTL(String(d.cache_max_ttl ?? 0))
+        setCommitted({
+          schema: d.schema ?? "public",
+          maxRows: String(d.max_rows ?? 1000),
+          cacheMaxTTL: String(d.cache_max_ttl ?? 0),
+        })
       })
       .catch((e: Error) => { if (!cancelled) setLoadError(e.message ?? "Failed to load") })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [client, retryCount])
 
-  const isDirty = schema !== committed.schema || maxRows !== committed.maxRows
+  const isDirty =
+    schema !== committed.schema ||
+    maxRows !== committed.maxRows ||
+    (serverCacheOffered && cacheMaxTTL !== committed.cacheMaxTTL)
 
   const handleSave = async () => {
     setIsSaving(true)
@@ -58,13 +69,17 @@ export function RestApiSettings(): React.ReactElement {
           ...studioAuthHeaders(client),
         },
         credentials: "include",
-        body: JSON.stringify({ schema, max_rows: parseInt(maxRows, 10) }),
+        body: JSON.stringify({
+          schema,
+          max_rows: parseInt(maxRows, 10),
+          ...(serverCacheOffered && { cache_max_ttl: parseInt(cacheMaxTTL, 10) || 0 }),
+        }),
       })
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
         throw new Error((body as { message?: string }).message ?? `${res.status} ${res.statusText}`)
       }
-      setCommitted({ schema, maxRows })
+      setCommitted({ schema, maxRows, cacheMaxTTL })
       setSavedOk(true)
       setTimeout(() => setSavedOk(false), 2000)
     } catch (err) {
@@ -135,8 +150,45 @@ export function RestApiSettings(): React.ReactElement {
               <span className="text-xs text-muted-foreground">per request</span>
             </div>
           </Row>
+          {serverCacheOffered ? (
+            <Row label="Cache max TTL">
+              <div className="flex items-center gap-2">
+                <Input
+                  className="w-24 text-sm font-mono"
+                  type="number"
+                  min={0}
+                  value={cacheMaxTTL}
+                  onChange={(e) => { setCacheMaxTTL(e.target.value); setSaveError(null) }}
+                />
+                <span className="text-xs text-muted-foreground">seconds (0 = off)</span>
+              </div>
+            </Row>
+          ) : null}
         </div>
       </Card>
+
+      {serverCacheOffered ? (
+      <Card>
+        <div className="px-4 py-3 border-b border-border">
+          <h2 className="text-sm font-semibold">Response cache</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Tables are uncached by default. Enable per table under each model&apos;s Cache tab or manage entries under{" "}
+            <a href="/api/rest/cache" className="text-primary hover:underline">API → REST → Cache</a>.
+          </p>
+        </div>
+      </Card>
+      ) : (
+      <Card className="border-amber-500/30 bg-amber-500/5">
+        <div className="px-4 py-3 space-y-2">
+          <h2 className="text-sm font-semibold">Server-side cache not on Free</h2>
+          <p className="text-xs text-muted-foreground">
+            Cloud free tier bypasses Valkey — requests always reach PostgREST (no server in-memory cache).
+            Client-only <code className="font-mono">.cache(&#123; ttl &#125;)</code> still works in your app.
+            Upgrade to Pro for Valkey-backed <code className="font-mono">.cache(&#123; server: true &#125;)</code>.
+          </p>
+        </div>
+      </Card>
+      )}
 
       {/* Tables */}
       <Card>

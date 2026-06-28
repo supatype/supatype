@@ -2,12 +2,17 @@
   "name": "supatype-integration",
   "private": true,
   "type": "module",
+  "scripts": {
+    "vite": "vite",
+    "seed": "tsx seed.ts"
+  },
   "dependencies": {
     "@supatype/cli": "workspace:*",
     "@supatype/client": "workspace:*",
     "@supatype/types": "workspace:*"
   },
   "devDependencies": {
-    "tsx": "^4.19.2"
+    "tsx": "^4.19.2",
+    "vite": "^6.0.0"
   }
 }

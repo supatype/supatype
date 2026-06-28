@@ -1,36 +1,25 @@
 import type { Command } from "commander"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { resolve, join, dirname, basename } from "node:path"
-import { fileURLToPath } from "node:url"
+import { resolve, join, basename } from "node:path"
 import { spawnSync } from "node:child_process"
-import * as p from "@clack/prompts"
+import { p, runClackFlow } from "../ui/clack.js"
 import { ensureNotCancelled, printLogo } from "../ui/prompts.js"
 import { generateAndWriteKeys } from "./keys.js"
 import { file, error, info, plain, warn } from "../ui/messages.js"
 import { nextSteps } from "../ui/next-steps.js"
 import { probeDockerDaemon, reportDockerUnavailable } from "../docker-runtime.js"
-
-export { scaffold }
-
-// ─── Markers used by `supatype app add / remove` (app.ts) ────────────────────
-export const APP_COMPOSE_MARKER = "  # ─── App service (run: supatype app add) ───"
-export const KONG_APP_MARKER = "  # ─── App fallback route (run: supatype app add) ───"
-
-const CLI_PACKAGE_JSON = join(
-  dirname(fileURLToPath(import.meta.url)),
-  "..",
-  "..",
-  "package.json",
-)
-
-function cliPackageVersion(): string {
-  try {
-    const pkg = JSON.parse(readFileSync(CLI_PACKAGE_JSON, "utf8")) as { version?: string }
-    return pkg.version ?? "0.1.0"
-  } catch {
-    return "0.1.0"
-  }
-}
+import { loadConfig } from "../config.js"
+import {
+  ensureComponentBinaries,
+  reportComponentBinaryFailures,
+} from "../ensure-component-binaries.js"
+import { mergeSupatypePackageJson } from "../init-package-json.js"
+import { cliPackageVersion } from "../cli-package-version.js"
+import {
+  initDependencyVersionsFallback,
+  resolveInitDependencyVersions,
+  type InitDependencyVersions,
+} from "../init-dependency-versions.js"
 
 // ─── Options model ─────────────────────────────────────────────────────────--
 
@@ -200,9 +189,23 @@ export function registerInit(program: Command): void {
 
       if (name) mkdirSync(dir, { recursive: true })
 
-      scaffold(dir, result)
+      const deps = await resolveInitDependencyVersions()
+      const runningCli = cliPackageVersion()
+      if (deps.cli !== runningCli || deps.types !== runningCli) {
+        info(
+          `Using published npm versions: @supatype/cli ^${deps.cli}, @supatype/types ^${deps.types}`,
+        )
+      }
 
-      if (doInstall) runInstall(dir, result.packageManager)
+      scaffold(dir, result, deps)
+
+      const installOk = doInstall ? runInstall(dir, result.packageManager) : true
+
+      const binariesReady = installOk ? await ensureInitBinaries(dir) : false
+      if (doInstall && !installOk) {
+        warn("Skipping component binary check until dependencies install successfully.")
+      }
+
       const keysGenerated = doKeys ? writeKeys(dir) : false
 
       warnDockerUnavailableForProvider(result.provider)
@@ -210,8 +213,9 @@ export function registerInit(program: Command): void {
       printNextSteps({
         name,
         result,
-        installed: doInstall,
+        installed: doInstall && installOk,
         keysGenerated,
+        binariesReady,
       })
     })
 }
@@ -222,6 +226,7 @@ async function runWizard(
   defaultName: string,
   defaultTarget: ProductionTarget,
 ): Promise<WizardResult> {
+  return runClackFlow(async () => {
   p.intro("Create a new Supatype project")
 
   const projectName = ensureNotCancelled(
@@ -407,6 +412,7 @@ async function runWizard(
     generateKeys,
     ...(adminEmail && adminPassword ? { adminEmail, adminPassword } : {}),
   }
+  })
 }
 
 async function promptApp(): Promise<ScaffoldAppOptions> {
@@ -485,7 +491,7 @@ function detectInvokingPackageManager(): PackageManager {
   return "npm"
 }
 
-function runInstall(dir: string, pm: PackageManager): void {
+function runInstall(dir: string, pm: PackageManager): boolean {
   info(`Installing dependencies with ${pm}...`)
   const res = spawnSync(pm, ["install"], {
     cwd: dir,
@@ -494,6 +500,29 @@ function runInstall(dir: string, pm: PackageManager): void {
   })
   if (res.status !== 0 || res.error) {
     warn(`Dependency install did not complete (run "${pm} install" manually).`)
+    return false
+  }
+  return true
+}
+
+async function ensureInitBinaries(dir: string): Promise<boolean> {
+  const previousCwd = process.cwd()
+  try {
+    process.chdir(dir)
+    const config = loadConfig(dir)
+    const result = await ensureComponentBinaries(config, dir)
+    if (!result.ok) {
+      reportComponentBinaryFailures(result.failures)
+      return false
+    }
+    return true
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    warn(`Could not verify component binaries: ${message}`)
+    warn("Run manually from your project directory: supatype update")
+    return false
+  } finally {
+    process.chdir(previousCwd)
   }
 }
 
@@ -508,7 +537,11 @@ function writeKeys(dir: string): boolean {
 
 // ─── Scaffold ──────────────────────────────────────────────────────────────--
 
-function scaffold(dir: string, optsOrName: ScaffoldOptions | string): void {
+export function scaffold(
+  dir: string,
+  optsOrName: ScaffoldOptions | string,
+  deps: InitDependencyVersions = initDependencyVersionsFallback(),
+): void {
   const opts =
     typeof optsOrName === "string" ? defaultScaffoldOptions(optsOrName) : optsOrName
   const write = (rel: string, content: string) => {
@@ -520,9 +553,17 @@ function scaffold(dir: string, optsOrName: ScaffoldOptions | string): void {
 
   const pkgPath = join(dir, "package.json")
   if (!existsSync(pkgPath)) {
-    write("package.json", packageJsonTemplate(opts, cliPackageVersion()))
+    write("package.json", packageJsonTemplate(opts, deps))
   } else {
-    file("skipped", "package.json (already exists)")
+    try {
+      const existing = JSON.parse(readFileSync(pkgPath, "utf8")) as Record<string, unknown>
+      const merged = mergeSupatypePackageJson(existing, opts, deps)
+      writeFileSync(pkgPath, `${JSON.stringify(merged, null, 2)}\n`, "utf8")
+      file("updated", "package.json (added Supatype dependencies)")
+    } catch {
+      warn("Could not merge into package.json — add @supatype/cli and @supatype/types manually.")
+      file("skipped", "package.json (invalid JSON)")
+    }
   }
 
   write("supatype.config.ts", tsConfigTemplate(opts))
@@ -565,8 +606,13 @@ function scaffoldAppAssets(
 
   if (opts.app.mode === "static") {
     const staticRel = staticDirRelative(opts.app.staticDir)
+    if (opts.app.viteDevUrl && opts.productionTarget !== "later") {
+      write("dist/index.html", holding)
+      scaffoldVite(opts, write, holding)
+      return
+    }
     write(`${staticRel}/index.html`, holding)
-    if (hasVite) scaffoldVite(opts, write, holding)
+    if (opts.app.viteDevUrl) scaffoldVite(opts, write, holding)
     return
   }
 
@@ -609,7 +655,7 @@ function scaffoldHelloFunction(
 
 // ─── Templates ───────────────────────────────────────────────────────────────
 
-function packageJsonTemplate(opts: ScaffoldOptions, cliVersion: string): string {
+function packageJsonTemplate(opts: ScaffoldOptions, deps: InitDependencyVersions): string {
   const scripts: string[] = [
     `    "dev": "supatype dev"`,
     `    "push": "supatype push"`,
@@ -633,8 +679,8 @@ function packageJsonTemplate(opts: ScaffoldOptions, cliVersion: string): string 
 ${scripts.join(",\n")}
   },
   "dependencies": {
-    "@supatype/cli": "^${cliVersion}",
-    "@supatype/types": "^${cliVersion}"
+    "@supatype/cli": "^${deps.cli}",
+    "@supatype/types": "^${deps.types}"
   },
   "devDependencies": {
 ${devDeps.join(",\n")}
@@ -701,20 +747,49 @@ function localConfigTemplate(app: ScaffoldAppOptions): string {
     `const localConfig: Partial<SupatypeConfig> = {`,
     `  server: { mode: "dev" },`,
   ]
-  if (app.mode === "proxy") {
-    lines.push(`  app: {`)
-    lines.push(`    mode: "proxy",`)
-    lines.push(`    upstream: "${app.upstream ?? "http://localhost:3000"}",`)
-    lines.push(`    start: "${app.start ?? "dev"}",`)
-    if (app.viteDevUrl) lines.push(`    vite_dev_url: "${app.viteDevUrl}",`)
-    lines.push(`  },`)
+  const localApp = localDevAppConfigLines(app)
+  if (localApp.length > 0) {
+    lines.push(...localApp)
   }
   lines.push(`}`, ``, `export default localConfig`, ``)
   return lines.join("\n")
 }
 
+/** App block for supatype.local.config.ts (proxy + Vite during local dev). */
+function localDevAppConfigLines(app: ScaffoldAppOptions): string[] {
+  if (app.mode === "proxy") {
+    return [
+      `  app: {`,
+      `    mode: "proxy",`,
+      `    upstream: "${app.upstream ?? "http://localhost:3000"}",`,
+      `    start: "${app.start ?? "dev"}",`,
+      ...(app.viteDevUrl ? [`    vite_dev_url: "${app.viteDevUrl}",`] : []),
+      `  },`,
+    ]
+  }
+  if (app.viteDevUrl) {
+    return [
+      `  app: {`,
+      `    mode: "proxy",`,
+      `    upstream: "${app.viteDevUrl}",`,
+      `    start: "vite",`,
+      `    vite_dev_url: "${app.viteDevUrl}",`,
+      `  },`,
+    ]
+  }
+  return []
+}
+
 function appConfigLines(app: ScaffoldAppOptions, productionTarget: ProductionTarget): string[] {
   if (app.mode === "static") {
+    if (productionTarget !== "later" && app.viteDevUrl) {
+      return [
+        `  app: {`,
+        `    mode: "static",`,
+        `    static_dir: "./dist",  // production build output`,
+        `  },`,
+      ]
+    }
     const out = [
       `  app: {`,
       `    mode: "static",`,
@@ -774,7 +849,7 @@ function holdingPageTemplate(projectName: string): string {
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>${name} — Supatype</title>
-    <meta name="description" content="A Supatype project. Define your types — we generate your backend." />
+    <meta name="description" content="A Supatype project. Define your types — we generate your platform." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -909,6 +984,8 @@ export default defineConfig({
     host: "127.0.0.1",
     port: ${port},
     strictPort: true,
+    // Docker Compose app proxy reaches the host as host.docker.internal.
+    allowedHosts: ["127.0.0.1", "localhost", "host.docker.internal"],
   },
 })
 `
@@ -1185,11 +1262,13 @@ function printNextSteps(args: {
   result: WizardResult
   installed: boolean
   keysGenerated: boolean
+  binariesReady: boolean
 }): void {
-  const { name, result, installed, keysGenerated } = args
+  const { name, result, installed, keysGenerated, binariesReady } = args
   const steps: string[] = []
   if (name) steps.push(`cd ${name}`)
   if (!installed) steps.push(`${result.packageManager} install`)
+  if (!binariesReady) steps.push("supatype update        # download component binaries")
   if (!keysGenerated) steps.push("supatype keys")
   const kongHint =
     result.provider === "docker" && result.kongPort !== undefined

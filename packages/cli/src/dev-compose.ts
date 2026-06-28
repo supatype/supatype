@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { spawnSync } from "node:child_process"
-import { startProxyDevApp } from "./app/proxy-dev-app.js"
+import { startProxyDevApp, resolveProxyDevScript } from "./app/proxy-dev-app.js"
 import { loadSchemaAst } from "./config.js"
 import {
   COMPOSE_DEV_KONG_PORT,
@@ -20,7 +20,8 @@ import { signJwt } from "./jwt.js"
 import { ensureDevDbPort, ensureKongPort } from "./dev-ports.js"
 import { handleComposeProjectRename } from "./compose-rename.js"
 import { recoverStaleDevSession, writeDevSessionLock } from "./dev-session-lock.js"
-import { readEnvValue, upsertEnvFile } from "./env-file.js"
+import { endDevSession, startDevSession } from "./dev-session.js"
+import { ensureDevApiConfig } from "./ensure-dev-api-config.js"
 import {
   COMPOSE_PINNED_IMAGE_ENV_KEYS,
   composeDockerImageEnv,
@@ -33,10 +34,11 @@ import {
 } from "./self-host-compose.js"
 import type { DockerBrandOptions } from "./docker-runtime.js"
 import { hasEngineOverride } from "./binary-cache.js"
-import { startStudioViteDevServer } from "./studio-dev-server.js"
+import { STUDIO_DEV_PORT, startStudioViteDevServer } from "./studio-dev-server.js"
+import { ensureLocalServerDockerImage } from "./compose-local-server-image.js"
 import { ensureEngine, engineRequest, type DiffResult } from "./engine-client.js"
 import { writeSchemaSourcePushArtifacts, type SchemaSourcePushArtifacts } from "./schema-sources.js"
-import { endDevSession } from "./dev-session.js"
+import { readEnvValue, upsertEnvFile } from "./env-file.js"
 import { writeLocalEnvironment } from "./link.js"
 import { registerDevShutdown } from "./dev-shutdown.js"
 import {
@@ -50,6 +52,7 @@ import { restoreSystemRelationTargets } from "./restore-system-relation-targets.
 import { provisionBucketsFromAst } from "./storage-provision.js"
 import type { ExtractedSchemaAstV2 } from "./schema-ast-v2.js"
 import { ensureFirstAdminUserForProject } from "./commands/admin.js"
+import { publishDevReady } from "./dev-ready-panel.js"
 
 const LOCAL_JWT_SECRET = "super-secret-jwt-token-with-at-least-32-characters-long"
 
@@ -171,6 +174,7 @@ function upsertDevComposeEnv(
   serviceRoleKey: string,
   kongPort: number,
   devDbPort?: number,
+  localServerImage?: string,
 ): void {
   const apiUrl = `http://localhost:${kongPort}`
   const imagePins = composeDockerImageEnv(config)
@@ -189,6 +193,7 @@ function upsertDevComposeEnv(
     SITE_URL: apiUrl,
     GOTRUE_MAILER_AUTOCONFIRM: "true",
     ...imagePins,
+    ...(localServerImage !== undefined && { SUPATYPE_SERVER_IMAGE: localServerImage }),
   }
   if (devDbPort !== undefined) {
     updates.SUPATYPE_DEV_DB_PORT = String(devDbPort)
@@ -207,8 +212,9 @@ function ensureDevComposeEnv(
   serviceRoleKey: string,
   kongPort: number,
   devDbPort?: number,
+  localServerImage?: string,
 ): void {
-  upsertDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, devDbPort)
+  upsertDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, devDbPort, localServerImage)
 }
 
 async function waitComposeHealthy(paths: SelfHostComposePaths, cwd: string, maxMs: number, composeProject: string): Promise<void> {
@@ -242,6 +248,34 @@ async function waitKongReady(kongPort: number, maxSec: number): Promise<void> {
     await new Promise((r) => setTimeout(r, 1000))
   }
   throw new Error(`Kong gateway at ${base} did not become ready within ${maxSec}s`)
+}
+
+/** Kong may be up while server → storage is still starting (503 or upstream errors). */
+async function waitStorageApiReady(
+  kongPort: number,
+  serviceRoleKey: string,
+  maxSec: number,
+): Promise<void> {
+  const url = `http://localhost:${kongPort}/storage/v1/bucket`
+  const headers = { Authorization: `Bearer ${serviceRoleKey}` }
+  for (let i = 0; i < maxSec; i++) {
+    try {
+      const res = await fetch(url, { headers })
+      if (res.ok) return
+      const body = await res.text()
+      const kongUpstreamDown = body.includes("invalid response was received from the upstream server")
+      if (!kongUpstreamDown && res.status !== 503) {
+        // Non-transient storage response (e.g. 401) — stop waiting.
+        return
+      }
+    } catch {
+      /* retry */
+    }
+    await new Promise((r) => setTimeout(r, 1000))
+  }
+  console.warn(
+    `[supatype] Storage API at ${url} did not become ready within ${maxSec}s — bucket provisioning may fail.`,
+  )
 }
 
 async function provisionDockerStorageBuckets(
@@ -641,6 +675,7 @@ export async function pushSchemaDocker(cwd: string, config: SupatypeProjectConfi
     exitComposeFailed(upGateway, "Could not start the Compose gateway stack.", pushBrand)
   }
   await waitKongReady(kongPort, 120)
+  await waitStorageApiReady(kongPort, serviceRoleKey, 90)
   await provisionDockerStorageBuckets(ast, kongPort, serviceRoleKey)
 
   await ensureFirstAdminUserForProject(cwd, config, {
@@ -666,14 +701,56 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   const anonKey = signJwt({ ...jwtBase, role: "anon" }, LOCAL_JWT_SECRET)
   const serviceRoleKey = signJwt({ ...jwtBase, role: "service_role" }, LOCAL_JWT_SECRET)
 
-  ensureDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, devDbPort)
+  const devBrand = { intro: "Local development" }
+  const localServerImage = await ensureLocalServerDockerImage(cwd, config, devBrand)
+
+  ensureDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, devDbPort, localServerImage)
 
   console.log(`[supatype] provider: docker — starting self-host Compose stack (project ${project}, gateway :${kongPort})...`)
   const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
+  if (ensureDevApiConfig(cwd)) {
+    console.log("[supatype] API config written to .supatype/api-config.json")
+  }
+
+  type StudioProc = Awaited<ReturnType<typeof startStudioViteDevServer>>
+  type AppProc = ReturnType<typeof startProxyDevApp>
+  const shutdownState: {
+    studioProc: StudioProc
+    appProc: AppProc
+    schemaWatcher: import("node:fs").FSWatcher | null
+    debounceTimer: ReturnType<typeof setTimeout> | null
+  } = {
+    studioProc: null,
+    appProc: null,
+    schemaWatcher: null,
+    debounceTimer: null,
+  }
+
+  registerDevShutdown(async () => {
+    shutdownState.schemaWatcher?.close()
+    shutdownState.schemaWatcher = null
+    if (shutdownState.debounceTimer) {
+      clearTimeout(shutdownState.debounceTimer)
+      shutdownState.debounceTimer = null
+    }
+    console.log("[supatype] Shutting down compose...")
+    await shutdownState.studioProc?.stop()
+    await shutdownState.appProc?.stop()
+    const downStatus = runDockerCompose(paths.composePath, ["down"], cwd, project, { quiet: true })
+    if (downStatus === 0) {
+      console.log("[supatype] Compose stack stopped.")
+    } else {
+      console.warn(`[supatype] Compose down exited with status ${downStatus}.`)
+    }
+  }, {
+    cwd,
+    compose: { cwd, composePath: paths.composePath, composeProject: project },
+  })
+
   await recoverStaleDevSession(cwd)
   await handleComposeProjectRename(cwd, config.project.name, paths)
-  const devBrand = { intro: "Local development" }
 
+  console.log("[supatype] Bringing up Docker Compose services...")
   const upStatus = runDockerCompose(paths.composePath, ["up", "-d"], cwd, project, {
     quiet: true,
     brand: devBrand,
@@ -695,8 +772,25 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
     compose: { project, composePath: paths.composePath },
   })
 
+  if (localServerImage !== undefined) {
+    console.log("[supatype] Recreating server with local image...")
+    const recreateStatus = runDockerCompose(
+      paths.composePath,
+      ["up", "-d", "--force-recreate", "--no-deps", "server"],
+      cwd,
+      project,
+      { quiet: true, brand: devBrand },
+    )
+    if (recreateStatus !== 0) {
+      endDevSession()
+      exitComposeFailed(recreateStatus, "Could not recreate the server container with the local image.", devBrand)
+    }
+  }
+
   console.log("[supatype] Waiting for API gateway...")
   await waitKongReady(kongPort, 120)
+  console.log("[supatype] Waiting for storage API...")
+  await waitStorageApiReady(kongPort, serviceRoleKey, 90)
 
   writeLocalEnvironment(cwd, {
     target: "local",
@@ -721,7 +815,9 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   const pidDir = join(homedir(), ".supatype", "projects", config.project.name, "pid")
   mkdirSync(pidDir, { recursive: true })
 
-  let studioProc: Awaited<ReturnType<typeof startStudioViteDevServer>> = null
+  startDevSession()
+
+  let studioProc: StudioProc = null
   const studioOverride = config.overrides?.studio
   if (studioOverride) {
     studioProc = startStudioViteDevServer({
@@ -730,66 +826,55 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
       pidDir,
       serviceRoleKey,
       proxyTarget: `http://localhost:${kongPort}`,
-      viteSupatypeUrl: `http://localhost:${kongPort}`,
+      viteSupatypeUrl: `http://localhost:${STUDIO_DEV_PORT}`,
       basePath: "/studio/",
     })
     studioProc?.start()
+    shutdownState.studioProc = studioProc
     if (studioProc) {
-      console.log("[supatype] Studio Vite dev server (overrides.studio) — live reload at /studio/")
+      console.log(
+        `[supatype] Studio (overrides.studio) — live reload proxied at http://localhost:${kongPort}/studio/`,
+      )
     }
   }
 
-  console.log(`
-[supatype] Services running (Docker Compose · project ${project}):
-  API (Kong)       http://localhost:${kongPort}
-    REST API       http://localhost:${kongPort}/rest/v1/
-    Auth           http://localhost:${kongPort}/auth/v1/
-    Storage        http://localhost:${kongPort}/storage/v1/
-    Realtime       ws://localhost:${kongPort}/realtime/v1/
-  Studio           http://localhost:${kongPort}/studio/
+  const links = [
+    { label: "API", url: `http://localhost:${kongPort}` },
+    { label: "REST", url: `http://localhost:${kongPort}/rest/v1/` },
+    { label: "Auth", url: `http://localhost:${kongPort}/auth/v1/` },
+    { label: "Storage", url: `http://localhost:${kongPort}/storage/v1/` },
+    { label: "Realtime", url: `ws://localhost:${kongPort}/realtime/v1/` },
+  ]
+  if (resolveProxyDevScript(config) !== null) {
+    links.push({ label: "App", url: `http://localhost:${kongPort}/` })
+  }
+  links.push({ label: "Studio", url: `http://localhost:${kongPort}/studio/` })
 
-  API keys (local dev only):
-    anon key       ${anonKey}
-    service_role   ${serviceRoleKey}
+  const hints: string[] = []
+  if (existsSync(join(cwd, "seed.ts"))) {
+    hints.push("Demo data: pnpm seed")
+  }
 
-  Press Ctrl+C to stop.
-`)
+  publishDevReady({
+    title: `Services running (Docker · ${project})`,
+    links,
+    anonKey,
+    serviceRoleKey,
+    ...(hints.length > 0 ? { hints } : {}),
+  })
 
   const appProc = startProxyDevApp(cwd, config, pidDir)
-
-  let schemaWatcher: import("node:fs").FSWatcher | null = null
-  let debounceTimer: ReturnType<typeof setTimeout> | null = null
-
-  registerDevShutdown(async () => {
-    schemaWatcher?.close()
-    schemaWatcher = null
-    if (debounceTimer) {
-      clearTimeout(debounceTimer)
-      debounceTimer = null
-    }
-    console.log("[supatype] Shutting down compose...")
-    await studioProc?.stop()
-    await appProc?.stop()
-    const downStatus = runDockerCompose(paths.composePath, ["down"], cwd, project, { quiet: true })
-    if (downStatus === 0) {
-      console.log("[supatype] Compose stack stopped.")
-    } else {
-      console.warn(`[supatype] Compose down exited with status ${downStatus}.`)
-    }
-  }, {
-    cwd,
-    compose: { cwd, composePath: paths.composePath, composeProject: project },
-  })
+  shutdownState.appProc = appProc
 
   if (opts.watch) {
     const schemaDir = join(projectRootFromConfig(config, cwd), config.schema?.path ?? "schema/index.ts", "..")
     console.log(`[supatype] Watching ${schemaDir} for changes...`)
     const { watch } = await import("node:fs")
-    schemaWatcher = watch(schemaDir, { recursive: true }, (_eventType, filename) => {
+    shutdownState.schemaWatcher = watch(schemaDir, { recursive: true }, (_eventType, filename) => {
       if (!filename?.endsWith(".ts")) return
-      if (debounceTimer) clearTimeout(debounceTimer)
-      debounceTimer = setTimeout(() => {
-        debounceTimer = null
+      if (shutdownState.debounceTimer) clearTimeout(shutdownState.debounceTimer)
+      shutdownState.debounceTimer = setTimeout(() => {
+        shutdownState.debounceTimer = null
         console.log(`\n[supatype] Change detected in ${filename}, pushing schema...`)
         runComposeSchemaPushQueued(cwd, config, paths, schemaPath, project)
           .then(async () => {

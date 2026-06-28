@@ -9,7 +9,7 @@ description: >-
 
 # Supatype
 
-Guide for working with Supatype projects. **Verify against `packages/cli/src/commands/*.ts` when repo facts are uncertain**: public docs may lag the CLI.
+Guide for working with Supatype projects. If unsure about a command or flag, run `supatype --help` (or `supatype <command> --help`) — published docs may lag the installed CLI.
 
 ## Quick reference
 
@@ -18,7 +18,8 @@ Guide for working with Supatype projects. **Verify against `packages/cli/src/com
 | Config and `.env` | [references/config.md](references/config.md) |
 | Schema and access rules | [references/schema.md](references/schema.md) |
 | CLI commands | [references/cli.md](references/cli.md) |
-| Frontend + client | [references/frontend.md](references/frontend.md) |
+| Frontend, client, React hooks + auth components | [references/frontend.md](references/frontend.md) |
+| REST GET caching (client + Valkey) | [references/caching.md](references/caching.md) |
 | Self-host production | [references/self-host.md](references/self-host.md) |
 
 ## Prerequisites
@@ -37,16 +38,24 @@ supatype dev                               # terminal 1 — Docker Compose; Kong
 npm run vite                               # terminal 2 — if app.vite_dev_url is set
 ```
 
-Supatype is in **early development**. For now, see what the latest alpha is on npm and install that:
+Install matching versions of CLI, client, and types from npm:
 
 ```bash
-npm view @supatype/cli versions   # pick the highest 0.1.0-alpha.*
-npm install @supatype/cli@<version> @supatype/client@<version> @supatype/types@<version>
+npm view @supatype/cli dist-tags    # compare latest vs alpha
+npm install @supatype/cli@latest @supatype/client@latest @supatype/types@latest
 ```
+
+Use `@alpha` only when the alpha tag is newer than `latest`:
+
+```bash
+npm install @supatype/cli@alpha @supatype/client@alpha @supatype/types@alpha
+```
+
+Pin all `@supatype/*` packages to the **same version** to avoid client/type skew.
 
 Omit `versions` in `supatype.config.ts` so Docker pulls `:latest` images.
 
-**Reference app:** `test-app` in the Supatype monorepo — canonical self-host + static + `vite_dev_url` layout. See [references/frontend.md](references/frontend.md).
+**Scaffold reference:** `supatype init --mode standalone` (static + `vite_dev_url`). Maintainer fixture: `examples/self-host/` in the Supatype monorepo. See [references/frontend.md](references/frontend.md).
 
 ## Daily workflow
 
@@ -55,7 +64,7 @@ Omit `versions` in `supatype.config.ts` so Docker pulls `:latest` images.
 3. `supatype push`: apply migration + regenerate types
 4. Use generated types with `@supatype/client` in app code
 
-## Core facts (CLI source)
+## Core facts
 
 - **Default provider:** `"docker"` in scaffolded `supatype.config.ts`
 - **Native alternative:** `provider: "native"`: host Postgres :5432, supatype-server :54321
@@ -81,6 +90,8 @@ const { data } = await supatype.from("posts").select("*")
 
 Add `@supatype/client` when wiring a frontend. Run `supatype push` after schema changes.
 
+**Prefer first-party framework bindings over the raw client.** For React use `@supatype/react` (`SupatypeProvider`, `useAuth`, `useQuery`, `useMutation`, `useSubscription`) and `@supatype/react-auth` (`LoginForm`, `SignUpForm`, `OAuthButton`); equivalents exist for Vue/Solid/Svelte, plus `@supatype/ssr` for server rendering. Don't hand-roll auth forms or auth state. See [references/frontend.md](references/frontend.md).
+
 ## Common failures
 
 | Error | Fix |
@@ -94,10 +105,11 @@ Add `@supatype/client` when wiring a frontend. Run `supatype push` after schema 
 | No supatype.config.ts | `supatype init` |
 | Types out of sync | `supatype push` or `supatype generate` |
 | Destructive migration blocked | Review `supatype diff`; use `supatype push --yes` if intended |
+| `SupatypeClient<Database>` not assignable to `SupatypeClient<any>` | Version skew between app's `@supatype/client` and the one `@supatype/react`(-auth) pulls; add npm `overrides: { "@supatype/client": "$@supatype/client" }` |
 
 ## When to read references
 
 - **Schema design, access, relations, buckets** → [references/schema.md](references/schema.md)
 - **Command flags and workflow** → [references/cli.md](references/cli.md)
-- **Astro/Vite/Next wiring** → [references/frontend.md](references/frontend.md)
+- **Astro/Vite/Next wiring, React hooks, auth UI components** → [references/frontend.md](references/frontend.md)
 - **Production compose** → [references/self-host.md](references/self-host.md)

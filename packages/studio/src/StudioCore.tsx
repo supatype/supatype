@@ -32,6 +32,7 @@ import { MigrationHistory } from "./views/MigrationHistory.js"
 import { StorageBrowser } from "./views/StorageBrowser.js"
 import { ApiDocs } from "./views/ApiDocs.js"
 import { RestApiSettings } from "./views/RestApiSettings.js"
+import { RestCacheBrowser, physicalTableName } from "./views/RestCacheBrowser.js"
 import { GraphQLExplorer } from "./views/GraphQLExplorer.js"
 import { GraphQLSettings } from "./views/GraphQLSettings.js"
 import { ModelSchema } from "./views/ModelSchema.js"
@@ -224,6 +225,36 @@ function CollectionGraphQLRoute(): React.ReactElement {
   return <ModelGraphQLDocs model={model} />
 }
 
+function CollectionCacheRoute(): React.ReactElement {
+  const config = useAdminConfig()
+  const { model: modelName } = useParams()
+  const model = config.models.find((m) => m.name === modelName)
+  if (!model) return <PageError>Model &quot;{modelName}&quot; not found</PageError>
+  const table = physicalTableName(model.tableName)
+  return (
+    <RestCacheBrowser
+      tableFilter={table}
+      title={`${model.label} — Cache`}
+      showTableSettings
+    />
+  )
+}
+
+function GlobalCacheRoute(): React.ReactElement {
+  const config = useAdminConfig()
+  const { name } = useParams()
+  const globalConfig = config.globals.find((g) => g.name === name)
+  if (!globalConfig) return <PageError>Global &quot;{name}&quot; not found</PageError>
+  const table = physicalTableName(globalConfig.tableName)
+  return (
+    <RestCacheBrowser
+      tableFilter={table}
+      title={`${globalConfig.label} — Cache`}
+      showTableSettings
+    />
+  )
+}
+
 function CollectionVersionsRoute(): React.ReactElement {
   const config = useAdminConfig()
   const { model: modelName, recordId } = useParams()
@@ -308,12 +339,14 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
               <Route path="models/globals/:name/data" element={<GlobalDataRoute />} />
               <Route path="models/globals/:name/api" element={<GlobalApiRoute />} />
               <Route path="models/globals/:name/graphql" element={<GlobalGraphQLRoute />} />
+              <Route path="models/globals/:name/cache" element={<GlobalCacheRoute />} />
               <Route path="models/globals/:name" element={<GlobalRoute />} />
               <Route path="models/:model" element={<CollectionListRoute />} />
               <Route path="models/:model/schema"  element={<CollectionSchemaRoute />} />
               <Route path="models/:model/data"    element={<CollectionDataRoute />} />
               <Route path="models/:model/api"     element={<CollectionApiRoute />} />
               <Route path="models/:model/graphql" element={<CollectionGraphQLRoute />} />
+              <Route path="models/:model/cache" element={<CollectionCacheRoute />} />
               <Route path="models/:model/create"  element={<CollectionCreateRoute />} />
               <Route path="models/:model/:recordId/versions" element={<CollectionVersionsRoute />} />
               <Route path="models/:model/:recordId" element={<CollectionEditRoute />} />
@@ -418,6 +451,7 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
               <Route path="api" element={<Navigate to="/api/rest" replace />} />
               <Route path="api/rest" element={<ApiDocs />} />
               <Route path="api/rest/settings" element={<RestApiSettings />} />
+              <Route path="api/rest/cache" element={<RestCacheBrowser title="REST API Cache" />} />
               <Route path="api/graphql" element={<GraphQLExplorer />} />
               <Route path="api/graphql/settings" element={<GraphQLSettings />} />
 

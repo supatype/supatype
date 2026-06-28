@@ -1,35 +1,39 @@
 import { describe, expect, it, vi, beforeEach } from "vitest"
 
-vi.mock("@clack/prompts", () => ({
-  confirm: vi.fn(),
+const confirmMock = vi.hoisted(() => vi.fn())
+
+vi.mock("../src/ui/clack.js", () => ({
+  p: {
+    confirm: confirmMock,
+    cancel: vi.fn(() => process.exit(0)),
+  },
   isCancel: vi.fn((v: unknown) => v === Symbol.for("cancel")),
-  cancel: vi.fn(),
+  CLACK_CANCEL: Symbol.for("cancel"),
 }))
 
 vi.mock("../src/ui/interactive.js", () => ({
   isInteractive: vi.fn(() => true),
 }))
 
-import * as clack from "@clack/prompts"
 import { confirm, logSkippedConfirm } from "../src/ui/confirm.js"
 import { isInteractive } from "../src/ui/interactive.js"
 
 describe("ui confirm", () => {
   beforeEach(() => {
-    vi.mocked(clack.confirm).mockReset()
+    confirmMock.mockReset()
     vi.mocked(isInteractive).mockReturnValue(true)
   })
 
-  it("returns clack confirm result in TTY mode", async () => {
-    vi.mocked(clack.confirm).mockResolvedValue(true)
+  it("returns ink confirm result in TTY mode", async () => {
+    confirmMock.mockResolvedValue(true)
     await expect(confirm("Proceed?")).resolves.toBe(true)
-    expect(clack.confirm).toHaveBeenCalledWith({ message: "Proceed?", initialValue: false })
+    expect(confirmMock).toHaveBeenCalledWith({ message: "Proceed?", initialValue: false })
   })
 
   it("uses nonInteractive fallback when not a TTY", async () => {
     vi.mocked(isInteractive).mockReturnValue(false)
     await expect(confirm("Proceed?", { nonInteractive: false })).resolves.toBe(false)
-    expect(clack.confirm).not.toHaveBeenCalled()
+    expect(confirmMock).not.toHaveBeenCalled()
   })
 
   it("logSkippedConfirm mentions --yes", () => {

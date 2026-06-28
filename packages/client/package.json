@@ -22,5 +22,8 @@
     "@types/node": "^22",
     "typescript": "^5",
     "vitest": "^4.0.18"
+  },
+  "dependencies": {
+    "@noble/hashes": "1.8.0"
   }
 }

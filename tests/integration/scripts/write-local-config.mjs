@@ -11,7 +11,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs"
-import { resolve } from "node:path"
+import { dirname, resolve } from "node:path"
 
 const out = process.argv[2]
 if (!out) {
@@ -24,10 +24,15 @@ const o = {}
 function addBin(key, val) {
   if (!val || !existsSync(val)) return
   try {
-    accessSync(val, constants.X_OK)
-    o[key] = resolve(val)
+    const st = statSync(val)
+    if (!st.isFile()) return
+    // Windows .exe files often fail constants.X_OK — existence + isFile is enough.
+    if (process.platform !== "win32") {
+      accessSync(val, constants.X_OK)
+    }
+    o[key] = resolve(val).replace(/\\/g, "/")
   } catch {
-    /* not executable or inaccessible */
+    /* inaccessible */
   }
 }
 
@@ -36,7 +41,18 @@ addBin("server", process.env["SUPATYPE_SERVER"])
 
 const pg = process.env["SUPATYPE_POSTGRES_DIR"]
 if (pg && existsSync(pg) && statSync(pg).isDirectory()) {
-  o["postgres_dir"] = resolve(pg)
+  o["postgres_dir"] = resolve(pg).replace(/\\/g, "/")
+}
+
+const studio = process.env["SUPATYPE_STUDIO_DIR"]
+if (studio && existsSync(studio) && statSync(studio).isDirectory()) {
+  o["studio"] = resolve(studio).replace(/\\/g, "/")
+} else {
+  const integrationDir = dirname(resolve(out))
+  const defaultStudio = resolve(integrationDir, "../../packages/studio")
+  if (existsSync(defaultStudio) && statSync(defaultStudio).isDirectory()) {
+    o["studio"] = "../../packages/studio"
+  }
 }
 
 const prov =
@@ -44,6 +60,12 @@ const prov =
 const partial = {}
 if (Object.keys(o).length > 0) {
   partial.overrides = o
+  const versions = {}
+  if (o.engine) versions.engine = "local"
+  if (o.server) versions.server = "local"
+  if (Object.keys(versions).length > 0) {
+    partial.versions = versions
+  }
 }
 if (prov === "native" || prov === "docker") {
   partial.provider = prov

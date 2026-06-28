@@ -38,6 +38,7 @@ function getTertiaryGroups(path: string): NavGroup[] | null {
       items: [
         { label: "Docs",     href: "/api/rest" },
         { label: "Settings", href: "/api/rest/settings" },
+        { label: "Cache",    href: "/api/rest/cache", activeWhen: (p) => p === "/api/rest/cache" },
       ],
     }]
   }
@@ -108,7 +109,8 @@ function getTertiaryGroups(path: string): NavGroup[] | null {
               !p.startsWith(base + "/schema") &&
               !p.startsWith(base + "/data") &&
               !p.startsWith(base + "/api") &&
-              !p.startsWith(base + "/graphql")),
+              !p.startsWith(base + "/graphql") &&
+              !p.startsWith(base + "/cache")),
         },
         {
           label: "Schema",
@@ -129,6 +131,11 @@ function getTertiaryGroups(path: string): NavGroup[] | null {
           label: "GraphQL",
           href: `${base}/graphql`,
           activeWhen: (p) => p === `${base}/graphql`,
+        },
+        {
+          label: "Cache",
+          href: `${base}/cache`,
+          activeWhen: (p) => p === `${base}/cache`,
         },
       ],
     }]
@@ -149,7 +156,8 @@ function getTertiaryGroups(path: string): NavGroup[] | null {
               !p.startsWith(base + "/schema") &&
               !p.startsWith(base + "/data") &&
               !p.startsWith(base + "/api") &&
-              !p.startsWith(base + "/graphql")),
+              !p.startsWith(base + "/graphql") &&
+              !p.startsWith(base + "/cache")),
         },
         {
           label: "Schema",
@@ -170,6 +178,11 @@ function getTertiaryGroups(path: string): NavGroup[] | null {
           label: "GraphQL",
           href: `${base}/graphql`,
           activeWhen: (p) => p === `${base}/graphql`,
+        },
+        {
+          label: "Cache",
+          href: `${base}/cache`,
+          activeWhen: (p) => p === `${base}/cache`,
         },
       ],
     }]

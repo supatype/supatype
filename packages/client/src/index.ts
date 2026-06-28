@@ -1,5 +1,6 @@
 import { AuthClient } from "./auth.js"
-import { QueryBuilder, MutationBuilder } from "./query.js"
+import { QueryBuilder, MutationBuilder, type HeadersProvider } from "./query.js"
+import { defaultQueryCache, type QueryCache } from "./query-cache.js"
 import { StorageClient } from "./storage.js"
 import { RealtimeClient } from "./realtime.js"
 import { PostgrestError } from "./errors.js"
@@ -32,8 +33,10 @@ export type {
   SupatypeFunctions,
   AugmentedDatabase,
 } from "./types.js"
+export type { QueryCacheOptions, CacheStatus } from "./query-cache.js"
 export { AuthClient } from "./auth.js"
-export { QueryBuilder, MutationBuilder } from "./query.js"
+export { QueryBuilder, MutationBuilder, type HeadersProvider } from "./query.js"
+export { QueryCache, defaultQueryCache } from "./query-cache.js"
 export { StorageClient, BucketClient } from "./storage.js"
 export type { StorageObject, TransformOptions } from "./storage.js"
 export { RealtimeClient } from "./realtime.js"
@@ -59,25 +62,33 @@ interface TableDef {
 class TableClient<TDef extends TableDef> {
   private readonly baseUrl: string
   private readonly path: string
-  private readonly headers: Record<string, string>
+  private readonly getHeaders: HeadersProvider
+  private readonly onUnauthorized: (() => Promise<void>) | undefined
+  private readonly queryCache: QueryCache
 
-  constructor(baseUrl: string, table: string, headers: Record<string, string>) {
+  constructor(
+    baseUrl: string,
+    table: string,
+    getHeaders: HeadersProvider,
+    queryCache: QueryCache = defaultQueryCache,
+    onUnauthorized?: (() => Promise<void>) | undefined,
+  ) {
     this.baseUrl = baseUrl
     this.path = `/rest/v1/${table}`
-    this.headers = headers
+    this.getHeaders = getHeaders
+    this.onUnauthorized = onUnauthorized
+    this.queryCache = queryCache
   }
 
-  /**
-   * Start a SELECT query.
-   *
-   * Pass a type parameter to narrow the result when embedding relations:
-   * ```ts
-   * client.from('posts').select<Post & { comments: Comment[] }>('*, comments(*)')
-   * ```
-   * Without a type parameter the full Row type is returned.
-   */
   select<TResult = TDef["Row"]>(columns?: string | undefined): QueryBuilder<TResult> {
-    return new QueryBuilder<TResult>(this.baseUrl, this.path, this.headers, columns)
+    return new QueryBuilder<TResult>(
+      this.baseUrl,
+      this.path,
+      this.getHeaders,
+      columns,
+      this.queryCache,
+      this.onUnauthorized,
+    )
   }
 
   insert(
@@ -86,9 +97,11 @@ class TableClient<TDef extends TableDef> {
     return new MutationBuilder<TDef["Row"]>(
       this.baseUrl,
       this.path,
-      this.headers,
+      this.getHeaders,
       "POST",
       data,
+      undefined,
+      this.onUnauthorized,
     )
   }
 
@@ -98,10 +111,11 @@ class TableClient<TDef extends TableDef> {
     return new MutationBuilder<TDef["Row"]>(
       this.baseUrl,
       this.path,
-      this.headers,
+      this.getHeaders,
       "POST",
       data,
       { upsert: true },
+      this.onUnauthorized,
     )
   }
 
@@ -109,9 +123,11 @@ class TableClient<TDef extends TableDef> {
     return new MutationBuilder<TDef["Row"]>(
       this.baseUrl,
       this.path,
-      this.headers,
+      this.getHeaders,
       "PATCH",
       data,
+      undefined,
+      this.onUnauthorized,
     )
   }
 
@@ -119,8 +135,11 @@ class TableClient<TDef extends TableDef> {
     return new MutationBuilder<TDef["Row"]>(
       this.baseUrl,
       this.path,
-      this.headers,
+      this.getHeaders,
       "DELETE",
+      undefined,
+      undefined,
+      this.onUnauthorized,
     )
   }
 }
@@ -220,13 +239,20 @@ export interface FunctionInvokeOptions {
 
 class FunctionsClient {
   private readonly baseUrl: string
-  private readonly headers: Record<string, string>
+  private readonly getHeaders: HeadersProvider
+  private readonly onUnauthorized: (() => Promise<void>) | undefined
   private readonly doFetch: (url: string, init?: RequestInit) => Promise<Response>
 
-  constructor(baseUrl: string, headers: Record<string, string>, doFetch: (url: string, init?: RequestInit) => Promise<Response>) {
+  constructor(
+    baseUrl: string,
+    getHeaders: HeadersProvider,
+    doFetch: (url: string, init?: RequestInit) => Promise<Response>,
+    onUnauthorized?: (() => Promise<void>) | undefined,
+  ) {
     this.baseUrl = baseUrl
-    this.headers = headers
+    this.getHeaders = getHeaders
     this.doFetch = doFetch
+    this.onUnauthorized = onUnauthorized
   }
 
   /**
@@ -245,14 +271,13 @@ class FunctionsClient {
     options?: (Omit<FunctionInvokeOptions, "body"> & { body?: EdgeFunctionArgs<TFn> | undefined }) | undefined,
   ): Promise<{ data: EdgeFunctionReturns<TFn> | null; error: SupatypeError | null }> {
     const method = options?.method ?? "POST"
-    const mergedHeaders: Record<string, string> = {
-      ...this.headers,
+    const resolveHeaders = async (): Promise<Record<string, string>> => ({
+      ...(await this.getHeaders()),
       ...options?.headers,
-    }
+    })
 
     const fetchOpts: RequestInit = {
       method,
-      headers: mergedHeaders,
     }
 
     if (options?.body !== undefined && method !== "GET") {
@@ -260,10 +285,19 @@ class FunctionsClient {
     }
 
     try {
-      const res = await this.doFetch(
+      let headers = await resolveHeaders()
+      let res = await this.doFetch(
         `${this.baseUrl}/functions/v1/${functionName}`,
-        fetchOpts,
+        { ...fetchOpts, headers },
       )
+      if (res.status === 401 && this.onUnauthorized !== undefined) {
+        await this.onUnauthorized()
+        headers = await resolveHeaders()
+        res = await this.doFetch(
+          `${this.baseUrl}/functions/v1/${functionName}`,
+          { ...fetchOpts, headers },
+        )
+      }
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({})) as Record<string, unknown>
@@ -367,9 +401,9 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
     : baseHeaders
   const storage = new StorageClient(`${config.url}/storage/v1`, storageHeaders)
   const realtime = new RealtimeClient(`${config.url}/realtime/v1`, baseHeaders)
-  const functions = new FunctionsClient(config.url, baseHeaders, doFetch)
+  const queryCache = config.queryCache ?? defaultQueryCache
 
-  const getAuthHeaders = (): Record<string, string> => {
+  const getAuthHeaders = async (): Promise<Record<string, string>> => {
     // Studio and other admin tools pass serviceRoleKey — use it for table/RPC/GraphQL
     // so supatype_admin RLS policies and bypass rules apply (anon would fail).
     if (config.serviceRoleKey) {
@@ -379,6 +413,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
         "Content-Type": "application/json",
       }
     }
+    await auth.ensureValidSession()
     const token = auth.currentAccessToken
     if (token !== null) {
       const role = jwtRole(token)
@@ -391,6 +426,12 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
     return baseHeaders
   }
 
+  const onUnauthorized = config.serviceRoleKey
+    ? undefined
+    : (): Promise<void> => auth.ensureValidSession()
+
+  const functions = new FunctionsClient(config.url, getAuthHeaders, doFetch, onUnauthorized)
+
   return {
     url: config.url,
     serviceRoleKey: config.serviceRoleKey,
@@ -399,7 +440,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
       table: TTable,
     ): TableClient<TDatabase["public"]["Tables"][TTable]> {
       type TDef = TDatabase["public"]["Tables"][TTable]
-      return new TableClient<TDef>(config.url, table, getAuthHeaders())
+      return new TableClient<TDef>(config.url, table, getAuthHeaders, queryCache, onUnauthorized)
     },
 
     global<TRow extends Record<string, unknown> = Record<string, unknown>>(name: string): GlobalClient<TRow> {
@@ -407,12 +448,12 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
       type TDef = { Row: TRow; Insert: TRow; Update: Partial<TRow> }
       return {
         async get(): Promise<{ data: TRow | null; error: SupatypeError | null }> {
-          const tc = new TableClient<TDef>(config.url, tableName, getAuthHeaders())
+          const tc = new TableClient<TDef>(config.url, tableName, getAuthHeaders, queryCache, onUnauthorized)
           const result = await tc.select().limit(1).maybeSingle()
           return { data: result.data ?? null, error: result.error }
         },
         async update(data: Partial<TRow>): Promise<{ data: TRow | null; error: SupatypeError | null }> {
-          const tc = new TableClient<TDef>(config.url, tableName, getAuthHeaders())
+          const tc = new TableClient<TDef>(config.url, tableName, getAuthHeaders, queryCache, onUnauthorized)
           const result = await tc.upsert(data as TRow)
           const row = Array.isArray(result.data) ? (result.data[0] as TRow | undefined) ?? null : null
           return { data: row, error: result.error }
@@ -437,9 +478,17 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
       try {
         res = await doFetch(`${config.url}/graphql/v1`, {
           method: "POST",
-          headers: getAuthHeaders(),
+          headers: await getAuthHeaders(),
           body: JSON.stringify(body),
         })
+        if (res.status === 401 && onUnauthorized !== undefined) {
+          await onUnauthorized()
+          res = await doFetch(`${config.url}/graphql/v1`, {
+            method: "POST",
+            headers: await getAuthHeaders(),
+            body: JSON.stringify(body),
+          })
+        }
       } catch (e) {
         return { data: null, error: { message: e instanceof Error ? e.message : "Network error" } }
       }
@@ -468,7 +517,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
       params?: FunctionArgs<TDatabase, TFn> | undefined,
       options?: { head?: boolean | undefined; count?: "exact" | "planned" | "estimated" | undefined } | undefined,
     ): Promise<RpcResult<FunctionReturns<TDatabase, TFn>>> {
-      const headers: Record<string, string> = { ...getAuthHeaders() }
+      const headers: Record<string, string> = { ...(await getAuthHeaders()) }
       const method = options?.head === true ? "HEAD" : "POST"
 
       if (options?.count !== undefined) {
@@ -482,6 +531,18 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
           headers,
           ...(params !== undefined && method !== "HEAD" && { body: JSON.stringify(params) }),
         })
+        if (res.status === 401 && onUnauthorized !== undefined) {
+          await onUnauthorized()
+          const retryHeaders: Record<string, string> = { ...(await getAuthHeaders()) }
+          if (options?.count !== undefined) {
+            retryHeaders["Prefer"] = `count=${options.count}`
+          }
+          res = await doFetch(`${config.url}/rest/v1/rpc/${fn}`, {
+            method,
+            headers: retryHeaders,
+            ...(params !== undefined && method !== "HEAD" && { body: JSON.stringify(params) }),
+          })
+        }
       } catch (e) {
         return { data: null, error: { message: e instanceof Error ? e.message : "Network error" } }
       }

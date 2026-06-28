@@ -2,6 +2,9 @@
  * Per-task log buffers for `supatype dev` TUI mode.
  */
 
+import type { DevReadyPanel } from "./dev-ready-panel.js"
+import { devReadyPanelRowCount } from "./dev-ready-panel.js"
+
 export type DevLogLevel = "log" | "warn" | "error"
 
 export interface DevTask {
@@ -18,6 +21,7 @@ export class DevLogBus {
   private readonly order: string[] = []
   private readonly listeners = new Set<() => void>()
   private focusedTaskId = "stack"
+  private readyPanel: DevReadyPanel | null = null
 
   constructor(private readonly maxLines = DEFAULT_MAX_LINES) {
     this.registerTask("stack", "supatype")
@@ -64,6 +68,20 @@ export class DevLogBus {
     const idx = this.order.indexOf(this.focusedTaskId)
     const prev = this.order[(idx - 1 + this.order.length) % this.order.length]
     if (prev) this.setFocusedTaskId(prev)
+  }
+
+  setReadyPanel(panel: DevReadyPanel): void {
+    this.readyPanel = panel
+    this.notify()
+  }
+
+  getReadyPanel(): DevReadyPanel | null {
+    return this.readyPanel
+  }
+
+  readyPanelRowCount(): number {
+    if (!this.readyPanel) return 0
+    return devReadyPanelRowCount(this.readyPanel)
   }
 
   append(taskId: string, line: string, level: DevLogLevel = "log"): void {

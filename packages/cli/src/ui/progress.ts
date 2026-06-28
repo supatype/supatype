@@ -1,9 +1,15 @@
-import * as p from "@clack/prompts"
+/**
+ * Progress UI for one-shot commands — Ink spinner inside command chrome.
+ */
+
+import { getActiveFlowApi } from "./runtime/flow-session.js"
 import { isInteractive } from "./interactive.js"
 import { info } from "./messages.js"
+import { runCommandChrome } from "./runtime/command-chrome.js"
 
 /**
- * Run an async task with a Clack spinner (TTY) or a plain status line (CI/pipes).
+ * Show progress with the branded Ink spinner when command chrome is active
+ * (or mount chrome for a standalone spinner).
  */
 export async function withSpinner<T>(
   message: string,
@@ -15,7 +21,12 @@ export async function withSpinner<T>(
     return task()
   }
 
-  const spinner = p.spinner()
+  const api = getActiveFlowApi()
+  if (!api) {
+    return runCommandChrome(() => withSpinner(message, task, doneMessage))
+  }
+
+  const spinner = api.spinner()
   spinner.start(message)
   try {
     const result = await task()

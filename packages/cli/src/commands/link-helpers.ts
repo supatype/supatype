@@ -12,7 +12,7 @@ import { targetFetch } from "../target-client.js"
 import { error, info, plain } from "../ui/messages.js"
 import { nextSteps } from "../ui/next-steps.js"
 import { isInteractive } from "../ui/interactive.js"
-import { ensureNotCancelled, printLogo, clack as p } from "../ui/prompts.js"
+import { ensureNotCancelled, p, runClackFlow } from "../ui/prompts.js"
 
 function resolveLinkToken(opts: {
   token?: string
@@ -145,35 +145,36 @@ export async function runLinkAction(opts: {
   let url = opts.url
 
   if (isInteractive() && !project && !url) {
-    printLogo()
-    p.intro("Link this project")
-    const targetKind = ensureNotCancelled(
-      await p.select<"cloud" | "self-host">({
-        message: "Link target",
-        options: [
-          { value: "cloud", label: "Supatype Cloud", hint: "managed project on supatype.com" },
-          { value: "self-host", label: "Self-host", hint: "your Kong gateway URL" },
-        ],
-      }),
-    )
-    if (targetKind === "cloud") {
-      project = ensureNotCancelled(
-        await p.text({
-          message: "Cloud project slug",
-          placeholder: projectRef,
-          defaultValue: projectRef,
+    await runClackFlow(async () => {
+      p.intro("Link this project")
+      const targetKind = ensureNotCancelled(
+        await p.select<"cloud" | "self-host">({
+          message: "Link target",
+          options: [
+            { value: "cloud", label: "Supatype Cloud", hint: "managed project on supatype.com" },
+            { value: "self-host", label: "Self-host", hint: "your Kong gateway URL" },
+          ],
         }),
-      ).trim()
-    } else {
-      url = ensureNotCancelled(
-        await p.text({
-          message: "Kong gateway URL",
-          placeholder: "https://api.example.com",
-          defaultValue: "http://localhost:18473",
-        }),
-      ).trim()
-    }
-    p.outro("Linking...")
+      )
+      if (targetKind === "cloud") {
+        project = ensureNotCancelled(
+          await p.text({
+            message: "Cloud project slug",
+            placeholder: projectRef,
+            defaultValue: projectRef,
+          }),
+        ).trim()
+      } else {
+        url = ensureNotCancelled(
+          await p.text({
+            message: "Kong gateway URL",
+            placeholder: "https://api.example.com",
+            defaultValue: "http://localhost:18473",
+          }),
+        ).trim()
+      }
+      p.outro("Linking...")
+    })
   }
 
   const token = resolveLinkToken(opts)

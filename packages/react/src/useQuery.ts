@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react"
-import type { AnyDatabase, SupatypeError } from "@supatype/client"
+import type { AnyDatabase, SupatypeError, QueryCacheOptions } from "@supatype/client"
 import { useSupatype } from "./context.js"
 
 export interface UseQueryOptions {
@@ -19,6 +19,8 @@ export interface UseQueryOptions {
   enabled?: boolean | undefined
   /** Re-fetch interval in milliseconds */
   refetchInterval?: number | undefined
+  /** In-memory GET cache; pass `{ server: true }` for Valkey-backed server cache */
+  cache?: QueryCacheOptions | undefined
 }
 
 export interface UseQueryResult<TRow> {
@@ -82,6 +84,9 @@ export function useQuery<
     }
     if (options?.offset !== undefined && options.limit !== undefined) {
       query = query.range(options.offset, options.offset + options.limit - 1)
+    }
+    if (options?.cache !== undefined) {
+      query = query.cache(options.cache)
     }
 
     const result = (await query) as { data: TRow[] | null; error: SupatypeError | null; count: number | null }

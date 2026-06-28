@@ -1,11 +1,15 @@
 /**
- * `supatype dev` output session — TUI (default) or interleaved stream mode.
+ * `supatype dev` output session — Ink dashboard (default) or interleaved stream mode.
  */
 
+import { render, type Instance } from "ink"
+import React from "react"
 import type { ProcessOptions } from "./process-manager.js"
-import { filterDevSubprocessLine, formatConsoleArgs } from "./dev-log-filter.js"
+import { filterDevSubprocessLine, filterStackLogLine, formatConsoleArgs } from "./dev-log-filter.js"
 import { DevLogBus, type DevLogLevel } from "./dev-log-bus.js"
-import { DevTui } from "./dev-tui.js"
+import { DevDashboard } from "./ui/dev/DevDashboard.js"
+import { ensureDevShutdownHooks } from "./dev-shutdown.js"
+import { clearDevPromptQueue } from "./ui/runtime/dev-prompt-queue.js"
 
 export type DevUiMode = "tui" | "stream"
 
@@ -18,26 +22,74 @@ export function resolveDevUiMode(streamFlag: boolean): DevUiMode {
 let activeSession: DevSession | null = null
 
 export function beginDevSession(mode: DevUiMode): DevSession {
+  ensureDevShutdownHooks()
   activeSession?.stop()
   activeSession = new DevSession(mode)
+  if (activeSession.isTui()) {
+    activeSession.enableConsoleCapture(false)
+    activeSession.startInk()
+  }
   return activeSession
 }
 
-/** Enter console capture + TUI. */
+/** @deprecated Ink starts in beginDevSession — kept for callers that invoke late. */
 export function startDevSession(): void {
-  activeSession?.start()
+  activeSession?.startInk()
+}
+
+export function isDevTuiActive(): boolean {
+  return activeSession?.isInkMounted() ?? false
 }
 
 export function endDevSession(): void {
+  clearDevPromptQueue()
   activeSession?.stop()
   activeSession = null
+}
+
+/** @deprecated Dev prompts render inside the Ink dashboard — no suspend needed. */
+export function suspendDevSessionForPrompt(): void {
+  prepareStdinForInteractivePrompt()
+}
+
+export function prepareStdinForInteractivePrompt(): void {
+  if (!process.stdin.isTTY) return
+  process.stdin.setRawMode(false)
+  process.stdin.resume()
+}
+
+/** @deprecated Dev prompts render inside the Ink dashboard — no resume needed. */
+export function resumeDevSessionAfterPrompt(): void {
+  // no-op — prompts are Ink overlays
+}
+
+/** @deprecated Use Ink overlay prompts — runs fn without tearing down the dashboard. */
+export async function withDevSessionSuspended<T>(fn: () => Promise<T>): Promise<T> {
+  return fn()
 }
 
 export function getActiveDevSession(): DevSession | null {
   return activeSession
 }
 
-/** Log to a TUI task stream, or prefixed console output in stream mode. */
+export function appendStackOutput(
+  text: string | null | undefined,
+  level: DevLogLevel = "log",
+): void {
+  if (text == null || text.trim() === "") return
+  const session = getActiveDevSession()
+  for (const line of text.split(/\r?\n/)) {
+    if (line.trim() === "") continue
+    if (session?.isTui() && !filterStackLogLine(line)) continue
+    if (session?.isConsoleCaptured()) {
+      session.bus.append("stack", line, level)
+      continue
+    }
+    const write = level === "warn" ? console.warn : level === "error" ? console.error : console.log
+    write(`[supatype] ${line}`)
+  }
+}
+
 export function appendDevTaskLog(
   taskId: string,
   taskTitle: string,
@@ -58,8 +110,9 @@ export function appendDevTaskLog(
 export class DevSession {
   readonly bus = new DevLogBus()
   readonly mode: DevUiMode
-  private tui: DevTui | null = null
+  private ink: Instance | null = null
   private restoreConsole: (() => void) | null = null
+  private consoleCaptured = false
 
   constructor(mode: DevUiMode) {
     this.mode = mode
@@ -69,18 +122,37 @@ export class DevSession {
     return this.mode === "tui"
   }
 
-  start(): void {
-    if (!this.isTui()) return
+  isInkMounted(): boolean {
+    return this.ink !== null
+  }
+
+  isConsoleCaptured(): boolean {
+    return this.consoleCaptured
+  }
+
+  needsPromptSuspend(): boolean {
+    return false
+  }
+
+  enableConsoleCapture(_tee: boolean): void {
+    if (!this.isTui() || this.consoleCaptured) return
     this.restoreConsole = patchConsole(this.bus)
-    this.tui = new DevTui(this.bus)
-    this.tui.start()
+    this.consoleCaptured = true
+  }
+
+  startInk(): void {
+    if (!this.isTui() || this.ink) return
+    this.ink = render(React.createElement(DevDashboard, { bus: this.bus }))
   }
 
   stop(): void {
-    this.tui?.stop()
-    this.tui = null
-    this.restoreConsole?.()
-    this.restoreConsole = null
+    this.ink?.unmount()
+    this.ink = null
+    if (this.restoreConsole) {
+      this.restoreConsole()
+      this.restoreConsole = null
+      this.consoleCaptured = false
+    }
   }
 }
 
@@ -105,6 +177,14 @@ export function enhanceProcessOptions(label: string, opts: ProcessOptions): Proc
   }
 }
 
+function appendFilteredStackLine(bus: DevLogBus, line: string, level: DevLogLevel): void {
+  for (const part of line.split(/\r?\n/)) {
+    if (!part.trim()) continue
+    if (!filterStackLogLine(part)) continue
+    bus.append("stack", part, level)
+  }
+}
+
 function patchConsole(bus: DevLogBus): () => void {
   const original = {
     log: console.log,
@@ -113,13 +193,13 @@ function patchConsole(bus: DevLogBus): () => void {
   }
 
   console.log = (...args: unknown[]) => {
-    bus.append("stack", formatConsoleArgs(args), "log")
+    appendFilteredStackLine(bus, formatConsoleArgs(args), "log")
   }
   console.warn = (...args: unknown[]) => {
-    bus.append("stack", formatConsoleArgs(args), "warn")
+    appendFilteredStackLine(bus, formatConsoleArgs(args), "warn")
   }
   console.error = (...args: unknown[]) => {
-    bus.append("stack", formatConsoleArgs(args), "error")
+    appendFilteredStackLine(bus, formatConsoleArgs(args), "error")
   }
 
   return () => {
