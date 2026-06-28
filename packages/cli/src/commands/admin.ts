@@ -17,6 +17,8 @@ import {
 } from "../project-config.js"
 import { readEnvValue, upsertEnvFile } from "../env-file.js"
 import { hasEngineOverride } from "../binary-cache.js"
+import { readDevSessionLock } from "../dev-session-lock.js"
+import { composeProjectName } from "../self-host-compose.js"
 import { confirm as uiConfirm } from "../ui/confirm.js"
 import { error, info, plain } from "../ui/messages.js"
 import { promptPassword, promptText } from "../ui/prompts.js"
@@ -30,6 +32,34 @@ export const ADMIN_PASSWORD_ENV = "SUPATYPE_ADMIN_PASSWORD"
 
 const BCRYPT_ROUNDS = 10
 
+/** GoTrue scopes users to the nil instance id in single-tenant/self-host mode. */
+export const GOTRUE_NIL_INSTANCE_ID = "00000000-0000-0000-0000-000000000000"
+
+/** Audience claim used by GoTrue when looking up users (matches GOTRUE_JWT_AUD in compose). */
+export function gotrueJwtAud(cwd: string): string {
+  return readEnvValue(cwd, "GOTRUE_JWT_AUD", "authenticated")
+}
+
+type DbQuery = (sql: string, params?: unknown[]) => Promise<QueryResult>
+type AuthConfirmedColumn = "email_confirmed_at" | "confirmed_at"
+
+/** Prefer GoTrue's column when migrated; fall back to postgres init `confirmed_at`. */
+export async function resolveAuthConfirmedAtColumn(query: DbQuery): Promise<AuthConfirmedColumn> {
+  const result = await query(
+    `SELECT column_name
+     FROM information_schema.columns
+     WHERE table_schema = 'auth'
+       AND table_name = 'users'
+       AND column_name IN ('email_confirmed_at', 'confirmed_at')
+     ORDER BY CASE column_name WHEN 'email_confirmed_at' THEN 0 ELSE 1 END
+     LIMIT 1`,
+  )
+  const row = result.rows[0] as { column_name?: string; value?: string } | undefined
+  const name = row?.column_name ?? row?.value
+  if (name === "email_confirmed_at" || name === "confirmed_at") return name
+  return "confirmed_at"
+}
+
 export interface EnsureFirstAdminOptions {
   email?: string
   password?: string
@@ -38,8 +68,6 @@ export interface EnsureFirstAdminOptions {
   connection?: string
   compose?: { project: string; composePath: string }
 }
-
-type DbQuery = (sql: string, params?: unknown[]) => Promise<QueryResult>
 
 export function registerAdmin(program: Command): void {
   const adminCmd = program
@@ -81,20 +109,33 @@ export function registerAdmin(program: Command): void {
 
         info(`Creating admin user: ${email} (role: ${role})...`)
 
-        const pg = await importPg()
-        const pool = new pg.Pool({ connectionString: connection, max: 2 })
+        const compose =
+          opts.connection === undefined ? resolveDockerComposeContext(cwd, config) : null
 
         try {
-          await ensureAuthUsersTable(pool)
-          await createAdminUser(pool, email, password, role)
+          if (compose) {
+            await createAdminUser(
+              (sql, params) => composeExecQuery(cwd, compose, sql, params),
+              email,
+              password,
+              role,
+              { cwd },
+            )
+          } else {
+            const pg = await importPg()
+            const pool = new pg.Pool({ connectionString: connection, max: 2 })
+            try {
+              await ensureAuthUsersTable(pool)
+              await createAdminUser(pool, email, password, role, { cwd })
+            } finally {
+              await pool.end()
+            }
+          }
           info("This user can now log in to the admin panel at /admin")
         } catch (err) {
-          const message =
-            err instanceof Error ? err.message : "Unknown error"
+          const message = err instanceof Error ? err.message : "Unknown error"
           error(`Failed to create admin user: ${message}`)
           process.exit(1)
-        } finally {
-          await pool.end()
         }
       },
     )
@@ -252,8 +293,9 @@ export async function ensureFirstAdminUserForProject(
         (sql, params) => composeExecQuery(root, merged.compose!, sql, params),
         merged,
       )
-    } catch {
-      // Non-fatal
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      error(`Could not ensure first admin user: ${message}`)
     }
     return
   }
@@ -288,7 +330,10 @@ async function ensureFirstAdminWithQuery(
 
   const role = options.role ?? "admin"
   try {
-    await createAdminUser(query, credentials.email, credentials.password, role, { quiet: true })
+    await createAdminUser(query, credentials.email, credentials.password, role, {
+      quiet: true,
+      cwd,
+    })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     error(`Failed to create admin user: ${message}`)
@@ -365,7 +410,7 @@ async function createAdminUser(
   email: string,
   password: string,
   role: string,
-  opts: { quiet?: boolean } = {},
+  opts: { quiet?: boolean; aud?: string; cwd?: string } = {},
 ): Promise<{ id: string; email: string }> {
   const query: DbQuery =
     typeof (db as Pool).query === "function"
@@ -373,9 +418,15 @@ async function createAdminUser(
       : (db as DbQuery)
 
   const normalized = email.toLowerCase()
-  const existing = await query(`SELECT id FROM auth.users WHERE email = $1`, [
-    normalized,
-  ])
+  const aud = opts.aud ?? (opts.cwd ? gotrueJwtAud(opts.cwd) : "authenticated")
+  const existing = await query(
+    `SELECT id FROM auth.users
+     WHERE instance_id = $1::uuid
+       AND LOWER(email) = $2
+       AND aud = $3
+       AND is_sso_user = false`,
+    [GOTRUE_NIL_INSTANCE_ID, normalized, aud],
+  )
   if (existing.rows.length > 0) {
     throw new Error(`User with email "${email}" already exists.`)
   }
@@ -387,18 +438,27 @@ async function createAdminUser(
     providers: ["email"],
   })
   const userMetadata = JSON.stringify({})
+  const confirmedCol = await resolveAuthConfirmedAtColumn(query)
 
   const result = await query(
     `INSERT INTO auth.users (
-      id, email, encrypted_password, role, aud,
+      instance_id, id, aud, role, email, encrypted_password,
       raw_app_meta_data, raw_user_meta_data,
-      email_confirmed_at, created_at, updated_at
+      ${confirmedCol},
+      confirmation_token, recovery_token,
+      email_change_token_new, email_change, email_change_token_current,
+      phone_change, phone_change_token, reauthentication_token,
+      is_sso_user, is_anonymous,
+      created_at, updated_at
     ) VALUES (
-      gen_random_uuid(), $1, $2, 'authenticated', 'authenticated',
-      $3::jsonb, $4::jsonb,
-      now(), now(), now()
+      $1::uuid, gen_random_uuid(), $2, 'authenticated', $3, $4,
+      $5::jsonb, $6::jsonb,
+      now(),
+      '', '', '', '', '', '', '', '',
+      false, false,
+      now(), now()
     ) RETURNING id, email`,
-    [normalized, passwordHash, appMetadata, userMetadata],
+    [GOTRUE_NIL_INSTANCE_ID, aud, normalized, passwordHash, appMetadata, userMetadata],
   )
 
   const user = result.rows[0] as { id: string; email: string }
@@ -417,7 +477,7 @@ async function ensureAuthUsersTable(pool: Pool): Promise<void> {
 
     CREATE TABLE IF NOT EXISTS auth.users (
       id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      instance_id   UUID,
+      instance_id   UUID DEFAULT '00000000-0000-0000-0000-000000000000'::uuid,
       aud           TEXT DEFAULT 'authenticated',
       role          TEXT DEFAULT 'authenticated',
       email         TEXT UNIQUE,
@@ -430,7 +490,13 @@ async function ensureAuthUsersTable(pool: Pool): Promise<void> {
       confirmation_token TEXT DEFAULT '',
       recovery_token TEXT DEFAULT '',
       email_change_token_new TEXT DEFAULT '',
-      email_change  TEXT DEFAULT ''
+      email_change_token_current TEXT DEFAULT '',
+      email_change  TEXT DEFAULT '',
+      phone_change  TEXT DEFAULT '',
+      phone_change_token TEXT DEFAULT '',
+      reauthentication_token TEXT DEFAULT '',
+      is_sso_user   BOOLEAN NOT NULL DEFAULT false,
+      is_anonymous  BOOLEAN NOT NULL DEFAULT false
     );
   `)
 }
@@ -455,6 +521,33 @@ async function hasAdminUsers(query: DbQuery): Promise<boolean> {
   return count > 0
 }
 
+/** Postgres password for compose `exec psql` (db is not published to the host). */
+export function composePostgresPassword(cwd: string): string {
+  return readEnvValue(cwd, "POSTGRES_PASSWORD", "postgres")
+}
+
+function resolveDockerComposeContext(
+  cwd: string,
+  config: SupatypeProjectConfig,
+): { project: string; composePath: string } | null {
+  if (resolveRuntimeProvider(config) !== "docker" || hasEngineOverride(config)) {
+    return null
+  }
+
+  const session = readDevSessionLock(cwd)
+  if (session?.composeProject && session.composePath && existsSync(session.composePath)) {
+    return { project: session.composeProject, composePath: session.composePath }
+  }
+
+  const composePath = resolve(cwd, ".supatype/self-host/docker-compose.yml")
+  if (!existsSync(composePath)) return null
+
+  return {
+    project: composeProjectName(config.project?.name ?? "project"),
+    composePath,
+  }
+}
+
 function composeExecQuery(
   cwd: string,
   compose: { project: string; composePath: string },
@@ -463,6 +556,7 @@ function composeExecQuery(
 ): Promise<QueryResult> {
   const db = readEnvValue(cwd, "POSTGRES_DB", "supatype")
   const user = readEnvValue(cwd, "POSTGRES_USER", "supatype_admin")
+  const pgPassword = composePostgresPassword(cwd)
   const envFile = join(cwd, ".env")
   const composeDir = dirname(compose.composePath)
   const args = [
@@ -477,7 +571,20 @@ function composeExecQuery(
   if (existsSync(envFile)) args.push("--env-file", envFile)
 
   if (params.length === 0) {
-    args.push("exec", "-T", "db", "psql", "-U", user, "-d", db, "-tAc", sql)
+    args.push(
+      "exec",
+      "-T",
+      "-e",
+      `PGPASSWORD=${pgPassword}`,
+      "db",
+      "psql",
+      "-U",
+      user,
+      "-d",
+      db,
+      "-tAc",
+      sql,
+    )
     const result = spawnSync("docker", args, { cwd: composeDir, encoding: "utf8" })
     if (result.status !== 0) {
       throw new Error((result.stderr ?? result.stdout ?? "compose psql failed").trim())
@@ -504,6 +611,8 @@ function composeExecQuery(
   args.push(
     "exec",
     "-T",
+    "-e",
+    `PGPASSWORD=${pgPassword}`,
     "db",
     "psql",
     "-U",

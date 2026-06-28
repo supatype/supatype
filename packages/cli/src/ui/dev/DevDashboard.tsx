@@ -22,6 +22,9 @@ const TASK_COL_WIDTH = 22
 const MIN_WIDTH = 60
 const MIN_HEIGHT = 14
 const TAGLINE = "local development"
+const CHROME_ABOVE_LOG = 2 // separator + keybindings
+const CHROME_BELOW_LOG = 2 // footer separator + focused line
+const MIN_LOG_ROWS = 3
 
 function truncate(text: string, width: number): string {
   if (width <= 0) return ""
@@ -97,10 +100,15 @@ export function DevDashboard({ bus }: DevDashboardProps): React.ReactElement {
   const focusedId = bus.getFocusedTaskId()
   const taskIds = bus.getTaskOrder()
   const readyPanel = bus.getReadyPanel()
-  const readyRows = readyPanel ? bus.readyPanelRowCount() : 0
   const logoRows = logoRowCount() + 1 // figlet + tagline
-  const chromeRows = logoRows + readyRows + 2 // separator + keybindings line
-  const logHeight = Math.max(4, rows - chromeRows - (promptOpen ? 6 : 0) - 1)
+  const promptRows = promptOpen ? 6 : 0
+  const fullReadyRows = readyPanel ? bus.readyPanelRowCount(false) : 0
+  const availableForPanel =
+    rows - logoRows - CHROME_ABOVE_LOG - CHROME_BELOW_LOG - MIN_LOG_ROWS - promptRows
+  const useCompactPanel = readyPanel !== null && fullReadyRows > availableForPanel
+  const readyRows = readyPanel ? bus.readyPanelRowCount(useCompactPanel) : 0
+  const chromeRows = logoRows + readyRows + CHROME_ABOVE_LOG + CHROME_BELOW_LOG + promptRows
+  const logHeight = Math.max(0, rows - chromeRows)
   const logWidth = cols - TASK_COL_WIDTH - 1
 
   useInput((input, key) => {
@@ -148,7 +156,9 @@ export function DevDashboard({ bus }: DevDashboardProps): React.ReactElement {
   return (
     <Box flexDirection="column" width={cols} height={rows}>
       <LogoWordmark maxWidth={cols} tagline={TAGLINE} />
-      {readyPanel ? <DevReadyPanelView panel={readyPanel} width={cols} /> : null}
+      {readyPanel ? (
+        <DevReadyPanelView panel={readyPanel} width={cols} compact={useCompactPanel} />
+      ) : null}
       <Text dimColor>{"─".repeat(cols)}</Text>
       <Text dimColor>
         {truncate(" ↑/k ↓/j task  u/d scroll  g/G top/bottom  Ctrl+C quit", cols)}

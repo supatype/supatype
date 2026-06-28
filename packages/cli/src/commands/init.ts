@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { resolve, join, basename } from "node:path"
 import { spawnSync } from "node:child_process"
 import { p, runClackFlow } from "../ui/clack.js"
-import { ensureNotCancelled, printLogo } from "../ui/prompts.js"
+import { ensureNotCancelled } from "../ui/prompts.js"
 import { generateAndWriteKeys } from "./keys.js"
 import { file, error, info, plain, warn } from "../ui/messages.js"
 import { nextSteps } from "../ui/next-steps.js"
@@ -20,6 +20,7 @@ import {
   resolveInitDependencyVersions,
   type InitDependencyVersions,
 } from "../init-dependency-versions.js"
+import { detectProjectSetup, type DetectedProjectSetup } from "../init-project-detect.js"
 
 // ─── Options model ─────────────────────────────────────────────────────────--
 
@@ -155,8 +156,14 @@ export function registerInit(program: Command): void {
 
       let result: WizardResult
       if (interactive) {
-        printLogo()
-        result = await runWizard(defaultName, modeTarget)
+        await runInteractiveInit({
+          name,
+          dir,
+          defaultName,
+          modeTarget,
+          opts,
+        })
+        return
       } else {
         result = {
           ...defaultScaffoldOptions(defaultName, modeTarget),
@@ -199,14 +206,25 @@ export function registerInit(program: Command): void {
 
       scaffold(dir, result, deps)
 
-      const installOk = doInstall ? runInstall(dir, result.packageManager) : true
-
-      const binariesReady = installOk ? await ensureInitBinaries(dir) : false
-      if (doInstall && !installOk) {
-        warn("Skipping component binary check until dependencies install successfully.")
-      }
-
+      const installOk = doInstall ? runInstall(dir, result.packageManager) : false
       const keysGenerated = doKeys ? writeKeys(dir) : false
+      const binariesReady =
+        doInstall && installOk ? await ensureInitBinaries(dir) : false
+
+      if (doInstall && !installOk) {
+        error(
+          `Dependency install failed. Run "${result.packageManager} install" in the project directory, then "supatype update".`,
+        )
+        process.exit(1)
+      }
+      if (doKeys && !keysGenerated) {
+        error("Could not generate API keys. Check .env has JWT_SECRET, then run `supatype keys`.")
+        process.exit(1)
+      }
+      if (doInstall && installOk && !binariesReady) {
+        error("Component binaries could not be downloaded. Run `supatype update` in the project directory.")
+        process.exit(1)
+      }
 
       warnDockerUnavailableForProvider(result.provider)
 
@@ -220,206 +238,304 @@ export function registerInit(program: Command): void {
     })
 }
 
+interface InteractiveInitArgs {
+  name: string | undefined
+  dir: string
+  defaultName: string
+  modeTarget: ProductionTarget
+  opts: InitCliOptions
+}
+
+/** Interactive init — one Ink session for wizard + scaffold + install + finish. */
+async function runInteractiveInit(args: InteractiveInitArgs): Promise<void> {
+  const { name, dir, defaultName, modeTarget, opts } = args
+
+  await runClackFlow(async () => {
+    p.intro("Create a new Supatype project")
+    const detected = detectProjectSetup(dir)
+    if (detected.hasExistingFiles && detected.summaryLines.length > 0) {
+      p.note(
+        ["Existing project detected:", ...detected.summaryLines.map((line) => `  • ${line}`)].join(
+          "\n",
+        ),
+      )
+    }
+    let result = await collectWizardAnswers(defaultName, modeTarget, dir, detected)
+
+    if (opts.admin === false) {
+      delete result.adminEmail
+      delete result.adminPassword
+    } else if (opts.adminEmail && opts.adminPassword) {
+      result.adminEmail = opts.adminEmail
+      result.adminPassword = opts.adminPassword
+    }
+
+    const doInstall = opts.install !== false && result.install
+    const doKeys = opts.keys !== false && result.generateKeys
+
+    if (name) mkdirSync(dir, { recursive: true })
+
+    const deps = await resolveInitDependencyVersions()
+    const runningCli = cliPackageVersion()
+    if (deps.cli !== runningCli || deps.types !== runningCli) {
+      info(
+        `Using published npm versions: @supatype/cli ^${deps.cli}, @supatype/types ^${deps.types}`,
+      )
+    }
+
+    const setupSpinner = p.spinner()
+    setupSpinner.start("Setting up your project...")
+
+    scaffold(dir, result, deps)
+
+    let installOk = !doInstall
+    if (doInstall) {
+      setupSpinner.start(`Installing dependencies with ${result.packageManager}...`)
+      installOk = runInstall(dir, result.packageManager)
+      setupSpinner.stop(installOk ? "Dependencies installed." : "Dependency install failed.")
+    }
+
+    let keysGenerated = !doKeys
+    if (doKeys) {
+      setupSpinner.start("Generating API keys...")
+      keysGenerated = writeKeys(dir)
+      setupSpinner.stop(keysGenerated ? "API keys generated." : "Could not generate API keys.")
+    }
+
+    let binariesReady = false
+    if (doInstall && installOk) {
+      setupSpinner.start("Preparing component binaries...")
+      binariesReady = await ensureInitBinaries(dir)
+      setupSpinner.stop(binariesReady ? "Component binaries ready." : "Some binaries are missing.")
+    }
+
+    if (doInstall && !installOk) {
+      error(
+        `Dependency install failed. Run "${result.packageManager} install" in the project directory, then "supatype update".`,
+      )
+      process.exit(1)
+    }
+    if (doKeys && !keysGenerated) {
+      error("Could not generate API keys. Check .env has JWT_SECRET, then run `supatype keys`.")
+      process.exit(1)
+    }
+    if (doInstall && installOk && !binariesReady) {
+      error("Component binaries could not be downloaded. Run `supatype update` in the project directory.")
+      process.exit(1)
+    }
+
+    warnDockerUnavailableForProvider(result.provider)
+
+    p.outro(`Supatype project ready${name ? ` in ${name}/` : ""}.`)
+    printNextSteps({
+      name,
+      result,
+      installed: doInstall && installOk,
+      keysGenerated,
+      binariesReady,
+    })
+  })
+
+  process.exit(0)
+}
+
 // ─── Wizard ──────────────────────────────────────────────────────────────────
 
-async function runWizard(
+async function collectWizardAnswers(
   defaultName: string,
   defaultTarget: ProductionTarget,
+  dir: string,
+  detected: DetectedProjectSetup,
 ): Promise<WizardResult> {
-  return runClackFlow(async () => {
-  p.intro("Create a new Supatype project")
-
-  const projectName = ensureNotCancelled(
-    await p.text({
-      message: "Project name",
-      defaultValue: defaultName,
-      placeholder: defaultName,
-    }),
-  ).trim() || defaultName
-
-  const packageManager = ensureNotCancelled(
-    await p.select<PackageManager>({
-      message: "Package manager",
-      initialValue: detectInvokingPackageManager(),
-      options: [
-        { value: "npm", label: "npm" },
-        { value: "pnpm", label: "pnpm" },
-        { value: "yarn", label: "yarn" },
-        { value: "bun", label: "bun" },
-      ],
-    }),
-  )
-
-  const productionTarget = ensureNotCancelled(
-    await p.select<ProductionTarget>({
-      message: "Where will this run in production?",
-      initialValue: defaultTarget,
-      options: [
-        { value: "cloud", label: "Supatype Cloud", hint: "managed; deploy via supatype link" },
-        { value: "self-host", label: "Self-host", hint: "your own server with TLS" },
-        { value: "later", label: "Decide later", hint: "local development only for now" },
-      ],
-    }),
-  )
-
-  let domain: string | undefined
-  let tlsEmail: string | undefined
-  if (productionTarget === "self-host") {
-    domain = ensureNotCancelled(
+    const projectName = ensureNotCancelled(
       await p.text({
-        message: "Production domain for ACME TLS (optional, can set later)",
-        placeholder: "api.example.com",
-        defaultValue: "",
+        message: "Project name",
+        defaultValue: defaultName,
+        placeholder: defaultName,
       }),
-    ).trim()
-    if (domain) {
-      tlsEmail =
-        ensureNotCancelled(
-          await p.text({
-            message: "Email for Let's Encrypt (HTTPS) certificates",
-            placeholder: "you@example.com",
-            defaultValue: "",
-          }),
-        ).trim() || undefined
+    ).trim() || defaultName
+
+    const admin = await promptAdminUser()
+
+    const packageManager = ensureNotCancelled(
+      await p.select<PackageManager>({
+        message: "Package manager",
+        initialValue: detectInvokingPackageManager(),
+        options: [
+          { value: "npm", label: "npm" },
+          { value: "pnpm", label: "pnpm" },
+          { value: "yarn", label: "yarn" },
+          { value: "bun", label: "bun" },
+        ],
+      }),
+    )
+
+    const productionTarget = ensureNotCancelled(
+      await p.select<ProductionTarget>({
+        message: "Where will this run in production?",
+        initialValue: defaultTarget,
+        options: [
+          { value: "cloud", label: "Supatype Cloud", hint: "managed; deploy via supatype link" },
+          { value: "self-host", label: "Self-host", hint: "your own server with TLS" },
+          { value: "later", label: "Decide later", hint: "local development only for now" },
+        ],
+      }),
+    )
+
+    let domain: string | undefined
+    let tlsEmail: string | undefined
+    if (productionTarget === "self-host") {
+      domain = ensureNotCancelled(
+        await p.text({
+          message: "Production domain for ACME TLS (optional, can set later)",
+          placeholder: "api.example.com",
+          defaultValue: "",
+        }),
+      ).trim()
+      if (domain) {
+        tlsEmail =
+          ensureNotCancelled(
+            await p.text({
+              message: "Email for Let's Encrypt (HTTPS) certificates",
+              placeholder: "you@example.com",
+              defaultValue: "",
+            }),
+          ).trim() || undefined
+      }
     }
-  }
 
-  const provider = ensureNotCancelled(
-    await p.select<ScaffoldOptions["provider"]>({
-      message: "How should Postgres and the server run for local development?",
-      initialValue: "docker",
-      options: [
-        { value: "docker", label: "Docker", hint: "Docker Compose stack (recommended)" },
-        { value: "native", label: "Native", hint: "host Postgres + server binaries, no Docker" },
-      ],
-    }),
-  )
+    const provider = ensureNotCancelled(
+      await p.select<ScaffoldOptions["provider"]>({
+        message: "How should Postgres and the server run for local development?",
+        initialValue: "docker",
+        options: [
+          { value: "docker", label: "Docker", hint: "Docker Compose stack (recommended)" },
+          { value: "native", label: "Native", hint: "host Postgres + server binaries, no Docker" },
+        ],
+      }),
+    )
 
-  let kongPort: number | undefined
-  if (provider === "docker") {
-    const { promptKongPortChoice } = await import("../dev-ports.js")
-    kongPort = await promptKongPortChoice()
-  }
+    let kongPort: number | undefined
+    if (provider === "docker") {
+      const { promptKongPortChoice } = await import("../dev-ports.js")
+      kongPort = await promptKongPortChoice()
+    }
 
-  const schemaPath = ensureNotCancelled(
-    await p.text({
-      message: "Where should your schema live?",
-      defaultValue: "schema/index.ts",
-      placeholder: "schema/index.ts",
-    }),
-  ).trim() || "schema/index.ts"
+    const defaultSchemaPath = existsSync(join(dir, "schema/index.ts"))
+      ? "schema/index.ts"
+      : "schema/index.ts"
+    const schemaPath = ensureNotCancelled(
+      await p.text({
+        message: "Where should your schema live?",
+        defaultValue: defaultSchemaPath,
+        placeholder: "schema/index.ts",
+      }),
+    ).trim() || defaultSchemaPath
 
-  const app = await promptApp()
+    const app = await promptApp(detected, productionTarget)
 
-  const email = ensureNotCancelled(
-    await p.select<ScaffoldOptions["email"]>({
-      message: "Email provider",
-      initialValue: "console",
-      options: [
-        { value: "console", label: "console", hint: "log emails to the terminal (dev)" },
-        { value: "smtp", label: "SMTP" },
-        { value: "resend", label: "Resend" },
-        { value: "ses", label: "Amazon SES" },
-      ],
-    }),
-  )
+    const email = ensureNotCancelled(
+      await p.select<ScaffoldOptions["email"]>({
+        message: "Email provider",
+        initialValue: "console",
+        options: [
+          { value: "console", label: "console", hint: "log emails to the terminal (dev)" },
+          { value: "smtp", label: "SMTP" },
+          { value: "resend", label: "Resend" },
+          { value: "ses", label: "Amazon SES" },
+        ],
+      }),
+    )
 
-  const storageLocal = ensureNotCancelled(
-    await p.select<StorageProvider>({
-      message: "Local storage (for development)?",
-      initialValue: "local",
-      options: STORAGE_PROVIDER_OPTIONS,
-    }),
-  )
+    const storageLocal = ensureNotCancelled(
+      await p.select<StorageProvider>({
+        message: "Local storage (for development)?",
+        initialValue: "local",
+        options: STORAGE_PROVIDER_OPTIONS,
+      }),
+    )
 
-  const storageProduction = ensureNotCancelled(
-    await p.select<StorageProvider>({
-      message: "Production storage?",
-      initialValue: "local",
-      options: STORAGE_PROVIDER_OPTIONS,
-    }),
-  )
+    const storageProduction = ensureNotCancelled(
+      await p.select<StorageProvider>({
+        message: "Production storage?",
+        initialValue: "local",
+        options: STORAGE_PROVIDER_OPTIONS,
+      }),
+    )
 
-  const helloFunction = ensureNotCancelled(
-    await p.confirm({
-      message: "Create a hello-world edge function?",
-      initialValue: false,
-    }),
-  )
+    const helloFunction = ensureNotCancelled(
+      await p.confirm({
+        message: "Create a hello-world edge function?",
+        initialValue: false,
+      }),
+    )
 
-  const install = ensureNotCancelled(
-    await p.confirm({
-      message: `Install dependencies with ${packageManager} now?`,
-      initialValue: true,
-    }),
-  )
+    return {
+      projectName,
+      provider,
+      ...(kongPort !== undefined ? { kongPort } : {}),
+      productionTarget,
+      ...(domain !== undefined ? { domain } : {}),
+      ...(tlsEmail !== undefined ? { tlsEmail } : {}),
+      schemaPath,
+      app,
+      email,
+      storageLocal,
+      storageProduction,
+      helloFunction,
+      packageManager,
+      install: true,
+      generateKeys: true,
+      ...admin,
+    }
+}
 
-  const generateKeys = ensureNotCancelled(
-    await p.confirm({
-      message: "Generate ANON_KEY and SERVICE_ROLE_KEY now?",
-      initialValue: true,
-    }),
-  )
-
-  let adminEmail: string | undefined
-  let adminPassword: string | undefined
+async function promptAdminUser(): Promise<{ adminEmail?: string; adminPassword?: string }> {
   const createAdmin = ensureNotCancelled(
     await p.confirm({
       message: "Create an admin user for /admin?",
       initialValue: true,
     }),
   )
-  if (createAdmin) {
-    adminEmail =
-      ensureNotCancelled(
-        await p.text({
-          message: "Admin email",
-          placeholder: "you@example.com",
-          defaultValue: "",
-        }),
-      ).trim() || undefined
-    if (adminEmail) {
-      adminPassword =
-        ensureNotCancelled(
-          await p.text({
-            message: "Admin password (min 8 chars)",
-            defaultValue: "",
-          }),
-        ).trim() || undefined
-      if (adminPassword && adminPassword.length < 8) {
-        adminPassword = undefined
-      }
-    }
+  if (!createAdmin) return {}
+
+  p.note("First sign-in at /admin — created automatically on supatype dev or push.")
+
+  const adminEmail = ensureNotCancelled(
+    await p.text({
+      message: "Admin email",
+      placeholder: "you@example.com",
+      validate: (value) => (value.trim() ? undefined : "Email is required"),
+    }),
+  ).trim()
+
+  let adminPassword = ""
+  while (true) {
+    adminPassword = ensureNotCancelled(
+      await p.password({ message: "Admin password (min 8 characters)" }),
+    ).trim()
+    if (adminPassword.length >= 8) break
+    p.log.warn("Password must be at least 8 characters.")
   }
 
-  p.outro("Setting up your project...")
-
-  return {
-    projectName,
-    provider,
-    ...(kongPort !== undefined ? { kongPort } : {}),
-    productionTarget,
-    ...(domain !== undefined ? { domain } : {}),
-    ...(tlsEmail !== undefined ? { tlsEmail } : {}),
-    schemaPath,
-    app,
-    email,
-    storageLocal,
-    storageProduction,
-    helloFunction,
-    packageManager,
-    install,
-    generateKeys,
-    ...(adminEmail && adminPassword ? { adminEmail, adminPassword } : {}),
-  }
-  })
+  return { adminEmail, adminPassword }
 }
 
-async function promptApp(): Promise<ScaffoldAppOptions> {
+async function promptApp(
+  detected: DetectedProjectSetup,
+  productionTarget: ProductionTarget,
+): Promise<ScaffoldAppOptions> {
+  const initialMode: ScaffoldAppOptions["mode"] =
+    detected.hasVite && productionTarget !== "later"
+      ? "static"
+      : detected.hasVite
+        ? "proxy"
+        : "none"
+
   const mode = ensureNotCancelled(
     await p.select<ScaffoldAppOptions["mode"]>({
       message: "Host a frontend app at /?",
-      initialValue: "none",
+      initialValue: initialMode,
       options: [
         { value: "none", label: "No app", hint: "API only" },
         { value: "static", label: "Static site", hint: "serve a built directory" },
@@ -432,11 +548,11 @@ async function promptApp(): Promise<ScaffoldAppOptions> {
     const staticDir = ensureNotCancelled(
       await p.text({
         message: "Directory to serve",
-        defaultValue: "./public",
-        placeholder: "./public",
+        defaultValue: detected.staticDir,
+        placeholder: detected.staticDir,
       }),
-    ).trim() || "./public"
-    const viteDevUrl = await promptViteDevUrl()
+    ).trim() || detected.staticDir
+    const viteDevUrl = await promptViteDevUrl(detected, productionTarget)
     return { mode, staticDir, ...(viteDevUrl ? { viteDevUrl } : {}) }
   }
 
@@ -444,40 +560,49 @@ async function promptApp(): Promise<ScaffoldAppOptions> {
     const upstream = ensureNotCancelled(
       await p.text({
         message: "URL of your running dev server",
-        defaultValue: "http://localhost:3000",
-        placeholder: "http://localhost:3000",
+        defaultValue: detected.hasVite ? detected.viteDevUrl : "http://localhost:3000",
+        placeholder: detected.hasVite ? detected.viteDevUrl : "http://localhost:3000",
       }),
-    ).trim() || "http://localhost:3000"
+    ).trim() || (detected.hasVite ? detected.viteDevUrl : "http://localhost:3000")
     const start = ensureNotCancelled(
       await p.text({
         message: "package.json script that starts your dev server",
-        defaultValue: "dev",
-        placeholder: "dev",
+        defaultValue: detected.hasVite ? "vite" : "dev",
+        placeholder: detected.hasVite ? "vite" : "dev",
       }),
-    ).trim() || "dev"
-    const viteDevUrl = await promptViteDevUrl()
+    ).trim() || (detected.hasVite ? "vite" : "dev")
+    const viteDevUrl = await promptViteDevUrl(detected, productionTarget)
     return { mode, upstream, start, ...(viteDevUrl ? { viteDevUrl } : {}) }
   }
 
   return { mode: "none" }
 }
 
-async function promptViteDevUrl(): Promise<string | undefined> {
+async function promptViteDevUrl(
+  detected: DetectedProjectSetup,
+  productionTarget: ProductionTarget,
+): Promise<string | undefined> {
+  const defaultYes = detected.hasVite || productionTarget !== "later"
   const useVite = ensureNotCancelled(
     await p.confirm({
-      message: "Enable live reload from a separate Vite dev server?",
-      initialValue: false,
+      message: detected.hasVite
+        ? "Use Vite for local development?"
+        : "Develop locally with Vite (live reload)?",
+      initialValue: defaultYes,
     }),
   )
   if (!useVite) return undefined
+
+  p.note(`Press Enter for ${detected.viteDevUrl}, or type a custom URL.`)
+
   return (
     ensureNotCancelled(
       await p.text({
         message: "Vite dev server URL",
-        defaultValue: "http://127.0.0.1:5173",
-        placeholder: "http://127.0.0.1:5173",
+        defaultValue: detected.viteDevUrl,
+        placeholder: detected.viteDevUrl,
       }),
-    ).trim() || "http://127.0.0.1:5173"
+    ).trim() || detected.viteDevUrl
   )
 }
 
@@ -492,14 +617,12 @@ function detectInvokingPackageManager(): PackageManager {
 }
 
 function runInstall(dir: string, pm: PackageManager): boolean {
-  info(`Installing dependencies with ${pm}...`)
   const res = spawnSync(pm, ["install"], {
     cwd: dir,
     stdio: "inherit",
     shell: process.platform === "win32",
   })
   if (res.status !== 0 || res.error) {
-    warn(`Dependency install did not complete (run "${pm} install" manually).`)
     return false
   }
   return true
@@ -574,7 +697,7 @@ export function scaffold(
   write(".env", envTemplate(opts))
   write("seed.ts", seedTemplate(opts.projectName))
   write("seeds/.gitkeep", "")
-  scaffoldAppAssets(opts, write)
+  scaffoldAppAssets(dir, opts, write)
 
   if (opts.helloFunction) scaffoldHelloFunction(dir, write)
 
@@ -598,45 +721,63 @@ function staticDirRelative(staticDir?: string): string {
 }
 
 function scaffoldAppAssets(
+  dir: string,
   opts: ScaffoldOptions,
   write: (rel: string, content: string) => void,
 ): void {
+  const writeUnlessExists = (rel: string, content: string) => {
+    const full = join(dir, rel)
+    if (existsSync(full)) {
+      file("skipped", `${rel} (already exists)`)
+      return
+    }
+    write(rel, content)
+  }
+
   const holding = holdingPageTemplate(opts.projectName)
   const hasVite = Boolean(opts.app.viteDevUrl)
 
   if (opts.app.mode === "static") {
     const staticRel = staticDirRelative(opts.app.staticDir)
     if (opts.app.viteDevUrl && opts.productionTarget !== "later") {
-      write("dist/index.html", holding)
-      scaffoldVite(opts, write, holding)
+      writeUnlessExists("dist/index.html", holding)
+      scaffoldVite(dir, opts, writeUnlessExists, holding)
       return
     }
-    write(`${staticRel}/index.html`, holding)
-    if (opts.app.viteDevUrl) scaffoldVite(opts, write, holding)
+    writeUnlessExists(`${staticRel}/index.html`, holding)
+    if (opts.app.viteDevUrl) scaffoldVite(dir, opts, writeUnlessExists, holding)
     return
   }
 
   if (opts.app.mode === "proxy" && opts.productionTarget !== "later") {
-    write("dist/index.html", holding)
-    if (hasVite) scaffoldVite(opts, write, holding)
+    writeUnlessExists("dist/index.html", holding)
+    if (hasVite) scaffoldVite(dir, opts, writeUnlessExists, holding)
     return
   }
 
   if (opts.app.mode === "proxy" && hasVite) {
-    scaffoldVite(opts, write, holding)
+    scaffoldVite(dir, opts, writeUnlessExists, holding)
     return
   }
 
-  write("public/.gitkeep", "")
+  writeUnlessExists("public/.gitkeep", "")
 }
 
 function scaffoldVite(
+  dir: string,
   opts: ScaffoldOptions,
   write: (rel: string, content: string) => void,
   holding: string,
 ): void {
   if (!opts.app.viteDevUrl) return
   write("index.html", holding)
+  const viteConfigRel = ["vite.config.ts", "vite.config.js", "vite.config.mjs", "vite.config.cjs"].find(
+    (name) => existsSync(join(dir, name)),
+  )
+  if (viteConfigRel) {
+    file("skipped", `${viteConfigRel} (already exists)`)
+    return
+  }
   write("vite.config.ts", viteConfigTemplate(opts.app.viteDevUrl))
 }
 
@@ -1265,26 +1406,32 @@ function printNextSteps(args: {
   binariesReady: boolean
 }): void {
   const { name, result, installed, keysGenerated, binariesReady } = args
+  const setupComplete = installed && keysGenerated && binariesReady
   const steps: string[] = []
   if (name) steps.push(`cd ${name}`)
-  if (!installed) steps.push(`${result.packageManager} install`)
-  if (!binariesReady) steps.push("supatype update        # download component binaries")
-  if (!keysGenerated) steps.push("supatype keys")
   const kongHint =
     result.provider === "docker" && result.kongPort !== undefined
       ? `supatype dev          # Docker Compose stack (Kong :${result.kongPort})`
       : "supatype dev          # Docker Compose stack (Kong :18473)"
-  steps.push(kongHint)
-  steps.push("supatype push         # apply schema + generate types")
-  if (result.adminEmail) {
-    steps.push("                      # first admin user is created on dev or push")
+  if (setupComplete) {
+    steps.push(kongHint)
+    steps.push("supatype push         # apply schema + generate types")
+    if (result.adminEmail) {
+      steps.push("                      # first admin user is created on dev or push")
+    }
+  } else {
+    if (!installed) steps.push(`${result.packageManager} install`)
+    if (!binariesReady) steps.push("supatype update        # download component binaries")
+    if (!keysGenerated) steps.push("supatype keys")
+    steps.push(kongHint)
+    steps.push("supatype push         # apply schema + generate types")
   }
   if (result.helloFunction) {
     steps.push("supatype functions serve   # run edge functions locally")
   }
 
   info(`Supatype project ready${name ? ` in ${name}/` : ""}.`)
-  nextSteps("Next steps:", steps)
+  nextSteps(setupComplete ? "Next steps:" : "Finish setup:", steps)
 
   if (result.app.mode === "none") {
     nextSteps("Static frontend (self-host):", [
