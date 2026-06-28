@@ -34,6 +34,23 @@ export function devReadyPanelRowCount(panel: DevReadyPanel): number {
   return rows
 }
 
+/** Shorter panel when the terminal is too small for every service row. */
+export function devReadyPanelCompactRowCount(panel: DevReadyPanel): number {
+  let rows = 2 // border
+  rows += 1 // title
+  rows += 2 // gateway + studio summary
+  for (const hint of panel.hints ?? []) {
+    if (hint.trim()) rows += 1
+  }
+  if (panel.anonKey) {
+    rows += 1
+    rows += 1
+    if (panel.serviceRoleKey) rows += 1
+  }
+  rows += 1 // marginBottom
+  return rows
+}
+
 function formatStreamBlock(panel: DevReadyPanel): string {
   const lines = [`[supatype] ${panel.title}`]
   for (const link of panel.links) {

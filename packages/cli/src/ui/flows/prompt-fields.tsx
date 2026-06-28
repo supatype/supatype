@@ -46,10 +46,16 @@ export function ConfirmPrompt({ spec, onSubmit }: ConfirmPromptProps): React.Rea
   const [value, setValue] = useState(spec.initialValue)
 
   useInput((input, key) => {
+    if (input === "y" || input === "Y") {
+      onSubmit(true)
+      return
+    }
+    if (input === "n" || input === "N") {
+      onSubmit(false)
+      return
+    }
     if (key.leftArrow || input === "h") setValue(false)
     if (key.rightArrow || input === "l") setValue(true)
-    if (input === "y" || input === "Y") setValue(true)
-    if (input === "n" || input === "N") setValue(false)
     if (key.return) onSubmit(value)
   })
 
@@ -60,19 +66,19 @@ export function ConfirmPrompt({ spec, onSubmit }: ConfirmPromptProps): React.Rea
       </Text>
       <Text>
         {value ? (
-          <Text color={theme.success} bold>
+          <Text color={theme.brand} bold>
             Yes
           </Text>
         ) : (
-          <Text>Yes</Text>
+          <Text dimColor>Yes</Text>
         )}
-        <Text> / </Text>
+        <Text dimColor> / </Text>
         {!value ? (
-          <Text color={theme.success} bold>
+          <Text color={theme.brand} bold>
             No
           </Text>
         ) : (
-          <Text>No</Text>
+          <Text dimColor>No</Text>
         )}
         <Text dimColor> — y/n, ←/→, enter</Text>
       </Text>

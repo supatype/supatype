@@ -36,6 +36,8 @@ export function FlowApp({ bind }: FlowAppProps): React.ReactElement {
       },
       waitForPrompt<T>(spec: ActiveFlowPrompt): Promise<T> {
         return new Promise<T>((resolve) => {
+          setLogLines([])
+          setSpinner(null)
           setPrompt(spec)
           setPromptResolver(() => (value: unknown) => {
             setPrompt(null)
@@ -51,7 +53,7 @@ export function FlowApp({ bind }: FlowAppProps): React.ReactElement {
   return (
     <Box flexDirection="column" paddingX={1}>
       <FlowLogoHeader />
-      <FlowLogPane lines={logLines} />
+      {prompt ? null : <FlowLogPane lines={logLines} />}
       {spinner ? <FlowSpinnerLine message={spinner} /> : null}
       {prompt && promptResolver ? (
         <PromptPanel>

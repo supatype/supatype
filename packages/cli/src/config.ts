@@ -158,7 +158,7 @@ process.stdout.write(JSON.stringify(config))
     }
 
     const failure = result.stderr || result.stdout
-    if (!failure.includes("ERR_PACKAGE_PATH_NOT_EXPORTED")) {
+    if (!shouldStripCliImportOnLoadFailure(failure)) {
       throw new Error(`Failed to load ${candidate}:\n${failure}`)
     }
 
@@ -167,6 +167,18 @@ process.stdout.write(JSON.stringify(config))
     throw new Error(`Failed to load ${candidate}:\n${failure}`)
   }
   return null
+}
+
+/** When @supatype/cli is not installed yet (e.g. during `supatype init`), strip its import. */
+function shouldStripCliImportOnLoadFailure(failure: string): boolean {
+  if (failure.includes("ERR_PACKAGE_PATH_NOT_EXPORTED")) return true
+  if (!failure.includes("@supatype/cli")) return false
+  return (
+    failure.includes("ERR_MODULE_NOT_FOUND") ||
+    failure.includes("MODULE_NOT_FOUND") ||
+    failure.includes("Cannot find module '@supatype/cli'") ||
+    failure.includes('Cannot find package \'@supatype/cli\'')
+  )
 }
 
 function loadTsConfigWithoutCliImport(

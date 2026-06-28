@@ -1,8 +1,9 @@
 import React, { useRef } from "react"
-import { render } from "ink"
+import { render, type Instance } from "ink"
 import { isInteractive } from "../interactive.js"
 import { createClackApi, type ClackApi } from "../clack-api.js"
 import { FlowApp } from "../flows/FlowApp.js"
+import { restoreStdinAfterInk } from "./stdin-after-ink.js"
 
 interface RunClackFlowRootProps {
   run: (api: ClackApi) => Promise<unknown>
@@ -37,16 +38,28 @@ export async function runClackFlow<T>(run: (api: ClackApi) => Promise<T>): Promi
       <RunClackFlowRoot
         run={run as (api: ClackApi) => Promise<unknown>}
         onComplete={(value) => {
-          instance.unmount()
+          teardownInk(instance)
           resolve(value as T)
         }}
         onError={(err) => {
-          instance.unmount()
+          teardownInk(instance)
           reject(err)
         }}
       />,
+      { patchConsole: false },
     )
   })
+}
+
+function teardownInk(instance: Instance): void {
+  try {
+    instance.clear()
+  } catch {
+    // ignore — terminal may already be reset
+  }
+  instance.unmount()
+  instance.cleanup()
+  restoreStdinAfterInk()
 }
 
 export { CLACK_CANCEL } from "./cancel.js"

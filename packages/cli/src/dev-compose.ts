@@ -768,10 +768,6 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
     console.error("[supatype] Initial schema push failed:", (e as Error).message),
   )
 
-  await ensureFirstAdminUserForProject(cwd, config, {
-    compose: { project, composePath: paths.composePath },
-  })
-
   if (localServerImage !== undefined) {
     console.log("[supatype] Recreating server with local image...")
     const recreateStatus = runDockerCompose(
@@ -791,6 +787,10 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   await waitKongReady(kongPort, 120)
   console.log("[supatype] Waiting for storage API...")
   await waitStorageApiReady(kongPort, serviceRoleKey, 90)
+
+  await ensureFirstAdminUserForProject(cwd, config, {
+    compose: { project, composePath: paths.composePath },
+  })
 
   writeLocalEnvironment(cwd, {
     target: "local",

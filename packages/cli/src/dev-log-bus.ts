@@ -3,7 +3,7 @@
  */
 
 import type { DevReadyPanel } from "./dev-ready-panel.js"
-import { devReadyPanelRowCount } from "./dev-ready-panel.js"
+import { devReadyPanelCompactRowCount, devReadyPanelRowCount } from "./dev-ready-panel.js"
 
 export type DevLogLevel = "log" | "warn" | "error"
 
@@ -79,9 +79,11 @@ export class DevLogBus {
     return this.readyPanel
   }
 
-  readyPanelRowCount(): number {
+  readyPanelRowCount(compact = false): number {
     if (!this.readyPanel) return 0
-    return devReadyPanelRowCount(this.readyPanel)
+    return compact
+      ? devReadyPanelCompactRowCount(this.readyPanel)
+      : devReadyPanelRowCount(this.readyPanel)
   }
 
   append(taskId: string, line: string, level: DevLogLevel = "log"): void {

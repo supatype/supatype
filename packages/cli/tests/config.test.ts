@@ -179,6 +179,25 @@ describe("loadConfig()", () => {
     expect(cfg.versions!.engine).toBe("0.4.2")
     expect(cfg.schema?.path).toBe("./a.ts")
   })
+
+  it("loads defineConfig import before @supatype/cli is installed (init scaffold)", () => {
+    writeFileSync(
+      join(tmpDir, "supatype.config.ts"),
+      `import { defineConfig } from "@supatype/cli"
+
+export default defineConfig({
+  project: { name: "fresh" },
+  database: { provider: "docker" },
+  server: { mode: "dev" },
+  app: { mode: "none" },
+  schema: { path: "./schema/index.ts" },
+})
+`,
+    )
+    const cfg = loadConfig(tmpDir)
+    expect(cfg.project?.name).toBe("fresh")
+    expect(cfg.schema?.path).toBe("./schema/index.ts")
+  })
 })
 
 describe("resolveRuntimeProvider()", () => {
