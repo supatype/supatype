@@ -176,7 +176,7 @@ describe("loadConfig()", () => {
       })}`,
     )
     const cfg = loadConfig(tmpDir)
-    expect(cfg.versions.engine).toBe("0.4.2")
+    expect(cfg.versions!.engine).toBe("0.4.2")
     expect(cfg.schema?.path).toBe("./a.ts")
   })
 })
@@ -207,7 +207,9 @@ describe("mergeProjectConfig()", () => {
       ...minimalProject("p"),
       email: { provider: "smtp", smtp: { host: "h1", port: 587, user: "u0" } },
     })
-    const merged = mergeProjectConfig(base, { email: { smtp: { host: "h2", pass: "x" } } })
+    const merged = mergeProjectConfig(base, {
+      email: { smtp: { host: "h2", pass: "x" } },
+    } as Partial<typeof base>)
     expect(merged.email?.provider).toBe("smtp")
     expect(merged.email?.smtp?.host).toBe("h2")
     expect(merged.email?.smtp?.port).toBe(587)
@@ -222,7 +224,7 @@ describe("mergeProjectConfig()", () => {
     })
     const merged = mergeProjectConfig(base, {
       email: { send_email_hook_secrets: "v1,whsec_customsecret0000000000000000" },
-    })
+    } as Partial<typeof base>)
     expect(merged.email?.send_email_hook).toBe(true)
     expect(merged.email?.send_email_hook_uri).toBe("http://old/hook")
     expect(merged.email?.send_email_hook_secrets).toBe("v1,whsec_customsecret0000000000000000")
@@ -233,7 +235,9 @@ describe("mergeProjectConfig()", () => {
       ...minimalProject("p"),
       app: { mode: "static", static_dir: "./dist", vite_dev_url: "http://127.0.0.1:1111" },
     })
-    const merged = mergeProjectConfig(base, { app: { vite_dev_url: "http://127.0.0.1:5173" } })
+    const merged = mergeProjectConfig(base, {
+      app: { vite_dev_url: "http://127.0.0.1:5173" },
+    } as Partial<typeof base>)
     expect(merged.app?.vite_dev_url).toBe("http://127.0.0.1:5173")
   })
 

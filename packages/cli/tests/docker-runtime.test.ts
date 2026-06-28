@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach, afterEach, afterAll } from "vitest"
+import { describe, expect, it, vi, beforeEach, afterEach, afterAll, type MockInstance } from "vitest"
 import type { SpawnSyncReturns } from "node:child_process"
 
 const spawnSyncMock = vi.hoisted(() => vi.fn())
@@ -186,8 +186,8 @@ describe("reportDockerUnavailable", () => {
 })
 
 describe("requireDockerDaemon", () => {
-  let exitMock: ReturnType<typeof vi.spyOn<typeof process, "exit">>
-  let errorMock: ReturnType<typeof vi.spyOn<typeof console, "error">>
+  let exitMock: MockInstance<(code?: string | number | null | undefined) => never>
+  let errorMock: MockInstance<typeof console.error>
 
   beforeEach(() => {
     spawnSyncMock.mockReset()

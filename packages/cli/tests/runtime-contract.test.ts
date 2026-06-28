@@ -115,7 +115,9 @@ describe("runtime contract", () => {
       SUPATYPE_SERVER_IMAGE: "supatype/server:v0.1.0",
       SUPATYPE_POSTGRES_IMAGE: "supatype/postgres:17-latest",
     })
-    expect(composeDockerImageEnv({ ...baseConfig, versions: undefined })).toEqual({})
+    const withoutVersions = { ...baseConfig }
+    delete withoutVersions.versions
+    expect(composeDockerImageEnv(withoutVersions)).toEqual({})
     expect(
       composeDockerImageEnv({
         ...baseConfig,
