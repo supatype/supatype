@@ -265,6 +265,58 @@ function getPropertyName(name: ts.PropertyName): string | null {
   return null
 }
 
+/**
+ * Known @supatype/types intersection mixins and the field source text they contribute.
+ * Used when a mixin type can't be resolved from the local alias registry
+ * (it comes from the external @supatype/types package, not a local file).
+ */
+const KNOWN_MIXIN_SOURCES: Record<string, string> = {
+  Timestamps: "{ created_at: ServerDefault<Date>; updated_at: ServerDefault<Date> }",
+  SoftDelete: "{ deleted_at: Optional<Date> }",
+  Publishable: "{ published_at: Optional<Date> }",
+}
+
+function synthesizeTypeLiteralMembers(source: string): ts.TypeElement[] {
+  const synth = ts.createSourceFile(
+    "__synth__.ts",
+    `type __T__ = ${source}`,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  )
+  const decl = synth.statements[0]
+  if (!decl || !ts.isTypeAliasDeclaration(decl) || !ts.isTypeLiteralNode(decl.type)) return []
+  return [...decl.type.members]
+}
+
+function mergeIntersectionParts(
+  parts: readonly ts.TypeNode[],
+  sourceFile: ts.SourceFile,
+  resolveCtx: ResolveContext,
+  depth: number,
+): ts.TypeLiteralNode | null {
+  const allMembers: ts.TypeElement[] = []
+  for (const part of parts) {
+    const resolved = unwrapModelFields(part, sourceFile, resolveCtx, depth + 1)
+    if (resolved) {
+      allMembers.push(...resolved.members)
+      continue
+    }
+    // Fall back to known @supatype/types intersection mixins (Timestamps, SoftDelete, Publishable)
+    if (ts.isTypeReferenceNode(part) && ts.isIdentifier(part.typeName)) {
+      const typeName = applyImportRename(part.typeName.text, sourceFile, resolveCtx.renameMap)
+      const mixinSource = KNOWN_MIXIN_SOURCES[typeName]
+      if (mixinSource) {
+        allMembers.push(...synthesizeTypeLiteralMembers(mixinSource))
+        continue
+      }
+    }
+    // Unresolvable parts are skipped — the model still extracts with whatever fields were found
+  }
+  if (allMembers.length === 0) return null
+  return ts.factory.createTypeLiteralNode(allMembers)
+}
+
 function unwrapModelFields(
   typeNode: ts.TypeNode,
   sourceFile: ts.SourceFile,
@@ -273,6 +325,11 @@ function unwrapModelFields(
 ): ts.TypeLiteralNode | null {
   if (depth > 16) return null
   if (ts.isTypeLiteralNode(typeNode)) return typeNode
+
+  // Handle intersection types: `{ …fields } & Timestamps`, `{ …fields } & SoftDelete`, etc.
+  if (ts.isIntersectionTypeNode(typeNode)) {
+    return mergeIntersectionParts(typeNode.types, sourceFile, resolveCtx, depth)
+  }
 
   if (needsChecker(typeNode)) {
     const resolved = resolveTypeNode(typeNode, sourceFile, resolveCtx)

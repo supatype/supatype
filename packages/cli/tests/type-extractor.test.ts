@@ -581,6 +581,107 @@ export type Post = Model<WithTimestamps<{
     expect(post?.options.singleton).toBeUndefined()
   })
 
+  it("extracts models that use intersection `} & Timestamps` with relational fields", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-intersection-timestamps-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type {
+  Model, LoggedIn, Owner, Public, RelatedTo, Unique, Optional, MaxLength, Timestamps, UUID,
+} from "@supatype/types"
+
+export type Profile = Model<{
+  id: UUID
+  display_name: string
+}, {
+  access: { read: LoggedIn; create: Owner<"id">; update: Owner<"id">; delete: Owner<"id"> }
+}>
+
+export type Room = Model<{
+  id: UUID
+  name: Unique<string>
+  topic: Optional<string>
+  created_by: RelatedTo<Profile, { required: true }>
+} & Timestamps, {
+  access: { read: Public; create: LoggedIn; update: Owner<"created_by_id">; delete: Owner<"created_by_id"> }
+}>
+
+export type Message = Model<{
+  id: UUID
+  room: RelatedTo<Room, { required: true, onDelete: "cascade" }>
+  author: RelatedTo<Profile, { required: true }>
+  body: MaxLength<string, 2000>
+} & Timestamps, {
+  access: { read: Public; create: LoggedIn; update: Owner<"author_id">; delete: Owner<"author_id"> }
+  indexes: [{ fields: ["room_id", "created_at"] }]
+}>
+`,
+      "utf8",
+    )
+
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    expect(ast).not.toBeNull()
+    expect(ast?.models).toHaveLength(3)
+
+    const room = ast?.models.find((m) => m.name === "Room")
+    const message = ast?.models.find((m) => m.name === "Message")
+
+    expect(room).toBeDefined()
+    expect(tableName(room)).toBe("room")
+    expect(room?.options.timestamps).toBe(true)
+    expect(room?.fields["created_by"]).toMatchObject({
+      kind: "relation",
+      cardinality: "belongsTo",
+      target: "Profile",
+      annotations: { db: { foreignKey: "created_by_id" } },
+    })
+    expect(room?.fields["created_at"]).toMatchObject({ kind: "datetime" })
+    expect(room?.fields["updated_at"]).toMatchObject({ kind: "datetime" })
+
+    expect(message).toBeDefined()
+    expect(tableName(message)).toBe("message")
+    expect(message?.options.timestamps).toBe(true)
+    expect(message?.fields["room"]).toMatchObject({
+      kind: "relation",
+      cardinality: "belongsTo",
+      target: "Room",
+      annotations: { db: { foreignKey: "room_id" } },
+    })
+    expect(message?.fields["author"]).toMatchObject({
+      kind: "relation",
+      cardinality: "belongsTo",
+      target: "Profile",
+    })
+  })
+
+  it("extracts models with `} & SoftDelete` intersection", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-intersection-softdelete-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, UUID, SoftDelete, Public, LoggedIn } from "@supatype/types"
+
+export type Post = Model<{
+  id: UUID
+  title: string
+} & SoftDelete, {
+  access: { read: Public; create: LoggedIn }
+}>
+`,
+      "utf8",
+    )
+
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const post = ast?.models.find((m) => m.name === "Post")
+    expect(post).toBeDefined()
+    expect(post?.fields["deleted_at"]).toMatchObject({ kind: "datetime", required: false })
+    expect(post?.options.softDelete).toBe(true)
+  })
+
   it("extracts LocaleConfig into schema AST locales", () => {
     const dir = mkdtempSync(join(tmpdir(), "supatype-types-locale-config-"))
     dirs.push(dir)
