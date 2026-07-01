@@ -1130,25 +1130,26 @@ function llmsTxtTemplate(projectName: string): string {
   const name = projectName
   return `# ${name}
 
-> ${name} is a project built with [Supatype](${HOLDING_PAGE_GITHUB_URL}), a tool that generates a typed backend platform — Postgres schema, REST/realtime API, auth, and file storage — directly from TypeScript type definitions.
+> ${name} is a project built with [Supatype](${HOLDING_PAGE_GITHUB_URL}), a type-first platform for PostgreSQL: define \`Model<…>\` types in TypeScript and get migrations, row-level security, a typed API, a Studio CMS, and client bindings generated from them.
 
 This page is a placeholder shown before ${name} has a deployed app. It exists so the domain resolves to something while the project is being built. The content below is about Supatype, the platform this project runs on, not about ${name} itself.
 
 ## What Supatype is
 
-Supatype is a self-hostable, Supabase-compatible backend platform. Instead of designing a database schema by hand, you write TypeScript types once and Supatype generates:
+Supatype is a self-hostable platform that generates your backend from a single TypeScript schema, instead of you hand-writing SQL migrations, RLS policies, API routes, and a separate admin CMS. It is not built on or compatible with Supabase — it is a competing, independent implementation. From one schema it generates:
 
-- A Postgres schema and migrations from those types
+- A Postgres schema and migrations (no SQL required)
 - A typed REST and realtime API around the generated tables
-- Auth (email/password, magic links, OAuth) and row-level security policies
-- File storage with per-bucket access rules
+- Row-level security policies generated from access rules
+- Auth (email/password, magic links, OAuth) and file storage
+- A Studio CMS for non-technical content editors
 - A typed client SDK, plus framework hooks for React, Vue, and Svelte
 
 ## How it's used
 
 1. Define data models as TypeScript types, typically in \`schema.ts\`.
 2. Run \`supatype push\` to generate the Postgres schema/migrations and the typed API around those types.
-3. Run \`supatype dev\` to start a local, Supabase-compatible stack (Postgres, auth, storage, realtime) for development.
+3. Run \`supatype dev\` to start a local Postgres + auth + storage + realtime stack for development.
 4. Import \`@supatype/client\` (or the \`@supatype/react\`, \`@supatype/vue\`, \`@supatype/svelte\` hooks) in the app to query, mutate, and subscribe to data with end-to-end type safety, without hand-writing API routes.
 5. Deploy self-hosted (Docker Compose, via \`supatype self-host\`) or to Supatype Cloud.
 
