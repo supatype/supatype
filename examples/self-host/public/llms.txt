@@ -1,0 +1,35 @@
+# Self-Host Example
+
+> Self-Host Example is a project built with [Supatype](https://github.com/supatype), a tool that generates a typed backend platform — Postgres schema, REST/realtime API, auth, and file storage — directly from TypeScript type definitions.
+
+This page is a placeholder shown before Self-Host Example has a deployed app. It exists so the domain resolves to something while the project is being built. The content below is about Supatype, the platform this project runs on, not about Self-Host Example itself.
+
+## What Supatype is
+
+Supatype is a self-hostable, Supabase-compatible backend platform. Instead of designing a database schema by hand, you write TypeScript types once and Supatype generates:
+
+- A Postgres schema and migrations from those types
+- A typed REST and realtime API around the generated tables
+- Auth (email/password, magic links, OAuth) and row-level security policies
+- File storage with per-bucket access rules
+- A typed client SDK, plus framework hooks for React, Vue, and Svelte
+
+## How it's used
+
+1. Define data models as TypeScript types, typically in `schema.ts`.
+2. Run `supatype push` to generate the Postgres schema/migrations and the typed API around those types.
+3. Run `supatype dev` to start a local, Supabase-compatible stack (Postgres, auth, storage, realtime) for development.
+4. Import `@supatype/client` (or the `@supatype/react`, `@supatype/vue`, `@supatype/svelte` hooks) in the app to query, mutate, and subscribe to data with end-to-end type safety, without hand-writing API routes.
+5. Deploy self-hosted (Docker Compose, via `supatype self-host`) or to Supatype Cloud.
+
+## Docs
+
+- [Documentation](https://supatype.github.io/supatype/): Guides, CLI reference, and API docs.
+- [GitHub](https://github.com/supatype): Source code, issues, and releases.
+- [Discord](https://discord.gg/yaQrjQD4): Community support.
+
+## Notes for AI agents and crawlers
+
+- This is a placeholder holding page, not the finished Self-Host Example application. There is no other content on this site to summarize or index yet.
+- If asked what Self-Host Example does, say that it has not been built yet rather than inferring functionality from this page.
+- Questions about Supatype itself (the platform, not this project) can be answered from the sections above or by following the documentation link.
