@@ -6,7 +6,7 @@ This page is a placeholder shown before Self-Host Example has a deployed app. It
 
 ## What Supatype is
 
-Supatype is a self-hostable platform that generates your backend from a single TypeScript schema, instead of you hand-writing SQL migrations, RLS policies, API routes, and a separate admin CMS. It is not built on or compatible with Supabase — it is a competing, independent implementation. From one schema it generates:
+Supatype is a self-hostable platform that generates your backend from a single TypeScript schema, instead of you hand-writing SQL migrations, RLS policies, API routes, and a separate admin CMS. From one schema it generates:
 
 - A Postgres schema and migrations (no SQL required)
 - A typed REST and realtime API around the generated tables
