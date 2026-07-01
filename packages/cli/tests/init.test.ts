@@ -187,6 +187,17 @@ describe("scaffold()", () => {
     expect(html).toContain("Supatype")
     expect(html).toContain("supatype.github.io/supatype/")
     expect(html).toContain("github.com/supatype")
+
+    expect(existsSync(join(tmpRoot, "dist/robots.txt"))).toBe(true)
+    const robots = readFileSync(join(tmpRoot, "dist/robots.txt"), "utf8")
+    expect(robots).toContain("User-agent: *")
+    expect(robots).toContain("Allow: /")
+
+    expect(existsSync(join(tmpRoot, "dist/llms.txt"))).toBe(true)
+    const llms = readFileSync(join(tmpRoot, "dist/llms.txt"), "utf8")
+    expect(llms).toContain("# my-app")
+    expect(llms).toContain("Supatype")
+    expect(llms).toContain("supatype push")
   })
 
   it("static app mode with Vite on self-host splits production static and local proxy override", () => {
@@ -209,6 +220,8 @@ describe("scaffold()", () => {
     expect(local).toContain('start: "vite"')
     expect(local).toContain('vite_dev_url: "http://127.0.0.1:5173"')
     expect(existsSync(join(tmpRoot, "dist/index.html"))).toBe(true)
+    expect(existsSync(join(tmpRoot, "dist/robots.txt"))).toBe(true)
+    expect(existsSync(join(tmpRoot, "dist/llms.txt"))).toBe(true)
     expect(existsSync(join(tmpRoot, "vite.config.ts"))).toBe(true)
   })
 
@@ -222,6 +235,8 @@ describe("scaffold()", () => {
       },
     })
     expect(existsSync(join(tmpRoot, "public/index.html"))).toBe(true)
+    expect(existsSync(join(tmpRoot, "public/robots.txt"))).toBe(true)
+    expect(existsSync(join(tmpRoot, "public/llms.txt"))).toBe(true)
     expect(existsSync(join(tmpRoot, "index.html"))).toBe(true)
     expect(existsSync(join(tmpRoot, "vite.config.ts"))).toBe(true)
     const pkg = readFileSync(join(tmpRoot, "package.json"), "utf8")
@@ -266,7 +281,11 @@ describe("scaffold()", () => {
     expect(local).toContain('start: "vite"')
     expect(local).toContain('vite_dev_url: "http://127.0.0.1:5173"')
     expect(existsSync(join(tmpRoot, "dist/index.html"))).toBe(true)
+    expect(existsSync(join(tmpRoot, "dist/robots.txt"))).toBe(true)
+    expect(existsSync(join(tmpRoot, "dist/llms.txt"))).toBe(true)
     expect(existsSync(join(tmpRoot, "index.html"))).toBe(true)
+    expect(existsSync(join(tmpRoot, "public/robots.txt"))).toBe(true)
+    expect(existsSync(join(tmpRoot, "public/llms.txt"))).toBe(true)
     expect(existsSync(join(tmpRoot, "vite.config.ts"))).toBe(true)
   })
 

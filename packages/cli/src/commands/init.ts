@@ -735,28 +735,36 @@ function scaffoldAppAssets(
   }
 
   const holding = holdingPageTemplate(opts.projectName)
+  const robots = robotsTxtTemplate()
+  const llms = llmsTxtTemplate(opts.projectName)
   const hasVite = Boolean(opts.app.viteDevUrl)
+
+  const writeHoldingAssets = (rel: string) => {
+    writeUnlessExists(`${rel}/index.html`, holding)
+    writeUnlessExists(`${rel}/robots.txt`, robots)
+    writeUnlessExists(`${rel}/llms.txt`, llms)
+  }
 
   if (opts.app.mode === "static") {
     const staticRel = staticDirRelative(opts.app.staticDir)
     if (opts.app.viteDevUrl && opts.productionTarget !== "later") {
-      writeUnlessExists("dist/index.html", holding)
-      scaffoldVite(dir, opts, writeUnlessExists, holding)
+      writeHoldingAssets("dist")
+      scaffoldVite(dir, opts, writeUnlessExists, holding, robots, llms)
       return
     }
-    writeUnlessExists(`${staticRel}/index.html`, holding)
-    if (opts.app.viteDevUrl) scaffoldVite(dir, opts, writeUnlessExists, holding)
+    writeHoldingAssets(staticRel)
+    if (opts.app.viteDevUrl) scaffoldVite(dir, opts, writeUnlessExists, holding, robots, llms)
     return
   }
 
   if (opts.app.mode === "proxy" && opts.productionTarget !== "later") {
-    writeUnlessExists("dist/index.html", holding)
-    if (hasVite) scaffoldVite(dir, opts, writeUnlessExists, holding)
+    writeHoldingAssets("dist")
+    if (hasVite) scaffoldVite(dir, opts, writeUnlessExists, holding, robots, llms)
     return
   }
 
   if (opts.app.mode === "proxy" && hasVite) {
-    scaffoldVite(dir, opts, writeUnlessExists, holding)
+    scaffoldVite(dir, opts, writeUnlessExists, holding, robots, llms)
     return
   }
 
@@ -768,9 +776,15 @@ function scaffoldVite(
   opts: ScaffoldOptions,
   write: (rel: string, content: string) => void,
   holding: string,
+  robots: string,
+  llms: string,
 ): void {
   if (!opts.app.viteDevUrl) return
   write("index.html", holding)
+  // Vite copies public/* to the site root as-is, so robots.txt/llms.txt live there
+  // rather than next to index.html (which Vite treats as an HTML entry point).
+  write("public/robots.txt", robots)
+  write("public/llms.txt", llms)
   const viteConfigRel = ["vite.config.ts", "vite.config.js", "vite.config.mjs", "vite.config.cjs"].find(
     (name) => existsSync(join(dir, name)),
   )
@@ -1103,6 +1117,53 @@ function holdingPageTemplate(projectName: string): string {
     </main>
   </body>
 </html>
+`
+}
+
+function robotsTxtTemplate(): string {
+  return `User-agent: *
+Allow: /
+`
+}
+
+function llmsTxtTemplate(projectName: string): string {
+  const name = projectName
+  return `# ${name}
+
+> ${name} is a project built with [Supatype](${HOLDING_PAGE_GITHUB_URL}), a type-first platform for PostgreSQL: define \`Model<…>\` types in TypeScript and get migrations, row-level security, a typed API, a Studio CMS, and client bindings generated from them.
+
+This page is a placeholder shown before ${name} has a deployed app. It exists so the domain resolves to something while the project is being built. The content below is about Supatype, the platform this project runs on, not about ${name} itself.
+
+## What Supatype is
+
+Supatype is a self-hostable platform that generates your backend from a single TypeScript schema, instead of you hand-writing SQL migrations, RLS policies, API routes, and a separate admin CMS. From one schema it generates:
+
+- A Postgres schema and migrations (no SQL required)
+- A typed REST and realtime API around the generated tables
+- Row-level security policies generated from access rules
+- Auth (email/password, magic links, OAuth) and file storage
+- A Studio CMS for non-technical content editors
+- A typed client SDK, plus framework hooks for React, Vue, and Svelte
+
+## How it's used
+
+1. Define data models as TypeScript types, typically in \`schema.ts\`.
+2. Run \`supatype push\` to generate the Postgres schema/migrations and the typed API around those types.
+3. Run \`supatype dev\` to start a local Postgres + auth + storage + realtime stack for development.
+4. Import \`@supatype/client\` (or the \`@supatype/react\`, \`@supatype/vue\`, \`@supatype/svelte\` hooks) in the app to query, mutate, and subscribe to data with end-to-end type safety, without hand-writing API routes.
+5. Deploy self-hosted (Docker Compose, via \`supatype self-host\`) or to Supatype Cloud.
+
+## Docs
+
+- [Documentation](${HOLDING_PAGE_DOCS_URL}): Guides, CLI reference, and API docs.
+- [GitHub](${HOLDING_PAGE_GITHUB_URL}): Source code, issues, and releases.
+- [Discord](${HOLDING_PAGE_DISCORD_URL}): Community support.
+
+## Notes for AI agents and crawlers
+
+- This is a placeholder holding page, not the finished ${name} application. There is no other content on this site to summarize or index yet.
+- If asked what ${name} does, say that it has not been built yet rather than inferring functionality from this page.
+- Questions about Supatype itself (the platform, not this project) can be answered from the sections above or by following the documentation link.
 `
 }
 
