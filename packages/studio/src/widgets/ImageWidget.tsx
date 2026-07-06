@@ -8,7 +8,10 @@ import {
   storagePublicUrl,
   type StorageRef,
 } from "../lib/storage-ref.js"
-import { getLocalizedFieldValue, setLocalizedFieldValue } from "../lib/localized-field.js"
+import {
+  getLocalizedEditValue,
+  setLocalizedFieldValue,
+} from "../lib/localized-field.js"
 
 const IMAGE_EXTS = new Set(["jpg", "jpeg", "png", "gif", "webp", "avif", "svg"])
 
@@ -201,6 +204,7 @@ export function ImageWidget({
   readOnly,
   currentLocale = "en",
   defaultLocale = "en",
+  localePlaceholder,
 }: WidgetProps): React.ReactElement {
   const client = useAdminClient()
   const fileRef = useRef<HTMLInputElement>(null)
@@ -208,15 +212,17 @@ export function ImageWidget({
   const [dragOver, setDragOver] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [fallbackPreviewUrl, setFallbackPreviewUrl] = useState<string | null>(null)
 
   const bucket = (config.options?.["bucket"] as string) ?? "images"
-  const localeValue = getLocalizedFieldValue(
-    value,
-    config.localized,
-    currentLocale,
-    defaultLocale,
-  )
+  const localeValue = getLocalizedEditValue(value, config.localized, currentLocale)
   const storageRef = parseStorageRef(localeValue, bucket)
+
+  const fallbackValue =
+    config.localized && currentLocale !== defaultLocale && !storageRef
+      ? getLocalizedEditValue(value, true, defaultLocale)
+      : null
+  const fallbackStorageRef = parseStorageRef(fallbackValue, bucket)
 
   const commitRef = (ref: StorageRef | null) => {
     onChange(
@@ -252,6 +258,36 @@ export function ImageWidget({
     }
   }, [client, storageRef?.bucket, storageRef?.path])
 
+  useEffect(() => {
+    if (!fallbackStorageRef) {
+      setFallbackPreviewUrl(null)
+      return
+    }
+
+    let blobUrl: string | null = null
+    let cancelled = false
+
+    void (async () => {
+      const { data, error } = await client.storage
+        .from(fallbackStorageRef.bucket)
+        .download(fallbackStorageRef.path)
+      if (cancelled) return
+      if (data) {
+        blobUrl = URL.createObjectURL(data)
+        setFallbackPreviewUrl(blobUrl)
+        return
+      }
+      if (error) {
+        setFallbackPreviewUrl(storagePublicUrl(client, fallbackStorageRef))
+      }
+    })()
+
+    return () => {
+      cancelled = true
+      if (blobUrl) URL.revokeObjectURL(blobUrl)
+    }
+  }, [client, fallbackStorageRef?.bucket, fallbackStorageRef?.path])
+
   const handleUpload = async (file: File) => {
     setUploading(true)
     try {
@@ -280,6 +316,10 @@ export function ImageWidget({
   }
 
   const displayUrl = previewUrl ?? (storageRef ? storagePublicUrl(client, storageRef) : null)
+  const fallbackDisplayUrl =
+    fallbackPreviewUrl ??
+    (fallbackStorageRef ? storagePublicUrl(client, fallbackStorageRef) : null)
+  const fallbackHint = localePlaceholder
 
   return (
     <>
@@ -310,6 +350,43 @@ export function ImageWidget({
                 </button>
               </div>
             )}
+          </div>
+        ) : fallbackStorageRef && fallbackDisplayUrl ? (
+          <div className="st-image-preview st-image-preview--fallback">
+            <img src={fallbackDisplayUrl} alt="" className="st-image-thumb st-image-thumb--fallback" />
+            <div className="st-image-fallback-hint">
+              <span className="st-image-fallback-text">
+                {fallbackHint ?? `Showing ${defaultLocale} version — upload to override`}
+              </span>
+              {!readOnly && (
+                <div className="st-image-preview-actions">
+                  <button
+                    type="button"
+                    className="st-btn st-btn-sm"
+                    onClick={() => { fileRef.current?.click() }}
+                  >
+                    Upload for this locale
+                  </button>
+                  <button
+                    type="button"
+                    className="st-btn st-btn-sm"
+                    onClick={() => { setPickerOpen(true) }}
+                  >
+                    Select from bucket
+                  </button>
+                </div>
+              )}
+            </div>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              className="st-hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                if (file) void handleUpload(file)
+              }}
+            />
           </div>
         ) : (
           <div className="st-image-upload">

@@ -5,7 +5,14 @@ interface TextWidgetProps extends WidgetProps {
   multiline?: boolean
 }
 
-export function TextWidget({ config, value, onChange, readOnly, multiline }: TextWidgetProps): React.ReactElement {
+export function TextWidget({
+  config,
+  value,
+  onChange,
+  readOnly,
+  multiline,
+  localePlaceholder,
+}: TextWidgetProps): React.ReactElement {
   const strValue = value === null || value === undefined ? "" : String(value)
   const maxLength = config.validation?.["maxLength"] as number | undefined
 
@@ -21,6 +28,7 @@ export function TextWidget({ config, value, onChange, readOnly, multiline }: Tex
           required={config.required}
           maxLength={maxLength}
           rows={6}
+          placeholder={localePlaceholder}
         />
         {maxLength && (
           <span className="st-char-count">
@@ -42,6 +50,7 @@ export function TextWidget({ config, value, onChange, readOnly, multiline }: Tex
         readOnly={readOnly}
         required={config.required}
         maxLength={maxLength}
+        placeholder={localePlaceholder}
       />
       {maxLength && (
         <span className="st-char-count">

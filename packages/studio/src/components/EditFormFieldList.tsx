@@ -1,6 +1,6 @@
 import React from "react"
 import type { FieldConfig } from "../config.js"
-import { getLocalizedFieldValue } from "../lib/edit-field-layout.js"
+import { getLocalizedFieldValue, getLocalizedFieldPlaceholder } from "../lib/edit-field-layout.js"
 import { FieldWidget } from "../widgets/FieldWidget.js"
 
 export interface EditFormFieldListProps {
@@ -33,6 +33,12 @@ export function EditFormFieldList({
           key={`${fieldConfig.name}-${currentLocale}-${variant}`}
           config={fieldConfig}
           value={getLocalizedFieldValue(values, fieldConfig, currentLocale, defaultLocale)}
+          localePlaceholder={getLocalizedFieldPlaceholder(
+            values,
+            fieldConfig,
+            currentLocale,
+            defaultLocale,
+          )}
           onChange={(val) => {
             if (fieldConfig.localized) {
               const existing = (values[fieldConfig.name] ?? {}) as Record<string, unknown>

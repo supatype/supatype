@@ -1,4 +1,8 @@
 import type { FieldConfig } from "../config.js"
+import {
+  getLocalizedEditValue,
+  getLocalizedFallbackPlaceholder,
+} from "./localized-field.js"
 
 export interface SplitEditFieldsContext {
   primaryKey: string
@@ -54,10 +58,21 @@ export function getLocalizedFieldValue(
   values: Record<string, unknown>,
   field: FieldConfig,
   currentLocale: string,
-  defaultLocale: string,
+  _defaultLocale: string,
 ): unknown {
-  const raw = values[field.name]
-  if (!field.localized || typeof raw !== "object" || raw === null) return raw
-  const locMap = raw as Record<string, unknown>
-  return locMap[currentLocale] ?? locMap[defaultLocale] ?? null
+  return getLocalizedEditValue(values[field.name], field.localized, currentLocale)
+}
+
+export function getLocalizedFieldPlaceholder(
+  values: Record<string, unknown>,
+  field: FieldConfig,
+  currentLocale: string,
+  defaultLocale: string,
+): string | undefined {
+  return getLocalizedFallbackPlaceholder(
+    values[field.name],
+    field.localized,
+    currentLocale,
+    defaultLocale,
+  )
 }

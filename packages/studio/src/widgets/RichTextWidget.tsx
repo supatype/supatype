@@ -107,7 +107,13 @@ const EDITOR_THEME = {
   paragraph: "st-rt-p",
 }
 
-export function RichTextWidget({ config, value, onChange, readOnly }: WidgetProps): React.ReactElement {
+export function RichTextWidget({
+  config,
+  value,
+  onChange,
+  readOnly,
+  localePlaceholder,
+}: WidgetProps): React.ReactElement {
   const initialConfig = {
     namespace: `richtext-${config.name}`,
     theme: EDITOR_THEME,
@@ -128,7 +134,11 @@ export function RichTextWidget({ config, value, onChange, readOnly }: WidgetProp
         <div className="st-richtext-container">
           <RichTextPlugin
             contentEditable={<ContentEditable className="st-richtext-content" />}
-            placeholder={<div className="st-richtext-placeholder">Write something…</div>}
+            placeholder={
+              <div className="st-richtext-placeholder">
+                {localePlaceholder ?? "Write something…"}
+              </div>
+            }
             ErrorBoundary={LexicalErrorBoundary}
           />
         </div>
