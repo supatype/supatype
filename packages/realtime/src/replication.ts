@@ -6,6 +6,7 @@ const { Client } = pg
 export interface ReplicationConfig {
   databaseUrl: string
   slotName: string
+  publicationName?: string | undefined
   pollInterval: number
 }
 
@@ -36,7 +37,8 @@ export class ReplicationListener {
     this.client = new Client({ connectionString: this.config.databaseUrl })
     await this.client.connect()
 
-    // Ensure the logical replication slot exists
+    // Ensure publication + logical replication slot exist before polling.
+    await this.ensurePublication()
     await this.ensureSlot()
 
     this.running = true
@@ -58,6 +60,20 @@ export class ReplicationListener {
     if (this.client) {
       await this.client.end()
       this.client = null
+    }
+  }
+
+  private async ensurePublication(): Promise<void> {
+    if (!this.client) return
+
+    const pubName = this.config.publicationName ?? "supatype_realtime_pub"
+    const result = await this.client.query(
+      `SELECT 1 FROM pg_publication WHERE pubname = $1`,
+      [pubName],
+    )
+
+    if (result.rows.length === 0) {
+      await this.client.query(`CREATE PUBLICATION ${quoteIdent(pubName)} FOR ALL TABLES`)
     }
   }
 
@@ -164,4 +180,8 @@ function buildRecord(names?: string[], values?: unknown[]): Record<string, unkno
     record[names[i]!] = values[i]
   }
   return record
+}
+
+function quoteIdent(ident: string): string {
+  return `"${ident.replace(/"/g, '""')}"`
 }
