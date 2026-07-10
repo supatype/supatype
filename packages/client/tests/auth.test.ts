@@ -373,6 +373,88 @@ describe("AuthClient.refreshSession()", () => {
   })
 })
 
+describe("AuthClient custom storage", () => {
+  beforeEach(() => vi.restoreAllMocks())
+
+  const VALID_SESSION = {
+    accessToken: "stored-access",
+    refreshToken: "stored-refresh",
+    tokenType: "bearer",
+    expiresIn: 3600,
+    expiresAt: Math.floor(Date.now() / 1000) + 3600,
+    user: {
+      id: "user-1",
+      email: "test@example.com",
+      appMetadata: { provider: "email" },
+      userMetadata: { name: "Test" },
+      createdAt: "2024-01-01T00:00:00Z",
+      updatedAt: "2024-01-01T00:00:00Z",
+    },
+  }
+
+  it("hydrates session from async storage and emits SIGNED_IN", async () => {
+    const storage = {
+      getItem: vi.fn().mockResolvedValue(JSON.stringify(VALID_SESSION)),
+      setItem: vi.fn().mockResolvedValue(undefined),
+      removeItem: vi.fn().mockResolvedValue(undefined),
+    }
+    const events: string[] = []
+    const client = new AuthClient(GOTRUE_URL, HEADERS, { storage })
+    client.onAuthStateChange((event) => events.push(event))
+
+    await client.whenReady()
+    const { data } = await client.getSession()
+
+    expect(data.session?.accessToken).toBe("stored-access")
+    expect(events).toContain("SIGNED_IN")
+  })
+
+  it("persists session to custom storage on sign in", async () => {
+    const storage = {
+      getItem: vi.fn().mockResolvedValue(null),
+      setItem: vi.fn().mockResolvedValue(undefined),
+      removeItem: vi.fn().mockResolvedValue(undefined),
+    }
+    const client = new AuthClient(GOTRUE_URL, HEADERS, { storage })
+    await client.whenReady()
+
+    vi.stubGlobal("fetch", mockFetch(TOKEN_RESPONSE))
+    await client.signInWithPassword({ email: "a@b.com", password: "pass" })
+
+    expect(storage.setItem).toHaveBeenCalled()
+    const [key, value] = storage.setItem.mock.calls[0] as [string, string]
+    expect(key).toBe("supatype.auth.session")
+    expect(JSON.parse(value).accessToken).toBe("access-token-123")
+  })
+
+  it("survives corrupt async storage without throwing", async () => {
+    const storage = {
+      getItem: vi.fn().mockRejectedValue(new Error("storage unavailable")),
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+    }
+    const client = new AuthClient(GOTRUE_URL, HEADERS, { storage })
+
+    await expect(client.whenReady()).resolves.toBeUndefined()
+    const { data } = await client.getSession()
+    expect(data.session).toBeNull()
+  })
+
+  it("does not read storage when persistSession is false", async () => {
+    const storage = {
+      getItem: vi.fn().mockResolvedValue(JSON.stringify(VALID_SESSION)),
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+    }
+    const client = new AuthClient(GOTRUE_URL, HEADERS, { storage, persistSession: false })
+    await client.whenReady()
+
+    expect(storage.getItem).not.toHaveBeenCalled()
+    const { data } = await client.getSession()
+    expect(data.session).toBeNull()
+  })
+})
+
 describe("AuthClient stale persisted session", () => {
   let store: Map<string, string>
 

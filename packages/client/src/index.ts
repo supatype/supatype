@@ -3,6 +3,7 @@ import { QueryBuilder, MutationBuilder, type HeadersProvider } from "./query.js"
 import { defaultQueryCache, type QueryCache } from "./query-cache.js"
 import { StorageClient } from "./storage.js"
 import { RealtimeClient } from "./realtime.js"
+import type { RealtimeEvent, RealtimePayload } from "./realtime.js"
 import { PostgrestError } from "./errors.js"
 import { createRetryFetch } from "./retry.js"
 import { warnIfServerlessDirectConnection } from "./fetch-with-retry.js"
@@ -14,6 +15,7 @@ import type {
   SupatypeFunctions,
   SupatypeClientConfig,
   SupatypeError,
+  SelectQueryOptions,
 } from "./types.js"
 
 export type {
@@ -26,6 +28,8 @@ export type {
   AnyDatabase,
   SupatypeClientConfig,
   FunctionDef,
+  AuthStorage,
+  SelectQueryOptions,
   TableDef,
   TableInsert,
   SupatypeModels,
@@ -61,26 +65,34 @@ interface TableDef {
 
 class TableClient<TDef extends TableDef> {
   private readonly baseUrl: string
+  private readonly table: string
   private readonly path: string
   private readonly getHeaders: HeadersProvider
   private readonly onUnauthorized: (() => Promise<void>) | undefined
   private readonly queryCache: QueryCache
+  private readonly realtime: RealtimeClient
 
   constructor(
     baseUrl: string,
     table: string,
     getHeaders: HeadersProvider,
+    realtime: RealtimeClient,
     queryCache: QueryCache = defaultQueryCache,
     onUnauthorized?: (() => Promise<void>) | undefined,
   ) {
     this.baseUrl = baseUrl
+    this.table = table
     this.path = `/rest/v1/${table}`
     this.getHeaders = getHeaders
+    this.realtime = realtime
     this.onUnauthorized = onUnauthorized
     this.queryCache = queryCache
   }
 
-  select<TResult = TDef["Row"]>(columns?: string | undefined): QueryBuilder<TResult> {
+  select<TResult = TDef["Row"]>(
+    columns?: string | undefined,
+    options?: SelectQueryOptions | undefined,
+  ): QueryBuilder<TResult> {
     return new QueryBuilder<TResult>(
       this.baseUrl,
       this.path,
@@ -88,6 +100,7 @@ class TableClient<TDef extends TableDef> {
       columns,
       this.queryCache,
       this.onUnauthorized,
+      options,
     )
   }
 
@@ -141,6 +154,43 @@ class TableClient<TDef extends TableDef> {
       undefined,
       this.onUnauthorized,
     )
+  }
+
+  /**
+   * Subscribe to postgres_changes for this table (typed to Row).
+   * Phase 10.6 F11 — preferred over raw `client.realtime.channel(...)`.
+   */
+  subscribe(
+    callback: (payload: RealtimePayload<TDef["Row"]>) => void,
+    opts?: {
+      event?: RealtimeEvent | undefined
+      filter?: string | undefined
+      schema?: string | undefined
+    } | undefined,
+  ): {
+    unsubscribe: () => void
+    channel: ReturnType<RealtimeClient["channel"]>
+  } {
+    const event = opts?.event ?? "*"
+    const schema = opts?.schema ?? "public"
+    const channel = this.realtime
+      .channel(`${schema}:${this.table}`)
+      .on(
+        "postgres_changes",
+        {
+          event,
+          schema,
+          table: this.table,
+          ...(opts?.filter !== undefined && { filter: opts.filter }),
+        },
+        callback,
+      )
+    return {
+      channel,
+      unsubscribe: () => {
+        channel.unsubscribe()
+      },
+    }
   }
 }
 
@@ -388,6 +438,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
     persistSession: config.auth?.persistSession,
     storageKey: config.auth?.storageKey,
     cookiePrefix: config.auth?.cookiePrefix,
+    storage: config.auth?.storage,
   })
   // Storage admin operations (listBuckets, createBucket, etc.) require service_role.
   // When a service role key is provided (developer tools like Studio), use it for
@@ -440,7 +491,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
       table: TTable,
     ): TableClient<TDatabase["public"]["Tables"][TTable]> {
       type TDef = TDatabase["public"]["Tables"][TTable]
-      return new TableClient<TDef>(config.url, table, getAuthHeaders, queryCache, onUnauthorized)
+      return new TableClient<TDef>(config.url, table, getAuthHeaders, realtime, queryCache, onUnauthorized)
     },
 
     global<TRow extends Record<string, unknown> = Record<string, unknown>>(name: string): GlobalClient<TRow> {
@@ -448,12 +499,12 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
       type TDef = { Row: TRow; Insert: TRow; Update: Partial<TRow> }
       return {
         async get(): Promise<{ data: TRow | null; error: SupatypeError | null }> {
-          const tc = new TableClient<TDef>(config.url, tableName, getAuthHeaders, queryCache, onUnauthorized)
+          const tc = new TableClient<TDef>(config.url, tableName, getAuthHeaders, realtime, queryCache, onUnauthorized)
           const result = await tc.select().limit(1).maybeSingle()
           return { data: result.data ?? null, error: result.error }
         },
         async update(data: Partial<TRow>): Promise<{ data: TRow | null; error: SupatypeError | null }> {
-          const tc = new TableClient<TDef>(config.url, tableName, getAuthHeaders, queryCache, onUnauthorized)
+          const tc = new TableClient<TDef>(config.url, tableName, getAuthHeaders, realtime, queryCache, onUnauthorized)
           const result = await tc.upsert(data as TRow)
           const row = Array.isArray(result.data) ? (result.data[0] as TRow | undefined) ?? null : null
           return { data: row, error: result.error }

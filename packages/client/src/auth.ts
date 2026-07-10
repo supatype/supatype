@@ -3,6 +3,7 @@ import type {
   AuthMFAChallengeResponse,
   AuthMFAEnrollResponse,
   AuthMFAListFactorsResponse,
+  AuthStorage,
   Factor,
   OtpType,
   Session,
@@ -12,17 +13,13 @@ import type {
 
 type AuthListener = (event: AuthChangeEvent, session: Session | null) => void
 
-interface AuthStorageAdapter {
-  getItem(key: string): string | null
-  setItem(key: string, value: string): void
-  removeItem(key: string): void
-}
-
 interface AuthClientOptions {
   initialSession?: Session | undefined
   persistSession?: boolean | undefined
   storageKey?: string | undefined
   cookiePrefix?: string | undefined
+  /** Custom session store (replaces browser localStorage/cookies when set). */
+  storage?: AuthStorage | undefined
 }
 
 const DEFAULT_STORAGE_KEY = "supatype.auth.session"
@@ -38,7 +35,11 @@ export class AuthClient {
   private readonly persistSession: boolean
   private readonly storageKey: string
   private readonly cookieName: string
-  private readonly storage: AuthStorageAdapter | null
+  private readonly storage: AuthStorage | null
+  /** When true, session is also mirrored to document.cookie (browser default path only). */
+  private readonly useCookies: boolean
+  /** Resolves when async storage hydration completes (immediate when not used). */
+  private readonly ready: Promise<void>
   /** Pending auto-refresh timer; refreshes the access token shortly before it expires. */
   private refreshTimer: ReturnType<typeof setTimeout> | null = null
   /** Dedupes concurrent refresh attempts (getSession + auto-refresh). */
@@ -51,10 +52,12 @@ export class AuthClient {
     this.storageKey = opts.storageKey ?? DEFAULT_STORAGE_KEY
     const cookiePrefix = opts.cookiePrefix ?? DEFAULT_COOKIE_PREFIX
     this.cookieName = `${cookiePrefix}-auth-token`
-    this.storage = this.getBrowserStorage()
+    this.useCookies = opts.storage === undefined
+    this.storage = opts.storage ?? this.getBrowserStorage()
 
     if (opts.initialSession !== undefined) {
       this.currentSession = opts.initialSession
+      this.ready = Promise.resolve()
       if (DEBUG_AUTH) {
         console.debug("[supatype:auth] constructor initialSession provided", {
           hasSession: true,
@@ -62,21 +65,54 @@ export class AuthClient {
         })
       }
     } else if (this.persistSession) {
-      this.currentSession = this.loadPersistedSession()
-      if (DEBUG_AUTH) {
-        console.debug("[supatype:auth] constructor loaded persisted session", {
-          hasSession: this.currentSession !== null,
-          userId: this.currentSession?.user.id ?? null,
-          storageKey: this.storageKey,
-          cookieName: this.cookieName,
-        })
+      if (opts.storage !== undefined) {
+        this.ready = this.hydrateFromStorage()
+      } else {
+        this.currentSession = this.loadPersistedSession()
+        this.ready = Promise.resolve()
+        if (DEBUG_AUTH) {
+          console.debug("[supatype:auth] constructor loaded persisted session", {
+            hasSession: this.currentSession !== null,
+            userId: this.currentSession?.user.id ?? null,
+            storageKey: this.storageKey,
+            cookieName: this.cookieName,
+          })
+        }
       }
+    } else {
+      this.ready = Promise.resolve()
     }
     // Keep the access token fresh while the app is open (and refresh immediately
     // if a persisted session loaded already expired).
     this.scheduleAutoRefresh()
     if (this.currentSession !== null && this.isAccessTokenExpired(this.currentSession)) {
       void this.ensureValidSession()
+    }
+  }
+
+  /** Resolves when custom storage hydration finishes (no-op resolve when sync). */
+  whenReady(): Promise<void> {
+    return this.ready
+  }
+
+  private async hydrateFromStorage(): Promise<void> {
+    try {
+      const session = await this.loadPersistedSessionAsync()
+      if (session === null) return
+      this.currentSession = session
+      this.scheduleAutoRefresh()
+      if (this.isAccessTokenExpired(session)) {
+        await this.ensureValidSessionInternal()
+      }
+      this._emitEvent("SIGNED_IN", session)
+      if (DEBUG_AUTH) {
+        console.debug("[supatype:auth] hydrated session from custom storage", {
+          userId: session.user.id,
+          storageKey: this.storageKey,
+        })
+      }
+    } catch {
+      // Corrupt or unavailable storage — treat as signed out.
     }
   }
 
@@ -112,6 +148,11 @@ export class AuthClient {
    * Safe to call before REST/RPC requests; no-op when signed out or token is valid.
    */
   async ensureValidSession(): Promise<void> {
+    await this.ready
+    return this.ensureValidSessionInternal()
+  }
+
+  private async ensureValidSessionInternal(): Promise<void> {
     const session = this.currentSession
     if (session === null || !this.isAccessTokenExpired(session)) return
     if (!session.refreshToken?.trim()) {
@@ -297,7 +338,8 @@ export class AuthClient {
     data: { session: Session | null }
     error: SupatypeError | null
   }> {
-    await this.ensureValidSession()
+    await this.ready
+    await this.ensureValidSessionInternal()
     return { data: { session: this.currentSession }, error: null }
   }
 
@@ -791,7 +833,7 @@ export class AuthClient {
     return this.currentSession?.accessToken ?? null
   }
 
-  private getBrowserStorage(): AuthStorageAdapter | null {
+  private getBrowserStorage(): AuthStorage | null {
     if (typeof window === "undefined") return null
     try {
       return window.localStorage
@@ -800,8 +842,28 @@ export class AuthClient {
     }
   }
 
+  private async readStorageItem(key: string): Promise<string | null> {
+    if (this.storage === null) return null
+    return await this.storage.getItem(key)
+  }
+
+  private async loadPersistedSessionAsync(): Promise<Session | null> {
+    const fromStorage = await this.readStorageItem(this.storageKey)
+    if (fromStorage !== null) {
+      const parsed = this.parsePersistedSession(fromStorage)
+      if (parsed !== null) return parsed
+    }
+    return null
+  }
+
   private loadPersistedSession(): Session | null {
-    const fromStorage = this.storage?.getItem(this.storageKey) ?? null
+    const raw = this.storage?.getItem(this.storageKey)
+    const fromStorage =
+      raw === null || raw === undefined
+        ? null
+        : typeof raw === "string"
+          ? raw
+          : null
     if (fromStorage !== null) {
       const parsed = this.parsePersistedSession(fromStorage)
       if (DEBUG_AUTH) {
@@ -812,7 +874,7 @@ export class AuthClient {
       }
       if (parsed !== null) return parsed
     }
-    if (typeof document !== "undefined") {
+    if (this.useCookies && typeof document !== "undefined") {
       const fromCookie = this.readCookie(this.cookieName)
       if (fromCookie !== null) {
         const parsed = this.parsePersistedSession(fromCookie)
@@ -899,15 +961,20 @@ export class AuthClient {
 
   private syncPersistedSession(session: Session | null): void {
     if (!this.persistSession) return
+    void this.writePersistedSession(session)
+  }
+
+  private async writePersistedSession(session: Session | null): Promise<void> {
     const storage = this.storage
-    const cookieExpires = session?.expiresAt
     if (session === null) {
       try {
-        storage?.removeItem(this.storageKey)
+        await storage?.removeItem(this.storageKey)
       } catch {
         // Ignore storage write failures.
       }
-      this.writeCookie(this.cookieName, "", -1)
+      if (this.useCookies) {
+        this.writeCookie(this.cookieName, "", -1)
+      }
       if (DEBUG_AUTH) {
         console.debug("[supatype:auth] cleared persisted session", {
           storageKey: this.storageKey,
@@ -927,11 +994,13 @@ export class AuthClient {
       user: this.serializeUserForCookie(session.user),
     })
     try {
-      storage?.setItem(this.storageKey, json)
+      await storage?.setItem(this.storageKey, json)
     } catch {
       // Ignore storage write failures.
     }
-    this.writeCookie(this.cookieName, cookiePayload, cookieExpires)
+    if (this.useCookies) {
+      this.writeCookie(this.cookieName, cookiePayload, session.expiresAt)
+    }
     if (DEBUG_AUTH) {
       console.debug("[supatype:auth] persisted session", {
         userId: session.user.id,
