@@ -1,0 +1,99 @@
+# Publish standalone supatype CLI binaries to releases.supatype.com/cli/
+name: CLI release
+
+on:
+  push:
+    tags:
+      - "cli-v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version string (e.g. 0.1.4)
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-amd64
+            runner: ubuntu-24.04
+            pkg_target: node22-linux-x64
+            output: supatype-cli-linux-amd64
+          - platform: linux-arm64
+            runner: ubuntu-24.04
+            pkg_target: node22-linux-arm64
+            output: supatype-cli-linux-arm64
+          - platform: darwin-amd64
+            runner: macos-14
+            pkg_target: node22-macos-x64
+            output: supatype-cli-darwin-amd64
+          - platform: darwin-arm64
+            runner: macos-14
+            pkg_target: node22-macos-arm64
+            output: supatype-cli-darwin-arm64
+          - platform: windows-amd64
+            runner: windows-latest
+            pkg_target: node22-win-x64
+            output: supatype-cli-windows-amd64.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install and bundle CLI
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter @supatype/cli build
+          node packages/cli/scripts/build-release-bundle.mjs
+
+      - name: Package standalone binary
+        run: |
+          npx --yes @yao-pkg/pkg@6.6.0 packages/cli/release-bundle/supatype-cli-bundle.cjs --targets ${{ matrix.pkg_target }} --output ${{ matrix.output }}
+
+      - name: Upload to CDN
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.CDN_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CDN_AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.CDN_AWS_REGION }}
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#cli-v}"
+          if [ -n "${{ inputs.version }}" ]; then VERSION="${{ inputs.version }}"; fi
+          EP="${{ secrets.CDN_ENDPOINT }}"
+          EP="${EP%/}"
+          BUCKET="${{ secrets.CDN_BUCKET }}"
+          BASE="s3://${BUCKET}/cli/v${VERSION}"
+          aws s3 cp "${{ matrix.output }}" "${BASE}/${{ matrix.output }}" --endpoint-url "${EP}" --no-progress
+
+  publish-manifest:
+    needs: build
+    runs-on: ubuntu-24.04
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Write cli/latest.json
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.CDN_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CDN_AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.CDN_AWS_REGION }}
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#cli-v}"
+          if [ -n "${{ inputs.version }}" ]; then VERSION="${{ inputs.version }}"; fi
+          EP="${{ secrets.CDN_ENDPOINT }}"
+          BUCKET="${{ secrets.CDN_BUCKET }}"
+          printf '{"version":"%s","date":"%s"}\n' "${VERSION}" "$(date -u +%Y-%m-%d)" > latest.json
+          aws s3 cp latest.json "s3://${BUCKET}/cli/latest.json" --endpoint-url "${EP%/}" --cache-control "no-cache" --no-progress
