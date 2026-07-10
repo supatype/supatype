@@ -116,6 +116,8 @@ export interface SupatypeProjectConfig {
     postgres_dir?: string
     /** Path to a local deno binary. */
     deno?: string
+    /** Path to a local supatype-realtime binary (or node entry script). */
+    realtime?: string
     /** Path to the @supatype/studio package directory (starts Vite dev server). */
     studio?: string
     /** Path to a local PostgREST binary. */

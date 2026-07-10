@@ -783,6 +783,22 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
     }
   }
 
+  const pinnedRealtimeImage = readEnvValue(cwd, "SUPATYPE_REALTIME_IMAGE", "").trim()
+  if (pinnedRealtimeImage !== "") {
+    console.log("[supatype] Recreating realtime with pinned image...")
+    const rtStatus = runDockerCompose(
+      paths.composePath,
+      ["up", "-d", "--force-recreate", "--no-deps", "realtime"],
+      cwd,
+      project,
+      { quiet: true, brand: devBrand },
+    )
+    if (rtStatus !== 0) {
+      endDevSession()
+      exitComposeFailed(rtStatus, "Could not recreate the realtime container.", devBrand)
+    }
+  }
+
   console.log("[supatype] Waiting for API gateway...")
   await waitKongReady(kongPort, 120)
   console.log("[supatype] Waiting for storage API...")

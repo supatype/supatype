@@ -44,6 +44,9 @@ import { publishDevReady } from "../dev-ready-panel.js"
 import { probeDockerDaemon, reportDockerUnavailable } from "../docker-runtime.js"
 import { fatalError } from "../ui/fatal.js"
 import { registerDevShutdown } from "../dev-shutdown.js"
+import { patchRouteManifest } from "../route-manifest.js"
+import { resolveRealtimeLaunch } from "../realtime-launch.js"
+import { writeAppViteEnv } from "../app-vite-env.js"
 import { ensureValkeySidecar, stopValkeySidecar } from "../valkey-sidecar.js"
 import {
   initdb,
@@ -72,6 +75,7 @@ function gotrueSMTPFromEmailConfig(email: SupatypeProjectConfig["email"] | undef
 }
 
 const NATIVE_PG_PORT = 5432
+const REALTIME_PORT = "4000"
 
 function portCheckCommand(port: number): string {
   return process.platform === "win32"
@@ -316,6 +320,38 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
       const anonKey        = signJwt({ ...jwtBase, role: "anon" },         LOCAL_JWT_SECRET)
       const serviceRoleKey = signJwt({ ...jwtBase, role: "service_role" }, LOCAL_JWT_SECRET)
 
+      const realtimeUrl = `http://127.0.0.1:${REALTIME_PORT}`
+      patchRouteManifest(manifestPath, {
+        realtime_enabled: true,
+        realtime_url: realtimeUrl,
+      })
+
+      writeAppViteEnv(cwd, config, `http://localhost:${serverPort}`, anonKey)
+
+      let realtimeProc: ProcessManager | null = null
+      try {
+        const launch = await resolveRealtimeLaunch(config, cwd)
+        realtimeProc = new ProcessManager(launch.bin, launch.args, {
+          label: "realtime",
+          pidDir,
+          colour: "\x1b[35m",
+          env: {
+            DATABASE_URL: dbURL,
+            JWT_SECRET: LOCAL_JWT_SECRET,
+            PORT: REALTIME_PORT,
+            SLOT_NAME: "supatype_realtime",
+            PUBLICATION_NAME: "supatype_realtime_pub",
+          },
+        })
+        realtimeProc.start()
+        console.log(`[supatype] Realtime service: ${realtimeUrl}`)
+      } catch (err) {
+        console.warn(
+          `[supatype] ⚠  Realtime unavailable — WebSocket subscriptions will not work.\n` +
+            `  ${(err as Error).message}`,
+        )
+      }
+
 
       const emailProvider = config.email?.provider ?? "console"
       const gotrueMailerProvider =
@@ -344,6 +380,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
           ? { SUPATYPE_DENO_SERVE_SCRIPT: denoServeScriptAbs }
           : {}),
         SUPATYPE_URL: `http://localhost:${serverPort}`,
+        SUPATYPE_REALTIME_URL: realtimeUrl,
         SUPATYPE_ANON_KEY: anonKey,
         SUPATYPE_SERVICE_ROLE_KEY: serviceRoleKey,
         PORT: serverPort,
@@ -518,6 +555,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
         console.log("[supatype] Shutting down...")
         await Promise.all([
           serverProc.stop(),
+          realtimeProc?.stop(),
           postgrestProc?.stop(),
           studioProc?.stop(),
           appProc?.stop(),
