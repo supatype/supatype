@@ -2,7 +2,7 @@
 # Integration test runner.
 #
 # Usage:
-#   ./scripts/integration-test.sh [--skip-build]
+#   ./scripts/integration-test.sh [--skip-build] [--skip-docker-build]
 #
 # Environment variables (all optional — override auto-detection):
 #   SUPATYPE_ENGINE        Path to local engine binary
@@ -17,7 +17,45 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INTEGRATION_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ROOT_DIR="$(cd "$INTEGRATION_DIR/../.." && pwd)"
 
-SKIP_BUILD="${1:-}"
+resolve_engine_binary() {
+  local base="$ROOT_DIR/../supatype-schema-engine/target/release/supatype-engine"
+  if [[ -f "${base}.exe" ]]; then
+    echo "${base}.exe"
+  elif [[ -f "$base" ]]; then
+    echo "$base"
+  fi
+}
+
+resolve_server_binary() {
+  local auth_dir="$ROOT_DIR/../supatype-auth"
+  if [[ -f "$auth_dir/supatype-server.exe" ]]; then
+    echo "$auth_dir/supatype-server.exe"
+  elif [[ -f "$auth_dir/supatype-server" ]]; then
+    echo "$auth_dir/supatype-server"
+  fi
+}
+
+SKIP_BUILD=""
+SKIP_DOCKER_BUILD=""
+for arg in "$@"; do
+  case "$arg" in
+    --skip-build) SKIP_BUILD=1 ;;
+    --skip-docker-build) SKIP_DOCKER_BUILD=1 ;;
+  esac
+done
+
+docker_build_image() {
+  local label="$1"
+  local tag="$2"
+  shift 2
+  if [[ -n "$SKIP_DOCKER_BUILD" ]] && docker image inspect "$tag" >/dev/null 2>&1; then
+    echo "==> Skipping $label image build ($tag already exists)"
+    return 0
+  fi
+  echo "==> Building $label image ($tag) — may take several minutes..."
+  docker build --progress=plain -t "$tag" "$@"
+}
+
 SERVER_PID=""
 SUPATYPE_PID=""
 
@@ -28,13 +66,16 @@ cleanup() {
     kill "$SUPATYPE_PID" 2>/dev/null || true
     wait "$SUPATYPE_PID" 2>/dev/null || true
   fi
+  if [[ -n "${INTEGRATION_LOCK_DIR:-}" ]]; then
+    rmdir "$INTEGRATION_LOCK_DIR" 2>/dev/null || true
+  fi
   echo "  Done."
 }
 trap cleanup EXIT INT TERM
 
 # ── Step 1: Build all components (unless --skip-build) ────────────────────────
 
-if [[ "$SKIP_BUILD" != "--skip-build" ]]; then
+if [[ -z "$SKIP_BUILD" ]]; then
   echo "==> Building packages"
   cd "$ROOT_DIR"
   pnpm build
@@ -43,15 +84,24 @@ if [[ "$SKIP_BUILD" != "--skip-build" ]]; then
     echo "==> Building schema engine (Rust)"
     cd "$ROOT_DIR/../supatype-schema-engine"
     cargo build --release --quiet
-    SUPATYPE_ENGINE="${SUPATYPE_ENGINE:-$ROOT_DIR/../supatype-schema-engine/target/release/supatype-engine}"
+    SUPATYPE_ENGINE="${SUPATYPE_ENGINE:-$(resolve_engine_binary)}"
   fi
 
   if [[ -d "$ROOT_DIR/../supatype-auth" ]]; then
     echo "==> Building supatype-server (Go)"
     cd "$ROOT_DIR/../supatype-auth"
-    go build -o /tmp/supatype-server-local ./cmd/ 2>/dev/null || true
-    SUPATYPE_SERVER="${SUPATYPE_SERVER:-/tmp/supatype-server-local}"
+    if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == MSYS* || "$(uname -s)" == CYGWIN* ]]; then
+      go build -o supatype-server.exe .
+      SUPATYPE_SERVER="${SUPATYPE_SERVER:-$(resolve_server_binary)}"
+    else
+      go build -o /tmp/supatype-server-local .
+      SUPATYPE_SERVER="${SUPATYPE_SERVER:-/tmp/supatype-server-local}"
+    fi
   fi
+
+  echo "==> Building @supatype/realtime"
+  cd "$ROOT_DIR"
+  pnpm --filter @supatype/realtime build
 
   cd "$INTEGRATION_DIR"
 fi
@@ -60,27 +110,74 @@ fi
 
 echo "==> Configuring integration project"
 
+export SUPATYPE_ENGINE="${SUPATYPE_ENGINE:-$(resolve_engine_binary)}"
+export SUPATYPE_SERVER="${SUPATYPE_SERVER:-$(resolve_server_binary)}"
+export SUPATYPE_REALTIME="${SUPATYPE_REALTIME:-$ROOT_DIR/packages/realtime/dist/index.js}"
+export SUPATYPE_PROVIDER="${SUPATYPE_PROVIDER:-docker}"
+
 node "$SCRIPT_DIR/write-local-config.mjs" "$INTEGRATION_DIR/supatype.local.config.ts"
 
-# ── Step 3: Start supatype dev ────────────────────────────────────────────────
+# ── Step 3: Docker images + supatype dev ─────────────────────────────────────
 
-# macOS: native host stack (:54399). Linux CI: full compose via Kong (:18473).
-OS_NAME="$(uname -s)"
-if [[ "$OS_NAME" == "Darwin" ]]; then
-  export SUPATYPE_PROVIDER="${SUPATYPE_PROVIDER:-native}"
-  BASE_URL="${SUPATYPE_URL:-http://localhost:54399}"
-else
-  export SUPATYPE_PROVIDER="${SUPATYPE_PROVIDER:-docker}"
-  # Docker dev always goes through Kong — ignore workflow SUPATYPE_URL=:54399.
-  BASE_URL="http://localhost:${SUPATYPE_KONG_PORT:-18473}"
-fi
+# Force docker for integration (Windows Git Bash reports MINGW*, not Darwin).
+export SUPATYPE_PROVIDER="${SUPATYPE_PROVIDER:-docker}"
+BASE_URL="http://localhost:${SUPATYPE_KONG_PORT:-18473}"
 export SUPATYPE_URL="$BASE_URL"
 
-echo "==> Starting supatype dev (provider=${SUPATYPE_PROVIDER}, url=${BASE_URL})"
 cd "$INTEGRATION_DIR"
 
+# Prevent concurrent runs — overlapping runs share one DB and flake on fixed slugs.
+INTEGRATION_LOCK_DIR="$INTEGRATION_DIR/.supatype/.integration-test.lock.d"
+mkdir -p "$(dirname "$INTEGRATION_LOCK_DIR")"
+if ! mkdir "$INTEGRATION_LOCK_DIR" 2>/dev/null; then
+  echo "ERROR: Another integration test is already running."
+  echo "  Stop other terminals (Ctrl+C) or remove: $INTEGRATION_LOCK_DIR"
+  exit 1
+fi
+
+COMPOSE_PROJECT="supatype-supatype-integration"
+COMPOSE_FILE="$INTEGRATION_DIR/.supatype/self-host/docker-compose.yml"
+
+stop_compose_stack() {
+  if [[ ! -f "$COMPOSE_FILE" ]]; then
+    echo "  (no compose file — skip)"
+    return 0
+  fi
+  local args=(compose -p "$COMPOSE_PROJECT" --project-directory "$INTEGRATION_DIR" -f "$COMPOSE_FILE")
+  if [[ -f "$INTEGRATION_DIR/.env" ]]; then
+    args+=(--env-file "$INTEGRATION_DIR/.env")
+  fi
+  local running
+  running="$(docker "${args[@]}" ps -q 2>/dev/null | wc -l | tr -d '[:space:]')"
+  if [[ -z "$running" || "$running" == "0" ]]; then
+    echo "  (compose stack not running — skip)"
+    return 0
+  fi
+  echo "  Stopping $running container(s)..."
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 120 docker "${args[@]}" down --remove-orphans >/dev/null 2>&1 || true
+  else
+    docker "${args[@]}" down --remove-orphans >/dev/null 2>&1 || true
+  fi
+  echo "  Compose stack stopped."
+}
+
 if [[ "$SUPATYPE_PROVIDER" == "docker" ]]; then
-  node "$ROOT_DIR/packages/cli/bin/supatype.js" self-host compose down 2>/dev/null || true
+  echo "==> Preparing Docker images for integration (first run can take 15–30 min)..."
+  echo "==> Stopping any existing compose stack..."
+  stop_compose_stack
+  PG_SRC=""
+  if [[ -d "$ROOT_DIR/../supatype-postgres" ]]; then
+    PG_SRC="$ROOT_DIR/../supatype-postgres"
+  elif [[ -d "$ROOT_DIR/supatype-postgres" ]]; then
+    PG_SRC="$ROOT_DIR/supatype-postgres"
+  fi
+  if [[ -n "$PG_SRC" ]]; then
+    docker_build_image "postgres" "${SUPATYPE_POSTGRES_IMAGE:-supatype/postgres:ci-dev}" "$PG_SRC"
+    export SUPATYPE_POSTGRES_IMAGE="${SUPATYPE_POSTGRES_IMAGE:-supatype/postgres:ci-dev}"
+  else
+    echo "WARN: supatype-postgres source not found — set SUPATYPE_POSTGRES_IMAGE or checkout supatype-postgres"
+  fi
   ENGINE_SRC=""
   if [[ -d "$ROOT_DIR/../supatype-schema-engine" ]]; then
     ENGINE_SRC="$ROOT_DIR/../supatype-schema-engine"
@@ -88,13 +185,34 @@ if [[ "$SUPATYPE_PROVIDER" == "docker" ]]; then
     ENGINE_SRC="$ROOT_DIR/supatype-schema-engine"
   fi
   if [[ -n "$ENGINE_SRC" ]]; then
-    echo "==> Building schema-engine image for compose dev"
-    docker build -t "${SUPATYPE_ENGINE_IMAGE:-supatype/schema-engine:ci-dev}" "$ENGINE_SRC"
+    docker_build_image "schema-engine" "${SUPATYPE_ENGINE_IMAGE:-supatype/schema-engine:ci-dev}" "$ENGINE_SRC"
     export SUPATYPE_ENGINE_IMAGE="${SUPATYPE_ENGINE_IMAGE:-supatype/schema-engine:ci-dev}"
   else
     echo "WARN: supatype-schema-engine source not found — set SUPATYPE_ENGINE_IMAGE or checkout schema-engine"
   fi
+  docker_build_image "realtime" "${SUPATYPE_REALTIME_IMAGE:-supatype/realtime:ci-dev}" \
+    -f "$ROOT_DIR/packages/realtime/Dockerfile" "$ROOT_DIR"
+  export SUPATYPE_REALTIME_IMAGE="${SUPATYPE_REALTIME_IMAGE:-supatype/realtime:ci-dev}"
+  if [[ -d "$ROOT_DIR/../supatype-auth" ]]; then
+    docker_build_image "server" "${SUPATYPE_SERVER_IMAGE:-supatype/server:ci-dev}" "$ROOT_DIR/../supatype-auth"
+    export SUPATYPE_SERVER_IMAGE="${SUPATYPE_SERVER_IMAGE:-supatype/server:ci-dev}"
+  fi
+  echo "==> Building control-plane image for compose dev"
+  if [[ -n "$SKIP_DOCKER_BUILD" ]] && docker image inspect "${SUPATYPE_CONTROL_PLANE_IMAGE:-supatype/control-plane:ci-dev}" >/dev/null 2>&1; then
+    echo "==> Skipping control-plane image build (${SUPATYPE_CONTROL_PLANE_IMAGE:-supatype/control-plane:ci-dev} already exists)"
+  else
+    echo "==> Building control-plane image (${SUPATYPE_CONTROL_PLANE_IMAGE:-supatype/control-plane:ci-dev}) — may take several minutes..."
+    docker build --progress=plain \
+      --build-arg ENGINE_IMAGE="${SUPATYPE_ENGINE_IMAGE:-supatype/schema-engine:ci-dev}" \
+      -t "${SUPATYPE_CONTROL_PLANE_IMAGE:-supatype/control-plane:ci-dev}" \
+      -f "$ROOT_DIR/packages/self-host-control/Dockerfile" \
+      "$ROOT_DIR/packages/self-host-control"
+  fi
+  export SUPATYPE_CONTROL_PLANE_IMAGE="${SUPATYPE_CONTROL_PLANE_IMAGE:-supatype/control-plane:ci-dev}"
+  node "$SCRIPT_DIR/prepare-docker-env.mjs"
 fi
+
+echo "==> Starting supatype dev (provider=${SUPATYPE_PROVIDER}, url=${BASE_URL})"
 
 CLI_BIN="$ROOT_DIR/packages/cli/bin/supatype.js"
 if [[ ! -f "$CLI_BIN" ]]; then
@@ -108,7 +226,8 @@ SUPATYPE_PID=$!
 # ── Step 4: Sync URL + anon key from .env (written by supatype dev / ensure-compose-env) ─
 
 ENV_FILE="$INTEGRATION_DIR/.env"
-for _ in $(seq 1 30); do
+echo "==> Waiting for supatype dev to write API keys to .env (up to 180s)..."
+for wait_i in $(seq 1 180); do
   if [[ -f "$ENV_FILE" ]] && grep -q '^ANON_KEY=.' "$ENV_FILE"; then
     if [[ "$SUPATYPE_PROVIDER" == "docker" ]]; then
       kport="$(grep '^SUPATYPE_KONG_PORT=' "$ENV_FILE" | cut -d= -f2- || true)"
@@ -127,17 +246,21 @@ for _ in $(seq 1 30); do
     fi
     break
   fi
+  if (( wait_i % 15 == 0 )); then
+    echo "  Still waiting for .env (${wait_i}s)..."
+  fi
   sleep 1
 done
 
 # ── Step 5: Wait for health ───────────────────────────────────────────────────
 
-MAX_WAIT=120
+MAX_WAIT=300
 echo "==> Waiting for $BASE_URL to be ready (up to ${MAX_WAIT}s)..."
 
 for i in $(seq 1 "$MAX_WAIT"); do
-  if curl -sf "$BASE_URL/auth/v1/health" > /dev/null 2>&1; then
-    echo "  Ready after ${i}s"
+  if curl -sf "$BASE_URL/auth/v1/health" > /dev/null 2>&1 \
+    && curl -sf "$BASE_URL/realtime/v1/health" > /dev/null 2>&1; then
+    echo "  Ready after ${i}s (auth + realtime)"
     break
   fi
   if [[ "$i" -eq "$MAX_WAIT" ]]; then
@@ -156,7 +279,8 @@ export SUPATYPE_ANON_KEY="${SUPATYPE_ANON_KEY:-integration-anon-key}"
 export SUPATYPE_SERVICE_ROLE_KEY="${SUPATYPE_SERVICE_ROLE_KEY:-}"
 
 pnpm exec node --import tsx/esm --test \
-  tests/api.test.ts
+  tests/api.test.ts \
+  tests/realtime.test.ts
 
 echo ""
 echo "==> All tests passed."

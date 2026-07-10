@@ -4,7 +4,11 @@
   "type": "module",
   "scripts": {
     "vite": "vite",
-    "seed": "tsx seed.ts"
+    "seed": "tsx seed.ts",
+    "test:integration": "bash scripts/integration-test.sh",
+    "test:integration:docker": "SUPATYPE_PROVIDER=docker bash scripts/integration-test.sh",
+    "test:integration:docker:quick": "SUPATYPE_PROVIDER=docker bash scripts/integration-test.sh --skip-build --skip-docker-build",
+    "test:integration:quick": "bash scripts/integration-test.sh --skip-build"
   },
   "dependencies": {
     "@supatype/cli": "workspace:*",

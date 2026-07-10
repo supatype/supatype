@@ -37,11 +37,12 @@ describe("health", () => {
 
 describe("posts REST CRUD", () => {
   let createdId: string | undefined
+  const slug = `hello-integration-${Date.now()}`
 
   test("insert a post", async () => {
     const { data, error } = await client
       .from("post")
-      .insert({ title: "Hello Integration", slug: "hello-integration" })
+      .insert({ title: "Hello Integration", slug })
 
     assert.ifError(error)
     assert.ok(Array.isArray(data) && data.length > 0, "No rows returned")
@@ -54,7 +55,7 @@ describe("posts REST CRUD", () => {
     const { data, error } = await client
       .from("post")
       .select()
-      .eq("slug", "hello-integration")
+      .eq("slug", slug)
 
     assert.ifError(error)
     assert.ok(Array.isArray(data) && data.length >= 1)

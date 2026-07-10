@@ -21,16 +21,27 @@ if (!out) {
 
 const o = {}
 
+function resolveExecutablePath(val) {
+  if (!val) return null
+  if (existsSync(val) && statSync(val).isFile()) return val
+  if (process.platform === "win32" && !val.toLowerCase().endsWith(".exe")) {
+    const exe = `${val}.exe`
+    if (existsSync(exe) && statSync(exe).isFile()) return exe
+  }
+  return null
+}
+
 function addBin(key, val) {
-  if (!val || !existsSync(val)) return
+  const resolved = resolveExecutablePath(val)
+  if (!resolved) return
   try {
-    const st = statSync(val)
+    const st = statSync(resolved)
     if (!st.isFile()) return
     // Windows .exe files often fail constants.X_OK — existence + isFile is enough.
     if (process.platform !== "win32") {
       accessSync(val, constants.X_OK)
     }
-    o[key] = resolve(val).replace(/\\/g, "/")
+    o[key] = resolve(resolved).replace(/\\/g, "/")
   } catch {
     /* inaccessible */
   }
@@ -38,6 +49,13 @@ function addBin(key, val) {
 
 addBin("engine", process.env["SUPATYPE_ENGINE"])
 addBin("server", process.env["SUPATYPE_SERVER"])
+addBin("realtime", process.env["SUPATYPE_REALTIME"])
+
+const integrationDir = dirname(resolve(out))
+const defaultRealtime = resolve(integrationDir, "../../packages/realtime/dist/index.js")
+if (!o["realtime"] && existsSync(defaultRealtime)) {
+  o["realtime"] = defaultRealtime.replace(/\\/g, "/")
+}
 
 const pg = process.env["SUPATYPE_POSTGRES_DIR"]
 if (pg && existsSync(pg) && statSync(pg).isDirectory()) {
@@ -63,6 +81,7 @@ if (Object.keys(o).length > 0) {
   const versions = {}
   if (o.engine) versions.engine = "local"
   if (o.server) versions.server = "local"
+  if (o.realtime) versions.realtime = "local"
   if (Object.keys(versions).length > 0) {
     partial.versions = versions
   }
