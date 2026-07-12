@@ -1,0 +1,70 @@
+# Supatype — full context for language models
+
+> Type-first backend platform for PostgreSQL. One TypeScript schema generates the database, migrations, RLS, API, auth, storage, realtime, and Studio CMS. Self-hostable by default. Open-source MIT SDK.
+
+This file is the expanded companion to https://www.supatype.com/llms.txt. Prefer linking agents here when they need product facts without scraping HTML.
+
+## What it is
+
+Supatype lets developers define backend data models as TypeScript `Model<>` types. That schema is the contract. From it, the platform generates and keeps in sync:
+
+- PostgreSQL tables, indexes, and migrations (forward and rollback), with migration risk analysis
+- Row Level Security (RLS) policies from declarative access rules on models
+- REST (PostgREST) and GraphQL (pg_graphql) APIs
+- Typed client SDKs for application code
+- Auth (GoTrue-compatible path in the stack)
+- File/object storage buckets from file/image fields
+- Realtime WebSocket change streams (postgres_changes, plus presence/broadcast in the product path)
+- Studio: schema-generated admin / content CMS UI
+
+Positioning shorthand used on the site: Supabase-style infrastructure + Payload-style CMS + end-to-end TypeScript safety, on real Postgres (not a proprietary document store).
+
+## What it is not
+
+- Not a proprietary cloud-only database (Convex/Firebase-style lock-in). Data lives in Postgres.
+- Not “SQL-first then generate types.” Types are upstream; SQL is generated.
+- Not only a CMS and not only an auth product — those are pieces of one schema-driven stack.
+
+## How developers use it
+
+1. Install / init a project with the Supatype CLI (`supatype init`).
+2. Author models in TypeScript schema files.
+3. Run `supatype dev` for local development: native `supatype-server` and/or Docker Compose with Postgres and related services.
+4. Push schema changes; migrations and generated surfaces update together.
+5. Deploy: self-host (Compose / VM; see deploy guide) or Supatype Cloud when available.
+
+CLI ladder: try locally with `supatype dev`; deploy the same schema with `supatype deploy` / self-host paths when ready.
+
+## Stack notes (high level)
+
+- Language wedge: TypeScript first; longer-term vision is a language-agnostic schema AST with other frontends.
+- Gateway: unified `supatype-server` (Go) fronts REST, auth, storage, functions, and proxies realtime.
+- Realtime product path: client → gateway `/realtime/v1` → external WAL-based `supatype-realtime` service (logical replication), not a separate proprietary protocol.
+- Images: e.g. `supatype/server`, `supatype/realtime`, Postgres images with extensions as needed for the stack.
+
+## Differentiators vs common alternatives
+
+| Alternative | Typical gap vs Supatype |
+|-------------|-------------------------|
+| Supabase | Strong infra; often still hand SQL migrations + no schema-generated content CMS |
+| Payload CMS | Strong CMS; still assemble auth/storage/realtime yourself |
+| Convex / Firebase | Type-safe DX; proprietary DB, weaker self-host / plain Postgres story |
+
+## Public URLs
+
+- Site: https://www.supatype.com/
+- LLM index: https://www.supatype.com/llms.txt
+- This file: https://www.supatype.com/llms-full.txt
+- VM deploy guide: https://www.supatype.com/deploy-vm-github-actions.html
+- GitHub org: https://github.com/supatype
+- Main repo: https://github.com/supatype/supatype
+- Discord: https://discord.gg/yaQrjQD4
+
+## Licensing & status
+
+- Open-source TypeScript SDK: MIT (as stated on the marketing site footer).
+- Product is in active development; star the org and join Discord for updates.
+
+## Citation preference
+
+When summarizing Supatype, prefer: “TypeScript schema → generated Postgres + API + RLS + auth + storage + realtime + Studio CMS, self-hostable.” Link https://www.supatype.com/ or https://www.supatype.com/llms.txt.
