@@ -73,6 +73,7 @@
 
 /* Inputs */
 .st-input, .st-textarea, .st-select, .st-search-input { width: 100%; padding: 0.5rem 0.75rem; border: 1px solid hsl(var(--border)); border-radius: 6px; font-size: 0.875rem; font-family: inherit; background: hsl(var(--background)); color: hsl(var(--foreground)); }
+.st-input::placeholder, .st-textarea::placeholder { color: hsl(var(--muted-foreground)); opacity: 0.75; }
 .st-input:focus, .st-textarea:focus, .st-select:focus, .st-search-input:focus { outline: none; border-color: hsl(var(--ring)); box-shadow: 0 0 0 3px hsla(var(--ring), 0.2); }
 .st-input-sm { padding: 0.3rem 0.5rem; font-size: 0.75rem; }
 .st-textarea { min-height: 100px; resize: vertical; }
@@ -81,7 +82,8 @@
 /* Fields / Forms */
 .st-field-label { display: block; font-size: 0.8rem; font-weight: 600; color: hsl(var(--foreground)); margin-bottom: 0.25rem; }
 .st-field-required { color: hsl(var(--destructive)); }
-.st-field-localized { color: hsl(var(--primary)); font-size: 0.7rem; margin-left: 0.25rem; }
+.st-field-localized { display: inline-flex; align-items: center; color: hsl(var(--primary)); margin-left: 0.25rem; vertical-align: middle; }
+.st-field-localized-icon { display: block; }
 .st-field-input { margin-bottom: 1rem; }
 .st-field--meta .st-field-label { font-size: 0.7rem; font-weight: 500; color: hsl(var(--muted-foreground)); text-transform: uppercase; letter-spacing: 0.04em; }
 .st-field--meta .st-field-input { margin-bottom: 0.75rem; }
@@ -180,8 +182,12 @@
 
 /* Image widget */
 .st-image-preview { display: flex; align-items: center; gap: 0.75rem; }
+.st-image-preview--fallback { opacity: 0.85; }
 .st-image-preview-actions { display: flex; flex-direction: column; gap: 0.375rem; }
 .st-image-thumb { width: 80px; height: 80px; object-fit: cover; border-radius: 6px; border: 1px solid hsl(var(--border)); }
+.st-image-thumb--fallback { opacity: 0.55; }
+.st-image-fallback-hint { display: flex; flex-direction: column; gap: 0.5rem; }
+.st-image-fallback-text { font-size: 0.8rem; color: hsl(var(--muted-foreground)); max-width: 14rem; }
 .st-image-upload { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; padding: 1.5rem; border: 2px dashed hsl(var(--border)); border-radius: 8px; color: hsl(var(--muted-foreground)); justify-content: center; }
 .st-image-widget--dragover { border-color: hsl(var(--primary)); }
 

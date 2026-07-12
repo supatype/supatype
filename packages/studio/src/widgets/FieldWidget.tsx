@@ -36,6 +36,8 @@ export interface WidgetProps {
   slugFollowSource?: boolean
   /** Compact read-only styling for the metadata sidebar. */
   variant?: "default" | "meta"
+  /** Default-locale text shown when the active locale has no translation yet. */
+  localePlaceholder?: string | undefined
 }
 
 /**
@@ -64,6 +66,31 @@ export function normalizeDerivedPreviewFieldConfig(config: FieldConfig): FieldCo
   }
 }
 
+function TranslationIcon(): React.ReactElement {
+  return (
+    <svg
+      className="st-field-localized-icon"
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="m5 8 6 6" />
+      <path d="m4 14 6-6 2-3" />
+      <path d="M2 5h12" />
+      <path d="M7 2v3" />
+      <path d="m22 22-5-10-5 10" />
+      <path d="M14 18h6" />
+    </svg>
+  )
+}
+
 export function FieldWidget(props: WidgetProps): React.ReactElement {
   const config = normalizeDerivedPreviewFieldConfig(props.config)
   const next = { ...props, config }
@@ -76,7 +103,11 @@ export function FieldWidget(props: WidgetProps): React.ReactElement {
       <label className="st-field-label" htmlFor={`field-${config.name}`}>
         {config.label}
         {config.required && <span className="st-field-required" aria-label="required"> *</span>}
-        {config.localized && <span className="st-field-localized" title="This field is translated"> L</span>}
+        {config.localized && (
+          <span className="st-field-localized" title="This field is translated" aria-label="Translated field">
+            <TranslationIcon />
+          </span>
+        )}
       </label>
       <div className="st-field-input">
         <WidgetRenderer {...next} />
