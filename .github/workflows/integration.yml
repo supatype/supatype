@@ -2,35 +2,30 @@ name: Integration Tests
 
 on:
   pull_request:
-    paths:
-      - "packages/cli/**"
-      - "packages/client/**"
-      - "packages/self-host-control/**"
-      - "tests/integration/**"
-      - ".github/workflows/integration.yml"
+    branches: [main]
   push:
     branches: [main]
-    paths:
-      - "packages/cli/**"
-      - "packages/client/**"
-      - "packages/self-host-control/**"
-      - "tests/integration/**"
-      - ".github/workflows/integration.yml"
 
 concurrency:
   group: integration-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # Exercises `supatype dev` (Docker compose) + @supatype/client against CDN binaries.
+  # Exercises `supatype dev` (Docker compose) + @supatype/client.
+  # Sibling images (postgres/engine/server) come from Docker Hub; realtime +
+  # control-plane are built from this monorepo.
   # macOS native is disabled until native Postgres ships contrib extensions (pgcrypto).
   dev-integration:
     name: supatype dev (docker)
     runs-on: ubuntu-22.04
-    # Disabled temporarily: `dev` integration behavior is currently flaky in CI.
-    # Keep `compose-smoke` so we still validate published docker images.
-    if: ${{ false }}
-    timeout-minutes: 15
+    timeout-minutes: 30
+    env:
+      SUPATYPE_PROVIDER: docker
+      SUPATYPE_POSTGRES_IMAGE: supatype/postgres:latest
+      SUPATYPE_ENGINE_IMAGE: supatype/schema-engine:latest
+      SUPATYPE_SERVER_IMAGE: supatype/server:latest
+      SUPATYPE_REALTIME_IMAGE: supatype/realtime:ci-dev
+      SUPATYPE_CONTROL_PLANE_IMAGE: supatype/control-plane:ci-dev
 
     steps:
       - uses: actions/checkout@v4
@@ -66,7 +61,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: dev-integration-logs-ubuntu
-          path: ~/.supatype/projects/supatype-integration/logs/
+          path: |
+            ~/.supatype/projects/supatype-integration/logs/
+            tests/integration/.supatype/
+            tests/integration/.env
           retention-days: 3
 
   # Exercises published Docker images via `supatype self-host compose` (Linux only).

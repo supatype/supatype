@@ -56,6 +56,17 @@ docker_build_image() {
   docker build --progress=plain -t "$tag" "$@"
 }
 
+docker_pull_image() {
+  local label="$1"
+  local tag="$2"
+  if docker image inspect "$tag" >/dev/null 2>&1; then
+    echo "==> Using cached $label image ($tag)"
+    return 0
+  fi
+  echo "==> Pulling $label image ($tag)..."
+  docker pull "$tag"
+}
+
 SERVER_PID=""
 SUPATYPE_PID=""
 
@@ -176,7 +187,8 @@ if [[ "$SUPATYPE_PROVIDER" == "docker" ]]; then
     docker_build_image "postgres" "${SUPATYPE_POSTGRES_IMAGE:-supatype/postgres:ci-dev}" "$PG_SRC"
     export SUPATYPE_POSTGRES_IMAGE="${SUPATYPE_POSTGRES_IMAGE:-supatype/postgres:ci-dev}"
   else
-    echo "WARN: supatype-postgres source not found — set SUPATYPE_POSTGRES_IMAGE or checkout supatype-postgres"
+    export SUPATYPE_POSTGRES_IMAGE="${SUPATYPE_POSTGRES_IMAGE:-supatype/postgres:latest}"
+    docker_pull_image "postgres" "$SUPATYPE_POSTGRES_IMAGE"
   fi
   ENGINE_SRC=""
   if [[ -d "$ROOT_DIR/../supatype-schema-engine" ]]; then
@@ -188,7 +200,8 @@ if [[ "$SUPATYPE_PROVIDER" == "docker" ]]; then
     docker_build_image "schema-engine" "${SUPATYPE_ENGINE_IMAGE:-supatype/schema-engine:ci-dev}" "$ENGINE_SRC"
     export SUPATYPE_ENGINE_IMAGE="${SUPATYPE_ENGINE_IMAGE:-supatype/schema-engine:ci-dev}"
   else
-    echo "WARN: supatype-schema-engine source not found — set SUPATYPE_ENGINE_IMAGE or checkout schema-engine"
+    export SUPATYPE_ENGINE_IMAGE="${SUPATYPE_ENGINE_IMAGE:-supatype/schema-engine:latest}"
+    docker_pull_image "schema-engine" "$SUPATYPE_ENGINE_IMAGE"
   fi
   docker_build_image "realtime" "${SUPATYPE_REALTIME_IMAGE:-supatype/realtime:ci-dev}" \
     -f "$ROOT_DIR/packages/realtime/Dockerfile" "$ROOT_DIR"
@@ -196,6 +209,9 @@ if [[ "$SUPATYPE_PROVIDER" == "docker" ]]; then
   if [[ -d "$ROOT_DIR/../supatype-auth" ]]; then
     docker_build_image "server" "${SUPATYPE_SERVER_IMAGE:-supatype/server:ci-dev}" "$ROOT_DIR/../supatype-auth"
     export SUPATYPE_SERVER_IMAGE="${SUPATYPE_SERVER_IMAGE:-supatype/server:ci-dev}"
+  else
+    export SUPATYPE_SERVER_IMAGE="${SUPATYPE_SERVER_IMAGE:-supatype/server:latest}"
+    docker_pull_image "server" "$SUPATYPE_SERVER_IMAGE"
   fi
   echo "==> Building control-plane image for compose dev"
   if [[ -n "$SKIP_DOCKER_BUILD" ]] && docker image inspect "${SUPATYPE_CONTROL_PLANE_IMAGE:-supatype/control-plane:ci-dev}" >/dev/null 2>&1; then
