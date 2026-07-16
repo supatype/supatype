@@ -52,9 +52,14 @@ jobs:
 
       - name: Prefetch engine/server/postgres/deno binaries
         run: node tests/integration/scripts/ci-prefetch-binaries.mjs
+        env:
+          # From-source CLI builds have no embedded key; map the release secret.
+          SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
 
       - name: Run supatype dev integration tests
         run: bash tests/integration/scripts/integration-test.sh --skip-build
+        env:
+          SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
 
       - name: Upload logs on failure
         if: failure()
