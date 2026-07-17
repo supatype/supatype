@@ -236,21 +236,6 @@ async function waitComposeHealthy(paths: SelfHostComposePaths, cwd: string, maxM
   throw new Error("Compose db service did not become healthy in time")
 }
 
-/** True when the named compose service has a running container. */
-function composeServiceIsRunning(
-  paths: SelfHostComposePaths,
-  cwd: string,
-  composeProject: string,
-  service: string,
-): boolean {
-  const envFile = join(cwd, ".env")
-  const args = ["compose", "-p", composeProject, "--project-directory", cwd, "-f", paths.composePath]
-  if (existsSync(envFile)) args.push("--env-file", envFile)
-  args.push("ps", "-q", "--status", "running", service)
-  const result = spawnSync("docker", args, { cwd, encoding: "utf8" })
-  return result.status === 0 && typeof result.stdout === "string" && result.stdout.trim() !== ""
-}
-
 async function waitKongReady(kongPort: number, maxSec: number): Promise<void> {
   const base = `http://localhost:${kongPort}`
   for (let i = 0; i < maxSec; i++) {
@@ -423,25 +408,11 @@ async function runComposeSchemaPush(
 
   console.log("[supatype] Applying schema via compose schema-engine...")
   const sources = writeSchemaSourcePushArtifacts(cwd)
-  // Pause realtime during DDL only if it is already running. Starting it from
-  // `finally` during db-only boot was bringing realtime up mid-migration and
-  // crashing Postgres ("crash of another server process").
-  const pauseRealtime = composeServiceIsRunning(paths, cwd, composeProject, "realtime")
-  if (pauseRealtime) {
-    runDockerCompose(paths.composePath, ["stop", "realtime"], cwd, composeProject, { quiet: true })
-  }
-  let push: { status: number; output: string }
-  try {
+  let push = await runComposeEnginePush(paths, cwd, composeProject, config, sources)
+  // Windows Docker bind mounts can lag briefly after the host write.
+  if (push.status !== 0) {
+    await new Promise((r) => setTimeout(r, 250))
     push = await runComposeEnginePush(paths, cwd, composeProject, config, sources)
-    // Windows Docker bind mounts can lag briefly after the host write.
-    if (push.status !== 0) {
-      await new Promise((r) => setTimeout(r, 250))
-      push = await runComposeEnginePush(paths, cwd, composeProject, config, sources)
-    }
-  } finally {
-    if (pauseRealtime) {
-      runDockerCompose(paths.composePath, ["start", "realtime"], cwd, composeProject, { quiet: true })
-    }
   }
   if (push.status !== 0) {
     _lastFailedAst = astJson
@@ -794,11 +765,9 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
 
   console.log("[supatype] Waiting for Postgres (compose)...")
   await waitComposeHealthy(paths, cwd, 180_000, project)
-  // Let PostgREST/server finish connecting before we pause realtime + run DDL.
+  // Brief settle so concurrent compose services are not mid-connect on first DDL.
   await new Promise((r) => setTimeout(r, 2000))
 
-  // runComposeSchemaPush pauses realtime when it is already running so logical
-  // replication cannot race the migration transaction.
   const schemaPath = schemaPathFromProject(config, cwd)
   {
     const maxAttempts = 3
