@@ -230,35 +230,25 @@ async function waitComposeHealthy(paths: SelfHostComposePaths, cwd: string, maxM
       [...baseArgs, "exec", "-T", "db", "pg_isready", "-U", "supatype_admin"],
       { cwd: composeDir, encoding: "utf8" },
     )
-    if (ready.status === 0) {
-      // pg_isready is enough for accept; probe with a real query using the compose password
-      // (plain psql without PGPASSWORD hangs/fails and falsely times out the wait).
-      const probe = spawnSync(
-        "docker",
-        [
-          ...baseArgs,
-          "exec",
-          "-T",
-          "-e",
-          "PGPASSWORD=postgres",
-          "db",
-          "psql",
-          "-U",
-          "supatype_admin",
-          "-d",
-          "supatype",
-          "-v",
-          "ON_ERROR_STOP=1",
-          "-c",
-          "SELECT 1",
-        ],
-        { cwd: composeDir, encoding: "utf8" },
-      )
-      if (probe.status === 0) return
-    }
+    if (ready.status === 0) return
     await new Promise((r) => setTimeout(r, 2000))
   }
   throw new Error("Compose db service did not become healthy in time")
+}
+
+/** True when the named compose service has a running container. */
+function composeServiceIsRunning(
+  paths: SelfHostComposePaths,
+  cwd: string,
+  composeProject: string,
+  service: string,
+): boolean {
+  const envFile = join(cwd, ".env")
+  const args = ["compose", "-p", composeProject, "--project-directory", cwd, "-f", paths.composePath]
+  if (existsSync(envFile)) args.push("--env-file", envFile)
+  args.push("ps", "-q", "--status", "running", service)
+  const result = spawnSync("docker", args, { cwd, encoding: "utf8" })
+  return result.status === 0 && typeof result.stdout === "string" && result.stdout.trim() !== ""
 }
 
 async function waitKongReady(kongPort: number, maxSec: number): Promise<void> {
@@ -433,8 +423,13 @@ async function runComposeSchemaPush(
 
   console.log("[supatype] Applying schema via compose schema-engine...")
   const sources = writeSchemaSourcePushArtifacts(cwd)
-  // Pause realtime during DDL — logical replication polling races long migration txns.
-  runDockerCompose(paths.composePath, ["stop", "realtime"], cwd, composeProject, { quiet: true })
+  // Pause realtime during DDL only if it is already running. Starting it from
+  // `finally` during db-only boot was bringing realtime up mid-migration and
+  // crashing Postgres ("crash of another server process").
+  const pauseRealtime = composeServiceIsRunning(paths, cwd, composeProject, "realtime")
+  if (pauseRealtime) {
+    runDockerCompose(paths.composePath, ["stop", "realtime"], cwd, composeProject, { quiet: true })
+  }
   let push: { status: number; output: string }
   try {
     push = await runComposeEnginePush(paths, cwd, composeProject, config, sources)
@@ -444,7 +439,9 @@ async function runComposeSchemaPush(
       push = await runComposeEnginePush(paths, cwd, composeProject, config, sources)
     }
   } finally {
-    runDockerCompose(paths.composePath, ["start", "realtime"], cwd, composeProject, { quiet: true })
+    if (pauseRealtime) {
+      runDockerCompose(paths.composePath, ["start", "realtime"], cwd, composeProject, { quiet: true })
+    }
   }
   if (push.status !== 0) {
     _lastFailedAst = astJson
@@ -806,6 +803,10 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
     let lastErr: unknown
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
+        // Cold-start settle: pg_isready can pass before Postgres is stable for DDL.
+        if (attempt === 1) {
+          await new Promise((r) => setTimeout(r, 2000))
+        }
         await runComposeSchemaPush(cwd, config, paths, schemaPath, project)
         lastErr = undefined
         break
@@ -816,6 +817,17 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
           (e as Error).message,
         )
         if (attempt < maxAttempts) {
+          // Wipe db volume — a crashed backend leaves partial migrations that poison retries.
+          console.log("[supatype] Resetting Postgres after failed schema push...")
+          runDockerCompose(paths.composePath, ["down", "-v"], cwd, project, {
+            quiet: true,
+            brand: devBrand,
+          })
+          runDockerCompose(paths.composePath, ["up", "-d", "db"], cwd, project, {
+            quiet: true,
+            brand: devBrand,
+          })
+          await waitComposeHealthy(paths, cwd, 120_000, project)
           await new Promise((r) => setTimeout(r, 2000 * attempt))
         }
       }
