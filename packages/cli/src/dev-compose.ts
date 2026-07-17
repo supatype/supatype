@@ -8,6 +8,7 @@ import { dirname, join, resolve } from "node:path"
 import { spawnSync } from "node:child_process"
 import { startProxyDevApp, resolveProxyDevScript } from "./app/proxy-dev-app.js"
 import { loadSchemaAst } from "./config.js"
+import { withComposeSchemaPushLock } from "./schema-push-lock.js"
 import {
   COMPOSE_DEV_KONG_PORT,
   connectionString,
@@ -408,12 +409,16 @@ async function runComposeSchemaPush(
 
   console.log("[supatype] Applying schema via compose schema-engine...")
   const sources = writeSchemaSourcePushArtifacts(cwd)
-  let push = await runComposeEnginePush(paths, cwd, composeProject, config, sources)
-  // Windows Docker bind mounts can lag briefly after the host write.
-  if (push.status !== 0) {
-    await new Promise((r) => setTimeout(r, 250))
-    push = await runComposeEnginePush(paths, cwd, composeProject, config, sources)
-  }
+  // B: hold advisory lock so realtime skips WAL polls (process stays up).
+  const push = await withComposeSchemaPushLock(paths, cwd, composeProject, async () => {
+    let result = await runComposeEnginePush(paths, cwd, composeProject, config, sources)
+    // Windows Docker bind mounts can lag briefly after the host write.
+    if (result.status !== 0) {
+      await new Promise((r) => setTimeout(r, 250))
+      result = await runComposeEnginePush(paths, cwd, composeProject, config, sources)
+    }
+    return result
+  })
   if (push.status !== 0) {
     _lastFailedAst = astJson
     const detail = filterComposeNoise(push.output) || push.output
@@ -753,21 +758,22 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   await recoverStaleDevSession(cwd)
   await handleComposeProjectRename(cwd, config.project.name, paths)
 
-  console.log("[supatype] Bringing up Docker Compose services...")
-  const upStatus = runDockerCompose(paths.composePath, ["up", "-d"], cwd, project, {
+  console.log("[supatype] Bringing up Postgres (compose db)...")
+  const upDbStatus = runDockerCompose(paths.composePath, ["up", "-d", "db"], cwd, project, {
     quiet: true,
     brand: devBrand,
   })
-  if (upStatus !== 0) {
+  if (upDbStatus !== 0) {
     endDevSession()
-    exitComposeFailed(upStatus, "Could not start the local Compose stack.", devBrand)
+    exitComposeFailed(upDbStatus, "Could not start Postgres (compose db service).", devBrand)
   }
 
   console.log("[supatype] Waiting for Postgres (compose)...")
   await waitComposeHealthy(paths, cwd, 180_000, project)
-  // Brief settle so concurrent compose services are not mid-connect on first DDL.
+  // Settle before DDL — pg_isready can pass slightly before the instance is stable.
   await new Promise((r) => setTimeout(r, 2000))
 
+  // A: apply schema before realtime (and the rest of the stack) starts decoding WAL.
   const schemaPath = schemaPathFromProject(config, cwd)
   {
     const maxAttempts = 3
@@ -795,6 +801,16 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
         `Initial schema push failed after ${maxAttempts} attempts: ${(lastErr as Error).message}`,
       )
     }
+  }
+
+  console.log("[supatype] Bringing up Docker Compose services...")
+  const upStatus = runDockerCompose(paths.composePath, ["up", "-d"], cwd, project, {
+    quiet: true,
+    brand: devBrand,
+  })
+  if (upStatus !== 0) {
+    endDevSession()
+    exitComposeFailed(upStatus, "Could not start the local Compose stack.", devBrand)
   }
 
   if (localServerImage !== undefined) {

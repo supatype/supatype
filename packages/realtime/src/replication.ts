@@ -1,5 +1,6 @@
 import pg from "pg"
 import type { WalChange, ChangeEvent } from "./types.js"
+import { isSchemaPushLockHeld } from "./schema-push-lock.js"
 
 const { Client } = pg
 
@@ -15,12 +16,16 @@ export interface ReplicationConfig {
  *
  * Polls the replication slot at a configurable interval and emits
  * parsed change events via callback.
+ *
+ * While a schema push holds the shared advisory lock, polls are skipped so
+ * WAL decoding does not race DDL (WebSocket server stays up).
  */
 export class ReplicationListener {
   private config: ReplicationConfig
   private client: pg.Client | null = null
   private timer: ReturnType<typeof setInterval> | null = null
   private running = false
+  private pollInFlight = false
   private onChangeCallback: ((change: WalChange) => void) | null = null
 
   constructor(config: ReplicationConfig) {
@@ -95,8 +100,14 @@ export class ReplicationListener {
 
   private async poll(): Promise<void> {
     if (!this.running || !this.client || !this.onChangeCallback) return
+    if (this.pollInFlight) return
+    this.pollInFlight = true
 
     try {
+      if (await isSchemaPushLockHeld(this.client)) {
+        return
+      }
+
       const result = await this.client.query(
         `SELECT data FROM pg_logical_slot_get_changes($1, NULL, NULL, 'include-timestamp', 'on', 'include-pk', 'on')`,
         [this.config.slotName],
@@ -104,13 +115,17 @@ export class ReplicationListener {
 
       for (const row of result.rows as Array<{ data: string }>) {
         const changes = this.parseWal2json(row.data)
+        const onChange = this.onChangeCallback
+        if (!onChange) return
         for (const change of changes) {
-          this.onChangeCallback(change)
+          onChange(change)
         }
       }
     } catch (err) {
       // Log but don't crash — replication errors are recoverable
       console.error("[realtime] replication poll error:", err)
+    } finally {
+      this.pollInFlight = false
     }
   }
 
