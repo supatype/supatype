@@ -898,8 +898,10 @@ export async function fetchAllLatestVersions(): Promise<Partial<Record<Component
  * Fails gracefully when graceful=true (suitable for postinstall).
  */
 /**
- * Verify all cached binaries for the current platform (used by integration CI).
- * Throws if any cached component is missing or fails format checks.
+ * Verify cached binaries for the current platform (used by integration CI).
+ * Only checks components present in `versions` — unpublished CDN components
+ * (no latest.json yet) are skipped with a log so CI can land before first release.
+ * Throws if a pinned component is missing from cache or fails format checks.
  */
 export function verifyCachedBinaries(versions: Partial<ComponentVersions> | undefined): void {
   if (!versions) {
@@ -909,7 +911,10 @@ export function verifyCachedBinaries(versions: Partial<ComponentVersions> | unde
   for (const component of BINARY_COMPONENTS) {
     const version = versions[component]
     if (typeof version !== "string" || version.trim() === "") {
-      throw new Error(`[supatype] versions.${component} must be set`)
+      console.log(
+        `[supatype] skipping verify for ${component} (no version — CDN latest.json not published yet)`,
+      )
+      continue
     }
     const destPath = join(cachePath(component, version), binaryName(component, version, platform))
     if (!cachedArtifactLooksValid(component, destPath)) {
