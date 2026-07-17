@@ -782,31 +782,29 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   await recoverStaleDevSession(cwd)
   await handleComposeProjectRename(cwd, config.project.name, paths)
 
-  console.log("[supatype] Bringing up Postgres (compose db)...")
-  const upDbStatus = runDockerCompose(paths.composePath, ["up", "-d", "db"], cwd, project, {
+  console.log("[supatype] Bringing up Docker Compose services...")
+  const upStatus = runDockerCompose(paths.composePath, ["up", "-d"], cwd, project, {
     quiet: true,
     brand: devBrand,
   })
-  if (upDbStatus !== 0) {
+  if (upStatus !== 0) {
     endDevSession()
-    exitComposeFailed(upDbStatus, "Could not start Postgres (compose db service).", devBrand)
+    exitComposeFailed(upStatus, "Could not start the local Compose stack.", devBrand)
   }
 
   console.log("[supatype] Waiting for Postgres (compose)...")
   await waitComposeHealthy(paths, cwd, 180_000, project)
+  // Let PostgREST/server finish connecting before we pause realtime + run DDL.
+  await new Promise((r) => setTimeout(r, 2000))
 
-  // Push schema before gateway/realtime/PostgREST attach — concurrent logical
-  // replication + DDL races cause intermittent sqlx EOF mid-migration in CI.
+  // runComposeSchemaPush pauses realtime when it is already running so logical
+  // replication cannot race the migration transaction.
   const schemaPath = schemaPathFromProject(config, cwd)
   {
     const maxAttempts = 3
     let lastErr: unknown
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        // Cold-start settle: pg_isready can pass before Postgres is stable for DDL.
-        if (attempt === 1) {
-          await new Promise((r) => setTimeout(r, 2000))
-        }
         await runComposeSchemaPush(cwd, config, paths, schemaPath, project)
         lastErr = undefined
         break
@@ -817,37 +815,17 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
           (e as Error).message,
         )
         if (attempt < maxAttempts) {
-          // Wipe db volume — a crashed backend leaves partial migrations that poison retries.
-          console.log("[supatype] Resetting Postgres after failed schema push...")
-          runDockerCompose(paths.composePath, ["down", "-v"], cwd, project, {
-            quiet: true,
-            brand: devBrand,
-          })
-          runDockerCompose(paths.composePath, ["up", "-d", "db"], cwd, project, {
-            quiet: true,
-            brand: devBrand,
-          })
-          await waitComposeHealthy(paths, cwd, 120_000, project)
+          await waitComposeHealthy(paths, cwd, 60_000, project).catch(() => undefined)
           await new Promise((r) => setTimeout(r, 2000 * attempt))
         }
       }
     }
     if (lastErr) {
-      console.error(
-        "[supatype] Initial schema push exhausted retries:",
-        (lastErr as Error).message,
+      endDevSession()
+      throw new Error(
+        `Initial schema push failed after ${maxAttempts} attempts: ${(lastErr as Error).message}`,
       )
     }
-  }
-
-  console.log("[supatype] Bringing up Docker Compose services...")
-  const upStatus = runDockerCompose(paths.composePath, ["up", "-d"], cwd, project, {
-    quiet: true,
-    brand: devBrand,
-  })
-  if (upStatus !== 0) {
-    endDevSession()
-    exitComposeFailed(upStatus, "Could not start the local Compose stack.", devBrand)
   }
 
   if (localServerImage !== undefined) {
