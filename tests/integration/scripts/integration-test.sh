@@ -300,34 +300,40 @@ for i in $(seq 1 "$MAX_WAIT"); do
   sleep 1
 done
 
-# Auth/realtime come up before the initial schema push finishes — wait for tables.
+# Auth/realtime can pass before the initial schema push and before the pinned
+# realtime image recreate finishes. Wait for the session lock (written only after
+# full compose bootstrap) plus REST schema + live health checks.
 export SUPATYPE_ANON_KEY="${SUPATYPE_ANON_KEY:-integration-anon-key}"
 export SUPATYPE_SERVICE_ROLE_KEY="${SUPATYPE_SERVICE_ROLE_KEY:-}"
 SCHEMA_WAIT_KEY="${SUPATYPE_SERVICE_ROLE_KEY:-$SUPATYPE_ANON_KEY}"
-echo "==> Waiting for schema (REST table post, up to ${MAX_WAIT}s)..."
+SESSION_LOCK="$INTEGRATION_DIR/.supatype/dev-session.json"
+echo "==> Waiting for full stack ready (dev-session + schema post, up to ${MAX_WAIT}s)..."
 for i in $(seq 1 "$MAX_WAIT"); do
-  code="$(
-    curl -s -o /dev/null -w "%{http_code}" \
-      -H "apikey: ${SCHEMA_WAIT_KEY}" \
-      -H "Authorization: Bearer ${SCHEMA_WAIT_KEY}" \
-      "$BASE_URL/rest/v1/post?select=id&limit=0" || echo "000"
-  )"
-  if [[ "$code" == "200" ]] \
+  code="000"
+  if [[ -f "$SESSION_LOCK" ]]; then
+    code="$(
+      curl -s -o /dev/null -w "%{http_code}" \
+        -H "apikey: ${SCHEMA_WAIT_KEY}" \
+        -H "Authorization: Bearer ${SCHEMA_WAIT_KEY}" \
+        "$BASE_URL/rest/v1/post?select=id&limit=0" || echo "000"
+    )"
+  fi
+  if [[ -f "$SESSION_LOCK" && "$code" == "200" ]] \
     && curl -sf "$BASE_URL/auth/v1/health" > /dev/null 2>&1 \
     && curl -sf "$BASE_URL/realtime/v1/health" > /dev/null 2>&1; then
-    echo "  Schema ready after ${i}s (post + auth + realtime)"
+    echo "  Stack ready after ${i}s (session + post + auth + realtime)"
     break
   fi
   if [[ "$i" -eq "$MAX_WAIT" ]]; then
-    echo "  ERROR: Schema table public.post not reachable within ${MAX_WAIT}s (last HTTP ${code})"
+    echo "  ERROR: Stack not ready within ${MAX_WAIT}s (session=$([[ -f "$SESSION_LOCK" ]] && echo yes || echo no), last HTTP ${code})"
     exit 1
   fi
   # Recover from a flaky initial compose push (transient DB EOF during migration).
   if (( i % 30 == 0 )); then
-    echo "  Still waiting for schema (${i}s, last HTTP ${code}) — retrying supatype push..."
+    echo "  Still waiting (${i}s, session=$([[ -f "$SESSION_LOCK" ]] && echo yes || echo no), HTTP ${code}) — retrying supatype push..."
     node "$CLI_BIN" push || true
   elif (( i % 15 == 0 )); then
-    echo "  Still waiting for schema (${i}s, last HTTP ${code})..."
+    echo "  Still waiting (${i}s, session=$([[ -f "$SESSION_LOCK" ]] && echo yes || echo no), HTTP ${code})..."
   fi
   sleep 1
 done
