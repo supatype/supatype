@@ -237,6 +237,21 @@ async function waitComposeHealthy(paths: SelfHostComposePaths, cwd: string, maxM
   throw new Error("Compose db service did not become healthy in time")
 }
 
+/** True when the named compose service has a running container. */
+function composeServiceIsRunning(
+  paths: SelfHostComposePaths,
+  cwd: string,
+  composeProject: string,
+  service: string,
+): boolean {
+  const envFile = join(cwd, ".env")
+  const args = ["compose", "-p", composeProject, "--project-directory", cwd, "-f", paths.composePath]
+  if (existsSync(envFile)) args.push("--env-file", envFile)
+  args.push("ps", "-q", "--status", "running", service)
+  const result = spawnSync("docker", args, { cwd, encoding: "utf8" })
+  return result.status === 0 && typeof result.stdout === "string" && result.stdout.trim() !== ""
+}
+
 async function waitKongReady(kongPort: number, maxSec: number): Promise<void> {
   const base = `http://localhost:${kongPort}`
   for (let i = 0; i < maxSec; i++) {
@@ -409,8 +424,7 @@ async function runComposeSchemaPush(
 
   console.log("[supatype] Applying schema via compose schema-engine...")
   const sources = writeSchemaSourcePushArtifacts(cwd)
-  // B: hold advisory lock so realtime skips WAL polls (process stays up).
-  const push = await withComposeSchemaPushLock(paths, cwd, composeProject, async () => {
+  const runPush = async () => {
     let result = await runComposeEnginePush(paths, cwd, composeProject, config, sources)
     // Windows Docker bind mounts can lag briefly after the host write.
     if (result.status !== 0) {
@@ -418,7 +432,12 @@ async function runComposeSchemaPush(
       result = await runComposeEnginePush(paths, cwd, composeProject, config, sources)
     }
     return result
-  })
+  }
+  // B: only hold the advisory lock when realtime is already decoding — first-boot
+  // push (db only) must not take the lock; that path crashed under lock+DDL in CI.
+  const push = composeServiceIsRunning(paths, cwd, composeProject, "realtime")
+    ? await withComposeSchemaPushLock(paths, cwd, composeProject, runPush)
+    : await runPush()
   if (push.status !== 0) {
     _lastFailedAst = astJson
     const detail = filterComposeNoise(push.output) || push.output
@@ -771,7 +790,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   console.log("[supatype] Waiting for Postgres (compose)...")
   await waitComposeHealthy(paths, cwd, 180_000, project)
   // Settle before DDL — pg_isready can pass slightly before the instance is stable.
-  await new Promise((r) => setTimeout(r, 2000))
+  await new Promise((r) => setTimeout(r, 3000))
 
   // A: apply schema before realtime (and the rest of the stack) starts decoding WAL.
   const schemaPath = schemaPathFromProject(config, cwd)
@@ -790,8 +809,17 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
           (e as Error).message,
         )
         if (attempt < maxAttempts) {
-          await waitComposeHealthy(paths, cwd, 60_000, project).catch(() => undefined)
-          await new Promise((r) => setTimeout(r, 2000 * attempt))
+          console.log("[supatype] Resetting Postgres after failed schema push...")
+          runDockerCompose(paths.composePath, ["down", "-v"], cwd, project, {
+            quiet: true,
+            brand: devBrand,
+          })
+          runDockerCompose(paths.composePath, ["up", "-d", "db"], cwd, project, {
+            quiet: true,
+            brand: devBrand,
+          })
+          await waitComposeHealthy(paths, cwd, 120_000, project)
+          await new Promise((r) => setTimeout(r, 3000 * attempt))
         }
       }
     }
