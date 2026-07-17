@@ -231,9 +231,27 @@ async function waitComposeHealthy(paths: SelfHostComposePaths, cwd: string, maxM
       { cwd: composeDir, encoding: "utf8" },
     )
     if (ready.status === 0) {
+      // pg_isready is enough for accept; probe with a real query using the compose password
+      // (plain psql without PGPASSWORD hangs/fails and falsely times out the wait).
       const probe = spawnSync(
         "docker",
-        [...baseArgs, "exec", "-T", "db", "psql", "-U", "supatype_admin", "-d", "supatype", "-v", "ON_ERROR_STOP=1", "-c", "SELECT 1"],
+        [
+          ...baseArgs,
+          "exec",
+          "-T",
+          "-e",
+          "PGPASSWORD=postgres",
+          "db",
+          "psql",
+          "-U",
+          "supatype_admin",
+          "-d",
+          "supatype",
+          "-v",
+          "ON_ERROR_STOP=1",
+          "-c",
+          "SELECT 1",
+        ],
         { cwd: composeDir, encoding: "utf8" },
       )
       if (probe.status === 0) return
