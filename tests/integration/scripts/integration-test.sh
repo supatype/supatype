@@ -322,7 +322,11 @@ for i in $(seq 1 "$MAX_WAIT"); do
     echo "  ERROR: Schema table public.post not reachable within ${MAX_WAIT}s (last HTTP ${code})"
     exit 1
   fi
-  if (( i % 15 == 0 )); then
+  # Recover from a flaky initial compose push (transient DB EOF during migration).
+  if (( i % 30 == 0 )); then
+    echo "  Still waiting for schema (${i}s, last HTTP ${code}) — retrying supatype push..."
+    node "$CLI_BIN" push || true
+  elif (( i % 15 == 0 )); then
     echo "  Still waiting for schema (${i}s, last HTTP ${code})..."
   fi
   sleep 1

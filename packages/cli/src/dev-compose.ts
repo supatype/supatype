@@ -764,9 +764,32 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   await waitComposeHealthy(paths, cwd, 180_000, project)
 
   const schemaPath = schemaPathFromProject(config, cwd)
-  await runComposeSchemaPush(cwd, config, paths, schemaPath, project).catch((e: unknown) =>
-    console.error("[supatype] Initial schema push failed:", (e as Error).message),
-  )
+  {
+    const maxAttempts = 3
+    let lastErr: unknown
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await runComposeSchemaPush(cwd, config, paths, schemaPath, project)
+        lastErr = undefined
+        break
+      } catch (e: unknown) {
+        lastErr = e
+        console.error(
+          `[supatype] Initial schema push failed (attempt ${attempt}/${maxAttempts}):`,
+          (e as Error).message,
+        )
+        if (attempt < maxAttempts) {
+          await new Promise((r) => setTimeout(r, 2000 * attempt))
+        }
+      }
+    }
+    if (lastErr) {
+      console.error(
+        "[supatype] Initial schema push exhausted retries:",
+        (lastErr as Error).message,
+      )
+    }
+  }
 
   if (localServerImage !== undefined) {
     console.log("[supatype] Recreating server with local image...")
