@@ -230,7 +230,14 @@ async function waitComposeHealthy(paths: SelfHostComposePaths, cwd: string, maxM
       [...baseArgs, "exec", "-T", "db", "pg_isready", "-U", "supatype_admin"],
       { cwd: composeDir, encoding: "utf8" },
     )
-    if (ready.status === 0) return
+    if (ready.status === 0) {
+      const probe = spawnSync(
+        "docker",
+        [...baseArgs, "exec", "-T", "db", "psql", "-U", "supatype_admin", "-d", "supatype", "-v", "ON_ERROR_STOP=1", "-c", "SELECT 1"],
+        { cwd: composeDir, encoding: "utf8" },
+      )
+      if (probe.status === 0) return
+    }
     await new Promise((r) => setTimeout(r, 2000))
   }
   throw new Error("Compose db service did not become healthy in time")
@@ -408,11 +415,18 @@ async function runComposeSchemaPush(
 
   console.log("[supatype] Applying schema via compose schema-engine...")
   const sources = writeSchemaSourcePushArtifacts(cwd)
-  let push = await runComposeEnginePush(paths, cwd, composeProject, config, sources)
-  // Windows Docker bind mounts can lag briefly after the host write.
-  if (push.status !== 0) {
-    await new Promise((r) => setTimeout(r, 250))
+  // Pause realtime during DDL — logical replication polling races long migration txns.
+  runDockerCompose(paths.composePath, ["stop", "realtime"], cwd, composeProject, { quiet: true })
+  let push: { status: number; output: string }
+  try {
     push = await runComposeEnginePush(paths, cwd, composeProject, config, sources)
+    // Windows Docker bind mounts can lag briefly after the host write.
+    if (push.status !== 0) {
+      await new Promise((r) => setTimeout(r, 250))
+      push = await runComposeEnginePush(paths, cwd, composeProject, config, sources)
+    }
+  } finally {
+    runDockerCompose(paths.composePath, ["start", "realtime"], cwd, composeProject, { quiet: true })
   }
   if (push.status !== 0) {
     _lastFailedAst = astJson
@@ -753,19 +767,21 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   await recoverStaleDevSession(cwd)
   await handleComposeProjectRename(cwd, config.project.name, paths)
 
-  console.log("[supatype] Bringing up Docker Compose services...")
-  const upStatus = runDockerCompose(paths.composePath, ["up", "-d"], cwd, project, {
+  console.log("[supatype] Bringing up Postgres (compose db)...")
+  const upDbStatus = runDockerCompose(paths.composePath, ["up", "-d", "db"], cwd, project, {
     quiet: true,
     brand: devBrand,
   })
-  if (upStatus !== 0) {
+  if (upDbStatus !== 0) {
     endDevSession()
-    exitComposeFailed(upStatus, "Could not start the local Compose stack.", devBrand)
+    exitComposeFailed(upDbStatus, "Could not start Postgres (compose db service).", devBrand)
   }
 
   console.log("[supatype] Waiting for Postgres (compose)...")
   await waitComposeHealthy(paths, cwd, 180_000, project)
 
+  // Push schema before gateway/realtime/PostgREST attach — concurrent logical
+  // replication + DDL races cause intermittent sqlx EOF mid-migration in CI.
   const schemaPath = schemaPathFromProject(config, cwd)
   {
     const maxAttempts = 3
@@ -792,6 +808,16 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
         (lastErr as Error).message,
       )
     }
+  }
+
+  console.log("[supatype] Bringing up Docker Compose services...")
+  const upStatus = runDockerCompose(paths.composePath, ["up", "-d"], cwd, project, {
+    quiet: true,
+    brand: devBrand,
+  })
+  if (upStatus !== 0) {
+    endDevSession()
+    exitComposeFailed(upStatus, "Could not start the local Compose stack.", devBrand)
   }
 
   if (localServerImage !== undefined) {
