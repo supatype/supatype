@@ -75,7 +75,21 @@ cleanup() {
   echo "==> Teardown"
   if [[ -n "$SUPATYPE_PID" ]]; then
     kill "$SUPATYPE_PID" 2>/dev/null || true
+    # Compose-down during graceful shutdown can hang in CI — bound the wait.
+    for _ in $(seq 1 20); do
+      if ! kill -0 "$SUPATYPE_PID" 2>/dev/null; then
+        break
+      fi
+      sleep 1
+    done
+    if kill -0 "$SUPATYPE_PID" 2>/dev/null; then
+      echo "  Force-killing hung supatype dev (pid $SUPATYPE_PID)..."
+      kill -9 "$SUPATYPE_PID" 2>/dev/null || true
+    fi
     wait "$SUPATYPE_PID" 2>/dev/null || true
+  fi
+  if declare -F stop_compose_stack >/dev/null 2>&1; then
+    stop_compose_stack || true
   fi
   if [[ -n "${INTEGRATION_LOCK_DIR:-}" ]]; then
     rmdir "$INTEGRATION_LOCK_DIR" 2>/dev/null || true
@@ -286,13 +300,38 @@ for i in $(seq 1 "$MAX_WAIT"); do
   sleep 1
 done
 
+# Auth/realtime come up before the initial schema push finishes — wait for tables.
+export SUPATYPE_ANON_KEY="${SUPATYPE_ANON_KEY:-integration-anon-key}"
+export SUPATYPE_SERVICE_ROLE_KEY="${SUPATYPE_SERVICE_ROLE_KEY:-}"
+SCHEMA_WAIT_KEY="${SUPATYPE_SERVICE_ROLE_KEY:-$SUPATYPE_ANON_KEY}"
+echo "==> Waiting for schema (REST table post, up to ${MAX_WAIT}s)..."
+for i in $(seq 1 "$MAX_WAIT"); do
+  code="$(
+    curl -s -o /dev/null -w "%{http_code}" \
+      -H "apikey: ${SCHEMA_WAIT_KEY}" \
+      -H "Authorization: Bearer ${SCHEMA_WAIT_KEY}" \
+      "$BASE_URL/rest/v1/post?select=id&limit=0" || echo "000"
+  )"
+  if [[ "$code" == "200" ]] \
+    && curl -sf "$BASE_URL/auth/v1/health" > /dev/null 2>&1 \
+    && curl -sf "$BASE_URL/realtime/v1/health" > /dev/null 2>&1; then
+    echo "  Schema ready after ${i}s (post + auth + realtime)"
+    break
+  fi
+  if [[ "$i" -eq "$MAX_WAIT" ]]; then
+    echo "  ERROR: Schema table public.post not reachable within ${MAX_WAIT}s (last HTTP ${code})"
+    exit 1
+  fi
+  if (( i % 15 == 0 )); then
+    echo "  Still waiting for schema (${i}s, last HTTP ${code})..."
+  fi
+  sleep 1
+done
+
 # ── Step 6: Run tests ─────────────────────────────────────────────────────────
 
 echo "==> Running integration tests"
 cd "$INTEGRATION_DIR"
-
-export SUPATYPE_ANON_KEY="${SUPATYPE_ANON_KEY:-integration-anon-key}"
-export SUPATYPE_SERVICE_ROLE_KEY="${SUPATYPE_SERVICE_ROLE_KEY:-}"
 
 pnpm exec node --import tsx/esm --test \
   tests/api.test.ts \
