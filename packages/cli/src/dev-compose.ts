@@ -240,8 +240,11 @@ async function waitKongReady(kongPort: number, maxSec: number): Promise<void> {
   const base = `http://localhost:${kongPort}`
   for (let i = 0; i < maxSec; i++) {
     try {
-      const res = await fetch(`${base}/auth/v1/health`)
-      if (res.ok) return
+      const [auth, realtime] = await Promise.all([
+        fetch(`${base}/auth/v1/health`),
+        fetch(`${base}/realtime/v1/health`),
+      ])
+      if (auth.ok && realtime.ok) return
     } catch {
       /* retry */
     }
