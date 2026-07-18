@@ -69,8 +69,10 @@ jobs:
           path: |
             ~/.supatype/projects/supatype-integration/logs/
             tests/integration/.supatype/
+            tests/integration/.supatype/ci-logs/
             tests/integration/.env
           retention-days: 3
+          if-no-files-found: warn
 
   # Exercises published Docker images via `supatype self-host compose` (Linux only).
   compose-smoke:

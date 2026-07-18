@@ -73,6 +73,10 @@ SUPATYPE_PID=""
 cleanup() {
   echo ""
   echo "==> Teardown"
+  # Capture Postgres evidence before killing `supatype dev` (its shutdown runs compose down).
+  if declare -F dump_compose_diagnostics >/dev/null 2>&1; then
+    dump_compose_diagnostics || true
+  fi
   if [[ -n "$SUPATYPE_PID" ]]; then
     kill "$SUPATYPE_PID" 2>/dev/null || true
     # Compose-down during graceful shutdown can hang in CI — bound the wait.
@@ -163,15 +167,39 @@ fi
 COMPOSE_PROJECT="supatype-supatype-integration"
 COMPOSE_FILE="$INTEGRATION_DIR/.supatype/self-host/docker-compose.yml"
 
+compose_args() {
+  local args=(compose -p "$COMPOSE_PROJECT" --project-directory "$INTEGRATION_DIR" -f "$COMPOSE_FILE")
+  if [[ -f "$INTEGRATION_DIR/.env" ]]; then
+    args+=(--env-file "$INTEGRATION_DIR/.env")
+  fi
+  printf '%s\n' "${args[@]}"
+}
+
+# Dump db logs / ps / dmesg before compose down so CI artifacts retain crash evidence.
+dump_compose_diagnostics() {
+  local out="$INTEGRATION_DIR/.supatype/ci-logs"
+  mkdir -p "$out"
+  if [[ ! -f "$COMPOSE_FILE" ]]; then
+    echo "  (no compose file — skip diagnostics)"
+    return 0
+  fi
+  local args
+  mapfile -t args < <(compose_args)
+  echo "==> Dumping compose diagnostics to $out"
+  docker "${args[@]}" logs --no-color --timestamps --tail 800 db >"$out/db.log" 2>&1 || true
+  docker "${args[@]}" ps -a >"$out/ps.txt" 2>&1 || true
+  dmesg -T 2>/dev/null | tail -n 100 >"$out/dmesg-tail.txt" || true
+  echo "--- last 200 lines of db logs ---"
+  tail -n 200 "$out/db.log" 2>/dev/null || true
+}
+
 stop_compose_stack() {
   if [[ ! -f "$COMPOSE_FILE" ]]; then
     echo "  (no compose file — skip)"
     return 0
   fi
-  local args=(compose -p "$COMPOSE_PROJECT" --project-directory "$INTEGRATION_DIR" -f "$COMPOSE_FILE")
-  if [[ -f "$INTEGRATION_DIR/.env" ]]; then
-    args+=(--env-file "$INTEGRATION_DIR/.env")
-  fi
+  local args
+  mapfile -t args < <(compose_args)
   local running
   running="$(docker "${args[@]}" ps -q 2>/dev/null | wc -l | tr -d '[:space:]')"
   if [[ -z "$running" || "$running" == "0" ]]; then

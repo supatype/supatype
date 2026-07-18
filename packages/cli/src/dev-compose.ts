@@ -252,6 +252,45 @@ function composeServiceIsRunning(
   return result.status === 0 && typeof result.stdout === "string" && result.stdout.trim() !== ""
 }
 
+/**
+ * Capture Postgres container logs before compose down destroys them.
+ * Writes `.supatype/ci-logs/db-*.log` and prints a tail for CI job logs.
+ */
+function dumpComposeDbLogs(
+  paths: SelfHostComposePaths,
+  cwd: string,
+  composeProject: string,
+  reason: string,
+): void {
+  const logDir = join(cwd, ".supatype", "ci-logs")
+  mkdirSync(logDir, { recursive: true })
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-")
+  const logPath = join(logDir, `db-${stamp}.log`)
+
+  const envFile = join(cwd, ".env")
+  const args = ["compose", "-p", composeProject, "--project-directory", cwd, "-f", paths.composePath]
+  if (existsSync(envFile)) args.push("--env-file", envFile)
+  args.push("logs", "--no-color", "--timestamps", "--tail", "800", "db")
+
+  const result = spawnSync("docker", args, {
+    cwd,
+    encoding: "utf8",
+    maxBuffer: 10 * 1024 * 1024,
+  })
+  const body = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim()
+  const content = body || `(empty — docker compose logs db exit ${result.status ?? "?"})\n`
+  try {
+    writeFileSync(logPath, content)
+  } catch {
+    /* best-effort */
+  }
+
+  const lines = content.split("\n")
+  const tail = lines.slice(-200).join("\n")
+  console.error(`[supatype] Postgres logs after ${reason} (saved ${logPath}):`)
+  console.error(tail)
+}
+
 async function waitKongReady(kongPort: number, maxSec: number): Promise<void> {
   const base = `http://localhost:${kongPort}`
   for (let i = 0; i < maxSec; i++) {
@@ -808,6 +847,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
           `[supatype] Initial schema push failed (attempt ${attempt}/${maxAttempts}):`,
           (e as Error).message,
         )
+        dumpComposeDbLogs(paths, cwd, project, `schema push attempt ${attempt}/${maxAttempts}`)
         if (attempt < maxAttempts) {
           console.log("[supatype] Resetting Postgres after failed schema push...")
           runDockerCompose(paths.composePath, ["down", "-v"], cwd, project, {
@@ -824,6 +864,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
       }
     }
     if (lastErr) {
+      dumpComposeDbLogs(paths, cwd, project, "initial schema push exhausted")
       endDevSession()
       throw new Error(
         `Initial schema push failed after ${maxAttempts} attempts: ${(lastErr as Error).message}`,
