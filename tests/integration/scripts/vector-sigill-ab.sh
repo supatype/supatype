@@ -39,9 +39,17 @@ resolve_postgres_src() {
 
 wait_ready() {
   local name="$1"
-  for _ in $(seq 1 90); do
-    if docker exec "$name" pg_isready -U "${POSTGRES_USER:-supatype_admin}" >/dev/null 2>&1; then
-      return 0
+  # pg_isready can pass during initdb before the role password is usable.
+  for _ in $(seq 1 120); do
+    if docker exec -e PGPASSWORD=postgres "$name" \
+      psql -v ON_ERROR_STOP=1 -U "${POSTGRES_USER:-supatype_admin}" -d "${POSTGRES_DB:-supatype}" \
+      -c 'SELECT 1' >/dev/null 2>&1; then
+      sleep 2
+      if docker exec -e PGPASSWORD=postgres "$name" \
+        psql -v ON_ERROR_STOP=1 -U "${POSTGRES_USER:-supatype_admin}" -d "${POSTGRES_DB:-supatype}" \
+        -c 'SELECT 1' >/dev/null 2>&1; then
+        return 0
+      fi
     fi
     sleep 1
   done
@@ -64,15 +72,18 @@ run_vector_probe() {
   wait_ready "$name"
 
   set +e
-  docker exec -i "$name" psql -v ON_ERROR_STOP=1 -U supatype_admin -d supatype <<'SQL' >/tmp/vector-probe-out.txt 2>&1
+  docker exec -e PGPASSWORD=postgres -i "$name" \
+    psql -v ON_ERROR_STOP=1 -U supatype_admin -d supatype <<'SQL' >/tmp/vector-probe-out.txt 2>&1
 CREATE EXTENSION IF NOT EXISTS vector;
 DROP TABLE IF EXISTS vector_sigill_probe;
 CREATE TABLE vector_sigill_probe (
   id bigserial PRIMARY KEY,
-  embedding vector(3)
+  embedding vector(1536)
 );
-INSERT INTO vector_sigill_probe (embedding) VALUES ('[1,2,3]');
-SELECT embedding <-> '[1,2,3]'::vector AS dist FROM vector_sigill_probe;
+INSERT INTO vector_sigill_probe (embedding)
+  VALUES (array_fill(0.1::real, ARRAY[1536])::vector);
+SELECT embedding <-> array_fill(0.1::real, ARRAY[1536])::vector AS dist
+  FROM vector_sigill_probe;
 SQL
   local rc=$?
   set -e
