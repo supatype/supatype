@@ -29,6 +29,9 @@
     "expo-web-browser": ">=13"
   },
   "peerDependenciesMeta": {
+    "react-native": {
+      "optional": true
+    },
     "expo-web-browser": {
       "optional": true
     }

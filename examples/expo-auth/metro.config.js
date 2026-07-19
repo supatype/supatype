@@ -14,6 +14,17 @@ config.resolver.nodeModulesPaths = [
   path.resolve(workspaceRoot, "node_modules"),
 ]
 
+// Force a single React/RN copy from the Expo app (SDK 54 → RN 0.81.5).
+// Without this, workspace peer installs (e.g. react-native@0.86) can win
+// when Metro resolves from @supatype/react-native-auth's package tree.
+const singletonModules = ["react", "react-dom", "react-native", "react-native-web"]
+config.resolver.extraNodeModules = Object.fromEntries(
+  singletonModules.map((name) => [
+    name,
+    path.resolve(projectRoot, "node_modules", name),
+  ]),
+)
+
 function resolveSupatypeEntrypoint(moduleName) {
   const segments = moduleName.split("/")
   if (segments.length < 2 || segments[0] !== "@supatype") return null
@@ -33,6 +44,23 @@ function resolveSupatypeEntrypoint(moduleName) {
   return fs.existsSync(filePath) ? filePath : null
 }
 
+function resolveProjectModule(moduleName) {
+  const base = moduleName.split("/")[0]?.startsWith("@")
+    ? moduleName.split("/").slice(0, 2).join("/")
+    : moduleName.split("/")[0]
+  if (!base || !singletonModules.includes(base)) return null
+  const root = path.resolve(projectRoot, "node_modules", base)
+  if (!fs.existsSync(root)) return null
+  try {
+    return {
+      filePath: require.resolve(moduleName, { paths: [projectRoot] }),
+      type: "sourceFile",
+    }
+  } catch {
+    return null
+  }
+}
+
 const defaultResolveRequest = config.resolver.resolveRequest
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   if (moduleName.startsWith("@supatype/")) {
@@ -41,6 +69,8 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
       return { filePath, type: "sourceFile" }
     }
   }
+  const pinned = resolveProjectModule(moduleName)
+  if (pinned) return pinned
   if (typeof defaultResolveRequest === "function") {
     return defaultResolveRequest(context, moduleName, platform)
   }

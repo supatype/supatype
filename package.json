@@ -22,5 +22,10 @@
     "typescript": "^5",
     "vitest": "^4.0.18"
   },
-  "packageManager": "pnpm@10.6.0"
+  "packageManager": "pnpm@10.6.0",
+  "pnpm": {
+    "overrides": {
+      "react-native": "0.81.5"
+    }
+  }
 }
