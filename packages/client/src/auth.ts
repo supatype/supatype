@@ -1,5 +1,6 @@
 import type {
   AuthChangeEvent,
+  AuthFlowType,
   AuthMFAChallengeResponse,
   AuthMFAEnrollResponse,
   AuthMFAListFactorsResponse,
@@ -10,6 +11,11 @@ import type {
   SupatypeError,
   User,
 } from "./types.js"
+import {
+  createCodeChallengeS256,
+  generateCodeVerifier,
+  PKCE_METHOD_S256,
+} from "./pkce.js"
 
 type AuthListener = (event: AuthChangeEvent, session: Session | null) => void
 
@@ -44,6 +50,8 @@ export class AuthClient {
   private refreshTimer: ReturnType<typeof setTimeout> | null = null
   /** Dedupes concurrent refresh attempts (getSession + auto-refresh). */
   private refreshInFlight: Promise<void> | null = null
+  /** In-memory PKCE code_verifier for the in-flight OAuth / OTP redirect. */
+  private codeVerifier: string | null = null
 
   constructor(url: string, baseHeaders: Record<string, string>, opts: AuthClientOptions = {}) {
     this.url = url
@@ -262,7 +270,12 @@ export class AuthClient {
 
   async signInWithOAuth(opts: {
     provider: string
-    options?: { redirectTo?: string | undefined } | undefined
+    options?: {
+      redirectTo?: string | undefined
+      /** Default: `implicit` (web-compatible). Pass `pkce` for mobile / RN. */
+      flowType?: AuthFlowType | undefined
+      scopes?: string | undefined
+    } | undefined
   }): Promise<{
     data: { url: string; provider: string }
     error: SupatypeError | null
@@ -272,7 +285,145 @@ export class AuthClient {
     if (opts.options?.redirectTo !== undefined) {
       url.searchParams.set("redirect_to", opts.options.redirectTo)
     }
+    if (opts.options?.scopes !== undefined) {
+      url.searchParams.set("scopes", opts.options.scopes)
+    }
+    const flowType = opts.options?.flowType ?? "implicit"
+    if (flowType === "pkce") {
+      await this.beginPkce()
+      url.searchParams.set("code_challenge", createCodeChallengeS256(this.codeVerifier!))
+      url.searchParams.set("code_challenge_method", PKCE_METHOD_S256)
+    }
     return { data: { url: url.toString(), provider: opts.provider }, error: null }
+  }
+
+  /**
+   * Apply tokens from an OAuth / deep-link redirect (implicit grant) or restore a session.
+   * Fetches `/user` to hydrate the user object, then persists via the configured storage.
+   */
+  async setSession(params: {
+    accessToken: string
+    refreshToken: string
+  }): Promise<{
+    data: { session: Session | null; user: User | null }
+    error: SupatypeError | null
+  }> {
+    const res = await fetch(`${this.url}/user`, {
+      headers: {
+        ...this.baseHeaders,
+        Authorization: `Bearer ${params.accessToken}`,
+      },
+    })
+    if (!res.ok) {
+      return {
+        data: { session: null, user: null },
+        error: await this._parseError(res),
+      }
+    }
+    const raw = await res.json() as Record<string, unknown>
+    const user = this._parseUser(raw)
+    const session: Session = {
+      accessToken: params.accessToken,
+      refreshToken: params.refreshToken,
+      tokenType: "bearer",
+      expiresIn: 3600,
+      user,
+    }
+    const exp = this.decodeJwtExp(params.accessToken)
+    if (exp !== null) {
+      session.expiresAt = exp
+      session.expiresIn = Math.max(0, exp - Math.floor(Date.now() / 1000))
+    }
+    this._setSession(session)
+    return { data: { session, user }, error: null }
+  }
+
+  /**
+   * Exchange a PKCE auth code for a session (`POST /token?grant_type=pkce`).
+   * Requires a prior `signInWithOAuth({ options: { flowType: "pkce" } })` (or OTP with PKCE)
+   * so the matching `code_verifier` is available in memory / storage.
+   */
+  async exchangeCodeForSession(authCode: string): Promise<{
+    data: { session: Session | null; user: User | null }
+    error: SupatypeError | null
+  }> {
+    const verifier = await this.readCodeVerifier()
+    if (verifier === null) {
+      return {
+        data: { session: null, user: null },
+        error: {
+          message: "Missing PKCE code_verifier. Start OAuth with flowType: \"pkce\" first.",
+          status: 400,
+        },
+      }
+    }
+    const res = await fetch(`${this.url}/token?grant_type=pkce`, {
+      method: "POST",
+      headers: this.baseHeaders,
+      body: JSON.stringify({
+        auth_code: authCode,
+        code_verifier: verifier,
+      }),
+    })
+    await this.clearCodeVerifier()
+    return this._parseAuthResponse(res)
+  }
+
+  /**
+   * Parse an OAuth / magic-link redirect URL and establish a session.
+   * Supports PKCE (`?code=`) and implicit (`#access_token=` / query tokens).
+   */
+  async getSessionFromUrl(url: string): Promise<{
+    data: { session: Session | null; user: User | null }
+    error: SupatypeError | null
+  }> {
+    let parsed: URL
+    try {
+      parsed = new URL(url)
+    } catch {
+      return {
+        data: { session: null, user: null },
+        error: { message: `Invalid redirect URL: ${url}`, status: 400 },
+      }
+    }
+
+    const query = parsed.searchParams
+    const hashParams = new URLSearchParams(
+      parsed.hash.startsWith("#") ? parsed.hash.slice(1) : parsed.hash,
+    )
+
+    const errorDescription =
+      query.get("error_description") ??
+      hashParams.get("error_description") ??
+      query.get("error") ??
+      hashParams.get("error")
+    if (errorDescription !== null && errorDescription !== "") {
+      return {
+        data: { session: null, user: null },
+        error: { message: errorDescription, status: 400 },
+      }
+    }
+
+    const code = query.get("code") ?? hashParams.get("code")
+    if (code !== null && code !== "") {
+      return this.exchangeCodeForSession(code)
+    }
+
+    const accessToken =
+      hashParams.get("access_token") ?? query.get("access_token")
+    const refreshToken =
+      hashParams.get("refresh_token") ?? query.get("refresh_token")
+    if (accessToken !== null && accessToken !== "" && refreshToken !== null && refreshToken !== "") {
+      return this.setSession({ accessToken, refreshToken })
+    }
+
+    return {
+      data: { session: null, user: null },
+      error: {
+        message: "No auth code or tokens found in redirect URL",
+        status: 400,
+      },
+    }
   }
 
   async signInWithOtp(opts: {
@@ -837,6 +988,65 @@ export class AuthClient {
     if (typeof window === "undefined") return null
     try {
       return window.localStorage
+    } catch {
+      return null
+    }
+  }
+
+  private codeVerifierStorageKey(): string {
+    return `${this.storageKey}-code-verifier`
+  }
+
+  private async beginPkce(): Promise<void> {
+    const verifier = generateCodeVerifier()
+    this.codeVerifier = verifier
+    if (!this.persistSession || this.storage === null) return
+    try {
+      await this.storage.setItem(this.codeVerifierStorageKey(), verifier)
+    } catch {
+      // Ignore storage write failures — in-memory verifier still works for same-process flows.
+    }
+  }
+
+  private async readCodeVerifier(): Promise<string | null> {
+    if (this.codeVerifier !== null) return this.codeVerifier
+    if (this.storage === null) return null
+    try {
+      const stored = await this.storage.getItem(this.codeVerifierStorageKey())
+      if (stored !== null && stored !== "") {
+        this.codeVerifier = stored
+        return stored
+      }
+    } catch {
+      // fall through
+    }
+    return null
+  }
+
+  private async clearCodeVerifier(): Promise<void> {
+    this.codeVerifier = null
+    if (this.storage === null) return
+    try {
+      await this.storage.removeItem(this.codeVerifierStorageKey())
+    } catch {
+      // Ignore
+    }
+  }
+
+  /** Decode JWT `exp` claim without verifying the signature. */
+  private decodeJwtExp(accessToken: string): number | null {
+    const parts = accessToken.split(".")
+    if (parts.length < 2) return null
+    try {
+      const payload = parts[1]!
+      const padded = payload + "=".repeat((4 - (payload.length % 4)) % 4)
+      const b64 = padded.replace(/-/g, "+").replace(/_/g, "/")
+      const json =
+        typeof atob === "function"
+          ? atob(b64)
+          : Buffer.from(b64, "base64").toString("utf8")
+      const claims = JSON.parse(json) as { exp?: unknown }
+      return typeof claims.exp === "number" ? claims.exp : null
     } catch {
       return null
     }

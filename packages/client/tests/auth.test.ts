@@ -455,6 +455,131 @@ describe("AuthClient custom storage", () => {
   })
 })
 
+describe("AuthClient OAuth session completion", () => {
+  beforeEach(() => vi.restoreAllMocks())
+
+  it("signInWithOAuth defaults to implicit (no PKCE params)", async () => {
+    const { data, error } = await freshClient().signInWithOAuth({ provider: "google" })
+    expect(error).toBeNull()
+    const url = new URL(data.url)
+    expect(url.searchParams.get("provider")).toBe("google")
+    expect(url.searchParams.get("code_challenge")).toBeNull()
+    expect(url.searchParams.get("code_challenge_method")).toBeNull()
+  })
+
+  it("signInWithOAuth pkce appends challenge and persists verifier", async () => {
+    const storage = {
+      getItem: vi.fn().mockResolvedValue(null),
+      setItem: vi.fn().mockResolvedValue(undefined),
+      removeItem: vi.fn().mockResolvedValue(undefined),
+    }
+    const client = new AuthClient(GOTRUE_URL, HEADERS, { storage })
+    await client.whenReady()
+
+    const { data, error } = await client.signInWithOAuth({
+      provider: "github",
+      options: { flowType: "pkce", redirectTo: "myapp://auth/callback" },
+    })
+
+    expect(error).toBeNull()
+    const url = new URL(data.url)
+    expect(url.searchParams.get("code_challenge_method")).toBe("s256")
+    expect(url.searchParams.get("code_challenge")).toMatch(/^[A-Za-z0-9\-._~]+$/)
+    expect(url.searchParams.get("redirect_to")).toBe("myapp://auth/callback")
+    expect(storage.setItem).toHaveBeenCalledWith(
+      "supatype.auth.session-code-verifier",
+      expect.stringMatching(/^[A-Za-z0-9\-._~]+$/),
+    )
+  })
+
+  it("exchangeCodeForSession posts auth_code + code_verifier", async () => {
+    const storage = {
+      getItem: vi.fn().mockResolvedValue(null),
+      setItem: vi.fn().mockResolvedValue(undefined),
+      removeItem: vi.fn().mockResolvedValue(undefined),
+    }
+    const client = new AuthClient(GOTRUE_URL, HEADERS, { storage })
+    await client.whenReady()
+    await client.signInWithOAuth({ provider: "google", options: { flowType: "pkce" } })
+
+    const fetch = mockFetch(TOKEN_RESPONSE)
+    vi.stubGlobal("fetch", fetch)
+
+    const { data, error } = await client.exchangeCodeForSession("auth-code-xyz")
+
+    expect(error).toBeNull()
+    expect(data.session?.accessToken).toBe("access-token-123")
+    expect(fetch).toHaveBeenCalledWith(
+      `${GOTRUE_URL}/token?grant_type=pkce`,
+      expect.objectContaining({ method: "POST" }),
+    )
+    const [, opts] = fetch.mock.calls[0] as [string, RequestInit]
+    const body = JSON.parse(opts.body as string) as Record<string, unknown>
+    expect(body["auth_code"]).toBe("auth-code-xyz")
+    expect(typeof body["code_verifier"]).toBe("string")
+    expect(storage.removeItem).toHaveBeenCalledWith("supatype.auth.session-code-verifier")
+  })
+
+  it("getSessionFromUrl exchanges PKCE code from query", async () => {
+    const storage = {
+      getItem: vi.fn().mockResolvedValue(null),
+      setItem: vi.fn().mockResolvedValue(undefined),
+      removeItem: vi.fn().mockResolvedValue(undefined),
+    }
+    const client = new AuthClient(GOTRUE_URL, HEADERS, { storage })
+    await client.whenReady()
+    await client.signInWithOAuth({ provider: "google", options: { flowType: "pkce" } })
+
+    vi.stubGlobal("fetch", mockFetch(TOKEN_RESPONSE))
+    const { data, error } = await client.getSessionFromUrl(
+      "myapp://auth/callback?code=returned-auth-code",
+    )
+
+    expect(error).toBeNull()
+    expect(data.session?.accessToken).toBe("access-token-123")
+  })
+
+  it("getSessionFromUrl sets session from implicit hash tokens", async () => {
+    const client = freshClient()
+    // Minimal JWT-ish payload with exp so setSession can decode (header.payload.sig)
+    const payload = Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 })).toString(
+      "base64url",
+    )
+    const accessToken = `eyJhbGciOiJub25lIn0.${payload}.sig`
+
+    vi.stubGlobal(
+      "fetch",
+      mockFetch({
+        ...RAW_USER,
+        id: "user-1",
+      }),
+    )
+
+    const { data, error } = await client.getSessionFromUrl(
+      `https://app.example/#access_token=${accessToken}&refresh_token=rt-1&token_type=bearer&expires_in=3600`,
+    )
+
+    expect(error).toBeNull()
+    expect(data.session?.accessToken).toBe(accessToken)
+    expect(data.session?.refreshToken).toBe("rt-1")
+    expect(data.user?.id).toBe("user-1")
+  })
+
+  it("getSessionFromUrl returns error from redirect query", async () => {
+    const { data, error } = await freshClient().getSessionFromUrl(
+      "myapp://auth/callback?error=access_denied&error_description=User+denied",
+    )
+    expect(data.session).toBeNull()
+    expect(error?.message).toBe("User denied")
+  })
+
+  it("exchangeCodeForSession errors when verifier is missing", async () => {
+    const { data, error } = await freshClient().exchangeCodeForSession("code")
+    expect(data.session).toBeNull()
+    expect(error?.message).toMatch(/code_verifier/)
+  })
+})
+
 describe("AuthClient stale persisted session", () => {
   let store: Map<string, string>
 
