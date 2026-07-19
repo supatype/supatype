@@ -22,6 +22,7 @@ export type {
   User,
   Session,
   AuthChangeEvent,
+  AuthFlowType,
   SupatypeError,
   QueryResult,
   RpcResult,
@@ -37,6 +38,11 @@ export type {
   SupatypeFunctions,
   AugmentedDatabase,
 } from "./types.js"
+export {
+  generateCodeVerifier,
+  createCodeChallengeS256,
+  PKCE_METHOD_S256,
+} from "./pkce.js"
 export type { QueryCacheOptions, CacheStatus } from "./query-cache.js"
 export { AuthClient } from "./auth.js"
 export { QueryBuilder, MutationBuilder, type HeadersProvider } from "./query.js"
