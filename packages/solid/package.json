@@ -1,6 +1,6 @@
 {
   "name": "@supatype/solid",
-  "version": "0.1.0",
+  "version": "0.1.5",
   "description": "Solid.js primitives for Supatype — createQuery, createMutation, createAuth, createSubscription",
   "type": "module",
   "main": "./dist/index.js",
