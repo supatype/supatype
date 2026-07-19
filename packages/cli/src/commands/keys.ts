@@ -70,6 +70,12 @@ export function generateAndWriteKeys(
     let content = readFileSync(envPath, "utf8")
     content = upsertEnvVar(content, "ANON_KEY", anonKey)
     content = upsertEnvVar(content, "SERVICE_ROLE_KEY", serviceKey)
+    content = upsertEnvVar(content, "VITE_SUPATYPE_ANON_KEY", anonKey)
+    content = upsertEnvVar(content, "PUBLIC_SUPATYPE_ANON_KEY", anonKey)
+    const apiUrl = readEnvVar(content, "PUBLIC_SUPATYPE_URL") ?? readEnvVar(content, "API_EXTERNAL_URL")
+    if (apiUrl) {
+      content = upsertEnvVar(content, "VITE_SUPATYPE_URL", apiUrl)
+    }
     writeFileSync(envPath, content, "utf8")
   }
 
@@ -81,6 +87,14 @@ function upsertEnvVar(content: string, key: string, value: string): string {
   if (re.test(content)) return content.replace(re, `${key}=${value}`)
   const sep = content.endsWith("\n") || content.length === 0 ? "" : "\n"
   return `${content}${sep}${key}=${value}\n`
+}
+
+function readEnvVar(content: string, key: string): string | undefined {
+  const re = new RegExp(`^${key}=(.*)$`, "m")
+  const match = re.exec(content)
+  if (!match?.[1]) return undefined
+  const value = match[1].trim()
+  return value.length > 0 ? value : undefined
 }
 
 export function resolveSecret(dir: string = process.cwd()): string | undefined {

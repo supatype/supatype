@@ -23,7 +23,7 @@ export function requiredHostComponents(
     return ["engine"]
   }
 
-  const components: Component[] = ["engine", "server", "postgres"]
+  const components: Component[] = ["engine", "server", "postgres", "realtime"]
   const hasFunctions = functionsPathCandidatesFromProject(config, cwd).some((dir) =>
     existsSync(dir),
   )

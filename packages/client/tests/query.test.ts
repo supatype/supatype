@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { QueryBuilder, MutationBuilder } from "../src/query.js"
+import { QueryBuilder, MutationBuilder, defaultQueryCache } from "../src/query.js"
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -152,6 +152,41 @@ describe("QueryBuilder — URL construction", () => {
     expect(u).toContain("order=created_at.desc.nullslast")
     expect(u).toContain("limit=10")
   })
+
+  it(".or() appends PostgREST or filter", async () => {
+    const { url } = captureUrl()
+    await new QueryBuilder<Post>(BASE, PATH, HEADERS).or("status.eq.active,owner_id.eq.123")
+    expect(decodeURIComponent(url())).toContain("or=(status.eq.active,owner_id.eq.123)")
+  })
+
+  it("select with count sends Prefer: count=exact header", async () => {
+    const fetch = mockFetch([], { contentRange: "0-0/99" })
+    vi.stubGlobal("fetch", fetch)
+    await new QueryBuilder<Post>(BASE, PATH, HEADERS, "*", defaultQueryCache, undefined, {
+      count: "exact",
+    })
+    const [, opts] = fetch.mock.calls[0] as [string, RequestInit]
+    expect((opts.headers as Record<string, string>)["Prefer"]).toBe("count=exact")
+  })
+
+  it("select with head issues HEAD request and returns count only", async () => {
+    const fetch = mockFetch(null, { contentRange: "0-0/42" })
+    vi.stubGlobal("fetch", fetch)
+    const { data, error, count } = await new QueryBuilder<Post>(
+      BASE,
+      PATH,
+      HEADERS,
+      "*",
+      defaultQueryCache,
+      undefined,
+      { count: "exact", head: true },
+    )
+    const [, opts] = fetch.mock.calls[0] as [string, RequestInit]
+    expect(opts.method).toBe("HEAD")
+    expect(data).toBeNull()
+    expect(error).toBeNull()
+    expect(count).toBe(42)
+  })
 })
 
 describe("QueryBuilder — results", () => {
@@ -282,5 +317,24 @@ describe("MutationBuilder — update / delete", () => {
     await new MutationBuilder<Post>(BASE, PATH, HEADERS, "POST", { id: "1", title: "A", status: "draft" }, { upsert: true })
     const [, opts] = fetch.mock.calls[0] as [string, RequestInit]
     expect((opts.headers as Record<string, string>)["Prefer"]).toContain("merge-duplicates")
+  })
+
+  it("update().eq().select().maybeSingle() returns first row", async () => {
+    const fetch = mockFetch([{ id: "1", title: "Updated", status: "published" }])
+    vi.stubGlobal("fetch", fetch)
+    const { data, error } = await new MutationBuilder<Post>(
+      BASE,
+      PATH,
+      HEADERS,
+      "PATCH",
+      { title: "Updated" },
+    )
+      .eq("id", "1")
+      .select()
+      .maybeSingle()
+    expect(error).toBeNull()
+    expect(data).toEqual({ id: "1", title: "Updated", status: "published" })
+    const [url] = fetch.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain("select=*")
   })
 })

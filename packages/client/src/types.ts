@@ -225,6 +225,18 @@ export interface AnyDatabase {
 
 // ─── Client config ────────────────────────────────────────────────────────────
 
+/** Sync or async key-value store for auth session persistence (e.g. AsyncStorage in React Native). */
+export interface AuthStorage {
+  getItem(key: string): string | null | Promise<string | null>
+  setItem(key: string, value: string): void | Promise<void>
+  removeItem(key: string): void | Promise<void>
+}
+
+export interface SelectQueryOptions {
+  count?: "exact" | "planned" | "estimated" | undefined
+  head?: boolean | undefined
+}
+
 export interface SupatypeClientConfig {
   /** Base URL of the Supatype gateway (e.g. http://localhost:18473) */
   url: string
@@ -247,6 +259,11 @@ export interface SupatypeClientConfig {
      * Default: `"st"`.
      */
     cookiePrefix?: string | undefined
+    /**
+     * Custom session store. When set, replaces browser localStorage/cookie persistence.
+     * React Native: pass an AsyncStorage or expo-secure-store adapter.
+     */
+    storage?: AuthStorage | undefined
   } | undefined
   /**
    * Disable automatic retry for transient errors.

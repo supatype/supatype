@@ -59,7 +59,7 @@ export function registerUpdate(program: Command): void {
 
       const platform = currentPlatform()
 
-      const components: Component[] = ["engine", "server", "postgres", "deno"]
+      const components: Component[] = ["engine", "server", "postgres", "deno", "realtime"]
       const updates: Array<{ component: Component; from: string; to: string }> = []
 
       info("Fetching latest component versions from CDN...")
@@ -67,6 +67,14 @@ export function registerUpdate(program: Command): void {
 
       for (const component of components) {
         const latest = latestVersions[component]
+        if (!latest) {
+          if (component === "realtime") {
+            info(`Skipping ${component}: not published on CDN yet`)
+            continue
+          }
+          error(`No latest version for ${component} on CDN`)
+          continue
+        }
         const current = pinnedVersion(component, config)
         if (!current) {
           if (opts.check) {

@@ -41,6 +41,7 @@ export class RealtimeServer {
     this.replication = new ReplicationListener({
       databaseUrl: env.databaseUrl,
       slotName: env.slotName,
+      publicationName: env.publicationName,
       pollInterval: env.replicationPollInterval,
     })
     this.rlsFilter = new RlsFilter(env.databaseUrl)
@@ -49,7 +50,9 @@ export class RealtimeServer {
   async start(): Promise<void> {
     // HTTP server for health checks + WebSocket upgrade
     this.httpServer = createServer((req, res) => {
-      if (req.url === "/health") {
+      const path = req.url?.split("?")[0] ?? ""
+      // /health, /health/ready, /health/live — k8s probes + gateway readiness
+      if (path === "/health" || path === "/health/ready" || path === "/health/live") {
         res.writeHead(200, { "Content-Type": "application/json" })
         res.end(JSON.stringify({ status: "ok" }))
         return

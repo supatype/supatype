@@ -22,6 +22,7 @@ import {
   type ExtractedSchemaAstV2,
   type ExtractedStorageBucketAst,
   type FieldAstV2,
+  type KernelFieldFacts,
   type ParsedField,
 } from "./schema-ast-v2.js"
 
@@ -410,6 +411,7 @@ function parseFieldType(
     fieldDefault: undefined as string | number | boolean | null | undefined,
     localized: false,
     notLocalized: false,
+    checkConstraint: undefined as string | undefined,
   }
 
   const resolving = new Set<string>()
@@ -481,11 +483,46 @@ function parseFieldType(
         current = valueArg ?? current
         continue
       }
-      case "MaxLength":
-      case "MinLength":
-      case "Between":
+      case "MaxLength": {
+        const max = parseNumericTypeArg(current.typeArguments?.[1], sourceFile)
+        if (max !== undefined) {
+          flags.checkConstraint = mergeCheckConstraint(
+            flags.checkConstraint,
+            `char_length("{name}") <= ${max}`,
+          )
+        }
         current = current.typeArguments?.[0] ?? current
         continue
+      }
+      case "MinLength": {
+        const min = parseNumericTypeArg(current.typeArguments?.[1], sourceFile)
+        if (min !== undefined) {
+          flags.checkConstraint = mergeCheckConstraint(
+            flags.checkConstraint,
+            `char_length("{name}") >= ${min}`,
+          )
+        }
+        current = current.typeArguments?.[0] ?? current
+        continue
+      }
+      case "Between": {
+        const min = parseNumericTypeArg(current.typeArguments?.[1], sourceFile)
+        const max = parseNumericTypeArg(current.typeArguments?.[2], sourceFile)
+        if (min !== undefined) {
+          flags.checkConstraint = mergeCheckConstraint(
+            flags.checkConstraint,
+            `"{name}"::numeric >= ${min}`,
+          )
+        }
+        if (max !== undefined) {
+          flags.checkConstraint = mergeCheckConstraint(
+            flags.checkConstraint,
+            `"{name}"::numeric <= ${max}`,
+          )
+        }
+        current = current.typeArguments?.[0] ?? current
+        continue
+      }
       case "Localized":
         flags.localized = true
         current = current.typeArguments?.[0] ?? current
@@ -494,36 +531,68 @@ function parseFieldType(
         flags.notLocalized = true
         current = current.typeArguments?.[0] ?? current
         continue
-      case "RelatedTo":
+      case "RelatedTo": {
         flags.relationCardinality = "one"
         flags.relationTarget = relationTargetFromTypeArg(current.typeArguments?.[0], sourceFile)
+        const relOpts = parseRelationOptions(current.typeArguments?.[1], sourceFile)
         // `target` must match `ModelAst.name` to satisfy validator resolution.
         // FK column follows the field name (two relations to the same model need distinct columns).
         return emitField({
           kind: "relation",
-          kernel: { cardinality: "belongsTo", target: flags.relationTarget! },
+          kernel: {
+            cardinality: "belongsTo",
+            target: flags.relationTarget!,
+            ...relationOptionsKernel(relOpts),
+          },
           db: { foreignKey: relationForeignKeyFromField(fieldName) },
           platform: flags.editorReadOnly ? { readOnly: true } : {},
         })
-      case "HasOne":
+      }
+      case "HasOne": {
         flags.relationCardinality = "one"
-        flags.relationTarget = current.typeArguments?.[0]?.getText(sourceFile).replace(/\W/g, "") ?? "unknown"
+        flags.relationTarget = relationTargetFromTypeArg(current.typeArguments?.[0], sourceFile)
+        const relOpts = parseRelationOptions(current.typeArguments?.[1], sourceFile)
         return emitField({
           kind: "relation",
-          kernel: { cardinality: "hasOne", target: flags.relationTarget },
+          kernel: {
+            cardinality: "hasOne",
+            target: flags.relationTarget,
+            ...relationOptionsKernel(relOpts),
+          },
           db: {},
           platform: flags.editorReadOnly ? { readOnly: true } : {},
         })
-      case "HasMany":
-      case "ManyToMany":
+      }
+      case "HasMany": {
         flags.relationCardinality = "many"
-        flags.relationTarget = current.typeArguments?.[0]?.getText(sourceFile).replace(/\W/g, "") ?? "unknown"
+        flags.relationTarget = relationTargetFromTypeArg(current.typeArguments?.[0], sourceFile)
+        const relOpts = parseRelationOptions(current.typeArguments?.[1], sourceFile)
         return emitField({
           kind: "relation",
-          kernel: { cardinality: "hasMany", target: flags.relationTarget },
+          kernel: {
+            cardinality: "hasMany",
+            target: flags.relationTarget,
+            ...relationOptionsKernel(relOpts),
+          },
           db: {},
           platform: flags.editorReadOnly ? { readOnly: true } : {},
         })
+      }
+      case "ManyToMany": {
+        flags.relationCardinality = "many"
+        flags.relationTarget = relationTargetFromTypeArg(current.typeArguments?.[0], sourceFile)
+        const relOpts = parseRelationOptions(current.typeArguments?.[1], sourceFile)
+        return emitField({
+          kind: "relation",
+          kernel: {
+            cardinality: "manyToMany",
+            target: flags.relationTarget,
+            ...relationOptionsKernel(relOpts),
+          },
+          db: {},
+          platform: flags.editorReadOnly ? { readOnly: true } : {},
+        })
+      }
       default: {
         const resolved = tryResolveTypeReference(current, sourceFile, resolveCtx, { fieldName, resolving })
         if (resolved) {
@@ -640,6 +709,13 @@ function parseFieldType(
       kernel.template = flags.computedFromTemplate
     }
     parsed = { ...parsed, kernel }
+  }
+
+  if (flags.checkConstraint !== undefined) {
+    parsed = {
+      ...parsed,
+      kernel: { ...parsed.kernel, check: flags.checkConstraint },
+    }
   }
 
   return emitField(finalizeParsedField(parsed, flags, context))
@@ -1534,7 +1610,7 @@ function parseModelIndexes(
   const indexes: unknown[] = []
   for (const element of indexesProp.type.elements) {
     if (!ts.isTypeLiteralNode(element)) continue
-    const indexDef: Record<string, unknown> = { using: "btree" }
+    const indexDef: Record<string, unknown> = { using: "btree", unique: false }
     for (const member of element.members) {
       if (!ts.isPropertySignature(member) || !member.type) continue
       const key = getPropertyName(member.name)
@@ -1626,6 +1702,73 @@ function parseAccessRule(typeNode: ts.TypeNode, sourceFile: ts.SourceFile): Reco
     default:
       return { type: "private" }
   }
+}
+
+interface ParsedRelationOptions {
+  required?: boolean
+  onDelete?: string
+  onUpdate?: string
+  through?: string
+}
+
+function parseRelationOptions(
+  optsArg: ts.TypeNode | undefined,
+  sourceFile: ts.SourceFile,
+): ParsedRelationOptions {
+  const out: ParsedRelationOptions = {}
+  if (!optsArg || !ts.isTypeLiteralNode(optsArg)) return out
+
+  for (const member of optsArg.members) {
+    if (!ts.isPropertySignature(member) || !member.name || !member.type) continue
+    const key = getPropertyName(member.name)
+    if (!key) continue
+
+    if (key === "required" && isBooleanLiteralType(member.type, true)) {
+      out.required = true
+      continue
+    }
+
+    if (
+      (key === "onDelete" || key === "onUpdate" || key === "through") &&
+      ts.isLiteralTypeNode(member.type) &&
+      ts.isStringLiteral(member.type.literal)
+    ) {
+      out[key] = member.type.literal.text
+    }
+  }
+
+  return out
+}
+
+function relationOptionsKernel(
+  opts: ParsedRelationOptions,
+): Pick<KernelFieldFacts, "required" | "onDelete" | "onUpdate" | "through"> {
+  return {
+    ...(opts.required === true && { required: true }),
+    ...(opts.onDelete !== undefined && { onDelete: opts.onDelete }),
+    ...(opts.onUpdate !== undefined && { onUpdate: opts.onUpdate }),
+    ...(opts.through !== undefined && { through: opts.through }),
+  }
+}
+
+function parseNumericTypeArg(typeArg: ts.TypeNode | undefined, sourceFile: ts.SourceFile): number | undefined {
+  if (!typeArg) return undefined
+  if (ts.isLiteralTypeNode(typeArg) && ts.isNumericLiteral(typeArg.literal)) {
+    const value = Number(typeArg.literal.text)
+    return Number.isFinite(value) ? value : undefined
+  }
+  if (ts.isLiteralTypeNode(typeArg) && ts.isStringLiteral(typeArg.literal)) {
+    const value = Number(typeArg.literal.text)
+    return Number.isFinite(value) ? value : undefined
+  }
+  const raw = typeArg.getText(sourceFile).trim()
+  const value = Number(raw)
+  return Number.isFinite(value) ? value : undefined
+}
+
+function mergeCheckConstraint(existing: string | undefined, next: string): string {
+  if (!existing) return next
+  return `(${existing}) AND (${next})`
 }
 
 function relationTargetFromTypeArg(typeArg: ts.TypeNode | undefined, sourceFile: ts.SourceFile): string {

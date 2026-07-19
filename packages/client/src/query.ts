@@ -1,6 +1,6 @@
 import type { QueryCache, QueryCacheOptions, CacheStatus } from "./query-cache.js"
 import { buildCacheKey, defaultQueryCache } from "./query-cache.js"
-import type { QueryResult, SupatypeError } from "./types.js"
+import type { QueryResult, SelectQueryOptions, SupatypeError } from "./types.js"
 
 const DEBUG_AUTH =
   (typeof process !== "undefined" && process.env["NEXT_PUBLIC_SUPATYPE_DEBUG_AUTH"] === "1") ||
@@ -72,6 +72,8 @@ export class QueryBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
   private readonly params: URLSearchParams
   private readonly queryCache: QueryCache
   private cacheOptions: QueryCacheOptions | undefined
+  private readonly countMode: SelectQueryOptions["count"]
+  private readonly head: boolean
 
   constructor(
     baseUrl: string,
@@ -80,6 +82,7 @@ export class QueryBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
     columns?: string | undefined,
     queryCache: QueryCache = defaultQueryCache,
     onUnauthorized?: (() => Promise<void>) | undefined,
+    selectOptions?: SelectQueryOptions | undefined,
   ) {
     this.baseUrl = baseUrl
     this.path = path
@@ -88,8 +91,13 @@ export class QueryBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
     this.extraHeaders = {}
     this.params = new URLSearchParams()
     this.queryCache = queryCache
+    this.countMode = selectOptions?.count
+    this.head = selectOptions?.head === true
     if (columns !== undefined) {
       this.params.set("select", columns)
+    }
+    if (this.countMode !== undefined) {
+      this.extraHeaders["Prefer"] = `count=${this.countMode}`
     }
   }
 
@@ -169,6 +177,12 @@ export class QueryBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
     return this
   }
 
+  /** PostgREST OR filter — pass conditions in PostgREST syntax, e.g. `"status.eq.active,owner_id.eq.123"`. */
+  or(filters: string): this {
+    this.params.append("or", `(${filters})`)
+    return this
+  }
+
   order(
     column: string,
     opts?: { ascending?: boolean | undefined; nullsFirst?: boolean | undefined } | undefined,
@@ -239,15 +253,28 @@ export class QueryBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
     }
   }
 
+  private mergePreferHeader(
+    headers: Record<string, string>,
+    extra: Record<string, string>,
+  ): Record<string, string> {
+    const merged = { ...headers, ...extra }
+    const preferParts = [headers["Prefer"], extra["Prefer"]].filter(Boolean)
+    if (preferParts.length > 0) {
+      merged["Prefer"] = preferParts.join(",")
+    }
+    return merged
+  }
+
   private async _fetch(fetchHeaders: Record<string, string>): Promise<QueryResult<TRow[]>> {
-    const mergedExtra = { ...this.extraHeaders, ...fetchHeaders }
+    const mergedExtra = this.mergePreferHeader(this.extraHeaders, fetchHeaders)
     const url = this.buildRequestUrl()
+    const method = this.head ? "HEAD" : "GET"
     const resolveRequestHeaders = async (): Promise<Record<string, string>> => {
       const authHeaders = await this.getHeaders()
       return this.applyServerCacheHeader({ ...authHeaders, ...mergedExtra })
     }
 
-    if (this.cacheOptions) {
+    if (this.cacheOptions && !this.head) {
       const requestHeaders = await resolveRequestHeaders()
       const cacheKey = buildCacheKey("GET", url, requestHeaders, {
         partition: this.cacheOptions.key,
@@ -263,7 +290,7 @@ export class QueryBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
     try {
       res = await fetchWithOptional401Retry(
         url,
-        {},
+        { method },
         resolveRequestHeaders,
         this.onUnauthorized,
       )
@@ -311,6 +338,13 @@ export class QueryBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
           },
           count: null,
         },
+        cacheStatus,
+      )
+    }
+
+    if (method === "HEAD" || res.status === 204) {
+      return withCacheMeta<TRow[]>(
+        { data: null, error: null, count },
         cacheStatus,
       )
     }
@@ -387,6 +421,36 @@ export class MutationBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
     return this
   }
 
+  /** Limit returned columns on the mutation response (requires `return=representation`). */
+  select(columns?: string): this {
+    this.params.set("select", columns ?? "*")
+    return this
+  }
+
+  async single(): Promise<QueryResult<TRow>> {
+    const { data, error, count, meta } = await this._execute({
+      Accept: "application/vnd.pgrst.object+json",
+    })
+    if (error !== null) return { data: null, error, count: null, ...(meta && { meta }) }
+    const row = data !== null && data.length > 0 ? (data[0] as TRow) : null
+    if (row === null) {
+      return {
+        data: null,
+        error: { message: "JSON object requested, multiple (or no) rows returned" },
+        count: null,
+        ...(meta && { meta }),
+      }
+    }
+    return { data: row, error: null, count: 1, ...(meta && { meta }) }
+  }
+
+  async maybeSingle(): Promise<QueryResult<TRow | null>> {
+    const { data, error, count, meta } = await this._execute({})
+    if (error !== null) return { data: null, error, count: null, ...(meta && { meta }) }
+    const row = data !== null && data.length > 0 ? (data[0] ?? null) : null
+    return { data: row, error: null, count, ...(meta && { meta }) }
+  }
+
   then<R1 = QueryResult<TRow[]>, R2 = never>(
     onfulfilled?: ((value: QueryResult<TRow[]>) => R1 | PromiseLike<R1>) | null | undefined,
     onrejected?: ((reason: unknown) => R2 | PromiseLike<R2>) | null | undefined,
@@ -394,12 +458,13 @@ export class MutationBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
     return this._execute().then(onfulfilled, onrejected)
   }
 
-  private async _execute(): Promise<QueryResult<TRow[]>> {
+  private async _execute(fetchHeaders: Record<string, string> = {}): Promise<QueryResult<TRow[]>> {
     const qs = this.params.toString()
     const url = `${this.baseUrl}${this.path}${qs ? `?${qs}` : ""}`
     const resolveRequestHeaders = async (): Promise<Record<string, string>> => ({
       ...(await this.getHeaders()),
       ...this.extraHeaders,
+      ...fetchHeaders,
     })
     const init: RequestInit = {
       method: this.method,

@@ -4,6 +4,7 @@ export interface RealtimeEnv {
   databaseUrl: string
   jwtSecret: string
   slotName: string
+  publicationName: string
   replicationPollInterval: number
   secureChannels: boolean
 
@@ -37,7 +38,8 @@ export function loadEnv(): RealtimeEnv {
     port: Number(process.env["PORT"] ?? "4000"),
     databaseUrl,
     jwtSecret,
-    slotName: process.env["SLOT_NAME"] ?? "realtime_slot",
+    slotName: process.env["SLOT_NAME"] ?? "supatype_realtime",
+    publicationName: process.env["PUBLICATION_NAME"] ?? "supatype_realtime_pub",
     replicationPollInterval: Number(process.env["REPLICATION_POLL_INTERVAL"] ?? "100"),
     secureChannels: process.env["SECURE_CHANNELS"] !== "false",
 

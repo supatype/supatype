@@ -33,6 +33,7 @@ describe("requiredHostComponents", () => {
       "engine",
       "server",
       "postgres",
+      "realtime",
     ])
     rmSync(dir, { recursive: true, force: true })
   })
@@ -44,6 +45,7 @@ describe("requiredHostComponents", () => {
       "engine",
       "server",
       "postgres",
+      "realtime",
       "deno",
     ])
     rmSync(dir, { recursive: true, force: true })

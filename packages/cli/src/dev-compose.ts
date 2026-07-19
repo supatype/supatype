@@ -8,6 +8,7 @@ import { dirname, join, resolve } from "node:path"
 import { spawnSync } from "node:child_process"
 import { startProxyDevApp, resolveProxyDevScript } from "./app/proxy-dev-app.js"
 import { loadSchemaAst } from "./config.js"
+import { withComposeSchemaPushLock } from "./schema-push-lock.js"
 import {
   COMPOSE_DEV_KONG_PORT,
   connectionString,
@@ -236,12 +237,69 @@ async function waitComposeHealthy(paths: SelfHostComposePaths, cwd: string, maxM
   throw new Error("Compose db service did not become healthy in time")
 }
 
+/** True when the named compose service has a running container. */
+function composeServiceIsRunning(
+  paths: SelfHostComposePaths,
+  cwd: string,
+  composeProject: string,
+  service: string,
+): boolean {
+  const envFile = join(cwd, ".env")
+  const args = ["compose", "-p", composeProject, "--project-directory", cwd, "-f", paths.composePath]
+  if (existsSync(envFile)) args.push("--env-file", envFile)
+  args.push("ps", "-q", "--status", "running", service)
+  const result = spawnSync("docker", args, { cwd, encoding: "utf8" })
+  return result.status === 0 && typeof result.stdout === "string" && result.stdout.trim() !== ""
+}
+
+/**
+ * Capture Postgres container logs before compose down destroys them.
+ * Writes `.supatype/ci-logs/db-*.log` and prints a tail for CI job logs.
+ */
+function dumpComposeDbLogs(
+  paths: SelfHostComposePaths,
+  cwd: string,
+  composeProject: string,
+  reason: string,
+): void {
+  const logDir = join(cwd, ".supatype", "ci-logs")
+  mkdirSync(logDir, { recursive: true })
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-")
+  const logPath = join(logDir, `db-${stamp}.log`)
+
+  const envFile = join(cwd, ".env")
+  const args = ["compose", "-p", composeProject, "--project-directory", cwd, "-f", paths.composePath]
+  if (existsSync(envFile)) args.push("--env-file", envFile)
+  args.push("logs", "--no-color", "--timestamps", "--tail", "800", "db")
+
+  const result = spawnSync("docker", args, {
+    cwd,
+    encoding: "utf8",
+    maxBuffer: 10 * 1024 * 1024,
+  })
+  const body = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim()
+  const content = body || `(empty — docker compose logs db exit ${result.status ?? "?"})\n`
+  try {
+    writeFileSync(logPath, content)
+  } catch {
+    /* best-effort */
+  }
+
+  const lines = content.split("\n")
+  const tail = lines.slice(-200).join("\n")
+  console.error(`[supatype] Postgres logs after ${reason} (saved ${logPath}):`)
+  console.error(tail)
+}
+
 async function waitKongReady(kongPort: number, maxSec: number): Promise<void> {
   const base = `http://localhost:${kongPort}`
   for (let i = 0; i < maxSec; i++) {
     try {
-      const res = await fetch(`${base}/auth/v1/health`)
-      if (res.ok) return
+      const [auth, realtime] = await Promise.all([
+        fetch(`${base}/auth/v1/health`),
+        fetch(`${base}/realtime/v1/health`),
+      ])
+      if (auth.ok && realtime.ok) return
     } catch {
       /* retry */
     }
@@ -405,12 +463,20 @@ async function runComposeSchemaPush(
 
   console.log("[supatype] Applying schema via compose schema-engine...")
   const sources = writeSchemaSourcePushArtifacts(cwd)
-  let push = await runComposeEnginePush(paths, cwd, composeProject, config, sources)
-  // Windows Docker bind mounts can lag briefly after the host write.
-  if (push.status !== 0) {
-    await new Promise((r) => setTimeout(r, 250))
-    push = await runComposeEnginePush(paths, cwd, composeProject, config, sources)
+  const runPush = async () => {
+    let result = await runComposeEnginePush(paths, cwd, composeProject, config, sources)
+    // Windows Docker bind mounts can lag briefly after the host write.
+    if (result.status !== 0) {
+      await new Promise((r) => setTimeout(r, 250))
+      result = await runComposeEnginePush(paths, cwd, composeProject, config, sources)
+    }
+    return result
   }
+  // B: only hold the advisory lock when realtime is already decoding — first-boot
+  // push (db only) must not take the lock; that path crashed under lock+DDL in CI.
+  const push = composeServiceIsRunning(paths, cwd, composeProject, "realtime")
+    ? await withComposeSchemaPushLock(paths, cwd, composeProject, runPush)
+    : await runPush()
   if (push.status !== 0) {
     _lastFailedAst = astJson
     const detail = filterComposeNoise(push.output) || push.output
@@ -750,6 +816,62 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   await recoverStaleDevSession(cwd)
   await handleComposeProjectRename(cwd, config.project.name, paths)
 
+  console.log("[supatype] Bringing up Postgres (compose db)...")
+  const upDbStatus = runDockerCompose(paths.composePath, ["up", "-d", "db"], cwd, project, {
+    quiet: true,
+    brand: devBrand,
+  })
+  if (upDbStatus !== 0) {
+    endDevSession()
+    exitComposeFailed(upDbStatus, "Could not start Postgres (compose db service).", devBrand)
+  }
+
+  console.log("[supatype] Waiting for Postgres (compose)...")
+  await waitComposeHealthy(paths, cwd, 180_000, project)
+  // Settle before DDL — pg_isready can pass slightly before the instance is stable.
+  await new Promise((r) => setTimeout(r, 3000))
+
+  // A: apply schema before realtime (and the rest of the stack) starts decoding WAL.
+  const schemaPath = schemaPathFromProject(config, cwd)
+  {
+    const maxAttempts = 3
+    let lastErr: unknown
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await runComposeSchemaPush(cwd, config, paths, schemaPath, project)
+        lastErr = undefined
+        break
+      } catch (e: unknown) {
+        lastErr = e
+        console.error(
+          `[supatype] Initial schema push failed (attempt ${attempt}/${maxAttempts}):`,
+          (e as Error).message,
+        )
+        dumpComposeDbLogs(paths, cwd, project, `schema push attempt ${attempt}/${maxAttempts}`)
+        if (attempt < maxAttempts) {
+          console.log("[supatype] Resetting Postgres after failed schema push...")
+          runDockerCompose(paths.composePath, ["down", "-v"], cwd, project, {
+            quiet: true,
+            brand: devBrand,
+          })
+          runDockerCompose(paths.composePath, ["up", "-d", "db"], cwd, project, {
+            quiet: true,
+            brand: devBrand,
+          })
+          await waitComposeHealthy(paths, cwd, 120_000, project)
+          await new Promise((r) => setTimeout(r, 3000 * attempt))
+        }
+      }
+    }
+    if (lastErr) {
+      dumpComposeDbLogs(paths, cwd, project, "initial schema push exhausted")
+      endDevSession()
+      throw new Error(
+        `Initial schema push failed after ${maxAttempts} attempts: ${(lastErr as Error).message}`,
+      )
+    }
+  }
+
   console.log("[supatype] Bringing up Docker Compose services...")
   const upStatus = runDockerCompose(paths.composePath, ["up", "-d"], cwd, project, {
     quiet: true,
@@ -759,14 +881,6 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
     endDevSession()
     exitComposeFailed(upStatus, "Could not start the local Compose stack.", devBrand)
   }
-
-  console.log("[supatype] Waiting for Postgres (compose)...")
-  await waitComposeHealthy(paths, cwd, 180_000, project)
-
-  const schemaPath = schemaPathFromProject(config, cwd)
-  await runComposeSchemaPush(cwd, config, paths, schemaPath, project).catch((e: unknown) =>
-    console.error("[supatype] Initial schema push failed:", (e as Error).message),
-  )
 
   if (localServerImage !== undefined) {
     console.log("[supatype] Recreating server with local image...")
@@ -780,6 +894,22 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
     if (recreateStatus !== 0) {
       endDevSession()
       exitComposeFailed(recreateStatus, "Could not recreate the server container with the local image.", devBrand)
+    }
+  }
+
+  const pinnedRealtimeImage = readEnvValue(cwd, "SUPATYPE_REALTIME_IMAGE", "").trim()
+  if (pinnedRealtimeImage !== "") {
+    console.log("[supatype] Recreating realtime with pinned image...")
+    const rtStatus = runDockerCompose(
+      paths.composePath,
+      ["up", "-d", "--force-recreate", "--no-deps", "realtime"],
+      cwd,
+      project,
+      { quiet: true, brand: devBrand },
+    )
+    if (rtStatus !== 0) {
+      endDevSession()
+      exitComposeFailed(rtStatus, "Could not recreate the realtime container.", devBrand)
     }
   }
 

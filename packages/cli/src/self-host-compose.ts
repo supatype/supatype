@@ -383,6 +383,20 @@ ${dbPorts}    volumes:
       db:
         condition: service_healthy
 
+  realtime:
+    image: \${SUPATYPE_REALTIME_IMAGE:-supatype/realtime:latest}
+    expose:
+      - "4000"
+    environment:
+      PORT: "4000"
+      DATABASE_URL: "postgresql://\${POSTGRES_USER:-supatype_admin}:\${POSTGRES_PASSWORD:-postgres}@db:5432/\${POSTGRES_DB:-supatype}"
+      JWT_SECRET: \${JWT_SECRET:-super-secret-jwt-token-change-in-production}
+      SLOT_NAME: supatype_realtime
+      PUBLICATION_NAME: supatype_realtime_pub
+    depends_on:
+      db:
+        condition: service_healthy
+
   control-plane:
     image: \${SUPATYPE_CONTROL_PLANE_IMAGE:-supatype/control-plane:latest}
     expose:
@@ -423,6 +437,7 @@ ${serverPorts}    volumes:
       SUPATYPE_SQL_DATABASE_URL: "postgresql://\${POSTGRES_USER:-supatype_admin}:\${POSTGRES_PASSWORD:-postgres}@db:5432/\${POSTGRES_DB:-supatype}"
       SUPATYPE_DENO_FUNCTIONS_DIR: /project/functions
       SUPATYPE_FUNCTIONS_WORKER_URL: http://functions-worker:8001
+      SUPATYPE_REALTIME_URL: http://realtime:4000
       SUPATYPE_CONTROL_PLANE_URL: http://control-plane:8080
       SUPATYPE_VALKEY_ADDR: valkey:6379
 ${appEnv}
@@ -451,6 +466,8 @@ ${devLocal ? "      STUDIO_OPEN_DEV: \"1\"\n" : ""}
       storage:
         condition: service_started
       functions-worker:
+        condition: service_started
+      realtime:
         condition: service_started
       control-plane:
         condition: service_started
@@ -502,6 +519,7 @@ function ensureComposeManifest(cwd: string): void {
     postgrest_url: "http://postgrest:3000",
     storage_url: "http://storage:5000",
     realtime_enabled: true,
+    realtime_url: "http://realtime:4000",
     functions_enabled: false,
   }
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8")

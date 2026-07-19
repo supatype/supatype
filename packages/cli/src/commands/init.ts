@@ -1201,7 +1201,9 @@ SITE_URL=http://localhost:3000`)
       `# Local API gateway (Kong) — unique per project so multiple stacks can run concurrently
 SUPATYPE_KONG_PORT=${opts.kongPort}
 PUBLIC_SUPATYPE_URL=${apiUrl}
-API_EXTERNAL_URL=${apiUrl}`,
+API_EXTERNAL_URL=${apiUrl}
+VITE_SUPATYPE_URL=${apiUrl}
+VITE_SUPATYPE_ANON_KEY=`,
     )
   }
 

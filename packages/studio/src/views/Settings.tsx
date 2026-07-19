@@ -99,13 +99,49 @@ function GeneralSettings(): React.ReactElement {
 // ─── API Keys Tab ─────────────────────────────────────────────────────────────
 
 function ApiKeysSettings(): React.ReactElement {
-  const [keys, setKeys] = useState<ApiKey[]>([])
   const [showKeys, setShowKeys] = useState(false)
-  const [showNewKeyForm, setShowNewKeyForm] = useState(false)
-  const [newKeyName, setNewKeyName] = useState("")
-  const [newKeyRole, setNewKeyRole] = useState<"anon" | "service_role">("anon")
   const [copied, setCopied] = useState<string | null>(null)
-  const [revokeConfirm, setRevokeConfirm] = useState<string | null>(null)
+
+  const runtime =
+    (typeof window !== "undefined"
+      ? (window as unknown as { __SUPATYPE_CLOUD__?: { anonKey?: string; serviceRoleKey?: string } }).__SUPATYPE_CLOUD__
+      : undefined) ?? {}
+
+  const anonKey =
+    runtime.anonKey ??
+    (typeof import.meta !== "undefined"
+      ? (import.meta as ImportMeta & { env?: Record<string, string> }).env?.["VITE_SUPATYPE_ANON_KEY"]
+      : undefined) ??
+    ""
+  const serviceRoleKey =
+    runtime.serviceRoleKey ??
+    (typeof import.meta !== "undefined"
+      ? (import.meta as ImportMeta & { env?: Record<string, string> }).env?.["VITE_SUPATYPE_SERVICE_ROLE_KEY"]
+      : undefined) ??
+    ""
+
+  const keys: ApiKey[] = [
+    ...(anonKey
+      ? [{
+          id: "anon",
+          name: "anon",
+          role: "anon" as const,
+          key: anonKey,
+          created_at: new Date(0).toISOString(),
+          last_used: null,
+        }]
+      : []),
+    ...(serviceRoleKey
+      ? [{
+          id: "service_role",
+          name: "service_role",
+          role: "service_role" as const,
+          key: serviceRoleKey,
+          created_at: new Date(0).toISOString(),
+          last_used: null,
+        }]
+      : []),
+  ]
 
   const copyToClipboard = (text: string, keyId: string) => {
     void navigator.clipboard.writeText(text)
@@ -113,67 +149,22 @@ function ApiKeysSettings(): React.ReactElement {
     setTimeout(() => setCopied(null), 2000)
   }
 
-  const handleCreateKey = () => {
-    if (!newKeyName.trim()) return
-    const newKey: ApiKey = {
-      id: `k-${Date.now()}`,
-      name: newKeyName.trim(),
-      role: newKeyRole,
-      key: `eyJ...new-key-${Date.now()}`,
-      created_at: new Date().toISOString(),
-      last_used: null,
-    }
-    setKeys((prev) => [...prev, newKey])
-    setShowNewKeyForm(false)
-    setNewKeyName("")
-  }
-
-  const handleRevokeKey = (keyId: string) => {
-    setKeys((prev) => prev.filter((k) => k.id !== keyId))
-    setRevokeConfirm(null)
-  }
-
   return (
     <Card className="p-4">
       <div className="flex justify-between items-center mb-4">
         <h3 className="m-0">API Keys</h3>
-        <div className="flex gap-2">
-          <Button size="sm" onClick={() => setShowKeys(!showKeys)}>
-            {showKeys ? "Hide Keys" : "Show Keys"}
-          </Button>
-          <Button size="sm" variant="primary" onClick={() => setShowNewKeyForm(true)}>
-            Generate New Key
-          </Button>
-        </div>
+        <Button size="sm" onClick={() => setShowKeys(!showKeys)}>
+          {showKeys ? "Hide Keys" : "Show Keys"}
+        </Button>
       </div>
-
-      {/* New key form */}
-      {showNewKeyForm ? (
-        <Card className="p-3 mb-4 bg-accent/30">
-          <div className="flex gap-2 items-end">
-            <div className="flex-1">
-              <label className="block text-[0.8rem] text-muted-foreground mb-1">Key Name</label>
-              <Input value={newKeyName} onChange={(e) => setNewKeyName(e.target.value)} placeholder="My API Key" />
-            </div>
-            <div className="w-[160px]">
-              <label className="block text-[0.8rem] text-muted-foreground mb-1">Role</label>
-              <Select className="w-full" value={newKeyRole} onChange={(e) => setNewKeyRole(e.target.value as "anon" | "service_role")}>
-                <option value="anon">anon (public)</option>
-                <option value="service_role">service_role (secret)</option>
-              </Select>
-            </div>
-            <Button variant="primary" onClick={handleCreateKey}>Generate</Button>
-            <Button onClick={() => setShowNewKeyForm(false)}>Cancel</Button>
-          </div>
-        </Card>
-      ) : null}
-
-      {/* Key list */}
+      <p className="text-xs text-muted-foreground mb-4">
+        Local/self-host keys come from Studio runtime config. Cloud projects manage rotatable keys under Cloud → Project Settings.
+      </p>
       <div className="flex flex-col gap-4">
         {keys.length === 0 ? (
           <EmptyState
-            title="API keys are managed via the cloud dashboard"
-            description="Live API key management will be available in a future release."
+            title="No API keys in Studio runtime"
+            description="Set VITE_SUPATYPE_ANON_KEY / service role in Studio config, or open Cloud project settings."
           />
         ) : keys.map((k) => (
           <div key={k.id} className="border border-border rounded-md p-4">
@@ -187,10 +178,6 @@ function ApiKeysSettings(): React.ReactElement {
                   {k.role}
                 </Badge>
               </div>
-              <div className="text-xs text-muted-foreground">
-                Created: {new Date(k.created_at).toLocaleDateString()}
-                {k.last_used ? ` | Last used: ${new Date(k.last_used).toLocaleDateString()}` : ""}
-              </div>
             </div>
             <div className="flex gap-2">
               <Input
@@ -201,14 +188,6 @@ function ApiKeysSettings(): React.ReactElement {
               <Button size="sm" onClick={() => copyToClipboard(k.key, k.id)}>
                 {copied === k.id ? "Copied!" : "Copy"}
               </Button>
-              {revokeConfirm === k.id ? (
-                <div className="flex gap-1 items-center">
-                  <Button size="sm" variant="destructive" onClick={() => handleRevokeKey(k.id)}>Confirm</Button>
-                  <Button size="sm" onClick={() => setRevokeConfirm(null)}>Cancel</Button>
-                </div>
-              ) : (
-                <Button size="sm" variant="destructive" onClick={() => setRevokeConfirm(k.id)}>Revoke</Button>
-              )}
             </div>
             {k.role === "service_role" ? (
               <p className="text-xs text-red-400 mt-1">

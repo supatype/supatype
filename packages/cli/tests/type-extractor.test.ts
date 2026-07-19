@@ -635,6 +635,7 @@ export type Message = Model<{
       kind: "relation",
       cardinality: "belongsTo",
       target: "Profile",
+      required: true,
       annotations: { db: { foreignKey: "created_by_id" } },
     })
     expect(room?.fields["created_at"]).toMatchObject({ kind: "datetime" })
@@ -647,12 +648,63 @@ export type Message = Model<{
       kind: "relation",
       cardinality: "belongsTo",
       target: "Room",
+      required: true,
+      onDelete: "cascade",
       annotations: { db: { foreignKey: "room_id" } },
     })
     expect(message?.fields["author"]).toMatchObject({
       kind: "relation",
       cardinality: "belongsTo",
       target: "Profile",
+      required: true,
+    })
+    expect(message?.fields["body"]).toMatchObject({
+      kind: "text",
+      check: 'char_length("{name}") <= 2000',
+    })
+    const messageIndexes = message?.annotations.db.indexes as Array<Record<string, unknown>>
+    expect(messageIndexes).toHaveLength(1)
+    expect(messageIndexes?.[0]).toMatchObject({
+      using: "btree",
+      unique: false,
+      fields: ["room_id", "created_at"],
+    })
+  })
+
+  it("extracts ManyToMany relations with through table option", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-many-to-many-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, UUID, ManyToMany, Public, LoggedIn } from "@supatype/types"
+
+export type Course = Model<{
+  id: UUID
+  title: string
+}, {
+  access: { read: Public; create: LoggedIn }
+}>
+
+export type Student = Model<{
+  id: UUID
+  name: string
+  courses: ManyToMany<Course, { through: "enrollments" }>
+}, {
+  access: { read: Public; create: LoggedIn }
+}>
+`,
+      "utf8",
+    )
+
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const student = ast?.models.find((m) => m.name === "Student")
+    expect(student?.fields["courses"]).toMatchObject({
+      kind: "relation",
+      cardinality: "manyToMany",
+      target: "Course",
+      through: "enrollments",
     })
   })
 
