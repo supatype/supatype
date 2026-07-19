@@ -1,0 +1,24 @@
+{
+  "expo": {
+    "name": "Supatype Expo Auth",
+    "slug": "supatype-expo-auth",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "supatype-expo-auth",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.supatype.expoauth"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0f766e"
+      },
+      "package": "com.supatype.expoauth"
+    },
+    "plugins": [
+      "expo-secure-store"
+    ]
+  }
+}

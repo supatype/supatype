@@ -1,0 +1,31 @@
+{
+  "name": "@supatype/example-expo-auth",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Expo example — Supatype email, magic link, and PKCE OAuth auth",
+  "main": "index.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web"
+  },
+  "dependencies": {
+    "@supatype/client": "workspace:*",
+    "@supatype/react": "workspace:*",
+    "@supatype/react-native": "workspace:*",
+    "@supatype/react-native-auth": "workspace:*",
+    "expo": "~52.0.46",
+    "expo-linking": "~7.0.5",
+    "expo-secure-store": "~14.0.1",
+    "expo-status-bar": "~2.0.1",
+    "expo-web-browser": "~14.0.2",
+    "react": "18.3.1",
+    "react-native": "0.76.9"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.25.0",
+    "@types/react": "~18.3.12",
+    "typescript": "^5"
+  }
+}
