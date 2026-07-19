@@ -1,6 +1,7 @@
 node_modules/
 .expo/
 dist/
+dist-smoke/
 .env
 *.jks
 *.p8
