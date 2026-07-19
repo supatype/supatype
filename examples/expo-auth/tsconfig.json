@@ -1,0 +1,14 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "paths": {
+      "@supatype/client": ["../../packages/client/src/index.ts"],
+      "@supatype/react": ["../../packages/react/src/index.ts"],
+      "@supatype/react-native": ["../../packages/react-native/src/index.ts"],
+      "@supatype/react-native-auth": ["../../packages/react-native-auth/src/index.ts"]
+    }
+  },
+  "include": ["**/*.ts", "**/*.tsx"]
+}
