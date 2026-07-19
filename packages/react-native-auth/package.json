@@ -1,0 +1,50 @@
+{
+  "name": "@supatype/react-native-auth",
+  "version": "0.1.5",
+  "description": "Pre-built React Native authentication UI for Supatype",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "dev": "tsc --project tsconfig.json --watch",
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@supatype/client": "workspace:*",
+    "@supatype/react": "workspace:*",
+    "@supatype/react-native": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "react-native": ">=0.73",
+    "expo-web-browser": ">=13"
+  },
+  "peerDependenciesMeta": {
+    "expo-web-browser": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/react": "^18",
+    "@types/react-test-renderer": "^18",
+    "react": "^18",
+    "react-test-renderer": "^18",
+    "typescript": "^5",
+    "vitest": "^4.0.18"
+  },
+  "keywords": [
+    "supatype",
+    "react-native",
+    "auth",
+    "expo"
+  ]
+}
