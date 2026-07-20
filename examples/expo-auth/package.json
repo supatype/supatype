@@ -2,22 +2,30 @@
   "name": "@supatype/example-expo-auth",
   "version": "0.1.0",
   "private": true,
-  "description": "Expo example — Supatype email, magic link, and PKCE OAuth auth",
+  "description": "Expo + Supatype auth example (schema, local stack, Secure Store, PKCE OAuth)",
   "main": "index.js",
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "supatype:keys": "supatype keys",
+    "supatype:push": "supatype push --yes",
+    "supatype:dev": "supatype dev",
+    "supatype:generate": "supatype generate",
+    "smoke": "tsx scripts/smoke-native-auth.mts",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p scripts/tsconfig.json --noEmit"
   },
   "dependencies": {
     "@babel/runtime": "^7.29.7",
     "@expo/metro-runtime": "~6.1.2",
+    "@supatype/cli": "workspace:*",
     "@supatype/client": "workspace:*",
     "@supatype/common": "workspace:^",
     "@supatype/react": "workspace:*",
     "@supatype/react-native": "workspace:*",
     "@supatype/react-native-auth": "workspace:*",
+    "@supatype/types": "workspace:*",
     "babel-preset-expo": "~54.0.12",
     "expo": "~54.0.36",
     "expo-linking": "~8.0.12",
@@ -31,7 +39,9 @@
   },
   "devDependencies": {
     "@babel/core": "^7.25.0",
+    "@types/node": "^22",
     "@types/react": "~19.1.17",
+    "tsx": "^4",
     "typescript": "^5"
   }
 }

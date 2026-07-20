@@ -1,10 +1,20 @@
 /**
- * Live smoke for @supatype/react-native against a GoTrue-compatible gateway.
+ * Live smoke for @supatype/react-native against a local Supatype stack.
  *
- * Usage:
- *   SUPATYPE_URL=http://localhost:54321 SUPATYPE_ANON_KEY=... \
- *     pnpm exec tsx examples/expo-auth/scripts/smoke-native-auth.mts
+ * Prerequisites: `supatype push` + `supatype dev` in examples/expo-auth
+ * (Kong gateway, default http://localhost:18473).
+ *
+ * Usage (from examples/expo-auth):
+ *   pnpm smoke
+ *
+ * Or from monorepo root:
+ *   pnpm exec tsx examples/expo-auth/scripts/smoke-native-auth.mts
  */
+import { readFileSync, existsSync } from "node:fs"
+import { resolve, dirname } from "node:path"
+import { fileURLToPath } from "node:url"
+import type { AugmentedDatabase, RealtimePayload } from "@supatype/client"
+import { RealtimeClient } from "@supatype/client"
 import {
   createNativeClient,
   openOAuth,
@@ -12,10 +22,42 @@ import {
   type SecureStoreLike,
 } from "@supatype/react-native"
 
-const GATEWAY = process.env["SUPATYPE_URL"] ?? "http://localhost:54321"
+const exampleRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
+
+function loadDotEnv(path: string): Record<string, string> {
+  if (!existsSync(path)) return {}
+  const out: Record<string, string> = {}
+  for (const line of readFileSync(path, "utf8").split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (trimmed === "" || trimmed.startsWith("#")) continue
+    const eq = trimmed.indexOf("=")
+    if (eq <= 0) continue
+    const key = trimmed.slice(0, eq).trim()
+    let value = trimmed.slice(eq + 1).trim()
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1)
+    }
+    out[key] = value
+  }
+  return out
+}
+
+const envFile = loadDotEnv(resolve(exampleRoot, ".env"))
+
+const GATEWAY =
+  process.env["SUPATYPE_URL"] ??
+  envFile["EXPO_PUBLIC_SUPATYPE_URL"] ??
+  envFile["PUBLIC_SUPATYPE_URL"] ??
+  "http://localhost:18473"
+
 const ANON =
   process.env["SUPATYPE_ANON_KEY"] ??
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0"
+  envFile["EXPO_PUBLIC_SUPATYPE_ANON_KEY"] ??
+  envFile["ANON_KEY"] ??
+  ""
 
 function memorySecureStore(): SecureStoreLike & { dump(): Map<string, string> } {
   const store = new Map<string, string>()
@@ -36,17 +78,18 @@ function assert(cond: unknown, msg: string): asserts cond {
 }
 
 async function main(): Promise<void> {
+  assert(ANON.length > 0, "Missing ANON_KEY — run `supatype keys` or `supatype dev` in examples/expo-auth")
   console.log(`Smoke target: ${GATEWAY}`)
 
   const health = await fetch(`${GATEWAY}/auth/v1/health`)
-  assert(health.ok, `auth health failed: ${health.status}`)
+  assert(health.ok, `auth health failed: ${health.status} (is \`supatype dev\` running?)`)
   console.log("✓ auth health")
 
   const secureStore = memorySecureStore()
   const email = `rn-smoke-${Date.now()}@example.com`
   const password = "SmokeTest123!@#"
 
-  const client = createNativeClient({
+  const client = createNativeClient<AugmentedDatabase>({
     url: GATEWAY,
     anonKey: ANON,
     secureStore,
@@ -76,8 +119,81 @@ async function main(): Promise<void> {
   assert(secureStore.dump().size > 0, "expected session persisted to secure store")
   console.log("✓ session written to secure store")
 
+  const { data: sessionData } = await client.auth.getSession()
+  const userId = sessionData.session?.user.id
+  assert(userId !== undefined, "missing user id for profile smoke")
+
+  const { error: upsertError } = await client.from("profile").upsert({
+    id: userId,
+    displayName: "smoke",
+  })
+  assert(upsertError === null, `profile upsert error: ${upsertError?.message}`)
+  const { data: profile, error: profileError } = await client
+    .from("profile")
+    .select("displayName")
+    .eq("id", userId)
+    .maybeSingle()
+  assert(profileError === null, `profile select error: ${profileError?.message}`)
+  assert(profile?.displayName === "smoke", "profile displayName mismatch")
+  console.log("✓ profile upsert + select (schema REST)")
+
+  // Realtime lobby chat (user JWT — LoggedIn RLS)
+  const accessToken = sessionData.session?.accessToken
+  assert(accessToken !== undefined && accessToken.length > 0, "missing access token for realtime")
+  const rtEvents: RealtimePayload<Record<string, unknown>>[] = []
+  const rt = new RealtimeClient(`${GATEWAY.replace(/\/$/, "")}/realtime/v1`, {
+    apikey: accessToken,
+    Authorization: `Bearer ${accessToken}`,
+  })
+  const LOBBY = "lobby"
+  const channel = rt
+    .channel("public:chat_message")
+    .on(
+      "postgres_changes",
+      {
+        event: "INSERT",
+        schema: "public",
+        table: "chat_message",
+        filter: `room=eq.${LOBBY}`,
+      },
+      (payload) => rtEvents.push(payload),
+    )
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("realtime subscribe timeout")), 15_000)
+    channel.subscribe((status) => {
+      if (status === "SUBSCRIBED") {
+        clearTimeout(timer)
+        resolve()
+      } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+        clearTimeout(timer)
+        reject(new Error(`realtime subscribe failed: ${status}`))
+      }
+    })
+  })
+  await new Promise((r) => setTimeout(r, 400))
+  const chatBody = `smoke-${Date.now()}`
+  const { error: chatInsertError } = await client.from("chat_message").insert({
+    room: LOBBY,
+    body: chatBody,
+    auth_user_id: userId,
+    authorName: "smoke",
+  } as AugmentedDatabase["public"]["Tables"]["chat_message"]["Insert"])
+  assert(chatInsertError === null, `chat insert error: ${chatInsertError?.message}`)
+  const deadline = Date.now() + 8_000
+  while (rtEvents.length < 1 && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 200))
+  }
+  assert(rtEvents.length >= 1, "expected realtime INSERT for chat_message")
+  assert(
+    (rtEvents[0]?.new as { body?: string } | null)?.body === chatBody,
+    "realtime payload body mismatch",
+  )
+  channel.unsubscribe()
+  rt.disconnect()
+  console.log("✓ realtime chat_message INSERT")
+
   // Simulate app relaunch: new client, same store
-  const client2 = createNativeClient({
+  const client2 = createNativeClient<AugmentedDatabase>({
     url: GATEWAY,
     anonKey: ANON,
     secureStore,

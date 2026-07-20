@@ -72,9 +72,11 @@ export function generateAndWriteKeys(
     content = upsertEnvVar(content, "SERVICE_ROLE_KEY", serviceKey)
     content = upsertEnvVar(content, "VITE_SUPATYPE_ANON_KEY", anonKey)
     content = upsertEnvVar(content, "PUBLIC_SUPATYPE_ANON_KEY", anonKey)
+    content = upsertEnvVar(content, "EXPO_PUBLIC_SUPATYPE_ANON_KEY", anonKey)
     const apiUrl = readEnvVar(content, "PUBLIC_SUPATYPE_URL") ?? readEnvVar(content, "API_EXTERNAL_URL")
     if (apiUrl) {
       content = upsertEnvVar(content, "VITE_SUPATYPE_URL", apiUrl)
+      content = upsertEnvVar(content, "EXPO_PUBLIC_SUPATYPE_URL", apiUrl)
     }
     writeFileSync(envPath, content, "utf8")
   }

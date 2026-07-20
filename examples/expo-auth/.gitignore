@@ -3,6 +3,7 @@ node_modules/
 dist/
 dist-smoke/
 .env
+supatype.local.config.ts
 *.jks
 *.p8
 *.p12

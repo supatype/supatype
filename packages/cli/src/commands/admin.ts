@@ -69,6 +69,16 @@ export interface EnsureFirstAdminOptions {
   compose?: { project: string; composePath: string }
 }
 
+function resolveAdminConnection(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  override?: string,
+): string {
+  if (override !== undefined) return override
+  if (hasEngineOverride(config)) return hostComposeDbUrlFromEnv(cwd)
+  return readEnvValue(cwd, "DATABASE_URL", connectionString(config))
+}
+
 export function registerAdmin(program: Command): void {
   const adminCmd = program
     .command("admin")
@@ -90,7 +100,7 @@ export function registerAdmin(program: Command): void {
       }) => {
         const cwd = process.cwd()
         const config = loadConfig(cwd)
-        const connection = opts.connection ?? connectionString(config)
+        const connection = resolveAdminConnection(cwd, config, opts.connection)
 
         const email = opts.email ?? (await promptText("Admin email"))
         if (!email || !email.includes("@")) {
@@ -150,7 +160,7 @@ export function registerAdmin(program: Command): void {
       async (opts: { email: string; role: string; connection?: string }) => {
         const cwd = process.cwd()
         const config = loadConfig(cwd)
-        const connection = opts.connection ?? connectionString(config)
+        const connection = resolveAdminConnection(cwd, config, opts.connection)
 
         const pg = await importPg()
         const pool = new pg.Pool({ connectionString: connection, max: 2 })
@@ -198,7 +208,7 @@ export function registerAdmin(program: Command): void {
     .action(async (opts: { connection?: string }) => {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
-      const connection = opts.connection ?? connectionString(config)
+      const connection = resolveAdminConnection(cwd, config, opts.connection)
 
       const pg = await importPg()
       const pool = new pg.Pool({ connectionString: connection, max: 2 })

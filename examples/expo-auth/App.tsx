@@ -7,7 +7,7 @@ import { AuthGate, AuthThemeProvider } from "@supatype/react-native-auth"
 import { SafeAreaProvider } from "./src/SafeAreaFallback"
 import { client } from "./src/client"
 import { AuthScreen } from "./src/AuthScreen"
-import { HomeScreen } from "./src/HomeScreen"
+import { MainScreen } from "./src/MainScreen"
 
 export default function App(): React.ReactElement {
   useEffect(() => {
@@ -23,7 +23,7 @@ export default function App(): React.ReactElement {
       <SupatypeProvider client={client}>
         <AuthThemeProvider>
           <AuthGate fallback={<AuthScreen />}>
-            <HomeScreen />
+            <MainScreen />
           </AuthGate>
         </AuthThemeProvider>
       </SupatypeProvider>

@@ -4,5 +4,10 @@
     "strict": true,
     "exactOptionalPropertyTypes": true
   },
-  "include": ["**/*.ts", "**/*.tsx"]
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    "supatype/generated/**/*.d.ts"
+  ],
+  "exclude": ["scripts"]
 }
