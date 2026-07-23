@@ -1,6 +1,6 @@
 {
   "name": "@supatype/vue",
-  "version": "0.1.0",
+  "version": "0.1.5",
   "description": "Vue composables for Supatype — useQuery, useMutation, useAuth, useSubscription",
   "type": "module",
   "main": "./dist/index.js",

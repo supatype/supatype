@@ -1,0 +1,51 @@
+{
+  "name": "@supatype/react-native",
+  "version": "0.1.5",
+  "description": "Supatype React Native helpers — secure auth storage, createNativeClient, PKCE OAuth deep links",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "dev": "tsc --project tsconfig.json --watch",
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@supatype/client": "workspace:*"
+  },
+  "peerDependencies": {
+    "expo-secure-store": ">=13",
+    "expo-web-browser": ">=13",
+    "@react-native-async-storage/async-storage": ">=1.23"
+  },
+  "peerDependenciesMeta": {
+    "expo-secure-store": {
+      "optional": true
+    },
+    "expo-web-browser": {
+      "optional": true
+    },
+    "@react-native-async-storage/async-storage": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5",
+    "vitest": "^4.0.18"
+  },
+  "keywords": [
+    "supatype",
+    "react-native",
+    "expo",
+    "auth"
+  ]
+}

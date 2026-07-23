@@ -40,6 +40,9 @@ export class ReplicationListener {
   /** Connect to Postgres and ensure the replication slot exists. */
   async start(): Promise<void> {
     this.client = new Client({ connectionString: this.config.databaseUrl })
+    this.client.on("error", (err) => {
+      console.error("[realtime] replication connection error:", err)
+    })
     await this.client.connect()
 
     // Ensure publication + logical replication slot exist before polling.

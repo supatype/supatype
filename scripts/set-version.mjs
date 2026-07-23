@@ -28,6 +28,8 @@ const npmPackages = [
   "common",
   "react",
   "react-auth",
+  "react-native",
+  "react-native-auth",
   "ssr",
   "ui",
   "plugin-seo",

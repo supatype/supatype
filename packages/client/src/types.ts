@@ -52,6 +52,16 @@ export type AuthChangeEvent =
   | "PASSWORD_RECOVERY"
   | "MFA_CHALLENGE_VERIFIED"
 
+/**
+ * OAuth / magic-link redirect flow.
+ * - `pkce` — authorize with code_challenge; app exchanges `?code=` via `exchangeCodeForSession`.
+ * - `implicit` — tokens returned in the URL hash (`#access_token=…`).
+ *
+ * Web `signInWithOAuth` defaults to `implicit` for backward compatibility.
+ * React Native helpers should pass `pkce` (recommended default for mobile).
+ */
+export type AuthFlowType = "pkce" | "implicit"
+
 // ─── MFA types ──────────────────────────────────────────────────────────────
 
 export interface AuthMFAEnrollResponse {

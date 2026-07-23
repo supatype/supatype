@@ -22,6 +22,9 @@ export class RlsFilter {
       connectionString: databaseUrl,
       max: 10,
     })
+    this.pool.on("error", (err) => {
+      console.error("[realtime] rls pool error:", err)
+    })
   }
 
   /**
