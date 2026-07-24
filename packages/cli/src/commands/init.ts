@@ -13,6 +13,7 @@ import {
   ensureComponentBinaries,
   reportComponentBinaryFailures,
 } from "../ensure-component-binaries.js"
+import { ensureFunctionsDenoTypes } from "../functions-deno-types.js"
 import { mergeSupatypePackageJson } from "../init-package-json.js"
 import { cliPackageVersion } from "../cli-package-version.js"
 import {
@@ -792,6 +793,12 @@ function scaffoldHelloFunction(
   if (!existsSync(join(dir, "functions/.env.local"))) {
     write("functions/.env.local", functionsEnvLocalTemplate())
   }
+  const denoTypes = ensureFunctionsDenoTypes(dir, join(dir, "functions"))
+  if (denoTypes.wroteDenoDts) file("created", "functions/deno.d.ts")
+  if (denoTypes.wroteTsconfig) file("created", "functions/tsconfig.json")
+  if (denoTypes.rootExclude === "updated") {
+    file("updated", 'tsconfig.json (exclude "functions")')
+  }
 }
 
 // ─── Templates ───────────────────────────────────────────────────────────────
@@ -1340,16 +1347,17 @@ function helloFunctionTemplate(): string {
 
 export default async function handler(req: Request): Promise<Response> {
   const { method } = req
+  const url = Deno.env.get("SUPATYPE_URL")
 
   if (method === "POST") {
     const body = await req.json()
-    return new Response(JSON.stringify({ message: "Hello from hello!", received: body }), {
+    return new Response(JSON.stringify({ message: "Hello from hello!", received: body, url }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     })
   }
 
-  return new Response(JSON.stringify({ message: "Hello from hello!" }), {
+  return new Response(JSON.stringify({ message: "Hello from hello!", url }), {
     status: 200,
     headers: { "Content-Type": "application/json" },
   })

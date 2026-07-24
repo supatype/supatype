@@ -67,10 +67,14 @@ Auth flag: `--token` (cloud = platform PAT; self-host = `SERVICE_ROLE_KEY`). `--
 
 | Command | Purpose |
 |---------|---------|
+| `supatype functions new <name>` | Scaffold `functions/<name>/index.ts` plus Deno IDE types (`functions/deno.d.ts`, `functions/tsconfig.json`) |
+| `supatype functions serve` | Local Deno server for all functions |
 | `supatype functions deploy` | Deploy edge functions via control plane when linked |
 | `supatype functions list` | List deployed functions |
 | `supatype plugins` | Plugin scaffolding |
 | `supatype types` | Type utilities |
+
+Kitchen-sink example (monorepo): `examples/edge-kit` — Vite UI that invokes sample functions.
 
 ## Ops and maintenance
 

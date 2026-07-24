@@ -16,6 +16,9 @@
     "./seed": {
       "import": "./dist/seed.js",
       "types": "./dist/seed.d.ts"
+    },
+    "./deno": {
+      "types": "./deno.d.ts"
     }
   },
   "scripts": {

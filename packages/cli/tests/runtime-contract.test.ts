@@ -276,6 +276,7 @@ describe("runtime contract", () => {
     expect(compose).toContain("\n  functions-worker:\n")
     expect(compose).toContain("SUPATYPE_FUNCTIONS_WORKER_URL: http://functions-worker:8001")
     expect(compose).toContain("SUPATYPE_FUNCTIONS_ROOT: /project/functions")
+    expect(compose).toContain("SUPATYPE_URL: http://kong:8000")
     expect(compose).not.toContain("deploy/functions")
     expect(compose).not.toContain("supatype-functions")
   })
