@@ -87,6 +87,7 @@ export function functionsTsConfigSource(): string {
     "moduleResolution": "bundler",
     "isolatedModules": true,
     "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
     "types": []
   },
   "include": ["./**/*.ts", "./deno.d.ts"]
