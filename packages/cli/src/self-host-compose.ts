@@ -373,7 +373,9 @@ ${dbPorts}    volumes:
       SUPATYPE_FUNCTIONS_ROOT: /project/functions
       SUPATYPE_DENO_FUNCTIONS_DIR: /project/functions
       PORT: "8001"
-      SUPATYPE_URL: \${API_EXTERNAL_URL:-${externalUrlFallback}}
+      # In-compose loopback to Kong (not API_EXTERNAL_URL / localhost — unreachable from this container).
+      SUPATYPE_URL: http://kong:8000
+      SUPATYPE_INTERNAL_URL: http://kong:8000
       SUPATYPE_ANON_KEY: \${ANON_KEY:-}
       SUPATYPE_SERVICE_ROLE_KEY: \${SERVICE_ROLE_KEY:-}
       STRIPE_SECRET_KEY: \${STRIPE_SECRET_KEY:-}

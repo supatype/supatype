@@ -1,0 +1,9 @@
+.env
+node_modules/
+dist/
+.supatype/
+supatype.local.config.ts
+supatype.local.config.js
+supatype.local.config.mjs
+functions/.env.local
+*.log
