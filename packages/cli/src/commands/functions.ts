@@ -24,6 +24,7 @@ import {
 import { loadProjectLink } from "../link.js"
 import { resolveTarget } from "../resolve-target.js"
 import { targetFetch } from "../target-client.js"
+import { ensureFunctionsDenoTypes } from "../functions-deno-types.js"
 import { error, info, plain } from "../ui/messages.js"
 import { nextSteps } from "../ui/next-steps.js"
 
@@ -140,18 +141,19 @@ function scaffoldFunction(cwd: string, name: string): void {
 // Docs: https://supatype.com/docs/edge-functions
 
 export default async function handler(req: Request): Promise<Response> {
-  const { method, url } = req
+  const { method } = req
+  const url = Deno.env.get("SUPATYPE_URL")
 
   // Example: read request body for POST requests
   if (method === "POST") {
     const body = await req.json()
-    return new Response(JSON.stringify({ message: "Hello from ${name}!", received: body }), {
+    return new Response(JSON.stringify({ message: "Hello from ${name}!", received: body, url }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     })
   }
 
-  return new Response(JSON.stringify({ message: "Hello from ${name}!" }), {
+  return new Response(JSON.stringify({ message: "Hello from ${name}!", url }), {
     status: 200,
     headers: { "Content-Type": "application/json" },
   })
@@ -181,13 +183,27 @@ export default async function handler(req: Request): Promise<Response> {
     )
   }
 
+  const denoTypes = ensureFunctionsDenoTypes(cwd, functionsDir)
+
   const functionsDirLabel = relativeFunctionsDir(cwd, functionsDir)
   info(`Created function: ${functionsDirLabel}/${name}/index.ts`)
-  nextSteps("Next steps:", [
+  if (denoTypes.wroteDenoDts) {
+    info(`Added Deno IDE types: ${functionsDirLabel}/deno.d.ts`)
+  }
+  if (denoTypes.wroteTsconfig) {
+    info(`Added functions tsconfig: ${functionsDirLabel}/tsconfig.json`)
+  }
+  if (denoTypes.rootExclude === "updated") {
+    info('Updated root tsconfig.json to exclude "functions"')
+  }
+
+  const steps = [
     "Local dev:    npx supatype functions serve",
     `Invoke:       npx supatype functions invoke ${name}`,
     "Deploy:       npx supatype functions deploy",
-  ])
+    ...denoTypes.hints,
+  ]
+  nextSteps("Next steps:", steps)
 }
 
 // ─── Discover functions ──────────────────────────────────────────────────────
