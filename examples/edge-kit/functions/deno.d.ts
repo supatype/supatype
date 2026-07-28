@@ -1,9 +1,16 @@
 /**
- * Ambient types for IDE / tsserver (runtime is Deno in Docker).
- * Kept in sync with `@supatype/cli` edge-function ambient (`packages/cli/deno.d.ts`).
+ * Supatype edge functions (IDE / tsserver).
+ * Runtime is Deno; this file covers APIs edge functions commonly use.
+ * Do not add `@types/deno` to the app package.json — it leaks into the
+ * whole project when root tsconfig has no `"types"` field.
+ *
+ * Optional: for the full Deno API, install the Deno VS Code/Cursor extension
+ * and open `functions/` as a Deno-enabled workspace folder.
  */
+/* eslint-disable @typescript-eslint/no-unused-vars */
 
 interface DenoEnv {
+  /** Returns the value of the environment variable, or `undefined` if unset. */
   get(key: string): string | undefined
   set(key: string, value: string): void
   delete(key: string): void
@@ -35,8 +42,8 @@ declare namespace Deno {
   }
 
   function readDir(path: string): AsyncIterable<DirEntry>
-  function stat(path: string): Promise<FileInfo>
   function readTextFile(path: string): Promise<string>
+  function stat(path: string): Promise<FileInfo>
 
   function serve(
     options: { port: number; hostname?: string; onListen?: (params: { hostname: string; port: number }) => void },
