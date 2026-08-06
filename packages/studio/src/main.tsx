@@ -38,9 +38,28 @@ function resolveAnonKey(): string {
   return runtimeConfig.anonKey ?? import.meta.env.VITE_SUPATYPE_ANON_KEY ?? "dev-anon-key"
 }
 
-/** Legacy embed: service role in browser skips the auth gate (deprecated). */
-function resolveLegacyServiceRoleKey(): string | undefined {
-  return runtimeConfig.serviceRoleKey ?? import.meta.env.VITE_SUPATYPE_SERVICE_ROLE_KEY
+/**
+ * Refuse a service role key in the browser.
+ *
+ * Studio used to accept one and skip the auth gate entirely. A key in the browser
+ * is unrestricted database access to anyone who opens devtools, and it bypasses
+ * every control the server now applies — Studio membership, the role's capability
+ * set, the acting identity, and the audit trail. All privileged calls go through
+ * `/studio/proxy`, which holds the key server-side and applies those controls.
+ *
+ * Ignored loudly rather than silently, so a deployment still passing one finds out
+ * why it stopped working.
+ */
+function warnIfBrowserServiceRoleKey(): void {
+  const supplied = runtimeConfig.serviceRoleKey ?? import.meta.env.VITE_SUPATYPE_SERVICE_ROLE_KEY
+  if (supplied === undefined || supplied === "") return
+  console.error(
+    "[supatype] A service role key was supplied to Studio in the browser and has been ignored. " +
+      "It grants unrestricted database access to anyone who opens devtools and bypasses Studio " +
+      "membership, role permissions and the audit trail. Remove VITE_SUPATYPE_SERVICE_ROLE_KEY / " +
+      "__SUPATYPE_CLOUD__.serviceRoleKey and sign in instead — privileged calls are proxied " +
+      "server-side.",
+  )
 }
 
 function readDemoSession(): boolean {
@@ -184,9 +203,9 @@ function StudioShell({ client, apiBaseUrl, demoMode, onEnterDemo }: StudioShellP
 function App(): React.ReactElement {
   const apiBaseUrl = resolveApiBase()
   const anonKey = resolveAnonKey()
-  const legacyServiceRoleKey = resolveLegacyServiceRoleKey()
-  const securedSelfHost = legacyServiceRoleKey === undefined
   const [demoMode, setDemoMode] = useState(readDemoSession)
+
+  useEffect(warnIfBrowserServiceRoleKey, [])
 
   const authClient = useMemo(
     () =>
@@ -198,39 +217,25 @@ function App(): React.ReactElement {
     [apiBaseUrl, anonKey],
   )
 
-  const legacyClient = useMemo(
-    () =>
-      createClient({
-        url: apiBaseUrl,
-        anonKey,
-        ...(legacyServiceRoleKey !== undefined && { serviceRoleKey: legacyServiceRoleKey }),
-      }),
-    [apiBaseUrl, anonKey, legacyServiceRoleKey],
-  )
-
   const enterDemo = () => setDemoMode(true)
 
+  // Demo mode never talks to a real project, so it needs no privilege at all.
   if (demoMode) {
-    return <StudioShell client={legacyClient} apiBaseUrl={apiBaseUrl} demoMode />
+    return <StudioShell client={authClient} apiBaseUrl={apiBaseUrl} demoMode />
   }
 
-  if (securedSelfHost) {
-    return (
-      <StudioAccessGate apiBaseUrl={apiBaseUrl} anonKey={anonKey} authClient={authClient}>
-        {(proxyClient) => (
-          <StudioShell
-            client={proxyClient}
-            apiBaseUrl={apiBaseUrl}
-            demoMode={false}
-            onEnterDemo={enterDemo}
-          />
-        )}
-      </StudioAccessGate>
-    )
-  }
-
+  // There is one path now: sign in, then every privileged call is proxied.
   return (
-    <StudioShell client={legacyClient} apiBaseUrl={apiBaseUrl} demoMode={false} onEnterDemo={enterDemo} />
+    <StudioAccessGate apiBaseUrl={apiBaseUrl} anonKey={anonKey} authClient={authClient}>
+      {(proxyClient) => (
+        <StudioShell
+          client={proxyClient}
+          apiBaseUrl={apiBaseUrl}
+          demoMode={false}
+          onEnterDemo={enterDemo}
+        />
+      )}
+    </StudioAccessGate>
   )
 }
 

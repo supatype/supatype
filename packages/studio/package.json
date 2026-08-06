@@ -19,6 +19,7 @@
     "./tailwind": "./tailwind.preset.ts"
   },
   "scripts": {
+    "test": "vitest run tests/",
     "dev": "vite",
     "build": "vite build",
     "build:lib": "BUILD_MODE=lib vite build",

@@ -104,44 +104,32 @@ function ApiKeysSettings(): React.ReactElement {
 
   const runtime =
     (typeof window !== "undefined"
-      ? (window as unknown as { __SUPATYPE_CLOUD__?: { anonKey?: string; serviceRoleKey?: string } }).__SUPATYPE_CLOUD__
+      ? (window as unknown as { __SUPATYPE_CLOUD__?: { anonKey?: string } }).__SUPATYPE_CLOUD__
       : undefined) ?? {}
 
+  // Only the anon key. It is publishable by design — safe in a browser bundle and
+  // safe to show. The service role key is deliberately absent: anything that puts
+  // it in the browser makes it readable by anyone who opens devtools, so it is
+  // never shipped to Studio and therefore never displayable here.
   const anonKey =
     runtime.anonKey ??
     (typeof import.meta !== "undefined"
       ? (import.meta as ImportMeta & { env?: Record<string, string> }).env?.["VITE_SUPATYPE_ANON_KEY"]
       : undefined) ??
     ""
-  const serviceRoleKey =
-    runtime.serviceRoleKey ??
-    (typeof import.meta !== "undefined"
-      ? (import.meta as ImportMeta & { env?: Record<string, string> }).env?.["VITE_SUPATYPE_SERVICE_ROLE_KEY"]
-      : undefined) ??
-    ""
 
-  const keys: ApiKey[] = [
-    ...(anonKey
-      ? [{
+  const keys: ApiKey[] = anonKey
+    ? [
+        {
           id: "anon",
           name: "anon",
           role: "anon" as const,
           key: anonKey,
           created_at: new Date(0).toISOString(),
           last_used: null,
-        }]
-      : []),
-    ...(serviceRoleKey
-      ? [{
-          id: "service_role",
-          name: "service_role",
-          role: "service_role" as const,
-          key: serviceRoleKey,
-          created_at: new Date(0).toISOString(),
-          last_used: null,
-        }]
-      : []),
-  ]
+        },
+      ]
+    : []
 
   const copyToClipboard = (text: string, keyId: string) => {
     void navigator.clipboard.writeText(text)
@@ -158,13 +146,15 @@ function ApiKeysSettings(): React.ReactElement {
         </Button>
       </div>
       <p className="text-xs text-muted-foreground mb-4">
-        Local/self-host keys come from Studio runtime config. Cloud projects manage rotatable keys under Cloud → Project Settings.
+        Only the publishable anon key is shown here. The service role key bypasses Row
+        Level Security, so it is never sent to the browser — read it with{" "}
+        <code>supatype keys</code>, or from Cloud → Project Settings.
       </p>
       <div className="flex flex-col gap-4">
         {keys.length === 0 ? (
           <EmptyState
-            title="No API keys in Studio runtime"
-            description="Set VITE_SUPATYPE_ANON_KEY / service role in Studio config, or open Cloud project settings."
+            title="No anon key in Studio runtime"
+            description="Set VITE_SUPATYPE_ANON_KEY in Studio config, or open Cloud project settings."
           />
         ) : keys.map((k) => (
           <div key={k.id} className="border border-border rounded-md p-4">

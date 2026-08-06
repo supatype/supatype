@@ -53,8 +53,10 @@ export function useProjectProxy(): ProjectProxy {
       if (!client.url) {
         throw new Error("SQL proxy URL is not configured — client URL is missing")
       }
-      if (!client.serviceRoleKey && !sessionProxy) {
-        throw new Error("SQL proxy requires authentication")
+      if (!sessionProxy) {
+        throw new Error(
+          "SQL proxy requires the session proxy — Studio no longer accepts a service role key in the browser",
+        )
       }
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
@@ -77,7 +79,7 @@ export function useProjectProxy(): ProjectProxy {
         ...(json.schema !== undefined && { schema: json.schema }),
       }
     },
-    [client.url, client.serviceRoleKey, sessionProxy],
+    [client.url, sessionProxy],
   )
 
   // The introspection SQL uses current_schema() — the server resolves the
@@ -178,18 +180,29 @@ export function useProjectProxy(): ProjectProxy {
     return Array.from(tableMap.values())
   }, [sql])
 
-  // List schemas — server enforces visibility based on JWT role.
+  // List schemas that contain at least one base table (hide empty public/extensions/auth shells).
   const schemas = useCallback(async (): Promise<string[]> => {
     const result = await sql(`
-      SELECT schema_name
-      FROM information_schema.schemata
-      WHERE schema_name NOT IN ('information_schema','pg_catalog','pg_toast','pg_temp_1','pg_toast_temp_1')
-        AND schema_name NOT LIKE 'pg_temp_%'
-        AND schema_name NOT LIKE 'pg_toast_temp_%'
-        AND left(schema_name, 1) <> '_'
+      SELECT s.schema_name
+      FROM information_schema.schemata s
+      WHERE s.schema_name NOT IN ('information_schema','pg_catalog','pg_toast','pg_temp_1','pg_toast_temp_1')
+        AND s.schema_name NOT LIKE 'pg_temp_%'
+        AND s.schema_name NOT LIKE 'pg_toast_temp_%'
+        AND left(s.schema_name, 1) <> '_'
+        AND EXISTS (
+          SELECT 1
+          FROM information_schema.tables t
+          WHERE t.table_schema = s.schema_name
+            AND t.table_type = 'BASE TABLE'
+        )
       ORDER BY
-        CASE schema_name WHEN 'public' THEN 0 ELSE 1 END,
-        schema_name
+        CASE
+          WHEN s.schema_name = 'public' THEN 0
+          WHEN s.schema_name IN ('auth', 'extensions', 'storage') THEN 2
+          WHEN s.schema_name LIKE '%\\_auth' ESCAPE '\\' OR s.schema_name LIKE '%\\_internal' ESCAPE '\\' THEN 2
+          ELSE 1
+        END,
+        s.schema_name
     `)
     return result.rows.map((r) => r["schema_name"] as string)
   }, [sql])
