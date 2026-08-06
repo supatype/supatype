@@ -20,7 +20,7 @@ import { hasEngineOverride } from "../binary-cache.js"
 import { readDevSessionLock } from "../dev-session-lock.js"
 import { composeProjectName } from "../self-host-compose.js"
 import { confirm as uiConfirm } from "../ui/confirm.js"
-import { error, info, plain, warn } from "../ui/messages.js"
+import { error, info, plain } from "../ui/messages.js"
 import { promptPassword, promptText } from "../ui/prompts.js"
 import { isInteractive } from "../ui/interactive.js"
 import {
@@ -170,6 +170,7 @@ export function registerAdmin(program: Command): void {
           // `app_metadata`: that key is the developer's namespace for their own
           // app roles, and writing Studio access there means assigning an app
           // role could hand out admin UI access by accident.
+          await ensureStudioMembersTable((sql, params) => pool.query(sql, params))
           const result = await pool.query(
             `WITH target AS (
                SELECT id, email FROM auth.users WHERE email = $2
@@ -208,7 +209,7 @@ export function registerAdmin(program: Command): void {
 
   adminCmd
     .command("list-users")
-    .description("List users with admin roles")
+    .description("List users with Studio access")
     .option("--connection <url>", "Database connection URL (overrides config)")
     .action(async (opts: { connection?: string }) => {
       const cwd = process.cwd()
@@ -219,12 +220,13 @@ export function registerAdmin(program: Command): void {
       const pool = new pg.Pool({ connectionString: connection, max: 2 })
 
       try {
+        // Studio access is membership, not a claim — list the grant that
+        // actually decides admission.
         const result = await pool.query(
-          `SELECT id, email, raw_app_meta_data->>'role' as role, created_at
-           FROM auth.users
-           WHERE raw_app_meta_data->>'role' IS NOT NULL
-             AND raw_app_meta_data->>'role' != 'authenticated'
-           ORDER BY created_at ASC`,
+          `SELECT u.id, u.email, m.role, m.created_at
+             FROM _supatype.studio_members m
+             JOIN auth.users u ON u.id = m.user_id
+            ORDER BY m.created_at ASC`,
         )
 
         if (result.rows.length === 0) {
@@ -323,7 +325,8 @@ export async function ensureFirstAdminUserForProject(
   await ensureFirstAdminUser(connection, merged)
 }
 
-async function ensureFirstAdminWithQuery(
+/** Exported for tests: the DB seam both the pool and compose paths share. */
+export async function ensureFirstAdminWithQuery(
   query: DbQuery,
   options: EnsureFirstAdminOptions,
 ): Promise<void> {
@@ -447,8 +450,11 @@ async function createAdminUser(
   }
 
   const passwordHash = await hashPasswordForAuth(password)
+  // No `role` here: `app_metadata` is the developer's namespace for their own
+  // application roles, and Studio access is granted through
+  // `_supatype.studio_members` instead. Writing it in both places means an app
+  // role assignment can silently confer admin UI access.
   const appMetadata = JSON.stringify({
-    role,
     provider: "email",
     providers: ["email"],
   })
@@ -493,25 +499,23 @@ async function createAdminUser(
  * Studio capability is deliberately not a JWT claim: `app_metadata` belongs to
  * the developer's own app roles, and letting it grant Studio access means a
  * developer assigning an app role could hand out admin UI access by accident.
- * Best-effort — an older engine may not have created the table yet, and failing
- * here must not undo a created user.
+ *
+ * This is now the *only* grant, so a failure here is fatal to the command — a
+ * user created without a membership row cannot reach Studio at all, and
+ * reporting success would leave no clue why.
  */
 async function recordStudioMembership(
   query: DbQuery,
   userId: string,
   role: string,
 ): Promise<void> {
-  try {
-    await query(
-      `INSERT INTO _supatype.studio_members (user_id, role)
-       VALUES ($1, $2)
-       ON CONFLICT (user_id) DO UPDATE SET role = EXCLUDED.role, updated_at = now()`,
-      [userId, role],
-    )
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    warn(`Created the user but could not record Studio membership: ${message}`)
-  }
+  await ensureStudioMembersTable(query)
+  await query(
+    `INSERT INTO _supatype.studio_members (user_id, role)
+     VALUES ($1, $2)
+     ON CONFLICT (user_id) DO UPDATE SET role = EXCLUDED.role, updated_at = now()`,
+    [userId, role],
+  )
 }
 
 async function ensureAuthUsersTable(pool: Pool): Promise<void> {
@@ -554,14 +558,52 @@ async function authUsersTableExists(query: DbQuery): Promise<boolean> {
   return Boolean(result.rows[0]?.exists)
 }
 
+/**
+ * Whether anyone can already reach Studio.
+ *
+ * Counts membership rows, not `app_metadata` claims: the claim no longer grants
+ * anything, so counting it would report an admin exists while nobody can log in.
+ * A missing table means the project has never been pushed — no admins.
+ */
 async function hasAdminUsers(query: DbQuery): Promise<boolean> {
+  // Postgres resolves relations at parse time, so the table has to be checked
+  // separately rather than guarded inside the count query. Absent means the
+  // project has never been pushed — no admins, and `createAdminUser` will
+  // create the table itself.
+  if (!(await studioMembersTableExists(query))) return false
+
   const adminCount = await query(
-    `SELECT COUNT(*)::int as count FROM auth.users
-     WHERE raw_app_meta_data->>'role' IS NOT NULL
-       AND raw_app_meta_data->>'role' != 'authenticated'`,
+    `SELECT COUNT(*)::int as count
+       FROM _supatype.studio_members m
+       JOIN auth.users u ON u.id = m.user_id
+      WHERE m.role <> 'authenticated'`,
   )
   const count = (adminCount.rows[0] as { count: number } | undefined)?.count ?? 0
   return count > 0
+}
+
+/**
+ * A project whose engine predates the membership table, or one that has never
+ * been pushed, still needs working `admin create-user` / `admin set-role`.
+ * Mirrors the engine's own definition (`create_studio_members_table_sql`).
+ */
+async function ensureStudioMembersTable(query: DbQuery): Promise<void> {
+  await query(`CREATE SCHEMA IF NOT EXISTS _supatype`)
+  await query(
+    `CREATE TABLE IF NOT EXISTS _supatype.studio_members (
+       user_id     UUID PRIMARY KEY,
+       role        TEXT NOT NULL,
+       created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+       updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+     )`,
+  )
+}
+
+async function studioMembersTableExists(query: DbQuery): Promise<boolean> {
+  const result = await query(
+    `SELECT to_regclass('_supatype.studio_members') IS NOT NULL as exists`,
+  )
+  return Boolean(result.rows[0]?.exists)
 }
 
 /** Postgres password for compose `exec psql` (db is not published to the host). */
