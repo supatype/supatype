@@ -32,6 +32,26 @@ export const ADMIN_PASSWORD_ENV = "SUPATYPE_ADMIN_PASSWORD"
 
 const BCRYPT_ROUNDS = 10
 
+/**
+ * Studio roles a membership row may hold, most privileged first.
+ *
+ * Must match `studioRolePermissions` in supatype-server and
+ * `STUDIO_ROLE_PERMISSIONS` in the control plane: capability checks refuse a role
+ * they do not recognise, so an unvalidated `--role` here would create a user who
+ * is locked out of the very panel they were made for.
+ */
+export const STUDIO_ROLES = ["admin", "editor", "viewer"] as const
+
+function assertStudioRole(role: string): void {
+  if ((STUDIO_ROLES as readonly string[]).includes(role)) return
+  error(
+    `Unknown Studio role "${role}". Choose one of: ${STUDIO_ROLES.join(", ")}.\n` +
+      "  Studio roles are Supatype's own; your application's roles are separate " +
+      "and belong in your access rules.",
+  )
+  process.exit(1)
+}
+
 /** GoTrue scopes users to the nil instance id in single-tenant/self-host mode. */
 export const GOTRUE_NIL_INSTANCE_ID = "00000000-0000-0000-0000-000000000000"
 
@@ -89,7 +109,7 @@ export function registerAdmin(program: Command): void {
     .description("Create an admin user for the admin panel")
     .option("--email <email>", "Admin user email address")
     .option("--password <password>", "Admin user password (prompted if not provided)")
-    .option("--role <role>", "Admin role to assign", "admin")
+    .option("--role <role>", `Studio role to assign (${STUDIO_ROLES.join(" | ")})`, "admin")
     .option("--connection <url>", "Database connection URL (overrides config)")
     .action(
       async (opts: {
@@ -116,6 +136,7 @@ export function registerAdmin(program: Command): void {
         }
 
         const role = opts.role
+        assertStudioRole(role)
 
         info(`Creating admin user: ${email} (role: ${role})...`)
 
@@ -154,10 +175,11 @@ export function registerAdmin(program: Command): void {
     .command("set-role")
     .description("Change an existing user's admin role")
     .requiredOption("--email <email>", "User email address")
-    .requiredOption("--role <role>", "New role to assign")
+    .requiredOption("--role <role>", `New Studio role (${STUDIO_ROLES.join(" | ")})`)
     .option("--connection <url>", "Database connection URL (overrides config)")
     .action(
       async (opts: { email: string; role: string; connection?: string }) => {
+        assertStudioRole(opts.role)
         const cwd = process.cwd()
         const config = loadConfig(cwd)
         const connection = resolveAdminConnection(cwd, config, opts.connection)
@@ -221,11 +243,15 @@ export function registerAdmin(program: Command): void {
 
       try {
         // Studio access is membership, not a claim — list the grant that
-        // actually decides admission.
+        // actually decides admission. LEFT JOIN, because a membership held by a
+        // Supatype Cloud account has no row in this project's `auth.users`;
+        // hiding those would make `list-users` disagree with who can log in.
         const result = await pool.query(
-          `SELECT u.id, u.email, m.role, m.created_at
+          `SELECT COALESCE(m.user_id, m.platform_user_id) AS id,
+                  COALESCE(u.email, '(cloud account)') AS email,
+                  m.role, m.created_at
              FROM _supatype.studio_members m
-             JOIN auth.users u ON u.id = m.user_id
+             LEFT JOIN auth.users u ON u.id = m.user_id
             ORDER BY m.created_at ASC`,
         )
 
@@ -572,6 +598,9 @@ async function hasAdminUsers(query: DbQuery): Promise<boolean> {
   // create the table itself.
   if (!(await studioMembersTableExists(query))) return false
 
+  // Inner JOIN on purpose, unlike `list-users`: a membership held by a cloud
+  // account cannot log in to a self-hosted GoTrue, so a project exported from
+  // cloud with only those grants genuinely still needs a first admin.
   const adminCount = await query(
     `SELECT COUNT(*)::int as count
        FROM _supatype.studio_members m
@@ -586,15 +615,24 @@ async function hasAdminUsers(query: DbQuery): Promise<boolean> {
  * A project whose engine predates the membership table, or one that has never
  * been pushed, still needs working `admin create-user` / `admin set-role`.
  * Mirrors the engine's own definition (`create_studio_members_table_sql`).
+ *
+ * A row is held by exactly one identity: `user_id` for a project user (what the
+ * CLI grants), or `platform_user_id` for a Supatype Cloud account. The engine
+ * migrates older single-identity tables; this only has to create the current
+ * shape when there is nothing there at all.
  */
 async function ensureStudioMembersTable(query: DbQuery): Promise<void> {
   await query(`CREATE SCHEMA IF NOT EXISTS _supatype`)
   await query(
     `CREATE TABLE IF NOT EXISTS _supatype.studio_members (
-       user_id     UUID PRIMARY KEY,
-       role        TEXT NOT NULL,
-       created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-       updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+       id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+       user_id           UUID UNIQUE,
+       platform_user_id  UUID UNIQUE,
+       role              TEXT NOT NULL,
+       created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+       updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+       CONSTRAINT studio_members_one_identity
+         CHECK (num_nonnulls(user_id, platform_user_id) = 1)
      )`,
   )
 }

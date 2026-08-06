@@ -3,7 +3,7 @@ import { mkdirSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import type { QueryResult } from "pg"
-import { ensureFirstAdminWithQuery } from "../src/commands/admin.js"
+import { ensureFirstAdminWithQuery, STUDIO_ROLES } from "../src/commands/admin.js"
 
 function result(rows: Record<string, unknown>[]): QueryResult {
   return {
@@ -65,6 +65,16 @@ async function seedFirstAdmin(): Promise<Recorded[]> {
   }
   return log
 }
+
+// Capability checks refuse a role they do not recognise, so the CLI's set has to
+// match the server's (`studioRolePermissions`) and the control plane's
+// (`STUDIO_ROLE_PERMISSIONS`) exactly — a role only this side knows about creates
+// a user who is locked out of the panel they were made for.
+describe("STUDIO_ROLES", () => {
+  it("matches the roles the servers understand", () => {
+    expect([...STUDIO_ROLES]).toEqual(["admin", "editor", "viewer"])
+  })
+})
 
 describe("first admin user creation", () => {
   // Regression: Studio access used to be granted by writing `role` into
