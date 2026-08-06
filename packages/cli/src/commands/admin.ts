@@ -40,7 +40,7 @@ const BCRYPT_ROUNDS = 10
  * they do not recognise, so an unvalidated `--role` here would create a user who
  * is locked out of the very panel they were made for.
  */
-export const STUDIO_ROLES = ["admin", "editor", "viewer"] as const
+export const STUDIO_ROLES = ["admin", "developer", "editor"] as const
 
 function assertStudioRole(role: string): void {
   if ((STUDIO_ROLES as readonly string[]).includes(role)) return

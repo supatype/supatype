@@ -72,7 +72,7 @@ async function seedFirstAdmin(): Promise<Recorded[]> {
 // a user who is locked out of the panel they were made for.
 describe("STUDIO_ROLES", () => {
   it("matches the roles the servers understand", () => {
-    expect([...STUDIO_ROLES]).toEqual(["admin", "editor", "viewer"])
+    expect([...STUDIO_ROLES]).toEqual(["admin", "developer", "editor"])
   })
 })
 
