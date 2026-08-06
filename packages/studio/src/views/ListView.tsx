@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from "react"
 import { Header } from "../components/Header.js"
 import { useAdminClient } from "../hooks/useAdminClient.js"
+import { useLocale } from "../hooks/useLocale.js"
+import { getLocalizedFieldValue } from "../lib/localized-field.js"
 import type { ModelConfig, FieldConfig } from "../config.js"
 
 interface ListViewProps {
@@ -15,6 +17,7 @@ interface SortState {
 
 export function ListView({ model, onNavigate }: ListViewProps): React.ReactElement {
   const client = useAdminClient()
+  const { currentLocale, defaultLocale } = useLocale()
   const [rows, setRows] = useState<Record<string, unknown>[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -195,7 +198,12 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
                     </td>
                     {columns.map((col) => (
                       <td key={col.name} className="st-table-cell">
-                        <CellRenderer value={row[col.name]} field={col} />
+                        <CellRenderer
+                          value={row[col.name]}
+                          field={col}
+                          currentLocale={currentLocale}
+                          defaultLocale={defaultLocale}
+                        />
                       </td>
                     ))}
                   </tr>
@@ -229,27 +237,55 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
   )
 }
 
-function CellRenderer({ value, field }: { value: unknown; field: FieldConfig }): React.ReactElement {
-  if (value === null || value === undefined) {
+function CellRenderer({
+  value,
+  field,
+  currentLocale,
+  defaultLocale,
+}: {
+  value: unknown
+  field: FieldConfig
+  currentLocale: string
+  defaultLocale: string
+}): React.ReactElement {
+  const resolved = getLocalizedFieldValue(value, field.localized === true, currentLocale, defaultLocale)
+
+  if (resolved === null || resolved === undefined) {
     return <span className="st-cell-null">—</span>
   }
 
   switch (field.widget) {
     case "boolean":
-      return <span className={`st-cell-bool st-cell-bool--${value ? "true" : "false"}`}>{value ? "Yes" : "No"}</span>
+      return <span className={`st-cell-bool st-cell-bool--${resolved ? "true" : "false"}`}>{resolved ? "Yes" : "No"}</span>
     case "image":
-      if (typeof value === "object" && value !== null && "path" in (value as Record<string, unknown>)) {
+    case "file":
+      if (typeof resolved === "object" && resolved !== null && "path" in (resolved as Record<string, unknown>)) {
         return <span className="st-cell-image">[Image]</span>
       }
-      return <span>{String(value)}</span>
+      return <span>{formatCellText(resolved)}</span>
     case "publish":
-      return <span className={`st-cell-status st-cell-status--${String(value)}`}>{String(value)}</span>
+      return <span className={`st-cell-status st-cell-status--${String(resolved)}`}>{String(resolved)}</span>
     case "date":
     case "datetime":
-      return <span className="st-cell-date">{new Date(String(value)).toLocaleDateString()}</span>
+      return <span className="st-cell-date">{new Date(String(resolved)).toLocaleDateString()}</span>
+    case "json":
+      return <span className="st-cell-text">{truncate(formatCellText(resolved), 100)}</span>
     default:
-      return <span className="st-cell-text">{truncate(String(value), 100)}</span>
+      return <span className="st-cell-text">{truncate(formatCellText(resolved), 100)}</span>
   }
+}
+
+function formatCellText(value: unknown): string {
+  if (typeof value === "string") return value
+  if (typeof value === "number" || typeof value === "boolean") return String(value)
+  if (typeof value === "object" && value !== null) {
+    try {
+      return JSON.stringify(value)
+    } catch {
+      return String(value)
+    }
+  }
+  return String(value)
 }
 
 function truncate(text: string, maxLength: number): string {

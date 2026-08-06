@@ -4,9 +4,9 @@
 
 @layer base {
   :root {
-    --background: 240 10% 3.9%;
-    /** Main workspace — slightly deeper than chrome (sidebar / header). */
-    --canvas: 240 12% 2.8%;
+    /** Page chrome + main workspace (unified — no sidebar/content seam). */
+    --background: 240 8% 6%;
+    --canvas: 240 8% 6%;
     --foreground: 0 0% 98%;
     --card: 240 8% 6%;
     --card-foreground: 0 0% 98%;
@@ -109,6 +109,7 @@
 .st-table th, .st-table td { text-align: left; padding: 0.625rem 0.75rem; border-bottom: 1px solid hsl(var(--border)); font-size: 0.875rem; }
 .st-table th { font-weight: 600; color: hsl(var(--muted-foreground)); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; cursor: pointer; user-select: none; }
 .st-table tr:hover td { background: hsl(var(--accent)); }
+.st-table-row { cursor: pointer; }
 .st-table-check { width: 2.5rem; text-align: center; }
 .st-table-loading, .st-table-empty { text-align: center; padding: 2rem; color: hsl(var(--muted-foreground)); }
 .st-sort-indicator { font-size: 0.7rem; margin-left: 0.25rem; }

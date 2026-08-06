@@ -67,8 +67,14 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
         if (result.error) {
           setError(result.error.message)
         } else if (result.data) {
-          const data = result.data as Record<string, unknown>
-          setValues(data)
+          // Proxy may drop Accept: object+json and return a one-row array — unwrap it.
+          const raw = result.data as unknown
+          const data = (Array.isArray(raw) ? raw[0] : raw) as Record<string, unknown> | undefined
+          if (data && typeof data === "object") {
+            setValues(data)
+          } else {
+            setError("Record not found")
+          }
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load record")

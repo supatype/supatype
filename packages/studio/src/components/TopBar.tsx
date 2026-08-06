@@ -83,16 +83,16 @@ export function TopBar({ config, leftItems, extraItems, demoMode, onToggleSideba
   const hasLeftItems = leftItems && leftItems.length > 0
 
   return (
-    <header className="flex items-center h-14 px-4 bg-background border-b border-border shrink-0 gap-3 z-50">
+    <header className="z-50 flex h-14 shrink-0 items-center gap-3 border-b border-border bg-background px-4">
       {/* Logo */}
-      <div className="flex items-center gap-2 shrink-0">
-        <SupatypeIcon size={22} />
+      <div className="flex shrink-0 items-center gap-2">
+        <SupatypeIcon size={22} className="h-[22px] w-[25px]" />
 
         {/* Mobile sidebar toggle */}
         <button
           type="button"
           onClick={onToggleSidebar}
-          className="flex items-center justify-center w-7 h-7 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors md:hidden"
+          className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:hidden"
           aria-label="Toggle sidebar"
         >
           <HamburgerIcon />
@@ -102,8 +102,16 @@ export function TopBar({ config, leftItems, extraItems, demoMode, onToggleSideba
       {/* Left slot: "/" + extension components (project name, branch indicator) */}
       {hasLeftItems && (
         <>
-          <span className="text-muted-foreground/50 text-lg select-none shrink-0">/</span>
-          <div className="flex items-center gap-2 min-w-0">
+          <svg
+            width="8"
+            height="22"
+            viewBox="0 0 8 22"
+            className="shrink-0 text-muted-foreground/50"
+            aria-hidden
+          >
+            <path d="M6.5 1.5 1.5 20.5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" />
+          </svg>
+          <div className="flex min-w-0 items-center gap-2">
             {leftItems!.map((Item, i) => (
               <Item key={i} />
             ))}
@@ -113,8 +121,16 @@ export function TopBar({ config, leftItems, extraItems, demoMode, onToggleSideba
 
       {!hasLeftItems && (
         <>
-          <span className="text-muted-foreground/50 text-lg select-none shrink-0">/</span>
-          <span className="text-sm text-muted-foreground truncate max-w-[200px]">Studio</span>
+          <svg
+            width="8"
+            height="22"
+            viewBox="0 0 8 22"
+            className="shrink-0 text-muted-foreground/50"
+            aria-hidden
+          >
+            <path d="M6.5 1.5 1.5 20.5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" />
+          </svg>
+          <span className="max-w-[200px] truncate text-sm text-muted-foreground">Studio</span>
           <BranchPill />
         </>
       )}
