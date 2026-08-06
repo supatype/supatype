@@ -1862,6 +1862,67 @@ function parseAccessRule(
         ),
       }
     }
+    case "All": {
+      const listArg = typeNode.typeArguments?.[0]
+      if (!listArg || !ts.isTupleTypeNode(listArg)) {
+        throw new Error(
+          '`All<>` takes a tuple of rules, as in `All<[Role<"editor">, NotNull<"published_at">]>`.',
+        )
+      }
+      // Unlike `Any<[]>`, an empty `All` grants *everything* — an empty AND is
+      // true. Reading as a restriction while imposing none is worse than an error.
+      if (listArg.elements.length === 0) {
+        throw new Error(
+          "`All<[]>` restricts nothing and grants everything. List the rules that " +
+            "must hold, or use `Public` if that is the intent.",
+        )
+      }
+      return {
+        type: "all",
+        rules: listArg.elements.map((element) =>
+          parseAccessRule(element, sourceFile, resolveCtx),
+        ),
+      }
+    }
+    case "Not": {
+      const inner = typeNode.typeArguments?.[0]
+      if (!inner) {
+        throw new Error('`Not<>` takes one rule, as in `Not<Role<"banned">>`.')
+      }
+      return { type: "not", rule: parseAccessRule(inner, sourceFile, resolveCtx) }
+    }
+    case "Eq":
+    case "Neq":
+    case "Gt":
+    case "Gte":
+    case "Lt":
+    case "Lte":
+    case "Like": {
+      const args = typeNode.typeArguments ?? []
+      if (args.length !== 2) {
+        throw new Error(
+          `\`${ref}<>\` takes two operands, as in \`${ref}<"author_id", AuthUid>\`.`,
+        )
+      }
+      return {
+        type: "compare",
+        op: ref.toLowerCase(),
+        left: parseAccessOperand(args[0]!, sourceFile),
+        right: parseAccessOperand(args[1]!, sourceFile),
+      }
+    }
+    case "IsNull":
+    case "NotNull": {
+      const operand = typeNode.typeArguments?.[0]
+      if (!operand) {
+        throw new Error(`\`${ref}<>\` takes one operand, as in \`${ref}<"deleted_at">\`.`)
+      }
+      return {
+        type: "nullCheck",
+        operand: parseAccessOperand(operand, sourceFile),
+        isNull: ref === "IsNull",
+      }
+    }
     case "Custom": {
       const sqlArg = typeNode.typeArguments?.[0]
       // The SQL is the whole rule, so an absent or non-literal argument cannot be
@@ -1886,10 +1947,93 @@ function parseAccessRule(
       throw new Error(
         `Unknown access rule "${ref}". Supported: Public, Private, LoggedIn, ` +
           `Owner<"field">, OwnerFrom<"relation">, Role<"name">, ` +
-          `Any<[rule, …]>, Custom<"sql">` +
+          `Any<[rule, …]>, All<[rule, …]>, Not<rule>, ` +
+          `Eq/Neq/Gt/Gte/Lt/Lte/Like<left, right>, IsNull<operand>, NotNull<operand>, ` +
+          `Custom<"sql">` +
           ` (buckets also accept BucketPublic, BucketPrivate, BucketLoggedIn, BucketOwner, BucketRole).`,
       )
   }
+}
+
+/**
+ * One side of a comparison.
+ *
+ * A bare string literal is a **column** on the model the rule is attached to.
+ * That is the common case by a wide margin, and making it the default keeps
+ * `Eq<"author_id", AuthUid>` readable; a constant is written `Literal<"x">` so the
+ * two can never be confused. Numbers and booleans are unambiguous, so they are
+ * taken as constants directly.
+ */
+function parseAccessOperand(
+  typeNode: ts.TypeNode,
+  sourceFile: ts.SourceFile,
+): Record<string, unknown> {
+  if (ts.isLiteralTypeNode(typeNode)) {
+    const literal = typeNode.literal
+    if (ts.isStringLiteral(literal)) {
+      const name = literal.text.trim()
+      if (name === "") {
+        throw new Error("An empty column name is not a valid operand.")
+      }
+      // Rendered into SQL as an identifier, so refuse anything that is not one
+      // rather than letting it through to the policy.
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+        throw new Error(
+          `"${name}" is not a valid column name. Use \`Literal<"${name}">\` for a ` +
+            `constant, or quote a real column.`,
+        )
+      }
+      return { kind: "column", name }
+    }
+    if (ts.isNumericLiteral(literal)) {
+      return { kind: "literal", value: Number(literal.text) }
+    }
+    if (literal.kind === ts.SyntaxKind.TrueKeyword) return { kind: "literal", value: true }
+    if (literal.kind === ts.SyntaxKind.FalseKeyword) return { kind: "literal", value: false }
+  }
+
+  if (ts.isTypeReferenceNode(typeNode) && !ts.isQualifiedName(typeNode.typeName)) {
+    const ref = ownerText(typeNode.typeName, sourceFile)
+    switch (ref) {
+      case "AuthUid":
+        return { kind: "authUid" }
+      case "AuthRole":
+        return { kind: "authRole" }
+      case "Claim": {
+        const pathArg = typeNode.typeArguments?.[0]
+        if (!pathArg || !ts.isLiteralTypeNode(pathArg) || !ts.isStringLiteral(pathArg.literal)) {
+          throw new Error('`Claim<>` takes a dotted path literal, as in `Claim<"app_metadata.tier">`.')
+        }
+        const path = pathArg.literal.text.trim()
+        // The path is split on dots to walk the claims object, so an empty
+        // segment would silently look up a key that cannot exist.
+        if (path === "" || path.split(".").some((segment) => segment.trim() === "")) {
+          throw new Error(
+            `\`Claim<"${path}">\` is not a valid claim path — use dotted segments, ` +
+              `as in \`Claim<"app_metadata.tier">\`.`,
+          )
+        }
+        return { kind: "claim", path }
+      }
+      case "Literal": {
+        const valueArg = typeNode.typeArguments?.[0]
+        if (!valueArg || !ts.isLiteralTypeNode(valueArg)) {
+          throw new Error('`Literal<>` takes a string, number or boolean, as in `Literal<"published">`.')
+        }
+        const literal = valueArg.literal
+        if (ts.isStringLiteral(literal)) return { kind: "literal", value: literal.text }
+        if (ts.isNumericLiteral(literal)) return { kind: "literal", value: Number(literal.text) }
+        if (literal.kind === ts.SyntaxKind.TrueKeyword) return { kind: "literal", value: true }
+        if (literal.kind === ts.SyntaxKind.FalseKeyword) return { kind: "literal", value: false }
+        throw new Error('`Literal<>` takes a string, number or boolean.')
+      }
+    }
+  }
+
+  throw new Error(
+    `\`${ownerText(typeNode, sourceFile)}\` is not a valid operand. Use a column name ` +
+      `("author_id"), AuthUid, AuthRole, Claim<"path"> or Literal<value>.`,
+  )
 }
 
 interface ParsedRelationOptions {

@@ -107,6 +107,155 @@ export type Post = Model<{ id: UUID }, { access: { read: Any<Role<"admin">> } }>
   })
 })
 
+describe("All<[…]> and Not<>", () => {
+  it("composes an AND-join and a negation", () => {
+    const post = extract(
+      `
+import type { Model, UUID, All, Not, Role, NotNull } from "@supatype/types"
+
+export type Post = Model<{
+  id: UUID
+}, {
+  access: { read: All<[Role<"editor">, NotNull<"published_at">, Not<Role<"banned">>]> }
+}>
+`,
+      "all",
+    )
+
+    expect(access(post)["read"]).toEqual({
+      type: "all",
+      rules: [
+        { type: "role", roles: ["editor"] },
+        { type: "nullCheck", operand: { kind: "column", name: "published_at" }, isNull: false },
+        { type: "not", rule: { type: "role", roles: ["banned"] } },
+      ],
+    })
+  })
+
+  // An empty AND is *true*: it reads as a restriction while imposing none, which
+  // is the opposite failure from `Any<[]>` and just as silent.
+  it("rejects an empty list", () => {
+    expect(() =>
+      extract(
+        `
+import type { Model, UUID, All } from "@supatype/types"
+export type Post = Model<{ id: UUID }, { access: { read: All<[]> } }>
+`,
+        "all-empty",
+      ),
+    ).toThrow(/grants everything/)
+  })
+})
+
+describe("comparisons", () => {
+  it("treats a bare string as a column and Literal<> as a constant", () => {
+    const post = extract(
+      `
+import type { Model, UUID, All, Eq, Gte, Literal, AuthUid, AuthRole, Claim } from "@supatype/types"
+
+export type Post = Model<{
+  id: UUID
+}, {
+  access: {
+    read: All<[
+      Eq<"author_id", AuthUid>,
+      Eq<"status", Literal<"published">>,
+      Eq<AuthRole, Literal<"admin">>,
+      Eq<"tier", Claim<"app_metadata.tier">>,
+      Gte<"views", Literal<10>>
+    ]>
+  }
+}>
+`,
+      "compare",
+    )
+
+    expect(access(post)["read"]).toEqual({
+      type: "all",
+      rules: [
+        { type: "compare", op: "eq", left: { kind: "column", name: "author_id" }, right: { kind: "authUid" } },
+        {
+          type: "compare",
+          op: "eq",
+          left: { kind: "column", name: "status" },
+          right: { kind: "literal", value: "published" },
+        },
+        {
+          type: "compare",
+          op: "eq",
+          left: { kind: "authRole" },
+          right: { kind: "literal", value: "admin" },
+        },
+        {
+          type: "compare",
+          op: "eq",
+          left: { kind: "column", name: "tier" },
+          right: { kind: "claim", path: "app_metadata.tier" },
+        },
+        {
+          type: "compare",
+          op: "gte",
+          left: { kind: "column", name: "views" },
+          right: { kind: "literal", value: 10 },
+        },
+      ],
+    })
+  })
+
+  it("extracts IsNull separately from equality", () => {
+    const post = extract(
+      `
+import type { Model, UUID, IsNull } from "@supatype/types"
+export type Post = Model<{ id: UUID }, { access: { read: IsNull<"deleted_at"> } }>
+`,
+      "isnull",
+    )
+    expect(access(post)["read"]).toEqual({
+      type: "nullCheck",
+      operand: { kind: "column", name: "deleted_at" },
+      isNull: true,
+    })
+  })
+
+  // A bare string becomes a SQL identifier, so anything that is not one has to be
+  // refused rather than reaching the policy.
+  it("rejects a bare string that is not a column name", () => {
+    expect(() =>
+      extract(
+        `
+import type { Model, UUID, Eq, AuthUid } from "@supatype/types"
+export type Post = Model<{ id: UUID }, { access: { read: Eq<"a b'; drop", AuthUid> } }>
+`,
+        "compare-badcol",
+      ),
+    ).toThrow(/not a valid column name/)
+  })
+
+  it("rejects a malformed claim path", () => {
+    expect(() =>
+      extract(
+        `
+import type { Model, UUID, Eq, Claim } from "@supatype/types"
+export type Post = Model<{ id: UUID }, { access: { read: Eq<"tier", Claim<"app_metadata..tier">> } }>
+`,
+        "compare-badclaim",
+      ),
+    ).toThrow(/not a valid claim path/)
+  })
+
+  it("rejects an unknown operand", () => {
+    expect(() =>
+      extract(
+        `
+import type { Model, UUID, Eq, Public } from "@supatype/types"
+export type Post = Model<{ id: UUID }, { access: { read: Eq<"a", Public> } }>
+`,
+        "compare-badoperand",
+      ),
+    ).toThrow(/not a valid operand/)
+  })
+})
+
 describe("Custom<sql>", () => {
   it("passes the predicate through verbatim", () => {
     const post = extract(

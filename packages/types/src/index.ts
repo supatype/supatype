@@ -375,6 +375,76 @@ export type Custom<TSql extends string = string> = Access<"Custom", {
   readonly kind: "Custom"
   readonly sql: TSql
 }>
+
+/** AND-composition: access needs **every** listed rule to match. */
+export type All<TRules extends readonly unknown[]> = Access<"All", {
+  readonly kind: "All"
+  readonly rules: TRules
+}>
+
+/** Negation. `Not<Role<"banned">>` grants access to everyone but that role. */
+export type Not<TRule> = Access<"Not", { readonly kind: "Not"; readonly rule: TRule }>
+
+// ─── Operands ────────────────────────────────────────────────────────────────
+//
+// The values a comparison can name. A bare string is a column on the model the
+// rule is attached to; everything else is one of these.
+
+/** The signed-in user's id. Compiles to `auth.uid()`, evaluated once per query. */
+export type AuthUid = Access<"AuthUid", { readonly kind: "AuthUid" }>
+
+/** The caller's role. Compiles to `auth.role()`, evaluated once per query. */
+export type AuthRole = Access<"AuthRole", { readonly kind: "AuthRole" }>
+
+/**
+ * A nested JWT claim, by dotted path: `Claim<"app_metadata.tier">`.
+ *
+ * This is the developer's own namespace — whatever your application puts in its
+ * tokens. A missing claim is SQL NULL, so comparing against one that is absent
+ * denies rather than erroring.
+ */
+export type Claim<TPath extends string> = Access<"Claim", {
+  readonly kind: "Claim"
+  readonly path: TPath
+}>
+
+/** A constant. Bare strings in a comparison mean *columns*, so literals are explicit. */
+export type Literal<TValue extends string | number | boolean> = Access<"Literal", {
+  readonly kind: "Literal"
+  readonly value: TValue
+}>
+
+// ─── Comparisons ─────────────────────────────────────────────────────────────
+
+type Comparison<TName extends string, TLeft, TRight> = Access<TName, {
+  readonly kind: TName
+  readonly left: TLeft
+  readonly right: TRight
+}>
+
+/**
+ * `Eq<"author_id", AuthUid>` — the row's `author_id` equals the caller.
+ *
+ * A bare string on either side is a column name; use `Literal<…>` for a constant,
+ * so `Eq<"status", Literal<"published">>` cannot be confused with a comparison
+ * between two columns.
+ */
+export type Eq<TLeft, TRight> = Comparison<"Eq", TLeft, TRight>
+export type Neq<TLeft, TRight> = Comparison<"Neq", TLeft, TRight>
+export type Gt<TLeft, TRight> = Comparison<"Gt", TLeft, TRight>
+export type Gte<TLeft, TRight> = Comparison<"Gte", TLeft, TRight>
+export type Lt<TLeft, TRight> = Comparison<"Lt", TLeft, TRight>
+export type Lte<TLeft, TRight> = Comparison<"Lte", TLeft, TRight>
+export type Like<TLeft, TRight> = Comparison<"Like", TLeft, TRight>
+
+/**
+ * `IsNull<"deleted_at">` / `NotNull<"published_at">`.
+ *
+ * Separate from `Eq`, because SQL null comparison is not equality: `col = NULL`
+ * is null, never true, so writing it that way would deny everything silently.
+ */
+export type IsNull<TOperand> = Access<"IsNull", { readonly kind: "IsNull"; readonly operand: TOperand }>
+export type NotNull<TOperand> = Access<"NotNull", { readonly kind: "NotNull"; readonly operand: TOperand }>
 type BoundOwnerForFields<TFields extends Record<string, unknown>> = Access<"Owner", {
   readonly kind: "Owner"
   readonly key: OwnerEligibleFieldKeys<TFields>
