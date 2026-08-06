@@ -46,7 +46,7 @@ export function extractSchemaAstFromTypes(
   const bucketAliases = new Map<string, string>()
   const bucketsById = new Map<string, ExtractedStorageBucketAst>()
   for (const sourceFile of sourceFiles) {
-    const bucketContext = collectBucketContext(sourceFile)
+    const bucketContext = collectBucketContext(sourceFile, resolveCtx)
     for (const [alias, bucketId] of bucketContext.aliases) {
       bucketAliases.set(alias, bucketId)
     }
@@ -111,6 +111,7 @@ export function extractSchemaAstFromTypes(
         stmt.name.text,
         fieldsArg,
         fields,
+        resolveCtx,
       )
 
       models.push(
@@ -1066,7 +1067,10 @@ function parseStringLiteralTuple(node: ts.TypeNode, sourceFile: ts.SourceFile): 
   return out
 }
 
-function collectBucketContext(sourceFile: ts.SourceFile): {
+function collectBucketContext(
+  sourceFile: ts.SourceFile,
+  resolveCtx: ResolveContext,
+): {
   aliases: Map<string, string>
   bucketsById: Map<string, ExtractedStorageBucketAst>
 } {
@@ -1084,7 +1088,7 @@ function collectBucketContext(sourceFile: ts.SourceFile): {
 
     const parsed =
       configArg && ts.isTypeLiteralNode(configArg)
-        ? parseBucketTypeLiteral(configArg, sourceFile)
+        ? parseBucketTypeLiteral(configArg, sourceFile, id, resolveCtx)
         : {}
 
     const next = buildExtractedBucketAst(id, parsed)
@@ -1133,6 +1137,8 @@ interface ParsedBucketLiteral {
 function parseBucketTypeLiteral(
   lit: ts.TypeLiteralNode,
   sourceFile: ts.SourceFile,
+  bucketId: string,
+  resolveCtx: ResolveContext,
 ): Partial<ParsedBucketLiteral> {
   const out: Partial<ParsedBucketLiteral> = {}
   for (const member of lit.members) {
@@ -1159,7 +1165,7 @@ function parseBucketTypeLiteral(
       continue
     }
     if (key === "access") {
-      const acc = parsePartialBucketAccess(member.type, sourceFile)
+      const acc = parsePartialBucketAccess(member.type, sourceFile, bucketId, resolveCtx)
       if (acc !== undefined && Object.keys(acc).length > 0) out.access = acc
       continue
     }
@@ -1221,14 +1227,28 @@ function parseMimeAcceptList(typeNode: ts.TypeNode, sourceFile: ts.SourceFile): 
 function parsePartialBucketAccess(
   typeNode: ts.TypeNode,
   sourceFile: ts.SourceFile,
+  bucketId: string,
+  resolveCtx: ResolveContext,
 ): Record<string, unknown> | undefined {
-  if (!ts.isTypeLiteralNode(typeNode)) return undefined
+  // Same hazard as model access: silently dropping these rules publishes a
+  // bucket with no read/write restrictions, so an alias must resolve and an
+  // unresolvable annotation must fail rather than degrade to "no rules".
+  const literal = resolveAccessLiteral(typeNode, sourceFile, resolveCtx)
+  if (!literal) {
+    throw new Error(
+      `Bucket "${bucketId}": could not resolve its \`access\` rules from ` +
+        `\`${typeNode.getText(sourceFile)}\`.\n` +
+        `  access must be an object type, or a type alias for one, e.g.\n` +
+        `    export type MediaAccess = { read: Public; create: Authenticated }\n` +
+        `  Refusing to continue: an unresolved access block would leave this bucket unrestricted.`,
+    )
+  }
   const access: Record<string, unknown> = {}
-  for (const member of typeNode.members) {
+  for (const member of literal.members) {
     if (!ts.isPropertySignature(member) || !member.type) continue
     const key = getPropertyName(member.name)
     if (key !== "read" && key !== "create" && key !== "delete") continue
-    access[key] = parseAccessRule(member.type, sourceFile)
+    access[key] = parseAccessRule(member.type, sourceFile, resolveCtx)
   }
   return access
 }
@@ -1554,6 +1574,7 @@ function parseModelMeta(
   modelName: string,
   fieldsArg: ts.TypeNode,
   fields: Record<string, FieldAstV2>,
+  resolveCtx: ResolveContext,
 ): {
   tableName: string
   access: Record<string, unknown>
@@ -1582,7 +1603,7 @@ function parseModelMeta(
 
   return {
     tableName,
-    access: parseModelAccess(metaArg, sourceFile),
+    access: parseModelAccess(metaArg, sourceFile, modelName, resolveCtx),
     options,
     indexes: parseModelIndexes(metaArg, sourceFile, fields),
   }
@@ -1646,28 +1667,141 @@ function resolveIndexFieldName(fieldName: string, fields: Record<string, FieldAs
   return fieldName
 }
 
-function parseModelAccess(metaArg: ts.TypeNode | undefined, sourceFile: ts.SourceFile): Record<string, unknown> {
+/**
+ * Resolve an `access:` annotation to its rule object.
+ *
+ * `access` may be written inline (`access: { read: Public }`) or factored into a
+ * shared type alias (`access: CmsPublicReadAdminWrite`) — the latter is the
+ * natural way to reuse one policy set across many models, so it has to resolve
+ * through aliases and intersections, not just literals.
+ *
+ * Anything unresolvable throws. Returning `{}` here means "no access rules",
+ * which the differ treats as "emit no RLS policies" — so a typo or an
+ * unsupported shape silently published a table with no row-level protection at
+ * all. Failing the extract is the only safe outcome.
+ */
+function parseModelAccess(
+  metaArg: ts.TypeNode | undefined,
+  sourceFile: ts.SourceFile,
+  modelName: string,
+  resolveCtx: ResolveContext,
+): Record<string, unknown> {
   if (!metaArg || !ts.isTypeLiteralNode(metaArg)) return {}
   const accessProp = metaArg.members.find(
     (member) => ts.isPropertySignature(member) && getPropertyName(member.name) === "access",
   )
-  if (!accessProp || !ts.isPropertySignature(accessProp) || !accessProp.type || !ts.isTypeLiteralNode(accessProp.type)) {
+  if (!accessProp || !ts.isPropertySignature(accessProp) || !accessProp.type) {
     return {}
   }
 
+  const literal = resolveAccessLiteral(accessProp.type, sourceFile, resolveCtx)
+  if (!literal) {
+    throw new Error(
+      `Model "${modelName}": could not resolve its \`access\` rules from ` +
+        `\`${accessProp.type.getText(sourceFile)}\`.\n` +
+        `  access must be an object type, or a type alias for one:\n` +
+        `    export type PublicReadAdminWrite = { read: Public; create: Role<"admin"> }\n` +
+        `  A \`const … as const\` value cannot be used here — access is read from types, and\n` +
+        `  rule names like Public / Role are types, not values.\n` +
+        `  Refusing to continue: an unresolved access block would publish this table with no RLS.`,
+    )
+  }
+
   const access: Record<string, unknown> = {}
-  for (const member of accessProp.type.members) {
+  for (const member of literal.members) {
     if (!ts.isPropertySignature(member) || !member.type) continue
     const key = getPropertyName(member.name)
     if (!key) continue
-    access[key] = parseAccessRule(member.type, sourceFile)
+    access[key] = parseAccessRule(member.type, sourceFile, resolveCtx)
+  }
+
+  if (Object.keys(access).length === 0) {
+    throw new Error(
+      `Model "${modelName}": \`access\` resolved to an empty rule set ` +
+        `(from \`${accessProp.type.getText(sourceFile)}\`). Remove \`access\` if the table is ` +
+        `intentionally unrestricted, or declare at least one of read/create/update/delete.`,
+    )
   }
   return access
 }
 
-function parseAccessRule(typeNode: ts.TypeNode, sourceFile: ts.SourceFile): Record<string, unknown> {
+/** Walk aliases/intersections down to the object type holding the access rules. */
+function resolveAccessLiteral(
+  typeNode: ts.TypeNode,
+  sourceFile: ts.SourceFile,
+  resolveCtx: ResolveContext,
+  depth = 0,
+): ts.TypeLiteralNode | null {
+  if (depth > 16) return null
+  if (ts.isTypeLiteralNode(typeNode)) return typeNode
+
+  if (ts.isIntersectionTypeNode(typeNode)) {
+    const members: ts.TypeElement[] = []
+    for (const part of typeNode.types) {
+      const resolved = resolveAccessLiteral(part, sourceFile, resolveCtx, depth + 1)
+      if (!resolved) return null
+      members.push(...resolved.members)
+    }
+    return ts.factory.createTypeLiteralNode(members)
+  }
+
+  if (ts.isTypeReferenceNode(typeNode)) {
+    const expanded = tryResolveTypeReference(typeNode, sourceFile, resolveCtx)
+    if (expanded) return resolveAccessLiteral(expanded, sourceFile, resolveCtx, depth + 1)
+  }
+
+  if (needsChecker(typeNode)) {
+    const resolved = resolveTypeNode(typeNode, sourceFile, resolveCtx)
+    if (resolved !== typeNode) {
+      return resolveAccessLiteral(resolved, sourceFile, resolveCtx, depth + 1)
+    }
+  }
+
+  return null
+}
+
+/**
+ * `access` rules may be declared in a different file from the model (a shared
+ * alias), and `getText(file)` reads the given file's text at the node's offsets
+ * — so passing the model's file for a node owned by another one yielded garbage
+ * and every rule silently fell through to `private`. Always read a node's text
+ * from the file that actually owns it.
+ */
+function ownerText(node: ts.Node, fallback: ts.SourceFile): string {
+  const own = node.pos >= 0 ? node.getSourceFile() : undefined
+  return node.getText(own ?? fallback)
+}
+
+function parseAccessRule(
+  typeNode: ts.TypeNode,
+  sourceFile: ts.SourceFile,
+  resolveCtx?: ResolveContext,
+): Record<string, unknown> {
+  // Reuse a single rule from a shared set: `access: { read: Rules["read"] }`.
+  if (ts.isIndexedAccessTypeNode(typeNode) && resolveCtx) {
+    const member = resolveIndexedAccessRule(typeNode, sourceFile, resolveCtx)
+    if (member) return parseAccessRule(member, sourceFile, resolveCtx)
+    throw new Error(
+      `Could not resolve access rule from \`${ownerText(typeNode, sourceFile)}\`. ` +
+        `Reference a rule set member as \`Rules["read"]\`, where Rules is a type alias.`,
+    )
+  }
+
   if (!ts.isTypeReferenceNode(typeNode)) return { type: "private" }
-  const ref = typeNode.typeName.getText(sourceFile)
+
+  // `Rules.read` is a qualified name (namespace lookup), not a member of a type
+  // alias — TypeScript rejects it, and it used to fall through to `private`,
+  // silently denying an operation the author meant to grant.
+  if (ts.isQualifiedName(typeNode.typeName)) {
+    const text = ownerText(typeNode.typeName, sourceFile)
+    const [head, ...rest] = text.split(".")
+    throw new Error(
+      `Access rule \`${text}\` is not valid: a member of a rule-set type must be written ` +
+        `\`${head}["${rest.join(".")}"]\`, not \`${text}\`.`,
+    )
+  }
+
+  const ref = ownerText(typeNode.typeName, sourceFile)
   switch (ref) {
     case "Public":
     case "BucketPublic":
@@ -1684,23 +1818,35 @@ function parseAccessRule(typeNode: ts.TypeNode, sourceFile: ts.SourceFile): Reco
       const args = typeNode.typeArguments ?? []
       const keyArg = args.length >= 2 ? args[1] : args[0]
       // Must match engine `AccessRule::Owner { field }` (see supatype-schema-engine parser/ast.rs).
-      return { type: "owner", field: keyArg?.getText(sourceFile).replace(/['"]/g, "") ?? "user_id" }
+      return {
+        type: "owner",
+        field: keyArg ? ownerText(keyArg, sourceFile).replace(/['"]/g, "") : "user_id",
+      }
     }
     case "OwnerFrom": {
       const relationArg = typeNode.typeArguments?.[0]
-      const relationField = relationArg?.getText(sourceFile).replace(/['"]/g, "") ?? "owner"
+      const relationField = relationArg
+        ? ownerText(relationArg, sourceFile).replace(/['"]/g, "")
+        : "owner"
       return { type: "owner", field: relationField }
     }
-    case "Role": {
-      const roleArg = typeNode.typeArguments?.[0]
-      return { type: "role", roles: [roleArg?.getText(sourceFile).replace(/['"]/g, "") ?? "admin"] }
-    }
+    case "Role":
     case "BucketRole": {
       const roleArg = typeNode.typeArguments?.[0]
-      return { type: "role", roles: [roleArg?.getText(sourceFile).replace(/['"]/g, "") ?? "admin"] }
+      return {
+        type: "role",
+        roles: [roleArg ? ownerText(roleArg, sourceFile).replace(/['"]/g, "") : "admin"],
+      }
     }
     default:
-      return { type: "private" }
+      // Falling back to `private` here would silently deny an operation the
+      // author believed they had granted — and with deny-by-default there is no
+      // longer any need for a permissive guess. Name the offending rule instead.
+      throw new Error(
+        `Unknown access rule "${ref}". Supported: Public, Private, LoggedIn, ` +
+          `Owner<"field">, OwnerFrom<"relation">, Role<"name">` +
+          ` (buckets also accept BucketPublic, BucketPrivate, BucketLoggedIn, BucketOwner, BucketRole).`,
+      )
   }
 }
 
@@ -1789,4 +1935,24 @@ function relationForeignKeyFromField(fieldName: string): string {
     .toLowerCase()
   const base = snake.replace(/_id$/i, "")
   return `${base}_id`
+}
+
+/** Resolve `Rules["read"]` to the rule type declared for that member. */
+function resolveIndexedAccessRule(
+  node: ts.IndexedAccessTypeNode,
+  sourceFile: ts.SourceFile,
+  resolveCtx: ResolveContext,
+): ts.TypeNode | undefined {
+  const literal = resolveAccessLiteral(node.objectType, sourceFile, resolveCtx)
+  if (!literal) return undefined
+  if (!ts.isLiteralTypeNode(node.indexType) || !ts.isStringLiteral(node.indexType.literal)) {
+    return undefined
+  }
+  const key = node.indexType.literal.text
+  for (const member of literal.members) {
+    if (ts.isPropertySignature(member) && getPropertyName(member.name) === key) {
+      return member.type
+    }
+  }
+  return undefined
 }

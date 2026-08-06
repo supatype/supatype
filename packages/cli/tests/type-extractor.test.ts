@@ -1135,4 +1135,116 @@ export type User = Model<{ id: UUID; email: NonNullable<string> }>
 
     expect(() => extractSchemaAstFromTypes(schemaPath, dir)).toThrow(/Unknown Supatype type "NonNullable"/)
   })
+  // Regression: access factored into a shared type alias silently produced NO
+  // rules, so every model using the pattern was published without RLS.
+  it("resolves model access from a shared type alias in another file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-access-alias-"))
+    dirs.push(dir)
+    writeFileSync(
+      join(dir, "shared.ts"),
+      `
+import type { Public, Role } from "@supatype/types"
+
+export type CmsPublicReadAdminWrite = {
+  read: Public
+  create: Role<"admin">
+  update: Role<"admin">
+  delete: Role<"admin">
+}
+`,
+      "utf8",
+    )
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, UUID } from "@supatype/types"
+import type { CmsPublicReadAdminWrite } from "./shared.js"
+
+export type Article = Model<{ id: UUID; title: string }, {
+  tableName: "articles"
+  access: CmsPublicReadAdminWrite
+}>
+`,
+      "utf8",
+    )
+
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const access = modelAccess(ast.models.find((m) => m.name === "Article"))
+    expect(access).toEqual({
+      read: { type: "public" },
+      create: { type: "role", roles: ["admin"] },
+      update: { type: "role", roles: ["admin"] },
+      delete: { type: "role", roles: ["admin"] },
+    })
+  })
+
+  it("resolves model access from an intersection of aliases", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-access-intersection-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, UUID, Public, Role } from "@supatype/types"
+
+type PublicRead = { read: Public }
+type AdminWrite = { create: Role<"admin">; delete: Role<"admin"> }
+
+export type Article = Model<{ id: UUID; title: string }, {
+  access: PublicRead & AdminWrite
+}>
+`,
+      "utf8",
+    )
+
+    const access = modelAccess(
+      extractSchemaAstFromTypes(schemaPath, dir).models.find((m) => m.name === "Article"),
+    )
+    expect(Object.keys(access).sort()).toEqual(["create", "delete", "read"])
+  })
+
+  // The dangerous case: `const … as const` cannot express access (the rule names
+  // are types), and silently ignoring it published an unprotected table.
+  it("throws when model access cannot be resolved instead of dropping the rules", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-access-unresolvable-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, UUID } from "@supatype/types"
+
+export type Article = Model<{ id: UUID; title: string }, {
+  access: typeof someRuntimeValue
+}>
+`,
+      "utf8",
+    )
+
+    expect(() => extractSchemaAstFromTypes(schemaPath, dir)).toThrow(
+      /Model "Article": could not resolve its `access` rules/,
+    )
+  })
+
+  it("throws when bucket access cannot be resolved", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-bucket-access-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Bucket } from "@supatype/types"
+
+export type Media = Bucket<"media", {
+  access: typeof someRuntimeValue
+}>
+`,
+      "utf8",
+    )
+
+    expect(() => extractSchemaAstFromTypes(schemaPath, dir)).toThrow(
+      /Bucket "media": could not resolve its `access` rules/,
+    )
+  })
 })

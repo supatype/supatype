@@ -20,7 +20,7 @@ import { hasEngineOverride } from "../binary-cache.js"
 import { readDevSessionLock } from "../dev-session-lock.js"
 import { composeProjectName } from "../self-host-compose.js"
 import { confirm as uiConfirm } from "../ui/confirm.js"
-import { error, info, plain } from "../ui/messages.js"
+import { error, info, plain, warn } from "../ui/messages.js"
 import { promptPassword, promptText } from "../ui/prompts.js"
 import { isInteractive } from "../ui/interactive.js"
 import {
@@ -166,13 +166,22 @@ export function registerAdmin(program: Command): void {
         const pool = new pg.Pool({ connectionString: connection, max: 2 })
 
         try {
+          // Studio roles live in `_supatype.studio_members`, not in
+          // `app_metadata`: that key is the developer's namespace for their own
+          // app roles, and writing Studio access there means assigning an app
+          // role could hand out admin UI access by accident.
           const result = await pool.query(
-            `UPDATE auth.users
-             SET raw_app_meta_data = raw_app_meta_data || $1::jsonb,
-                 updated_at = now()
-             WHERE email = $2
-             RETURNING id, email, raw_app_meta_data`,
-            [JSON.stringify({ role: opts.role }), opts.email.toLowerCase()],
+            `WITH target AS (
+               SELECT id, email FROM auth.users WHERE email = $2
+             ), upsert AS (
+               INSERT INTO _supatype.studio_members (user_id, role)
+               SELECT id, $1 FROM target
+               ON CONFLICT (user_id) DO UPDATE
+                 SET role = EXCLUDED.role, updated_at = now()
+               RETURNING user_id
+             )
+             SELECT id, email FROM target`,
+            [opts.role, opts.email.toLowerCase()],
           )
 
           if (result.rows.length === 0) {
@@ -180,11 +189,7 @@ export function registerAdmin(program: Command): void {
             process.exit(1)
           }
 
-          const user = result.rows[0] as {
-            id: string
-            email: string
-            raw_app_meta_data: Record<string, unknown>
-          }
+          const user = result.rows[0] as { id: string; email: string }
 
           info("Role updated successfully.")
           plain(`  ID:    ${user.id}`)
@@ -472,6 +477,7 @@ async function createAdminUser(
   )
 
   const user = result.rows[0] as { id: string; email: string }
+  await recordStudioMembership(query, user.id, role)
   if (!opts.quiet) {
     info("Admin user created successfully.")
     plain(`  ID:    ${user.id}`)
@@ -479,6 +485,33 @@ async function createAdminUser(
     plain(`  Role:  ${role}`)
   }
   return user
+}
+
+/**
+ * Record Studio access in `_supatype.studio_members`.
+ *
+ * Studio capability is deliberately not a JWT claim: `app_metadata` belongs to
+ * the developer's own app roles, and letting it grant Studio access means a
+ * developer assigning an app role could hand out admin UI access by accident.
+ * Best-effort — an older engine may not have created the table yet, and failing
+ * here must not undo a created user.
+ */
+async function recordStudioMembership(
+  query: DbQuery,
+  userId: string,
+  role: string,
+): Promise<void> {
+  try {
+    await query(
+      `INSERT INTO _supatype.studio_members (user_id, role)
+       VALUES ($1, $2)
+       ON CONFLICT (user_id) DO UPDATE SET role = EXCLUDED.role, updated_at = now()`,
+      [userId, role],
+    )
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    warn(`Created the user but could not record Studio membership: ${message}`)
+  }
 }
 
 async function ensureAuthUsersTable(pool: Pool): Promise<void> {

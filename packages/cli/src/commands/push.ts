@@ -150,13 +150,20 @@ async function pushViaTarget(
     }
     await generateTypesLocal(ast, config)
     await provisionLocalStorage(ast, config)
-  } else {
-    info(`Pushed to ${target.mode} (${target.environment}).`)
+
+    // Local Studio only — a cloud/self-host push must not advertise the local
+    // gateway URL from config, which may not even be running.
+    const baseUrl = (serverBaseUrl(config) ?? "").replace(/\/$/, "")
+    if (baseUrl) {
+      plain(`\nStudio: ${baseUrl}/studio/`)
+    }
+    return
   }
 
-  const baseUrl = (serverBaseUrl(config) ?? "").replace(/\/$/, "")
-  if (baseUrl) {
-    plain(`\nStudio: ${baseUrl}/studio/`)
+  info(`Pushed to ${target.mode} (${target.environment}).`)
+  const envUrl = target.link?.environments?.[target.environment]?.apiUrl?.replace(/\/$/, "")
+  if (envUrl) {
+    plain(`\nProject API: ${envUrl}`)
   }
 }
 
