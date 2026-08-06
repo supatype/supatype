@@ -1838,13 +1838,55 @@ function parseAccessRule(
         roles: [roleArg ? ownerText(roleArg, sourceFile).replace(/['"]/g, "") : "admin"],
       }
     }
+    case "Any": {
+      const listArg = typeNode.typeArguments?.[0]
+      if (!listArg || !ts.isTupleTypeNode(listArg)) {
+        throw new Error(
+          `\`Any<>\` takes a tuple of rules, as in ` +
+            `\`Any<[Role<"admin">, Owner<"author_id">]>\`.`,
+        )
+      }
+      // An empty list would compile to a policy that grants nothing while
+      // reading like a grant — the exact silent-denial failure the unknown-rule
+      // branch below exists to prevent.
+      if (listArg.elements.length === 0) {
+        throw new Error(
+          "`Any<[]>` grants nothing. List the rules that should allow access, or " +
+            "use `Private` if denying is the intent.",
+        )
+      }
+      return {
+        type: "any",
+        rules: listArg.elements.map((element) =>
+          parseAccessRule(element, sourceFile, resolveCtx),
+        ),
+      }
+    }
+    case "Custom": {
+      const sqlArg = typeNode.typeArguments?.[0]
+      // The SQL is the whole rule, so an absent or non-literal argument cannot be
+      // guessed at. `Custom<string>` in particular resolves to the *type* string,
+      // which would otherwise reach Postgres verbatim.
+      if (!sqlArg || !ts.isLiteralTypeNode(sqlArg) || !ts.isStringLiteral(sqlArg.literal)) {
+        throw new Error(
+          "`Custom<>` needs a string literal of SQL, as in " +
+            '`Custom<"published_at <= now()">`.',
+        )
+      }
+      const expression = sqlArg.literal.text.trim()
+      if (expression === "") {
+        throw new Error("`Custom<\"\">` is empty — write the SQL predicate, or use `Private`.")
+      }
+      return { type: "custom", expression }
+    }
     default:
       // Falling back to `private` here would silently deny an operation the
       // author believed they had granted — and with deny-by-default there is no
       // longer any need for a permissive guess. Name the offending rule instead.
       throw new Error(
         `Unknown access rule "${ref}". Supported: Public, Private, LoggedIn, ` +
-          `Owner<"field">, OwnerFrom<"relation">, Role<"name">` +
+          `Owner<"field">, OwnerFrom<"relation">, Role<"name">, ` +
+          `Any<[rule, …]>, Custom<"sql">` +
           ` (buckets also accept BucketPublic, BucketPrivate, BucketLoggedIn, BucketOwner, BucketRole).`,
       )
   }

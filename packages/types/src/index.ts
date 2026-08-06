@@ -335,6 +335,46 @@ export type OwnerFrom<TRelationField extends string> = Access<"OwnerFrom", {
   readonly relation: TRelationField
 }>
 export type Role<R extends string = string> = Access<"Role", { readonly kind: "Role"; readonly role: R }>
+
+/**
+ * OR-composition: access is granted when **any** listed rule matches.
+ *
+ * Without this, rules are a closed set of single shapes and the commonest real
+ * requirement — "an admin, or the owner" — cannot be written at all. Every rule
+ * is combinable, including nested `Any`.
+ *
+ * ```typescript
+ * access: { update: Any<[Role<"admin">, Owner<"author_id">]> }
+ * ```
+ *
+ * Compiles to the rules joined with `OR`. An empty list is rejected at extract
+ * time rather than compiling to a policy that grants nothing.
+ */
+export type Any<TRules extends readonly unknown[]> = Access<"Any", {
+  readonly kind: "Any"
+  readonly rules: TRules
+}>
+
+/**
+ * A raw SQL predicate, used verbatim as the policy expression.
+ *
+ * The documented escape hatch for what the rule set cannot yet express — and for
+ * what Postgres itself cannot reach from a policy, such as comparing the old and
+ * new row, which belongs in a trigger or a function this can call.
+ *
+ * The string is **not** validated or parameterised: it is your SQL, in your
+ * database, with `auth.uid()` and friends available. Studio cannot compute
+ * affordances from it either, since it cannot interpret arbitrary SQL — prefer a
+ * structured rule wherever one fits.
+ *
+ * ```typescript
+ * access: { read: Custom<"published_at <= now()"> }
+ * ```
+ */
+export type Custom<TSql extends string = string> = Access<"Custom", {
+  readonly kind: "Custom"
+  readonly sql: TSql
+}>
 type BoundOwnerForFields<TFields extends Record<string, unknown>> = Access<"Owner", {
   readonly kind: "Owner"
   readonly key: OwnerEligibleFieldKeys<TFields>
