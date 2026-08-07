@@ -479,3 +479,189 @@ export type Post = Model<{ id: UUID }, { access: { update: { using: Public; wat:
   })
 })
 
+
+// "Publish at 09:00 next Tuesday" is *data* — the row carries `published_at` and the
+// rule is the same for every row. There is deliberately no literal-timestamp
+// operand; the policy re-evaluates per query, so the row starts matching at 09:00
+// with no cron and no publish worker.
+describe("temporal operands", () => {
+  it("expresses the scheduled-publishing rule", () => {
+    const post = extract(
+      `
+import type { Model, UUID, Any, All, Role, Lte, Gt, IsNull, Now } from "@supatype/types"
+
+export type Post = Model<{
+  id: UUID
+}, {
+  access: {
+    read: Any<[
+      Role<"editor">,
+      All<[Lte<"published_at", Now>, Any<[IsNull<"expires_at">, Gt<"expires_at", Now>]>]>
+    ]>
+  }
+}>
+`,
+      "now",
+    )
+
+    expect(access(post)["read"]).toEqual({
+      type: "any",
+      rules: [
+        { type: "role", roles: ["editor"] },
+        {
+          type: "all",
+          rules: [
+            {
+              type: "compare",
+              op: "lte",
+              left: { kind: "column", name: "published_at" },
+              right: { kind: "now" },
+            },
+            {
+              type: "any",
+              rules: [
+                { type: "nullCheck", operand: { kind: "column", name: "expires_at" }, isNull: true },
+                {
+                  type: "compare",
+                  op: "gt",
+                  left: { kind: "column", name: "expires_at" },
+                  right: { kind: "now" },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    })
+  })
+
+  it("extracts relative and truncated times", () => {
+    const post = extract(
+      `
+import type { Model, UUID, All, Gte, Lte, Ago, FromNow, StartOf } from "@supatype/types"
+
+export type Post = Model<{
+  id: UUID
+}, {
+  access: {
+    read: All<[
+      Gte<"created_at", Ago<30, "days">>,
+      Lte<"starts_at", FromNow<7, "days">>,
+      Gte<"updated_at", StartOf<"week">>
+    ]>
+  }
+}>
+`,
+      "durations",
+    )
+
+    expect(access(post)["read"]).toEqual({
+      type: "all",
+      rules: [
+        {
+          type: "compare",
+          op: "gte",
+          left: { kind: "column", name: "created_at" },
+          right: { kind: "ago", amount: 30, unit: "days" },
+        },
+        {
+          type: "compare",
+          op: "lte",
+          left: { kind: "column", name: "starts_at" },
+          right: { kind: "fromNow", amount: 7, unit: "days" },
+        },
+        {
+          type: "compare",
+          op: "gte",
+          left: { kind: "column", name: "updated_at" },
+          right: { kind: "startOf", unit: "week" },
+        },
+      ],
+    })
+  })
+
+  // A permissive `"30 days"` string would be raw SQL by another name, so the amount
+  // and unit are validated separately and the interval is reassembled from them.
+  it("rejects a fractional or negative amount", () => {
+    const bad = (n: string) => `
+import type { Model, UUID, Gte, Ago } from "@supatype/types"
+export type Post = Model<{ id: UUID }, { access: { read: Gte<"a", Ago<${n}, "days">> } }>
+`
+    expect(() => extract(bad("0.5"), "ago-frac")).toThrow(/whole number/)
+    // A negative literal is a prefix-unary expression, not a numeric literal, so it
+    // needs its own branch — otherwise the message misses the real advice.
+    expect(() => extract(bad("-5"), "ago-neg")).toThrow(/does not take a negative amount/)
+  })
+
+  it("rejects an unknown unit", () => {
+    expect(() =>
+      extract(
+        `
+import type { Model, UUID, Gte, Ago } from "@supatype/types"
+export type Post = Model<{ id: UUID }, { access: { read: Gte<"a", Ago<30, "fortnights">> } }>
+`,
+        "ago-unit",
+      ),
+    ).toThrow(/not a valid unit/)
+  })
+
+  it("rejects an unknown StartOf granularity", () => {
+    expect(() =>
+      extract(
+        `
+import type { Model, UUID, Gte, StartOf } from "@supatype/types"
+export type Post = Model<{ id: UUID }, { access: { read: Gte<"a", StartOf<"fortnight">> } }>
+`,
+        "startof-unit",
+      ),
+    ).toThrow(/not a valid granularity/)
+  })
+})
+
+// `In<>` asks "is this row's value in the set". Payload's site-access rule guards on
+// `user.sites?.length > 0` first — without that, an editor with no sites still
+// matches the unassigned-rows branch.
+describe("Exists<> non-empty guard", () => {
+  it("expresses the Payload site-access rule in full", () => {
+    const post = extract(
+      `
+import type { Model, UUID, Any, All, Role, In, Exists, IsNull, Rows, Eq, AuthUid } from "@supatype/types"
+
+type MySites = Rows<"user_sites", "site_id", Eq<"user_id", AuthUid>>
+
+export type Post = Model<{
+  id: UUID
+}, {
+  access: {
+    read: Any<[
+      Role<"admin">,
+      All<[
+        Role<"editor">,
+        Exists<MySites>,
+        Any<[In<"site_id", MySites>, IsNull<"site_id">]>
+      ]>
+    ]>
+  }
+}>
+`,
+      "exists",
+    )
+
+    const read = access(post)["read"] as { rules: Record<string, unknown>[] }
+    const editorBranch = read.rules[1] as { rules: Record<string, unknown>[] }
+    expect(editorBranch.rules[1]).toEqual({
+      type: "exists",
+      source: {
+        kind: "rows",
+        table: "user_sites",
+        column: "site_id",
+        where: {
+          type: "compare",
+          op: "eq",
+          left: { kind: "column", name: "user_id" },
+          right: { kind: "authUid" },
+        },
+      },
+    })
+  })
+})

@@ -1988,6 +1988,16 @@ function parseAccessRule(
         isNull: ref === "IsNull",
       }
     }
+    case "Exists": {
+      const source = typeNode.typeArguments?.[0]
+      if (!source) {
+        throw new Error('`Exists<>` takes a source, as in `Exists<MySites>`.')
+      }
+      return {
+        type: "exists",
+        source: parseMembershipSource(source, sourceFile, resolveCtx),
+      }
+    }
     case "In": {
       const args = typeNode.typeArguments ?? []
       if (args.length !== 2) {
@@ -2127,6 +2137,77 @@ function parseMembershipSource(
   )
 }
 
+/** Interval units, matching `TimeUnit` in `@supatype/types` and the engine. */
+const TIME_UNITS = [
+  "seconds",
+  "minutes",
+  "hours",
+  "days",
+  "weeks",
+  "months",
+  "years",
+] as const
+
+/** Granularities for `StartOf<>`. */
+const TRUNC_UNITS = ["day", "week", "month", "year"] as const
+
+/**
+ * `Ago<30, "days">` / `FromNow<7, "days">`.
+ *
+ * The amount and unit are validated here and the interval is re-assembled from the
+ * parsed integer and the matched keyword, so no author-supplied text reaches
+ * Postgres. That is what keeps this from being a small escape hatch: a permissive
+ * `"30 days"` string would be raw SQL by another name.
+ */
+function parseDurationOperand(
+  ref: "Ago" | "FromNow",
+  args: readonly ts.TypeNode[],
+  sourceFile: ts.SourceFile,
+): Record<string, unknown> {
+  if (args.length !== 2) {
+    throw new Error(`\`${ref}<>\` takes an amount and a unit, as in \`${ref}<30, "days">\`.`)
+  }
+
+  const amountNode = args[0]!
+  const opposite = ref === "Ago" ? "FromNow" : "Ago"
+
+  // A negative literal is a prefix-unary expression in the TypeScript AST, not a
+  // numeric literal, so it has to be recognised separately — otherwise `Ago<-5, …>`
+  // is refused for the wrong reason and the message misses the real advice.
+  if (
+    ts.isLiteralTypeNode(amountNode) &&
+    ts.isPrefixUnaryExpression(amountNode.literal) &&
+    amountNode.literal.operator === ts.SyntaxKind.MinusToken
+  ) {
+    throw new Error(
+      `\`${ref}<>\` does not take a negative amount. For the other direction use ` +
+        `\`${opposite}<>\`, which reads correctly instead of relying on a double negative.`,
+    )
+  }
+
+  if (!ts.isLiteralTypeNode(amountNode) || !ts.isNumericLiteral(amountNode.literal)) {
+    throw new Error(`\`${ref}<>\` needs a number literal amount, as in \`${ref}<30, "days">\`.`)
+  }
+  const amount = Number(amountNode.literal.text)
+  if (!Number.isInteger(amount)) {
+    throw new Error(
+      `\`${ref}<${amount}, …>\` must be a whole number of units — Postgres intervals ` +
+        `take integers, so a fraction would be silently truncated or rejected.`,
+    )
+  }
+
+  const unit = stringLiteralArg(args[1], ref, "unit")
+  if (!TIME_UNITS.includes(unit as (typeof TIME_UNITS)[number])) {
+    throw new Error(
+      `\`${ref}<${amount}, "${unit}">\` is not a valid unit. Use one of: ` +
+        `${TIME_UNITS.join(", ")} (plural).`,
+    )
+  }
+
+  void sourceFile
+  return { kind: ref === "Ago" ? "ago" : "fromNow", amount, unit }
+}
+
 /** A string, number or boolean literal as its plain JS value. */
 function literalFromNode(
   node: ts.TypeNode,
@@ -2199,11 +2280,27 @@ function parseAccessOperand(
 
   if (ts.isTypeReferenceNode(typeNode) && !ts.isQualifiedName(typeNode.typeName)) {
     const ref = ownerText(typeNode.typeName, sourceFile)
+    const operandArgs = typeNode.typeArguments ?? []
     switch (ref) {
       case "AuthUid":
         return { kind: "authUid" }
       case "AuthRole":
         return { kind: "authRole" }
+      case "Now":
+        return { kind: "now" }
+      case "StartOf": {
+        const unit = stringLiteralArg(operandArgs[0], "StartOf", "unit")
+        if (!TRUNC_UNITS.includes(unit as (typeof TRUNC_UNITS)[number])) {
+          throw new Error(
+            `\`StartOf<"${unit}">\` is not a valid granularity. Use one of: ` +
+              `${TRUNC_UNITS.join(", ")}.`,
+          )
+        }
+        return { kind: "startOf", unit }
+      }
+      case "Ago":
+      case "FromNow":
+        return parseDurationOperand(ref, operandArgs, sourceFile)
       case "Claim": {
         const pathArg = typeNode.typeArguments?.[0]
         if (!pathArg || !ts.isLiteralTypeNode(pathArg) || !ts.isStringLiteral(pathArg.literal)) {

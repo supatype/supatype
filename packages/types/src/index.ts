@@ -393,6 +393,69 @@ export type Literal<TValue extends string | number | boolean> = Access<"Literal"
   readonly value: TValue
 }>
 
+// ─── Time ────────────────────────────────────────────────────────────────────
+//
+// A closed set of temporal operands. Closed on purpose: it keeps `now()` (which is
+// STABLE, and evaluated once per query) as the only clock a rule can read.
+// `clock_timestamp()` is VOLATILE and would make the generated affordance
+// functions' STABLE declaration a lie.
+//
+// There is deliberately no literal-timestamp operand. "Publish at 09:00 next
+// Tuesday" is *data* — the row carries `published_at`, and the rule is the same for
+// every row: `Lte<"published_at", Now>`. The policy re-evaluates per query, so the
+// row starts matching at 09:00 with no cron and no publish worker.
+
+/** Transaction start time (`now()`). */
+export type Now = Access<"Now", { readonly kind: "Now" }>
+
+/** Units for {@link Ago} / {@link FromNow}. Plural only — Postgres accepts both. */
+export type TimeUnit =
+  | "seconds"
+  | "minutes"
+  | "hours"
+  | "days"
+  | "weeks"
+  | "months"
+  | "years"
+
+/** Granularity for {@link StartOf}. */
+export type TruncUnit = "day" | "week" | "month" | "year"
+
+/**
+ * The start of the current day, week, month or year — `date_trunc(unit, now())`.
+ *
+ * `Gte<"created_at", StartOf<"week">>` is "created since Monday".
+ */
+export type StartOf<TUnit extends TruncUnit> = Access<"StartOf", {
+  readonly kind: "StartOf"
+  readonly unit: TUnit
+}>
+
+/**
+ * A duration before now: `Ago<30, "days">` is `now() - INTERVAL '30 days'`.
+ *
+ * Two arguments rather than one `"30 days"` string, for two reasons. A template
+ * literal `` `${number} ${TimeUnit}` `` accepts `"-5 days"`, `"0.5 days"` and
+ * `"1e3 days"` — the last is not valid interval syntax, so it type-checks and fails
+ * at push. And TypeScript cannot enumerate `${number}`, so a template literal offers
+ * **no autocomplete**; this form completes the unit properly.
+ *
+ * The amount must be a positive integer — for the other direction use
+ * {@link FromNow}, which reads correctly rather than relying on a double negative.
+ */
+export type Ago<TAmount extends number, TUnit extends TimeUnit> = Access<"Ago", {
+  readonly kind: "Ago"
+  readonly amount: TAmount
+  readonly unit: TUnit
+}>
+
+/** A duration after now: `FromNow<7, "days">` is `now() + INTERVAL '7 days'`. */
+export type FromNow<TAmount extends number, TUnit extends TimeUnit> = Access<"FromNow", {
+  readonly kind: "FromNow"
+  readonly amount: TAmount
+  readonly unit: TUnit
+}>
+
 // ─── Comparisons ─────────────────────────────────────────────────────────────
 
 type Comparison<TName extends string, TLeft, TRight> = Access<TName, {
@@ -469,6 +532,24 @@ export type Values<TItems extends readonly (string | number | boolean)[]> = Acce
 export type In<TColumn extends string, TSource> = Access<"In", {
   readonly kind: "In"
   readonly column: TColumn
+  readonly source: TSource
+}>
+
+/**
+ * The source set is non-empty, independent of any column.
+ *
+ * `In<>` asks "is this row's value in the set", which is a different question.
+ * Guarding on `Exists<>` is what makes "an editor *who has sites* may see their
+ * sites or unassigned rows" mean what it says — without it, an editor with no sites
+ * still matches the unassigned branch:
+ *
+ * ```typescript
+ * type MySites = Rows<"user_sites", "site_id", Eq<"user_id", AuthUid>>
+ * All<[Role<"editor">, Exists<MySites>, Any<[In<"site_id", MySites>, IsNull<"site_id">]>]>
+ * ```
+ */
+export type Exists<TSource> = Access<"Exists", {
+  readonly kind: "Exists"
   readonly source: TSource
 }>
 type BoundOwnerForFields<TFields extends Record<string, unknown>> = Access<"Owner", {
