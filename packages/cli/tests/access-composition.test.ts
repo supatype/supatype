@@ -400,6 +400,85 @@ export type Post = Model<{
   })
 })
 
+// An update policy has two halves: USING picks which rows may be modified, WITH
+// CHECK constrains what they may become. One rule for both is the right default,
+// but it makes "an editor may move a post between their own sites" inexpressible.
+describe("update: { using, check }", () => {
+  it("splits row selection from the result constraint", () => {
+    const post = extract(
+      `
+import type { Model, UUID, In, Rows, Eq, AuthUid, Owner } from "@supatype/types"
+
+type MySites = Rows<"user_sites", "site_id", Eq<"user_id", AuthUid>>
+
+export type Post = Model<{
+  id: UUID
+}, {
+  access: {
+    update: { using: Owner<"author_id">; check: In<"site_id", MySites> }
+  }
+}>
+`,
+      "update-split",
+    )
+
+    expect(access(post)["update"]).toEqual({ type: "owner", field: "author_id" })
+    expect(access(post)["updateCheck"]).toEqual({
+      type: "in",
+      column: "site_id",
+      source: {
+        kind: "rows",
+        table: "user_sites",
+        column: "site_id",
+        where: {
+          type: "compare",
+          op: "eq",
+          left: { kind: "column", name: "user_id" },
+          right: { kind: "authUid" },
+        },
+      },
+    })
+  })
+
+  // The plain form is untouched: no `updateCheck`, so the engine uses one rule for
+  // both halves, which is what every existing schema means.
+  it("leaves a plain rule alone", () => {
+    const post = extract(
+      `
+import type { Model, UUID, Owner } from "@supatype/types"
+export type Post = Model<{ id: UUID }, { access: { update: Owner<"author_id"> } }>
+`,
+      "update-plain",
+    )
+    expect(access(post)["update"]).toEqual({ type: "owner", field: "author_id" })
+    expect(access(post)["updateCheck"]).toBeUndefined()
+  })
+
+  it("rejects a check with no using", () => {
+    expect(() =>
+      extract(
+        `
+import type { Model, UUID, Public } from "@supatype/types"
+export type Post = Model<{ id: UUID }, { access: { update: { check: Public } } }>
+`,
+        "update-checkonly",
+      ),
+    ).toThrow(/needs a `using` rule/)
+  })
+
+  it("rejects an unknown key", () => {
+    expect(() =>
+      extract(
+        `
+import type { Model, UUID, Public } from "@supatype/types"
+export type Post = Model<{ id: UUID }, { access: { update: { using: Public; wat: Public } } }>
+`,
+        "update-badkey",
+      ),
+    ).toThrow(/may only contain/)
+  })
+})
+
 describe("Custom<sql>", () => {
   it("passes the predicate through verbatim", () => {
     const post = extract(

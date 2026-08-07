@@ -1712,6 +1712,19 @@ function parseModelAccess(
     if (!ts.isPropertySignature(member) || !member.type) continue
     const key = getPropertyName(member.name)
     if (!key) continue
+
+    // `update: { using, check }` splits which rows may be changed from what they
+    // may be changed into. Flattened here into the two AST fields the engine
+    // renders, so the engine never has to know about the sugar.
+    if (key === "update") {
+      const split = parseUpdateSplit(member.type, sourceFile, resolveCtx)
+      if (split) {
+        access["update"] = split.using
+        if (split.check !== undefined) access["updateCheck"] = split.check
+        continue
+      }
+    }
+
     access[key] = parseAccessRule(member.type, sourceFile, resolveCtx)
   }
 
@@ -1723,6 +1736,57 @@ function parseModelAccess(
     )
   }
   return access
+}
+
+/**
+ * `update: { using: …, check: … }`, or null when `update` is a plain rule.
+ *
+ * An update policy has two halves: `USING` picks which existing rows may be
+ * modified, `WITH CHECK` constrains what they may become. One rule for both is the
+ * right default and what every existing schema means — but it makes "an editor may
+ * move a post between their own sites" inexpressible, because the row they are
+ * changing and the row they are changing it into are judged by the same predicate.
+ */
+function parseUpdateSplit(
+  typeNode: ts.TypeNode,
+  sourceFile: ts.SourceFile,
+  resolveCtx?: ResolveContext,
+): { using: Record<string, unknown>; check?: Record<string, unknown> } | null {
+  const literal = resolveCtx
+    ? resolveAccessLiteral(typeNode, sourceFile, resolveCtx)
+    : ts.isTypeLiteralNode(typeNode)
+      ? typeNode
+      : null
+  if (!literal) return null
+
+  let using: ts.TypeNode | undefined
+  let check: ts.TypeNode | undefined
+  for (const member of literal.members) {
+    if (!ts.isPropertySignature(member) || !member.type) continue
+    const name = getPropertyName(member.name)
+    if (name === "using") using = member.type
+    else if (name === "check") check = member.type
+    else if (name !== undefined) {
+      throw new Error(
+        `\`update\` may only contain \`using\` and \`check\`, found "${name}".`,
+      )
+    }
+  }
+
+  // Not the split form at all — an object with neither key is some other shape.
+  if (!using && !check) return null
+  if (!using) {
+    throw new Error(
+      "`update: { check }` needs a `using` rule too — without it no row is " +
+        "selectable for update, so the check can never apply.",
+    )
+  }
+
+  const parsed: { using: Record<string, unknown>; check?: Record<string, unknown> } = {
+    using: parseAccessRule(using, sourceFile, resolveCtx),
+  }
+  if (check) parsed.check = parseAccessRule(check, sourceFile, resolveCtx)
+  return parsed
 }
 
 /** Walk aliases/intersections down to the object type holding the access rules. */
