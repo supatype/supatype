@@ -256,6 +256,150 @@ export type Post = Model<{ id: UUID }, { access: { read: Eq<"a", Public> } }>
   })
 })
 
+describe("In<> membership", () => {
+  it("compiles a Rows<> source with its narrowing rule", () => {
+    const post = extract(
+      `
+import type { Model, UUID, In, Rows, Eq, AuthUid } from "@supatype/types"
+
+export type Post = Model<{
+  id: UUID
+}, {
+  access: { read: In<"site_id", Rows<"user_sites", "site_id", Eq<"user_id", AuthUid>>> }
+}>
+`,
+      "in-rows",
+    )
+
+    expect(access(post)["read"]).toEqual({
+      type: "in",
+      column: "site_id",
+      source: {
+        kind: "rows",
+        table: "user_sites",
+        column: "site_id",
+        where: {
+          type: "compare",
+          op: "eq",
+          left: { kind: "column", name: "user_id" },
+          right: { kind: "authUid" },
+        },
+      },
+    })
+  })
+
+  it("accepts a claim array and a fixed set", () => {
+    const post = extract(
+      `
+import type { Model, UUID, Any, In, Claim, Values } from "@supatype/types"
+
+export type Post = Model<{
+  id: UUID
+}, {
+  access: {
+    read: Any<[
+      In<"site_id", Claim<"app_metadata.sites">>,
+      In<"status", Values<["published", "archived"]>>
+    ]>
+  }
+}>
+`,
+      "in-claim",
+    )
+
+    expect(access(post)["read"]).toEqual({
+      type: "any",
+      rules: [
+        {
+          type: "in",
+          column: "site_id",
+          source: { kind: "claim", path: "app_metadata.sites" },
+        },
+        {
+          type: "in",
+          column: "status",
+          source: { kind: "literal", values: ["published", "archived"] },
+        },
+      ],
+    })
+  })
+
+  it("rejects a source it cannot resolve", () => {
+    expect(() =>
+      extract(
+        `
+import type { Model, UUID, In, Public } from "@supatype/types"
+export type Post = Model<{ id: UUID }, { access: { read: In<"a", Public> } }>
+`,
+        "in-badsource",
+      ),
+    ).toThrow(/not a valid membership source/)
+  })
+
+  it("rejects a table name that is not an identifier", () => {
+    expect(() =>
+      extract(
+        `
+import type { Model, UUID, In, Rows } from "@supatype/types"
+export type Post = Model<{ id: UUID }, { access: { read: In<"a", Rows<"a b; drop", "c">> } }>
+`,
+        "in-badtable",
+      ),
+    ).toThrow(/not a valid table name/)
+  })
+})
+
+// The plan's headline parameterisation: the type-level equivalent of Payload's
+// access-control factory. Before this, any named alias — even unparameterised —
+// was reported as an unknown rule and had to be written inline at every use.
+describe("parameterised rule aliases", () => {
+  it("expands a generic alias at the point of use", () => {
+    const post = extract(
+      `
+import type { Model, UUID, Any, All, Role, In, Rows, Eq, AuthUid } from "@supatype/types"
+
+type MySites = Rows<"user_sites", "site_id", Eq<"user_id", AuthUid>>
+type SiteAccess<Field extends string> = Any<[Role<"admin">, All<[Role<"editor">, In<Field, MySites>]>]>
+
+export type Post = Model<{
+  id: UUID
+}, {
+  access: { update: SiteAccess<"site_id"> }
+}>
+`,
+      "alias",
+    )
+
+    expect(access(post)["update"]).toEqual({
+      type: "any",
+      rules: [
+        { type: "role", roles: ["admin"] },
+        {
+          type: "all",
+          rules: [
+            { type: "role", roles: ["editor"] },
+            {
+              type: "in",
+              column: "site_id",
+              source: {
+                kind: "rows",
+                table: "user_sites",
+                column: "site_id",
+                where: {
+                  type: "compare",
+                  op: "eq",
+                  left: { kind: "column", name: "user_id" },
+                  right: { kind: "authUid" },
+                },
+              },
+            },
+          ],
+        },
+      ],
+    })
+  })
+})
+
 describe("Custom<sql>", () => {
   it("passes the predicate through verbatim", () => {
     const post = extract(

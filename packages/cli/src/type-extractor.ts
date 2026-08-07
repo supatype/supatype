@@ -1776,6 +1776,7 @@ function parseAccessRule(
   typeNode: ts.TypeNode,
   sourceFile: ts.SourceFile,
   resolveCtx?: ResolveContext,
+  depth = 0,
 ): Record<string, unknown> {
   // Reuse a single rule from a shared set: `access: { read: Rules["read"] }`.
   if (ts.isIndexedAccessTypeNode(typeNode) && resolveCtx) {
@@ -1923,6 +1924,26 @@ function parseAccessRule(
         isNull: ref === "IsNull",
       }
     }
+    case "In": {
+      const args = typeNode.typeArguments ?? []
+      if (args.length !== 2) {
+        throw new Error(
+          '`In<>` takes a column and a source, as in `In<"site_id", MySites>`.',
+        )
+      }
+      const column = parseAccessOperand(args[0]!, sourceFile)
+      if (column["kind"] !== "column") {
+        throw new Error(
+          "`In<>`'s first argument must be a column name — the membership test is " +
+            "about a column of the row being checked.",
+        )
+      }
+      return {
+        type: "in",
+        column: column["name"],
+        source: parseMembershipSource(args[1]!, sourceFile, resolveCtx),
+      }
+    }
     case "Custom": {
       const sqlArg = typeNode.typeArguments?.[0]
       // The SQL is the whole rule, so an absent or non-literal argument cannot be
@@ -1940,7 +1961,14 @@ function parseAccessRule(
       }
       return { type: "custom", expression }
     }
-    default:
+    default: {
+      // A named alias — possibly parameterised — standing for a rule. Expanded
+      // before giving up, so `SiteAccess<"site_id">` works.
+      if (resolveCtx && depth < 16) {
+        const expanded = resolveAccessAliasNode(typeNode, sourceFile, resolveCtx)
+        if (expanded) return parseAccessRule(expanded, sourceFile, resolveCtx, depth + 1)
+      }
+
       // Falling back to `private` here would silently deny an operation the
       // author believed they had granted — and with deny-by-default there is no
       // longer any need for a permissive guess. Name the offending rule instead.
@@ -1952,7 +1980,138 @@ function parseAccessRule(
           `Custom<"sql">` +
           ` (buckets also accept BucketPublic, BucketPrivate, BucketLoggedIn, BucketOwner, BucketRole).`,
       )
+    }
   }
+}
+
+/**
+ * Expands a named alias to the type it stands for.
+ *
+ * This is what makes rules parameterisable — the type-level equivalent of
+ * Payload's access-control factory:
+ *
+ * ```typescript
+ * type SiteAccess<F extends string> = Any<[Role<"admin">, In<F, MySites>]>
+ * access: { update: SiteAccess<"site_id"> }
+ * ```
+ *
+ * Without it a rule had to be written inline at every use, and any alias — even an
+ * unparameterised one — was reported as an unknown rule.
+ */
+function resolveAccessAliasNode(
+  typeNode: ts.TypeReferenceNode,
+  sourceFile: ts.SourceFile,
+  resolveCtx: ResolveContext,
+): ts.TypeNode | undefined {
+  const expanded = tryResolveTypeReference(typeNode, sourceFile, resolveCtx)
+  if (expanded && expanded !== typeNode) return expanded
+
+  if (needsChecker(typeNode)) {
+    const resolved = resolveTypeNode(typeNode, sourceFile, resolveCtx)
+    if (resolved !== typeNode) return resolved
+  }
+  return undefined
+}
+
+/**
+ * The set on the right of an `In<>`.
+ *
+ * Resolved through the same alias machinery as rules, so a shared
+ * `type MySites = Rows<…>` can be reused across models — the parameterisation the
+ * plan calls the type-level equivalent of Payload's access factory.
+ */
+function parseMembershipSource(
+  typeNode: ts.TypeNode,
+  sourceFile: ts.SourceFile,
+  resolveCtx?: ResolveContext,
+): Record<string, unknown> {
+  if (ts.isIndexedAccessTypeNode(typeNode) && resolveCtx) {
+    const member = resolveIndexedAccessRule(typeNode, sourceFile, resolveCtx)
+    if (member) return parseMembershipSource(member, sourceFile, resolveCtx)
+  }
+
+  if (ts.isTypeReferenceNode(typeNode) && !ts.isQualifiedName(typeNode.typeName)) {
+    const ref = ownerText(typeNode.typeName, sourceFile)
+    const args = typeNode.typeArguments ?? []
+
+    if (ref === "Claim") {
+      return parseAccessOperand(typeNode, sourceFile)
+    }
+
+    if (ref === "Rows") {
+      const table = stringLiteralArg(args[0], "Rows", "table name")
+      const column = stringLiteralArg(args[1], "Rows", "column name")
+      const source: Record<string, unknown> = { kind: "rows", table, column }
+      // The third argument narrows the source rows. Absent means "every row",
+      // which is a lookup rather than a membership check — allowed, but rarely
+      // what was meant, so it stays explicit rather than being defaulted.
+      if (args[2]) {
+        source["where"] = parseAccessRule(args[2], sourceFile, resolveCtx)
+      }
+      return source
+    }
+
+    if (ref === "Values") {
+      const listArg = args[0]
+      if (!listArg || !ts.isTupleTypeNode(listArg)) {
+        throw new Error('`Values<>` takes a tuple, as in `Values<["draft", "review"]>`.')
+      }
+      if (listArg.elements.length === 0) {
+        throw new Error("`Values<[]>` matches nothing. List the values, or use `Private`.")
+      }
+      // Not `parseAccessOperand`: there, a bare string is a *column*, which is
+      // right for a comparison and wrong here. Inside a value list a string can
+      // only be a value, so it is read as one — no `Literal<>` wrapper needed.
+      return {
+        kind: "literal",
+        values: listArg.elements.map((element) => literalFromNode(element, sourceFile)),
+      }
+    }
+
+    // A named alias for a source: `type MySites = Rows<…>`.
+    if (resolveCtx) {
+      const resolved = resolveAccessAliasNode(typeNode, sourceFile, resolveCtx)
+      if (resolved) return parseMembershipSource(resolved, sourceFile, resolveCtx)
+    }
+  }
+
+  throw new Error(
+    `\`${ownerText(typeNode, sourceFile)}\` is not a valid membership source. Use ` +
+      `Rows<"table", "column", Where>, Claim<"path"> or Values<[…]>.`,
+  )
+}
+
+/** A string, number or boolean literal as its plain JS value. */
+function literalFromNode(
+  node: ts.TypeNode,
+  sourceFile: ts.SourceFile,
+): string | number | boolean {
+  if (ts.isLiteralTypeNode(node)) {
+    const literal = node.literal
+    if (ts.isStringLiteral(literal)) return literal.text
+    if (ts.isNumericLiteral(literal)) return Number(literal.text)
+    if (literal.kind === ts.SyntaxKind.TrueKeyword) return true
+    if (literal.kind === ts.SyntaxKind.FalseKeyword) return false
+  }
+  throw new Error(
+    `\`${ownerText(node, sourceFile)}\` is not a string, number or boolean literal.`,
+  )
+}
+
+function stringLiteralArg(
+  node: ts.TypeNode | undefined,
+  owner: string,
+  what: string,
+): string {
+  if (!node || !ts.isLiteralTypeNode(node) || !ts.isStringLiteral(node.literal)) {
+    throw new Error(`\`${owner}<>\` needs a ${what} as a string literal.`)
+  }
+  const value = node.literal.text.trim()
+  // Rendered as a SQL identifier, so refuse anything that is not one.
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
+    throw new Error(`"${value}" is not a valid ${what}.`)
+  }
+  return value
 }
 
 /**

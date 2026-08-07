@@ -445,6 +445,53 @@ export type Like<TLeft, TRight> = Comparison<"Like", TLeft, TRight>
  */
 export type IsNull<TOperand> = Access<"IsNull", { readonly kind: "IsNull"; readonly operand: TOperand }>
 export type NotNull<TOperand> = Access<"NotNull", { readonly kind: "NotNull"; readonly operand: TOperand }>
+
+// ─── Membership ──────────────────────────────────────────────────────────────
+
+/**
+ * Rows of another table, narrowed by a rule: the source for a membership test.
+ *
+ * ```typescript
+ * type MySites = Rows<"user_sites", "site_id", Eq<"user_id", AuthUid>>
+ * ```
+ *
+ * The `Where` rule is evaluated against `user_sites`, not against the model the
+ * access rule is attached to — it is what makes this *the caller's* sites rather
+ * than every row in the join table.
+ *
+ * Because the join column is named here, the engine emits the index for it. The
+ * classic RLS performance trap is a membership subquery scanning an unindexed join
+ * table once per row tested; naming it makes that generated infrastructure.
+ */
+export type Rows<
+  TTable extends string,
+  TColumn extends string,
+  TWhere = never,
+> = Access<"Rows", {
+  readonly kind: "Rows"
+  readonly table: TTable
+  readonly column: TColumn
+  readonly where: TWhere
+}>
+
+/** A fixed set, for `In<"status", Values<["draft", "review"]>>`. */
+export type Values<TItems extends readonly (string | number | boolean)[]> = Access<"Values", {
+  readonly kind: "Values"
+  readonly values: TItems
+}>
+
+/**
+ * `In<"site_id", MySites>` — the row's column appears in the source set.
+ *
+ * Compiles to a semi-join (`EXISTS`), not `IN (SELECT …)`, so the planner stops at
+ * the first match per row instead of materialising the set. Sources are `Rows<>`,
+ * `Claim<>` (a claim holding an array) or `Values<>`.
+ */
+export type In<TColumn extends string, TSource> = Access<"In", {
+  readonly kind: "In"
+  readonly column: TColumn
+  readonly source: TSource
+}>
 type BoundOwnerForFields<TFields extends Record<string, unknown>> = Access<"Owner", {
   readonly kind: "Owner"
   readonly key: OwnerEligibleFieldKeys<TFields>
