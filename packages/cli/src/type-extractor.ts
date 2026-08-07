@@ -2008,23 +2008,6 @@ function parseAccessRule(
         source: parseMembershipSource(args[1]!, sourceFile, resolveCtx),
       }
     }
-    case "Custom": {
-      const sqlArg = typeNode.typeArguments?.[0]
-      // The SQL is the whole rule, so an absent or non-literal argument cannot be
-      // guessed at. `Custom<string>` in particular resolves to the *type* string,
-      // which would otherwise reach Postgres verbatim.
-      if (!sqlArg || !ts.isLiteralTypeNode(sqlArg) || !ts.isStringLiteral(sqlArg.literal)) {
-        throw new Error(
-          "`Custom<>` needs a string literal of SQL, as in " +
-            '`Custom<"published_at <= now()">`.',
-        )
-      }
-      const expression = sqlArg.literal.text.trim()
-      if (expression === "") {
-        throw new Error("`Custom<\"\">` is empty — write the SQL predicate, or use `Private`.")
-      }
-      return { type: "custom", expression }
-    }
     default: {
       // A named alias — possibly parameterised — standing for a rule. Expanded
       // before giving up, so `SiteAccess<"site_id">` works.
@@ -2040,8 +2023,7 @@ function parseAccessRule(
         `Unknown access rule "${ref}". Supported: Public, Private, LoggedIn, ` +
           `Owner<"field">, OwnerFrom<"relation">, Role<"name">, ` +
           `Any<[rule, …]>, All<[rule, …]>, Not<rule>, ` +
-          `Eq/Neq/Gt/Gte/Lt/Lte/Like<left, right>, IsNull<operand>, NotNull<operand>, ` +
-          `Custom<"sql">` +
+          `Eq/Neq/Gt/Gte/Lt/Lte/Like<left, right>, IsNull<operand>, NotNull<operand>` +
           ` (buckets also accept BucketPublic, BucketPrivate, BucketLoggedIn, BucketOwner, BucketRole).`,
       )
     }

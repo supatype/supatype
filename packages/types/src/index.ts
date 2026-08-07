@@ -355,27 +355,6 @@ export type Any<TRules extends readonly unknown[]> = Access<"Any", {
   readonly rules: TRules
 }>
 
-/**
- * A raw SQL predicate, used verbatim as the policy expression.
- *
- * The documented escape hatch for what the rule set cannot yet express — and for
- * what Postgres itself cannot reach from a policy, such as comparing the old and
- * new row, which belongs in a trigger or a function this can call.
- *
- * The string is **not** validated or parameterised: it is your SQL, in your
- * database, with `auth.uid()` and friends available. Studio cannot compute
- * affordances from it either, since it cannot interpret arbitrary SQL — prefer a
- * structured rule wherever one fits.
- *
- * ```typescript
- * access: { read: Custom<"published_at <= now()"> }
- * ```
- */
-export type Custom<TSql extends string = string> = Access<"Custom", {
-  readonly kind: "Custom"
-  readonly sql: TSql
-}>
-
 /** AND-composition: access needs **every** listed rule to match. */
 export type All<TRules extends readonly unknown[]> = Access<"All", {
   readonly kind: "All"
