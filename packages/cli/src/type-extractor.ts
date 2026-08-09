@@ -1603,7 +1603,7 @@ function parseModelMeta(
 
   return {
     tableName,
-    access: parseModelAccess(metaArg, sourceFile, modelName, resolveCtx),
+    access: parseModelAccess(metaArg, sourceFile, modelName, fields, resolveCtx),
     options,
     indexes: parseModelIndexes(metaArg, sourceFile, fields),
   }
@@ -1684,6 +1684,7 @@ function parseModelAccess(
   metaArg: ts.TypeNode | undefined,
   sourceFile: ts.SourceFile,
   modelName: string,
+  fields: Record<string, FieldAstV2>,
   resolveCtx: ResolveContext,
 ): Record<string, unknown> {
   if (!metaArg || !ts.isTypeLiteralNode(metaArg)) return {}
@@ -1725,6 +1726,12 @@ function parseModelAccess(
       }
     }
 
+    if (key === "fields") {
+      const fieldRules = parseFieldAccess(member.type, sourceFile, modelName, fields, resolveCtx)
+      if (Object.keys(fieldRules).length > 0) access["fields"] = fieldRules
+      continue
+    }
+
     access[key] = parseAccessRule(member.type, sourceFile, resolveCtx)
   }
 
@@ -1736,6 +1743,82 @@ function parseModelAccess(
     )
   }
   return access
+}
+
+/**
+ * `fields: { [column]: { read?, write? } }` — per-column narrowing of the table rules.
+ *
+ * Any rule the DSL can express is allowed. Enforcement is a query rewrite that
+ * evaluates the rule per row with the caller's claims, so ownership, membership and
+ * application roles all work here — none of which a column privilege could express.
+ */
+function parseFieldAccess(
+  typeNode: ts.TypeNode,
+  sourceFile: ts.SourceFile,
+  modelName: string,
+  fields: Record<string, FieldAstV2>,
+  resolveCtx?: ResolveContext,
+): Record<string, Record<string, unknown>> {
+  const literal = resolveCtx
+    ? resolveAccessLiteral(typeNode, sourceFile, resolveCtx)
+    : ts.isTypeLiteralNode(typeNode)
+      ? typeNode
+      : null
+  if (!literal) {
+    throw new Error(
+      `Model "${modelName}": could not resolve \`access.fields\` from ` +
+        `\`${typeNode.getText(sourceFile)}\`. It must be an object type, or a type ` +
+        `alias for one: \`fields: { salary: { read: Private } }\`.`,
+    )
+  }
+
+  const out: Record<string, Record<string, unknown>> = {}
+  for (const member of literal.members) {
+    if (!ts.isPropertySignature(member) || !member.type) continue
+    const declared = getPropertyName(member.name)
+    if (!declared) continue
+    // A privilege is granted on a column, and a relation field is not one --
+    // `author` is stored as `author_id`. Same mapping the index builder uses.
+    // Names that match nothing are passed through rather than rejected: composite
+    // wrappers expand into columns this map never sees, so a hard error here would
+    // refuse valid schemas. Postgres rejects the unknown column at push instead.
+    const column = resolveIndexFieldName(declared, fields) ?? declared
+
+    const columnLiteral = resolveCtx
+      ? resolveAccessLiteral(member.type, sourceFile, resolveCtx)
+      : ts.isTypeLiteralNode(member.type)
+        ? member.type
+        : null
+    if (!columnLiteral) {
+      throw new Error(
+        `Model "${modelName}": \`access.fields.${column}\` must be an object with ` +
+          `\`read\` and/or \`write\`, found \`${member.type.getText(sourceFile)}\`.`,
+      )
+    }
+
+    const rules: Record<string, unknown> = {}
+    for (const opMember of columnLiteral.members) {
+      if (!ts.isPropertySignature(opMember) || !opMember.type) continue
+      const operation = getPropertyName(opMember.name)
+      if (operation !== "read" && operation !== "write") {
+        throw new Error(
+          `Model "${modelName}": \`access.fields.${column}\` may only contain ` +
+            `\`read\` and \`write\`, found "${operation}".`,
+        )
+      }
+      rules[operation] = parseAccessRule(opMember.type, sourceFile, resolveCtx)
+    }
+
+    // An empty `{}` reads as "this column is restricted" but restricts nothing.
+    if (Object.keys(rules).length === 0) {
+      throw new Error(
+        `Model "${modelName}": \`access.fields.${column}\` declares no rules. ` +
+          `Give it a \`read\` or a \`write\`, or remove the entry.`,
+      )
+    }
+    out[column] = rules
+  }
+  return out
 }
 
 /**

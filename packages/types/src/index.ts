@@ -562,6 +562,64 @@ type BoundOwnerFromForFields<TFields extends Record<string, unknown>> = Access<"
   readonly relation: RelationFieldKeys<TFields>
 }>
 
+/**
+ * The composable half of the DSL — every shape that takes other rules or operands
+ * as arguments.
+ *
+ * Written with `unknown` arguments rather than a recursive constraint. TypeScript
+ * cannot thread the model's field names down through a tuple of nested rules
+ * without instantiation-depth failures on the deeper compositions, so a column
+ * named inside a composition is checked by Postgres when the policy is created,
+ * not by the editor. The named shapes below stay bound to the model's fields, so
+ * the common `Owner<…>` typo is still caught where it always was.
+ */
+type ComposedAccessRule =
+  | Any<readonly unknown[]>
+  | All<readonly unknown[]>
+  | Not<unknown>
+  | Eq<unknown, unknown>
+  | Neq<unknown, unknown>
+  | Gt<unknown, unknown>
+  | Gte<unknown, unknown>
+  | Lt<unknown, unknown>
+  | Lte<unknown, unknown>
+  | Like<unknown, unknown>
+  | IsNull<unknown>
+  | NotNull<unknown>
+  | In<string, unknown>
+  | Exists<unknown>
+
+/**
+ * Any rule that may stand as an access predicate for a model.
+ *
+ * The named shapes stay bound to `TFields` so `Owner<"athor_id">` is still a typo
+ * the editor catches; the composed shapes are open, per the note above.
+ */
+export type AccessRuleFor<TFields extends Record<string, unknown>> =
+  | Public
+  | Private
+  | LoggedIn
+  | Owner<OwnerEligibleFieldKeys<TFields>>
+  | OwnerFrom<RelationFieldKeys<TFields>>
+  | BoundOwnerForFields<TFields>
+  | BoundOwnerFromForFields<TFields>
+  | Role<string>
+  | ComposedAccessRule
+
+/**
+ * `update` as a plain rule, or split into its two halves.
+ *
+ * `using` picks which existing rows may be modified, `check` constrains what they
+ * may become. Unambiguous against a bare rule because every rule carries a `kind`
+ * and this object does not.
+ */
+type UpdateAccessFor<TFields extends Record<string, unknown>> =
+  | AccessRuleFor<TFields>
+  | {
+      readonly using: AccessRuleFor<TFields>
+      readonly check?: AccessRuleFor<TFields>
+    }
+
 /** `Optional<…>` wraps `Modifier<"Optional", …>` (detect structurally — do not inspect `[SUPATYPE_TYPE]`; primitives under `Optional` add their own tags and tag intersections are unreliable). */
 type IsModifierOptional<V> = [V] extends [Modifier<"Optional", infer _>] ? true : false
 
@@ -641,42 +699,37 @@ export type ModelIndex = {
 
 export type ModelMeta<TFields extends Record<string, unknown>> = {
   access?: {
-    read?:
-      | Public
-      | Private
-      | LoggedIn
-      | Owner<OwnerEligibleFieldKeys<TFields>>
-      | OwnerFrom<RelationFieldKeys<TFields>>
-      | BoundOwnerForFields<TFields>
-      | BoundOwnerFromForFields<TFields>
-      | Role<string>
-    create?:
-      | Public
-      | Private
-      | LoggedIn
-      | Owner<OwnerEligibleFieldKeys<TFields>>
-      | OwnerFrom<RelationFieldKeys<TFields>>
-      | BoundOwnerForFields<TFields>
-      | BoundOwnerFromForFields<TFields>
-      | Role<string>
-    update?:
-      | Public
-      | Private
-      | LoggedIn
-      | Owner<OwnerEligibleFieldKeys<TFields>>
-      | OwnerFrom<RelationFieldKeys<TFields>>
-      | BoundOwnerForFields<TFields>
-      | BoundOwnerFromForFields<TFields>
-      | Role<string>
-    delete?:
-      | Public
-      | Private
-      | LoggedIn
-      | Owner<OwnerEligibleFieldKeys<TFields>>
-      | OwnerFrom<RelationFieldKeys<TFields>>
-      | BoundOwnerForFields<TFields>
-      | BoundOwnerFromForFields<TFields>
-      | Role<string>
+    read?: AccessRuleFor<TFields>
+    create?: AccessRuleFor<TFields>
+    update?: UpdateAccessFor<TFields>
+    delete?: AccessRuleFor<TFields>
+    /**
+     * Per-column rules, narrowing the table rules for one field.
+     *
+     * Enforced by Postgres column privileges, which are granted per *database*
+     * role — so the only distinction they can draw is `anon` against
+     * `authenticated`. `Public`, `LoggedIn` and `Private` (and `Any`/`All`/`Not`
+     * of them) compile; a rule naming a row, a claim or an application role does
+     * not, and is a hard error at extract rather than a privilege that silently
+     * fails to express it.
+     *
+     * ```typescript
+     * access: { read: Public, fields: { internal_ref: { read: Private } } }
+     * ```
+     *
+     * For a genuinely row- or role-dependent column, move it to its own table
+     * with its own rules. That is the shape the whole stack already understands —
+     * policies, realtime and caching all follow it — rather than a column that
+     * only some layers know is restricted.
+     */
+    fields?: {
+      // Relations are named by their column (`author_id`), because that is what a
+      // privilege is granted on — `author` is not a column at all.
+      readonly [K in (keyof TFields & string) | RelationOwnerKeys<TFields>]?: {
+        readonly read?: AccessRuleFor<TFields>
+        readonly write?: AccessRuleFor<TFields>
+      }
+    }
   }
   tableName?: string
   searchable?: readonly string[]
