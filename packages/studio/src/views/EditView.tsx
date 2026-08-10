@@ -7,6 +7,13 @@ import { LivePreviewPane } from "../components/LivePreviewPane.js"
 import type { ModelConfig } from "../config.js"
 import { useAdminConfig } from "../hooks/useAdminConfig.js"
 import { splitEditFields } from "../lib/edit-field-layout.js"
+import { applyFieldAccess } from "../lib/field-access-layout.js"
+import {
+  affordanceColumn,
+  isOperationOffered,
+  needsPerRecordCheck,
+  useStudioFieldAccess,
+} from "../hooks/useStudioFieldAccess.js"
 import { serializeRecordForApi } from "../lib/recordValues.js"
 
 interface EditViewProps {
@@ -27,6 +34,9 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
   const createTimestampDefaultsApplied = useRef(false)
 
   const isCreate = recordId === undefined
+  const fieldAccess = useStudioFieldAccess()
+  // null = not asked or not answerable. Only ever set from the database's own answer.
+  const [recordDeletable, setRecordDeletable] = useState<boolean | null>(null)
 
   useEffect(() => {
     if (recordId !== undefined) {
@@ -52,6 +62,39 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
       return next
     })
   }, [recordId, model.fields, model.primaryKey])
+
+  // Per-record delete affordance, asked only when the table-level verdict is `row`.
+  //
+  // Deliberately its own query rather than extra columns on the record load: the affordance is
+  // not a column of the record, and `serializeRecordForApi` spreads whatever is in `values`
+  // straight into the PATCH body — so a computed column merged in there would be sent back as
+  // an unknown column and fail every save.
+  useEffect(() => {
+    if (recordId === undefined) return
+    if (!needsPerRecordCheck(fieldAccess, model.tableName, "delete")) {
+      setRecordDeletable(null)
+      return
+    }
+
+    let cancelled = false
+    const column = affordanceColumn(model.tableName, "delete")
+    void (async () => {
+      const result = await client
+        .from(model.tableName as never)
+        .select(`${model.primaryKey},${column}`)
+        .eq(model.primaryKey, recordId)
+        .single()
+      if (cancelled) return
+      const row = result.data as Record<string, unknown> | null
+      // Fails open: an error or a missing answer leaves the control offered, and the database
+      // refuses the delete if it should.
+      setRecordDeletable(result.error !== null || row === null ? null : row[column] === true)
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [client, fieldAccess, model.tableName, model.primaryKey, recordId])
 
   useEffect(() => {
     if (!recordId) return
@@ -177,6 +220,12 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
   }
   const { mainFields, metaFields } = splitEditFields(model.fields, splitCtx)
 
+  // Per-column access, applied to the field lists rather than inside the widgets: a column
+  // this caller cannot write becomes a disabled input, and one no caller can supply is left
+  // out of a create form instead of rendered as an input nobody can satisfy.
+  const accessibleMainFields = applyFieldAccess(mainFields, fieldAccess, model.tableName, isCreate)
+  const accessibleMetaFields = applyFieldAccess(metaFields, fieldAccess, model.tableName, isCreate)
+
   const livePreviewConfig = config.livePreview?.[model.name]
 
   if (loading) {
@@ -196,8 +245,8 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
       {error && <div className="st-error" role="alert">{error}</div>}
 
       <EditFormLayout
-        mainFields={mainFields}
-        metaFields={metaFields}
+        mainFields={accessibleMainFields}
+        metaFields={accessibleMetaFields}
         values={values}
         onChange={handleChange}
         primaryKey={model.primaryKey}
@@ -210,7 +259,12 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
         isCreate={isCreate}
         {...(!isCreate && {
           onDuplicate: () => { void handleDuplicate() },
-          onDelete: () => { void handleDelete() },
+          // Two layers: the table-level verdict withdraws the control where it is settled, and
+          // the per-record affordance answers where it is not.
+          ...(isOperationOffered(fieldAccess, model.tableName, "delete") &&
+            recordDeletable !== false && {
+              onDelete: () => { void handleDelete() },
+            }),
         })}
         preview={
           livePreviewConfig ? (

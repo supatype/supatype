@@ -1,8 +1,13 @@
 /**
- * Database password display and management.
+ * Database password management.
  *
- * Shows the database password with a reveal toggle and a reset button.
- * The host app provides the `onResetPassword` callback which returns the new password.
+ * **Shown once, then reset-only.** The password is surfaced when the stack is created and
+ * never again: there is no reveal here, deliberately. Recovering a stored credential into a
+ * browser session means a stolen dashboard session is also a database credential, and the
+ * only thing a reveal buys over a reset is not having to update connection strings.
+ *
+ * The host app provides `onResetPassword`, which returns the new password — that return value
+ * is the one moment it is displayable, so the host is responsible for showing it.
  */
 
 import { useState, useCallback, type FC } from "react"
@@ -10,21 +15,18 @@ import { useState, useCallback, type FC } from "react"
 // -- Types -------------------------------------------------------------------
 
 export interface DatabasePasswordPanelProps {
-  dbPassword: string
   /** Called to reset the password. Should return the new password string. */
   onResetPassword: () => Promise<string>
-  /** Called after a successful password reset with the new password. */
+  /** Called after a successful password reset with the new password — show it once. */
   onPasswordChanged: (newPassword: string) => void
 }
 
 // -- Component ---------------------------------------------------------------
 
 export const DatabasePasswordPanel: FC<DatabasePasswordPanelProps> = ({
-  dbPassword,
   onResetPassword,
   onPasswordChanged,
 }) => {
-  const [showPassword, setShowPassword] = useState(false)
   const [resetting, setResetting] = useState(false)
   const [resetError, setResetError] = useState<string | null>(null)
   const [confirmReset, setConfirmReset] = useState(false)
@@ -59,18 +61,10 @@ export const DatabasePasswordPanel: FC<DatabasePasswordPanelProps> = ({
         API access through PostgREST with RLS enforcement.
       </p>
 
-      {/* Password display with reveal toggle */}
-      <div className="flex items-center gap-2">
-        <code className="flex-1 rounded border border-gray-200 bg-gray-50 px-3 py-2 font-mono text-sm dark:border-gray-700 dark:bg-gray-900">
-          {showPassword ? dbPassword : "\u2022".repeat(24)}
-        </code>
-        <button
-          onClick={() => setShowPassword(!showPassword)}
-          className="rounded border border-gray-300 px-3 py-2 text-xs font-medium hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-800"
-        >
-          {showPassword ? "Hide" : "Reveal"}
-        </button>
-      </div>
+      <p className="text-xs text-gray-500">
+        It was shown once when this project was created and is not recoverable here. If you no
+        longer have it, reset it below \u2014 the new password is shown once.
+      </p>
 
       {/* Reset database password */}
       <div className="space-y-2">

@@ -4,6 +4,12 @@ import { useAdminClient } from "../hooks/useAdminClient.js"
 import { useLocale } from "../hooks/useLocale.js"
 import { getLocalizedFieldValue } from "../lib/localized-field.js"
 import type { ModelConfig, FieldConfig } from "../config.js"
+import {
+  cellAccess,
+  isOperationOffered,
+  useStudioFieldAccess,
+  type CellAccess,
+} from "../hooks/useStudioFieldAccess.js"
 
 interface ListViewProps {
   model: ModelConfig
@@ -18,6 +24,7 @@ interface SortState {
 export function ListView({ model, onNavigate }: ListViewProps): React.ReactElement {
   const client = useAdminClient()
   const { currentLocale, defaultLocale } = useLocale()
+  const fieldAccess = useStudioFieldAccess()
   const [rows, setRows] = useState<Record<string, unknown>[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -104,13 +111,17 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
       <Header
         title={model.labelPlural}
         actions={
-          <button
-            type="button"
-            className="st-btn st-btn-primary"
-            onClick={() => { onNavigate(`/models/${model.name}/create`) }}
-          >
-            Create {model.label}
-          </button>
+          // Withdrawn only on a settled deny: `row` means some records allow it, and the
+          // server is what refuses either way.
+          isOperationOffered(fieldAccess, model.tableName, "create") ? (
+            <button
+              type="button"
+              className="st-btn st-btn-primary"
+              onClick={() => { onNavigate(`/models/${model.name}/create`) }}
+            >
+              Create {model.label}
+            </button>
+          ) : null
         }
       />
 
@@ -128,9 +139,11 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
         {selected.size > 0 && (
           <div className="st-bulk-actions">
             <span>{selected.size} selected</span>
-            <button type="button" className="st-btn st-btn-danger" onClick={() => { void handleBulkDelete() }}>
-              Delete selected
-            </button>
+            {isOperationOffered(fieldAccess, model.tableName, "delete") && (
+              <button type="button" className="st-btn st-btn-danger" onClick={() => { void handleBulkDelete() }}>
+                Delete selected
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -198,12 +211,16 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
                     </td>
                     {columns.map((col) => (
                       <td key={col.name} className="st-table-cell">
-                        <CellRenderer
-                          value={row[col.name]}
-                          field={col}
-                          currentLocale={currentLocale}
-                          defaultLocale={defaultLocale}
-                        />
+                        <AccessAwareCell
+                          access={cellAccess(fieldAccess, model.tableName, col.name, row[col.name])}
+                        >
+                          <CellRenderer
+                            value={row[col.name]}
+                            field={col}
+                            currentLocale={currentLocale}
+                            defaultLocale={defaultLocale}
+                          />
+                        </AccessAwareCell>
                       </td>
                     ))}
                   </tr>
@@ -290,4 +307,69 @@ function formatCellText(value: unknown): string {
 
 function truncate(text: string, maxLength: number): string {
   return text.length > maxLength ? text.slice(0, maxLength) + "..." : text
+}
+
+/**
+ * Renders a cell with its access state, and **never hides a value that came back**.
+ *
+ * A withheld column arrives as null, which as an empty cell is indistinguishable from a record
+ * that simply has no value — so `hidden` shows a lock instead of nothing. But that only holds
+ * where masking is actually being applied and the verdict is settled: an empty cell for an
+ * elevated caller, or under a per-row rule, is not evidence of anything, and claiming otherwise
+ * would tell the reader a record is hiding a value it does not have.
+ *
+ * `revealed` is the case that matters for an administrator, who acts elevated by default. The
+ * masking extension exempts the service role, so restricted columns reach them in full. Blanking
+ * those would hide data they are entitled to and make the restriction look like it applies to
+ * them.
+ */
+function AccessAwareCell({
+  access,
+  children,
+}: {
+  access: CellAccess
+  children: React.ReactNode
+}): React.ReactElement {
+  if (access === "hidden") {
+    return (
+      <span
+        className="st-cell-masked"
+        title="Hidden by a field access rule"
+        aria-label="Hidden by a field access rule"
+      >
+        &#128274;
+      </span>
+    )
+  }
+
+  if (access === "unknown") {
+    // Restricted, empty, and per-row: this record either withholds the value or has none, and
+    // nothing available here can tell which. Say that rather than pick one.
+    return (
+      <span
+        className="st-cell-masked st-cell-masked-unknown"
+        title="Hidden by a field access rule, or empty — this column is restricted per record"
+        aria-label="Hidden by a field access rule, or empty"
+      >
+        &#128274;?
+      </span>
+    )
+  }
+
+  if (access === "revealed") {
+    return (
+      <span className="st-cell-restricted">
+        {children}
+        <span
+          className="st-cell-restricted-marker"
+          title="Access-controlled field — other callers may not see this value"
+          aria-label="Access-controlled field"
+        >
+          &#128274;
+        </span>
+      </span>
+    )
+  }
+
+  return <>{children}</>
 }
