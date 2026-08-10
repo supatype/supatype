@@ -706,21 +706,36 @@ export type ModelMeta<TFields extends Record<string, unknown>> = {
     /**
      * Per-column rules, narrowing the table rules for one field.
      *
-     * Enforced by Postgres column privileges, which are granted per *database*
-     * role — so the only distinction they can draw is `anon` against
-     * `authenticated`. `Public`, `LoggedIn` and `Private` (and `Any`/`All`/`Not`
-     * of them) compile; a rule naming a row, a claim or an application role does
-     * not, and is a hard error at extract rather than a privilege that silently
-     * fails to express it.
-     *
      * ```typescript
-     * access: { read: Public, fields: { internal_ref: { read: Private } } }
+     * access: {
+     *   read: Public,
+     *   fields: { salary: { read: Owner<"user_id">, write: Role<"admin"> } },
+     * }
      * ```
      *
-     * For a genuinely row- or role-dependent column, move it to its own table
-     * with its own rules. That is the shape the whole stack already understands —
-     * policies, realtime and caching all follow it — rather than a column that
-     * only some layers know is restricted.
+     * The **full rule language** applies, row-dependent rules included. Enforced
+     * by the `supatype_mask` extension, which rewrites every reference to the
+     * column in the planner: a caller who may not read it gets `null` rather than
+     * a 403, because `SELECT *` names every column and a revoked one would take
+     * the whole table down with it. Column privileges are layered underneath for
+     * writes only, as defence in depth.
+     *
+     * A `write` rule is compiled conjoined with the field's `read` rule, so write
+     * without read is unrepresentable — otherwise a caller could round-trip away a
+     * value they were never shown.
+     *
+     * **`INSERT` cannot evaluate a row-dependent write rule**: there is no row
+     * yet, so the column falls back to its default instead of accepting the
+     * submitted value. Use an identity-only rule (`Role<>`, `LoggedIn`,
+     * `Claim<>`) for a column that must be settable at creation time.
+     *
+     * Relations are named by their column (`author_id`), because that is what the
+     * restriction applies to — `author` is not a column at all.
+     *
+     * Requires the extension: a push carrying field rules against a database
+     * without it fails rather than half-enforcing. A column restricted from nearly
+     * everyone and queried often is still better off in its own table — masking
+     * costs a predicate call per row and cannot use the column's index.
      */
     fields?: {
       // Relations are named by their column (`author_id`), because that is what a

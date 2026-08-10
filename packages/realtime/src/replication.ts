@@ -27,6 +27,8 @@ export class ReplicationListener {
   private running = false
   private pollInFlight = false
   private onChangeCallback: ((change: WalChange) => void) | null = null
+  private onSchemaChangeCallback: (() => void) | null = null
+  private sawSchemaPush = false
 
   constructor(config: ReplicationConfig) {
     this.config = config
@@ -35,6 +37,11 @@ export class ReplicationListener {
   /** Register the change handler. */
   onChange(callback: (change: WalChange) => void): void {
     this.onChangeCallback = callback
+  }
+
+  /** Fired once after a schema push releases the decode lock. */
+  onSchemaChange(callback: () => void): void {
+    this.onSchemaChangeCallback = callback
   }
 
   /** Connect to Postgres and ensure the replication slot exists. */
@@ -108,7 +115,15 @@ export class ReplicationListener {
 
     try {
       if (await isSchemaPushLockHeld(this.client)) {
+        this.sawSchemaPush = true
         return
+      }
+
+      // The lock has just been released, so the push has committed. Field rules are read
+      // from security labels and cached, and this is the moment that cache is stale.
+      if (this.sawSchemaPush) {
+        this.sawSchemaPush = false
+        this.onSchemaChangeCallback?.()
       }
 
       const result = await this.client.query(

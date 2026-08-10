@@ -6,6 +6,7 @@ import { verifyToken, type JwtClaims } from "./auth.js"
 import { ChannelManager, type ConnectedClient } from "./channels.js"
 import { ReplicationListener } from "./replication.js"
 import { RlsFilter } from "./rls.js"
+import { filterIsMaskSafe } from "./field-mask.js"
 import type {
   ClientMessage,
   ServerMessage,
@@ -78,6 +79,12 @@ export class RealtimeServer {
     // Start logical replication
     this.replication.onChange((change) => {
       void this.handleWalChange(change)
+    })
+    // A push can add, change or remove a field rule, and those are read from security
+    // labels and cached. Re-read them rather than wait out the TTL, so a newly restricted
+    // column stops being broadcast at the push rather than up to a TTL later.
+    this.replication.onSchemaChange(() => {
+      this.rlsFilter.invalidateFieldMasks()
     })
     await this.replication.start()
 
@@ -363,37 +370,30 @@ export class RealtimeServer {
     if (this.env.multiTenant) {
       const schema = change.schema
 
-      // Filter out internal schemas: {ref}_auth, {ref}_internal, extensions, pg_*
+      // Filter out internal / system schemas (self-host + dedicated cloud)
       if (
         schema.endsWith("_auth") ||
         schema.endsWith("_internal") ||
+        schema === "auth" ||
+        schema === "_supatype" ||
+        schema === "storage" ||
         schema === "extensions" ||
         schema.startsWith("pg_") ||
-        schema === "_platform"
+        schema === "_platform" ||
+        schema === "cron"
       ) {
         return
       }
 
-      // In developer_only mode, the schema IS the project ref
-      // Only forward to subscribers of that project
+      // Legacy shared: schema name IS the project ref. Dedicated uses non-multiTenant path.
       const projectRef = schema
       const subscribers = this.channels.getSubscribersForProject(schema, change.table, projectRef)
       if (subscribers.length === 0) return
 
-      for (const { client, subscription } of subscribers) {
-        if (subscription.event !== "*" && subscription.event !== change.event) continue
-        if (!this.matchesFilter(change, subscription.filter)) continue
-        const canSee = await this.rlsFilter.canSee(client.claims, change)
-        if (!canSee) continue
+      const masked = await this.rlsFilter.maskedColumns(change.schema, change.table)
 
-        const msg: ServerMessage = {
-          type: "change",
-          channel: subscription.channel,
-          event: change.event,
-          payload: { old: change.oldRecord, new: change.newRecord },
-          timestamp: change.commitTimestamp,
-        }
-        this.send(client.ws, msg)
+      for (const { client, subscription } of subscribers) {
+        await this.deliverIfVisible(client, subscription, change, masked)
       }
       return
     }
@@ -402,35 +402,54 @@ export class RealtimeServer {
     const subscribers = this.channels.getSubscribers(change.schema, change.table)
     if (subscribers.length === 0) return
 
+    const masked = await this.rlsFilter.maskedColumns(change.schema, change.table)
+
     for (const { client, subscription } of subscribers) {
-      // Check event filter
-      if (subscription.event !== "*" && subscription.event !== change.event) {
-        continue
-      }
-
-      // Check column filters
-      if (!this.matchesFilter(change, subscription.filter)) {
-        continue
-      }
-
-      // RLS check — verify the subscriber can see this record
-      const canSee = await this.rlsFilter.canSee(client.claims, change)
-      if (!canSee) continue
-
-      // Send the change event
-      const msg: ServerMessage = {
-        type: "change",
-        channel: subscription.channel,
-        event: change.event,
-        payload: {
-          old: change.oldRecord,
-          new: change.newRecord,
-        },
-        timestamp: change.commitTimestamp,
-      }
-      this.send(client.ws, msg)
+      await this.deliverIfVisible(client, subscription, change, masked)
     }
   }
+
+  /**
+   * Decide whether one subscriber gets one change, and send it masked.
+   *
+   * Shared by both dispatch paths on purpose. The ordering here is security-relevant — the
+   * subscriber's column filter must not be matched against values they may not read — and
+   * two copies of it would be two chances to get it wrong.
+   */
+  private async deliverIfVisible(
+    client: ConnectedClient,
+    subscription: Subscription,
+    change: WalChange,
+    masked: Set<string>,
+  ): Promise<void> {
+    if (subscription.event !== "*" && subscription.event !== change.event) return
+
+    // Cheap pass before the round trip, valid only when the filter names nothing
+    // restricted. Filters that do are matched against the masked record instead, because
+    // "did I receive this event" would otherwise answer a question about a hidden value.
+    if (
+      filterIsMaskSafe(subscription.filter, masked) &&
+      !this.matchesFilter(change, subscription.filter)
+    ) {
+      return
+    }
+
+    // Row visibility plus field masking — what comes back is already masked, or nothing.
+    const visible = await this.rlsFilter.visibleChange(client.claims, change)
+    if (!visible) return
+
+    // Authoritative filter pass, against what this subscriber is actually allowed to see.
+    if (!this.matchesFilter(visible, subscription.filter)) return
+
+    this.send(client.ws, {
+      type: "change",
+      channel: subscription.channel,
+      event: change.event,
+      payload: { old: visible.oldRecord, new: visible.newRecord },
+      timestamp: change.commitTimestamp,
+    })
+  }
+
 
   /** Check if a change matches PostgREST-style column filters. */
   private matchesFilter(change: WalChange, filter: Record<string, string>): boolean {
