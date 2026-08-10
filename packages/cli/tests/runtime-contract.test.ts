@@ -109,6 +109,49 @@ describe("runtime contract", () => {
     expect(compose).toContain("supatype/schema-engine:latest")
   })
 
+  // PostgREST must connect as `authenticator`, never as POSTGRES_USER. POSTGRES_USER is
+  // `supatype_admin`, a superuser, and a superuser session may SET ROLE to any role in the
+  // cluster — so a request whose JWT named one got it. Verified against a live stack: a
+  // token with `role: "supatype_admin"` returned every row of an RLS-protected table.
+  it("self-host compose connects PostgREST as authenticator, not the superuser", () => {
+    const compose = renderSelfHostCompose(baseConfig)
+    expect(compose).toContain("PGRST_DB_URI: postgresql://authenticator:")
+    expect(compose).not.toMatch(/PGRST_DB_URI:.*POSTGRES_USER/)
+    expect(compose).not.toMatch(/PGRST_DB_URI:.*supatype_admin/)
+  })
+
+  // A separate credential, so rotating the operator's POSTGRES_PASSWORD cannot take the REST
+  // API down with it. Unset is a hard compose error rather than an empty password.
+  it("gives PostgREST its own credential, not POSTGRES_PASSWORD", () => {
+    const compose = renderSelfHostCompose(baseConfig)
+    expect(compose).toMatch(/PGRST_DB_URI:.*\$\{AUTHENTICATOR_PASSWORD:\?/)
+    expect(compose).not.toMatch(/PGRST_DB_URI:.*POSTGRES_PASSWORD/)
+    expect(compose).toMatch(/AUTHENTICATOR_PASSWORD: \$\{AUTHENTICATOR_PASSWORD:\?/)
+  })
+
+  // `supatype dev --provider docker` renders *this* file, so a `${VAR:?}` with no default
+  // takes local dev down before anything starts — `docker compose` refuses to interpolate and
+  // exits 1. Adding one therefore means wiring it into `upsertDevComposeEnv` as well. This
+  // list is the reminder; if it fails, do that rather than just updating the list.
+  it("requires only variables the dev path also sets", () => {
+    const compose = renderSelfHostCompose(baseConfig)
+    const required = [...compose.matchAll(/\$\{([A-Z0-9_]+):\?/g)].map((m) => m[1])
+    expect([...new Set(required)].sort()).toEqual([
+      "AUTHENTICATOR_PASSWORD",
+      "JWT_SECRET",
+      "POSTGRES_PASSWORD",
+    ])
+  })
+
+  // The whole point of requiring them: a service must never fall back to a secret published in
+  // this repository. That default used to reach PostgREST, storage and GoTrue.
+  it("never defaults a secret to a published constant", () => {
+    const compose = renderSelfHostCompose(baseConfig)
+    expect(compose).not.toContain("super-secret-jwt-token")
+    expect(compose).not.toMatch(/\$\{JWT_SECRET:-/)
+    expect(compose).not.toMatch(/\$\{POSTGRES_PASSWORD:-/)
+  })
+
   it("composeDockerImageEnv maps pinned versions to SUPATYPE_*_IMAGE", () => {
     expect(composeDockerImageEnv(baseConfig)).toEqual({
       SUPATYPE_ENGINE_IMAGE: "supatype/schema-engine:v0.4.2",

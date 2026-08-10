@@ -13,11 +13,15 @@ export const config = {
     "postgresql://supatype_admin:postgres@localhost:5432/postgres",
   ),
 
-  /** JWT secret shared with GoTrue / Kong. */
-  jwtSecret: env(
-    "JWT_SECRET",
-    "super-secret-jwt-token-change-in-production",
-  ),
+  /**
+   * JWT secret shared with GoTrue / Kong.
+   *
+   * **No fallback, deliberately.** This validates every caller's token, and the value it used
+   * to default to is published in this repository — so a deployment that forgot to set
+   * JWT_SECRET accepted tokens anyone could mint, and looked healthy doing it. Refusing to
+   * start is the only safe reading of a missing signing secret.
+   */
+  jwtSecret: env("JWT_SECRET"),
 
   /** S3-compatible endpoint (MinIO for local dev). */
   s3Endpoint: env("S3_ENDPOINT", "http://localhost:9000"),
@@ -57,8 +61,8 @@ export const config = {
   /** Total storage quota for this project (bytes). -1 = unlimited. */
   storageQuota: parseInt(env("STORAGE_QUOTA", String(1024 * 1024 * 1024)), 10),
 
-  /** HMAC secret for pre-signed URL tokens. Falls back to JWT secret. */
-  signedUrlSecret: env("SIGNED_URL_SECRET", env("JWT_SECRET", "super-secret-jwt-token-change-in-production")),
+  /** HMAC secret for pre-signed URL tokens. Falls back to the JWT secret, which is required. */
+  signedUrlSecret: env("SIGNED_URL_SECRET", env("JWT_SECRET")),
 
   /** Default pre-signed URL expiry in seconds. */
   defaultSignedUrlExpiry: parseInt(env("DEFAULT_SIGNED_URL_EXPIRY", "3600"), 10),

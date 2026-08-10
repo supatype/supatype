@@ -2,6 +2,7 @@ import type { Command } from "commander"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { resolve, join, basename } from "node:path"
 import { spawnSync } from "node:child_process"
+import { randomBytes } from "node:crypto"
 import { p, runClackFlow } from "../ui/clack.js"
 import { ensureNotCancelled } from "../ui/prompts.js"
 import { generateAndWriteKeys } from "./keys.js"
@@ -1189,13 +1190,28 @@ export type SiteSettings = Model<{
 
 function envTemplate(opts: ScaffoldOptions): string {
   const sections: string[] = []
-  sections.push(`DATABASE_URL=postgresql://supatype_admin:postgres@localhost:5432/${opts.projectName}
-POSTGRES_USER=supatype_admin
-POSTGRES_PASSWORD=postgres
-POSTGRES_DB=${opts.projectName}`)
+  // Generated, not constant. These reach a server: the previous defaults meant a self-host
+  // deployment ran with a password of `postgres` and a JWT secret published in this repo —
+  // and anyone holding that secret can mint a token naming any Postgres role. Safe to generate
+  // only because `supatype dev` no longer overwrites them on every run (see local-secrets.ts).
+  const postgresPassword = randomBytes(24).toString("base64url")
 
-  sections.push(`# JWT — run \`supatype keys\` to generate ANON_KEY and SERVICE_ROLE_KEY
-JWT_SECRET=super-secret-jwt-token-change-in-production
+  sections.push(`DATABASE_URL=postgresql://supatype_admin:${postgresPassword}@localhost:5432/${opts.projectName}
+POSTGRES_USER=supatype_admin
+POSTGRES_PASSWORD=${postgresPassword}
+POSTGRES_DB=${opts.projectName}
+
+# PostgREST's own database credential. It connects as \`authenticator\`, a role that holds no
+# privileges and can only switch to anon/authenticated/service_role — so a request whose JWT
+# names any other role is refused by Postgres rather than honoured.
+#
+# Deliberately NOT the same as POSTGRES_PASSWORD: that one is yours, for direct SQL access, and
+# rotating it should never take the REST API down with it.
+AUTHENTICATOR_PASSWORD=${randomBytes(24).toString("base64url")}`)
+
+  sections.push(`# JWT — ANON_KEY and SERVICE_ROLE_KEY are derived from this secret.
+# Changing it invalidates every issued token; re-run \`supatype keys\` afterwards.
+JWT_SECRET=${randomBytes(48).toString("base64url")}
 ANON_KEY=
 SERVICE_ROLE_KEY=`)
 
@@ -1442,6 +1458,16 @@ function printNextSteps(args: {
 
   info(`Supatype project ready${name ? ` in ${name}/` : ""}.`)
   nextSteps(setupComplete ? "Next steps:" : "Finish setup:", steps)
+
+  // Shown once, at creation. These are generated per project rather than shipped as
+  // constants, so this is the moment to say they exist and where they live — nothing prints
+  // them again, and the JWT secret is only echoed as a fingerprint from here on.
+  nextSteps("Secrets — generated for this project, kept in .env:", [
+    "POSTGRES_PASSWORD    direct SQL access as the superuser",
+    "AUTHENTICATOR_PASSWORD    PostgREST's own login; rotating the one above does not affect it",
+    "JWT_SECRET    signs ANON_KEY and SERVICE_ROLE_KEY; changing it invalidates every token",
+    "Keep .env out of version control, and use different values in production.",
+  ])
 
   if (result.app.mode === "none") {
     nextSteps("Static frontend (self-host):", [

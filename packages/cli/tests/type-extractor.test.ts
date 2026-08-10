@@ -1170,7 +1170,7 @@ export type Article = Model<{ id: UUID; title: string }, {
     )
 
     const ast = extractSchemaAstFromTypes(schemaPath, dir)
-    const access = modelAccess(ast.models.find((m) => m.name === "Article"))
+    const access = modelAccess(ast?.models.find((m) => m.name === "Article"))
     expect(access).toEqual({
       read: { type: "public" },
       create: { type: "role", roles: ["admin"] },
@@ -1198,9 +1198,8 @@ export type Article = Model<{ id: UUID; title: string }, {
       "utf8",
     )
 
-    const access = modelAccess(
-      extractSchemaAstFromTypes(schemaPath, dir).models.find((m) => m.name === "Article"),
-    )
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const access = modelAccess(ast?.models.find((m) => m.name === "Article"))
     expect(Object.keys(access).sort()).toEqual(["create", "delete", "read"])
   })
 

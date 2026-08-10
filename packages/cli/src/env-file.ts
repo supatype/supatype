@@ -29,6 +29,13 @@ export function readEnvValue(cwd: string, key: string, fallback: string): string
   return fallback
 }
 
+/** Whether `.env` carries a non-empty value for `key`. Distinguishes absent from defaulted. */
+export function hasEnvValue(cwd: string, key: string): boolean {
+  const envPath = join(cwd, ".env")
+  if (!existsSync(envPath)) return false
+  return new RegExp(`^${key}=(.+)$`, "m").test(readFileSync(envPath, "utf8"))
+}
+
 export function readEnvInt(cwd: string, key: string): number | null {
   const raw = readEnvValue(cwd, key, "")
   if (!raw) return null

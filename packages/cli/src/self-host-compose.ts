@@ -321,14 +321,25 @@ services:
     image: \${SUPATYPE_POSTGRES_IMAGE:-supatype/postgres:latest}
     environment:
       POSTGRES_USER: \${POSTGRES_USER:-supatype_admin}
-      POSTGRES_PASSWORD: \${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: \${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is missing from .env}
       POSTGRES_DB: \${POSTGRES_DB:-supatype}
+      # Read by the image's init to password the \`authenticator\` role PostgREST connects as.
+      AUTHENTICATOR_PASSWORD: \${AUTHENTICATOR_PASSWORD:?AUTHENTICATOR_PASSWORD is missing from .env}
 ${dbPorts}    volumes:
       - db-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \${POSTGRES_USER:-supatype_admin}"]
+      # -h 127.0.0.1 forces TCP. Without it \`pg_isready\` uses the Unix socket, which the
+      # entrypoint's temporary init server is already listening on while TCP is still refused —
+      # so the container reported healthy, \`depends_on: service_healthy\` released, and every
+      # service that connects over the network died with ECONNREFUSED on first boot. PostgREST
+      # survived only because it retries. Observed on a clean stack: server, storage and
+      # realtime all exited 1 while db said "healthy".
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \${POSTGRES_USER:-supatype_admin} -d \${POSTGRES_DB:-supatype}"]
       interval: 5s
       timeout: 5s
+      # First boot runs initdb plus every bootstrap migration. Failures inside the start period
+      # do not count against retries, so a slow init waits rather than being declared unhealthy.
+      start_period: 90s
       retries: 20
 
   postgrest:
@@ -336,10 +347,17 @@ ${dbPorts}    volumes:
     expose:
       - "3000"
     environment:
-      PGRST_DB_URI: postgresql://\${POSTGRES_USER:-supatype_admin}:\${POSTGRES_PASSWORD:-postgres}@db:5432/\${POSTGRES_DB:-supatype}
+      # Connects as \`authenticator\`, not \${POSTGRES_USER} — which is a superuser, and a
+      # superuser session may SET ROLE to any role in the cluster, so a request whose JWT
+      # named one got it. \`authenticator\` is NOINHERIT with membership in only
+      # anon/authenticated/service_role, so the same SET ROLE is refused.
+      #
+      # Its own credential, not POSTGRES_PASSWORD: yours is for direct SQL access and
+      # rotating it must not take the REST API down. \`supatype init\` generates this.
+      PGRST_DB_URI: postgresql://authenticator:\${AUTHENTICATOR_PASSWORD:?AUTHENTICATOR_PASSWORD is missing from .env}@db:5432/\${POSTGRES_DB:-supatype}
       PGRST_DB_SCHEMA: "public, supatype, graphql_public, auth"
       PGRST_DB_ANON_ROLE: anon
-      PGRST_JWT_SECRET: \${JWT_SECRET:-super-secret-jwt-token-change-in-production}
+      PGRST_JWT_SECRET: \${JWT_SECRET:?JWT_SECRET is missing from .env}
       PGRST_DB_EXTRA_SEARCH_PATH: public,extensions
       PGRST_DB_POOL: 3
     depends_on:
@@ -352,8 +370,8 @@ ${dbPorts}    volumes:
       - "5000"
     environment:
       PORT: 5000
-      DATABASE_URL: "postgresql://\${POSTGRES_USER:-supatype_admin}:\${POSTGRES_PASSWORD:-postgres}@db:5432/\${POSTGRES_DB:-supatype}"
-      JWT_SECRET: \${JWT_SECRET:-super-secret-jwt-token-change-in-production}
+      DATABASE_URL: "postgresql://\${POSTGRES_USER:-supatype_admin}:\${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is missing from .env}@db:5432/\${POSTGRES_DB:-supatype}"
+      JWT_SECRET: \${JWT_SECRET:?JWT_SECRET is missing from .env}
       S3_ENDPOINT: http://minio:9000
       S3_REGION: us-east-1
       S3_ACCESS_KEY: supatype
@@ -391,8 +409,8 @@ ${dbPorts}    volumes:
       - "4000"
     environment:
       PORT: "4000"
-      DATABASE_URL: "postgresql://\${POSTGRES_USER:-supatype_admin}:\${POSTGRES_PASSWORD:-postgres}@db:5432/\${POSTGRES_DB:-supatype}"
-      JWT_SECRET: \${JWT_SECRET:-super-secret-jwt-token-change-in-production}
+      DATABASE_URL: "postgresql://\${POSTGRES_USER:-supatype_admin}:\${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is missing from .env}@db:5432/\${POSTGRES_DB:-supatype}"
+      JWT_SECRET: \${JWT_SECRET:?JWT_SECRET is missing from .env}
       SLOT_NAME: supatype_realtime
       PUBLICATION_NAME: supatype_realtime_pub
     depends_on:
@@ -410,7 +428,7 @@ ${dbPorts}    volumes:
       PORT: "8080"
       SUPATYPE_PROJECT_REF: ${JSON.stringify(config.project.name)}
       SUPATYPE_PROJECT_ROOT: /project
-      DATABASE_URL: "postgresql://\${POSTGRES_USER:-supatype_admin}:\${POSTGRES_PASSWORD:-postgres}@db:5432/\${POSTGRES_DB:-supatype}"
+      DATABASE_URL: "postgresql://\${POSTGRES_USER:-supatype_admin}:\${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is missing from .env}@db:5432/\${POSTGRES_DB:-supatype}"
       SUPATYPE_FUNCTIONS_ROOT: /project/functions
       SUPATYPE_STATIC_ROOT: /project/${staticDir.replace(/^\.\//, "")}
       SUPATYPE_DEPLOYMENTS_DIR: /project/.supatype/deployments
@@ -436,7 +454,7 @@ ${serverPorts}    volumes:
       SUPATYPE_URL: \${API_EXTERNAL_URL:-${externalUrlFallback}}
       SUPATYPE_ANON_KEY: \${ANON_KEY:-}
       SUPATYPE_SERVICE_ROLE_KEY: \${SERVICE_ROLE_KEY:-}
-      SUPATYPE_SQL_DATABASE_URL: "postgresql://\${POSTGRES_USER:-supatype_admin}:\${POSTGRES_PASSWORD:-postgres}@db:5432/\${POSTGRES_DB:-supatype}"
+      SUPATYPE_SQL_DATABASE_URL: "postgresql://\${POSTGRES_USER:-supatype_admin}:\${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is missing from .env}@db:5432/\${POSTGRES_DB:-supatype}"
       SUPATYPE_DENO_FUNCTIONS_DIR: /project/functions
       SUPATYPE_FUNCTIONS_WORKER_URL: http://functions-worker:8001
       SUPATYPE_REALTIME_URL: http://realtime:4000
@@ -448,9 +466,9 @@ ${appEnv}
       API_EXTERNAL_URL: \${API_EXTERNAL_URL:-${externalUrlFallback}}
       GOTRUE_API_EXTERNAL_URL: \${API_EXTERNAL_URL:-${externalUrlFallback}}
       GOTRUE_DB_DRIVER: postgres
-      GOTRUE_DB_DATABASE_URL: "postgres://\${POSTGRES_USER:-supatype_admin}:\${POSTGRES_PASSWORD:-postgres}@db:5432/\${POSTGRES_DB:-supatype}?search_path=auth"
+      GOTRUE_DB_DATABASE_URL: "postgres://\${POSTGRES_USER:-supatype_admin}:\${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is missing from .env}@db:5432/\${POSTGRES_DB:-supatype}?search_path=auth"
       GOTRUE_SITE_URL: \${SITE_URL:-${siteUrlFallback}}
-      GOTRUE_JWT_SECRET: \${JWT_SECRET:-super-secret-jwt-token-change-in-production}
+      GOTRUE_JWT_SECRET: \${JWT_SECRET:?JWT_SECRET is missing from .env}
       GOTRUE_JWT_EXP: 3600
       GOTRUE_JWT_AUD: authenticated
       GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated

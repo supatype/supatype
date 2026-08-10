@@ -26,6 +26,12 @@ import {
 import { discoverTsFunctionsInDir, writeDevFunctionsRouter } from "../functions-router-gen.js"
 import { signJwt } from "../jwt.js"
 import {
+  devAuthenticatorPassword,
+  devJwtSecret,
+  devPostgresPassword,
+  secretFingerprint,
+} from "../local-secrets.js"
+import {
   normalisePlatformPath,
   cachePath,
   currentPlatform,
@@ -172,9 +178,15 @@ export function registerDev(program: Command): void {
 
       // ── 5–7. Start Postgres ───────────────────────────────────────────────
       let dbURL: string
+      /** What PostgREST connects as — deliberately not `dbURL`, which is a superuser. */
+      let postgrestDbURL: string
       let stopPostgres: () => void | Promise<void>
       const pgPort = NATIVE_PG_PORT
-      const pgPassword = "postgres"
+      const pgPassword = devPostgresPassword(cwd)
+      // Distinct from pgPassword even locally, so the split the other paths enforce is the
+      // one developers see. Read from .env when present so it matches a stack the user has
+      // already provisioned.
+      const authenticatorPassword = devAuthenticatorPassword(cwd)
       // pgBinDir is set on the native path and used to add DLL search path for
       // PostgREST on Windows (PostgREST links against libpq + SSL from MinGW).
       let pgBinDir: string | null = null
@@ -192,7 +204,8 @@ export function registerDev(program: Command): void {
         pgStart(pgOpts)
         await pgWaitReady(pgOpts, 15_000)
         console.log("[supatype] Postgres is ready.")
-        dbURL = `postgres://postgres:postgres@127.0.0.1:${pgPort}/${projectName}?sslmode=disable`
+        dbURL = `postgres://postgres:${pgPassword}@127.0.0.1:${pgPort}/${projectName}?sslmode=disable`
+        postgrestDbURL = `postgres://authenticator:${authenticatorPassword}@127.0.0.1:${pgPort}/${projectName}?sslmode=disable`
         stopPostgres = () => pgStop(pgOpts)
 
         // Create project database if it doesn't exist (native only).
@@ -219,6 +232,14 @@ export function registerDev(program: Command): void {
         //   anon          – unauthenticated requests (RLS enforced)
         //   authenticated – signed-in user requests  (RLS enforced)
         //   service_role  – developer/admin bypass   (BYPASSRLS)
+        //   authenticator – the role PostgREST *connects* as, and nothing else
+        //
+        // `authenticator` is NOINHERIT and holds no privileges of its own: it can only
+        // SET ROLE to the three above. That containment is the point. Connecting as
+        // `postgres` — a superuser — meant a request whose JWT named *any* role in the
+        // cluster got it, because a superuser may SET ROLE to anything. Verified: as
+        // postgres, `SET ROLE supatype_replication_admin` succeeds; as authenticator the
+        // same statement is refused. Mirrors the image, which has had this role all along.
         const rolesSql = `
 CREATE SCHEMA IF NOT EXISTS auth;
 DO $$ BEGIN
@@ -228,8 +249,11 @@ DO $$ BEGIN
     THEN CREATE ROLE authenticated NOLOGIN; END IF;
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'service_role')
     THEN CREATE ROLE service_role NOLOGIN BYPASSRLS; END IF;
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticator')
+    THEN CREATE ROLE authenticator LOGIN NOINHERIT PASSWORD '${authenticatorPassword}'; END IF;
 END $$;
 GRANT anon, authenticated, service_role TO postgres;
+GRANT anon, authenticated, service_role TO authenticator;
 GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
 -- Table-level privileges (RLS restricts rows; roles still need table access)
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon;
@@ -246,7 +270,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
           { stdio: "pipe", encoding: "utf8", env: pgEnv })
       }
 
-      const LOCAL_JWT_SECRET = "super-secret-jwt-token-with-at-least-32-characters-long"
+      const LOCAL_JWT_SECRET = devJwtSecret(cwd)
       const authDbURL = dbURL.includes("?")
         ? `${dbURL}&search_path=auth`
         : `${dbURL}?search_path=auth`
@@ -472,7 +496,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
         }
 
         const postgrestEnv: Record<string, string> = {
-          PGRST_DB_URI: dbURL,
+          PGRST_DB_URI: postgrestDbURL,
           PGRST_DB_SCHEMA: "public, supatype, graphql_public",
           PGRST_DB_ANON_ROLE: "anon",
           PGRST_SERVER_PORT: postgrestPort,
@@ -547,7 +571,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
         links,
         anonKey,
         serviceRoleKey,
-        hints: [`Postgres ${dbURL}`, `JWT secret: ${LOCAL_JWT_SECRET}`],
+        hints: [`Postgres ${dbURL}`, `JWT secret: #${secretFingerprint(LOCAL_JWT_SECRET)} (in .env)`],
       })
 
       // ── Shutdown handler ──────────────────────────────────────────────────

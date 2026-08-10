@@ -40,6 +40,12 @@ import { ensureLocalServerDockerImage } from "./compose-local-server-image.js"
 import { ensureEngine, engineRequest, type DiffResult } from "./engine-client.js"
 import { writeSchemaSourcePushArtifacts, type SchemaSourcePushArtifacts } from "./schema-sources.js"
 import { readEnvValue, upsertEnvFile } from "./env-file.js"
+import {
+  devJwtSecret,
+  devPostgresPassword,
+  seedMissingDatabaseIdentity,
+  seedMissingLocalSecrets,
+} from "./local-secrets.js"
 import { writeLocalEnvironment } from "./link.js"
 import { registerDevShutdown } from "./dev-shutdown.js"
 import {
@@ -54,8 +60,6 @@ import { provisionBucketsFromAst } from "./storage-provision.js"
 import type { ExtractedSchemaAstV2 } from "./schema-ast-v2.js"
 import { ensureFirstAdminUserForProject } from "./commands/admin.js"
 import { publishDevReady } from "./dev-ready-panel.js"
-
-const LOCAL_JWT_SECRET = "super-secret-jwt-token-with-at-least-32-characters-long"
 
 /** Default host port for compose Postgres when `overrides.engine` is set (devLocal). */
 const COMPOSE_DEV_DB_PORT = 54329
@@ -72,8 +76,10 @@ export interface DevComposeOptions {
 }
 
 /** In-compose Postgres URL (SCRAM; not published to the host). */
-export function composeDbUrl(): string {
-  return "postgresql://supatype_admin:postgres@db:5432/supatype?sslmode=disable"
+export function composeDbUrl(cwd: string): string {
+  const user = readEnvValue(cwd, "POSTGRES_USER", "supatype_admin")
+  const db = readEnvValue(cwd, "POSTGRES_DB", "supatype")
+  return `postgresql://${user}:${devPostgresPassword(cwd)}@db:5432/${db}?sslmode=disable`
 }
 
 /**
@@ -87,7 +93,7 @@ async function resolveDevDbPort(cwd: string): Promise<number> {
 function hostComposeDbUrl(cwd: string): string {
   const port = readEnvValue(cwd, "SUPATYPE_DEV_DB_PORT", String(COMPOSE_DEV_DB_PORT))
   const user = readEnvValue(cwd, "POSTGRES_USER", "supatype_admin")
-  const pass = readEnvValue(cwd, "POSTGRES_PASSWORD", "postgres")
+  const pass = devPostgresPassword(cwd)
   const db = readEnvValue(cwd, "POSTGRES_DB", "supatype")
   return `postgresql://${user}:${pass}@127.0.0.1:${port}/${db}?sslmode=disable`
 }
@@ -117,8 +123,8 @@ export async function ensureDockerDbPublishedForHostEngine(
 
   const now = Math.floor(Date.now() / 1000)
   const jwtBase = { iss: "supatype", iat: now, exp: now + 315_360_000 }
-  const anonKey = signJwt({ ...jwtBase, role: "anon" }, LOCAL_JWT_SECRET)
-  const serviceRoleKey = signJwt({ ...jwtBase, role: "service_role" }, LOCAL_JWT_SECRET)
+  const anonKey = signJwt({ ...jwtBase, role: "anon" }, devJwtSecret(cwd))
+  const serviceRoleKey = signJwt({ ...jwtBase, role: "service_role" }, devJwtSecret(cwd))
   ensureDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, devDbPort)
 
   const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
@@ -179,11 +185,25 @@ function upsertDevComposeEnv(
 ): void {
   const apiUrl = `http://localhost:${kongPort}`
   const imagePins = composeDockerImageEnv(config)
+  // `POSTGRES_PASSWORD` and `JWT_SECRET` are deliberately absent.
+  //
+  // They used to be pinned here to published constants on every `dev` run, against the same
+  // `.env` a self-host deployment reads — so a project could not hold its own secrets, and one
+  // `dev` after generating them put the published values back with nothing to show it. They are
+  // now resolved from `.env` (see `local-secrets.ts`) and written by `init` alone.
+  //
+  // The keys below still have to be written, because they are *derived*: the anon and
+  // service-role tokens are signed with the effective secret, so leaving a stale pair in place
+  // would desync them from the secret that validates them.
   const updates: Record<string, string> = {
-    POSTGRES_USER: "supatype_admin",
-    POSTGRES_PASSWORD: "postgres",
-    POSTGRES_DB: "supatype",
-    JWT_SECRET: LOCAL_JWT_SECRET,
+    // The docker dev path renders the *self-host* compose file, where the secrets have no
+    // defaults — an unset value is a hard compose error rather than a service quietly starting
+    // with a published constant. This guarantees presence without overwriting: only keys
+    // genuinely absent from `.env` are filled, and with the value the project has been running
+    // with rather than a fresh one.
+    ...seedMissingLocalSecrets(cwd),
+    // Project configuration, seeded not overwritten — see seedMissingDatabaseIdentity.
+    ...seedMissingDatabaseIdentity(cwd),
     ANON_KEY: anonKey,
     SERVICE_ROLE_KEY: serviceRoleKey,
     PUBLIC_SUPATYPE_ANON_KEY: anonKey,
@@ -200,8 +220,13 @@ function upsertDevComposeEnv(
   }
   if (devDbPort !== undefined) {
     updates.SUPATYPE_DEV_DB_PORT = String(devDbPort)
+    // User and database from the project, not hardcoded — same reason as
+    // `seedMissingDatabaseIdentity`: a project not named "supatype" had this URL pointing at a
+    // database that does not exist.
+    const dbUser = readEnvValue(cwd, "POSTGRES_USER", "supatype_admin")
+    const dbName = readEnvValue(cwd, "POSTGRES_DB", "supatype")
     updates.DATABASE_URL =
-      `postgresql://supatype_admin:postgres@localhost:${devDbPort}/supatype?sslmode=disable`
+      `postgresql://${dbUser}:${devPostgresPassword(cwd)}@localhost:${devDbPort}/${dbName}?sslmode=disable`
   }
   const removeImageKeys = COMPOSE_PINNED_IMAGE_ENV_KEYS.filter((key) => !(key in imagePins))
   upsertEnvFile(cwd, updates, removeImageKeys)
@@ -540,7 +565,7 @@ async function runComposeEnginePush(
     "-i",
     "/project/.supatype/schema.ast.json",
     "--database-url",
-    composeDbUrl(),
+    composeDbUrl(cwd),
     "--force",
     "--non-interactive",
   )
@@ -606,7 +631,7 @@ async function runComposeEngineDiff(
     "-i",
     "/project/.supatype/schema.ast.json",
     "--database-url",
-    composeDbUrl(),
+    composeDbUrl(cwd),
     "--schema",
     pgSchema,
   )
@@ -659,8 +684,8 @@ export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfi
   const kongPort = await resolveKongPort(cwd)
   const now = Math.floor(Date.now() / 1000)
   const jwtBase = { iss: "supatype", iat: now, exp: now + 315_360_000 }
-  const anonKey = signJwt({ ...jwtBase, role: "anon" }, LOCAL_JWT_SECRET)
-  const serviceRoleKey = signJwt({ ...jwtBase, role: "service_role" }, LOCAL_JWT_SECRET)
+  const anonKey = signJwt({ ...jwtBase, role: "anon" }, devJwtSecret(cwd))
+  const serviceRoleKey = signJwt({ ...jwtBase, role: "service_role" }, devJwtSecret(cwd))
   ensureDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, undefined)
 
   const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
@@ -714,8 +739,8 @@ export async function pushSchemaDocker(cwd: string, config: SupatypeProjectConfi
 
   const now = Math.floor(Date.now() / 1000)
   const jwtBase = { iss: "supatype", iat: now, exp: now + 315_360_000 }
-  const anonKey = signJwt({ ...jwtBase, role: "anon" }, LOCAL_JWT_SECRET)
-  const serviceRoleKey = signJwt({ ...jwtBase, role: "service_role" }, LOCAL_JWT_SECRET)
+  const anonKey = signJwt({ ...jwtBase, role: "anon" }, devJwtSecret(cwd))
+  const serviceRoleKey = signJwt({ ...jwtBase, role: "service_role" }, devJwtSecret(cwd))
   ensureDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, devDbPort)
 
   const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
@@ -766,8 +791,8 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
 
   const now = Math.floor(Date.now() / 1000)
   const jwtBase = { iss: "supatype", iat: now, exp: now + 315_360_000 }
-  const anonKey = signJwt({ ...jwtBase, role: "anon" }, LOCAL_JWT_SECRET)
-  const serviceRoleKey = signJwt({ ...jwtBase, role: "service_role" }, LOCAL_JWT_SECRET)
+  const anonKey = signJwt({ ...jwtBase, role: "anon" }, devJwtSecret(cwd))
+  const serviceRoleKey = signJwt({ ...jwtBase, role: "service_role" }, devJwtSecret(cwd))
 
   const devBrand = { intro: "Local development" }
   const localServerImage = await ensureLocalServerDockerImage(cwd, config, devBrand)
@@ -927,7 +952,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   writeLocalEnvironment(cwd, {
     target: "local",
     apiUrl: `http://localhost:${kongPort}`,
-    databaseUrl: hasEngineOverride(config) ? hostComposeDbUrl(cwd) : composeDbUrl(),
+    databaseUrl: hasEngineOverride(config) ? hostComposeDbUrl(cwd) : composeDbUrl(cwd),
     projectRef: config.project.name,
     kongPort,
     provider: "docker",
