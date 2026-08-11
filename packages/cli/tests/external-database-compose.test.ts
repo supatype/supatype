@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { renderSelfHostCompose } from "../src/self-host-compose.js"
+import { loopbackExternalHost, renderSelfHostCompose } from "../src/self-host-compose.js"
 import { validateProjectConfig, type SupatypeProjectConfig } from "../src/project-config.js"
 import { DENO_RELEASE_PIN } from "../src/release-pins.js"
 
@@ -152,5 +152,33 @@ describe("external database — compose", () => {
     // `depends_on:` or a stray blank mapping key.
     const compose = renderSelfHostCompose(external())
     expect(compose).toContain("    depends_on:\n      valkey:\n        condition: service_started")
+  })
+})
+
+describe("a loopback external URL", () => {
+  // Found by rehearsing a push against a real external Postgres: `db check` passed and `push`
+  // applied the schema, because the CLI runs on the host — then storage, realtime and the server all
+  // died with ECONNREFUSED against their own loopback, because inside a container `127.0.0.1` is
+  // that container. A retry loop would only have hidden it.
+  it("is detected, whatever form it takes", () => {
+    for (const host of ["localhost", "127.0.0.1", "127.0.0.53", "[::1]"]) {
+      const url = host.startsWith("[")
+        ? `postgres://u:p@${host}:5432/d`
+        : `postgres://u:p@${host}:5432/d`
+      expect(loopbackExternalHost(project({ external: { url } })), host).toBeDefined()
+    }
+  })
+
+  it("does not fire for a host containers can actually reach", () => {
+    for (const host of ["host.docker.internal", "db.example.com", "172.17.0.1", "10.0.0.5"]) {
+      expect(
+        loopbackExternalHost(project({ external: { url: `postgres://u:p@${host}:5432/d` } })),
+        host,
+      ).toBeUndefined()
+    }
+  })
+
+  it("does not fire for a managed database", () => {
+    expect(loopbackExternalHost(managed())).toBeUndefined()
   })
 })

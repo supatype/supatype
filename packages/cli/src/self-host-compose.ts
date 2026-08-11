@@ -663,12 +663,67 @@ function assertExternalUrlMatchesEnv(cwd: string, config: SupatypeProjectConfig)
   )
 }
 
+/**
+ * A loopback host in the external URL cannot work from inside a container.
+ *
+ * `127.0.0.1` means "this container" to every service in the stack, so an external database on the
+ * host machine is unreachable — while the *CLI* reaches it fine, because the CLI runs on the host.
+ * That asymmetry is the trap: `supatype db check` passes, `push` applies the schema, and then
+ * storage, realtime and the server all die with ECONNREFUSED against their own loopback. Found by
+ * rehearsing exactly that.
+ *
+ * Refused rather than rewritten. The compose file interpolates one `${DATABASE_URL}` for every
+ * service, so silently substituting a different host would mean the CLI and the stack no longer
+ * agree about which database they are talking to — the thing every other check here exists to
+ * prevent.
+ */
+export function loopbackExternalHost(config: SupatypeProjectConfig): string | undefined {
+  const url = externalDatabaseUrl(config)
+  if (url === undefined) return undefined
+
+  let host: string
+  try {
+    host = new URL(url).hostname.toLowerCase()
+  } catch {
+    return undefined // Shape is validated at config load; nothing useful to add here.
+  }
+  // Node strips the brackets from an IPv6 hostname, and 127.0.0.0/8 is all loopback.
+  const loopback =
+    host === "localhost" ||
+    host === "::1" ||
+    host === "[::1]" ||
+    /^127\.\d+\.\d+\.\d+$/.test(host)
+  return loopback ? host : undefined
+}
+
+function assertExternalUrlReachableFromContainers(config: SupatypeProjectConfig): void {
+  const host = loopbackExternalHost(config)
+  if (host === undefined) return
+
+  fatalError(
+    `database.external.url points at ${host}, which no container can reach`,
+    [
+      "Inside a container, localhost is that container — not the machine running Docker. Every",
+      "service in the stack would fail to connect, while the CLI succeeds because it runs on the host.",
+      "",
+      "Use a host the containers can resolve:",
+      "  host.docker.internal   (Docker Desktop on macOS and Windows)",
+      "  172.17.0.1             (the docker0 bridge on Linux, or add an extra_hosts entry)",
+      "  the database's LAN address or hostname",
+      "",
+      "The CLI reaches the same address, so one value keeps working for both.",
+    ],
+    { brand: { intro: "Self-host compose" } },
+  )
+}
+
 export function writeSelfHostCompose(
   cwd: string,
   config: SupatypeProjectConfig,
   options?: SelfHostComposeOptions,
 ): SelfHostComposePaths {
   assertExternalUrlMatchesEnv(cwd, config)
+  assertExternalUrlReachableFromContainers(config)
   const paths = selfHostComposePaths(cwd)
   mkdirSync(paths.dir, { recursive: true })
   ensureProjectFunctionsDir(cwd, config)

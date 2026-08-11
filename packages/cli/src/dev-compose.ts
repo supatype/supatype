@@ -15,6 +15,7 @@ import {
   projectRootFromConfig,
   resolveRuntimeProvider,
   schemaPathFromProject,
+  usesExternalDatabase,
   type SupatypeProjectConfig,
 } from "./project-config.js"
 import { signJwt } from "./jwt.js"
@@ -90,6 +91,19 @@ async function resolveDevDbPort(cwd: string): Promise<number> {
   return ensureDevDbPort(cwd)
 }
 
+/**
+ * The database URL to hand a tool, from wherever it happens to run.
+ *
+ * The compose helpers below describe the `db` *container* — on the host at
+ * `SUPATYPE_DEV_DB_PORT`, or in-network at `db:5432`. Neither exists for a project pointed at an
+ * external database, and passing one produced "pool timed out while waiting for an open connection"
+ * — a message with nothing in it about the URL being wrong.
+ */
+function projectDatabaseUrl(cwd: string, config: SupatypeProjectConfig, inNetwork = false): string {
+  if (usesExternalDatabase(config)) return connectionString(config)
+  return inNetwork ? composeDbUrl(cwd) : hostComposeDbUrl(cwd)
+}
+
 function hostComposeDbUrl(cwd: string): string {
   const port = readEnvValue(cwd, "SUPATYPE_DEV_DB_PORT", String(COMPOSE_DEV_DB_PORT))
   const user = readEnvValue(cwd, "POSTGRES_USER", "supatype_admin")
@@ -128,14 +142,7 @@ export async function ensureDockerDbPublishedForHostEngine(
   ensureDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, devDbPort)
 
   const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
-  const up = runDockerCompose(paths.composePath, ["up", "-d", "db"], cwd, project, {
-    quiet: true,
-    ...(brand !== undefined && { brand }),
-  })
-  if (up !== 0) {
-    exitComposeFailed(up, "Could not start Postgres (compose db service).", brand)
-  }
-  await waitComposeHealthy(paths, cwd, 120_000, project)
+  await startComposeDatabase(config, paths, cwd, project, brand)
 }
 
 /**
@@ -148,6 +155,9 @@ export function usesLocalDockerEngineDb(
 ): boolean {
   if (explicitConnection?.trim()) return false
   if (config.connection?.trim()) return false
+  // An external database is already reachable and is not ours to publish. Without this the engine
+  // path tried `compose up -d db` against a compose file that deliberately has no `db` service.
+  if (usesExternalDatabase(config)) return false
   return resolveRuntimeProvider(config) === "docker" && hasEngineOverride(config)
 }
 
@@ -172,6 +182,36 @@ export async function resolveHostEngineDatabaseUrl(
 
 async function resolveKongPort(cwd: string): Promise<number> {
   return ensureKongPort(cwd, { context: "dev" })
+}
+
+/**
+ * Bring up the compose `db` service and wait for it to answer.
+ *
+ * A no-op when the project uses an external database: there is no such service, the database is
+ * already running, and its readiness is the operator's — `supatype db check` is what reports on it.
+ * Four call sites did this inline, so an external project hit `compose up -d db` against a compose
+ * file that deliberately has no `db`.
+ */
+async function startComposeDatabase(
+  config: SupatypeProjectConfig,
+  paths: SelfHostComposePaths,
+  cwd: string,
+  project: string,
+  brand: DockerBrandOptions | undefined,
+  timeoutMs = 120_000,
+  onFailure?: () => void,
+): Promise<void> {
+  if (usesExternalDatabase(config)) return
+
+  const up = runDockerCompose(paths.composePath, ["up", "-d", "db"], cwd, project, {
+    quiet: true,
+    ...(brand !== undefined && { brand }),
+  })
+  if (up !== 0) {
+    onFailure?.()
+    exitComposeFailed(up, "Could not start Postgres (compose db service).", brand)
+  }
+  await waitComposeHealthy(paths, cwd, timeoutMs, project)
 }
 
 function upsertDevComposeEnv(
@@ -218,7 +258,12 @@ function upsertDevComposeEnv(
     ...imagePins,
     ...(localServerImage !== undefined && { SUPATYPE_SERVER_IMAGE: localServerImage }),
   }
-  if (devDbPort !== undefined) {
+  // Never for an external database: this URL describes the `db` container, which that project does
+  // not have. Writing it overwrote the operator's own DATABASE_URL — the value the whole stack and
+  // every CLI command reads — with a DSN pointing at a database that does not exist. Found by
+  // rehearsing a push against a real external Postgres, where the compose guard then refused to
+  // proceed because .env and the config disagreed. They disagreed because of this line.
+  if (devDbPort !== undefined && !usesExternalDatabase(config)) {
     updates.SUPATYPE_DEV_DB_PORT = String(devDbPort)
     // User and database from the project, not hardcoded — same reason as
     // `seedMissingDatabaseIdentity`: a project not named "supatype" had this URL pointing at a
@@ -465,7 +510,7 @@ async function runComposeSchemaPush(
     try {
       await engineRequest("/push", {
         ast,
-        database_url: hostComposeDbUrl(cwd),
+        database_url: projectDatabaseUrl(cwd, config),
         schema: pgSchema,
         force: true,
         ...(sources
@@ -565,7 +610,7 @@ async function runComposeEnginePush(
     "-i",
     "/project/.supatype/schema.ast.json",
     "--database-url",
-    composeDbUrl(cwd),
+    projectDatabaseUrl(cwd, config, true),
     "--force",
     "--non-interactive",
   )
@@ -631,7 +676,7 @@ async function runComposeEngineDiff(
     "-i",
     "/project/.supatype/schema.ast.json",
     "--database-url",
-    composeDbUrl(cwd),
+    projectDatabaseUrl(cwd, config, true),
     "--schema",
     pgSchema,
   )
@@ -676,7 +721,7 @@ export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfi
     await ensureEngine()
     return engineRequest<DiffResult>("/diff", {
       ast,
-      database_url: hostComposeDbUrl(cwd),
+      database_url: projectDatabaseUrl(cwd, config),
       schema: pgSchema,
     })
   }
@@ -691,14 +736,7 @@ export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfi
   const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
   const diffBrand = { intro: "Schema diff" }
 
-  const up = runDockerCompose(paths.composePath, ["up", "-d", "db"], cwd, project, {
-    quiet: true,
-    brand: diffBrand,
-  })
-  if (up !== 0) {
-    exitComposeFailed(up, "Could not start Postgres (compose db service).", diffBrand)
-  }
-  await waitComposeHealthy(paths, cwd, 120_000, project)
+  await startComposeDatabase(config, paths, cwd, project, diffBrand)
 
   const schemaPath = schemaPathFromProject(config, cwd)
   const ast = loadSchemaAst(schemaPath, cwd)
@@ -735,7 +773,13 @@ export async function pushSchemaDocker(cwd: string, config: SupatypeProjectConfi
   }
   const project = composeProjectName(config.project.name)
   const kongPort = await resolveKongPort(cwd)
-  const devDbPort = hasEngineOverride(config) ? await resolveDevDbPort(cwd) : undefined
+  // No dev db port for an external database: `ensureDevDbPort` allocates a host port for the `db`
+  // container *and persists a matching DATABASE_URL*, which overwrote the operator's own URL — the
+  // one the whole stack and every CLI command reads.
+  const devDbPort =
+    hasEngineOverride(config) && !usesExternalDatabase(config)
+      ? await resolveDevDbPort(cwd)
+      : undefined
 
   const now = Math.floor(Date.now() / 1000)
   const jwtBase = { iss: "supatype", iat: now, exp: now + 315_360_000 }
@@ -747,14 +791,7 @@ export async function pushSchemaDocker(cwd: string, config: SupatypeProjectConfi
   const pushBrand = { intro: "Push schema" }
 
   console.log(`[supatype] provider: docker — applying schema via compose (project ${project})...`)
-  const up = runDockerCompose(paths.composePath, ["up", "-d", "db"], cwd, project, {
-    quiet: true,
-    brand: pushBrand,
-  })
-  if (up !== 0) {
-    exitComposeFailed(up, "Could not start Postgres (compose db service).", pushBrand)
-  }
-  await waitComposeHealthy(paths, cwd, 120_000, project)
+  await startComposeDatabase(config, paths, cwd, project, pushBrand)
 
   const schemaPath = schemaPathFromProject(config, cwd)
   const ast = loadSchemaAst(schemaPath, cwd)
@@ -787,7 +824,13 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   // stack on the machine (own containers, volumes, network, and gateway port).
   const project = composeProjectName(config.project.name)
   const kongPort = await resolveKongPort(cwd)
-  const devDbPort = hasEngineOverride(config) ? await resolveDevDbPort(cwd) : undefined
+  // No dev db port for an external database: `ensureDevDbPort` allocates a host port for the `db`
+  // container *and persists a matching DATABASE_URL*, which overwrote the operator's own URL — the
+  // one the whole stack and every CLI command reads.
+  const devDbPort =
+    hasEngineOverride(config) && !usesExternalDatabase(config)
+      ? await resolveDevDbPort(cwd)
+      : undefined
 
   const now = Math.floor(Date.now() / 1000)
   const jwtBase = { iss: "supatype", iat: now, exp: now + 315_360_000 }
@@ -843,18 +886,10 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   await recoverStaleDevSession(cwd)
   await handleComposeProjectRename(cwd, config.project.name, paths)
 
-  console.log("[supatype] Bringing up Postgres (compose db)...")
-  const upDbStatus = runDockerCompose(paths.composePath, ["up", "-d", "db"], cwd, project, {
-    quiet: true,
-    brand: devBrand,
-  })
-  if (upDbStatus !== 0) {
-    endDevSession()
-    exitComposeFailed(upDbStatus, "Could not start Postgres (compose db service).", devBrand)
+  if (!usesExternalDatabase(config)) {
+    console.log("[supatype] Bringing up Postgres (compose db)...")
   }
-
-  console.log("[supatype] Waiting for Postgres (compose)...")
-  await waitComposeHealthy(paths, cwd, 180_000, project)
+  await startComposeDatabase(config, paths, cwd, project, devBrand, 180_000, endDevSession)
   // Settle before DDL — pg_isready can pass slightly before the instance is stable.
   await new Promise((r) => setTimeout(r, 3000))
 
@@ -876,16 +911,17 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
         )
         dumpComposeDbLogs(paths, cwd, project, `schema push attempt ${attempt}/${maxAttempts}`)
         if (attempt < maxAttempts) {
-          console.log("[supatype] Resetting Postgres after failed schema push...")
-          runDockerCompose(paths.composePath, ["down", "-v"], cwd, project, {
-            quiet: true,
-            brand: devBrand,
-          })
-          runDockerCompose(paths.composePath, ["up", "-d", "db"], cwd, project, {
-            quiet: true,
-            brand: devBrand,
-          })
-          await waitComposeHealthy(paths, cwd, 120_000, project)
+          // Only for a database Supatype created. Tearing down an external one is not ours to do,
+          // and `down -v` would destroy the stack's other volumes for a failure that was never
+          // about Postgres.
+          if (!usesExternalDatabase(config)) {
+            console.log("[supatype] Resetting Postgres after failed schema push...")
+            runDockerCompose(paths.composePath, ["down", "-v"], cwd, project, {
+              quiet: true,
+              brand: devBrand,
+            })
+            await startComposeDatabase(config, paths, cwd, project, devBrand)
+          }
           await new Promise((r) => setTimeout(r, 3000 * attempt))
         }
       }
@@ -952,7 +988,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   writeLocalEnvironment(cwd, {
     target: "local",
     apiUrl: `http://localhost:${kongPort}`,
-    databaseUrl: hasEngineOverride(config) ? hostComposeDbUrl(cwd) : composeDbUrl(cwd),
+    databaseUrl: projectDatabaseUrl(cwd, config, !hasEngineOverride(config)),
     projectRef: config.project.name,
     kongPort,
     provider: "docker",
