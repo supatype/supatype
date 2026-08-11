@@ -20,6 +20,38 @@ export function upsertEnvFile(
   writeFileSync(envPath, `${merged.join("\n").trimEnd()}\n`, "utf8")
 }
 
+/**
+ * Parse a project `.env` into key/value pairs.
+ *
+ * Deliberately small: `KEY=value`, `#` comments, one optional layer of surrounding quotes. No
+ * interpolation and no `export` handling, because Compose's own parser does not do those either and
+ * a `.env` that means two different things depending on who reads it is worse than a limited one.
+ */
+export function readEnvFile(cwd: string): Record<string, string> {
+  const envPath = join(cwd, ".env")
+  if (!existsSync(envPath)) return {}
+
+  const out: Record<string, string> = {}
+  for (const line of readFileSync(envPath, "utf8").split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (trimmed.length === 0 || trimmed.startsWith("#")) continue
+    const eq = trimmed.indexOf("=")
+    if (eq <= 0) continue
+    const key = trimmed.slice(0, eq).trim()
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue
+    let value = trimmed.slice(eq + 1).trim()
+    if (
+      value.length >= 2 &&
+      ((value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'")))
+    ) {
+      value = value.slice(1, -1)
+    }
+    out[key] = value
+  }
+  return out
+}
+
 export function readEnvValue(cwd: string, key: string, fallback: string): string {
   const envPath = join(cwd, ".env")
   if (existsSync(envPath)) {

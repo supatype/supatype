@@ -89,6 +89,25 @@ describe("runtime contract", () => {
     expect(first).toBe(second)
   })
 
+  it("self-host compose exposes the managed schema over REST, not a hardcoded public", () => {
+    // The literal here was the reason a non-default pg_schema pushed correctly and then answered
+    // PGRST106 on every request: the engine had moved and PostgREST was never told.
+    const compose = renderSelfHostCompose({
+      ...baseConfig,
+      schema: { pg_schema: "app" },
+    })
+    expect(compose).toContain('PGRST_DB_SCHEMA: "app, supatype, graphql_public, auth"')
+    expect(compose).not.toContain('PGRST_DB_SCHEMA: "public,')
+  })
+
+  it("self-host compose honours an explicit api_schemas list verbatim", () => {
+    const compose = renderSelfHostCompose({
+      ...baseConfig,
+      schema: { pg_schema: "app", api_schemas: ["app", "reporting"] },
+    })
+    expect(compose).toContain('PGRST_DB_SCHEMA: "app, reporting"')
+  })
+
   it("self-host compose does not inject a synthetic app-proxy service", () => {
     const compose = renderSelfHostCompose({ ...baseConfig, app: { mode: "proxy", upstream: "http://app:3000" } })
     expect(compose).not.toContain("ghcr.io/supatype/app-proxy")

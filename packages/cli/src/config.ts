@@ -3,6 +3,7 @@ import { resolve } from "node:path"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { evalTsSnippet } from "./tsx-runner.js"
+import { readEnvFile } from "./env-file.js"
 import {
   mergeProjectConfig,
   validateProjectConfig,
@@ -135,7 +136,25 @@ export function loadConfig(cwd: string = process.cwd()): SupatypeProjectConfig {
   if (localRaw === null) return base
 
   const localNorm = normalizeProjectJson(localRaw) as Partial<SupatypeProjectConfig>
-  return mergeProjectConfig(base, localNorm)
+  // Re-validated after merging: the local override can reintroduce a combination the base file was
+  // rejected for — `database.provider` beside an inherited `database.external`, say — and merging
+  // has no opinion about that.
+  return validateProjectConfig(
+    mergeProjectConfig(base, localNorm),
+    "supatype.local.config.ts (merged with supatype.config.ts)",
+  )
+}
+
+/**
+ * Environment for the child process that imports the config module.
+ *
+ * `supatype.config.ts` is TypeScript, so the natural way to keep a database password out of version
+ * control is `process.env.DATABASE_URL` — which only works if the project's `.env` is visible to the
+ * process doing the import. A real environment variable still wins over the file, matching how every
+ * other dotenv reader behaves and how Compose itself resolves the same names.
+ */
+function configLoadEnv(cwd: string): NodeJS.ProcessEnv {
+  return { ...readEnvFile(cwd), ...process.env }
 }
 
 function loadFirstTsConfig(
@@ -152,7 +171,7 @@ const mod = await import(${JSON.stringify(urlPath)})
 const config = mod.default ?? mod
 process.stdout.write(JSON.stringify(config))
 `
-    const result = evalTsSnippet(snippet, { cwd })
+    const result = evalTsSnippet(snippet, { cwd, env: configLoadEnv(cwd) })
     if (result.exitCode === 0) {
       return JSON.parse(result.stdout) as Record<string, unknown>
     }
@@ -203,7 +222,7 @@ const mod = await import(${JSON.stringify(urlPath)})
 const config = mod.default ?? mod
 process.stdout.write(JSON.stringify(config))
 `
-    const result = evalTsSnippet(snippet, { cwd })
+    const result = evalTsSnippet(snippet, { cwd, env: configLoadEnv(cwd) })
     if (result.exitCode !== 0) return null
     return JSON.parse(result.stdout) as Record<string, unknown>
   } finally {

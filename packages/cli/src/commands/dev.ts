@@ -18,6 +18,7 @@ import { isAbsolute, join, relative, resolve } from "node:path"
 import { loadConfig } from "../config.js"
 import type { ExtractedSchemaAstV2 } from "../schema-ast-v2.js"
 import {
+  apiSchemaList,
   functionsPathCandidatesFromProject,
   resolveRuntimeProvider,
   schemaPathFromProject,
@@ -497,7 +498,13 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
 
         const postgrestEnv: Record<string, string> = {
           PGRST_DB_URI: postgrestDbURL,
-          PGRST_DB_SCHEMA: "public, supatype, graphql_public",
+          // Derived from schema.pg_schema (or schema.api_schemas) — a hardcoded "public" here meant
+          // a non-default pg_schema pushed correctly and then answered PGRST106 on every request.
+          PGRST_DB_SCHEMA: apiSchemaList(config),
+          // Parity with self-host, which has always set this. Unqualified names in column defaults
+          // (`uuid_generate_v4()`) resolve here, and with a non-public pg_schema the request schema
+          // alone does not reach them.
+          PGRST_DB_EXTRA_SEARCH_PATH: "public,extensions",
           PGRST_DB_ANON_ROLE: "anon",
           PGRST_SERVER_PORT: postgrestPort,
           PGRST_SERVER_HOST: "127.0.0.1",
