@@ -20,12 +20,15 @@ interface DoctorReport {
   unmanagedDrift: DoctorItem[]
 }
 
-function printSection(title: string, items: DoctorItem[]): void {
+/** Exported for tests: the label form is easy to get subtly wrong per item kind. */
+export function printSection(title: string, items: DoctorItem[]): void {
   if (items.length === 0) return
   plain(`\n${title} (${items.length}):\n`)
   for (const item of items) {
     const fields = item.fields.length > 0 ? ` (${item.fields.join(", ")})` : ""
-    plain(`  • ${item.table}.${item.name}${fields}`)
+    // A table's `name` *is* its table, so the usual `table.name` form renders "widget.widget".
+    const label = item.table === item.name ? item.name : `${item.table}.${item.name}`
+    plain(`  • ${label}${fields}`)
     plain(`    ${item.message}`)
   }
 }

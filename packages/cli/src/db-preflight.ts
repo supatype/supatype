@@ -43,6 +43,74 @@ export interface PreflightReport {
   worst: Severity
 }
 
+/** Slot name for the decoding probe. Dropped immediately; never left behind. */
+const PROBE_SLOT = "supatype_preflight_probe"
+
+type QueryFn = <T extends pg.QueryResultRow = pg.QueryResultRow>(
+  sql: string,
+  params?: unknown[],
+) => Promise<T[]>
+
+/**
+ * Ask the database to do the one thing realtime needs, then undo it.
+ *
+ * SQLSTATEs measured against `supatype/postgres` rather than recalled:
+ * `55000` wal_level too low, `58P01` the plugin's library is absent, `42501` the role may not use
+ * replication slots.
+ */
+async function probeLogicalDecoding(q: QueryFn): Promise<CheckResult> {
+  const base = { id: "logical-decoding", title: "wal2json logical decoding (realtime)" }
+  try {
+    await q(`SELECT pg_create_logical_replication_slot($1, 'wal2json')`, [PROBE_SLOT])
+  } catch (error) {
+    const code = (error as { code?: unknown }).code
+    const detail =
+      code === "58P01"
+        ? "the wal2json output plugin is not installed on this server"
+        : code === "42501"
+          ? "this role may not use replication slots (no REPLICATION attribute)"
+          : error instanceof Error
+            ? error.message
+            : String(error)
+    return {
+      ...base,
+      severity: "degrade",
+      detail,
+      impact:
+        "Realtime subscriptions are unavailable; everything else is unaffected. The service still " +
+        "starts, reports this reason on /health/ready, and serves nothing else differently.",
+      ...(code === "42501"
+        ? { remedy: `ALTER ROLE CURRENT_USER WITH REPLICATION;`, remedyNeedsOperator: true }
+        : {
+            remedy: [
+              "-- wal2json is a server library, not an extension: it must be installed on the host",
+              "-- (or offered by your provider) and cannot be added over SQL. Supatype's own image",
+              "-- ships it. Set database.external.realtime: false to stop starting the service.",
+            ].join("\n"),
+            remedyNeedsOperator: true,
+          }),
+    }
+  }
+
+  // Leave nothing behind. A slot that is never read holds WAL forever, which on a database Supatype
+  // does not own is the rudest possible failure: the disk fills and nothing says why.
+  try {
+    await q(`SELECT pg_drop_replication_slot($1)`, [PROBE_SLOT])
+  } catch (error) {
+    return {
+      ...base,
+      severity: "warn",
+      detail: "the probe slot was created but could not be dropped",
+      impact:
+        `An unread replication slot named "${PROBE_SLOT}" retains WAL indefinitely and will ` +
+        "eventually fill the disk.",
+      remedy: `SELECT pg_drop_replication_slot('${PROBE_SLOT}');`,
+    }
+  }
+
+  return { ...base, severity: "pass", detail: "a wal2json slot can be created and dropped" }
+}
+
 const REQUIRED_ROLES = ["anon", "authenticated", "service_role", "authenticator"] as const
 
 /**
@@ -137,8 +205,9 @@ export async function runPreflight(
     [opts.schema],
   )
   const schemaExists = schemaRows.length > 0
-  const { can_create } = await one<{ can_create: boolean }>(
-    "SELECT has_database_privilege(current_database(), 'CREATE') AS can_create",
+  const { can_create, database } = await one<{ can_create: boolean; database: string }>(
+    `SELECT has_database_privilege(current_database(), 'CREATE') AS can_create,
+            current_database() AS database`,
   )
   results.push({
     id: "target-schema",
@@ -152,6 +221,29 @@ export async function runPreflight(
     ...(!schemaExists && can_create && { remedy: `CREATE SCHEMA IF NOT EXISTS ${ident(opts.schema)};` }),
     ...(!schemaExists && !can_create && {
       impact: "The engine needs its own schema for migration history and schema state.",
+    }),
+  })
+
+  // `CREATE` on the database, which the check above only asked about when the target schema was
+  // missing — and `public` always exists, so on a database where the role cannot create schemas that
+  // check passed while the stack could not start.
+  //
+  // Measured on a role with `CONNECT` and `USAGE ON SCHEMA public` but no `CREATE`: storage's
+  // bootstrap fails `42501 permission denied for database`, and so does every one of the engine's own
+  // schemas. Storage was the least examined service in this plan and this is the whole of what it
+  // needs — no extensions, no superuser, no replication, just somewhere to put `storage.buckets` and
+  // `storage.objects`.
+  results.push({
+    id: "create-schemas",
+    title: "CREATE on the database",
+    severity: can_create ? "pass" : "fail",
+    detail: can_create ? "granted" : "not granted to this role",
+    ...(!can_create && {
+      impact:
+        "Four schemas cannot be created: `storage` (buckets and objects), `_platform` (trigger " +
+        "functions), `supatype` (Studio's views) and `_supatype` (migration history). Storage exits " +
+        "at boot and the engine cannot record a migration.",
+      remedy: `GRANT CREATE ON DATABASE ${ident(database)} TO ${ident(privs.current_user)};`,
     }),
   })
 
@@ -306,6 +398,19 @@ export async function runPreflight(
       remedyNeedsOperator: true,
     }),
   })
+
+  // The definitive realtime check: create the slot realtime would create, then drop it.
+  //
+  // There is no catalog to consult. `wal2json` is a shared library, not an extension, so it never
+  // appears in `pg_available_extensions` — the only way to know whether this database can decode is
+  // to ask it to. Cloud SQL does not ship the plugin at all; plenty of managed Postgres will not
+  // grant `REPLICATION`. Both produce a stack that looks healthy until the first subscription.
+  //
+  // Skipped when `wal_level` or the slot budget already rules it out, since the probe would fail for
+  // that reason and report it a second time under a less specific heading.
+  if (walLogical && slotsFree > 0) {
+    results.push(await probeLogicalDecoding(q))
+  }
 
   // ── Existing tables in the target schema ───────────────────────────────────
   if (schemaExists) {
