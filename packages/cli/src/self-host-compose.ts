@@ -401,7 +401,9 @@ ${external ? "" : "  db-data:\n"}  minio-data:
       DATABASE_URL: "${ownerUrl}"
       JWT_SECRET: \${JWT_SECRET:?JWT_SECRET is missing from .env}
       SLOT_NAME: supatype_realtime
-      PUBLICATION_NAME: supatype_realtime_pub
+      # Matches the publication the supatype/postgres image creates. Read by nothing today —
+      # wal2json decodes from the slot — and kept for a future pgoutput decoder.
+      PUBLICATION_NAME: supatype_realtime
 ${dbDependency}`
     : `  # No \`realtime\` service: database.external.realtime is false. Subscriptions are
   # unavailable; REST, storage, auth and functions are unaffected.

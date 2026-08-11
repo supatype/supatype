@@ -4,6 +4,15 @@ export interface RealtimeEnv {
   databaseUrl: string
   jwtSecret: string
   slotName: string
+  /**
+   * Publication name, currently read by nothing.
+   *
+   * `wal2json` decodes from the *slot*; publications are a `pgoutput` concept. The value is kept so a
+   * future pgoutput decoder has somewhere to look, and its default matches the empty publication
+   * `supatype/postgres` actually creates — it used to default to `supatype_realtime_pub`, a third
+   * name that existed nowhere, which is how a decoder would have been written against a publication
+   * that was never there.
+   */
   publicationName: string
   replicationPollInterval: number
   secureChannels: boolean
@@ -39,7 +48,7 @@ export function loadEnv(): RealtimeEnv {
     databaseUrl,
     jwtSecret,
     slotName: process.env["SLOT_NAME"] ?? "supatype_realtime",
-    publicationName: process.env["PUBLICATION_NAME"] ?? "supatype_realtime_pub",
+    publicationName: process.env["PUBLICATION_NAME"] ?? "supatype_realtime",
     replicationPollInterval: Number(process.env["REPLICATION_POLL_INTERVAL"] ?? "100"),
     secureChannels: process.env["SECURE_CHANNELS"] !== "false",
 

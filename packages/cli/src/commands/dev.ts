@@ -365,7 +365,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
             JWT_SECRET: LOCAL_JWT_SECRET,
             PORT: REALTIME_PORT,
             SLOT_NAME: "supatype_realtime",
-            PUBLICATION_NAME: "supatype_realtime_pub",
+            PUBLICATION_NAME: "supatype_realtime",
           },
         })
         realtimeProc.start()

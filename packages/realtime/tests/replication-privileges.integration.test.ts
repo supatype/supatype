@@ -58,7 +58,9 @@ describe.skipIf(!databaseUrl)("replication privileges", () => {
     await admin
       .query(`SELECT pg_drop_replication_slot($1)`, [SLOT])
       .catch(() => undefined /* not there yet */)
-    await admin.query(`DROP PUBLICATION IF EXISTS supatype_realtime_pub`)
+    // No publication is dropped here on purpose: `supatype/postgres` ships an empty
+    // `supatype_realtime` publication of its own, so the test compares the set of publications
+    // before and after startup rather than asserting a name is absent.
   })
 
   afterAll(async () => {
@@ -81,6 +83,10 @@ describe.skipIf(!databaseUrl)("replication privileges", () => {
     })
     listener.onChange((c) => changes.push(c))
 
+    const publicationsBefore: string[] = (
+      await admin.query(`SELECT pubname FROM pg_publication ORDER BY pubname`)
+    ).rows.map((r: { pubname: string }) => r.pubname)
+
     // The assertion that matters: this used to need superuser and now must not.
     await listener.start()
 
@@ -89,9 +95,16 @@ describe.skipIf(!databaseUrl)("replication privileges", () => {
       expect(slots.rows.length, "the non-superuser role should have created the slot").toBe(1)
       expect(slots.rows[0].plugin).toBe("wal2json")
 
-      // No publication — the thing that required superuser must not have been recreated.
-      const pubs = await admin.query(`SELECT pubname FROM pg_publication WHERE pubname = 'supatype_realtime_pub'`)
-      expect(pubs.rows.length, "startup created a publication again; that reintroduces the superuser requirement").toBe(0)
+      // No *new* publication — the thing that required superuser must not have been recreated.
+      // Compared as a set rather than by name: the image ships one already, and `PUBLICATION_NAME`
+      // is configurable, so "no publication called X" would prove the wrong thing.
+      const publicationsAfter: string[] = (
+        await admin.query(`SELECT pubname FROM pg_publication ORDER BY pubname`)
+      ).rows.map((r: { pubname: string }) => r.pubname)
+      expect(
+        publicationsAfter,
+        "startup created a publication; that reintroduces the superuser requirement",
+      ).toEqual(publicationsBefore)
 
       await admin.query(`INSERT INTO public.${TABLE} VALUES (1, 'decoded without a publication')`)
 
