@@ -52,8 +52,16 @@ export class ReplicationListener {
     })
     await this.client.connect()
 
-    // Ensure publication + logical replication slot exist before polling.
-    await this.ensurePublication()
+    // The slot, and deliberately not a publication.
+    //
+    // This used to run `CREATE PUBLICATION … FOR ALL TABLES` first, which **requires superuser**
+    // — the strictest privilege anywhere in this service, and one managed Postgres (RDS, Cloud SQL)
+    // does not grant. It was the single biggest reason realtime could not run against a database
+    // Supatype does not own. And it did nothing: `wal2json` decodes from the *slot*, publications
+    // are a `pgoutput` concept, and nothing here consulted `pg_publication` after creating it.
+    //
+    // Reinstate only alongside a decoder that consumes a publication, and expect to have to answer
+    // the superuser question then. `publicationName` stays in the config for that eventuality.
     await this.ensureSlot()
 
     this.running = true
@@ -75,20 +83,6 @@ export class ReplicationListener {
     if (this.client) {
       await this.client.end()
       this.client = null
-    }
-  }
-
-  private async ensurePublication(): Promise<void> {
-    if (!this.client) return
-
-    const pubName = this.config.publicationName ?? "supatype_realtime_pub"
-    const result = await this.client.query(
-      `SELECT 1 FROM pg_publication WHERE pubname = $1`,
-      [pubName],
-    )
-
-    if (result.rows.length === 0) {
-      await this.client.query(`CREATE PUBLICATION ${quoteIdent(pubName)} FOR ALL TABLES`)
     }
   }
 
@@ -213,8 +207,4 @@ function buildRecord(names?: string[], values?: unknown[]): Record<string, unkno
     record[names[i]!] = values[i]
   }
   return record
-}
-
-function quoteIdent(ident: string): string {
-  return `"${ident.replace(/"/g, '""')}"`
 }
