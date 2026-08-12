@@ -347,20 +347,31 @@ export async function runPreflight(
     )
   }
 
+  // Field rules are enforced either way now, so this is no longer a degrade.
+  //
+  // It reported "per-column rules cannot be enforced" and "a push carrying them refuses", both of
+  // which stopped being true when the view tier landed. What the operator needs to know is *which*
+  // mechanism they will get and the one way the two differ.
   results.push({
     id: "ext-supatype_mask",
-    title: "supatype_mask (field-level access rules)",
-    severity: installed.has("supatype_mask") ? "pass" : "degrade",
+    title: "Field-level access rules (access.fields)",
+    severity: installed.has("supatype_mask") ? "pass" : "warn",
     detail: installed.has("supatype_mask")
-      ? "installed"
+      ? "enforced by supatype_mask, the planner rewrite (tier 1)"
       : available.has("supatype_mask")
-        ? "available but not installed"
-        : "not available on this server",
+        ? "supatype_mask is available but not installed — rules will be enforced by generated api views (tier 2)"
+        : "enforced by generated api views (tier 2); supatype_mask is not available on this server",
     ...(!installed.has("supatype_mask") && {
       impact:
-        "Per-column read/write rules (access.fields) cannot be enforced. A push carrying them " +
-        "refuses rather than applying a schema whose restrictions do not exist.",
-      ...(available.has("supatype_mask") && { remedy: "CREATE EXTENSION IF NOT EXISTS supatype_mask;" }),
+        "Tier 2 puts the masking expression in a view instead of the query planner. It is the same " +
+        "behaviour with one exception: an aggregate over a masked column returns the sum of what the " +
+        "caller may read, where tier 1 raises. Unreachable through the API — PostgREST ships with " +
+        "aggregates disabled and Supatype never enables them — so this matters only for direct SQL " +
+        "against the api views. PostgREST is pointed at `api` instead of your managed schema, and the " +
+        "API roles hold their privileges on the views rather than the tables.",
+      ...(available.has("supatype_mask") && {
+        remedy: "CREATE EXTENSION IF NOT EXISTS supatype_mask;",
+      }),
     }),
   })
 
