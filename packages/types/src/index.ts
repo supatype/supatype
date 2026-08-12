@@ -43,10 +43,19 @@ export type DateTime = Primitive<"DateTime", Date>
 export type Timestamp = Primitive<"Timestamp", Date>
 export type Geo = Primitive<"Geo", { type: "point" | "polygon" | "linestring"; coordinates: unknown }>
 
+/** Source text with the language it is written in. Stored as `JSONB`. */
 export type Code<Lang extends string = string> = Primitive<"Code", { lang: Lang; source: string }>
 export type Duration = Primitive<"Duration", { ms: number }>
 export type GeoPoint = Primitive<"GeoPoint", { lat: number; lng: number }>
-export type Currency<Code extends string = string> = Primitive<"Currency", { amount: bigint; code: Code }>
+/**
+ * An amount in minor units with the currency it is denominated in. Stored as `JSONB`.
+ *
+ * `amount` is a **string**, like {@link Money} and {@link Decimal}, because the value crosses the
+ * wire as JSON: `bigint` cannot be serialised (`JSON.stringify(1n)` throws) and `number` loses
+ * integers past 2^53. Use {@link Money} or {@link Decimal} instead when you want a numeric column
+ * to sum and index — this type keeps the currency with the amount, which a scalar column cannot.
+ */
+export type Currency<Code extends string = string> = Primitive<"Currency", { amount: string; code: Code }>
 
 /** Link target for {@link Button}. */
 export type ButtonTarget = "_self" | "_blank"
@@ -239,20 +248,58 @@ export type WithSoftDelete<T extends Record<string, unknown>> = T & SoftDelete
 export type WithPublishable<T extends Record<string, unknown>> = T & Publishable
 
 export type OnDelete = "cascade" | "setNull" | "restrict" | "noAction"
+export type OnUpdate = OnDelete
+/**
+ * Options on a relation field.
+ *
+ * Only what the extractor reads. `inverse` used to be declared here and was honoured by nothing,
+ * which is worse than absent: it type-checked, so a schema could name an inverse relation and get
+ * silence. The inverse side is declared as its own `HasMany<…>` / `HasOne<…>` field instead.
+ */
 export type RelationOptions = {
+  /** `NOT NULL` on the foreign key column. */
   required?: boolean
   onDelete?: OnDelete
-  inverse?: string
+  onUpdate?: OnUpdate
+  /** `ManyToMany` only — the junction table's name, instead of one derived from the two models. */
+  through?: string
 }
-export type RelatedTo<T, TOptions extends RelationOptions = {}> = Relation<"RelatedTo", T> & {
+/**
+ * The target model, held behind a property so that resolving a relation field does not resolve the
+ * model it points at.
+ *
+ * Two models that name each other — a `HasOne` and its `RelatedTo`, or a `RelatedTo` both ways —
+ * used to fail with `TS2589: Type instantiation is excessively deep`. `Model<F>` spreads `F` through
+ * a mapped type that probes every field (`[V] extends [Modifier<"Optional", …>]`), and probing
+ * `RelatedTo<Post>` = `Post & …` meant expanding `Post`, which was still being defined. The
+ * collection relations escaped it: `Comment[]` is decidable without expanding `Comment`, so
+ * `HasMany` and `ManyToMany` are left as they were and only the one-ish relations defer here.
+ *
+ * Nothing needs a relation field's value type — the target's *identity* carries the relation, the
+ * generated client types carry the row shapes, and the CLI reads these declarations as syntax
+ * rather than resolving them. So the target moves into a phantom property, where TypeScript leaves
+ * it alone until something asks.
+ */
+export interface RelationTarget<T> {
+  readonly __relationTarget?: T
+}
+export type RelatedTo<T, TOptions extends RelationOptions = {}> = Relation<
+  "RelatedTo",
+  RelationTarget<T>
+> & {
   readonly __relationOptions?: TOptions
   readonly __relationKind: "relatedTo"
 }
+// `HasMany` and `ManyToMany` keep the plain `T[]`: an array is already decidable without expanding
+// its element, which is why the collection relations never hit the recursion in the first place.
 export type HasMany<T, TOptions extends RelationOptions = {}> = Relation<"HasMany", T[]> & {
   readonly __relationOptions?: TOptions
   readonly __relationKind: "hasMany"
 }
-export type HasOne<T, TOptions extends RelationOptions = {}> = Relation<"HasOne", T | null> & {
+export type HasOne<T, TOptions extends RelationOptions = {}> = Relation<
+  "HasOne",
+  RelationTarget<T> | null
+> & {
   readonly __relationOptions?: TOptions
   readonly __relationKind: "hasOne"
 }
@@ -713,12 +760,15 @@ export type ModelMeta<TFields extends Record<string, unknown>> = {
      * }
      * ```
      *
-     * The **full rule language** applies, row-dependent rules included. Enforced
-     * by the `supatype_mask` extension, which rewrites every reference to the
-     * column in the planner: a caller who may not read it gets `null` rather than
-     * a 403, because `SELECT *` names every column and a revoked one would take
-     * the whole table down with it. Column privileges are layered underneath for
-     * writes only, as defence in depth.
+     * The **full rule language** applies, row-dependent rules included. A caller who
+     * may not read the column gets `null` rather than a 403, because `SELECT *` names
+     * every column and a revoked one would take the whole table down with it. Column
+     * privileges are layered underneath for writes only, as defence in depth.
+     *
+     * Enforced one of two ways, chosen from what the database can do: the
+     * `supatype_mask` extension rewrites every reference to the column in the planner,
+     * and where the extension cannot be loaded — most managed Postgres — the same
+     * expression is carried by generated views in an `api` schema instead.
      *
      * A `write` rule is compiled conjoined with the field's `read` rule, so write
      * without read is unrepresentable — otherwise a caller could round-trip away a
@@ -732,10 +782,15 @@ export type ModelMeta<TFields extends Record<string, unknown>> = {
      * Relations are named by their column (`author_id`), because that is what the
      * restriction applies to — `author` is not a column at all.
      *
-     * Requires the extension: a push carrying field rules against a database
-     * without it fails rather than half-enforcing. A column restricted from nearly
-     * everyone and queried often is still better off in its own table — masking
-     * costs a predicate call per row and cannot use the column's index.
+     * Neither tier half-enforces: a push never applies a schema whose restrictions do
+     * not exist. They differ in one place — under the view tier an aggregate over a
+     * masked column returns the sum of the rows the caller may read, where the
+     * extension raises an error. Unreachable through the API, since PostgREST ships
+     * with aggregates disabled.
+     *
+     * A column restricted from nearly everyone and queried often is still better off
+     * in its own table — masking costs a predicate call per row and cannot use the
+     * column's index.
      */
     fields?: {
       // Relations are named by their column (`author_id`), because that is what a

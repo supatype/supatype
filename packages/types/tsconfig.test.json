@@ -1,0 +1,16 @@
+{
+  // The type tests are only tests if something typechecks them. `tsconfig.json` builds `src` alone
+  // and `vitest run` executes without checking types, so every `expectTypeOf` in `tests/` was
+  // decorative — which is how a relation cycle that could not compile went unnoticed.
+  //
+  // `tests/primitives.test.ts` and `tests/optional-model-spread.test.ts` are NOT included yet: they
+  // carry 30 type errors of their own, written against an older `expectTypeOf` API (`toMatchTypeOf`
+  // is gone in vitest 4) and against `@ts-expect-error` placements that no longer fire. Each needs
+  // its intent re-read rather than a mechanical rename, so they are owed a cleanup — add them here
+  // as they are fixed, and delete this note when the list is just `tests/**/*.ts`.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["src", "tests/relation-cycles.test.ts"]
+}

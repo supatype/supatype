@@ -96,6 +96,12 @@ function toTsType(meta: Record<string, unknown>): string {
   const kind = typeof meta["kind"] === "string" ? meta["kind"] : "json"
   const required = meta["required"] === true
   const base = (() => {
+    // A field that knows its own shape says so. Without this, everything stored as JSONB collapses
+    // to `Record<string, unknown>` in the generated row — so `Currency` would arrive as an opaque
+    // object rather than `{ amount: string; code: "USD" }`, and the schema's precision would be
+    // lost exactly where a caller reads it.
+    const declared = meta["tsType"]
+    if (typeof declared === "string" && declared.length > 0) return declared
     switch (kind) {
       case "uuid":
       case "slug":

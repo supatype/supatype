@@ -1,7 +1,7 @@
 "use client"
 
 import React from "react"
-import type { SupatypeClient, AnyDatabase } from "@supatype/client"
+import type { SupatypeClient, AnyDatabase, AugmentedDatabase } from "@supatype/client"
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const SupatypeContext = React.createContext<SupatypeClient<any> | null>(null)
@@ -37,7 +37,7 @@ export function SupatypeProvider({ client, children }: SupatypeProviderProps): R
  * Access the Supatype client directly. Most callers should use the
  * higher-level hooks (useAuth, useQuery, useMutation) instead.
  */
-export function useSupatype<TDatabase extends AnyDatabase = AnyDatabase>(): SupatypeClient<TDatabase> {
+export function useSupatype<TDatabase extends AnyDatabase = AugmentedDatabase>(): SupatypeClient<TDatabase> {
   const client = React.useContext(SupatypeContext) as SupatypeClient<TDatabase> | null
   if (client === null) {
     throw new Error("useSupatype must be used inside a <SupatypeProvider>")

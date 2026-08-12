@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useCallback } from "react"
-import type { AnyDatabase, SupatypeError } from "@supatype/client"
+import type { AnyDatabase, AugmentedDatabase, SupatypeError } from "@supatype/client"
 import { useSupatype } from "./context.js"
 
 export interface FunctionCallOptions {
@@ -37,7 +37,7 @@ export interface UseFunctionResult<TResponse> {
  */
 export function useFunction<
   TResponse = unknown,
-  TDatabase extends AnyDatabase = AnyDatabase,
+  TDatabase extends AnyDatabase = AugmentedDatabase,
 >(
   functionName: string,
 ): UseFunctionResult<TResponse> {

@@ -908,8 +908,19 @@ function parseScalarType(
         return scalar("tsVector")
       case "Money":
         return scalar("money")
-      case "Decimal":
-        return scalar("decimal")
+      case "Decimal": {
+        // `Decimal<10, 2>` names a precision and a scale, and the engine renders `NUMERIC(p, s)`
+        // from them — but nothing used to read the type arguments, so every Decimal became an
+        // unbounded NUMERIC. Silently, which is the worst way to lose a constraint on a money column.
+        const precision = parseNumericTypeArg(typeNode.typeArguments?.[0], sourceFile)
+        const scale = parseNumericTypeArg(typeNode.typeArguments?.[1], sourceFile)
+        return scalar("decimal", {
+          kernel: {
+            ...(precision !== undefined && { precision }),
+            ...(scale !== undefined && { scale }),
+          },
+        })
+      }
       case "DateOnly":
         return scalar("date")
       case "Date":
@@ -931,7 +942,26 @@ function parseScalarType(
       case "Button":
         return scalar("button", { db: { pgType: "JSONB" } })
       case "Duration":
-        return scalar("json", { db: { pgType: "JSONB" } })
+        return scalar("json", { db: { pgType: "JSONB" }, kernel: { tsType: "{ ms: number }" } })
+      // `Code` and `Currency` each carry two values, so a scalar column would have to drop one:
+      // JSONB keeps `lang` with its `source`, and an amount with the currency it is denominated in.
+      // `tsType` is what stops the generated client row from flattening them to an opaque object.
+      case "Code": {
+        const lang = literalStringType(typeNode.typeArguments?.[0])
+        return scalar("json", {
+          db: { pgType: "JSONB" },
+          kernel: { tsType: `{ lang: ${lang !== null ? JSON.stringify(lang) : "string"}; source: string }` },
+        })
+      }
+      case "Currency": {
+        const currencyCode = literalStringType(typeNode.typeArguments?.[0])
+        return scalar("json", {
+          db: { pgType: "JSONB" },
+          kernel: {
+            tsType: `{ amount: string; code: ${currencyCode !== null ? JSON.stringify(currencyCode) : "string"} }`,
+          },
+        })
+      }
       case "GeoPoint":
       case "Geo":
         return scalar("geo", { kernel: { geoType: "point", srid: 4326 } })
