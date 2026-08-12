@@ -442,7 +442,9 @@ async function resolveAdminCredentials(
 }
 
 export function clearAdminSeedPassword(cwd: string): void {
-  upsertEnvFile(cwd, {}, [ADMIN_PASSWORD_ENV])
+  // Unconditional: this is a one-time seed password being retired, and whoever wrote it wanted it
+  // gone once used.
+  upsertEnvFile(cwd, {}, { remove: [ADMIN_PASSWORD_ENV] })
 }
 
 export async function hashPasswordForAuth(password: string): Promise<string> {

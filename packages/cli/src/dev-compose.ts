@@ -68,8 +68,13 @@ const COMPOSE_DEV_DB_PORT = 54329
 /** Sync optional Docker image pins from config into `.env` (no JWT rotation). */
 export function syncComposeImagePins(cwd: string, config: SupatypeProjectConfig): void {
   const imagePins = composeDockerImageEnv(config)
+  // Clean up only what a previous run wrote from config. A hand-written image tag in `.env` is the
+  // documented way to run a local build, and this used to delete it on every compose run.
   const removeImageKeys = COMPOSE_PINNED_IMAGE_ENV_KEYS.filter((key) => !(key in imagePins))
-  upsertEnvFile(cwd, imagePins, removeImageKeys)
+  upsertEnvFile(cwd, imagePins, {
+    removeManaged: removeImageKeys,
+    managed: COMPOSE_PINNED_IMAGE_ENV_KEYS,
+  })
 }
 
 export interface DevComposeOptions {
@@ -274,7 +279,10 @@ function upsertDevComposeEnv(
       `postgresql://${dbUser}:${devPostgresPassword(cwd)}@localhost:${devDbPort}/${dbName}?sslmode=disable`
   }
   const removeImageKeys = COMPOSE_PINNED_IMAGE_ENV_KEYS.filter((key) => !(key in imagePins))
-  upsertEnvFile(cwd, updates, removeImageKeys)
+  upsertEnvFile(cwd, updates, {
+    removeManaged: removeImageKeys,
+    managed: COMPOSE_PINNED_IMAGE_ENV_KEYS,
+  })
 }
 
 /** Keep compose + Studio on the same freshly signed dev JWTs; sync optional image pins from config. */
