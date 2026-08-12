@@ -28,6 +28,7 @@ import { existsSync } from "node:fs"
 // it for a lazy import and every command that generates compose would have thrown at runtime — caught
 // by the tests that run the built binary rather than the source.
 import { loadSchemaAst } from "./config.js"
+export { nativeMaskLibraryPresent } from "./postgres-ctl.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
 import {
   resolveRuntimeProvider,
@@ -36,6 +37,7 @@ import {
 } from "./project-config.js"
 
 export type FieldMaskingTier = "none" | "extension" | "views"
+
 
 /** Postgres image this project would run, when it runs one at all. */
 function postgresImage(config: SupatypeProjectConfig): string | undefined {
@@ -72,8 +74,14 @@ export function schemaHasFieldRules(ast: unknown): boolean {
 }
 
 /** The tier this project's next push will use. */
-export function fieldMaskingTier(config: SupatypeProjectConfig, ast: unknown): FieldMaskingTier {
+export function fieldMaskingTier(
+  config: SupatypeProjectConfig,
+  ast: unknown,
+  /** Set on the native path once the Postgres install is known — see [`nativeMaskLibraryPresent`]. */
+  maskLibraryPresent?: boolean,
+): FieldMaskingTier {
   if (!schemaHasFieldRules(ast)) return "none"
+  if (maskLibraryPresent === true) return "extension"
   return imageShipsMaskExtension(config) ? "extension" : "views"
 }
 
@@ -87,11 +95,12 @@ export function fieldMaskingTier(config: SupatypeProjectConfig, ast: unknown): F
 export function fieldMaskingTierFromProject(
   cwd: string,
   config: SupatypeProjectConfig,
+  maskLibraryPresent?: boolean,
 ): FieldMaskingTier {
   try {
     const schemaPath = schemaPathFromProject(config, cwd)
     if (!existsSync(schemaPath)) return "none"
-    return fieldMaskingTier(config, loadSchemaAst(schemaPath, cwd))
+    return fieldMaskingTier(config, loadSchemaAst(schemaPath, cwd), maskLibraryPresent)
   } catch {
     return "none"
   }

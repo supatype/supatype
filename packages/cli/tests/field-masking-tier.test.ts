@@ -1,7 +1,11 @@
 import { describe, it, expect } from "vitest"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
+import { tmpdir } from "node:os"
 import {
   fieldMaskingTier,
   imageShipsMaskExtension,
+  nativeMaskLibraryPresent,
   schemaHasFieldRules,
 } from "../src/field-masking-tier.js"
 import { apiSchemaList, validateProjectConfig, type SupatypeProjectConfig } from "../src/project-config.js"
@@ -135,5 +139,46 @@ describe("the exposed schema list", () => {
       schema: { api_schemas: ["public", "supatype"] },
     })
     expect(apiSchemaList(cfg, "views")).toBe("public, supatype")
+  })
+})
+
+describe("nativeMaskLibraryPresent", () => {
+  it("is false for an install without the library", () => {
+    // The case that must not be assumed away: an archive downloaded before the library was bundled.
+    // Claiming tier 1 for it would select the planner rewrite and the push would be refused.
+    const dir = mkdtempSync(join(tmpdir(), "supatype-pg-"))
+    mkdirSync(join(dir, "bin"), { recursive: true })
+    mkdirSync(join(dir, "lib", "postgresql"), { recursive: true })
+    expect(nativeMaskLibraryPresent(join(dir, "bin"))).toBe(false)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it("finds the library in either archive layout", () => {
+    // Linux and macOS put extension libraries in `lib/`; the Windows archive uses `lib/postgresql/`.
+    for (const [subdir, lib] of [
+      [["lib"], "supatype_mask.so"],
+      [["lib"], "supatype_mask.dylib"],
+      [["lib", "postgresql"], "supatype_mask.dll"],
+    ] as const) {
+      const dir = mkdtempSync(join(tmpdir(), "supatype-pg-"))
+      mkdirSync(join(dir, "bin"), { recursive: true })
+      mkdirSync(join(dir, ...subdir), { recursive: true })
+      writeFileSync(join(dir, ...subdir, lib), "")
+      expect(nativeMaskLibraryPresent(join(dir, "bin")), lib).toBe(true)
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("is false without an install directory at all", () => {
+    expect(nativeMaskLibraryPresent(null)).toBe(false)
+    expect(nativeMaskLibraryPresent(undefined)).toBe(false)
+  })
+
+  it("selects the extension tier when the library is installed", () => {
+    // The point of the whole change: native dev enforces field rules the same way the image does.
+    expect(fieldMaskingTier(project({ provider: "native" }), withRules, true)).toBe("extension")
+    expect(fieldMaskingTier(project({ provider: "native" }), withRules, false)).toBe("views")
+    // Still nothing to enforce when no column is masked.
+    expect(fieldMaskingTier(project({ provider: "native" }), withoutRules, true)).toBe("none")
   })
 })

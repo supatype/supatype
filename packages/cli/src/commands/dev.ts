@@ -58,6 +58,7 @@ import { writeAppViteEnv } from "../app-vite-env.js"
 import { ensureValkeySidecar, stopValkeySidecar } from "../valkey-sidecar.js"
 import {
   initdb,
+  nativeMaskLibraryPresent,
   start as pgStart,
   stop as pgStop,
   waitReady as pgWaitReady,
@@ -242,8 +243,17 @@ export function registerDev(program: Command): void {
         // cluster got it, because a superuser may SET ROLE to anything. Verified: as
         // postgres, `SET ROLE supatype_replication_admin` succeeds; as authenticator the
         // same statement is refused. Mirrors the image, which has had this role all along.
+        // Created here rather than during the push, because the engine chooses how to enforce field
+        // rules from the extensions present *when it diffs*. Creating it later would leave the tier
+        // decided against a database that no longer looks like that.
+        //
+        // Conditional on the library being bundled: an archive downloaded before it was would fail
+        // the CREATE, and there is nothing the developer could do about it from here.
+        const maskSql = nativeMaskLibraryPresent(pgBinDir)
+          ? "CREATE EXTENSION IF NOT EXISTS supatype_mask;\n"
+          : ""
         const rolesSql = `
-CREATE SCHEMA IF NOT EXISTS auth;
+${maskSql}CREATE SCHEMA IF NOT EXISTS auth;
 DO $$ BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'anon')
     THEN CREATE ROLE anon NOLOGIN; END IF;
@@ -503,7 +513,12 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
           // a non-default pg_schema pushed correctly and then answered PGRST106 on every request.
           // Native dev has no masking extension either, so a schema with field rules is served from
           // `api` here too — the case an "is the database external" rule would have got wrong.
-          PGRST_DB_SCHEMA: apiSchemaList(config, fieldMaskingTierFromProject(cwd, config)),
+          PGRST_DB_SCHEMA: apiSchemaList(
+            config,
+            // The installed archive decides: one downloaded before the masking library was bundled
+            // has no extension, so its field rules are enforced by views instead.
+            fieldMaskingTierFromProject(cwd, config, nativeMaskLibraryPresent(pgBinDir)),
+          ),
           // Parity with self-host, which has always set this. Unqualified names in column defaults
           // (`uuid_generate_v4()`) resolve here, and with a non-public pg_schema the request schema
           // alone does not reach them.
