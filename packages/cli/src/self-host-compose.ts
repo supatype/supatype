@@ -15,6 +15,7 @@ import {
 import { hasEngineOverride, hasStudioOverride, pinnedVersion, fetchLatestVersion, VERSION_PIN_LOCAL } from "./binary-cache.js"
 import { buildKongDeclarative } from "./kong-config.js"
 import { readEnvFile } from "./env-file.js"
+import { fieldMaskingTierFromProject, type FieldMaskingTier } from "./field-masking-tier.js"
 
 /** Env keys written when `versions` pins exist in supatype.config.ts. */
 export const COMPOSE_PINNED_IMAGE_ENV_KEYS = [
@@ -275,6 +276,14 @@ function serverAppEnvForCompose(config: SupatypeProjectConfig, devLocal: boolean
 export interface SelfHostComposeOptions {
   /** `supatype dev` with provider docker: internal-only db/server; Kong on host :18473. */
   devLocal?: boolean
+  /**
+   * Which mechanism enforces per-column rules, when the caller knows.
+   *
+   * Only the call sites that have loaded the schema can say — see `field-masking-tier.ts`. Left
+   * unset, the exposed schema list is today's, which is correct for every project without field
+   * rules and for every project on `supatype/postgres`.
+   */
+  fieldMaskingTier?: FieldMaskingTier
 }
 
 export function renderSelfHostCompose(
@@ -466,7 +475,7 @@ ${dbServiceBlock}  postgrest:
       # Derived from schema.pg_schema (or schema.api_schemas). Hardcoding this is why choosing a
       # non-public pg_schema used to give a correct push and an API that answered PGRST106 for
       # everything — the engine moved and PostgREST was never told.
-      PGRST_DB_SCHEMA: "${apiSchemaList(config)}"
+      PGRST_DB_SCHEMA: "${apiSchemaList(config, options?.fieldMaskingTier)}"
       PGRST_DB_ANON_ROLE: anon
       PGRST_JWT_SECRET: \${JWT_SECRET:?JWT_SECRET is missing from .env}
       PGRST_DB_EXTRA_SEARCH_PATH: public,extensions
@@ -719,18 +728,40 @@ function assertExternalUrlReachableFromContainers(config: SupatypeProjectConfig)
   )
 }
 
+/**
+ * The tier to write into the compose file.
+ *
+ * Resolved here so every caller gets it, rather than threaded through four call sites that load the
+ * schema a moment later anyway. A schema that fails to load falls back to the default list: compose
+ * generation is the wrong place to report a syntax error, and `push`/`dev` do it properly seconds
+ * later with the file and line.
+ */
+function resolveFieldMaskingTier(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  options?: SelfHostComposeOptions,
+): FieldMaskingTier | undefined {
+  if (options?.fieldMaskingTier !== undefined) return options.fieldMaskingTier
+  return fieldMaskingTierFromProject(cwd, config)
+}
+
 export function writeSelfHostCompose(
   cwd: string,
   config: SupatypeProjectConfig,
   options?: SelfHostComposeOptions,
 ): SelfHostComposePaths {
   assertExternalUrlMatchesEnv(cwd, config)
+  const tier = resolveFieldMaskingTier(cwd, config, options)
+  const resolved: SelfHostComposeOptions = {
+    ...options,
+    ...(tier !== undefined && { fieldMaskingTier: tier }),
+  }
   assertExternalUrlReachableFromContainers(config)
   const paths = selfHostComposePaths(cwd)
   mkdirSync(paths.dir, { recursive: true })
   ensureProjectFunctionsDir(cwd, config)
   ensureComposeManifest(cwd, config)
-  writeFileSync(paths.composePath, renderSelfHostCompose(config, cwd, options), "utf8")
+  writeFileSync(paths.composePath, renderSelfHostCompose(config, cwd, resolved), "utf8")
   const studioHostDev = options?.devLocal === true && hasStudioOverride(config)
   const tlsEnabled = selfHostTlsEnabled(config, options?.devLocal === true)
   const domain = config.server.domain?.trim()

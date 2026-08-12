@@ -25,6 +25,7 @@ import {
   type SupatypeProjectConfig,
 } from "../project-config.js"
 import { discoverTsFunctionsInDir, writeDevFunctionsRouter } from "../functions-router-gen.js"
+import { fieldMaskingTierFromProject } from "../field-masking-tier.js"
 import { signJwt } from "../jwt.js"
 import {
   devAuthenticatorPassword,
@@ -500,7 +501,9 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
           PGRST_DB_URI: postgrestDbURL,
           // Derived from schema.pg_schema (or schema.api_schemas) — a hardcoded "public" here meant
           // a non-default pg_schema pushed correctly and then answered PGRST106 on every request.
-          PGRST_DB_SCHEMA: apiSchemaList(config),
+          // Native dev has no masking extension either, so a schema with field rules is served from
+          // `api` here too — the case an "is the database external" rule would have got wrong.
+          PGRST_DB_SCHEMA: apiSchemaList(config, fieldMaskingTierFromProject(cwd, config)),
           // Parity with self-host, which has always set this. Unqualified names in column defaults
           // (`uuid_generate_v4()`) resolve here, and with a non-public pg_schema the request schema
           // alone does not reach them.

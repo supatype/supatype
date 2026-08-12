@@ -605,9 +605,14 @@ export const STACK_API_SCHEMAS = ["supatype", "graphql_public", "auth"] as const
  * duplicates removed: PostgREST serves the first entry as the default profile, so the managed
  * schema has to lead.
  */
-export function apiSchemas(cfg: SupatypeProjectConfig): string[] {
+export function apiSchemas(cfg: SupatypeProjectConfig, tier?: "none" | "extension" | "views"): string[] {
   const explicit = cfg.schema?.api_schemas
-  const list = explicit && explicit.length > 0 ? explicit : [pgSchema(cfg), ...STACK_API_SCHEMAS]
+  // Tier-2 field masking serves from `api`, and the managed schema must come **off** the list: a
+  // client picks its schema per request with `Accept-Profile`, so leaving it exposed would let any
+  // caller read the unmasked table and make the mask opt-out. The API roles hold no privileges there
+  // under tier 2 either, so exposing it would only produce denials.
+  const managed = tier === "views" ? "api" : pgSchema(cfg)
+  const list = explicit && explicit.length > 0 ? explicit : [managed, ...STACK_API_SCHEMAS]
 
   const seen = new Set<string>()
   const out: string[] = []
@@ -621,6 +626,9 @@ export function apiSchemas(cfg: SupatypeProjectConfig): string[] {
 }
 
 /** `PGRST_DB_SCHEMA` value: comma-separated, in order. */
-export function apiSchemaList(cfg: SupatypeProjectConfig): string {
-  return apiSchemas(cfg).join(", ")
+export function apiSchemaList(
+  cfg: SupatypeProjectConfig,
+  tier?: "none" | "extension" | "views",
+): string {
+  return apiSchemas(cfg, tier).join(", ")
 }
