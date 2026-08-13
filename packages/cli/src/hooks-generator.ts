@@ -68,6 +68,14 @@ export function generateHooksModule(ast: unknown): string | null {
 //   }
 //
 //   export default hook(moderate)
+//
+// One function can serve a model's whole lifecycle instead, since the worker takes one default
+// export per directory:
+//
+//   export default hooks({
+//     beforeChange: moderate,
+//     afterChange: reindex,
+//   })
 
 /**
  * Lexical editor state as JSON, or the plain string accepted for seeds and defaults.
@@ -161,6 +169,14 @@ export type AfterDelete<T extends HookedTable> = (
   ctx: AfterDeleteContext<T>,
 ) => void | Promise<void>
 
+/** Every handler a single function may serve, when one function covers a model's whole lifecycle. */
+export interface HookHandlers<T extends HookedTable> {
+  readonly beforeChange?: BeforeChange<T>
+  readonly beforeDelete?: BeforeDelete<T>
+  readonly afterChange?: AfterChange<T>
+  readonly afterDelete?: AfterDelete<T>
+}
+
 type AnyHandler = (ctx: never) => unknown
 
 interface WireContext {
@@ -234,6 +250,28 @@ export function hook(handler: AnyHandler): (req: Request) => Promise<Response> {
     }
 
     return json(verdict as Record<string, unknown>, 200)
+  }
+}
+
+/**
+ * Serve several of a model's hooks from one function, dispatched on \`X-Supatype-Hook\`.
+ *
+ * The worker takes **one default export per function directory**, so \`hook(single)\` is one hook per
+ * directory. That is fine for a single moderation rule and tedious for a model whose whole lifecycle
+ * you want in one place — hence this. Point every event at the same function name in the schema:
+ *
+ *   hooks: { beforeChange: "post-hooks", afterChange: "post-hooks" }
+ *
+ * An event arriving with no handler is a 200, not an error: the schema and this file can be out of
+ * step for one deploy, and failing a write because the *other* half has not shipped yet would be the
+ * wrong way round.
+ */
+export function hooks(handlers: Record<string, AnyHandler | undefined>): (req: Request) => Promise<Response> {
+  return async (req: Request): Promise<Response> => {
+    const event = req.headers.get("x-supatype-hook") ?? ""
+    const handler = handlers[event]
+    if (handler === undefined) return json({}, 200)
+    return hook(handler)(req)
   }
 }
 
