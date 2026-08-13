@@ -27,6 +27,7 @@ STUB_PID=""
 
 cleanup() {
   docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+  [ -f "$WORK/worker.pid" ] && kill "$(cat "$WORK/worker.pid")" >/dev/null 2>&1 || true
   [ -n "$STUB_PID" ] && kill "$STUB_PID" >/dev/null 2>&1 || true
   rm -rf "$WORK"
 }
@@ -124,6 +125,32 @@ createServer((req, res) => {
 }).listen(Number(process.argv[2]))
 STUB
 
+# Credential probes: identical handlers, one named in the allowlist and one not.
+mkdir -p "$WORK/functions/peek-key" "$WORK/hooks/privileged"
+cat > "$WORK/functions/peek-key/index.ts" <<'TS'
+export default (): Response =>
+  new Response(JSON.stringify({ key: Deno.env.get("SUPATYPE_SERVICE_ROLE_KEY") ?? null }), {
+    headers: { "Content-Type": "application/json" },
+  })
+TS
+cat > "$WORK/hooks/privileged/index.ts" <<'TS'
+export default (): Response =>
+  new Response(JSON.stringify({ key: Deno.env.get("SUPATYPE_SERVICE_ROLE_KEY") ?? null }), {
+    headers: { "Content-Type": "application/json" },
+  })
+TS
+
+mkdir -p "$WORK/functions/import-peek"
+cat > "$WORK/functions/import-peek/index.ts" <<'TS'
+// Reads the key at *import* time, which is the case the startup ordering has to defeat: a module body
+// runs when the worker loads it, so a key still in the environment then can be copied and kept.
+const stolen = Deno.env.get("SUPATYPE_SERVICE_ROLE_KEY") ?? null
+export default (): Response =>
+  new Response(JSON.stringify({ stolenAtImport: stolen }), {
+    headers: { "Content-Type": "application/json" },
+  })
+TS
+
 cp "$REPO_ROOT/packages/functions-worker/main.ts" "$WORK/worker-main.ts"
 
 STUB_LOG="$WORK/stub.log"
@@ -131,11 +158,43 @@ STUB_LOG="$WORK/stub.log"
 node "$WORK/previous-stub.mjs" 8098 "$STUB_LOG" &
 STUB_PID=$!
 
+# Docker is the more faithful runtime, but a local `deno` runs the same worker code and keeps this
+# script usable when the daemon is down. Worth having: the credential-ordering leak below was found on
+# this fallback path, because a test that needs Docker Desktop running is a test that quietly does not.
+USE_DOCKER=1
+if ! docker info >/dev/null 2>&1; then
+  command -v deno >/dev/null 2>&1 || fail "no running docker daemon and no local deno"
+  USE_DOCKER=0
+  echo "→ docker unavailable; running the worker with local deno"
+  (
+    cd "$WORK"
+    SUPATYPE_FUNCTIONS_ROOT="$WORK/functions" \
+    SUPATYPE_HOOKS_ROOT="$WORK/hooks" \
+    SUPATYPE_SERVICE_ROLE_KEY=super-secret-admin-key \
+    SUPATYPE_SERVICE_ROLE_ROUTES=hooks/privileged \
+    SUPATYPE_INTERNAL_URL="http://localhost:8098" \
+    PORT="$PORT" \
+    deno run --allow-all "$WORK/worker-main.ts" > "$WORK/worker.log" 2>&1 &
+    echo $! > "$WORK/worker.pid"
+  )
+  for _ in $(seq 1 30); do
+    grep -q "handler(s)" "$WORK/worker.log" 2>/dev/null && break
+    sleep 1
+  done
+  grep -q "handler(s)" "$WORK/worker.log" \
+    || fail "worker did not start: $(tail -3 "$WORK/worker.log" 2>/dev/null)"
+fi
+
+if [ "$USE_DOCKER" = "1" ]; then
 echo "→ starting the real worker under $DENO_IMAGE"
 docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
 if ! MSYS_NO_PATHCONV=1 docker run --rm -d --name "$CONTAINER" \
   -p "${PORT}:8001" \
   -e SUPATYPE_FUNCTIONS_ROOT=/project/functions \
+  -e SUPATYPE_HOOKS_ROOT=/project/hooks \
+  -e SUPATYPE_SERVICE_ROLE_KEY=super-secret-admin-key \
+  -e SUPATYPE_SERVICE_ROLE_ROUTES=hooks/privileged \
+  -e SUPATYPE_INTERNAL_URL=http://host.docker.internal:8098 \
   -e PORT=8001 \
   --add-host host.docker.internal:host-gateway \
   -v "$(mount_path "$WORK"):/project:ro" \
@@ -149,8 +208,9 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 
-docker logs "$CONTAINER" 2>&1 | grep -q "2 handler(s)" \
-  || fail "worker did not discover both handlers: $(docker logs "$CONTAINER" 2>&1 | tail -3)"
+docker logs "$CONTAINER" 2>&1 | grep -qE "[0-9]+ handler\(s\)" \
+  || fail "worker did not start: $(docker logs "$CONTAINER" 2>&1 | tail -3)"
+fi
 
 # ── The contract: the status is the outcome ───────────────────────────────────
 call() { # event, json, [function]
@@ -176,14 +236,44 @@ expect "the multiplexer dispatches"       "$(call afterChange '{"table":"posts",
 expect "an unhandled event is a 200"      "$(call beforeDelete '{"table":"posts","operation":"delete","requestId":"r7","filter":"id=eq.1"}')" 200 '{}'
 expect "malformed payload is a 400"       "$(call beforeChange 'not json')" 400 "not JSON"
 
-PREV='{"table":"posts","operation":"update","requestId":"r8","patch":{"title":"x"},"filter":"id=eq.1","previousUrl":"http://host.docker.internal:8098/hook/r8/previous"}'
+# A path, not a URL: the adapter joins it to SUPATYPE_INTERNAL_URL, because the server does not know
+# its own in-network address while the worker is already told how to reach the stack.
+PREV='{"table":"posts","operation":"update","requestId":"r8","patch":{"title":"x"},"filter":"id=eq.1","previousPath":"/hooks/v1/previous/tok"}'
 expect "previous() fetches and truncates" "$(call beforeChange "$PREV" prev-probe)" 422 "saw 1 row(s) truncated=true"
 grep -q "sig=v1,testsig" "$STUB_LOG" \
   || fail "previous() did not forward the webhook signature: $(cat "$STUB_LOG")"
 echo "  ✓ previous() forwards the signature it was called with"
 
-docker logs "$CONTAINER" 2>&1 | grep -q "\[after\] posts insert rows=1" \
+# Whichever runtime is in use, the handler's own stdout is where the proof is.
+worker_logs() {
+  if [ "$USE_DOCKER" = "1" ]; then docker logs "$CONTAINER" 2>&1; else cat "$WORK/worker.log"; fi
+}
+worker_logs | grep -q "\[after\] posts insert rows=1" \
   || fail "the afterChange handler did not run"
 echo "  ✓ afterChange ran inside the worker"
+
+# ── The service-role key is withheld unless a route asked for it ──────────────
+# Withheld *before handlers are imported*: a module body runs at import time, so a key still in the
+# environment then is a key a handler can copy and keep. Testing it in the real worker is the only way
+# to know the ordering held.
+peeked() { curl -s -X POST "http://localhost:${PORT}/$1" -H "content-type: application/json" -d '{}'; }
+
+IMPORT_PEEK="$(peeked import-peek)"
+echo "$IMPORT_PEEK" | grep -q '"stolenAtImport":null' \
+  || fail "a handler captured the key at import time: $IMPORT_PEEK"
+echo "  ✓ a handler cannot capture it at import time"
+
+PUBLIC_PEEK="$(peeked peek-key)"
+echo "$PUBLIC_PEEK" | grep -q '"key":null'   || fail "a public function could read the service-role key: $PUBLIC_PEEK"
+echo "  ✓ a public function cannot see the service-role key"
+
+HOOK_PEEK="$(peeked hooks/privileged)"
+echo "$HOOK_PEEK" | grep -q "super-secret-admin-key"   || fail "an allowlisted route could not read the key it was granted: $HOOK_PEEK"
+echo "  ✓ an allowlisted route receives it"
+
+# And it does not leak from that invocation into the next one.
+PUBLIC_AGAIN="$(peeked peek-key)"
+echo "$PUBLIC_AGAIN" | grep -q '"key":null'   || fail "the key leaked from a granted call into a later one: $PUBLIC_AGAIN"
+echo "  ✓ and it does not persist into the next call"
 
 echo "PASS: the generated adapter behaves inside the real functions worker"

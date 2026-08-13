@@ -40,6 +40,40 @@ function hooksRoot(): string {
 /** Route prefix for hook handlers. The gateway refuses this prefix on the public path. */
 const HOOKS_ROUTE_PREFIX = "hooks/"
 
+/**
+ * Routes allowed to see `SUPATYPE_SERVICE_ROLE_KEY`, from `SUPATYPE_SERVICE_ROLE_ROUTES`.
+ *
+ * Names are routes as this worker serves them, so a hook is `hooks/<name>`.
+ */
+function serviceRoleRoutes(): Set<string> {
+  const raw = (Deno.env.get("SUPATYPE_SERVICE_ROLE_ROUTES") ?? "").trim()
+  if (!raw) return new Set()
+  return new Set(
+    raw
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0),
+  )
+}
+
+/**
+ * Take the service-role key out of the process environment, returning it for scoped re-injection.
+ *
+ * **Before handlers are imported**, which is the whole point: a handler's module body runs at import
+ * time, so a key still in `Deno.env` then is a key any handler can copy and keep. Withholding it
+ * afterwards would be theatre.
+ *
+ * The default is now "no admin credential". A function is a public endpoint — anyone holding the anon
+ * key can invoke one — and an ambient service-role key made every one of them able to read and write
+ * past every access rule in the schema. Opting in is a line in `supatype.config.ts`, which is
+ * reviewable; ambient privilege is not.
+ */
+function withholdServiceRoleKey(): string {
+  const key = Deno.env.get("SUPATYPE_SERVICE_ROLE_KEY") ?? ""
+  if (key) Deno.env.delete("SUPATYPE_SERVICE_ROLE_KEY")
+  return key
+}
+
 async function discoverRoutes(root: string): Promise<DiscoveredRoute[]> {
   const single = Deno.env.get("SUPATYPE_FUNCTION_NAME")?.trim()
   const out: DiscoveredRoute[] = []
@@ -87,6 +121,10 @@ async function discoverRoutes(root: string): Promise<DiscoveredRoute[]> {
 function entrypointImportUrl(entrypoint: string): string {
   const normalized = entrypoint.replace(/\\/g, "/")
   if (normalized.startsWith("file://")) return normalized
+  // A Windows absolute path is not a URL: `new URL("C:/x")` reads the drive letter as the scheme, and
+  // Deno then refuses to import scheme "c". Invisible in a Linux container, where every root starts
+  // with "/", and fatal the moment this worker runs on a developer's machine.
+  if (/^[A-Za-z]:\//.test(normalized)) return `file:///${normalized}`
   if (normalized.startsWith("/")) return `file://${normalized}`
   return new URL(normalized, import.meta.url).href
 }
@@ -107,6 +145,9 @@ async function loadHandlers(routes: DiscoveredRoute[]): Promise<Record<string, H
 }
 
 const port = parseInt(Deno.env.get("PORT") ?? "8001", 10)
+// Order matters: withhold, then import. See withholdServiceRoleKey.
+const serviceRoleKey = withholdServiceRoleKey()
+const serviceRoleAllowed = serviceRoleRoutes()
 const root = functionsRoot()
 const routes = await discoverRoutes(root)
 const handlers = await loadHandlers(routes)
@@ -224,7 +265,14 @@ Deno.serve({ port }, async (req: Request): Promise<Response> => {
 
       const supatypeUrl = Deno.env.get("SUPATYPE_URL")
       const supatypeAnon = Deno.env.get("SUPATYPE_ANON_KEY")
-      const supatypeServiceRole = Deno.env.get("SUPATYPE_SERVICE_ROLE_KEY")
+      // The key is not in the process environment — it was withheld before any handler was imported.
+      // It comes from the closure, and only for a route that asked for it.
+      //
+      // Read from the closure rather than re-injected before this block: `setScoped` captures the
+      // *current* value as the one to restore afterwards, so injecting first made the restore put the
+      // grant back permanently — a leak into every later call, which is what the test caught.
+      const supatypeServiceRole =
+        serviceRoleKey && serviceRoleAllowed.has(fnName) ? serviceRoleKey : undefined
       const supatypeDbUrl = Deno.env.get("SUPATYPE_DB_URL") ?? Deno.env.get("DATABASE_URL")
       const supatypeJwks = Deno.env.get("SUPATYPE_JWKS")
 

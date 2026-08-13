@@ -228,6 +228,17 @@ export interface SupatypeProjectConfig {
   functions?: {
     /** Path to edge functions directory, relative to `supatype.root` when not absolute. */
     path?: string
+    /**
+     * Routes allowed to see the **service-role key**, which reads and writes past every access rule.
+     *
+     * Empty by default, and that default is the point: a function is a public endpoint anyone holding
+     * the anon key can invoke, so an ambient admin credential made every one of them able to read the
+     * whole database. Naming a route here is a reviewable line in a diff; ambient privilege is not.
+     *
+     * A hook is named as it is routed — `"hooks/moderate-post"`. Most hooks need nothing here:
+     * `ctx.previous()` already reads the rows a write is about to change.
+     */
+    serviceRole?: readonly string[]
   }
   output?: {
     /** Path for generated TypeScript types. */
@@ -544,6 +555,17 @@ export function selfHostTlsEnabled(
 /** Resolved runtime provider (`config.provider` ?? `database.provider` ?? native). */
 export function resolveRuntimeProvider(cfg: SupatypeProjectConfig): "native" | "docker" {
   return cfg.provider ?? cfg.database.provider ?? "native"
+}
+
+/**
+ * Routes entitled to the service-role key, as the worker's env expects them.
+ *
+ * Resolved here rather than in the compose template so there is one definition of the format, and so
+ * a typo'd entry is visible in one place rather than silently granting nothing.
+ */
+export function serviceRoleRoutes(cfg: SupatypeProjectConfig): string[] {
+  const declared = cfg.functions?.serviceRole ?? []
+  return [...declared].map((entry) => entry.trim()).filter((entry) => entry.length > 0).sort()
 }
 
 /** Kong gateway port when `provider: docker` (self-host compose dev). */
