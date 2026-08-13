@@ -24,12 +24,14 @@ CONTAINER="supatype-hook-adapter-test"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 WORK="$(mktemp -d)"
 STUB_PID=""
+STUB2_PID=""
 
 cleanup() {
   docker rm -f "$CONTAINER" "${CONTAINER}-nohooks" >/dev/null 2>&1 || true
   [ -f "$WORK/worker2.pid" ] && kill "$(cat "$WORK/worker2.pid")" >/dev/null 2>&1 || true
   [ -f "$WORK/worker.pid" ] && kill "$(cat "$WORK/worker.pid")" >/dev/null 2>&1 || true
   [ -n "$STUB_PID" ] && kill "$STUB_PID" >/dev/null 2>&1 || true
+  [ -n "$STUB2_PID" ] && kill "$STUB2_PID" >/dev/null 2>&1 || true
   rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -120,7 +122,7 @@ cat > "$WORK/previous-stub.mjs" <<'STUB'
 import { createServer } from "node:http"
 import { appendFileSync } from "node:fs"
 createServer((req, res) => {
-  appendFileSync(process.argv[3], `${req.method} ${req.url} sig=${req.headers["webhook-signature"] ?? "none"}\n`)
+  appendFileSync(process.argv[3], `${req.method} ${req.url} sig=${req.headers["webhook-signature"] ?? "none"} depth=${req.headers["x-supatype-hook-depth"] ?? "none"}\n`)
   res.writeHead(200, { "content-type": "application/json" })
   res.end(JSON.stringify({ rows: [{ id: "1", title: "stored" }], truncated: true }))
 }).listen(Number(process.argv[2]))
@@ -148,6 +150,21 @@ export default (): Response =>
   })
 TS
 
+mkdir -p "$WORK/hooks/writer"
+cat > "$WORK/hooks/writer/index.ts" <<'TS'
+// A hand-rolled fetch, deliberately: the guard has to hold for a handler that never touches the
+// generated adapter, which is the only way it holds for a handler using any client at all.
+export default async (_req: Request): Promise<Response> => {
+  await fetch(`${Deno.env.get("SUPATYPE_INTERNAL_URL")}/rest/v1/posts`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "[{}]",
+  })
+  await fetch(`${Deno.env.get("SUPATYPE_EXTERNAL_URL")}/charge`, { method: "POST" })
+  return new Response(null, { status: 204 })
+}
+TS
+
 mkdir -p "$WORK/functions/import-peek"
 cat > "$WORK/functions/import-peek/index.ts" <<'TS'
 // Reads the key at *import* time, which is the case the startup ordering has to defeat: a module body
@@ -166,6 +183,12 @@ STUB_LOG="$WORK/stub.log"
 node "$WORK/previous-stub.mjs" 8098 "$STUB_LOG" &
 STUB_PID=$!
 
+# Somebody else's API, so the test can tell "carried onward" from "leaked to everyone".
+EXTERNAL_LOG="$WORK/external.log"
+: > "$EXTERNAL_LOG"
+node "$WORK/previous-stub.mjs" 8097 "$EXTERNAL_LOG" &
+STUB2_PID=$!
+
 # Docker is the more faithful runtime, but a local `deno` runs the same worker code and keeps this
 # script usable when the daemon is down. Worth having: the credential-ordering leak below was found on
 # this fallback path, because a test that needs Docker Desktop running is a test that quietly does not.
@@ -181,6 +204,7 @@ if ! docker info >/dev/null 2>&1; then
     SUPATYPE_SERVICE_ROLE_KEY=super-secret-admin-key \
     SUPATYPE_SERVICE_ROLE_ROUTES=granted-fn \
     SUPATYPE_INTERNAL_URL="http://localhost:8098" \
+    SUPATYPE_EXTERNAL_URL="http://localhost:8097" \
     PORT="$PORT" \
     deno run --allow-all "$WORK/worker-main.ts" > "$WORK/worker.log" 2>&1 &
     echo $! > "$WORK/worker.pid"
@@ -203,6 +227,7 @@ if ! MSYS_NO_PATHCONV=1 docker run --rm -d --name "$CONTAINER" \
   -e SUPATYPE_SERVICE_ROLE_KEY=super-secret-admin-key \
   -e SUPATYPE_SERVICE_ROLE_ROUTES=granted-fn \
   -e SUPATYPE_INTERNAL_URL=http://host.docker.internal:8098 \
+  -e SUPATYPE_EXTERNAL_URL=http://host.docker.internal:8097 \
   -e PORT=8001 \
   --add-host host.docker.internal:host-gateway \
   -v "$(mount_path "$WORK"):/project:ro" \
@@ -289,6 +314,21 @@ echo "  ✓ a hook receives it without being listed"
 PUBLIC_AGAIN="$(peeked peek-key)"
 echo "$PUBLIC_AGAIN" | grep -q '"key":null'   || fail "the key leaked from a granted call into a later one: $PUBLIC_AGAIN"
 echo "  ✓ and it does not persist into the next call"
+
+# ── The chain depth survives a handler that knows nothing about it ────────────
+# A hook holds the service-role key, so a hook writing to its own table re-enters the API and calls
+# itself again. The server refuses past a small depth — but only if the count survives the hop through
+# handler code, and a handler writes with whatever client it likes.
+curl -s -o /dev/null -X POST "http://localhost:${PORT}/hooks/writer" \
+  -H "content-type: application/json" -H "x-supatype-hook-depth: 2" -d '{}'
+
+grep -q "depth=2" "$STUB_LOG" \
+  || fail "a handler's own write to the stack did not carry the chain depth: $(tail -2 "$STUB_LOG")"
+echo "  ✓ a handler's write carries the chain depth"
+
+grep -q "depth=none" "$EXTERNAL_LOG" \
+  || fail "an internal header leaked to a third-party API: $(tail -2 "$EXTERNAL_LOG")"
+echo "  ✓ and it is not leaked to anyone else"
 
 # ── A hooks root that is not there is ordinary, not fatal ─────────────────────
 # Cloud sets SUPATYPE_HOOKS_ROOT on every project's worker, and a project with functions but no hooks

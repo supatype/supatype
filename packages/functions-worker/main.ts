@@ -230,6 +230,56 @@ async function scopedEnvForFunction(fnName: string): Promise<Record<string, stri
   return { ...shared, ...fnVars }
 }
 
+const HOOK_DEPTH_HEADER = "x-supatype-hook-depth"
+
+/**
+ * Carry the hook chain's depth onto whatever the handler calls the stack with.
+ *
+ * A hook receives the service-role key, so a hook that writes to its own table re-enters the API and
+ * calls itself again — `service_role` decides what Postgres permits, not whether the hook middleware
+ * runs. The server refuses past a small depth, but only if the count survives the hop through a
+ * handler, and a handler writes with whatever client it likes.
+ *
+ * So the count is attached here rather than asked of the handler: `fetch` is what every client is built
+ * on, and patching it for the invocation means a hook cannot skip the guard by accident. Scoped and
+ * restored like the environment above, and safe for the same reason — invocations hold the env lock, so
+ * one runs at a time.
+ *
+ * Only for hooks, and only for requests to this stack: a handler calling a payment API must not leak
+ * an internal header to it.
+ */
+function carryHookDepth(req: Request, fnName: string): () => void {
+  const depth = req.headers.get(HOOK_DEPTH_HEADER)
+  if (!fnName.startsWith(HOOKS_ROUTE_PREFIX) || depth === null) return () => {}
+
+  const stack = stackOrigin()
+  if (stack === null) return () => {}
+
+  const original = globalThis.fetch
+  globalThis.fetch = (input: Request | URL | string, init?: RequestInit): Promise<Response> => {
+    const url = input instanceof Request ? input.url : String(input)
+    if (!url.startsWith(stack)) return original(input, init)
+
+    const request = new Request(input as Request, init)
+    request.headers.set(HOOK_DEPTH_HEADER, depth)
+    return original(request)
+  }
+  return () => {
+    globalThis.fetch = original
+  }
+}
+
+/** The stack's own origin, or null when this worker was not told how to reach it. */
+function stackOrigin(): string | null {
+  const raw = Deno.env.get("SUPATYPE_INTERNAL_URL") ?? Deno.env.get("SUPATYPE_URL")
+  if (raw === undefined || raw.trim() === "") return null
+  try {
+    return new URL(raw).origin
+  } catch {
+    return null
+  }
+}
+
 async function runWithScopedEnv<T>(fnName: string, run: () => Promise<T>): Promise<T> {
   return withEnvLock(async () => {
     const scoped = await scopedEnvForFunction(fnName)
@@ -312,9 +362,11 @@ Deno.serve({ port }, async (req: Request): Promise<Response> => {
       setScoped("SUPATYPE_EXECUTION_ID", crypto.randomUUID())
       setScoped("DENO_DEPLOYMENT_ID", Deno.env.get("DENO_DEPLOYMENT_ID") ?? "local-dev")
 
+      const restoreFetch = carryHookDepth(req, fnName)
       try {
         return await handlers[fnName]!(req)
       } finally {
+        restoreFetch()
         for (const [key, old] of prev.entries()) {
           if (old === undefined) Deno.env.delete(key)
           else Deno.env.set(key, old)
