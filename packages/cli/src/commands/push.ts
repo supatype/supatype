@@ -2,7 +2,7 @@ import type { Command } from "commander"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { loadConfig, loadSchemaAst } from "../config.js"
-import { validateModelHooks } from "../model-hooks.js"
+import { syncManifestHooks, validateModelHooks, writeHooksModule } from "../model-hooks.js"
 import { fatalError } from "../ui/fatal.js"
 import {
   preferredFunctionsPathFromProject,
@@ -176,6 +176,14 @@ async function pushViaTarget(
 }
 
 async function generateTypesLocal(ast: unknown, config: SupatypeProjectConfig): Promise<void> {
+  // Independent of `output`: a project with hooks needs its handler types whether or not it asked
+  // for client types, and the module is written next to the functions that import it.
+  const cwd = process.cwd()
+  const hooksPath = writeHooksModule(cwd, preferredFunctionsPathFromProject(config, cwd), ast)
+  if (hooksPath !== null) info(`Hook handler types written to ${hooksPath}`)
+  // The server watches this file, so a changed hook takes effect without a restart.
+  if (syncManifestHooks(cwd, ast)) info("Hook map written to .supatype/manifest.json")
+
   if (!config.output?.types && !config.output?.client) return
   await withSpinner("Generating types", async () => {
     await ensureEngine()

@@ -8,8 +8,9 @@
  * Kept out of the extractor on purpose: resolving the functions directory needs the project config,
  * and the extractor is a leaf that reads type syntax and nothing else.
  */
-import { existsSync, readdirSync, statSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { join, relative } from "node:path"
+import { generateHooksModule } from "./hooks-generator.js"
 
 export interface DeclaredHook {
   model: string
@@ -84,4 +85,120 @@ export function validateModelHooks(
       : `No functions found in ${where}. Create one with: supatype functions new <name>`,
   )
   return lines
+}
+
+/**
+ * Write `functions/_supatype/hooks.ts`, or remove a stale one when no hooks remain.
+ *
+ * Removal matters as much as writing: deleting the last hook from a schema should leave no typed
+ * module behind claiming tables are hooked, and a handler importing it should start failing to
+ * compile rather than sitting there dead.
+ *
+ * Returns the project-relative path written, or null when there was nothing to write.
+ */
+export function writeHooksModule(cwd: string, functionsDir: string, ast: unknown): string | null {
+  const module = generateHooksModule(ast)
+  const dir = join(functionsDir, "_supatype")
+  const file = join(dir, "hooks.ts")
+
+  if (module === null) {
+    if (existsSync(file)) rmSync(file, { force: true })
+    return null
+  }
+
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(file, module, "utf8")
+  return relative(cwd, file) || file
+}
+
+/** Per-table hook config, in the shape `proxy.RouteManifest` reads. */
+export interface ManifestHookEntry {
+  function: string
+  timeout?: number
+  onUnavailable?: "reject" | "log"
+}
+
+/**
+ * The hook map for `.supatype/manifest.json`, keyed by **table name** — because that is what the
+ * server matches a request path against, not the model name.
+ *
+ * Defaults are resolved here rather than in the server: one place decides that a `before*` hook
+ * rejects when it cannot be reached and an `after*` hook only logs, so the two implementations
+ * cannot disagree about the safe direction.
+ */
+export function manifestHooks(ast: unknown): Record<string, Record<string, ManifestHookEntry>> {
+  const models = (ast as { models?: unknown[] })?.models
+  if (!Array.isArray(models)) return {}
+
+  const out: Record<string, Record<string, ManifestHookEntry>> = {}
+  for (const model of models) {
+    const shaped = model as {
+      annotations?: {
+        db?: { tableName?: string }
+        platform?: { hooks?: Record<string, { function?: string; timeout?: number; onUnavailable?: string }> }
+      }
+    }
+    const table = shaped.annotations?.db?.tableName
+    const hooks = shaped.annotations?.platform?.hooks
+    if (typeof table !== "string" || table.length === 0) continue
+    if (typeof hooks !== "object" || hooks === null) continue
+
+    const entries: Record<string, ManifestHookEntry> = {}
+    for (const [event, value] of Object.entries(hooks)) {
+      const fn = value?.function
+      if (typeof fn !== "string" || fn.length === 0) continue
+      const onUnavailable =
+        value.onUnavailable === "reject" || value.onUnavailable === "log"
+          ? value.onUnavailable
+          : event.startsWith("before")
+            ? "reject"
+            : "log"
+      entries[event] = {
+        function: fn,
+        timeout: typeof value.timeout === "number" ? value.timeout : DEFAULT_HOOK_TIMEOUT_MS,
+        onUnavailable,
+      }
+    }
+    if (Object.keys(entries).length > 0) out[table] = entries
+  }
+  return out
+}
+
+/** Well below the 10s edge-function ceiling, so a hung hook fails fast instead of holding a slot. */
+export const DEFAULT_HOOK_TIMEOUT_MS = 2000
+
+/**
+ * Merge the hook map into an existing `.supatype/manifest.json`.
+ *
+ * **Only updates a manifest that is already there.** Creating one from scratch here would be a
+ * hazard: `functions_enabled` is a plain bool on the server's side, so a manifest carrying only
+ * hooks would read as functions *disabled* — the exact defect this repo fixed a commit ago, arriving
+ * by a different door. The compose path owns creation; this owns one key.
+ *
+ * Returns true when the file was rewritten.
+ */
+export function syncManifestHooks(cwd: string, ast: unknown): boolean {
+  const manifestPath = join(cwd, ".supatype", "manifest.json")
+  if (!existsSync(manifestPath)) return false
+
+  let parsed: Record<string, unknown>
+  try {
+    parsed = JSON.parse(readFileSync(manifestPath, "utf8")) as Record<string, unknown>
+  } catch {
+    return false // Malformed: the server will complain about it far more clearly than we can here.
+  }
+  if (typeof parsed !== "object" || parsed === null) return false
+
+  const hooks = manifestHooks(ast)
+  const next = JSON.stringify(hooks)
+  const current = JSON.stringify(parsed["hooks"] ?? {})
+  if (next === current) return false
+
+  if (Object.keys(hooks).length === 0) {
+    delete parsed["hooks"]
+  } else {
+    parsed["hooks"] = hooks
+  }
+  writeFileSync(manifestPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8")
+  return true
 }
