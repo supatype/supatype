@@ -41,9 +41,11 @@ function hooksRoot(): string {
 const HOOKS_ROUTE_PREFIX = "hooks/"
 
 /**
- * Routes allowed to see `SUPATYPE_SERVICE_ROLE_KEY`, from `SUPATYPE_SERVICE_ROLE_ROUTES`.
+ * Public function routes allowed to see `SUPATYPE_SERVICE_ROLE_KEY`, from
+ * `SUPATYPE_SERVICE_ROLE_ROUTES`.
  *
- * Names are routes as this worker serves them, so a hook is `hooks/<name>`.
+ * Hooks do not appear here: they get the key by default (see serviceRoleGranted). This list is for
+ * the public surface, where the default is nothing.
  */
 function serviceRoleRoutes(): Set<string> {
   const raw = (Deno.env.get("SUPATYPE_SERVICE_ROLE_ROUTES") ?? "").trim()
@@ -68,6 +70,23 @@ function serviceRoleRoutes(): Set<string> {
  * past every access rule in the schema. Opting in is a line in `supatype.config.ts`, which is
  * reviewable; ambient privilege is not.
  */
+/**
+ * Whether a route may see the service-role key.
+ *
+ * **Hooks: yes.** A hook is procedural — only the API server calls it, around a write the caller was
+ * already permitted to make — and the gateway refuses its route from outside, so it is not reachable
+ * by anyone who could choose to invoke it. Requiring each one to be listed would be friction with no
+ * attacker to stop, and it is the same trust a trigger or a migration already has.
+ *
+ * **Public functions: only if named.** Those *are* invocable by anyone holding the anon key, so an
+ * ambient admin credential there is read and write access past every access rule in the schema,
+ * handed to code the internet can call.
+ */
+function serviceRoleGranted(route: string): boolean {
+  if (route.startsWith(HOOKS_ROUTE_PREFIX)) return true
+  return serviceRoleAllowed.has(route)
+}
+
 function withholdServiceRoleKey(): string {
   const key = Deno.env.get("SUPATYPE_SERVICE_ROLE_KEY") ?? ""
   if (key) Deno.env.delete("SUPATYPE_SERVICE_ROLE_KEY")
@@ -271,8 +290,7 @@ Deno.serve({ port }, async (req: Request): Promise<Response> => {
       // Read from the closure rather than re-injected before this block: `setScoped` captures the
       // *current* value as the one to restore afterwards, so injecting first made the restore put the
       // grant back permanently — a leak into every later call, which is what the test caught.
-      const supatypeServiceRole =
-        serviceRoleKey && serviceRoleAllowed.has(fnName) ? serviceRoleKey : undefined
+      const supatypeServiceRole = serviceRoleKey && serviceRoleGranted(fnName) ? serviceRoleKey : undefined
       const supatypeDbUrl = Deno.env.get("SUPATYPE_DB_URL") ?? Deno.env.get("DATABASE_URL")
       const supatypeJwks = Deno.env.get("SUPATYPE_JWKS")
 

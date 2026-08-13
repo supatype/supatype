@@ -515,9 +515,10 @@ ${dbDependency}
       SUPATYPE_URL: http://kong:8000
       SUPATYPE_INTERNAL_URL: http://kong:8000
       SUPATYPE_ANON_KEY: \${ANON_KEY:-}
-      # Present so the worker can hand it to the routes below, and withheld from every other handler
-      # before any of them is imported. A function is a public endpoint; an ambient admin credential
-      # made each one able to read past every access rule in the schema.
+      # Present so the worker can hand it to hooks — which are procedural and unreachable from
+      # outside — and to the public functions named below. Withheld from every other handler before
+      # any of them is imported: a function is a public endpoint, and an ambient admin credential made
+      # each one able to read past every access rule in the schema.
       SUPATYPE_SERVICE_ROLE_KEY: \${SERVICE_ROLE_KEY:-}
       SUPATYPE_SERVICE_ROLE_ROUTES: "${serviceRoleRoutes(config).join(",")}"
       STRIPE_SECRET_KEY: \${STRIPE_SECRET_KEY:-}

@@ -125,8 +125,15 @@ createServer((req, res) => {
 }).listen(Number(process.argv[2]))
 STUB
 
-# Credential probes: identical handlers, one named in the allowlist and one not.
-mkdir -p "$WORK/functions/peek-key" "$WORK/hooks/privileged"
+# Credential probes: identical handlers in three positions — a plain public function, a public
+# function named in `serviceRole`, and a hook that is named nowhere.
+mkdir -p "$WORK/functions/peek-key" "$WORK/functions/granted-fn" "$WORK/hooks/privileged"
+cat > "$WORK/functions/granted-fn/index.ts" <<'TS'
+export default (): Response =>
+  new Response(JSON.stringify({ key: Deno.env.get("SUPATYPE_SERVICE_ROLE_KEY") ?? null }), {
+    headers: { "Content-Type": "application/json" },
+  })
+TS
 cat > "$WORK/functions/peek-key/index.ts" <<'TS'
 export default (): Response =>
   new Response(JSON.stringify({ key: Deno.env.get("SUPATYPE_SERVICE_ROLE_KEY") ?? null }), {
@@ -171,7 +178,7 @@ if ! docker info >/dev/null 2>&1; then
     SUPATYPE_FUNCTIONS_ROOT="$WORK/functions" \
     SUPATYPE_HOOKS_ROOT="$WORK/hooks" \
     SUPATYPE_SERVICE_ROLE_KEY=super-secret-admin-key \
-    SUPATYPE_SERVICE_ROLE_ROUTES=hooks/privileged \
+    SUPATYPE_SERVICE_ROLE_ROUTES=granted-fn \
     SUPATYPE_INTERNAL_URL="http://localhost:8098" \
     PORT="$PORT" \
     deno run --allow-all "$WORK/worker-main.ts" > "$WORK/worker.log" 2>&1 &
@@ -193,7 +200,7 @@ if ! MSYS_NO_PATHCONV=1 docker run --rm -d --name "$CONTAINER" \
   -e SUPATYPE_FUNCTIONS_ROOT=/project/functions \
   -e SUPATYPE_HOOKS_ROOT=/project/hooks \
   -e SUPATYPE_SERVICE_ROLE_KEY=super-secret-admin-key \
-  -e SUPATYPE_SERVICE_ROLE_ROUTES=hooks/privileged \
+  -e SUPATYPE_SERVICE_ROLE_ROUTES=granted-fn \
   -e SUPATYPE_INTERNAL_URL=http://host.docker.internal:8098 \
   -e PORT=8001 \
   --add-host host.docker.internal:host-gateway \
@@ -267,9 +274,15 @@ PUBLIC_PEEK="$(peeked peek-key)"
 echo "$PUBLIC_PEEK" | grep -q '"key":null'   || fail "a public function could read the service-role key: $PUBLIC_PEEK"
 echo "  ✓ a public function cannot see the service-role key"
 
+GRANTED_FN="$(peeked granted-fn)"
+echo "$GRANTED_FN" | grep -q "super-secret-admin-key"   || fail "a public function named in serviceRole did not receive the key: $GRANTED_FN"
+echo "  ✓ a public function named in serviceRole receives it"
+
+# Named nowhere, and still granted: a hook is procedural and unreachable from outside, so listing
+# every one would be friction with no attacker to stop — the same trust a trigger already has.
 HOOK_PEEK="$(peeked hooks/privileged)"
-echo "$HOOK_PEEK" | grep -q "super-secret-admin-key"   || fail "an allowlisted route could not read the key it was granted: $HOOK_PEEK"
-echo "  ✓ an allowlisted route receives it"
+echo "$HOOK_PEEK" | grep -q "super-secret-admin-key"   || fail "a hook did not receive the key it gets by default: $HOOK_PEEK"
+echo "  ✓ a hook receives it without being listed"
 
 # And it does not leak from that invocation into the next one.
 PUBLIC_AGAIN="$(peeked peek-key)"

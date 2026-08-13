@@ -229,14 +229,17 @@ export interface SupatypeProjectConfig {
     /** Path to edge functions directory, relative to `supatype.root` when not absolute. */
     path?: string
     /**
-     * Routes allowed to see the **service-role key**, which reads and writes past every access rule.
+     * **Public functions** allowed to see the service-role key, which reads and writes past every
+     * access rule.
      *
      * Empty by default, and that default is the point: a function is a public endpoint anyone holding
      * the anon key can invoke, so an ambient admin credential made every one of them able to read the
-     * whole database. Naming a route here is a reviewable line in a diff; ambient privilege is not.
+     * whole database. Naming one here is a reviewable line in a diff; ambient privilege is not.
      *
-     * A hook is named as it is routed — `"hooks/moderate-post"`. Most hooks need nothing here:
-     * `ctx.previous()` already reads the rows a write is about to change.
+     * **Model hooks are not listed here and do not need to be.** A hook is procedural: only the API
+     * server calls it, around a write the caller was already permitted to make, and the gateway
+     * refuses its route from outside — so there is no attacker to withhold it from, and the trust is
+     * the same a trigger already has.
      */
     serviceRole?: readonly string[]
   }
