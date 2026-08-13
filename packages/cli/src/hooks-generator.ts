@@ -187,8 +187,13 @@ interface WireContext {
   rows?: unknown[]
   patch?: unknown
   filter?: string
-  /** Server callback for pre-write rows; absent when there are none to fetch. */
-  previousUrl?: string
+  /**
+   * Server callback **path** for pre-write rows; absent when there are none to fetch.
+   *
+   * A path rather than a URL because the server does not know its own in-network address, while this
+   * worker is already told how to reach the stack.
+   */
+  previousPath?: string
 }
 
 /**
@@ -221,8 +226,8 @@ export function hook(handler: AnyHandler): (req: Request) => Promise<Response> {
       ...(wire.rows !== undefined && { rows: wire.rows }),
       ...(wire.patch !== undefined && { patch: wire.patch }),
       ...(wire.filter !== undefined && { filter: wire.filter }),
-      ...(wire.previousUrl !== undefined && {
-        previous: () => fetchPrevious(wire.previousUrl as string, signature),
+      ...(wire.previousPath !== undefined && {
+        previous: () => fetchPrevious(wire.previousPath as string, signature),
       }),
     }
 
@@ -275,10 +280,32 @@ export function hooks(handlers: Record<string, AnyHandler | undefined>): (req: R
   }
 }
 
+/**
+ * The stack's address from this worker's point of view.
+ *
+ * \`SUPATYPE_INTERNAL_URL\` in Compose is the in-network gateway; \`SUPATYPE_URL\` is the same value
+ * there. Never a public or host URL — \`localhost\` inside this container is this container.
+ */
+function stackBaseUrl(): string {
+  const base =
+    Deno.env.get("SUPATYPE_INTERNAL_URL") ??
+    Deno.env.get("SUPATYPE_URL") ??
+    ""
+  if (base === "") {
+    throw new Error(
+      "ctx.previous() needs SUPATYPE_INTERNAL_URL or SUPATYPE_URL to reach the API from this function",
+    )
+  }
+  // No regex: a backslash in a template literal is one escape away from emitting broken code, and a
+  // generator's output has to be right the first time.
+  return base.endsWith("/") ? base.slice(0, -1) : base
+}
+
 async function fetchPrevious(
-  url: string,
+  path: string,
   signature: string | null,
 ): Promise<{ rows: unknown[]; truncated: boolean }> {
+  const url = stackBaseUrl() + path
   const res = await fetch(url, {
     method: "POST",
     headers: signature !== null ? { "webhook-signature": signature } : {},

@@ -82,6 +82,17 @@ describe("the generated module compiles", () => {
     expect(module).not.toBeNull()
     writeFileSync(join(dir, "hooks.ts"), module ?? "", "utf8")
 
+    // `supatype functions new` writes a `functions/deno.d.ts`, which is where a real project gets
+    // this. The generated module uses `Deno.env` to find the API, so the fixture needs it too.
+    writeFileSync(
+      join(dir, "deno.d.ts"),
+      `declare namespace Deno {
+  const env: { get(key: string): string | undefined }
+}
+`,
+      "utf8",
+    )
+
     // A handler written the way the docs will show it, including the narrowing that the
     // discriminated union is there to provide.
     writeFileSync(
@@ -148,6 +159,17 @@ export const alsoPurge = hook(purge)
     const dir = mkdtempSync(join(tmpdir(), "supatype-hooksneg-"))
     dirs.push(dir)
     writeFileSync(join(dir, "hooks.ts"), generateHooksModule(astFor(HOOKED_SCHEMA)) ?? "", "utf8")
+    // `supatype functions new` writes a `functions/deno.d.ts`, which is where a real project gets
+    // this. The generated module uses `Deno.env` to find the API, so the fixture needs it too.
+    writeFileSync(
+      join(dir, "deno.d.ts"),
+      `declare namespace Deno {
+  const env: { get(key: string): string | undefined }
+}
+`,
+      "utf8",
+    )
+
     writeFileSync(
       join(dir, "handler.ts"),
       `import type { BeforeChange } from "./hooks.ts"
