@@ -292,13 +292,17 @@ Deno.serve({ port }, async (req: Request): Promise<Response> => {
       // grant back permanently — a leak into every later call, which is what the test caught.
       const supatypeServiceRole = serviceRoleKey && serviceRoleGranted(fnName) ? serviceRoleKey : undefined
       const supatypeDbUrl = Deno.env.get("SUPATYPE_DB_URL") ?? Deno.env.get("DATABASE_URL")
-      const supatypeJwks = Deno.env.get("SUPATYPE_JWKS")
+      // No SUPATYPE_JWKS. It was read here and set by nothing, and the shape is a trap: with the
+      // default HS256 signing the only "key" to put in it is the symmetric secret, which is the power
+      // to *mint* a service_role token, not merely to verify one — strictly worse than the ambient
+      // service-role key removed in this same series. A function verifies a caller by asking
+      // `/auth/v1/user`, or simply acts as the caller and lets RLS answer. Where a project configures
+      // asymmetric JWT keys, `/auth/v1/.well-known/jwks.json` serves the public half and rotates.
 
       setScoped("SUPATYPE_URL", supatypeUrl)
       setScoped("SUPATYPE_ANON_KEY", supatypeAnon)
       setScoped("SUPATYPE_SERVICE_ROLE_KEY", supatypeServiceRole)
       setScoped("SUPATYPE_DB_URL", supatypeDbUrl)
-      setScoped("SUPATYPE_JWKS", supatypeJwks)
       if (!Deno.env.get("SUPATYPE_PUBLISHABLE_KEYS") && supatypeAnon) {
         setScoped("SUPATYPE_PUBLISHABLE_KEYS", JSON.stringify({ anon: supatypeAnon }))
       }
