@@ -813,6 +813,56 @@ export type ModelMeta<TFields extends Record<string, unknown>> = {
   softDelete?: boolean
   /** When true, copy-like fields default to localized (same as {@link LocalizedModel}). */
   autoLocalize?: true
+  /**
+   * Lifecycle hooks — an **edge function** run by the API at a write boundary.
+   *
+   * ```typescript
+   * hooks: {
+   *   beforeChange: "moderate-post",
+   *   afterChange: { function: "index-post", timeout: 5000 },
+   * }
+   * ```
+   *
+   * The value names a function directory under your project's `functions/`, and the name is
+   * checked when you push — a hook that silently never fires because of a typo is the failure
+   * this feature must not have. `supatype push` also generates a typed handler signature per
+   * hooked model, so `row` is the model's real column set rather than `unknown`.
+   *
+   * **A hook is not a security boundary.** It fires for writes through the API; direct SQL,
+   * seeds, migrations and anything holding `service_role` bypass it. Invariants belong in
+   * {@link ModelMeta.access}, a `CHECK`, or a generated column — all of which apply to every
+   * writer. A hook is for the work that is genuinely application logic: enrichment,
+   * notification, indexing, a validation the database cannot express.
+   *
+   * `beforeChange` and `beforeDelete` are called before the write reaches Postgres and can
+   * reject it (any `4xx` from the function) or replace its body. `afterChange` and
+   * `afterDelete` run once the write has succeeded and cannot change it.
+   */
+  hooks?: {
+    readonly beforeChange?: ModelHook
+    readonly afterChange?: ModelHook
+    readonly beforeDelete?: ModelHook
+    readonly afterDelete?: ModelHook
+  }
+}
+
+/** A hook: a function name, or that name with per-hook options. */
+export type ModelHook = string | ModelHookOptions
+
+export type ModelHookOptions = {
+  /** Function directory under the project's `functions/`. */
+  readonly function: string
+  /** Milliseconds before the hook is abandoned. Default 2000. */
+  readonly timeout?: number
+  /**
+   * What it means when the hook **does not answer** — a timeout, a connection failure, a `5xx`,
+   * or a body that cannot be parsed. A `4xx` is not this: that is the hook working correctly and
+   * saying no, and it reaches the caller as the status the hook chose.
+   *
+   * Defaults to `"reject"` before a write (a validation hook that stopped running must not let
+   * writes through) and `"log"` after one (the write already happened; there is nothing to fail).
+   */
+  readonly onUnavailable?: "reject" | "log"
 }
 
 /** Shorthand for singleton globals — `Model<Fields, GlobalMeta<Fields>>`. */

@@ -105,7 +105,7 @@ export function extractSchemaAstFromTypes(
         )
       }
 
-      const { tableName, access, options, indexes } = parseModelMeta(
+      const { tableName, access, options, indexes, hooks } = parseModelMeta(
         metaArg,
         sourceFile,
         stmt.name.text,
@@ -115,7 +115,7 @@ export function extractSchemaAstFromTypes(
       )
 
       models.push(
-        emitModel(stmt.name.text, fields, options, tableName, access, indexes),
+        emitModel(stmt.name.text, fields, options, tableName, access, indexes, hooks),
       )
     }
   }
@@ -1619,6 +1619,7 @@ function parseModelMeta(
   access: Record<string, unknown>
   options: Record<string, unknown>
   indexes: unknown[]
+  hooks: Record<string, ParsedModelHook>
 } {
   const literal = parseMetaLiteral(metaArg, sourceFile)
   const singleton = literal.singleton === true
@@ -1645,6 +1646,84 @@ function parseModelMeta(
     access: parseModelAccess(metaArg, sourceFile, modelName, fields, resolveCtx),
     options,
     indexes: parseModelIndexes(metaArg, sourceFile, fields),
+    hooks: parseModelHooks(metaArg, sourceFile),
+  }
+}
+
+/** One lifecycle hook: `"fn-name"` or `{ function: "fn-name", timeout: 5000 }`. */
+interface ParsedModelHook {
+  function: string
+  timeout?: number
+  onUnavailable?: "reject" | "log"
+}
+
+const HOOK_EVENTS = ["beforeChange", "afterChange", "beforeDelete", "afterDelete"] as const
+
+/**
+ * Read `hooks` from a model's meta.
+ *
+ * Deliberately strict: an entry that is neither a string nor an object with a `function` name is
+ * **dropped**, and `validateModelHooks` then reports the model whose hook did not survive. A hook
+ * silently not firing is the failure this feature cannot have, so an unreadable declaration must
+ * fail the push rather than extract to nothing.
+ */
+function parseModelHooks(
+  metaArg: ts.TypeNode | undefined,
+  sourceFile: ts.SourceFile,
+): Record<string, ParsedModelHook> {
+  if (!metaArg || !ts.isTypeLiteralNode(metaArg)) return {}
+
+  const hooksProp = metaArg.members.find(
+    (member) => ts.isPropertySignature(member) && getPropertyName(member.name) === "hooks",
+  )
+  if (!hooksProp || !ts.isPropertySignature(hooksProp) || !hooksProp.type) return {}
+  if (!ts.isTypeLiteralNode(hooksProp.type)) return {}
+
+  const hooks: Record<string, ParsedModelHook> = {}
+  for (const member of hooksProp.type.members) {
+    if (!ts.isPropertySignature(member) || !member.type) continue
+    const event = getPropertyName(member.name)
+    if (!event || !(HOOK_EVENTS as readonly string[]).includes(event)) continue
+
+    const parsed = parseModelHookValue(member.type, sourceFile)
+    if (parsed !== null) hooks[event] = parsed
+  }
+  return hooks
+}
+
+function parseModelHookValue(
+  node: ts.TypeNode,
+  sourceFile: ts.SourceFile,
+): ParsedModelHook | null {
+  const literal = literalStringType(node)
+  if (literal !== null) {
+    return literal.trim().length > 0 ? { function: literal } : null
+  }
+  if (!ts.isTypeLiteralNode(node)) return null
+
+  let fn: string | undefined
+  let timeout: number | undefined
+  let onUnavailable: "reject" | "log" | undefined
+
+  for (const member of node.members) {
+    if (!ts.isPropertySignature(member) || !member.type) continue
+    const key = getPropertyName(member.name)
+    if (key === "function") {
+      const value = literalStringType(member.type)
+      if (value !== null && value.trim().length > 0) fn = value
+    } else if (key === "timeout") {
+      timeout = parseNumericTypeArg(member.type, sourceFile)
+    } else if (key === "onUnavailable") {
+      const value = literalStringType(member.type)
+      if (value === "reject" || value === "log") onUnavailable = value
+    }
+  }
+
+  if (fn === undefined) return null
+  return {
+    function: fn,
+    ...(timeout !== undefined && { timeout }),
+    ...(onUnavailable !== undefined && { onUnavailable }),
   }
 }
 

@@ -2,7 +2,14 @@ import type { Command } from "commander"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { loadConfig, loadSchemaAst } from "../config.js"
-import { resolveRuntimeProvider, schemaPathFromProject, serverBaseUrl } from "../project-config.js"
+import { validateModelHooks } from "../model-hooks.js"
+import { fatalError } from "../ui/fatal.js"
+import {
+  preferredFunctionsPathFromProject,
+  resolveRuntimeProvider,
+  schemaPathFromProject,
+  serverBaseUrl,
+} from "../project-config.js"
 import { ensureEngine, engineRequest, type DiffResult } from "../engine-client.js"
 import { printDiffOperations, printDiffWarnings } from "../diff-output.js"
 import { signJwt } from "../jwt.js"
@@ -54,6 +61,7 @@ export function registerPush(program: Command): void {
       const config = loadConfig(cwd)
       const pgSchema = schemaPgSchema(cwd)
       const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
+      assertModelHooksResolve(cwd, config, ast)
 
       const linked = loadProjectLink(cwd)
       const useDirect = opts.direct || opts.local || Boolean(opts.connection)
@@ -201,4 +209,19 @@ async function writeLocalAdminConfig(ast: unknown, config: SupatypeProjectConfig
   const admin = withAdminRoles(await engineRequest<unknown>("/admin", { ast }), config)
   restoreSystemRelationTargets(admin, ast)
   writeFileSync(join(dir, "admin-config.json"), `${JSON.stringify(admin, null, 2)}\n`)
+}
+
+/**
+ * Stop the push when a declared hook names a function that is not there.
+ *
+ * A hook is only enforcement if it runs. A typo'd name would extract cleanly, reach the manifest, and
+ * then never fire — so the write it was meant to validate would succeed and look fine. Cheaper to
+ * fail here, naming the directory searched.
+ */
+function assertModelHooksResolve(cwd: string, config: SupatypeProjectConfig, ast: unknown): void {
+  const problems = validateModelHooks(ast, preferredFunctionsPathFromProject(config, cwd), cwd)
+  if (problems.length === 0) return
+  fatalError("A model declares a hook whose function does not exist.", problems, {
+    brand: { intro: "Push" },
+  })
 }
