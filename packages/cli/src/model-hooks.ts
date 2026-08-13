@@ -202,3 +202,59 @@ export function syncManifestHooks(cwd: string, ast: unknown): boolean {
   writeFileSync(manifestPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8")
   return true
 }
+
+export interface HooksReport {
+  declared: DeclaredHook[]
+  /** Hooks whose function directory is missing. */
+  missing: DeclaredHook[]
+  /** True when a manifest exists and says the functions subsystem is off. */
+  functionsDisabled: boolean
+  /** True when a manifest exists but carries no hook map, so the server has nothing to call. */
+  mapMissing: boolean
+}
+
+/**
+ * What `supatype doctor` needs to answer "will my hooks actually run?".
+ *
+ * Local facts only — the schema, the functions on disk, and the manifest the server reads. No probe
+ * of a running worker, so the answer is the same whether or not the stack is up, and a report that
+ * needs a stack is a report nobody runs before deploying.
+ *
+ * The case worth catching: hooks declared while `functions_enabled` is false. Nothing fails, no error
+ * appears, and every hook silently never fires.
+ */
+export function hooksReport(cwd: string, functionsDir: string, ast: unknown): HooksReport {
+  const declared = declaredHooks(ast)
+  const manifestPath = join(cwd, ".supatype", "manifest.json")
+
+  let functionsDisabled = false
+  let mapMissing = false
+  if (declared.length > 0 && existsSync(manifestPath)) {
+    try {
+      const parsed = JSON.parse(readFileSync(manifestPath, "utf8")) as Record<string, unknown>
+      functionsDisabled = parsed["functions_enabled"] === false
+      mapMissing = parsed["hooks"] === undefined
+    } catch {
+      // Unparseable: the server reports that far better than a doctor line could.
+    }
+  }
+
+  const known = new Set(
+    existsSync(functionsDir)
+      ? readdirSync(functionsDir).filter(
+          (entry) =>
+            !entry.startsWith("_") &&
+            !entry.startsWith(".") &&
+            statSync(join(functionsDir, entry)).isDirectory() &&
+            existsSync(join(functionsDir, entry, "index.ts")),
+        )
+      : [],
+  )
+
+  return {
+    declared,
+    missing: declared.filter((hook) => !known.has(hook.function)),
+    functionsDisabled,
+    mapMissing,
+  }
+}

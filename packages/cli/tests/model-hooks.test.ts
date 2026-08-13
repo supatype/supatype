@@ -7,6 +7,7 @@ import {
   declaredHooks,
   manifestHooks,
   syncManifestHooks,
+  hooksReport,
   validateModelHooks,
   writeHooksModule,
 } from "../src/model-hooks.js"
@@ -246,5 +247,76 @@ export type Post = Model<{ id: UUID }, { tableName: "posts"; hooks: { beforeChan
     const written = writeHooksModule(dir, functionsDir, ast)
     expect(written).toContain(join("functions", "_supatype", "hooks.ts"))
     expect(readFileSync(join(functionsDir, "_supatype", "hooks.ts"), "utf8")).toContain("HookedTable")
+  })
+})
+
+describe("model hooks — doctor report", () => {
+  const schema = `
+import type { Model, UUID } from "@supatype/types"
+
+export type Post = Model<{ id: UUID }, {
+  tableName: "posts"
+  hooks: { beforeChange: "moderate-post" }
+}>
+`
+
+  it("reports nothing for a schema with no hooks", () => {
+    const { dir, ast } = project(`
+import type { Model, UUID } from "@supatype/types"
+
+export type Post = Model<{ id: UUID }, { tableName: "posts" }>
+`)
+    expect(hooksReport(dir, join(dir, "functions"), ast).declared).toEqual([])
+  })
+
+  it("marks a hook whose function is absent", () => {
+    const { dir, ast } = project(schema)
+    const report = hooksReport(dir, join(dir, "functions"), ast)
+    expect(report.declared).toHaveLength(1)
+    expect(report.missing).toHaveLength(1)
+  })
+
+  it("catches functions being switched off, which makes every hook inert silently", () => {
+    const { dir, ast } = project(schema)
+    addFunction(dir, "moderate-post")
+    mkdirSync(join(dir, ".supatype"), { recursive: true })
+    writeFileSync(
+      join(dir, ".supatype", "manifest.json"),
+      JSON.stringify({ functions_enabled: false, hooks: { posts: {} } }),
+      "utf8",
+    )
+
+    const report = hooksReport(dir, join(dir, "functions"), ast)
+    expect(report.missing).toEqual([])
+    expect(report.functionsDisabled).toBe(true)
+  })
+
+  it("catches a manifest with no hook map, so the server has nothing to call", () => {
+    const { dir, ast } = project(schema)
+    addFunction(dir, "moderate-post")
+    mkdirSync(join(dir, ".supatype"), { recursive: true })
+    writeFileSync(
+      join(dir, ".supatype", "manifest.json"),
+      JSON.stringify({ functions_enabled: true }),
+      "utf8",
+    )
+
+    const report = hooksReport(dir, join(dir, "functions"), ast)
+    expect(report.mapMissing).toBe(true)
+    expect(report.functionsDisabled).toBe(false)
+  })
+
+  it("is clean when the function exists and the manifest agrees", () => {
+    const { dir, ast } = project(schema)
+    addFunction(dir, "moderate-post")
+    mkdirSync(join(dir, ".supatype"), { recursive: true })
+    writeFileSync(
+      join(dir, ".supatype", "manifest.json"),
+      JSON.stringify({ functions_enabled: true, hooks: { posts: { beforeChange: { function: "moderate-post" } } } }),
+      "utf8",
+    )
+
+    const report = hooksReport(dir, join(dir, "functions"), ast)
+    expect(report).toMatchObject({ missing: [], functionsDisabled: false, mapMissing: false })
   })
 })

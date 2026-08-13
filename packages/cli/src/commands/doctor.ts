@@ -1,10 +1,11 @@
 import type { Command } from "commander"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { info, plain } from "../ui/messages.js"
-import { schemaPathFromProject } from "../project-config.js"
+import { preferredFunctionsPathFromProject, schemaPathFromProject } from "../project-config.js"
 import { resolveTarget, targetSchemaDoctor, schemaPgSchema } from "../resolve-target.js"
 import { loadProjectLink } from "../link.js"
 import { resolveHostEngineDatabaseUrl } from "../dev-compose.js"
+import { hooksReport, type HooksReport } from "../model-hooks.js"
 
 interface DoctorItem {
   kind: string
@@ -85,6 +86,8 @@ export function registerDoctor(program: Command): void {
         })) as DoctorReport
       }
 
+      printHooks(hooksReport(cwd, preferredFunctionsPathFromProject(config, cwd), ast))
+
       printSection("Missing (in AST, not in DB)", report.missing ?? [])
       printSection("Stale managed (stamped, not in AST)", report.staleManaged ?? [])
       printSection("Unmanaged drift (manual decision)", report.unmanagedDrift ?? [])
@@ -103,4 +106,36 @@ export function registerDoctor(program: Command): void {
         process.exit(1)
       }
     })
+}
+
+/**
+ * Whether declared hooks can actually run.
+ *
+ * Worth its own section because every failure here is silent: a hook whose function is missing, or a
+ * stack with functions switched off, produces no error anywhere — the write just succeeds
+ * unvalidated. Drift you cannot see is the thing doctor exists for.
+ */
+export function printHooks(report: HooksReport): void {
+  if (report.declared.length === 0) return
+
+  plain(`\nHooks (${report.declared.length}):\n`)
+  for (const hook of report.declared) {
+    const broken = report.missing.some(
+      (m) => m.model === hook.model && m.event === hook.event,
+    )
+    plain(`  ${broken ? "✗" : "•"} ${hook.model}.${hook.event} → ${hook.function}`)
+  }
+
+  if (report.missing.length > 0) {
+    plain("\n  Those marked ✗ name a function that does not exist, so they never fire.")
+    plain("  Create it with: supatype functions new <name>")
+  }
+  if (report.functionsDisabled) {
+    plain("\n  functions_enabled is false in .supatype/manifest.json — every hook is inert.")
+    plain("  Regenerate the stack config with: supatype self-host compose")
+  }
+  if (report.mapMissing) {
+    plain("\n  .supatype/manifest.json carries no hook map, so the server has nothing to call.")
+    plain("  Run: supatype push")
+  }
 }
