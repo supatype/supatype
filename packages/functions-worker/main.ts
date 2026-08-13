@@ -97,37 +97,35 @@ async function discoverRoutes(root: string): Promise<DiscoveredRoute[]> {
   const single = Deno.env.get("SUPATYPE_FUNCTION_NAME")?.trim()
   const out: DiscoveredRoute[] = []
 
-  let entries: AsyncIterable<Deno.DirEntry>
+  // The catch has to wrap the *iteration*: `Deno.readDir` returns its iterable without touching the
+  // filesystem, so a missing directory raises NotFound on the first `next()`, not here. A root that
+  // does not exist is ordinary — a project with functions but no hooks has no hooks directory — and
+  // letting it throw would fail startup and take that project's working functions down with it.
   try {
-    entries = Deno.readDir(root)
-  } catch (err) {
-    if (err instanceof Deno.errors.NotFound) {
-      return []
-    }
-    throw err
-  }
+    for await (const entry of Deno.readDir(root)) {
+      if (entry.name.startsWith("_") || entry.name.startsWith(".")) continue
 
-  for await (const entry of entries) {
-    if (entry.name.startsWith("_") || entry.name.startsWith(".")) continue
+      const fullPath = `${root}/${entry.name}`
 
-    const fullPath = `${root}/${entry.name}`
-
-    if (entry.isDirectory) {
-      const indexTs = `${fullPath}/index.ts`
-      try {
-        await Deno.stat(indexTs)
-        if (!single || entry.name === single) {
-          out.push({ name: entry.name, entrypoint: indexTs })
+      if (entry.isDirectory) {
+        const indexTs = `${fullPath}/index.ts`
+        try {
+          await Deno.stat(indexTs)
+          if (!single || entry.name === single) {
+            out.push({ name: entry.name, entrypoint: indexTs })
+          }
+        } catch {
+          // no index.ts
         }
-      } catch {
-        // no index.ts
-      }
-    } else if (entry.isFile && entry.name.endsWith(".ts") && !entry.name.endsWith(".d.ts")) {
-      const name = entry.name.replace(/\.ts$/, "")
-      if (!single || name === single) {
-        out.push({ name, entrypoint: fullPath })
+      } else if (entry.isFile && entry.name.endsWith(".ts") && !entry.name.endsWith(".d.ts")) {
+        const name = entry.name.replace(/\.ts$/, "")
+        if (!single || name === single) {
+          out.push({ name, entrypoint: fullPath })
+        }
       }
     }
+  } catch (err) {
+    if (!(err instanceof Deno.errors.NotFound)) throw err
   }
 
   if (single && out.length === 0) {

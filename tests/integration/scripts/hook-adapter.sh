@@ -26,7 +26,8 @@ WORK="$(mktemp -d)"
 STUB_PID=""
 
 cleanup() {
-  docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+  docker rm -f "$CONTAINER" "${CONTAINER}-nohooks" >/dev/null 2>&1 || true
+  [ -f "$WORK/worker2.pid" ] && kill "$(cat "$WORK/worker2.pid")" >/dev/null 2>&1 || true
   [ -f "$WORK/worker.pid" ] && kill "$(cat "$WORK/worker.pid")" >/dev/null 2>&1 || true
   [ -n "$STUB_PID" ] && kill "$STUB_PID" >/dev/null 2>&1 || true
   rm -rf "$WORK"
@@ -288,5 +289,52 @@ echo "  ✓ a hook receives it without being listed"
 PUBLIC_AGAIN="$(peeked peek-key)"
 echo "$PUBLIC_AGAIN" | grep -q '"key":null'   || fail "the key leaked from a granted call into a later one: $PUBLIC_AGAIN"
 echo "  ✓ and it does not persist into the next call"
+
+# ── A hooks root that is not there is ordinary, not fatal ─────────────────────
+# Cloud sets SUPATYPE_HOOKS_ROOT on every project's worker, and a project with functions but no hooks
+# has no such directory. Worth a real start rather than a unit test: `Deno.readDir` returns its iterable
+# without touching the filesystem, so the NotFound arrives during iteration and a `try` around the call
+# alone does not catch it — which crashed startup and took that project's working functions with it.
+PORT2=$((PORT + 1))
+if [ "$USE_DOCKER" = "1" ]; then
+  CONTAINER2="${CONTAINER}-nohooks"
+  docker rm -f "$CONTAINER2" >/dev/null 2>&1 || true
+  MSYS_NO_PATHCONV=1 docker run -d --name "$CONTAINER2" \
+    -p "${PORT2}:8001" \
+    -e SUPATYPE_FUNCTIONS_ROOT=/project/functions \
+    -e SUPATYPE_HOOKS_ROOT=/project/no-such-hooks \
+    -e SUPATYPE_SERVICE_ROLE_KEY=super-secret-admin-key \
+    -e SUPATYPE_SERVICE_ROLE_ROUTES=granted-fn \
+    -e PORT=8001 \
+    -v "$(mount_path "$WORK"):/project:ro" \
+    "$DENO_IMAGE" run --allow-all /project/worker-main.ts > "$WORK/docker2.out" 2>&1 \
+    || fail "docker run failed: $(cat "$WORK/docker2.out")"
+  logs2() { docker logs "$CONTAINER2" 2>&1; }
+else
+  (
+    cd "$WORK"
+    SUPATYPE_FUNCTIONS_ROOT="$WORK/functions" \
+    SUPATYPE_HOOKS_ROOT="$WORK/no-such-hooks" \
+    SUPATYPE_SERVICE_ROLE_KEY=super-secret-admin-key \
+    SUPATYPE_SERVICE_ROLE_ROUTES=granted-fn \
+    PORT="$PORT2" \
+    deno run --allow-all "$WORK/worker-main.ts" > "$WORK/worker2.log" 2>&1 &
+    echo $! > "$WORK/worker2.pid"
+  )
+  logs2() { cat "$WORK/worker2.log"; }
+fi
+
+for _ in $(seq 1 30); do
+  logs2 | grep -qE "[0-9]+ handler\(s\)" && break
+  sleep 1
+done
+logs2 | grep -qE "[0-9]+ handler\(s\)" \
+  || fail "the worker refused to start without a hooks directory: $(logs2 | tail -3)"
+curl -fsS -o /dev/null -X POST "http://localhost:${PORT2}/granted-fn" \
+  -H "content-type: application/json" -d '{}' \
+  || fail "a public function did not answer on a worker with no hooks directory"
+[ "$USE_DOCKER" = "1" ] && docker rm -f "$CONTAINER2" >/dev/null 2>&1 || true
+[ -f "$WORK/worker2.pid" ] && kill "$(cat "$WORK/worker2.pid")" >/dev/null 2>&1 || true
+echo "  ✓ a missing hooks directory is not fatal"
 
 echo "PASS: the generated adapter behaves inside the real functions worker"
