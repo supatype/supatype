@@ -618,10 +618,20 @@ ${kongDependsOn}${kongValkeyDepends}
 ${volumesBlock}`
 }
 
+/** In-compose worker address — matches the `functions-worker` service this file always generates. */
+const COMPOSE_FUNCTIONS_WORKER_URL = "http://functions-worker:8001"
+
 function ensureComposeManifest(cwd: string, config: SupatypeProjectConfig): void {
   const manifestPath = join(cwd, ".supatype", "manifest.json")
-  if (existsSync(manifestPath)) return
   mkdirSync(dirname(manifestPath), { recursive: true })
+
+  // The manifest is generated, not operator-authored, but `push` writes real values into it (the
+  // schema, for one), so an existing file is repaired rather than replaced.
+  if (existsSync(manifestPath)) {
+    repairComposeFunctionsFlag(manifestPath)
+    return
+  }
+
   const manifest = {
     schema: "public",
     postgrest_url: "http://postgrest:3000",
@@ -630,9 +640,37 @@ function ensureComposeManifest(cwd: string, config: SupatypeProjectConfig): void
     // the server ends up proxying subscriptions to a host that does not resolve.
     realtime_enabled: realtimeEnabled(config),
     ...(realtimeEnabled(config) && { realtime_url: "http://realtime:4000" }),
-    functions_enabled: false,
+    // True because this file *always* generates a `functions-worker` service and hands the server
+    // `SUPATYPE_FUNCTIONS_WORKER_URL`. It said false, so the server answered 404 for every function
+    // in a stack that was running a worker for them — provisioned, then switched off.
+    functions_enabled: true,
+    functions_worker_url: COMPOSE_FUNCTIONS_WORKER_URL,
   }
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8")
+}
+
+/**
+ * Turn functions on in a manifest written by an older CLI, leaving every other key alone.
+ *
+ * Without this, only new projects get working functions: a stack generated before the flag was
+ * corrected keeps `functions_enabled: false` on disk, and regenerating the compose file — the
+ * obvious thing to try — does not fix it.
+ */
+function repairComposeFunctionsFlag(manifestPath: string): void {
+  let parsed: Record<string, unknown>
+  try {
+    parsed = JSON.parse(readFileSync(manifestPath, "utf8")) as Record<string, unknown>
+  } catch {
+    return // Malformed: leave it for the server to complain about rather than overwrite it here.
+  }
+  if (typeof parsed !== "object" || parsed === null) return
+  if (parsed["functions_enabled"] === true && parsed["functions_worker_url"] !== undefined) return
+
+  parsed["functions_enabled"] = true
+  if (parsed["functions_worker_url"] === undefined) {
+    parsed["functions_worker_url"] = COMPOSE_FUNCTIONS_WORKER_URL
+  }
+  writeFileSync(manifestPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8")
 }
 
 function ensureProjectFunctionsDir(cwd: string, config: SupatypeProjectConfig): void {

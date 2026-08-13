@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { runtimeRouteSpec } from "../src/runtime-routes.js"
@@ -308,6 +308,55 @@ describe("runtime contract", () => {
       expect(kong).toContain("http://host.docker.internal:3002")
       expect(kong).not.toContain("http://studio:3002")
       expect(kong).toContain("strip_path: false")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("manifest switches functions on, because the compose file always runs a worker", () => {
+    // The generated compose file starts a `functions-worker` and hands the server
+    // SUPATYPE_FUNCTIONS_WORKER_URL, while the manifest beside it said functions were disabled. The
+    // server reads the manifest, so every function 404'd in a stack that was running a worker for
+    // them. Docker `supatype dev` renders this same file, so one flag broke both paths.
+    const dir = mkdtempSync(join(tmpdir(), "supatype-fn-manifest-"))
+    try {
+      writeSelfHostCompose(dir, baseConfig)
+      const compose = readFileSync(join(dir, ".supatype", "self-host", "docker-compose.yml"), "utf8")
+      expect(compose).toContain("  functions-worker:")
+      expect(compose).toContain("SUPATYPE_FUNCTIONS_WORKER_URL: http://functions-worker:8001")
+
+      const manifest = JSON.parse(
+        readFileSync(join(dir, ".supatype", "manifest.json"), "utf8"),
+      ) as Record<string, unknown>
+      expect(manifest["functions_enabled"]).toBe(true)
+      expect(manifest["functions_worker_url"]).toBe("http://functions-worker:8001")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("repairs a manifest written by an older CLI without touching its other keys", () => {
+    // Regenerating the compose file is the obvious fix to try, so it has to work: without the
+    // repair, only brand-new projects get functions and an existing stack stays broken.
+    const dir = mkdtempSync(join(tmpdir(), "supatype-fn-repair-"))
+    try {
+      mkdirSync(join(dir, ".supatype"), { recursive: true })
+      writeFileSync(
+        join(dir, ".supatype", "manifest.json"),
+        JSON.stringify({ schema: "tenant_7", postgrest_url: "http://pg:3000", functions_enabled: false }),
+        "utf8",
+      )
+
+      writeSelfHostCompose(dir, baseConfig)
+
+      const manifest = JSON.parse(
+        readFileSync(join(dir, ".supatype", "manifest.json"), "utf8"),
+      ) as Record<string, unknown>
+      expect(manifest["functions_enabled"]).toBe(true)
+      expect(manifest["functions_worker_url"]).toBe("http://functions-worker:8001")
+      // Values `push` put there survive: the schema is not "public" and must stay as found.
+      expect(manifest["schema"]).toBe("tenant_7")
+      expect(manifest["postgrest_url"]).toBe("http://pg:3000")
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
