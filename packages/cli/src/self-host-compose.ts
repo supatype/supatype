@@ -6,6 +6,7 @@ import { fatalError } from "./ui/fatal.js"
 import {
   apiSchemaList,
   externalDatabaseUrl,
+  hooksPathFromProject,
   preferredFunctionsPathFromProject,
   realtimeEnabled,
   selfHostTlsEnabled,
@@ -504,6 +505,10 @@ ${dbDependency}
     environment:
       SUPATYPE_FUNCTIONS_ROOT: /project/functions
       SUPATYPE_DENO_FUNCTIONS_DIR: /project/functions
+      # Model hooks, served by this same worker under a hooks/ route the gateway refuses from
+      # outside. One worker rather than two: a second container would cost a pod per project on
+      # cloud, for isolation the route boundary already provides.
+      SUPATYPE_HOOKS_ROOT: /project/hooks
       PORT: "8001"
       # In-compose loopback to Kong (not API_EXTERNAL_URL / localhost — unreachable from this container).
       SUPATYPE_URL: http://kong:8000
@@ -675,6 +680,10 @@ function repairComposeFunctionsFlag(manifestPath: string): void {
 
 function ensureProjectFunctionsDir(cwd: string, config: SupatypeProjectConfig): void {
   mkdirSync(preferredFunctionsPathFromProject(config, cwd), { recursive: true })
+  // Both roots must exist before compose mounts the project read-only: a missing directory becomes
+  // a bind mount of a file that is not there, and the worker fails to start rather than serving the
+  // half it does have.
+  mkdirSync(hooksPathFromProject(config, cwd), { recursive: true })
 }
 
 /**

@@ -112,11 +112,11 @@ export type Post = Model<{ id: UUID }, {
     expect(problems.join("\n")).toContain("moderate-posts")
   })
 
-  it("says how to create one when the functions directory is empty", () => {
+  it("says how to create one when the hooks directory is empty", () => {
     const { dir, ast } = project(schema)
-    mkdirSync(join(dir, "functions"), { recursive: true })
-    expect(validateModelHooks(ast, join(dir, "functions"), dir).join("\n")).toContain(
-      "supatype functions new",
+    mkdirSync(join(dir, "hooks"), { recursive: true })
+    expect(validateModelHooks(ast, join(dir, "hooks"), dir).join("\n")).toContain(
+      "supatype hooks new",
     )
   })
 
@@ -137,7 +137,7 @@ export type Post = Model<{ id: UUID }, { tableName: "posts" }>
     writeFileSync(join(dir, "functions", "readme.md"), "notes", "utf8")
 
     const problems = validateModelHooks(ast, join(dir, "functions"), dir).join("\n")
-    expect(problems).toContain("No functions found")
+    expect(problems).toContain("No hooks found")
     expect(problems).not.toContain("_shared")
   })
 })

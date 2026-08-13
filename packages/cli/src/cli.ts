@@ -18,6 +18,7 @@ import { registerApp } from "./commands/app.js"
 import { registerAdd } from "./commands/add.js"
 import { registerSelfHost } from "./commands/self-host.js"
 import { registerCloud } from "./commands/cloud.js"
+import { registerLogin } from "./commands/login.js"
 import { registerEngine } from "./commands/engine.js"
 import { registerDb } from "./commands/db.js"
 import { registerDeploy } from "./commands/deploy.js"
@@ -25,10 +26,12 @@ import { registerStatus } from "./commands/status.js"
 import { registerLogs } from "./commands/logs.js"
 import { registerAdmin } from "./commands/admin.js"
 import { registerFunctions } from "./commands/functions.js"
+import { registerHooks } from "./commands/hooks.js"
 import { registerPlugins } from "./commands/plugins.js"
 import { registerTypes } from "./commands/types.js"
 import { registerMigrateFromV1 } from "./commands/migrate-from-v1.js"
 import { registerSelfUpdate } from "./commands/self-update.js"
+import { registerInternalCommands } from "./commands/internal.js"
 import { cliPackageVersion } from "./cli-package-version.js"
 import { reportCliFatal } from "./ui/fatal.js"
 import { wrapProgramActionsWithChrome } from "./ui/runtime/command-chrome.js"
@@ -43,6 +46,7 @@ export async function run(): Promise<void> {
   registerDev(program)
   registerCache(program)
   registerSelfUpdate(program)
+  registerInternalCommands(program)
   registerUpdate(program)
   registerPg(program)
   registerPush(program)
@@ -58,6 +62,7 @@ export async function run(): Promise<void> {
   registerApp(program)
   registerAdd(program)
   registerSelfHost(program)
+  registerLogin(program)
   registerCloud(program)
   registerEngine(program)
   registerDb(program)
@@ -66,6 +71,7 @@ export async function run(): Promise<void> {
   registerLogs(program)
   registerAdmin(program)
   registerFunctions(program)
+  registerHooks(program)
   registerPlugins(program)
   registerTypes(program)
   registerMigrateFromV1(program)

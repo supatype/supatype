@@ -1,7 +1,7 @@
 import type { Command } from "commander"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { info, plain } from "../ui/messages.js"
-import { preferredFunctionsPathFromProject, schemaPathFromProject } from "../project-config.js"
+import { hooksPathFromProject, schemaPathFromProject } from "../project-config.js"
 import { resolveTarget, targetSchemaDoctor, schemaPgSchema } from "../resolve-target.js"
 import { loadProjectLink } from "../link.js"
 import { resolveHostEngineDatabaseUrl } from "../dev-compose.js"
@@ -86,7 +86,7 @@ export function registerDoctor(program: Command): void {
         })) as DoctorReport
       }
 
-      printHooks(hooksReport(cwd, preferredFunctionsPathFromProject(config, cwd), ast))
+      printHooks(hooksReport(cwd, hooksPathFromProject(config, cwd), ast))
 
       printSection("Missing (in AST, not in DB)", report.missing ?? [])
       printSection("Stale managed (stamped, not in AST)", report.staleManaged ?? [])
@@ -128,7 +128,7 @@ export function printHooks(report: HooksReport): void {
 
   if (report.missing.length > 0) {
     plain("\n  Those marked ✗ name a function that does not exist, so they never fire.")
-    plain("  Create it with: supatype functions new <name>")
+    plain("  Create it with: supatype hooks new <name>")
   }
   if (report.functionsDisabled) {
     plain("\n  functions_enabled is false in .supatype/manifest.json — every hook is inert.")

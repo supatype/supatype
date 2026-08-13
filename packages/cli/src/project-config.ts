@@ -481,6 +481,19 @@ export function functionsPathCandidatesFromProject(cfg: SupatypeProjectConfig, c
   return [resolve(root, "functions"), resolve(root, "supatype/functions")]
 }
 
+/**
+ * Directory holding **model hooks** — procedural handlers the API calls around a write.
+ *
+ * Separate from `functions/` because the two have different trust models: a function is a public
+ * endpoint anyone with the anon key may invoke, while a hook is only ever called by the server. One
+ * worker serves both, and the gateway refuses the hook namespace from outside — so keeping them in
+ * separate directories is what makes that boundary structural rather than a list to maintain.
+ */
+export function hooksPathFromProject(cfg: SupatypeProjectConfig, cwd: string): string {
+  const root = projectRootFromConfig(cfg, cwd)
+  return resolve(root, "hooks")
+}
+
 /** Preferred default functions path (used when creating new functions). */
 export function preferredFunctionsPathFromProject(cfg: SupatypeProjectConfig, cwd: string): string {
   const candidates = functionsPathCandidatesFromProject(cfg, cwd)

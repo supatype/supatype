@@ -5,7 +5,7 @@ import { loadConfig, loadSchemaAst } from "../config.js"
 import { syncManifestHooks, validateModelHooks, writeHooksModule } from "../model-hooks.js"
 import { fatalError } from "../ui/fatal.js"
 import {
-  preferredFunctionsPathFromProject,
+  hooksPathFromProject,
   resolveRuntimeProvider,
   schemaPathFromProject,
   serverBaseUrl,
@@ -179,7 +179,7 @@ async function generateTypesLocal(ast: unknown, config: SupatypeProjectConfig): 
   // Independent of `output`: a project with hooks needs its handler types whether or not it asked
   // for client types, and the module is written next to the functions that import it.
   const cwd = process.cwd()
-  const hooksPath = writeHooksModule(cwd, preferredFunctionsPathFromProject(config, cwd), ast)
+  const hooksPath = writeHooksModule(cwd, hooksPathFromProject(config, cwd), ast)
   if (hooksPath !== null) info(`Hook handler types written to ${hooksPath}`)
   // The server watches this file, so a changed hook takes effect without a restart.
   if (syncManifestHooks(cwd, ast)) info("Hook map written to .supatype/manifest.json")
@@ -227,7 +227,7 @@ async function writeLocalAdminConfig(ast: unknown, config: SupatypeProjectConfig
  * fail here, naming the directory searched.
  */
 function assertModelHooksResolve(cwd: string, config: SupatypeProjectConfig, ast: unknown): void {
-  const problems = validateModelHooks(ast, preferredFunctionsPathFromProject(config, cwd), cwd)
+  const problems = validateModelHooks(ast, hooksPathFromProject(config, cwd), cwd)
   if (problems.length === 0) return
   fatalError("A model declares a hook whose function does not exist.", problems, {
     brand: { intro: "Push" },

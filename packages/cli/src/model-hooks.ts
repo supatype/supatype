@@ -81,8 +81,8 @@ export function validateModelHooks(
   lines.push("")
   lines.push(
     available.length > 0
-      ? `Functions found in ${where}: ${available.join(", ")}`
-      : `No functions found in ${where}. Create one with: supatype functions new <name>`,
+      ? `Hooks found in ${where}: ${available.join(", ")}`
+      : `No hooks found in ${where}. Create one with: supatype hooks new <name>`,
   )
   return lines
 }

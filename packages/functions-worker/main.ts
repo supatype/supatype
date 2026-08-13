@@ -22,6 +22,24 @@ function functionsRoot(): string {
   return root.endsWith("/") ? root.slice(0, -1) : root
 }
 
+/**
+ * Root for **model hooks**, served under a `hooks/` route prefix.
+ *
+ * Hooks are procedural — the API server calls them around a write — while everything under the
+ * functions root is a public endpoint anyone holding the anon key can invoke. Keeping them in one
+ * worker rather than two costs a project no extra pod; keeping them under a route prefix is what lets
+ * the gateway refuse them from outside, so the separation is structural rather than a deny-list that
+ * a stale manifest could empty.
+ */
+function hooksRoot(): string {
+  const root = (Deno.env.get("SUPATYPE_HOOKS_ROOT") ?? "").trim()
+  if (!root) return ""
+  return root.endsWith("/") ? root.slice(0, -1) : root
+}
+
+/** Route prefix for hook handlers. The gateway refuses this prefix on the public path. */
+const HOOKS_ROUTE_PREFIX = "hooks/"
+
 async function discoverRoutes(root: string): Promise<DiscoveredRoute[]> {
   const single = Deno.env.get("SUPATYPE_FUNCTION_NAME")?.trim()
   const out: DiscoveredRoute[] = []
@@ -92,6 +110,17 @@ const port = parseInt(Deno.env.get("PORT") ?? "8001", 10)
 const root = functionsRoot()
 const routes = await discoverRoutes(root)
 const handlers = await loadHandlers(routes)
+
+// Hooks are namespaced so one worker can serve both without a name in `hooks/` ever shadowing — or
+// being reachable as — a public function of the same name.
+const hooksDir = hooksRoot()
+if (hooksDir) {
+  const hookRoutes = await discoverRoutes(hooksDir)
+  const hookHandlers = await loadHandlers(hookRoutes)
+  for (const [name, handler] of Object.entries(hookHandlers)) {
+    handlers[HOOKS_ROUTE_PREFIX + name] = handler
+  }
+}
 
 console.log(
   `[functions-worker] ${Object.keys(handlers).length} handler(s) on :${port}` +
@@ -166,7 +195,11 @@ async function runWithScopedEnv<T>(fnName: string, run: () => Promise<T>): Promi
 Deno.serve({ port }, async (req: Request): Promise<Response> => {
   const url = new URL(req.url)
   const pathParts = url.pathname.replace(/^\/functions\/v1\/?/, "").split("/").filter(Boolean)
-  const fnName = pathParts[0] ?? ""
+  // A hook is addressed as `hooks/<name>`, so the first segment alone is not the handler key.
+  const fnName =
+    pathParts[0] === "hooks" && pathParts[1]
+      ? HOOKS_ROUTE_PREFIX + pathParts[1]
+      : pathParts[0] ?? ""
 
   if (!fnName || !handlers[fnName]) {
     return new Response(

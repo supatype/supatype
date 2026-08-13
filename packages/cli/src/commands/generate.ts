@@ -2,7 +2,7 @@ import type { Command } from "commander"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { resolve, dirname } from "node:path"
 import { loadConfig, loadSchemaAst } from "../config.js"
-import { preferredFunctionsPathFromProject, schemaPathFromProject } from "../project-config.js"
+import { hooksPathFromProject, schemaPathFromProject } from "../project-config.js"
 import { ensureEngine, engineRequest } from "../engine-client.js"
 import { generateClientAugmentation } from "../augmentation-generator.js"
 import { writeHooksModule } from "../model-hooks.js"
@@ -43,7 +43,7 @@ export function registerGenerate(program: Command): void {
       writeFileSync(augmentationOutPath, augmentationCode, "utf8")
       info(`Client augmentation written to ${outputClientPath}`)
 
-      const hooksPath = writeHooksModule(cwd, preferredFunctionsPathFromProject(config, cwd), ast)
+      const hooksPath = writeHooksModule(cwd, hooksPathFromProject(config, cwd), ast)
       if (hooksPath !== null) info(`Hook handler types written to ${hooksPath}`)
     })
 }
