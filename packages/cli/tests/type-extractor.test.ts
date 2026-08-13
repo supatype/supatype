@@ -1293,6 +1293,13 @@ export type Snippet = Model<{
     // Without a literal argument the currency is not known statically, so the row carries it.
     expect(snippet?.fields["anyLang"]).toMatchObject({ tsType: "{ lang: string; source: string }" })
     expect(snippet?.fields["anyCurrency"]).toMatchObject({ tsType: "{ amount: string; code: string }" })
+
+    // Both are JSONB, so the column kind cannot tell Studio which editor to show. The `editor`
+    // annotation is what separates a code snippet from a money amount from a raw JSON blob.
+    expect(snippet?.fields["body"]).toMatchObject({ annotations: { platform: { editor: "code" } } })
+    expect(snippet?.fields["price"]).toMatchObject({
+      annotations: { platform: { editor: "currency" } },
+    })
   })
 
   it("throws when bucket access cannot be resolved", () => {

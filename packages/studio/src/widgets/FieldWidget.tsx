@@ -14,6 +14,8 @@ import { BlocksWidget } from "./BlocksWidget.js"
 import { PublishWidget } from "./PublishWidget.js"
 import { ColorWidget } from "./ColorWidget.js"
 import { XmlWidget } from "./XmlWidget.js"
+import { CodeWidget } from "./CodeWidget.js"
+import { CurrencyWidget } from "./CurrencyWidget.js"
 import { SlugWidget } from "./SlugWidget.js"
 import { DerivedTextWidget } from "./DerivedTextWidget.js"
 import { ButtonWidget } from "./ButtonWidget.js"
@@ -157,6 +159,10 @@ function WidgetRenderer(props: WidgetProps): React.ReactElement {
       return <ColorWidget {...props} />
     case "xml":
       return <XmlWidget {...props} />
+    case "code":
+      return <CodeWidget {...props} />
+    case "currency":
+      return <CurrencyWidget {...props} />
     case "button":
       return <ButtonWidget {...props} />
     default:

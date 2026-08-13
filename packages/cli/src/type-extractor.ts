@@ -942,7 +942,11 @@ function parseScalarType(
       case "Button":
         return scalar("button", { db: { pgType: "JSONB" } })
       case "Duration":
-        return scalar("json", { db: { pgType: "JSONB" }, kernel: { tsType: "{ ms: number }" } })
+        return scalar("json", {
+          db: { pgType: "JSONB" },
+          platform: { editor: "duration" },
+          kernel: { tsType: "{ ms: number }" },
+        })
       // `Code` and `Currency` each carry two values, so a scalar column would have to drop one:
       // JSONB keeps `lang` with its `source`, and an amount with the currency it is denominated in.
       // `tsType` is what stops the generated client row from flattening them to an opaque object.
@@ -950,6 +954,10 @@ function parseScalarType(
         const lang = literalStringType(typeNode.typeArguments?.[0])
         return scalar("json", {
           db: { pgType: "JSONB" },
+          // `editor` picks the Studio widget. Without it a code snippet and a money amount both get
+          // the raw JSON editor, because the widget is otherwise chosen from the column kind alone
+          // and both of these are JSONB.
+          platform: { editor: "code" },
           kernel: { tsType: `{ lang: ${lang !== null ? JSON.stringify(lang) : "string"}; source: string }` },
         })
       }
@@ -957,6 +965,7 @@ function parseScalarType(
         const currencyCode = literalStringType(typeNode.typeArguments?.[0])
         return scalar("json", {
           db: { pgType: "JSONB" },
+          platform: { editor: "currency" },
           kernel: {
             tsType: `{ amount: string; code: ${currencyCode !== null ? JSON.stringify(currencyCode) : "string"} }`,
           },
