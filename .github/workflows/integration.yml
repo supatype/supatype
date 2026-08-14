@@ -5,6 +5,10 @@ on:
     branches: [main]
   push:
     branches: [main]
+  schedule:
+    # CDN soak — weekly (install.sh path; linux only)
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
 
 concurrency:
   group: integration-${{ github.ref }}
@@ -17,6 +21,7 @@ jobs:
   # macOS native is disabled until native Postgres ships contrib extensions (pgcrypto).
   dev-integration:
     name: supatype dev (docker)
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     env:
@@ -77,6 +82,7 @@ jobs:
   # Exercises published Docker images via `supatype self-host compose` (Linux only).
   compose-smoke:
     name: self-host compose (images)
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-22.04
     timeout-minutes: 20
 
@@ -116,3 +122,99 @@ jobs:
           name: compose-smoke-logs
           path: tests/integration/.supatype/self-host/
           retention-days: 3
+
+  # Phase 10.6 C21 — workspace CLI → init (docker) → dev → healthy API.
+  # macOS runners have no Docker Desktop; Colima provides the daemon.
+  zero-to-running:
+    name: C21 workspace (${{ matrix.os }})
+    if: github.event_name != 'schedule'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-14]
+    env:
+      SUPATYPE_C21_INSTALL: workspace
+      SUPATYPE_C21_WORK_ROOT: ${{ runner.temp }}/c21-work
+      SUPATYPE_C21_KEEP_ON_FAILURE: "1"
+      SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start Docker (Colima on macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install docker docker-compose colima
+          colima start --cpu 3 --memory 8 --disk 40
+          docker info
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Cache component binaries
+        uses: actions/cache@v4
+        with:
+          path: ~/.supatype/cache
+          key: supatype-binaries-v2-${{ matrix.os }}-${{ hashFiles('packages/cli/src/binary-cache.ts') }}
+          restore-keys: |
+            supatype-binaries-v2-${{ matrix.os }}-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript packages
+        run: pnpm build
+
+      - name: Prefetch engine binary for init
+        run: node tests/integration/scripts/ci-prefetch-binaries.mjs
+        env:
+          SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
+
+      - name: Run C21 zero-to-running soak
+        run: bash tests/integration/scripts/zero-to-running.sh
+
+      - name: Upload C21 logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zero-to-running-workspace-${{ matrix.os }}
+          path: ${{ runner.temp }}/c21-work/c21-smoke/
+          retention-days: 3
+          if-no-files-found: warn
+
+  # Phase 10.6 C21 — curl|sh CDN install path (linux only; not Windows).
+  # Runs on schedule + main pushes + manual dispatch (skips PRs to avoid CDN flakiness blocking reviews).
+  zero-to-running-cdn:
+    name: C21 CDN install (linux)
+    if: >
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    env:
+      SUPATYPE_C21_INSTALL: cdn
+      SUPATYPE_C21_WORK_ROOT: ${{ runner.temp }}/c21-cdn-work
+      SUPATYPE_C21_KEEP_ON_FAILURE: "1"
+      SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run C21 CDN zero-to-running soak
+        run: bash tests/integration/scripts/zero-to-running.sh
+
+      - name: Upload C21 CDN logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zero-to-running-cdn-ubuntu
+          path: ${{ runner.temp }}/c21-cdn-work/c21-smoke/
+          retention-days: 3
+          if-no-files-found: warn
