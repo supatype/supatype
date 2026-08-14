@@ -563,8 +563,13 @@ export function resolveRuntimeProvider(cfg: SupatypeProjectConfig): "native" | "
 /**
  * Routes entitled to the service-role key, as the worker's env expects them.
  *
- * Resolved here rather than in the compose template so there is one definition of the format, and so
- * a typo'd entry is visible in one place rather than silently granting nothing.
+ * Resolved here rather than in the compose template so there is one definition of the format.
+ *
+ * This does **not** check that the names exist — it cannot, since it has only the config. An earlier
+ * version of this comment claimed a typo was "visible in one place rather than silently granting
+ * nothing", which was false: nothing read the list except the two callers that turn it into an env var.
+ * `checkServiceRoleRoutes` in `service-role-check.ts` is what actually resolves the names, and `push`
+ * refuses on it.
  */
 export function serviceRoleRoutes(cfg: SupatypeProjectConfig): string[] {
   const declared = cfg.functions?.serviceRole ?? []

@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { syncManifestHooks, validateModelHooks, writeHooksModule } from "../model-hooks.js"
 import { adapterEntry, readHookUpload } from "../hook-upload.js"
+import { checkServiceRoleRoutes, serviceRoleProblemLines } from "../service-role-check.js"
 import { fatalError } from "../ui/fatal.js"
 import {
   hooksPathFromProject,
@@ -64,6 +65,7 @@ export function registerPush(program: Command): void {
       const pgSchema = schemaPgSchema(cwd)
       const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
       assertModelHooksResolve(cwd, config, ast)
+      assertServiceRoleGrantsResolve(cwd, config)
 
       const linked = loadProjectLink(cwd)
       const useDirect = opts.direct || opts.local || Boolean(opts.connection)
@@ -286,6 +288,23 @@ async function writeLocalAdminConfig(ast: unknown, config: SupatypeProjectConfig
  * then never fire — so the write it was meant to validate would succeed and look fine. Cheaper to
  * fail here, naming the directory searched.
  */
+/**
+ * Refuse a push whose `functions.serviceRole` names a function that does not exist.
+ *
+ * The grant fails closed, which is the safe direction and the invisible one: the function reads no key
+ * at runtime, in a deploy that reported success. A warning is printed for an entry that is merely
+ * redundant, since a reader would reasonably assume the line is what does the granting.
+ */
+function assertServiceRoleGrantsResolve(cwd: string, config: SupatypeProjectConfig): void {
+  const problems = checkServiceRoleRoutes(config, cwd)
+  for (const warning of problems.warnings) plain(warning)
+  const lines = serviceRoleProblemLines(problems)
+  if (lines.length === 0) return
+  fatalError("functions.serviceRole names a function that does not exist.", lines, {
+    brand: { intro: "Push" },
+  })
+}
+
 function assertModelHooksResolve(cwd: string, config: SupatypeProjectConfig, ast: unknown): void {
   const problems = validateModelHooks(ast, hooksPathFromProject(config, cwd), cwd)
   if (problems.length === 0) return

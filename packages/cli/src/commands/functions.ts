@@ -16,6 +16,7 @@ import { ensureBinary } from "../ensure-binary.js"
 import {
   functionsPathCandidatesFromProject,
   preferredFunctionsPathFromProject,
+  serviceRoleRoutes,
 } from "../project-config.js"
 import {
   discoverTsFunctionsInDir,
@@ -438,6 +439,9 @@ async function deployViaTarget(
               source,
               entrypoint: `${fn.name}/index.ts`,
             }],
+            // Sent every deploy, and replaced wholesale by the platform: the config file is the whole
+            // truth, so a name removed from it must stop being entitled to the service-role key.
+            serviceRole: serviceRoleRoutesFor(cwd),
           },
           token: target.token!,
           orgId: target.orgId,
@@ -495,6 +499,9 @@ async function deployCloud(cwd: string, fns: DiscoveredFunction[], env?: string)
             source,
             entrypoint: `${fn.name}/index.ts`,
           }],
+          // Same grants as the target path: both reach the same endpoint, and a project deployed one
+          // way must not end up with a different credential surface than the other.
+          serviceRole: serviceRoleRoutesFor(cwd),
         }),
         signal: AbortSignal.timeout(60_000),
       })
@@ -514,6 +521,20 @@ async function deployCloud(cwd: string, fns: DiscoveredFunction[], env?: string)
 
   info(`Deployed ${fns.length} function(s)`)
   info(`Invoke: https://${linked.ref}.supatype.dev/functions/v1/<name>`)
+}
+
+/**
+ * The project's `functions.serviceRole` list, or undefined when the config cannot be read.
+ *
+ * Undefined rather than `[]`: the platform replaces the stored list wholesale when the field is present,
+ * so sending an empty array because a config failed to load would revoke every grant the project has.
+ */
+export function serviceRoleRoutesFor(cwd: string): string[] | undefined {
+  try {
+    return serviceRoleRoutes(loadConfig(cwd))
+  } catch {
+    return undefined
+  }
 }
 
 function readFunctionSource(fn: DiscoveredFunction): string {

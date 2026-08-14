@@ -1,11 +1,12 @@
 import type { Command } from "commander"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { info, plain } from "../ui/messages.js"
-import { hooksPathFromProject, schemaPathFromProject } from "../project-config.js"
+import { hooksPathFromProject, schemaPathFromProject, serviceRoleRoutes } from "../project-config.js"
 import { resolveTarget, targetSchemaDoctor, schemaPgSchema } from "../resolve-target.js"
 import { loadProjectLink } from "../link.js"
 import { resolveHostEngineDatabaseUrl } from "../dev-compose.js"
 import { hooksReport, type HooksReport } from "../model-hooks.js"
+import { checkServiceRoleRoutes, type ServiceRoleProblems } from "../service-role-check.js"
 
 interface DoctorItem {
   kind: string
@@ -87,6 +88,7 @@ export function registerDoctor(program: Command): void {
       }
 
       printHooks(hooksReport(cwd, hooksPathFromProject(config, cwd), ast))
+      printServiceRoleGrants(checkServiceRoleRoutes(config, cwd), serviceRoleRoutes(config))
 
       printSection("Missing (in AST, not in DB)", report.missing ?? [])
       printSection("Stale managed (stamped, not in AST)", report.staleManaged ?? [])
@@ -138,4 +140,30 @@ export function printHooks(report: HooksReport): void {
     plain("\n  .supatype/manifest.json carries no hook map, so the server has nothing to call.")
     plain("  Run: supatype push")
   }
+}
+
+/**
+ * Report which functions may see the service-role key, and which grants do nothing.
+ *
+ * Worth printing even when everything resolves: this is the list of functions that can read and write
+ * past every access rule in the schema, and "which ones are those again?" should be answerable without
+ * opening the config.
+ */
+export function printServiceRoleGrants(
+  problems: ServiceRoleProblems,
+  declared: readonly string[],
+): void {
+  if (declared.length === 0) return
+
+  plain(`\nService-role grants (${declared.length}):\n`)
+  const broken = new Set(problems.missing)
+  for (const name of declared) {
+    plain(`  ${broken.has(name) ? "✗" : "•"} ${name}`)
+  }
+
+  if (broken.size > 0) {
+    plain("\n  Those marked ✗ match no function, so they grant nothing — the function reads no key.")
+  }
+  for (const warning of problems.warnings) plain(warning)
+  plain("\n  These functions bypass every access rule in the schema. Anything not listed cannot.")
 }
