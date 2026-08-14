@@ -10,15 +10,21 @@ interface DiscoveredRoute {
   entrypoint: string
 }
 
+/**
+ * Root for public functions, or "" when this worker serves none.
+ *
+ * Empty is a real configuration, not a mistake: a per-hook worker mounts a hooks root and nothing else,
+ * and its pod has no functions directory to point at. Requiring this one made such a pod crashloop —
+ * which the API server sees as the hook refusing to answer, failing every write to its table. Startup
+ * still fails when *both* roots are empty, since a worker with no source at all is a misconfiguration.
+ */
 function functionsRoot(): string {
   const root = (
     Deno.env.get("SUPATYPE_FUNCTIONS_ROOT") ??
     Deno.env.get("SUPATYPE_DENO_FUNCTIONS_DIR") ??
     ""
   ).trim()
-  if (!root) {
-    throw new Error("SUPATYPE_FUNCTIONS_ROOT (or SUPATYPE_DENO_FUNCTIONS_DIR) is required")
-  }
+  if (!root) return ""
   return root.endsWith("/") ? root.slice(0, -1) : root
 }
 
@@ -128,10 +134,6 @@ async function discoverRoutes(root: string): Promise<DiscoveredRoute[]> {
     if (!(err instanceof Deno.errors.NotFound)) throw err
   }
 
-  if (single && out.length === 0) {
-    throw new Error(`Function "${single}" not found under ${root}`)
-  }
-
   return out.sort((a, b) => a.name.localeCompare(b.name))
 }
 
@@ -166,12 +168,17 @@ const port = parseInt(Deno.env.get("PORT") ?? "8001", 10)
 const serviceRoleKey = withholdServiceRoleKey()
 const serviceRoleAllowed = serviceRoleRoutes()
 const root = functionsRoot()
-const routes = await discoverRoutes(root)
+const routes = root ? await discoverRoutes(root) : []
 const handlers = await loadHandlers(routes)
 
 // Hooks are namespaced so one worker can serve both without a name in `hooks/` ever shadowing — or
 // being reachable as — a public function of the same name.
 const hooksDir = hooksRoot()
+if (!root && !hooksDir) {
+  throw new Error(
+    "SUPATYPE_FUNCTIONS_ROOT or SUPATYPE_HOOKS_ROOT is required (a worker with neither serves nothing)",
+  )
+}
 if (hooksDir) {
   const hookRoutes = await discoverRoutes(hooksDir)
   const hookHandlers = await loadHandlers(hookRoutes)
@@ -180,12 +187,26 @@ if (hooksDir) {
   }
 }
 
+// A worker pinned to one route still has to find it, and with two roots "absent from this one" is not
+// "absent everywhere": a per-hook pod names its hook and has no functions directory at all. Checked
+// once, after both roots, so the failure means what it says — and it stays a failure, because a pod
+// serving nothing would answer 404 to the API server, which reads as the hook refusing to answer and
+// fails every write to its table.
+const single = Deno.env.get("SUPATYPE_FUNCTION_NAME")?.trim()
+if (single && Object.keys(handlers).length === 0) {
+  throw new Error(
+    `Handler "${single}" not found under ${root}` + (hooksDir ? ` or ${hooksDir}` : ""),
+  )
+}
+
 console.log(
   `[functions-worker] ${Object.keys(handlers).length} handler(s) on :${port}` +
     (Deno.env.get("SUPATYPE_FUNCTION_NAME") ? ` (single: ${Deno.env.get("SUPATYPE_FUNCTION_NAME")})` : ""),
 )
 
-const normalizedFunctionsDir = root
+// Falls back to the hooks root: a per-hook worker has no functions directory, and the shared env file
+// is looked for beside whichever source this worker actually has.
+const normalizedFunctionsDir = root || hooksDir
 const sharedEnvPath =
   Deno.env.get("SUPATYPE_SHARED_ENV_FILE") ?? `${normalizedFunctionsDir}/.env.local`
 

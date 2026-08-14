@@ -27,8 +27,10 @@ STUB_PID=""
 STUB2_PID=""
 
 cleanup() {
-  docker rm -f "$CONTAINER" "${CONTAINER}-nohooks" >/dev/null 2>&1 || true
+  docker rm -f "$CONTAINER" "${CONTAINER}-nohooks" "${CONTAINER}-perhook" "${CONTAINER}-bothroots" >/dev/null 2>&1 || true
   [ -f "$WORK/worker2.pid" ] && kill "$(cat "$WORK/worker2.pid")" >/dev/null 2>&1 || true
+  [ -f "$WORK/worker3.pid" ] && kill "$(cat "$WORK/worker3.pid")" >/dev/null 2>&1 || true
+  [ -f "$WORK/worker4.pid" ] && kill "$(cat "$WORK/worker4.pid")" >/dev/null 2>&1 || true
   [ -f "$WORK/worker.pid" ] && kill "$(cat "$WORK/worker.pid")" >/dev/null 2>&1 || true
   [ -n "$STUB_PID" ] && kill "$STUB_PID" >/dev/null 2>&1 || true
   [ -n "$STUB2_PID" ] && kill "$STUB2_PID" >/dev/null 2>&1 || true
@@ -376,5 +378,96 @@ curl -fsS -o /dev/null -X POST "http://localhost:${PORT2}/granted-fn" \
 [ "$USE_DOCKER" = "1" ] && docker rm -f "$CONTAINER2" >/dev/null 2>&1 || true
 [ -f "$WORK/worker2.pid" ] && kill "$(cat "$WORK/worker2.pid")" >/dev/null 2>&1 || true
 echo "  ✓ a missing hooks directory is not fatal"
+
+# ── The shape a free-tier project runs: one hook, no functions at all ─────────
+# Cloud gives each free-tier hook its own Deployment, pinned with SUPATYPE_FUNCTION_NAME and mounting
+# only a hooks root. The pin used to be checked per root, so "absent from the functions root" read as
+# "absent", and such a pod crashlooped — serving nothing, which the API server reads as the hook
+# refusing to answer, failing every write to its table.
+PORT3=$((PORT + 2))
+if [ "$USE_DOCKER" = "1" ]; then
+  CONTAINER3="${CONTAINER}-perhook"
+  docker rm -f "$CONTAINER3" >/dev/null 2>&1 || true
+  MSYS_NO_PATHCONV=1 docker run -d --name "$CONTAINER3" \
+    -p "${PORT3}:8001" \
+    -e SUPATYPE_HOOKS_ROOT=/project/hooks \
+    -e SUPATYPE_FUNCTION_NAME=privileged \
+    -e SUPATYPE_SERVICE_ROLE_KEY=super-secret-admin-key \
+    -e PORT=8001 \
+    -v "$(mount_path "$WORK"):/project:ro" \
+    "$DENO_IMAGE" run --allow-all /project/worker-main.ts > "$WORK/docker3.out" 2>&1 \
+    || fail "docker run failed: $(cat "$WORK/docker3.out")"
+  logs3() { docker logs "$CONTAINER3" 2>&1; }
+else
+  (
+    cd "$WORK"
+    SUPATYPE_HOOKS_ROOT="$WORK/hooks" \
+    SUPATYPE_FUNCTION_NAME=privileged \
+    SUPATYPE_SERVICE_ROLE_KEY=super-secret-admin-key \
+    PORT="$PORT3" \
+    deno run --allow-all "$WORK/worker-main.ts" > "$WORK/worker3.log" 2>&1 &
+    echo $! > "$WORK/worker3.pid"
+  )
+  logs3() { cat "$WORK/worker3.log"; }
+fi
+
+for _ in $(seq 1 30); do
+  logs3 | grep -qE "[0-9]+ handler\(s\)" && break
+  sleep 1
+done
+logs3 | grep -qE "[0-9]+ handler\(s\)" \
+  || fail "a per-hook worker did not start: $(logs3 | tail -3)"
+
+# And it answers on the namespaced route, which is the only one the API server calls.
+HOOK_ONLY="$(curl -s -X POST "http://localhost:${PORT3}/hooks/privileged" \
+  -H "content-type: application/json" -d '{}')"
+echo "$HOOK_ONLY" | grep -q "super-secret-admin-key" \
+  || fail "a per-hook worker did not serve its hook: $HOOK_ONLY"
+echo "  ✓ a worker pinned to one hook serves it with no functions root"
+
+# Same pin, but with a functions root mounted as well — a shape no template generates today and an
+# obvious one to reach for (pin a single hook on a worker that also holds functions). The pin used to be
+# checked per root, so the hook being absent from the *functions* root threw before the hooks root was
+# ever scanned.
+PORT4=$((PORT + 3))
+if [ "$USE_DOCKER" = "1" ]; then
+  CONTAINER4="${CONTAINER}-bothroots"
+  docker rm -f "$CONTAINER4" >/dev/null 2>&1 || true
+  MSYS_NO_PATHCONV=1 docker run -d --name "$CONTAINER4" \
+    -p "${PORT4}:8001" \
+    -e SUPATYPE_FUNCTIONS_ROOT=/project/functions \
+    -e SUPATYPE_HOOKS_ROOT=/project/hooks \
+    -e SUPATYPE_FUNCTION_NAME=privileged \
+    -e SUPATYPE_SERVICE_ROLE_KEY=super-secret-admin-key \
+    -e PORT=8001 \
+    -v "$(mount_path "$WORK"):/project:ro" \
+    "$DENO_IMAGE" run --allow-all /project/worker-main.ts > "$WORK/docker4.out" 2>&1 \
+    || fail "docker run failed: $(cat "$WORK/docker4.out")"
+  logs4() { docker logs "$CONTAINER4" 2>&1; }
+else
+  (
+    cd "$WORK"
+    SUPATYPE_FUNCTIONS_ROOT="$WORK/functions" \
+    SUPATYPE_HOOKS_ROOT="$WORK/hooks" \
+    SUPATYPE_FUNCTION_NAME=privileged \
+    SUPATYPE_SERVICE_ROLE_KEY=super-secret-admin-key \
+    PORT="$PORT4" \
+    deno run --allow-all "$WORK/worker-main.ts" > "$WORK/worker4.log" 2>&1 &
+    echo $! > "$WORK/worker4.pid"
+  )
+  logs4() { cat "$WORK/worker4.log"; }
+fi
+
+for _ in $(seq 1 30); do
+  logs4 | grep -qE "[0-9]+ handler\(s\)" && break
+  sleep 1
+done
+logs4 | grep -qE "[0-9]+ handler\(s\)" \
+  || fail "a worker pinned to a hook refused to start beside a functions root: $(logs4 | tail -3)"
+BOTH_ROOTS="$(curl -s -X POST "http://localhost:${PORT4}/hooks/privileged" \
+  -H "content-type: application/json" -d '{}')"
+echo "$BOTH_ROOTS" | grep -q "super-secret-admin-key" \
+  || fail "a pinned hook was not served beside a functions root: $BOTH_ROOTS"
+echo "  ✓ and the pin is honoured across both roots, not per root"
 
 echo "PASS: the generated adapter behaves inside the real functions worker"
