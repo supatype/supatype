@@ -3,14 +3,46 @@ import type { SerializedEditorState } from "./lexical.js"
 declare const SUPATYPE_TYPE: unique symbol
 declare const SUPATYPE_MODEL: unique symbol
 
-type Brand<TShape, TTag extends string> = TShape & {
+/**
+ * A value type wearing a compile-time label.
+ *
+ * Named for what it does rather than the community's "branded types" idiom, which reads as content
+ * vocabulary in a package that also exports `Block`, `Blocks` and `Localized`.
+ *
+ * The phantom property is **optional**, which is what keeps values usable: `id.toUpperCase()` works and
+ * a plain string can be assigned to a `UUID`. It also means the label is not reliably *detectable* — any
+ * type structurally satisfies a tag whose only property is optional — so this is for things that are
+ * values (`UUID`, an access rule, the model marker) and never for field declarations. Declarations use
+ * a required discriminator instead; see `Modifier`.
+ *
+ * Two differently-tagged types do repel each other (`Email` is not a `UUID`), but only because
+ * `exactOptionalPropertyTypes` is on. Erased at runtime: no value ever carries the property.
+ */
+type Tagged<TShape, TTag extends string> = TShape & {
   readonly [SUPATYPE_TYPE]?: { readonly tag: TTag }
 }
 
-type Primitive<TName extends string, TShape> = Brand<TShape, `primitive:${TName}`>
-type Modifier<TName extends string, TInner> = Brand<TInner, `modifier:${TName}`>
-type Relation<TName extends string, TInner> = Brand<TInner, `relation:${TName}`>
-type Access<TName extends string, TShape = { readonly kind: TName }> = Brand<TShape, `access:${TName}`>
+type Primitive<TName extends string, TShape> = Tagged<TShape, `primitive:${TName}`>
+/**
+ * A field *declaration* wrapper — `Optional<string>`, `Unique<Slug>`, `Localized<RichText>`.
+ *
+ * **Nominal, with a required discriminator**, unlike `Tagged`. Nobody ever holds a value of type
+ * `Optional<string>`: you declare a field with it and read the row shape `Model<>` derives, so this does
+ * not need to be assignable to its own inner type — and making it so was the cause of three defects.
+ *
+ * As an intersection carrying an optional tag, every type satisfied `Modifier<Name, infer _>`: a plain
+ * `string` reported as `Optional`, so unwrapping never reached a fixed point (`TS2589` on reading any
+ * optional field), `Optional<FileAsset<B>>` collapsed to `never`, and stacked modifiers lost their tag
+ * to an intersection so only structural matching could see the outer one. A required property is
+ * exactly what the relation types already use (`__relationKind`), which is why relation detection was
+ * never broken.
+ */
+type Modifier<TName extends string, TInner> = {
+  readonly __modifier: TName
+  readonly __inner: TInner
+}
+type Relation<TName extends string, TInner> = Tagged<TInner, `relation:${TName}`>
+type Access<TName extends string, TShape = { readonly kind: TName }> = Tagged<TShape, `access:${TName}`>
 
 export type UUID = Primitive<"UUID", string>
 export type Email = Primitive<"Email", string>
@@ -667,18 +699,38 @@ type UpdateAccessFor<TFields extends Record<string, unknown>> =
       readonly check?: AccessRuleFor<TFields>
     }
 
-/** `Optional<…>` wraps `Modifier<"Optional", …>` (detect structurally — do not inspect `[SUPATYPE_TYPE]`; primitives under `Optional` add their own tags and tag intersections are unreliable). */
-type IsModifierOptional<V> = [V] extends [Modifier<"Optional", infer _>] ? true : false
+/**
+ * Which modifier a declaration is, or `never` for anything that is not one.
+ *
+ * Reads the required discriminator, so a plain type answers `never` rather than claiming to be whatever
+ * was asked. The bracketed comparison matters: `never` is assignable to everything, so a bare
+ * `ModifierNameOf<V> extends TName` would report *true* for every unwrapped value.
+ */
+type ModifierNameOf<V> = V extends { readonly __modifier: infer TName extends string } ? TName : never
+type ModifierInnerOf<V> = V extends { readonly __inner: infer TInner } ? TInner : never
+type IsModifier<V, TName extends string> = [ModifierNameOf<V>] extends [TName] ? true : false
 
-type InferOptionalInner<V> = V extends Modifier<"Optional", infer Inner> ? Inner : never
+type IsModifierOptional<V> = IsModifier<V, "Optional">
+type InferOptionalInner<V> = ModifierInnerOf<V>
+type IsModifierLocalized<V> = IsModifier<V, "Localized">
+type InferLocalizedInner<V> = ModifierInnerOf<V>
+type IsModifierNotLocalized<V> = IsModifier<V, "NotLocalized">
+type InferNotLocalizedInner<V> = ModifierInnerOf<V>
 
-type IsModifierLocalized<V> = [V] extends [Modifier<"Localized", infer _>] ? true : false
-
-type InferLocalizedInner<V> = V extends Modifier<"Localized", infer Inner> ? Inner : never
-
-type IsModifierNotLocalized<V> = [V] extends [Modifier<"NotLocalized", infer _>] ? true : false
-
-type InferNotLocalizedInner<V> = V extends Modifier<"NotLocalized", infer Inner> ? Inner : never
+/**
+ * Whether a field's key is optional on the row — `Optional` anywhere in the stack, not just outermost.
+ *
+ * `Unique<Optional<string>>` is as nullable as `Optional<Unique<string>>`. The old structural check
+ * could only see the outer wrapper, so which one you wrote decided whether the key was optional.
+ */
+type HasOptionalModifier<V> = V extends {
+  readonly __modifier: infer TName extends string
+  readonly __inner: infer TInner
+}
+  ? TName extends "Optional"
+    ? true
+    : HasOptionalModifier<TInner>
+  : false
 
 type ImageAssetLocalizedOption<V> =
   V extends ImageAsset<infer _B, infer O> ? (O extends { localized: true } ? true : false) : false
@@ -686,15 +738,22 @@ type ImageAssetLocalizedOption<V> =
 type FileAssetLocalizedOption<V> =
   V extends FileAsset<infer _B, infer O> ? (O extends { localized: true } ? true : false) : false
 
-/** Apply default localization to copy-like fields (used by {@link LocalizedModel}). */
+/**
+ * Apply default localization to copy-like fields (used by {@link LocalizedModel}).
+ *
+ * Walks *through* any modifier and rebuilds it around the localized inner, so `Unique<string>` becomes
+ * `Unique<Localized<string>>`. It used to reach the `V extends string` branch for such a field — a
+ * modifier was structurally its own inner type — and return a bare `Localized<string>`, silently
+ * dropping the `Unique`.
+ */
 type ApplyAutoLocalizedField<V> =
-  IsModifierOptional<V> extends true
-    ? Optional<ApplyAutoLocalizedField<InferOptionalInner<V>>>
-    : IsModifierNotLocalized<V> extends true
-      ? InferNotLocalizedInner<V>
-      : IsModifierLocalized<V> extends true
+  V extends { readonly __modifier: infer TName extends string; readonly __inner: infer TInner }
+    ? TName extends "NotLocalized"
+      ? TInner
+      : TName extends "Localized"
         ? V
-        : V extends string
+        : { readonly __modifier: TName; readonly __inner: ApplyAutoLocalizedField<TInner> }
+    : V extends string
           ? Localized<string>
           : V extends RichText
             ? Localized<RichText>
@@ -712,26 +771,31 @@ type ApplyAutoLocalizedFields<TFields extends Record<string, unknown>> = {
   [K in keyof TFields]: ApplyAutoLocalizedField<TFields[K]>
 }
 
-/** Strip `Optional` / `Localized` / `NotLocalized` wrappers for inferred row shapes. */
-type UnwrapModelFieldType<V> =
-  IsModifierOptional<V> extends true
-    ? UnwrapModelFieldType<InferOptionalInner<V>>
-    : IsModifierNotLocalized<V> extends true
-      ? UnwrapModelFieldType<InferNotLocalizedInner<V>>
-      : IsModifierLocalized<V> extends true
-        ? InferLocalizedInner<V>
-        : V
+/**
+ * The value a declared field reads as on the row: every modifier peeled off, whatever it is.
+ *
+ * Unbounded and still terminating, because each step removes one wrapper — `__inner` is strictly
+ * smaller than the type it came from. The previous version needed a depth cap to escape a recursion
+ * that could not converge, and a cap that runs out returns a half-unwrapped type rather than an error.
+ *
+ * Every modifier, not the three that used to be special-cased: a declaration is no longer structurally
+ * its own inner type, so `Unique<Slug>` would otherwise surface on the row as the wrapper object rather
+ * than as a string. `Localized<T>` needs no case of its own — its inner already *is* the locale record.
+ */
+type UnwrapModelFieldType<V> = V extends { readonly __modifier: string; readonly __inner: infer TInner }
+  ? UnwrapModelFieldType<TInner>
+  : V
 
 /** Row shape from `TFields`: `Optional<…>` → `key?: Inner` (`Inner` includes `null`). */
 export type SpreadOptionalModelFields<TFields extends Record<string, unknown>> =
   keyof TFields extends never
     ? {}
     : {
-        [K in keyof TFields as IsModifierOptional<TFields[K]> extends true ? never : K]: UnwrapModelFieldType<
+        [K in keyof TFields as HasOptionalModifier<TFields[K]> extends true ? never : K]: UnwrapModelFieldType<
           TFields[K]
         >
       } & {
-        [K in keyof TFields as IsModifierOptional<TFields[K]> extends true
+        [K in keyof TFields as HasOptionalModifier<TFields[K]> extends true
           ? K extends keyof TFields & (string | number)
             ? K
             : never
