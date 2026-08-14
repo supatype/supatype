@@ -133,7 +133,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, macos-14]
+        # macos-13, not macos-14: the arm64 runners have no nested virtualisation, so Colima's `vz`
+        # driver dies at "creating and starting" and no Docker daemon can come up there at all. The
+        # x86_64 image can host one — slower to start, and the only way to exercise this on macOS.
+        os: [ubuntu-22.04, macos-13]
     env:
       SUPATYPE_C21_INSTALL: workspace
       SUPATYPE_C21_KEEP_ON_FAILURE: "1"
