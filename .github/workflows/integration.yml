@@ -133,10 +133,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macos-13, not macos-14: the arm64 runners have no nested virtualisation, so Colima's `vz`
-        # driver dies at "creating and starting" and no Docker daemon can come up there at all. The
-        # x86_64 image can host one — slower to start, and the only way to exercise this on macOS.
-        os: [ubuntu-22.04, macos-13]
+        # x86_64, not arm64: the arm64 macOS runners have no nested virtualisation, so Colima's `vz`
+        # driver dies at "creating and starting" and no Docker daemon can come up there at all.
+        #
+        # `macos-15-intel`, not `macos-13`: that label was retired on 2025-12-04 and a job requesting
+        # it queues forever rather than failing — see the same note in supatype-postgres's
+        # native-archives workflow, which is where the current Intel label is recorded.
+        os: [ubuntu-22.04, macos-15-intel]
     env:
       SUPATYPE_C21_INSTALL: workspace
       SUPATYPE_C21_KEEP_ON_FAILURE: "1"
