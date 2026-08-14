@@ -26,6 +26,10 @@ const updates = {
   POSTGRES_USER: "supatype_admin",
   POSTGRES_PASSWORD: "postgres",
   POSTGRES_DB: "supatype",
+  // The generator deliberately never invents this: the authenticator role is the operator's to
+  // create, so the compose file interpolates it as required with no default. A fixture is the
+  // operator here, so it supplies its own — the stack does not start without it.
+  AUTHENTICATOR_PASSWORD: "authenticator-ci-password",
   JWT_SECRET,
   ANON_KEY: anonKey,
   SERVICE_ROLE_KEY: serviceRoleKey,
