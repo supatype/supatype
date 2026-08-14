@@ -20,6 +20,7 @@ import { registerApp } from "../src/commands/app.js"
 import { registerAdd } from "../src/commands/add.js"
 import { registerSelfHost } from "../src/commands/self-host.js"
 import { registerCloud } from "../src/commands/cloud.js"
+import { registerLogin } from "../src/commands/login.js"
 import { registerEngine } from "../src/commands/engine.js"
 import { registerDb } from "../src/commands/db.js"
 import { registerDeploy } from "../src/commands/deploy.js"
@@ -80,6 +81,7 @@ function buildProgram(): Command {
   registerApp(program)
   registerAdd(program)
   registerSelfHost(program)
+  registerLogin(program)
   registerCloud(program)
   registerEngine(program)
   registerDb(program)
@@ -118,32 +120,35 @@ describe("CLI command chrome coverage", () => {
       expect(handlerBefore, `${path} should be wrapped`).toBeDefined()
     }
 
-    expect(excluded).toEqual(
-      expect.arrayContaining([
-        "dev",
-        "init",
-        "link",
-        "add domain",
-        "logs",
-        "pg psql",
-        "functions serve",
-        "self-host compose logs",
-      ]),
-    )
+    for (const path of [
+      "dev",
+      "init",
+      "link",
+      "login",
+      "add domain",
+      "logs",
+      "pg psql",
+      "functions serve",
+      "self-host compose logs",
+    ]) {
+      expect(excluded, `${path} should skip chrome`).toContain(path)
+    }
 
-    expect(wrapped).toEqual(
-      expect.arrayContaining([
-        "push",
-        "diff",
-        "doctor",
-        "pull",
-        "cache list",
-        "cache rest list",
-        "deploy",
-        "deploy rollback",
-        "keys",
-        "generate",
-      ]),
-    )
+    for (const path of [
+      "push",
+      "diff",
+      "doctor",
+      "pull",
+      "cache list",
+      "cache rest list",
+      "deploy",
+      "deploy rollback",
+      "keys",
+      "generate",
+      "logout",
+      "whoami",
+    ]) {
+      expect(wrapped, `${path} should use chrome`).toContain(path)
+    }
   })
 })
