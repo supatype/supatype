@@ -136,11 +136,15 @@ jobs:
         os: [ubuntu-22.04, macos-14]
     env:
       SUPATYPE_C21_INSTALL: workspace
-      SUPATYPE_C21_WORK_ROOT: ${{ runner.temp }}/c21-work
       SUPATYPE_C21_KEEP_ON_FAILURE: "1"
       SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
 
     steps:
+      # $RUNNER_TEMP, not ${{ runner.temp }}: the `runner` context does not exist in a
+      # job-level `env:`, and referencing it there makes GitHub reject the whole file.
+      - name: Choose a work root outside the checkout
+        run: echo "SUPATYPE_C21_WORK_ROOT=$RUNNER_TEMP/c21-work" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v4
 
       - name: Start Docker (Colima on macOS)
@@ -200,11 +204,15 @@ jobs:
     timeout-minutes: 45
     env:
       SUPATYPE_C21_INSTALL: cdn
-      SUPATYPE_C21_WORK_ROOT: ${{ runner.temp }}/c21-cdn-work
       SUPATYPE_C21_KEEP_ON_FAILURE: "1"
       SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
 
     steps:
+      # $RUNNER_TEMP, not ${{ runner.temp }}: the `runner` context does not exist in a
+      # job-level `env:`, and referencing it there makes GitHub reject the whole file.
+      - name: Choose a work root outside the checkout
+        run: echo "SUPATYPE_C21_WORK_ROOT=$RUNNER_TEMP/c21-cdn-work" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v4
 
       - name: Run C21 CDN zero-to-running soak
