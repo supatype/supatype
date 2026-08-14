@@ -1,8 +1,9 @@
 import type { Command } from "commander"
-import { mkdirSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { syncManifestHooks, validateModelHooks, writeHooksModule } from "../model-hooks.js"
+import { adapterEntry, readHookUpload } from "../hook-upload.js"
 import { fatalError } from "../ui/fatal.js"
 import {
   hooksPathFromProject,
@@ -27,6 +28,7 @@ import {
   type DeployTarget,
 } from "../resolve-target.js"
 import { loadProjectLink } from "../link.js"
+import { targetFetch } from "../target-client.js"
 import {
   buildSchemaSourcesPayload,
   cacheSchemaSourcesLocally,
@@ -151,6 +153,10 @@ async function pushViaTarget(
     }
   }
 
+  if (target.mode === "cloud" || target.mode === "self-host") {
+    await deployHooksToTarget(cwd, config, target, ast)
+  }
+
   if (target.mode === "direct" || target.mode === "local") {
     await writeLocalAdminConfig(ast, config)
     if (target.databaseUrl) {
@@ -173,6 +179,60 @@ async function pushViaTarget(
   if (envUrl) {
     plain(`\nProject API: ${envUrl}`)
   }
+}
+
+/**
+ * Upload the hooks this schema names to a managed stack.
+ *
+ * On `push` rather than `functions deploy`, because the hook *map* comes from the schema: the two have
+ * to move together, and a map naming a handler that was never uploaded turns every write to that table
+ * into a 503.
+ *
+ * The handler types are written locally as well. A project pushing to cloud still edits its hooks on
+ * this machine, and `hooks/_supatype/hooks.ts` is what makes them typed — it is generated, never
+ * committed, so a fresh clone that has only ever pushed to cloud would otherwise have no types at all.
+ */
+async function deployHooksToTarget(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  target: DeployTarget,
+  ast: unknown,
+): Promise<void> {
+  const hooksDir = hooksPathFromProject(config, cwd)
+  const hooksPath = writeHooksModule(cwd, hooksDir, ast)
+  if (hooksPath !== null) info(`Hook handler types written to ${hooksPath}`)
+
+  let upload: ReturnType<typeof readHookUpload>
+  try {
+    upload = readHookUpload(cwd, hooksDir, ast)
+  } catch (err) {
+    // Refused rather than partially uploaded: the schema is already applied, so the honest thing is to
+    // say the hooks did not deploy and why, leaving the previous ones in place.
+    fatalError(err instanceof Error ? err.message : String(err))
+    return
+  }
+  if (upload === null) return
+
+  const adapter = readGeneratedAdapter(hooksDir)
+  const handlers = adapter === null ? upload.handlers : [...upload.handlers, adapter]
+
+  await withSpinner(`Deploying ${upload.handlers.length} hook(s)`, () =>
+    targetFetch(target.apiBaseUrl, target.apiPrefix, {
+      method: "POST",
+      path: `/projects/${target.projectRef}/hooks/deploy`,
+      body: { handlers, map: upload.map },
+      token: target.token!,
+      orgId: target.orgId,
+      environment: target.mode === "cloud" ? target.environment : undefined,
+    }),
+  ).then(() => info(`Deployed ${upload.handlers.length} hook(s)`))
+}
+
+/** The generated adapter, flattened to the name handlers were rewritten to import. */
+function readGeneratedAdapter(hooksDir: string): { name: string; source: string } | null {
+  const file = join(hooksDir, "_supatype", "hooks.ts")
+  if (!existsSync(file)) return null
+  return adapterEntry(readFileSync(file, "utf8"))
 }
 
 async function generateTypesLocal(ast: unknown, config: SupatypeProjectConfig): Promise<void> {
