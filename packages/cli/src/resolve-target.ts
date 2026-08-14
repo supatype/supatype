@@ -6,6 +6,7 @@ import { ensureEngine, engineRequest } from "./engine-client.js"
 import type { SchemaSourcesPayload } from "./schema-sources.js"
 import {
   connectionString,
+  pgSchema,
   resolveRuntimeProvider,
   schemaPathFromProject,
   serverBaseUrl,
@@ -20,7 +21,12 @@ import {
   type LocalEnvironment,
   type ProjectLink,
 } from "./link.js"
-import { targetFetch } from "./target-client.js"
+import {
+  persistCloudSession,
+  resolveCloudAccessToken,
+  resolveCloudRefreshToken,
+} from "./cloud-credentials.js"
+import { targetFetch, type TargetFetchOptions } from "./target-client.js"
 
 export interface ResolveTargetFlags {
   env?: string | undefined
@@ -38,8 +44,12 @@ export interface DeployTarget {
   apiBaseUrl: string
   apiPrefix: "/api/v1" | "/platform/v1"
   token?: string | undefined
+  /** Cloud GoTrue refresh token (mode === "cloud" only). */
+  refreshToken?: string | undefined
   orgId?: string | undefined
   link: ProjectLink | null
+  /** Project cwd — needed to persist refreshed cloud tokens. */
+  cwd?: string
   /** Engine subprocess path when mode is direct or local without control plane. */
   databaseUrl?: string
 }
@@ -147,12 +157,19 @@ export function resolveTarget(cwd: string, flags: ResolveTargetFlags = {}): Depl
     )
   }
 
-  const token = resolveEnvironmentToken(link, envTarget)
+  const token =
+    (link.kind === "cloud" ? resolveCloudAccessToken(link) : undefined) ??
+    resolveEnvironmentToken(link, envTarget)
   if (!token) {
-    throw new Error(`No token for environment "${envName}". Re-run supatype link --token ...`)
+    throw new Error(
+      link.kind === "cloud"
+        ? `No cloud session for environment "${envName}". Run: supatype login`
+        : `No token for environment "${envName}". Re-run supatype link --token ...`,
+    )
   }
 
   if (link.kind === "cloud") {
+    const refreshToken = resolveCloudRefreshToken(link)
     return {
       mode: "cloud",
       environment: envName,
@@ -161,6 +178,8 @@ export function resolveTarget(cwd: string, flags: ResolveTargetFlags = {}): Depl
       apiPrefix: "/api/v1",
       token,
       link,
+      cwd,
+      ...(refreshToken !== undefined ? { refreshToken } : {}),
       ...(link.orgId !== undefined ? { orgId: link.orgId } : {}),
     }
   }
@@ -173,6 +192,44 @@ export function resolveTarget(cwd: string, flags: ResolveTargetFlags = {}): Depl
     apiPrefix: "/platform/v1",
     token,
     link,
+    cwd,
+  }
+}
+
+function cloudAuthRefresh(target: DeployTarget): TargetFetchOptions["authRefresh"] | undefined {
+  if (target.mode !== "cloud" || !target.refreshToken || !target.cwd) return undefined
+  const cloudApiUrl = (target.link?.cloudApiUrl ?? target.apiBaseUrl).replace(/\/$/, "")
+  const cwd = target.cwd
+  return {
+    cloudApiUrl,
+    refreshToken: target.refreshToken,
+    onRefreshed: ({ accessToken, refreshToken }) => {
+      persistCloudSession(cwd, {
+        apiUrl: cloudApiUrl,
+        accessToken,
+        ...(refreshToken !== undefined ? { refreshToken } : {}),
+      })
+      target.token = accessToken
+      if (refreshToken !== undefined) target.refreshToken = refreshToken
+    },
+  }
+}
+
+function apiFetchOpts(
+  target: DeployTarget,
+  method: string,
+  path: string,
+  body?: unknown,
+): TargetFetchOptions {
+  const authRefresh = cloudAuthRefresh(target)
+  return {
+    method,
+    path,
+    token: target.token!,
+    ...(body !== undefined ? { body } : {}),
+    ...(target.orgId !== undefined ? { orgId: target.orgId } : {}),
+    ...(target.mode === "cloud" ? { environment: target.environment } : {}),
+    ...(authRefresh !== undefined ? { authRefresh } : {}),
   }
 }
 
@@ -194,14 +251,14 @@ export async function targetSchemaDiff(
     })
   }
 
-  return targetFetch<DiffResult>(target.apiBaseUrl, target.apiPrefix, {
-    method: "POST",
-    path: projectPath(target, "/schema/diff"),
-    body: { ast, schema: opts?.schema ?? "public" },
-    token: target.token!,
-    orgId: target.orgId,
-    environment: target.mode === "cloud" ? target.environment : undefined,
-  })
+  return targetFetch<DiffResult>(
+    target.apiBaseUrl,
+    target.apiPrefix,
+    apiFetchOpts(target, "POST", projectPath(target, "/schema/diff"), {
+      ast,
+      schema: opts?.schema ?? "public",
+    }),
+  )
 }
 
 export async function targetSchemaPush(
@@ -236,14 +293,11 @@ export async function targetSchemaPush(
     }
   }
 
-  return targetFetch(target.apiBaseUrl, target.apiPrefix, {
-    method: "POST",
-    path: projectPath(target, "/schema/push"),
-    body: pushBody,
-    token: target.token!,
-    orgId: target.orgId,
-    environment: target.mode === "cloud" ? target.environment : undefined,
-  })
+  return targetFetch(
+    target.apiBaseUrl,
+    target.apiPrefix,
+    apiFetchOpts(target, "POST", projectPath(target, "/schema/push"), pushBody),
+  )
 }
 
 export interface SchemaRollbackResult {
@@ -286,14 +340,13 @@ export async function targetSchemaRollback(
     })
   }
 
-  return targetFetch<SchemaRollbackResult>(target.apiBaseUrl, target.apiPrefix, {
-    method: "POST",
-    path: projectPath(target, "/schema/rollback"),
-    body: { schema: opts?.schema ?? "public" },
-    token: target.token!,
-    orgId: target.orgId,
-    environment: target.mode === "cloud" ? target.environment : undefined,
-  })
+  return targetFetch<SchemaRollbackResult>(
+    target.apiBaseUrl,
+    target.apiPrefix,
+    apiFetchOpts(target, "POST", projectPath(target, "/schema/rollback"), {
+      schema: opts?.schema ?? "public",
+    }),
+  )
 }
 
 export async function targetListMigrations(
@@ -308,13 +361,11 @@ export async function targetListMigrations(
     return Array.isArray(result) ? result : (result.migrations ?? [])
   }
 
-  return targetFetch<MigrationListEntry[]>(target.apiBaseUrl, target.apiPrefix, {
-    method: "GET",
-    path: projectPath(target, "/schema/migrations"),
-    token: target.token!,
-    orgId: target.orgId,
-    environment: target.mode === "cloud" ? target.environment : undefined,
-  })
+  return targetFetch<MigrationListEntry[]>(
+    target.apiBaseUrl,
+    target.apiPrefix,
+    apiFetchOpts(target, "GET", projectPath(target, "/schema/migrations")),
+  )
 }
 
 export async function targetSchemaDoctor(
@@ -332,14 +383,15 @@ export async function targetSchemaDoctor(
     })
   }
 
-  return targetFetch(target.apiBaseUrl, target.apiPrefix, {
-    method: "POST",
-    path: projectPath(target, "/schema/doctor"),
-    body: { ast, no_cache: opts?.noCache ?? false, schema: opts?.schema ?? "public" },
-    token: target.token!,
-    orgId: target.orgId,
-    environment: target.mode === "cloud" ? target.environment : undefined,
-  })
+  return targetFetch(
+    target.apiBaseUrl,
+    target.apiPrefix,
+    apiFetchOpts(target, "POST", projectPath(target, "/schema/doctor"), {
+      ast,
+      no_cache: opts?.noCache ?? false,
+      schema: opts?.schema ?? "public",
+    }),
+  )
 }
 
 export async function targetSchemaIntrospect(
@@ -354,14 +406,13 @@ export async function targetSchemaIntrospect(
     })
   }
 
-  return targetFetch(target.apiBaseUrl, target.apiPrefix, {
-    method: "POST",
-    path: projectPath(target, "/schema/introspect"),
-    body: { schema: opts?.schema ?? "public" },
-    token: target.token!,
-    orgId: target.orgId,
-    environment: target.mode === "cloud" ? target.environment : undefined,
-  })
+  return targetFetch(
+    target.apiBaseUrl,
+    target.apiPrefix,
+    apiFetchOpts(target, "POST", projectPath(target, "/schema/introspect"), {
+      schema: opts?.schema ?? "public",
+    }),
+  )
 }
 
 export async function targetSchemaAdopt(
@@ -381,20 +432,17 @@ export async function targetSchemaAdopt(
     })
   }
 
-  return targetFetch(target.apiBaseUrl, target.apiPrefix, {
-    method: "POST",
-    path: projectPath(target, "/schema/adopt"),
-    body: {
+  return targetFetch(
+    target.apiBaseUrl,
+    target.apiPrefix,
+    apiFetchOpts(target, "POST", projectPath(target, "/schema/adopt"), {
       ast,
       schema: opts?.schema ?? "public",
       yes: opts?.yes ?? false,
       no_cache: opts?.noCache ?? false,
       ...(opts?.names !== undefined ? { names: opts.names } : {}),
-    },
-    token: target.token!,
-    orgId: target.orgId,
-    environment: target.mode === "cloud" ? target.environment : undefined,
-  })
+    }),
+  )
 }
 
 export async function targetStatus(target: DeployTarget): Promise<unknown> {
@@ -402,18 +450,15 @@ export async function targetStatus(target: DeployTarget): Promise<unknown> {
     return { mode: "direct", environment: target.environment }
   }
 
-  return targetFetch(target.apiBaseUrl, target.apiPrefix, {
-    method: "GET",
-    path: projectPath(target, "/status"),
-    token: target.token!,
-    orgId: target.orgId,
-    environment: target.mode === "cloud" ? target.environment : undefined,
-  })
+  return targetFetch(
+    target.apiBaseUrl,
+    target.apiPrefix,
+    apiFetchOpts(target, "GET", projectPath(target, "/status")),
+  )
 }
 
 export function schemaPgSchema(cwd: string): string {
-  const config = loadConfig(cwd)
-  return config.schema?.pg_schema ?? "public"
+  return pgSchema(loadConfig(cwd))
 }
 
 export { schemaPathFromProject }

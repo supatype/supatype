@@ -21,7 +21,10 @@ export interface ProjectLink {
   kind: ProjectLinkKind
   projectRef: string
   defaultEnvironment: string
+  /** Access token (cloud user JWT) or self-host SERVICE_ROLE_KEY. */
   token?: string
+  /** Cloud GoTrue refresh token — used to renew short-lived access JWTs. */
+  refreshToken?: string
   orgId?: string | undefined
   cloudApiUrl?: string
   linkedAt: string
@@ -209,6 +212,7 @@ export function createCloudLink(params: {
   projectRef: string
   cloudApiUrl: string
   token: string
+  refreshToken?: string
   orgId?: string | undefined
   environments?: Array<{ name: string; apiUrl: string }>
   existing?: ProjectLink | null
@@ -227,6 +231,8 @@ export function createCloudLink(params: {
     }
   }
 
+  const refreshToken = params.refreshToken ?? params.existing?.refreshToken
+
   return {
     version: LINK_VERSION,
     kind: "cloud",
@@ -239,5 +245,6 @@ export function createCloudLink(params: {
       ? { ...params.existing.environments, ...envMap }
       : envMap,
     ...(params.orgId !== undefined ? { orgId: params.orgId } : {}),
+    ...(refreshToken !== undefined ? { refreshToken } : {}),
   }
 }
