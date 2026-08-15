@@ -5,7 +5,9 @@ import type { RealtimeEnv } from "./env.js"
 import { verifyToken, type JwtClaims } from "./auth.js"
 import { ChannelManager, type ConnectedClient } from "./channels.js"
 import { ReplicationListener } from "./replication.js"
+import { RealtimeUnsupportedError } from "./capability.js"
 import { RlsFilter } from "./rls.js"
+import { filterIsMaskSafe } from "./field-mask.js"
 import type {
   ClientMessage,
   ServerMessage,
@@ -30,6 +32,8 @@ export class RealtimeServer {
   private replication: ReplicationListener
   private rlsFilter: RlsFilter
   private httpServer: ReturnType<typeof createServer> | null = null
+  /** The in-flight initial replication connection, so shutdown and tests can await it. */
+  private replicationStartup: Promise<void> = Promise.resolve()
 
   /** Cached project routes for multi-tenant JWT verification + tier limits. */
   private projectRoutes = new Map<string, ProjectRoute>()
@@ -51,10 +55,28 @@ export class RealtimeServer {
     // HTTP server for health checks + WebSocket upgrade
     this.httpServer = createServer((req, res) => {
       const path = req.url?.split("?")[0] ?? ""
-      // /health, /health/ready, /health/live — k8s probes + gateway readiness
-      if (path === "/health" || path === "/health/ready" || path === "/health/live") {
+      // Liveness is "the process is up"; readiness is "replication is actually connected". They used
+      // to be the same answer, which was fine only because the server refused to listen at all until
+      // replication was up — so a database that was merely slow took the container down instead of
+      // reporting itself as not ready yet.
+      if (path === "/health" || path === "/health/live") {
         res.writeHead(200, { "Content-Type": "application/json" })
         res.end(JSON.stringify({ status: "ok" }))
+        return
+      }
+      if (path === "/health/ready") {
+        const ready = this.replication.isConnected()
+        const unsupported = this.replication.unsupportedReason()
+        res.writeHead(ready ? 200 : 503, { "Content-Type": "application/json" })
+        res.end(
+          JSON.stringify({
+            status: ready ? "ok" : unsupported ? "unsupported" : "waiting for database",
+            // Named rather than implied: "not ready" that will never become ready is a different
+            // operational fact from "not ready yet", and a gateway or dashboard has to tell them
+            // apart to say anything useful.
+            ...(unsupported !== null && { reason: unsupported }),
+          }),
+        )
         return
       }
       res.writeHead(404)
@@ -79,15 +101,37 @@ export class RealtimeServer {
     this.replication.onChange((change) => {
       void this.handleWalChange(change)
     })
-    await this.replication.start()
+    // A push can add, change or remove a field rule, and those are read from security
+    // labels and cached. Re-read them rather than wait out the TTL, so a newly restricted
+    // column stops being broadcast at the push rather than up to a TTL later.
+    this.replication.onSchemaChange(() => {
+      this.rlsFilter.invalidateFieldMasks()
+    })
 
-    // Listen on configured port
+    // Listen first, then connect. The old order awaited replication before binding the port, so a
+    // database that was not up yet meant no health endpoint to ask and — since the rejection reached
+    // `main()` — no process either. Now the port opens, `/health/ready` answers 503 with the reason,
+    // and replication keeps retrying behind it.
     await new Promise<void>((resolve) => {
       this.httpServer!.listen(this.env.port, () => {
         console.log(`[realtime] WebSocket server listening on port ${this.env.port}${this.env.multiTenant ? " (multi-tenant)" : ""}`)
         resolve()
       })
     })
+
+    this.replicationStartup = this.replication.start().catch((err) => {
+      // A database that cannot do logical decoding is already reported by the listener, and the
+      // service stays up serving presence and broadcast — only change-subscriptions are gone.
+      if (err instanceof RealtimeUnsupportedError) return
+      // Anything else non-transient is a broken process, not a missing feature.
+      console.error("[realtime] replication failed to start:", err)
+      process.exitCode = 1
+    })
+  }
+
+  /** Resolves when the initial replication connection has settled — tests await this. */
+  async waitForReplicationStartup(): Promise<void> {
+    await this.replicationStartup
   }
 
   async stop(): Promise<void> {
@@ -363,37 +407,30 @@ export class RealtimeServer {
     if (this.env.multiTenant) {
       const schema = change.schema
 
-      // Filter out internal schemas: {ref}_auth, {ref}_internal, extensions, pg_*
+      // Filter out internal / system schemas (self-host + dedicated cloud)
       if (
         schema.endsWith("_auth") ||
         schema.endsWith("_internal") ||
+        schema === "auth" ||
+        schema === "_supatype" ||
+        schema === "storage" ||
         schema === "extensions" ||
         schema.startsWith("pg_") ||
-        schema === "_platform"
+        schema === "_platform" ||
+        schema === "cron"
       ) {
         return
       }
 
-      // In developer_only mode, the schema IS the project ref
-      // Only forward to subscribers of that project
+      // Legacy shared: schema name IS the project ref. Dedicated uses non-multiTenant path.
       const projectRef = schema
       const subscribers = this.channels.getSubscribersForProject(schema, change.table, projectRef)
       if (subscribers.length === 0) return
 
-      for (const { client, subscription } of subscribers) {
-        if (subscription.event !== "*" && subscription.event !== change.event) continue
-        if (!this.matchesFilter(change, subscription.filter)) continue
-        const canSee = await this.rlsFilter.canSee(client.claims, change)
-        if (!canSee) continue
+      const masked = await this.rlsFilter.maskedColumns(change.schema, change.table)
 
-        const msg: ServerMessage = {
-          type: "change",
-          channel: subscription.channel,
-          event: change.event,
-          payload: { old: change.oldRecord, new: change.newRecord },
-          timestamp: change.commitTimestamp,
-        }
-        this.send(client.ws, msg)
+      for (const { client, subscription } of subscribers) {
+        await this.deliverIfVisible(client, subscription, change, masked)
       }
       return
     }
@@ -402,35 +439,54 @@ export class RealtimeServer {
     const subscribers = this.channels.getSubscribers(change.schema, change.table)
     if (subscribers.length === 0) return
 
+    const masked = await this.rlsFilter.maskedColumns(change.schema, change.table)
+
     for (const { client, subscription } of subscribers) {
-      // Check event filter
-      if (subscription.event !== "*" && subscription.event !== change.event) {
-        continue
-      }
-
-      // Check column filters
-      if (!this.matchesFilter(change, subscription.filter)) {
-        continue
-      }
-
-      // RLS check — verify the subscriber can see this record
-      const canSee = await this.rlsFilter.canSee(client.claims, change)
-      if (!canSee) continue
-
-      // Send the change event
-      const msg: ServerMessage = {
-        type: "change",
-        channel: subscription.channel,
-        event: change.event,
-        payload: {
-          old: change.oldRecord,
-          new: change.newRecord,
-        },
-        timestamp: change.commitTimestamp,
-      }
-      this.send(client.ws, msg)
+      await this.deliverIfVisible(client, subscription, change, masked)
     }
   }
+
+  /**
+   * Decide whether one subscriber gets one change, and send it masked.
+   *
+   * Shared by both dispatch paths on purpose. The ordering here is security-relevant — the
+   * subscriber's column filter must not be matched against values they may not read — and
+   * two copies of it would be two chances to get it wrong.
+   */
+  private async deliverIfVisible(
+    client: ConnectedClient,
+    subscription: Subscription,
+    change: WalChange,
+    masked: Set<string>,
+  ): Promise<void> {
+    if (subscription.event !== "*" && subscription.event !== change.event) return
+
+    // Cheap pass before the round trip, valid only when the filter names nothing
+    // restricted. Filters that do are matched against the masked record instead, because
+    // "did I receive this event" would otherwise answer a question about a hidden value.
+    if (
+      filterIsMaskSafe(subscription.filter, masked) &&
+      !this.matchesFilter(change, subscription.filter)
+    ) {
+      return
+    }
+
+    // Row visibility plus field masking — what comes back is already masked, or nothing.
+    const visible = await this.rlsFilter.visibleChange(client.claims, change)
+    if (!visible) return
+
+    // Authoritative filter pass, against what this subscriber is actually allowed to see.
+    if (!this.matchesFilter(visible, subscription.filter)) return
+
+    this.send(client.ws, {
+      type: "change",
+      channel: subscription.channel,
+      event: change.event,
+      payload: { old: visible.oldRecord, new: visible.newRecord },
+      timestamp: change.commitTimestamp,
+    })
+  }
+
 
   /** Check if a change matches PostgREST-style column filters. */
   private matchesFilter(change: WalChange, filter: Record<string, string>): boolean {

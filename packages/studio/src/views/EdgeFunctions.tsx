@@ -74,11 +74,7 @@ function InvokeTab({
   const [queryString, setQueryString] = useState("")
   const [body, setBody] = useState("{}")
   const [authMode, setAuthMode] = useState<"none" | "service_role" | "custom">("none")
-  const privilegedAuthLabel = client.serviceRoleKey
-    ? "Service role"
-    : usesSessionProxy(client)
-      ? "Studio session"
-      : "Privileged"
+  const privilegedAuthLabel = usesSessionProxy(client) ? "Studio session" : "Privileged"
   const [customToken, setCustomToken] = useState("")
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)

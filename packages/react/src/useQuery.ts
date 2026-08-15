@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react"
-import type { AnyDatabase, SupatypeError, QueryCacheOptions } from "@supatype/client"
+import type { AnyDatabase, AugmentedDatabase, SupatypeError, QueryCacheOptions } from "@supatype/client"
 import { useSupatype } from "./context.js"
 
 export interface UseQueryOptions {
@@ -44,7 +44,7 @@ export interface UseQueryResult<TRow> {
  * ```
  */
 export function useQuery<
-  TDatabase extends AnyDatabase = AnyDatabase,
+  TDatabase extends AnyDatabase = AugmentedDatabase,
   TTable extends keyof TDatabase["public"]["Tables"] & string = keyof TDatabase["public"]["Tables"] & string,
   TRow = TDatabase["public"]["Tables"][TTable]["Row"],
 >(

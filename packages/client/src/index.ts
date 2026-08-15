@@ -25,6 +25,7 @@ export type {
   AuthFlowType,
   SupatypeError,
   QueryResult,
+  MaskedField,
   RpcResult,
   AnyDatabase,
   SupatypeClientConfig,
@@ -431,6 +432,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
     apikey: config.anonKey,
     Authorization: `Bearer ${config.anonKey}`,
     "Content-Type": "application/json",
+    ...config.headers,
   }
 
   // Create a retry-aware fetch bound to client-level config
@@ -454,6 +456,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
         apikey: config.serviceRoleKey,
         Authorization: `Bearer ${config.serviceRoleKey}`,
         "Content-Type": "application/json",
+        ...config.headers,
       }
     : baseHeaders
   const storage = new StorageClient(`${config.url}/storage/v1`, storageHeaders)
@@ -468,6 +471,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
         apikey: config.serviceRoleKey,
         Authorization: `Bearer ${config.serviceRoleKey}`,
         "Content-Type": "application/json",
+        ...config.headers,
       }
     }
     await auth.ensureValidSession()

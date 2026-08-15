@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useCallback } from "react"
-import type { AnyDatabase, SupatypeError } from "@supatype/client"
+import type { AnyDatabase, AugmentedDatabase, SupatypeError } from "@supatype/client"
 import { useSupatype } from "./context.js"
 
 export type MutationOperation = "insert" | "update" | "delete" | "upsert"
@@ -33,7 +33,7 @@ export interface UseMutationResult<TRow> {
  * ```
  */
 export function useMutation<
-  TDatabase extends AnyDatabase = AnyDatabase,
+  TDatabase extends AnyDatabase = AugmentedDatabase,
   TTable extends keyof TDatabase["public"]["Tables"] & string = keyof TDatabase["public"]["Tables"] & string,
   TRow = TDatabase["public"]["Tables"][TTable]["Row"],
 >(

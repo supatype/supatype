@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { runtimeRouteSpec } from "../src/runtime-routes.js"
@@ -89,6 +89,25 @@ describe("runtime contract", () => {
     expect(first).toBe(second)
   })
 
+  it("self-host compose exposes the managed schema over REST, not a hardcoded public", () => {
+    // The literal here was the reason a non-default pg_schema pushed correctly and then answered
+    // PGRST106 on every request: the engine had moved and PostgREST was never told.
+    const compose = renderSelfHostCompose({
+      ...baseConfig,
+      schema: { pg_schema: "app" },
+    })
+    expect(compose).toContain('PGRST_DB_SCHEMA: "app, supatype, graphql_public, auth"')
+    expect(compose).not.toContain('PGRST_DB_SCHEMA: "public,')
+  })
+
+  it("self-host compose honours an explicit api_schemas list verbatim", () => {
+    const compose = renderSelfHostCompose({
+      ...baseConfig,
+      schema: { pg_schema: "app", api_schemas: ["app", "reporting"] },
+    })
+    expect(compose).toContain('PGRST_DB_SCHEMA: "app, reporting"')
+  })
+
   it("self-host compose does not inject a synthetic app-proxy service", () => {
     const compose = renderSelfHostCompose({ ...baseConfig, app: { mode: "proxy", upstream: "http://app:3000" } })
     expect(compose).not.toContain("ghcr.io/supatype/app-proxy")
@@ -107,6 +126,49 @@ describe("runtime contract", () => {
     expect(compose).toContain("\n  schema-engine:\n")
     expect(compose).toContain('profiles: ["tools"]')
     expect(compose).toContain("supatype/schema-engine:latest")
+  })
+
+  // PostgREST must connect as `authenticator`, never as POSTGRES_USER. POSTGRES_USER is
+  // `supatype_admin`, a superuser, and a superuser session may SET ROLE to any role in the
+  // cluster — so a request whose JWT named one got it. Verified against a live stack: a
+  // token with `role: "supatype_admin"` returned every row of an RLS-protected table.
+  it("self-host compose connects PostgREST as authenticator, not the superuser", () => {
+    const compose = renderSelfHostCompose(baseConfig)
+    expect(compose).toContain("PGRST_DB_URI: postgresql://authenticator:")
+    expect(compose).not.toMatch(/PGRST_DB_URI:.*POSTGRES_USER/)
+    expect(compose).not.toMatch(/PGRST_DB_URI:.*supatype_admin/)
+  })
+
+  // A separate credential, so rotating the operator's POSTGRES_PASSWORD cannot take the REST
+  // API down with it. Unset is a hard compose error rather than an empty password.
+  it("gives PostgREST its own credential, not POSTGRES_PASSWORD", () => {
+    const compose = renderSelfHostCompose(baseConfig)
+    expect(compose).toMatch(/PGRST_DB_URI:.*\$\{AUTHENTICATOR_PASSWORD:\?/)
+    expect(compose).not.toMatch(/PGRST_DB_URI:.*POSTGRES_PASSWORD/)
+    expect(compose).toMatch(/AUTHENTICATOR_PASSWORD: \$\{AUTHENTICATOR_PASSWORD:\?/)
+  })
+
+  // `supatype dev --provider docker` renders *this* file, so a `${VAR:?}` with no default
+  // takes local dev down before anything starts — `docker compose` refuses to interpolate and
+  // exits 1. Adding one therefore means wiring it into `upsertDevComposeEnv` as well. This
+  // list is the reminder; if it fails, do that rather than just updating the list.
+  it("requires only variables the dev path also sets", () => {
+    const compose = renderSelfHostCompose(baseConfig)
+    const required = [...compose.matchAll(/\$\{([A-Z0-9_]+):\?/g)].map((m) => m[1])
+    expect([...new Set(required)].sort()).toEqual([
+      "AUTHENTICATOR_PASSWORD",
+      "JWT_SECRET",
+      "POSTGRES_PASSWORD",
+    ])
+  })
+
+  // The whole point of requiring them: a service must never fall back to a secret published in
+  // this repository. That default used to reach PostgREST, storage and GoTrue.
+  it("never defaults a secret to a published constant", () => {
+    const compose = renderSelfHostCompose(baseConfig)
+    expect(compose).not.toContain("super-secret-jwt-token")
+    expect(compose).not.toMatch(/\$\{JWT_SECRET:-/)
+    expect(compose).not.toMatch(/\$\{POSTGRES_PASSWORD:-/)
   })
 
   it("composeDockerImageEnv maps pinned versions to SUPATYPE_*_IMAGE", () => {
@@ -246,6 +308,55 @@ describe("runtime contract", () => {
       expect(kong).toContain("http://host.docker.internal:3002")
       expect(kong).not.toContain("http://studio:3002")
       expect(kong).toContain("strip_path: false")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("manifest switches functions on, because the compose file always runs a worker", () => {
+    // The generated compose file starts a `functions-worker` and hands the server
+    // SUPATYPE_FUNCTIONS_WORKER_URL, while the manifest beside it said functions were disabled. The
+    // server reads the manifest, so every function 404'd in a stack that was running a worker for
+    // them. Docker `supatype dev` renders this same file, so one flag broke both paths.
+    const dir = mkdtempSync(join(tmpdir(), "supatype-fn-manifest-"))
+    try {
+      writeSelfHostCompose(dir, baseConfig)
+      const compose = readFileSync(join(dir, ".supatype", "self-host", "docker-compose.yml"), "utf8")
+      expect(compose).toContain("  functions-worker:")
+      expect(compose).toContain("SUPATYPE_FUNCTIONS_WORKER_URL: http://functions-worker:8001")
+
+      const manifest = JSON.parse(
+        readFileSync(join(dir, ".supatype", "manifest.json"), "utf8"),
+      ) as Record<string, unknown>
+      expect(manifest["functions_enabled"]).toBe(true)
+      expect(manifest["functions_worker_url"]).toBe("http://functions-worker:8001")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("repairs a manifest written by an older CLI without touching its other keys", () => {
+    // Regenerating the compose file is the obvious fix to try, so it has to work: without the
+    // repair, only brand-new projects get functions and an existing stack stays broken.
+    const dir = mkdtempSync(join(tmpdir(), "supatype-fn-repair-"))
+    try {
+      mkdirSync(join(dir, ".supatype"), { recursive: true })
+      writeFileSync(
+        join(dir, ".supatype", "manifest.json"),
+        JSON.stringify({ schema: "tenant_7", postgrest_url: "http://pg:3000", functions_enabled: false }),
+        "utf8",
+      )
+
+      writeSelfHostCompose(dir, baseConfig)
+
+      const manifest = JSON.parse(
+        readFileSync(join(dir, ".supatype", "manifest.json"), "utf8"),
+      ) as Record<string, unknown>
+      expect(manifest["functions_enabled"]).toBe(true)
+      expect(manifest["functions_worker_url"]).toBe("http://functions-worker:8001")
+      // Values `push` put there survive: the schema is not "public" and must stay as found.
+      expect(manifest["schema"]).toBe("tenant_7")
+      expect(manifest["postgrest_url"]).toBe("http://pg:3000")
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

@@ -83,16 +83,26 @@ export async function withComposeSchemaPushLock<T>(
   composeProject: string,
   fn: () => Promise<T>,
 ): Promise<T> {
-  const holdSql =
-    `SELECT pg_advisory_lock(${SCHEMA_PUSH_LOCK_CLASSID}, ${SCHEMA_PUSH_LOCK_OBJID});` +
-    ` SELECT pg_sleep(86400);`
-  const args = dbExecArgs(paths, cwd, composeProject, ["-c", holdSql])
+  // The lock is held by a psql session reading from **stdin**, not by `-c … pg_sleep(86400)`.
+  //
+  // Killing the local `docker` client does not stop the process inside the container: `docker
+  // compose exec` does not forward the signal. With a sleeping session that meant every push
+  // left a backend holding this advisory lock for 24 hours — so `supatype push` never exited and
+  // the next push blocked on it. Observed end-to-end before this change.
+  //
+  // Closing stdin *does* propagate: psql sees EOF, exits, and the session ends, which is what
+  // releases an advisory lock. Deterministic, and it needs no signal to cross the boundary.
+  const args = dbExecArgs(paths, cwd, composeProject, ["-f", "-"])
 
   let stderrBuf = ""
   const holder: ChildProcess = spawn("docker", args, {
     cwd,
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ["pipe", "pipe", "pipe"],
   })
+  holder.stdin?.write(
+    `SELECT pg_advisory_lock(${SCHEMA_PUSH_LOCK_CLASSID}, ${SCHEMA_PUSH_LOCK_OBJID});\n`,
+  )
+  // Deliberately not ended — the open pipe is what keeps the session, and the lock, alive.
   holder.stderr?.on("data", (chunk: Buffer) => {
     stderrBuf += chunk.toString()
   })
@@ -114,18 +124,47 @@ export async function withComposeSchemaPushLock<T>(
   try {
     return await fn()
   } finally {
-    if (holder.exitCode === null) {
-      holder.kill("SIGTERM")
-      await new Promise<void>((resolveDone) => {
-        const t = setTimeout(() => {
-          holder.kill("SIGKILL")
-          resolveDone()
-        }, 3000)
-        holder.once("exit", () => {
-          clearTimeout(t)
-          resolveDone()
-        })
-      })
-    }
+    await releaseHolder(holder, paths, cwd, composeProject)
   }
+}
+
+/**
+ * End the holder session, then confirm the lock is actually gone.
+ *
+ * Closing stdin is the mechanism; the check is because a leaked holder is silent and expensive —
+ * it blocks every later push. If EOF did not do it, terminate the backend directly.
+ */
+async function releaseHolder(
+  holder: ChildProcess,
+  paths: SelfHostComposePaths,
+  cwd: string,
+  composeProject: string,
+): Promise<void> {
+  if (holder.exitCode === null) {
+    holder.stdin?.end()
+    await new Promise<void>((resolveDone) => {
+      const t = setTimeout(() => {
+        holder.kill("SIGKILL")
+        resolveDone()
+      }, 5000)
+      holder.once("exit", () => {
+        clearTimeout(t)
+        resolveDone()
+      })
+    })
+  }
+
+  if (!schemaPushLockIsHeld(paths, cwd, composeProject)) return
+
+  // Last resort: the session outlived its client. Ending it releases the lock.
+  spawnSync(
+    "docker",
+    dbExecArgs(paths, cwd, composeProject, [
+      "-tAc",
+      `SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+         WHERE pid <> pg_backend_pid()
+           AND query LIKE '%pg_advisory_lock(${SCHEMA_PUSH_LOCK_CLASSID}, ${SCHEMA_PUSH_LOCK_OBJID})%'`,
+    ]),
+    { cwd, stdio: "ignore" },
+  )
 }

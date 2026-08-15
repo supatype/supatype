@@ -1,4 +1,4 @@
-interface AstModel {
+export interface AstModel {
   name?: string
   tableName?: string
   fields: Record<string, Record<string, unknown>>
@@ -11,7 +11,14 @@ interface AstShape {
   models?: AstModel[]
 }
 
-function resolveTableName(model: AstModel): string {
+/**
+ * Shared with the hooks generator on purpose.
+ *
+ * A hook's `row` must be the same shape the client sees for that table, and two copies of this logic
+ * would drift — the client would gain a column type the hook handler did not, which is the failure
+ * mode this codebase has already paid for once.
+ */
+export function resolveTableName(model: AstModel): string {
   const fromAnnotations = model.annotations?.db?.tableName
   if (typeof fromAnnotations === "string" && fromAnnotations.length > 0) return fromAnnotations
   if (typeof model.tableName === "string" && model.tableName.length > 0) return model.tableName
@@ -58,7 +65,7 @@ export function generateClientAugmentation(ast: unknown): string {
   return lines.join("\n")
 }
 
-function generateRowType(fields: Record<string, Record<string, unknown>>): string {
+export function generateRowType(fields: Record<string, Record<string, unknown>>): string {
   const entries = Object.entries(fields).sort(([a], [b]) => a.localeCompare(b))
   if (entries.length === 0) return "Record<string, unknown>"
   const body = entries
@@ -71,7 +78,7 @@ function insertColumnOptionalOnInsert(meta: Record<string, unknown>): boolean {
   return meta["default"] !== undefined || fieldServerGenerated(meta)
 }
 
-function generateInsertType(fields: Record<string, Record<string, unknown>>): string {
+export function generateInsertType(fields: Record<string, Record<string, unknown>>): string {
   const entries = Object.entries(fields).sort(([a], [b]) => a.localeCompare(b))
   if (entries.length === 0) return "Record<string, unknown>"
   const body = entries
@@ -83,7 +90,7 @@ function generateInsertType(fields: Record<string, Record<string, unknown>>): st
   return `{\n${body}\n}`
 }
 
-function generateUpdateType(fields: Record<string, Record<string, unknown>>): string {
+export function generateUpdateType(fields: Record<string, Record<string, unknown>>): string {
   const entries = Object.entries(fields).sort(([a], [b]) => a.localeCompare(b))
   if (entries.length === 0) return "Record<string, unknown>"
   const body = entries
@@ -96,6 +103,12 @@ function toTsType(meta: Record<string, unknown>): string {
   const kind = typeof meta["kind"] === "string" ? meta["kind"] : "json"
   const required = meta["required"] === true
   const base = (() => {
+    // A field that knows its own shape says so. Without this, everything stored as JSONB collapses
+    // to `Record<string, unknown>` in the generated row — so `Currency` would arrive as an opaque
+    // object rather than `{ amount: string; code: "USD" }`, and the schema's precision would be
+    // lost exactly where a caller reads it.
+    const declared = meta["tsType"]
+    if (typeof declared === "string" && declared.length > 0) return declared
     switch (kind) {
       case "uuid":
       case "slug":

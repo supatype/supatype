@@ -196,6 +196,26 @@ function binaryName(component: Component, version: string, platform: PlatformId)
   }
 }
 
+/**
+ * Names a published archive may carry, most-canonical first.
+ *
+ * `supatype-postgres` published the Intel macOS archive as `darwin-x86_64` while every other platform
+ * used `amd64` — the spelling the CLI derives from `process.arch === "x64"`. Releases already on the CDN
+ * carry the old name, so both are accepted and the *signed* checksums manifest decides which exists.
+ * Nothing is guessed: the URL and the hash always come from the same manifest entry.
+ */
+export function archiveNameCandidates(
+  component: Component,
+  version: string,
+  platform: PlatformId,
+): string[] {
+  const canonical = binaryName(component, version, platform)
+  if (component === "postgres" && platform.os === "darwin" && platform.arch === "amd64") {
+    return [canonical, canonical.replace("darwin-amd64", "darwin-x86_64")]
+  }
+  return [canonical]
+}
+
 // ---------------------------------------------------------------------------
 // Platform detection
 // ---------------------------------------------------------------------------
@@ -390,7 +410,6 @@ export async function download(
     return destPath
   }
 
-  const binaryUrl = `${CDN_BASE}${CDN_PATHS[component](version, platform)}`
   const checksumsUrl = `${CDN_BASE}${checksumsDirPath(component, version)}`
   const minisigUrl = `${checksumsUrl}.minisig`
 
@@ -399,15 +418,20 @@ export async function download(
   const tmpPath = destPath + ".tmp"
   try {
     // ── Fetch checksums + optional minisig (retried on transient failures) ───
-    const expectedChecksum = await withRetry(() =>
-      fetchChecksums(checksumsUrl, minisigUrl, name),
+    const match = await withRetry(() =>
+      fetchChecksums(checksumsUrl, minisigUrl, archiveNameCandidates(component, version, platform)),
     )
+
+    // The directory from the path template, the filename from the manifest: a release published under
+    // a legacy name is fetched under that name rather than one the CLI assumed.
+    const cdnDir = CDN_PATHS[component](version, platform).replace(/\/[^/]+$/, "")
+    const binaryUrl = `${CDN_BASE}${cdnDir}/${match.filename}`
 
     // ── Stream-download binary with progress (retried on transient failures) ─
     await withRetry(() => streamToFileWithProgress(binaryUrl, tmpPath))
 
     // ── Verify SHA256 ────────────────────────────────────────────────────────
-    await verifyChecksum(tmpPath, expectedChecksum, component)
+    await verifyChecksum(tmpPath, match.checksum, component)
 
     writeFileSync(destPath, readFileSync(tmpPath))
 
@@ -440,8 +464,8 @@ export async function download(
 async function fetchChecksums(
   checksumsUrl: string,
   minisigUrl: string,
-  binaryFilename: string,
-): Promise<string> {
+  binaryFilenames: string | string[],
+): Promise<ChecksumMatch> {
   const csResp = await fetch(checksumsUrl)
   if (!csResp.ok) {
     throw new Error(`Failed to fetch checksums from ${checksumsUrl}: HTTP ${csResp.status}`)
@@ -458,7 +482,7 @@ async function fetchChecksums(
         "[supatype] \u26a0  SUPATYPE_ALLOW_UNVERIFIED_DOWNLOADS=1 — no minisign public " +
           "key configured; verifying SHA256 only (authenticity NOT checked).",
       )
-      return extractChecksum(checksumsText, binaryFilename)
+      return extractChecksum(checksumsText, binaryFilenames)
     }
     throw new Error(
       "No minisign public key configured — cannot verify release authenticity.\n" +
@@ -479,7 +503,7 @@ async function fetchChecksums(
   const sigText = await sigResp.text()
   verifyMinisign(Buffer.from(checksumsText, "utf8"), sigText, pubKey)
 
-  return extractChecksum(checksumsText, binaryFilename)
+  return extractChecksum(checksumsText, binaryFilenames)
 }
 
 // ---------------------------------------------------------------------------
@@ -568,18 +592,26 @@ export function verifyMinisign(fileBytes: Buffer, sigFileContent: string, pubKey
  * Extract the SHA256 hash for `filename` from a checksums.sha256 file.
  * Format: `<hash>  <filename>` (sha256sum output, two spaces).
  */
-function extractChecksum(checksumsText: string, filename: string): string {
-  const target = basename(filename)
-  for (const line of checksumsText.split("\n")) {
-    const parts = line.trim().split(/\s+/)
-    if (parts.length >= 2 && parts[1] === target) {
-      return parts[0]!
+function extractChecksum(checksumsText: string, filenames: string | string[]): ChecksumMatch {
+  const targets = (Array.isArray(filenames) ? filenames : [filenames]).map((f) => basename(f))
+  for (const target of targets) {
+    for (const line of checksumsText.split("\n")) {
+      const parts = line.trim().split(/\s+/)
+      if (parts.length >= 2 && parts[1] === target) {
+        return { filename: target, checksum: parts[0]! }
+      }
     }
   }
   throw new Error(
-    `Checksum not found for "${target}" in checksums.sha256.\n` +
+    `Checksum not found for ${targets.map((t) => `"${t}"`).join(" or ")} in checksums.sha256.\n` +
       "The checksums file may be from a different release.",
   )
+}
+
+/** Which published name matched, and its hash — both from the same signed manifest entry. */
+export interface ChecksumMatch {
+  filename: string
+  checksum: string
 }
 
 // ---------------------------------------------------------------------------

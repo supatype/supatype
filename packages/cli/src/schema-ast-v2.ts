@@ -88,7 +88,7 @@ export interface ModelAstV2 {
   options: Record<string, unknown>
   annotations: {
     db: { tableName: string; indexes: unknown[] }
-    platform: { access: Record<string, unknown> }
+    platform: { access: Record<string, unknown>; hooks?: Record<string, unknown> }
   }
 }
 
@@ -294,6 +294,7 @@ export function emitModel(
   tableName: string,
   access: Record<string, unknown>,
   indexes: unknown[] = [],
+  hooks: Record<string, unknown> = {},
 ): ModelAstV2 {
   return {
     name,
@@ -301,7 +302,9 @@ export function emitModel(
     options,
     annotations: {
       db: { tableName, indexes },
-      platform: { access },
+      // Hooks sit in `platform` beside `access`: they are an API-layer concern, not a column one —
+      // supatype-server reads them, Postgres never sees them.
+      platform: { access, ...(Object.keys(hooks).length > 0 && { hooks }) },
     },
   }
 }

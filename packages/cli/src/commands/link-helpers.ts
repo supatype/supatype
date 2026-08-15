@@ -1,5 +1,6 @@
 import type { Command } from "commander"
 import { loadConfig } from "../config.js"
+import { loadCloudCredentials } from "../cloud-credentials.js"
 import {
   createCloudLink,
   createSelfHostLink,
@@ -23,7 +24,8 @@ function resolveLinkToken(opts: {
     opts.serviceRoleKey ??
     process.env["SUPATYPE_ACCESS_TOKEN"] ??
     process.env["SUPATYPE_TOKEN"] ??
-    process.env["SERVICE_ROLE_KEY"]
+    process.env["SERVICE_ROLE_KEY"] ??
+    loadCloudCredentials()?.accessToken
   )
 }
 
@@ -211,11 +213,15 @@ export async function runLinkAction(opts: {
   }
 
   if (!token) {
-    error("Authentication required. Set SUPATYPE_ACCESS_TOKEN or pass --token.")
+    error("Authentication required. Run: supatype login  (or set SUPATYPE_ACCESS_TOKEN / pass --token).")
     process.exit(1)
   }
 
   const cloudApiUrl = opts.apiUrl.replace(/\/$/, "")
+  const creds = loadCloudCredentials()
+  const refreshToken =
+    (creds?.apiUrl.replace(/\/$/, "") === cloudApiUrl ? creds.refreshToken : undefined) ??
+    existing?.refreshToken
 
   if (project) {
     const one = await targetFetch<{ slug: string; orgId: string }>(cloudApiUrl, "/api/v1", {
@@ -250,6 +256,7 @@ export async function runLinkAction(opts: {
       orgId: one.orgId,
       environments,
       existing,
+      ...(refreshToken !== undefined ? { refreshToken } : {}),
     })
     saveProjectLink(cwd, link)
     info(`Linked to cloud project: ${project}`)

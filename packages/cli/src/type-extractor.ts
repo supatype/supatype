@@ -46,7 +46,7 @@ export function extractSchemaAstFromTypes(
   const bucketAliases = new Map<string, string>()
   const bucketsById = new Map<string, ExtractedStorageBucketAst>()
   for (const sourceFile of sourceFiles) {
-    const bucketContext = collectBucketContext(sourceFile)
+    const bucketContext = collectBucketContext(sourceFile, resolveCtx)
     for (const [alias, bucketId] of bucketContext.aliases) {
       bucketAliases.set(alias, bucketId)
     }
@@ -105,16 +105,17 @@ export function extractSchemaAstFromTypes(
         )
       }
 
-      const { tableName, access, options, indexes } = parseModelMeta(
+      const { tableName, access, options, indexes, hooks } = parseModelMeta(
         metaArg,
         sourceFile,
         stmt.name.text,
         fieldsArg,
         fields,
+        resolveCtx,
       )
 
       models.push(
-        emitModel(stmt.name.text, fields, options, tableName, access, indexes),
+        emitModel(stmt.name.text, fields, options, tableName, access, indexes, hooks),
       )
     }
   }
@@ -907,8 +908,19 @@ function parseScalarType(
         return scalar("tsVector")
       case "Money":
         return scalar("money")
-      case "Decimal":
-        return scalar("decimal")
+      case "Decimal": {
+        // `Decimal<10, 2>` names a precision and a scale, and the engine renders `NUMERIC(p, s)`
+        // from them — but nothing used to read the type arguments, so every Decimal became an
+        // unbounded NUMERIC. Silently, which is the worst way to lose a constraint on a money column.
+        const precision = parseNumericTypeArg(typeNode.typeArguments?.[0], sourceFile)
+        const scale = parseNumericTypeArg(typeNode.typeArguments?.[1], sourceFile)
+        return scalar("decimal", {
+          kernel: {
+            ...(precision !== undefined && { precision }),
+            ...(scale !== undefined && { scale }),
+          },
+        })
+      }
       case "DateOnly":
         return scalar("date")
       case "Date":
@@ -930,7 +942,35 @@ function parseScalarType(
       case "Button":
         return scalar("button", { db: { pgType: "JSONB" } })
       case "Duration":
-        return scalar("json", { db: { pgType: "JSONB" } })
+        return scalar("json", {
+          db: { pgType: "JSONB" },
+          platform: { editor: "duration" },
+          kernel: { tsType: "{ ms: number }" },
+        })
+      // `Code` and `Currency` each carry two values, so a scalar column would have to drop one:
+      // JSONB keeps `lang` with its `source`, and an amount with the currency it is denominated in.
+      // `tsType` is what stops the generated client row from flattening them to an opaque object.
+      case "Code": {
+        const lang = literalStringType(typeNode.typeArguments?.[0])
+        return scalar("json", {
+          db: { pgType: "JSONB" },
+          // `editor` picks the Studio widget. Without it a code snippet and a money amount both get
+          // the raw JSON editor, because the widget is otherwise chosen from the column kind alone
+          // and both of these are JSONB.
+          platform: { editor: "code" },
+          kernel: { tsType: `{ lang: ${lang !== null ? JSON.stringify(lang) : "string"}; source: string }` },
+        })
+      }
+      case "Currency": {
+        const currencyCode = literalStringType(typeNode.typeArguments?.[0])
+        return scalar("json", {
+          db: { pgType: "JSONB" },
+          platform: { editor: "currency" },
+          kernel: {
+            tsType: `{ amount: string; code: ${currencyCode !== null ? JSON.stringify(currencyCode) : "string"} }`,
+          },
+        })
+      }
       case "GeoPoint":
       case "Geo":
         return scalar("geo", { kernel: { geoType: "point", srid: 4326 } })
@@ -1066,7 +1106,10 @@ function parseStringLiteralTuple(node: ts.TypeNode, sourceFile: ts.SourceFile): 
   return out
 }
 
-function collectBucketContext(sourceFile: ts.SourceFile): {
+function collectBucketContext(
+  sourceFile: ts.SourceFile,
+  resolveCtx: ResolveContext,
+): {
   aliases: Map<string, string>
   bucketsById: Map<string, ExtractedStorageBucketAst>
 } {
@@ -1084,7 +1127,7 @@ function collectBucketContext(sourceFile: ts.SourceFile): {
 
     const parsed =
       configArg && ts.isTypeLiteralNode(configArg)
-        ? parseBucketTypeLiteral(configArg, sourceFile)
+        ? parseBucketTypeLiteral(configArg, sourceFile, id, resolveCtx)
         : {}
 
     const next = buildExtractedBucketAst(id, parsed)
@@ -1133,6 +1176,8 @@ interface ParsedBucketLiteral {
 function parseBucketTypeLiteral(
   lit: ts.TypeLiteralNode,
   sourceFile: ts.SourceFile,
+  bucketId: string,
+  resolveCtx: ResolveContext,
 ): Partial<ParsedBucketLiteral> {
   const out: Partial<ParsedBucketLiteral> = {}
   for (const member of lit.members) {
@@ -1159,7 +1204,7 @@ function parseBucketTypeLiteral(
       continue
     }
     if (key === "access") {
-      const acc = parsePartialBucketAccess(member.type, sourceFile)
+      const acc = parsePartialBucketAccess(member.type, sourceFile, bucketId, resolveCtx)
       if (acc !== undefined && Object.keys(acc).length > 0) out.access = acc
       continue
     }
@@ -1221,14 +1266,28 @@ function parseMimeAcceptList(typeNode: ts.TypeNode, sourceFile: ts.SourceFile): 
 function parsePartialBucketAccess(
   typeNode: ts.TypeNode,
   sourceFile: ts.SourceFile,
+  bucketId: string,
+  resolveCtx: ResolveContext,
 ): Record<string, unknown> | undefined {
-  if (!ts.isTypeLiteralNode(typeNode)) return undefined
+  // Same hazard as model access: silently dropping these rules publishes a
+  // bucket with no read/write restrictions, so an alias must resolve and an
+  // unresolvable annotation must fail rather than degrade to "no rules".
+  const literal = resolveAccessLiteral(typeNode, sourceFile, resolveCtx)
+  if (!literal) {
+    throw new Error(
+      `Bucket "${bucketId}": could not resolve its \`access\` rules from ` +
+        `\`${typeNode.getText(sourceFile)}\`.\n` +
+        `  access must be an object type, or a type alias for one, e.g.\n` +
+        `    export type MediaAccess = { read: Public; create: Authenticated }\n` +
+        `  Refusing to continue: an unresolved access block would leave this bucket unrestricted.`,
+    )
+  }
   const access: Record<string, unknown> = {}
-  for (const member of typeNode.members) {
+  for (const member of literal.members) {
     if (!ts.isPropertySignature(member) || !member.type) continue
     const key = getPropertyName(member.name)
     if (key !== "read" && key !== "create" && key !== "delete") continue
-    access[key] = parseAccessRule(member.type, sourceFile)
+    access[key] = parseAccessRule(member.type, sourceFile, resolveCtx)
   }
   return access
 }
@@ -1554,11 +1613,13 @@ function parseModelMeta(
   modelName: string,
   fieldsArg: ts.TypeNode,
   fields: Record<string, FieldAstV2>,
+  resolveCtx: ResolveContext,
 ): {
   tableName: string
   access: Record<string, unknown>
   options: Record<string, unknown>
   indexes: unknown[]
+  hooks: Record<string, ParsedModelHook>
 } {
   const literal = parseMetaLiteral(metaArg, sourceFile)
   const singleton = literal.singleton === true
@@ -1582,9 +1643,87 @@ function parseModelMeta(
 
   return {
     tableName,
-    access: parseModelAccess(metaArg, sourceFile),
+    access: parseModelAccess(metaArg, sourceFile, modelName, fields, resolveCtx),
     options,
     indexes: parseModelIndexes(metaArg, sourceFile, fields),
+    hooks: parseModelHooks(metaArg, sourceFile),
+  }
+}
+
+/** One lifecycle hook: `"fn-name"` or `{ function: "fn-name", timeout: 5000 }`. */
+interface ParsedModelHook {
+  function: string
+  timeout?: number
+  onUnavailable?: "reject" | "log"
+}
+
+const HOOK_EVENTS = ["beforeChange", "afterChange", "beforeDelete", "afterDelete"] as const
+
+/**
+ * Read `hooks` from a model's meta.
+ *
+ * Deliberately strict: an entry that is neither a string nor an object with a `function` name is
+ * **dropped**, and `validateModelHooks` then reports the model whose hook did not survive. A hook
+ * silently not firing is the failure this feature cannot have, so an unreadable declaration must
+ * fail the push rather than extract to nothing.
+ */
+function parseModelHooks(
+  metaArg: ts.TypeNode | undefined,
+  sourceFile: ts.SourceFile,
+): Record<string, ParsedModelHook> {
+  if (!metaArg || !ts.isTypeLiteralNode(metaArg)) return {}
+
+  const hooksProp = metaArg.members.find(
+    (member) => ts.isPropertySignature(member) && getPropertyName(member.name) === "hooks",
+  )
+  if (!hooksProp || !ts.isPropertySignature(hooksProp) || !hooksProp.type) return {}
+  if (!ts.isTypeLiteralNode(hooksProp.type)) return {}
+
+  const hooks: Record<string, ParsedModelHook> = {}
+  for (const member of hooksProp.type.members) {
+    if (!ts.isPropertySignature(member) || !member.type) continue
+    const event = getPropertyName(member.name)
+    if (!event || !(HOOK_EVENTS as readonly string[]).includes(event)) continue
+
+    const parsed = parseModelHookValue(member.type, sourceFile)
+    if (parsed !== null) hooks[event] = parsed
+  }
+  return hooks
+}
+
+function parseModelHookValue(
+  node: ts.TypeNode,
+  sourceFile: ts.SourceFile,
+): ParsedModelHook | null {
+  const literal = literalStringType(node)
+  if (literal !== null) {
+    return literal.trim().length > 0 ? { function: literal } : null
+  }
+  if (!ts.isTypeLiteralNode(node)) return null
+
+  let fn: string | undefined
+  let timeout: number | undefined
+  let onUnavailable: "reject" | "log" | undefined
+
+  for (const member of node.members) {
+    if (!ts.isPropertySignature(member) || !member.type) continue
+    const key = getPropertyName(member.name)
+    if (key === "function") {
+      const value = literalStringType(member.type)
+      if (value !== null && value.trim().length > 0) fn = value
+    } else if (key === "timeout") {
+      timeout = parseNumericTypeArg(member.type, sourceFile)
+    } else if (key === "onUnavailable") {
+      const value = literalStringType(member.type)
+      if (value === "reject" || value === "log") onUnavailable = value
+    }
+  }
+
+  if (fn === undefined) return null
+  return {
+    function: fn,
+    ...(timeout !== undefined && { timeout }),
+    ...(onUnavailable !== undefined && { onUnavailable }),
   }
 }
 
@@ -1646,28 +1785,289 @@ function resolveIndexFieldName(fieldName: string, fields: Record<string, FieldAs
   return fieldName
 }
 
-function parseModelAccess(metaArg: ts.TypeNode | undefined, sourceFile: ts.SourceFile): Record<string, unknown> {
+/**
+ * Resolve an `access:` annotation to its rule object.
+ *
+ * `access` may be written inline (`access: { read: Public }`) or factored into a
+ * shared type alias (`access: CmsPublicReadAdminWrite`) — the latter is the
+ * natural way to reuse one policy set across many models, so it has to resolve
+ * through aliases and intersections, not just literals.
+ *
+ * Anything unresolvable throws. Returning `{}` here means "no access rules",
+ * which the differ treats as "emit no RLS policies" — so a typo or an
+ * unsupported shape silently published a table with no row-level protection at
+ * all. Failing the extract is the only safe outcome.
+ */
+function parseModelAccess(
+  metaArg: ts.TypeNode | undefined,
+  sourceFile: ts.SourceFile,
+  modelName: string,
+  fields: Record<string, FieldAstV2>,
+  resolveCtx: ResolveContext,
+): Record<string, unknown> {
   if (!metaArg || !ts.isTypeLiteralNode(metaArg)) return {}
   const accessProp = metaArg.members.find(
     (member) => ts.isPropertySignature(member) && getPropertyName(member.name) === "access",
   )
-  if (!accessProp || !ts.isPropertySignature(accessProp) || !accessProp.type || !ts.isTypeLiteralNode(accessProp.type)) {
+  if (!accessProp || !ts.isPropertySignature(accessProp) || !accessProp.type) {
     return {}
   }
 
+  const literal = resolveAccessLiteral(accessProp.type, sourceFile, resolveCtx)
+  if (!literal) {
+    throw new Error(
+      `Model "${modelName}": could not resolve its \`access\` rules from ` +
+        `\`${accessProp.type.getText(sourceFile)}\`.\n` +
+        `  access must be an object type, or a type alias for one:\n` +
+        `    export type PublicReadAdminWrite = { read: Public; create: Role<"admin"> }\n` +
+        `  A \`const … as const\` value cannot be used here — access is read from types, and\n` +
+        `  rule names like Public / Role are types, not values.\n` +
+        `  Refusing to continue: an unresolved access block would publish this table with no RLS.`,
+    )
+  }
+
   const access: Record<string, unknown> = {}
-  for (const member of accessProp.type.members) {
+  for (const member of literal.members) {
     if (!ts.isPropertySignature(member) || !member.type) continue
     const key = getPropertyName(member.name)
     if (!key) continue
-    access[key] = parseAccessRule(member.type, sourceFile)
+
+    // `update: { using, check }` splits which rows may be changed from what they
+    // may be changed into. Flattened here into the two AST fields the engine
+    // renders, so the engine never has to know about the sugar.
+    if (key === "update") {
+      const split = parseUpdateSplit(member.type, sourceFile, resolveCtx)
+      if (split) {
+        access["update"] = split.using
+        if (split.check !== undefined) access["updateCheck"] = split.check
+        continue
+      }
+    }
+
+    if (key === "fields") {
+      const fieldRules = parseFieldAccess(member.type, sourceFile, modelName, fields, resolveCtx)
+      if (Object.keys(fieldRules).length > 0) access["fields"] = fieldRules
+      continue
+    }
+
+    access[key] = parseAccessRule(member.type, sourceFile, resolveCtx)
+  }
+
+  if (Object.keys(access).length === 0) {
+    throw new Error(
+      `Model "${modelName}": \`access\` resolved to an empty rule set ` +
+        `(from \`${accessProp.type.getText(sourceFile)}\`). Remove \`access\` if the table is ` +
+        `intentionally unrestricted, or declare at least one of read/create/update/delete.`,
+    )
   }
   return access
 }
 
-function parseAccessRule(typeNode: ts.TypeNode, sourceFile: ts.SourceFile): Record<string, unknown> {
+/**
+ * `fields: { [column]: { read?, write? } }` — per-column narrowing of the table rules.
+ *
+ * Any rule the DSL can express is allowed. Enforcement is a query rewrite that
+ * evaluates the rule per row with the caller's claims, so ownership, membership and
+ * application roles all work here — none of which a column privilege could express.
+ */
+function parseFieldAccess(
+  typeNode: ts.TypeNode,
+  sourceFile: ts.SourceFile,
+  modelName: string,
+  fields: Record<string, FieldAstV2>,
+  resolveCtx?: ResolveContext,
+): Record<string, Record<string, unknown>> {
+  const literal = resolveCtx
+    ? resolveAccessLiteral(typeNode, sourceFile, resolveCtx)
+    : ts.isTypeLiteralNode(typeNode)
+      ? typeNode
+      : null
+  if (!literal) {
+    throw new Error(
+      `Model "${modelName}": could not resolve \`access.fields\` from ` +
+        `\`${typeNode.getText(sourceFile)}\`. It must be an object type, or a type ` +
+        `alias for one: \`fields: { salary: { read: Private } }\`.`,
+    )
+  }
+
+  const out: Record<string, Record<string, unknown>> = {}
+  for (const member of literal.members) {
+    if (!ts.isPropertySignature(member) || !member.type) continue
+    const declared = getPropertyName(member.name)
+    if (!declared) continue
+    // A privilege is granted on a column, and a relation field is not one --
+    // `author` is stored as `author_id`. Same mapping the index builder uses.
+    // Names that match nothing are passed through rather than rejected: composite
+    // wrappers expand into columns this map never sees, so a hard error here would
+    // refuse valid schemas. Postgres rejects the unknown column at push instead.
+    const column = resolveIndexFieldName(declared, fields) ?? declared
+
+    const columnLiteral = resolveCtx
+      ? resolveAccessLiteral(member.type, sourceFile, resolveCtx)
+      : ts.isTypeLiteralNode(member.type)
+        ? member.type
+        : null
+    if (!columnLiteral) {
+      throw new Error(
+        `Model "${modelName}": \`access.fields.${column}\` must be an object with ` +
+          `\`read\` and/or \`write\`, found \`${member.type.getText(sourceFile)}\`.`,
+      )
+    }
+
+    const rules: Record<string, unknown> = {}
+    for (const opMember of columnLiteral.members) {
+      if (!ts.isPropertySignature(opMember) || !opMember.type) continue
+      const operation = getPropertyName(opMember.name)
+      if (operation !== "read" && operation !== "write") {
+        throw new Error(
+          `Model "${modelName}": \`access.fields.${column}\` may only contain ` +
+            `\`read\` and \`write\`, found "${operation}".`,
+        )
+      }
+      rules[operation] = parseAccessRule(opMember.type, sourceFile, resolveCtx)
+    }
+
+    // An empty `{}` reads as "this column is restricted" but restricts nothing.
+    if (Object.keys(rules).length === 0) {
+      throw new Error(
+        `Model "${modelName}": \`access.fields.${column}\` declares no rules. ` +
+          `Give it a \`read\` or a \`write\`, or remove the entry.`,
+      )
+    }
+    out[column] = rules
+  }
+  return out
+}
+
+/**
+ * `update: { using: …, check: … }`, or null when `update` is a plain rule.
+ *
+ * An update policy has two halves: `USING` picks which existing rows may be
+ * modified, `WITH CHECK` constrains what they may become. One rule for both is the
+ * right default and what every existing schema means — but it makes "an editor may
+ * move a post between their own sites" inexpressible, because the row they are
+ * changing and the row they are changing it into are judged by the same predicate.
+ */
+function parseUpdateSplit(
+  typeNode: ts.TypeNode,
+  sourceFile: ts.SourceFile,
+  resolveCtx?: ResolveContext,
+): { using: Record<string, unknown>; check?: Record<string, unknown> } | null {
+  const literal = resolveCtx
+    ? resolveAccessLiteral(typeNode, sourceFile, resolveCtx)
+    : ts.isTypeLiteralNode(typeNode)
+      ? typeNode
+      : null
+  if (!literal) return null
+
+  let using: ts.TypeNode | undefined
+  let check: ts.TypeNode | undefined
+  for (const member of literal.members) {
+    if (!ts.isPropertySignature(member) || !member.type) continue
+    const name = getPropertyName(member.name)
+    if (name === "using") using = member.type
+    else if (name === "check") check = member.type
+    else if (name !== undefined) {
+      throw new Error(
+        `\`update\` may only contain \`using\` and \`check\`, found "${name}".`,
+      )
+    }
+  }
+
+  // Not the split form at all — an object with neither key is some other shape.
+  if (!using && !check) return null
+  if (!using) {
+    throw new Error(
+      "`update: { check }` needs a `using` rule too — without it no row is " +
+        "selectable for update, so the check can never apply.",
+    )
+  }
+
+  const parsed: { using: Record<string, unknown>; check?: Record<string, unknown> } = {
+    using: parseAccessRule(using, sourceFile, resolveCtx),
+  }
+  if (check) parsed.check = parseAccessRule(check, sourceFile, resolveCtx)
+  return parsed
+}
+
+/** Walk aliases/intersections down to the object type holding the access rules. */
+function resolveAccessLiteral(
+  typeNode: ts.TypeNode,
+  sourceFile: ts.SourceFile,
+  resolveCtx: ResolveContext,
+  depth = 0,
+): ts.TypeLiteralNode | null {
+  if (depth > 16) return null
+  if (ts.isTypeLiteralNode(typeNode)) return typeNode
+
+  if (ts.isIntersectionTypeNode(typeNode)) {
+    const members: ts.TypeElement[] = []
+    for (const part of typeNode.types) {
+      const resolved = resolveAccessLiteral(part, sourceFile, resolveCtx, depth + 1)
+      if (!resolved) return null
+      members.push(...resolved.members)
+    }
+    return ts.factory.createTypeLiteralNode(members)
+  }
+
+  if (ts.isTypeReferenceNode(typeNode)) {
+    const expanded = tryResolveTypeReference(typeNode, sourceFile, resolveCtx)
+    if (expanded) return resolveAccessLiteral(expanded, sourceFile, resolveCtx, depth + 1)
+  }
+
+  if (needsChecker(typeNode)) {
+    const resolved = resolveTypeNode(typeNode, sourceFile, resolveCtx)
+    if (resolved !== typeNode) {
+      return resolveAccessLiteral(resolved, sourceFile, resolveCtx, depth + 1)
+    }
+  }
+
+  return null
+}
+
+/**
+ * `access` rules may be declared in a different file from the model (a shared
+ * alias), and `getText(file)` reads the given file's text at the node's offsets
+ * — so passing the model's file for a node owned by another one yielded garbage
+ * and every rule silently fell through to `private`. Always read a node's text
+ * from the file that actually owns it.
+ */
+function ownerText(node: ts.Node, fallback: ts.SourceFile): string {
+  const own = node.pos >= 0 ? node.getSourceFile() : undefined
+  return node.getText(own ?? fallback)
+}
+
+function parseAccessRule(
+  typeNode: ts.TypeNode,
+  sourceFile: ts.SourceFile,
+  resolveCtx?: ResolveContext,
+  depth = 0,
+): Record<string, unknown> {
+  // Reuse a single rule from a shared set: `access: { read: Rules["read"] }`.
+  if (ts.isIndexedAccessTypeNode(typeNode) && resolveCtx) {
+    const member = resolveIndexedAccessRule(typeNode, sourceFile, resolveCtx)
+    if (member) return parseAccessRule(member, sourceFile, resolveCtx)
+    throw new Error(
+      `Could not resolve access rule from \`${ownerText(typeNode, sourceFile)}\`. ` +
+        `Reference a rule set member as \`Rules["read"]\`, where Rules is a type alias.`,
+    )
+  }
+
   if (!ts.isTypeReferenceNode(typeNode)) return { type: "private" }
-  const ref = typeNode.typeName.getText(sourceFile)
+
+  // `Rules.read` is a qualified name (namespace lookup), not a member of a type
+  // alias — TypeScript rejects it, and it used to fall through to `private`,
+  // silently denying an operation the author meant to grant.
+  if (ts.isQualifiedName(typeNode.typeName)) {
+    const text = ownerText(typeNode.typeName, sourceFile)
+    const [head, ...rest] = text.split(".")
+    throw new Error(
+      `Access rule \`${text}\` is not valid: a member of a rule-set type must be written ` +
+        `\`${head}["${rest.join(".")}"]\`, not \`${text}\`.`,
+    )
+  }
+
+  const ref = ownerText(typeNode.typeName, sourceFile)
   switch (ref) {
     case "Public":
     case "BucketPublic":
@@ -1684,24 +2084,459 @@ function parseAccessRule(typeNode: ts.TypeNode, sourceFile: ts.SourceFile): Reco
       const args = typeNode.typeArguments ?? []
       const keyArg = args.length >= 2 ? args[1] : args[0]
       // Must match engine `AccessRule::Owner { field }` (see supatype-schema-engine parser/ast.rs).
-      return { type: "owner", field: keyArg?.getText(sourceFile).replace(/['"]/g, "") ?? "user_id" }
+      return {
+        type: "owner",
+        field: keyArg ? ownerText(keyArg, sourceFile).replace(/['"]/g, "") : "user_id",
+      }
     }
     case "OwnerFrom": {
       const relationArg = typeNode.typeArguments?.[0]
-      const relationField = relationArg?.getText(sourceFile).replace(/['"]/g, "") ?? "owner"
+      const relationField = relationArg
+        ? ownerText(relationArg, sourceFile).replace(/['"]/g, "")
+        : "owner"
       return { type: "owner", field: relationField }
     }
-    case "Role": {
-      const roleArg = typeNode.typeArguments?.[0]
-      return { type: "role", roles: [roleArg?.getText(sourceFile).replace(/['"]/g, "") ?? "admin"] }
-    }
+    case "Role":
     case "BucketRole": {
       const roleArg = typeNode.typeArguments?.[0]
-      return { type: "role", roles: [roleArg?.getText(sourceFile).replace(/['"]/g, "") ?? "admin"] }
+      return {
+        type: "role",
+        roles: [roleArg ? ownerText(roleArg, sourceFile).replace(/['"]/g, "") : "admin"],
+      }
     }
-    default:
-      return { type: "private" }
+    case "Any": {
+      const listArg = typeNode.typeArguments?.[0]
+      if (!listArg || !ts.isTupleTypeNode(listArg)) {
+        throw new Error(
+          `\`Any<>\` takes a tuple of rules, as in ` +
+            `\`Any<[Role<"admin">, Owner<"author_id">]>\`.`,
+        )
+      }
+      // An empty list would compile to a policy that grants nothing while
+      // reading like a grant — the exact silent-denial failure the unknown-rule
+      // branch below exists to prevent.
+      if (listArg.elements.length === 0) {
+        throw new Error(
+          "`Any<[]>` grants nothing. List the rules that should allow access, or " +
+            "use `Private` if denying is the intent.",
+        )
+      }
+      return {
+        type: "any",
+        rules: listArg.elements.map((element) =>
+          parseAccessRule(element, sourceFile, resolveCtx),
+        ),
+      }
+    }
+    case "All": {
+      const listArg = typeNode.typeArguments?.[0]
+      if (!listArg || !ts.isTupleTypeNode(listArg)) {
+        throw new Error(
+          '`All<>` takes a tuple of rules, as in `All<[Role<"editor">, NotNull<"published_at">]>`.',
+        )
+      }
+      // Unlike `Any<[]>`, an empty `All` grants *everything* — an empty AND is
+      // true. Reading as a restriction while imposing none is worse than an error.
+      if (listArg.elements.length === 0) {
+        throw new Error(
+          "`All<[]>` restricts nothing and grants everything. List the rules that " +
+            "must hold, or use `Public` if that is the intent.",
+        )
+      }
+      return {
+        type: "all",
+        rules: listArg.elements.map((element) =>
+          parseAccessRule(element, sourceFile, resolveCtx),
+        ),
+      }
+    }
+    case "Not": {
+      const inner = typeNode.typeArguments?.[0]
+      if (!inner) {
+        throw new Error('`Not<>` takes one rule, as in `Not<Role<"banned">>`.')
+      }
+      return { type: "not", rule: parseAccessRule(inner, sourceFile, resolveCtx) }
+    }
+    case "Eq":
+    case "Neq":
+    case "Gt":
+    case "Gte":
+    case "Lt":
+    case "Lte":
+    case "Like": {
+      const args = typeNode.typeArguments ?? []
+      if (args.length !== 2) {
+        throw new Error(
+          `\`${ref}<>\` takes two operands, as in \`${ref}<"author_id", AuthUid>\`.`,
+        )
+      }
+      return {
+        type: "compare",
+        op: ref.toLowerCase(),
+        left: parseAccessOperand(args[0]!, sourceFile),
+        right: parseAccessOperand(args[1]!, sourceFile),
+      }
+    }
+    case "IsNull":
+    case "NotNull": {
+      const operand = typeNode.typeArguments?.[0]
+      if (!operand) {
+        throw new Error(`\`${ref}<>\` takes one operand, as in \`${ref}<"deleted_at">\`.`)
+      }
+      return {
+        type: "nullCheck",
+        operand: parseAccessOperand(operand, sourceFile),
+        isNull: ref === "IsNull",
+      }
+    }
+    case "Exists": {
+      const source = typeNode.typeArguments?.[0]
+      if (!source) {
+        throw new Error('`Exists<>` takes a source, as in `Exists<MySites>`.')
+      }
+      return {
+        type: "exists",
+        source: parseMembershipSource(source, sourceFile, resolveCtx),
+      }
+    }
+    case "In": {
+      const args = typeNode.typeArguments ?? []
+      if (args.length !== 2) {
+        throw new Error(
+          '`In<>` takes a column and a source, as in `In<"site_id", MySites>`.',
+        )
+      }
+      const column = parseAccessOperand(args[0]!, sourceFile)
+      if (column["kind"] !== "column") {
+        throw new Error(
+          "`In<>`'s first argument must be a column name — the membership test is " +
+            "about a column of the row being checked.",
+        )
+      }
+      return {
+        type: "in",
+        column: column["name"],
+        source: parseMembershipSource(args[1]!, sourceFile, resolveCtx),
+      }
+    }
+    default: {
+      // A named alias — possibly parameterised — standing for a rule. Expanded
+      // before giving up, so `SiteAccess<"site_id">` works.
+      if (resolveCtx && depth < 16) {
+        const expanded = resolveAccessAliasNode(typeNode, sourceFile, resolveCtx)
+        if (expanded) return parseAccessRule(expanded, sourceFile, resolveCtx, depth + 1)
+      }
+
+      // Falling back to `private` here would silently deny an operation the
+      // author believed they had granted — and with deny-by-default there is no
+      // longer any need for a permissive guess. Name the offending rule instead.
+      throw new Error(
+        `Unknown access rule "${ref}". Supported: Public, Private, LoggedIn, ` +
+          `Owner<"field">, OwnerFrom<"relation">, Role<"name">, ` +
+          `Any<[rule, …]>, All<[rule, …]>, Not<rule>, ` +
+          `Eq/Neq/Gt/Gte/Lt/Lte/Like<left, right>, IsNull<operand>, NotNull<operand>` +
+          ` (buckets also accept BucketPublic, BucketPrivate, BucketLoggedIn, BucketOwner, BucketRole).`,
+      )
+    }
   }
+}
+
+/**
+ * Expands a named alias to the type it stands for.
+ *
+ * This is what makes rules parameterisable — the type-level equivalent of
+ * Payload's access-control factory:
+ *
+ * ```typescript
+ * type SiteAccess<F extends string> = Any<[Role<"admin">, In<F, MySites>]>
+ * access: { update: SiteAccess<"site_id"> }
+ * ```
+ *
+ * Without it a rule had to be written inline at every use, and any alias — even an
+ * unparameterised one — was reported as an unknown rule.
+ */
+function resolveAccessAliasNode(
+  typeNode: ts.TypeReferenceNode,
+  sourceFile: ts.SourceFile,
+  resolveCtx: ResolveContext,
+): ts.TypeNode | undefined {
+  const expanded = tryResolveTypeReference(typeNode, sourceFile, resolveCtx)
+  if (expanded && expanded !== typeNode) return expanded
+
+  if (needsChecker(typeNode)) {
+    const resolved = resolveTypeNode(typeNode, sourceFile, resolveCtx)
+    if (resolved !== typeNode) return resolved
+  }
+  return undefined
+}
+
+/**
+ * The set on the right of an `In<>`.
+ *
+ * Resolved through the same alias machinery as rules, so a shared
+ * `type MySites = Rows<…>` can be reused across models — the parameterisation the
+ * plan calls the type-level equivalent of Payload's access factory.
+ */
+function parseMembershipSource(
+  typeNode: ts.TypeNode,
+  sourceFile: ts.SourceFile,
+  resolveCtx?: ResolveContext,
+): Record<string, unknown> {
+  if (ts.isIndexedAccessTypeNode(typeNode) && resolveCtx) {
+    const member = resolveIndexedAccessRule(typeNode, sourceFile, resolveCtx)
+    if (member) return parseMembershipSource(member, sourceFile, resolveCtx)
+  }
+
+  if (ts.isTypeReferenceNode(typeNode) && !ts.isQualifiedName(typeNode.typeName)) {
+    const ref = ownerText(typeNode.typeName, sourceFile)
+    const args = typeNode.typeArguments ?? []
+
+    if (ref === "Claim") {
+      return parseAccessOperand(typeNode, sourceFile)
+    }
+
+    if (ref === "Rows") {
+      const table = stringLiteralArg(args[0], "Rows", "table name")
+      const column = stringLiteralArg(args[1], "Rows", "column name")
+      const source: Record<string, unknown> = { kind: "rows", table, column }
+      // The third argument narrows the source rows. Absent means "every row",
+      // which is a lookup rather than a membership check — allowed, but rarely
+      // what was meant, so it stays explicit rather than being defaulted.
+      if (args[2]) {
+        source["where"] = parseAccessRule(args[2], sourceFile, resolveCtx)
+      }
+      return source
+    }
+
+    if (ref === "Values") {
+      const listArg = args[0]
+      if (!listArg || !ts.isTupleTypeNode(listArg)) {
+        throw new Error('`Values<>` takes a tuple, as in `Values<["draft", "review"]>`.')
+      }
+      if (listArg.elements.length === 0) {
+        throw new Error("`Values<[]>` matches nothing. List the values, or use `Private`.")
+      }
+      // Not `parseAccessOperand`: there, a bare string is a *column*, which is
+      // right for a comparison and wrong here. Inside a value list a string can
+      // only be a value, so it is read as one — no `Literal<>` wrapper needed.
+      return {
+        kind: "literal",
+        values: listArg.elements.map((element) => literalFromNode(element, sourceFile)),
+      }
+    }
+
+    // A named alias for a source: `type MySites = Rows<…>`.
+    if (resolveCtx) {
+      const resolved = resolveAccessAliasNode(typeNode, sourceFile, resolveCtx)
+      if (resolved) return parseMembershipSource(resolved, sourceFile, resolveCtx)
+    }
+  }
+
+  throw new Error(
+    `\`${ownerText(typeNode, sourceFile)}\` is not a valid membership source. Use ` +
+      `Rows<"table", "column", Where>, Claim<"path"> or Values<[…]>.`,
+  )
+}
+
+/** Interval units, matching `TimeUnit` in `@supatype/types` and the engine. */
+const TIME_UNITS = [
+  "seconds",
+  "minutes",
+  "hours",
+  "days",
+  "weeks",
+  "months",
+  "years",
+] as const
+
+/** Granularities for `StartOf<>`. */
+const TRUNC_UNITS = ["day", "week", "month", "year"] as const
+
+/**
+ * `Ago<30, "days">` / `FromNow<7, "days">`.
+ *
+ * The amount and unit are validated here and the interval is re-assembled from the
+ * parsed integer and the matched keyword, so no author-supplied text reaches
+ * Postgres. That is what keeps this from being a small escape hatch: a permissive
+ * `"30 days"` string would be raw SQL by another name.
+ */
+function parseDurationOperand(
+  ref: "Ago" | "FromNow",
+  args: readonly ts.TypeNode[],
+  sourceFile: ts.SourceFile,
+): Record<string, unknown> {
+  if (args.length !== 2) {
+    throw new Error(`\`${ref}<>\` takes an amount and a unit, as in \`${ref}<30, "days">\`.`)
+  }
+
+  const amountNode = args[0]!
+  const opposite = ref === "Ago" ? "FromNow" : "Ago"
+
+  // A negative literal is a prefix-unary expression in the TypeScript AST, not a
+  // numeric literal, so it has to be recognised separately — otherwise `Ago<-5, …>`
+  // is refused for the wrong reason and the message misses the real advice.
+  if (
+    ts.isLiteralTypeNode(amountNode) &&
+    ts.isPrefixUnaryExpression(amountNode.literal) &&
+    amountNode.literal.operator === ts.SyntaxKind.MinusToken
+  ) {
+    throw new Error(
+      `\`${ref}<>\` does not take a negative amount. For the other direction use ` +
+        `\`${opposite}<>\`, which reads correctly instead of relying on a double negative.`,
+    )
+  }
+
+  if (!ts.isLiteralTypeNode(amountNode) || !ts.isNumericLiteral(amountNode.literal)) {
+    throw new Error(`\`${ref}<>\` needs a number literal amount, as in \`${ref}<30, "days">\`.`)
+  }
+  const amount = Number(amountNode.literal.text)
+  if (!Number.isInteger(amount)) {
+    throw new Error(
+      `\`${ref}<${amount}, …>\` must be a whole number of units — Postgres intervals ` +
+        `take integers, so a fraction would be silently truncated or rejected.`,
+    )
+  }
+
+  const unit = stringLiteralArg(args[1], ref, "unit")
+  if (!TIME_UNITS.includes(unit as (typeof TIME_UNITS)[number])) {
+    throw new Error(
+      `\`${ref}<${amount}, "${unit}">\` is not a valid unit. Use one of: ` +
+        `${TIME_UNITS.join(", ")} (plural).`,
+    )
+  }
+
+  void sourceFile
+  return { kind: ref === "Ago" ? "ago" : "fromNow", amount, unit }
+}
+
+/** A string, number or boolean literal as its plain JS value. */
+function literalFromNode(
+  node: ts.TypeNode,
+  sourceFile: ts.SourceFile,
+): string | number | boolean {
+  if (ts.isLiteralTypeNode(node)) {
+    const literal = node.literal
+    if (ts.isStringLiteral(literal)) return literal.text
+    if (ts.isNumericLiteral(literal)) return Number(literal.text)
+    if (literal.kind === ts.SyntaxKind.TrueKeyword) return true
+    if (literal.kind === ts.SyntaxKind.FalseKeyword) return false
+  }
+  throw new Error(
+    `\`${ownerText(node, sourceFile)}\` is not a string, number or boolean literal.`,
+  )
+}
+
+function stringLiteralArg(
+  node: ts.TypeNode | undefined,
+  owner: string,
+  what: string,
+): string {
+  if (!node || !ts.isLiteralTypeNode(node) || !ts.isStringLiteral(node.literal)) {
+    throw new Error(`\`${owner}<>\` needs a ${what} as a string literal.`)
+  }
+  const value = node.literal.text.trim()
+  // Rendered as a SQL identifier, so refuse anything that is not one.
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
+    throw new Error(`"${value}" is not a valid ${what}.`)
+  }
+  return value
+}
+
+/**
+ * One side of a comparison.
+ *
+ * A bare string literal is a **column** on the model the rule is attached to.
+ * That is the common case by a wide margin, and making it the default keeps
+ * `Eq<"author_id", AuthUid>` readable; a constant is written `Literal<"x">` so the
+ * two can never be confused. Numbers and booleans are unambiguous, so they are
+ * taken as constants directly.
+ */
+function parseAccessOperand(
+  typeNode: ts.TypeNode,
+  sourceFile: ts.SourceFile,
+): Record<string, unknown> {
+  if (ts.isLiteralTypeNode(typeNode)) {
+    const literal = typeNode.literal
+    if (ts.isStringLiteral(literal)) {
+      const name = literal.text.trim()
+      if (name === "") {
+        throw new Error("An empty column name is not a valid operand.")
+      }
+      // Rendered into SQL as an identifier, so refuse anything that is not one
+      // rather than letting it through to the policy.
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+        throw new Error(
+          `"${name}" is not a valid column name. Use \`Literal<"${name}">\` for a ` +
+            `constant, or quote a real column.`,
+        )
+      }
+      return { kind: "column", name }
+    }
+    if (ts.isNumericLiteral(literal)) {
+      return { kind: "literal", value: Number(literal.text) }
+    }
+    if (literal.kind === ts.SyntaxKind.TrueKeyword) return { kind: "literal", value: true }
+    if (literal.kind === ts.SyntaxKind.FalseKeyword) return { kind: "literal", value: false }
+  }
+
+  if (ts.isTypeReferenceNode(typeNode) && !ts.isQualifiedName(typeNode.typeName)) {
+    const ref = ownerText(typeNode.typeName, sourceFile)
+    const operandArgs = typeNode.typeArguments ?? []
+    switch (ref) {
+      case "AuthUid":
+        return { kind: "authUid" }
+      case "AuthRole":
+        return { kind: "authRole" }
+      case "Now":
+        return { kind: "now" }
+      case "StartOf": {
+        const unit = stringLiteralArg(operandArgs[0], "StartOf", "unit")
+        if (!TRUNC_UNITS.includes(unit as (typeof TRUNC_UNITS)[number])) {
+          throw new Error(
+            `\`StartOf<"${unit}">\` is not a valid granularity. Use one of: ` +
+              `${TRUNC_UNITS.join(", ")}.`,
+          )
+        }
+        return { kind: "startOf", unit }
+      }
+      case "Ago":
+      case "FromNow":
+        return parseDurationOperand(ref, operandArgs, sourceFile)
+      case "Claim": {
+        const pathArg = typeNode.typeArguments?.[0]
+        if (!pathArg || !ts.isLiteralTypeNode(pathArg) || !ts.isStringLiteral(pathArg.literal)) {
+          throw new Error('`Claim<>` takes a dotted path literal, as in `Claim<"app_metadata.tier">`.')
+        }
+        const path = pathArg.literal.text.trim()
+        // The path is split on dots to walk the claims object, so an empty
+        // segment would silently look up a key that cannot exist.
+        if (path === "" || path.split(".").some((segment) => segment.trim() === "")) {
+          throw new Error(
+            `\`Claim<"${path}">\` is not a valid claim path — use dotted segments, ` +
+              `as in \`Claim<"app_metadata.tier">\`.`,
+          )
+        }
+        return { kind: "claim", path }
+      }
+      case "Literal": {
+        const valueArg = typeNode.typeArguments?.[0]
+        if (!valueArg || !ts.isLiteralTypeNode(valueArg)) {
+          throw new Error('`Literal<>` takes a string, number or boolean, as in `Literal<"published">`.')
+        }
+        const literal = valueArg.literal
+        if (ts.isStringLiteral(literal)) return { kind: "literal", value: literal.text }
+        if (ts.isNumericLiteral(literal)) return { kind: "literal", value: Number(literal.text) }
+        if (literal.kind === ts.SyntaxKind.TrueKeyword) return { kind: "literal", value: true }
+        if (literal.kind === ts.SyntaxKind.FalseKeyword) return { kind: "literal", value: false }
+        throw new Error('`Literal<>` takes a string, number or boolean.')
+      }
+    }
+  }
+
+  throw new Error(
+    `\`${ownerText(typeNode, sourceFile)}\` is not a valid operand. Use a column name ` +
+      `("author_id"), AuthUid, AuthRole, Claim<"path"> or Literal<value>.`,
+  )
 }
 
 interface ParsedRelationOptions {
@@ -1789,4 +2624,24 @@ function relationForeignKeyFromField(fieldName: string): string {
     .toLowerCase()
   const base = snake.replace(/_id$/i, "")
   return `${base}_id`
+}
+
+/** Resolve `Rules["read"]` to the rule type declared for that member. */
+function resolveIndexedAccessRule(
+  node: ts.IndexedAccessTypeNode,
+  sourceFile: ts.SourceFile,
+  resolveCtx: ResolveContext,
+): ts.TypeNode | undefined {
+  const literal = resolveAccessLiteral(node.objectType, sourceFile, resolveCtx)
+  if (!literal) return undefined
+  if (!ts.isLiteralTypeNode(node.indexType) || !ts.isStringLiteral(node.indexType.literal)) {
+    return undefined
+  }
+  const key = node.indexType.literal.text
+  for (const member of literal.members) {
+    if (ts.isPropertySignature(member) && getPropertyName(member.name) === key) {
+      return member.type
+    }
+  }
+  return undefined
 }

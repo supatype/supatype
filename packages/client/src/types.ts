@@ -132,12 +132,37 @@ export interface SupatypeError {
 
 // ─── Query result ─────────────────────────────────────────────────────────────
 
+/**
+ * A column in the response that carries a read restriction.
+ *
+ * Postgres cannot omit a column — the result-set shape is fixed and identical for every row
+ * — so a column you may not read comes back as `null`, indistinguishable on the wire from a
+ * value that is genuinely null. This says which nulls are explicable by masking.
+ *
+ * Advisory. It describes the schema's restrictions, not a decision: what you can actually
+ * read is enforced in the database, and ignoring or tampering with this changes nothing.
+ */
+export interface MaskedField {
+  column: string
+  /**
+   * `identity` — the verdict is the same for every row in this response, so a `null` in the
+   * column is explicable by masking for the whole result set.
+   *
+   * `row` — the rule reads the row, so only *some* nulls are masked values and the rest are
+   * genuinely null. Deliberately not narrowed further: the header is computed before the
+   * query runs, so claiming more would be a guess.
+   */
+  scope: "identity" | "row"
+}
+
 export interface QueryResult<TData> {
   data: TData | null
   error: SupatypeError | null
   count: number | null
   meta?: {
     cacheStatus?: "HIT" | "MISS" | "BYPASS" | undefined
+    /** Present only when the response named restricted columns. Absent means "not stated". */
+    maskedFields?: MaskedField[] | undefined
   } | undefined
 }
 
@@ -295,4 +320,8 @@ export interface SupatypeClientConfig {
    * before any requests are made.
    */
   initialSession?: Session | undefined
+  /**
+   * Extra headers merged into every request (e.g. Studio `X-Supatype-Environment`).
+   */
+  headers?: Record<string, string> | undefined
 }

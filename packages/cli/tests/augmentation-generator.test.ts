@@ -96,4 +96,32 @@ describe("generateClientAugmentation", () => {
     expect(out).toContain('import("@supatype/types/lexical").SerializedEditorState')
     expect(out).not.toMatch(/body: Record<string, unknown>/)
   })
+
+  it("uses a field's declared tsType instead of collapsing JSONB to an opaque object", () => {
+    // `Currency<"USD">` and `Code<"sql">` are stored as JSONB because each carries two values. If
+    // the generated row typed them as `Record<string, unknown>`, a caller reading `price.amount`
+    // would get no help from the schema that already knows the shape.
+    const ast = {
+      models: [
+        {
+          name: "Snippet",
+          annotations: { db: { tableName: "snippet", indexes: [] } },
+          fields: {
+            price: {
+              kind: "json",
+              pgType: "JSONB",
+              required: true,
+              tsType: '{ amount: string; code: "USD" }',
+            },
+            notes: { kind: "json", pgType: "JSONB", required: false },
+          },
+        },
+      ],
+    }
+
+    const out = generateClientAugmentation(ast)
+    expect(out).toContain('price: { amount: string; code: "USD" }')
+    // A field with no declared shape still falls back, and optional fields still admit null.
+    expect(out).toContain("notes: Record<string, unknown> | null")
+  })
 })

@@ -1,8 +1,17 @@
 import type { Command } from "commander"
-import { mkdirSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { loadConfig, loadSchemaAst } from "../config.js"
-import { resolveRuntimeProvider, schemaPathFromProject, serverBaseUrl } from "../project-config.js"
+import { syncManifestHooks, validateModelHooks, writeHooksModule } from "../model-hooks.js"
+import { adapterEntry, readHookUpload } from "../hook-upload.js"
+import { checkServiceRoleRoutes, serviceRoleProblemLines } from "../service-role-check.js"
+import { fatalError } from "../ui/fatal.js"
+import {
+  hooksPathFromProject,
+  resolveRuntimeProvider,
+  schemaPathFromProject,
+  serverBaseUrl,
+} from "../project-config.js"
 import { ensureEngine, engineRequest, type DiffResult } from "../engine-client.js"
 import { printDiffOperations, printDiffWarnings } from "../diff-output.js"
 import { signJwt } from "../jwt.js"
@@ -20,6 +29,7 @@ import {
   type DeployTarget,
 } from "../resolve-target.js"
 import { loadProjectLink } from "../link.js"
+import { targetFetch } from "../target-client.js"
 import {
   buildSchemaSourcesPayload,
   cacheSchemaSourcesLocally,
@@ -54,6 +64,8 @@ export function registerPush(program: Command): void {
       const config = loadConfig(cwd)
       const pgSchema = schemaPgSchema(cwd)
       const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
+      assertModelHooksResolve(cwd, config, ast)
+      assertServiceRoleGrantsResolve(cwd, config)
 
       const linked = loadProjectLink(cwd)
       const useDirect = opts.direct || opts.local || Boolean(opts.connection)
@@ -143,6 +155,10 @@ async function pushViaTarget(
     }
   }
 
+  if (target.mode === "cloud" || target.mode === "self-host") {
+    await deployHooksToTarget(cwd, config, target, ast)
+  }
+
   if (target.mode === "direct" || target.mode === "local") {
     await writeLocalAdminConfig(ast, config)
     if (target.databaseUrl) {
@@ -150,17 +166,86 @@ async function pushViaTarget(
     }
     await generateTypesLocal(ast, config)
     await provisionLocalStorage(ast, config)
-  } else {
-    info(`Pushed to ${target.mode} (${target.environment}).`)
+
+    // Local Studio only — a cloud/self-host push must not advertise the local
+    // gateway URL from config, which may not even be running.
+    const baseUrl = (serverBaseUrl(config) ?? "").replace(/\/$/, "")
+    if (baseUrl) {
+      plain(`\nStudio: ${baseUrl}/studio/`)
+    }
+    return
   }
 
-  const baseUrl = (serverBaseUrl(config) ?? "").replace(/\/$/, "")
-  if (baseUrl) {
-    plain(`\nStudio: ${baseUrl}/studio/`)
+  info(`Pushed to ${target.mode} (${target.environment}).`)
+  const envUrl = target.link?.environments?.[target.environment]?.apiUrl?.replace(/\/$/, "")
+  if (envUrl) {
+    plain(`\nProject API: ${envUrl}`)
   }
 }
 
+/**
+ * Upload the hooks this schema names to a managed stack.
+ *
+ * On `push` rather than `functions deploy`, because the hook *map* comes from the schema: the two have
+ * to move together, and a map naming a handler that was never uploaded turns every write to that table
+ * into a 503.
+ *
+ * The handler types are written locally as well. A project pushing to cloud still edits its hooks on
+ * this machine, and `hooks/_supatype/hooks.ts` is what makes them typed — it is generated, never
+ * committed, so a fresh clone that has only ever pushed to cloud would otherwise have no types at all.
+ */
+async function deployHooksToTarget(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  target: DeployTarget,
+  ast: unknown,
+): Promise<void> {
+  const hooksDir = hooksPathFromProject(config, cwd)
+  const hooksPath = writeHooksModule(cwd, hooksDir, ast)
+  if (hooksPath !== null) info(`Hook handler types written to ${hooksPath}`)
+
+  let upload: ReturnType<typeof readHookUpload>
+  try {
+    upload = readHookUpload(cwd, hooksDir, ast)
+  } catch (err) {
+    // Refused rather than partially uploaded: the schema is already applied, so the honest thing is to
+    // say the hooks did not deploy and why, leaving the previous ones in place.
+    fatalError(err instanceof Error ? err.message : String(err))
+    return
+  }
+  if (upload === null) return
+
+  const adapter = readGeneratedAdapter(hooksDir)
+  const handlers = adapter === null ? upload.handlers : [...upload.handlers, adapter]
+
+  await withSpinner(`Deploying ${upload.handlers.length} hook(s)`, () =>
+    targetFetch(target.apiBaseUrl, target.apiPrefix, {
+      method: "POST",
+      path: `/projects/${target.projectRef}/hooks/deploy`,
+      body: { handlers, map: upload.map },
+      token: target.token!,
+      orgId: target.orgId,
+      environment: target.mode === "cloud" ? target.environment : undefined,
+    }),
+  ).then(() => info(`Deployed ${upload.handlers.length} hook(s)`))
+}
+
+/** The generated adapter, flattened to the name handlers were rewritten to import. */
+function readGeneratedAdapter(hooksDir: string): { name: string; source: string } | null {
+  const file = join(hooksDir, "_supatype", "hooks.ts")
+  if (!existsSync(file)) return null
+  return adapterEntry(readFileSync(file, "utf8"))
+}
+
 async function generateTypesLocal(ast: unknown, config: SupatypeProjectConfig): Promise<void> {
+  // Independent of `output`: a project with hooks needs its handler types whether or not it asked
+  // for client types, and the module is written next to the functions that import it.
+  const cwd = process.cwd()
+  const hooksPath = writeHooksModule(cwd, hooksPathFromProject(config, cwd), ast)
+  if (hooksPath !== null) info(`Hook handler types written to ${hooksPath}`)
+  // The server watches this file, so a changed hook takes effect without a restart.
+  if (syncManifestHooks(cwd, ast)) info("Hook map written to .supatype/manifest.json")
+
   if (!config.output?.types && !config.output?.client) return
   await withSpinner("Generating types", async () => {
     await ensureEngine()
@@ -194,4 +279,36 @@ async function writeLocalAdminConfig(ast: unknown, config: SupatypeProjectConfig
   const admin = withAdminRoles(await engineRequest<unknown>("/admin", { ast }), config)
   restoreSystemRelationTargets(admin, ast)
   writeFileSync(join(dir, "admin-config.json"), `${JSON.stringify(admin, null, 2)}\n`)
+}
+
+/**
+ * Stop the push when a declared hook names a function that is not there.
+ *
+ * A hook is only enforcement if it runs. A typo'd name would extract cleanly, reach the manifest, and
+ * then never fire — so the write it was meant to validate would succeed and look fine. Cheaper to
+ * fail here, naming the directory searched.
+ */
+/**
+ * Refuse a push whose `functions.serviceRole` names a function that does not exist.
+ *
+ * The grant fails closed, which is the safe direction and the invisible one: the function reads no key
+ * at runtime, in a deploy that reported success. A warning is printed for an entry that is merely
+ * redundant, since a reader would reasonably assume the line is what does the granting.
+ */
+function assertServiceRoleGrantsResolve(cwd: string, config: SupatypeProjectConfig): void {
+  const problems = checkServiceRoleRoutes(config, cwd)
+  for (const warning of problems.warnings) plain(warning)
+  const lines = serviceRoleProblemLines(problems)
+  if (lines.length === 0) return
+  fatalError("functions.serviceRole names a function that does not exist.", lines, {
+    brand: { intro: "Push" },
+  })
+}
+
+function assertModelHooksResolve(cwd: string, config: SupatypeProjectConfig, ast: unknown): void {
+  const problems = validateModelHooks(ast, hooksPathFromProject(config, cwd), cwd)
+  if (problems.length === 0) return
+  fatalError("A model declares a hook whose function does not exist.", problems, {
+    brand: { intro: "Push" },
+  })
 }

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom"
 import type { AdminConfig } from "../../config.js"
 import { useAdminConfig } from "../../hooks/useAdminConfig.js"
 import { useProjectProxy } from "../../hooks/useProjectProxy.js"
+import { useSchemaPicker } from "../../hooks/useSchemaPicker.js"
 import { useApiQuery } from "../../hooks/useApiQuery.js"
 import { Button, Card } from "../../components/ui.js"
 import { EmptyState } from "../../components/EmptyState.js"
@@ -49,14 +50,13 @@ export function TablesView(): React.ReactElement {
   const admin = useAdminConfig()
   const proxy = useProjectProxy()
   const navigate = useNavigate()
-  const [schema, setSchema] = useState("public")
+  const { schemas, schema, setSchema } = useSchemaPicker()
   const [selectedTable, setSelectedTable] = useState<string | null>(null)
   const [sqlModal, setSqlModal] = useState<{ mode: "create" | "drop"; table?: string } | null>(null)
   const [sqlText, setSqlText] = useState("")
   const [runError, setRunError] = useState<string | null>(null)
   const [runBusy, setRunBusy] = useState(false)
 
-  const { data: schemas } = useApiQuery(() => proxy.schemas(), [proxy])
   const { data: tables, loading, error, refetch } = useApiQuery(
     () => proxy.sql(LIST_QUERY(schema)).then((r) => r.rows),
     [proxy, schema],
@@ -98,7 +98,7 @@ export function TablesView(): React.ReactElement {
             onChange={(e) => setSchema(e.target.value)}
             className="px-2 py-1 text-sm rounded-md border border-border bg-background text-foreground focus:outline-none"
           >
-            {(schemas ?? ["public"]).map((s) => <option key={s} value={s}>{s}</option>)}
+            {(schemas.length > 0 ? schemas : [schema]).map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
         <Button

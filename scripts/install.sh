@@ -1,8 +1,17 @@
 #!/usr/bin/env bash
 # Supatype CLI installer — curl | bash
 #
+# Supported: Linux and macOS (darwin) only.
+# Windows: use `npm install -g @supatype/cli` — do not promote this script on Windows
+# (Git Bash reports MINGW*; native Windows uses supatype-cli-windows-amd64.exe via self-update).
+# See plans/ENGINEERING-STATUS.md §6 "Install platform policy".
+#
 # Usage:
 #   curl -fsSL https://releases.supatype.com/install.sh | bash
+#
+# macOS alternative: Homebrew — https://github.com/supatype/homebrew
+#   brew tap supatype/homebrew
+#   brew install supatype
 #
 # Environment overrides:
 #   SUPATYPE_VERSION     — install a specific version (default: latest)

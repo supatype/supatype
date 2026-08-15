@@ -1,6 +1,6 @@
 import type { QueryCache, QueryCacheOptions, CacheStatus } from "./query-cache.js"
 import { buildCacheKey, defaultQueryCache } from "./query-cache.js"
-import type { QueryResult, SelectQueryOptions, SupatypeError } from "./types.js"
+import type { MaskedField, QueryResult, SelectQueryOptions, SupatypeError } from "./types.js"
 
 const DEBUG_AUTH =
   (typeof process !== "undefined" && process.env["NEXT_PUBLIC_SUPATYPE_DEBUG_AUTH"] === "1") ||
@@ -24,14 +24,40 @@ function decodeJwtRoleFromAuthHeader(headers: Record<string, string>): string | 
   }
 }
 
-function withCacheMeta<T>(
+/**
+ * Parse `X-Supatype-Masked-Fields: salary=row, ssn=identity`.
+ *
+ * Unrecognised entries are dropped rather than guessed at: this is advisory decoration, so
+ * a header from a newer server saying something this client does not understand should
+ * degrade to silence, never to a wrong claim about which columns are masked.
+ */
+export function parseMaskedFields(header: string | null): MaskedField[] | undefined {
+  if (header === null || header.trim() === "") return undefined
+
+  const fields: MaskedField[] = []
+  for (const entry of header.split(",")) {
+    const [column, scope] = entry.split("=", 2).map((part) => part.trim())
+    if (column === undefined || column === "") continue
+    if (scope !== "identity" && scope !== "row") continue
+    fields.push({ column, scope })
+  }
+
+  return fields.length > 0 ? fields : undefined
+}
+
+function withMeta<T>(
   result: QueryResult<T>,
-  cacheStatus?: CacheStatus,
+  meta: { cacheStatus?: CacheStatus; maskedFields?: MaskedField[] | undefined },
 ): QueryResult<T> {
-  if (cacheStatus === undefined) return result
+  const { cacheStatus, maskedFields } = meta
+  if (cacheStatus === undefined && maskedFields === undefined) return result
   return {
     ...result,
-    meta: { ...(result.meta ?? {}), cacheStatus },
+    meta: {
+      ...(result.meta ?? {}),
+      ...(cacheStatus !== undefined && { cacheStatus }),
+      ...(maskedFields !== undefined && { maskedFields }),
+    },
   }
 }
 
@@ -216,7 +242,17 @@ export class QueryBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
       Accept: "application/vnd.pgrst.object+json",
     })
     if (error !== null) return { data: null, error, count: null, ...(meta && { meta }) }
-    return { data: data as unknown as TRow, error: null, count: 1, ...(meta && { meta }) }
+    // Some proxies drop Accept and return a one-element array — unwrap.
+    const row = (Array.isArray(data) ? data[0] : data) as TRow | undefined
+    if (row === undefined) {
+      return {
+        data: null,
+        error: { message: "JSON object requested, multiple (or no) rows returned", code: "PGRST116" },
+        count: null,
+        ...(meta && { meta }),
+      }
+    }
+    return { data: row, error: null, count: 1, ...(meta && { meta }) }
   }
 
   /** Return a single row or null (errors if many found). */
@@ -282,7 +318,7 @@ export class QueryBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
       })
       const cached = this.queryCache.get<TRow[]>(cacheKey)
       if (cached) {
-        return withCacheMeta(cached, "HIT")
+        return withMeta(cached, { cacheStatus: "HIT" })
       }
     }
 
@@ -308,6 +344,7 @@ export class QueryBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
         ? parseInt(contentRange.split("/")[1] ?? "0", 10)
         : null
 
+    const maskedFields = parseMaskedFields(res.headers.get("X-Supatype-Masked-Fields"))
     const serverCacheStatus = res.headers.get("X-Supatype-Cache-Status") as CacheStatus | null
     const cacheStatus: CacheStatus =
       serverCacheStatus === "HIT" || serverCacheStatus === "MISS" || serverCacheStatus === "BYPASS"
@@ -328,7 +365,7 @@ export class QueryBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
           code: typeof err["code"] === "string" ? err["code"] : null,
         })
       }
-      return withCacheMeta<TRow[]>(
+      return withMeta<TRow[]>(
         {
           data: null,
           error: {
@@ -338,14 +375,14 @@ export class QueryBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
           },
           count: null,
         },
-        cacheStatus,
+        { cacheStatus, maskedFields },
       )
     }
 
     if (method === "HEAD" || res.status === 204) {
-      return withCacheMeta<TRow[]>(
+      return withMeta<TRow[]>(
         { data: null, error: null, count },
-        cacheStatus,
+        { cacheStatus, maskedFields },
       )
     }
 
@@ -360,7 +397,7 @@ export class QueryBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
       this.queryCache.set(cacheKey, result, this.cacheOptions.ttl)
     }
 
-    return withCacheMeta(result, cacheStatus)
+    return withMeta(result, { cacheStatus, maskedFields })
   }
 }
 

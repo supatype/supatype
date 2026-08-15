@@ -63,6 +63,13 @@ jobs:
         run: |
           npx --yes @yao-pkg/pkg@6.6.0 packages/cli/release-bundle/supatype-cli-bundle.cjs --targets ${{ matrix.pkg_target }} --output ${{ matrix.output }}
 
+      - name: Upload CLI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.platform }}
+          path: ${{ matrix.output }}
+          if-no-files-found: error
+
       - name: Upload to CDN
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         env:
@@ -97,3 +104,59 @@ jobs:
           BUCKET="${{ secrets.CDN_BUCKET }}"
           printf '{"version":"%s","date":"%s"}\n' "${VERSION}" "$(date -u +%Y-%m-%d)" > latest.json
           aws s3 cp latest.json "s3://${BUCKET}/cli/latest.json" --endpoint-url "${EP%/}" --cache-control "no-cache" --no-progress
+
+  update-homebrew-formula:
+    name: Homebrew formula
+    needs: [build, publish-manifest]
+    runs-on: ubuntu-24.04
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: cli-artifacts
+          pattern: cli-*
+          merge-multiple: true
+
+      - name: Generate Formula/supatype.rb
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#cli-v}"
+          if [ -n "${{ inputs.version }}" ]; then VERSION="${{ inputs.version }}"; fi
+          mkdir -p homebrew-input homebrew-formula/Formula
+          find cli-artifacts -type f -name 'supatype-cli-*' ! -name '*.exe' -exec cp {} homebrew-input/ \;
+          ls -la homebrew-input
+          HOMEBREW_FORMULA_OUT=homebrew-formula/Formula/supatype.rb \
+            node packages/cli/scripts/generate-homebrew-formula.mjs "${VERSION}" homebrew-input
+
+      - name: Upload Homebrew formula artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: homebrew-formula
+          path: homebrew-formula/Formula/supatype.rb
+          if-no-files-found: error
+
+      - name: Push formula to supatype/homebrew (optional)
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO }}
+        run: |
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "HOMEBREW_TAP_GITHUB_TOKEN not set — skipping tap push"
+            exit 0
+          fi
+          TAP_REPO="${TAP_REPO:-supatype/homebrew}"
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#cli-v}"
+          if [ -n "${{ inputs.version }}" ]; then VERSION="${{ inputs.version }}"; fi
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${TAP_REPO}.git" tap
+          mkdir -p tap/Formula
+          cp homebrew-formula/Formula/supatype.rb tap/Formula/supatype.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/supatype.rb
+          git diff --staged --quiet && echo "No formula changes" && exit 0
+          git commit -m "supatype ${VERSION}"
+          git push origin HEAD:main

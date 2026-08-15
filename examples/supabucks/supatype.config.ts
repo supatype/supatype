@@ -16,12 +16,6 @@ export default defineConfig({
     mode: "static",
     static_dir: "./dist",
   },
-  versions: {
-    engine: "0.1.1",
-    server: "1.0.5",
-    postgres: "17.2",
-    deno: "2.2.0",
-  },
   email: { provider: "console" },
   storage: { provider: "local", local_path: ".supatype/storage" },
   schema: { path: "schema/index.ts", pg_schema: "public" },

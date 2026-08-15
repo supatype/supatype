@@ -3,8 +3,14 @@
  */
 
 import type { Command } from "commander"
-import { existsSync, readdirSync, rmSync, statSync } from "node:fs"
-import { join } from "node:path"
+import { existsSync } from "node:fs"
+import {
+  BINARY_COMPONENTS,
+  formatBytes,
+  listCacheEntries,
+  resolveCacheProjectDirs,
+} from "../cache-clean.js"
+import { cleanCachedBinaries } from "../cache-pins.js"
 import { cacheRoot, type Component } from "../binary-cache.js"
 import {
   deleteRestCacheEntry,
@@ -12,9 +18,11 @@ import {
   getRestCacheEntry,
   listRestCacheEntries,
 } from "../rest-cache-admin.js"
-import { error, info, plain } from "../ui/messages.js"
+import { error, info, plain, warn } from "../ui/messages.js"
 
-const COMPONENTS: Component[] = ["engine", "server", "postgres", "deno"]
+function isComponent(value: string): value is Component {
+  return (BINARY_COMPONENTS as readonly string[]).includes(value)
+}
 
 export function registerCache(program: Command): void {
   const cache = program
@@ -24,79 +32,106 @@ export function registerCache(program: Command): void {
   cache
     .command("list")
     .description("List cached component binaries and their sizes")
-    .action(async () => {
+    .option("--project <path>", "Include pins from another project directory", collectPaths, [])
+    .action(async (opts: { project: string[] }) => {
+      const cwd = process.cwd()
+      const projectDirs = resolveCacheProjectDirs(cwd, opts.project)
       const root = cacheRoot()
+
       if (!existsSync(root)) {
+        info("Cache is empty.")
+        return
+      }
+
+      const entries = listCacheEntries(projectDirs)
+      if (entries.length === 0) {
         info("Cache is empty.")
         return
       }
 
       let totalBytes = 0
-      let found = false
-
-      for (const component of COMPONENTS) {
-        const compDir = join(root, component)
-        if (!existsSync(compDir)) continue
-
-        const versions = readdirSync(compDir).filter(
-          (v) => statSync(join(compDir, v)).isDirectory(),
-        )
-        for (const version of versions) {
-          const vDir = join(compDir, version)
-          const size = dirSize(vDir)
-          totalBytes += size
-          found = true
-          plain(`  ${component}@${version}  ${formatBytes(size)}`)
-        }
-      }
-
-      if (!found) {
-        info("Cache is empty.")
-        return
+      for (const entry of entries) {
+        totalBytes += entry.bytes
+        const pinLabel = entry.pinned ? "  (pinned)" : ""
+        plain(`  ${entry.component}@${entry.version}  ${formatBytes(entry.bytes)}${pinLabel}`)
       }
 
       plain(`\nTotal: ${formatBytes(totalBytes)}`)
       info(`Cache root: ${root}`)
+      if (projectDirs.length > 0) {
+        info(`Pin scan: ${projectDirs.length} project(s)`)
+      }
     })
 
   cache
     .command("clean [component] [version]")
     .description(
-      "Remove cached binaries. Optionally specify a component and/or version.\n" +
+      "Remove cached binaries not pinned by local project configs.\n" +
+        "Use --force to remove everything (legacy behavior).\n" +
         "Examples:\n" +
-        "  supatype cache clean           # remove everything\n" +
-        "  supatype cache clean engine    # remove all engine versions\n" +
-        "  supatype cache clean engine 0.4.2",
+        "  supatype cache clean                    # remove unpinned versions\n" +
+        "  supatype cache clean engine             # remove unpinned engine versions\n" +
+        "  supatype cache clean engine 0.4.2       # remove one version (warns if pinned)\n" +
+        "  supatype cache clean --force            # remove all cached binaries",
     )
-    .action(async (component?: string, version?: string) => {
-      const root = cacheRoot()
-      if (!existsSync(root)) {
-        info("Cache is already empty.")
-        return
-      }
+    .option("--dry-run", "Show what would be removed without deleting")
+    .option("--force", "Remove all matching cache entries, ignoring version pins")
+    .option("--project <path>", "Include pins from another project directory", collectPaths, [])
+    .action(
+      async (
+        component?: string,
+        version?: string,
+        opts?: { dryRun?: boolean; force?: boolean; project?: string[] },
+      ) => {
+        const cwd = process.cwd()
+        const projectDirs = resolveCacheProjectDirs(cwd, opts?.project ?? [])
+        const root = cacheRoot()
 
-      const targets = component ? [component as Component] : COMPONENTS
-
-      for (const comp of targets) {
-        const compDir = join(root, comp)
-        if (!existsSync(compDir)) continue
-
-        if (version) {
-          const vDir = join(compDir, version)
-          if (!existsSync(vDir)) {
-            info(`${comp}@${version} not cached.`)
-            continue
-          }
-          rmSync(vDir, { recursive: true, force: true })
-          plain(`  removed  ${comp}@${version}`)
-        } else {
-          rmSync(compDir, { recursive: true, force: true })
-          plain(`  removed  ${comp} (all versions)`)
+        if (!existsSync(root)) {
+          info("Cache is already empty.")
+          return
         }
-      }
 
-      info("Done.")
-    })
+        if (component && !isComponent(component)) {
+          error(
+            `Unknown component "${component}". Valid: ${BINARY_COMPONENTS.join(", ")}`,
+          )
+          process.exitCode = 1
+          return
+        }
+
+        const components: Component[] =
+          component !== undefined ? [component as Component] : [...BINARY_COMPONENTS]
+        const result = cleanCachedBinaries({
+          components,
+          ...(version !== undefined && version !== "" ? { version } : {}),
+          ...(opts?.force !== undefined ? { force: opts.force } : {}),
+          ...(opts?.dryRun !== undefined ? { dryRun: opts.dryRun } : {}),
+          projectDirs,
+        })
+
+        for (const message of result.warned) {
+          warn(message)
+        }
+
+        for (const entry of result.skipped) {
+          plain(`  kept     ${entry.component}@${entry.version}  (${entry.reason})`)
+        }
+
+        for (const entry of result.removed) {
+          const prefix = opts?.dryRun ? "would remove" : "removed"
+          plain(`  ${prefix}  ${entry.component}@${entry.version}`)
+        }
+
+        if (result.removed.length === 0 && result.skipped.length === 0) {
+          info("Nothing to clean.")
+        } else if (opts?.dryRun) {
+          info(`Dry run — ${result.removed.length} entr${result.removed.length === 1 ? "y" : "ies"} would be removed.`)
+        } else {
+          info("Done.")
+        }
+      },
+    )
 
   const rest = cache
     .command("rest")
@@ -193,26 +228,6 @@ export function registerCache(program: Command): void {
     })
 }
 
-function dirSize(dir: string): number {
-  let total = 0
-  try {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const full = join(dir, entry.name)
-      if (entry.isDirectory()) {
-        total += dirSize(full)
-      } else {
-        total += statSync(full).size
-      }
-    }
-  } catch {
-    // Skip unreadable entries.
-  }
-  return total
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
+function collectPaths(value: string, previous: string[]): string[] {
+  return [...previous, value]
 }

@@ -1,6 +1,7 @@
 import { createServer as httpCreateServer, type IncomingMessage, type ServerResponse } from "node:http"
 import { authenticate, isServiceRole, type JwtPayload } from "./auth.js"
 import { ensureSchema } from "./db.js"
+import { withDatabaseRetry } from "./db-retry.js"
 import * as bucketRoutes from "./routes/buckets.js"
 import * as objectRoutes from "./routes/objects.js"
 import { getDefaultCorsHeaders } from "./middleware/cors.js"
@@ -96,7 +97,11 @@ route("DELETE", "/object/:bucket", objectRoutes.removeObjects, { requireAuth: tr
 export function createServer() {
   let schemaReady = false
 
-  ensureSchema()
+  // Retried rather than fatal: a database that is not reachable *yet* is the normal case on a cold
+  // start, and the only thing that used to hide it was the Compose healthcheck on a `db` container.
+  // An external database has no such container, and any database can restart under a running stack.
+  // A non-connection failure still exits — see db-retry.ts for where that line is drawn.
+  withDatabaseRetry(() => ensureSchema(), { label: "storage schema" })
     .then(() => {
       schemaReady = true
       console.log("storage schema ready")

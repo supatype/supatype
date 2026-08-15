@@ -1135,4 +1135,191 @@ export type User = Model<{ id: UUID; email: NonNullable<string> }>
 
     expect(() => extractSchemaAstFromTypes(schemaPath, dir)).toThrow(/Unknown Supatype type "NonNullable"/)
   })
+  // Regression: access factored into a shared type alias silently produced NO
+  // rules, so every model using the pattern was published without RLS.
+  it("resolves model access from a shared type alias in another file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-access-alias-"))
+    dirs.push(dir)
+    writeFileSync(
+      join(dir, "shared.ts"),
+      `
+import type { Public, Role } from "@supatype/types"
+
+export type CmsPublicReadAdminWrite = {
+  read: Public
+  create: Role<"admin">
+  update: Role<"admin">
+  delete: Role<"admin">
+}
+`,
+      "utf8",
+    )
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, UUID } from "@supatype/types"
+import type { CmsPublicReadAdminWrite } from "./shared.js"
+
+export type Article = Model<{ id: UUID; title: string }, {
+  tableName: "articles"
+  access: CmsPublicReadAdminWrite
+}>
+`,
+      "utf8",
+    )
+
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const access = modelAccess(ast?.models.find((m) => m.name === "Article"))
+    expect(access).toEqual({
+      read: { type: "public" },
+      create: { type: "role", roles: ["admin"] },
+      update: { type: "role", roles: ["admin"] },
+      delete: { type: "role", roles: ["admin"] },
+    })
+  })
+
+  it("resolves model access from an intersection of aliases", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-access-intersection-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, UUID, Public, Role } from "@supatype/types"
+
+type PublicRead = { read: Public }
+type AdminWrite = { create: Role<"admin">; delete: Role<"admin"> }
+
+export type Article = Model<{ id: UUID; title: string }, {
+  access: PublicRead & AdminWrite
+}>
+`,
+      "utf8",
+    )
+
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const access = modelAccess(ast?.models.find((m) => m.name === "Article"))
+    expect(Object.keys(access).sort()).toEqual(["create", "delete", "read"])
+  })
+
+  // The dangerous case: `const … as const` cannot express access (the rule names
+  // are types), and silently ignoring it published an unprotected table.
+  it("throws when model access cannot be resolved instead of dropping the rules", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-access-unresolvable-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, UUID } from "@supatype/types"
+
+export type Article = Model<{ id: UUID; title: string }, {
+  access: typeof someRuntimeValue
+}>
+`,
+      "utf8",
+    )
+
+    expect(() => extractSchemaAstFromTypes(schemaPath, dir)).toThrow(
+      /Model "Article": could not resolve its `access` rules/,
+    )
+  })
+
+  it("carries Decimal precision and scale through to the AST", () => {
+    // `Decimal<10, 2>` used to extract as an unbounded NUMERIC: the engine renders `NUMERIC(p, s)`
+    // from these two facts, and nothing read the type arguments. A money column silently lost its
+    // constraint, which no error surfaced and no test caught.
+    const dir = mkdtempSync(join(tmpdir(), "supatype-decimal-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Decimal, Model, UUID } from "@supatype/types"
+
+export type Invoice = Model<{
+  id: UUID
+  total: Decimal<10, 2>
+  rate: Decimal<5, 4>
+}>
+`,
+      "utf8",
+    )
+
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const invoice = ast?.models.find((m) => m.name === "Invoice")
+    expect(invoice?.fields["total"]).toMatchObject({ kind: "decimal", precision: 10, scale: 2 })
+    expect(invoice?.fields["rate"]).toMatchObject({ kind: "decimal", precision: 5, scale: 4 })
+  })
+
+  it("extracts Code and Currency as JSONB carrying their declared shape", () => {
+    // Both were exported from `@supatype/types` and rejected by the extractor, so a schema using
+    // either failed the push with "unknown type". Each carries two values — a language with its
+    // source, an amount with its currency — so JSONB is the column that does not drop one.
+    const dir = mkdtempSync(join(tmpdir(), "supatype-code-currency-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Code, Currency, Model, UUID } from "@supatype/types"
+
+export type Snippet = Model<{
+  id: UUID
+  body: Code<"sql">
+  anyLang: Code
+  price: Currency<"USD">
+  anyCurrency: Currency
+}>
+`,
+      "utf8",
+    )
+
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const snippet = ast?.models.find((m) => m.name === "Snippet")
+
+    expect(snippet?.fields["body"]).toMatchObject({
+      kind: "json",
+      annotations: { db: { pgType: "JSONB" } },
+      tsType: '{ lang: "sql"; source: string }',
+    })
+    expect(snippet?.fields["price"]).toMatchObject({
+      kind: "json",
+      annotations: { db: { pgType: "JSONB" } },
+      tsType: '{ amount: string; code: "USD" }',
+    })
+
+    // Without a literal argument the currency is not known statically, so the row carries it.
+    expect(snippet?.fields["anyLang"]).toMatchObject({ tsType: "{ lang: string; source: string }" })
+    expect(snippet?.fields["anyCurrency"]).toMatchObject({ tsType: "{ amount: string; code: string }" })
+
+    // Both are JSONB, so the column kind cannot tell Studio which editor to show. The `editor`
+    // annotation is what separates a code snippet from a money amount from a raw JSON blob.
+    expect(snippet?.fields["body"]).toMatchObject({ annotations: { platform: { editor: "code" } } })
+    expect(snippet?.fields["price"]).toMatchObject({
+      annotations: { platform: { editor: "currency" } },
+    })
+  })
+
+  it("throws when bucket access cannot be resolved", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-bucket-access-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Bucket } from "@supatype/types"
+
+export type Media = Bucket<"media", {
+  access: typeof someRuntimeValue
+}>
+`,
+      "utf8",
+    )
+
+    expect(() => extractSchemaAstFromTypes(schemaPath, dir)).toThrow(
+      /Bucket "media": could not resolve its `access` rules/,
+    )
+  })
 })

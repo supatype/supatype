@@ -13,6 +13,8 @@ export function restoreStdinAfterInk(): void {
     // ignore — stdin may already be restored
   }
 
-  stdin.resume()
+  // Pause so one-shot Ink flows (cache list, keys, …) can exit; resume() would keep the
+  // process alive waiting for stdin on Windows Git Bash / MINGW64.
+  stdin.pause()
   process.stdout.write("\n")
 }

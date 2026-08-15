@@ -3,6 +3,9 @@ import { useSearchParams } from "react-router-dom"
 import { useStudioClient } from "../StudioCore.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import { useProjectProxy } from "../hooks/useProjectProxy.js"
+import { useStudioMembers } from "../hooks/useStudioMembers.js"
+import { useStudioCapability } from "../hooks/useStudioCapability.js"
+import { StudioAccessCell } from "../components/StudioAccessCell.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { Badge, Button, Card, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
@@ -390,6 +393,8 @@ function mapGoTrueUser(raw: any): AuthUser {
 export function AuthManagement(): React.ReactElement {
   const client = useStudioClient()
   const proxy = useProjectProxy()
+  const studioMembers = useStudioMembers()
+  const studioAccess = useStudioCapability()
 
   const authAdminFetch = useCallback(async (path: string, options?: RequestInit) => {
     const res = await fetch(`${client.url}/auth/v1/admin${path}`, {
@@ -637,6 +642,10 @@ export function AuthManagement(): React.ReactElement {
             <tr className="border-b border-border">
               <Th>Email</Th>
               <Th>Role</Th>
+              {/* Studio's own namespace, kept visibly apart from the application
+                  role above — conflating them is how granting an app role could
+                  hand out admin UI access. */}
+              <Th>Studio access</Th>
               <Th>Providers</Th>
               <Th>Confirmed</Th>
               <Th>Status</Th>
@@ -658,6 +667,14 @@ export function AuthManagement(): React.ReactElement {
                   <Badge variant={u.role === "admin" ? "indigo" : "green"}>
                     {u.role}
                   </Badge>
+                </Td>
+                <Td>
+                  <StudioAccessCell
+                    userId={u.id}
+                    members={studioMembers}
+                    currentUserId={studioAccess.userId}
+                    canManage={studioAccess.canManageMembers}
+                  />
                 </Td>
                 <Td>
                   <div className="flex gap-1">

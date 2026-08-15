@@ -1,10 +1,12 @@
 import type { Command } from "commander"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { info, plain } from "../ui/messages.js"
-import { schemaPathFromProject } from "../project-config.js"
+import { hooksPathFromProject, schemaPathFromProject, serviceRoleRoutes } from "../project-config.js"
 import { resolveTarget, targetSchemaDoctor, schemaPgSchema } from "../resolve-target.js"
 import { loadProjectLink } from "../link.js"
 import { resolveHostEngineDatabaseUrl } from "../dev-compose.js"
+import { hooksReport, type HooksReport } from "../model-hooks.js"
+import { checkServiceRoleRoutes, type ServiceRoleProblems } from "../service-role-check.js"
 
 interface DoctorItem {
   kind: string
@@ -20,12 +22,15 @@ interface DoctorReport {
   unmanagedDrift: DoctorItem[]
 }
 
-function printSection(title: string, items: DoctorItem[]): void {
+/** Exported for tests: the label form is easy to get subtly wrong per item kind. */
+export function printSection(title: string, items: DoctorItem[]): void {
   if (items.length === 0) return
   plain(`\n${title} (${items.length}):\n`)
   for (const item of items) {
     const fields = item.fields.length > 0 ? ` (${item.fields.join(", ")})` : ""
-    plain(`  • ${item.table}.${item.name}${fields}`)
+    // A table's `name` *is* its table, so the usual `table.name` form renders "widget.widget".
+    const label = item.table === item.name ? item.name : `${item.table}.${item.name}`
+    plain(`  • ${label}${fields}`)
     plain(`    ${item.message}`)
   }
 }
@@ -82,6 +87,9 @@ export function registerDoctor(program: Command): void {
         })) as DoctorReport
       }
 
+      printHooks(hooksReport(cwd, hooksPathFromProject(config, cwd), ast))
+      printServiceRoleGrants(checkServiceRoleRoutes(config, cwd), serviceRoleRoutes(config))
+
       printSection("Missing (in AST, not in DB)", report.missing ?? [])
       printSection("Stale managed (stamped, not in AST)", report.staleManaged ?? [])
       printSection("Unmanaged drift (manual decision)", report.unmanagedDrift ?? [])
@@ -100,4 +108,62 @@ export function registerDoctor(program: Command): void {
         process.exit(1)
       }
     })
+}
+
+/**
+ * Whether declared hooks can actually run.
+ *
+ * Worth its own section because every failure here is silent: a hook whose function is missing, or a
+ * stack with functions switched off, produces no error anywhere — the write just succeeds
+ * unvalidated. Drift you cannot see is the thing doctor exists for.
+ */
+export function printHooks(report: HooksReport): void {
+  if (report.declared.length === 0) return
+
+  plain(`\nHooks (${report.declared.length}):\n`)
+  for (const hook of report.declared) {
+    const broken = report.missing.some(
+      (m) => m.model === hook.model && m.event === hook.event,
+    )
+    plain(`  ${broken ? "✗" : "•"} ${hook.model}.${hook.event} → ${hook.function}`)
+  }
+
+  if (report.missing.length > 0) {
+    plain("\n  Those marked ✗ name a function that does not exist, so they never fire.")
+    plain("  Create it with: supatype hooks new <name>")
+  }
+  if (report.functionsDisabled) {
+    plain("\n  functions_enabled is false in .supatype/manifest.json — every hook is inert.")
+    plain("  Regenerate the stack config with: supatype self-host compose")
+  }
+  if (report.mapMissing) {
+    plain("\n  .supatype/manifest.json carries no hook map, so the server has nothing to call.")
+    plain("  Run: supatype push")
+  }
+}
+
+/**
+ * Report which functions may see the service-role key, and which grants do nothing.
+ *
+ * Worth printing even when everything resolves: this is the list of functions that can read and write
+ * past every access rule in the schema, and "which ones are those again?" should be answerable without
+ * opening the config.
+ */
+export function printServiceRoleGrants(
+  problems: ServiceRoleProblems,
+  declared: readonly string[],
+): void {
+  if (declared.length === 0) return
+
+  plain(`\nService-role grants (${declared.length}):\n`)
+  const broken = new Set(problems.missing)
+  for (const name of declared) {
+    plain(`  ${broken.has(name) ? "✗" : "•"} ${name}`)
+  }
+
+  if (broken.size > 0) {
+    plain("\n  Those marked ✗ match no function, so they grant nothing — the function reads no key.")
+  }
+  for (const warning of problems.warnings) plain(warning)
+  plain("\n  These functions bypass every access rule in the schema. Anything not listed cannot.")
 }

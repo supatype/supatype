@@ -38,6 +38,10 @@ export type WidgetType =
   | "uuid"
   | "color"
   | "xml"
+  /** `Code<Lang>` — `{ lang, source }` in JSONB, edited as source text. */
+  | "code"
+  /** `Currency<Code>` — `{ amount, code }` in JSONB, amount in minor units. */
+  | "currency"
   | "button"
 
 export interface FieldConfig {

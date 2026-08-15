@@ -32,6 +32,26 @@ export const ADMIN_PASSWORD_ENV = "SUPATYPE_ADMIN_PASSWORD"
 
 const BCRYPT_ROUNDS = 10
 
+/**
+ * Studio roles a membership row may hold, most privileged first.
+ *
+ * Must match `studioRolePermissions` in supatype-server and
+ * `STUDIO_ROLE_PERMISSIONS` in the control plane: capability checks refuse a role
+ * they do not recognise, so an unvalidated `--role` here would create a user who
+ * is locked out of the very panel they were made for.
+ */
+export const STUDIO_ROLES = ["admin", "developer", "editor"] as const
+
+function assertStudioRole(role: string): void {
+  if ((STUDIO_ROLES as readonly string[]).includes(role)) return
+  error(
+    `Unknown Studio role "${role}". Choose one of: ${STUDIO_ROLES.join(", ")}.\n` +
+      "  Studio roles are Supatype's own; your application's roles are separate " +
+      "and belong in your access rules.",
+  )
+  process.exit(1)
+}
+
 /** GoTrue scopes users to the nil instance id in single-tenant/self-host mode. */
 export const GOTRUE_NIL_INSTANCE_ID = "00000000-0000-0000-0000-000000000000"
 
@@ -89,7 +109,7 @@ export function registerAdmin(program: Command): void {
     .description("Create an admin user for the admin panel")
     .option("--email <email>", "Admin user email address")
     .option("--password <password>", "Admin user password (prompted if not provided)")
-    .option("--role <role>", "Admin role to assign", "admin")
+    .option("--role <role>", `Studio role to assign (${STUDIO_ROLES.join(" | ")})`, "admin")
     .option("--connection <url>", "Database connection URL (overrides config)")
     .action(
       async (opts: {
@@ -116,6 +136,7 @@ export function registerAdmin(program: Command): void {
         }
 
         const role = opts.role
+        assertStudioRole(role)
 
         info(`Creating admin user: ${email} (role: ${role})...`)
 
@@ -154,10 +175,11 @@ export function registerAdmin(program: Command): void {
     .command("set-role")
     .description("Change an existing user's admin role")
     .requiredOption("--email <email>", "User email address")
-    .requiredOption("--role <role>", "New role to assign")
+    .requiredOption("--role <role>", `New Studio role (${STUDIO_ROLES.join(" | ")})`)
     .option("--connection <url>", "Database connection URL (overrides config)")
     .action(
       async (opts: { email: string; role: string; connection?: string }) => {
+        assertStudioRole(opts.role)
         const cwd = process.cwd()
         const config = loadConfig(cwd)
         const connection = resolveAdminConnection(cwd, config, opts.connection)
@@ -166,13 +188,23 @@ export function registerAdmin(program: Command): void {
         const pool = new pg.Pool({ connectionString: connection, max: 2 })
 
         try {
+          // Studio roles live in `_supatype.studio_members`, not in
+          // `app_metadata`: that key is the developer's namespace for their own
+          // app roles, and writing Studio access there means assigning an app
+          // role could hand out admin UI access by accident.
+          await ensureStudioMembersTable((sql, params) => pool.query(sql, params))
           const result = await pool.query(
-            `UPDATE auth.users
-             SET raw_app_meta_data = raw_app_meta_data || $1::jsonb,
-                 updated_at = now()
-             WHERE email = $2
-             RETURNING id, email, raw_app_meta_data`,
-            [JSON.stringify({ role: opts.role }), opts.email.toLowerCase()],
+            `WITH target AS (
+               SELECT id, email FROM auth.users WHERE email = $2
+             ), upsert AS (
+               INSERT INTO _supatype.studio_members (user_id, role)
+               SELECT id, $1 FROM target
+               ON CONFLICT (user_id) DO UPDATE
+                 SET role = EXCLUDED.role, updated_at = now()
+               RETURNING user_id
+             )
+             SELECT id, email FROM target`,
+            [opts.role, opts.email.toLowerCase()],
           )
 
           if (result.rows.length === 0) {
@@ -180,11 +212,7 @@ export function registerAdmin(program: Command): void {
             process.exit(1)
           }
 
-          const user = result.rows[0] as {
-            id: string
-            email: string
-            raw_app_meta_data: Record<string, unknown>
-          }
+          const user = result.rows[0] as { id: string; email: string }
 
           info("Role updated successfully.")
           plain(`  ID:    ${user.id}`)
@@ -203,7 +231,7 @@ export function registerAdmin(program: Command): void {
 
   adminCmd
     .command("list-users")
-    .description("List users with admin roles")
+    .description("List users with Studio access")
     .option("--connection <url>", "Database connection URL (overrides config)")
     .action(async (opts: { connection?: string }) => {
       const cwd = process.cwd()
@@ -214,12 +242,17 @@ export function registerAdmin(program: Command): void {
       const pool = new pg.Pool({ connectionString: connection, max: 2 })
 
       try {
+        // Studio access is membership, not a claim — list the grant that
+        // actually decides admission. LEFT JOIN, because a membership held by a
+        // Supatype Cloud account has no row in this project's `auth.users`;
+        // hiding those would make `list-users` disagree with who can log in.
         const result = await pool.query(
-          `SELECT id, email, raw_app_meta_data->>'role' as role, created_at
-           FROM auth.users
-           WHERE raw_app_meta_data->>'role' IS NOT NULL
-             AND raw_app_meta_data->>'role' != 'authenticated'
-           ORDER BY created_at ASC`,
+          `SELECT COALESCE(m.user_id, m.platform_user_id) AS id,
+                  COALESCE(u.email, '(cloud account)') AS email,
+                  m.role, m.created_at
+             FROM _supatype.studio_members m
+             LEFT JOIN auth.users u ON u.id = m.user_id
+            ORDER BY m.created_at ASC`,
         )
 
         if (result.rows.length === 0) {
@@ -318,7 +351,8 @@ export async function ensureFirstAdminUserForProject(
   await ensureFirstAdminUser(connection, merged)
 }
 
-async function ensureFirstAdminWithQuery(
+/** Exported for tests: the DB seam both the pool and compose paths share. */
+export async function ensureFirstAdminWithQuery(
   query: DbQuery,
   options: EnsureFirstAdminOptions,
 ): Promise<void> {
@@ -408,7 +442,9 @@ async function resolveAdminCredentials(
 }
 
 export function clearAdminSeedPassword(cwd: string): void {
-  upsertEnvFile(cwd, {}, [ADMIN_PASSWORD_ENV])
+  // Unconditional: this is a one-time seed password being retired, and whoever wrote it wanted it
+  // gone once used.
+  upsertEnvFile(cwd, {}, { remove: [ADMIN_PASSWORD_ENV] })
 }
 
 export async function hashPasswordForAuth(password: string): Promise<string> {
@@ -442,8 +478,11 @@ async function createAdminUser(
   }
 
   const passwordHash = await hashPasswordForAuth(password)
+  // No `role` here: `app_metadata` is the developer's namespace for their own
+  // application roles, and Studio access is granted through
+  // `_supatype.studio_members` instead. Writing it in both places means an app
+  // role assignment can silently confer admin UI access.
   const appMetadata = JSON.stringify({
-    role,
     provider: "email",
     providers: ["email"],
   })
@@ -472,6 +511,7 @@ async function createAdminUser(
   )
 
   const user = result.rows[0] as { id: string; email: string }
+  await recordStudioMembership(query, user.id, role)
   if (!opts.quiet) {
     info("Admin user created successfully.")
     plain(`  ID:    ${user.id}`)
@@ -479,6 +519,31 @@ async function createAdminUser(
     plain(`  Role:  ${role}`)
   }
   return user
+}
+
+/**
+ * Record Studio access in `_supatype.studio_members`.
+ *
+ * Studio capability is deliberately not a JWT claim: `app_metadata` belongs to
+ * the developer's own app roles, and letting it grant Studio access means a
+ * developer assigning an app role could hand out admin UI access by accident.
+ *
+ * This is now the *only* grant, so a failure here is fatal to the command — a
+ * user created without a membership row cannot reach Studio at all, and
+ * reporting success would leave no clue why.
+ */
+async function recordStudioMembership(
+  query: DbQuery,
+  userId: string,
+  role: string,
+): Promise<void> {
+  await ensureStudioMembersTable(query)
+  await query(
+    `INSERT INTO _supatype.studio_members (user_id, role)
+     VALUES ($1, $2)
+     ON CONFLICT (user_id) DO UPDATE SET role = EXCLUDED.role, updated_at = now()`,
+    [userId, role],
+  )
 }
 
 async function ensureAuthUsersTable(pool: Pool): Promise<void> {
@@ -521,14 +586,64 @@ async function authUsersTableExists(query: DbQuery): Promise<boolean> {
   return Boolean(result.rows[0]?.exists)
 }
 
+/**
+ * Whether anyone can already reach Studio.
+ *
+ * Counts membership rows, not `app_metadata` claims: the claim no longer grants
+ * anything, so counting it would report an admin exists while nobody can log in.
+ * A missing table means the project has never been pushed — no admins.
+ */
 async function hasAdminUsers(query: DbQuery): Promise<boolean> {
+  // Postgres resolves relations at parse time, so the table has to be checked
+  // separately rather than guarded inside the count query. Absent means the
+  // project has never been pushed — no admins, and `createAdminUser` will
+  // create the table itself.
+  if (!(await studioMembersTableExists(query))) return false
+
+  // Inner JOIN on purpose, unlike `list-users`: a membership held by a cloud
+  // account cannot log in to a self-hosted GoTrue, so a project exported from
+  // cloud with only those grants genuinely still needs a first admin.
   const adminCount = await query(
-    `SELECT COUNT(*)::int as count FROM auth.users
-     WHERE raw_app_meta_data->>'role' IS NOT NULL
-       AND raw_app_meta_data->>'role' != 'authenticated'`,
+    `SELECT COUNT(*)::int as count
+       FROM _supatype.studio_members m
+       JOIN auth.users u ON u.id = m.user_id
+      WHERE m.role <> 'authenticated'`,
   )
   const count = (adminCount.rows[0] as { count: number } | undefined)?.count ?? 0
   return count > 0
+}
+
+/**
+ * A project whose engine predates the membership table, or one that has never
+ * been pushed, still needs working `admin create-user` / `admin set-role`.
+ * Mirrors the engine's own definition (`create_studio_members_table_sql`).
+ *
+ * A row is held by exactly one identity: `user_id` for a project user (what the
+ * CLI grants), or `platform_user_id` for a Supatype Cloud account. The engine
+ * migrates older single-identity tables; this only has to create the current
+ * shape when there is nothing there at all.
+ */
+async function ensureStudioMembersTable(query: DbQuery): Promise<void> {
+  await query(`CREATE SCHEMA IF NOT EXISTS _supatype`)
+  await query(
+    `CREATE TABLE IF NOT EXISTS _supatype.studio_members (
+       id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+       user_id           UUID UNIQUE,
+       platform_user_id  UUID UNIQUE,
+       role              TEXT NOT NULL,
+       created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+       updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+       CONSTRAINT studio_members_one_identity
+         CHECK (num_nonnulls(user_id, platform_user_id) = 1)
+     )`,
+  )
+}
+
+async function studioMembersTableExists(query: DbQuery): Promise<boolean> {
+  const result = await query(
+    `SELECT to_regclass('_supatype.studio_members') IS NOT NULL as exists`,
+  )
+  return Boolean(result.rows[0]?.exists)
 }
 
 /** Postgres password for compose `exec psql` (db is not published to the host). */

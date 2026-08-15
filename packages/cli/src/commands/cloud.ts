@@ -1,6 +1,7 @@
 import type { Command } from "commander"
 import { readFileSync, writeFileSync, existsSync } from "node:fs"
 import { resolve } from "node:path"
+import { loadCloudCredentials, persistCloudSession } from "../cloud-credentials.js"
 import { loadProjectLink, migrateLegacyLinkFiles } from "../link.js"
 import { targetFetch } from "../target-client.js"
 import { registerEnvs, registerLinkOptions, runLinkAction } from "./link-helpers.js"
@@ -28,7 +29,7 @@ export function loadCloudConfig(cwd: string): CloudConfig | null {
   }
   return {
     apiUrl: link.cloudApiUrl ?? "https://api.supatype.com",
-    token: link.token ?? "",
+    token: link.token ?? loadCloudCredentials()?.accessToken ?? "",
     projectSlug: link.projectRef,
     ...(link.orgId !== undefined ? { orgId: link.orgId } : {}),
   }
@@ -44,19 +45,39 @@ function saveCloudConfig(cwd: string, config: CloudConfig): void {
 }
 
 async function cloudFetch<T>(config: CloudConfig, method: string, path: string, body?: unknown): Promise<T> {
+  const cwd = process.cwd()
+  const creds = loadCloudCredentials()
+  const refreshToken = creds?.refreshToken ?? loadProjectLink(cwd)?.refreshToken
   return targetFetch<T>(config.apiUrl, "/api/v1", {
     method,
     path,
-    body,
+    ...(body !== undefined ? { body } : {}),
     token: config.token,
-    orgId: config.orgId,
+    ...(config.orgId !== undefined ? { orgId: config.orgId } : {}),
+    ...(refreshToken
+      ? {
+          authRefresh: {
+            cloudApiUrl: config.apiUrl,
+            refreshToken,
+            onRefreshed: ({ accessToken, refreshToken: nextRefresh }) => {
+              persistCloudSession(cwd, {
+                apiUrl: config.apiUrl,
+                accessToken,
+                ...(nextRefresh !== undefined ? { refreshToken: nextRefresh } : {}),
+              })
+              config.token = accessToken
+            },
+          },
+        }
+      : {}),
   })
 }
 
 export function isCloudLinked(cwd: string): boolean {
   migrateLegacyLinkFiles(cwd)
   const link = loadProjectLink(cwd)
-  return Boolean(link?.kind === "cloud" && link.projectRef && link.token)
+  if (!(link?.kind === "cloud" && link.projectRef)) return false
+  return Boolean(link.token || loadCloudCredentials()?.accessToken)
 }
 
 export async function pushSchemaToLinkedProject(
@@ -260,15 +281,18 @@ function getCloudConfigOrExit(): CloudConfig {
   const cwd = process.cwd()
   let config = loadCloudConfig(cwd)
   if (!config) {
+    const creds = loadCloudCredentials()
     const token =
       process.env["SUPATYPE_ACCESS_TOKEN"] ??
-      process.env["SUPATYPE_TOKEN"]
-    const apiUrl = process.env["SUPATYPE_API_URL"] ?? "https://api.supatype.com"
+      process.env["SUPATYPE_TOKEN"] ??
+      creds?.accessToken
+    const apiUrl =
+      process.env["SUPATYPE_API_URL"] ?? creds?.apiUrl ?? "https://api.supatype.com"
     if (!token) {
-      error("Not connected to Supatype Cloud. Run: supatype link, or set SUPATYPE_ACCESS_TOKEN.")
+      error("Not connected to Supatype Cloud. Run: supatype login (then supatype link), or set SUPATYPE_ACCESS_TOKEN.")
       process.exit(1)
     }
-    config = { apiUrl, token }
+    config = { apiUrl: apiUrl.replace(/\/$/, ""), token }
   }
   return config
 }

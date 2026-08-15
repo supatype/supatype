@@ -12,6 +12,7 @@ import { Sidebar, getPageBreadcrumbs } from "./components/Sidebar.js"
 import { SecondaryPanel } from "./components/SecondaryPanel.js"
 import { TertiaryNav } from "./components/TertiaryNav.js"
 import { TopBar } from "./components/TopBar.js"
+import { ElevatedModeBanner } from "./components/ElevatedModeBanner.js"
 
 // Re-export for dev tool views that import useStudioClient
 export const useStudioClient = useAdminClient
@@ -107,6 +108,11 @@ function StudioLayout({ extensions, demoMode }: StudioLayoutProps): React.ReactE
         demoMode={demoMode}
         onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
       />
+
+      {/* Reading past RLS is legitimate but must never be silent — an empty table
+          should never leave you guessing whether it means "no rows" or "no rows
+          you can see". */}
+      <ElevatedModeBanner />
 
       {/* 3-tier nav: primary icon sidebar + secondary panel + content */}
       <div className="flex flex-1 overflow-hidden">

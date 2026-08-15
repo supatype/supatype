@@ -4,6 +4,7 @@ import { useAdminClient } from "../hooks/useAdminClient.js"
 import { useAdminConfig } from "../hooks/useAdminConfig.js"
 import { FieldWidget } from "./FieldWidget.js"
 import { Slideover } from "../components/Slideover.js"
+import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import type { WidgetProps } from "./FieldWidget.js"
 import type { SupatypeClient } from "@supatype/client"
 import {
@@ -52,14 +53,16 @@ async function postgrestQuery(
     if (k === "limit") url.searchParams.set("limit", v)
     else url.searchParams.set(k, v)
   }
-  const token = client.serviceRoleKey
+  // The signed-in user's token, proxied: the server decides whether this reads
+  // as them or elevated. Sending a service role key from the browser would skip
+  // that decision entirely.
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    ...(token ? { apikey: token, Authorization: `Bearer ${token}` } : {}),
+    ...studioAuthHeaders(client),
     ...(schema ? { "Accept-Profile": schema } : {}),
   }
   try {
-    const res = await fetch(url.toString(), { headers })
+    const res = await fetch(url.toString(), { headers, credentials: "include" })
     if (!res.ok) {
       const err = await res.json().catch(() => ({})) as Record<string, unknown>
       return { data: [], error: { message: String(err["message"] ?? `HTTP ${res.status}`) } }

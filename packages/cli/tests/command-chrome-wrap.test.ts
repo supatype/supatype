@@ -10,6 +10,7 @@ describe("shouldExcludeCommandChrome", () => {
     expect(shouldExcludeCommandChrome("dev")).toBe(true)
     expect(shouldExcludeCommandChrome("init")).toBe(true)
     expect(shouldExcludeCommandChrome("link")).toBe(true)
+    expect(shouldExcludeCommandChrome("_postinstall")).toBe(true)
     expect(shouldExcludeCommandChrome("add domain")).toBe(true)
     expect(shouldExcludeCommandChrome("logs")).toBe(true)
     expect(shouldExcludeCommandChrome("pg psql")).toBe(true)

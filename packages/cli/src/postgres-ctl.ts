@@ -5,7 +5,7 @@
 
 import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync } from "node:fs"
-import { dirname, join } from "node:path"
+import { dirname, join, resolve as resolvePath } from "node:path"
 
 export interface PgOptions {
   /** Absolute path to the directory containing pg_ctl, initdb, psql, etc. */
@@ -72,15 +72,42 @@ export function initdb(opts: PgOptions): void {
  * Start Postgres using pg_ctl.
  * Returns immediately once pg_ctl has handed off to the server process.
  */
+/**
+ * Whether a native Postgres install carries the masking library.
+ *
+ * Asked of the filesystem rather than assumed from the provider, because a developer with an archive
+ * downloaded before the library was bundled has a native Postgres *without* it. Assuming otherwise
+ * would select tier 1 and their next push would be refused by the capability probe.
+ *
+ * Two layouts: Linux and macOS put extension libraries in `lib/`, the Windows archive in
+ * `lib/postgresql/`.
+ */
+export function nativeMaskLibraryPresent(pgBinDir: string | null | undefined): boolean {
+  if (!pgBinDir) return false
+  const prefix = resolvePath(pgBinDir, "..")
+  return ["supatype_mask.so", "supatype_mask.dylib", "supatype_mask.dll"].some(
+    (lib) =>
+      existsSync(join(prefix, "lib", lib)) || existsSync(join(prefix, "lib", "postgresql", lib)),
+  )
+}
+
 export function start(opts: PgOptions): void {
   const bin = pgBin(opts.pgBinDir, "pg_ctl")
   const logPath = opts.logPath ?? join(opts.dataDir, "postgres.log")
+
+  // `supatype_mask` is a planner hook, so it has to be preloaded — `CREATE EXTENSION` alone does
+  // nothing without it. Only when the archive actually carries the library: an install downloaded
+  // before it was bundled would fail to start with "could not access file".
+  //
+  // Native Postgres was started with no preloaded libraries at all until now, which is why field
+  // rules could not be enforced on the default `supatype dev`.
+  const preload = nativeMaskLibraryPresent(opts.pgBinDir) ? " -c shared_preload_libraries=supatype_mask" : ""
 
   const args = [
     "start",
     "-D", opts.dataDir,
     "-l", logPath,
-    "-o", `-p ${opts.port}`,
+    "-o", `-p ${opts.port}${preload}`,
     "--wait",
   ]
 

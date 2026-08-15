@@ -94,3 +94,4 @@ export type { CompositeField, CompositeFieldGroupProps } from "./plugins/Composi
 
 // Utilities
 export { cn } from "./lib/utils.js"
+export { normalizeAdminConfig } from "./lib/normalize-admin-config.js"
