@@ -21,15 +21,21 @@ set -euo pipefail
 
 VERSION="${SUPATYPE_VERSION:-latest}"
 INSTALL_DIR="${SUPATYPE_INSTALL_DIR:-$HOME/.supatype/bin}"
-CDN="https://releases.supatype.com/cli"
+# Overridable so the whole path contract can be exercised against a local server. Every
+# break this script has had — the manifest name, the arch token, the artefact shape — was a
+# disagreement with the publisher that no test could have caught while the host was fixed.
+CDN="${SUPATYPE_CDN:-https://releases.supatype.com/cli}"
 
 # ── Detect platform ────────────────────────────────────────────────────────────
 
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH="$(uname -m)"
 
+# amd64, not x86_64: every other artefact we publish is named for Node's `process.arch`
+# mapping, and the CLI asks for `amd64` on all platforms. Publishing under the uname
+# spelling is what left Intel macOS with a postgres archive no client ever requested.
 case "$ARCH" in
-  x86_64)        ARCH="x86_64" ;;
+  x86_64|amd64)  ARCH="amd64" ;;
   arm64|aarch64) ARCH="arm64" ;;
   *)
     echo "Error: unsupported architecture: $ARCH" >&2
@@ -47,10 +53,13 @@ esac
 
 # ── Resolve "latest" ───────────────────────────────────────────────────────────
 
+# cli/latest.json is the manifest the release workflow writes and `supatype self-update`
+# reads. sed rather than jq: this runs on a machine that has nothing installed yet.
 if [[ "$VERSION" == "latest" ]]; then
-  VERSION="$(curl -fsSL "$CDN/latest/version.txt")"
+  VERSION="$(curl -fsSL "$CDN/latest.json" |
+    sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
   if [[ -z "$VERSION" ]]; then
-    echo "Error: could not resolve latest version from $CDN/latest/version.txt" >&2
+    echo "Error: could not resolve latest version from $CDN/latest.json" >&2
     exit 1
   fi
 fi
@@ -59,26 +68,31 @@ echo "Installing supatype v${VERSION} (${OS}/${ARCH})..."
 
 # ── Download and verify ────────────────────────────────────────────────────────
 
-TARBALL="supatype-cli-${OS}-${ARCH}.tar.gz"
-URL="$CDN/v${VERSION}/${TARBALL}"
-SHA_URL="${URL}.sha256"
+# The artefact is the executable itself, not an archive — pkg emits one file and that is
+# what the CDN carries, so there is nothing to unpack.
+BINARY="supatype-cli-${OS}-${ARCH}"
+URL="$CDN/v${VERSION}/${BINARY}"
+SHA_URL="$CDN/v${VERSION}/checksums.sha256"
 
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
-curl -fsSL "$URL" -o "$tmpdir/$TARBALL"
+curl -fsSL "$URL" -o "$tmpdir/$BINARY"
 
-expected="$(curl -fsSL "$SHA_URL" | awk '{print $1}')"
+# One checksums file covers every platform; take the line for ours. `sha256sum` writes the
+# name as `*name` in binary mode, so match both spellings.
+expected="$(curl -fsSL "$SHA_URL" |
+  awk -v want="$BINARY" '{ sub(/^\*/, "", $2); if ($2 == want) print $1 }')"
 if [[ -z "$expected" ]]; then
-  echo "Error: could not fetch checksum from $SHA_URL" >&2
+  echo "Error: no checksum for $BINARY in $SHA_URL" >&2
   exit 1
 fi
 
 # sha256sum on Linux, shasum on macOS
 if command -v sha256sum &>/dev/null; then
-  actual="$(sha256sum "$tmpdir/$TARBALL" | awk '{print $1}')"
+  actual="$(sha256sum "$tmpdir/$BINARY" | awk '{print $1}')"
 else
-  actual="$(shasum -a 256 "$tmpdir/$TARBALL" | awk '{print $1}')"
+  actual="$(shasum -a 256 "$tmpdir/$BINARY" | awk '{print $1}')"
 fi
 
 if [[ "$expected" != "$actual" ]]; then
@@ -91,7 +105,9 @@ fi
 # ── Install ────────────────────────────────────────────────────────────────────
 
 mkdir -p "$INSTALL_DIR"
-tar -xzf "$tmpdir/$TARBALL" -C "$INSTALL_DIR"
+# Move into place only after the checksum passes, so an interrupted run never leaves a
+# half-written `supatype` on PATH.
+mv "$tmpdir/$BINARY" "$INSTALL_DIR/supatype"
 chmod +x "$INSTALL_DIR/supatype"
 
 # ── PATH setup ─────────────────────────────────────────────────────────────────

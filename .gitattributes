@@ -1,0 +1,4 @@
+# Shell scripts must keep LF wherever they were authored. `scripts/install.sh` is served from
+# the CDN and run by `curl | bash`; a CRLF committed from a Windows worktree makes the very
+# first line fail with `$'\r': command not found`, on every user's machine at once.
+*.sh text eol=lf

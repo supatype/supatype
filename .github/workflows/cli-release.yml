@@ -91,19 +91,46 @@ jobs:
     runs-on: ubuntu-24.04
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     steps:
-      - name: Write cli/latest.json
+      - uses: actions/checkout@v4
+
+      - name: Collect every platform's binary
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publish checksums, manifest and installer
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.CDN_AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.CDN_AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: ${{ secrets.CDN_AWS_REGION }}
         run: |
+          set -euo pipefail
           VERSION="${{ github.ref_name }}"
           VERSION="${VERSION#cli-v}"
           if [ -n "${{ inputs.version }}" ]; then VERSION="${{ inputs.version }}"; fi
           EP="${{ secrets.CDN_ENDPOINT }}"
+          EP="${EP%/}"
           BUCKET="${{ secrets.CDN_BUCKET }}"
+
+          # download-artifact nests each artifact in its own directory; the checksums file
+          # lists bare names, because that is how install.sh and Homebrew refer to them.
+          mkdir -p dist
+          find artifacts -type f -name 'supatype-cli-*' -exec cp {} dist/ \;
+          ( cd dist && sha256sum supatype-cli-* > checksums.sha256 && cat checksums.sha256 )
+
+          # Versioned, so it can never disagree with the binaries beside it. Overwriting a
+          # published path is what put a fresh checksum next to a stale archive on postgres.
+          aws s3 cp dist/checksums.sha256 "s3://${BUCKET}/cli/v${VERSION}/checksums.sha256" \
+            --endpoint-url "${EP}" --no-progress
+
           printf '{"version":"%s","date":"%s"}\n' "${VERSION}" "$(date -u +%Y-%m-%d)" > latest.json
-          aws s3 cp latest.json "s3://${BUCKET}/cli/latest.json" --endpoint-url "${EP%/}" --cache-control "no-cache" --no-progress
+          aws s3 cp latest.json "s3://${BUCKET}/cli/latest.json" --endpoint-url "${EP}" --cache-control "no-cache" --no-progress
+
+          # The documented entry point — `curl -fsSL https://releases.supatype.com/install.sh | bash`
+          # 404s until something puts it there, and nothing did.
+          aws s3 cp scripts/install.sh "s3://${BUCKET}/install.sh" \
+            --endpoint-url "${EP}" --cache-control "no-cache" \
+            --content-type "text/x-shellscript" --no-progress
 
   update-homebrew-formula:
     name: Homebrew formula
