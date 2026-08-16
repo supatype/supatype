@@ -123,10 +123,11 @@ jobs:
           path: tests/integration/.supatype/self-host/
           retention-days: 3
 
-  # Phase 10.6 C21 — workspace CLI → init (docker) → dev → healthy API.
+  # Zero to running, from the workspace build: init (docker) → dev → an API that answers.
+  # Phase-10.6 row C21, kept here as provenance — the job is named for what it does.
   # macOS runners have no Docker Desktop; Colima provides the daemon.
   zero-to-running:
-    name: C21 workspace (${{ matrix.os }})
+    name: "zero to running: workspace CLI (${{ matrix.os }})"
     if: github.event_name != 'schedule'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
@@ -141,15 +142,15 @@ jobs:
         # native-archives workflow, which is where the current Intel label is recorded.
         os: [ubuntu-22.04, macos-15-intel]
     env:
-      SUPATYPE_C21_INSTALL: workspace
-      SUPATYPE_C21_KEEP_ON_FAILURE: "1"
+      SUPATYPE_ZTR_INSTALL: workspace
+      SUPATYPE_ZTR_KEEP_ON_FAILURE: "1"
       SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
 
     steps:
       # $RUNNER_TEMP, not ${{ runner.temp }}: the `runner` context does not exist in a
       # job-level `env:`, and referencing it there makes GitHub reject the whole file.
       - name: Choose a work root outside the checkout
-        run: echo "SUPATYPE_C21_WORK_ROOT=$RUNNER_TEMP/c21-work" >> "$GITHUB_ENV"
+        run: echo "SUPATYPE_ZTR_WORK_ROOT=$RUNNER_TEMP/zero-to-running" >> "$GITHUB_ENV"
 
       - uses: actions/checkout@v4
 
@@ -186,22 +187,24 @@ jobs:
         env:
           SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
 
-      - name: Run C21 zero-to-running soak
+      - name: Run the zero-to-running soak
         run: bash tests/integration/scripts/zero-to-running.sh
 
-      - name: Upload C21 logs on failure
+      - name: Upload the run's logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: zero-to-running-workspace-${{ matrix.os }}
-          path: ${{ runner.temp }}/c21-work/c21-smoke/
+          path: ${{ runner.temp }}/zero-to-running/ztr-smoke/
           retention-days: 3
           if-no-files-found: warn
 
-  # Phase 10.6 C21 — curl|sh CDN install path (linux only; not Windows).
+  # The same journey through the published installer — `curl | sh` from the CDN rather than the
+  # workspace build, so it exercises what a new user actually runs. Linux only; not Windows.
+  # Phase-10.6 row C21.
   # Runs on schedule + main pushes + manual dispatch (skips PRs to avoid CDN flakiness blocking reviews).
   zero-to-running-cdn:
-    name: C21 CDN install (linux)
+    name: "zero to running: curl | sh install (linux)"
     if: >
       github.event_name == 'schedule' ||
       github.event_name == 'workflow_dispatch' ||
@@ -209,26 +212,26 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     env:
-      SUPATYPE_C21_INSTALL: cdn
-      SUPATYPE_C21_KEEP_ON_FAILURE: "1"
+      SUPATYPE_ZTR_INSTALL: cdn
+      SUPATYPE_ZTR_KEEP_ON_FAILURE: "1"
       SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
 
     steps:
       # $RUNNER_TEMP, not ${{ runner.temp }}: the `runner` context does not exist in a
       # job-level `env:`, and referencing it there makes GitHub reject the whole file.
       - name: Choose a work root outside the checkout
-        run: echo "SUPATYPE_C21_WORK_ROOT=$RUNNER_TEMP/c21-cdn-work" >> "$GITHUB_ENV"
+        run: echo "SUPATYPE_ZTR_WORK_ROOT=$RUNNER_TEMP/zero-to-running-cdn" >> "$GITHUB_ENV"
 
       - uses: actions/checkout@v4
 
-      - name: Run C21 CDN zero-to-running soak
+      - name: Run the zero-to-running soak through the published installer
         run: bash tests/integration/scripts/zero-to-running.sh
 
-      - name: Upload C21 CDN logs on failure
+      - name: Upload the run's logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: zero-to-running-cdn-ubuntu
-          path: ${{ runner.temp }}/c21-cdn-work/c21-smoke/
+          path: ${{ runner.temp }}/zero-to-running-cdn/ztr-smoke/
           retention-days: 3
           if-no-files-found: warn

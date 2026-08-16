@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Phase 10.6 C21 — zero-to-running soak (docker-default init path).
+# Zero to running: a new project from nothing to an API that answers, on the docker-default init
+# path. Phase-10.6 row C21 asked for it; the name says what it does.
 #
 # Simulates: install CLI → supatype init → supatype dev → healthy API.
 #
@@ -7,10 +8,10 @@
 #   bash tests/integration/scripts/zero-to-running.sh
 #
 # Environment:
-#   SUPATYPE_C21_INSTALL   workspace (default) | cdn  — cdn uses install.sh (linux/darwin only; not Windows)
-#   SUPATYPE_C21_VERSION   CLI version when SUPATYPE_C21_INSTALL=cdn (default: latest)
-#   SUPATYPE_C21_WORK_ROOT Parent dir for the temp project (default: mktemp -d)
-#   SUPATYPE_C21_MAX_WAIT  Health poll timeout seconds (default: 300)
+#   SUPATYPE_ZTR_INSTALL   workspace (default) | cdn  — cdn uses install.sh (linux/darwin only; not Windows)
+#   SUPATYPE_ZTR_VERSION   CLI version when SUPATYPE_ZTR_INSTALL=cdn (default: latest)
+#   SUPATYPE_ZTR_WORK_ROOT Parent dir for the temp project (default: mktemp -d)
+#   SUPATYPE_ZTR_MAX_WAIT  Health poll timeout seconds (default: 300)
 #   SUPATYPE_RELEASE_PUBLIC_KEY  Required for init binary prefetch (CDN engine)
 #   SUPATYPE_*_IMAGE       Optional Docker Hub pins (default :latest)
 #
@@ -24,10 +25,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 CLI_BIN="$ROOT_DIR/packages/cli/bin/supatype.js"
 
-PROJECT_NAME="${SUPATYPE_C21_PROJECT:-c21-smoke}"
-MAX_WAIT="${SUPATYPE_C21_MAX_WAIT:-300}"
-INSTALL_MODE="${SUPATYPE_C21_INSTALL:-workspace}"
-WORK_PARENT="${SUPATYPE_C21_WORK_ROOT:-}"
+PROJECT_NAME="${SUPATYPE_ZTR_PROJECT:-ztr-smoke}"
+MAX_WAIT="${SUPATYPE_ZTR_MAX_WAIT:-300}"
+INSTALL_MODE="${SUPATYPE_ZTR_INSTALL:-workspace}"
+WORK_PARENT="${SUPATYPE_ZTR_WORK_ROOT:-}"
 CREATED_WORK_ROOT=""
 
 SUPATYPE_PID=""
@@ -35,7 +36,7 @@ FAILED=0
 
 cleanup() {
   echo ""
-  echo "==> C21 teardown"
+  echo "==> zero-to-running teardown"
   if [[ -n "$SUPATYPE_PID" ]]; then
     kill "$SUPATYPE_PID" 2>/dev/null || true
     for _ in $(seq 1 20); do
@@ -51,7 +52,7 @@ cleanup() {
     wait "$SUPATYPE_PID" 2>/dev/null || true
   fi
   if [[ -n "$CREATED_WORK_ROOT" && -d "$CREATED_WORK_ROOT" ]]; then
-    if [[ "$FAILED" == "1" && "${SUPATYPE_C21_KEEP_ON_FAILURE:-}" == "1" ]]; then
+    if [[ "$FAILED" == "1" && "${SUPATYPE_ZTR_KEEP_ON_FAILURE:-}" == "1" ]]; then
       echo "  Keeping work dir for debugging: $CREATED_WORK_ROOT"
     else
       rm -rf "$CREATED_WORK_ROOT"
@@ -75,7 +76,7 @@ EOF
 }
 
 install_cli_cdn() {
-  SUPATYPE_VERSION="${SUPATYPE_C21_VERSION:-latest}" \
+  SUPATYPE_VERSION="${SUPATYPE_ZTR_VERSION:-latest}" \
     bash "$ROOT_DIR/scripts/install.sh"
 }
 
@@ -84,7 +85,7 @@ setup_cli() {
     workspace) install_cli_workspace ;;
     cdn) install_cli_cdn ;;
     *)
-      echo "ERROR: unknown SUPATYPE_C21_INSTALL=$INSTALL_MODE (use workspace or cdn)" >&2
+      echo "ERROR: unknown SUPATYPE_ZTR_INSTALL=$INSTALL_MODE (use workspace or cdn)" >&2
       exit 1
       ;;
   esac
@@ -164,7 +165,7 @@ main() {
   local start_ts
   start_ts="$(date +%s)"
 
-  echo "==> C21 zero-to-running (install=$INSTALL_MODE)"
+  echo "==> zero to running (install=$INSTALL_MODE)"
   setup_cli
   supatype --version
 
@@ -208,7 +209,7 @@ main() {
 
   local elapsed=$(( $(date +%s) - start_ts ))
   echo ""
-  echo "==> C21 passed in ${elapsed}s"
+  echo "==> zero to running passed in ${elapsed}s"
   echo "    install=$INSTALL_MODE init=$PROJECT_NAME url=$base_url"
 }
 
