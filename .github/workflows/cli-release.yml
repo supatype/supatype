@@ -53,9 +53,30 @@ jobs:
           node-version: 22
           cache: pnpm
 
-      - name: Install and bundle CLI
+      # release.yml does this before publishing to npm; without it here the binary carried
+      # whatever version happened to be committed, which is never the one being released.
+      - name: Stamp the release version across the workspace
+        shell: bash
         run: |
-          pnpm install --frozen-lockfile
+          set -euo pipefail
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#cli-v}"
+          if [ -n "${{ inputs.version }}" ]; then VERSION="${{ inputs.version }}"; fi
+          node scripts/set-version.mjs "$VERSION"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Without this the binary ships EMBEDDED_RELEASE_PUBLIC_KEY = "", and binary-cache
+      # fails closed: a new user's first `supatype dev` cannot verify the components it
+      # downloads and stops with "No minisign public key configured".
+      - name: Embed release public key (required)
+        run: node scripts/embed-release-pubkey.mjs
+        env:
+          MINISIGN_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
+
+      - name: Bundle CLI
+        run: |
           pnpm --filter @supatype/cli build
           node packages/cli/scripts/build-release-bundle.mjs
 

@@ -202,19 +202,23 @@ jobs:
   # The same journey through the published installer — `curl | sh` from the CDN rather than the
   # workspace build, so it exercises what a new user actually runs. Linux only; not Windows.
   # Phase-10.6 row C21.
-  # Runs on schedule + main pushes + manual dispatch (skips PRs to avoid CDN flakiness blocking reviews).
+  # Schedule + manual dispatch only. Not main pushes: no CLI has been published to the CDN
+  # yet — the release bundle does not build (ink and yoga-layout use top-level await, which
+  # esbuild cannot emit as CJS) — so this job can only fail, and a permanently red main
+  # teaches everyone to ignore it. Restore the main-push trigger with the first cli-v* tag.
   zero-to-running-cdn:
     name: "zero to running: curl | sh install (linux)"
     if: >
       github.event_name == 'schedule' ||
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/main')
+      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     env:
       SUPATYPE_ZTR_INSTALL: cdn
       SUPATYPE_ZTR_KEEP_ON_FAILURE: "1"
-      SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
+      # Deliberately no SUPATYPE_RELEASE_PUBLIC_KEY. The published binary embeds the key at
+      # release time; supplying it here would test a configuration no user has, and would
+      # hide a release that forgot to embed it — which every release so far would have.
 
     steps:
       # $RUNNER_TEMP, not ${{ runner.temp }}: the `runner` context does not exist in a
