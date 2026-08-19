@@ -234,6 +234,10 @@ describe("edge functions", () => {
     assert.equal(body.ok, true)
     assert.equal(body.hasSupatypeUrl, true)
     assert.equal(body.hasAnonKey, true)
-    assert.equal(body.hasServiceRoleKey, true)
+    // False by design, and the point of the least-privilege work: the worker withholds the
+    // service role key and hands it back only to a route that declared it needs one, or to a
+    // model hook. env-check declares nothing, so it must not see an ambient admin credential.
+    // This assertion said true, from before that change, and had been failing CI since.
+    assert.equal(body.hasServiceRoleKey, false)
   })
 })
