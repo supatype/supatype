@@ -1,7 +1,8 @@
 {
   "name": "@supatype/react",
   "version": "0.1.5",
-  "description": "Supatype React hooks — useAuth, useQuery, useMutation, SupatypeProvider",
+  "license": "MIT",
+  "description": "Supatype React hooks: useAuth, useQuery, useMutation, SupatypeProvider",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

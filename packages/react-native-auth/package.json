@@ -1,6 +1,7 @@
 {
   "name": "@supatype/react-native-auth",
   "version": "0.1.5",
+  "license": "MIT",
   "description": "Pre-built React Native authentication UI for Supatype",
   "type": "module",
   "main": "./dist/index.js",

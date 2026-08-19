@@ -1,7 +1,8 @@
 {
   "name": "@supatype/cli",
   "version": "0.1.5",
-  "description": "Supatype CLI — schema push, introspect, generate",
+  "license": "Apache-2.0",
+  "description": "Supatype CLI: schema push, introspect, generate",
   "type": "module",
   "bin": {
     "supatype": "./bin/supatype.js"

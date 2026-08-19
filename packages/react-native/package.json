@@ -1,7 +1,8 @@
 {
   "name": "@supatype/react-native",
   "version": "0.1.5",
-  "description": "Supatype React Native helpers — secure auth storage, createNativeClient, PKCE OAuth deep links",
+  "license": "MIT",
+  "description": "Supatype React Native helpers, secure auth storage, createNativeClient, PKCE OAuth deep links",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

@@ -1,7 +1,8 @@
 {
   "name": "@supatype/ssr",
   "version": "0.1.5",
-  "description": "Supatype server-side rendering utilities — create a client from cookie-based auth for Server Components, Route Handlers, and middleware",
+  "license": "MIT",
+  "description": "Supatype server-side rendering utilities, create a client from cookie-based auth for Server Components, Route Handlers, and middleware",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

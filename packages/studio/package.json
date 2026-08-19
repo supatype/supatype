@@ -1,8 +1,9 @@
 {
   "name": "@supatype/studio",
   "version": "0.1.5",
+  "license": "Apache-2.0",
   "private": true,
-  "description": "Supatype Studio — unified admin panel and developer dashboard",
+  "description": "Supatype Studio: unified admin panel and developer dashboard",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
