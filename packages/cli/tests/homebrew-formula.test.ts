@@ -7,6 +7,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 let counter = 0
 let tmpDir: string
 
+// These pin the pre-tarball artefact contract: bare executables named supatype-cli-<os>-<arch>.
+// The release now publishes .tar.gz archives (plus -musl variants), so the generator this file
+// exercises is out of date and cannot produce an installable formula. The assertions are kept
+// as a faithful description of the current generator rather than deleted, but they are not
+// evidence that Homebrew works. Both move together in phase 4 of
+// plans/Standalone-CLI-Distribution-Plan.md.
 const PLATFORMS = [
   "supatype-cli-darwin-arm64",
   "supatype-cli-darwin-amd64",

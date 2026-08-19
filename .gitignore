@@ -32,7 +32,12 @@ npm-debug.log*
 pnpm-debug.log*
 *.tsbuildinfo
 
-# Local binary overrides — never commit
+# Release build output. Each compiled CLI binary is 80 to 130 MB, so an unignored run of
+# build-release-artifacts.sh leaves the best part of a gigabyte in the working tree.
+release-bundle/
+artifacts/
+
+# Local binary overrides, never commit
 supatype.local.config.ts
 supatype.local.config.js
 supatype.local.config.mjs
