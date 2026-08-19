@@ -7,12 +7,20 @@
 # See plans/ENGINEERING-STATUS.md §6 "Install platform policy".
 #
 # Usage:
-#   curl -fsSL https://releases.supatype.com/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/supatype/supatype/main/scripts/install.sh | bash
+#
+# That URL, not the CDN copy, is the documented one. The script carries the public key the
+# archives are verified against, so serving it from the same bucket as the archives would put
+# the key and the thing it checks under one authority: whoever could replace an archive could
+# replace the key. GitHub and the CDN are two origins, which is what makes the signature check
+# below worth performing. A copy is mirrored to releases.supatype.com/install.sh for
+# convenience, and it is the weaker of the two.
 #
 # Environment overrides:
 #   SUPATYPE_VERSION     install a specific version (default: latest)
 #   SUPATYPE_INSTALL_DIR install directory (default: ~/.supatype/bin)
 #   SUPATYPE_CDN         base URL, so the path contract can be tested against a local server
+#   SUPATYPE_RELEASE_PUBLIC_KEY  override the embedded key (testing, or a private mirror)
 
 set -euo pipefail
 
@@ -22,6 +30,14 @@ INSTALL_DIR="${SUPATYPE_INSTALL_DIR:-$HOME/.supatype/bin}"
 # this script has had (the manifest name, the arch token, the artefact shape) was a
 # disagreement with the publisher that no test could have caught while the host was fixed.
 CDN="${SUPATYPE_CDN:-https://releases.supatype.com/cli}"
+
+# The minisign public key releases are signed with, in the same form `minisign -p` prints: the
+# base64 payload line, without the comment line above it. Committed rather than injected at
+# release time, because a key the CDN could rewrite would verify nothing.
+#
+# Key ID DE133E99689AE71D. Confirmed against the published engine, server, deno and postgres
+# manifests on the CDN, with minisign itself and with the verification below.
+RELEASE_PUBLIC_KEY="${SUPATYPE_RELEASE_PUBLIC_KEY:-RWQd55pomT4T3t+5FLZZ6+h0DoHrtiuU9RBUHHm9BcFHeGRvW7BXxBCr}"
 
 # ── Detect platform ────────────────────────────────────────────────────────────
 
@@ -56,6 +72,62 @@ if [[ "$OS" == "linux" ]] && compgen -G '/lib/ld-musl-*.so.1' >/dev/null; then
   LIBC="-musl"
 fi
 
+
+# ── Signature verification ─────────────────────────────────────────────────────
+
+# The checksums file is signed; verifying it means the archive list came from us, where the
+# SHA256 alone only means the bytes arrived intact. Someone able to replace both the archive
+# and the manifest passes the checksum and fails this.
+#
+# openssl rather than minisign: a machine running this script has nothing installed yet, and
+# openssl is present on virtually every Linux box. Downloading minisign to check our own
+# signature would add a third-party binary to the install path without raising the ceiling,
+# since the pin would live in this same script.
+#
+# macOS ships LibreSSL as /usr/bin/openssl, which has neither `pkeyutl -rawin` nor blake2b512,
+# so this degrades to checksum-only there rather than failing.
+openssl_can_verify() {
+  command -v openssl >/dev/null 2>&1 || return 1
+  openssl dgst -blake2b512 </dev/null >/dev/null 2>&1 || return 1
+  openssl pkeyutl -help 2>&1 | grep -q -- "-rawin" || return 1
+}
+
+# minisign formats, as implemented in packages/cli/src/binary-cache.ts:
+#   public key: [2 algo]["Ed"] [8 key id] [32 ed25519 key]
+#   signature:  [2 algo]["ED" prehashed | "Ed" legacy] [8 key id] [64 signature]
+verify_minisign() {
+  local file="$1" sigfile="$2" pubkey="$3" work="$4"
+
+  printf '%s' "$pubkey" | openssl base64 -d -A > "$work/pk.bin" 2>/dev/null || return 1
+  sed -n '2p' "$sigfile" | tr -d '
+' | openssl base64 -d -A > "$work/sig.bin" 2>/dev/null || return 1
+
+  local pk_id sig_id algo
+  pk_id="$(dd if="$work/pk.bin" bs=1 skip=2 count=8 2>/dev/null | od -An -tx1 | tr -d ' 
+')"
+  sig_id="$(dd if="$work/sig.bin" bs=1 skip=2 count=8 2>/dev/null | od -An -tx1 | tr -d ' 
+')"
+  if [[ "$pk_id" != "$sig_id" ]]; then
+    echo "Error: the signature was produced with a different key than the one in this script." >&2
+    return 1
+  fi
+
+  # Wrap the raw 32 bytes in the fixed SubjectPublicKeyInfo prefix for id-Ed25519, which is
+  # what openssl will load. printf rather than xxd: xxd ships with vim on some distributions.
+  printf '%s' 'MCowBQYDK2VwAyEA' | openssl base64 -d -A > "$work/pk.der"
+  dd if="$work/pk.bin" bs=1 skip=10 count=32 2>/dev/null >> "$work/pk.der"
+  dd if="$work/sig.bin" bs=1 skip=10 count=64 2>/dev/null > "$work/sig.raw"
+
+  algo="$(dd if="$work/sig.bin" bs=1 count=2 2>/dev/null)"
+  case "$algo" in
+    ED) openssl dgst -blake2b512 -binary "$file" > "$work/msg" ;;
+    Ed) cp "$file" "$work/msg" ;;
+    *)  echo "Error: unsupported minisign algorithm: $algo" >&2; return 1 ;;
+  esac
+
+  openssl pkeyutl -verify -pubin -inkey "$work/pk.der" -keyform DER     -rawin -in "$work/msg" -sigfile "$work/sig.raw" >/dev/null 2>&1
+}
+
 # ── Resolve "latest" ───────────────────────────────────────────────────────────
 
 # cli/latest.json is the manifest the release workflow writes and `supatype self-update`
@@ -89,10 +161,34 @@ trap 'rm -rf "$tmpdir"' EXIT
 
 curl -fsSL "$URL" -o "$tmpdir/$TARBALL"
 
+# The manifest is fetched to a file rather than a variable, because the signature is over the
+# bytes as published: reformatting it through a shell variable would not verify.
+curl -fsSL "$SHA_URL" -o "$tmpdir/checksums.sha256"
+
+if [[ -z "$RELEASE_PUBLIC_KEY" ]]; then
+  echo "  Note: no release public key is embedded in this installer, so the download is" >&2
+  echo "        checked against its SHA256 only, not verified as coming from us." >&2
+elif ! openssl_can_verify; then
+  echo "  Note: this system's openssl cannot verify ed25519 signatures (macOS ships LibreSSL)," >&2
+  echo "        so the download is checked against its SHA256 only." >&2
+  echo "        For a verified install use: npm install -g @supatype/cli" >&2
+else
+  if ! curl -fsSL "${SHA_URL}.minisig" -o "$tmpdir/checksums.sha256.minisig"; then
+    echo "Error: could not fetch ${SHA_URL}.minisig." >&2
+    echo "       Every release signs its manifest, so a missing signature means the release is" >&2
+    echo "       incomplete or the download was tampered with. Refusing to continue." >&2
+    exit 1
+  fi
+  if ! verify_minisign "$tmpdir/checksums.sha256" "$tmpdir/checksums.sha256.minisig"         "$RELEASE_PUBLIC_KEY" "$tmpdir"; then
+    echo "Error: the release manifest failed signature verification. Refusing to continue." >&2
+    exit 1
+  fi
+  echo "  Signature verified."
+fi
+
 # One checksums file covers every platform; take the line for ours. `sha256sum` writes the
 # name as `*name` in binary mode, so match both spellings.
-expected="$(curl -fsSL "$SHA_URL" |
-  awk -v want="$TARBALL" '{ sub(/^\*/, "", $2); if ($2 == want) print $1 }')"
+expected="$(awk -v want="$TARBALL" '{ sub(/^\*/, "", $2); if ($2 == want) print $1 }'   "$tmpdir/checksums.sha256")"
 if [[ -z "$expected" ]]; then
   echo "Error: no checksum for $TARBALL in $SHA_URL" >&2
   exit 1
