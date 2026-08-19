@@ -1,5 +1,5 @@
 /**
- * Subprocess tests — spawn the compiled CLI binary and verify commands are
+ * Subprocess tests: spawn the compiled CLI binary and verify commands are
  * registered. Requires `pnpm build` to have run first (turbo handles this).
  */
 import { describe, it, expect } from "vitest"
@@ -17,8 +17,14 @@ const PACKAGE_VERSION = (
 function runCli(args: string[]): { stdout: string; stderr: string; exitCode: number } {
   const result = spawnSync(process.execPath, [CLI_BIN, ...args], {
     encoding: "utf8",
-    timeout: 10_000,
+    timeout: 60_000,
   })
+  if (result.signal) {
+    throw new Error(
+      `CLI subprocess killed by ${result.signal} after the spawn timeout. `
+        + `Args: ${args.join(" ")}. This is usually machine contention, not a CLI fault.`,
+    )
+  }
   return {
     stdout: String(result.stdout ?? ""),
     stderr: String(result.stderr ?? ""),

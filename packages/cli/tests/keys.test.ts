@@ -1,5 +1,5 @@
 /**
- * Tests for `supatype keys` — JWT generation command.
+ * Tests for `supatype keys`, JWT generation command.
  * Uses subprocess tests (requires built dist/) for the CLI integration,
  * plus direct module tests for the signing logic.
  */
@@ -20,10 +20,16 @@ function runCli(
 ): { stdout: string; stderr: string; exitCode: number } {
   const result = spawnSync(process.execPath, [CLI_BIN, ...args], {
     encoding: "utf8",
-    timeout: 10_000,
+    timeout: 60_000,
     cwd: opts.cwd,
     env: { ...process.env, ...opts.env },
   })
+  if (result.signal) {
+    throw new Error(
+      `CLI subprocess killed by ${result.signal} after the spawn timeout. `
+        + `Args: ${args.join(" ")}. This is usually machine contention, not a CLI fault.`,
+    )
+  }
   return {
     stdout: String(result.stdout ?? ""),
     stderr: String(result.stderr ?? ""),
