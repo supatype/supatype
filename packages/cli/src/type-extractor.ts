@@ -313,7 +313,7 @@ function mergeIntersectionParts(
         continue
       }
     }
-    // Unresolvable parts are skipped — the model still extracts with whatever fields were found
+    // Unresolvable parts are skipped, the model still extracts with whatever fields were found
   }
   if (allMembers.length === 0) return null
   return ts.factory.createTypeLiteralNode(allMembers)
@@ -910,7 +910,7 @@ function parseScalarType(
         return scalar("money")
       case "Decimal": {
         // `Decimal<10, 2>` names a precision and a scale, and the engine renders `NUMERIC(p, s)`
-        // from them — but nothing used to read the type arguments, so every Decimal became an
+        // from them: but nothing used to read the type arguments, so every Decimal became an
         // unbounded NUMERIC. Silently, which is the worst way to lose a constraint on a money column.
         const precision = parseNumericTypeArg(typeNode.typeArguments?.[0], sourceFile)
         const scale = parseNumericTypeArg(typeNode.typeArguments?.[1], sourceFile)
@@ -1453,7 +1453,7 @@ function looksLikeComputedTemplateLiteral(lit: string): boolean {
   return /\{truncate\s*\(/i.test(lit) || /\{[a-zA-Z_]\w*\}/g.test(lit)
 }
 
-/** Resolves second type arg of `ComputedFrom<Value, Sources>` — tuple concat, single field, or template literal. */
+/** Resolves second type arg of `ComputedFrom<Value, Sources>`, tuple concat, single field, or template literal. */
 function parseComputedFromSecondArg(
   sourcesArg: ts.TypeNode | undefined,
   sourceFile: ts.SourceFile,
@@ -1789,12 +1789,12 @@ function resolveIndexFieldName(fieldName: string, fields: Record<string, FieldAs
  * Resolve an `access:` annotation to its rule object.
  *
  * `access` may be written inline (`access: { read: Public }`) or factored into a
- * shared type alias (`access: CmsPublicReadAdminWrite`) — the latter is the
+ * shared type alias (`access: CmsPublicReadAdminWrite`), the latter is the
  * natural way to reuse one policy set across many models, so it has to resolve
  * through aliases and intersections, not just literals.
  *
  * Anything unresolvable throws. Returning `{}` here means "no access rules",
- * which the differ treats as "emit no RLS policies" — so a typo or an
+ * which the differ treats as "emit no RLS policies", so a typo or an
  * unsupported shape silently published a table with no row-level protection at
  * all. Failing the extract is the only safe outcome.
  */
@@ -1820,7 +1820,7 @@ function parseModelAccess(
         `\`${accessProp.type.getText(sourceFile)}\`.\n` +
         `  access must be an object type, or a type alias for one:\n` +
         `    export type PublicReadAdminWrite = { read: Public; create: Role<"admin"> }\n` +
-        `  A \`const … as const\` value cannot be used here — access is read from types, and\n` +
+        `  A \`const … as const\` value cannot be used here, access is read from types, and\n` +
         `  rule names like Public / Role are types, not values.\n` +
         `  Refusing to continue: an unresolved access block would publish this table with no RLS.`,
     )
@@ -1864,11 +1864,11 @@ function parseModelAccess(
 }
 
 /**
- * `fields: { [column]: { read?, write? } }` — per-column narrowing of the table rules.
+ * `fields: { [column]: { read?, write? } }`, per-column narrowing of the table rules.
  *
  * Any rule the DSL can express is allowed. Enforcement is a query rewrite that
  * evaluates the rule per row with the caller's claims, so ownership, membership and
- * application roles all work here — none of which a column privilege could express.
+ * application roles all work here, none of which a column privilege could express.
  */
 function parseFieldAccess(
   typeNode: ts.TypeNode,
@@ -1944,7 +1944,7 @@ function parseFieldAccess(
  *
  * An update policy has two halves: `USING` picks which existing rows may be
  * modified, `WITH CHECK` constrains what they may become. One rule for both is the
- * right default and what every existing schema means — but it makes "an editor may
+ * right default and what every existing schema means, but it makes "an editor may
  * move a post between their own sites" inexpressible, because the row they are
  * changing and the row they are changing it into are judged by the same predicate.
  */
@@ -1974,11 +1974,11 @@ function parseUpdateSplit(
     }
   }
 
-  // Not the split form at all — an object with neither key is some other shape.
+  // Not the split form at all, an object with neither key is some other shape.
   if (!using && !check) return null
   if (!using) {
     throw new Error(
-      "`update: { check }` needs a `using` rule too — without it no row is " +
+      "`update: { check }` needs a `using` rule too, without it no row is " +
         "selectable for update, so the check can never apply.",
     )
   }
@@ -2028,7 +2028,7 @@ function resolveAccessLiteral(
 /**
  * `access` rules may be declared in a different file from the model (a shared
  * alias), and `getText(file)` reads the given file's text at the node's offsets
- * — so passing the model's file for a node owned by another one yielded garbage
+ *- so passing the model's file for a node owned by another one yielded garbage
  * and every rule silently fell through to `private`. Always read a node's text
  * from the file that actually owns it.
  */
@@ -2056,7 +2056,7 @@ function parseAccessRule(
   if (!ts.isTypeReferenceNode(typeNode)) return { type: "private" }
 
   // `Rules.read` is a qualified name (namespace lookup), not a member of a type
-  // alias — TypeScript rejects it, and it used to fall through to `private`,
+  // alias: TypeScript rejects it, and it used to fall through to `private`,
   // silently denying an operation the author meant to grant.
   if (ts.isQualifiedName(typeNode.typeName)) {
     const text = ownerText(typeNode.typeName, sourceFile)
@@ -2113,7 +2113,7 @@ function parseAccessRule(
         )
       }
       // An empty list would compile to a policy that grants nothing while
-      // reading like a grant — the exact silent-denial failure the unknown-rule
+      // reading like a grant, the exact silent-denial failure the unknown-rule
       // branch below exists to prevent.
       if (listArg.elements.length === 0) {
         throw new Error(
@@ -2135,7 +2135,7 @@ function parseAccessRule(
           '`All<>` takes a tuple of rules, as in `All<[Role<"editor">, NotNull<"published_at">]>`.',
         )
       }
-      // Unlike `Any<[]>`, an empty `All` grants *everything* — an empty AND is
+      // Unlike `Any<[]>`, an empty `All` grants *everything*, an empty AND is
       // true. Reading as a restriction while imposing none is worse than an error.
       if (listArg.elements.length === 0) {
         throw new Error(
@@ -2209,7 +2209,7 @@ function parseAccessRule(
       const column = parseAccessOperand(args[0]!, sourceFile)
       if (column["kind"] !== "column") {
         throw new Error(
-          "`In<>`'s first argument must be a column name — the membership test is " +
+          "`In<>`'s first argument must be a column name, the membership test is " +
             "about a column of the row being checked.",
         )
       }
@@ -2220,7 +2220,7 @@ function parseAccessRule(
       }
     }
     default: {
-      // A named alias — possibly parameterised — standing for a rule. Expanded
+      // A named alias: possibly parameterised, standing for a rule. Expanded
       // before giving up, so `SiteAccess<"site_id">` works.
       if (resolveCtx && depth < 16) {
         const expanded = resolveAccessAliasNode(typeNode, sourceFile, resolveCtx)
@@ -2228,7 +2228,7 @@ function parseAccessRule(
       }
 
       // Falling back to `private` here would silently deny an operation the
-      // author believed they had granted — and with deny-by-default there is no
+      // author believed they had granted, and with deny-by-default there is no
       // longer any need for a permissive guess. Name the offending rule instead.
       throw new Error(
         `Unknown access rule "${ref}". Supported: Public, Private, LoggedIn, ` +
@@ -2244,7 +2244,7 @@ function parseAccessRule(
 /**
  * Expands a named alias to the type it stands for.
  *
- * This is what makes rules parameterisable — the type-level equivalent of
+ * This is what makes rules parameterisable, the type-level equivalent of
  * Payload's access-control factory:
  *
  * ```typescript
@@ -2252,8 +2252,8 @@ function parseAccessRule(
  * access: { update: SiteAccess<"site_id"> }
  * ```
  *
- * Without it a rule had to be written inline at every use, and any alias — even an
- * unparameterised one — was reported as an unknown rule.
+ * Without it a rule had to be written inline at every use, and any alias, even an
+ * unparameterised one: was reported as an unknown rule.
  */
 function resolveAccessAliasNode(
   typeNode: ts.TypeReferenceNode,
@@ -2274,7 +2274,7 @@ function resolveAccessAliasNode(
  * The set on the right of an `In<>`.
  *
  * Resolved through the same alias machinery as rules, so a shared
- * `type MySites = Rows<…>` can be reused across models — the parameterisation the
+ * `type MySites = Rows<…>` can be reused across models, the parameterisation the
  * plan calls the type-level equivalent of Payload's access factory.
  */
 function parseMembershipSource(
@@ -2300,7 +2300,7 @@ function parseMembershipSource(
       const column = stringLiteralArg(args[1], "Rows", "column name")
       const source: Record<string, unknown> = { kind: "rows", table, column }
       // The third argument narrows the source rows. Absent means "every row",
-      // which is a lookup rather than a membership check — allowed, but rarely
+      // which is a lookup rather than a membership check, allowed, but rarely
       // what was meant, so it stays explicit rather than being defaulted.
       if (args[2]) {
         source["where"] = parseAccessRule(args[2], sourceFile, resolveCtx)
@@ -2318,7 +2318,7 @@ function parseMembershipSource(
       }
       // Not `parseAccessOperand`: there, a bare string is a *column*, which is
       // right for a comparison and wrong here. Inside a value list a string can
-      // only be a value, so it is read as one — no `Literal<>` wrapper needed.
+      // only be a value, so it is read as one, no `Literal<>` wrapper needed.
       return {
         kind: "literal",
         values: listArg.elements.map((element) => literalFromNode(element, sourceFile)),
@@ -2373,7 +2373,7 @@ function parseDurationOperand(
   const opposite = ref === "Ago" ? "FromNow" : "Ago"
 
   // A negative literal is a prefix-unary expression in the TypeScript AST, not a
-  // numeric literal, so it has to be recognised separately — otherwise `Ago<-5, …>`
+  // numeric literal, so it has to be recognised separately, otherwise `Ago<-5, …>`
   // is refused for the wrong reason and the message misses the real advice.
   if (
     ts.isLiteralTypeNode(amountNode) &&
@@ -2392,7 +2392,7 @@ function parseDurationOperand(
   const amount = Number(amountNode.literal.text)
   if (!Number.isInteger(amount)) {
     throw new Error(
-      `\`${ref}<${amount}, …>\` must be a whole number of units — Postgres intervals ` +
+      `\`${ref}<${amount}, …>\` must be a whole number of units, Postgres intervals ` +
         `take integers, so a fraction would be silently truncated or rejected.`,
     )
   }
@@ -2512,7 +2512,7 @@ function parseAccessOperand(
         // segment would silently look up a key that cannot exist.
         if (path === "" || path.split(".").some((segment) => segment.trim() === "")) {
           throw new Error(
-            `\`Claim<"${path}">\` is not a valid claim path — use dotted segments, ` +
+            `\`Claim<"${path}">\` is not a valid claim path, use dotted segments, ` +
               `as in \`Claim<"app_metadata.tier">\`.`,
           )
         }

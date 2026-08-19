@@ -356,7 +356,7 @@ export function ImageWidget({
             <img src={fallbackDisplayUrl} alt="" className="st-image-thumb st-image-thumb--fallback" />
             <div className="st-image-fallback-hint">
               <span className="st-image-fallback-text">
-                {fallbackHint ?? `Showing ${defaultLocale} version — upload to override`}
+                {fallbackHint ?? `Showing ${defaultLocale} version, upload to override`}
               </span>
               {!readOnly && (
                 <div className="st-image-preview-actions">

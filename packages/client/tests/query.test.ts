@@ -35,7 +35,7 @@ function captureUrl(): { url: () => string; fetch: ReturnType<typeof vi.fn> } {
 
 // ─── QueryBuilder ─────────────────────────────────────────────────────────────
 
-describe("QueryBuilder — URL construction", () => {
+describe("QueryBuilder: URL construction", () => {
   beforeEach(() => vi.restoreAllMocks())
 
   it("sends request to base + path with no params", async () => {
@@ -189,7 +189,7 @@ describe("QueryBuilder — URL construction", () => {
   })
 })
 
-describe("QueryBuilder — results", () => {
+describe("QueryBuilder: results", () => {
   beforeEach(() => vi.restoreAllMocks())
 
   it("returns data array on success", async () => {
@@ -261,7 +261,7 @@ describe("QueryBuilder.maybeSingle()", () => {
 
 // ─── MutationBuilder ──────────────────────────────────────────────────────────
 
-describe("MutationBuilder — insert", () => {
+describe("MutationBuilder: insert", () => {
   beforeEach(() => vi.restoreAllMocks())
 
   it("sends POST with body", async () => {
@@ -283,7 +283,7 @@ describe("MutationBuilder — insert", () => {
   })
 })
 
-describe("MutationBuilder — update / delete", () => {
+describe("MutationBuilder: update / delete", () => {
   beforeEach(() => vi.restoreAllMocks())
 
   it("update sends PATCH with eq filter in URL", async () => {

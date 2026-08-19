@@ -68,7 +68,7 @@ async function seedFirstAdmin(): Promise<Recorded[]> {
 
 // Capability checks refuse a role they do not recognise, so the CLI's set has to
 // match the server's (`studioRolePermissions`) and the control plane's
-// (`STUDIO_ROLE_PERMISSIONS`) exactly — a role only this side knows about creates
+// (`STUDIO_ROLE_PERMISSIONS`) exactly: a role only this side knows about creates
 // a user who is locked out of the panel they were made for.
 describe("STUDIO_ROLES", () => {
   it("matches the roles the servers understand", () => {

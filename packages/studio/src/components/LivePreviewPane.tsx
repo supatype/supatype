@@ -18,7 +18,7 @@ export function LivePreviewPane({ config, values, model }: LivePreviewPaneProps)
       )
     : config.url
 
-  // PostMessage sync — send form data to the iframe on every change
+  // PostMessage sync: send form data to the iframe on every change
   useEffect(() => {
     const iframe = iframeRef.current
     if (!iframe?.contentWindow) return

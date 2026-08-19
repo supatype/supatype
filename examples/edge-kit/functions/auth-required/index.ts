@@ -23,7 +23,7 @@ export default async function handler(req: Request): Promise<Response> {
     return json(
       {
         error: "unauthorized",
-        message: "Anon key is not enough — sign in (or sign up) so invoke sends a user JWT",
+        message: "Anon key is not enough, sign in (or sign up) so invoke sends a user JWT",
       },
       401,
     )

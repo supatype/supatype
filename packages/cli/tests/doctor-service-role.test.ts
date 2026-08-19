@@ -36,7 +36,7 @@ describe("printServiceRoleGrants", () => {
 
   it("marks a grant that matches no function", () => {
     printServiceRoleGrants(
-      { ...empty, errors: ['  "send-emial" — no functions/send-emial/index.ts'], missing: ["send-emial"] },
+      { ...empty, errors: ['  "send-emial", no functions/send-emial/index.ts'], missing: ["send-emial"] },
       ["send-emial", "audit"],
     )
     const out = lines.join("\n")
@@ -47,7 +47,7 @@ describe("printServiceRoleGrants", () => {
 
   it("passes a redundant-entry warning through", () => {
     printServiceRoleGrants(
-      { ...empty, warnings: ['  "hooks/x" is not needed — a hook receives the key'] },
+      { ...empty, warnings: ['  "hooks/x" is not needed, a hook receives the key'] },
       ["hooks/x"],
     )
     expect(lines.join("\n")).toContain("is not needed")

@@ -37,7 +37,7 @@ export async function ensureComponentBinaries(
   const list = describeRequiredHostComponents(components)
   if (provider === "docker") {
     info(
-      `Preparing host CLI tools (${list}) — Compose still runs Postgres and the API stack.`,
+      `Preparing host CLI tools (${list}), Compose still runs Postgres and the API stack.`,
     )
   } else {
     info(`Preparing local runtime components (${list})…`)

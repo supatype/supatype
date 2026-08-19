@@ -46,7 +46,7 @@ export interface StudioCoreProps {
   extensions?: StudioExtension
   /** Default sidebar mode. Defaults to "developer". */
   defaultMode?: StudioMode
-  /** Self-host: user chose "Explore with sample data" — show a demo badge in the shell. */
+  /** Self-host: user chose "Explore with sample data", show a demo badge in the shell. */
   demoMode?: boolean
   /**
    * Base URL of the cloud control plane (e.g. https://api.supatype.com).

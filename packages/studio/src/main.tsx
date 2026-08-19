@@ -43,7 +43,7 @@ function resolveAnonKey(): string {
  *
  * Studio used to accept one and skip the auth gate entirely. A key in the browser
  * is unrestricted database access to anyone who opens devtools, and it bypasses
- * every control the server now applies — Studio membership, the role's capability
+ * every control the server now applies, Studio membership, the role's capability
  * set, the acting identity, and the audit trail. All privileged calls go through
  * `/studio/proxy`, which holds the key server-side and applies those controls.
  *
@@ -57,7 +57,7 @@ function warnIfBrowserServiceRoleKey(): void {
     "[supatype] A service role key was supplied to Studio in the browser and has been ignored. " +
       "It grants unrestricted database access to anyone who opens devtools and bypasses Studio " +
       "membership, role permissions and the audit trail. Remove VITE_SUPATYPE_SERVICE_ROLE_KEY / " +
-      "__SUPATYPE_CLOUD__.serviceRoleKey and sign in instead — privileged calls are proxied " +
+      "__SUPATYPE_CLOUD__.serviceRoleKey and sign in instead, privileged calls are proxied " +
       "server-side.",
   )
 }

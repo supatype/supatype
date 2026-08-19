@@ -38,9 +38,9 @@ export type WidgetType =
   | "uuid"
   | "color"
   | "xml"
-  /** `Code<Lang>` — `{ lang, source }` in JSONB, edited as source text. */
+  /** `Code<Lang>`: `{ lang, source }` in JSONB, edited as source text. */
   | "code"
-  /** `Currency<Code>` — `{ amount, code }` in JSONB, amount in minor units. */
+  /** `Currency<Code>`: `{ amount, code }` in JSONB, amount in minor units. */
   | "currency"
   | "button"
 
@@ -157,7 +157,7 @@ export interface AdminConfig {
   branding?: BrandingConfig
   livePreview?: Record<string, LivePreviewConfig>
   dashboard?: DashboardConfig
-  /** Current org tier — used to enforce dashboard view limits. */
+  /** Current org tier: used to enforce dashboard view limits. */
   tier?: Tier
   /** Roles allowed to access Studio (from supatype.config.ts admin.roles). */
   adminRoles?: string[]
@@ -183,7 +183,7 @@ export interface DashboardView {
   updated_at: string
 }
 
-/** Legacy single-widget list — still accepted for static config overrides. */
+/** Legacy single-widget list: still accepted for static config overrides. */
 export interface DashboardConfig {
   widgets?: DashboardBlock[]
 }

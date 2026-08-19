@@ -9,7 +9,7 @@ import { ErrorBanner } from "../../components/ErrorBanner.js"
 /** Match server-side identifier rules so schema hints stay safe in SQL text. */
 function safeSchemaName(schema: string): string {
   if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(schema)) return "public"
-  // pg_catalog stores unquoted schema names lowercased — fold so we match information_schema + pg_policies.
+  // pg_catalog stores unquoted schema names lowercased, fold so we match information_schema + pg_policies.
   return schema.toLowerCase()
 }
 
@@ -205,9 +205,9 @@ export function PoliciesView(): React.ReactElement {
                       const expr = withCheck || qual || "(none)"
                       return (
                       <tr key={`${pname || "policy"}-${rowIdx}`} className="border-b border-border last:border-0">
-                        <td className="px-4 py-2.5 font-mono text-xs text-foreground">{pname || "—"}</td>
-                        <td className="px-4 py-2.5"><Badge variant="blue">{rowText(p, "cmd") || "—"}</Badge></td>
-                        <td className="px-4 py-2.5"><Badge variant={rowText(p, "permissive") === "PERMISSIVE" ? "green" : "yellow"}>{rowText(p, "permissive") || "—"}</Badge></td>
+                        <td className="px-4 py-2.5 font-mono text-xs text-foreground">{pname || "-"}</td>
+                        <td className="px-4 py-2.5"><Badge variant="blue">{rowText(p, "cmd") || "-"}</Badge></td>
+                        <td className="px-4 py-2.5"><Badge variant={rowText(p, "permissive") === "PERMISSIVE" ? "green" : "yellow"}>{rowText(p, "permissive") || "-"}</Badge></td>
                         <td className="px-4 py-2.5">
                           <div className="inline-flex items-center gap-2">
                             <Badge variant="blue">{exprLabel}</Badge>

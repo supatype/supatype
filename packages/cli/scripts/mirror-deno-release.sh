@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# mirror-deno-release.sh — Download official Deno release zips and rename to Supatype CDN layout.
+# mirror-deno-release.sh: Download official Deno release zips and rename to Supatype CDN layout.
 #
 # Output binaries (cwd or $OUT_DIR):
 #   deno-linux-amd64, deno-linux-arm64, deno-darwin-amd64, deno-darwin-arm64, deno-windows-amd64.exe

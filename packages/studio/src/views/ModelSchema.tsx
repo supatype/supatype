@@ -56,7 +56,7 @@ export function ModelSchema({ model }: ModelSchemaProps): React.ReactElement {
         </div>
       </Card>
 
-      {/* Fields — merged config + live DB */}
+      {/* Fields: merged config + live DB */}
       <Card>
         <div className="px-4 py-3 border-b border-border flex items-center gap-3">
           <div>
@@ -89,24 +89,24 @@ export function ModelSchema({ model }: ModelSchemaProps): React.ReactElement {
                     <Td>
                       <code className="font-mono text-xs">{name}</code>
                     </Td>
-                    <Td className="text-muted-foreground">{cfg?.label ?? "—"}</Td>
+                    <Td className="text-muted-foreground">{cfg?.label ?? "-"}</Td>
                     <Td>
                       {cfg ? (
                         <span className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
                           {cfg.widget}
                         </span>
-                      ) : <span className="text-muted-foreground/40">—</span>}
+                      ) : <span className="text-muted-foreground/40">-</span>}
                     </Td>
                     <Td>
                       {col ? (
                         <code className="text-xs text-primary">{col.type}</code>
-                      ) : <span className="text-muted-foreground/40">—</span>}
+                      ) : <span className="text-muted-foreground/40">-</span>}
                     </Td>
                     <Td>
-                      {col ? (col.nullable ? "yes" : "no") : <span className="text-muted-foreground/40">—</span>}
+                      {col ? (col.nullable ? "yes" : "no") : <span className="text-muted-foreground/40">-</span>}
                     </Td>
                     <Td className="text-xs text-muted-foreground">
-                      {col?.default_value ?? "—"}
+                      {col?.default_value ?? "-"}
                     </Td>
                     <Td>
                       <div className="flex gap-1">

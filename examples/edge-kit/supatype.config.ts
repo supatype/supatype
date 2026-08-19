@@ -1,7 +1,7 @@
 import { defineConfig } from "@supatype/cli"
 
 /**
- * Edge kit — functions-first manual test / demo.
+ * Edge kit: functions-first manual test / demo.
  *
  * Workflow: `pnpm keys` → `pnpm push` → `pnpm dev`
  * Gateway: Kong on SUPATYPE_KONG_PORT (default 18473).

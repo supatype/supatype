@@ -1,5 +1,5 @@
 /**
- * supatype cache — list and clean cached component binaries + REST Valkey cache.
+ * supatype cache: list and clean cached component binaries + REST Valkey cache.
  */
 
 import type { Command } from "commander"
@@ -126,7 +126,7 @@ export function registerCache(program: Command): void {
         if (result.removed.length === 0 && result.skipped.length === 0) {
           info("Nothing to clean.")
         } else if (opts?.dryRun) {
-          info(`Dry run — ${result.removed.length} entr${result.removed.length === 1 ? "y" : "ies"} would be removed.`)
+          info(`Dry run: ${result.removed.length} entr${result.removed.length === 1 ? "y" : "ies"} would be removed.`)
         } else {
           info("Done.")
         }
@@ -160,7 +160,7 @@ export function registerCache(program: Command): void {
           )
         }
         if (result.cursor !== "0") {
-          plain(`\n(more available — cursor ${result.cursor})`)
+          plain(`\n(more available: cursor ${result.cursor})`)
         }
       } catch (e) {
         error(e instanceof Error ? e.message : String(e))

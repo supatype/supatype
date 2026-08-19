@@ -177,8 +177,8 @@ export function TablesView(): React.ReactElement {
               <tr key={col["column_name"] as string} className="border-b border-border last:border-0">
                 <td className="py-2 font-mono text-xs text-foreground">{col["column_name"] as string}</td>
                 <td className="py-2 text-xs text-muted-foreground">{col["udt_name"] as string}</td>
-                <td className="py-2 text-xs">{col["is_nullable"] === "YES" ? "✓" : "—"}</td>
-                <td className="py-2 text-xs text-muted-foreground font-mono truncate max-w-[100px]">{(col["column_default"] as string | null) ?? "—"}</td>
+                <td className="py-2 text-xs">{col["is_nullable"] === "YES" ? "✓" : "-"}</td>
+                <td className="py-2 text-xs text-muted-foreground font-mono truncate max-w-[100px]">{(col["column_default"] as string | null) ?? "-"}</td>
               </tr>
             ))}
           </tbody>

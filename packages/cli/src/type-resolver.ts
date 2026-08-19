@@ -295,7 +295,7 @@ function parseResolvedTypeText(typeText: string): ts.TypeNode {
   return decl.type
 }
 
-/** `T extends string ? Optional<T> : T` and similar — pick the Optional branch for scalar args. */
+/** `T extends string ? Optional<T> : T` and similar, pick the Optional branch for scalar args. */
 function tryEvaluateConditionalAlias(entry: AliasEntry, typeArgs: readonly ts.TypeNode[]): ts.TypeNode | null {
   const substituted = substituteAndParse(entry, typeArgs)
   if (!ts.isConditionalTypeNode(substituted)) return null

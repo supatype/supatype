@@ -1,5 +1,5 @@
 /**
- * Progress UI for one-shot commands — Ink spinner inside command chrome.
+ * Progress UI for one-shot commands, Ink spinner inside command chrome.
  */
 
 import { getActiveFlowApi } from "./runtime/flow-session.js"

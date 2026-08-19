@@ -55,7 +55,7 @@ function teardownInk(instance: Instance): void {
   try {
     instance.clear()
   } catch {
-    // ignore — terminal may already be reset
+    // ignore: terminal may already be reset
   }
   instance.unmount()
   instance.cleanup()

@@ -120,7 +120,7 @@ export class AuthClient {
         })
       }
     } catch {
-      // Corrupt or unavailable storage — treat as signed out.
+      // Corrupt or unavailable storage, treat as signed out.
     }
   }
 
@@ -1004,7 +1004,7 @@ export class AuthClient {
     try {
       await this.storage.setItem(this.codeVerifierStorageKey(), verifier)
     } catch {
-      // Ignore storage write failures — in-memory verifier still works for same-process flows.
+      // Ignore storage write failures, in-memory verifier still works for same-process flows.
     }
   }
 

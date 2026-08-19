@@ -112,7 +112,7 @@ function buildEndpointsFromModels(models?: ModelConfig[]): ApiEndpoint[] {
       return single ? JSON.stringify(obj, null, 2) : JSON.stringify([obj], null, 2)
     }
 
-    // GET — List all rows
+    // GET: List all rows
     endpoints.push({
       method: "GET",
       path: `/rest/v1/${model.tableName}`,
@@ -130,7 +130,7 @@ function buildEndpointsFromModels(models?: ModelConfig[]): ApiEndpoint[] {
       response_type: `${model.tableName}[]`,
     })
 
-    // GET — Single row
+    // GET: Single row
     endpoints.push({
       method: "GET",
       path: `/rest/v1/${model.tableName}?${pkName}=eq.{${pkName}}`,
@@ -145,7 +145,7 @@ function buildEndpointsFromModels(models?: ModelConfig[]): ApiEndpoint[] {
       response_type: model.tableName,
     })
 
-    // POST — Insert
+    // POST: Insert
     endpoints.push({
       method: "POST",
       path: `/rest/v1/${model.tableName}`,
@@ -167,7 +167,7 @@ function buildEndpointsFromModels(models?: ModelConfig[]): ApiEndpoint[] {
       request_body_example: bodyExample(insertFields),
     })
 
-    // PATCH — Update
+    // PATCH: Update
     endpoints.push({
       method: "PATCH",
       path: `/rest/v1/${model.tableName}?${pkName}=eq.{${pkName}}`,
@@ -189,7 +189,7 @@ function buildEndpointsFromModels(models?: ModelConfig[]): ApiEndpoint[] {
       request_body_example: bodyExample(updateFields),
     })
 
-    // DELETE — Delete
+    // DELETE: Delete
     endpoints.push({
       method: "DELETE",
       path: `/rest/v1/${model.tableName}?${pkName}=eq.{${pkName}}`,
@@ -543,7 +543,7 @@ export function ApiDocs(): React.ReactElement {
   const config = useContext(AdminConfigContext)
 
   // Endpoints are built from the admin config (user models + hardcoded auth/storage).
-  // No DB introspection needed — that prevents GoTrue internal tables from leaking in.
+  // No DB introspection needed, that prevents GoTrue internal tables from leaking in.
   const endpoints = useMemo(
     () => buildEndpointsFromModels(config?.models),
     [config],
@@ -584,7 +584,7 @@ export function ApiDocs(): React.ReactElement {
       ) : !config.models?.length ? (
         <EmptyState
           title="No model endpoints yet"
-          description="Push a schema first — define models in your supatype config and run `supatype push`."
+          description="Push a schema first, define models in your supatype config and run `supatype push`."
         />
       ) : (
         <>

@@ -60,7 +60,7 @@ export function CodeMirrorEditor({
   useEffect(() => { onChangeRef.current = onChange }, [onChange])
   useEffect(() => { onBlurRef.current = onBlur }, [onBlur])
 
-  // Mount once — editor owns its own state
+  // Mount once: editor owns its own state
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!containerRef.current) return
@@ -90,7 +90,7 @@ export function CodeMirrorEditor({
       view.destroy()
       viewRef.current = null
     }
-  }, []) // intentionally empty — editor created once
+  }, []) // intentionally empty, editor created once
 
   // Sync value changes from parent (e.g. form reset / locale switch)
   useEffect(() => {

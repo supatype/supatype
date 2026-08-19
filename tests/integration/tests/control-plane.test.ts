@@ -1,5 +1,5 @@
 /**
- * Control-plane integration tests — run against a live supatype dev stack.
+ * Control-plane integration tests: run against a live supatype dev stack.
  *
  * Requires SUPATYPE_URL and SUPATYPE_SERVICE_ROLE_KEY from `supatype dev`.
  * Run via: scripts/control-plane-test.sh

@@ -2,7 +2,7 @@
  * Validate the lifecycle hooks a schema declares against the functions that exist.
  *
  * A hook names a function directory. If the name is wrong, the honest failure is at push time with
- * the path we searched — not at runtime, where the symptom is a hook that never fires and a write
+ * the path we searched, not at runtime, where the symptom is a hook that never fires and a write
  * that quietly succeeds unvalidated. That silence is the whole reason this check exists.
  *
  * Kept out of the extractor on purpose: resolving the functions directory needs the project config,
@@ -119,7 +119,7 @@ export interface ManifestHookEntry {
 }
 
 /**
- * The hook map for `.supatype/manifest.json`, keyed by **table name** — because that is what the
+ * The hook map for `.supatype/manifest.json`, keyed by **table name**, because that is what the
  * server matches a request path against, not the model name.
  *
  * Defaults are resolved here rather than in the server: one place decides that a `before*` hook
@@ -172,7 +172,7 @@ export const DEFAULT_HOOK_TIMEOUT_MS = 2000
  *
  * **Only updates a manifest that is already there.** Creating one from scratch here would be a
  * hazard: `functions_enabled` is a plain bool on the server's side, so a manifest carrying only
- * hooks would read as functions *disabled* — the exact defect this repo fixed a commit ago, arriving
+ * hooks would read as functions *disabled*, the exact defect this repo fixed a commit ago, arriving
  * by a different door. The compose path owns creation; this owns one key.
  *
  * Returns true when the file was rewritten.
@@ -216,7 +216,7 @@ export interface HooksReport {
 /**
  * What `supatype doctor` needs to answer "will my hooks actually run?".
  *
- * Local facts only — the schema, the functions on disk, and the manifest the server reads. No probe
+ * Local facts only: the schema, the functions on disk, and the manifest the server reads. No probe
  * of a running worker, so the answer is the same whether or not the stack is up, and a report that
  * needs a stack is a report nobody runs before deploying.
  *

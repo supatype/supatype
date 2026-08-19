@@ -459,7 +459,7 @@ function SchemaSelector({
         </svg>
       </button>
 
-      {/* Dropdown — absolutely positioned, escapes parent clip via z-index */}
+      {/* Dropdown: absolutely positioned, escapes parent clip via z-index */}
       {open && (
         <div
           className="rounded-lg border border-border bg-popover shadow-xl"
@@ -603,7 +603,7 @@ export function SchemaView(): React.ReactElement {
           <ErdFlow tables={tables} activeSchema={activeSchema} />
         </div>
       ) : (
-        /* Fields view — table list + detail */
+        /* Fields view: table list + detail */
         <div className="flex gap-4 flex-1 min-h-0">
           {/* Table list */}
           <div className="w-[200px] flex-shrink-0 overflow-y-auto">
@@ -654,7 +654,7 @@ export function SchemaView(): React.ReactElement {
                             <Td className={f.is_primary ? "font-semibold" : ""}>{f.name}</Td>
                             <Td><code className="text-primary text-xs">{f.type}</code></Td>
                             <Td>{f.nullable ? "yes" : "no"}</Td>
-                            <Td className="text-xs text-muted-foreground">{f.default_value ?? "—"}</Td>
+                            <Td className="text-xs text-muted-foreground">{f.default_value ?? "-"}</Td>
                             <Td>
                               <div className="flex gap-1">
                                 {f.is_primary ? <Badge variant="indigo">PK</Badge> : null}
@@ -662,7 +662,7 @@ export function SchemaView(): React.ReactElement {
                                 {f.is_indexed ? <Badge variant="blue">IDX</Badge> : null}
                               </div>
                             </Td>
-                            <Td className="text-xs text-muted-foreground">{f.references ?? "—"}</Td>
+                            <Td className="text-xs text-muted-foreground">{f.references ?? "-"}</Td>
                           </tr>
                         ))}
                       </tbody>

@@ -14,7 +14,7 @@ import {
  * disappears without any component knowing about access rules.
  *
  * **A column no caller can supply is dropped from a create form**, not disabled. Rendering it
- * would be an input that cannot be satisfied — and for a required column, a form that can
+ * would be an input that cannot be satisfied, and for a required column, a form that can
  * never be submitted, failing with a not-null violation that names the constraint rather than
  * the rule. `create` is a distinct verdict precisely because of this case: an ownership write
  * rule is satisfiable on update by the owner and satisfiable on insert by nobody.

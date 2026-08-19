@@ -1,9 +1,9 @@
 /**
- * `supatype hooks` — scaffold and inspect model hooks.
+ * `supatype hooks`: scaffold and inspect model hooks.
  *
  * Separate from `supatype functions` because the two are different things wearing the same runtime.
  * A function is a **public endpoint**: anyone holding the anon key can invoke it. A hook is
- * **procedural** — only the API server calls it, around a write, and the gateway refuses the route
+ * **procedural**: only the API server calls it, around a write, and the gateway refuses the route
  * from outside. Keeping them in separate directories is what makes that boundary structural instead
  * of a list somebody has to maintain.
  */
@@ -85,7 +85,7 @@ function scaffoldHook(cwd: string, name: string): void {
 /**
  * The scaffold deliberately imports from `../_supatype/hooks.ts`, which `push` generates.
  *
- * Before the first push that file does not exist, so the handler will not compile — which is the
+ * Before the first push that file does not exist, so the handler will not compile, which is the
  * honest state: the types come from the schema, and a handler typed against a model that has not been
  * pushed is a handler typed against a guess.
  */
@@ -94,7 +94,7 @@ function handlerTemplate(name: string, declared: { model: string; event: string 
   const model = declared[0]?.model ?? "YourModel"
 
   if (event.startsWith("after")) {
-    return `// ${name} — model hook (${event})
+    return `// ${name}: model hook (${event})
 //
 // Runs after the write has succeeded. It cannot change or undo it: a rejection here would be a
 // rejection of something that already happened. Failures are logged, not surfaced to the caller.
@@ -109,7 +109,7 @@ export default hook(handler)
 `
   }
 
-  return `// ${name} — model hook (${event}) for ${model}
+  return `// ${name}: model hook (${event}) for ${model}
 //
 // Runs before the write reaches Postgres, so it can reject it or rewrite the body.
 //
@@ -125,7 +125,7 @@ const handler: BeforeChange<"your_table"> = async (ctx) => {
   }
 
   // \`ctx.patch\` is the submitted partial; \`ctx.previous()\` reads the rows about to change.
-  // Those come back as stored — unmasked — so do not echo them into a rejection message.
+  // Those come back as stored, unmasked, so do not echo them into a rejection message.
   return {}
 
   // Reject with a message the caller sees, and a status of your choosing:

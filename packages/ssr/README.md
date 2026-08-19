@@ -87,7 +87,7 @@ createServerClient(url, anonKey, {
 
 1. Reads all cookies via the adapter's `getAll()`
 2. Finds the auth token cookie matching `<prefix>-*-auth-token`
-3. Parses the JSON session value and checks the JWT `exp` claim — expired tokens are discarded
+3. Parses the JSON session value and checks the JWT `exp` claim, expired tokens are discarded
 4. Passes the session as `initialSession` to `createClient`, so all subsequent requests carry the user's JWT automatically
 5. Signature verification is handled server-side by the gateway when the token is forwarded
 
@@ -95,7 +95,7 @@ createServerClient(url, anonKey, {
 
 ### `createServerClient<TDatabase>(url, anonKey, options)`
 
-Returns a fully-typed `SupatypeClient` pre-loaded with the user's session from cookies. The returned client has the same API as the browser client — `.from()`, `.auth`, `.storage`, `.rpc()`, etc.
+Returns a fully-typed `SupatypeClient` pre-loaded with the user's session from cookies. The returned client has the same API as the browser client, `.from()`, `.auth`, `.storage`, `.rpc()`, etc.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|

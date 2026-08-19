@@ -5,12 +5,12 @@ import { useState, useEffect, useRef } from "react"
 export interface UseLivePreviewOptions<TData> {
   /** The initial/server data to display when not in preview mode. */
   initialData: TData
-  /** Optional model name filter — only accept preview data for this model. */
+  /** Optional model name filter, only accept preview data for this model. */
   model?: string
 }
 
 export interface UseLivePreviewResult<TData> {
-  /** The current data — either live preview data or initial data. */
+  /** The current data: either live preview data or initial data. */
   data: TData
   /** Whether the component is currently receiving live preview updates. */
   isPreview: boolean

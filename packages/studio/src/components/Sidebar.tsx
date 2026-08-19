@@ -233,13 +233,13 @@ export function Sidebar({ config, extraSections, className }: SidebarProps): Rea
   }
 
   return (
-    // Reserve 52px in the layout — panel floats over content when expanded
+    // Reserve 52px in the layout, panel floats over content when expanded
     <aside
       className={cn("relative shrink-0 w-[52px] h-full", className)}
       role="navigation"
       aria-label="Studio navigation"
     >
-      {/* Floating panel — always 52px, expands to 220px on hover, overlays content */}
+      {/* Floating panel: always 52px, expands to 220px on hover, overlays content */}
       <div
         onMouseEnter={() => setExpanded(true)}
         onMouseLeave={() => setExpanded(false)}
@@ -344,9 +344,9 @@ export function getPageTitle(path: string, config: AdminConfig): string {
     if (model) {
       if (path.endsWith("/create")) return `Create ${model.label}`
       if (path.endsWith("/versions")) return "Version History"
-      if (path.endsWith("/api")) return `${model.label} — REST API`
-      if (path.endsWith("/graphql")) return `${model.label} — GraphQL`
-      if (path.endsWith("/cache")) return `${model.label} — Cache`
+      if (path.endsWith("/api")) return `${model.label}, REST API`
+      if (path.endsWith("/graphql")) return `${model.label}, GraphQL`
+      if (path.endsWith("/cache")) return `${model.label}, Cache`
       if (path.match(/\/models\/[^/]+\/[^/]+$/)) return `Edit ${model.label}`
       return model.labelPlural
     }
@@ -357,11 +357,11 @@ export function getPageTitle(path: string, config: AdminConfig): string {
   if (globalMatch) {
     const g = config.globals.find((g) => g.name === globalMatch[1])
     if (g) {
-      if (path.endsWith("/schema")) return `${g.label} — Schema`
-      if (path.endsWith("/data")) return `${g.label} — Data`
-      if (path.endsWith("/api")) return `${g.label} — REST API`
-      if (path.endsWith("/graphql")) return `${g.label} — GraphQL`
-      if (path.endsWith("/cache")) return `${g.label} — Cache`
+      if (path.endsWith("/schema")) return `${g.label}, Schema`
+      if (path.endsWith("/data")) return `${g.label}, Data`
+      if (path.endsWith("/api")) return `${g.label}, REST API`
+      if (path.endsWith("/graphql")) return `${g.label}, GraphQL`
+      if (path.endsWith("/cache")) return `${g.label}, Cache`
       return g.label
     }
   }

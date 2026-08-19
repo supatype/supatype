@@ -156,7 +156,7 @@ describe("@supatype/types primitives", () => {
     type _Bad = Model<{ id: UUID; authUser: RelatedTo<SupatypeAuthUser> }, { access: { update: OwnerFrom<"auth_user_id"> } }>
   })
 
-  // The three below used to assert that a modifier is transparent in a bare type literal —
+  // The three below used to assert that a modifier is transparent in a bare type literal,
   // `ServerDefault<string>` was structurally a string. That was the accident behind three defects, so a
   // modifier is now a declaration wrapper: it is the *row* that reads as a string, which is what a
   // caller actually holds. The intent is unchanged; the subject is the model rather than the literal.

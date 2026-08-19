@@ -1,5 +1,5 @@
 /**
- * Realtime integration — proxied WebSocket, WAL CDC, RLS, filters, presence/broadcast.
+ * Realtime integration: proxied WebSocket, WAL CDC, RLS, filters, presence/broadcast.
  *
  * Phase 10.6: F15 (CDC + latency), F17 (RLS isolation).
  */

@@ -15,7 +15,7 @@ export interface LogoWordmarkProps {
   tagline?: string
 }
 
-/** Figlet slant wordmark — native Ink colours (no embedded ANSI). */
+/** Figlet slant wordmark: native Ink colours (no embedded ANSI). */
 export function LogoWordmark({ maxWidth, tagline }: LogoWordmarkProps): React.ReactElement {
   const lines = layoutLogoBlock(pickLogoLines())
 

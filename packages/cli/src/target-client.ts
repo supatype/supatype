@@ -115,7 +115,7 @@ export async function targetFetch<T>(
       !opts.authRefresh
     ) {
       throw new TargetApiError(
-        `${message}. Session expired — run: supatype login`,
+        `${message}. Session expired, run: supatype login`,
         result.status,
         result.json.code,
       )

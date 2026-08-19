@@ -130,7 +130,7 @@ describe("runtime contract", () => {
 
   // PostgREST must connect as `authenticator`, never as POSTGRES_USER. POSTGRES_USER is
   // `supatype_admin`, a superuser, and a superuser session may SET ROLE to any role in the
-  // cluster — so a request whose JWT named one got it. Verified against a live stack: a
+  // cluster: so a request whose JWT named one got it. Verified against a live stack: a
   // token with `role: "supatype_admin"` returned every row of an RLS-protected table.
   it("self-host compose connects PostgREST as authenticator, not the superuser", () => {
     const compose = renderSelfHostCompose(baseConfig)
@@ -149,7 +149,7 @@ describe("runtime contract", () => {
   })
 
   // `supatype dev --provider docker` renders *this* file, so a `${VAR:?}` with no default
-  // takes local dev down before anything starts — `docker compose` refuses to interpolate and
+  // takes local dev down before anything starts, `docker compose` refuses to interpolate and
   // exits 1. Adding one therefore means wiring it into `upsertDevComposeEnv` as well. This
   // list is the reminder; if it fails, do that rather than just updating the list.
   it("requires only variables the dev path also sets", () => {

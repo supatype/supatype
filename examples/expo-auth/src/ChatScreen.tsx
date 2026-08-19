@@ -187,7 +187,7 @@ export function ChatScreen({
             </View>
           )}
           ListEmptyComponent={
-            <Text style={styles.muted}>No messages yet — say hello.</Text>
+            <Text style={styles.muted}>No messages yet, say hello.</Text>
           }
         />
       )}
@@ -222,7 +222,7 @@ function mergeMessages(
   seen: Set<string>,
 ): ChatRow[] {
   const merged = new Map<string, ChatRow>()
-  // Live first, then initial — REST rows win on duplicate ids and keep `created_at`.
+  // Live first, then initial, REST rows win on duplicate ids and keep `created_at`.
   for (const row of [...live, ...initial]) {
     merged.set(row.id, row)
     seen.add(row.id)

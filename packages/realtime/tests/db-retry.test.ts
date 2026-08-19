@@ -7,8 +7,8 @@ import { isTransientConnectionError, withDatabaseRetry } from "../src/db-retry.j
 /**
  * The line between "not there yet" and "wrong".
  *
- * This classification is the whole design. Too broad and a genuine misconfiguration — bad password,
- * missing database — becomes an infinite wait with no error surfaced. Too narrow and the service
+ * This classification is the whole design. Too broad and a genuine misconfiguration, bad password,
+ * missing database: becomes an infinite wait with no error surfaced. Too narrow and the service
  * exits on a cold start, which is what it used to do, hidden by the Compose `db` healthcheck that a
  * `database.external` stack does not have.
  */
@@ -22,7 +22,7 @@ describe("isTransientConnectionError", () => {
   })
 
   it("treats Postgres connection-exception and startup states as transient", () => {
-    // 57P03 is "cannot_connect_now" — the server is up but still recovering, which is exactly the
+    // 57P03 is "cannot_connect_now": the server is up but still recovering, which is exactly the
     // window a cold start lands in.
     for (const code of ["08006", "08001", "08004", "57P03", "57P01", "53300"]) {
       expect(isTransientConnectionError(pgError(code)), code).toBe(true)
@@ -146,7 +146,7 @@ describe("withDatabaseRetry", () => {
 
 describe("the storage copy", () => {
   it("has not drifted from this one", () => {
-    // Two services, two containers, no shared server-side package to put this in — so the file is
+    // Two services, two containers, no shared server-side package to put this in, so the file is
     // duplicated, and the error classification is precisely the part that must not diverge. Only the
     // leading doc comment differs, since each explains its own service's failure.
     const here = dirname(fileURLToPath(import.meta.url))

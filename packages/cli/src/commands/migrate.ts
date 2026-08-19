@@ -58,9 +58,9 @@ export function registerMigrate(program: Command): void {
         const size =
           manifest?.compressedBytes !== undefined
             ? `${(manifest.compressedBytes / 1024).toFixed(1)} KB`
-            : "—"
-        const files = manifest?.fileCount ?? "—"
-        const author = manifest?.pushedBy ?? "—"
+            : "-"
+        const files = manifest?.fileCount ?? "-"
+        const author = manifest?.pushedBy ?? "-"
         const rolled = m.rolledBack ? " (rolled back)" : ""
         plain(
           `${m.name}${rolled}\n  applied: ${m.appliedAt}  status: ${m.status}\n  author: ${author}  files: ${files}  snapshot: ${size}`,
@@ -212,7 +212,7 @@ async function offerSchemaRestore(
   const manifestPaths = new Set(manifest.files.map((f) => f.path))
   const orphans = findOrphanSchemaFiles(root, manifest.entryPoint, manifestPaths)
   for (const orphan of orphans) {
-    warn(`${orphan} not in snapshot — review manually`)
+    warn(`${orphan} not in snapshot, review manually`)
   }
 
   info(`Restored schema files from migration ${label}.`)
@@ -222,6 +222,6 @@ async function offerSchemaRestore(
   if ((postDiff.operations ?? []).length === 0) {
     info("Schema matches database after restore.")
   } else {
-    info("Run `supatype diff` — schema may still differ from database.")
+    info("Run `supatype diff`: schema may still differ from database.")
   }
 }

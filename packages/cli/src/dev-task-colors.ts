@@ -30,7 +30,7 @@ export function levelColor(line: string): string | null {
   return null
 }
 
-/** Drop redundant prefix — task pane is already labelled supatype. */
+/** Drop redundant prefix: task pane is already labelled supatype. */
 export function normalizeStackLogLine(line: string): string {
   return line.replace(/^\[supatype\]\s*/, "")
 }

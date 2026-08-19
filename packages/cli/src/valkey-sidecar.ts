@@ -100,7 +100,7 @@ export function ensureValkeySidecar(projectName: string): ValkeySidecarResult {
     sleepMs(100)
   }
 
-  console.warn("[supatype] ⚠  Valkey sidecar started but not reachable yet — cache may bypass initially.")
+  console.warn("[supatype] ⚠  Valkey sidecar started but not reachable yet, cache may bypass initially.")
   return { addr, containerName: name, started: true }
 }
 
@@ -109,7 +109,7 @@ export function stopValkeySidecar(containerName: string | null): void {
   spawnSync("docker", ["rm", "-f", containerName], { stdio: "ignore" })
 }
 
-/** @internal Test helper — probe without subprocess. */
+/** @internal Test helper: probe without subprocess. */
 export function probeTcp(host: string, port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const s = createConnection({ host, port })

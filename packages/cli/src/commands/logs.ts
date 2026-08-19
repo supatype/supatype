@@ -1,5 +1,5 @@
 /**
- * supatype logs — tail aggregated logs from local Docker containers.
+ * supatype logs: tail aggregated logs from local Docker containers.
  */
 import type { Command } from "commander"
 import { spawn } from "node:child_process"

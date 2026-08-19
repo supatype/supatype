@@ -72,7 +72,7 @@ export interface AppConfig {
   headers?: Record<string, string>
 }
 
-/** Identity helper — provides type inference for config files. */
+/** Identity helper: provides type inference for config files. */
 export function defineConfig(config: SupatypeProjectConfig): SupatypeProjectConfig {
   return config
 }
@@ -137,7 +137,7 @@ export function loadConfig(cwd: string = process.cwd()): SupatypeProjectConfig {
 
   const localNorm = normalizeProjectJson(localRaw) as Partial<SupatypeProjectConfig>
   // Re-validated after merging: the local override can reintroduce a combination the base file was
-  // rejected for — `database.provider` beside an inherited `database.external`, say — and merging
+  // rejected for: `database.provider` beside an inherited `database.external`, say, and merging
   // has no opinion about that.
   return validateProjectConfig(
     mergeProjectConfig(base, localNorm),
@@ -149,7 +149,7 @@ export function loadConfig(cwd: string = process.cwd()): SupatypeProjectConfig {
  * Environment for the child process that imports the config module.
  *
  * `supatype.config.ts` is TypeScript, so the natural way to keep a database password out of version
- * control is `process.env.DATABASE_URL` — which only works if the project's `.env` is visible to the
+ * control is `process.env.DATABASE_URL`: which only works if the project's `.env` is visible to the
  * process doing the import. A real environment variable still wins over the file, matching how every
  * other dotenv reader behaves and how Compose itself resolves the same names.
  */

@@ -31,7 +31,7 @@ export interface SchemaTable {
 }
 
 export interface ProjectProxy {
-  /** Execute a SQL query. Optionally hint a schema — server enforces access. */
+  /** Execute a SQL query. Optionally hint a schema, server enforces access. */
   sql: (query: string, schema?: string) => Promise<SqlResult>
   /** Introspect tables in the given schema (server validates JWT role). */
   introspect: (schema?: string) => Promise<SchemaTable[]>
@@ -42,7 +42,7 @@ export interface ProjectProxy {
 /**
  * Wraps raw fetch calls to the project proxy for SQL execution and schema
  * introspection. Schema routing is enforced server-side from the JWT role
- * claim — the client may send a hint but cannot exceed its permissions.
+ * claim: the client may send a hint but cannot exceed its permissions.
  */
 export function useProjectProxy(): ProjectProxy {
   const client = useAdminClient()
@@ -51,11 +51,11 @@ export function useProjectProxy(): ProjectProxy {
   const sql = useCallback(
     async (query: string, schema?: string): Promise<SqlResult> => {
       if (!client.url) {
-        throw new Error("SQL proxy URL is not configured — client URL is missing")
+        throw new Error("SQL proxy URL is not configured, client URL is missing")
       }
       if (!sessionProxy) {
         throw new Error(
-          "SQL proxy requires the session proxy — Studio no longer accepts a service role key in the browser",
+          "SQL proxy requires the session proxy, Studio no longer accepts a service role key in the browser",
         )
       }
       const headers: Record<string, string> = {
@@ -82,7 +82,7 @@ export function useProjectProxy(): ProjectProxy {
     [client.url, sessionProxy],
   )
 
-  // The introspection SQL uses current_schema() — the server resolves the
+  // The introspection SQL uses current_schema(), the server resolves the
   // actual schema via SET LOCAL before executing, so current_schema() reflects
   // whatever the server allowed based on the JWT role.
   const introspect = useCallback(async (schema?: string): Promise<SchemaTable[]> => {

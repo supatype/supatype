@@ -114,7 +114,7 @@ export function registerDoctor(program: Command): void {
  * Whether declared hooks can actually run.
  *
  * Worth its own section because every failure here is silent: a hook whose function is missing, or a
- * stack with functions switched off, produces no error anywhere — the write just succeeds
+ * stack with functions switched off, produces no error anywhere, the write just succeeds
  * unvalidated. Drift you cannot see is the thing doctor exists for.
  */
 export function printHooks(report: HooksReport): void {
@@ -133,7 +133,7 @@ export function printHooks(report: HooksReport): void {
     plain("  Create it with: supatype hooks new <name>")
   }
   if (report.functionsDisabled) {
-    plain("\n  functions_enabled is false in .supatype/manifest.json — every hook is inert.")
+    plain("\n  functions_enabled is false in .supatype/manifest.json, every hook is inert.")
     plain("  Regenerate the stack config with: supatype self-host compose")
   }
   if (report.mapMissing) {
@@ -162,7 +162,7 @@ export function printServiceRoleGrants(
   }
 
   if (broken.size > 0) {
-    plain("\n  Those marked ✗ match no function, so they grant nothing — the function reads no key.")
+    plain("\n  Those marked ✗ match no function, so they grant nothing, the function reads no key.")
   }
   for (const warning of problems.warnings) plain(warning)
   plain("\n  These functions bypass every access rule in the schema. Anything not listed cannot.")

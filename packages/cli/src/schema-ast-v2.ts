@@ -1,5 +1,5 @@
 /**
- * AST v2 wire format — canonical types and emitters.
+ * AST v2 wire format, canonical types and emitters.
  * Parsers build {@link ParsedField}; only `emitField` / `emitModel` / `emitSchema` produce JSON.
  */
 
@@ -30,7 +30,7 @@ export interface FieldAnnotations {
   platform?: PlatformFieldAnnotations
 }
 
-/** Kernel facts only — never db/platform keys at this layer. */
+/** Kernel facts only: never db/platform keys at this layer. */
 export interface KernelFieldFacts {
   required?: boolean
   primaryKey?: boolean
@@ -62,7 +62,7 @@ export interface KernelFieldFacts {
   index?: boolean
 }
 
-/** Internal parse result — not serialized. */
+/** Internal parse result: not serialized. */
 export interface ParsedField {
   kind: string
   kernel: KernelFieldFacts
@@ -302,7 +302,7 @@ export function emitModel(
     options,
     annotations: {
       db: { tableName, indexes },
-      // Hooks sit in `platform` beside `access`: they are an API-layer concern, not a column one —
+      // Hooks sit in `platform` beside `access`: they are an API-layer concern, not a column one,
       // supatype-server reads them, Postgres never sees them.
       platform: { access, ...(Object.keys(hooks).length > 0 && { hooks }) },
     },

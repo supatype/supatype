@@ -10,7 +10,7 @@ export function restoreStdinAfterInk(): void {
   try {
     if (stdin.isRaw) stdin.setRawMode?.(false)
   } catch {
-    // ignore — stdin may already be restored
+    // ignore: stdin may already be restored
   }
 
   // Pause so one-shot Ink flows (cache list, keys, …) can exit; resume() would keep the

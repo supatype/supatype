@@ -130,7 +130,7 @@ export function composePullNeedsIgnoreFailures(
 /**
  * Schema-engine image for a one-off `docker compose run` when pushing schema.
  * Uses config pin when set; otherwise CDN engine semver (Docker Hub `:latest` can lag).
- * Does not touch `.env` — server/postgres still use compose `:latest` defaults.
+ * Does not touch `.env`, server/postgres still use compose `:latest` defaults.
  */
 export async function schemaEngineImageForPush(
   config: SupatypeProjectConfig,
@@ -174,7 +174,7 @@ export function staticDirForCompose(config: SupatypeProjectConfig): string | und
 /**
  * Bind-mount source for `/project` in generated compose files.
  * Paths are resolved from `--project-directory` (always the project root in `runDockerCompose`),
- * not from the compose file directory — use `.` not `../..`.
+ * not from the compose file directory, use `.` not `../..`.
  */
 function projectMountPath(_cwd: string): string {
   return "."
@@ -198,13 +198,13 @@ function kongMountPath(_cwd: string): string {
  *
  * One expression instead of six identical constructions of `@db:5432`. With an external database it
  * becomes `${DATABASE_URL:?…}`: the URL is the operator's, so there is nothing for the generator to
- * build — and interpolating the value into the compose file would write a password into a generated
+ * build: and interpolating the value into the compose file would write a password into a generated
  * file. Compose resolves the variable from `.env` at up-time, the same place the config's
  * `process.env.DATABASE_URL` read it from.
  */
 function ownerDatabaseUrl(config: SupatypeProjectConfig, scheme = "postgresql"): string {
   if (usesExternalDatabase(config)) {
-    return "${DATABASE_URL:?DATABASE_URL is missing from .env — required by database.external}"
+    return "${DATABASE_URL:?DATABASE_URL is missing from .env, required by database.external}"
   }
   return (
     `${scheme}://\${POSTGRES_USER:-supatype_admin}:` +
@@ -217,7 +217,7 @@ function ownerDatabaseUrl(config: SupatypeProjectConfig, scheme = "postgresql"):
  * PostgREST's DSN, which connects as `authenticator` rather than the owner.
  *
  * For an external database the host, port, database and query string are taken from the operator's
- * URL and only the password stays a variable. The alternative — a second full URL in `.env` — is one
+ * URL and only the password stays a variable. The alternative, a second full URL in `.env`, is one
  * more thing to keep in step with the first, and two URLs that disagree about *which database* is a
  * split-brain nobody notices until the API is serving one and migrations are landing in the other.
  * A hostname is not the secret here; the password is, and it stays out of the generated file.
@@ -237,7 +237,7 @@ function postgrestDatabaseUrl(config: SupatypeProjectConfig): string {
 /** Host Vite dev server as seen from Kong inside Docker Compose. */
 export const COMPOSE_STUDIO_HOST_URL = "http://host.docker.internal:3002"
 
-/** Studio container — always Docker Hub unless SUPATYPE_STUDIO_IMAGE is set in .env. */
+/** Studio container: always Docker Hub unless SUPATYPE_STUDIO_IMAGE is set in .env. */
 function studioServiceBlock(): string {
   return `    image: \${SUPATYPE_STUDIO_IMAGE:-supatype/studio:latest}`
 }
@@ -281,7 +281,7 @@ export interface SelfHostComposeOptions {
   /**
    * Which mechanism enforces per-column rules, when the caller knows.
    *
-   * Only the call sites that have loaded the schema can say — see `field-masking-tier.ts`. Left
+   * Only the call sites that have loaded the schema can say, see `field-masking-tier.ts`. Left
    * unset, the exposed schema list is today's, which is correct for every project without field
    * rules and for every project on `supatype/postgres`.
    */
@@ -385,7 +385,7 @@ ${external ? "" : "  db-data:\n"}  minio-data:
 
   // `depends_on` for the services that talk to Postgres. With an external database there is no
   // container to wait on, so the clause disappears entirely and each service retries on connect
-  // instead — which is also what covers a database that restarts *after* boot, something no
+  // instead: which is also what covers a database that restarts *after* boot, something no
   // healthcheck ever did.
   const dbDependencyClause = external
     ? ""
@@ -412,8 +412,8 @@ ${external ? "" : "  db-data:\n"}  minio-data:
       DATABASE_URL: "${ownerUrl}"
       JWT_SECRET: \${JWT_SECRET:?JWT_SECRET is missing from .env}
       SLOT_NAME: supatype_realtime
-      # Matches the publication the supatype/postgres image creates. Read by nothing today —
-      # wal2json decodes from the slot — and kept for a future pgoutput decoder.
+      # Matches the publication the supatype/postgres image creates. Read by nothing today,
+      # wal2json decodes from the slot, and kept for a future pgoutput decoder.
       PUBLICATION_NAME: supatype_realtime
 ${dbDependency}`
     : `  # No \`realtime\` service: database.external.realtime is false. Subscriptions are
@@ -443,7 +443,7 @@ ${dbPorts}    volumes:
       - db-data:/var/lib/postgresql/data
     healthcheck:
       # -h 127.0.0.1 forces TCP. Without it \`pg_isready\` uses the Unix socket, which the
-      # entrypoint's temporary init server is already listening on while TCP is still refused —
+      # entrypoint's temporary init server is already listening on while TCP is still refused,
       # so the container reported healthy, \`depends_on: service_healthy\` released, and every
       # service that connects over the network died with ECONNREFUSED on first boot. PostgREST
       # survived only because it retries. Observed on a clean stack: server, storage and
@@ -466,7 +466,7 @@ ${dbServiceBlock}  postgrest:
     expose:
       - "3000"
     environment:
-      # Connects as \`authenticator\`, not \${POSTGRES_USER} — which is a superuser, and a
+      # Connects as \`authenticator\`, not \${POSTGRES_USER}, which is a superuser, and a
       # superuser session may SET ROLE to any role in the cluster, so a request whose JWT
       # named one got it. \`authenticator\` is NOINHERIT with membership in only
       # anon/authenticated/service_role, so the same SET ROLE is refused.
@@ -476,7 +476,7 @@ ${dbServiceBlock}  postgrest:
       PGRST_DB_URI: ${postgrestUrl}
       # Derived from schema.pg_schema (or schema.api_schemas). Hardcoding this is why choosing a
       # non-public pg_schema used to give a correct push and an API that answered PGRST106 for
-      # everything — the engine moved and PostgREST was never told.
+      # everything: the engine moved and PostgREST was never told.
       PGRST_DB_SCHEMA: "${apiSchemaList(config, options?.fieldMaskingTier)}"
       PGRST_DB_ANON_ROLE: anon
       PGRST_JWT_SECRET: \${JWT_SECRET:?JWT_SECRET is missing from .env}
@@ -511,12 +511,12 @@ ${dbDependency}
       # cloud, for isolation the route boundary already provides.
       SUPATYPE_HOOKS_ROOT: /project/hooks
       PORT: "8001"
-      # In-compose loopback to Kong (not API_EXTERNAL_URL / localhost — unreachable from this container).
+      # In-compose loopback to Kong (not API_EXTERNAL_URL / localhost, unreachable from this container).
       SUPATYPE_URL: http://kong:8000
       SUPATYPE_INTERNAL_URL: http://kong:8000
       SUPATYPE_ANON_KEY: \${ANON_KEY:-}
-      # Present so the worker can hand it to hooks — which are procedural and unreachable from
-      # outside — and to the public functions named below. Withheld from every other handler before
+      # Present so the worker can hand it to hooks, which are procedural and unreachable from
+      # outside: and to the public functions named below. Withheld from every other handler before
       # any of them is imported: a function is a public endpoint, and an ambient admin credential made
       # each one able to read past every access rule in the schema.
       SUPATYPE_SERVICE_ROLE_KEY: \${SERVICE_ROLE_KEY:-}
@@ -629,7 +629,7 @@ ${kongDependsOn}${kongValkeyDepends}
 ${volumesBlock}`
 }
 
-/** In-compose worker address — matches the `functions-worker` service this file always generates. */
+/** In-compose worker address: matches the `functions-worker` service this file always generates. */
 const COMPOSE_FUNCTIONS_WORKER_URL = "http://functions-worker:8001"
 
 function ensureComposeManifest(cwd: string, config: SupatypeProjectConfig): void {
@@ -653,7 +653,7 @@ function ensureComposeManifest(cwd: string, config: SupatypeProjectConfig): void
     ...(realtimeEnabled(config) && { realtime_url: "http://realtime:4000" }),
     // True because this file *always* generates a `functions-worker` service and hands the server
     // `SUPATYPE_FUNCTIONS_WORKER_URL`. It said false, so the server answered 404 for every function
-    // in a stack that was running a worker for them — provisioned, then switched off.
+    // in a stack that was running a worker for them, provisioned, then switched off.
     functions_enabled: true,
     functions_worker_url: COMPOSE_FUNCTIONS_WORKER_URL,
   }
@@ -664,8 +664,8 @@ function ensureComposeManifest(cwd: string, config: SupatypeProjectConfig): void
  * Turn functions on in a manifest written by an older CLI, leaving every other key alone.
  *
  * Without this, only new projects get working functions: a stack generated before the flag was
- * corrected keeps `functions_enabled: false` on disk, and regenerating the compose file — the
- * obvious thing to try — does not fix it.
+ * corrected keeps `functions_enabled: false` on disk, and regenerating the compose file, the
+ * obvious thing to try, does not fix it.
  */
 function repairComposeFunctionsFlag(manifestPath: string): void {
   let parsed: Record<string, unknown>
@@ -696,7 +696,7 @@ function ensureProjectFunctionsDir(cwd: string, config: SupatypeProjectConfig): 
  * The config's external URL and `.env`'s `DATABASE_URL` must be the same string.
  *
  * The CLI resolves the URL from config; Compose substitutes `.env` at up-time. If the two disagree,
- * `push` migrates one database while the services serve another — which reads as data loss and
+ * `push` migrates one database while the services serve another, which reads as data loss and
  * isn't. It also makes the generated GoTrue DSN wrong, since whether to append `search_path` with
  * `?` or `&` is decided from the config URL's query string.
  */
@@ -731,14 +731,14 @@ function assertExternalUrlMatchesEnv(cwd: string, config: SupatypeProjectConfig)
  * A loopback host in the external URL cannot work from inside a container.
  *
  * `127.0.0.1` means "this container" to every service in the stack, so an external database on the
- * host machine is unreachable — while the *CLI* reaches it fine, because the CLI runs on the host.
+ * host machine is unreachable, while the *CLI* reaches it fine, because the CLI runs on the host.
  * That asymmetry is the trap: `supatype db check` passes, `push` applies the schema, and then
  * storage, realtime and the server all die with ECONNREFUSED against their own loopback. Found by
  * rehearsing exactly that.
  *
  * Refused rather than rewritten. The compose file interpolates one `${DATABASE_URL}` for every
  * service, so silently substituting a different host would mean the CLI and the stack no longer
- * agree about which database they are talking to — the thing every other check here exists to
+ * agree about which database they are talking to, the thing every other check here exists to
  * prevent.
  */
 export function loopbackExternalHost(config: SupatypeProjectConfig): string | undefined {
@@ -767,7 +767,7 @@ function assertExternalUrlReachableFromContainers(config: SupatypeProjectConfig)
   fatalError(
     `database.external.url points at ${host}, which no container can reach`,
     [
-      "Inside a container, localhost is that container — not the machine running Docker. Every",
+      "Inside a container, localhost is that container, not the machine running Docker. Every",
       "service in the stack would fail to connect, while the CLI succeeds because it runs on the host.",
       "",
       "Use a host the containers can resolve:",
@@ -902,7 +902,7 @@ export function runDockerCompose(
   return result.status ?? 1
 }
 
-/** Compose project name for a Supatype project — isolates docker state per project. */
+/** Compose project name for a Supatype project, isolates docker state per project. */
 export function composeProjectName(projectName: string): string {
   const slug = projectName.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "")
   return `supatype-${slug || "project"}`

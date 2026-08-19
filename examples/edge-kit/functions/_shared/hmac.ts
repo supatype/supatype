@@ -1,4 +1,4 @@
-/** HMAC-SHA256 hex digest (Web Crypto — available in Deno). */
+/** HMAC-SHA256 hex digest (Web Crypto, available in Deno). */
 
 export async function hmacSha256Hex(secret: string, body: string): Promise<string> {
   const key = await crypto.subtle.importKey(

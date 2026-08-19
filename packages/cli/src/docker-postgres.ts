@@ -1,5 +1,5 @@
 /**
- * docker-postgres — manage a supatype/postgres Docker container for local dev.
+ * docker-postgres: manage a supatype/postgres Docker container for local dev.
  *
  * Used by `supatype dev` when database.provider = "docker".
  * The container is named supatype-{projectName} and persists data in a
@@ -11,7 +11,7 @@ import { spawnSync } from "node:child_process"
 export interface DockerPgOptions {
   /** Docker image to run. Defaults to supatype/postgres:latest. */
   image: string
-  /** Project name — used to derive the container and volume names. */
+  /** Project name: used to derive the container and volume names. */
   projectName: string
   /** Host port to bind to container's 5432. */
   port: number
@@ -85,7 +85,7 @@ export function dockerPgStart(opts: DockerPgOptions): void {
 }
 
 /**
- * Stop the container (fast — does not remove it or the data volume).
+ * Stop the container (fast, does not remove it or the data volume).
  * Safe to call even if the container is not running.
  */
 export function dockerPgStop(projectName: string): void {
@@ -120,7 +120,7 @@ export function dockerPgPostInitServing(logs: string): boolean {
 
   const initDone = logs.lastIndexOf("PostgreSQL init process complete")
   if (initDone === -1) {
-    // Reused data volume — this run did not re-run entrypoint init.
+    // Reused data volume: this run did not re-run entrypoint init.
     return true
   }
   return initDone < lastReady
@@ -240,7 +240,7 @@ export function dockerDbUrl(projectName: string, port: number, password = DEFAUL
 /**
  * DB URL for processes sharing the Postgres container network namespace
  * (supatype-server migrate in a one-shot container). Uses loopback inside the
- * container where pg_hba grants trust — avoids host-published-port SCRAM/SSL issues.
+ * container where pg_hba grants trust, avoids host-published-port SCRAM/SSL issues.
  */
 export function dockerPgLoopbackDbUrl(projectName: string, password = DEFAULT_DEV_PASSWORD): string {
   return `postgres://${PG_USER}:${password}@127.0.0.1:5432/${projectName}?sslmode=disable`
@@ -254,7 +254,7 @@ export const DEFAULT_SERVER_DOCKER_IMAGE = "supatype/server:latest"
 
 /**
  * Run `supatype-server migrate` on the Postgres container network (loopback trust).
- * Used on Windows + database.provider docker — host-published :5432 breaks libpq TLS there.
+ * Used on Windows + database.provider docker, host-published :5432 breaks libpq TLS there.
  */
 export function runGotrueMigrationsViaDocker(
   pgContainerName: string,

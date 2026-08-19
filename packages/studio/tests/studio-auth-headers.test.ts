@@ -13,7 +13,7 @@ describe("studioAuthHeaders", () => {
   // Regression: Studio accepted a service role key in the browser and sent it on
   // every privileged call. That is unrestricted database access to anyone who
   // opens devtools, and it bypasses Studio membership, the role's permissions,
-  // the acting identity and the audit trail — every control the server applies.
+  // the acting identity and the audit trail, every control the server applies.
   it("never sends a service role key, even when one is attached to the client", () => {
     const client = {
       url: "http://localhost:18473/studio/proxy",
@@ -33,7 +33,7 @@ describe("studioAuthHeaders", () => {
     })
   })
 
-  // No token means no headers — an unauthenticated request must be refused by the
+  // No token means no headers, an unauthenticated request must be refused by the
   // server rather than quietly succeeding with some ambient privilege.
   it("sends nothing when there is no session", () => {
     expect(studioAuthHeaders(clientWithToken(null))).toEqual({})

@@ -48,7 +48,7 @@ export interface DeployTarget {
   refreshToken?: string | undefined
   orgId?: string | undefined
   link: ProjectLink | null
-  /** Project cwd — needed to persist refreshed cloud tokens. */
+  /** Project cwd: needed to persist refreshed cloud tokens. */
   cwd?: string
   /** Engine subprocess path when mode is direct or local without control plane. */
   databaseUrl?: string

@@ -57,7 +57,7 @@ export class RealtimeServer {
       const path = req.url?.split("?")[0] ?? ""
       // Liveness is "the process is up"; readiness is "replication is actually connected". They used
       // to be the same answer, which was fine only because the server refused to listen at all until
-      // replication was up — so a database that was merely slow took the container down instead of
+      // replication was up: so a database that was merely slow took the container down instead of
       // reporting itself as not ready yet.
       if (path === "/health" || path === "/health/live") {
         res.writeHead(200, { "Content-Type": "application/json" })
@@ -109,8 +109,8 @@ export class RealtimeServer {
     })
 
     // Listen first, then connect. The old order awaited replication before binding the port, so a
-    // database that was not up yet meant no health endpoint to ask and — since the rejection reached
-    // `main()` — no process either. Now the port opens, `/health/ready` answers 503 with the reason,
+    // database that was not up yet meant no health endpoint to ask and, since the rejection reached
+    // `main()`: no process either. Now the port opens, `/health/ready` answers 503 with the reason,
     // and replication keeps retrying behind it.
     await new Promise<void>((resolve) => {
       this.httpServer!.listen(this.env.port, () => {
@@ -121,7 +121,7 @@ export class RealtimeServer {
 
     this.replicationStartup = this.replication.start().catch((err) => {
       // A database that cannot do logical decoding is already reported by the listener, and the
-      // service stays up serving presence and broadcast — only change-subscriptions are gone.
+      // service stays up serving presence and broadcast, only change-subscriptions are gone.
       if (err instanceof RealtimeUnsupportedError) return
       // Anything else non-transient is a broken process, not a missing feature.
       console.error("[realtime] replication failed to start:", err)
@@ -129,7 +129,7 @@ export class RealtimeServer {
     })
   }
 
-  /** Resolves when the initial replication connection has settled — tests await this. */
+  /** Resolves when the initial replication connection has settled, tests await this. */
   async waitForReplicationStartup(): Promise<void> {
     await this.replicationStartup
   }
@@ -191,7 +191,7 @@ export class RealtimeServer {
       }
     }
 
-    // Extract JWT — in multi-tenant mode, verify against per-project secret
+    // Extract JWT: in multi-tenant mode, verify against per-project secret
     const claims = this.env.multiTenant && projectRef
       ? this.extractClaimsMultiTenant(req, projectRef)
       : this.extractClaims(req)
@@ -205,7 +205,7 @@ export class RealtimeServer {
     if (claims) {
       this.send(ws, { type: "system", status: "ok", message: "authenticated" })
     } else {
-      this.send(ws, { type: "system", status: "ok", message: "connected — send auth message to authenticate" })
+      this.send(ws, { type: "system", status: "ok", message: "connected, send auth message to authenticate" })
     }
 
     ws.on("message", (data) => {
@@ -435,7 +435,7 @@ export class RealtimeServer {
       return
     }
 
-    // Single-tenant mode — original behaviour
+    // Single-tenant mode: original behaviour
     const subscribers = this.channels.getSubscribers(change.schema, change.table)
     if (subscribers.length === 0) return
 
@@ -449,8 +449,8 @@ export class RealtimeServer {
   /**
    * Decide whether one subscriber gets one change, and send it masked.
    *
-   * Shared by both dispatch paths on purpose. The ordering here is security-relevant — the
-   * subscriber's column filter must not be matched against values they may not read — and
+   * Shared by both dispatch paths on purpose. The ordering here is security-relevant, the
+   * subscriber's column filter must not be matched against values they may not read, and
    * two copies of it would be two chances to get it wrong.
    */
   private async deliverIfVisible(
@@ -471,7 +471,7 @@ export class RealtimeServer {
       return
     }
 
-    // Row visibility plus field masking — what comes back is already masked, or nothing.
+    // Row visibility plus field masking, what comes back is already masked, or nothing.
     const visible = await this.rlsFilter.visibleChange(client.claims, change)
     if (!visible) return
 

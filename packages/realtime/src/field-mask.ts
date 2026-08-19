@@ -4,7 +4,7 @@ import type pg from "pg"
  * Per-column masking for realtime payloads.
  *
  * Logical decoding does not plan a query, so nothing the `supatype_mask` extension does
- * reaches a WAL record — a column masked for a caller over REST would otherwise arrive
+ * reaches a WAL record, a column masked for a caller over REST would otherwise arrive
  * in full over the socket. Realtime has to apply the same rules itself.
  *
  * It does so from the same source of truth: the security labels the schema engine writes.
@@ -165,7 +165,7 @@ export class FieldMaskCatalog {
         masks.set(row.column_name, null)
         continue
       }
-      // No read restriction — a WRITE-only rule leaves reads alone.
+      // No read restriction: a WRITE-only rule leaves reads alone.
       if (parsed.read) masks.set(row.column_name, parsed.read)
     }
 
@@ -182,7 +182,7 @@ export class FieldMaskCatalog {
  * subscriptions would binary-search it. Same oracle the extension closes in a `WHERE`
  * clause, one layer up.
  *
- * `*` is the catalog's "unknown", which makes every filter unsafe — a round trip rather
+ * `*` is the catalog's "unknown", which makes every filter unsafe, a round trip rather
  * than a disclosure.
  */
 export function filterIsMaskSafe(

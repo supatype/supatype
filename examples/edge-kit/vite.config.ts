@@ -6,7 +6,7 @@ const gateway = process.env.VITE_SUPATYPE_URL?.replace(/\/$/, "") || "http://127
 export default defineConfig({
   plugins: [react()],
   server: {
-    // Bind IPv4 explicitly — default "localhost" is often ::1-only on Windows,
+    // Bind IPv4 explicitly: default "localhost" is often ::1-only on Windows,
     // so Docker (host.docker.internal → 127.0.0.1) gets connection refused → Kong 502.
     host: "127.0.0.1",
     port: 5173,

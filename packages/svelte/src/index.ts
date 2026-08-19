@@ -1,4 +1,4 @@
-// @supatype/svelte — Svelte stores for Supatype
+// @supatype/svelte: Svelte stores for Supatype
 
 export { setSupatypeClient, getSupatypeClient } from "./context.js"
 

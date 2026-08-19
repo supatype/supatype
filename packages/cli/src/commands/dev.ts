@@ -1,9 +1,9 @@
 /**
- * supatype dev — start local Postgres, apply schema, run supatype-server.
+ * supatype dev: start local Postgres, apply schema, run supatype-server.
  *
  * Runtime provider (top-level `provider` or legacy `database.provider`):
- *   native — host Postgres + host server + host engine (default)
- *   docker — full self-host Compose stack (Kong :18473); see dev-compose.ts
+ *   native: host Postgres + host server + host engine (default)
+ *   docker: full self-host Compose stack (Kong :18473); see dev-compose.ts
  *
  * Edge functions (when a functions/ dir exists): Deno is resolved from the CDN cache
  * (auto-download on miss). Self-host/cloud Docker stacks use supatype-server in-container;
@@ -127,7 +127,7 @@ export function registerDev(program: Command): void {
     .action(async (opts: { watch: boolean; stream?: boolean; port?: string }) => {
       const cwd = process.cwd()
 
-      // ── 1. Load project config (before TUI — fatal errors must hit real stderr) ──
+      // ── 1. Load project config (before TUI, fatal errors must hit real stderr) ──
       const config = loadConfig(cwd)
       const provider = resolveRuntimeProvider(config)
 
@@ -181,7 +181,7 @@ export function registerDev(program: Command): void {
 
       // ── 5–7. Start Postgres ───────────────────────────────────────────────
       let dbURL: string
-      /** What PostgREST connects as — deliberately not `dbURL`, which is a superuser. */
+      /** What PostgREST connects as, deliberately not `dbURL`, which is a superuser. */
       let postgrestDbURL: string
       let stopPostgres: () => void | Promise<void>
       const pgPort = NATIVE_PG_PORT
@@ -195,7 +195,7 @@ export function registerDev(program: Command): void {
       let pgBinDir: string | null = null
 
       {
-        // native — resolve pg bin dir and manage with pg_ctl
+        // native: resolve pg bin dir and manage with pg_ctl
         pgBinDir = await resolvePgBinDir(config)
         const dataDir = config.database.data_dir ?? join(stateRoot, "data")
         mkdirSync(dataDir, { recursive: true })
@@ -239,7 +239,7 @@ export function registerDev(program: Command): void {
         //
         // `authenticator` is NOINHERIT and holds no privileges of its own: it can only
         // SET ROLE to the three above. That containment is the point. Connecting as
-        // `postgres` — a superuser — meant a request whose JWT named *any* role in the
+        // `postgres`: a superuser: meant a request whose JWT named *any* role in the
         // cluster got it, because a superuser may SET ROLE to anything. Verified: as
         // postgres, `SET ROLE supatype_replication_admin` succeeds; as authenticator the
         // same statement is refused. Mirrors the image, which has had this role all along.
@@ -300,7 +300,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
       mkdirSync(supatypeDir, { recursive: true })
 
       const localStoragePath = config.storage?.provider !== "s3" ? join(stateRoot, "storage") : undefined
-      // Native Postgres builds don't include PostGIS — skip geo fields rather than failing.
+      // Native Postgres builds don't include PostGIS, skip geo fields rather than failing.
       const skipFieldKinds: ReadonlySet<string> = new Set(["geo", "vector"])
 
       await runSchemaPush(cwd, engineBin, schemaPath, dbURL, manifestPath, adminConfigPath, localStoragePath, skipFieldKinds, config).catch(
@@ -341,7 +341,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
           }
         } catch (err) {
           console.warn(
-            `[supatype] ⚠  Found ${functionsDir} but could not provision Deno — edge functions will not run.\n` +
+            `[supatype] ⚠  Found ${functionsDir} but could not provision Deno, edge functions will not run.\n` +
               `  ${(err as Error).message}\n` +
               "  (Functions still appear in Studio; invocations need Deno.)",
           )
@@ -383,7 +383,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
         console.log(`[supatype] Realtime service: ${realtimeUrl}`)
       } catch (err) {
         console.warn(
-          `[supatype] ⚠  Realtime unavailable — WebSocket subscriptions will not work.\n` +
+          `[supatype] ⚠  Realtime unavailable, WebSocket subscriptions will not work.\n` +
             `  ${(err as Error).message}`,
         )
       }
@@ -509,10 +509,10 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
 
         const postgrestEnv: Record<string, string> = {
           PGRST_DB_URI: postgrestDbURL,
-          // Derived from schema.pg_schema (or schema.api_schemas) — a hardcoded "public" here meant
+          // Derived from schema.pg_schema (or schema.api_schemas), a hardcoded "public" here meant
           // a non-default pg_schema pushed correctly and then answered PGRST106 on every request.
           // Native dev has no masking extension either, so a schema with field rules is served from
-          // `api` here too — the case an "is the database external" rule would have got wrong.
+          // `api` here too: the case an "is the database external" rule would have got wrong.
           PGRST_DB_SCHEMA: apiSchemaList(
             config,
             // The installed archive decides: one downloaded before the masking library was bundled
@@ -644,9 +644,9 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
 // Schema push (engine subprocess)
 // ---------------------------------------------------------------------------
 
-// Last successfully-pushed AST JSON — used to skip no-op re-fires.
+// Last successfully-pushed AST JSON, used to skip no-op re-fires.
 let _lastPushedAst: string | null = null
-// AST that failed on its last attempt — always retried even if content is unchanged.
+// AST that failed on its last attempt, always retried even if content is unchanged.
 let _lastFailedAst: string | null = null
 
 async function runSchemaPush(
@@ -670,7 +670,7 @@ async function runSchemaPush(
     ast = filtered
     if (adapted.length > 0) {
       console.warn(
-        `[supatype] ⚠  ${adapted.length} field(s) replaced with JSONB — required extensions not available:\n` +
+        `[supatype] ⚠  ${adapted.length} field(s) replaced with JSONB, required extensions not available:\n` +
         adapted.map((s: string) => `    ${s}`).join("\n"),
       )
     }
@@ -744,7 +744,7 @@ async function runSchemaPush(
     { cwd, stdio: "pipe", encoding: "utf8" },
   )
   if (genResult.status !== 0) {
-    console.warn("[supatype] Manifest generation failed — server routing may be stale.")
+    console.warn("[supatype] Manifest generation failed, server routing may be stale.")
   }
 
   // Generate admin config (for Studio). Engine writes to stdout.
@@ -889,7 +889,7 @@ async function extractPostgresArchive(
 }
 
 // ---------------------------------------------------------------------------
-// PostgREST resolver — downloads from GitHub releases if not cached
+// PostgREST resolver: downloads from GitHub releases if not cached
 // ---------------------------------------------------------------------------
 
 const POSTGREST_DEFAULT_VERSION = "12.2.3"
@@ -1030,12 +1030,12 @@ function repairWindowsPostgrestRuntime(cacheDir: string, archivePath: string, bi
 }
 
 // ---------------------------------------------------------------------------
-// Local-dev JWT generator (no external dep — pure crypto)
+// Local-dev JWT generator (no external dep, pure crypto)
 // ---------------------------------------------------------------------------
 
 
 // ---------------------------------------------------------------------------
-// AST adaptation — replace extension-dependent fields with JSONB fallbacks
+// AST adaptation: replace extension-dependent fields with JSONB fallbacks
 // ---------------------------------------------------------------------------
 
 interface AstField { kind: string; required?: boolean; [k: string]: unknown }

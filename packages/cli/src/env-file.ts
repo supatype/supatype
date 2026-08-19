@@ -10,7 +10,7 @@ import { join } from "node:path"
  * `SUPATYPE_REALTIME_IMAGE` from `.env` and could not override `SUPATYPE_SERVER_IMAGE`, because the
  * latter is derivable from a pin and the former is not. Same file, same shape, different rules.
  */
-export const MANAGED_MARKER = "# supatype:managed — value from versions in supatype.config.ts"
+export const MANAGED_MARKER = "# supatype:managed, value from versions in supatype.config.ts"
 
 interface EnvLine {
   /** `KEY` for an assignment, undefined for comments and blanks. */
@@ -47,7 +47,7 @@ function parseLines(text: string): EnvLine[] {
 
 export interface UpsertOptions {
   /**
-   * Keys to delete — but only where the CLI wrote them (see [`MANAGED_MARKER`]). A hand-written value
+   * Keys to delete: but only where the CLI wrote them (see [`MANAGED_MARKER`]). A hand-written value
    * is left alone, because the operator putting an image tag in `.env` is the documented way to run a
    * local build and deleting it silently sent them back to `:latest`.
    */

@@ -138,7 +138,7 @@ function scaffoldFunction(cwd: string, name: string): void {
 
   mkdirSync(fnDir, { recursive: true })
 
-  const indexContent = `// ${name} — Supatype Edge Function
+  const indexContent = `// ${name}, Supatype Edge Function
 // Docs: https://supatype.com/docs/edge-functions
 
 export default async function handler(req: Request): Promise<Response> {
@@ -257,7 +257,7 @@ function discoverFunctions(cwd: string): DiscoveredFunction[] {
     const stat = statSync(fullPath)
 
     if (stat.isDirectory()) {
-      // Directory function — look for index.ts
+      // Directory function: look for index.ts
       const indexPath = join(fullPath, "index.ts")
       if (existsSync(indexPath)) {
         fns.push({ name: entry, entrypoint: indexPath, absPath: fullPath })
@@ -369,7 +369,7 @@ async function deploy(cwd: string, opts: { only?: string; env?: string; dryRun?:
   }
 
   if (opts.dryRun) {
-    plain("Dry run — the following functions would be deployed:\n")
+    plain("Dry run: the following functions would be deployed:\n")
     for (const fn of fns) {
       plain(`  ${fn.name}  →  ${relative(cwd, fn.entrypoint)}`)
     }
@@ -543,7 +543,7 @@ function readFunctionSource(fn: DiscoveredFunction): string {
     return readFileSync(fn.absPath, "utf8")
   }
 
-  // Directory function — read all .ts files
+  // Directory function: read all .ts files
   const files: Record<string, string> = {}
   const entries = readdirSync(fn.absPath, { recursive: true }) as string[]
   for (const entry of entries) {
@@ -607,7 +607,7 @@ async function listFunctions(cwd: string): Promise<void> {
     plain(`  ${"─".repeat(28)} ${"─".repeat(24)} ${"─".repeat(20)} ${"─".repeat(12)}`)
 
     for (const fn of data) {
-      const deployed = fn.deployedAt ? new Date(fn.deployedAt).toLocaleString() : "—"
+      const deployed = fn.deployedAt ? new Date(fn.deployedAt).toLocaleString() : "-"
       plain(
         `  ${fn.name.padEnd(28)} ${deployed.padEnd(24)} ${String(fn.invocations24h ?? 0).padEnd(20)} ${fn.avgDurationMs ?? 0}ms`,
       )

@@ -1,14 +1,14 @@
 /**
  * Deploy commands:
- *   supatype deploy              — Supatype Cloud by default (linked via supatype link), else platform projectRef; use --local for engine + DB
- *   supatype deploy --local      — push schema via local engine + optional static app to .supatype/static
- *   supatype deploy --app-only   — only build & deploy the static site
- *   supatype deploy --schema-only — only push schema changes
- *   supatype deploy --skip-build — deploy existing build output (no build step)
- *   supatype deploy --preview    — deploy to a preview URL
- *   supatype deploy rollback     — roll back to previous deployment
- *   supatype deploy status       — show current deployment info
- *   supatype deploy logs <version> — show build logs
+ *   supatype deploy: Supatype Cloud by default (linked via supatype link), else platform projectRef; use --local for engine + DB
+ *   supatype deploy --local: push schema via local engine + optional static app to .supatype/static
+ *   supatype deploy --app-only: only build & deploy the static site
+ *   supatype deploy --schema-only: only push schema changes
+ *   supatype deploy --skip-build: deploy existing build output (no build step)
+ *   supatype deploy --preview: deploy to a preview URL
+ *   supatype deploy rollback: roll back to previous deployment
+ *   supatype deploy status: show current deployment info
+ *   supatype deploy logs <version>, show build logs
  */
 
 import type { Command } from "commander"
@@ -31,7 +31,7 @@ export function registerDeploy(program: Command): void {
   const deploy = program
     .command("deploy")
     .description(
-      "Deploy schema and app — Supatype Cloud by default when linked (`supatype link`); pass --local for engine + your database",
+      "Deploy schema and app, Supatype Cloud by default when linked (`supatype link`); pass --local for engine + your database",
     )
     .option("--local", "Use local schema engine and database_url from config (skip cloud control plane)")
     .option("--environment <name>", "Target environment when linked", "production")
@@ -119,7 +119,7 @@ export function registerDeploy(program: Command): void {
             error("No build section found in supatype.config.ts")
             process.exit(1)
           }
-          // No build config — skip app deployment silently
+          // No build config: skip app deployment silently
           return
         }
 
@@ -151,7 +151,7 @@ export function registerDeploy(program: Command): void {
             buildEnv["NEXT_PUBLIC_SUPATYPE_URL"] = cloudCfg.apiUrl || `https://${cloudCfg.projectSlug}.supatype.dev`
             buildEnv["VITE_SUPATYPE_URL"] = buildEnv["NEXT_PUBLIC_SUPATYPE_URL"]!
             buildEnv["PUBLIC_SUPATYPE_URL"] = buildEnv["NEXT_PUBLIC_SUPATYPE_URL"]!
-            // NEVER inject service_role key — only anon key is safe for client-side
+            // NEVER inject service_role key, only anon key is safe for client-side
           }
 
           // Install dependencies

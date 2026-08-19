@@ -1,6 +1,6 @@
 /**
  * Ambient Deno types for Supatype edge functions (IDE / tsserver).
- * Runtime is Deno; this file is NOT a full Deno stdlib — it covers the
+ * Runtime is Deno; this file is NOT a full Deno stdlib, it covers the
  * APIs edge functions commonly use (env + a few filesystem helpers).
  *
  * Prefer referencing via `functions/deno.d.ts` (scaffolded by

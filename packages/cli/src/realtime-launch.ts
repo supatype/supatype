@@ -46,7 +46,7 @@ export async function resolveRealtimeLaunch(
       return { bin: process.execPath, args: [entry] }
     }
     throw new Error(
-      "realtime binary not available — run `supatype update` or set overrides.realtime in supatype.config.ts",
+      "realtime binary not available, run `supatype update` or set overrides.realtime in supatype.config.ts",
     )
   }
 }

@@ -67,13 +67,13 @@ function ToolbarPlugin(): React.ReactElement {
       <button type="button" title="Heading 3" onMouseDown={(e) => { e.preventDefault(); setHeading("h3") }}>H3</button>
       <button type="button" title="Paragraph" onMouseDown={(e) => { e.preventDefault(); setParagraph() }}>¶</button>
       <span className="st-richtext-divider" />
-      <button type="button" title="Bullet list" onMouseDown={(e) => { e.preventDefault(); editor.dispatchCommand(INSERT_UNORDERED_LIST_COMMAND, undefined) }}>•—</button>
-      <button type="button" title="Numbered list" onMouseDown={(e) => { e.preventDefault(); editor.dispatchCommand(INSERT_ORDERED_LIST_COMMAND, undefined) }}>1—</button>
+      <button type="button" title="Bullet list" onMouseDown={(e) => { e.preventDefault(); editor.dispatchCommand(INSERT_UNORDERED_LIST_COMMAND, undefined) }}>•-</button>
+      <button type="button" title="Numbered list" onMouseDown={(e) => { e.preventDefault(); editor.dispatchCommand(INSERT_ORDERED_LIST_COMMAND, undefined) }}>1-</button>
     </div>
   )
 }
 
-// ── InitialStatePlugin — loads saved Lexical JSON on mount ────────────────────
+// ── InitialStatePlugin: loads saved Lexical JSON on mount ────────────────────
 
 function InitialStatePlugin({ value }: { value: unknown }): null {
   const [editor] = useLexicalComposerContext()
@@ -87,7 +87,7 @@ function InitialStatePlugin({ value }: { value: unknown }): null {
         const state = editor.parseEditorState(JSON.stringify(value))
         editor.setEditorState(state)
       } catch {
-        // Invalid saved state — leave editor empty
+        // Invalid saved state: leave editor empty
       }
     }
   }, [editor, value])

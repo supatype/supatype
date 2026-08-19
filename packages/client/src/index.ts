@@ -165,7 +165,7 @@ class TableClient<TDef extends TableDef> {
 
   /**
    * Subscribe to postgres_changes for this table (typed to Row).
-   * Phase 10.6 F11 — preferred over raw `client.realtime.channel(...)`.
+   * Phase 10.6 F11: preferred over raw `client.realtime.channel(...)`.
    */
   subscribe(
     callback: (payload: RealtimePayload<TDef["Row"]>) => void,
@@ -464,7 +464,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
   const queryCache = config.queryCache ?? defaultQueryCache
 
   const getAuthHeaders = async (): Promise<Record<string, string>> => {
-    // Studio and other admin tools pass serviceRoleKey — use it for table/RPC/GraphQL
+    // Studio and other admin tools pass serviceRoleKey, use it for table/RPC/GraphQL
     // so supatype_admin RLS policies and bypass rules apply (anon would fail).
     if (config.serviceRoleKey) {
       return {

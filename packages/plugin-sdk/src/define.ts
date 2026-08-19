@@ -2,10 +2,10 @@
  * Builder functions for defining Supatype plugins.
  *
  * These are the primary API surface for plugin authors:
- *   defineFieldType()  — custom field types (e.g., phone, currency)
- *   defineComposite()  — field bundles (e.g., SEO, address)
- *   defineProvider()   — service providers (e.g., Stripe, PostHog)
- *   defineWidget()     — admin panel widgets (e.g., color picker)
+ *   defineFieldType(): custom field types (e.g., phone, currency)
+ *   defineComposite(): field bundles (e.g., SEO, address)
+ *   defineProvider(): service providers (e.g., Stripe, PostHog)
+ *   defineWidget(): admin panel widgets (e.g., color picker)
  */
 
 import {

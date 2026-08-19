@@ -109,7 +109,7 @@ function StudioLayout({ extensions, demoMode }: StudioLayoutProps): React.ReactE
         onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
       />
 
-      {/* Reading past RLS is legitimate but must never be silent — an empty table
+      {/* Reading past RLS is legitimate but must never be silent, an empty table
           should never leave you guessing whether it means "no rows" or "no rows
           you can see". */}
       <ElevatedModeBanner />
@@ -240,7 +240,7 @@ function CollectionCacheRoute(): React.ReactElement {
   return (
     <RestCacheBrowser
       tableFilter={table}
-      title={`${model.label} — Cache`}
+      title={`${model.label}: Cache`}
       showTableSettings
     />
   )
@@ -255,7 +255,7 @@ function GlobalCacheRoute(): React.ReactElement {
   return (
     <RestCacheBrowser
       tableFilter={table}
-      title={`${globalConfig.label} — Cache`}
+      title={`${globalConfig.label}: Cache`}
       showTableSettings
     />
   )
@@ -359,7 +359,7 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
               <Route path="globals" element={<Navigate to="/models/globals" replace />} />
               <Route path="globals/:name" element={<LegacyGlobalRedirect />} />
 
-              {/* Developer tools — Database */}
+              {/* Developer tools: Database */}
               <Route path="database">
                 <Route index element={<Navigate to="overview" replace />} />
                 <Route path="overview"    element={<SchemaView />} />
@@ -437,15 +437,15 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
               <Route path="ai" element={<Navigate to="/ai/usage" replace />} />
               <Route path="ai/usage"   element={<ComingSoon title="AI Usage" description="Track AI call volume, feature breakdown, and spending caps across schema generation, migration copilot, content assist, and RAG. Coming in Phase 15." />} />
               <Route path="ai/vectors" element={<ComingSoon title="Vector Management" description="Embedding browser, similarity search tester, index management, and vector space visualisation. Coming in Phase 15." />} />
-              <Route path="ai/rag"     element={<ComingSoon title="RAG Pipeline" description="Schema-declared retrieval-augmented generation. Embed content from any model's fields, search by semantic meaning, and ground LLM answers in your real data — with RLS enforced automatically. Coming in Phase 15." />} />
+              <Route path="ai/rag"     element={<ComingSoon title="RAG Pipeline" description="Schema-declared retrieval-augmented generation. Embed content from any model's fields, search by semantic meaning, and ground LLM answers in your real data, with RLS enforced automatically. Coming in Phase 15." />} />
               <Route path="ai/agents" element={<Navigate to="/ai/agents/list" replace />} />
               <Route path="ai/agents/list"       element={<ComingSoon title="Agents" description="Declare LLM agents in your schema with tools, access rules, and triggers. Platform agents run on schedules or database events. User-facing agents are callable via the SDK. Coming in Phase 18.5." />} />
-              <Route path="ai/agents/runs"       element={<ComingSoon title="Agent Run History" description="Step-by-step tool call history for every agent run — trigger source, cost estimate, injection detection alerts, and full conversation archive. Coming in Phase 18.5." />} />
+              <Route path="ai/agents/runs"       element={<ComingSoon title="Agent Run History" description="Step-by-step tool call history for every agent run, trigger source, cost estimate, injection detection alerts, and full conversation archive. Coming in Phase 18.5." />} />
               <Route path="ai/agents/playground" element={<ComingSoon title="Agent Playground" description="Run any declared agent from Studio with a custom input. Streams tool calls and the final answer in real time. Coming in Phase 18.5." />} />
 
               {/* Commerce, Analytics, Branching, Integrations */}
               <Route path="commerce"     element={<ComingSoon title="Commerce" description="Order management, subscription billing, Stripe Connect payouts, and revenue analytics. Coming in Phase 16." />} />
-              <Route path="analytics"    element={<ComingSoon title="Analytics" description="Auto-generated dashboards from your schema — KPI cards, time-series charts, and CSV export. Coming in Phase 21." />} />
+              <Route path="analytics"    element={<ComingSoon title="Analytics" description="Auto-generated dashboards from your schema, KPI cards, time-series charts, and CSV export. Coming in Phase 21." />} />
               <Route path="branching"    element={<ComingSoon title="Branching & Environments" description="Schema-aware preview environments, branch diff view, and one-click merge. Coming in Phase 22." />} />
               <Route path="integrations" element={<ComingSoon title="Integrations" description="Connect GitHub for CI/CD deployments and Vercel for preview environment sync. Coming in Phase 25." />} />
               <Route path="audit"        element={<ComingSoon title="Audit Log" description="Immutable log of all data changes with before/after snapshots and user attribution. Coming in Phase 13." />} />

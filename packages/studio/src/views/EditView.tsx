@@ -67,7 +67,7 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
   //
   // Deliberately its own query rather than extra columns on the record load: the affordance is
   // not a column of the record, and `serializeRecordForApi` spreads whatever is in `values`
-  // straight into the PATCH body — so a computed column merged in there would be sent back as
+  // straight into the PATCH body, so a computed column merged in there would be sent back as
   // an unknown column and fail every save.
   useEffect(() => {
     if (recordId === undefined) return
@@ -110,7 +110,7 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
         if (result.error) {
           setError(result.error.message)
         } else if (result.data) {
-          // Proxy may drop Accept: object+json and return a one-row array — unwrap it.
+          // Proxy may drop Accept: object+json and return a one-row array, unwrap it.
           const raw = result.data as unknown
           const data = (Array.isArray(raw) ? raw[0] : raw) as Record<string, unknown> | undefined
           if (data && typeof data === "object") {

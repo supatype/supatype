@@ -66,7 +66,7 @@ describe("checkServiceRoleRoutes", () => {
   })
 
   it("warns rather than fails on a hook entry", () => {
-    // It was the documented form once, and the worker grants hooks whatever the list says — so it is
+    // It was the documented form once, and the worker grants hooks whatever the list says, so it is
     // harmless, and worth saying because a reader would assume the line is what grants.
     const problems = checkServiceRoleRoutes(config(["hooks/moderate-post"]), projectWith([]))
     expect(problems.errors).toEqual([])
@@ -89,7 +89,7 @@ describe("serviceRoleProblemLines", () => {
 
   it("lists what could have been named instead", () => {
     const lines = serviceRoleProblemLines({
-      errors: ['  "x" — no functions/x/index.ts'],
+      errors: ['  "x": no functions/x/index.ts'],
       missing: ["x"],
       warnings: [],
       available: ["audit", "send-email"],
@@ -99,7 +99,7 @@ describe("serviceRoleProblemLines", () => {
 
   it("says so when there are no functions at all", () => {
     const lines = serviceRoleProblemLines({
-      errors: ['  "x" — nope'],
+      errors: ['  "x": nope'],
       missing: ["x"],
       warnings: [],
       available: [],

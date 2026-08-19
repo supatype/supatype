@@ -268,7 +268,7 @@ function CellRenderer({
   const resolved = getLocalizedFieldValue(value, field.localized === true, currentLocale, defaultLocale)
 
   if (resolved === null || resolved === undefined) {
-    return <span className="st-cell-null">—</span>
+    return <span className="st-cell-null">-</span>
   }
 
   switch (field.widget) {
@@ -313,7 +313,7 @@ function truncate(text: string, maxLength: number): string {
  * Renders a cell with its access state, and **never hides a value that came back**.
  *
  * A withheld column arrives as null, which as an empty cell is indistinguishable from a record
- * that simply has no value — so `hidden` shows a lock instead of nothing. But that only holds
+ * that simply has no value, so `hidden` shows a lock instead of nothing. But that only holds
  * where masking is actually being applied and the verdict is settled: an empty cell for an
  * elevated caller, or under a per-row rule, is not evidence of anything, and claiming otherwise
  * would tell the reader a record is hiding a value it does not have.
@@ -348,7 +348,7 @@ function AccessAwareCell({
     return (
       <span
         className="st-cell-masked st-cell-masked-unknown"
-        title="Hidden by a field access rule, or empty — this column is restricted per record"
+        title="Hidden by a field access rule, or empty, this column is restricted per record"
         aria-label="Hidden by a field access rule, or empty"
       >
         &#128274;?
@@ -362,7 +362,7 @@ function AccessAwareCell({
         {children}
         <span
           className="st-cell-restricted-marker"
-          title="Access-controlled field — other callers may not see this value"
+          title="Access-controlled field: other callers may not see this value"
           aria-label="Access-controlled field"
         >
           &#128274;

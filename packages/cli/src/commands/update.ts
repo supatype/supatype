@@ -1,5 +1,5 @@
 /**
- * supatype update — bump component versions in supatype.config.ts
+ * supatype update: bump component versions in supatype.config.ts
  * and download the new binaries.
  */
 

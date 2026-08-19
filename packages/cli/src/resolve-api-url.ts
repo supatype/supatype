@@ -35,7 +35,7 @@ export function resolveProjectApiUrl(cwd: string): string {
       return fromConfig.replace(/\/+$/, "")
     }
   } catch {
-    // No supatype.config — fall through to PORT default.
+    // No supatype.config: fall through to PORT default.
   }
 
   const port = readEnvValue(cwd, "PORT", "54321").trim() || "54321"

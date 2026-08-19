@@ -4,7 +4,7 @@
 # Usage:
 #   ./scripts/integration-test.sh [--skip-build] [--skip-docker-build]
 #
-# Environment variables (all optional — override auto-detection):
+# Environment variables (all optional, override auto-detection):
 #   SUPATYPE_ENGINE        Path to local engine binary
 #   SUPATYPE_SERVER        Path to local server binary
 #   SUPATYPE_POSTGRES_DIR  Path to local Postgres installation directory
@@ -52,7 +52,7 @@ docker_build_image() {
     echo "==> Skipping $label image build ($tag already exists)"
     return 0
   fi
-  echo "==> Building $label image ($tag) — may take several minutes..."
+  echo "==> Building $label image ($tag), may take several minutes..."
   docker build --progress=plain -t "$tag" "$@"
 }
 
@@ -79,7 +79,7 @@ cleanup() {
   fi
   if [[ -n "$SUPATYPE_PID" ]]; then
     kill "$SUPATYPE_PID" 2>/dev/null || true
-    # Compose-down during graceful shutdown can hang in CI — bound the wait.
+    # Compose-down during graceful shutdown can hang in CI, bound the wait.
     for _ in $(seq 1 20); do
       if ! kill -0 "$SUPATYPE_PID" 2>/dev/null; then
         break
@@ -155,7 +155,7 @@ export SUPATYPE_URL="$BASE_URL"
 
 cd "$INTEGRATION_DIR"
 
-# Prevent concurrent runs — overlapping runs share one DB and flake on fixed slugs.
+# Prevent concurrent runs: overlapping runs share one DB and flake on fixed slugs.
 INTEGRATION_LOCK_DIR="$INTEGRATION_DIR/.supatype/.integration-test.lock.d"
 mkdir -p "$(dirname "$INTEGRATION_LOCK_DIR")"
 if ! mkdir "$INTEGRATION_LOCK_DIR" 2>/dev/null; then
@@ -180,7 +180,7 @@ dump_compose_diagnostics() {
   local out="$INTEGRATION_DIR/.supatype/ci-logs"
   mkdir -p "$out"
   if [[ ! -f "$COMPOSE_FILE" ]]; then
-    echo "  (no compose file — skip diagnostics)"
+    echo "  (no compose file, skip diagnostics)"
     return 0
   fi
   local args
@@ -195,7 +195,7 @@ dump_compose_diagnostics() {
 
 stop_compose_stack() {
   if [[ ! -f "$COMPOSE_FILE" ]]; then
-    echo "  (no compose file — skip)"
+    echo "  (no compose file, skip)"
     return 0
   fi
   local args
@@ -203,7 +203,7 @@ stop_compose_stack() {
   local running
   running="$(docker "${args[@]}" ps -q 2>/dev/null | wc -l | tr -d '[:space:]')"
   if [[ -z "$running" || "$running" == "0" ]]; then
-    echo "  (compose stack not running — skip)"
+    echo "  (compose stack not running, skip)"
     return 0
   fi
   echo "  Stopping $running container(s)..."
@@ -259,7 +259,7 @@ if [[ "$SUPATYPE_PROVIDER" == "docker" ]]; then
   if [[ -n "$SKIP_DOCKER_BUILD" ]] && docker image inspect "${SUPATYPE_CONTROL_PLANE_IMAGE:-supatype/control-plane:ci-dev}" >/dev/null 2>&1; then
     echo "==> Skipping control-plane image build (${SUPATYPE_CONTROL_PLANE_IMAGE:-supatype/control-plane:ci-dev} already exists)"
   else
-    echo "==> Building control-plane image (${SUPATYPE_CONTROL_PLANE_IMAGE:-supatype/control-plane:ci-dev}) — may take several minutes..."
+    echo "==> Building control-plane image (${SUPATYPE_CONTROL_PLANE_IMAGE:-supatype/control-plane:ci-dev}), may take several minutes..."
     docker build --progress=plain \
       --build-arg ENGINE_IMAGE="${SUPATYPE_ENGINE_IMAGE:-supatype/schema-engine:ci-dev}" \
       -t "${SUPATYPE_CONTROL_PLANE_IMAGE:-supatype/control-plane:ci-dev}" \
@@ -274,7 +274,7 @@ echo "==> Starting supatype dev (provider=${SUPATYPE_PROVIDER}, url=${BASE_URL})
 
 CLI_BIN="$ROOT_DIR/packages/cli/bin/supatype.js"
 if [[ ! -f "$CLI_BIN" ]]; then
-  echo "ERROR: CLI not found at $CLI_BIN — run 'pnpm build' first"
+  echo "ERROR: CLI not found at $CLI_BIN, run 'pnpm build' first"
   exit 1
 fi
 
@@ -358,7 +358,7 @@ for i in $(seq 1 "$MAX_WAIT"); do
   fi
   # Recover from a flaky initial compose push (transient DB EOF during migration).
   if (( i % 30 == 0 )); then
-    echo "  Still waiting (${i}s, session=$([[ -f "$SESSION_LOCK" ]] && echo yes || echo no), HTTP ${code}) — retrying supatype push..."
+    echo "  Still waiting (${i}s, session=$([[ -f "$SESSION_LOCK" ]] && echo yes || echo no), HTTP ${code}), retrying supatype push..."
     node "$CLI_BIN" push || true
   elif (( i % 15 == 0 )); then
     echo "  Still waiting (${i}s, session=$([[ -f "$SESSION_LOCK" ]] && echo yes || echo no), HTTP ${code})..."

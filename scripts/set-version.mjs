@@ -5,7 +5,7 @@
  * Usage: node scripts/set-version.mjs 0.1.0-alpha.1
  *
  * Only updates the "version" field. Internal workspace:* dependencies are left
- * as-is — pnpm automatically rewrites them to the concrete version at publish
+ * as-is: pnpm automatically rewrites them to the concrete version at publish
  * time, so the lockfile stays valid throughout the release CI run.
  */
 import { readFileSync, writeFileSync } from "node:fs"
@@ -73,7 +73,7 @@ for (const dir of dockerVersioned) {
   }
 }
 
-// Examples are private packages — keep workspace:* so the lockfile stays valid.
+// Examples are private packages, so keep workspace:* so the lockfile stays valid.
 
 // The standalone binary has no package.json to read at runtime, so the version has to be a
 // value in the source before it is bundled. Same approach as embed-release-pubkey.mjs.

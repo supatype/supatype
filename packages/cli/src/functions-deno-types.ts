@@ -23,7 +23,7 @@ export function functionsDenoAmbientSource(): string {
   return `/**
  * ${MARKER}.
  * Runtime is Deno; this file covers APIs edge functions commonly use.
- * Do not add \`@types/deno\` to the app package.json — it leaks into the
+ * Do not add \`@types/deno\` to the app package.json, it leaks into the
  * whole project when root tsconfig has no \`"types"\` field.
  *
  * Optional: for the full Deno API, install the Deno VS Code/Cursor extension
@@ -75,7 +75,7 @@ declare namespace Deno {
 `
 }
 
-/** `functions/tsconfig.json` — owns function files so the app config can exclude them. */
+/** `functions/tsconfig.json`: owns function files so the app config can exclude them. */
 export function functionsTsConfigSource(): string {
   return `{
   "compilerOptions": {
@@ -166,7 +166,7 @@ function ensureRootTsconfigExcludesFunctions(
     writeFileSync(path, `${JSON.stringify(asJson, null, 2)}\n`, "utf8")
     return "updated"
   } catch {
-    // JSONC / trailing commas — try a conservative string splice into an existing exclude array.
+    // JSONC / trailing commas, try a conservative string splice into an existing exclude array.
     if (/"exclude"\s*:\s*\[/.test(raw)) {
       const next = raw.replace(/("exclude"\s*:\s*\[)/, `$1\n    "functions",`)
       if (next !== raw) {

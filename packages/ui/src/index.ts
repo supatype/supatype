@@ -1,4 +1,4 @@
-// @supatype/ui — Shared component library
+// @supatype/ui: Shared component library
 
 export { Button } from "./Button.js"
 export type { ButtonProps } from "./Button.js"

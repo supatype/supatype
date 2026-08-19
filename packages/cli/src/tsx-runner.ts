@@ -13,7 +13,7 @@ import { tmpdir } from "node:os"
 
 const _require = createRequire(import.meta.url)
 
-// The CLI's own source directory — workspace packages are
+// The CLI's own source directory, workspace packages are
 // resolvable from here. Eval snippets are written here so ESM resolution finds them.
 const CLI_SRC_DIR = dirname(fileURLToPath(import.meta.url))
 

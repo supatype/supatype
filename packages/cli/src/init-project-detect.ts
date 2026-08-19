@@ -62,7 +62,7 @@ function detectStaticDir(cwd: string): string {
   return "./public"
 }
 
-/** Inspect `cwd` before init prompts — Vite, static dir, existing Supatype config. */
+/** Inspect `cwd` before init prompts, Vite, static dir, existing Supatype config. */
 export function detectProjectSetup(cwd: string): DetectedProjectSetup {
   let entries: string[] = []
   try {

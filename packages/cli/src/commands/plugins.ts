@@ -407,7 +407,7 @@ function validatePlugins(cwd: string): void {
     }
 
     if (issues.length === 0) {
-      plain(`  ✓ ${p.name} — valid`)
+      plain(`  ✓ ${p.name}: valid`)
     } else {
       hasErrors = true
       plain(`  ✗ ${p.name}`)

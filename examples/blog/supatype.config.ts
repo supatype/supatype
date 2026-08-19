@@ -1,7 +1,7 @@
 import { defineConfig } from "@supatype/cli"
 
 /**
- * Blog example — full project config in one file.
+ * Blog example: full project config in one file.
  *
  * `supatype generate` does not need `connection` if you only emit types; set
  * `connection` or `DATABASE_URL` for `push` / `migrate`.

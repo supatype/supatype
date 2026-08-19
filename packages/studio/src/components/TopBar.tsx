@@ -15,11 +15,11 @@ const DOCS_URL = "https://supatype.com/docs"
 
 interface TopBarProps {
   config: AdminConfig | null
-  /** Components rendered after the logo "/" separator (left slot — project switcher, branch indicator). */
+  /** Components rendered after the logo "/" separator (left slot, project switcher, branch indicator). */
   leftItems?: React.ComponentType[] | undefined
   /** Components rendered on the right side before the avatar. */
   extraItems?: React.ComponentType[] | undefined
-  /** Sample-data mode (self-host) — shows a badge. */
+  /** Sample-data mode (self-host): shows a badge. */
   demoMode?: boolean | undefined
   onToggleSidebar: () => void
 }
@@ -178,7 +178,7 @@ export function TopBar({ config, leftItems, extraItems, demoMode, onToggleSideba
         Feedback
       </a>
 
-      {/* Help — docs */}
+      {/* Help: docs */}
       <a
         href={DOCS_URL}
         target="_blank"

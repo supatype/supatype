@@ -1,4 +1,4 @@
-# Edge Kit — functions kitchen sink
+# Edge Kit: functions kitchen sink
 
 Maintainer / contributor example for **edge functions**: Deno IDE types, env injection, auth gates, PostgREST writes from Deno, and webhook HMAC.
 
@@ -44,9 +44,9 @@ pnpm dev
 
 ## Manual checklist (Deno types DX)
 
-1. Open `functions/env-check/index.ts` — `Deno.env.get(...)` must **not** show `Cannot find name 'Deno'`.
-2. Open `src/App.tsx` — must **not** see a global `Deno` namespace on app code (functions are excluded from the root tsconfig).
-3. `pnpm typecheck` — both app and `functions/` projects pass.
+1. Open `functions/env-check/index.ts`: `Deno.env.get(...)` must **not** show `Cannot find name 'Deno'`.
+2. Open `src/App.tsx`: must **not** see a global `Deno` namespace on app code (functions are excluded from the root tsconfig).
+3. `pnpm typecheck`: both app and `functions/` projects pass.
 4. With the stack up: **ping**, **env-check**, **echo**, **auth 401 / anon reject / user OK**, **write-note**, **webhook** all behave as labeled on the buttons.
 
 ## Notes

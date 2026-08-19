@@ -7,7 +7,7 @@ import type { WidgetProps } from "./FieldWidget.js"
 import { CodeMirrorEditor } from "./CodeMirrorEditor.js"
 
 /**
- * Editor for a `Code<Lang>` field — `{ lang, source }` stored as JSONB.
+ * Editor for a `Code<Lang>` field, `{ lang, source }` stored as JSONB.
  *
  * The value is an object, not a string, so this edits `source` and leaves `lang` as the schema
  * declared it. Without this widget the field falls to the raw JSON editor, where a snippet is a
@@ -56,7 +56,7 @@ export function CodeWidget({ config, value, onChange, readOnly }: WidgetProps): 
       {lang !== "" && (
         <p className="st-field-hint text-xs text-muted-foreground mt-1">
           {lang}
-          {extensions.length === 0 && " — no highlighter for this language"}
+          {extensions.length === 0 && ", no highlighter for this language"}
         </p>
       )}
     </div>

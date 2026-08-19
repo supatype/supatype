@@ -107,7 +107,7 @@ function ApiKeysSettings(): React.ReactElement {
       ? (window as unknown as { __SUPATYPE_CLOUD__?: { anonKey?: string } }).__SUPATYPE_CLOUD__
       : undefined) ?? {}
 
-  // Only the anon key. It is publishable by design — safe in a browser bundle and
+  // Only the anon key. It is publishable by design, safe in a browser bundle and
   // safe to show. The service role key is deliberately absent: anything that puts
   // it in the browser makes it readable by anyone who opens devtools, so it is
   // never shipped to Studio and therefore never displayable here.
@@ -147,7 +147,7 @@ function ApiKeysSettings(): React.ReactElement {
       </div>
       <p className="text-xs text-muted-foreground mb-4">
         Only the publishable anon key is shown here. The service role key bypasses Row
-        Level Security, so it is never sent to the browser — read it with{" "}
+        Level Security, so it is never sent to the browser, read it with{" "}
         <code>supatype keys</code>, or from Cloud → Project Settings.
       </p>
       <div className="flex flex-col gap-4">
@@ -361,7 +361,7 @@ function CorsSettings({ demoMode }: { demoMode: boolean }): React.ReactElement {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle")
-  /** Raw value from GET config — undefined cors key means platform permissive default */
+  /** Raw value from GET config, undefined cors key means platform permissive default */
   const [serverAllowedSnapshot, setServerAllowedSnapshot] = useState<string[] | undefined>(undefined)
   const [configReady, setConfigReady] = useState(false)
   const [bannerDismissed, setBannerDismissed] = useState(false)
@@ -491,8 +491,8 @@ function CorsSettings({ demoMode }: { demoMode: boolean }): React.ReactElement {
         title="CORS configuration"
         description="Save allowed browser origins for your project API so production web apps and embedded UIs tighten cross-origin access. Changes sync to Kong and the Studio proxy."
         features={[
-          "Persisted in project config — survives schema pushes",
-          "Wildcard or explicit HTTPS origins — JWT / RLS still apply",
+          "Persisted in project config, survives schema pushes",
+          "Wildcard or explicit HTTPS origins, JWT / RLS still apply",
           "Native iOS/Android clients are not affected by CORS (browser-only policy)",
           "Dismissable reminder when origins are unrestricted",
         ]}
@@ -507,9 +507,9 @@ function CorsSettings({ demoMode }: { demoMode: boolean }): React.ReactElement {
           <div className="font-medium text-amber-300 mb-2">Browsers may call your API from any web origin</div>
           <p className="text-muted-foreground text-[0.85rem] leading-relaxed mb-2">
             {permissiveUnset && !savedListHasStar
-              ? "No explicit allow-list is saved yet — the platform uses a permissive default so front-end builds are not silently blocked."
-              : "Your allow-list includes * — every website can initiate cross-origin browser requests to your project URLs."}
-            {" "}Authentication (JWT/session) and Row Level Security still apply — this setting does not bypass them.
+              ? "No explicit allow-list is saved yet, the platform uses a permissive default so front-end builds are not silently blocked."
+              : "Your allow-list includes *, every website can initiate cross-origin browser requests to your project URLs."}
+            {" "}Authentication (JWT/session) and Row Level Security still apply, this setting does not bypass them.
             {" "}Native apps (Kotlin, Swift, URLSession, OkHttp, etc.) are not gated by CORS.
           </p>
           <p className="text-muted-foreground text-[0.85rem] leading-relaxed mb-3">
@@ -522,7 +522,7 @@ function CorsSettings({ demoMode }: { demoMode: boolean }): React.ReactElement {
       <Card className="p-4">
         <h3>CORS allowed origins</h3>
         <p className="text-[0.8rem] text-muted-foreground mb-4">
-          Only applies to browsers. Use * only when you fully understand exposure. Leave empty and save only if you intentionally want strict lock-down (explicit empty list — browser requests with Origin may fail).
+          Only applies to browsers. Use * only when you fully understand exposure. Leave empty and save only if you intentionally want strict lock-down (explicit empty list, browser requests with Origin may fail).
         </p>
 
         {loadError ? <p className="text-red-400 text-xs mb-3">{loadError}</p> : null}
@@ -803,8 +803,8 @@ function DangerZone(): React.ReactElement {
 
 function DatabaseSettings({ client }: { client: ReturnType<typeof useStudioClient> }): React.ReactElement {
   const proxy = useProjectProxy()
-  const { data: maxConns } = useApiQuery(() => proxy.sql("SHOW max_connections").then((r) => r.rows[0]?.["max_connections"] as string ?? "—"), [proxy])
-  const { data: stmtTimeout } = useApiQuery(() => proxy.sql("SHOW statement_timeout").then((r) => r.rows[0]?.["statement_timeout"] as string ?? "—"), [proxy])
+  const { data: maxConns } = useApiQuery(() => proxy.sql("SHOW max_connections").then((r) => r.rows[0]?.["max_connections"] as string ?? "-"), [proxy])
+  const { data: stmtTimeout } = useApiQuery(() => proxy.sql("SHOW statement_timeout").then((r) => r.rows[0]?.["statement_timeout"] as string ?? "-"), [proxy])
   const [credStatus, setCredStatus] = useState<{ mode: string; password_status: string; can_reveal: boolean; generation: number; message?: string } | null>(null)
   const [credLoading, setCredLoading] = useState(false)
   const [credError, setCredError] = useState<string | null>(null)
@@ -812,8 +812,8 @@ function DatabaseSettings({ client }: { client: ReturnType<typeof useStudioClien
   const [credActionLoading, setCredActionLoading] = useState(false)
 
   const dbUrl = client.url.replace(/\/rest\/v1\/?$/, "")
-  const connStr = dbUrl ? `postgres://postgres:[password]@${new URL(dbUrl).host}/postgres` : "—"
-  const poolStr = dbUrl ? `postgres://postgres:[password]@${new URL(dbUrl).host}:5432/postgres?pgbouncer=true` : "—"
+  const connStr = dbUrl ? `postgres://postgres:[password]@${new URL(dbUrl).host}/postgres` : "-"
+  const poolStr = dbUrl ? `postgres://postgres:[password]@${new URL(dbUrl).host}:5432/postgres?pgbouncer=true` : "-"
 
   const authHeaders = studioAuthHeaders(client)
 

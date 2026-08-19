@@ -12,7 +12,7 @@ export function apiBaseUrl(): string {
   }
 
   // Docker Compose wrongly used to inject the host gateway (localhost:18473).
-  // From the worker container that is unreachable — use Kong on the compose network.
+  // From the worker container that is unreachable, use Kong on the compose network.
   try {
     const url = new URL(raw)
     if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {

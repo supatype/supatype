@@ -248,7 +248,7 @@ interface InteractiveInitArgs {
   opts: InitCliOptions
 }
 
-/** Interactive init — one Ink session for wizard + scaffold + install + finish. */
+/** Interactive init: one Ink session for wizard + scaffold + install + finish. */
 async function runInteractiveInit(args: InteractiveInitArgs): Promise<void> {
   const { name, dir, defaultName, modeTarget, opts } = args
 
@@ -501,7 +501,7 @@ async function promptAdminUser(): Promise<{ adminEmail?: string; adminPassword?:
   )
   if (!createAdmin) return {}
 
-  p.note("First sign-in at /admin — created automatically on supatype dev or push.")
+  p.note("First sign-in at /admin, created automatically on supatype dev or push.")
 
   const adminEmail = ensureNotCancelled(
     await p.text({
@@ -686,7 +686,7 @@ export function scaffold(
       writeFileSync(pkgPath, `${JSON.stringify(merged, null, 2)}\n`, "utf8")
       file("updated", "package.json (added Supatype dependencies)")
     } catch {
-      warn("Could not merge into package.json — add @supatype/cli and @supatype/types manually.")
+      warn("Could not merge into package.json, add @supatype/cli and @supatype/types manually.")
       file("skipped", "package.json (invalid JSON)")
     }
   }
@@ -891,7 +891,7 @@ function localConfigTemplate(app: ScaffoldAppOptions): string {
   const lines: string[] = [
     `import type { SupatypeConfig } from "@supatype/cli"`,
     ``,
-    `// Local development overrides — gitignored, deep-merged over supatype.config.ts.`,
+    `// Local development overrides, gitignored, deep-merged over supatype.config.ts.`,
     `// Keeps \`supatype dev\` in local mode while the committed config targets production.`,
     `const localConfig: Partial<SupatypeConfig> = {`,
     `  server: { mode: "dev" },`,
@@ -997,8 +997,8 @@ function holdingPageTemplate(projectName: string): string {
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>${name} — Supatype</title>
-    <meta name="description" content="A Supatype project. Define your types — we generate your platform." />
+    <title>${name}: Supatype</title>
+    <meta name="description" content="A Supatype project. Define your types, we generate your platform." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -1146,12 +1146,12 @@ function storageConfigLines(
 ): string[] {
   const lines: string[] = []
   if (storageLocal === "s3") {
-    lines.push(`  storage: { provider: "s3" },  // dev — configure S3_* in .env`)
+    lines.push(`  storage: { provider: "s3" },  // dev, configure S3_* in .env`)
   } else {
     lines.push(`  storage: { provider: "local", local_path: ".supatype/storage" },`)
   }
   if (storageProduction === "s3" && storageLocal !== "s3") {
-    lines.push(`  // Production storage: external S3 bucket — set production S3_* in .env`)
+    lines.push(`  // Production storage: external S3 bucket, set production S3_* in .env`)
   } else if (storageProduction === "local" && storageLocal === "s3") {
     lines.push(`  // Production storage: MinIO on your server (included in self-host compose)`)
   }
@@ -1174,7 +1174,7 @@ export type Profile = Model<{
   }
 }>
 
-/** Example singleton global — editable in Studio under Settings. */
+/** Example singleton global: editable in Studio under Settings. */
 export type SiteSettings = Model<{
   id: UUID
   site_name: string
@@ -1191,7 +1191,7 @@ export type SiteSettings = Model<{
 function envTemplate(opts: ScaffoldOptions): string {
   const sections: string[] = []
   // Generated, not constant. These reach a server: the previous defaults meant a self-host
-  // deployment ran with a password of `postgres` and a JWT secret published in this repo —
+  // deployment ran with a password of `postgres` and a JWT secret published in this repo,
   // and anyone holding that secret can mint a token naming any Postgres role. Safe to generate
   // only because `supatype dev` no longer overwrites them on every run (see local-secrets.ts).
   const postgresPassword = randomBytes(24).toString("base64url")
@@ -1202,14 +1202,14 @@ POSTGRES_PASSWORD=${postgresPassword}
 POSTGRES_DB=${opts.projectName}
 
 # PostgREST's own database credential. It connects as \`authenticator\`, a role that holds no
-# privileges and can only switch to anon/authenticated/service_role — so a request whose JWT
+# privileges and can only switch to anon/authenticated/service_role, so a request whose JWT
 # names any other role is refused by Postgres rather than honoured.
 #
 # Deliberately NOT the same as POSTGRES_PASSWORD: that one is yours, for direct SQL access, and
 # rotating it should never take the REST API down with it.
 AUTHENTICATOR_PASSWORD=${randomBytes(24).toString("base64url")}`)
 
-  sections.push(`# JWT — ANON_KEY and SERVICE_ROLE_KEY are derived from this secret.
+  sections.push(`# JWT: ANON_KEY and SERVICE_ROLE_KEY are derived from this secret.
 # Changing it invalidates every issued token; re-run \`supatype keys\` afterwards.
 JWT_SECRET=${randomBytes(48).toString("base64url")}
 ANON_KEY=
@@ -1221,7 +1221,7 @@ SITE_URL=http://localhost:3000`)
   if (opts.provider === "docker" && opts.kongPort !== undefined) {
     const apiUrl = `http://localhost:${opts.kongPort}`
     sections.push(
-      `# Local API gateway (Kong) — unique per project so multiple stacks can run concurrently
+      `# Local API gateway (Kong), unique per project so multiple stacks can run concurrently
 SUPATYPE_KONG_PORT=${opts.kongPort}
 PUBLIC_SUPATYPE_URL=${apiUrl}
 API_EXTERNAL_URL=${apiUrl}
@@ -1235,7 +1235,7 @@ VITE_SUPATYPE_ANON_KEY=`,
 
   if (opts.adminEmail && opts.adminPassword) {
     sections.push(
-      `# First admin for /admin — consumed on first supatype dev or push (password removed after use)
+      `# First admin for /admin, consumed on first supatype dev or push (password removed after use)
 SUPATYPE_ADMIN_EMAIL=${opts.adminEmail}
 SUPATYPE_ADMIN_PASSWORD=${opts.adminPassword}`,
     )
@@ -1269,7 +1269,7 @@ SMTP_PASS=
 SMTP_SENDER_NAME=${projectName}`
     case "console":
     default:
-      return `# SMTP — leave empty to use email autoconfirm in dev (no emails sent)
+      return `# SMTP: leave empty to use email autoconfirm in dev (no emails sent)
 SMTP_HOST=
 SMTP_PORT=
 SMTP_USER=
@@ -1284,7 +1284,7 @@ function storageEnvSections(
 ): string {
   if (storageLocal === storageProduction) {
     if (storageLocal === "s3") {
-      return `# Storage (local development and production — external bucket)
+      return `# Storage (local development and production, external bucket)
 # Use separate buckets for dev and production in your provider.
 S3_ENDPOINT=
 S3_REGION=us-east-1
@@ -1295,7 +1295,7 @@ S3_SECRET_KEY=`
     return `${localStorageEnvSection("local")}
 
 # Production storage (MinIO on your server)
-# Included in the self-host compose stack — no extra configuration needed.`
+# Included in the self-host compose stack, no extra configuration needed.`
   }
 
   return [localStorageEnvSection(storageLocal), productionStorageEnvSection(storageProduction)].join(
@@ -1305,14 +1305,14 @@ S3_SECRET_KEY=`
 
 function localStorageEnvSection(storage: StorageProvider): string {
   if (storage === "s3") {
-    return `# Storage (local development — external bucket)
+    return `# Storage (local development, external bucket)
 S3_ENDPOINT=
 S3_REGION=us-east-1
 S3_BUCKET=
 S3_ACCESS_KEY=
 S3_SECRET_KEY=`
   }
-  return `# Storage (local development — MinIO)
+  return `# Storage (local development, MinIO)
 S3_ENDPOINT=http://localhost:9000
 S3_ACCESS_KEY=supatype
 S3_SECRET_KEY=supatype-secret`
@@ -1320,15 +1320,15 @@ S3_SECRET_KEY=supatype-secret`
 
 function productionStorageEnvSection(storage: StorageProvider): string {
   if (storage === "s3") {
-    return `# Storage (production — external bucket)
+    return `# Storage (production, external bucket)
 S3_ENDPOINT=
 S3_REGION=us-east-1
 S3_BUCKET=
 S3_ACCESS_KEY=
 S3_SECRET_KEY=`
   }
-  return `# Storage (production — MinIO on your server)
-# Included in the self-host compose stack — no extra configuration needed.`
+  return `# Storage (production, MinIO on your server)
+# Included in the self-host compose stack, no extra configuration needed.`
 }
 
 function seedTemplate(projectName: string): string {
@@ -1358,7 +1358,7 @@ seed().catch((e) => {
 }
 
 function helloFunctionTemplate(): string {
-  return `// hello — Supatype Edge Function
+  return `// hello: Supatype Edge Function
 // Docs: https://supatype.com/docs/edge-functions
 
 export default async function handler(req: Request): Promise<Response> {
@@ -1397,7 +1397,7 @@ dist/
 supatype.local.config.ts
 supatype.local.config.js
 supatype.local.config.mjs
-# Generated by supatype push (legacy paths — prefer output.types in config)
+# Generated by supatype push (legacy paths, prefer output.types in config)
 src/types/supatype.d.ts
 src/lib/supatype.ts
 `
@@ -1408,7 +1408,7 @@ export function mergeGitignoreTemplate(existingContent: string): string {
     return existingContent
   }
   const block = `
-# Supatype — local runtime (contains secrets in link.json)
+# Supatype: local runtime (contains secrets in link.json)
 .supatype/
 `
   return existingContent.endsWith("\n") ? `${existingContent}${block}` : `${existingContent}\n${block}`
@@ -1460,9 +1460,9 @@ function printNextSteps(args: {
   nextSteps(setupComplete ? "Next steps:" : "Finish setup:", steps)
 
   // Shown once, at creation. These are generated per project rather than shipped as
-  // constants, so this is the moment to say they exist and where they live — nothing prints
+  // constants, so this is the moment to say they exist and where they live, nothing prints
   // them again, and the JWT secret is only echoed as a fingerprint from here on.
-  nextSteps("Secrets — generated for this project, kept in .env:", [
+  nextSteps("Secrets: generated for this project, kept in .env:", [
     "POSTGRES_PASSWORD    direct SQL access as the superuser",
     "AUTHENTICATOR_PASSWORD    PostgREST's own login; rotating the one above does not affect it",
     "JWT_SECRET    signs ANON_KEY and SERVICE_ROLE_KEY; changing it invalidates every token",
@@ -1496,7 +1496,7 @@ function printNextSteps(args: {
       selfHostSteps.push("supatype self-host compose up -d   # Kong provisions HTTPS automatically")
       selfHostSteps.push(`Your Supatype platform goes live at https://${domain}`)
       selfHostSteps.push(
-        "Your app, REST, Auth, Storage, Realtime, Functions, and Studio — all behind one HTTPS domain (certs persist in valkey-data)",
+        "Your app, REST, Auth, Storage, Realtime, Functions, and Studio, all behind one HTTPS domain (certs persist in valkey-data)",
       )
     } else {
       selfHostSteps.push(

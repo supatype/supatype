@@ -2,12 +2,12 @@ import React from "react"
 import type { WidgetProps } from "./FieldWidget.js"
 
 /**
- * Editor for a `Currency<Code>` field — `{ amount, code }` stored as JSONB, where `amount` is a
+ * Editor for a `Currency<Code>` field, `{ amount, code }` stored as JSONB, where `amount` is a
  * string of **minor units** (1050 is £10.50) and `code` is the ISO currency.
  *
  * The input edits minor units, because that is what the row holds and what arithmetic elsewhere will
  * use. Dividing by 100 to show a friendlier number would be wrong for the currencies that do not
- * have two decimal places — JPY has none, KWD has three — so the human-readable figure is a
+ * have two decimal places, JPY has none, KWD has three, so the human-readable figure is a
  * **read-only preview** produced by `Intl.NumberFormat`, which knows each currency's exponent.
  */
 interface CurrencyValue {
@@ -61,7 +61,7 @@ export function CurrencyWidget({ config, value, onChange, readOnly }: WidgetProp
         />
       </div>
       <p className="st-field-hint text-xs text-muted-foreground">
-        {preview !== null ? `${preview} — stored as ${amount} minor units` : "Amount in minor units"}
+        {preview !== null ? `${preview}, stored as ${amount} minor units` : "Amount in minor units"}
       </p>
     </div>
   )

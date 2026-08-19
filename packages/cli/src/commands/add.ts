@@ -99,6 +99,6 @@ function printDomainNextSteps(cwd: string, domain: string): void {
     "supatype self-host compose up -d   # Kong provisions HTTPS automatically",
     `Platform URL: https://${domain}`,
   ])
-  plain("  App, REST, Auth, Storage, Realtime, Functions, and Studio — one HTTPS domain.")
+  plain("  App, REST, Auth, Storage, Realtime, Functions, and Studio, one HTTPS domain.")
   plain("  Certificates persist in the valkey-data volume.\n")
 }

@@ -54,8 +54,8 @@ export type AuthChangeEvent =
 
 /**
  * OAuth / magic-link redirect flow.
- * - `pkce` — authorize with code_challenge; app exchanges `?code=` via `exchangeCodeForSession`.
- * - `implicit` — tokens returned in the URL hash (`#access_token=…`).
+ * - `pkce`: authorize with code_challenge; app exchanges `?code=` via `exchangeCodeForSession`.
+ * - `implicit`: tokens returned in the URL hash (`#access_token=…`).
  *
  * Web `signInWithOAuth` defaults to `implicit` for backward compatibility.
  * React Native helpers should pass `pkce` (recommended default for mobile).
@@ -135,8 +135,8 @@ export interface SupatypeError {
 /**
  * A column in the response that carries a read restriction.
  *
- * Postgres cannot omit a column — the result-set shape is fixed and identical for every row
- * — so a column you may not read comes back as `null`, indistinguishable on the wire from a
+ * Postgres cannot omit a column, the result-set shape is fixed and identical for every row
+ *- so a column you may not read comes back as `null`, indistinguishable on the wire from a
  * value that is genuinely null. This says which nulls are explicable by masking.
  *
  * Advisory. It describes the schema's restrictions, not a decision: what you can actually
@@ -145,10 +145,10 @@ export interface SupatypeError {
 export interface MaskedField {
   column: string
   /**
-   * `identity` — the verdict is the same for every row in this response, so a `null` in the
+   * `identity`: the verdict is the same for every row in this response, so a `null` in the
    * column is explicable by masking for the whole result set.
    *
-   * `row` — the rule reads the row, so only *some* nulls are masked values and the rest are
+   * `row`: the rule reads the row, so only *some* nulls are masked values and the rest are
    * genuinely null. Deliberately not narrowed further: the header is computed before the
    * query runs, so claiming more would be a guess.
    */
@@ -278,7 +278,7 @@ export interface SupatypeClientConfig {
   /** Anon JWT key */
   anonKey: string
   /**
-   * Service role key — bypasses row-level security.
+   * Service role key: bypasses row-level security.
    * Only set this in trusted server-side or developer-tool contexts.
    * Never expose to end-user clients.
    */

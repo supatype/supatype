@@ -1,5 +1,5 @@
 /**
- * Integration tests — run against a live supatype dev stack.
+ * Integration tests: run against a live supatype dev stack.
  *
  * Requires SUPATYPE_URL and SUPATYPE_ANON_KEY environment variables.
  * Run via: scripts/integration-test.sh

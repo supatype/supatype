@@ -215,7 +215,7 @@ export function RestCacheBrowser({
             <h2 className="text-sm font-semibold">No server-side cache on Free</h2>
             <p className="text-sm text-muted-foreground">
               Free projects do <strong className="font-medium text-foreground">not</strong> get Valkey-backed
-              caching. There is no in-memory cache on the server either — every API request is proxied to PostgREST,
+              caching. There is no in-memory cache on the server either, every API request is proxied to PostgREST,
               even when the client sends <code className="text-xs font-mono">.cache(&#123; server: true &#125;)</code>{" "}
               (the server responds with <code className="text-xs font-mono">X-Supatype-Cache-Status: BYPASS</code>).
             </p>
@@ -253,7 +253,7 @@ export function RestCacheBrowser({
       {showTableSettings && tableFilter && (
         <Card>
           <div className="px-4 py-3 border-b border-border">
-            <h2 className="text-sm font-semibold">Cache settings — {tableFilter}</h2>
+            <h2 className="text-sm font-semibold">Cache settings, {tableFilter}</h2>
             <p className="text-xs text-muted-foreground mt-0.5">
               Server cache is off by default. Enable here, then use{" "}
               <code className="font-mono">.cache(&#123; ttl, server: true &#125;)</code> in your app.
@@ -328,7 +328,7 @@ export function RestCacheBrowser({
                   className="border-b border-border hover:bg-accent/40 cursor-pointer"
                   onClick={() => void openDetail(e.key)}
                 >
-                  <td className="px-4 py-2 font-mono text-xs">{e.table ?? "—"}</td>
+                  <td className="px-4 py-2 font-mono text-xs">{e.table ?? "-"}</td>
                   <td className="px-4 py-2">
                     <span
                       className={cn(

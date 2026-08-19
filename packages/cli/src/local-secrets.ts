@@ -2,7 +2,7 @@
  * The secrets the local stack runs with.
  *
  * **Read from `.env`, never pinned back into it.** These used to be hardcoded constants that
- * `supatype dev` wrote to `.env` on every run — which meant a project could not hold its own
+ * `supatype dev` wrote to `.env` on every run, which meant a project could not hold its own
  * secrets: whatever `supatype init` or the developer put there was replaced by the published
  * defaults on the next `dev`, and the same `.env` then went to a server. Resolving instead of
  * pinning is what lets a generated secret survive to production.
@@ -16,7 +16,7 @@ import { hasEnvValue, readEnvValue } from "./env-file.js"
 /**
  * Fallback JWT signing secret for a project that has none.
  *
- * Published, therefore worthless as a secret — anyone can mint a token for a stack still using
+ * Published, therefore worthless as a secret, anyone can mint a token for a stack still using
  * it. That is precisely why `init` generates one instead of relying on this.
  */
 export const FALLBACK_JWT_SECRET = "super-secret-jwt-token-with-at-least-32-characters-long"
@@ -52,7 +52,7 @@ export function devAuthenticatorPassword(cwd: string): string {
  *
  * The compose template requires these with `${VAR:?}` rather than defaulting them, because a
  * default is how a published constant ends up signing a real deployment's tokens. That only
- * works if something guarantees presence — this does, for any project that predates
+ * works if something guarantees presence, this does, for any project that predates
  * `supatype init` writing them.
  *
  * **Fills with the fallback, does not generate.** Preserving the value such a project has been
@@ -72,11 +72,11 @@ export function seedMissingLocalSecrets(cwd: string): Record<string, string> {
 }
 
 /**
- * The database identity the local stack connects with — seeded, never overwritten.
+ * The database identity the local stack connects with, seeded, never overwritten.
  *
  * `POSTGRES_DB` in particular is *project configuration*: `supatype init` sets it to the
  * project name, and the running container's database was created from it. Rewriting it to a
- * default afterwards points every tool at a database that does not exist — observed as
+ * default afterwards points every tool at a database that does not exist, observed as
  * `supatype push` failing with `FATAL: database "supatype" does not exist` on a project called
  * something else, because the push path rewrote `.env` after `self-host compose up` had already
  * created the database under its real name.

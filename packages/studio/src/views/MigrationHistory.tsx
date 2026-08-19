@@ -89,7 +89,7 @@ const MIGRATIONS_LIST_SQL = `SELECT id, name, hash, applied_at::TEXT, rolled_bac
        (sql_up IS NOT NULL AND btrim(sql_up) <> '') AS has_sql
  FROM _supatype.migrations ORDER BY id ASC`
 
-/** Candidates for display: DDL rows, initial baseline — not legacy admin_refresh noise. */
+/** Candidates for display: DDL rows, initial baseline, not legacy admin_refresh noise. */
 function isTrackedMigration(m: Migration): boolean {
   if (m.name.startsWith("admin_refresh_")) return false
   if (m.has_sql) return true

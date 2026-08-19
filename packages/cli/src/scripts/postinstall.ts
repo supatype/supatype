@@ -1,5 +1,5 @@
 /**
- * Postinstall script — @supatype/cli global/project install.
+ * Postinstall script: @supatype/cli global/project install.
  *
  * Host binaries (engine, server, postgres, deno) are downloaded on demand:
  * - native provider: first supatype dev / supatype update

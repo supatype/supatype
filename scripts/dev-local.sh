@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Local dev runner — bypasses pnpm/cmd.exe so Ctrl+C shuts down cleanly.
+# Local dev runner: bypasses pnpm/cmd.exe so Ctrl+C shuts down cleanly.
 set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

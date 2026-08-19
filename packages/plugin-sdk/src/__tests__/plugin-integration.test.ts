@@ -191,7 +191,7 @@ describe("provider plugin lifecycle", () => {
     registerPlugin("@example/email-provider", email as unknown as AnyPluginDefinition)
 
     // getProviderPlugin uses key "provider:category:name" but registerPlugin
-    // stores under "provider:name" — use getPluginsByType to verify registration
+    // stores under "provider:name": use getPluginsByType to verify registration
     const providers = getPluginsByType("provider")
     expect(providers.length).toBe(1)
     expect(providers[0]!.packageName).toBe("@example/email-provider")

@@ -42,7 +42,7 @@ describe("apiSchemas", () => {
 
   it("leads with the managed schema when pg_schema moves", () => {
     // First entry is what PostgREST serves as the default profile, so the managed schema has to
-    // lead — otherwise unprefixed requests would resolve against `supatype`.
+    // lead: otherwise unprefixed requests would resolve against `supatype`.
     expect(apiSchemaList(project({ pg_schema: "app" }))).toBe(
       "app, supatype, graphql_public, auth",
     )

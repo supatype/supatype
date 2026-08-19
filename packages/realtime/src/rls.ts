@@ -41,7 +41,7 @@ export class RlsFilter {
     this.fieldMasks = new FieldMaskCatalog(this.pool)
   }
 
-  /** Drop the cached field rules — called when a schema push completes. */
+  /** Drop the cached field rules, called when a schema push completes. */
   invalidateFieldMasks(): void {
     this.fieldMasks.invalidate()
   }
@@ -191,7 +191,7 @@ export class RlsFilter {
    *
    * Still a re-read rather than a generated `can_read_<table>` call, because the stored
    * policies are authoritative and may include hand-written ones no generated function
-   * knows about. The field verdicts above are a different question — those have no
+   * knows about. The field verdicts above are a different question, those have no
    * policy to defer to.
    */
   private async recordVisible(client: pg.PoolClient, change: WalChange): Promise<boolean> {
@@ -215,7 +215,7 @@ export class RlsFilter {
    *
    * Known coarseness, pre-existing and unchanged here: a subscriber who may read *some*
    * rows sees *every* delete on the table. Field masking now applies to those payloads, so
-   * a restricted column is no longer disclosed by one — but which deletes a caller learns
+   * a restricted column is no longer disclosed by one, but which deletes a caller learns
    * about is still broader than RLS would allow, and closing it needs last-known-visibility
    * tracking rather than a query.
    */

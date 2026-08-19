@@ -15,7 +15,7 @@ import { applyFieldAccess } from "../src/lib/field-access-layout.js"
 import type { FieldConfig } from "../src/config.js"
 
 // Studio renders from advisory answers: the database is what refuses. So every rule here fails
-// open, and — the point that reshaped this module — the interface must never hide a value that
+// open, and: the point that reshaped this module, the interface must never hide a value that
 // actually came back. An administrator acts elevated by default, which the masking extension
 // exempts, so restricted columns reach them in full; blanking those would hide data they are
 // entitled to and misrepresent a restriction that is not being applied to them.
@@ -42,7 +42,7 @@ describe("normaliseFieldAccess", () => {
     expect(normaliseFieldAccess(RESTRICTED)).toEqual(RESTRICTED)
   })
 
-  // An unrecognised verdict must not invent a restriction — it behaves as unrestricted, which is
+  // An unrecognised verdict must not invent a restriction, it behaves as unrestricted, which is
   // the same as not having asked.
   it("treats an unknown verdict as unrestricted", () => {
     const result = normaliseFieldAccess({
@@ -98,7 +98,7 @@ describe("cellAccess", () => {
   })
 
   // An empty restricted column is not evidence of hiding. Masking is not applied to an elevated
-  // caller at all, so a null is genuinely a null — a record created without a value for the
+  // caller at all, so a null is genuinely a null, a record created without a value for the
   // column must not come back looking like a record withholding one.
   it("does not lock an empty cell for an elevated caller", () => {
     const elevated = access(RESTRICTED, { mode: "elevated" })
@@ -133,7 +133,7 @@ describe("write and create predicates", () => {
     expect(isFieldCreatable(resolved, "posts", "secret")).toBe(false)
   })
 
-  // Elevated requests run as the service role, which the extension exempts — so the write will
+  // Elevated requests run as the service role, which the extension exempts, so the write will
   // succeed and disabling the input would be a lie about a restriction that is not applied.
   it("allows everything when elevated", () => {
     const elevated = access(RESTRICTED, { mode: "elevated" })

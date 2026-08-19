@@ -9,7 +9,7 @@ Shared Ink-based design system for the Supatype CLI.
 | `fatal.ts` | `fatalError`, `reportCliFatal` |
 | `confirm.ts` | Yes/no prompts (Ink overlay in dev, Ink flow in TTY) |
 | `progress.ts` | `withSpinner` + `runCommandChrome` for one-shot commands |
-| `runtime/command-chrome.ts` | Ink shell (logo, logs, spinner) — applied globally via `wrapProgramActionsWithChrome` in `cli.ts` |
+| `runtime/command-chrome.ts` | Ink shell (logo, logs, spinner), applied globally via `wrapProgramActionsWithChrome` in `cli.ts` |
 | `prompts.ts` | Logo, `promptText`, `promptPassword`, `ensureNotCancelled` |
 | `clack.ts` | Clack-compatible `p.*` API + `runClackFlow()` for wizards |
 | `flows/` | Ink flow shell + prompt fields |

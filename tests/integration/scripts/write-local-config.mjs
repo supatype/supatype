@@ -37,7 +37,7 @@ function addBin(key, val) {
   try {
     const st = statSync(resolved)
     if (!st.isFile()) return
-    // Windows .exe files often fail constants.X_OK — existence + isFile is enough.
+    // Windows .exe files often fail constants.X_OK, existence + isFile is enough.
     if (process.platform !== "win32") {
       accessSync(val, constants.X_OK)
     }

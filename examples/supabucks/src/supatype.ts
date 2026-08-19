@@ -3,7 +3,7 @@ import type { Database } from "../supatype/generated/database"
 
 /**
  * Supabucks is served by Supatype itself (app.mode: "static"), so the API lives
- * at the same origin as the page — no CORS, no hardcoded host. The anon key is
+ * at the same origin as the page, no CORS, no hardcoded host. The anon key is
  * injected at build time (signed with the local dev secret).
  *
  * Typed with the generated `Database` (supatype/generated/database.ts), so

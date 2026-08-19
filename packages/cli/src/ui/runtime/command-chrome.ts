@@ -89,7 +89,7 @@ export function isCommandChromeActive(): boolean {
   return getActiveFlowApi() !== null
 }
 
-/** Commands that mount their own Ink UI — do not wrap with command chrome. */
+/** Commands that mount their own Ink UI, do not wrap with command chrome. */
 const WIZARD_COMMAND_PATHS = new Set(["dev", "init", "link", "login", "_postinstall"])
 
 /** Prefixes for subcommands that call `runClackFlow` internally. */

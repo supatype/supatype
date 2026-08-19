@@ -32,7 +32,7 @@ async function seed(): Promise<void> {
 
   const existing = await db`SELECT COUNT(*)::int AS count FROM post`
   if ((existing.rows[0] as { count: number }).count > 0) {
-    console.log("Posts already present — skipping seed.")
+    console.log("Posts already present: skipping seed.")
     await db.end()
     return
   }
@@ -61,7 +61,7 @@ async function seed(): Promise<void> {
   `
 
   await db.end()
-  console.log("Done — open the app at your Kong URL (/) and reload to test cache.")
+  console.log("Done: open the app at your Kong URL (/) and reload to test cache.")
 }
 
 seed().catch((e: unknown) => {

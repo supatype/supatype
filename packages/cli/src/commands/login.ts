@@ -1,6 +1,6 @@
 /**
  * Cloud session login / logout for CLI control-plane auth.
- * Self-host uses SERVICE_ROLE_KEY via `supatype link --url` — not this command.
+ * Self-host uses SERVICE_ROLE_KEY via `supatype link --url`, not this command.
  */
 import type { Command } from "commander"
 import {
@@ -77,7 +77,7 @@ export function registerLogin(program: Command): void {
         if (link?.kind === "cloud") {
           info(`Updated cloud session for linked project ${link.projectRef}`)
         } else if (!session.refreshToken) {
-          plain("Warning: no refresh_token returned — session may expire in ~1h. Update control plane.")
+          plain("Warning: no refresh_token returned, session may expire in ~1h. Update control plane.")
         } else {
           plain("Tip: link a project with: supatype link --project <slug>")
         }

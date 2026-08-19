@@ -8,7 +8,7 @@ import { unsupportedRealtimeReason } from "../src/capability.js"
  * database may simply not offer logical decoding. Cloud SQL ships no `wal2json`; plenty of managed
  * Postgres will not grant `REPLICATION`.
  *
- * The SQLSTATEs are measured against `supatype/postgres`, not recalled — see capability.ts.
+ * The SQLSTATEs are measured against `supatype/postgres`, not recalled, see capability.ts.
  */
 const pgError = (code: string, message = "") => Object.assign(new Error(message || code), { code })
 

@@ -72,9 +72,9 @@ export type User = Model<{
 
 /**
  * Derived vs server-only vs audit:
- * - `ComputedFrom` — Studio **derivedText** preview tracks sources like {@link Slug}; regenerate admin after schema changes.
- * - `Computed` — server/DB only, **no** Studio preview wiring (read-only in the editor).
- * - `created_at` / `updated_at` — by **column name**, extractor adds `DEFAULT NOW()` + Studio prefill (`Timestamp` columns); optional `Timestamps` mixin matches that pair.
+ * - `ComputedFrom`: Studio **derivedText** preview tracks sources like {@link Slug}; regenerate admin after schema changes.
+ * - `Computed`: server/DB only, **no** Studio preview wiring (read-only in the editor).
+ * - `created_at` / `updated_at`: by **column name**, extractor adds `DEFAULT NOW()` + Studio prefill (`Timestamp` columns); optional `Timestamps` mixin matches that pair.
  *
  * Templates: `{field}`, `{truncate(field, n)}`, `\n` in the string literal for newlines.
  */

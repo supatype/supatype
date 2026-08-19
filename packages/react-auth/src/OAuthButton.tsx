@@ -1,5 +1,5 @@
 /**
- * OAuthButton component — Gap Appendices task 12
+ * OAuthButton component: Gap Appendices task 12
  *
  * Renders a styled sign-in button for an OAuth provider.
  * Handles the full OAuth flow via `useAuth().signInWithOAuth()`.

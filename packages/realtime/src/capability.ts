@@ -43,19 +43,19 @@ export type UnsupportedReason =
 
 /** SQLSTATEs that mean "this database will never support realtime as configured". */
 const UNSUPPORTED_BY_CODE: Record<string, UnsupportedReason> = {
-  // object_not_in_prerequisite_state — raised by CheckLogicalDecodingRequirements.
+  // object_not_in_prerequisite_state: raised by CheckLogicalDecodingRequirements.
   "55000": "wal_level is not logical",
-  // undefined_file — the output plugin's shared library is not on the server.
+  // undefined_file: the output plugin's shared library is not on the server.
   "58P01": "the wal2json output plugin is not installed",
-  // insufficient_privilege — CheckSlotPermissions; only REPLICATION roles may create a slot.
+  // insufficient_privilege: CheckSlotPermissions; only REPLICATION roles may create a slot.
   "42501": "the database role may not use replication slots",
 }
 
 /**
  * The reason realtime cannot run on this database, or undefined if the error is something else.
  *
- * Only call this for failures from slot creation. The same codes mean other things elsewhere — 42501
- * is any privilege failure — and treating a missing table as "realtime unsupported" would hide a
+ * Only call this for failures from slot creation. The same codes mean other things elsewhere, 42501
+ * is any privilege failure, and treating a missing table as "realtime unsupported" would hide a
  * genuine bug behind a capability message.
  */
 export function unsupportedRealtimeReason(error: unknown): UnsupportedReason | undefined {

@@ -77,7 +77,7 @@ export async function applyPublicPolicy(name: string): Promise<void> {
         RestrictPublicBuckets: false,
       },
     }))
-  } catch { /* not supported by all S3-compatible backends — safe to ignore */ }
+  } catch { /* not supported by all S3-compatible backends, safe to ignore */ }
 
   await s3.send(new PutBucketPolicyCommand({
     Bucket: name,

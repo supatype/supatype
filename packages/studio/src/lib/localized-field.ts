@@ -11,7 +11,7 @@ export function getLocalizedFieldValue(
   return locMap[currentLocale] ?? locMap[defaultLocale] ?? null
 }
 
-/** Resolve a localized value for editing — current locale only, no fallback. */
+/** Resolve a localized value for editing, current locale only, no fallback. */
 export function getLocalizedEditValue(
   raw: unknown,
   localized: boolean,
