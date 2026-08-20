@@ -20,7 +20,7 @@ export interface StudioDevServerOptions {
    * so fetches hit the Vite proxy (SUPATYPE_PROXY_TARGET) and avoid CORS.
    */
   viteSupatypeUrl: string
-  /** Vite `base` — `/studio/` when behind Kong at `/studio/`; `/` for native dev on :3002. */
+  /** Vite `base`: `/studio/` when behind Kong at `/studio/`; `/` for native dev on :3002. */
   basePath?: string
 }
 

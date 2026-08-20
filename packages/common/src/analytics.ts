@@ -27,7 +27,7 @@ class PostHogAnalytics implements AnalyticsClient {
       })
       this.posthog = ph.default as unknown as typeof this.posthog
     } catch {
-      // PostHog not available — analytics disabled
+      // PostHog not available: analytics disabled
     }
   }
 

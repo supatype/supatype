@@ -60,7 +60,7 @@ async function promptPortConflict(
 export interface EnsureKongPortOptions {
   /** When false, fail fast instead of prompting (CI / scripts). */
   interactive?: boolean
-  /** init wizard — slightly different copy */
+  /** init wizard: slightly different copy */
   context?: "dev" | "init"
 }
 
@@ -102,7 +102,7 @@ export async function ensureKongPort(
   return port
 }
 
-/** Wizard / init — pick a Kong port without writing `.env` (scaffold writes it). */
+/** Wizard / init: pick a Kong port without writing `.env` (scaffold writes it). */
 export async function promptKongPortChoice(): Promise<number> {
   const freeDefault = (await isPortInUse(COMPOSE_DEV_KONG_PORT))
     ? await findNextFreePort(COMPOSE_DEV_KONG_PORT)
@@ -139,7 +139,7 @@ async function promptPortConflictWithoutPersist(
   const headline =
     reason === "init"
       ? `Port ${blockedPort} is already in use on this machine.`
-      : `Port ${blockedPort} is in use — another Supatype project or service may already be bound to it.`
+      : `Port ${blockedPort} is in use, another Supatype project or service may already be bound to it.`
 
   const choice = await p.select<"suggested" | "custom" | "cancel">({
     message: headline,

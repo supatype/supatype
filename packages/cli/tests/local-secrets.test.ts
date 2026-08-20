@@ -14,7 +14,7 @@ import {
 import { upsertEnvFile } from "../src/env-file.js"
 
 // The bug these exist to prevent: `supatype dev` used to pin POSTGRES_PASSWORD and JWT_SECRET
-// to published constants in `.env` on every run — the same `.env` a self-host deployment reads.
+// to published constants in `.env` on every run, the same `.env` a self-host deployment reads.
 // A generated secret survived until the developer's next `dev`, then reverted silently, and the
 // deployment went out with a secret anyone can look up.
 
@@ -32,7 +32,7 @@ describe("resolving local secrets", () => {
     expect(devAuthenticatorPassword(dir)).toBe("auth-mine")
   })
 
-  // A project with no `.env` still has to start, so the constants remain — as fallbacks only.
+  // A project with no `.env` still has to start, so the constants remain, as fallbacks only.
   it("falls back when the project has none", () => {
     const dir = project()
     expect(devJwtSecret(dir)).toBe(FALLBACK_JWT_SECRET)
@@ -43,7 +43,7 @@ describe("resolving local secrets", () => {
 
 describe("the dev env write does not clobber secrets", () => {
   // This is the regression. `upsertEnvFile` replaces any key handed to it, so the guarantee has
-  // to be that the dev path never hands it these — asserted here at the level that matters:
+  // to be that the dev path never hands it these, asserted here at the level that matters:
   // write what dev writes, then check the secrets are byte-identical.
   it("leaves generated secrets untouched across repeated writes", () => {
     const dir = project(

@@ -32,8 +32,8 @@ cd examples/expo-auth
 cp .env.example .env
 pnpm exec supatype keys          # mints JWTs + EXPO_PUBLIC_* in .env
 pnpm exec supatype push --yes    # migrate schema + regenerate types
-pnpm exec supatype dev           # terminal 1 — Compose stack, Kong :18473
-pnpm start                       # terminal 2 — Expo
+pnpm exec supatype dev           # terminal 1, Compose stack, Kong :18473
+pnpm start                       # terminal 2, Expo
 ```
 
 Open in Expo Go. On a physical device, set `EXPO_PUBLIC_SUPATYPE_URL` to your LAN IP
@@ -61,7 +61,7 @@ Manual UI:
 3. Kill and relaunch (native) or refresh the browser (web) → still signed in.
 4. Sign out → auth screen returns.
 5. Magic link / OAuth when providers + email are configured.
-6. Open **Chat** tab — send a message; open a second device/simulator to see realtime delivery.
+6. Open **Chat** tab: send a message; open a second device/simulator to see realtime delivery.
 
 Bundle check: `pnpm exec expo export --platform web --output-dir dist-smoke`
 

@@ -1,5 +1,5 @@
 /**
- * Pin-aware cache eviction — collect `versions.*` pins across local projects (C13).
+ * Pin-aware cache eviction: collect `versions.*` pins across local projects (C13).
  */
 
 import { existsSync, readdirSync, rmSync, statSync } from "node:fs"
@@ -219,7 +219,7 @@ export function cleanCachedBinaries(options: CleanCachedBinariesOptions): CleanC
       if (!force && explicitVersion && pinned) {
         const reason = pinReason(component, version, sources) ?? "pinned"
         result.warned.push(
-          `${component}@${version} is ${reason} — removing anyway (explicit version)`,
+          `${component}@${version} is ${reason}: removing anyway (explicit version)`,
         )
       }
 

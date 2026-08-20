@@ -30,7 +30,7 @@ const project = (database: unknown): SupatypeProjectConfig =>
 const external = (url = EXTERNAL_URL) => project({ external: { url } })
 const managed = () => project({ provider: "docker" })
 
-describe("external database — compose", () => {
+describe("external database: compose", () => {
   it("omits the db service and says why", () => {
     const compose = renderSelfHostCompose(external())
     expect(compose).not.toMatch(/^ {2}db:$/m)
@@ -88,12 +88,12 @@ describe("external database — compose", () => {
   it("appends GoTrue's search_path with the right separator", () => {
     // A URL that already has a query string needs `&`; a second `?` produces a DSN that fails to
     // parse, and GoTrue would exit rather than run its auth migrations.
-    expect(renderSelfHostCompose(external())).toContain('${DATABASE_URL:?DATABASE_URL is missing from .env — required by database.external}?search_path=auth"')
+    expect(renderSelfHostCompose(external())).toContain('${DATABASE_URL:?DATABASE_URL is missing from .env, required by database.external}?search_path=auth"')
     expect(
       renderSelfHostCompose(
         external("postgres://owner:secret@db.example.com:5432/app?sslmode=require"),
       ),
-    ).toContain('${DATABASE_URL:?DATABASE_URL is missing from .env — required by database.external}&search_path=auth"')
+    ).toContain('${DATABASE_URL:?DATABASE_URL is missing from .env, required by database.external}&search_path=auth"')
   })
 
   it("omits realtime entirely when the project turns it off", () => {
@@ -109,7 +109,7 @@ describe("external database — compose", () => {
   })
 
   it("keeps realtime when the flag is unset", () => {
-    // Unset means "probe it", not "assume it is broken" — the service reports its own capability.
+    // Unset means "probe it", not "assume it is broken", the service reports its own capability.
     const compose = renderSelfHostCompose(external())
     expect(compose).toMatch(/^ {2}realtime:$/m)
     expect(compose).toContain("SUPATYPE_REALTIME_URL: http://realtime:4000")
@@ -157,7 +157,7 @@ describe("external database — compose", () => {
 
 describe("a loopback external URL", () => {
   // Found by rehearsing a push against a real external Postgres: `db check` passed and `push`
-  // applied the schema, because the CLI runs on the host — then storage, realtime and the server all
+  // applied the schema, because the CLI runs on the host, then storage, realtime and the server all
   // died with ECONNREFUSED against their own loopback, because inside a container `127.0.0.1` is
   // that container. A retry loop would only have hidden it.
   it("is detected, whatever form it takes", () => {

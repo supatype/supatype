@@ -1,14 +1,14 @@
 /**
  * Wait for Postgres instead of exiting when it is not there yet.
  *
- * Realtime used to exit 1 if `replication.start()` could not connect, and — worse — `poll()` caught
+ * Realtime used to exit 1 if `replication.start()` could not connect, and, worse, `poll()` caught
  * every error and logged it, so a database that went away *after* boot left the service up, holding
  * WebSocket clients, and permanently deaf. The Compose `db` healthcheck only ever covered the first
  * case, and an external database has no such container to wait on at all.
  *
  * A connection that cannot be established is retried indefinitely, because the operator's remedy is
- * to fix the database and the service should then recover on its own. Anything else — a syntax
- * error, a missing privilege — is fatal on the first attempt, since retrying it forever would bury
+ * to fix the database and the service should then recover on its own. Anything else, a syntax
+ * error, a missing privilege, is fatal on the first attempt, since retrying it forever would bury
  * the one message that explains what is wrong.
  *
  * `packages/storage/src/db-retry.ts` is the same logic for the same reason; a fix to the error
@@ -26,7 +26,7 @@ const TRANSIENT_CODES = new Set([
   "EHOSTUNREACH",
   "ENETUNREACH",
   "EPIPE",
-  // Postgres class 08 — connection exception.
+  // Postgres class 08: connection exception.
   "08000",
   "08003",
   "08006",
@@ -95,7 +95,7 @@ export async function withDatabaseRetry<T>(
       const reason = error instanceof Error ? error.message : String(error)
       log(
         `[supatype] ${label}: database not reachable (attempt ${tries}, ${waited}s elapsed): ` +
-          `${reason} — retrying in ${delay}ms`,
+          `${reason}: retrying in ${delay}ms`,
       )
       await sleep(delay)
       if (!shouldContinue()) throw error

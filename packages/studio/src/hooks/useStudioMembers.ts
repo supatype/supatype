@@ -40,7 +40,7 @@ export interface UseStudioMembersReturn {
  *
  * Studio roles are Supatype's own namespace. They are deliberately not the
  * developer's application roles, which live in the caller's own claims and tables
- * and are theirs to manage — writing Studio access into `app_metadata` is how
+ * and are theirs to manage, writing Studio access into `app_metadata` is how
  * assigning an app role could hand out admin UI access by accident.
  *
  * The server is the authority on every refusal here. This hook does not
@@ -173,7 +173,7 @@ function readRoles(body: unknown): StudioRoleInfo[] {
 }
 
 /**
- * Both hosts answer with the same shape under different wrappers — self-host
+ * Both hosts answer with the same shape under different wrappers, self-host
  * returns `{ members: [...] }`, the control plane wraps everything in `{ data }`,
  * and the cloud role catalogue is a plain string array.
  */

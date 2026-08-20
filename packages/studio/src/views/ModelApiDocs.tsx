@@ -388,7 +388,7 @@ export function ModelApiDocs({ model }: Props): React.ReactElement {
   return (
     <div className="max-w-3xl">
       <div className="mb-5">
-        <h2 className="text-base font-semibold">{model.labelPlural} — REST API</h2>
+        <h2 className="text-base font-semibold">{model.labelPlural}: REST API</h2>
         <p className="text-sm text-muted-foreground mt-1">
           PostgREST endpoints for{" "}
           <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">{model.tableName}</code>.

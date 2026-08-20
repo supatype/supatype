@@ -9,7 +9,7 @@ export function usesSessionProxy(client: { url: string }): boolean {
 /**
  * Authorization headers for Studio's privileged fetches.
  *
- * Always the signed-in user's token — never a service role key. The key lives on
+ * Always the signed-in user's token, never a service role key. The key lives on
  * the server behind `/studio/proxy`, which resolves the caller's Studio
  * membership, applies their role's permissions, decides the acting identity and
  * records elevated access. A key sent from here would bypass all four.

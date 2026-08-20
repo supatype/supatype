@@ -14,7 +14,7 @@ interface StudioAccessCellProps {
 /**
  * A user's Studio role, editable in place by an admin.
  *
- * This is *Studio* access — Supatype's own namespace — not the application roles
+ * This is *Studio* access, Supatype's own namespace, not the application roles
  * the developer defines for their own users. Those live in the developer's claims
  * and tables and are theirs to manage; the two are shown apart on purpose, because
  * conflating them is how granting an app role could hand out admin UI access.

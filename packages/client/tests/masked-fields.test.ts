@@ -3,7 +3,7 @@ import { parseMaskedFields } from "../src/query.js"
 
 // A column you may not read comes back as `null`, because Postgres cannot omit a column from
 // a result set. On the wire that is indistinguishable from a value that is genuinely null.
-// This header is what tells the two apart — advisory only, so parsing it must fail towards
+// This header is what tells the two apart, advisory only, so parsing it must fail towards
 // saying nothing rather than towards saying something wrong.
 
 describe("parseMaskedFields", () => {

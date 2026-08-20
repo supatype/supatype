@@ -1,7 +1,7 @@
 import { renderRichText, type RichTextNode } from "@supatype/common/richtext"
 
 export interface RichTextProps {
-  /** Lexical JSON content — a root node, an array of child nodes, or null. */
+  /** Lexical JSON content: a root node, an array of child nodes, or null. */
   content: RichTextNode | RichTextNode[] | null | undefined
   /** Optional CSS class applied to the wrapper element. */
   className?: string

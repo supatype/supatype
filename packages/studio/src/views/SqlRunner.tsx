@@ -200,7 +200,7 @@ function SqlEditor({
     })
     viewRef.current = view
     return () => { view.destroy(); viewRef.current = null }
-  }, []) // intentionally empty — editor created once
+  }, []) // intentionally empty, editor created once
 
   // Sync value changes from outside (e.g. loading from history)
   useEffect(() => {
@@ -310,7 +310,7 @@ export function SqlRunner(): React.ReactElement {
         }
         setSqlSchema(map)
       } catch {
-        // editor works fine without schema — autocomplete just shows keywords
+        // editor works fine without schema, autocomplete just shows keywords
       }
     })()
   }, [introspect])

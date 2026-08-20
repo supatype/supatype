@@ -1,5 +1,5 @@
 /**
- * Integration test — Task 92: File upload size limit
+ * Integration test: Task 92: File upload size limit
  *
  * Tests: upload exceeding limit -> 413 with clear message.
  */
@@ -36,7 +36,7 @@ function mockFetchResponse(
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
-describe("Task 92 — File upload size limit integration", () => {
+describe("Task 92: File upload size limit integration", () => {
   beforeEach(() => vi.restoreAllMocks())
 
   describe("Upload within size limit", () => {
@@ -56,7 +56,7 @@ describe("Task 92 — File upload size limit integration", () => {
       vi.stubGlobal("fetch", mockFetchResponse(200, { Key: "docs/file.pdf" }))
 
       const client = freshClient()
-      const blob = createMockBlob(50 * 1024 * 1024) // 50 MB — right at limit
+      const blob = createMockBlob(50 * 1024 * 1024) // 50 MB, right at limit
       const { data, error } = await client.from("docs").upload("file.pdf", blob, {
         contentType: "application/pdf",
       })
@@ -176,7 +176,7 @@ describe("Task 92 — File upload size limit integration", () => {
 
       const client = freshClient()
 
-      // StorageClient.upload does not wrap fetch errors — they propagate
+      // StorageClient.upload does not wrap fetch errors, they propagate
       await expect(
         client.from("bucket").upload("file.txt", createMockBlob(100)),
       ).rejects.toThrow("Network error")

@@ -28,7 +28,7 @@ const raw = (database: unknown, rest: Record<string, unknown> = {}): unknown => 
 const validate = (database: unknown, rest?: Record<string, unknown>) =>
   validateProjectConfig(raw(database, rest), "supatype.config.ts")
 
-describe("database.external — accepted", () => {
+describe("database.external: accepted", () => {
   it("accepts a url on its own, with no database.provider", () => {
     const cfg = validate({ external: { url: EXTERNAL_URL } })
     expect(externalDatabaseUrl(cfg)).toBe(EXTERNAL_URL)
@@ -52,7 +52,7 @@ describe("database.external — accepted", () => {
   })
 })
 
-describe("database.external — rejected", () => {
+describe("database.external: rejected", () => {
   it("rejects a missing url", () => {
     expect(() => validate({ external: {} })).toThrow(/database\.external\.url is required/)
     expect(() => validate({ external: { url: "   " } })).toThrow(

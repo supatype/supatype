@@ -41,7 +41,7 @@ const FRAMEWORK_DETECTION: Array<{ dep: string; framework: AppFramework }> = [
   { dep: "@remix-run/react", framework: "remix-spa" },
   { dep: "@sveltejs/kit", framework: "sveltekit" },
   { dep: "nuxt", framework: "nuxt" },
-  // Vite last — many frameworks use Vite under the hood
+  // Vite last: many frameworks use Vite under the hood
   { dep: "vite", framework: "vite" },
 ]
 

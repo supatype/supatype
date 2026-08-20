@@ -1,5 +1,5 @@
 /**
- * Dropdown menu — shadcn/ui pattern: Radix primitives styled with Tailwind (`cn`).
+ * Dropdown menu: shadcn/ui pattern: Radix primitives styled with Tailwind (`cn`).
  * https://ui.shadcn.com/docs/components/dropdown-menu
  *
  * There is no `shadcn` npm package; installs are vendored sources that list

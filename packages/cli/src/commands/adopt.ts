@@ -54,7 +54,7 @@ export function registerAdopt(program: Command): void {
 
       const statements = preview.stampStatements ?? []
       if (statements.length === 0) {
-        info("Nothing to stamp — matching objects are already managed or absent.")
+        info("Nothing to stamp: matching objects are already managed or absent.")
         return
       }
 

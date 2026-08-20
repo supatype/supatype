@@ -9,7 +9,7 @@ export interface RealtimeEnv {
    *
    * `wal2json` decodes from the *slot*; publications are a `pgoutput` concept. The value is kept so a
    * future pgoutput decoder has somewhere to look, and its default matches the empty publication
-   * `supatype/postgres` actually creates — it used to default to `supatype_realtime_pub`, a third
+   * `supatype/postgres` actually creates: it used to default to `supatype_realtime_pub`, a third
    * name that existed nowhere, which is how a decoder would have been written against a publication
    * that was never there.
    */

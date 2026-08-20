@@ -17,7 +17,7 @@ export const config = {
    * JWT secret shared with GoTrue / Kong.
    *
    * **No fallback, deliberately.** This validates every caller's token, and the value it used
-   * to default to is published in this repository — so a deployment that forgot to set
+   * to default to is published in this repository, so a deployment that forgot to set
    * JWT_SECRET accepted tokens anyone could mint, and looked healthy doing it. Refusing to
    * start is the only safe reading of a missing signing secret.
    */
@@ -52,7 +52,7 @@ export const config = {
   /** Transform cache TTL in seconds (default 1 hour). */
   transformCacheTtl: parseInt(env("TRANSFORM_CACHE_TTL", "3600"), 10),
 
-  /** Project tier — injected at deploy time for per-file and quota enforcement. */
+  /** Project tier: injected at deploy time for per-file and quota enforcement. */
   projectTier: env("PROJECT_TIER", "free") as "free" | "pro" | "team" | "enterprise",
 
   /** Per-file upload limit for the current tier (bytes). Overrides maxUploadSize when set. -1 = unlimited. */

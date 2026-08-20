@@ -57,12 +57,26 @@ jobs:
             echo "::notice::Docker Hub latest=yes (version=${VERSION}, prerelease=${IS_PRE}, stable_tag_in_repo=${HAS_STABLE})"
           else
             echo "docker_push_latest=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Docker Hub latest=no — prerelease ${VERSION} will not move :latest while a stable vX.Y.Z tag exists"
+            echo "::notice::Docker Hub latest=no, prerelease ${VERSION} will not move :latest while a stable vX.Y.Z tag exists"
           fi
 
   # ── Build, test, and publish npm packages ───────────────────────────────────
-  npm:
+  # The standalone CLI, from the same tag and the same version as everything else.
+  #
+  # This runs before npm publishes, deliberately. Publishing to the CDN is additive and every
+  # path is immutable, so a bad attempt is superseded by the next version and costs nothing;
+  # an npm publish cannot be undone. Doing the reversible half first, and only reaching the
+  # irreversible half once the binaries have been compiled, signed and executed on real
+  # hardware, is the closest this can get to an atomic release.
+  cli:
     needs: prepare
+    uses: ./.github/workflows/cli-release.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+    secrets: inherit
+
+  npm:
+    needs: [prepare, cli]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -284,7 +298,7 @@ jobs:
             type=raw,value=latest,enable=${{ needs.docker-latest-policy.outputs.docker_push_latest == 'true' }}
 
       # schema-engine is a separate repo with independent versioning, so the
-      # engine image tag is NOT the monorepo version — always use :latest.
+      # engine image tag is NOT the monorepo version, always use :latest.
       - uses: docker/build-push-action@v5
         with:
           context: packages/self-host-control

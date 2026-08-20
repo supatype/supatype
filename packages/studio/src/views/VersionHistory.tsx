@@ -75,7 +75,7 @@ export function VersionHistory({ model, recordId, onNavigate }: VersionHistoryPr
   return (
     <div className="st-version-history">
       <Header
-        title={`Version History — ${model.label}`}
+        title={`Version History: ${model.label}`}
         actions={
           <button
             type="button"
@@ -149,7 +149,7 @@ export function VersionHistory({ model, recordId, onNavigate }: VersionHistoryPr
 }
 
 function formatValue(value: unknown): string {
-  if (value === null || value === undefined) return "—"
+  if (value === null || value === undefined) return "-"
   if (typeof value === "object") return JSON.stringify(value).slice(0, 100)
   return String(value)
 }

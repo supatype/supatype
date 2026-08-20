@@ -39,7 +39,7 @@ import { wrapProgramActionsWithChrome } from "./ui/runtime/command-chrome.js"
 export async function run(): Promise<void> {
   const program = new Command()
     .name("supatype")
-    .description("Supatype — type-first platform for PostgreSQL")
+    .description("Supatype: type-first platform for PostgreSQL")
     .version(cliPackageVersion())
 
   registerInit(program)

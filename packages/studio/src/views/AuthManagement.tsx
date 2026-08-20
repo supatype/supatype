@@ -265,7 +265,7 @@ function UserDetail({
                 {userSessions.map((s) => (
                   <tr key={s.id} className="border-b border-border">
                     <Td className="text-xs">{s.user_agent || <span className="text-zinc-600">Unknown</span>}</Td>
-                    <Td className="font-mono text-xs">{s.ip || "—"}</Td>
+                    <Td className="font-mono text-xs">{s.ip || "-"}</Td>
                     <Td className="text-xs text-muted-foreground">{new Date(s.updated_at).toLocaleString()}</Td>
                     <Td>
                       <Button size="xs" variant="destructive" onClick={() => onRevokeSession(s.id)}>
@@ -562,7 +562,7 @@ export function AuthManagement(): React.ReactElement {
   }, [proxy, refetchSessions])
 
   const handleImpersonate = useCallback((_userId: string) => {
-    // Impersonation placeholder — shown in detail view
+    // Impersonation placeholder: shown in detail view
   }, [])
 
   if (loading) {
@@ -643,7 +643,7 @@ export function AuthManagement(): React.ReactElement {
               <Th>Email</Th>
               <Th>Role</Th>
               {/* Studio's own namespace, kept visibly apart from the application
-                  role above — conflating them is how granting an app role could
+                  role above: conflating them is how granting an app role could
                   hand out admin UI access. */}
               <Th>Studio access</Th>
               <Th>Providers</Th>

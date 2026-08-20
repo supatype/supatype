@@ -177,10 +177,10 @@ export async function downloadSigned(ctx: RequestContext): Promise<void> {
   // Try application-level HMAC token first, fall back to S3 pre-signed URL proxy
   const payload = verifySignedToken(token, bucketId, objectPath)
   if (!payload) {
-    // The token might be an S3-level pre-signed URL token — check if it looks
+    // The token might be an S3-level pre-signed URL token, check if it looks
     // like a base64url.base64url pair (our format) vs. S3 query params
     if (token.includes(".")) {
-      // It was our format but failed verification — reject
+      // It was our format but failed verification, reject
       sendJson(ctx.res, 403, { error: "Invalid or expired signed URL" })
       return
     }

@@ -1,5 +1,5 @@
 /**
- * postgres-ctl — wrappers around pg_ctl, initdb, and pg_isready for managing
+ * postgres-ctl: wrappers around pg_ctl, initdb, and pg_isready for managing
  * a native Postgres installation.
  */
 
@@ -95,7 +95,7 @@ export function start(opts: PgOptions): void {
   const bin = pgBin(opts.pgBinDir, "pg_ctl")
   const logPath = opts.logPath ?? join(opts.dataDir, "postgres.log")
 
-  // `supatype_mask` is a planner hook, so it has to be preloaded — `CREATE EXTENSION` alone does
+  // `supatype_mask` is a planner hook, so it has to be preloaded, `CREATE EXTENSION` alone does
   // nothing without it. Only when the archive actually carries the library: an install downloaded
   // before it was bundled would fail to start with "could not access file".
   //
@@ -131,7 +131,7 @@ export function stop(opts: PgOptions): void {
     encoding: "utf8",
     env: pgSpawnEnv(opts.pgBinDir),
   })
-  // Ignore exit code — Postgres may already be stopped.
+  // Ignore exit code: Postgres may already be stopped.
   void result
 }
 
@@ -175,7 +175,7 @@ export async function isPortInUse(port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const server = createServer()
     server.once("error", (err: NodeJS.ErrnoException) => {
-      // EADDRINUSE — something is listening. EACCES — Windows excluded/reserved port range.
+      // EADDRINUSE: something is listening. EACCES, Windows excluded/reserved port range.
       resolve(err.code === "EADDRINUSE" || err.code === "EACCES")
     })
     server.once("listening", () => {

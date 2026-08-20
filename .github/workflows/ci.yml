@@ -60,20 +60,20 @@ jobs:
       - name: Build storage package
         run: pnpm --filter @supatype/storage build
 
-      - name: Build docker image — storage
+      - name: Build docker image, storage
         uses: docker/build-push-action@v5
         with:
           context: packages/storage
           push: false
 
-      - name: Build docker image — realtime
+      - name: Build docker image, realtime
         uses: docker/build-push-action@v5
         with:
           context: .
           file: packages/realtime/Dockerfile
           push: false
 
-      - name: Build docker image — studio
+      - name: Build docker image, studio
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -83,7 +83,7 @@ jobs:
       - name: Build self-host-control package
         run: pnpm --filter @supatype/self-host-control build
 
-      - name: Build docker image — control-plane
+      - name: Build docker image, control-plane
         uses: docker/build-push-action@v5
         with:
           context: packages/self-host-control

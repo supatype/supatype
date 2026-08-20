@@ -29,7 +29,7 @@ export type FieldAccessMap = Record<string, Record<string, FieldAccess> | undefi
 /**
  * Whose identity data requests act as.
  *
- * `elevated` means the server swaps in the service role, which `supatype_mask` exempts — so
+ * `elevated` means the server swaps in the service role, which `supatype_mask` exempts, so
  * every restricted column comes back in the clear. The restrictions are then *descriptive*
  * rather than applied, and the interface must say so rather than pretend otherwise.
  */
@@ -45,7 +45,7 @@ export interface StudioFieldAccess {
   fields: FieldAccessMap
   /**
    * Table-level verdicts, which have shipped in `/studio/session` since P2.6 and were until now
-   * unread — so Studio offered buttons the server would refuse.
+   * unread: so Studio offered buttons the server would refuse.
    */
   tables: TableAccessMap
 }
@@ -58,7 +58,7 @@ export interface StudioFieldAccess {
  * from a create form where no caller could supply it.
  *
  * **Fails open, deliberately.** If this cannot be read the interface behaves exactly as it
- * did before — the database still refuses what it should, and a save that fails is a far
+ * did before: the database still refuses what it should, and a save that fails is a far
  * better outcome than an interface that hides a field on the strength of a network error.
  * That is the same reason nothing here is an authorization decision: the enforcement is the
  * security labels and the query rewrite.
@@ -156,18 +156,18 @@ export function isFieldRestricted(
 /**
  * How one cell should be rendered.
  *
- * A restricted column that is simply *empty* must not be reported as withheld — otherwise a
+ * A restricted column that is simply *empty* must not be reported as withheld, otherwise a
  * record created without a value for it looks like a record hiding one. Whether a null can be
  * read as masking depends on both the acting mode and how settled the verdict is, so all three
  * inputs matter:
  *
- * - `plain` — no restriction; render normally.
- * - `hidden` — certainly withheld. Only when masking is actually being applied *and* the verdict
+ * - `plain`: no restriction; render normally.
+ * - `hidden`: certainly withheld. Only when masking is actually being applied *and* the verdict
  *   denies every row, so a null cannot be anything else.
- * - `unknown` — restricted, null, and genuinely ambiguous: a `row` verdict means some records
+ * - `unknown`: restricted, null, and genuinely ambiguous: a `row` verdict means some records
  *   withhold and others are empty, and nothing here can tell which this is. Says so rather than
  *   guessing.
- * - `revealed` — the caller is seeing the true value, whatever it is. Marked so they know the
+ * - `revealed`: the caller is seeing the true value, whatever it is. Marked so they know the
  *   column is access-controlled and others may not see it. Includes an elevated caller's empty
  *   cell: masking is not applied to them, so the emptiness is real.
  */
@@ -195,7 +195,7 @@ export function cellAccess(
  *
  * True when elevated: the request will run as the service role, which the masking extension
  * exempts, so the write will succeed and disabling the input would be a lie the UI tells about
- * a restriction that is not being applied. Unknown also means "let the user try" — the database
+ * a restriction that is not being applied. Unknown also means "let the user try", the database
  * refuses what it should.
  */
 export function isFieldWritable(
@@ -211,7 +211,7 @@ export function isFieldWritable(
  * Whether a column belongs on a create form.
  *
  * A column no caller can supply is left out rather than rendered as an input that cannot be
- * satisfied — which for a required column would otherwise be a form that can never be
+ * satisfied: which for a required column would otherwise be a form that can never be
  * submitted. Elevated callers keep the field for the same reason as above: the insert will
  * run as the service role and succeed.
  */
@@ -249,7 +249,7 @@ export function normaliseTableAccess(raw: unknown): TableAccessMap {
  * Whether Studio should offer an operation on a table at all.
  *
  * Only a settled `deny` withdraws the control. `row` means some records allow it, so the button
- * stays and the per-record answer decides — withdrawing it wholesale would hide an action the
+ * stays and the per-record answer decides, withdrawing it wholesale would hide an action the
  * caller does have on most of their rows.
  *
  * Elevated callers keep everything, because the request will run as the service role and

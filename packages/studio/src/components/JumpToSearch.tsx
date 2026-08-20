@@ -88,7 +88,7 @@ async function searchLiveData(
   const results: SearchItem[] = []
 
   await Promise.allSettled([
-    // Auth users — search by email and display name
+    // Auth users: search by email and display name
     (async () => {
       const res = await fetch(`${client.url}/auth/v1/admin/users?per_page=200`, { headers, signal })
       if (!res.ok) return
@@ -111,7 +111,7 @@ async function searchLiveData(
       }
     })(),
 
-    // Model records — use each model's configured search fields
+    // Model records: use each model's configured search fields
     ...models.slice(0, 5).map(async (model) => {
       const fields = model.searchFields.length > 0
         ? model.searchFields
@@ -144,7 +144,7 @@ async function searchLiveData(
 // ─── Component ────────────────────────────────────────────────────────────────
 
 interface JumpToSearchProps {
-  /** Compact variant for the header — smaller padding, narrower placeholder */
+  /** Compact variant for the header, smaller padding, narrower placeholder */
   compact?: boolean
 }
 
@@ -229,7 +229,7 @@ export function JumpToSearch({ compact = false }: JumpToSearchProps): React.Reac
   const hasResults = results.length > 0
   const noResults = !searching && query.trim().length >= 2 && results.length === 0
 
-  // Index of first "record" result — used to draw a separator
+  // Index of first "record" result, used to draw a separator
   const firstRecordIndex = results.findIndex((r) => r.kind === "record")
 
   return (

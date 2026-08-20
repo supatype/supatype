@@ -4,7 +4,7 @@ const DEFAULT_GATEWAY = "http://localhost:18473"
 
 /**
  * API base URL for the browser client.
- * Prefer env; never use the Vite dev origin (:5173) — that returns index.html for /functions/*.
+ * Prefer env; never use the Vite dev origin (:5173), that returns index.html for /functions/*.
  */
 function resolveUrl(): string {
   const fromEnv = (import.meta.env.VITE_SUPATYPE_URL as string | undefined)?.trim()
@@ -12,11 +12,11 @@ function resolveUrl(): string {
 
   if (typeof window !== "undefined") {
     const { protocol, hostname, port, origin } = window.location
-    // Direct Vite — talk to Kong (or same host via vite proxy)
+    // Direct Vite: talk to Kong (or same host via vite proxy)
     if (port === "5173") {
       return `${protocol}//${hostname}:18473`
     }
-    // Proxied through Kong — same origin is correct
+    // Proxied through Kong: same origin is correct
     if (origin) return origin.replace(/\/$/, "")
   }
 

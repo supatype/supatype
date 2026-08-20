@@ -1,7 +1,7 @@
 import { defineConfig } from "@supatype/cli"
 
 /**
- * Supabucks — a coffee-shop loyalty app demo.
+ * Supabucks: a coffee-shop loyalty app demo.
  *
  * The frontend is a Vite + React SPA built to ./dist and served by Supatype
  * itself (app.mode: "static"). The app and the API share one origin

@@ -20,7 +20,7 @@ import { apiSchemaList, validateProjectConfig, type SupatypeProjectConfig } from
  *
  * The rule is deliberately **not** "is the database external". A native `supatype dev` has no
  * extension either, and calling that tier 1 would point PostgREST at a schema whose tables the API
- * roles no longer hold privileges on — every request denied.
+ * roles no longer hold privileges on, every request denied.
  */
 const project = (database: unknown, rest: Record<string, unknown> = {}): SupatypeProjectConfig =>
   validateProjectConfig(

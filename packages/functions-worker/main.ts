@@ -14,7 +14,7 @@ interface DiscoveredRoute {
  * Root for public functions, or "" when this worker serves none.
  *
  * Empty is a real configuration, not a mistake: a per-hook worker mounts a hooks root and nothing else,
- * and its pod has no functions directory to point at. Requiring this one made such a pod crashloop —
+ * and its pod has no functions directory to point at. Requiring this one made such a pod crashloop,
  * which the API server sees as the hook refusing to answer, failing every write to its table. Startup
  * still fails when *both* roots are empty, since a worker with no source at all is a misconfiguration.
  */
@@ -31,7 +31,7 @@ function functionsRoot(): string {
 /**
  * Root for **model hooks**, served under a `hooks/` route prefix.
  *
- * Hooks are procedural — the API server calls them around a write — while everything under the
+ * Hooks are procedural: the API server calls them around a write, while everything under the
  * functions root is a public endpoint anyone holding the anon key can invoke. Keeping them in one
  * worker rather than two costs a project no extra pod; keeping them under a route prefix is what lets
  * the gateway refuse them from outside, so the separation is structural rather than a deny-list that
@@ -71,16 +71,16 @@ function serviceRoleRoutes(): Set<string> {
  * time, so a key still in `Deno.env` then is a key any handler can copy and keep. Withholding it
  * afterwards would be theatre.
  *
- * The default is now "no admin credential". A function is a public endpoint — anyone holding the anon
- * key can invoke one — and an ambient service-role key made every one of them able to read and write
+ * The default is now "no admin credential". A function is a public endpoint, anyone holding the anon
+ * key can invoke one, and an ambient service-role key made every one of them able to read and write
  * past every access rule in the schema. Opting in is a line in `supatype.config.ts`, which is
  * reviewable; ambient privilege is not.
  */
 /**
  * Whether a route may see the service-role key.
  *
- * **Hooks: yes.** A hook is procedural — only the API server calls it, around a write the caller was
- * already permitted to make — and the gateway refuses its route from outside, so it is not reachable
+ * **Hooks: yes.** A hook is procedural, only the API server calls it, around a write the caller was
+ * already permitted to make, and the gateway refuses its route from outside, so it is not reachable
  * by anyone who could choose to invoke it. Requiring each one to be listed would be friction with no
  * attacker to stop, and it is the same trust a trigger or a migration already has.
  *
@@ -105,7 +105,7 @@ async function discoverRoutes(root: string): Promise<DiscoveredRoute[]> {
 
   // The catch has to wrap the *iteration*: `Deno.readDir` returns its iterable without touching the
   // filesystem, so a missing directory raises NotFound on the first `next()`, not here. A root that
-  // does not exist is ordinary — a project with functions but no hooks has no hooks directory — and
+  // does not exist is ordinary, a project with functions but no hooks has no hooks directory, and
   // letting it throw would fail startup and take that project's working functions down with it.
   try {
     for await (const entry of Deno.readDir(root)) {
@@ -171,8 +171,8 @@ const root = functionsRoot()
 const routes = root ? await discoverRoutes(root) : []
 const handlers = await loadHandlers(routes)
 
-// Hooks are namespaced so one worker can serve both without a name in `hooks/` ever shadowing — or
-// being reachable as — a public function of the same name.
+// Hooks are namespaced so one worker can serve both without a name in `hooks/` ever shadowing, or
+// being reachable as: a public function of the same name.
 const hooksDir = hooksRoot()
 if (!root && !hooksDir) {
   throw new Error(
@@ -189,7 +189,7 @@ if (hooksDir) {
 
 // A worker pinned to one route still has to find it, and with two roots "absent from this one" is not
 // "absent everywhere": a per-hook pod names its hook and has no functions directory at all. Checked
-// once, after both roots, so the failure means what it says — and it stays a failure, because a pod
+// once, after both roots, so the failure means what it says, and it stays a failure, because a pod
 // serving nothing would answer 404 to the API server, which reads as the hook refusing to answer and
 // fails every write to its table.
 const single = Deno.env.get("SUPATYPE_FUNCTION_NAME")?.trim()
@@ -257,13 +257,13 @@ const HOOK_DEPTH_HEADER = "x-supatype-hook-depth"
  * Carry the hook chain's depth onto whatever the handler calls the stack with.
  *
  * A hook receives the service-role key, so a hook that writes to its own table re-enters the API and
- * calls itself again — `service_role` decides what Postgres permits, not whether the hook middleware
+ * calls itself again: `service_role` decides what Postgres permits, not whether the hook middleware
  * runs. The server refuses past a small depth, but only if the count survives the hop through a
  * handler, and a handler writes with whatever client it likes.
  *
  * So the count is attached here rather than asked of the handler: `fetch` is what every client is built
  * on, and patching it for the invocation means a hook cannot skip the guard by accident. Scoped and
- * restored like the environment above, and safe for the same reason — invocations hold the env lock, so
+ * restored like the environment above, and safe for the same reason, invocations hold the env lock, so
  * one runs at a time.
  *
  * Only for hooks, and only for requests to this stack: a handler calling a payment API must not leak
@@ -353,17 +353,17 @@ Deno.serve({ port }, async (req: Request): Promise<Response> => {
 
       const supatypeUrl = Deno.env.get("SUPATYPE_URL")
       const supatypeAnon = Deno.env.get("SUPATYPE_ANON_KEY")
-      // The key is not in the process environment — it was withheld before any handler was imported.
+      // The key is not in the process environment, it was withheld before any handler was imported.
       // It comes from the closure, and only for a route that asked for it.
       //
       // Read from the closure rather than re-injected before this block: `setScoped` captures the
       // *current* value as the one to restore afterwards, so injecting first made the restore put the
-      // grant back permanently — a leak into every later call, which is what the test caught.
+      // grant back permanently: a leak into every later call, which is what the test caught.
       const supatypeServiceRole = serviceRoleKey && serviceRoleGranted(fnName) ? serviceRoleKey : undefined
       const supatypeDbUrl = Deno.env.get("SUPATYPE_DB_URL") ?? Deno.env.get("DATABASE_URL")
       // No SUPATYPE_JWKS. It was read here and set by nothing, and the shape is a trap: with the
       // default HS256 signing the only "key" to put in it is the symmetric secret, which is the power
-      // to *mint* a service_role token, not merely to verify one — strictly worse than the ambient
+      // to *mint* a service_role token, not merely to verify one, strictly worse than the ambient
       // service-role key removed in this same series. A function verifies a caller by asking
       // `/auth/v1/user`, or simply acts as the caller and lets RLS answer. Where a project configures
       // asymmetric JWT keys, `/auth/v1/.well-known/jwks.json` serves the public half and rotates.

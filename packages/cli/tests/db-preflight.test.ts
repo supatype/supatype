@@ -44,7 +44,7 @@ describe("splitting remedies", () => {
 
 describe("the authenticator password guard", () => {
   // The credential is the operator's by decision. Executing the placeholder would create a role
-  // with a password from our source code — worse than refusing, and harder to notice.
+  // with a password from our source code, worse than refusing, and harder to notice.
   it("detects a remedy that would execute the placeholder", () => {
     const remedies = [
       result({ remedy: `CREATE ROLE authenticator LOGIN NOINHERIT PASSWORD '${PASSWORD_PLACEHOLDER}';` }),

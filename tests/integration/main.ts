@@ -8,7 +8,7 @@ const reloadBtn = document.querySelector<HTMLButtonElement>("#reload")!
 
 if (!anonKey) {
   errorEl.hidden = false
-  errorEl.textContent = "Missing VITE_SUPATYPE_ANON_KEY — check tests/integration/.env"
+  errorEl.textContent = "Missing VITE_SUPATYPE_ANON_KEY, check tests/integration/.env"
 } else {
   const supatype = createClient({
     url: window.location.origin,

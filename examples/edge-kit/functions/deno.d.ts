@@ -1,7 +1,7 @@
 /**
  * Supatype edge functions (IDE / tsserver).
  * Runtime is Deno; this file covers APIs edge functions commonly use.
- * Do not add `@types/deno` to the app package.json — it leaks into the
+ * Do not add `@types/deno` to the app package.json, it leaks into the
  * whole project when root tsconfig has no `"types"` field.
  *
  * Optional: for the full Deno API, install the Deno VS Code/Cursor extension

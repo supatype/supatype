@@ -33,7 +33,7 @@ function addFunction(dir: string, name: string): void {
   writeFileSync(join(dir, "functions", name, "index.ts"), "export default () => new Response()", "utf8")
 }
 
-describe("model hooks — declaration", () => {
+describe("model hooks: declaration", () => {
   it("extracts both the shorthand and the options form", () => {
     const { ast } = project(`
 import type { Model, UUID } from "@supatype/types"
@@ -84,7 +84,7 @@ export type Post = Model<{ id: UUID }, {
   })
 })
 
-describe("model hooks — push-time validation", () => {
+describe("model hooks: push-time validation", () => {
   const schema = `
 import type { Model, UUID } from "@supatype/types"
 
@@ -142,7 +142,7 @@ export type Post = Model<{ id: UUID }, { tableName: "posts" }>
   })
 })
 
-describe("model hooks — manifest map", () => {
+describe("model hooks: manifest map", () => {
   const schema = `
 import type { Model, UUID } from "@supatype/types"
 
@@ -193,7 +193,7 @@ export type Post = Model<{ id: UUID }, {
 
   it("never creates a manifest from scratch", () => {
     // `functions_enabled` is a plain bool on the server's side, so a manifest carrying only hooks
-    // would read as functions *disabled* — the defect fixed one commit earlier, by another door.
+    // would read as functions *disabled*, the defect fixed one commit earlier, by another door.
     const { dir, ast } = project(schema)
     expect(syncManifestHooks(dir, ast)).toBe(false)
     expect(existsSync(join(dir, ".supatype", "manifest.json"))).toBe(false)
@@ -220,7 +220,7 @@ export type Post = Model<{ id: UUID }, { tableName: "posts" }>
   })
 })
 
-describe("model hooks — generated module on disk", () => {
+describe("model hooks: generated module on disk", () => {
   it("removes a stale module when the last hook is deleted", () => {
     // Otherwise a typed module sits there claiming tables are hooked, and a handler importing it
     // keeps compiling while never running.
@@ -250,7 +250,7 @@ export type Post = Model<{ id: UUID }, { tableName: "posts"; hooks: { beforeChan
   })
 })
 
-describe("model hooks — doctor report", () => {
+describe("model hooks: doctor report", () => {
   const schema = `
 import type { Model, UUID } from "@supatype/types"
 

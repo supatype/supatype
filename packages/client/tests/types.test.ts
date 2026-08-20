@@ -1,5 +1,5 @@
 /**
- * Type inference tests — verify that TypeScript generics produce the correct
+ * Type inference tests: verify that TypeScript generics produce the correct
  * types throughout the client API.  These assertions are checked at compile
  * time by tsc and at runtime via vitest's expectTypeOf.
  */
@@ -103,7 +103,7 @@ describe("QueryBuilder chaining preserves type", () => {
   })
 
   it(".single() resolves to QueryResult<Row>", async () => {
-    // Just type checking — no network call
+    // Just type checking: no network call
     const q = client.from("posts").select().single()
     expectTypeOf(q).resolves.toMatchTypeOf<QueryResult<Post>>()
   })

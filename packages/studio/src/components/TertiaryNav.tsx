@@ -18,7 +18,7 @@ function edgeFunctionsBaseFromPath(path: string): string | null {
 }
 
 function getTertiaryGroups(path: string): NavGroup[] | null {
-  // Observability — Logs
+  // Observability: Logs
   if (path === "/observability/logs" || path.startsWith("/observability/logs/")) {
     return [{
       items: [
@@ -83,7 +83,7 @@ function getTertiaryGroups(path: string): NavGroup[] | null {
     }]
   }
 
-  // Intelligence — Agents sub-tabs
+  // Intelligence: Agents sub-tabs
   if (path.startsWith("/ai/agents")) {
     return [{
       items: [

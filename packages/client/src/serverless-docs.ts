@@ -1,5 +1,5 @@
 /**
- * Serverless connection documentation — Gap Appendices task 84
+ * Serverless connection documentation: Gap Appendices task 84
  *
  * Code-accessible documentation for connection modes.
  * Rendered in Studio's getting-started view and available to CLI help output.
@@ -39,7 +39,7 @@ export const CONNECTION_MODES: readonly ConnectionModeDoc[] = [
       "",
       "const client = createClient(process.env.SUPATYPE_URL!, process.env.SUPATYPE_ANON_KEY!)",
       "",
-      "// Safe in serverless — each call is an HTTP request, not a new DB connection",
+      "// Safe in serverless, each call is an HTTP request, not a new DB connection",
       "const users = await client.from(\"users\").select()",
     ].join("\n"),
   },
@@ -54,7 +54,7 @@ export const CONNECTION_MODES: readonly ConnectionModeDoc[] = [
       "within seconds under load. Direct connections are only appropriate for long-lived " +
       "server processes that open a connection once and reuse it across many requests.",
     example: [
-      '// ONLY for long-lived servers — NOT for serverless',
+      '// ONLY for long-lived servers, NOT for serverless',
       'import pg from "pg"',
       "",
       "const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL })",
@@ -72,7 +72,7 @@ export const CONNECTION_MODES: readonly ConnectionModeDoc[] = [
 export const SERVERLESS_CONNECTION_WARNING =
   "Use the Supatype SDK (via PostgREST) in serverless environments (Next.js API routes, " +
   "Vercel Edge Functions, AWS Lambda). PostgREST handles connection pooling for you. " +
-  "Do NOT use direct database connections from serverless — each invocation opens a new " +
+  "Do NOT use direct database connections from serverless, each invocation opens a new " +
   "connection, which will exhaust your connection pool within seconds under load."
 
 /**

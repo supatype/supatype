@@ -17,7 +17,7 @@ export function registerApp(program: Command): void {
     .option("--static", "Serve a static directory at / (default: ./public, or [dir] argument)")
     .option("--port <port>", "Port your app listens on (proxy mode)", "3000")
     .option("--upstream <url>", "URL of your running dev server (proxy mode; defaults to localhost:<port>)")
-    .option("--dockerfile <path>", "(deprecated) ignored — use supatype.config.ts")
+    .option("--dockerfile <path>", "(deprecated) ignored, use supatype.config.ts")
     .action(
       (
         dir: string | undefined,
@@ -80,7 +80,7 @@ function addProxyApp(cwd: string, port: string, upstream?: string): void {
   try {
     const configPath = updateAppConfigInProject(cwd, { mode: "proxy", upstream: upstreamUrl })
     file("updated", configPath)
-    info(`Forwarding to ${upstreamUrl} — app at ${localKongBaseUrl()}/`)
+    info(`Forwarding to ${upstreamUrl}: app at ${localKongBaseUrl()}/`)
     nextSteps("Next:", ["supatype self-host compose render"])
   } catch (err) {
     error((err as Error).message)

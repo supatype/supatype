@@ -123,7 +123,7 @@ export function TypesView(): React.ReactElement {
                   <td className="px-4 py-3">
                     <Badge variant={row["typtype"] === "e" ? "indigo" : "blue"}>{row["typtype"] === "e" ? "enum" : "composite"}</Badge>
                   </td>
-                  <td className="px-4 py-3 text-xs text-muted-foreground">{((row["enum_values"] as string[] | null) ?? []).join(", ") || "—"}</td>
+                  <td className="px-4 py-3 text-xs text-muted-foreground">{((row["enum_values"] as string[] | null) ?? []).join(", ") || "-"}</td>
                   <td className="px-4 py-3 text-right">
                     <button type="button" className="text-xs text-destructive hover:underline" onClick={() => setDropModal(row["typname"] as string)}>Drop</button>
                   </td>

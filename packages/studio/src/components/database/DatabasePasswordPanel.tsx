@@ -6,7 +6,7 @@
  * browser session means a stolen dashboard session is also a database credential, and the
  * only thing a reveal buys over a reset is not having to update connection strings.
  *
- * The host app provides `onResetPassword`, which returns the new password — that return value
+ * The host app provides `onResetPassword`, which returns the new password, that return value
  * is the one moment it is displayable, so the host is responsible for showing it.
  */
 
@@ -17,7 +17,7 @@ import { useState, useCallback, type FC } from "react"
 export interface DatabasePasswordPanelProps {
   /** Called to reset the password. Should return the new password string. */
   onResetPassword: () => Promise<string>
-  /** Called after a successful password reset with the new password — show it once. */
+  /** Called after a successful password reset with the new password, show it once. */
   onPasswordChanged: (newPassword: string) => void
 }
 

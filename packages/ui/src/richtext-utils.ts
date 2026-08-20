@@ -31,7 +31,7 @@ export function emptyRichTextDocument(): SerializedEditorState {
   }
 }
 
-/** Plain sentence → minimal Lexical document (single paragraph). Not HTML — literal text only. */
+/** Plain sentence → minimal Lexical document (single paragraph). Not HTML, literal text only. */
 export function stringToRichTextDocument(text: string): SerializedEditorState {
   return {
     root: {
@@ -87,7 +87,7 @@ export function normalizeRichTextDefault(
         const parsed = JSON.parse(trimmed) as unknown
         if (isLexicalDocument(parsed)) return parsed
       } catch {
-        // fall through — treat as plain text
+        // fall through: treat as plain text
       }
     }
     return stringToRichTextDocument(value)

@@ -1,6 +1,6 @@
 /**
  * Release pins read from files under packages/cli/releases/.
- * CI (deno-releases workflow) uses the same paths — bump only releases/deno/VERSION.
+ * CI (deno-releases workflow) uses the same paths, bump only releases/deno/VERSION.
  */
 
 import { readFileSync } from "node:fs"
@@ -17,7 +17,7 @@ function readPinFile(...segments: string[]): string {
   } catch {
     throw new Error(
       `Missing release pin file: ${path}\n` +
-        "Expected packages/cli/releases/… — reinstall @supatype/cli or build from the monorepo.",
+        "Expected packages/cli/releases/…: reinstall @supatype/cli or build from the monorepo.",
     )
   }
   const version = raw.trim()

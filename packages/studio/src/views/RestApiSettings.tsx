@@ -182,7 +182,7 @@ export function RestApiSettings(): React.ReactElement {
         <div className="px-4 py-3 space-y-2">
           <h2 className="text-sm font-semibold">Server-side cache not on Free</h2>
           <p className="text-xs text-muted-foreground">
-            Cloud free tier bypasses Valkey — requests always reach PostgREST (no server in-memory cache).
+            Cloud free tier bypasses Valkey, requests always reach PostgREST (no server in-memory cache).
             Client-only <code className="font-mono">.cache(&#123; ttl &#125;)</code> still works in your app.
             Upgrade to Pro for Valkey-backed <code className="font-mono">.cache(&#123; server: true &#125;)</code>.
           </p>

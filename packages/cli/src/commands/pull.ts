@@ -10,7 +10,7 @@ import { info, plain } from "../ui/messages.js"
 export function registerPull(program: Command): void {
   program
     .command("pull")
-    .description("Scaffold schema/index.ts from live database introspection (draft — review before push)")
+    .description("Scaffold schema/index.ts from live database introspection (draft, review before push)")
     .option("--connection <url>", "Database connection URL (overrides config)")
     .option("--out <path>", "Write scaffold to file (default: stdout)")
     .option("--dry-run", "Print scaffold to stdout without writing files")
@@ -34,7 +34,7 @@ export function registerPull(program: Command): void {
       if (opts.dryRun || !opts.out) {
         plain(scaffold)
         if (!opts.dryRun && !opts.out) {
-          info("(draft printed to stdout — use --out to write a file)")
+          info("(draft printed to stdout, use --out to write a file)")
         }
         return
       }

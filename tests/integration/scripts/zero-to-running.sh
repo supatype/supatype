@@ -8,7 +8,7 @@
 #   bash tests/integration/scripts/zero-to-running.sh
 #
 # Environment:
-#   SUPATYPE_ZTR_INSTALL   workspace (default) | cdn  — cdn uses install.sh (linux/darwin only; not Windows)
+#   SUPATYPE_ZTR_INSTALL   workspace (default) | cdn, cdn uses install.sh (linux/darwin only; not Windows)
 #   SUPATYPE_ZTR_VERSION   CLI version when SUPATYPE_ZTR_INSTALL=cdn (default: latest)
 #   SUPATYPE_ZTR_WORK_ROOT Parent dir for the temp project (default: mktemp -d)
 #   SUPATYPE_ZTR_MAX_WAIT  Health poll timeout seconds (default: 300)
@@ -64,7 +64,7 @@ trap cleanup EXIT INT TERM
 
 install_cli_workspace() {
   if [[ ! -f "$CLI_BIN" ]]; then
-    echo "ERROR: CLI not found at $CLI_BIN — run 'pnpm build' first" >&2
+    echo "ERROR: CLI not found at $CLI_BIN, run 'pnpm build' first" >&2
     exit 1
   fi
   mkdir -p "$HOME/.supatype/bin"

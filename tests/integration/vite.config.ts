@@ -1,6 +1,6 @@
 import { defineConfig, loadEnv } from "vite"
 
-/** Dedicated port — default 5173 is often taken by other local Vite apps. */
+/** Dedicated port: default 5173 is often taken by other local Vite apps. */
 const APP_DEV_PORT = 5174
 
 export default defineConfig(({ mode }) => {

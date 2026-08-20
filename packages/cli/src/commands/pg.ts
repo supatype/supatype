@@ -1,5 +1,5 @@
 /**
- * supatype pg — manage the native Postgres instance for a project.
+ * supatype pg: manage the native Postgres instance for a project.
  *
  * Commands: start, stop, reset, psql
  */

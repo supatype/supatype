@@ -1,5 +1,5 @@
 /**
- * supatype status — show linked target or local dev stack state.
+ * supatype status: show linked target or local dev stack state.
  */
 import type { Command } from "commander"
 import { spawnSync } from "node:child_process"

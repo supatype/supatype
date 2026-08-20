@@ -43,7 +43,7 @@ export function parseEnginePushOutput(output: string): EnginePushResult | null {
 export function formatEnginePushMessage(result: EnginePushResult): string {
   if (result.status === "up_to_date") {
     if (result.admin_refreshed) {
-      return "Schema up to date — Studio metadata synced."
+      return "Schema up to date, Studio metadata synced."
     }
     return "Schema up to date."
   }

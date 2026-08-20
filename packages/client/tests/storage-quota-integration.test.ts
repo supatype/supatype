@@ -1,5 +1,5 @@
 /**
- * Integration test — Task 93: Storage quota exceeded
+ * Integration test: Task 93: Storage quota exceeded
  *
  * Tests: quota exceeded -> 507 with clear message.
  */
@@ -35,7 +35,7 @@ function mockFetchResponse(
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
-describe("Task 93 — Storage quota integration", () => {
+describe("Task 93: Storage quota integration", () => {
   beforeEach(() => vi.restoreAllMocks())
 
   describe("Quota exceeded on upload", () => {

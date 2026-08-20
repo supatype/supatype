@@ -521,7 +521,7 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
 
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
 
-  // Sort handler — shift-click for multi-column
+  // Sort handler: shift-click for multi-column
   const handleSort = useCallback((col: string, shiftKey: boolean) => {
     setSorts((prev) => {
       const existing = prev.findIndex((s) => s.column === col)
@@ -689,7 +689,7 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
 
   return (
     <div className="flex gap-4 h-full">
-      {/* Table selector sidebar — hidden when a specific table is already in the path */}
+      {/* Table selector sidebar, hidden when a specific table is already in the path */}
       {!initialTable && (
         <div className="w-[220px] flex-shrink-0">
           <Input

@@ -8,7 +8,7 @@ const anonKey = process.env["EXPO_PUBLIC_SUPATYPE_ANON_KEY"]
 
 if (url === undefined || url === "" || anonKey === undefined || anonKey === "") {
   throw new Error(
-    "Set EXPO_PUBLIC_SUPATYPE_URL and EXPO_PUBLIC_SUPATYPE_ANON_KEY (run `supatype keys` / `supatype dev` — see .env.example).",
+    "Set EXPO_PUBLIC_SUPATYPE_URL and EXPO_PUBLIC_SUPATYPE_ANON_KEY (run `supatype keys` / `supatype dev`, see .env.example).",
   )
 }
 

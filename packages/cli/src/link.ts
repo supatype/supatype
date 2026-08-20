@@ -23,7 +23,7 @@ export interface ProjectLink {
   defaultEnvironment: string
   /** Access token (cloud user JWT) or self-host SERVICE_ROLE_KEY. */
   token?: string
-  /** Cloud GoTrue refresh token — used to renew short-lived access JWTs. */
+  /** Cloud GoTrue refresh token, used to renew short-lived access JWTs. */
   refreshToken?: string
   orgId?: string | undefined
   cloudApiUrl?: string

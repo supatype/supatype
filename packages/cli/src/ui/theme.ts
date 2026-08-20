@@ -1,5 +1,5 @@
 /**
- * Supatype terminal design tokens — shared by Ink components and plain CI output.
+ * Supatype terminal design tokens, shared by Ink components and plain CI output.
  */
 
 export const RESET = "\x1b[0m"

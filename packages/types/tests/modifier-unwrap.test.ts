@@ -5,12 +5,12 @@ import type { Localized, Model, Optional, UUID } from "../src/index.js"
  * Reading a modifier-wrapped field off a row type.
  *
  * This was `TS2589: Type instantiation is excessively deep and possibly infinite` for *any* `Optional`
- * field — not an exotic case: `post.nick` on a model with one optional column. A brand is an
+ * field: not an exotic case: `post.nick` on a model with one optional column. A brand is an
  * intersection carrying an optional phantom property, so every type structurally satisfies
  * `Modifier<Name, infer _>`; unwrapping one level produced the inner type, which still reported as a
  * modifier, so the unwrap never reached a fixed point.
  *
- * These read as ordinary assertions about the row shape, which is the point — a type nobody can index
+ * These read as ordinary assertions about the row shape, which is the point, a type nobody can index
  * into is not a type users have.
  */
 type Post = Model<{

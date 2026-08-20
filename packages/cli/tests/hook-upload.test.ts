@@ -86,7 +86,7 @@ describe("readHookUpload", () => {
   })
 
   it("refuses a hook with a second file rather than dropping it", () => {
-    // Silent truncation would deploy successfully and fail at import — which reads to the caller as
+    // Silent truncation would deploy successfully and fail at import, which reads to the caller as
     // that table's writes being broken for no visible reason.
     const { cwd, hooks } = project()
     writeHook(hooks, "moderate-post", HANDLER, { "helpers.ts": "export const x = 1\n" })

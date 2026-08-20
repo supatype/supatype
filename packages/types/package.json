@@ -1,6 +1,7 @@
 {
   "name": "@supatype/types",
   "version": "0.1.5",
+  "license": "MIT",
   "description": "Pure type primitives for Supatype RFC v2",
   "type": "module",
   "main": "./dist/index.js",

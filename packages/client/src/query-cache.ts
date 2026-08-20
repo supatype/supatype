@@ -45,7 +45,7 @@ function parseJwtPayload(token: string): JwtPayload | null {
   }
 }
 
-/** Auth component for cache keys — mirrors server IdentityForCache. */
+/** Auth component for cache keys, mirrors server IdentityForCache. */
 export function identityFingerprint(
   headers: Record<string, string>,
   scope: "public" | "user",

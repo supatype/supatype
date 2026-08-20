@@ -148,7 +148,7 @@ export function Dashboard(): React.ReactElement {
                   </button>
                   {!canSaveMore && !activeView && (
                     <span className="text-xs text-muted-foreground">
-                      {limitLabel} view limit reached — upgrade to save more
+                      {limitLabel} view limit reached, upgrade to save more
                     </span>
                   )}
                   <button
@@ -497,7 +497,7 @@ function SignupsChartBlock(): React.ReactElement {
   return (
     <div className="p-5">
       <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">
-        New Signups — last 30 days
+        New Signups: last 30 days
       </h3>
       {data.length === 0 ? (
         <p className="text-sm text-muted-foreground">No signup data yet</p>

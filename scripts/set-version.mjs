@@ -5,7 +5,7 @@
  * Usage: node scripts/set-version.mjs 0.1.0-alpha.1
  *
  * Only updates the "version" field. Internal workspace:* dependencies are left
- * as-is — pnpm automatically rewrites them to the concrete version at publish
+ * as-is: pnpm automatically rewrites them to the concrete version at publish
  * time, so the lockfile stays valid throughout the release CI run.
  */
 import { readFileSync, writeFileSync } from "node:fs"
@@ -73,6 +73,22 @@ for (const dir of dockerVersioned) {
   }
 }
 
-// Examples are private packages — keep workspace:* so the lockfile stays valid.
+// Examples are private packages, so keep workspace:* so the lockfile stays valid.
+
+// The standalone binary has no package.json to read at runtime, so the version has to be a
+// value in the source before it is bundled. Same approach as embed-release-pubkey.mjs.
+const embeddedVersionFile = join(packagesDir, "cli", "src", "cli-version-embedded.ts")
+const marker = /^export const EMBEDDED_CLI_VERSION: string = ".*"$/m
+const embedded = readFileSync(embeddedVersionFile, "utf8")
+if (!marker.test(embedded)) {
+  console.error(`set-version: EMBEDDED_CLI_VERSION marker not found in ${embeddedVersionFile}`)
+  process.exit(1)
+}
+writeFileSync(
+  embeddedVersionFile,
+  embedded.replace(marker, `export const EMBEDDED_CLI_VERSION: string = ${JSON.stringify(version)}`),
+  "utf8",
+)
+console.log(`\nstandalone CLI: EMBEDDED_CLI_VERSION → ${version}`)
 
 console.log(`\nSet ${updated} packages to v${version}`)

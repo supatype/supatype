@@ -32,7 +32,7 @@ export type Profile = Model<
   }
 >
 
-/** Shared lobby chat — realtime INSERT events on `chat_message`. */
+/** Shared lobby chat: realtime INSERT events on `chat_message`. */
 export type ChatMessage = Model<
   {
     id: UUID

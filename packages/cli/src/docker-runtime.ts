@@ -1,5 +1,5 @@
 /**
- * Docker daemon availability — used before `docker compose` and other docker CLI calls.
+ * Docker daemon availability: used before `docker compose` and other docker CLI calls.
  */
 
 import { spawnSync } from "node:child_process"
@@ -41,7 +41,7 @@ export function probeDockerDaemon(): DockerDaemonProbe {
   const versionStderr = (version.stderr ?? "").trim()
   const versionDetail = `${versionStderr}${version.stdout ?? ""}`.trim()
 
-  // No client version — CLI missing or broken.
+  // No client version: CLI missing or broken.
   if (!clientVersion) {
     return {
       ok: false,
@@ -51,7 +51,7 @@ export function probeDockerDaemon(): DockerDaemonProbe {
   }
 
   // Client is present but daemon refused (paused/stopped). `docker info` can hang
-  // while paused on Docker Desktop — use the version stderr and skip info.
+  // while paused on Docker Desktop, use the version stderr and skip info.
   if (version.status !== 0 && versionStderr) {
     return { ok: false, reason: "daemon_unavailable", detail: versionStderr }
   }
@@ -104,7 +104,7 @@ function dockerUnavailableHints(probe: Extract<DockerDaemonProbe, { ok: false }>
   return hints
 }
 
-/** @deprecated Tests only — use `reportDockerUnavailable`. */
+/** @deprecated Tests only: use `reportDockerUnavailable`. */
 export function formatDockerUnavailableMessage(
   probe: Extract<DockerDaemonProbe, { ok: false }>,
 ): string {
@@ -142,7 +142,7 @@ export function reportDockerUnavailable(
 export function requireDockerDaemon(opts?: DockerReportOptions): void {
   const probe = probeDockerDaemon()
   if (probe.ok) return
-  // Dev TUI patches console — restore stderr before printing a fatal message.
+  // Dev TUI patches console, restore stderr before printing a fatal message.
   if (getActiveDevSession()) {
     endDevSession()
   }

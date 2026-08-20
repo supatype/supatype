@@ -1,5 +1,5 @@
 /**
- * Pre-signed URL security — Task 45
+ * Pre-signed URL security: Task 45
  *
  * For private bucket files, generate and validate pre-signed URLs using
  * HMAC-SHA256. These URLs contain:

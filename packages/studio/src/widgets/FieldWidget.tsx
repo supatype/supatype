@@ -44,7 +44,7 @@ export interface WidgetProps {
 
 /**
  * Engine admin JSON declares `derivedText`; older bundles may still expose `sources`/`template`
- * on `widget: "text"` — route those to DerivedTextWidget so previews track like slug.
+ * on `widget: "text"`: route those to DerivedTextWidget so previews track like slug.
  */
 export function normalizeDerivedPreviewFieldConfig(config: FieldConfig): FieldConfig {
   if (config.widget === "derivedText") return config

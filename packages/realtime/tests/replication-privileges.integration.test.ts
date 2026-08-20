@@ -7,7 +7,7 @@ import type { WalChange } from "../src/types.js"
  * What privilege realtime actually needs.
  *
  * The listener used to run `CREATE PUBLICATION … FOR ALL TABLES` at startup, which requires
- * **superuser** — a privilege managed Postgres (RDS, Cloud SQL and friends) does not grant. It was
+ * **superuser**: a privilege managed Postgres (RDS, Cloud SQL and friends) does not grant. It was
  * the single biggest obstacle to running realtime against a database Supatype does not own, and it
  * did nothing: `wal2json` decodes from the replication slot, publications are a `pgoutput` concept,
  * and nothing read `pg_publication` after creating it.
@@ -40,7 +40,7 @@ describe.skipIf(!databaseUrl)("replication privileges", () => {
     admin = new pg.Client({ connectionString: databaseUrl })
     await admin.connect()
 
-    // A role that can create a replication slot but is *not* a superuser — the shape a managed
+    // A role that can create a replication slot but is *not* a superuser, the shape a managed
     // provider gives you.
     await admin.query(`
       DO $$ BEGIN
@@ -95,7 +95,7 @@ describe.skipIf(!databaseUrl)("replication privileges", () => {
       expect(slots.rows.length, "the non-superuser role should have created the slot").toBe(1)
       expect(slots.rows[0].plugin).toBe("wal2json")
 
-      // No *new* publication — the thing that required superuser must not have been recreated.
+      // No *new* publication: the thing that required superuser must not have been recreated.
       // Compared as a set rather than by name: the image ships one already, and `PUBLICATION_NAME`
       // is configurable, so "no publication called X" would prove the wrong thing.
       const publicationsAfter: string[] = (
@@ -109,7 +109,7 @@ describe.skipIf(!databaseUrl)("replication privileges", () => {
       await admin.query(`INSERT INTO public.${TABLE} VALUES (1, 'decoded without a publication')`)
 
       // Wait for *this* table. The slot decodes the whole database, so a sibling integration test
-      // running concurrently will put its own changes through first — waiting for "any change"
+      // running concurrently will put its own changes through first, waiting for "any change"
       // makes this pass or fail on test ordering.
       const mine = () => changes.find((c) => c.table === TABLE && c.event === "INSERT")
       const deadline = Date.now() + 15_000

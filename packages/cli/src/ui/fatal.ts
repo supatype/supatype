@@ -27,7 +27,7 @@ export function fatalError(message: string, hints: string[] = [], opts?: FatalOp
   process.exit(opts?.exitCode ?? 1)
 }
 
-/** Top-level CLI catch — user-facing message without branding. */
+/** Top-level CLI catch: user-facing message without branding. */
 export function reportCliFatal(err: unknown): void {
   const message = err instanceof Error ? err.message : String(err)
   error(message)

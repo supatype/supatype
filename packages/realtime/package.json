@@ -1,7 +1,8 @@
 {
   "name": "@supatype/realtime",
   "version": "0.1.5",
-  "description": "Supatype realtime service \u00e2\u20ac\u201d WebSocket server with Postgres logical replication, presence, and broadcast",
+  "license": "Apache-2.0",
+  "description": "Supatype realtime service â€” WebSocket server with Postgres logical replication, presence, and broadcast",
   "type": "module",
   "exports": {
     ".": {

@@ -1,5 +1,5 @@
 /**
- * Rich text rendering — converts Lexical JSON to HTML.
+ * Rich text rendering: converts Lexical JSON to HTML.
  */
 
 export type RichTextNode =

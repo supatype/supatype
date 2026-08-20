@@ -61,7 +61,7 @@ export class ReplicationListener {
   /**
    * Why realtime cannot run on this database, or null when it can.
    *
-   * Set when slot creation fails for a reason no amount of retrying fixes — `wal_level`, a missing
+   * Set when slot creation fails for a reason no amount of retrying fixes, `wal_level`, a missing
    * `wal2json`, a role without `REPLICATION`. The service stays up and reports this rather than
    * exiting, because the rest of the stack is unaffected and the operator's database may simply not
    * offer the feature.
@@ -76,8 +76,8 @@ export class ReplicationListener {
    * The connection is retried while it is unreachable rather than throwing, which used to take the
    * whole process down. The `db` healthcheck made that survivable in a Compose stack; an external
    * database has no container to wait on, and no healthcheck ever covered a database that restarts
-   * under a running service. A non-connection failure — a slot that cannot be created because
-   * `wal_level` is wrong, say — still propagates, because that is a message the operator needs.
+   * under a running service. A non-connection failure, a slot that cannot be created because
+   * `wal_level` is wrong, say, still propagates, because that is a message the operator needs.
    */
   async start(): Promise<void> {
     this.stopped = false
@@ -114,7 +114,7 @@ export class ReplicationListener {
       // The slot, and deliberately not a publication.
       //
       // This used to run `CREATE PUBLICATION … FOR ALL TABLES` first, which **requires superuser**
-      // — the strictest privilege anywhere in this service, and one managed Postgres (RDS, Cloud SQL)
+      //- the strictest privilege anywhere in this service, and one managed Postgres (RDS, Cloud SQL)
       // does not grant. It was the single biggest reason realtime could not run against a database
       // Supatype does not own. And it did nothing: `wal2json` decodes from the *slot*, publications
       // are a `pgoutput` concept, and nothing here consulted `pg_publication` after creating it.
@@ -148,7 +148,7 @@ export class ReplicationListener {
    * Re-establish a connection that has died under a running service.
    *
    * Without this, a database restart left realtime up and holding WebSocket clients while `poll()`
-   * logged the same error every interval forever — subscribers saw silence, not an error, which is
+   * logged the same error every interval forever, subscribers saw silence, not an error, which is
    * the worst of the available outcomes. Idempotent, because both the client's `error` event and the
    * next poll will usually notice the same failure.
    */
@@ -243,7 +243,7 @@ export class ReplicationListener {
         }
       }
     } catch (err) {
-      // Log but don't crash — replication errors are recoverable
+      // Log but don't crash, replication errors are recoverable
       console.error("[realtime] replication poll error:", err)
       // A lost connection is not recoverable by polling it again, which is what used to happen:
       // the same error every interval, forever, while subscribers saw silence.

@@ -1,6 +1,6 @@
 /**
  * Engine management commands:
- *   supatype engine status  — check if the engine container is reachable
+ *   supatype engine status: check if the engine container is reachable
  */
 
 import type { Command } from "commander"

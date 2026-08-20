@@ -6,7 +6,7 @@ on:
   push:
     branches: [main]
   schedule:
-    # CDN soak — weekly (install.sh path; linux only)
+    # CDN soak: weekly (install.sh path; linux only)
     - cron: "17 6 * * 1"
   workflow_dispatch:
 
@@ -124,7 +124,7 @@ jobs:
           retention-days: 3
 
   # Zero to running, from the workspace build: init (docker) → dev → an API that answers.
-  # Phase-10.6 row C21, kept here as provenance — the job is named for what it does.
+  # Phase-10.6 row C21, kept here as provenance, the job is named for what it does.
   # macOS runners have no Docker Desktop; Colima provides the daemon.
   zero-to-running:
     name: "zero to running: workspace CLI (${{ matrix.os }})"
@@ -138,7 +138,7 @@ jobs:
         # driver dies at "creating and starting" and no Docker daemon can come up there at all.
         #
         # `macos-15-intel`, not `macos-13`: that label was retired on 2025-12-04 and a job requesting
-        # it queues forever rather than failing — see the same note in supatype-postgres's
+        # it queues forever rather than failing, see the same note in supatype-postgres's
         # native-archives workflow, which is where the current Intel label is recorded.
         os: [ubuntu-22.04, macos-15-intel]
     env:
@@ -199,22 +199,26 @@ jobs:
           retention-days: 3
           if-no-files-found: warn
 
-  # The same journey through the published installer — `curl | sh` from the CDN rather than the
+  # The same journey through the published installer, `curl | sh` from the CDN rather than the
   # workspace build, so it exercises what a new user actually runs. Linux only; not Windows.
   # Phase-10.6 row C21.
-  # Runs on schedule + main pushes + manual dispatch (skips PRs to avoid CDN flakiness blocking reviews).
+  # Schedule + manual dispatch only. Not main pushes: no CLI has been published to the CDN
+  # yet: the release bundle does not build (ink and yoga-layout use top-level await, which
+  # esbuild cannot emit as CJS), so this job can only fail, and a permanently red main
+  # teaches everyone to ignore it. Restore the main-push trigger with the first v* tag that publishes the CLI.
   zero-to-running-cdn:
     name: "zero to running: curl | sh install (linux)"
     if: >
       github.event_name == 'schedule' ||
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/main')
+      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     env:
       SUPATYPE_ZTR_INSTALL: cdn
       SUPATYPE_ZTR_KEEP_ON_FAILURE: "1"
-      SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
+      # Deliberately no SUPATYPE_RELEASE_PUBLIC_KEY. The published binary embeds the key at
+      # release time; supplying it here would test a configuration no user has, and would
+      # hide a release that forgot to embed it, which every release so far would have.
 
     steps:
       # $RUNNER_TEMP, not ${{ runner.temp }}: the `runner` context does not exist in a

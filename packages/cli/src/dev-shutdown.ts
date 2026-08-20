@@ -1,5 +1,5 @@
 /**
- * Graceful shutdown for `supatype dev` — SIGINT, TUI Ctrl+C, terminal close,
+ * Graceful shutdown for `supatype dev`, SIGINT, TUI Ctrl+C, terminal close,
  * and a synchronous compose-down fallback on process exit.
  */
 
@@ -23,7 +23,7 @@ let forceQuitRequested = false
 let hooksRegistered = false
 let ignoreSigintUntil = 0
 
-/** SIGINT/SIGTERM hooks — call as soon as `supatype dev` starts (before compose is up). */
+/** SIGINT/SIGTERM hooks: call as soon as `supatype dev` starts (before compose is up). */
 export function ensureDevShutdownHooks(): void {
   if (hooksRegistered) return
   hooksRegistered = true
@@ -62,7 +62,7 @@ function syncComposeDownFallback(): void {
       { quiet: true },
     )
   } catch {
-    // best-effort — process is exiting
+    // best-effort: process is exiting
   }
   if (shutdownCwd) clearDevSessionLock(shutdownCwd)
 }
@@ -74,7 +74,7 @@ function onProcessExit(): void {
 export interface RegisterDevShutdownOptions {
   /** Sync `docker compose down` when async teardown cannot finish (terminal close, kill). */
   compose?: DevComposeShutdownFallback
-  /** Project root — clears `.supatype/dev-session.json` after shutdown. */
+  /** Project root: clears `.supatype/dev-session.json` after shutdown. */
   cwd?: string
 }
 
@@ -89,7 +89,7 @@ export function registerDevShutdown(
   ensureDevShutdownHooks()
 }
 
-/** TUI Ctrl+C — do not re-emit SIGINT (avoids double-fire on Windows raw mode). */
+/** TUI Ctrl+C: do not re-emit SIGINT (avoids double-fire on Windows raw mode). */
 export function requestDevShutdown(): void {
   ignoreSigintUntil = Date.now() + 400
   void runDevShutdown()
@@ -99,7 +99,7 @@ export function isDevShuttingDown(): boolean {
   return shuttingDown
 }
 
-/** @internal Tests — reset module state between cases. */
+/** @internal Tests: reset module state between cases. */
 export function resetDevShutdownForTests(): void {
   shutdownWork = null
   composeFallback = null
@@ -125,7 +125,7 @@ async function runDevShutdown(): Promise<void> {
     } catch {
       // best-effort terminal restore
     }
-    process.stderr.write("\n[supatype] Forced quit — Docker containers may still be running.\n")
+    process.stderr.write("\n[supatype] Forced quit: Docker containers may still be running.\n")
     process.stdout.write("\n")
     process.exit(130)
   }
@@ -145,7 +145,7 @@ async function runDevShutdown(): Promise<void> {
   } catch (err) {
     process.stderr.write(`[supatype] Shutdown failed: ${(err as Error).message}\n`)
     process.stderr.write(
-      "[supatype] Docker containers may still be running — try: supatype self-host compose down\n",
+      "[supatype] Docker containers may still be running, try: supatype self-host compose down\n",
     )
     syncComposeDownFallback()
     shutdownCompleted = true

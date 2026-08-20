@@ -2,7 +2,7 @@
  * Package a project's hooks for a managed stack.
  *
  * Self-hosted stacks need none of this: the worker mounts the project directory, so `hooks/` is already
- * where it looks. A managed project has no directory — its worker reads a ConfigMap, whose keys may only
+ * where it looks. A managed project has no directory, its worker reads a ConfigMap, whose keys may only
  * contain alphanumerics, `-`, `_` and `.`. So the tree is flattened here, where it can be checked and
  * explained, rather than in the deploy route where a dropped file would be silent.
  */
@@ -28,7 +28,7 @@ export interface HookUpload {
  * Rewrite the one import a hook handler is generated to make.
  *
  * `../_supatype/hooks.ts` is a path that cannot survive flattening, and it is the specifier our own
- * scaffold writes — so it is rewritten rather than refused. Any *other* relative import is refused
+ * scaffold writes: so it is rewritten rather than refused. Any *other* relative import is refused
  * below: it would resolve to nothing on the worker, and a hook that fails to import is a hooked table
  * whose writes all start failing.
  */
@@ -55,7 +55,7 @@ function unsupportedImports(source: string): string[] {
  * holding the service-role key with nothing able to call it. Uploading it buys nothing and widens what
  * runs with that credential.
  *
- * Throws with a message meant for a terminal when a handler cannot be flattened faithfully — the
+ * Throws with a message meant for a terminal when a handler cannot be flattened faithfully, the
  * alternative is a deploy that succeeds and a hook that fails to import, which reads to the caller as
  * the table's writes being broken for no visible reason.
  */

@@ -1,7 +1,8 @@
 {
   "name": "@supatype/storage",
   "version": "0.1.5",
-  "description": "Supatype storage service — file upload, download, and image transformation",
+  "license": "Apache-2.0",
+  "description": "Supatype storage service: file upload, download, and image transformation",
   "type": "module",
   "exports": {
     ".": {

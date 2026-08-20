@@ -482,7 +482,7 @@ export function RelationWidget({ config, value, onChange, readOnly }: WidgetProp
   )
 
   const slideoverTitle = slideoverId
-    ? `${config.label} — ${displayMap[slideoverId]?.label ?? slideoverId}`
+    ? `${config.label}: ${displayMap[slideoverId]?.label ?? slideoverId}`
     : config.label
 
   return (

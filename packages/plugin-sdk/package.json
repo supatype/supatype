@@ -1,7 +1,8 @@
 {
   "name": "@supatype/plugin-sdk",
   "version": "0.1.5",
-  "description": "Plugin SDK for building Supatype extensions — field types, composites, providers, and widgets",
+  "license": "MIT",
+  "description": "Plugin SDK for building Supatype extensions, field types, composites, providers, and widgets",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

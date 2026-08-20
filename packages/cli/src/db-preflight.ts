@@ -3,7 +3,7 @@
  *
  * Written for the bring-your-own-Postgres case: an external database will not look like
  * `supatype/postgres`, and the failures it produces are mostly indirect. The four API roles are
- * the sharpest example — every `GRANT` the engine emits is guarded with
+ * the sharpest example: every `GRANT` the engine emits is guarded with
  * `IF EXISTS (SELECT 1 FROM pg_roles …)`, so a missing role is skipped in silence and the symptom
  * is an API that cannot switch roles at all, days later.
  *
@@ -31,7 +31,7 @@ export interface CheckResult {
   /** SQL that resolves it, if SQL can. */
   remedy?: string
   /**
-   * True when the remedy cannot run inside a transaction — server settings, chiefly. `--fix`
+   * True when the remedy cannot run inside a transaction, server settings, chiefly. `--fix`
    * refuses these and reports them rather than half-applying.
    */
   remedyNeedsOperator?: boolean
@@ -117,7 +117,7 @@ const REQUIRED_ROLES = ["anon", "authenticated", "service_role", "authenticator"
  * Stands in for the `authenticator` password when the operator has not supplied one.
  *
  * Fine to print for a human to replace; never acceptable to execute. `--fix` refuses when a remedy
- * still contains it, because the decision was that this credential belongs to the operator —
+ * still contains it, because the decision was that this credential belongs to the operator,
  * Supatype does not invent one for a database it does not own, and creating a role with a
  * placeholder password would be worse than refusing.
  */
@@ -225,13 +225,13 @@ export async function runPreflight(
   })
 
   // `CREATE` on the database, which the check above only asked about when the target schema was
-  // missing — and `public` always exists, so on a database where the role cannot create schemas that
+  // missing: and `public` always exists, so on a database where the role cannot create schemas that
   // check passed while the stack could not start.
   //
   // Measured on a role with `CONNECT` and `USAGE ON SCHEMA public` but no `CREATE`: storage's
   // bootstrap fails `42501 permission denied for database`, and so does every one of the engine's own
   // schemas. Storage was the least examined service in this plan and this is the whole of what it
-  // needs — no extensions, no superuser, no replication, just somewhere to put `storage.buckets` and
+  // needs: no extensions, no superuser, no replication, just somewhere to put `storage.buckets` and
   // `storage.objects`.
   results.push({
     id: "create-schemas",
@@ -274,7 +274,7 @@ export async function runPreflight(
         // create role" because BYPASSRLS is superuser-only. Better to say so up front.
         (needsSuperuserForRoles(missing, privs.is_super)
           ? "\n         Note: service_role needs BYPASSRLS, which only a superuser can grant. " +
-            `This connection is not a superuser, so --fix cannot create it — have someone with ` +
+            `This connection is not a superuser, so --fix cannot create it, have someone with ` +
             `superuser apply the emitted SQL, or create service_role first.`
           : ""),
       remedy: roleRemedy(missing, opts.authenticatorPassword),
@@ -333,7 +333,7 @@ export async function runPreflight(
   results.push(
     extensionCheck("pgcrypto", installed, available, {
       title: "pgcrypto",
-      needs: "UUID primary keys — the engine emits gen_random_uuid() defaults.",
+      needs: "UUID primary keys, the engine emits gen_random_uuid() defaults.",
       whenMissing: "fail",
     }),
   )
@@ -359,14 +359,14 @@ export async function runPreflight(
     detail: installed.has("supatype_mask")
       ? "enforced by supatype_mask, the planner rewrite (tier 1)"
       : available.has("supatype_mask")
-        ? "supatype_mask is available but not installed — rules will be enforced by generated api views (tier 2)"
+        ? "supatype_mask is available but not installed, rules will be enforced by generated api views (tier 2)"
         : "enforced by generated api views (tier 2); supatype_mask is not available on this server",
     ...(!installed.has("supatype_mask") && {
       impact:
         "Tier 2 puts the masking expression in a view instead of the query planner. It is the same " +
         "behaviour with one exception: an aggregate over a masked column returns the sum of what the " +
-        "caller may read, where tier 1 raises. Unreachable through the API — PostgREST ships with " +
-        "aggregates disabled and Supatype never enables them — so this matters only for direct SQL " +
+        "caller may read, where tier 1 raises. Unreachable through the API, PostgREST ships with " +
+        "aggregates disabled and Supatype never enables them, so this matters only for direct SQL " +
         "against the api views. PostgREST is pointed at `api` instead of your managed schema, and the " +
         "API roles hold their privileges on the views rather than the tables.",
       ...(available.has("supatype_mask") && {
@@ -413,7 +413,7 @@ export async function runPreflight(
   // The definitive realtime check: create the slot realtime would create, then drop it.
   //
   // There is no catalog to consult. `wal2json` is a shared library, not an extension, so it never
-  // appears in `pg_available_extensions` — the only way to know whether this database can decode is
+  // appears in `pg_available_extensions`: the only way to know whether this database can decode is
   // to ask it to. Cloud SQL does not ship the plugin at all; plenty of managed Postgres will not
   // grant `REPLICATION`. Both produce a stack that looks healthy until the first subscription.
   //
@@ -448,7 +448,7 @@ export async function runPreflight(
           (names.length > 8 ? `, … and ${names.length - 8} more` : ""),
         impact:
           "These are not described by your schema. Model them, or keep them out of the managed " +
-          "schema — a push only manages what it created.",
+          "schema: a push only manages what it created.",
       })
     }
   }
@@ -488,7 +488,7 @@ function extensionCheck(
  * SQL to create the missing API roles.
  *
  * `authenticator` needs a password because PostgREST logs in as it; the others never do. The
- * password is the operator's to supply — Supatype does not invent a credential for a database it
+ * password is the operator's to supply, Supatype does not invent a credential for a database it
  * does not own.
  */
 function roleRemedy(missing: readonly string[], authenticatorPassword?: string): string {
@@ -518,7 +518,7 @@ function roleRemedy(missing: readonly string[], authenticatorPassword?: string):
  * Whether creating the missing roles needs superuser rather than merely CREATEROLE.
  *
  * `service_role` carries `BYPASSRLS`, and only a superuser may set that attribute. A CREATEROLE
- * operator — which is what managed Postgres typically gives you — gets "permission denied to
+ * operator: which is what managed Postgres typically gives you, gets "permission denied to
  * create role" with no indication that the attribute is the reason.
  */
 function needsSuperuserForRoles(missing: readonly string[], isSuperuser: boolean): boolean {
@@ -551,7 +551,7 @@ export function operatorRemedies(report: PreflightReport): CheckResult[] {
  * Postgres, so any failure rolls the whole thing back and the database is exactly as it was. That
  * is the guarantee worth having when the database belongs to someone else.
  *
- * Server settings are the exception and are never included — `ALTER SYSTEM` cannot run in a
+ * Server settings are the exception and are never included, `ALTER SYSTEM` cannot run in a
  * transaction, and needs a restart besides. Those are reported for the operator to do.
  */
 export async function applyRemedies(

@@ -34,7 +34,7 @@ function serviceRoleKey(cwd: string): string {
     readEnvValue(cwd, "SUPATYPE_SERVICE_ROLE_KEY", "").trim() ||
     readEnvValue(cwd, "SERVICE_ROLE_KEY", "").trim()
   if (!key) {
-    throw new Error("SERVICE_ROLE_KEY not found in .env — run supatype dev or supatype keys")
+    throw new Error("SERVICE_ROLE_KEY not found in .env, run supatype dev or supatype keys")
   }
   return key.trim()
 }
@@ -66,7 +66,7 @@ function formatCacheApiError(
     return "REST server cache is not available on this plan or deployment."
   }
   if (status === 503 && trimmed.includes("valkey")) {
-    return "Valkey is not configured — server-side REST cache requires Valkey (supatype dev with docker)."
+    return "Valkey is not configured, server-side REST cache requires Valkey (supatype dev with docker)."
   }
   return `${operation} failed (${status}): ${trimmed || "(empty body)"}`
 }

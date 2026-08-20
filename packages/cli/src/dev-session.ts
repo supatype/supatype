@@ -1,5 +1,5 @@
 /**
- * `supatype dev` output session — Ink dashboard (default) or interleaved stream mode.
+ * `supatype dev` output session, Ink dashboard (default) or interleaved stream mode.
  */
 
 import { render, type Instance } from "ink"
@@ -32,7 +32,7 @@ export function beginDevSession(mode: DevUiMode): DevSession {
   return activeSession
 }
 
-/** @deprecated Ink starts in beginDevSession — kept for callers that invoke late. */
+/** @deprecated Ink starts in beginDevSession, kept for callers that invoke late. */
 export function startDevSession(): void {
   activeSession?.startInk()
 }
@@ -47,7 +47,7 @@ export function endDevSession(): void {
   activeSession = null
 }
 
-/** @deprecated Dev prompts render inside the Ink dashboard — no suspend needed. */
+/** @deprecated Dev prompts render inside the Ink dashboard, no suspend needed. */
 export function suspendDevSessionForPrompt(): void {
   prepareStdinForInteractivePrompt()
 }
@@ -58,12 +58,12 @@ export function prepareStdinForInteractivePrompt(): void {
   process.stdin.resume()
 }
 
-/** @deprecated Dev prompts render inside the Ink dashboard — no resume needed. */
+/** @deprecated Dev prompts render inside the Ink dashboard, no resume needed. */
 export function resumeDevSessionAfterPrompt(): void {
-  // no-op — prompts are Ink overlays
+  // no-op: prompts are Ink overlays
 }
 
-/** @deprecated Use Ink overlay prompts — runs fn without tearing down the dashboard. */
+/** @deprecated Use Ink overlay prompts, runs fn without tearing down the dashboard. */
 export async function withDevSessionSuspended<T>(fn: () => Promise<T>): Promise<T> {
   return fn()
 }

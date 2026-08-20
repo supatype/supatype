@@ -1,5 +1,5 @@
 /**
- * Integration test — Task 91: SDK rate limit handling
+ * Integration test: Task 91: SDK rate limit handling
  *
  * Simulates 429 with Retry-After: 2 -> SDK waits -> retries -> succeeds.
  */
@@ -23,7 +23,7 @@ function mockResponse(status: number, body: unknown = {}, headers?: Record<strin
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
-describe("Task 91 — SDK rate limit integration", () => {
+describe("Task 91: SDK rate limit integration", () => {
   beforeEach(() => {
     vi.restoreAllMocks()
     vi.useFakeTimers()
@@ -144,7 +144,7 @@ describe("Task 91 — SDK rate limit integration", () => {
 
     // Wait for 429 retry (1s)
     await vi.advanceTimersByTimeAsync(1100)
-    // Wait for 503 retry (1000ms — second retry delay)
+    // Wait for 503 retry (1000ms, second retry delay)
     await vi.advanceTimersByTimeAsync(1100)
 
     const res = await promise

@@ -87,7 +87,7 @@ export async function withComposeSchemaPushLock<T>(
   //
   // Killing the local `docker` client does not stop the process inside the container: `docker
   // compose exec` does not forward the signal. With a sleeping session that meant every push
-  // left a backend holding this advisory lock for 24 hours — so `supatype push` never exited and
+  // left a backend holding this advisory lock for 24 hours, so `supatype push` never exited and
   // the next push blocked on it. Observed end-to-end before this change.
   //
   // Closing stdin *does* propagate: psql sees EOF, exits, and the session ends, which is what
@@ -102,7 +102,7 @@ export async function withComposeSchemaPushLock<T>(
   holder.stdin?.write(
     `SELECT pg_advisory_lock(${SCHEMA_PUSH_LOCK_CLASSID}, ${SCHEMA_PUSH_LOCK_OBJID});\n`,
   )
-  // Deliberately not ended — the open pipe is what keeps the session, and the lock, alive.
+  // Deliberately not ended: the open pipe is what keeps the session, and the lock, alive.
   holder.stderr?.on("data", (chunk: Buffer) => {
     stderrBuf += chunk.toString()
   })
@@ -131,7 +131,7 @@ export async function withComposeSchemaPushLock<T>(
 /**
  * End the holder session, then confirm the lock is actually gone.
  *
- * Closing stdin is the mechanism; the check is because a leaked holder is silent and expensive —
+ * Closing stdin is the mechanism; the check is because a leaked holder is silent and expensive,
  * it blocks every later push. If EOF did not do it, terminate the backend directly.
  */
 async function releaseHolder(

@@ -1,7 +1,7 @@
 import { defineConfig } from "@supatype/cli"
 
 /**
- * Expo auth example — full Supatype project (schema + local docker stack).
+ * Expo auth example: full Supatype project (schema + local docker stack).
  *
  * Workflow: `supatype keys` → `supatype push` → `supatype dev` → `pnpm start`
  * API gateway: Kong on SUPATYPE_KONG_PORT (default 18473).

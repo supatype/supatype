@@ -80,7 +80,7 @@ export function ConfirmPrompt({ spec, onSubmit }: ConfirmPromptProps): React.Rea
         ) : (
           <Text dimColor>No</Text>
         )}
-        <Text dimColor> — y/n, ←/→, enter</Text>
+        <Text dimColor>: y/n, ←/→, enter</Text>
       </Text>
     </Box>
   )

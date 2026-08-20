@@ -1,5 +1,5 @@
 /**
- * Integration test — Task 90: SDK retry behaviour
+ * Integration test: Task 90: SDK retry behaviour
  *
  * Simulates 503 -> SDK retries 3x with backoff -> succeeds or throws after max retries.
  */
@@ -22,7 +22,7 @@ function mockResponse(status: number, body: unknown = {}): Response {
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
-describe("Task 90 — SDK retry integration", () => {
+describe("Task 90: SDK retry integration", () => {
   beforeEach(() => {
     vi.restoreAllMocks()
     vi.useFakeTimers()
@@ -159,7 +159,7 @@ describe("Task 90 — SDK retry integration", () => {
     vi.useFakeTimers()
   })
 
-  it("respects retry: false option — no retries attempted", async () => {
+  it("respects retry: false option, no retries attempted", async () => {
     const fetchSpy = vi.fn().mockResolvedValue(mockResponse(503))
     vi.stubGlobal("fetch", fetchSpy)
 

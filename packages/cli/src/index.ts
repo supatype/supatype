@@ -1,5 +1,5 @@
 /**
- * @supatype/cli — programmatic API for invoking the engine.
+ * @supatype/cli: programmatic API for invoking the engine.
  *
  * For CLI usage: use the `supatype` binary.
  */

@@ -1,5 +1,5 @@
 /**
- * `supatype dev` when `provider: docker` — full self-host Compose stack (Kong gateway).
+ * `supatype dev` when `provider: docker`, full self-host Compose stack (Kong gateway).
  */
 
 import { existsSync, mkdirSync, writeFileSync } from "node:fs"
@@ -99,10 +99,10 @@ async function resolveDevDbPort(cwd: string): Promise<number> {
 /**
  * The database URL to hand a tool, from wherever it happens to run.
  *
- * The compose helpers below describe the `db` *container* — on the host at
+ * The compose helpers below describe the `db` *container*, on the host at
  * `SUPATYPE_DEV_DB_PORT`, or in-network at `db:5432`. Neither exists for a project pointed at an
  * external database, and passing one produced "pool timed out while waiting for an open connection"
- * — a message with nothing in it about the URL being wrong.
+ *- a message with nothing in it about the URL being wrong.
  */
 function projectDatabaseUrl(cwd: string, config: SupatypeProjectConfig, inNetwork = false): string {
   if (usesExternalDatabase(config)) return connectionString(config)
@@ -193,7 +193,7 @@ async function resolveKongPort(cwd: string): Promise<number> {
  * Bring up the compose `db` service and wait for it to answer.
  *
  * A no-op when the project uses an external database: there is no such service, the database is
- * already running, and its readiness is the operator's — `supatype db check` is what reports on it.
+ * already running, and its readiness is the operator's, `supatype db check` is what reports on it.
  * Four call sites did this inline, so an external project hit `compose up -d db` against a compose
  * file that deliberately has no `db`.
  */
@@ -233,7 +233,7 @@ function upsertDevComposeEnv(
   // `POSTGRES_PASSWORD` and `JWT_SECRET` are deliberately absent.
   //
   // They used to be pinned here to published constants on every `dev` run, against the same
-  // `.env` a self-host deployment reads — so a project could not hold its own secrets, and one
+  // `.env` a self-host deployment reads, so a project could not hold its own secrets, and one
   // `dev` after generating them put the published values back with nothing to show it. They are
   // now resolved from `.env` (see `local-secrets.ts`) and written by `init` alone.
   //
@@ -242,12 +242,12 @@ function upsertDevComposeEnv(
   // would desync them from the secret that validates them.
   const updates: Record<string, string> = {
     // The docker dev path renders the *self-host* compose file, where the secrets have no
-    // defaults — an unset value is a hard compose error rather than a service quietly starting
+    // defaults: an unset value is a hard compose error rather than a service quietly starting
     // with a published constant. This guarantees presence without overwriting: only keys
     // genuinely absent from `.env` are filled, and with the value the project has been running
     // with rather than a fresh one.
     ...seedMissingLocalSecrets(cwd),
-    // Project configuration, seeded not overwritten — see seedMissingDatabaseIdentity.
+    // Project configuration, seeded not overwritten, see seedMissingDatabaseIdentity.
     ...seedMissingDatabaseIdentity(cwd),
     ANON_KEY: anonKey,
     SERVICE_ROLE_KEY: serviceRoleKey,
@@ -264,13 +264,13 @@ function upsertDevComposeEnv(
     ...(localServerImage !== undefined && { SUPATYPE_SERVER_IMAGE: localServerImage }),
   }
   // Never for an external database: this URL describes the `db` container, which that project does
-  // not have. Writing it overwrote the operator's own DATABASE_URL — the value the whole stack and
-  // every CLI command reads — with a DSN pointing at a database that does not exist. Found by
+  // not have. Writing it overwrote the operator's own DATABASE_URL, the value the whole stack and
+  // every CLI command reads, with a DSN pointing at a database that does not exist. Found by
   // rehearsing a push against a real external Postgres, where the compose guard then refused to
   // proceed because .env and the config disagreed. They disagreed because of this line.
   if (devDbPort !== undefined && !usesExternalDatabase(config)) {
     updates.SUPATYPE_DEV_DB_PORT = String(devDbPort)
-    // User and database from the project, not hardcoded — same reason as
+    // User and database from the project, not hardcoded, same reason as
     // `seedMissingDatabaseIdentity`: a project not named "supatype" had this URL pointing at a
     // database that does not exist.
     const dbUser = readEnvValue(cwd, "POSTGRES_USER", "supatype_admin")
@@ -358,7 +358,7 @@ function dumpComposeDbLogs(
     maxBuffer: 10 * 1024 * 1024,
   })
   const body = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim()
-  const content = body || `(empty — docker compose logs db exit ${result.status ?? "?"})\n`
+  const content = body || `(empty, docker compose logs db exit ${result.status ?? "?"})\n`
   try {
     writeFileSync(logPath, content)
   } catch {
@@ -403,7 +403,7 @@ async function waitStorageApiReady(
       const body = await res.text()
       const kongUpstreamDown = body.includes("invalid response was received from the upstream server")
       if (!kongUpstreamDown && res.status !== 503) {
-        // Non-transient storage response (e.g. 401) — stop waiting.
+        // Non-transient storage response (e.g. 401), stop waiting.
         return
       }
     } catch {
@@ -412,7 +412,7 @@ async function waitStorageApiReady(
     await new Promise((r) => setTimeout(r, 1000))
   }
   console.warn(
-    `[supatype] Storage API at ${url} did not become ready within ${maxSec}s — bucket provisioning may fail.`,
+    `[supatype] Storage API at ${url} did not become ready within ${maxSec}s, bucket provisioning may fail.`,
   )
 }
 
@@ -445,7 +445,7 @@ async function refreshSchemaArtifacts(
     await ensureEngine()
   } catch (err) {
     console.warn(
-      `[supatype] Host engine unavailable — admin/types not refreshed: ${(err as Error).message}`,
+      `[supatype] Host engine unavailable, admin/types not refreshed: ${(err as Error).message}`,
     )
     return
   }
@@ -480,7 +480,7 @@ async function refreshSchemaArtifacts(
     console.log("[supatype] Admin config written to .supatype/admin-config.json")
   } catch (err) {
     console.warn(
-      `[supatype] Admin config generation failed — Studio may show stale field widgets: ${(err as Error).message}`,
+      `[supatype] Admin config generation failed, Studio may show stale field widgets: ${(err as Error).message}`,
     )
   }
 }
@@ -498,7 +498,7 @@ async function runComposeSchemaPush(
   const supatypeDir = join(cwd, ".supatype")
   mkdirSync(supatypeDir, { recursive: true })
   const astPath = join(supatypeDir, "schema.ast.json")
-  // Always materialise on disk — schema-engine reads via bind mount; skip must not omit the write.
+  // Always materialise on disk, schema-engine reads via bind mount; skip must not omit the write.
   writeFileSync(astPath, astJson)
   if (astJson === _lastPushedAst && astJson !== _lastFailedAst) return
 
@@ -506,7 +506,7 @@ async function runComposeSchemaPush(
     throw new Error(`Failed to write schema AST at ${astPath}`)
   }
 
-  // Admin + types come from the AST only (no DB) — refresh before push so Studio stays
+  // Admin + types come from the AST only (no DB), refresh before push so Studio stays
   // in sync even when migration fails (e.g. bad engine image, lossy column change).
   await refreshSchemaArtifacts(cwd, config, ast)
 
@@ -552,7 +552,7 @@ async function runComposeSchemaPush(
     }
     return result
   }
-  // B: only hold the advisory lock when realtime is already decoding — first-boot
+  // B: only hold the advisory lock when realtime is already decoding, first-boot
   // push (db only) must not take the lock; that path crashed under lock+DDL in CI.
   const push = composeServiceIsRunning(paths, cwd, composeProject, "realtime")
     ? await withComposeSchemaPushLock(paths, cwd, composeProject, runPush)
@@ -711,7 +711,7 @@ async function runComposeEngineDiff(
 
 /**
  * `supatype diff` when `provider: docker`. Uses in-compose schema-engine unless
- * `overrides.engine` is set — then Postgres is published to the host and diff runs
+ * `overrides.engine` is set: then Postgres is published to the host and diff runs
  * through the local engine binary.
  */
 export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfig): Promise<DiffResult> {
@@ -772,7 +772,7 @@ export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfi
 
 /**
  * `supatype push` when `provider: docker`. Uses in-compose schema-engine unless
- * `overrides.engine` is set — then Postgres is published to the host and push runs
+ * `overrides.engine` is set: then Postgres is published to the host and push runs
  * through the local engine binary (AST v2, contributor builds).
  */
 export async function pushSchemaDocker(cwd: string, config: SupatypeProjectConfig): Promise<void> {
@@ -782,7 +782,7 @@ export async function pushSchemaDocker(cwd: string, config: SupatypeProjectConfi
   const project = composeProjectName(config.project.name)
   const kongPort = await resolveKongPort(cwd)
   // No dev db port for an external database: `ensureDevDbPort` allocates a host port for the `db`
-  // container *and persists a matching DATABASE_URL*, which overwrote the operator's own URL — the
+  // container *and persists a matching DATABASE_URL*, which overwrote the operator's own URL, the
   // one the whole stack and every CLI command reads.
   const devDbPort =
     hasEngineOverride(config) && !usesExternalDatabase(config)
@@ -798,7 +798,7 @@ export async function pushSchemaDocker(cwd: string, config: SupatypeProjectConfi
   const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
   const pushBrand = { intro: "Push schema" }
 
-  console.log(`[supatype] provider: docker — applying schema via compose (project ${project})...`)
+  console.log(`[supatype] provider docker, applying schema via compose (project ${project})...`)
   await startComposeDatabase(config, paths, cwd, project, pushBrand)
 
   const schemaPath = schemaPathFromProject(config, cwd)
@@ -833,7 +833,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   const project = composeProjectName(config.project.name)
   const kongPort = await resolveKongPort(cwd)
   // No dev db port for an external database: `ensureDevDbPort` allocates a host port for the `db`
-  // container *and persists a matching DATABASE_URL*, which overwrote the operator's own URL — the
+  // container *and persists a matching DATABASE_URL*, which overwrote the operator's own URL, the
   // one the whole stack and every CLI command reads.
   const devDbPort =
     hasEngineOverride(config) && !usesExternalDatabase(config)
@@ -850,7 +850,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
 
   ensureDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, devDbPort, localServerImage)
 
-  console.log(`[supatype] provider: docker — starting self-host Compose stack (project ${project}, gateway :${kongPort})...`)
+  console.log(`[supatype] provider docker, starting self-host Compose stack (project ${project}, gateway :${kongPort})...`)
   const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
   if (ensureDevApiConfig(cwd)) {
     console.log("[supatype] API config written to .supatype/api-config.json")
@@ -898,7 +898,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
     console.log("[supatype] Bringing up Postgres (compose db)...")
   }
   await startComposeDatabase(config, paths, cwd, project, devBrand, 180_000, endDevSession)
-  // Settle before DDL — pg_isready can pass slightly before the instance is stable.
+  // Settle before DDL: pg_isready can pass slightly before the instance is stable.
   await new Promise((r) => setTimeout(r, 3000))
 
   // A: apply schema before realtime (and the rest of the stack) starts decoding WAL.
@@ -1034,7 +1034,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
     shutdownState.studioProc = studioProc
     if (studioProc) {
       console.log(
-        `[supatype] Studio (overrides.studio) — live reload proxied at http://localhost:${kongPort}/studio/`,
+        `[supatype] Studio (overrides.studio): live reload proxied at http://localhost:${kongPort}/studio/`,
       )
     }
   }
@@ -1122,6 +1122,6 @@ function grantAuthSchemaAccess(
     { cwd: composeDir, encoding: "utf8", timeout: 10_000 },
   )
   if (result.status !== 0) {
-    console.warn("[supatype] Could not grant service_role access to auth.users — Studio relation preview may fail.")
+    console.warn("[supatype] Could not grant service_role access to auth.users, Studio relation preview may fail.")
   }
 }

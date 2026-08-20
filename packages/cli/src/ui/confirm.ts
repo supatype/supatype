@@ -9,7 +9,7 @@ export interface ConfirmOptions {
 }
 
 /**
- * Yes/no confirmation — Ink overlay in dev, Ink flow in TTY, default otherwise.
+ * Yes/no confirmation: Ink overlay in dev, Ink flow in TTY, default otherwise.
  */
 export async function confirm(message: string, opts: ConfirmOptions = {}): Promise<boolean> {
   const fallback = opts.nonInteractive ?? opts.default ?? false

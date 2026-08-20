@@ -2,7 +2,7 @@
  * Check that every name in `functions.serviceRole` is a function that exists.
  *
  * The grant fails **closed**: a typo, or a function that has since been renamed, means that function
- * quietly does not receive the service-role key. Nothing breaks loudly — the handler simply reads
+ * quietly does not receive the service-role key. Nothing breaks loudly, the handler simply reads
  * `undefined` and whatever it does with the key stops working, at runtime, in a deploy that reported
  * success. So the name is checked where it is declared, against the directory it must match.
  *
@@ -77,7 +77,7 @@ export function checkServiceRoleRoutes(
       // Not an error: it was the documented form once, and the worker grants hooks whatever this says.
       // Still worth saying, because a reader would reasonably assume the line is what does the granting.
       warnings.push(
-        `  "${name}" is not needed — a hook receives the service-role key because only the API server ` +
+        `  "${name}" is not needed, a hook receives the service-role key because only the API server ` +
           `can reach it`,
       )
       continue
@@ -85,7 +85,7 @@ export function checkServiceRoleRoutes(
     if (!known.has(name)) {
       const where =
         searched.length > 1 ? ` (searched ${searched.join(", ")})` : ""
-      errors.push(`  "${name}" — no ${primary}/${name}/index.ts${where}`)
+      errors.push(`  "${name}": no ${primary}/${name}/index.ts${where}`)
       missing.push(name)
     }
   }

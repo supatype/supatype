@@ -1,6 +1,6 @@
 // ─── Admin panel CLI commands (Gap Appendices task 48) ──────────────────────
 //
-// `npx supatype admin create-user` — create an admin user in the project's
+// `npx supatype admin create-user`, create an admin user in the project's
 // auth.users table. First admin is ensured on `supatype dev` or `supatype push`.
 
 import type { Command } from "commander"
@@ -242,7 +242,7 @@ export function registerAdmin(program: Command): void {
       const pool = new pg.Pool({ connectionString: connection, max: 2 })
 
       try {
-        // Studio access is membership, not a claim — list the grant that
+        // Studio access is membership, not a claim, list the grant that
         // actually decides admission. LEFT JOIN, because a membership held by a
         // Supatype Cloud account has no row in this project's `auth.users`;
         // hiding those would make `list-users` disagree with who can log in.
@@ -308,7 +308,7 @@ export async function ensureFirstAdminUser(
       options,
     )
   } catch {
-    // Non-fatal — skip when DB is unreachable or auth schema is not ready
+    // Non-fatal: skip when DB is unreachable or auth schema is not ready
   } finally {
     await pool.end()
   }
@@ -528,7 +528,7 @@ async function createAdminUser(
  * the developer's own app roles, and letting it grant Studio access means a
  * developer assigning an app role could hand out admin UI access by accident.
  *
- * This is now the *only* grant, so a failure here is fatal to the command — a
+ * This is now the *only* grant, so a failure here is fatal to the command, a
  * user created without a membership row cannot reach Studio at all, and
  * reporting success would leave no clue why.
  */
@@ -591,12 +591,12 @@ async function authUsersTableExists(query: DbQuery): Promise<boolean> {
  *
  * Counts membership rows, not `app_metadata` claims: the claim no longer grants
  * anything, so counting it would report an admin exists while nobody can log in.
- * A missing table means the project has never been pushed — no admins.
+ * A missing table means the project has never been pushed, no admins.
  */
 async function hasAdminUsers(query: DbQuery): Promise<boolean> {
   // Postgres resolves relations at parse time, so the table has to be checked
   // separately rather than guarded inside the count query. Absent means the
-  // project has never been pushed — no admins, and `createAdminUser` will
+  // project has never been pushed, no admins, and `createAdminUser` will
   // create the table itself.
   if (!(await studioMembersTableExists(query))) return false
 

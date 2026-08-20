@@ -19,7 +19,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 if [[ ! -f "$CLI_BIN" ]]; then
-  echo "ERROR: CLI not found at $CLI_BIN — run 'pnpm build' first"
+  echo "ERROR: CLI not found at $CLI_BIN, run 'pnpm build' first"
   exit 1
 fi
 

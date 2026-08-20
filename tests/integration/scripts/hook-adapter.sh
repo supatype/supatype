@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Model hooks — prove the generated adapter works inside the real functions worker.
+# Model hooks: prove the generated adapter works inside the real functions worker.
 #
 # The unit tests compile the generated module with `tsc`. That catches types and syntax and cannot
 # catch the thing that actually matters here: whether the **worker** discovers a `hook()`-wrapped
@@ -41,7 +41,7 @@ trap cleanup EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 # Docker needs a host path its daemon understands. Under Git Bash / MSYS, `mktemp -d` gives
-# `/tmp/tmp.XXXX`, which the Windows daemon cannot resolve — and the failure surfaces later as a
+# `/tmp/tmp.XXXX`, which the Windows daemon cannot resolve, and the failure surfaces later as a
 # container that is simply not there, which is a poor thing to debug.
 mount_path() {
   if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else echo "$1"; fi
@@ -130,7 +130,7 @@ createServer((req, res) => {
 }).listen(Number(process.argv[2]))
 STUB
 
-# Credential probes: identical handlers in three positions — a plain public function, a public
+# Credential probes: identical handlers in three positions, a plain public function, a public
 # function named in `serviceRole`, and a hook that is named nowhere.
 mkdir -p "$WORK/functions/peek-key" "$WORK/functions/granted-fn" "$WORK/hooks/privileged"
 cat > "$WORK/functions/granted-fn/index.ts" <<'TS'
@@ -307,7 +307,7 @@ echo "$GRANTED_FN" | grep -q "super-secret-admin-key"   || fail "a public functi
 echo "  ✓ a public function named in serviceRole receives it"
 
 # Named nowhere, and still granted: a hook is procedural and unreachable from outside, so listing
-# every one would be friction with no attacker to stop — the same trust a trigger already has.
+# every one would be friction with no attacker to stop, the same trust a trigger already has.
 HOOK_PEEK="$(peeked hooks/privileged)"
 echo "$HOOK_PEEK" | grep -q "super-secret-admin-key"   || fail "a hook did not receive the key it gets by default: $HOOK_PEEK"
 echo "  ✓ a hook receives it without being listed"
@@ -319,7 +319,7 @@ echo "  ✓ and it does not persist into the next call"
 
 # ── The chain depth survives a handler that knows nothing about it ────────────
 # A hook holds the service-role key, so a hook writing to its own table re-enters the API and calls
-# itself again. The server refuses past a small depth — but only if the count survives the hop through
+# itself again. The server refuses past a small depth, but only if the count survives the hop through
 # handler code, and a handler writes with whatever client it likes.
 curl -s -o /dev/null -X POST "http://localhost:${PORT}/hooks/writer" \
   -H "content-type: application/json" -H "x-supatype-hook-depth: 2" -d '{}'
@@ -336,7 +336,7 @@ echo "  ✓ and it is not leaked to anyone else"
 # Cloud sets SUPATYPE_HOOKS_ROOT on every project's worker, and a project with functions but no hooks
 # has no such directory. Worth a real start rather than a unit test: `Deno.readDir` returns its iterable
 # without touching the filesystem, so the NotFound arrives during iteration and a `try` around the call
-# alone does not catch it — which crashed startup and took that project's working functions with it.
+# alone does not catch it, which crashed startup and took that project's working functions with it.
 PORT2=$((PORT + 1))
 if [ "$USE_DOCKER" = "1" ]; then
   CONTAINER2="${CONTAINER}-nohooks"
@@ -382,7 +382,7 @@ echo "  ✓ a missing hooks directory is not fatal"
 # ── The shape a free-tier project runs: one hook, no functions at all ─────────
 # Cloud gives each free-tier hook its own Deployment, pinned with SUPATYPE_FUNCTION_NAME and mounting
 # only a hooks root. The pin used to be checked per root, so "absent from the functions root" read as
-# "absent", and such a pod crashlooped — serving nothing, which the API server reads as the hook
+# "absent", and such a pod crashlooped, serving nothing, which the API server reads as the hook
 # refusing to answer, failing every write to its table.
 PORT3=$((PORT + 2))
 if [ "$USE_DOCKER" = "1" ]; then
@@ -425,7 +425,7 @@ echo "$HOOK_ONLY" | grep -q "super-secret-admin-key" \
   || fail "a per-hook worker did not serve its hook: $HOOK_ONLY"
 echo "  ✓ a worker pinned to one hook serves it with no functions root"
 
-# Same pin, but with a functions root mounted as well — a shape no template generates today and an
+# Same pin, but with a functions root mounted as well, a shape no template generates today and an
 # obvious one to reach for (pin a single hook on a worker that also holds functions). The pin used to be
 # checked per root, so the hook being absent from the *functions* root threw before the hooks root was
 # ever scanned.

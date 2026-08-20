@@ -41,7 +41,7 @@ export default defineConfig({
     allowedHosts: ["host.docker.internal", "localhost", "127.0.0.1"],
     // When SUPATYPE_PROXY_TARGET is set (injected by `supatype dev`), forward all
     // API paths to the backend server-side so the browser sees same-origin requests
-    // and CORS is never triggered — regardless of the server's CORS policy.
+    // and CORS is never triggered, regardless of the server's CORS policy.
     proxy: process.env.SUPATYPE_PROXY_TARGET
       ? {
           "/studio-config": { target: process.env.SUPATYPE_PROXY_TARGET, changeOrigin: true },

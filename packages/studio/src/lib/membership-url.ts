@@ -2,7 +2,7 @@
  * Where the Studio membership API lives, given the admin client's base URL.
  *
  * Self-host exposes the routes *beside* `/studio/proxy`, not inside it: the proxy
- * forwards to the data plane, and membership is not data-plane traffic — posting
+ * forwards to the data plane, and membership is not data-plane traffic, posting
  * through it would look for `/rest/v1/admin/studio-members`.
  *
  * Cloud already scopes the project in the path and exposes the routes as siblings

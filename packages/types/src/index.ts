@@ -10,8 +10,8 @@ declare const SUPATYPE_MODEL: unique symbol
  * vocabulary in a package that also exports `Block`, `Blocks` and `Localized`.
  *
  * The phantom property is **optional**, which is what keeps values usable: `id.toUpperCase()` works and
- * a plain string can be assigned to a `UUID`. It also means the label is not reliably *detectable* — any
- * type structurally satisfies a tag whose only property is optional — so this is for things that are
+ * a plain string can be assigned to a `UUID`. It also means the label is not reliably *detectable*, any
+ * type structurally satisfies a tag whose only property is optional, so this is for things that are
  * values (`UUID`, an access rule, the model marker) and never for field declarations. Declarations use
  * a required discriminator instead; see `Modifier`.
  *
@@ -24,11 +24,11 @@ type Tagged<TShape, TTag extends string> = TShape & {
 
 type Primitive<TName extends string, TShape> = Tagged<TShape, `primitive:${TName}`>
 /**
- * A field *declaration* wrapper — `Optional<string>`, `Unique<Slug>`, `Localized<RichText>`.
+ * A field *declaration* wrapper, `Optional<string>`, `Unique<Slug>`, `Localized<RichText>`.
  *
  * **Nominal, with a required discriminator**, unlike `Tagged`. Nobody ever holds a value of type
  * `Optional<string>`: you declare a field with it and read the row shape `Model<>` derives, so this does
- * not need to be assignable to its own inner type — and making it so was the cause of three defects.
+ * not need to be assignable to its own inner type, and making it so was the cause of three defects.
  *
  * As an intersection carrying an optional tag, every type satisfied `Modifier<Name, infer _>`: a plain
  * `string` reported as `Optional`, so unwrapping never reached a fixed point (`TS2589` on reading any
@@ -85,14 +85,14 @@ export type GeoPoint = Primitive<"GeoPoint", { lat: number; lng: number }>
  * `amount` is a **string**, like {@link Money} and {@link Decimal}, because the value crosses the
  * wire as JSON: `bigint` cannot be serialised (`JSON.stringify(1n)` throws) and `number` loses
  * integers past 2^53. Use {@link Money} or {@link Decimal} instead when you want a numeric column
- * to sum and index — this type keeps the currency with the amount, which a scalar column cannot.
+ * to sum and index, this type keeps the currency with the amount, which a scalar column cannot.
  */
 export type Currency<Code extends string = string> = Primitive<"Currency", { amount: string; code: Code }>
 
 /** Link target for {@link Button}. */
 export type ButtonTarget = "_self" | "_blank"
 
-/** CMS button / CTA — label, href, optional aria-label and target (stored as JSONB). */
+/** CMS button / CTA, label, href, optional aria-label and target (stored as JSONB). */
 export type ButtonValue = {
   label: string
   href: string
@@ -103,11 +103,11 @@ export type ButtonValue = {
 export type Button = Primitive<"Button", ButtonValue>
 /**
  * Lexical JSON in DB/UI.
- * **`string`** is allowed in TS for defaults, seeds, and incremental adoption (plain text or Lexical JSON string — not HTML).
+ * **`string`** is allowed in TS for defaults, seeds, and incremental adoption (plain text or Lexical JSON string, not HTML).
  *
  * Schema defaults:
- * - `RichText<"Your sentence">` — plain-text default (sugar)
- * - `Default<RichText, "Your sentence">` — same, composes with modifiers
+ * - `RichText<"Your sentence">`: plain-text default (sugar)
+ * - `Default<RichText, "Your sentence">`: same, composes with modifiers
  * - Lexical document: pass a JSON string literal or use `Default<RichText, '{"root":…}'>`
  */
 export type RichText<D extends string = never> = Primitive<
@@ -157,7 +157,7 @@ export type BucketConfig<
  * Names a logical storage bucket. Export `type AvatarBucket = Bucket<"avatars", { … }>` and pass
  * {@link ImageAsset}<AvatarBucket> / {@link FileAsset}<AvatarBucket> on models.
  *
- * Config is erased at runtime — only `@supatype/cli` reads it via the TypeScript type checker shape.
+ * Config is erased at runtime, only `@supatype/cli` reads it via the TypeScript type checker shape.
  */
 export type Bucket<
   TName extends string = string,
@@ -169,7 +169,7 @@ export type Asset<TBucket extends Bucket = Bucket> = Primitive<"Asset", {
   mimeType?: string
   size?: number
 }>
-/** Second generic on {@link ImageAsset} / {@link FileAsset} — parsed by CLI only. */
+/** Second generic on {@link ImageAsset} / {@link FileAsset}, parsed by CLI only. */
 export type AssetFieldOptions = {
   /** When true, stored as JSONB locale map of storage refs. Default false. */
   localized?: boolean
@@ -193,7 +193,7 @@ export type LocaleConfig<
   TDefault extends TLocales[number] = TLocales[number],
 > = Primitive<"LocaleConfig", { locales: TLocales; defaultLocale: TDefault }>
 /**
- * Translatable field — stored as JSONB with locale keys in Postgres,
+ * Translatable field: stored as JSONB with locale keys in Postgres,
  * e.g. `{ "en": "Hello", "de": "Hallo" }`. Configure locales with {@link LocaleConfig}.
  *
  * Use `Optional<Localized<string>>` when the field may be null.
@@ -220,7 +220,7 @@ export type Searchable<T> = Modifier<"Searchable", T>
 export type EditorReadOnly<T> = Modifier<"EditorReadOnly", T>
 /**
  * DB / trigger maintained only: Studio treats as read-only + server-generated on insert.
- * There is **no** live preview or “follow title until edited” UX — declare dependencies with
+ * There is **no** live preview or “follow title until edited” UX, declare dependencies with
  * {@link ComputedFrom} instead if you want slug-like preview in Studio.
  */
 export type Computed<T> = Modifier<"Computed", T>
@@ -230,7 +230,7 @@ export type Computed<T> = Modifier<"Computed", T>
  *
  * Use `Optional<ComputedFrom<…>>` when the field may be null.
  *
- * **Second type argument — three shapes:**
+ * **Second type argument: three shapes:**
  * - **One field** (concat preview): `ComputedFrom<string, "title">`
  * - **Several fields** (join with spaces, then truncate): `ComputedFrom<string, readonly ["title", "subtitle"]>`
  * - **Template string** (placeholders + optional `truncate`): a string literal containing `{fieldName}` and/or
@@ -262,7 +262,7 @@ export type Between<T, Min extends number, Max extends number> = Modifier<`Betwe
  * Equivalent manual fields: naming columns `created_at` / `updated_at` plus `Timestamp` / `ServerDefault<DateTime>`
  * wires the same defaults in the extractor; you don’t need this mixin unless you prefer the shorthand.
  *
- * Arbitrary timestamps use `ServerDefault<DateTime>` (or `@default`/`Expression` via engine fixtures) —
+ * Arbitrary timestamps use `ServerDefault<DateTime>` (or `@default`/`Expression` via engine fixtures),
  * those are configurable; only the **names** above get the convention treatment without extra wrappers.
  */
 export type Timestamps = {
@@ -293,21 +293,21 @@ export type RelationOptions = {
   required?: boolean
   onDelete?: OnDelete
   onUpdate?: OnUpdate
-  /** `ManyToMany` only — the junction table's name, instead of one derived from the two models. */
+  /** `ManyToMany` only: the junction table's name, instead of one derived from the two models. */
   through?: string
 }
 /**
  * The target model, held behind a property so that resolving a relation field does not resolve the
  * model it points at.
  *
- * Two models that name each other — a `HasOne` and its `RelatedTo`, or a `RelatedTo` both ways —
+ * Two models that name each other, a `HasOne` and its `RelatedTo`, or a `RelatedTo` both ways,
  * used to fail with `TS2589: Type instantiation is excessively deep`. `Model<F>` spreads `F` through
  * a mapped type that probes every field (`[V] extends [Modifier<"Optional", …>]`), and probing
  * `RelatedTo<Post>` = `Post & …` meant expanding `Post`, which was still being defined. The
  * collection relations escaped it: `Comment[]` is decidable without expanding `Comment`, so
  * `HasMany` and `ManyToMany` are left as they were and only the one-ish relations defer here.
  *
- * Nothing needs a relation field's value type — the target's *identity* carries the relation, the
+ * Nothing needs a relation field's value type, the target's *identity* carries the relation, the
  * generated client types carry the row shapes, and the CLI reads these declarations as syntax
  * rather than resolving them. So the target moves into a phantom property, where TypeScript leaves
  * it alone until something asks.
@@ -419,7 +419,7 @@ export type Role<R extends string = string> = Access<"Role", { readonly kind: "R
  * OR-composition: access is granted when **any** listed rule matches.
  *
  * Without this, rules are a closed set of single shapes and the commonest real
- * requirement — "an admin, or the owner" — cannot be written at all. Every rule
+ * requirement: "an admin, or the owner", cannot be written at all. Every rule
  * is combinable, including nested `Any`.
  *
  * ```typescript
@@ -457,7 +457,7 @@ export type AuthRole = Access<"AuthRole", { readonly kind: "AuthRole" }>
 /**
  * A nested JWT claim, by dotted path: `Claim<"app_metadata.tier">`.
  *
- * This is the developer's own namespace — whatever your application puts in its
+ * This is the developer's own namespace, whatever your application puts in its
  * tokens. A missing claim is SQL NULL, so comparing against one that is absent
  * denies rather than erroring.
  */
@@ -480,14 +480,14 @@ export type Literal<TValue extends string | number | boolean> = Access<"Literal"
 // functions' STABLE declaration a lie.
 //
 // There is deliberately no literal-timestamp operand. "Publish at 09:00 next
-// Tuesday" is *data* — the row carries `published_at`, and the rule is the same for
+// Tuesday" is *data*: the row carries `published_at`, and the rule is the same for
 // every row: `Lte<"published_at", Now>`. The policy re-evaluates per query, so the
 // row starts matching at 09:00 with no cron and no publish worker.
 
 /** Transaction start time (`now()`). */
 export type Now = Access<"Now", { readonly kind: "Now" }>
 
-/** Units for {@link Ago} / {@link FromNow}. Plural only — Postgres accepts both. */
+/** Units for {@link Ago} / {@link FromNow}. Plural only, Postgres accepts both. */
 export type TimeUnit =
   | "seconds"
   | "minutes"
@@ -501,7 +501,7 @@ export type TimeUnit =
 export type TruncUnit = "day" | "week" | "month" | "year"
 
 /**
- * The start of the current day, week, month or year — `date_trunc(unit, now())`.
+ * The start of the current day, week, month or year, `date_trunc(unit, now())`.
  *
  * `Gte<"created_at", StartOf<"week">>` is "created since Monday".
  */
@@ -515,11 +515,11 @@ export type StartOf<TUnit extends TruncUnit> = Access<"StartOf", {
  *
  * Two arguments rather than one `"30 days"` string, for two reasons. A template
  * literal `` `${number} ${TimeUnit}` `` accepts `"-5 days"`, `"0.5 days"` and
- * `"1e3 days"` — the last is not valid interval syntax, so it type-checks and fails
+ * `"1e3 days"`: the last is not valid interval syntax, so it type-checks and fails
  * at push. And TypeScript cannot enumerate `${number}`, so a template literal offers
  * **no autocomplete**; this form completes the unit properly.
  *
- * The amount must be a positive integer — for the other direction use
+ * The amount must be a positive integer, for the other direction use
  * {@link FromNow}, which reads correctly rather than relying on a double negative.
  */
 export type Ago<TAmount extends number, TUnit extends TimeUnit> = Access<"Ago", {
@@ -544,7 +544,7 @@ type Comparison<TName extends string, TLeft, TRight> = Access<TName, {
 }>
 
 /**
- * `Eq<"author_id", AuthUid>` — the row's `author_id` equals the caller.
+ * `Eq<"author_id", AuthUid>`: the row's `author_id` equals the caller.
  *
  * A bare string on either side is a column name; use `Literal<…>` for a constant,
  * so `Eq<"status", Literal<"published">>` cannot be confused with a comparison
@@ -577,7 +577,7 @@ export type NotNull<TOperand> = Access<"NotNull", { readonly kind: "NotNull"; re
  * ```
  *
  * The `Where` rule is evaluated against `user_sites`, not against the model the
- * access rule is attached to — it is what makes this *the caller's* sites rather
+ * access rule is attached to, it is what makes this *the caller's* sites rather
  * than every row in the join table.
  *
  * Because the join column is named here, the engine emits the index for it. The
@@ -602,7 +602,7 @@ export type Values<TItems extends readonly (string | number | boolean)[]> = Acce
 }>
 
 /**
- * `In<"site_id", MySites>` — the row's column appears in the source set.
+ * `In<"site_id", MySites>`: the row's column appears in the source set.
  *
  * Compiles to a semi-join (`EXISTS`), not `IN (SELECT …)`, so the planner stops at
  * the first match per row instead of materialising the set. Sources are `Rows<>`,
@@ -619,7 +619,7 @@ export type In<TColumn extends string, TSource> = Access<"In", {
  *
  * `In<>` asks "is this row's value in the set", which is a different question.
  * Guarding on `Exists<>` is what makes "an editor *who has sites* may see their
- * sites or unassigned rows" mean what it says — without it, an editor with no sites
+ * sites or unassigned rows" mean what it says, without it, an editor with no sites
  * still matches the unassigned branch:
  *
  * ```typescript
@@ -642,7 +642,7 @@ type BoundOwnerFromForFields<TFields extends Record<string, unknown>> = Access<"
 }>
 
 /**
- * The composable half of the DSL — every shape that takes other rules or operands
+ * The composable half of the DSL, every shape that takes other rules or operands
  * as arguments.
  *
  * Written with `unknown` arguments rather than a recursive constraint. TypeScript
@@ -718,7 +718,7 @@ type IsModifierNotLocalized<V> = IsModifier<V, "NotLocalized">
 type InferNotLocalizedInner<V> = ModifierInnerOf<V>
 
 /**
- * Whether a field's key is optional on the row — `Optional` anywhere in the stack, not just outermost.
+ * Whether a field's key is optional on the row, `Optional` anywhere in the stack, not just outermost.
  *
  * `Unique<Optional<string>>` is as nullable as `Optional<Unique<string>>`. The old structural check
  * could only see the outer wrapper, so which one you wrote decided whether the key was optional.
@@ -742,8 +742,8 @@ type FileAssetLocalizedOption<V> =
  * Apply default localization to copy-like fields (used by {@link LocalizedModel}).
  *
  * Walks *through* any modifier and rebuilds it around the localized inner, so `Unique<string>` becomes
- * `Unique<Localized<string>>`. It used to reach the `V extends string` branch for such a field — a
- * modifier was structurally its own inner type — and return a bare `Localized<string>`, silently
+ * `Unique<Localized<string>>`. It used to reach the `V extends string` branch for such a field, a
+ * modifier was structurally its own inner type, and return a bare `Localized<string>`, silently
  * dropping the `Unique`.
  */
 type ApplyAutoLocalizedField<V> =
@@ -774,13 +774,13 @@ type ApplyAutoLocalizedFields<TFields extends Record<string, unknown>> = {
 /**
  * The value a declared field reads as on the row: every modifier peeled off, whatever it is.
  *
- * Unbounded and still terminating, because each step removes one wrapper — `__inner` is strictly
+ * Unbounded and still terminating, because each step removes one wrapper, `__inner` is strictly
  * smaller than the type it came from. The previous version needed a depth cap to escape a recursion
  * that could not converge, and a cap that runs out returns a half-unwrapped type rather than an error.
  *
  * Every modifier, not the three that used to be special-cased: a declaration is no longer structurally
  * its own inner type, so `Unique<Slug>` would otherwise surface on the row as the wrapper object rather
- * than as a string. `Localized<T>` needs no case of its own — its inner already *is* the locale record.
+ * than as a string. `Localized<T>` needs no case of its own, its inner already *is* the locale record.
  */
 type UnwrapModelFieldType<V> = V extends { readonly __modifier: string; readonly __inner: infer TInner }
   ? UnwrapModelFieldType<TInner>
@@ -831,11 +831,11 @@ export type ModelMeta<TFields extends Record<string, unknown>> = {
      *
      * Enforced one of two ways, chosen from what the database can do: the
      * `supatype_mask` extension rewrites every reference to the column in the planner,
-     * and where the extension cannot be loaded — most managed Postgres — the same
+     * and where the extension cannot be loaded, most managed Postgres, the same
      * expression is carried by generated views in an `api` schema instead.
      *
      * A `write` rule is compiled conjoined with the field's `read` rule, so write
-     * without read is unrepresentable — otherwise a caller could round-trip away a
+     * without read is unrepresentable, otherwise a caller could round-trip away a
      * value they were never shown.
      *
      * **`INSERT` cannot evaluate a row-dependent write rule**: there is no row
@@ -844,21 +844,21 @@ export type ModelMeta<TFields extends Record<string, unknown>> = {
      * `Claim<>`) for a column that must be settable at creation time.
      *
      * Relations are named by their column (`author_id`), because that is what the
-     * restriction applies to — `author` is not a column at all.
+     * restriction applies to: `author` is not a column at all.
      *
      * Neither tier half-enforces: a push never applies a schema whose restrictions do
-     * not exist. They differ in one place — under the view tier an aggregate over a
+     * not exist. They differ in one place, under the view tier an aggregate over a
      * masked column returns the sum of the rows the caller may read, where the
      * extension raises an error. Unreachable through the API, since PostgREST ships
      * with aggregates disabled.
      *
      * A column restricted from nearly everyone and queried often is still better off
-     * in its own table — masking costs a predicate call per row and cannot use the
+     * in its own table, masking costs a predicate call per row and cannot use the
      * column's index.
      */
     fields?: {
       // Relations are named by their column (`author_id`), because that is what a
-      // privilege is granted on — `author` is not a column at all.
+      // privilege is granted on, `author` is not a column at all.
       readonly [K in (keyof TFields & string) | RelationOwnerKeys<TFields>]?: {
         readonly read?: AccessRuleFor<TFields>
         readonly write?: AccessRuleFor<TFields>
@@ -867,9 +867,9 @@ export type ModelMeta<TFields extends Record<string, unknown>> = {
   }
   tableName?: string
   searchable?: readonly string[]
-  /** Composite or single-column indexes — emitted to Postgres via the schema engine. */
+  /** Composite or single-column indexes, emitted to Postgres via the schema engine. */
   indexes?: readonly ModelIndex[]
-  /** Exactly one row — Studio Globals, singleton partial unique index in Postgres. */
+  /** Exactly one row: Studio Globals, singleton partial unique index in Postgres. */
   singleton?: true
   /** When omitted, the CLI infers from `WithTimestamps` or `created_at` / `updated_at` fields. */
   timestamps?: boolean
@@ -878,7 +878,7 @@ export type ModelMeta<TFields extends Record<string, unknown>> = {
   /** When true, copy-like fields default to localized (same as {@link LocalizedModel}). */
   autoLocalize?: true
   /**
-   * Lifecycle hooks — an **edge function** run by the API at a write boundary.
+   * Lifecycle hooks: an **edge function** run by the API at a write boundary.
    *
    * ```typescript
    * hooks: {
@@ -888,13 +888,13 @@ export type ModelMeta<TFields extends Record<string, unknown>> = {
    * ```
    *
    * The value names a function directory under your project's `functions/`, and the name is
-   * checked when you push — a hook that silently never fires because of a typo is the failure
+   * checked when you push, a hook that silently never fires because of a typo is the failure
    * this feature must not have. `supatype push` also generates a typed handler signature per
    * hooked model, so `row` is the model's real column set rather than `unknown`.
    *
    * **A hook is not a security boundary.** It fires for writes through the API; direct SQL,
    * seeds, migrations and anything holding `service_role` bypass it. Invariants belong in
-   * {@link ModelMeta.access}, a `CHECK`, or a generated column — all of which apply to every
+   * {@link ModelMeta.access}, a `CHECK`, or a generated column, all of which apply to every
    * writer. A hook is for the work that is genuinely application logic: enrichment,
    * notification, indexing, a validation the database cannot express.
    *
@@ -919,7 +919,7 @@ export type ModelHookOptions = {
   /** Milliseconds before the hook is abandoned. Default 2000. */
   readonly timeout?: number
   /**
-   * What it means when the hook **does not answer** — a timeout, a connection failure, a `5xx`,
+   * What it means when the hook **does not answer**, a timeout, a connection failure, a `5xx`,
    * or a body that cannot be parsed. A `4xx` is not this: that is the hook working correctly and
    * saying no, and it reaches the caller as the status the hook chose.
    *
@@ -929,7 +929,7 @@ export type ModelHookOptions = {
   readonly onUnavailable?: "reject" | "log"
 }
 
-/** Shorthand for singleton globals — `Model<Fields, GlobalMeta<Fields>>`. */
+/** Shorthand for singleton globals, `Model<Fields, GlobalMeta<Fields>>`. */
 export type GlobalMeta<TFields extends Record<string, unknown>> = ModelMeta<TFields> & {
   singleton: true
 }

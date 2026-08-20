@@ -33,7 +33,7 @@ function previewFromDraftField(
   if (typeof raw === "string" || typeof raw === "number" || typeof raw === "bigint") return String(raw)
   if (raw instanceof Date && !Number.isNaN(raw.getTime())) return raw.toISOString()
   if (typeof raw === "object" && !Array.isArray(raw)) {
-    // Lexical `SerializedEditorState` is `{ root: … }`, not `{ [locale]: … }` — detect before locale map.
+    // Lexical `SerializedEditorState` is `{ root: … }`, not `{ [locale]: … }`, detect before locale map.
     if (isSerializedEditorRoot(raw)) return collectLexicalText(raw.root).trim()
     if (currentLocale && defaultLocale) {
       const picked = (raw as Record<string, unknown>)[currentLocale]

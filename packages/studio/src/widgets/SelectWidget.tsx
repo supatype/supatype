@@ -12,7 +12,7 @@ export function SelectWidget({ config, value, onChange, readOnly }: WidgetProps)
   const selectValue = empty ? defaultOption : String(value)
 
   // Required selects omit a blank option, but React still starts with value="".
-  // Browsers display the first <option> while form state stays empty until onChange —
+  // Browsers display the first <option> while form state stays empty until onChange,
   // so Save can omit the column and Postgres raises NOT NULL.
   useEffect(() => {
     if (readOnly || !empty || !config.required || options.length === 0) return
@@ -28,7 +28,7 @@ export function SelectWidget({ config, value, onChange, readOnly }: WidgetProps)
       disabled={readOnly}
       required={config.required}
     >
-      {!config.required && <option value="">— Select —</option>}
+      {!config.required && <option value="">, Select, </option>}
       {options.map((opt) => (
         <option key={opt} value={opt}>
           {opt}

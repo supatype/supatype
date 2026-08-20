@@ -71,7 +71,7 @@ export type Post = Model<{ id: UUID }, { tableName: "posts" }>
 describe("the generated module compiles", () => {
   /**
    * The generator emits TypeScript, so the only test that really proves it works is a compiler.
-   * A missing brace or a type that does not resolve would otherwise reach a user's editor — and this
+   * A missing brace or a type that does not resolve would otherwise reach a user's editor, and this
    * file is imported by their hook, so a broken emit breaks their function rather than our build.
    */
   it("typechecks under strict mode, together with a handler that uses it", () => {

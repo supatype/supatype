@@ -10,7 +10,7 @@ import { MANAGED_MARKER, readEnvFile, upsertEnvFile } from "../src/env-file.js"
  * Two defects motivated this: the rewrite rebuilt the file from its assignments alone, so every
  * comment and blank line vanished; and the image keys derivable from `versions` were deleted
  * unconditionally, so `SUPATYPE_REALTIME_IMAGE` could be overridden from `.env` and
- * `SUPATYPE_SERVER_IMAGE` could not. Same file, same shape, different rules — which is how an hour
+ * `SUPATYPE_SERVER_IMAGE` could not. Same file, same shape, different rules, which is how an hour
  * goes into wondering why a locally built image is ignored.
  */
 let dir: string
@@ -63,7 +63,7 @@ JWT_SECRET=abc
 
   it("does clean up a value it wrote itself", () => {
     // Otherwise removing a pin from config leaves a stale image reference that silently keeps
-    // running the old version — the reason the deletion existed at all.
+    // running the old version, the reason the deletion existed at all.
     upsertEnvFile(
       dir,
       { SUPATYPE_SERVER_IMAGE: "supatype/server:v1.2.3" },
@@ -112,7 +112,7 @@ JWT_SECRET=abc
   })
 
   it("does not treat a commented-out assignment as a value", () => {
-    // `# FOO=bar` is a note, not a setting — the old parser kept it as a key called "# FOO".
+    // `# FOO=bar` is a note, not a setting, the old parser kept it as a key called "# FOO".
     write("# FOO=bar\nREAL=1\n")
     upsertEnvFile(dir, { REAL: "2" })
     expect(read()).toContain("# FOO=bar")

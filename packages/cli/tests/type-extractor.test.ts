@@ -1255,8 +1255,8 @@ export type Invoice = Model<{
 
   it("extracts Code and Currency as JSONB carrying their declared shape", () => {
     // Both were exported from `@supatype/types` and rejected by the extractor, so a schema using
-    // either failed the push with "unknown type". Each carries two values — a language with its
-    // source, an amount with its currency — so JSONB is the column that does not drop one.
+    // either failed the push with "unknown type". Each carries two values, a language with its
+    // source, an amount with its currency, so JSONB is the column that does not drop one.
     const dir = mkdtempSync(join(tmpdir(), "supatype-code-currency-"))
     dirs.push(dir)
     const schemaPath = join(dir, "schema.ts")

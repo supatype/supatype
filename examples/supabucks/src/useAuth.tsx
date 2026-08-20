@@ -55,7 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let active = true
     supatype.auth.getSession().then(async ({ data }) => {
       if (!active) return
-      // getSession returns { session }, not { user } — the user lives on the session.
+      // getSession returns { session }, not { user }, the user lives on the session.
       let session = data.session
       // If a persisted session loaded already expired, refresh before the first
       // data fetch so we don't fire a request with a dead token (one-off 401).

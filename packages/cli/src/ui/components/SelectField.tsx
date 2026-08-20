@@ -34,7 +34,7 @@ export function SelectField({
   })
 
   const items = options.map((opt) => ({
-    label: opt.hint ? `${opt.label} — ${opt.hint}` : opt.label,
+    label: opt.hint ? `${opt.label}, ${opt.hint}` : opt.label,
     value: opt.value,
   }))
 

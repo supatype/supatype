@@ -110,7 +110,7 @@ export interface Subscription {
   /** Parsed as schema:table from the channel name. */
   schema: string
   table: string
-  /** Event filter — "*" means all events. */
+  /** Event filter: "*" means all events. */
   event: ChangeEvent | "*"
   /** PostgREST-style column filters. */
   filter: Record<string, string>

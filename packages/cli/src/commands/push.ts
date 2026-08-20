@@ -167,7 +167,7 @@ async function pushViaTarget(
     await generateTypesLocal(ast, config)
     await provisionLocalStorage(ast, config)
 
-    // Local Studio only — a cloud/self-host push must not advertise the local
+    // Local Studio only: a cloud/self-host push must not advertise the local
     // gateway URL from config, which may not even be running.
     const baseUrl = (serverBaseUrl(config) ?? "").replace(/\/$/, "")
     if (baseUrl) {
@@ -191,7 +191,7 @@ async function pushViaTarget(
  * into a 503.
  *
  * The handler types are written locally as well. A project pushing to cloud still edits its hooks on
- * this machine, and `hooks/_supatype/hooks.ts` is what makes them typed — it is generated, never
+ * this machine, and `hooks/_supatype/hooks.ts` is what makes them typed, it is generated, never
  * committed, so a fresh clone that has only ever pushed to cloud would otherwise have no types at all.
  */
 async function deployHooksToTarget(
@@ -285,7 +285,7 @@ async function writeLocalAdminConfig(ast: unknown, config: SupatypeProjectConfig
  * Stop the push when a declared hook names a function that is not there.
  *
  * A hook is only enforcement if it runs. A typo'd name would extract cleanly, reach the manifest, and
- * then never fire — so the write it was meant to validate would succeed and look fine. Cheaper to
+ * then never fire: so the write it was meant to validate would succeed and look fine. Cheaper to
  * fail here, naming the directory searched.
  */
 /**

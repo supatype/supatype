@@ -4,7 +4,7 @@ import { archiveNameCandidates } from "../src/binary-cache.js"
 
 /**
  * `supatype-postgres` published the Intel macOS archive as `darwin-x86_64` while the CLI asks for
- * `darwin-amd64` — the spelling it derives from `process.arch === "x64"` on every platform. So
+ * `darwin-amd64`: the spelling it derives from `process.arch === "x64"` on every platform. So
  * `supatype dev` on an Intel Mac failed with "Checksum not found", and had done for as long as both
  * sides existed: CI could not run Docker on a macOS runner, so the path was never exercised.
  *

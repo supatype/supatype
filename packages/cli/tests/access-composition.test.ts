@@ -24,7 +24,7 @@ function access(model: ModelAstV2 | undefined): Record<string, unknown> {
 }
 
 // Without OR-composition the rule set is a closed list of single shapes, and the
-// commonest real requirement — "an admin, or the owner" — cannot be written at all.
+// commonest real requirement: "an admin, or the owner", cannot be written at all.
 describe("Any<[…]>", () => {
   it("composes rules into an OR-join", () => {
     const post = extract(
@@ -81,7 +81,7 @@ export type Post = Model<{
   })
 
   // An empty list reads like a grant and compiles to a policy that grants
-  // nothing — exactly the silent denial the unknown-rule error exists to prevent.
+  // nothing: exactly the silent denial the unknown-rule error exists to prevent.
   it("rejects an empty list", () => {
     expect(() =>
       extract(
@@ -350,7 +350,7 @@ export type Post = Model<{ id: UUID }, { access: { read: In<"a", Rows<"a b; drop
 })
 
 // The plan's headline parameterisation: the type-level equivalent of Payload's
-// access-control factory. Before this, any named alias — even unparameterised —
+// access-control factory. Before this, any named alias, even unparameterised,
 // was reported as an unknown rule and had to be written inline at every use.
 describe("parameterised rule aliases", () => {
   it("expands a generic alias at the point of use", () => {
@@ -480,7 +480,7 @@ export type Post = Model<{ id: UUID }, { access: { update: { using: Public; wat:
 })
 
 
-// "Publish at 09:00 next Tuesday" is *data* — the row carries `published_at` and the
+// "Publish at 09:00 next Tuesday" is *data*, the row carries `published_at` and the
 // rule is the same for every row. There is deliberately no literal-timestamp
 // operand; the policy re-evaluates per query, so the row starts matching at 09:00
 // with no cron and no publish worker.
@@ -589,7 +589,7 @@ export type Post = Model<{ id: UUID }, { access: { read: Gte<"a", Ago<${n}, "day
 `
     expect(() => extract(bad("0.5"), "ago-frac")).toThrow(/whole number/)
     // A negative literal is a prefix-unary expression, not a numeric literal, so it
-    // needs its own branch — otherwise the message misses the real advice.
+    // needs its own branch, otherwise the message misses the real advice.
     expect(() => extract(bad("-5"), "ago-neg")).toThrow(/does not take a negative amount/)
   })
 
@@ -619,7 +619,7 @@ export type Post = Model<{ id: UUID }, { access: { read: Gte<"a", StartOf<"fortn
 })
 
 // `In<>` asks "is this row's value in the set". Payload's site-access rule guards on
-// `user.sites?.length > 0` first — without that, an editor with no sites still
+// `user.sites?.length > 0` first, without that, an editor with no sites still
 // matches the unassigned-rows branch.
 describe("Exists<> non-empty guard", () => {
   it("expresses the Payload site-access rule in full", () => {

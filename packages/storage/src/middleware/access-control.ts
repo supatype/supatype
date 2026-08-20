@@ -1,5 +1,5 @@
 /**
- * Storage access control — Task 44
+ * Storage access control: Task 44
  *
  * Bucket access modes:
  * - 'public':  Anyone can read. Authenticated users can upload.

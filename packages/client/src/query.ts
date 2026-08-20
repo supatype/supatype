@@ -203,7 +203,7 @@ export class QueryBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
     return this
   }
 
-  /** PostgREST OR filter — pass conditions in PostgREST syntax, e.g. `"status.eq.active,owner_id.eq.123"`. */
+  /** PostgREST OR filter: pass conditions in PostgREST syntax, e.g. `"status.eq.active,owner_id.eq.123"`. */
   or(filters: string): this {
     this.params.append("or", `(${filters})`)
     return this
@@ -242,7 +242,7 @@ export class QueryBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
       Accept: "application/vnd.pgrst.object+json",
     })
     if (error !== null) return { data: null, error, count: null, ...(meta && { meta }) }
-    // Some proxies drop Accept and return a one-element array — unwrap.
+    // Some proxies drop Accept and return a one-element array, unwrap.
     const row = (Array.isArray(data) ? data[0] : data) as TRow | undefined
     if (row === undefined) {
       return {

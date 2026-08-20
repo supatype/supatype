@@ -1,5 +1,5 @@
 /**
- * self-host commands — manage self-hosted deployments.
+ * self-host commands: manage self-hosted deployments.
  *
  * Compose-based commands are the default path.
  * Native/systemd commands remain available for bare-metal deployments.

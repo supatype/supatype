@@ -9,9 +9,9 @@ type NextVariant = "app-router" | "app-router-ssr" | "pages-router" | "pages-rou
 
 const NEXT_VARIANTS: Array<{ id: NextVariant; label: string }> = [
   { id: "app-router",     label: "App Router"       },
-  { id: "app-router-ssr", label: "App Router — SSR"  },
+  { id: "app-router-ssr", label: "App Router, SSR"  },
   { id: "pages-router",   label: "Pages Router"      },
-  { id: "pages-router-ssr", label: "Pages Router — SSR" },
+  { id: "pages-router-ssr", label: "Pages Router, SSR" },
 ]
 
 function isSSR(v: NextVariant): boolean {
@@ -168,7 +168,7 @@ export async function createSupatypeClient() {
   }
 
   if (ssr) {
-    // pages-router-ssr: no separate util — client created inline in getServerSideProps
+    // pages-router-ssr: no separate util, client created inline in getServerSideProps
     return {
       filename: "utils/supatype-server.ts",
       code: `import { createServerClient } from '@supatype/ssr'
@@ -312,7 +312,7 @@ export default function Page() {
       filename: "app/page.tsx",
       code: `import { createSupatypeClient } from '@/utils/supatype-server'
 
-// This is a React Server Component — no 'use client' needed
+// This is a React Server Component, no 'use client' needed
 export default async function Page() {
   const supatype = await createSupatypeClient()
   const { data } = await supatype
@@ -561,7 +561,7 @@ function DirectContent() {
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        Connect directly to Postgres — useful for migrations, scripts, or any tool that takes a connection string.
+        Connect directly to Postgres, useful for migrations, scripts, or any tool that takes a connection string.
       </p>
       <Step n={1} title="Connection string">
         <CodeBlock code={conn} filename="connection string" />
@@ -604,7 +604,7 @@ function McpContent() {
         <CodeBlock code={`SUPATYPE_URL=your-project-url\nSUPATYPE_SERVICE_KEY=your-service-role-key`} filename=".env" />
       </Step>
       <div className="rounded-lg border border-border bg-secondary/20 px-3 py-2.5 text-xs text-muted-foreground">
-        The service role key bypasses RLS — use it only in trusted environments. Find it in <span className="text-foreground font-medium">Settings → API</span>.
+        The service role key bypasses RLS, use it only in trusted environments. Find it in <span className="text-foreground font-medium">Settings → API</span>.
       </div>
     </div>
   )

@@ -81,7 +81,7 @@ const scenarios: Scenario[] = [
   {
     id: "auth-raw",
     name: "auth-required · no Bearer",
-    blurb: "Raw fetch with only apikey — should fail",
+    blurb: "Raw fetch with only apikey, should fail",
     expect: "401 unauthorized",
     run: async () => {
       const res = await fetch(`${gatewayUrl}/functions/v1/auth-required`, {
@@ -96,7 +96,7 @@ const scenarios: Scenario[] = [
   {
     id: "auth-anon",
     name: "auth-required · anon JWT",
-    blurb: "Client invoke with default anon Bearer — should fail",
+    blurb: "Client invoke with default anon Bearer, should fail",
     expect: "401 · anon key not enough",
     run: async () => {
       const { data, error } = await client.functions.invoke("auth-required", { body: {} })
@@ -114,7 +114,7 @@ const scenarios: Scenario[] = [
       const { data: signData, error: signErr } = await client.auth.signUp({ email, password })
       if (signErr) throw new Error(signErr.message)
       if (!signData.session) {
-        throw new Error("signUp returned no session — is GOTRUE_MAILER_AUTOCONFIRM=true?")
+        throw new Error("signUp returned no session, is GOTRUE_MAILER_AUTOCONFIRM=true?")
       }
       setSessionEmail(email)
       const { data, error } = await client.functions.invoke("auth-required", { body: {} })

@@ -7,7 +7,7 @@ import type { WalChange } from "../src/types.js"
  * Field masking against a real database.
  *
  * The unit tests cover which columns get nulled; this covers the part that can only be
- * wrong against Postgres — building the table's composite type from a WAL record and
+ * wrong against Postgres: building the table's composite type from a WAL record and
  * evaluating the generated predicate against it, as the subscriber, in one transaction.
  *
  * Needs `DATABASE_URL` pointing at a database with `supatype_mask` available. Skips
@@ -93,7 +93,7 @@ describe.skipIf(!databaseUrl)("RlsFilter field masking", () => {
   })
 
   // DELETE carries only the replica-identity columns, so there is no restricted value in
-  // the payload to leak — but the event must still be judged without a row to re-read.
+  // the payload to leak, but the event must still be judged without a row to re-read.
   it("handles a delete whose row no longer exists", async () => {
     await admin.query("DELETE FROM rt_posts WHERE id = 1")
     try {

@@ -48,7 +48,7 @@ export function filterStackLogLine(line: string): boolean {
   return false
 }
 
-/** Drop docker noise only — keep diff tables, push status, and command output. */
+/** Drop docker noise only, keep diff tables, push status, and command output. */
 export function filterCommandLogLine(line: string): boolean {
   const t = stripAnsi(line).trim()
   if (!t) return false
