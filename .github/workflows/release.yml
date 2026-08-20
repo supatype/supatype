@@ -323,3 +323,100 @@ jobs:
           name: ${{ github.ref_name }}
           prerelease: ${{ contains(needs.prepare.outputs.version, 'alpha') || contains(needs.prepare.outputs.version, 'beta') || contains(needs.prepare.outputs.version, 'rc') }}
           generate_release_notes: true
+
+  # Homebrew lives here, not inside the reusable CLI workflow. It used to, and because npm
+  # depends on that workflow as a unit, a failure pushing a formula blocked the npm publish:
+  # v0.1.8 shipped to the CDN and to Docker Hub while npm stayed on 0.1.7. Publishing a
+  # formula is a post-release action, so it belongs beside github-release, where failing is
+  # loud without holding up a release that already succeeded.
+  #
+  # Gated on a repo variable, not on whether the token exists: secrets are unavailable in any
+  # `if:`, and inferring "configured" from a credential's presence reports an expired token as
+  # a green skip.
+  homebrew-formula:
+    name: Homebrew formula
+    needs: [prepare, cli]
+    runs-on: ubuntu-24.04
+    if: vars.HOMEBREW_TAP_REPO != ''
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # The whole artefact directory, not a filtered copy. The generator reads checksums.sha256
+      # to get each hash from the release's signed manifest, and the previous copy step took only
+      # supatype-cli-*.tar.gz, so the manifest never arrived and generation failed after the CDN
+      # publish had already succeeded.
+      - uses: actions/download-artifact@v4
+        with:
+          path: cli-artifacts
+          pattern: cli-*
+          merge-multiple: true
+
+      - name: Generate Formula/supatype.rb
+        run: |
+          set -euo pipefail
+          ls -la cli-artifacts
+          mkdir -p homebrew-formula/Formula
+          HOMEBREW_FORMULA_OUT=homebrew-formula/Formula/supatype.rb             node packages/cli/scripts/generate-homebrew-formula.mjs "${VERSION}" cli-artifacts
+
+      - name: Push formula to the tap
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO || 'supatype/homebrew-tap' }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "HOMEBREW_TAP_REPO is set but HOMEBREW_TAP_GITHUB_TOKEN is not." >&2
+            echo "Add the token, or clear the variable to disable Homebrew publishing." >&2
+            exit 1
+          fi
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${TAP_REPO}.git" tap
+          mkdir -p tap/Formula
+          cp homebrew-formula/Formula/supatype.rb tap/Formula/supatype.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/supatype.rb
+          git diff --staged --quiet && echo "No formula changes" && exit 0
+          git commit -m "supatype ${VERSION}"
+          git push origin HEAD:main
+
+  # A formula ships only once Homebrew has installed from it. Valid-looking Ruby proves nothing:
+  # the URLs have to resolve, the sha256 has to match what the CDN serves, and bin.install has to
+  # find that name inside the archive. Both arches, because the formula picks a different URL on
+  # each and only one can be wrong at a time.
+  verify-homebrew-install:
+    name: brew install (${{ matrix.arch }})
+    needs: [prepare, homebrew-formula]
+    if: vars.HOMEBREW_TAP_REPO != ''
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: intel
+            runner: macos-15-intel
+    steps:
+      - name: Install from the tap and run it
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          TAP: ${{ vars.HOMEBREW_TAP_REPO || 'supatype/homebrew-tap' }}
+        run: |
+          set -euo pipefail
+          # The tap name drops the homebrew- prefix: supatype/homebrew-tap taps as supatype/tap.
+          TAP_NAME="${TAP/\/homebrew-/\/}"
+          echo "tapping $TAP_NAME"
+          brew tap "$TAP_NAME"
+          brew install --formula "$TAP_NAME/supatype"
+
+          got="$(supatype --version)"
+          if [ "$got" != "$VERSION" ]; then
+            echo "::error::brew installed $got, expected $VERSION"
+            exit 1
+          fi
+          echo "installed and running: $got"
+          supatype --help | head -3
+
