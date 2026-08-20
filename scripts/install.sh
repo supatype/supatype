@@ -168,10 +168,13 @@ curl -fsSL "$SHA_URL" -o "$tmpdir/checksums.sha256"
 if [[ -z "$RELEASE_PUBLIC_KEY" ]]; then
   echo "  Note: no release public key is embedded in this installer, so the download is" >&2
   echo "        checked against its SHA256 only, not verified as coming from us." >&2
+elif ! command -v openssl >/dev/null 2>&1; then
+  echo "  Note: openssl is not installed, so the download is checked against its SHA256 only," >&2
+  echo "        not verified as coming from us. Install openssl and re-run to verify it." >&2
 elif ! openssl_can_verify; then
-  echo "  Note: this system's openssl cannot verify ed25519 signatures (macOS ships LibreSSL)," >&2
-  echo "        so the download is checked against its SHA256 only." >&2
-  echo "        For a verified install use: npm install -g @supatype/cli" >&2
+  echo "  Note: this openssl cannot verify ed25519 signatures (macOS ships LibreSSL, which has" >&2
+  echo "        neither pkeyutl -rawin nor blake2b512), so the SHA256 is checked but the" >&2
+  echo "        signature is not. For a verified install use: npm install -g @supatype/cli" >&2
 else
   if ! curl -fsSL "${SHA_URL}.minisig" -o "$tmpdir/checksums.sha256.minisig"; then
     echo "Error: could not fetch ${SHA_URL}.minisig." >&2
