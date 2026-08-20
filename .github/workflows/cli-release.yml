@@ -258,16 +258,15 @@ jobs:
           aws s3 cp latest.json "s3://${BUCKET}/cli/latest.json" \
             --endpoint-url "${EP}" --cache-control "no-cache" --no-progress
 
-  # Homebrew is not wired yet: github.com/supatype/homebrew does not exist, and
-  # generate-homebrew-formula.mjs still emits URLs for bare executables rather than the
-  # tarballs published above, so this cannot succeed even with a token. Turning it on is its
-  # own piece of work (Standalone-CLI-Distribution-Plan.md, phase 4).
+  # Generates Formula/supatype.rb from the archives this release actually published and pushes
+  # it to the tap. It runs after publish, so the URLs in the formula resolve by the time anyone
+  # can install from it.
   #
   # Gated on a repo variable rather than on whether a secret happens to exist. Secret presence
-  # conflates three different states (phase 4 not started, token rotated or expired, a fork
-  # with no secrets) and reports all of them as a green job called "Homebrew formula", so a
-  # broken publish path could never be loudly broken. A variable is visible in settings, and a
-  # missing token inside the enabled path is now a hard failure.
+  # conflates unconfigured, expired and fork-without-secrets, and reports all three as a green
+  # job called "Homebrew formula", so a broken publish path could never be loudly broken. A
+  # variable is visible in settings; a missing token inside the enabled path is a hard failure.
+  # secrets are unavailable in any `if:`, which is why the switch cannot be the token itself.
   update-homebrew-formula:
     name: Homebrew formula
     needs: [build, publish]
@@ -295,7 +294,7 @@ jobs:
       - name: Push formula to the tap
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
-          TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO }}
+          TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO || 'supatype/homebrew-tap' }}
         run: |
           set -euo pipefail
           if [ -z "${GH_TOKEN}" ]; then
@@ -313,3 +312,41 @@ jobs:
           git diff --staged --quiet && echo "No formula changes" && exit 0
           git commit -m "supatype ${VERSION}"
           git push origin HEAD:main
+
+  # A formula is only shipped once Homebrew has installed from it. Generating valid-looking Ruby
+  # proves nothing: the URLs have to resolve, the sha256 has to match what the CDN serves, and
+  # `bin.install "supatype"` has to find that name inside the archive. Both arches, because the
+  # formula picks a different URL on each and only one of them can be wrong at a time.
+  verify-homebrew-install:
+    name: brew install (${{ matrix.arch }})
+    needs: [build, update-homebrew-formula]
+    if: vars.HOMEBREW_TAP_REPO != ''
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: intel
+            runner: macos-15-intel
+    steps:
+      - name: Install from the tap and run it
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          TAP: ${{ vars.HOMEBREW_TAP_REPO || 'supatype/homebrew-tap' }}
+        run: |
+          set -euo pipefail
+          # The tap name drops the homebrew- prefix: supatype/homebrew-tap taps as supatype/tap.
+          TAP_NAME="${TAP/\/homebrew-/\/}"
+          echo "tapping $TAP_NAME"
+          brew tap "$TAP_NAME"
+          brew install --formula "$TAP_NAME/supatype"
+
+          got="$(supatype --version)"
+          if [ "$got" != "$VERSION" ]; then
+            echo "::error::brew installed $got, expected $VERSION"
+            exit 1
+          fi
+          echo "installed and running: $got"
+          supatype --help | head -3
