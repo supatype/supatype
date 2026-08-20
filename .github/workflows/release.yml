@@ -343,22 +343,37 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The whole artefact directory, not a filtered copy. The generator reads checksums.sha256
-      # to get each hash from the release's signed manifest, and the previous copy step took only
-      # supatype-cli-*.tar.gz, so the manifest never arrived and generation failed after the CDN
-      # publish had already succeeded.
-      - uses: actions/download-artifact@v4
-        with:
-          path: cli-artifacts
-          pattern: cli-*
-          merge-multiple: true
-
-      - name: Generate Formula/supatype.rb
+      # The manifest comes from the CDN, not from a build artefact. A formula should describe
+      # what was published rather than what a job happened to have on disk, and this job runs in
+      # the caller while the artefact was uploaded by a called workflow, which is a dependency
+      # worth not having. Fetching it also means a formula can be regenerated for an existing
+      # release without rebuilding anything.
+      - name: Fetch the published manifest and generate Formula/supatype.rb
         run: |
           set -euo pipefail
-          ls -la cli-artifacts
-          mkdir -p homebrew-formula/Formula
-          HOMEBREW_FORMULA_OUT=homebrew-formula/Formula/supatype.rb             node packages/cli/scripts/generate-homebrew-formula.mjs "${VERSION}" cli-artifacts
+          mkdir -p published homebrew-formula/Formula
+          MANIFEST="https://releases.supatype.com/cli/v${VERSION}/checksums.sha256"
+          if ! curl -fsSL "$MANIFEST" -o published/checksums.sha256; then
+            echo "::error::$MANIFEST is not readable, so the CLI publish did not complete."
+            exit 1
+          fi
+          curl -fsSL "${MANIFEST}.minisig" -o published/checksums.sha256.minisig
+
+          # Verified before it is trusted, since every hash in the formula comes from it. The key
+          # is the one committed in the installer, matched on its RW prefix: minisign public keys
+          # always start with that, and grep avoids a backreference that would need escaping.
+          KEY="$(grep -o 'RW[A-Za-z0-9+/=]\{40,\}' scripts/install.sh | head -1)"
+          if [ -z "$KEY" ]; then
+            echo "::error::could not read the release public key out of scripts/install.sh"
+            exit 1
+          fi
+          sudo apt-get install -y -qq minisign
+          printf 'untrusted comment: supatype release key\n%s\n' "$KEY" > published/key.pub
+          minisign -V -p published/key.pub -m published/checksums.sha256
+
+          cat published/checksums.sha256
+          HOMEBREW_FORMULA_OUT=homebrew-formula/Formula/supatype.rb \
+            node packages/cli/scripts/generate-homebrew-formula.mjs "${VERSION}" published
 
       - name: Push formula to the tap
         env:
