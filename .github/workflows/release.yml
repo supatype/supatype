@@ -422,9 +422,16 @@ jobs:
         run: |
           set -euo pipefail
           # The tap name drops the homebrew- prefix: supatype/homebrew-tap taps as supatype/tap.
-          TAP_NAME="${TAP/\/homebrew-/\/}"
-          echo "tapping $TAP_NAME"
-          brew tap "$TAP_NAME"
+          #
+          # Built from prefix removal rather than ${TAP/\/homebrew-/\/}: a backslash in a bash
+          # replacement is consumed by bash 5 and kept by the bash 3.2 macOS ships, so that form
+          # worked when tested on Linux and produced `supatype\/homebrew-tap` on the runner. These
+          # expansions contain no delimiter to escape, so they cannot differ between versions.
+          TAP_OWNER="${TAP%%/*}"
+          TAP_REPO_NAME="${TAP##*/}"
+          TAP_NAME="${TAP_OWNER}/${TAP_REPO_NAME#homebrew-}"
+          echo "tapping $TAP_NAME (from repository $TAP)"
+          brew tap "$TAP_NAME\"
           brew install --formula "$TAP_NAME/supatype"
 
           got="$(supatype --version)"
