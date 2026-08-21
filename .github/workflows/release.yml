@@ -431,7 +431,7 @@ jobs:
           TAP_REPO_NAME="${TAP##*/}"
           TAP_NAME="${TAP_OWNER}/${TAP_REPO_NAME#homebrew-}"
           echo "tapping $TAP_NAME (from repository $TAP)"
-          brew tap "$TAP_NAME\"
+          brew tap "$TAP_NAME"
           brew install --formula "$TAP_NAME/supatype"
 
           got="$(supatype --version)"
