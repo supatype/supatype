@@ -202,15 +202,15 @@ jobs:
   # The same journey through the published installer, `curl | sh` from the CDN rather than the
   # workspace build, so it exercises what a new user actually runs. Linux only; not Windows.
   # Phase-10.6 row C21.
-  # Schedule + manual dispatch only. Not main pushes: no CLI has been published to the CDN
-  # yet: the release bundle does not build (ink and yoga-layout use top-level await, which
-  # esbuild cannot emit as CJS), so this job can only fail, and a permanently red main
-  # teaches everyone to ignore it. Restore the main-push trigger with the first v* tag that publishes the CLI.
+  # Back on main pushes: a v* release now publishes a CLI, so this exercises the installer
+  # against a real release rather than failing for want of one. It stays off pull requests,
+  # because a CDN or network problem would otherwise block reviews for an unrelated reason.
   zero-to-running-cdn:
     name: "zero to running: curl | sh install (linux)"
     if: >
       github.event_name == 'schedule' ||
-      github.event_name == 'workflow_dispatch'
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     env:
@@ -239,3 +239,48 @@ jobs:
           path: ${{ runner.temp }}/zero-to-running-cdn/ztr-smoke/
           retention-days: 3
           if-no-files-found: warn
+
+  # The publish-and-install contract, on every change rather than on demand.
+  #
+  # This path has produced eight defects that only a real tag exercised: a bundle that could not
+  # build, an entry point that exited 0 in silence, a binary reporting 0.0.0, self-update
+  # replacing a path inside the embedded filesystem, a publisher able to advertise a version the
+  # binary did not carry, a formula generator fed the wrong input, hashes read from the wrong
+  # source, and a bash replacement that behaved differently on macOS. Each was found by running
+  # the real thing, and none would have been found by reading it.
+  #
+  # Builds one target for the host, serves it as the CDN layout, installs with the real
+  # install.sh, asserts the installed binary reports the published version, then that a tampered
+  # archive and a manifest signed by another key are both refused.
+  cli-artifact-roundtrip:
+    name: publish and install round trip
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      # Without minisign the test skips its signature checks, which are half the point.
+      - name: Install minisign
+        run: sudo apt-get install -y -qq minisign
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the CLI
+        run: pnpm --filter @supatype/cli build
+
+      - name: Round trip
+        run: bash tests/integration/scripts/cli-artifact-roundtrip.sh
+
