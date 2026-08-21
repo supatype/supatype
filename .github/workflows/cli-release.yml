@@ -27,10 +27,6 @@ on:
 permissions:
   contents: read
 
-env:
-  # Pinned: a Bun bump changes the compiled runtime, so treat it as release affecting.
-  BUN_VERSION: "1.3.12"
-
 jobs:
   build:
     name: compile and sign
@@ -71,9 +67,12 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      # .bun-version, not a literal here: integration.yml compiles the same artefacts for its
+      # round-trip check, and a release that compiles with a different Bun than the check
+      # exercised is a difference nothing would report.
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: ${{ env.BUN_VERSION }}
+          bun-version-file: .bun-version
 
       # The standalone binary has no package.json to read at runtime, so the version has to
       # be a value in the source before it is compiled. Without this `--version` answers
