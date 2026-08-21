@@ -12,6 +12,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Parses every shell `run:` block in .github/workflows with `bash -n`.
+      #
+      # Workflow shell is not executed until the workflow runs, and release workflows run on a
+      # tag, so a syntax error there is found by a release rather than by CI. That has happened:
+      # a stray backslash before a closing quote made a step unparseable, and it was only seen
+      # when `brew install` ran for the first time during v0.1.10.
+      - name: Workflow shell steps parse
+        run: python3 scripts/lint-workflow-shell.py
+
       - uses: pnpm/action-setup@v4
 
       - uses: actions/setup-node@v4
