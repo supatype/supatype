@@ -23,6 +23,17 @@ const EMBEDDED_FS_PATH = /(^|\/)(\$bunfs|~BUN)\//i
  * it is only correct to prefer it when argv[1] is an embedded path. Under Node the script path
  * is what identifies the install.
  */
+/**
+ * True when this process is a compiled single-file binary rather than Node running our JS.
+ *
+ * The distinction decides capability, not cosmetics: a compiled binary carries the Bun runtime
+ * and can import TypeScript directly, while it has no node_modules to resolve tsx from and no
+ * writable directory beside itself. A machine that installed with `curl | sh` has no Node at all.
+ */
+export function isCompiledBinary(): boolean {
+  return EMBEDDED_FS_PATH.test(normalizePath(process.argv[1] ?? ""))
+}
+
 export function runningBinaryPath(): string {
   const main = normalizePath(process.argv[1] ?? "")
   return EMBEDDED_FS_PATH.test(main) ? process.execPath : (process.argv[1] ?? "")

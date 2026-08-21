@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync, unlinkSync } from "node:fs"
 import { resolve } from "node:path"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { evalTsSnippet } from "./tsx-runner.js"
+import { importModuleAsJson } from "./tsx-runner.js"
 import { readEnvFile } from "./env-file.js"
 import {
   mergeProjectConfig,
@@ -166,12 +166,7 @@ function loadFirstTsConfig(
     if (!existsSync(configPath)) continue
 
     const urlPath = "file:///" + configPath.replace(/\\/g, "/")
-    const snippet = `
-const mod = await import(${JSON.stringify(urlPath)})
-const config = mod.default ?? mod
-process.stdout.write(JSON.stringify(config))
-`
-    const result = evalTsSnippet(snippet, { cwd, env: configLoadEnv(cwd) })
+    const result = importModuleAsJson(urlPath, { cwd, env: configLoadEnv(cwd) })
     if (result.exitCode === 0) {
       return JSON.parse(result.stdout) as Record<string, unknown>
     }
@@ -217,12 +212,7 @@ function loadTsConfigWithoutCliImport(
   writeFileSync(tmpPath, wrapper, "utf8")
   try {
     const urlPath = "file:///" + tmpPath.replace(/\\/g, "/")
-    const snippet = `
-const mod = await import(${JSON.stringify(urlPath)})
-const config = mod.default ?? mod
-process.stdout.write(JSON.stringify(config))
-`
-    const result = evalTsSnippet(snippet, { cwd, env: configLoadEnv(cwd) })
+    const result = importModuleAsJson(urlPath, { cwd, env: configLoadEnv(cwd) })
     if (result.exitCode !== 0) return null
     return JSON.parse(result.stdout) as Record<string, unknown>
   } finally {
