@@ -11,7 +11,7 @@ import {
 import { resolve, join, basename, relative, isAbsolute } from "node:path"
 import { spawnSync, execSync } from "node:child_process"
 import { localKongBaseUrl } from "../local-gateway.js"
-import { loadConfig } from "../config.js"
+import { loadConfig, rethrowIfConfigBroken } from "../config.js"
 import { ensureBinary } from "../ensure-binary.js"
 import {
   functionsPathCandidatesFromProject,
@@ -532,7 +532,8 @@ async function deployCloud(cwd: string, fns: DiscoveredFunction[], env?: string)
 export function serviceRoleRoutesFor(cwd: string): string[] | undefined {
   try {
     return serviceRoleRoutes(loadConfig(cwd))
-  } catch {
+  } catch (err) {
+    rethrowIfConfigBroken(err)
     return undefined
   }
 }

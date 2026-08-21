@@ -157,6 +157,37 @@ function configLoadEnv(cwd: string): NodeJS.ProcessEnv {
   return { ...readEnvFile(cwd), ...process.env }
 }
 
+/**
+ * A config file exists but could not be evaluated.
+ *
+ * Distinct from absence on purpose. Six call sites catch config loading so the CLI still works
+ * outside a project, and while they treated both cases the same, a config that failed to load
+ * looked exactly like no config at all. That is how a standalone binary that could not read any
+ * config shipped in v0.1.9 and still appeared to function: `status` printed a stack of stopped
+ * services, and `db check` fell back to DATABASE_URL from .env and reported a connection error.
+ * Those call sites should swallow absence and re-throw this.
+ */
+export class ConfigLoadError extends Error {
+  readonly configPath: string
+
+  constructor(configPath: string, detail: string) {
+    super(`Failed to load ${configPath}:\n${detail}`)
+    this.name = "ConfigLoadError"
+    this.configPath = configPath
+  }
+}
+
+/**
+ * Re-throw a config that exists but could not be read; swallow anything else.
+ *
+ * For the call sites that catch config loading so the CLI still works outside a project. They
+ * want to ignore absence, not breakage, and treating the two alike is what let a standalone
+ * binary that could read no config at all still look like it was working.
+ */
+export function rethrowIfConfigBroken(err: unknown): void {
+  if (err instanceof ConfigLoadError) throw err
+}
+
 function loadFirstTsConfig(
   cwd: string,
   candidates: string[],
@@ -173,12 +204,12 @@ function loadFirstTsConfig(
 
     const failure = result.stderr || result.stdout
     if (!shouldStripCliImportOnLoadFailure(failure)) {
-      throw new Error(`Failed to load ${candidate}:\n${failure}`)
+      throw new ConfigLoadError(candidate, failure)
     }
 
     const fallback = loadTsConfigWithoutCliImport(configPath, cwd)
     if (fallback !== null) return fallback
-    throw new Error(`Failed to load ${candidate}:\n${failure}`)
+    throw new ConfigLoadError(candidate, failure)
   }
   return null
 }

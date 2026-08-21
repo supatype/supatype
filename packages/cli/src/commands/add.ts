@@ -1,6 +1,6 @@
 import type { Command } from "commander"
 import { p, runClackFlow } from "../ui/clack.js"
-import { loadConfig } from "../config.js"
+import { loadConfig, rethrowIfConfigBroken } from "../config.js"
 import { selfHostTlsEnabled } from "../project-config.js"
 import { updateServerConfigInProject } from "../app-config.js"
 import { ensureNotCancelled } from "../ui/prompts.js"
@@ -82,7 +82,8 @@ function printDomainNextSteps(cwd: string, domain: string): void {
   let tlsActive = true
   try {
     tlsActive = selfHostTlsEnabled(loadConfig(cwd))
-  } catch {
+  } catch (err) {
+    rethrowIfConfigBroken(err)
     // config re-load is best-effort for the warning below
   }
 
