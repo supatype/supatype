@@ -10,6 +10,7 @@ import { createRequire } from "node:module"
 import { fileURLToPath } from "node:url"
 import { writeFileSync, unlinkSync } from "node:fs"
 import { tmpdir } from "node:os"
+import { isCompiledBinary } from "./cli-install-method.js"
 
 const _require = createRequire(import.meta.url)
 
@@ -51,7 +52,9 @@ export function runTsFile(
   filePath: string,
   opts: SpawnSyncOptions = {},
 ): RunResult {
-  const result = spawnSync(process.execPath, [TSX_BIN, filePath], {
+  // Same split as importModuleAsJson: the binary interprets TypeScript itself, Node uses tsx.
+  const argv = isCompiledBinary() ? ["_run-ts", filePath] : [TSX_BIN, filePath]
+  const result = spawnSync(process.execPath, argv, {
     encoding: "utf8",
     maxBuffer: 50 * 1024 * 1024,
     ...opts,
@@ -86,4 +89,40 @@ export function evalTsSnippet(
       // ignore cleanup errors
     }
   }
+}
+
+/**
+ * Import a module and return its default export as JSON text.
+ *
+ * Two interpreters, one contract. Under Node this writes a snippet and runs it through tsx, as
+ * it always has. As a compiled binary it re-executes itself, because there is no node_modules to
+ * resolve tsx from, no writable directory beside the executable, and on a `curl | sh` machine no
+ * Node either: the previous behaviour failed with
+ * `ENOENT: open '/$bunfs/root/supatype-eval-....mts'` and broke init, update, dev and push.
+ *
+ * Callers get the same stdout, stderr and exit code either way.
+ */
+export function importModuleAsJson(
+  target: string,
+  opts: SpawnSyncOptions = {},
+): RunResult {
+  if (isCompiledBinary()) {
+    const result = spawnSync(process.execPath, ["_print-module", target], {
+      encoding: "utf8",
+      maxBuffer: 50 * 1024 * 1024,
+      ...opts,
+    })
+    return {
+      stdout: String(result.stdout ?? ""),
+      stderr: String(result.stderr ?? ""),
+      exitCode: result.status ?? 1,
+    }
+  }
+
+  const snippet = `
+const mod = await import(${JSON.stringify(target)})
+const config = mod.default ?? mod
+process.stdout.write(JSON.stringify(config))
+`
+  return evalTsSnippet(snippet, opts)
 }

@@ -2,7 +2,7 @@
  * Resolve the project API base URL (Kong gateway or direct server) for CLI HTTP calls.
  */
 
-import { loadConfig } from "./config.js"
+import { loadConfig, rethrowIfConfigBroken } from "./config.js"
 import { readEnvValue } from "./env-file.js"
 import { serverBaseUrl } from "./project-config.js"
 
@@ -34,7 +34,8 @@ export function resolveProjectApiUrl(cwd: string): string {
     if (fromConfig) {
       return fromConfig.replace(/\/+$/, "")
     }
-  } catch {
+  } catch (err) {
+    rethrowIfConfigBroken(err)
     // No supatype.config: fall through to PORT default.
   }
 

@@ -131,6 +131,36 @@ update_env=(
   "SUPATYPE_RELEASE_PUBLIC_KEY=$PUBKEY"
 )
 
+# The binary must be able to evaluate a TypeScript config.
+#
+# --version and --help never load one, so every check in the release path passed while this was
+# broken: the binary wrote a temp file beside its own executable and spawned node with tsx, and a
+# curl | sh machine has neither. That shipped in v0.1.9 and broke init, update, dev, push, seed
+# and doctor.
+#
+# `doctor` is the probe because it loads the config and needs nothing else: no database, no
+# Docker, no downloads. Most other commands hide the failure rather than showing it. `status` and
+# `db check` carry on as though there were no config at all, which is why this went unnoticed,
+# and `db check` reads DATABASE_URL from .env so it looks like it worked.
+echo "==> the installed binary can evaluate a TypeScript config"
+proj="$work/proj"
+mkdir -p "$proj"
+( cd "$proj" && "$work/bin/supatype" init cfgtest -y --no-install >/dev/null 2>&1 ) || true
+doctor_out="$work/doctor.log"
+( cd "$proj/cfgtest" && "$work/bin/supatype" doctor >"$doctor_out" 2>&1 ) || true
+if grep -qE 'bunfs|supatype-eval-[0-9]+\.mts' "$doctor_out"; then
+  echo "FAIL: the binary could not evaluate the config it just wrote." >&2
+  grep -E 'bunfs|\.mts' "$doctor_out" | head -2 | sed 's/^/      /' >&2
+  exit 1
+fi
+# Reaching the schema means the config parsed. Without this the check would pass on an empty file.
+if ! grep -qiE "schema" "$doctor_out"; then
+  echo "FAIL: doctor did not get as far as the schema, so the config did not load:" >&2
+  sed 's/^/      /' "$doctor_out" | head -5 >&2
+  exit 1
+fi
+sed -n '1p' "$doctor_out" | sed 's/^/    /'
+
 echo "==> self-update accepts the signed release"
 # --force, because the installed binary is already the version latest.json advertises; the point
 # is to exercise download, verification and replacement rather than the guard.

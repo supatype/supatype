@@ -6,7 +6,7 @@
  */
 
 import type { Command } from "commander"
-import { loadConfig } from "../config.js"
+import { loadConfig, rethrowIfConfigBroken } from "../config.js"
 import { connectionString } from "../project-config.js"
 import { loadProjectLink } from "../link.js"
 import { resolveTarget } from "../resolve-target.js"
@@ -153,7 +153,8 @@ export function registerDb(program: Command): void {
           const config = loadConfig(cwd)
           url = url ?? connectionString(config)
           schema = schema ?? config.schema?.pg_schema ?? "public"
-        } catch {
+        } catch (err) {
+          rethrowIfConfigBroken(err)
           // Runnable outside a project, which is the point, an operator should be able to check a
           // database before committing to any config at all.
           url = url ?? process.env["DATABASE_URL"]
