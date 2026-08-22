@@ -12,10 +12,20 @@ const CLI_BIN = resolve(__dirname, "../bin/supatype.js")
 
 function runCli(cwd: string, args: string[]): { stdout: string; stderr: string; exitCode: number } {
   const result = spawnSync(process.execPath, [CLI_BIN, ...args], {
-    encoding: "utf8",
     cwd,
-    timeout: 10_000,
+    encoding: "utf8",
+    // 60s, not 10s: this spawns the built CLI, which imports Ink, React and commander before it
+    // does anything. That is about 1.2s idle, and CI runs `turbo run test` across every package at
+    // once, where it exceeded 10s and the subprocess was killed. The assertion then compared
+    // against empty output and pointed at the CLI rather than at contention.
+    timeout: 60_000,
   })
+  if (result.signal) {
+    throw new Error(
+      `CLI subprocess killed by ${result.signal} after the spawn timeout. `
+        + `Args: ${args.join(" ")}. This is usually machine contention, not a CLI fault.`,
+    )
+  }
   return {
     stdout: String(result.stdout ?? ""),
     stderr: String(result.stderr ?? ""),

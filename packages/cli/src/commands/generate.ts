@@ -1,11 +1,8 @@
 import type { Command } from "commander"
-import { mkdirSync, writeFileSync } from "node:fs"
-import { resolve, dirname } from "node:path"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { hooksPathFromProject, schemaPathFromProject } from "../project-config.js"
-import { ensureEngine, engineRequest } from "../engine-client.js"
-import { generateClientAugmentation } from "../augmentation-generator.js"
 import { writeHooksModule } from "../model-hooks.js"
+import { writeGeneratedTypes } from "../type-generation.js"
 import { error, info } from "../ui/messages.js"
 
 export function registerGenerate(program: Command): void {
@@ -20,28 +17,23 @@ export function registerGenerate(program: Command): void {
       const outputTypesPath = config.output?.types ?? "types/database.ts"
       const outputClientPath = config.output?.client ?? "supatype/generated/index.d.ts"
 
-      await ensureEngine()
       info("Loading schema...")
       const ast = loadSchemaAst(schemaPath, cwd)
 
-      const result = await engineRequest<{ code?: string; message?: string }>("/generate", { ast, lang: "typescript" })
-
-      const typesCode = result.code ?? result.message
-      if (typesCode === undefined) {
-        error("Engine returned no output.")
+      // Shared with push, which used to delegate the writing to the engine and produce no files.
+      // Unlike push, this command always writes: the defaults above are the point of running it.
+      try {
+        const written = await writeGeneratedTypes({
+          cwd,
+          ast,
+          typesPath: outputTypesPath,
+          clientPath: outputClientPath,
+        })
+        for (const message of written) info(message)
+      } catch (err) {
+        error(err instanceof Error ? err.message : String(err))
         process.exit(1)
       }
-
-      const outPath = resolve(cwd, outputTypesPath)
-      mkdirSync(dirname(outPath), { recursive: true })
-      writeFileSync(outPath, typesCode, "utf8")
-      info(`Types written to ${outputTypesPath}`)
-
-      const augmentationOutPath = resolve(cwd, outputClientPath)
-      const augmentationCode = generateClientAugmentation(ast)
-      mkdirSync(dirname(augmentationOutPath), { recursive: true })
-      writeFileSync(augmentationOutPath, augmentationCode, "utf8")
-      info(`Client augmentation written to ${outputClientPath}`)
 
       const hooksPath = writeHooksModule(cwd, hooksPathFromProject(config, cwd), ast)
       if (hooksPath !== null) info(`Hook handler types written to ${hooksPath}`)

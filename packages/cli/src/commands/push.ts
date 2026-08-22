@@ -38,6 +38,7 @@ import {
 import { confirm, logSkippedConfirm } from "../ui/confirm.js"
 import { info, plain } from "../ui/messages.js"
 import { withSpinner } from "../ui/progress.js"
+import { writeGeneratedTypes } from "../type-generation.js"
 import { isInteractive } from "../ui/interactive.js"
 
 const DEV_JWT_SECRET = "super-secret-jwt-token-with-at-least-32-characters-long"
@@ -247,14 +248,19 @@ async function generateTypesLocal(ast: unknown, config: SupatypeProjectConfig): 
   if (syncManifestHooks(cwd, ast)) info("Hook map written to .supatype/manifest.json")
 
   if (!config.output?.types && !config.output?.client) return
-  await withSpinner("Generating types", async () => {
-    await ensureEngine()
-    const genBody: Record<string, unknown> = { ast, lang: "typescript" }
-    if (config.output?.types) genBody["types_path"] = config.output.types
-    if (config.output?.client) genBody["client_path"] = config.output.client
-    const genResult = await engineRequest<{ message?: string }>("/generate", genBody)
-    return genResult.message ?? "Types generated."
-  }).then((msg) => info(msg))
+  // The CLI writes these, it does not ask the engine to. Passing types_path and client_path and
+  // reading only `message` meant the generated TypeScript was printed to the terminal and no file
+  // was ever created, so `push` reported success and produced nothing.
+  const written = await withSpinner("Generating types", async () => {
+    const messages = await writeGeneratedTypes({
+      cwd,
+      ast,
+      typesPath: config.output?.types,
+      clientPath: config.output?.client,
+    })
+    return messages
+  })
+  for (const message of written) info(message)
 }
 
 async function provisionLocalStorage(ast: unknown, config: SupatypeProjectConfig): Promise<void> {

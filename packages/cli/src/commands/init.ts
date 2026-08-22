@@ -816,7 +816,22 @@ function packageJsonTemplate(opts: ScaffoldOptions, deps: InitDependencyVersions
   if (opts.helloFunction) {
     scripts.push(`    "functions": "supatype functions serve"`)
   }
-  const devDeps = [`    "tsx": "^4.19.2"`, `    "typescript": "^5"`]
+  // Both are development-time only, so they belong in devDependencies. Validated end to end
+  // against a real database: schema/index.ts imports @supatype/types with `import type`, which is
+  // erased at build; supatype.config.ts imports defineConfig, which only the CLI evaluates; and
+  // seed.ts is run by `tsx seed.ts`. Nothing `supatype push` or `supatype generate` writes refers
+  // to either package: the generated types import nothing, and the client augmentation declares a
+  // module for @supatype/client, which stays a real dependency.
+  //
+  // In dependencies they were installed by `npm install --omit=dev`, so every production install
+  // of a Supatype app pulled the whole CLI toolchain (ink, react, typescript, ts-morph, pg, tsx)
+  // to support three files that never run in production.
+  const devDeps = [
+    `    "@supatype/cli": "^${deps.cli}"`,
+    `    "@supatype/types": "^${deps.types}"`,
+    `    "tsx": "^4.19.2"`,
+    `    "typescript": "^5"`,
+  ]
   if (opts.app.viteDevUrl) {
     devDeps.push(`    "vite": "^6"`)
   }
@@ -826,10 +841,6 @@ function packageJsonTemplate(opts: ScaffoldOptions, deps: InitDependencyVersions
   "type": "module",
   "scripts": {
 ${scripts.join(",\n")}
-  },
-  "dependencies": {
-    "@supatype/cli": "^${deps.cli}",
-    "@supatype/types": "^${deps.types}"
   },
   "devDependencies": {
 ${devDeps.join(",\n")}

@@ -246,13 +246,6 @@ jobs:
             --endpoint-url "${EP}" --no-progress \
             --cache-control "public, max-age=31536000, immutable"
 
-          # The documented entry point is
-          # `curl -fsSL https://releases.supatype.com/install.sh | bash`, and nothing had ever
-          # put a file there.
-          aws s3 cp scripts/install.sh "s3://${BUCKET}/install.sh" \
-            --endpoint-url "${EP}" --cache-control "no-cache" \
-            --content-type "text/x-shellscript" --no-progress
-
           printf '{"version":"%s","date":"%s"}\n' "${CLI_VERSION}" "$(date -u +%Y-%m-%d)" > latest.json
           aws s3 cp latest.json "s3://${BUCKET}/cli/latest.json" \
             --endpoint-url "${EP}" --cache-control "no-cache" --no-progress
