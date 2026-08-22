@@ -7,14 +7,13 @@
 # See plans/ENGINEERING-STATUS.md §6 "Install platform policy".
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/supatype/supatype/main/scripts/install.sh | bash
+#   curl -fsSL https://supatype.com/install.sh | bash
 #
-# That URL, not the CDN copy, is the documented one. The script carries the public key the
-# archives are verified against, so serving it from the same bucket as the archives would put
-# the key and the thing it checks under one authority: whoever could replace an archive could
-# replace the key. GitHub and the CDN are two origins, which is what makes the signature check
-# below worth performing. A copy is mirrored to releases.supatype.com/install.sh for
-# convenience, and it is the weaker of the two.
+# That URL redirects to this file on GitHub, and it is deliberately not served from the release
+# bucket. The script carries the public key the archives are verified against, so putting it
+# beside the archives would place the key and the thing it checks under one authority: whoever
+# could replace an archive could replace the key, and verification would still pass. GitHub and
+# the CDN are two origins, which is what makes the signature check below worth performing.
 #
 # Environment overrides:
 #   SUPATYPE_VERSION     install a specific version (default: latest)
