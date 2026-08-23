@@ -10,7 +10,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="${SUPATYPE_ZTR_WORK_ROOT:-$(mktemp -d -t ztr-native-XXXXXX)}"
-INSTALL_URL="${SUPATYPE_INSTALL_URL:-https://releases.supatype.com/install.sh}"
+INSTALL_URL="${SUPATYPE_INSTALL_URL:-https://supatype.com/install.sh}"
 MAX_WAIT="${SUPATYPE_ZTR_MAX_WAIT:-60}"
 
 echo "==> workdir: $WORK"
