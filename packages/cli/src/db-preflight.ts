@@ -113,6 +113,16 @@ async function probeLogicalDecoding(q: QueryFn): Promise<CheckResult> {
 
 const REQUIRED_ROLES = ["anon", "authenticated", "service_role", "authenticator"] as const
 
+/** The three roles PostgREST switches to per request. `authenticator` only connects and switches. */
+const API_ROLES = ["anon", "authenticated", "service_role"] as const
+
+/** One row per API role that exists, for the schema named in the query. */
+export interface AuthSchemaUsageRow {
+  rolname: string | null
+  has_usage: boolean | null
+  owner: string
+}
+
 /**
  * Stands in for the `authenticator` password when the operator has not supplied one.
  *
@@ -309,7 +319,7 @@ export async function runPreflight(
         WHERE g.rolname = 'authenticator'`,
     )
     const held = new Set(memberships.map((m) => m.rolname))
-    const needed = ["anon", "authenticated", "service_role"].filter((r) => !held.has(r))
+    const needed = API_ROLES.filter((r) => !held.has(r))
     results.push({
       id: "authenticator-memberships",
       title: "authenticator can reach the three API roles",
@@ -321,6 +331,19 @@ export async function runPreflight(
       }),
     })
   }
+
+  // USAGE on the auth schema, asked by OID so a role that does not exist cannot raise
+  // `role "x" does not exist` the way the name-taking overload would.
+  const authUsage = await q<AuthSchemaUsageRow>(
+    `SELECT r.rolname,
+            has_schema_privilege(r.oid, n.oid, 'USAGE') AS has_usage,
+            pg_get_userbyid(n.nspowner) AS owner
+       FROM pg_namespace n
+       LEFT JOIN pg_roles r ON r.rolname = ANY($1)
+      WHERE n.nspname = 'auth'`,
+    [API_ROLES as unknown as string[]],
+  )
+  results.push(authSchemaUsageCheck(authUsage, privs))
 
   // ── Extensions ─────────────────────────────────────────────────────────────
   const installed = new Set(
@@ -454,6 +477,71 @@ export async function runPreflight(
   }
 
   return { results, worst: worstOf(results) }
+}
+
+/**
+ * Can the API roles reach the auth helpers when a query calls them?
+ *
+ * Postgres evaluates a policy's `USING` clause with the table owner's privileges, so row-level
+ * security works without this grant and looks like proof the schema is fine. Field masking does
+ * not: `supatype_mask` rewrites a masked column into `CASE WHEN can_read_t__c(t) …` in the target
+ * list, which runs as the caller and reaches `auth.role()` directly. Studio's per-record
+ * `can_<op>_<table>` calls have the same shape.
+ *
+ * `supatype/postgres` grants this at initdb, so a missing grant means a database Supatype did not
+ * bootstrap. Kept a `degrade` rather than a `fail`: two named features stop working and the rest
+ * of the stack is unaffected.
+ */
+export function authSchemaUsageCheck(
+  rows: AuthSchemaUsageRow[],
+  privs: { current_user: string; is_super: boolean },
+): CheckResult {
+  const base = { id: "auth-schema-usage", title: "USAGE on schema auth (API roles)" }
+
+  // No auth schema yet: the first push creates it and grants on it, so there is nothing to fix.
+  if (rows.length === 0) {
+    return {
+      ...base,
+      severity: "pass",
+      detail: "schema auth does not exist yet; the first push creates it and grants usage",
+    }
+  }
+
+  const owner = rows[0]!.owner
+  const present = rows.filter((r) => r.rolname !== null)
+
+  // The roles check above owns this finding; repeating it here as a privilege problem would send
+  // the operator after the wrong fix.
+  if (present.length === 0) {
+    return { ...base, severity: "pass", detail: "no API roles exist on this server yet" }
+  }
+
+  const lacking = present.filter((r) => !r.has_usage).map((r) => r.rolname!)
+  if (lacking.length === 0) {
+    return {
+      ...base,
+      severity: "pass",
+      detail: `granted to ${present.map((r) => r.rolname).join(", ")} (schema owned by "${owner}")`,
+    }
+  }
+
+  // A grant from a role that owns neither the schema nor the server is discarded with a WARNING
+  // rather than an error, so `--fix` would report "Applied" having changed nothing. That is the
+  // same fault as a privilege generated and never applied, so hand it to the operator instead.
+  const canGrant = owner === privs.current_user || privs.is_super
+
+  return {
+    ...base,
+    severity: "degrade",
+    detail: `not granted to ${lacking.join(", ")} (schema owned by "${owner}")`,
+    impact:
+      "Field-level access is unavailable: a push declaring `access.fields` refuses rather than " +
+      "applying, and a masked column read by one of these roles fails with 42501 instead of " +
+      "masking. Studio's per-record permission checks fail the same way. Row-level security is " +
+      "unaffected, because Postgres evaluates policies with the table owner's privileges.",
+    remedy: `GRANT USAGE ON SCHEMA auth TO ${lacking.map(ident).join(", ")};`,
+    ...(!canGrant && { remedyNeedsOperator: true }),
+  }
 }
 
 function extensionCheck(
