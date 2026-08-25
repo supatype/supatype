@@ -144,6 +144,12 @@ jobs:
     env:
       SUPATYPE_ZTR_INSTALL: workspace
       SUPATYPE_ZTR_KEEP_ON_FAILURE: "1"
+      # Docker on the macOS runner is a Colima VM: it takes about two minutes to boot before
+      # compose starts, and the gateway has been observed still coming up five minutes after
+      # that, with `supatype dev` itself healthy and still waiting. 300s is a Linux budget, so
+      # on macOS it fails the job on the hardware rather than on the product. `matrix` is
+      # available in a job-level `env:`, unlike `runner`.
+      SUPATYPE_ZTR_MAX_WAIT: ${{ matrix.os == 'macos-15-intel' && '900' || '300' }}
       SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
 
     steps:
