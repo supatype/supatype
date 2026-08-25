@@ -9,6 +9,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/http-wait.sh"
 WORK="${SUPATYPE_ZTR_WORK_ROOT:-$(mktemp -d -t ztr-native-XXXXXX)}"
 INSTALL_URL="${SUPATYPE_INSTALL_URL:-https://supatype.com/install.sh}"
 MAX_WAIT="${SUPATYPE_ZTR_MAX_WAIT:-60}"
@@ -50,18 +51,16 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "==> Waiting up to ${MAX_WAIT}s for API health..."
+ztr_native_ready() {
+  http_ok http://127.0.0.1:54321/auth/v1/health \
+    || http_ok http://127.0.0.1:18473/auth/v1/health
+}
+
 OK=0
-for i in $(seq 1 "$MAX_WAIT"); do
-  if curl -sf http://127.0.0.1:54321/auth/v1/health >/dev/null 2>&1 \
-    || curl -sf http://127.0.0.1:18473/auth/v1/health >/dev/null 2>&1; then
-    OK=1
-    ELAPSED=$(( $(date +%s) - START ))
-    echo "==> API up in ${ELAPSED}s"
-    break
-  fi
-  sleep 1
-done
+if wait_until "$MAX_WAIT" "native API health" ztr_native_ready; then
+  OK=1
+  echo "==> API up in $(( $(date +%s) - START ))s"
+fi
 
 if [[ "$OK" != "1" ]]; then
   echo "zero-to-running (native) FAILED: API not ready within ${MAX_WAIT}s" >&2

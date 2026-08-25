@@ -24,6 +24,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 CLI_BIN="$ROOT_DIR/packages/cli/bin/supatype.js"
+source "$SCRIPT_DIR/lib/http-wait.sh"
 
 PROJECT_NAME="${SUPATYPE_ZTR_PROJECT:-ztr-smoke}"
 MAX_WAIT="${SUPATYPE_ZTR_MAX_WAIT:-300}"
@@ -128,22 +129,11 @@ resolve_base_url() {
   echo "http://localhost:${kport}"
 }
 
+ztr_health_ready() { http_ok "$ZTR_HEALTH_URL"; }
+
 wait_for_health() {
-  local base_url="$1"
-  echo "==> Waiting for $base_url/auth/v1/health (up to ${MAX_WAIT}s)..."
-  local i
-  for i in $(seq 1 "$MAX_WAIT"); do
-    if curl -sf "$base_url/auth/v1/health" >/dev/null 2>&1; then
-      echo "  API ready after ${i}s"
-      return 0
-    fi
-    if (( i % 30 == 0 )); then
-      echo "  Still waiting (${i}s)..."
-    fi
-    sleep 1
-  done
-  echo "ERROR: API did not become ready within ${MAX_WAIT}s" >&2
-  return 1
+  ZTR_HEALTH_URL="$1/auth/v1/health"
+  wait_until "$MAX_WAIT" "$ZTR_HEALTH_URL" ztr_health_ready
 }
 
 dump_failure_logs() {
