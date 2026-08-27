@@ -96,7 +96,9 @@ jobs:
       # selects nothing (`turbo --dry=json` reports no packages and no tasks) and only costs a
       # pnpm and turbo startup.
       - name: Build the CLI
-        run: pnpm --filter @supatype/cli build
+        # `@supatype/cli...`, not the package alone: the CLI imports @supatype/types, so on a
+        # fresh checkout building it by itself fails with TS2307 before it starts.
+        run: pnpm --filter "@supatype/cli..." build
 
       - name: Compile and package every target
         run: bash packages/cli/scripts/build-release-artifacts.sh "$CLI_VERSION" "$PWD/artifacts"

@@ -285,7 +285,9 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build the CLI
-        run: pnpm --filter @supatype/cli build
+        # `@supatype/cli...`, not the package alone: the CLI imports @supatype/types, so on a
+        # fresh checkout building it by itself fails with TS2307 before it starts.
+        run: pnpm --filter "@supatype/cli..." build
 
       - name: Round trip
         run: bash tests/integration/scripts/cli-artifact-roundtrip.sh
