@@ -17,7 +17,7 @@ import { normalizeAdminConfig } from "../src/lib/normalize-admin-config.js"
  */
 
 const CONFIG_PATH = fileURLToPath(
-  new URL("../../../tests/integration/.supatype/admin-config.json", import.meta.url),
+  new URL("./fixtures/admin-config.json", import.meta.url),
 )
 
 const normalized = (): ReturnType<typeof normalizeAdminConfig> =>

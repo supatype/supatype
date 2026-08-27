@@ -14,7 +14,7 @@ import type { AdminConfig, FieldConfig } from "../src/config.js"
  */
 
 const CONFIG_PATH = fileURLToPath(
-  new URL("../../../tests/integration/.supatype/admin-config.json", import.meta.url),
+  new URL("./fixtures/admin-config.json", import.meta.url),
 )
 
 const config = (): AdminConfig =>

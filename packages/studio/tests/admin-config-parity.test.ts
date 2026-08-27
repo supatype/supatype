@@ -8,19 +8,24 @@ import type { AdminConfig } from "../src/config.js"
 /**
  * Studio against the engine's actual output, rather than against what Studio believes it emits.
  *
- * `tests/integration/.supatype/admin-config.json` is produced by the **real engine** during
- * `supatype push`, and the integration workflow regenerates it. It is the one artifact that crosses
- * from the engine repository into this one, which makes it the only place a divergence between what
- * the engine emits and what Studio understands can be caught without a shared test fixture.
+ * The fixture in `tests/fixtures/admin-config.json` is **real engine output**: a copy of what
+ * `supatype push` wrote for `tests/integration/schema/bounds.ts`. It is committed because the live
+ * artifact it came from, `tests/integration/.supatype/admin-config.json`, is gitignored and only
+ * exists on a machine that has run the stack. These tests read it from disk, so before it was
+ * committed they passed locally and failed in CI every single time, which is worse than not
+ * existing: a red check nobody can act on.
+ *
+ * A committed fixture goes stale, so it is not left to trust. `integration-test.sh` regenerates the
+ * config against a live stack and diffs it against this file, failing with instructions when the
+ * engine's output moves. Add a measure to the engine and this fixture must be regenerated in the
+ * same change, which is exactly the coupling worth enforcing.
  *
  * The failure this guards against is precise: the engine gains a measure, Studio does not implement
  * it, and every existing test still passes because both sides are internally consistent. That is the
  * shape of the original defect, one layer up.
  */
 
-const CONFIG_PATH = fileURLToPath(
-  new URL("../../../tests/integration/.supatype/admin-config.json", import.meta.url),
-)
+const CONFIG_PATH = fileURLToPath(new URL("./fixtures/admin-config.json", import.meta.url))
 
 function loadConfig(): AdminConfig {
   return JSON.parse(readFileSync(CONFIG_PATH, "utf8")) as AdminConfig
