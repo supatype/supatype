@@ -1,0 +1,26 @@
+import type { SupatypeProjectConfig } from "@supatype/cli"
+
+/**
+ * Locally built engine, server and Studio, so this example exercises the working tree rather than a
+ * published release.
+ *
+ * `versions: "local"` is what tells the CLI not to resolve and download a pinned build; `overrides`
+ * is where each one actually comes from. Without both, the CLI would fetch the last release and the
+ * feature under test would not be in it.
+ *
+ * Engine is the debug build: this is a demo, not a benchmark, and `cargo build --release` costs
+ * minutes for nothing here. Point it at `target/release/...` if you care about push latency.
+ */
+const local: Partial<SupatypeProjectConfig> = {
+  versions: {
+    engine: "local",
+    server: "local",
+  },
+  overrides: {
+    engine: "C:/Users/Nic_J/Documents/NJ/supatype-schema-engine/target/debug/supatype-engine.exe",
+    server: "C:/Users/Nic_J/Documents/NJ/supatype-auth/supatype-server.exe",
+    studio: "../../packages/studio",
+  },
+}
+
+export default local
