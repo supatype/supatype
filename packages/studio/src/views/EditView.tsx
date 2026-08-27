@@ -15,6 +15,8 @@ import {
   useStudioFieldAccess,
 } from "../hooks/useStudioFieldAccess.js"
 import { serializeRecordForApi } from "../lib/recordValues.js"
+import { describeViolations, validateRecord } from "../lib/validate-record.js"
+import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
 
 interface EditViewProps {
   model: ModelConfig
@@ -23,6 +25,10 @@ interface EditViewProps {
 }
 
 export function EditView({ model, recordId, onNavigate }: EditViewProps): React.ReactElement {
+  // Rows here are read with the service role, so the elevated-access notice applies
+  // to this view. See `useShowsProjectRows`.
+  useShowsProjectRows()
+
   const client = useAdminClient()
   const config = useAdminConfig()
   const { currentLocale, defaultLocale } = useLocale()
@@ -30,6 +36,9 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
   const [loading, setLoading] = useState(!!recordId)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Keyed by column. Both sources land here: a bound or constraint Studio checked itself, and a
+  // field validator's refusal from the server, which names the column it refused.
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const isDirty = useRef(false)
   const createTimestampDefaultsApplied = useRef(false)
 
@@ -127,14 +136,45 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
     })()
   }, [client, model.tableName, model.primaryKey, recordId])
 
+  /**
+   * Put a refused write's message on the input it names.
+   *
+   * The server attaches the column when a field validator refuses. Everything else keeps the banner
+   * alone: a constraint violation from Postgres names a generated constraint, not a field, and
+   * guessing which input it meant would point the author at the wrong one.
+   */
+  const noteFieldError = useCallback(
+    (err: { message: string; field?: string | undefined }) => {
+      if (err.field === undefined) return
+      setFieldErrors({ [err.field]: err.message })
+    },
+    [],
+  )
+
   const handleChange = useCallback((fieldName: string, value: unknown) => {
     isDirty.current = true
     setValues((prev) => ({ ...prev, [fieldName]: value }))
   }, [])
 
   const handleSave = async () => {
+    const violations = validateRecord(model.fields, values, model.constraints ?? [])
+    if (violations.length > 0) {
+      setError(describeViolations(violations))
+      // A violation attributed to one field goes on that input; a cross-field rule has no single
+      // input to blame and stays in the banner alone.
+      setFieldErrors(
+        Object.fromEntries(
+          violations
+            .filter((v) => model.fields.some((f) => f.name === v.field))
+            .map((v) => [v.field, v.locale ? `(${v.locale}) ${v.message}` : v.message]),
+        ),
+      )
+      return
+    }
+
     setSaving(true)
     setError(null)
+    setFieldErrors({})
     try {
       if (isCreate) {
         const { [model.primaryKey]: _pk, ...insertValues } = serializeRecordForApi(model, values)
@@ -144,6 +184,7 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
 
         if (result.error) {
           setError(result.error.message)
+          noteFieldError(result.error)
         } else if (result.data) {
           const rows = result.data as Record<string, unknown>[]
           const data = rows[0]
@@ -161,6 +202,7 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
 
         if (result.error) {
           setError(result.error.message)
+          noteFieldError(result.error)
         } else {
           isDirty.current = false
         }
@@ -257,6 +299,8 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
         saving={saving}
         onSave={() => { void handleSave() }}
         isCreate={isCreate}
+        {...(Object.keys(fieldErrors).length > 0 && { fieldErrors })}
+        {...(Object.keys(fieldErrors).length > 0 && { fieldErrors })}
         {...(!isCreate && {
           onDuplicate: () => { void handleDuplicate() },
           // Two layers: the table-level verdict withdraws the control where it is settled, and

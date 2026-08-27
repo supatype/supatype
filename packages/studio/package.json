@@ -59,6 +59,7 @@
     "tailwind-merge": "^2.5.0"
   },
   "devDependencies": {
+    "@supatype/types": "workspace:*",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^4",

@@ -5,12 +5,18 @@ import { useAdminClient } from "../hooks/useAdminClient.js"
 import { useLocale } from "../hooks/useLocale.js"
 import type { GlobalConfig } from "../config.js"
 import { splitEditFields } from "../lib/edit-field-layout.js"
+import { describeViolations, validateRecord } from "../lib/validate-record.js"
+import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
 
 interface GlobalEditViewProps {
   global: GlobalConfig
 }
 
 export function GlobalEditView({ global: globalConfig }: GlobalEditViewProps): React.ReactElement {
+  // Rows here are read with the service role, so the elevated-access notice applies
+  // to this view. See `useShowsProjectRows`.
+  useShowsProjectRows()
+
   const client = useAdminClient()
   const { currentLocale, defaultLocale } = useLocale()
   const [values, setValues] = useState<Record<string, unknown>>({})
@@ -53,6 +59,12 @@ export function GlobalEditView({ global: globalConfig }: GlobalEditViewProps): R
   }, [])
 
   const handleSave = async () => {
+    const violations = validateRecord(globalConfig.fields, values)
+    if (violations.length > 0) {
+      setError(describeViolations(violations))
+      return
+    }
+
     setSaving(true)
     setError(null)
     try {

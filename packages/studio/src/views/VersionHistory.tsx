@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react"
 import { Header } from "../components/Header.js"
 import { useAdminClient } from "../hooks/useAdminClient.js"
 import type { ModelConfig } from "../config.js"
+import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
 
 interface VersionHistoryProps {
   model: ModelConfig
@@ -17,6 +18,10 @@ interface VersionEntry {
 }
 
 export function VersionHistory({ model, recordId, onNavigate }: VersionHistoryProps): React.ReactElement {
+  // Rows here are read with the service role, so the elevated-access notice applies
+  // to this view. See `useShowsProjectRows`.
+  useShowsProjectRows()
+
   const client = useAdminClient()
   const [versions, setVersions] = useState<VersionEntry[]>([])
   const [loading, setLoading] = useState(true)

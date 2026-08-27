@@ -19,6 +19,8 @@ export interface EditFormLayoutProps {
   onDuplicate?: () => void
   onDelete?: () => void
   preview?: React.ReactNode
+  /** Per-field messages from the last refused save, keyed by column. */
+  fieldErrors?: Record<string, string>
   className?: string
 }
 
@@ -38,6 +40,7 @@ export function EditFormLayout({
   onDuplicate,
   onDelete,
   preview,
+  fieldErrors,
   className,
 }: EditFormLayoutProps): React.ReactElement {
   const showSidebar = true
@@ -61,6 +64,7 @@ export function EditFormLayout({
             defaultLocale={defaultLocale}
             recordSyncKey={recordSyncKey}
             slugFollowSource={slugFollowSource}
+            {...(fieldErrors !== undefined && { fieldErrors })}
           />
         </form>
         {preview}

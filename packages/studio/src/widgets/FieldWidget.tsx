@@ -38,6 +38,14 @@ export interface WidgetProps {
   slugFollowSource?: boolean
   /** Compact read-only styling for the metadata sidebar. */
   variant?: "default" | "meta"
+  /**
+   * Why this field was refused, shown beneath the input.
+   *
+   * A validator's refusal names the column it refused, and putting it here rather than in the form's
+   * banner is the entire reason a validator is worth declaring over a `beforeChange` hook: a hook
+   * speaks for the write, so its message has nowhere better to go.
+   */
+  error?: string
   /** Default-locale text shown when the active locale has no translation yet. */
   localePlaceholder?: string | undefined
 }
@@ -100,7 +108,7 @@ export function FieldWidget(props: WidgetProps): React.ReactElement {
 
   return (
     <div
-      className={`st-field st-field--${config.widget}${config.required ? " st-field--required" : ""}${variant === "meta" ? " st-field--meta" : ""}`}
+      className={`st-field st-field--${config.widget}${config.required ? " st-field--required" : ""}${variant === "meta" ? " st-field--meta" : ""}${props.error !== undefined ? " st-field--invalid" : ""}`}
     >
       <label className="st-field-label" htmlFor={`field-${config.name}`}>
         {config.label}
@@ -114,6 +122,11 @@ export function FieldWidget(props: WidgetProps): React.ReactElement {
       <div className="st-field-input">
         <WidgetRenderer {...next} />
       </div>
+      {props.error !== undefined && (
+        <p className="st-field-error" role="alert" id={`field-${config.name}-error`}>
+          {props.error}
+        </p>
+      )}
     </div>
   )
 }

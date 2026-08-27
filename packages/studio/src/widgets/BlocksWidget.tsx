@@ -125,8 +125,26 @@ export function BlocksWidget({
     setExpandedIndex(index + 1)
   }
 
+  // An item count has no native input attribute to lean on, so the bound has to be visible or the
+  // author only learns about it when the save is refused.
+  const { minItems, maxItems } = config.validation ?? {}
+  const itemBound =
+    minItems !== undefined || maxItems !== undefined
+      ? [
+          minItems !== undefined ? `at least ${minItems}` : null,
+          maxItems !== undefined ? `at most ${maxItems}` : null,
+        ]
+          .filter(Boolean)
+          .join(", ")
+      : null
+
   return (
     <div className="st-blocks-widget">
+      {itemBound !== null && (
+        <span className="st-char-count">
+          {blocks.length} block{blocks.length === 1 ? "" : "s"} ({itemBound})
+        </span>
+      )}
       {blocks.map((block, index) => {
         const blockType = blockTypes.find((bt) => bt.name === block.type)
         const isExpanded = expandedIndex === index

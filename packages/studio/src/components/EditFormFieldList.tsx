@@ -13,6 +13,8 @@ export interface EditFormFieldListProps {
   recordSyncKey: string
   slugFollowSource: boolean
   variant?: "default" | "meta"
+  /** Per-field messages from the last refused save, keyed by column. */
+  fieldErrors?: Record<string, string>
 }
 
 export function EditFormFieldList({
@@ -25,6 +27,7 @@ export function EditFormFieldList({
   recordSyncKey,
   slugFollowSource,
   variant = "default",
+  fieldErrors,
 }: EditFormFieldListProps): React.ReactElement {
   return (
     <>
@@ -32,6 +35,9 @@ export function EditFormFieldList({
         <FieldWidget
           key={`${fieldConfig.name}-${currentLocale}-${variant}`}
           config={fieldConfig}
+          {...(fieldErrors?.[fieldConfig.name] !== undefined && {
+            error: fieldErrors[fieldConfig.name],
+          })}
           value={getLocalizedFieldValue(values, fieldConfig, currentLocale, defaultLocale)}
           localePlaceholder={getLocalizedFieldPlaceholder(
             values,

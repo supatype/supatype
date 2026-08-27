@@ -74,14 +74,8 @@ export function DerivedTextWidget({
       : "title"
 
   const strValue = value === null || value === undefined ? "" : String(value)
-  const rawMaxLength = config.validation?.["maxLength"]
-  const parsedMax =
-    typeof rawMaxLength === "number"
-      ? rawMaxLength
-      : typeof rawMaxLength === "string"
-        ? Number.parseInt(rawMaxLength, 10)
-        : NaN
-  const previewCap = Number.isFinite(parsedMax) ? parsedMax : multiline ? 2000 : 280
+  const declaredMax = config.validation?.maxLength
+  const previewCap = declaredMax ?? (multiline ? 2000 : 280)
 
   const manualRef = useRef(false)
   const onChangeRef = useRef(onChange)
@@ -119,7 +113,6 @@ export function DerivedTextWidget({
 
   const regenerateLabel = `Refill preview from ${sourceLabel}`
 
-  const countMax = Number.isFinite(parsedMax) ? parsedMax : undefined
   const fieldId = `field-${config.name}`
 
   return (
@@ -137,7 +130,7 @@ export function DerivedTextWidget({
               manualRef.current = true
               onChange(e.target.value === "" ? null : e.target.value)
             }}
-            maxLength={countMax}
+            maxLength={declaredMax}
           />
         ) : (
           <input
@@ -152,7 +145,7 @@ export function DerivedTextWidget({
               onChange(e.target.value === "" ? null : e.target.value)
             }}
             autoComplete="off"
-            maxLength={countMax}
+            maxLength={declaredMax}
           />
         )}
         {!readOnly ? (
@@ -187,9 +180,9 @@ export function DerivedTextWidget({
           </button>
         ) : null}
       </div>
-      {countMax !== undefined ? (
+      {declaredMax !== undefined ? (
         <span className="st-char-count">
-          {strValue.length} / {countMax}
+          {strValue.length} / {declaredMax}
         </span>
       ) : null}
     </div>

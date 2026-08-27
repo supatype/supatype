@@ -95,7 +95,10 @@ export function Input({
 }: Omit<React.InputHTMLAttributes<HTMLInputElement>, "className"> & { className?: string }): React.ReactElement {
   return (
     <input
-      className={cn("w-full px-3 py-1.5 rounded-md border border-border bg-background text-foreground text-sm focus:outline-none focus:border-ring focus:ring-2 focus:ring-ring/20", className)}
+      // A disabled input has to *look* disabled. Without these it renders identically to an
+      // editable one, so a field the form will never read looks like a field you forgot to
+      // fill in, and clicking it does nothing with no explanation.
+      className={cn("w-full px-3 py-1.5 rounded-md border border-border bg-background text-foreground text-sm focus:outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 disabled:bg-muted disabled:text-muted-foreground disabled:border-border/60 disabled:cursor-not-allowed disabled:focus:ring-0 disabled:focus:border-border/60", className)}
       {...props}
     />
   )

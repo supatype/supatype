@@ -12,7 +12,10 @@ import { Sidebar, getPageBreadcrumbs } from "./components/Sidebar.js"
 import { SecondaryPanel } from "./components/SecondaryPanel.js"
 import { TertiaryNav } from "./components/TertiaryNav.js"
 import { TopBar } from "./components/TopBar.js"
-import { ElevatedModeBanner } from "./components/ElevatedModeBanner.js"
+import {
+  ElevatedModeBanner,
+  ElevatedNoticeProvider,
+} from "./components/ElevatedModeBanner.js"
 
 // Re-export for dev tool views that import useStudioClient
 export const useStudioClient = useAdminClient
@@ -37,6 +40,7 @@ import { RestCacheBrowser, physicalTableName } from "./views/RestCacheBrowser.js
 import { GraphQLExplorer } from "./views/GraphQLExplorer.js"
 import { GraphQLSettings } from "./views/GraphQLSettings.js"
 import { ModelSchema } from "./views/ModelSchema.js"
+import { ModelRules } from "./views/ModelRules.js"
 import { ModelApiDocs } from "./views/ModelApiDocs.js"
 import { ModelGraphQLDocs } from "./views/ModelGraphQLDocs.js"
 import { LogsViewer } from "./views/LogsViewer.js"
@@ -51,6 +55,8 @@ import { TablesView } from "./views/database/TablesView.js"
 import { ViewsView } from "./views/database/ViewsView.js"
 import { FunctionsView } from "./views/database/FunctionsView.js"
 import { TriggersView } from "./views/database/TriggersView.js"
+import { IndexesView } from "./views/database/IndexesView.js"
+import { ConstraintsView } from "./views/database/ConstraintsView.js"
 import { TypesView } from "./views/database/TypesView.js"
 import { RolesView } from "./views/database/RolesView.js"
 import { ExtensionsView } from "./views/database/ExtensionsView.js"
@@ -99,6 +105,7 @@ function StudioLayout({ extensions, demoMode }: StudioLayoutProps): React.ReactE
   }
 
   return (
+    <ElevatedNoticeProvider>
     <div className="flex flex-col h-screen bg-background overflow-hidden">
       {/* Full-width top bar */}
       <TopBar
@@ -108,11 +115,6 @@ function StudioLayout({ extensions, demoMode }: StudioLayoutProps): React.ReactE
         demoMode={demoMode}
         onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
       />
-
-      {/* Reading past RLS is legitimate but must never be silent, an empty table
-          should never leave you guessing whether it means "no rows" or "no rows
-          you can see". */}
-      <ElevatedModeBanner />
 
       {/* 3-tier nav: primary icon sidebar + secondary panel + content */}
       <div className="flex flex-1 overflow-hidden">
@@ -149,11 +151,19 @@ function StudioLayout({ extensions, demoMode }: StudioLayoutProps): React.ReactE
             id="studio-main"
             className="flex-1 overflow-y-auto p-6 bg-[hsl(var(--canvas))]"
           >
+            {/* Reading past RLS is legitimate but must never be silent: an empty table
+                should never leave you guessing whether it means "no rows" or "no rows
+                you can see". Inside the content column, not above the chrome, because
+                it describes what is on this page and full-width it displaced the nav.
+                Renders only while a view showing project rows is mounted, see
+                `useShowsProjectRows`. */}
+            <ElevatedModeBanner />
             <Outlet />
           </main>
         </div>
       </div>
     </div>
+    </ElevatedNoticeProvider>
   )
 }
 
@@ -205,6 +215,14 @@ function CollectionSchemaRoute(): React.ReactElement {
   const model = config.models.find((m) => m.name === modelName)
   if (!model) return <PageError>Model &quot;{modelName}&quot; not found</PageError>
   return <ModelSchema model={model} />
+}
+
+function CollectionRulesRoute(): React.ReactElement {
+  const config = useAdminConfig()
+  const { model: modelName } = useParams()
+  const model = config.models.find((m) => m.name === modelName)
+  if (!model) return <PageError>Model &quot;{modelName}&quot; not found</PageError>
+  return <ModelRules model={model} />
 }
 
 function CollectionDataRoute(): React.ReactElement {
@@ -349,6 +367,7 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
               <Route path="models/globals/:name" element={<GlobalRoute />} />
               <Route path="models/:model" element={<CollectionListRoute />} />
               <Route path="models/:model/schema"  element={<CollectionSchemaRoute />} />
+              <Route path="models/:model/rules"   element={<CollectionRulesRoute />} />
               <Route path="models/:model/data"    element={<CollectionDataRoute />} />
               <Route path="models/:model/api"     element={<CollectionApiRoute />} />
               <Route path="models/:model/graphql" element={<CollectionGraphQLRoute />} />
@@ -367,6 +386,8 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
                 <Route path="views"       element={<ViewsView />} />
                 <Route path="functions"   element={<FunctionsView />} />
                 <Route path="triggers"    element={<TriggersView />} />
+                <Route path="indexes"     element={<IndexesView />} />
+                <Route path="constraints" element={<ConstraintsView />} />
                 <Route path="types"       element={<TypesView />} />
                 <Route path="roles"       element={<RolesView />} />
                 <Route path="extensions"  element={<ExtensionsView />} />

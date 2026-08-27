@@ -1,4 +1,4 @@
-import type { AdminConfig, FieldConfig, GlobalConfig, NavGroup } from "../config.js"
+import type { AdminConfig, FieldConfig, GlobalConfig, ModelConfig, NavGroup } from "../config.js"
 
 function humanize(name: string): string {
   return name
@@ -36,6 +36,12 @@ export function mapEngineFields(rawFields: unknown): FieldConfig[] {
       ...(fi["options"] !== undefined ? { options: fi["options"] as Record<string, unknown> } : {}),
       ...(fi["readOnly"] !== undefined ? { readOnly: Boolean(fi["readOnly"]) } : {}),
       ...(fi["hidden"] !== undefined ? { hidden: Boolean(fi["hidden"]) } : {}),
+      // The field's declared bounds, carried through rather than rebuilt. Studio checks these
+      // before it sends a write, so a dropped `validation` is a form that accepts a value the
+      // database is about to refuse, and a Rules tab that reports a bounded field as unbounded.
+      ...(fi["validation"] !== undefined
+        ? { validation: fi["validation"] as NonNullable<FieldConfig["validation"]> }
+        : {}),
     }
   })
 }
@@ -65,6 +71,15 @@ export function normalizeAdminConfig(raw: unknown): AdminConfig {
       softDelete: Boolean(mo["softDelete"] ?? false),
       timestamps: Boolean(mo["timestamps"] ?? false),
       hasHooks: Boolean(mo["hasHooks"] ?? false),
+      // Model-level rules, carried through for the same reason as a field's bounds: they are what
+      // the database enforces, and nothing else in Studio can derive them. Without these the Rules
+      // tab reports a model with fourteen live check constraints as having none.
+      ...(mo["constraints"] !== undefined
+        ? { constraints: mo["constraints"] as NonNullable<ModelConfig["constraints"]> }
+        : {}),
+      ...(mo["indexes"] !== undefined
+        ? { indexes: mo["indexes"] as NonNullable<ModelConfig["indexes"]> }
+        : {}),
     }
   })
 

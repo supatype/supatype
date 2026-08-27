@@ -14,7 +14,8 @@ export function TextWidget({
   localePlaceholder,
 }: TextWidgetProps): React.ReactElement {
   const strValue = value === null || value === undefined ? "" : String(value)
-  const maxLength = config.validation?.["maxLength"] as number | undefined
+  const maxLength = config.validation?.maxLength
+  const minLength = config.validation?.minLength
 
   if (multiline) {
     return (
@@ -27,6 +28,7 @@ export function TextWidget({
           readOnly={readOnly}
           required={config.required}
           maxLength={maxLength}
+          minLength={minLength}
           rows={6}
           placeholder={localePlaceholder}
         />
@@ -50,6 +52,7 @@ export function TextWidget({
         readOnly={readOnly}
         required={config.required}
         maxLength={maxLength}
+        minLength={minLength}
         placeholder={localePlaceholder}
       />
       {maxLength && (

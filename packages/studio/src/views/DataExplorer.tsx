@@ -7,6 +7,7 @@ import { ErrorBanner } from "../components/ErrorBanner.js"
 import { SlidePanel } from "../components/SlidePanel.js"
 import { cn } from "../lib/utils.js"
 import { Badge, Button, Card, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
+import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -397,6 +398,10 @@ function CellValue({
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export function DataExplorer({ initialTable }: { initialTable?: string }): React.ReactElement {
+  // Rows here are read with the service role, so the elevated-access notice applies
+  // to this view. See `useShowsProjectRows`.
+  useShowsProjectRows()
+
   const client = useStudioClient()
   const proxy = useProjectProxy()
 

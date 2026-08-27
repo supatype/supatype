@@ -10,6 +10,7 @@ import {
   useStudioFieldAccess,
   type CellAccess,
 } from "../hooks/useStudioFieldAccess.js"
+import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
 
 interface ListViewProps {
   model: ModelConfig
@@ -22,6 +23,10 @@ interface SortState {
 }
 
 export function ListView({ model, onNavigate }: ListViewProps): React.ReactElement {
+  // Rows here are read with the service role, so the elevated-access notice applies
+  // to this view. See `useShowsProjectRows`.
+  useShowsProjectRows()
+
   const client = useAdminClient()
   const { currentLocale, defaultLocale } = useLocale()
   const fieldAccess = useStudioFieldAccess()
