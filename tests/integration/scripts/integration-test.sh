@@ -380,10 +380,14 @@ fi
 # the engine gains a measure, the fixture does not, and the parity test keeps passing against
 # yesterday's output. This is the half that cannot go stale, because it runs against a live push.
 echo "==> Studio fixture matches the engine's output"
+# Absolute paths from the script's own variables: this runs after `cd "$INTEGRATION_DIR"`, so
+# repo-relative paths resolve against tests/integration and the file is not found.
+SUPATYPE_LIVE_CONFIG="$INTEGRATION_DIR/.supatype/admin-config.json" \
+SUPATYPE_FIXTURE_CONFIG="$ROOT_DIR/packages/studio/tests/fixtures/admin-config.json" \
 node -e '
   const { readFileSync } = require("node:fs")
-  const live = JSON.parse(readFileSync("tests/integration/.supatype/admin-config.json", "utf8"))
-  const fixture = JSON.parse(readFileSync("packages/studio/tests/fixtures/admin-config.json", "utf8"))
+  const live = JSON.parse(readFileSync(process.env.SUPATYPE_LIVE_CONFIG, "utf8"))
+  const fixture = JSON.parse(readFileSync(process.env.SUPATYPE_FIXTURE_CONFIG, "utf8"))
   const measures = (config) => {
     const seen = new Set()
     for (const model of config.models) {
