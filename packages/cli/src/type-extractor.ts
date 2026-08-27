@@ -23,8 +23,10 @@ import {
   type ExtractedStorageBucketAst,
   type FieldAstV2,
   type KernelFieldFacts,
+  type FieldKind,
   type ParsedField,
 } from "./schema-ast-v2.js"
+import { compileBounds, measureFormFor, type DeclaredBounds } from "./field-bounds.js"
 
 export type { ExtractedSchemaAstV2 as ExtractedSchemaAst, ExtractedStorageBucketAst } from "./schema-ast-v2.js"
 
@@ -105,7 +107,8 @@ export function extractSchemaAstFromTypes(
         )
       }
 
-      const { tableName, access, options, indexes, hooks } = parseModelMeta(
+      const { tableName, access, options, indexes, constraints, hooks, validators } =
+        parseModelMeta(
         metaArg,
         sourceFile,
         stmt.name.text,
@@ -115,7 +118,17 @@ export function extractSchemaAstFromTypes(
       )
 
       models.push(
-        emitModel(stmt.name.text, fields, options, tableName, access, indexes, hooks),
+        emitModel(
+          stmt.name.text,
+          fields,
+          options,
+          tableName,
+          access,
+          indexes,
+          hooks,
+          constraints,
+          validators,
+        ),
       )
     }
   }
@@ -387,6 +400,55 @@ function parseDefaultLiteral(
   return undefined
 }
 
+/** Which {@link DeclaredBounds} key each length/item modifier fills. */
+const BOUND_KEY_BY_MODIFIER = {
+  MaxLength: "maxLength",
+  MinLength: "minLength",
+  MaxItems: "maxItems",
+  MinItems: "minItems",
+} as const satisfies Record<string, keyof DeclaredBounds>
+
+/**
+ * A `Between` bound: a number for a numeric column, an ISO-8601 string for a temporal one.
+ *
+ * Which of the two is legal is decided from the field's kind in `compileBounds`, not here, because
+ * the kind is not known until the wrappers are off.
+ */
+function parseRangeBound(
+  node: ts.TypeNode | undefined,
+  sourceFile: ts.SourceFile,
+): number | string | undefined {
+  const asNumber = parseNumericTypeArg(node, sourceFile)
+  if (asNumber !== undefined) return asNumber
+  return literalStringType(node) ?? undefined
+}
+
+/**
+ * Whether a `JSON<T>` field holds an array, which is what decides between item bounds and none.
+ *
+ * Answered from the declared type argument rather than guessed downstream: the engine sees only
+ * `JSONB` and cannot tell `JSON<Item[]>` from `JSON<{ a: string }>`, so `jsonb_array_length` would
+ * be a coin flip that raises at insert time when it loses.
+ */
+function jsonTypeArgIsArray(node: ts.TypeNode, sourceFile: ts.SourceFile): boolean {
+  if (!ts.isTypeReferenceNode(node)) return false
+  const arg = node.typeArguments?.[0]
+  if (!arg) return false
+  return isArrayLikeTypeNode(arg, sourceFile)
+}
+
+function isArrayLikeTypeNode(node: ts.TypeNode, sourceFile: ts.SourceFile): boolean {
+  if (ts.isArrayTypeNode(node)) return true
+  // `readonly Item[]`
+  if (ts.isTypeOperatorNode(node) && node.operator === ts.SyntaxKind.ReadonlyKeyword) {
+    return isArrayLikeTypeNode(node.type, sourceFile)
+  }
+  if (ts.isTypeReferenceNode(node) && ts.isIdentifier(node.typeName)) {
+    return node.typeName.text === "Array" || node.typeName.text === "ReadonlyArray"
+  }
+  return false
+}
+
 function parseFieldType(
   fieldName: string,
   typeNode: ts.TypeNode,
@@ -412,7 +474,7 @@ function parseFieldType(
     fieldDefault: undefined as string | number | boolean | null | undefined,
     localized: false,
     notLocalized: false,
-    checkConstraint: undefined as string | undefined,
+    bounds: {} as DeclaredBounds,
   }
 
   const resolving = new Set<string>()
@@ -484,43 +546,22 @@ function parseFieldType(
         current = valueArg ?? current
         continue
       }
-      case "MaxLength": {
-        const max = parseNumericTypeArg(current.typeArguments?.[1], sourceFile)
-        if (max !== undefined) {
-          flags.checkConstraint = mergeCheckConstraint(
-            flags.checkConstraint,
-            `char_length("{name}") <= ${max}`,
-          )
-        }
-        current = current.typeArguments?.[0] ?? current
-        continue
-      }
-      case "MinLength": {
-        const min = parseNumericTypeArg(current.typeArguments?.[1], sourceFile)
-        if (min !== undefined) {
-          flags.checkConstraint = mergeCheckConstraint(
-            flags.checkConstraint,
-            `char_length("{name}") >= ${min}`,
-          )
+      case "MaxLength":
+      case "MinLength":
+      case "MaxItems":
+      case "MinItems": {
+        const amount = parseNumericTypeArg(current.typeArguments?.[1], sourceFile)
+        if (amount !== undefined) {
+          flags.bounds[BOUND_KEY_BY_MODIFIER[typeName]] = amount
         }
         current = current.typeArguments?.[0] ?? current
         continue
       }
       case "Between": {
-        const min = parseNumericTypeArg(current.typeArguments?.[1], sourceFile)
-        const max = parseNumericTypeArg(current.typeArguments?.[2], sourceFile)
-        if (min !== undefined) {
-          flags.checkConstraint = mergeCheckConstraint(
-            flags.checkConstraint,
-            `"{name}"::numeric >= ${min}`,
-          )
-        }
-        if (max !== undefined) {
-          flags.checkConstraint = mergeCheckConstraint(
-            flags.checkConstraint,
-            `"{name}"::numeric <= ${max}`,
-          )
-        }
+        const min = parseRangeBound(current.typeArguments?.[1], sourceFile)
+        const max = parseRangeBound(current.typeArguments?.[2], sourceFile)
+        if (min !== undefined) flags.bounds.min = min
+        if (max !== undefined) flags.bounds.max = max
         current = current.typeArguments?.[0] ?? current
         continue
       }
@@ -712,10 +753,25 @@ function parseFieldType(
     parsed = { ...parsed, kernel }
   }
 
-  if (flags.checkConstraint !== undefined) {
+  // Bounds compile here, not in the modifier cases above: `MaxLength<string[], 10>` is only knowably
+  // an item count once the wrappers are off and the kind is `array`. Compiling early is what made
+  // every bound `char_length`, which does not exist for an array and fails `CREATE TABLE`.
+  const jsonIsArray = parsed.kind === "json" && jsonTypeArgIsArray(current, sourceFile)
+  if (jsonIsArray) {
+    parsed = { ...parsed, kernel: { ...parsed.kernel, jsonArray: true } }
+  }
+
+  if (Object.keys(flags.bounds).length > 0) {
+    const compiled = compileBounds(fieldName, parsed.kind, flags.bounds, { jsonIsArray })
     parsed = {
       ...parsed,
-      kernel: { ...parsed.kernel, check: flags.checkConstraint },
+      kernel: {
+        ...parsed.kernel,
+        ...(compiled.check !== undefined && {
+          check: mergeCheckConstraint(parsed.kernel.check, compiled.check),
+        }),
+        ...(compiled.validation !== undefined && { validation: compiled.validation }),
+      },
     }
   }
 
@@ -1287,7 +1343,9 @@ function parsePartialBucketAccess(
     if (!ts.isPropertySignature(member) || !member.type) continue
     const key = getPropertyName(member.name)
     if (key !== "read" && key !== "create" && key !== "delete") continue
-    access[key] = parseAccessRule(member.type, sourceFile, resolveCtx)
+    const bucketRule = parseAccessRule(member.type, sourceFile, resolveCtx)
+    assertAccessRuleIsRenderable(bucketRule, bucketId, key)
+    access[key] = bucketRule
   }
   return access
 }
@@ -1619,7 +1677,9 @@ function parseModelMeta(
   access: Record<string, unknown>
   options: Record<string, unknown>
   indexes: unknown[]
+  constraints: unknown[]
   hooks: Record<string, ParsedModelHook>
+  validators: Record<string, ParsedModelHook>
 } {
   const literal = parseMetaLiteral(metaArg, sourceFile)
   const singleton = literal.singleton === true
@@ -1646,8 +1706,152 @@ function parseModelMeta(
     access: parseModelAccess(metaArg, sourceFile, modelName, fields, resolveCtx),
     options,
     indexes: parseModelIndexes(metaArg, sourceFile, fields),
+    constraints: parseModelConstraints(metaArg, sourceFile, modelName, fields, resolveCtx),
     hooks: parseModelHooks(metaArg, sourceFile),
+    validators: parseModelValidators(metaArg, sourceFile, modelName, fields),
   }
+}
+
+/**
+ * Operands a `CHECK` cannot evaluate, and why.
+ *
+ * All of these are legal in an access rule, which is exactly why they need refusing here rather
+ * than left to fail at `CREATE TABLE`: the vocabulary is shared, so the mistake is easy and the
+ * error Postgres gives for it names nothing useful.
+ */
+const CONSTRAINT_FORBIDDEN_OPERANDS: Record<string, string> = {
+  authUid: "a CHECK constraint cannot see who is writing",
+  authRole: "a CHECK constraint cannot see who is writing",
+  claim: "a CHECK constraint cannot read the caller's JWT",
+  role: "a CHECK constraint cannot see the caller's role",
+  now: "a row valid on insert would become invalid on update, so a constraint cannot read the clock",
+  startOf: "a constraint cannot read the clock",
+  ago: "a constraint cannot read the clock",
+  fromNow: "a constraint cannot read the clock",
+  rows: "a CHECK constraint cannot query another table",
+  exists: "a CHECK constraint cannot query another table",
+}
+
+/**
+ * Walk a parsed constraint node and refuse anything the database cannot enforce as a `CHECK`.
+ *
+ * Walks the parsed form rather than the syntax, so a node reached through `Any`, `All` or `Not`
+ * is checked the same as a top-level one.
+ */
+function assertConstraintIsEnforceable(node: unknown, model: string, index: number): void {
+  if (Array.isArray(node)) {
+    for (const item of node) assertConstraintIsEnforceable(item, model, index)
+    return
+  }
+  if (typeof node !== "object" || node === null) return
+
+  const record = node as Record<string, unknown>
+  for (const key of ["type", "kind"]) {
+    const value = record[key]
+    if (typeof value !== "string") continue
+    const why = CONSTRAINT_FORBIDDEN_OPERANDS[value]
+    if (why !== undefined) {
+      throw new Error(
+        `Model "${model}": constraint ${index + 1} uses \`${value}\`, which is not allowed in a ` +
+          `constraint because ${why}. Move the rule to \`access\` if it depends on the caller.`,
+      )
+    }
+  }
+  for (const value of Object.values(record)) assertConstraintIsEnforceable(value, model, index)
+}
+
+/**
+ * Resolve `Length<>` and `ItemCount<>` inside a constraint to the measure their column actually
+ * takes, so the engine renders mechanically and never has to know about field kinds.
+ *
+ * Done here because this is the only layer that has both halves: the field's kind, and the table
+ * the bounds modifiers already resolve against. The engine seeing `JSONB` cannot tell an array from
+ * an object, and a second kind table in Rust is how `char_length(text[])` would come back in a new
+ * file after being fixed once.
+ */
+function resolveConstraintMeasures(
+  node: unknown,
+  fields: Record<string, FieldAstV2>,
+  model: string,
+  index: number,
+): void {
+  if (Array.isArray(node)) {
+    for (const item of node) resolveConstraintMeasures(item, fields, model, index)
+    return
+  }
+  if (typeof node !== "object" || node === null) return
+
+  const record = node as Record<string, unknown>
+  const kind = record["kind"]
+  if (kind === "length" || kind === "itemCount") {
+    const column = String(record["column"])
+    const field = fields[column]
+    if (!field) {
+      throw new Error(
+        `Model "${model}": constraint ${index + 1} measures \`${column}\`, which is not a field on ` +
+          "this model. Measures need a declared field, because the measure depends on its type.",
+      )
+    }
+    const measure = kind === "length" ? "length" : "items"
+    const resolved = measureFormFor(field.kind as FieldKind, measure, {
+      jsonIsArray: field["jsonArray"] === true,
+    })
+    if (resolved.form === undefined) {
+      throw new Error(
+        `Model "${model}": constraint ${index + 1} uses ` +
+          `\`${kind === "length" ? "Length" : "ItemCount"}<"${column}">\`, but ` +
+          `${resolved.instead}.`,
+      )
+    }
+    record["form"] = resolved.form
+    return
+  }
+
+  for (const value of Object.values(record)) {
+    resolveConstraintMeasures(value, fields, model, index)
+  }
+}
+
+/**
+ * Read `constraints` from a model's meta.
+ *
+ * Reuses `parseAccessRule`, because a constraint *is* an access rule with a narrower operand set:
+ * a second parser for the same node vocabulary would be two grammars to keep aligned, and they
+ * would drift the first time either gained a node.
+ */
+function parseModelConstraints(
+  metaArg: ts.TypeNode | undefined,
+  sourceFile: ts.SourceFile,
+  modelName: string,
+  fields: Record<string, FieldAstV2>,
+  resolveCtx: ResolveContext,
+): unknown[] {
+  if (!metaArg || !ts.isTypeLiteralNode(metaArg)) return []
+
+  const prop = metaArg.members.find(
+    (member) => ts.isPropertySignature(member) && getPropertyName(member.name) === "constraints",
+  )
+  if (!prop || !ts.isPropertySignature(prop) || !prop.type) return []
+
+  if (!ts.isTupleTypeNode(prop.type)) {
+    throw new Error(
+      `Model "${modelName}": \`constraints\` must be a tuple, as in ` +
+        `\`constraints: [Lte<"starts_at", "ends_at">]\`.`,
+    )
+  }
+
+  return prop.type.elements.map((element, index) => {
+    const parsed = parseAccessRule(element, sourceFile, resolveCtx)
+    if (parsed["type"] === "private") {
+      throw new Error(
+        `Model "${modelName}": constraint ${index + 1}, ` +
+          `\`${ownerText(element, sourceFile)}\`, is not a rule this vocabulary knows.`,
+      )
+    }
+    assertConstraintIsEnforceable(parsed, modelName, index)
+    resolveConstraintMeasures(parsed, fields, modelName, index)
+    return parsed
+  })
 }
 
 /** One lifecycle hook: `"fn-name"` or `{ function: "fn-name", timeout: 5000 }`. */
@@ -1667,6 +1871,62 @@ const HOOK_EVENTS = ["beforeChange", "afterChange", "beforeDelete", "afterDelete
  * silently not firing is the failure this feature cannot have, so an unreadable declaration must
  * fail the push rather than extract to nothing.
  */
+/**
+ * Read `validate` from a model's meta: field name to the function that checks it.
+ *
+ * Strict for the same reason `parseModelHooks` is: a validator that silently never fires is the
+ * failure this feature cannot have. An entry that is neither a string nor an object with a
+ * `function` name is dropped here and reported by `validateModelHooks`, which fails the push.
+ *
+ * Keyed by the **field** as written, not the column: the extractor resolves the two, and a validator
+ * naming a field the model does not declare is an error worth catching here where the message can
+ * list what the model does have.
+ */
+function parseModelValidators(
+  metaArg: ts.TypeNode | undefined,
+  sourceFile: ts.SourceFile,
+  modelName: string,
+  fields: Record<string, FieldAstV2>,
+): Record<string, ParsedModelHook> {
+  if (!metaArg || !ts.isTypeLiteralNode(metaArg)) return {}
+
+  const prop = metaArg.members.find(
+    (member) => ts.isPropertySignature(member) && getPropertyName(member.name) === "validate",
+  )
+  if (!prop || !ts.isPropertySignature(prop) || !prop.type) return {}
+  if (!ts.isTypeLiteralNode(prop.type)) {
+    throw new Error(
+      `Model "${modelName}": \`validate\` must be an object mapping a field to a function name, ` +
+        'as in `validate: { setupItems: "validate-setup-items" }`.',
+    )
+  }
+
+  const out: Record<string, ParsedModelHook> = {}
+  for (const member of prop.type.members) {
+    if (!ts.isPropertySignature(member) || !member.type) continue
+    const field = getPropertyName(member.name)
+    if (!field) continue
+
+    if (!Object.prototype.hasOwnProperty.call(fields, field)) {
+      const known = Object.keys(fields).join(", ")
+      throw new Error(
+        `Model "${modelName}": \`validate\` names "${field}", which is not a field on this model. ` +
+          `Fields are: ${known}.`,
+      )
+    }
+
+    const parsed = parseModelHookValue(member.type, sourceFile)
+    if (parsed === null) {
+      throw new Error(
+        `Model "${modelName}": the validator for "${field}" must be a function name, or an object ` +
+          'with a `function` name, as in `{ function: "check-it", timeout: 5000 }`.',
+      )
+    }
+    out[field] = parsed
+  }
+  return out
+}
+
 function parseModelHooks(
   metaArg: ts.TypeNode | undefined,
   sourceFile: ts.SourceFile,
@@ -1798,6 +2058,42 @@ function resolveIndexFieldName(fieldName: string, fields: Record<string, FieldAs
  * unsupported shape silently published a table with no row-level protection at
  * all. Failing the extract is the only safe outcome.
  */
+/**
+ * Nodes that parse but that the engine's RLS renderer does not know.
+ *
+ * `Length`, `ItemCount` and `Matches` exist for `constraints`, and they share a parser with access
+ * rules because a constraint *is* an access rule with a narrower operand set. That reuse runs both
+ * ways: nothing stops someone writing `Gte<Length<"title">, Literal<5>>` in an `access` block, where
+ * it would parse cleanly, reach an engine that has no case for it, and produce a policy that does
+ * not say what the author wrote. Refusing here keeps the sharing honest until the RLS renderer
+ * learns them.
+ */
+const CONSTRAINT_ONLY_NODES = new Set(["length", "itemCount", "matches"])
+
+function assertAccessRuleIsRenderable(node: unknown, model: string, operation: string): void {
+  if (Array.isArray(node)) {
+    for (const item of node) assertAccessRuleIsRenderable(item, model, operation)
+    return
+  }
+  if (typeof node !== "object" || node === null) return
+
+  const record = node as Record<string, unknown>
+  // Operands are tagged `kind`, rules `type`, so both are checked: `Matches` is a rule.
+  const tag = [record["kind"], record["type"]].find(
+    (value) => typeof value === "string" && CONSTRAINT_ONLY_NODES.has(value),
+  )
+  if (typeof tag === "string") {
+    const spelled = { length: "Length", itemCount: "ItemCount", matches: "Matches" }[tag] ?? tag
+    throw new Error(
+      `Model "${model}": \`${spelled}<>\` is not supported in an \`access\` rule (\`${operation}\`). ` +
+        "It belongs in `constraints`, which the database enforces for every writer.",
+    )
+  }
+  for (const value of Object.values(record)) {
+    assertAccessRuleIsRenderable(value, model, operation)
+  }
+}
+
 function parseModelAccess(
   metaArg: ts.TypeNode | undefined,
   sourceFile: ts.SourceFile,
@@ -1850,7 +2146,9 @@ function parseModelAccess(
       continue
     }
 
-    access[key] = parseAccessRule(member.type, sourceFile, resolveCtx)
+    const rule = parseAccessRule(member.type, sourceFile, resolveCtx)
+    assertAccessRuleIsRenderable(rule, modelName, key)
+    access[key] = rule
   }
 
   if (Object.keys(access).length === 0) {
@@ -2177,6 +2475,35 @@ function parseAccessRule(
         right: parseAccessOperand(args[1]!, sourceFile),
       }
     }
+    case "Matches": {
+      const args = typeNode.typeArguments ?? []
+      if (args.length !== 2) {
+        throw new Error(
+          '`Matches<>` takes a column and a pattern, as in `Matches<"sku", "^[A-Z]{3}$">`.',
+        )
+      }
+      const column = stringLiteralArg(args[0], "Matches", "column")
+      const pattern = literalStringType(args[1] as ts.TypeNode)
+      if (pattern === null) {
+        throw new Error(
+          '`Matches<>` needs a string literal pattern, as in `Matches<"sku", "^[A-Z]{3}$">`.',
+        )
+      }
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(column)) {
+        throw new Error(`\`Matches<"${column}", ...>\` does not name a valid column.`)
+      }
+      // Validated here so an unparseable pattern is a CLI error naming the field, rather than a
+      // Postgres error part way through a migration. Postgres regex is POSIX and JavaScript's is
+      // not, so this catches malformed patterns, not every dialect difference.
+      try {
+        new RegExp(pattern)
+      } catch {
+        throw new Error(
+          `\`Matches<"${column}", "${pattern}">\`: the pattern is not a valid regular expression.`,
+        )
+      }
+      return { type: "matches", column, pattern }
+    }
     case "IsNull":
     case "NotNull": {
       const operand = typeNode.typeArguments?.[0]
@@ -2483,6 +2810,14 @@ function parseAccessOperand(
     const ref = ownerText(typeNode.typeName, sourceFile)
     const operandArgs = typeNode.typeArguments ?? []
     switch (ref) {
+      case "Length":
+      case "ItemCount": {
+        const column = stringLiteralArg(operandArgs[0], ref, "column")
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(column)) {
+          throw new Error(`\`${ref}<"${column}">\` does not name a valid column.`)
+        }
+        return { kind: ref === "Length" ? "length" : "itemCount", column }
+      }
       case "AuthUid":
         return { kind: "authUid" }
       case "AuthRole":

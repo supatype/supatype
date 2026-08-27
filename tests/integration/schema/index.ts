@@ -1,5 +1,6 @@
 export type * from "./buckets.js"
 export type * from "./blog.js"
+export type * from "./bounds.js"
 export type * from "./event.js"
 export type * from "./network-log.js"
 export type * from "./product.js"

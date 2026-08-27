@@ -1322,4 +1322,53 @@ export type Media = Bucket<"media", {
       /Bucket "media": could not resolve its `access` rules/,
     )
   })
+
+  it("emits structured validation bounds alongside the compiled check constraint", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-validation-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type {
+  Model, Public, UUID, Int, Optional, MaxLength, MinLength, Between,
+} from "@supatype/types"
+
+export type Review = Model<{
+  id: UUID
+  headline: MaxLength<string, 120>
+  body: MinLength<MaxLength<string, 4000>, 20>
+  rating: Between<Int, 1, 5>
+  note: Optional<string>
+}, {
+  access: { read: Public }
+}>
+`,
+      "utf8",
+    )
+
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const review = ast?.models.find((m) => m.name === "Review")
+    expect(review).toBeDefined()
+
+    expect(review?.fields["headline"]).toMatchObject({
+      check: 'char_length("{name}") <= 120',
+      validation: { maxLength: 120 },
+    })
+
+    // Stacked modifiers merge into one check and one validation object.
+    expect(review?.fields["body"]).toMatchObject({
+      validation: { maxLength: 4000, minLength: 20 },
+    })
+    expect(review?.fields["body"]?.["check"]).toContain('char_length("{name}") <= 4000')
+    expect(review?.fields["body"]?.["check"]).toContain('char_length("{name}") >= 20')
+
+    expect(review?.fields["rating"]).toMatchObject({
+      kind: "integer",
+      validation: { min: 1, max: 5 },
+    })
+
+    // A field with no constraint modifier carries no validation key at all.
+    expect(review?.fields["note"]?.["validation"]).toBeUndefined()
+  })
 })

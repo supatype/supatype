@@ -28,16 +28,21 @@ function hookedModels(ast: unknown): HookedModel[] {
 
   return models
     .filter((model) => {
-      const hooks = (model as { annotations?: { platform?: { hooks?: unknown } } }).annotations
-        ?.platform?.hooks
-      return typeof hooks === "object" && hooks !== null && Object.keys(hooks).length > 0
+      const platform = (
+        model as { annotations?: { platform?: { hooks?: unknown; validate?: unknown } } }
+      ).annotations?.platform
+      const declares = (value: unknown): boolean =>
+        typeof value === "object" && value !== null && Object.keys(value).length > 0
+      // Validators need the same row types hooks do, so a model declaring only validators must
+      // still appear here or `FieldValidator<"products", ...>` would not compile.
+      return declares(platform?.hooks) || declares(platform?.validate)
     })
     .map((model) => ({ table: resolveTableName(model), fields: model.fields }))
     .sort((a, b) => a.table.localeCompare(b.table))
 }
 
 /**
- * The module source, or `null` when no model declares a hook.
+ * The module source, or `null` when no model declares a hook or a field validator.
  *
  * Returning null rather than an empty module keeps a `_supatype/hooks.ts` from appearing in projects
  * that have no hooks, a generated file nobody imports is a file somebody eventually edits.
@@ -168,6 +173,78 @@ export type AfterChange<T extends HookedTable> = (
 export type AfterDelete<T extends HookedTable> = (
   ctx: AfterDeleteContext<T>,
 ) => void | Promise<void>
+
+
+/**
+ * A per-field validator: one field's value, and a verdict about it.
+ *
+ * \`FieldValidator<"products", "setup_items">\` types \`value\` as that column's real type, so a
+ * validator cannot quietly be written against the wrong shape.
+ *
+ * Return \`true\` to accept, or a message to refuse. The message reaches the caller attached to the
+ * field name, which is what lets a form put it on the input rather than in a banner: the whole
+ * reason for declaring this instead of putting the same logic in a \`beforeChange\` hook.
+ */
+export type FieldValidatorContext<T extends HookedTable, F extends keyof HookTables[T]["Row"]> =
+  HookBase & {
+    readonly operation: "insert" | "update"
+    readonly field: F
+    readonly value: HookTables[T]["Row"][F]
+  }
+
+export type FieldVerdict = true | string
+
+export type FieldValidator<T extends HookedTable, F extends keyof HookTables[T]["Row"]> = (
+  ctx: FieldValidatorContext<T, F>,
+) => FieldVerdict | Promise<FieldVerdict>
+
+interface WireValidatorContext {
+  table?: string
+  operation?: string
+  field?: string
+  value?: unknown
+  user?: unknown
+  requestId?: string
+}
+
+/**
+ * Wrap a typed validator as the request handler the worker expects.
+ *
+ * A refusal is **422 with the field named**, not a bare 400: the request was understood and one
+ * value was rejected. A thrown error is deliberately *not* turned into a refusal, because a broken
+ * validator has not decided anything: it becomes a 500, which the server reads as unavailable and
+ * refuses the write on, rather than as the validator saying no.
+ */
+export function fieldValidator(
+  handler: (ctx: never) => FieldVerdict | Promise<FieldVerdict>,
+): (req: Request) => Promise<Response> {
+  return async (req: Request): Promise<Response> => {
+    if (req.method !== "POST") {
+      return json({ message: "A validator is invoked with POST" }, 405)
+    }
+
+    let wire: WireValidatorContext
+    try {
+      wire = (await req.json()) as WireValidatorContext
+    } catch {
+      return json({ message: "Validator payload was not JSON" }, 400)
+    }
+
+    const field = wire.field ?? ""
+    const ctx = {
+      table: wire.table ?? "",
+      operation: wire.operation === "update" ? "update" : "insert",
+      field,
+      value: wire.value,
+      user: (wire.user ?? null) as never,
+      requestId: wire.requestId ?? "",
+    }
+
+    const verdict = await handler(ctx as never)
+    if (verdict === true) return json({}, 200)
+    return json({ field, message: String(verdict), error: String(verdict) }, 422)
+  }
+}
 
 /** Every handler a single function may serve, when one function covers a model's whole lifecycle. */
 export interface HookHandlers<T extends HookedTable> {

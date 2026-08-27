@@ -14,10 +14,12 @@ import {
   connectionString,
   projectRootFromConfig,
   resolveRuntimeProvider,
+  hooksPathFromProject,
   schemaPathFromProject,
   usesExternalDatabase,
   type SupatypeProjectConfig,
 } from "./project-config.js"
+import { syncManifestHooks, writeHooksModule } from "./model-hooks.js"
 import { signJwt } from "./jwt.js"
 import { ensureDevDbPort, ensureKongPort } from "./dev-ports.js"
 import { handleComposeProjectRename } from "./compose-rename.js"
@@ -37,11 +39,16 @@ import {
 import type { DockerBrandOptions } from "./docker-runtime.js"
 import { hasEngineOverride } from "./binary-cache.js"
 import { STUDIO_DEV_PORT, startStudioViteDevServer } from "./studio-dev-server.js"
-import { ensureLocalServerDockerImage } from "./compose-local-server-image.js"
+import {
+  ensureLocalServerDockerImage,
+  usesLocalServerImage,
+  LOCAL_SERVER_DOCKER_IMAGE,
+} from "./compose-local-server-image.js"
 import { ensureEngine, engineRequest, type DiffResult } from "./engine-client.js"
 import { writeSchemaSourcePushArtifacts, type SchemaSourcePushArtifacts } from "./schema-sources.js"
 import { readEnvValue, upsertEnvFile } from "./env-file.js"
 import {
+  devAuthenticatorPassword,
   devJwtSecret,
   devPostgresPassword,
   seedMissingDatabaseIdentity,
@@ -219,14 +226,13 @@ async function startComposeDatabase(
   await waitComposeHealthy(paths, cwd, timeoutMs, project)
 }
 
-function upsertDevComposeEnv(
+export function upsertDevComposeEnv(
   cwd: string,
   config: SupatypeProjectConfig,
   anonKey: string,
   serviceRoleKey: string,
   kongPort: number,
   devDbPort?: number,
-  localServerImage?: string,
 ): void {
   const apiUrl = `http://localhost:${kongPort}`
   const imagePins = composeDockerImageEnv(config)
@@ -261,7 +267,6 @@ function upsertDevComposeEnv(
     SITE_URL: apiUrl,
     GOTRUE_MAILER_AUTOCONFIRM: "true",
     ...imagePins,
-    ...(localServerImage !== undefined && { SUPATYPE_SERVER_IMAGE: localServerImage }),
   }
   // Never for an external database: this URL describes the `db` container, which that project does
   // not have. Writing it overwrote the operator's own DATABASE_URL, the value the whole stack and
@@ -278,10 +283,25 @@ function upsertDevComposeEnv(
     updates.DATABASE_URL =
       `postgresql://${dbUser}:${devPostgresPassword(cwd)}@localhost:${devDbPort}/${dbName}?sslmode=disable`
   }
-  const removeImageKeys = COMPOSE_PINNED_IMAGE_ENV_KEYS.filter((key) => !(key in imagePins))
+  // `SUPATYPE_SERVER_IMAGE` is written here, not passed in, and it is deliberately *not* marked
+  // managed. The managed marker means "this value came from `versions` in the config and is mine to
+  // clean up when the pin goes away". The locally built image comes from `overrides`, so removing
+  // it as an unpinned managed key was wrong: any `.env` write that did not know about the local
+  // image deleted it, and compose then recreated the server from the published image.
+  const wantsLocalServer = usesLocalServerImage(cwd, config)
+  if (wantsLocalServer) updates.SUPATYPE_SERVER_IMAGE = LOCAL_SERVER_DOCKER_IMAGE
+
+  const managedImageKeys = COMPOSE_PINNED_IMAGE_ENV_KEYS.filter(
+    (key) => !(wantsLocalServer && key === "SUPATYPE_SERVER_IMAGE"),
+  )
+  const removeImageKeys = managedImageKeys.filter((key) => !(key in imagePins))
   upsertEnvFile(cwd, updates, {
     removeManaged: removeImageKeys,
-    managed: COMPOSE_PINNED_IMAGE_ENV_KEYS,
+    managed: managedImageKeys,
+    // A local image left in `.env` after the project stopped asking for one would keep pointing
+    // compose at a stale build, and it carries no marker for `removeManaged` to act on.
+    ...(!wantsLocalServer &&
+      !("SUPATYPE_SERVER_IMAGE" in imagePins) && { remove: ["SUPATYPE_SERVER_IMAGE"] }),
   })
 }
 
@@ -293,9 +313,8 @@ function ensureDevComposeEnv(
   serviceRoleKey: string,
   kongPort: number,
   devDbPort?: number,
-  localServerImage?: string,
 ): void {
-  upsertDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, devDbPort, localServerImage)
+  upsertDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, devDbPort)
 }
 
 async function waitComposeHealthy(paths: SelfHostComposePaths, cwd: string, maxMs: number, composeProject: string): Promise<void> {
@@ -440,6 +459,20 @@ async function refreshSchemaArtifacts(
 ): Promise<void> {
   const supatypeDir = join(cwd, ".supatype")
   const adminConfigPath = join(supatypeDir, "admin-config.json")
+
+  // Before the engine gate below: these are read straight off the AST, so a push whose engine is
+  // unavailable should still leave the server the right maps. The server watches this file, so a
+  // hook or validator added to the schema takes effect without restarting the stack.
+  //
+  // `dev` used to skip both entirely, because only the `direct`/`local` push branch wrote them.
+  // Every project running on Compose therefore had a manifest with no `hooks` and no `validators`
+  // key, and the server, having nothing to call, ran neither. A hook silently not firing is bad; a
+  // validator silently not firing means a write the schema says is checked is accepted with a 201.
+  const hooksModule = writeHooksModule(cwd, hooksPathFromProject(config, cwd), ast)
+  if (hooksModule !== null) console.log(`[supatype] Hook handler types written to ${hooksModule}`)
+  if (syncManifestHooks(cwd, ast)) {
+    console.log("[supatype] Hook and validator maps written to .supatype/manifest.json")
+  }
 
   try {
     await ensureEngine()
@@ -848,7 +881,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   const devBrand = { intro: "Local development" }
   const localServerImage = await ensureLocalServerDockerImage(cwd, config, devBrand)
 
-  ensureDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, devDbPort, localServerImage)
+  ensureDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, devDbPort)
 
   console.log(`[supatype] provider docker, starting self-host Compose stack (project ${project}, gateway :${kongPort})...`)
   const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
@@ -900,6 +933,10 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   await startComposeDatabase(config, paths, cwd, project, devBrand, 180_000, endDevSession)
   // Settle before DDL: pg_isready can pass slightly before the instance is stable.
   await new Promise((r) => setTimeout(r, 3000))
+
+  if (!usesExternalDatabase(config)) {
+    reconcileAuthenticatorPassword(paths, cwd, project)
+  }
 
   // A: apply schema before realtime (and the rest of the stack) starts decoding WAL.
   const schemaPath = schemaPathFromProject(config, cwd)
@@ -1102,6 +1139,56 @@ function astHasSystemAuthRelation(ast: unknown): boolean {
     }
   }
   return false
+}
+
+/**
+ * Set `authenticator`'s password to the one `.env` holds, every time the stack starts.
+ *
+ * The Postgres image passwords that role from `AUTHENTICATOR_PASSWORD` in its init scripts, which
+ * run once, on an empty data directory. So the value the role actually has is whatever `.env` said
+ * the day the volume was created, and `.env` can move afterwards. When the two diverge PostgREST
+ * cannot log in, exits, and every REST request answers 502 with the real reason visible only in a
+ * container log the developer has no reason to read.
+ *
+ * Reconciling here makes `.env` the answer to what the password is, rather than the volume's
+ * birthday. It is idempotent, and it runs before the schema push so the API is already reachable by
+ * the time the stack reports ready.
+ */
+function reconcileAuthenticatorPassword(
+  paths: SelfHostComposePaths,
+  cwd: string,
+  composeProject: string,
+): void {
+  const composeDir = dirname(paths.composePath)
+  const owner = readEnvValue(cwd, "POSTGRES_USER", "supatype_admin")
+  const database = readEnvValue(cwd, "POSTGRES_DB", "supatype")
+  const result = spawnSync(
+    "docker",
+    [
+      "compose", "-p", composeProject, "-f", paths.composePath,
+      "exec", "-T",
+      "-e", `PGPASSWORD=${devPostgresPassword(cwd)}`,
+      "-e", `SUPATYPE_AUTHENTICATOR_PASSWORD=${devAuthenticatorPassword(cwd)}`,
+      "db", "psql", "-v", "ON_ERROR_STOP=1", "-U", owner, "-d", database,
+    ],
+    {
+      cwd: composeDir,
+      encoding: "utf8",
+      timeout: 10_000,
+      // `\getenv` reads the value from the container's environment, so the password is never a
+      // `docker exec` argument, which any process listing on the machine would show.
+      input: [
+        "\\getenv pw SUPATYPE_AUTHENTICATOR_PASSWORD",
+        "ALTER ROLE authenticator WITH LOGIN PASSWORD :'pw';",
+        "",
+      ].join("\n"),
+    },
+  )
+  if (result.status !== 0) {
+    console.warn(
+      "[supatype] Could not set the authenticator password; the REST API may answer 502.",
+    )
+  }
 }
 
 function grantAuthSchemaAccess(

@@ -218,6 +218,62 @@ export type Post = Model<{ id: UUID }, { tableName: "posts" }>
     ) as Record<string, unknown>
     expect(manifest["hooks"]).toBeUndefined()
   })
+
+  it("writes the validator map, which is what makes a validator run at all", () => {
+    // The map was built and unit-tested for a release in which nothing wrote it to the manifest.
+    // The server therefore had no validator to call, and a write that should have been refused was
+    // accepted with a 201 and no error anywhere: the one failure this feature cannot have.
+    const { dir, ast } = project(`
+import type { JSON, Model, UUID } from "@supatype/types"
+
+export type Post = Model<{
+  id: UUID
+  items: JSON<{ minutes: number }[]>
+}, {
+  tableName: "posts"
+  validate: { items: "check-items" }
+}>
+`)
+    mkdirSync(join(dir, ".supatype"), { recursive: true })
+    writeFileSync(
+      join(dir, ".supatype", "manifest.json"),
+      JSON.stringify({ functions_enabled: true }),
+      "utf8",
+    )
+
+    expect(syncManifestHooks(dir, ast)).toBe(true)
+    const manifest = JSON.parse(
+      readFileSync(join(dir, ".supatype", "manifest.json"), "utf8"),
+    ) as Record<string, unknown>
+    const validators = manifest["validators"] as Record<string, Record<string, unknown>>
+    expect(validators?.["posts"]?.["items"]).toMatchObject({
+      function: "check-items",
+      onUnavailable: "reject",
+    })
+  })
+
+  it("removes the validator map when the last validator goes away", () => {
+    const { dir, ast } = project(`
+import type { Model, UUID } from "@supatype/types"
+
+export type Post = Model<{ id: UUID }, { tableName: "posts" }>
+`)
+    mkdirSync(join(dir, ".supatype"), { recursive: true })
+    writeFileSync(
+      join(dir, ".supatype", "manifest.json"),
+      JSON.stringify({
+        functions_enabled: true,
+        validators: { posts: { items: { function: "gone" } } },
+      }),
+      "utf8",
+    )
+
+    expect(syncManifestHooks(dir, ast)).toBe(true)
+    const manifest = JSON.parse(
+      readFileSync(join(dir, ".supatype", "manifest.json"), "utf8"),
+    ) as Record<string, unknown>
+    expect(manifest["validators"]).toBeUndefined()
+  })
 })
 
 describe("model hooks: generated module on disk", () => {

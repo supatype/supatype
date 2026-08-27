@@ -128,6 +128,15 @@ export interface SupatypeError {
   message: string
   status?: number | undefined
   code?: string | undefined
+  /**
+   * The column a field validator refused, when the refusal came from one.
+   *
+   * Carried separately from `message` so a client does not parse prose to know which input to mark.
+   * A validator's whole reason for existing over a `beforeChange` hook is that its refusal names a
+   * field; losing that here would leave the message in a banner, which is what a hook already gives
+   * you.
+   */
+  field?: string | undefined
 }
 
 // ─── Query result ─────────────────────────────────────────────────────────────

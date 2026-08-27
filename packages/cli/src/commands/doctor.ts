@@ -117,7 +117,37 @@ export function registerDoctor(program: Command): void {
  * stack with functions switched off, produces no error anywhere, the write just succeeds
  * unvalidated. Drift you cannot see is the thing doctor exists for.
  */
+/**
+ * Field validators, reported separately from hooks because the consequence differs.
+ *
+ * A hook that never fires is a step that did not happen. A validator that never fires would be a
+ * field written unchecked, so the server refuses the write instead: these fields cannot be saved at
+ * all until the function exists, and the line has to say that rather than imply a silent gap.
+ */
+function printFieldValidators(report: HooksReport): void {
+  if (report.validators.length === 0) return
+
+  plain(`\nField validators (${report.validators.length}):\n`)
+  for (const entry of report.validators) {
+    const broken = report.validatorsMissing.some(
+      (m) => m.model === entry.model && m.field === entry.field,
+    )
+    plain(`  ${broken ? "✗" : "•"} ${entry.model}.${entry.field} → ${entry.function}`)
+  }
+
+  if (report.validatorsMissing.length > 0) {
+    plain("\n  Those marked ✗ name a function that does not exist. An unreachable validator refuses")
+    plain("  the write, so these fields cannot be saved until the function is created.")
+    plain("  Create it with: supatype hooks new <name>")
+  }
+  if (report.validatorMapMissing) {
+    plain("\n  .supatype/manifest.json carries no validator map, so no field is being checked.")
+    plain("  Run: supatype push")
+  }
+}
+
 export function printHooks(report: HooksReport): void {
+  printFieldValidators(report)
   if (report.declared.length === 0) return
 
   plain(`\nHooks (${report.declared.length}):\n`)
