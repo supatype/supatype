@@ -372,6 +372,9 @@ export class QueryBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
             message: String(err["message"] ?? err["hint"] ?? "Request failed"),
             status: res.status,
             ...(err["code"] !== undefined && { code: String(err["code"]) }),
+            // A field validator's refusal names the column it refused. Kept whole rather than
+            // folded into the message, so a form can mark the input.
+            ...(typeof err["field"] === "string" && { field: err["field"] }),
           },
           count: null,
         },

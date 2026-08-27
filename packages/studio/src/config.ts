@@ -15,6 +15,14 @@ export const DASHBOARD_VIEW_LIMITS: Record<Tier, number> = {
   enterprise: -1,
 }
 
+import type { FieldValidation } from "@supatype/types"
+import type { ModelConstraint } from "./lib/evaluate-constraint.js"
+
+// Declared once, in `@supatype/types`, beside the modifiers that compile into it. Re-exported
+// because widgets import it from here alongside `FieldConfig`.
+export type { FieldValidation }
+export type { ModelConstraint }
+
 export type WidgetType =
   | "text"
   | "textarea"
@@ -52,8 +60,8 @@ export interface FieldConfig {
   localized: boolean
   /** Field-specific options (e.g. enum values, relation target, block types). */
   options?: Record<string, unknown>
-  /** Validation rules (min, max, maxLength, pattern, etc.). */
-  validation?: Record<string, unknown>
+  /** Bounds declared on the field's type; the same rule Postgres enforces as a CHECK. */
+  validation?: FieldValidation
   /** Whether this field appears in the list view column. */
   listColumn?: boolean
   /** Column width hint for list view. */
@@ -108,6 +116,30 @@ export interface ModelConfig {
   timestamps: boolean
   /** Whether this model has hooks configured. */
   hasHooks: boolean
+  /**
+   * Model-level rules the database enforces, carried as the nodes the CLI parsed.
+   *
+   * Nodes rather than SQL: Studio evaluates them against the form so it can say which rule failed
+   * and, when one names a single column, on which field. A rendered `CHECK` could only be sent to
+   * Postgres and waited on.
+   */
+  constraints?: ModelConstraint[]
+  /**
+   * Indexes the schema declares, as the engine resolved them.
+   *
+   * Only declared ones. An index the engine creates for a relation or a blocks field follows from
+   * another declaration, and listing it beside the chosen ones would read as a choice.
+   */
+  indexes?: ModelIndex[]
+}
+
+/** One declared index. */
+export interface ModelIndex {
+  name: string
+  fields: string[]
+  unique: boolean
+  /** `btree`, `gin`, and so on, as Postgres names them. */
+  using: string
 }
 
 export interface GlobalConfig {

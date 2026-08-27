@@ -107,6 +107,7 @@ function getTertiaryGroups(path: string): NavGroup[] | null {
             p === base ||
             (p.startsWith(base + "/") &&
               !p.startsWith(base + "/schema") &&
+              !p.startsWith(base + "/rules") &&
               !p.startsWith(base + "/data") &&
               !p.startsWith(base + "/api") &&
               !p.startsWith(base + "/graphql") &&
@@ -154,6 +155,7 @@ function getTertiaryGroups(path: string): NavGroup[] | null {
             p === base ||
             (p.startsWith(base + "/") &&
               !p.startsWith(base + "/schema") &&
+              !p.startsWith(base + "/rules") &&
               !p.startsWith(base + "/data") &&
               !p.startsWith(base + "/api") &&
               !p.startsWith(base + "/graphql") &&
@@ -163,6 +165,11 @@ function getTertiaryGroups(path: string): NavGroup[] | null {
           label: "Schema",
           href: `${base}/schema`,
           activeWhen: (p) => p === `${base}/schema`,
+        },
+        {
+          label: "Rules",
+          href: `${base}/rules`,
+          activeWhen: (p) => p === `${base}/rules`,
         },
         {
           label: "Data",

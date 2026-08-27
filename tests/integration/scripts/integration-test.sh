@@ -373,7 +373,46 @@ if (( STACK_READY != 1 )); then
   exit 1
 fi
 
-# ── Step 6: Run tests ─────────────────────────────────────────────────────────
+# ── Step 6: The studio fixture still matches what the engine emits ────────────
+#
+# packages/studio/tests/fixtures/admin-config.json is a committed copy of this file, because the
+# studio parity tests need it and this path is gitignored. A committed copy goes stale silently:
+# the engine gains a measure, the fixture does not, and the parity test keeps passing against
+# yesterday's output. This is the half that cannot go stale, because it runs against a live push.
+echo "==> Studio fixture matches the engine's output"
+# Absolute paths from the script's own variables: this runs after `cd "$INTEGRATION_DIR"`, so
+# repo-relative paths resolve against tests/integration and the file is not found.
+SUPATYPE_LIVE_CONFIG="$INTEGRATION_DIR/.supatype/admin-config.json" \
+SUPATYPE_FIXTURE_CONFIG="$ROOT_DIR/packages/studio/tests/fixtures/admin-config.json" \
+node -e '
+  const { readFileSync } = require("node:fs")
+  const live = JSON.parse(readFileSync(process.env.SUPATYPE_LIVE_CONFIG, "utf8"))
+  const fixture = JSON.parse(readFileSync(process.env.SUPATYPE_FIXTURE_CONFIG, "utf8"))
+  const measures = (config) => {
+    const seen = new Set()
+    for (const model of config.models) {
+      for (const field of model.fields) for (const key of Object.keys(field.validation ?? {})) seen.add(key)
+    }
+    return [...seen].sort()
+  }
+  const a = measures(live).join(",")
+  const b = measures(fixture).join(",")
+  if (a !== b) {
+    console.error(`FAIL: the engine now emits [${a}], the studio fixture carries [${b}].`)
+    console.error("      Regenerate it: copy tests/integration/.supatype/admin-config.json over")
+    console.error("      packages/studio/tests/fixtures/admin-config.json, then run the studio tests.")
+    process.exit(1)
+  }
+  const models = (config) => config.models.map((m) => m.name).sort().join(",")
+  if (models(live) !== models(fixture)) {
+    console.error("FAIL: the fixture describes a different set of models than this push produced.")
+    console.error(`      live: ${models(live)}`)
+    console.error(`      fixture: ${models(fixture)}`)
+    process.exit(1)
+  }
+  console.log(`    measures match: [${a}]`)
+'
+# ── Step 7: Run tests ─────────────────────────────────────────────────────────
 
 echo "==> Running integration tests"
 cd "$INTEGRATION_DIR"

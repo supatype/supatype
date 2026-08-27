@@ -223,11 +223,37 @@ export function registerDb(program: Command): void {
             info(`\nApplying ${fixable.length} remediation(s) in one transaction...`)
             try {
               await applyRemedies(client, fixable)
-              info("Applied. Re-run `supatype db check` to confirm.")
             } catch (err) {
               error(`Rolled back: the database is unchanged: ${(err as Error).message}`)
               process.exitCode = 1
               return
+            }
+
+            // Re-read rather than report the commit. A committed statement is not a fixed finding:
+            // `GRANT` on an object the caller does not own raises `WARNING: no privileges were
+            // granted` and commits happily, so "Applied" was a claim about the transaction rather
+            // than about the database. Checking is the whole job of this command.
+            const after = await runPreflight(client, {
+              schema: schema!,
+              ...(opts.authenticatorPassword !== undefined && {
+                authenticatorPassword: opts.authenticatorPassword,
+              }),
+            })
+            const stillFailing = transactionalRemedies(after)
+
+            if (stillFailing.length === 0) {
+              info(`Applied. ${fixable.length} finding(s) fixed and confirmed.`)
+            } else {
+              error(
+                `\nApplied, but ${stillFailing.length} of ${fixable.length} finding(s) are still failing:`,
+              )
+              for (const r of stillFailing) error(`  ${r.title}: ${r.detail}`)
+              error(
+                "\n  The statements committed without error and changed nothing that the check can see.\n" +
+                  "  The usual cause is a privilege the connected role does not hold: Postgres reports\n" +
+                  "  that as a warning, not an error. Re-run with --emit and apply the SQL as an owner.",
+              )
+              process.exitCode = 1
             }
           }
           if (manual.length > 0) {

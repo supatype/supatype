@@ -73,7 +73,9 @@ echo "==> stamping v$VERSION, as the release workflow does"
 ( cd "$ROOT_DIR" && node scripts/set-version.mjs "$VERSION" >/dev/null )
 
 echo "==> building ${os}-${arch}${libc} with the release script"
-( cd "$ROOT_DIR" && pnpm --filter @supatype/cli build >/dev/null )
+# `@supatype/cli...` rather than the package alone: the CLI imports @supatype/types, so
+# building it by itself fails with TS2307 the moment any CLI source reaches for that package.
+( cd "$ROOT_DIR" && pnpm --filter "@supatype/cli..." build >/dev/null )
 mkdir -p "$work/cdn/cli/v$VERSION"
 ONLY="${os}-${arch}${libc}" bash "$ROOT_DIR/packages/cli/scripts/build-release-artifacts.sh" \
   "$VERSION" "$work/cdn/cli/v$VERSION" | sed 's/^/    /'

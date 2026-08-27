@@ -23,6 +23,23 @@ export function resolveServerSourceRoot(serverOverride: string, cwd: string): st
 }
 
 /**
+ * Whether this project's compose stack should run the locally built server image.
+ *
+ * Synchronous and cheap, so any code path that writes `.env` can ask rather than being handed the
+ * answer. It used to be handed down as an argument from the one path that built the image, and the
+ * four paths that did not know about it wrote `.env` without `SUPATYPE_SERVER_IMAGE` while still
+ * asking for unpinned image keys to be cleaned up. Each of those removed the key `dev` had just
+ * written, so `overrides.server` held only until the next `push`, after which compose silently
+ * recreated the container from the published image and the local build was not running at all.
+ */
+export function usesLocalServerImage(cwd: string, config: SupatypeProjectConfig): boolean {
+  if (config.versions?.server !== VERSION_PIN_LOCAL) return false
+  const override = config.overrides?.server?.trim()
+  if (!override) return false
+  return resolveServerSourceRoot(override, cwd) !== null
+}
+
+/**
  * When `versions.server` is `local`, build a Linux server image from the source tree
  * next to `overrides.server` so compose dev matches the contributor's binary.
  */

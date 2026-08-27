@@ -7,6 +7,7 @@ import { useStudioClient } from "../StudioCore.js"
 import { useProjectProxy } from "../hooks/useProjectProxy.js"
 import { cn } from "../lib/utils.js"
 import { Badge, Button, Card, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
+import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -270,6 +271,10 @@ function exportJson(rows: Record<string, unknown>[]): void {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export function SqlRunner(): React.ReactElement {
+  // Rows here are read with the service role, so the elevated-access notice applies
+  // to this view. See `useShowsProjectRows`.
+  useShowsProjectRows()
+
   const client = useStudioClient()
   const { sql, introspect } = useProjectProxy()
 

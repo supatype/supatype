@@ -3,6 +3,7 @@ import { Header } from "../components/Header.js"
 import { useAdminClient } from "../hooks/useAdminClient.js"
 import type { StorageObject } from "@supatype/client"
 import { storagePublicUrl } from "../lib/storage-ref.js"
+import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
 
 type ViewMode = "grid" | "list"
 
@@ -11,6 +12,10 @@ interface MediaFile extends StorageObject {
 }
 
 export function MediaLibrary(): React.ReactElement {
+  // Rows here are read with the service role, so the elevated-access notice applies
+  // to this view. See `useShowsProjectRows`.
+  useShowsProjectRows()
+
   const client = useAdminClient()
   const [buckets, setBuckets] = useState<Array<{ id: string; name: string; public: boolean }>>([])
   const [currentBucket, setCurrentBucket] = useState<string | null>(null)

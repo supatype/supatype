@@ -210,3 +210,89 @@ export default nope
     expect(output).toContain("comments")
   })
 })
+
+describe("field validators", () => {
+  const VALIDATED_SCHEMA = `
+import type { JSON, Model, Public, UUID } from "@supatype/types"
+
+export type Product = Model<{
+  id: UUID
+  sku: string
+  setupItems: JSON<{ label: string }[]>
+}, {
+  access: { read: Public }
+  validate: { setupItems: "check-setup-items", sku: { function: "check-sku", timeout: 3000 } }
+}>
+`
+
+  it("generates the module for a model that declares only validators", () => {
+    // Validators need the same row types hooks do. A model declaring only validators used to produce
+    // no module at all, which would make `FieldValidator<"product", ...>` fail to resolve.
+    const module = generateHooksModule(astFor(VALIDATED_SCHEMA))
+    expect(module).not.toBeNull()
+    expect(module).toContain("FieldValidator")
+    expect(module).toContain("export function fieldValidator(")
+  })
+
+  it("typechecks with a validator written the way the docs will show it", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-validatorcompile-"))
+    dirs.push(dir)
+
+    const module = generateHooksModule(astFor(VALIDATED_SCHEMA))
+    writeFileSync(join(dir, "hooks.ts"), module ?? "", "utf8")
+    writeFileSync(
+      join(dir, "deno.d.ts"),
+      `declare namespace Deno {
+  const env: { get(key: string): string | undefined }
+}
+`,
+      "utf8",
+    )
+    writeFileSync(
+      join(dir, "handler.ts"),
+      `import { fieldValidator, type FieldValidator } from "./hooks.ts"
+
+// The value is the column's real type, so this narrows without a cast.
+const checkItems: FieldValidator<"product", "setupItems"> = (ctx) => {
+  if (!Array.isArray(ctx.value) || ctx.value.length === 0) {
+    return "At least one setup item is required."
+  }
+  return true
+}
+
+export default fieldValidator(checkItems)
+`,
+      "utf8",
+    )
+    writeFileSync(
+      join(dir, "tsconfig.json"),
+      JSON.stringify({
+        compilerOptions: {
+          strict: true,
+          exactOptionalPropertyTypes: true,
+          noEmit: true,
+          target: "ES2022",
+          module: "ESNext",
+          moduleResolution: "Bundler",
+          allowImportingTsExtensions: true,
+          lib: ["ES2022", "DOM"],
+        },
+        include: ["*.ts"],
+      }),
+      "utf8",
+    )
+
+    const tsc = join(__dirname, "..", "..", "..", "node_modules", "typescript", "bin", "tsc")
+    let output = ""
+    try {
+      execFileSync(process.execPath, [tsc, "-p", join(dir, "tsconfig.json")], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      })
+    } catch (err) {
+      const failure = err as { stdout?: string; stderr?: string }
+      output = `${failure.stdout ?? ""}${failure.stderr ?? ""}`
+    }
+    expect(output, "the generated validator surface must compile").toBe("")
+  })
+})

@@ -2,7 +2,12 @@ import type { Command } from "commander"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { loadConfig, loadSchemaAst } from "../config.js"
-import { syncManifestHooks, validateModelHooks, writeHooksModule } from "../model-hooks.js"
+import {
+  syncManifestHooks,
+  validateModelHooks,
+  validateModelValidators,
+  writeHooksModule,
+} from "../model-hooks.js"
 import { adapterEntry, readHookUpload } from "../hook-upload.js"
 import { checkServiceRoleRoutes, serviceRoleProblemLines } from "../service-role-check.js"
 import { fatalError } from "../ui/fatal.js"
@@ -312,9 +317,24 @@ function assertServiceRoleGrantsResolve(cwd: string, config: SupatypeProjectConf
 }
 
 function assertModelHooksResolve(cwd: string, config: SupatypeProjectConfig, ast: unknown): void {
-  const problems = validateModelHooks(ast, hooksPathFromProject(config, cwd), cwd)
-  if (problems.length === 0) return
-  fatalError("A model declares a hook whose function does not exist.", problems, {
-    brand: { intro: "Push" },
-  })
+  const dir = hooksPathFromProject(config, cwd)
+
+  const problems = validateModelHooks(ast, dir, cwd)
+  if (problems.length > 0) {
+    fatalError("A model declares a hook whose function does not exist.", problems, {
+      brand: { intro: "Push" },
+    })
+  }
+
+  // Reported separately from hooks, because the fix is different: a missing validator means a field
+  // nobody is checking, and the message should say so rather than talk about lifecycle events.
+  const validatorProblems = validateModelValidators(ast, dir, cwd)
+  if (validatorProblems.length > 0) {
+    fatalError(
+      "A model declares a field validator whose function does not exist, so that field would be " +
+        "written unchecked.",
+      validatorProblems,
+      { brand: { intro: "Push" } },
+    )
+  }
 }

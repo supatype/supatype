@@ -37,6 +37,8 @@ const STATIC_SECTIONS: Record<string, SectionDef> = {
           { label: "Views",      href: "/database/views" },
           { label: "Functions",  href: "/database/functions" },
           { label: "Triggers",   href: "/database/triggers" },
+          { label: "Indexes",    href: "/database/indexes" },
+          { label: "Constraints", href: "/database/constraints" },
           { label: "Types",      href: "/database/types" },
           { label: "Roles",      href: "/database/roles" },
           { label: "Extensions", href: "/database/extensions" },

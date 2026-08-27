@@ -1,0 +1,2301 @@
+{
+  "adminRoles": [
+    "admin",
+    "supatype_admin"
+  ],
+  "globals": [],
+  "localization": {
+    "defaultLocale": "en",
+    "locales": [
+      "en",
+      "fr",
+      "de"
+    ]
+  },
+  "models": [
+    {
+      "constraints": [],
+      "defaultSort": {
+        "direction": "desc",
+        "field": "created_at"
+      },
+      "fields": [
+        {
+          "filterable": true,
+          "label": "Id",
+          "localized": false,
+          "name": "id",
+          "readOnly": true,
+          "required": true,
+          "showInList": false,
+          "sortable": true,
+          "widget": "uuid"
+        },
+        {
+          "filterable": true,
+          "label": "Email",
+          "localized": false,
+          "name": "email",
+          "required": true,
+          "showInList": true,
+          "sortable": true,
+          "widget": "email"
+        },
+        {
+          "filterable": true,
+          "label": "Username",
+          "localized": false,
+          "name": "username",
+          "required": true,
+          "showInList": true,
+          "sortable": true,
+          "widget": "text"
+        },
+        {
+          "filterable": false,
+          "label": "Bio",
+          "localized": false,
+          "name": "bio",
+          "required": false,
+          "showInList": false,
+          "sortable": false,
+          "widget": "richtext"
+        },
+        {
+          "filterable": false,
+          "label": "Avatar url",
+          "localized": false,
+          "name": "avatarUrl",
+          "options": {
+            "bucket": "avatars"
+          },
+          "required": false,
+          "showInList": false,
+          "sortable": false,
+          "widget": "image"
+        },
+        {
+          "filterable": false,
+          "label": "Website url",
+          "localized": false,
+          "name": "websiteUrl",
+          "required": false,
+          "showInList": true,
+          "sortable": false,
+          "widget": "url"
+        },
+        {
+          "filterable": true,
+          "label": "Role",
+          "localized": false,
+          "name": "role",
+          "options": {
+            "values": [
+              "user",
+              "editor",
+              "admin"
+            ]
+          },
+          "required": true,
+          "showInList": true,
+          "sortable": true,
+          "widget": "select"
+        }
+      ],
+      "indexes": [],
+      "listColumns": [
+        "email",
+        "role",
+        "created_at"
+      ],
+      "name": "author",
+      "publishing": false,
+      "searchFields": [
+        "email",
+        "username"
+      ],
+      "singleton": false,
+      "softDelete": false,
+      "tableName": "author",
+      "timestamps": true
+    },
+    {
+      "constraints": [],
+      "defaultSort": {
+        "direction": "desc",
+        "field": "created_at"
+      },
+      "fields": [
+        {
+          "filterable": true,
+          "label": "Id",
+          "localized": false,
+          "name": "id",
+          "readOnly": true,
+          "required": true,
+          "showInList": false,
+          "sortable": true,
+          "widget": "uuid"
+        },
+        {
+          "filterable": true,
+          "label": "Author",
+          "localized": false,
+          "name": "author_id",
+          "options": {
+            "cardinality": "belongsTo",
+            "foreignKey": "author_id",
+            "target": "author"
+          },
+          "required": false,
+          "showInList": true,
+          "sortable": false,
+          "widget": "relation"
+        },
+        {
+          "filterable": true,
+          "label": "Display name",
+          "localized": false,
+          "name": "displayName",
+          "required": true,
+          "showInList": true,
+          "sortable": true,
+          "widget": "text"
+        },
+        {
+          "filterable": true,
+          "label": "Follower count",
+          "localized": false,
+          "name": "followerCount",
+          "required": true,
+          "showInList": true,
+          "sortable": true,
+          "widget": "number"
+        },
+        {
+          "filterable": true,
+          "label": "Following count",
+          "localized": false,
+          "name": "followingCount",
+          "required": true,
+          "showInList": true,
+          "sortable": true,
+          "widget": "number"
+        },
+        {
+          "filterable": true,
+          "label": "Reputation score",
+          "localized": false,
+          "name": "reputationScore",
+          "required": true,
+          "showInList": true,
+          "sortable": true,
+          "widget": "number"
+        },
+        {
+          "filterable": true,
+          "label": "Rank",
+          "localized": false,
+          "name": "rank",
+          "required": false,
+          "showInList": true,
+          "sortable": true,
+          "widget": "number"
+        },
+        {
+          "filterable": true,
+          "label": "Birth date",
+          "localized": false,
+          "name": "birthDate",
+          "required": false,
+          "showInList": true,
+          "sortable": true,
+          "widget": "date"
+        },
+        {
+          "filterable": true,
+          "label": "Last seen at",
+          "localized": false,
+          "name": "lastSeenAt",
+          "required": false,
+          "showInList": true,
+          "sortable": true,
+          "widget": "datetime"
+        }
+      ],
+      "indexes": [],
+      "listColumns": [
+        "displayName",
+        "created_at"
+      ],
+      "name": "userProfile",
+      "publishing": false,
+      "searchFields": [
+        "displayName"
+      ],
+      "singleton": false,
+      "softDelete": true,
+      "tableName": "user_profile",
+      "timestamps": true
+    },
+    {
+      "constraints": [],
+      "defaultSort": {
+        "direction": "desc",
+        "field": "created_at"
+      },
+      "fields": [
+        {
+          "filterable": true,
+          "label": "Id",
+          "localized": false,
+          "name": "id",
+          "readOnly": true,
+          "required": true,
+          "showInList": false,
+          "sortable": true,
+          "widget": "uuid"
+        },
+        {
+          "filterable": true,
+          "label": "Name",
+          "localized": false,
+          "name": "name",
+          "required": true,
+          "showInList": true,
+          "sortable": true,
+          "widget": "text"
+        },
+        {
+          "filterable": true,
+          "label": "Slug",
+          "localized": false,
+          "name": "slug",
+          "options": {
+            "from": "name"
+          },
+          "required": true,
+          "showInList": true,
+          "sortable": true,
+          "widget": "slug"
+        },
+        {
+          "filterable": true,
+          "label": "Description",
+          "localized": false,
+          "name": "description",
+          "required": false,
+          "showInList": true,
+          "sortable": true,
+          "widget": "text"
+        },
+        {
+          "filterable": true,
+          "label": "Color",
+          "localized": false,
+          "name": "color",
+          "required": true,
+          "showInList": true,
+          "sortable": true,
+          "widget": "color"
+        },
+        {
+          "filterable": true,
+          "label": "Is active",
+          "localized": false,
+          "name": "isActive",
+          "required": true,
+          "showInList": true,
+          "sortable": true,
+          "widget": "boolean"
+        },
+        {
+          "filterable": true,
+          "label": "External id",
+          "localized": false,
+          "name": "externalId",
+          "required": true,
+          "showInList": false,
+          "sortable": true,
+          "widget": "uuid"
+        }
+      ],
+      "indexes": [],
+      "listColumns": [
+        "name",
+        "created_at"
+      ],
+      "name": "category",
+      "publishing": false,
+      "searchFields": [
+        "name",
+        "slug",
+        "description"
+      ],
+      "singleton": false,
+      "softDelete": false,
+      "tableName": "category",
+      "timestamps": true
+    },
+    {
+      "constraints": [],
+      "defaultSort": {
+        "direction": "desc",
+        "field": "id"
+      },
+      "fields": [
+        {
+          "filterable": true,
+          "label": "Id",
+          "localized": false,
+          "name": "id",
+          "readOnly": true,
+          "required": true,
+          "showInList": false,
+          "sortable": true,
+          "widget": "uuid"
+        },
+        {
+          "filterable": true,
+          "label": "Name",
+          "localized": false,
+          "name": "name",
+          "required": true,
+          "showInList": true,
+          "sortable": true,
+          "widget": "text"
+        },
+        {
+          "filterable": true,
+          "label": "Color",
+          "localized": false,
+          "name": "color",
+          "required": false,
+          "showInList": true,
+          "sortable": true,
+          "widget": "color"
+        },
+        {
+          "filterable": false,
+          "label": "Posts",
+          "localized": false,
+          "name": "posts",
+          "options": {
+            "cardinality": "manyToMany",
+            "foreignKey": "post_id",
+            "junctionTable": "post_tag",
+            "localKey": "tag_id",
+            "target": "post"
+          },
+          "required": false,
+          "showInList": false,
+          "sortable": false,
+          "widget": "multirelation"
+        }
+      ],
+      "indexes": [],
+      "listColumns": [
+        "name"
+      ],
+      "name": "tag",
+      "publishing": false,
+      "searchFields": [
+        "name"
+      ],
+      "singleton": false,
+      "softDelete": false,
+      "tableName": "tag",
+      "timestamps": false
+    },
+    {
+      "constraints": [],
+      "defaultSort": {
+        "direction": "desc",
+        "field": "created_at"
+      },
+      "fields": [
+        {
+          "filterable": true,
+          "label": "Id",
+          "localized": false,
+          "name": "id",
+          "readOnly": true,
+          "required": true,
+          "showInList": false,
+          "sortable": true,
+          "widget": "uuid"
+        },
+        {
+          "filterable": true,
+          "label": "Title",
+          "localized": false,
+          "name": "title",
+          "required": true,
+          "showInList": true,
+          "sortable": true,
+          "widget": "text"
+        },
+        {
+          "filterable": true,
+          "label": "Slug",
+          "localized": false,
+          "name": "slug",
+          "options": {
+            "from": "title"
+          },
+          "required": true,
+          "showInList": true,
+          "sortable": true,
+          "widget": "slug"
+        },
+        {
+          "filterable": true,
+          "label": "Excerpt",
+          "localized": false,
+          "name": "excerpt",
+          "required": false,
+          "showInList": true,
+          "sortable": true,
+          "widget": "text"
+        },
+        {
+          "filterable": false,
+          "label": "Body",
+          "localized": false,
+          "name": "body",
+          "required": false,
+          "showInList": false,
+          "sortable": false,
+          "widget": "richtext"
+        },
+        {
+          "filterable": true,
+          "label": "Author",
+          "localized": false,
+          "name": "author_id",
+          "options": {
+            "cardinality": "belongsTo",
+            "foreignKey": "author_id",
+            "target": "author"
+          },
+          "required": false,
+          "showInList": true,
+          "sortable": false,
+          "widget": "relation"
+        },
+        {
+          "filterable": true,
+          "label": "Category",
+          "localized": false,
+          "name": "category_id",
+          "options": {
+            "cardinality": "belongsTo",
+            "foreignKey": "category_id",
+            "target": "category"
+          },
+          "required": false,
+          "showInList": true,
+          "sortable": false,
+          "widget": "relation"
+        },
+        {
+          "filterable": false,
+          "label": "Tags",
+          "localized": false,
+          "name": "tags",
+          "options": {
+            "cardinality": "manyToMany",
+            "foreignKey": "tag_id",
+            "junctionTable": "post_tag",
+            "localKey": "post_id",
+            "target": "tag"
+          },
+          "required": false,
+          "showInList": false,
+          "sortable": false,
+          "widget": "multirelation"
+        },
+        {
+          "filterable": false,
+          "label": "Cover image",
+          "localized": false,
+          "name": "coverImage",
+          "options": {
+            "bucket": "post-covers"
+          },
+          "required": false,
+          "showInList": false,
+          "sortable": false,
+          "widget": "image"
+        },
+        {
+          "filterable": false,
+          "label": "Attachment",
+          "localized": false,
+          "name": "attachment",
+          "options": {
+            "bucket": "post-attachments"
+          },
+          "required": false,
+          "showInList": false,
+          "sortable": false,
+          "widget": "file"
+        },
+        {
+          "filterable": true,
+          "label": "View count",
+          "localized": false,
+          "name": "viewCount",
+          "required": true,
+          "showInList": true,
+          "sortable": true,
+          "widget": "number"
+        },
+        {
+          "filterable": true,
+          "label": "Rating",
+          "localized": false,
+          "name": "rating",
+          "required": false,
+          "showInList": true,
+          "sortable": true,
+          "widget": "number"
+        },
+        {
+          "filterable": false,
+          "label": "Search vector",
+          "localized": false,
+          "name": "searchVector",
+          "readOnly": true,
+          "required": false,
+          "showInList": false,
+          "sortable": false,
+          "widget": "text"
+        },
+        {
+          "filterable": false,
+          "label": "Embedding",
+          "localized": false,
+          "name": "embedding",
+          "options": {
+            "dimensions": 1536
+          },
+          "readOnly": true,
+          "required": false,
+          "showInList": false,
+          "sortable": false,
+          "widget": "text"
+        },
+        {
+          "filterable": false,
+          "label": "Metadata",
+          "localized": false,
+          "name": "metadata",
+          "required": false,
+          "showInList": false,
+          "sortable": false,
+          "widget": "json"
+        }
+      ],
+      "indexes": [],
+      "listColumns": [
+        "title",
+        "created_at"
+      ],
+      "name": "post",
+      "publishing": false,
+      "searchFields": [
+        "title",
+        "slug",
+        "excerpt"
+      ],
+      "singleton": false,
+      "softDelete": false,
+      "tableName": "post",
+      "timestamps": true
+    },
+    {
+      "constraints": [],
+      "defaultSort": {
+        "direction": "desc",
+        "field": "created_at"
+      },
+      "fields": [
+        {
+          "filterable": true,
+          "label": "Id",
+          "localized": false,
+          "name": "id",
+          "readOnly": true,
+          "required": true,
+          "showInList": false,
+          "sortable": true,
+          "widget": "uuid"
+        },
+        {
+          "filterable": true,
+          "label": "Body",
+          "localized": false,
+          "name": "body",
+          "required": true,
+          "showInList": true,
+          "sortable": true,
+          "widget": "text"
+        },
+        {
+          "filterable": true,
+          "label": "Post",
+          "localized": false,
+          "name": "post_id",
+          "options": {
+            "cardinality": "belongsTo",
+            "foreignKey": "post_id",
+            "target": "post"
+          },
+          "required": false,
+          "showInList": true,
+          "sortable": false,
+          "widget": "relation"
+        },
+        {
+          "filterable": true,
+          "label": "Author",
+          "localized": false,
+          "name": "author_id",
+          "options": {
+            "cardinality": "belongsTo",
+            "foreignKey": "author_id",
+            "target": "author"
+          },
+          "required": false,
+          "showInList": true,
+          "sortable": false,
+          "widget": "relation"
+        },
+        {
+          "filterable": true,
+          "label": "User id",
+          "localized": false,
+          "name": "user_id",
+          "options": {
+            "cardinality": "belongsTo",
+            "foreignKey": "user_id",
+            "target": "author"
+          },
+          "required": false,
+          "showInList": true,
+          "sortable": false,
+          "widget": "relation"
+        },
+        {
+          "filterable": true,
+          "label": "Upvotes",
+          "localized": false,
+          "name": "upvotes",
+          "required": true,
+          "showInList": true,
+          "sortable": true,
+          "widget": "number"
+        }
+      ],
+      "indexes": [],
+      "listColumns": [
+        "body",
+        "created_at"
+      ],
+      "name": "comment",
+      "publishing": false,
+      "searchFields": [
+        "body"
+      ],
+      "singleton": false,
+      "softDelete": true,
+      "tableName": "comment",
+      "timestamps": true
+    },
+    {
+      "constraints": [
+        {
+          "columns": [
+            "windowOpens",
+            "windowCloses"
+          ],
+          "name": "bounds_probe_check_1",
+          "rule": {
+            "left": {
+              "kind": "column",
+              "name": "windowOpens"
+            },
+            "op": "lte",
+            "right": {
+              "kind": "column",
+              "name": "windowCloses"
+            },
+            "type": "compare"
+          }
+        },
+        {
+          "columns": [
+            "reference"
+          ],
+          "name": "bounds_probe_check_2",
+          "rule": {
+            "column": "reference",
+            "pattern": "^[A-Z]{2}-[0-9]{4}$",
+            "type": "matches"
+          }
+        },
+        {
+          "columns": [
+            "tags"
+          ],
+          "name": "bounds_probe_check_3",
+          "rule": {
+            "left": {
+              "column": "tags",
+              "form": "array",
+              "kind": "itemCount"
+            },
+            "op": "gte",
+            "right": {
+              "kind": "literal",
+              "value": 0.0
+            },
+            "type": "compare"
+          }
+        },
+        {
+          "columns": [
+            "headline"
+          ],
+          "name": "bounds_probe_check_4",
+          "rule": {
+            "left": {
+              "column": "headline",
+              "form": "chars",
+              "kind": "length"
+            },
+            "op": "lte",
+            "right": {
+              "kind": "literal",
+              "value": 500.0
+            },
+            "type": "compare"
+          }
+        },
+        {
+          "columns": [
+            "headline",
+            "reference"
+          ],
+          "name": "bounds_probe_check_5",
+          "rule": {
+            "rules": [
+              {
+                "isNull": false,
+                "operand": {
+                  "kind": "column",
+                  "name": "headline"
+                },
+                "type": "nullCheck"
+              },
+              {
+                "isNull": false,
+                "operand": {
+                  "kind": "column",
+                  "name": "reference"
+                },
+                "type": "nullCheck"
+              }
+            ],
+            "type": "any"
+          }
+        }
+      ],
+      "defaultSort": {
+        "direction": "desc",
+        "field": "id"
+      },
+      "fields": [
+        {
+          "filterable": true,
+          "label": "Id",
+          "localized": false,
+          "name": "id",
+          "readOnly": true,
+          "required": true,
+          "showInList": false,
+          "sortable": true,
+          "widget": "uuid"
+        },
+        {
+          "filterable": true,
+          "label": "Headline",
+          "localized": false,
+          "name": "headline",
+          "required": false,
+          "showInList": true,
+          "sortable": true,
+          "validation": {
+            "maxLength": 500,
+            "minLength": 1
+          },
+          "widget": "text"
+        },
+        {
+          "filterable": false,
+          "label": "Body",
+          "localized": false,
+          "name": "body",
+          "required": false,
+          "showInList": false,
+          "sortable": false,
+          "validation": {
+            "maxLength": 100000
+          },
+          "widget": "richtext"
+        },
+        {
+          "filterable": false,
+          "label": "Tags",
+          "localized": false,
+          "name": "tags",
+          "required": false,
+          "showInList": false,
+          "sortable": false,
+          "validation": {
+            "maxItems": 100
+          },
+          "widget": "json"
+        },
+        {
+          "filterable": false,
+          "label": "Refs",
+          "localized": false,
+          "name": "refs",
+          "required": false,
+          "showInList": false,
+          "sortable": false,
+          "validation": {
+            "minItems": 1
+          },
+          "widget": "json"
+        },
+        {
+          "filterable": false,
+          "label": "Sections",
+          "localized": false,
+          "name": "sections",
+          "options": {
+            "blockTypes": [
+              {
+                "fields": [
+                  {
+                    "label": "Text",
+                    "localized": false,
+                    "name": "text",
+                    "required": false,
+                    "widget": "text"
+                  }
+                ],
+                "icon": null,
+                "label": "Note",
+                "name": "note"
+              }
+            ]
+          },
+          "required": false,
+          "showInList": false,
+          "sortable": false,
+          "validation": {
+            "maxItems": 100
+          },
+          "widget": "blocks"
+        },
+        {
+          "filterable": true,
+          "label": "Rating",
+          "localized": false,
+          "name": "rating",
+          "required": false,
+          "showInList": true,
+          "sortable": true,
+          "validation": {
+            "max": 1000,
+            "min": 0
+          },
+          "widget": "number"
+        },
+        {
+          "filterable": true,
+          "label": "Observed on",
+          "localized": false,
+          "name": "observedOn",
+          "required": false,
+          "showInList": true,
+          "sortable": true,
+          "validation": {
+            "max": "2100-01-01",
+            "min": "2000-01-01"
+          },
+          "widget": "date"
+        },
+        {
+          "filterable": true,
+          "label": "Window opens",
+          "localized": false,
+          "name": "windowOpens",
+          "required": false,
+          "showInList": true,
+          "sortable": true,
+          "widget": "date"
+        },
+        {
+          "filterable": true,
+          "label": "Window closes",
+          "localized": false,
+          "name": "windowCloses",
+          "required": false,
+          "showInList": true,
+          "sortable": true,
+          "widget": "date"
+        },
+        {
+          "filterable": true,
+          "label": "Reference",
+          "localized": false,
+          "name": "reference",
+          "required": false,
+          "showInList": true,
+          "sortable": true,
+          "widget": "text"
+        }
+      ],
+      "indexes": [
+        {
+          "fields": [
+            "windowOpens",
+            "reference"
+          ],
+          "name": "bounds_probe_windowOpens_reference_idx",
+          "unique": false,
+          "using": "btree"
+        }
+      ],
+      "listColumns": [
+        "headline"
+      ],
+      "name": "boundsProbe",
+      "publishing": false,
+      "searchFields": [
+        "headline",
+        "reference"
+      ],
+      "singleton": false,
+      "softDelete": false,
+      "tableName": "bounds_probe",
+      "timestamps": false
+    },
+    {
+      "constraints": [],
+      "defaultSort": {
+        "direction": "desc",
+        "field": "created_at"
+      },
+      "fields": [
+        {
+          "filterable": true,
+          "label": "Id",
+          "localized": false,
+          "name": "id",
+          "readOnly": true,
+          "required": true,
+          "showInList": false,
+          "sortable": true,
+          "widget": "uuid"
+        },
+        {
+          "filterable": true,
+          "label": "Title",
+          "localized": false,
+          "name": "title",
+          "required": true,
+          "showInList": true,
+          "sortable": true,
+          "widget": "text"
+        },
+        {
+          "filterable": false,
+          "label": "Description",
+          "localized": false,
+          "name": "description",
+          "required": false,
+          "showInList": false,
+          "sortable": false,
+          "widget": "richtext"
+        },
+        {
+          "filterable": true,
+          "label": "Starts at",
+          "localized": false,
+          "name": "startsAt",
+          "required": true,
+          "showInList": true,
+          "sortable": true,
+          "widget": "datetime"
+        },
+        {
+          "filterable": true,
+          "label": "Ends at",
+          "localized": false,
+          "name": "endsAt",
+          "required": false,
+          "showInList": true,
+          "sortable": true,
+          "widget": "datetime"
+        },
+        {
+          "filterable": true,
+          "label": "Event date",
+          "localized": false,
+          "name": "eventDate",
+          "required": false,
+          "showInList": true,
+          "sortable": true,
+          "widget": "date"
+        },
+        {
+          "filterable": true,
+          "label": "Created ts",
+          "localized": false,
+          "name": "createdTs",
+          "required": false,
+          "showInList": true,
+          "sortable": true,
+          "widget": "datetime"
+        },
+        {
+          "filterable": false,
+          "label": "Duration",
+          "localized": false,
+          "name": "duration",
+          "required": false,
+          "showInList": false,
+          "sortable": false,
+          "widget": "duration"
+        },
+        {
+          "filterable": false,
+          "label": "Location",
+          "localized": false,
+          "name": "location",
+          "required": false,
+          "showInList": false,
+          "sortable": false,
+          "widget": "text"
+        },
+        {
+          "filterable": false,
+          "label": "Coverage area",
+          "localized": false,
+          "name": "coverageArea",
+          "required": false,
+          "showInList": false,
+          "sortable": false,
+          "widget": "text"
+        },
+        {
+          "filterable": false,
+          "label": "Route",
+          "localized": false,
+          "name": "route",
+          "required": false,
+          "showInList": false,
+          "sortable": false,
+          "widget": "text"
+        },
+        {
+          "filterable": true,
+          "label": "Organizer",
+          "localized": false,
+          "name": "organizer_id",
+          "options": {
+            "cardinality": "belongsTo",
+            "foreignKey": "organizer_id",
+            "target": "author"
+          },
+          "required": false,
+          "showInList": true,
+          "sortable": false,
+          "widget": "relation"
+        },
+        {
+          "filterable": true,
+          "label": "Max attendees",
+          "localized": false,
+          "name": "maxAttendees",
+          "required": false,
+          "showInList": true,
+          "sortable": true,
+          "widget": "number"
+        },
+        {
+          "filterable": true,
+          "label": "Is public",
+          "localized": false,
+          "name": "isPublic",
+          "required": true,
+          "showInList": true,
+          "sortable": true,
+          "widget": "boolean"
+        },
+        {
+          "filterable": true,
+          "label": "Created at",
+          "localized": false,
+          "name": "created_at",
+          "options": {
+            "studioTimestampDefault": "now"
+          },
+          "readOnly": true,
+          "required": false,
+          "showInList": true,
+          "sortable": true,
+          "widget": "datetime"
+        },
+        {
+          "filterable": true,
+          "label": "Updated at",
+          "localized": false,
+          "name": "updated_at",
+          "options": {
+            "studioTimestampDefault": "now"
+          },
+          "readOnly": true,
+          "required": false,
+          "showInList": true,
+          "sortable": true,
+          "widget": "datetime"
+        }
+      ],
+      "indexes": [],
+      "listColumns": [
+        "title",
+        "created_at"
+      ],
+      "name": "event",
+      "publishing": false,
+      "searchFields": [
+        "title"
+      ],
+      "singleton": false,
+      "softDelete": false,
+      "tableName": "event",
+      "timestamps": true
+    },
+    {
+      "constraints": [],
+      "defaultSort": {
+        "direction": "desc",
+        "field": "created_at"
+      },
+      "fields": [
+        {
+          "filterable": true,
+          "label": "Id",
+          "localized": false,
+          "name": "id",
+          "readOnly": true,
+          "required": true,
+          "showInList": false,
+          "sortable": true,
+          "widget": "uuid"
+        },
+        {
+          "filterable": false,
+          "label": "Source ip",
+          "localized": false,
+          "name": "sourceIp",
+          "required": true,
+          "showInList": false,
+          "sortable": false,
+          "widget": "text"
+        },
+        {
+          "filterable": false,
+          "label": "Subnet",
+          "localized": false,
+          "name": "subnet",
+          "required": false,
+          "showInList": false,
+          "sortable": false,
+          "widget": "text"
+        },
+        {
+          "filterable": false,
+          "label": "Device mac",
+          "localized": false,
+          "name": "deviceMac",
+          "required": false,
+          "showInList": false,
+          "sortable": false,
+          "widget": "text"
+        },
+        {
+          "filterable": false,
+          "label": "Audit attachment",
+          "localized": false,
+          "name": "auditAttachment",
+          "options": {
+            "bucket": "audit-logs"
+          },
+          "required": false,
+          "showInList": false,
+          "sortable": false,
+          "widget": "file"
+        },
+        {
+          "filterable": false,
+          "label": "Payload",
+          "localized": false,
+          "name": "payload",
+          "required": false,
+          "showInList": false,
+          "sortable": false,
+          "widget": "text"
+        },
+        {
+          "filterable": false,
+          "label": "Raw xml",
+          "localized": false,
+          "name": "rawXml",
+          "required": false,
+          "showInList": false,
+          "sortable": false,
+          "widget": "xml"
+        },
+        {
+          "filterable": false,
+          "label": "Search query",
+          "localized": false,
+          "name": "searchQuery",
+          "readOnly": true,
+          "required": false,
+          "showInList": false,
+          "sortable": false,
+          "widget": "text"
+        },
+        {
+          "filterable": false,
+          "label": "Search vector",
+          "localized": false,
+          "name": "searchVector",
+          "readOnly": true,
+          "required": false,
+          "showInList": false,
+          "sortable": false,
+          "widget": "text"
+        },
+        {
+          "filterable": true,
+          "label": "Severity",
+          "localized": false,
+          "name": "severity",
+          "required": true,
+          "showInList": true,
+          "sortable": true,
+          "widget": "number"
+        },
+        {
+          "filterable": true,
+          "label": "Recorded at",
+          "localized": false,
+          "name": "recordedAt",
+          "options": {
+            "studioTimestampDefault": "now"
+          },
+          "readOnly": true,
+          "required": false,
+          "showInList": true,
+          "sortable": true,
+          "widget": "datetime"
+        },
+        {
+          "filterable": true,
+          "label": "Created at",
+          "localized": false,
+          "name": "created_at",
+          "options": {
+            "studioTimestampDefault": "now"
+          },
+          "readOnly": true,
+          "required": false,
+          "showInList": true,
+          "sortable": true,
+          "widget": "datetime"
+        },
+        {
+          "filterable": true,
+          "label": "Updated at",
+          "localized": false,
+          "name": "updated_at",
+          "options": {
+            "studioTimestampDefault": "now"
+          },
+          "readOnly": true,
+          "required": false,
+          "showInList": true,
+          "sortable": true,
+          "widget": "datetime"
+        }
+      ],
+      "indexes": [],
+      "listColumns": [
+        "created_at"
+      ],
+      "name": "networkLog",
+      "publishing": false,
+      "searchFields": [],
+      "singleton": false,
+      "softDelete": false,
+      "tableName": "network_log",
+      "timestamps": true
+    },
+    {
+      "constraints": [],
+      "defaultSort": {
+        "direction": "desc",
+        "field": "created_at"
+      },
+      "fields": [
+        {
+          "filterable": true,
+          "label": "Id",
+          "localized": false,
+          "name": "id",
+          "readOnly": true,
+          "required": true,
+          "showInList": false,
+          "sortable": true,
+          "widget": "uuid"
+        },
+        {
+          "filterable": true,
+          "label": "Name",
+          "localized": false,
+          "name": "name",
+          "required": true,
+          "showInList": true,
+          "sortable": true,
+          "widget": "text"
+        },
+        {
+          "filterable": true,
+          "label": "Sku",
+          "localized": false,
+          "name": "sku",
+          "required": true,
+          "showInList": true,
+          "sortable": true,
+          "widget": "text"
+        },
+        {
+          "filterable": true,
+          "label": "Price",
+          "localized": false,
+          "name": "price",
+          "required": true,
+          "showInList": false,
+          "sortable": true,
+          "widget": "number"
+        },
+        {
+          "filterable": true,
+          "label": "List price",
+          "localized": false,
+          "name": "listPrice",
+          "options": {
+            "currency": true,
+            "step": "0.01"
+          },
+          "required": false,
+          "showInList": true,
+          "sortable": true,
+          "widget": "number"
+        },
+        {
+          "filterable": true,
+          "label": "Weight",
+          "localized": false,
+          "name": "weight",
+          "required": false,
+          "showInList": true,
+          "sortable": true,
+          "widget": "number"
+        },
+        {
+          "filterable": true,
+          "label": "Stock",
+          "localized": false,
+          "name": "stock",
+          "required": true,
+          "showInList": true,
+          "sortable": true,
+          "widget": "number"
+        },
+        {
+          "filterable": true,
+          "label": "Total sold",
+          "localized": false,
+          "name": "totalSold",
+          "required": true,
+          "showInList": true,
+          "sortable": true,
+          "widget": "number"
+        },
+        {
+          "filterable": true,
+          "label": "Min order",
+          "localized": false,
+          "name": "minOrder",
+          "required": true,
+          "showInList": true,
+          "sortable": true,
+          "widget": "number"
+        },
+        {
+          "filterable": true,
+          "label": "Status",
+          "localized": false,
+          "name": "status",
+          "options": {
+            "values": [
+              "active",
+              "inactive",
+              "discontinued"
+            ]
+          },
+          "required": true,
+          "showInList": true,
+          "sortable": true,
+          "widget": "select"
+        },
+        {
+          "filterable": false,
+          "label": "Feature tags",
+          "localized": false,
+          "name": "featureTags",
+          "required": false,
+          "showInList": false,
+          "sortable": false,
+          "widget": "json"
+        },
+        {
+          "filterable": false,
+          "label": "Manual file",
+          "localized": false,
+          "name": "manualFile",
+          "options": {
+            "bucket": "product-manuals"
+          },
+          "required": false,
+          "showInList": false,
+          "sortable": false,
+          "widget": "file"
+        },
+        {
+          "filterable": false,
+          "label": "Primary image",
+          "localized": false,
+          "name": "primaryImage",
+          "options": {
+            "bucket": "products"
+          },
+          "required": true,
+          "showInList": false,
+          "sortable": false,
+          "widget": "image"
+        },
+        {
+          "filterable": false,
+          "label": "Embedding",
+          "localized": false,
+          "name": "embedding",
+          "options": {
+            "dimensions": 1536
+          },
+          "readOnly": true,
+          "required": false,
+          "showInList": false,
+          "sortable": false,
+          "widget": "text"
+        },
+        {
+          "filterable": false,
+          "label": "Specs",
+          "localized": false,
+          "name": "specs",
+          "required": false,
+          "showInList": false,
+          "sortable": false,
+          "widget": "json"
+        },
+        {
+          "filterable": false,
+          "label": "Content",
+          "localized": false,
+          "name": "content",
+          "options": {
+            "blockTypes": [
+              {
+                "fields": [
+                  {
+                    "label": "Heading",
+                    "localized": false,
+                    "name": "heading",
+                    "required": false,
+                    "widget": "text"
+                  },
+                  {
+                    "label": "Subheading",
+                    "localized": false,
+                    "name": "subheading",
+                    "required": false,
+                    "widget": "text"
+                  },
+                  {
+                    "label": "Background image",
+                    "localized": false,
+                    "name": "backgroundImage",
+                    "options": {
+                      "bucket": "hero-images"
+                    },
+                    "required": false,
+                    "widget": "image"
+                  },
+                  {
+                    "label": "Cta label",
+                    "localized": false,
+                    "name": "ctaLabel",
+                    "required": false,
+                    "widget": "text"
+                  },
+                  {
+                    "label": "Cta url",
+                    "localized": false,
+                    "name": "ctaUrl",
+                    "required": false,
+                    "widget": "url"
+                  }
+                ],
+                "icon": "layout",
+                "label": "Hero Section",
+                "name": "hero"
+              },
+              {
+                "fields": [
+                  {
+                    "label": "Content",
+                    "localized": false,
+                    "name": "content",
+                    "required": false,
+                    "widget": "richtext"
+                  }
+                ],
+                "icon": "align-left",
+                "label": "Rich Text",
+                "name": "rich_text"
+              },
+              {
+                "fields": [
+                  {
+                    "label": "Level",
+                    "localized": false,
+                    "name": "level",
+                    "options": {
+                      "values": [
+                        "info",
+                        "warning",
+                        "error",
+                        "success"
+                      ]
+                    },
+                    "required": false,
+                    "widget": "select"
+                  },
+                  {
+                    "label": "Message",
+                    "localized": false,
+                    "name": "message",
+                    "required": false,
+                    "widget": "text"
+                  },
+                  {
+                    "label": "Icon",
+                    "localized": false,
+                    "name": "icon",
+                    "required": false,
+                    "widget": "text"
+                  }
+                ],
+                "icon": "alert-circle",
+                "label": "Callout",
+                "name": "callout"
+              },
+              {
+                "fields": [
+                  {
+                    "label": "Caption",
+                    "localized": false,
+                    "name": "caption",
+                    "required": false,
+                    "widget": "text"
+                  },
+                  {
+                    "label": "Columns",
+                    "localized": false,
+                    "name": "columns",
+                    "required": false,
+                    "widget": "number"
+                  },
+                  {
+                    "label": "Show captions",
+                    "localized": false,
+                    "name": "showCaptions",
+                    "required": false,
+                    "widget": "boolean"
+                  }
+                ],
+                "icon": "image",
+                "label": "Image Gallery",
+                "name": "image_gallery"
+              }
+            ]
+          },
+          "required": false,
+          "showInList": false,
+          "sortable": false,
+          "widget": "blocks"
+        }
+      ],
+      "indexes": [],
+      "listColumns": [
+        "name",
+        "status",
+        "created_at"
+      ],
+      "name": "product",
+      "publishing": false,
+      "searchFields": [
+        "name",
+        "sku"
+      ],
+      "singleton": false,
+      "softDelete": false,
+      "tableName": "product",
+      "timestamps": true
+    },
+    {
+      "constraints": [],
+      "defaultSort": {
+        "direction": "desc",
+        "field": "created_at"
+      },
+      "fields": [
+        {
+          "filterable": true,
+          "label": "Id",
+          "localized": false,
+          "name": "id",
+          "readOnly": true,
+          "required": true,
+          "showInList": false,
+          "sortable": true,
+          "widget": "uuid"
+        },
+        {
+          "filterable": true,
+          "label": "Subscriber",
+          "localized": false,
+          "name": "subscriber_id",
+          "options": {
+            "cardinality": "belongsTo",
+            "foreignKey": "subscriber_id",
+            "target": "author"
+          },
+          "required": false,
+          "showInList": true,
+          "sortable": false,
+          "widget": "relation"
+        },
+        {
+          "filterable": true,
+          "label": "External id",
+          "localized": false,
+          "name": "externalId",
+          "required": true,
+          "showInList": true,
+          "sortable": true,
+          "widget": "number"
+        },
+        {
+          "filterable": true,
+          "label": "Plan id",
+          "localized": false,
+          "name": "planId",
+          "required": true,
+          "showInList": false,
+          "sortable": true,
+          "widget": "uuid"
+        },
+        {
+          "filterable": true,
+          "label": "Status",
+          "localized": false,
+          "name": "status",
+          "options": {
+            "values": [
+              "trialing",
+              "active",
+              "past_due",
+              "canceled",
+              "unpaid"
+            ]
+          },
+          "required": true,
+          "showInList": true,
+          "sortable": true,
+          "widget": "select"
+        },
+        {
+          "filterable": true,
+          "label": "Billing period",
+          "localized": false,
+          "name": "billingPeriod",
+          "options": {
+            "values": [
+              "monthly",
+              "annual"
+            ]
+          },
+          "required": true,
+          "showInList": true,
+          "sortable": true,
+          "widget": "select"
+        },
+        {
+          "filterable": true,
+          "label": "Current period end",
+          "localized": false,
+          "name": "currentPeriodEnd",
+          "required": true,
+          "showInList": true,
+          "sortable": true,
+          "widget": "datetime"
+        },
+        {
+          "filterable": true,
+          "label": "Trial ends at",
+          "localized": false,
+          "name": "trialEndsAt",
+          "required": false,
+          "showInList": true,
+          "sortable": true,
+          "widget": "datetime"
+        },
+        {
+          "filterable": true,
+          "label": "Canceled at",
+          "localized": false,
+          "name": "canceledAt",
+          "required": false,
+          "showInList": true,
+          "sortable": true,
+          "widget": "datetime"
+        },
+        {
+          "filterable": true,
+          "label": "Quantity",
+          "localized": false,
+          "name": "quantity",
+          "required": true,
+          "showInList": true,
+          "sortable": true,
+          "widget": "number"
+        },
+        {
+          "filterable": true,
+          "label": "Unit amount",
+          "localized": false,
+          "name": "unitAmount",
+          "required": true,
+          "showInList": false,
+          "sortable": true,
+          "widget": "number"
+        },
+        {
+          "filterable": true,
+          "label": "Currency",
+          "localized": false,
+          "name": "currency",
+          "required": true,
+          "showInList": true,
+          "sortable": true,
+          "validation": {
+            "maxLength": 3
+          },
+          "widget": "text"
+        },
+        {
+          "filterable": false,
+          "label": "Metadata",
+          "localized": false,
+          "name": "metadata",
+          "required": false,
+          "showInList": false,
+          "sortable": false,
+          "widget": "json"
+        },
+        {
+          "filterable": true,
+          "label": "Created at",
+          "localized": false,
+          "name": "created_at",
+          "options": {
+            "studioTimestampDefault": "now"
+          },
+          "readOnly": true,
+          "required": false,
+          "showInList": true,
+          "sortable": true,
+          "widget": "datetime"
+        },
+        {
+          "filterable": true,
+          "label": "Updated at",
+          "localized": false,
+          "name": "updated_at",
+          "options": {
+            "studioTimestampDefault": "now"
+          },
+          "readOnly": true,
+          "required": false,
+          "showInList": true,
+          "sortable": true,
+          "widget": "datetime"
+        }
+      ],
+      "indexes": [],
+      "listColumns": [
+        "currency",
+        "status",
+        "billingPeriod",
+        "created_at"
+      ],
+      "name": "subscription",
+      "publishing": false,
+      "searchFields": [
+        "currency"
+      ],
+      "singleton": false,
+      "softDelete": false,
+      "tableName": "subscription",
+      "timestamps": true
+    },
+    {
+      "constraints": [],
+      "defaultSort": {
+        "direction": "desc",
+        "field": "created_at"
+      },
+      "fields": [
+        {
+          "filterable": true,
+          "label": "Id",
+          "localized": false,
+          "name": "id",
+          "readOnly": true,
+          "required": true,
+          "showInList": false,
+          "sortable": true,
+          "widget": "uuid"
+        },
+        {
+          "filterable": true,
+          "label": "Title",
+          "localized": false,
+          "name": "title",
+          "required": true,
+          "showInList": true,
+          "sortable": true,
+          "widget": "text"
+        },
+        {
+          "filterable": true,
+          "label": "Slug",
+          "localized": false,
+          "name": "slug",
+          "options": {
+            "from": "title"
+          },
+          "required": true,
+          "showInList": true,
+          "sortable": true,
+          "widget": "slug"
+        },
+        {
+          "filterable": false,
+          "label": "Content",
+          "localized": false,
+          "name": "content",
+          "options": {
+            "blockTypes": [
+              {
+                "fields": [
+                  {
+                    "label": "Heading",
+                    "localized": false,
+                    "name": "heading",
+                    "required": false,
+                    "widget": "text"
+                  },
+                  {
+                    "label": "Subheading",
+                    "localized": false,
+                    "name": "subheading",
+                    "required": false,
+                    "widget": "text"
+                  },
+                  {
+                    "label": "Background image",
+                    "localized": false,
+                    "name": "backgroundImage",
+                    "options": {
+                      "bucket": "hero-images"
+                    },
+                    "required": false,
+                    "widget": "image"
+                  },
+                  {
+                    "label": "Cta label",
+                    "localized": false,
+                    "name": "ctaLabel",
+                    "required": false,
+                    "widget": "text"
+                  },
+                  {
+                    "label": "Cta url",
+                    "localized": false,
+                    "name": "ctaUrl",
+                    "required": false,
+                    "widget": "url"
+                  }
+                ],
+                "icon": "layout",
+                "label": "Hero Section",
+                "name": "hero"
+              },
+              {
+                "fields": [
+                  {
+                    "label": "Content",
+                    "localized": false,
+                    "name": "content",
+                    "required": false,
+                    "widget": "richtext"
+                  }
+                ],
+                "icon": "align-left",
+                "label": "Rich Text",
+                "name": "rich_text"
+              },
+              {
+                "fields": [
+                  {
+                    "label": "Level",
+                    "localized": false,
+                    "name": "level",
+                    "options": {
+                      "values": [
+                        "info",
+                        "warning",
+                        "error",
+                        "success"
+                      ]
+                    },
+                    "required": false,
+                    "widget": "select"
+                  },
+                  {
+                    "label": "Message",
+                    "localized": false,
+                    "name": "message",
+                    "required": false,
+                    "widget": "text"
+                  },
+                  {
+                    "label": "Icon",
+                    "localized": false,
+                    "name": "icon",
+                    "required": false,
+                    "widget": "text"
+                  }
+                ],
+                "icon": "alert-circle",
+                "label": "Callout",
+                "name": "callout"
+              },
+              {
+                "fields": [
+                  {
+                    "label": "Caption",
+                    "localized": false,
+                    "name": "caption",
+                    "required": false,
+                    "widget": "text"
+                  },
+                  {
+                    "label": "Columns",
+                    "localized": false,
+                    "name": "columns",
+                    "required": false,
+                    "widget": "number"
+                  },
+                  {
+                    "label": "Show captions",
+                    "localized": false,
+                    "name": "showCaptions",
+                    "required": false,
+                    "widget": "boolean"
+                  }
+                ],
+                "icon": "image",
+                "label": "Image Gallery",
+                "name": "image_gallery"
+              }
+            ]
+          },
+          "required": false,
+          "showInList": false,
+          "sortable": false,
+          "widget": "blocks"
+        },
+        {
+          "filterable": true,
+          "label": "Author",
+          "localized": false,
+          "name": "author_id",
+          "options": {
+            "cardinality": "belongsTo",
+            "foreignKey": "author_id",
+            "target": "author"
+          },
+          "required": false,
+          "showInList": true,
+          "sortable": false,
+          "widget": "relation"
+        },
+        {
+          "filterable": false,
+          "label": "Metadata",
+          "localized": false,
+          "name": "metadata",
+          "required": false,
+          "showInList": false,
+          "sortable": false,
+          "widget": "json"
+        }
+      ],
+      "indexes": [],
+      "listColumns": [
+        "title",
+        "created_at"
+      ],
+      "name": "page",
+      "publishing": false,
+      "searchFields": [
+        "title",
+        "slug"
+      ],
+      "singleton": false,
+      "softDelete": false,
+      "tableName": "page",
+      "timestamps": true
+    }
+  ],
+  "navigation": [
+    {
+      "group": "Content",
+      "items": [
+        {
+          "label": "author",
+          "model": "author"
+        },
+        {
+          "label": "userProfile",
+          "model": "user_profile"
+        },
+        {
+          "label": "category",
+          "model": "category"
+        },
+        {
+          "label": "tag",
+          "model": "tag"
+        },
+        {
+          "label": "post",
+          "model": "post"
+        },
+        {
+          "label": "comment",
+          "model": "comment"
+        },
+        {
+          "label": "boundsProbe",
+          "model": "bounds_probe"
+        },
+        {
+          "label": "event",
+          "model": "event"
+        },
+        {
+          "label": "networkLog",
+          "model": "network_log"
+        },
+        {
+          "label": "product",
+          "model": "product"
+        },
+        {
+          "label": "subscription",
+          "model": "subscription"
+        },
+        {
+          "label": "page",
+          "model": "page"
+        }
+      ]
+    }
+  ],
+  "storageBuckets": [
+    {
+      "access": {
+        "create": {
+          "roles": [
+            "service_role"
+          ],
+          "type": "role"
+        },
+        "delete": {
+          "roles": [
+            "service_role"
+          ],
+          "type": "role"
+        },
+        "read": {
+          "roles": [
+            "service_role"
+          ],
+          "type": "role"
+        },
+        "update": null
+      },
+      "accessMode": "custom",
+      "allowedMimeTypes": null,
+      "fileSizeLimit": null,
+      "id": "audit-logs",
+      "public": false,
+      "s3BucketPolicy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Deny\",\"Principal\":\"*\",\"Action\":\"s3:GetObject\",\"Resource\":\"arn:aws:s3:::audit-logs/*\"}]}"
+    },
+    {
+      "access": null,
+      "accessMode": "public",
+      "allowedMimeTypes": null,
+      "fileSizeLimit": null,
+      "id": "avatars",
+      "public": true,
+      "s3BucketPolicy": null
+    },
+    {
+      "access": null,
+      "accessMode": "public",
+      "allowedMimeTypes": null,
+      "fileSizeLimit": null,
+      "id": "hero-images",
+      "public": true,
+      "s3BucketPolicy": null
+    },
+    {
+      "access": {
+        "create": {
+          "type": "authenticated"
+        },
+        "delete": {
+          "field": "owner_id",
+          "type": "owner"
+        },
+        "read": {
+          "type": "authenticated"
+        },
+        "update": null
+      },
+      "accessMode": "private",
+      "allowedMimeTypes": null,
+      "fileSizeLimit": 52428800,
+      "id": "post-attachments",
+      "public": false,
+      "s3BucketPolicy": null
+    },
+    {
+      "access": null,
+      "accessMode": "public",
+      "allowedMimeTypes": null,
+      "fileSizeLimit": null,
+      "id": "post-covers",
+      "public": true,
+      "s3BucketPolicy": null
+    },
+    {
+      "access": {
+        "create": {
+          "roles": [
+            "service_role"
+          ],
+          "type": "role"
+        },
+        "delete": {
+          "roles": [
+            "service_role"
+          ],
+          "type": "role"
+        },
+        "read": {
+          "roles": [
+            "service_role"
+          ],
+          "type": "role"
+        },
+        "update": null
+      },
+      "accessMode": "private",
+      "allowedMimeTypes": [
+        "application/pdf"
+      ],
+      "fileSizeLimit": null,
+      "id": "product-manuals",
+      "public": false,
+      "s3BucketPolicy": null
+    },
+    {
+      "access": null,
+      "accessMode": "public",
+      "allowedMimeTypes": null,
+      "fileSizeLimit": null,
+      "id": "products",
+      "public": true,
+      "s3BucketPolicy": null
+    }
+  ],
+  "version": 1
+}

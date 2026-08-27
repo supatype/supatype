@@ -253,9 +253,69 @@ export type AutoIncrement<T extends number | bigint> = Modifier<"AutoIncrement",
  */
 export type ServerDefault<T> = Modifier<"ServerDefault", T>
 export type Default<T, V> = Modifier<`Default:${Extract<V, string | number | boolean | bigint | null>}`, T>
+/**
+ * Character bounds, or octets for `Bytea`.
+ *
+ * Length is always "how much text", never "how many". A collection is bounded with {@link MaxItems}
+ * so neither word carries two meanings, and so a reader never has to know a column's storage to know
+ * what the number counts. Declaring one on a collection is a push-time error naming the other.
+ */
 export type MaxLength<T, N extends number> = Modifier<`MaxLength:${N}`, T>
 export type MinLength<T, N extends number> = Modifier<`MinLength:${N}`, T>
-export type Between<T, Min extends number, Max extends number> = Modifier<`Between:${Min}:${Max}`, T>
+
+/**
+ * Element bounds for an array, a JSON array or a `Blocks` field.
+ *
+ * `MinItems<Blocks<Section>, 1>` is "a page must have at least one section", the rule that otherwise
+ * has to live in application code and be re-implemented per client.
+ */
+export type MaxItems<T, N extends number> = Modifier<`MaxItems:${N}`, T>
+export type MinItems<T, N extends number> = Modifier<`MinItems:${N}`, T>
+
+/**
+ * An inclusive range, numeric or temporal.
+ *
+ * A number bounds a numeric column; an ISO-8601 string literal bounds a date or time column and is
+ * compiled to that column's own type, never to `numeric`. The two are not interchangeable: a string
+ * on a numeric column, or a number on a temporal one, is refused at push time rather than coerced,
+ * and a literal that is not a valid date is refused there too rather than failing mid-migration.
+ *
+ * ```typescript
+ * rating: Between<Int, 1, 5>
+ * eventDate: Between<DateOnly, "2026-01-01", "2026-12-31">
+ * ```
+ */
+export type Between<
+  T,
+  Min extends number | string,
+  Max extends number | string,
+> = Modifier<`Between:${Min}:${Max}`, T>
+/**
+ * What the bound modifiers above compile into: one contract, declared once.
+ *
+ * This shape crosses three boundaries. The CLI writes it into the schema AST beside the SQL it
+ * compiled, the engine copies it into `admin-config.json`, and Studio reads it to check a value
+ * before the write leaves the browser. It was previously declared separately in the CLI and in
+ * Studio, identically and by hand, which meant adding a measure was two edits and a hope. It lives
+ * here because this package is where the modifiers themselves are declared, and because it compiles
+ * to nothing: a `import type` of this costs no dependency at runtime, which the CLI's standalone
+ * binary depends on.
+ *
+ * Every comparison is **inclusive**, matching the `<=` and `>=` the constraint compiles to. An
+ * absent value is legal however tight the bound, because a `CHECK` that evaluates to `NULL` passes.
+ */
+export interface FieldValidation {
+  /** Characters, or octets for a binary column. */
+  maxLength?: number
+  minLength?: number
+  /** Elements of an array, a JSON array or a blocks field. */
+  maxItems?: number
+  minItems?: number
+  /** Inclusive range: a number for a numeric column, an ISO-8601 string for a temporal one. */
+  min?: number | string
+  max?: number | string
+}
+
 /**
  * Built-in audit pair: expands to columns with DB `DEFAULT NOW()` and Studio prefill on create.
  *
@@ -908,7 +968,92 @@ export type ModelMeta<TFields extends Record<string, unknown>> = {
     readonly beforeDelete?: ModelHook
     readonly afterDelete?: ModelHook
   }
+
+  /**
+   * Per-field validators: a rule no vocabulary can express, run before the write.
+   *
+   * ```typescript
+   * validate: { setupItems: "validate-setup-items" }
+   * ```
+   *
+   * The value names a directory under `hooks/`, checked when you push, and `push`
+   * generates a typed handler signature so the value it receives is the field's real type rather
+   * than `unknown`. The handler returns `true` to accept or a message string to refuse.
+   *
+   * **A validator sees one field, and its refusal names that field**, which is what lets Studio put
+   * the message on the input instead of in a banner. That attribution is the whole difference from
+   * writing the same logic inside {@link ModelMeta.hooks}, which speaks for the write as a whole.
+   *
+   * **It is not a constraint.** It runs on the API write path, so direct SQL, seeds and migrations
+   * are not subject to it. Anything expressible as a bound (`MaxLength`, `MaxItems`, `Between`) or
+   * as a {@link ModelMeta.constraints} rule should be one, because those hold for every writer. Use
+   * this for what genuinely cannot be: a call to another system, a rule needing the previous row.
+   *
+   * A validator that cannot be reached **refuses** the write. A value nobody checked is not a value
+   * that passed.
+   */
+  validate?: { readonly [field: string]: ModelHook }
+
+  /**
+   * Table-level rules the database enforces, written in the same vocabulary as {@link ModelMeta.access}.
+   *
+   * The field modifiers (`MaxLength`, `MaxItems`, `Between`) cover one column and one measure. This
+   * covers what they cannot: a comparison between two columns, a rule that depends on another
+   * column's value, a pattern.
+   *
+   * ```typescript
+   * constraints: [
+   *   Lte<"starts_at", "ends_at">,
+   *   Gte<ItemCount<"setup_items">, Literal<1>>,
+   *   Any<[Eq<"status", Literal<"draft">>, NotNull<"published_at">]>,
+   * ]
+   * ```
+   *
+   * **Declared on the model, not the field**, because the vocabulary names columns as bare strings:
+   * a field-level wrapper would either repeat the field's own name inside its own declaration or
+   * need a `Self` operand that exists nowhere else. Cross-column rules are table constraints in
+   * Postgres regardless. A constraint naming one column is attributed back to that field, so Studio
+   * can report it on the input rather than the form.
+   *
+   * **No caller, no clock.** `AuthUid`, `Claim`, `Role`, `AuthRole` and the temporal operands are
+   * legal in an access rule and refused here: a `CHECK` cannot see who is writing, and `now()` in
+   * one would make a row that was valid on insert invalid on update. Push fails naming the node.
+   */
+  constraints?: readonly unknown[]
 }
+
+/**
+ * How much of a column there is, for a comparison: characters for text, plain text for rich text,
+ * octets for a binary column.
+ *
+ * The counterpart of `MaxLength` in expression position. Separate from {@link ItemCount} for the
+ * same reason `MaxLength` is separate from `MaxItems`: length is how much text, count is how many,
+ * and a reader should not need to know a column's storage to know which they are looking at.
+ */
+export type Length<TColumn extends string> = Access<"Length", {
+  readonly kind: "Length"
+  readonly column: TColumn
+}>
+
+/** How many elements a column holds: an array, a JSON array, or a blocks field. */
+export type ItemCount<TColumn extends string> = Access<"ItemCount", {
+  readonly kind: "ItemCount"
+  readonly column: TColumn
+}>
+
+/**
+ * `Matches<"sku", "^[A-Z]{3}-[0-9]{4}$">`: the column matches a regular expression.
+ *
+ * Takes a **pattern**, never a predicate. There is nothing to escape out of, the engine renders it
+ * as the right-hand side of `~` rather than as SQL, and Studio can run the same string through
+ * `RegExp` to report the failure before the write. A predicate here would be raw SQL by another
+ * name, which is settled: see `Custom<sql>` in ACCESS-CONTROL-README.
+ */
+export type Matches<TColumn extends string, TPattern extends string> = Access<"Matches", {
+  readonly kind: "Matches"
+  readonly column: TColumn
+  readonly pattern: TPattern
+}>
 
 /** A hook: a function name, or that name with per-hook options. */
 export type ModelHook = string | ModelHookOptions

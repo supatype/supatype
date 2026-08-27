@@ -11,6 +11,7 @@ import { Badge, Button, Card, CodeBlock, Input, Select, Th, Td } from "../compon
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { SlidePanel } from "../components/SlidePanel.js"
+import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -37,7 +38,14 @@ interface AuthIdentity {
 
 interface MfaFactor {
   id: string
-  type: "totp"
+  /**
+   * The factor kind GoTrue enrolled, rendered verbatim.
+   *
+   * Not narrowed to `"totp"`: GoTrue also enrols phone factors, and the mapper was casting through
+   * `any` to satisfy a literal it could not honour. A card reading "phone" is right; one reading
+   * "totp" over a phone factor is a lie about someone's second factor.
+   */
+  type: string
   friendly_name: string | null
   created_at: string
   verified: boolean
@@ -60,15 +68,30 @@ const statusFilters = ["all", "active", "disabled", "unconfirmed"]
 
 function UserForm({
   user,
+  studioRoles,
   onSave,
   onCancel,
 }: {
   user: AuthUser | null
-  onSave: (data: { email: string; role: string; password?: string; metadata: Record<string, unknown> }) => void
+  /**
+   * Studio roles this viewer may grant, empty when they may not grant any.
+   *
+   * Only offered when creating. An existing user's Studio access is edited in the list, where the
+   * server's own refusals (no self-change, no demoting the last admin) are already handled.
+   */
+  studioRoles: readonly string[]
+  onSave: (data: {
+    email: string
+    role: string
+    password?: string
+    metadata: Record<string, unknown>
+    studioRole?: string
+  }) => void
   onCancel: () => void
 }): React.ReactElement {
   const [email, setEmail] = useState(user?.email ?? "")
   const role = user?.role ?? "authenticated"
+  const [studioRole, setStudioRole] = useState("")
   const [password, setPassword] = useState("")
   const [metadataJson, setMetadataJson] = useState(JSON.stringify(user?.metadata ?? {}, null, 2))
   const [error, setError] = useState<string | null>(null)
@@ -90,6 +113,7 @@ function UserForm({
       role,
       ...(password.trim() ? { password: password.trim() } : {}),
       metadata,
+      ...(studioRole !== "" ? { studioRole } : {}),
     })
   }
 
@@ -107,12 +131,31 @@ function UserForm({
           <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
         </div>
         <div>
-          <label className="block text-[0.8rem] text-muted-foreground mb-1">Role</label>
-          <Input value={role} disabled />
+          <label className="block text-[0.8rem] text-muted-foreground mb-1">Project role</label>
+          <Input value={role} disabled readOnly />
           <p className="text-[0.75rem] text-muted-foreground mt-1">
             Project users are always provisioned as <code>authenticated</code>.
           </p>
         </div>
+        {user === null && studioRoles.length > 0 ? (
+          <div>
+            <label className="block text-[0.8rem] text-muted-foreground mb-1">Studio access</label>
+            <Select value={studioRole} onChange={(e) => setStudioRole(e.target.value)}>
+              <option value="">No access</option>
+              {studioRoles.map((r) => (
+                <option key={r} value={r}>
+                  {r}
+                </option>
+              ))}
+            </Select>
+            <p className="text-[0.75rem] text-muted-foreground mt-1">
+              {/* Named apart from the project role above because conflating the two is how
+                  granting an application role would hand out admin UI access. */}
+              Whether this person may use Studio, and with what permissions. Separate from the
+              project role: it grants nothing in your own application.
+            </p>
+          </div>
+        ) : null}
         <div>
           <label className="block text-[0.8rem] text-muted-foreground mb-1">User Metadata (JSON)</label>
           <textarea
@@ -358,8 +401,45 @@ function InviteUserForm({
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function mapGoTrueUser(raw: any): AuthUser {
+/**
+ * A user as GoTrue's admin API returns it.
+ *
+ * Every field optional, because this describes someone else's JSON rather than a value we
+ * constructed: a server that stops sending `factors` should narrow what Studio can show, not throw
+ * while mapping. `any` here would have hidden exactly that.
+ */
+interface GoTrueUser {
+  id: string
+  email?: string | null
+  phone?: string | null
+  role?: string | null
+  email_confirmed_at?: string | null
+  banned_until?: string | null
+  last_sign_in_at?: string | null
+  created_at: string
+  updated_at: string
+  user_metadata?: Record<string, unknown> | null
+  identities?: GoTrueIdentity[] | null
+  factors?: GoTrueFactor[] | null
+}
+
+interface GoTrueIdentity {
+  provider: string
+  identity_id?: string | null
+  id?: string | null
+  created_at: string
+}
+
+interface GoTrueFactor {
+  id: string
+  factor_type?: string | null
+  type?: string | null
+  friendly_name?: string | null
+  created_at: string
+  status?: string | null
+}
+
+function mapGoTrueUser(raw: GoTrueUser): AuthUser {
   return {
     id: raw.id,
     email: raw.email ?? "",
@@ -372,14 +452,14 @@ function mapGoTrueUser(raw: any): AuthUser {
     updated_at: raw.updated_at,
     metadata: raw.user_metadata ?? {},
     providers: Array.isArray(raw.identities)
-      ? raw.identities.map((i: any) => ({
+      ? raw.identities.map((i) => ({
           provider: i.provider,
-          provider_id: i.identity_id ?? i.id,
+          provider_id: i.identity_id ?? i.id ?? "",
           linked_at: i.created_at,
         }))
       : [],
     mfa_factors: Array.isArray(raw.factors)
-      ? raw.factors.map((f: any) => ({
+      ? raw.factors.map((f) => ({
           id: f.id,
           type: f.factor_type ?? f.type ?? "totp",
           friendly_name: f.friendly_name ?? null,
@@ -391,10 +471,19 @@ function mapGoTrueUser(raw: any): AuthUser {
 }
 
 export function AuthManagement(): React.ReactElement {
+  // Rows here are read with the service role, so the elevated-access notice applies
+  // to this view. See `useShowsProjectRows`.
+  useShowsProjectRows()
+
   const client = useStudioClient()
   const proxy = useProjectProxy()
   const studioMembers = useStudioMembers()
   const studioAccess = useStudioCapability()
+  // Empty unless the viewer may manage members at all, so the control is absent rather than
+  // offering a grant the server will refuse.
+  const grantableStudioRoles = studioAccess.canManageMembers
+    ? studioMembers.roles.map((r) => r.role)
+    : []
 
   const authAdminFetch = useCallback(async (path: string, options?: RequestInit) => {
     const res = await fetch(`${client.url}/auth/v1/admin${path}`, {
@@ -414,7 +503,7 @@ export function AuthManagement(): React.ReactElement {
   const { data: usersData, loading, error, refetch } = useApiQuery(
     async () => {
       const json = await authAdminFetch("/users?page=1&per_page=50")
-      return (json.users as any[]).map(mapGoTrueUser)
+      return (json.users as GoTrueUser[]).map(mapGoTrueUser)
     },
     [authAdminFetch],
   )
@@ -514,8 +603,14 @@ export function AuthManagement(): React.ReactElement {
     setSelectedUser(null)
   }, [authAdminFetch, refetch])
 
-  const handleCreateUser = useCallback(async (data: { email: string; role: string; password?: string; metadata: Record<string, unknown> }) => {
-    await authAdminFetch("/users", {
+  const handleCreateUser = useCallback(async (data: {
+    email: string
+    role: string
+    password?: string
+    metadata: Record<string, unknown>
+    studioRole?: string
+  }) => {
+    const created = (await authAdminFetch("/users", {
       method: "POST",
       body: JSON.stringify({
         email: data.email,
@@ -523,10 +618,19 @@ export function AuthManagement(): React.ReactElement {
         user_metadata: data.metadata,
         role: data.role,
       }),
-    })
+    })) as { id?: string }
+
+    // Two calls because they are two different things: the account lives in `auth.users`, the
+    // Studio grant lives in `_supatype.studio_members`, and only the first is GoTrue's to create.
+    // A failure here leaves a real user with no Studio access, which is the safe half to be left
+    // holding: the alternative is a grant pointing at a user that does not exist.
+    if (data.studioRole !== undefined && typeof created.id === "string") {
+      await studioMembers.setRole(created.id, data.studioRole)
+    }
+
     refetch()
     setShowCreateForm(false)
-  }, [authAdminFetch, refetch])
+  }, [authAdminFetch, refetch, studioMembers])
 
   const handleEditUser = useCallback(async (data: { email: string; role: string; password?: string; metadata: Record<string, unknown> }) => {
     if (!editingUser) return
@@ -750,6 +854,7 @@ export function AuthManagement(): React.ReactElement {
         {editingUser && (
           <UserForm
             user={editingUser}
+            studioRoles={[]}
             onSave={(data) => { void handleEditUser(data) }}
             onCancel={() => setEditingUser(null)}
           />
@@ -757,6 +862,7 @@ export function AuthManagement(): React.ReactElement {
         {showCreateForm && (
           <UserForm
             user={null}
+            studioRoles={grantableStudioRoles}
             onSave={(data) => { void handleCreateUser(data) }}
             onCancel={() => setShowCreateForm(false)}
           />

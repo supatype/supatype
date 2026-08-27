@@ -8,10 +8,15 @@ import type { DashboardBlock, ModelConfig } from "../config.js"
 import { DASHBOARD_VIEW_LIMITS } from "../config.js"
 import { JumpToSearch } from "../components/JumpToSearch.js"
 import { studioRestHeaders } from "../lib/studio-auth-headers.js"
+import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
 export function Dashboard(): React.ReactElement {
+  // Rows here are read with the service role, so the elevated-access notice applies
+  // to this view. See `useShowsProjectRows`.
+  useShowsProjectRows()
+
   const config = useAdminConfig()
   const client = useAdminClient()
   const tier = config.tier ?? "free"

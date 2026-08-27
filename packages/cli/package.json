@@ -45,10 +45,11 @@
     "typescript": "^5"
   },
   "devDependencies": {
+    "@supatype/types": "workspace:*",
     "@types/bcryptjs": "^2.4.6",
-    "@types/react": "^18.3.18",
     "@types/node": "^22",
     "@types/pg": "^8",
+    "@types/react": "^18.3.18",
     "vitest": "^4.0.18"
   }
 }

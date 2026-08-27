@@ -167,6 +167,9 @@
 .st-live-preview-iframe { width: 100%; height: 500px; border: none; }
 
 /* Widgets */
+.st-field-error { font-size: 0.75rem; color: hsl(var(--destructive)); margin-top: 0.25rem; }
+.st-field--invalid .st-input,
+.st-field--invalid .st-textarea { border-color: hsl(var(--destructive)); }
 .st-char-count { font-size: 0.7rem; color: hsl(var(--muted-foreground)); float: right; margin-top: 0.25rem; }
 .st-widget-slug-row { display: flex; align-items: center; gap: 0.5rem; width: 100%; }
 .st-widget-slug-input { flex: 1; min-width: 0; }
