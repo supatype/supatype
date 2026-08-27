@@ -18,6 +18,8 @@ import {
   serverBaseUrl,
 } from "../project-config.js"
 import { ensureEngine, engineRequest, type DiffResult } from "../engine-client.js"
+import { assertEngineSupportsSchema } from "../engine-floor.js"
+import { pinnedVersion } from "../binary-cache.js"
 import { printDiffOperations, printDiffWarnings } from "../diff-output.js"
 import { signJwt } from "../jwt.js"
 import { provisionBucketsFromAst } from "../storage-provision.js"
@@ -72,6 +74,7 @@ export function registerPush(program: Command): void {
       const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
       assertModelHooksResolve(cwd, config, ast)
       assertServiceRoleGrantsResolve(cwd, config)
+      assertEngineSupportsSchema(ast, pinnedVersion("engine", config))
 
       const linked = loadProjectLink(cwd)
       const useDirect = opts.direct || opts.local || Boolean(opts.connection)
