@@ -16,6 +16,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INTEGRATION_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ROOT_DIR="$(cd "$INTEGRATION_DIR/../.." && pwd)"
+source "$SCRIPT_DIR/lib/http-wait.sh"
 
 resolve_engine_binary() {
   local base="$ROOT_DIR/../supatype-schema-engine/target/release/supatype-engine"
@@ -313,20 +314,14 @@ done
 # ── Step 5: Wait for health ───────────────────────────────────────────────────
 
 MAX_WAIT=300
-echo "==> Waiting for $BASE_URL to be ready (up to ${MAX_WAIT}s)..."
+auth_and_realtime_ready() {
+  http_ok "$BASE_URL/auth/v1/health" && http_ok "$BASE_URL/realtime/v1/health"
+}
 
-for i in $(seq 1 "$MAX_WAIT"); do
-  if curl -sf "$BASE_URL/auth/v1/health" > /dev/null 2>&1 \
-    && curl -sf "$BASE_URL/realtime/v1/health" > /dev/null 2>&1; then
-    echo "  Ready after ${i}s (auth + realtime)"
-    break
-  fi
-  if [[ "$i" -eq "$MAX_WAIT" ]]; then
-    echo "  ERROR: Server did not become ready within ${MAX_WAIT}s"
-    exit 1
-  fi
-  sleep 1
-done
+if ! wait_until "$MAX_WAIT" "$BASE_URL (auth + realtime)" auth_and_realtime_ready; then
+  echo "  ERROR: Server did not become ready within ${MAX_WAIT}s"
+  exit 1
+fi
 
 # Auth/realtime can pass before the initial schema push and before the pinned
 # realtime image recreate finishes. Wait for the session lock (written only after
@@ -335,36 +330,48 @@ export SUPATYPE_ANON_KEY="${SUPATYPE_ANON_KEY:-integration-anon-key}"
 export SUPATYPE_SERVICE_ROLE_KEY="${SUPATYPE_SERVICE_ROLE_KEY:-}"
 SCHEMA_WAIT_KEY="${SUPATYPE_SERVICE_ROLE_KEY:-$SUPATYPE_ANON_KEY}"
 SESSION_LOCK="$INTEGRATION_DIR/.supatype/dev-session.json"
+# Keeps its own loop rather than using wait_until: it retries `supatype push` on a cadence to
+# recover from a flaky initial compose push, which a plain readiness predicate cannot express.
+# The deadline is wall clock and every request is bounded, which is the part that matters.
 echo "==> Waiting for full stack ready (dev-session + schema post, up to ${MAX_WAIT}s)..."
-for i in $(seq 1 "$MAX_WAIT"); do
+STACK_READY=0
+code="000"          # read by the failure message below, so set before the loop
+stack_started=$SECONDS
+next_push=30
+next_report=15
+while (( SECONDS - stack_started < MAX_WAIT )); do
   code="000"
   if [[ -f "$SESSION_LOCK" ]]; then
-    code="$(
-      curl -s -o /dev/null -w "%{http_code}" \
-        -H "apikey: ${SCHEMA_WAIT_KEY}" \
-        -H "Authorization: Bearer ${SCHEMA_WAIT_KEY}" \
-        "$BASE_URL/rest/v1/post?select=id&limit=0" || echo "000"
-    )"
+    code="$(http_status \
+      -H "apikey: ${SCHEMA_WAIT_KEY}" \
+      -H "Authorization: Bearer ${SCHEMA_WAIT_KEY}" \
+      "$BASE_URL/rest/v1/post?select=id&limit=0")"
   fi
   if [[ -f "$SESSION_LOCK" && "$code" == "200" ]] \
-    && curl -sf "$BASE_URL/auth/v1/health" > /dev/null 2>&1 \
-    && curl -sf "$BASE_URL/realtime/v1/health" > /dev/null 2>&1; then
-    echo "  Stack ready after ${i}s (session + post + auth + realtime)"
+    && http_ok "$BASE_URL/auth/v1/health" \
+    && http_ok "$BASE_URL/realtime/v1/health"; then
+    echo "  Stack ready after $(( SECONDS - stack_started ))s (session + post + auth + realtime)"
+    STACK_READY=1
     break
   fi
-  if [[ "$i" -eq "$MAX_WAIT" ]]; then
-    echo "  ERROR: Stack not ready within ${MAX_WAIT}s (session=$([[ -f "$SESSION_LOCK" ]] && echo yes || echo no), last HTTP ${code})"
-    exit 1
-  fi
-  # Recover from a flaky initial compose push (transient DB EOF during migration).
-  if (( i % 30 == 0 )); then
-    echo "  Still waiting (${i}s, session=$([[ -f "$SESSION_LOCK" ]] && echo yes || echo no), HTTP ${code}), retrying supatype push..."
+  elapsed=$(( SECONDS - stack_started ))
+  session_state="$([[ -f "$SESSION_LOCK" ]] && echo yes || echo no)"
+  if (( elapsed >= next_push )); then
+    echo "  Still waiting (${elapsed}s, session=${session_state}, HTTP ${code}), retrying supatype push..."
     node "$CLI_BIN" push || true
-  elif (( i % 15 == 0 )); then
-    echo "  Still waiting (${i}s, session=$([[ -f "$SESSION_LOCK" ]] && echo yes || echo no), HTTP ${code})..."
+    next_push=$(( next_push + 30 ))
+    next_report=$(( elapsed + 15 ))
+  elif (( elapsed >= next_report )); then
+    echo "  Still waiting (${elapsed}s, session=${session_state}, HTTP ${code})..."
+    next_report=$(( next_report + 15 ))
   fi
   sleep 1
 done
+
+if (( STACK_READY != 1 )); then
+  echo "  ERROR: Stack not ready within ${MAX_WAIT}s (session=$([[ -f "$SESSION_LOCK" ]] && echo yes || echo no), last HTTP ${code})"
+  exit 1
+fi
 
 # ── Step 6: The studio fixture still matches what the engine emits ────────────
 #

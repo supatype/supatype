@@ -2,6 +2,8 @@
 # Smoke-test self-host Docker images (supatype/postgres, supatype/server, etc.).
 set -euo pipefail
 
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/http-wait.sh"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INTEGRATION_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ROOT_DIR="$(cd "$INTEGRATION_DIR/../.." && pwd)"
@@ -38,17 +40,12 @@ echo "    storage=${SUPATYPE_STORAGE_IMAGE} server=${SUPATYPE_SERVER_IMAGE} work
 cd "$INTEGRATION_DIR"
 node "$CLI_BIN" self-host compose up -d
 
-echo "==> Waiting for $BASE_URL/auth/v1/health (up to ${MAX_WAIT}s)..."
-for i in $(seq 1 "$MAX_WAIT"); do
-  if curl -sf "$BASE_URL/auth/v1/health" > /dev/null 2>&1; then
-    echo "  Ready after ${i}s"
-    exit 0
-  fi
-  if [[ "$i" -eq "$MAX_WAIT" ]]; then
-    echo "  ERROR: Compose stack did not become ready within ${MAX_WAIT}s"
-    docker compose -f "$COMPOSE_DIR/docker-compose.yml" ps || true
-    docker logs integration-server-1 2>&1 | tail -20 || true
-    exit 1
-  fi
-  sleep 1
-done
+compose_ready() { http_ok "$BASE_URL/auth/v1/health"; }
+
+if ! wait_until "$MAX_WAIT" "$BASE_URL/auth/v1/health" compose_ready; then
+  echo "  ERROR: Compose stack did not become ready within ${MAX_WAIT}s"
+  docker compose -f "$COMPOSE_DIR/docker-compose.yml" ps || true
+  docker logs integration-server-1 2>&1 | tail -20 || true
+  exit 1
+fi
+exit 0
