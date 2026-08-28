@@ -39,11 +39,10 @@ fi
 
 cd "$EXAMPLE_DIR"
 
-# `.env` is gitignored, so CI has none. `keys` needs a secret to sign with.
-if [[ ! -f .env ]]; then
-  printf 'JWT_SECRET=%s\n' "$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')" > .env
-fi
-node "$CLI_BIN" keys 2>/dev/null | grep -E '^(ANON_KEY|SERVICE_ROLE_KEY)=' >> .env
+# `.env` is gitignored, so CI has none. The same helper the compose smoke uses, rather than a
+# second copy of the secret list: the hand-rolled version here wrote JWT_SECRET and the keys but
+# not AUTHENTICATOR_PASSWORD, and compose refuses to interpolate a variable it cannot resolve.
+node "$SCRIPT_DIR/ensure-compose-env.mjs" "$EXAMPLE_DIR"
 
 echo "==> Bringing the stack up"
 node "$CLI_BIN" self-host compose up -d
