@@ -53,7 +53,7 @@ describe("external database: compose", () => {
 
   it("points every database consumer at the one URL", () => {
     const compose = renderSelfHostCompose(external())
-    // storage, realtime, control-plane, server (SUPATYPE_SQL_DATABASE_URL), and GoTrue.
+    // storage, realtime, control-plane, server (SUPATYPE_SQL_DATABASE_URL), and auth.
     const references = compose.match(/\$\{DATABASE_URL:\?/g) ?? []
     expect(references.length).toBe(5)
   })
@@ -85,9 +85,9 @@ describe("external database: compose", () => {
     expect(compose).toContain("@db.example.com:5432/app?sslmode=require")
   })
 
-  it("appends GoTrue's search_path with the right separator", () => {
+  it("appends the auth search_path with the right separator", () => {
     // A URL that already has a query string needs `&`; a second `?` produces a DSN that fails to
-    // parse, and GoTrue would exit rather than run its auth migrations.
+    // parse, and the service would exit rather than run its auth migrations.
     expect(renderSelfHostCompose(external())).toContain('${DATABASE_URL:?DATABASE_URL is missing from .env, required by database.external}?search_path=auth"')
     expect(
       renderSelfHostCompose(

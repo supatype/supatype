@@ -5,7 +5,7 @@ import type { Command } from "commander"
 import { spawn } from "node:child_process"
 import { error } from "../ui/messages.js"
 
-const SERVICES = ["postgres", "postgrest", "gotrue", "kong", "minio", "realtime", "studio"]
+const SERVICES = ["postgres", "postgrest", "auth", "kong", "minio", "realtime", "studio"]
 
 export function registerLogs(program: Command): void {
   program

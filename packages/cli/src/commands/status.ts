@@ -80,7 +80,7 @@ function printLocalStackStatus(cwd: string): void {
   const services: ServiceStatus[] = [
     { name: "Postgres", container: "supatype-postgres", port: 5432 },
     { name: "PostgREST", container: "supatype-postgrest", port: 3000 },
-    { name: "GoTrue", container: "supatype-gotrue", port: 9999 },
+    { name: "Auth", container: "supatype-auth", port: 9999 },
     { name: "Kong", container: "supatype-kong", port: kongPort },
     { name: "Control plane", container: "supatype-control-plane" },
     { name: "MinIO", container: "supatype-minio", port: 9000 },

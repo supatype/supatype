@@ -52,18 +52,18 @@ function assertStudioRole(role: string): void {
   process.exit(1)
 }
 
-/** GoTrue scopes users to the nil instance id in single-tenant/self-host mode. */
-export const GOTRUE_NIL_INSTANCE_ID = "00000000-0000-0000-0000-000000000000"
+/** The auth service scopes users to the nil instance id in single-tenant/self-host mode. */
+export const SUPATYPE_NIL_INSTANCE_ID = "00000000-0000-0000-0000-000000000000"
 
-/** Audience claim used by GoTrue when looking up users (matches GOTRUE_JWT_AUD in compose). */
-export function gotrueJwtAud(cwd: string): string {
-  return readEnvValue(cwd, "GOTRUE_JWT_AUD", "authenticated")
+/** Audience claim used when looking up users (matches SUPATYPE_JWT_AUD in compose). */
+export function authJwtAud(cwd: string): string {
+  return readEnvValue(cwd, "SUPATYPE_JWT_AUD", "authenticated")
 }
 
 type DbQuery = (sql: string, params?: unknown[]) => Promise<QueryResult>
 type AuthConfirmedColumn = "email_confirmed_at" | "confirmed_at"
 
-/** Prefer GoTrue's column when migrated; fall back to postgres init `confirmed_at`. */
+/** Prefer the migrated column when present; fall back to postgres init `confirmed_at`. */
 export async function resolveAuthConfirmedAtColumn(query: DbQuery): Promise<AuthConfirmedColumn> {
   const result = await query(
     `SELECT column_name
@@ -464,14 +464,14 @@ async function createAdminUser(
       : (db as DbQuery)
 
   const normalized = email.toLowerCase()
-  const aud = opts.aud ?? (opts.cwd ? gotrueJwtAud(opts.cwd) : "authenticated")
+  const aud = opts.aud ?? (opts.cwd ? authJwtAud(opts.cwd) : "authenticated")
   const existing = await query(
     `SELECT id FROM auth.users
      WHERE instance_id = $1::uuid
        AND LOWER(email) = $2
        AND aud = $3
        AND is_sso_user = false`,
-    [GOTRUE_NIL_INSTANCE_ID, normalized, aud],
+    [SUPATYPE_NIL_INSTANCE_ID, normalized, aud],
   )
   if (existing.rows.length > 0) {
     throw new Error(`User with email "${email}" already exists.`)
@@ -507,7 +507,7 @@ async function createAdminUser(
       false, false,
       now(), now()
     ) RETURNING id, email`,
-    [GOTRUE_NIL_INSTANCE_ID, aud, normalized, passwordHash, appMetadata, userMetadata],
+    [SUPATYPE_NIL_INSTANCE_ID, aud, normalized, passwordHash, appMetadata, userMetadata],
   )
 
   const user = result.rows[0] as { id: string; email: string }
@@ -601,7 +601,7 @@ async function hasAdminUsers(query: DbQuery): Promise<boolean> {
   if (!(await studioMembersTableExists(query))) return false
 
   // Inner JOIN on purpose, unlike `list-users`: a membership held by a cloud
-  // account cannot log in to a self-hosted GoTrue, so a project exported from
+  // account cannot log in to a self-hosted auth service, so a project exported from
   // cloud with only those grants genuinely still needs a first admin.
   const adminCount = await query(
     `SELECT COUNT(*)::int as count

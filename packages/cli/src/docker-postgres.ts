@@ -256,7 +256,7 @@ export const DEFAULT_SERVER_DOCKER_IMAGE = "supatype/server:latest"
  * Run `supatype-server migrate` on the Postgres container network (loopback trust).
  * Used on Windows + database.provider docker, host-published :5432 breaks libpq TLS there.
  */
-export function runGotrueMigrationsViaDocker(
+export function runAuthMigrationsViaDocker(
   pgContainerName: string,
   serverImage: string,
   migrateEnv: Record<string, string>,
@@ -276,7 +276,7 @@ export function runGotrueMigrationsViaDocker(
   if (result.status !== 0) {
     const detail = (result.stderr ?? result.stdout ?? "").trim()
     throw new Error(
-      `GoTrue migrations failed in Docker (exit ${result.status ?? "unknown"})` +
+      `auth migrations failed in Docker (exit ${result.status ?? "unknown"})` +
         (detail ? `:\n${detail}` : ""),
     )
   }

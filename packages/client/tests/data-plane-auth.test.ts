@@ -7,7 +7,7 @@ import { createClient } from "../src/index.js"
 
 const BASE = "http://localhost:18473"
 const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiJ9.test"
-const GOTRUE = `${BASE}/auth/v1`
+const AUTH = `${BASE}/auth/v1`
 
 function fakeJwt(payload: Record<string, unknown>): string {
   const header = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" }))
@@ -105,7 +105,7 @@ describe("createClient data plane auth", () => {
     expect((restCall![1].headers as Record<string, string>)["Authorization"]).toBe(
       `Bearer ${freshAccess}`,
     )
-    expect(fetchSpy.mock.calls.some(([url]) => String(url).includes(`${GOTRUE}/token`))).toBe(true)
+    expect(fetchSpy.mock.calls.some(([url]) => String(url).includes(`${AUTH}/token`))).toBe(true)
   })
 
   it("falls back to anon headers after refresh fails", async () => {

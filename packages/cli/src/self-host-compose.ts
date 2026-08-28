@@ -297,11 +297,11 @@ export function renderSelfHostCompose(
   const kongMount = kongMountPath(cwd)
   const external = usesExternalDatabase(config)
   const ownerUrl = ownerDatabaseUrl(config)
-  // GoTrue's driver wants the `postgres://` spelling; an external URL is used as given.
-  const gotrueUrl = external ? ownerUrl : ownerDatabaseUrl(config, "postgres")
+  // the auth driver wants the `postgres://` spelling; an external URL is used as given.
+  const authUrl = external ? ownerUrl : ownerDatabaseUrl(config, "postgres")
   // An external URL may already carry query parameters (`?sslmode=require` is common on managed
   // providers), and appending a second `?` produces a DSN that fails to parse.
-  const gotrueSearchPathSeparator = externalDatabaseUrl(config)?.includes("?") ? "&" : "?"
+  const authSearchPathSeparator = externalDatabaseUrl(config)?.includes("?") ? "&" : "?"
   const postgrestUrl = postgrestDatabaseUrl(config)
   const devLocal = options?.devLocal === true
   const tlsEnabled = selfHostTlsEnabled(config, devLocal)
@@ -567,20 +567,19 @@ ${realtimeServerEnv}
       SUPATYPE_CONTROL_PLANE_URL: http://control-plane:8080
       SUPATYPE_VALKEY_ADDR: valkey:6379
 ${appEnv}
-      GOTRUE_API_HOST: 0.0.0.0
-      GOTRUE_API_PORT: 9999
-      API_EXTERNAL_URL: \${API_EXTERNAL_URL:-${externalUrlFallback}}
-      GOTRUE_API_EXTERNAL_URL: \${API_EXTERNAL_URL:-${externalUrlFallback}}
-      GOTRUE_DB_DRIVER: postgres
-      GOTRUE_DB_DATABASE_URL: "${gotrueUrl}${gotrueSearchPathSeparator}search_path=auth"
-      GOTRUE_SITE_URL: \${SITE_URL:-${siteUrlFallback}}
-      GOTRUE_JWT_SECRET: \${JWT_SECRET:?JWT_SECRET is missing from .env}
-      GOTRUE_JWT_EXP: 3600
-      GOTRUE_JWT_AUD: authenticated
-      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
-      GOTRUE_JWT_ADMIN_ROLES: service_role,supatype_admin
-      GOTRUE_MAILER_AUTOCONFIRM: \${GOTRUE_MAILER_AUTOCONFIRM:-true}
-      GOTRUE_DISABLE_SIGNUP: \${DISABLE_SIGNUP:-false}
+      SUPATYPE_API_HOST: 0.0.0.0
+      SUPATYPE_API_PORT: 9999
+      SUPATYPE_API_EXTERNAL_URL: \${API_EXTERNAL_URL:-${externalUrlFallback}}
+      SUPATYPE_DB_DRIVER: postgres
+      SUPATYPE_DB_DATABASE_URL: "${authUrl}${authSearchPathSeparator}search_path=auth"
+      SUPATYPE_SITE_URL: \${SITE_URL:-${siteUrlFallback}}
+      SUPATYPE_JWT_SECRET: \${JWT_SECRET:?JWT_SECRET is missing from .env}
+      SUPATYPE_JWT_EXP: 3600
+      SUPATYPE_JWT_AUD: authenticated
+      SUPATYPE_JWT_DEFAULT_GROUP_NAME: authenticated
+      SUPATYPE_JWT_ADMIN_ROLES: service_role,supatype_admin
+      SUPATYPE_MAILER_AUTOCONFIRM: \${SUPATYPE_MAILER_AUTOCONFIRM:-true}
+      SUPATYPE_DISABLE_SIGNUP: \${DISABLE_SIGNUP:-false}
 ${devLocal ? "      STUDIO_OPEN_DEV: \"1\"\n" : ""}
     depends_on:
 ${dbDependencyClause}      valkey:
@@ -697,7 +696,7 @@ function ensureProjectFunctionsDir(cwd: string, config: SupatypeProjectConfig): 
  *
  * The CLI resolves the URL from config; Compose substitutes `.env` at up-time. If the two disagree,
  * `push` migrates one database while the services serve another, which reads as data loss and
- * isn't. It also makes the generated GoTrue DSN wrong, since whether to append `search_path` with
+ * isn't. It also makes the generated auth DSN wrong, since whether to append `search_path` with
  * `?` or `&` is decided from the config URL's query string.
  */
 function assertExternalUrlMatchesEnv(cwd: string, config: SupatypeProjectConfig): void {

@@ -265,7 +265,7 @@ export function upsertDevComposeEnv(
     SUPATYPE_KONG_PORT: String(kongPort),
     API_EXTERNAL_URL: apiUrl,
     SITE_URL: apiUrl,
-    GOTRUE_MAILER_AUTOCONFIRM: "true",
+    SUPATYPE_MAILER_AUTOCONFIRM: "true",
     ...imagePins,
   }
   // Never for an external database: this URL describes the `db` container, which that project does

@@ -258,7 +258,7 @@ export class AuthClient {
       body["data"] = credentials.options.data
     }
     if (credentials?.options?.captchaToken !== undefined) {
-      body["gotrue_meta_security"] = { captcha_token: credentials.options.captchaToken }
+      body["supatype_meta_security"] = { captcha_token: credentials.options.captchaToken }
     }
     const res = await fetch(`${this.url}/signup`, {
       method: "POST",

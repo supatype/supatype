@@ -65,21 +65,21 @@ import {
   isPortInUse,
   pgSpawnEnv,
 } from "../postgres-ctl.js"
-/** Map `email.smtp` from supatype.config.ts into GOTRUE_SMTP_* for the embedded GoTrue process. */
-function gotrueSMTPFromEmailConfig(email: SupatypeProjectConfig["email"] | undefined): Record<string, string> {
+/** Map `email.smtp` from supatype.config.ts into SUPATYPE_SMTP_* for the embedded auth service. */
+function authSMTPFromEmailConfig(email: SupatypeProjectConfig["email"] | undefined): Record<string, string> {
   const s = email?.smtp
   if (!s) return {}
   const out: Record<string, string> = {}
   const host = s.host?.trim()
-  if (host) out.GOTRUE_SMTP_HOST = host
-  if (s.port !== undefined) out.GOTRUE_SMTP_PORT = String(s.port)
+  if (host) out.SUPATYPE_SMTP_HOST = host
+  if (s.port !== undefined) out.SUPATYPE_SMTP_PORT = String(s.port)
   const user = s.user?.trim()
-  if (user) out.GOTRUE_SMTP_USER = user
-  if (s.pass !== undefined && s.pass !== "") out.GOTRUE_SMTP_PASS = s.pass
+  if (user) out.SUPATYPE_SMTP_USER = user
+  if (s.pass !== undefined && s.pass !== "") out.SUPATYPE_SMTP_PASS = s.pass
   const admin = s.admin_email?.trim()
-  if (admin) out.GOTRUE_SMTP_ADMIN_EMAIL = admin
+  if (admin) out.SUPATYPE_SMTP_ADMIN_EMAIL = admin
   const sender = s.sender_name?.trim()
-  if (sender) out.GOTRUE_SMTP_SENDER_NAME = sender
+  if (sender) out.SUPATYPE_SMTP_SENDER_NAME = sender
   return out
 }
 
@@ -287,10 +287,10 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
         ? `${dbURL}&search_path=auth`
         : `${dbURL}?search_path=auth`
 
-      // ── 8. GoTrue migrations (auth.users before engine studio SQL) ─────────
-      console.log("[supatype] Running GoTrue migrations...")
-      const migrateEnv = gotrueMigrateEnv(serverPort, dbURL, LOCAL_JWT_SECRET)
-      runGotrueMigrations(serverBin, migrateEnv)
+      // ── 8. auth migrations (auth.users before engine studio SQL) ─────────
+      console.log("[supatype] Running auth migrations...")
+      const migrateEnv = authMigrateEnv(serverPort, dbURL, LOCAL_JWT_SECRET)
+      runAuthMigrations(serverBin, migrateEnv)
 
       // ── 9. Engine: apply schema ───────────────────────────────────────────
       const schemaPath = schemaPathFromProject(config, cwd)
@@ -348,7 +348,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
         }
       }
 
-      // Matches GOTRUE_HOOK_SEND_EMAIL_SECRETS symmetric format (dev only). Override via .env.
+      // Matches SUPATYPE_HOOK_SEND_EMAIL_SECRETS symmetric format (dev only). Override via .env.
       const LOCAL_SEND_EMAIL_HOOK_SECRETS =
         "v1,whsec_abcdefghijklmnopqrstuvwxyz01234567"
       const now = Math.floor(Date.now() / 1000)
@@ -390,7 +390,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
 
 
       const emailProvider = config.email?.provider ?? "console"
-      const gotrueMailerProvider =
+      const authMailerProvider =
         emailProvider === "console"
           ? "console"
           : emailProvider === "resend"
@@ -430,47 +430,47 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
         ...(config.app.vite_dev_url !== undefined && config.app.vite_dev_url.trim() !== ""
           ? { SUPATYPE_VITE_DEV_URL: config.app.vite_dev_url.trim() }
           : {}),
-        // GoTrue required fields (sensible local-dev defaults)
-        GOTRUE_DB_DATABASE_URL: authDbURL,
+        // Auth service required fields (sensible local-dev defaults)
+        SUPATYPE_DB_DATABASE_URL: authDbURL,
         DATABASE_URL: authDbURL,
         SUPATYPE_SQL_DATABASE_URL: dbURL,
         PGSSLMODE: "disable",
-        GOTRUE_DB_NAMESPACE: "auth",
-        GOTRUE_DB_DRIVER: "postgres",
-        GOTRUE_JWT_SECRET: LOCAL_JWT_SECRET,
-        GOTRUE_JWT_EXP: "3600",
-        GOTRUE_JWT_AUD: "authenticated",
-        GOTRUE_JWT_ADMIN_ROLES: "supatype_admin,service_role",
+        SUPATYPE_DB_NAMESPACE: "auth",
+        SUPATYPE_DB_DRIVER: "postgres",
+        SUPATYPE_JWT_SECRET: LOCAL_JWT_SECRET,
+        SUPATYPE_JWT_EXP: "3600",
+        SUPATYPE_JWT_AUD: "authenticated",
+        SUPATYPE_JWT_ADMIN_ROLES: "supatype_admin,service_role",
         API_EXTERNAL_URL: `http://localhost:${serverPort}/auth/v1`,
-        GOTRUE_API_HOST: "localhost",
-        GOTRUE_SITE_URL: `http://localhost:${serverPort}`,
-        GOTRUE_MAILER_MAILER_PROVIDER: gotrueMailerProvider,
-        GOTRUE_MAILER_AUTOCONFIRM: "true",
-        GOTRUE_LOG_LEVEL: "info",
-        GOTRUE_DISABLE_SIGNUP: "false",
+        SUPATYPE_API_HOST: "localhost",
+        SUPATYPE_SITE_URL: `http://localhost:${serverPort}`,
+        SUPATYPE_MAILER_MAILER_PROVIDER: authMailerProvider,
+        SUPATYPE_MAILER_AUTOCONFIRM: "true",
+        SUPATYPE_LOG_LEVEL: "info",
+        SUPATYPE_DISABLE_SIGNUP: "false",
         ...(config.email?.resend_api_key !== undefined && config.email.resend_api_key !== ""
           ? { RESEND_API_KEY: config.email.resend_api_key }
           : {}),
-        ...(gotrueMailerProvider === "resend" &&
+        ...(authMailerProvider === "resend" &&
         config.email?.resend_from !== undefined &&
         config.email.resend_from.trim() !== ""
           ? { RESEND_FROM: config.email.resend_from.trim() }
           : {}),
-        ...(gotrueMailerProvider === "ses" &&
+        ...(authMailerProvider === "ses" &&
         config.email?.ses_from !== undefined &&
         config.email.ses_from.trim() !== ""
           ? { SES_FROM: config.email.ses_from.trim() }
           : {}),
-        ...(gotrueMailerProvider === "smtp" ? gotrueSMTPFromEmailConfig(config.email) : {}),
+        ...(authMailerProvider === "smtp" ? authSMTPFromEmailConfig(config.email) : {}),
         ...(config.email?.send_email_hook === true
           ? {
-              GOTRUE_HOOK_SEND_EMAIL_ENABLED: "true",
-              GOTRUE_HOOK_SEND_EMAIL_URI:
+              SUPATYPE_HOOK_SEND_EMAIL_ENABLED: "true",
+              SUPATYPE_HOOK_SEND_EMAIL_URI:
                 config.email?.send_email_hook_uri !== undefined &&
                 config.email.send_email_hook_uri.trim() !== ""
                   ? config.email.send_email_hook_uri.trim()
                   : `http://127.0.0.1:${serverPort}/internal/v0hooks/send-email`,
-              GOTRUE_HOOK_SEND_EMAIL_SECRETS:
+              SUPATYPE_HOOK_SEND_EMAIL_SECRETS:
                 config.email?.send_email_hook_secrets !== undefined &&
                 config.email.send_email_hook_secrets.trim() !== ""
                   ? config.email.send_email_hook_secrets.trim()
@@ -526,7 +526,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
           PGRST_DB_ANON_ROLE: "anon",
           PGRST_SERVER_PORT: postgrestPort,
           PGRST_SERVER_HOST: "127.0.0.1",
-          PGRST_JWT_SECRET: serverEnv["GOTRUE_JWT_SECRET"] ?? "",
+          PGRST_JWT_SECRET: serverEnv["SUPATYPE_JWT_SECRET"] ?? "",
           PGRST_LOG_LEVEL: "warn",
           // On Windows, PostgREST (MinGW/GHC binary) needs libpq.dll and
           // OpenSSL DLLs. Prepend a Postgres bin dir which bundles these
@@ -1079,30 +1079,30 @@ function adaptUnsupportedKinds(
 // .env loader
 // ---------------------------------------------------------------------------
 
-/** Minimal GoTrue env for `migrate` (matches required fields in serverEnv below). */
-function gotrueMigrateEnv(
+/** Minimal auth env for `migrate` (matches required fields in serverEnv below). */
+function authMigrateEnv(
   serverPort: string,
   sqlDbURL: string,
   jwtSecret: string,
 ): Record<string, string> {
   const base = `http://localhost:${serverPort}`
   return {
-    // envconfig: gotrue + DB.DATABASE_URL → GOTRUE_DB_DATABASE_URL
-    GOTRUE_DB_DATABASE_URL: sqlDbURL,
+    // envconfig: the service prefix + DB.DATABASE_URL → SUPATYPE_DB_DATABASE_URL
+    SUPATYPE_DB_DATABASE_URL: sqlDbURL,
     DATABASE_URL: sqlDbURL,
-    GOTRUE_DB_DRIVER: "postgres",
-    GOTRUE_DB_NAMESPACE: "auth",
+    SUPATYPE_DB_DRIVER: "postgres",
+    SUPATYPE_DB_NAMESPACE: "auth",
     PGSSLMODE: "disable",
-    GOTRUE_JWT_SECRET: jwtSecret,
+    SUPATYPE_JWT_SECRET: jwtSecret,
     API_EXTERNAL_URL: `${base}/auth/v1`,
-    GOTRUE_API_HOST: "localhost",
-    GOTRUE_SITE_URL: base,
-    GOTRUE_MAILER_AUTOCONFIRM: "true",
+    SUPATYPE_API_HOST: "localhost",
+    SUPATYPE_SITE_URL: base,
+    SUPATYPE_MAILER_AUTOCONFIRM: "true",
   }
 }
 
-/** Apply GoTrue DDL (auth.users, etc.) before engine push references auth schema. */
-function runGotrueMigrations(
+/** Apply auth DDL (auth.users, etc.) before engine push references auth schema. */
+function runAuthMigrations(
   serverBin: string,
   migrateEnv: Record<string, string>,
 ): void {
@@ -1117,7 +1117,7 @@ function runGotrueMigrations(
   if (result.status !== 0) {
     const detail = (result.stderr ?? result.stdout ?? "").trim()
     throw new Error(
-      `GoTrue migrations failed (exit ${result.status ?? "unknown"})` +
+      `auth migrations failed (exit ${result.status ?? "unknown"})` +
         (detail ? `:\n${detail}` : ""),
     )
   }

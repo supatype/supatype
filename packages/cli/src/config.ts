@@ -45,7 +45,7 @@ export interface SelfHostConfig {
    */
   services?: {
     db?: ServiceVersionPin
-    gotrue?: ServiceVersionPin
+    auth?: ServiceVersionPin
     postgrest?: ServiceVersionPin
     kong?: ServiceVersionPin
     caddy?: ServiceVersionPin
