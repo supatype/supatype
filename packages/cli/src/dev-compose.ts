@@ -144,7 +144,7 @@ export async function ensureDockerDbPublishedForHostEngine(
   }
 
   const project = composeProjectName(config.project.name)
-  const kongPort = await resolveKongPort(cwd)
+  const kongPort = await resolveKongPort(cwd, project)
   const devDbPort = await resolveDevDbPort(cwd)
 
   const now = Math.floor(Date.now() / 1000)
@@ -192,8 +192,10 @@ export async function resolveHostEngineDatabaseUrl(
   return connectionString(config)
 }
 
-async function resolveKongPort(cwd: string): Promise<number> {
-  return ensureKongPort(cwd, { context: "dev" })
+async function resolveKongPort(cwd: string, composeProject?: string): Promise<number> {
+  // The compose project is passed so an already-running stack of *this* project counts as
+  // available rather than as a collision.
+  return ensureKongPort(cwd, { context: "dev", ...(composeProject !== undefined && { composeProject }) })
 }
 
 /**
@@ -390,13 +392,40 @@ function dumpComposeDbLogs(
   console.error(tail)
 }
 
+/**
+ * The gateway as the CLI reaches it, over IPv4.
+ *
+ * Not `localhost`. Docker publishes on `0.0.0.0`, so the IPv4 address is the one that is certainly
+ * bound, while `localhost` resolves to `::1` first on Windows and macOS. Docker Desktop does forward
+ * IPv6 through a relay, and when that relay is unhealthy it accepts the connection and then never
+ * answers, so every readiness poll hangs rather than failing.
+ *
+ * The URLs written to `.env` and printed for the operator stay on `localhost`: those are for a
+ * browser, where the name is the friendlier thing to see and the browser will fall back on its own.
+ */
+function loopbackBase(port: number): string {
+  return `http://127.0.0.1:${port}`
+}
+
+/**
+ * `fetch` with a deadline, because the built-in has none.
+ *
+ * A poll loop bounded by `maxSec` iterations is only bounded if each attempt can end. Against a
+ * socket that accepts and never responds, an un-timed `fetch` never settles, the loop never reaches
+ * its second iteration, and a wait advertised as 120 seconds runs until someone kills it. That is
+ * how `supatype push` came to hang indefinitely after reporting the schema applied.
+ */
+async function fetchWithin(url: string, ms: number, init?: RequestInit): Promise<Response> {
+  return await fetch(url, { ...init, signal: AbortSignal.timeout(ms) })
+}
+
 async function waitKongReady(kongPort: number, maxSec: number): Promise<void> {
-  const base = `http://localhost:${kongPort}`
+  const base = loopbackBase(kongPort)
   for (let i = 0; i < maxSec; i++) {
     try {
       const [auth, realtime] = await Promise.all([
-        fetch(`${base}/auth/v1/health`),
-        fetch(`${base}/realtime/v1/health`),
+        fetchWithin(`${base}/auth/v1/health`, 2000),
+        fetchWithin(`${base}/realtime/v1/health`, 2000),
       ])
       if (auth.ok && realtime.ok) return
     } catch {
@@ -413,11 +442,11 @@ async function waitStorageApiReady(
   serviceRoleKey: string,
   maxSec: number,
 ): Promise<void> {
-  const url = `http://localhost:${kongPort}/storage/v1/bucket`
+  const url = `${loopbackBase(kongPort)}/storage/v1/bucket`
   const headers = { Authorization: `Bearer ${serviceRoleKey}` }
   for (let i = 0; i < maxSec; i++) {
     try {
-      const res = await fetch(url, { headers })
+      const res = await fetchWithin(url, 2000, { headers })
       if (res.ok) return
       const body = await res.text()
       const kongUpstreamDown = body.includes("invalid response was received from the upstream server")
@@ -440,7 +469,7 @@ async function provisionDockerStorageBuckets(
   kongPort: number,
   serviceRoleKey: string,
 ): Promise<void> {
-  await provisionBucketsFromAst(ast, `http://localhost:${kongPort}/storage/v1`, serviceRoleKey)
+  await provisionBucketsFromAst(ast, `${loopbackBase(kongPort)}/storage/v1`, serviceRoleKey)
 }
 
 let _lastPushedAst: string | null = null
@@ -767,7 +796,7 @@ export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfi
     })
   }
 
-  const kongPort = await resolveKongPort(cwd)
+  const kongPort = await resolveKongPort(cwd, project)
   const now = Math.floor(Date.now() / 1000)
   const jwtBase = { iss: "supatype", iat: now, exp: now + 315_360_000 }
   const anonKey = signJwt({ ...jwtBase, role: "anon" }, devJwtSecret(cwd))
@@ -813,7 +842,7 @@ export async function pushSchemaDocker(cwd: string, config: SupatypeProjectConfi
     throw new Error("pushSchemaDocker requires provider: docker")
   }
   const project = composeProjectName(config.project.name)
-  const kongPort = await resolveKongPort(cwd)
+  const kongPort = await resolveKongPort(cwd, project)
   // No dev db port for an external database: `ensureDevDbPort` allocates a host port for the `db`
   // container *and persists a matching DATABASE_URL*, which overwrote the operator's own URL, the
   // one the whole stack and every CLI command reads.
@@ -864,7 +893,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   // Per-project compose name + port isolate this project from any other Supatype
   // stack on the machine (own containers, volumes, network, and gateway port).
   const project = composeProjectName(config.project.name)
-  const kongPort = await resolveKongPort(cwd)
+  const kongPort = await resolveKongPort(cwd, project)
   // No dev db port for an external database: `ensureDevDbPort` allocates a host port for the `db`
   // container *and persists a matching DATABASE_URL*, which overwrote the operator's own URL, the
   // one the whole stack and every CLI command reads.

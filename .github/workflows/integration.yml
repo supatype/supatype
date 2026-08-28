@@ -123,6 +123,64 @@ jobs:
           path: tests/integration/.supatype/self-host/
           retention-days: 3
 
+
+  # Every validation mechanism, against a running stack, asserted by what it refuses.
+  #
+  # The unit suites cover generation and parsing; this covers the seams between them, which is where
+  # every defect in this feature has actually been. A validator map the CLI built and nothing wrote,
+  # a manifest key the compose path never set, a Studio normalizer that dropped the rules: all had
+  # green tests and none survived a request.
+  validation-e2e:
+    name: field validation (live stack)
+    # Dispatch and schedule only, for now. The stack it needs is not published yet: this asserts a
+    # validator refusal, which needs a `supatype/server` carrying per-field validators, and bounds
+    # backed by CHECKs, which needs a `supatype/schema-engine` release carrying the constraint
+    # generator. Until both ship, running this on every pull request would fail work that has
+    # nothing to do with it.
+    #
+    # **Add `pull_request` here once schema-engine >= the constraint release and server >= the
+    # validator release are on Docker Hub.** That is the whole condition; nothing else blocks it.
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript packages
+        run: pnpm build
+
+      # Built here, not pulled: the published worker predates the `hooks/` route prefix, so it
+      # serves no hook at all and would resolve `hooks/<name>` to a function literally called
+      # "hooks". The worker is in this repository, so this half needs no release to be testable.
+      - name: Build functions-worker from source
+        run: |
+          docker build             -t supatype/functions-worker:ci             -f packages/functions-worker/Dockerfile             packages/functions-worker
+
+      - name: Run the validation e2e
+        run: bash tests/integration/scripts/validation-e2e.sh
+        env:
+          SUPATYPE_FUNCTIONS_WORKER_IMAGE: supatype/functions-worker:ci
+
+      - name: Upload stack logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-e2e-logs
+          path: |
+            examples/validation/.supatype/
+            examples/validation/*.log
+          retention-days: 3
   # Zero to running, from the workspace build: init (docker) → dev → an API that answers.
   # Phase-10.6 row C21, kept here as provenance, the job is named for what it does.
   # macOS runners have no Docker Desktop; Colima provides the daemon.
