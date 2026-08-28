@@ -1,27 +1,19 @@
 /**
- * supatype status: show linked target or local dev stack state.
+ * supatype status: show linked target or local stack state.
  */
 import type { Command } from "commander"
-import { spawnSync } from "node:child_process"
 import { existsSync } from "node:fs"
 import { resolve } from "node:path"
-import { LOCAL_KONG_HOST_PORT, localKongBaseUrl } from "../local-gateway.js"
+import { composeContext, composeServices } from "../compose-services.js"
+import { localKongBaseUrl } from "../local-gateway.js"
 import { loadLocalEnvironment, loadProjectLink } from "../link.js"
 import { resolveTarget, targetStatus } from "../resolve-target.js"
 import { error, info, plain, warn } from "../ui/messages.js"
 
-interface ServiceStatus {
-  name: string
-  container: string
-  status: "running" | "stopped" | "error"
-  port?: number
-  uptime?: string
-}
-
 export function registerStatus(program: Command): void {
   program
     .command("status")
-    .description("Show linked target status or local dev services")
+    .description("Show linked target status or local stack services")
     .option("--env <name>", "Target environment when linked")
     .action(async (opts: { env?: string }) => {
       const cwd = process.cwd()
@@ -73,47 +65,48 @@ async function printLinkedStatus(target: ReturnType<typeof resolveTarget>): Prom
   }
 }
 
+/**
+ * printLocalStackStatus reports what the stack is actually running.
+ *
+ * It asks Docker rather than checking a list of container names held here. The
+ * list this replaced named containers the compose file does not create, and
+ * omitted every one it does, so the command described an eight-service stack
+ * that has not existed since those services moved in-process behind
+ * supatype-server.
+ */
 function printLocalStackStatus(cwd: string): void {
-  const localEnv = loadLocalEnvironment(cwd)
-  const kongPort = localEnv?.kongPort ?? LOCAL_KONG_HOST_PORT
-
-  const services: ServiceStatus[] = [
-    { name: "Postgres", container: "supatype-postgres", port: 5432 },
-    { name: "PostgREST", container: "supatype-postgrest", port: 3000 },
-    { name: "Auth", container: "supatype-auth", port: 9999 },
-    { name: "Kong", container: "supatype-kong", port: kongPort },
-    { name: "Control plane", container: "supatype-control-plane" },
-    { name: "MinIO", container: "supatype-minio", port: 9000 },
-    { name: "Realtime", container: "supatype-realtime", port: 4000 },
-    { name: "Studio", container: "supatype-studio", port: 3100 },
-  ].map((svc) => {
-    const status = getContainerStatus(svc.container)
-    const uptime = getContainerUptime(svc.container)
-    return { ...svc, status, ...(uptime !== undefined && { uptime }) }
-  })
-
-  plain("Supatype Local Development Stack\n")
-
-  const maxName = Math.max(...services.map((s) => s.name.length))
-  for (const svc of services) {
-    const icon = svc.status === "running" ? "●" : svc.status === "stopped" ? "○" : "✕"
-    const status = svc.status.padEnd(8)
-    const port = svc.port ? `:${svc.port}` : ""
-    const uptime = svc.uptime ? ` (${svc.uptime})` : ""
-    plain(`  ${icon} ${svc.name.padEnd(maxName)}  ${status}  ${port}${uptime}`)
+  const ctx = composeContext(cwd)
+  if (!ctx) {
+    plain("Supatype local stack\n")
+    info("No generated compose file here.")
+    info("Run `supatype self-host compose up` to create the stack, or `supatype dev`,")
+    info("which runs the development stack outside Docker.")
+    return
   }
 
-  const running = services.filter((s) => s.status === "running")
+  const services = composeServices(ctx)
+  plain(`Supatype local stack (${ctx.projectName})\n`)
+
+  if (services.length === 0) {
+    info("No containers yet. Start the stack with `supatype self-host compose up`.")
+    return
+  }
+
+  const width = Math.max(...services.map((svc) => svc.service.length))
+  for (const svc of services) {
+    const icon = svc.state === "running" ? "●" : svc.state === "exited" ? "○" : "✕"
+    const ports = svc.ports ? `  ${svc.ports}` : ""
+    plain(`  ${icon} ${svc.service.padEnd(width)}  ${svc.state.padEnd(10)}${ports}`)
+  }
+
+  const running = services.filter((svc) => svc.state === "running")
   plain(`\n${running.length}/${services.length} services running`)
 
   if (running.length > 0) {
-    const apiUrl = localEnv?.apiUrl ?? localKongBaseUrl()
-    plain(`\nAPI URL:    ${apiUrl}`)
-    plain(`Studio:     http://localhost:3100`)
+    const localEnv = loadLocalEnvironment(cwd)
+    plain(`\nAPI URL:    ${localEnv?.apiUrl ?? localKongBaseUrl()}`)
     if (localEnv?.databaseUrl) {
       plain(`Database:   ${localEnv.databaseUrl}`)
-    } else {
-      plain(`Database:   postgresql://supatype_admin:postgres@localhost:5432/postgres`)
     }
   }
 
@@ -121,33 +114,4 @@ function printLocalStackStatus(cwd: string): void {
     plain("\nLocal environment file: .supatype/environment.json")
     info("Link remote ops: supatype link --url <api> --token $SERVICE_ROLE_KEY")
   }
-}
-
-function getContainerStatus(name: string): "running" | "stopped" | "error" {
-  const result = spawnSync("docker", ["inspect", "--format", "{{.State.Status}}", name], {
-    timeout: 5000,
-  })
-  const status = result.stdout?.toString().trim()
-  if (status === "running") return "running"
-  if (result.status !== 0) return "stopped"
-  return "error"
-}
-
-function getContainerUptime(name: string): string | undefined {
-  const result = spawnSync("docker", ["inspect", "--format", "{{.State.StartedAt}}", name], {
-    timeout: 5000,
-  })
-  if (result.status !== 0) return undefined
-  const startedAt = result.stdout?.toString().trim()
-  if (!startedAt) return undefined
-
-  const started = new Date(startedAt)
-  const now = new Date()
-  const diffMs = now.getTime() - started.getTime()
-  if (diffMs < 0) return undefined
-
-  const hours = Math.floor(diffMs / (1000 * 60 * 60))
-  const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60))
-  if (hours > 0) return `${hours}h ${minutes}m`
-  return `${minutes}m`
 }
