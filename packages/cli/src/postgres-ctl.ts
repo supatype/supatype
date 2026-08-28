@@ -168,21 +168,61 @@ export async function waitReady(opts: PgOptions, timeoutMs = 10_000): Promise<vo
 // ---------------------------------------------------------------------------
 
 /**
- * Returns true if a TCP listener is already bound to port on 127.0.0.1.
+ * Can this port be bound, on the addresses that matter?
+ *
+ *   - `0.0.0.0` is what Docker publishes on and what compose has to bind.
+ *   - `127.0.0.1` catches a listener bound to loopback only, which a wildcard bind can be allowed
+ *     to sit alongside on some platforms.
  */
-export async function isPortInUse(port: number): Promise<boolean> {
+async function bindFails(port: number, host: string): Promise<boolean> {
   const { createServer } = await import("node:net")
   return new Promise((resolve) => {
     const server = createServer()
     server.once("error", (err: NodeJS.ErrnoException) => {
-      // EADDRINUSE: something is listening. EACCES, Windows excluded/reserved port range.
+      // EADDRINUSE: something is listening. EACCES: Windows excluded/reserved port range.
       resolve(err.code === "EADDRINUSE" || err.code === "EACCES")
     })
     server.once("listening", () => {
       server.close(() => resolve(false))
     })
-    server.listen(port, "127.0.0.1")
+    server.listen(port, host)
   })
+}
+
+/**
+ * Is something answering on this port?
+ *
+ * Binding is not enough on its own. Docker Desktop publishes through a proxy that does not hold a
+ * bind a normal socket can see, so `bindFails` succeeds while nginx on that port answers HTTP 200.
+ * Measured on Windows: bind says free, curl says 200. `supatype dev` believed the bind, handed the
+ * port to compose, and compose failed with "Bind for 0.0.0.0:5432 failed: port is already
+ * allocated". Connecting is what notices.
+ */
+async function connectSucceeds(port: number, timeoutMs = 400): Promise<boolean> {
+  const { connect } = await import("node:net")
+  return new Promise((resolve) => {
+    const socket = connect({ port, host: "127.0.0.1" })
+    const done = (answer: boolean): void => {
+      socket.destroy()
+      resolve(answer)
+    }
+    socket.setTimeout(timeoutMs)
+    socket.once("connect", () => done(true))
+    socket.once("timeout", () => done(false))
+    socket.once("error", () => done(false))
+  })
+}
+
+/**
+ * True when the port cannot be used for a new listener.
+ *
+ * Either signal is enough. Reporting a port busy when it is usable costs an increment in
+ * `findNextFreePort`; reporting it free when it is not costs a failed `docker compose up`, which is
+ * the failure this exists to prevent.
+ */
+export async function isPortInUse(port: number): Promise<boolean> {
+  if (await connectSucceeds(port)) return true
+  return (await bindFails(port, "0.0.0.0")) || (await bindFails(port, "127.0.0.1"))
 }
 
 // ---------------------------------------------------------------------------

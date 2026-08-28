@@ -144,7 +144,7 @@ export async function ensureDockerDbPublishedForHostEngine(
   }
 
   const project = composeProjectName(config.project.name)
-  const kongPort = await resolveKongPort(cwd)
+  const kongPort = await resolveKongPort(cwd, project)
   const devDbPort = await resolveDevDbPort(cwd)
 
   const now = Math.floor(Date.now() / 1000)
@@ -192,8 +192,10 @@ export async function resolveHostEngineDatabaseUrl(
   return connectionString(config)
 }
 
-async function resolveKongPort(cwd: string): Promise<number> {
-  return ensureKongPort(cwd, { context: "dev" })
+async function resolveKongPort(cwd: string, composeProject?: string): Promise<number> {
+  // The compose project is passed so an already-running stack of *this* project counts as
+  // available rather than as a collision.
+  return ensureKongPort(cwd, { context: "dev", ...(composeProject !== undefined && { composeProject }) })
 }
 
 /**
@@ -794,7 +796,7 @@ export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfi
     })
   }
 
-  const kongPort = await resolveKongPort(cwd)
+  const kongPort = await resolveKongPort(cwd, project)
   const now = Math.floor(Date.now() / 1000)
   const jwtBase = { iss: "supatype", iat: now, exp: now + 315_360_000 }
   const anonKey = signJwt({ ...jwtBase, role: "anon" }, devJwtSecret(cwd))
@@ -840,7 +842,7 @@ export async function pushSchemaDocker(cwd: string, config: SupatypeProjectConfi
     throw new Error("pushSchemaDocker requires provider: docker")
   }
   const project = composeProjectName(config.project.name)
-  const kongPort = await resolveKongPort(cwd)
+  const kongPort = await resolveKongPort(cwd, project)
   // No dev db port for an external database: `ensureDevDbPort` allocates a host port for the `db`
   // container *and persists a matching DATABASE_URL*, which overwrote the operator's own URL, the
   // one the whole stack and every CLI command reads.
@@ -891,7 +893,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   // Per-project compose name + port isolate this project from any other Supatype
   // stack on the machine (own containers, volumes, network, and gateway port).
   const project = composeProjectName(config.project.name)
-  const kongPort = await resolveKongPort(cwd)
+  const kongPort = await resolveKongPort(cwd, project)
   // No dev db port for an external database: `ensureDevDbPort` allocates a host port for the `db`
   // container *and persists a matching DATABASE_URL*, which overwrote the operator's own URL, the
   // one the whole stack and every CLI command reads.
