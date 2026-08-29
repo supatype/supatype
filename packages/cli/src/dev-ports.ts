@@ -4,6 +4,7 @@
  * availability so multiple projects and port collisions are surfaced clearly.
  */
 
+import { spawnSync } from "node:child_process"
 import { CLACK_CANCEL, isCancel, p } from "./ui/clack.js"
 import { COMPOSE_DEV_KONG_PORT } from "./project-config.js"
 import { isPortInUse } from "./postgres-ctl.js"
@@ -13,6 +14,41 @@ import { fatalError } from "./ui/fatal.js"
 
 const MIN_PORT = 1024
 const MAX_PORT = 65535
+
+/**
+ * Which compose project publishes a host port, from `docker ps` output.
+ *
+ * Separated from the spawn so the decision is testable: the question "is this port held by my own
+ * stack" is the whole point of the check, and a check that can only be exercised by starting Docker
+ * is a check nobody exercises.
+ *
+ * Docker prints one line per matching container, and a container with no compose label prints an
+ * empty line. Any line naming a different project means someone else holds the port.
+ */
+export function composeProjectOwnsPort(dockerPsOutput: string, project: string): boolean {
+  const owners = dockerPsOutput
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+  return owners.length > 0 && owners.every((owner) => owner === project)
+}
+
+/**
+ * True when the container publishing `port` belongs to this project's compose stack.
+ *
+ * Asks Docker rather than probing the port over HTTP. A health check would answer just as happily
+ * for a *different* project's gateway on the same port, and proceeding there would push a schema
+ * into the wrong database. Refusing is the safe answer for a stranger; only our own stack is fine.
+ */
+export function portHeldByComposeProject(port: number, project: string): boolean {
+  const result = spawnSync(
+    "docker",
+    ["ps", "--filter", `publish=${port}`, "--format", '{{.Label "com.docker.compose.project"}}'],
+    { encoding: "utf8" },
+  )
+  if (result.status !== 0 || typeof result.stdout !== "string") return false
+  return composeProjectOwnsPort(result.stdout, project)
+}
 
 export function isValidHostPort(port: number): boolean {
   return Number.isInteger(port) && port >= MIN_PORT && port <= MAX_PORT
@@ -62,6 +98,11 @@ export interface EnsureKongPortOptions {
   interactive?: boolean
   /** init wizard: slightly different copy */
   context?: "dev" | "init"
+  /**
+   * Compose project for this directory. When given, a port published by that project is accepted
+   * rather than refused: that is this project's own stack, not a stranger's.
+   */
+  composeProject?: string
 }
 
 /**
@@ -80,6 +121,13 @@ export async function ensureKongPort(
 
   if (persisted !== null) {
     if (!(await isPortInUse(persisted))) return persisted
+
+    // Occupied by this project's own stack is not a conflict, it is the normal state after
+    // `supatype self-host compose up -d`. Refusing here made a hand-run `up -d` followed by
+    // `push` impossible, and it stopped the validation soak, which does exactly that.
+    if (opts.composeProject !== undefined && portHeldByComposeProject(persisted, opts.composeProject)) {
+      return persisted
+    }
 
     if (!interactive) {
       fatalError(`Port ${persisted} is already in use (SUPATYPE_KONG_PORT in .env).`, [
