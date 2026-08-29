@@ -402,13 +402,16 @@ function InviteUserForm({
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 /**
- * A user as the auth admin API returns it.
+ * A user as the auth admin API returns it, which is not the AuthUser above: that
+ * one is what this view renders, with the fields it needs and no nulls. Sharing
+ * the name merged the two declarations and made every field of the rendered user
+ * optional.
  *
  * Every field optional, because this describes someone else's JSON rather than a value we
  * constructed: a server that stops sending `factors` should narrow what Studio can show, not throw
  * while mapping. `any` here would have hidden exactly that.
  */
-interface AuthUser {
+interface AuthUserResponse {
   id: string
   email?: string | null
   phone?: string | null
@@ -419,18 +422,18 @@ interface AuthUser {
   created_at: string
   updated_at: string
   user_metadata?: Record<string, unknown> | null
-  identities?: AuthIdentity[] | null
-  factors?: AuthFactor[] | null
+  identities?: AuthIdentityResponse[] | null
+  factors?: AuthFactorResponse[] | null
 }
 
-interface AuthIdentity {
+interface AuthIdentityResponse {
   provider: string
   identity_id?: string | null
   id?: string | null
   created_at: string
 }
 
-interface AuthFactor {
+interface AuthFactorResponse {
   id: string
   factor_type?: string | null
   type?: string | null
@@ -439,7 +442,7 @@ interface AuthFactor {
   status?: string | null
 }
 
-function mapAuthUser(raw: AuthUser): AuthUser {
+function mapAuthUser(raw: AuthUserResponse): AuthUser {
   return {
     id: raw.id,
     email: raw.email ?? "",
@@ -503,7 +506,7 @@ export function AuthManagement(): React.ReactElement {
   const { data: usersData, loading, error, refetch } = useApiQuery(
     async () => {
       const json = await authAdminFetch("/users?page=1&per_page=50")
-      return (json.users as AuthUser[]).map(mapAuthUser)
+      return (json.users as AuthUserResponse[]).map(mapAuthUser)
     },
     [authAdminFetch],
   )
