@@ -10,7 +10,8 @@
     "keys": "supatype keys",
     "verify": "tsx verify.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "verify:channels": "tsx verify-channels.ts"
+    "verify:channels": "tsx verify-channels.ts",
+    "verify:filter": "tsx verify-filter.ts"
   },
   "dependencies": {
     "@supatype/cli": "workspace:*",

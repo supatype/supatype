@@ -20,6 +20,7 @@
     "supatype.config.ts",
     "verify.ts",
     "verify-channels.ts",
+    "verify-filter.ts",
     "supatype/generated"
   ],
   "exclude": [
