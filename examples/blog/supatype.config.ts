@@ -14,12 +14,10 @@ export default defineConfig({
   database: { provider: "docker" },
   server: { mode: "dev", port: 54399 },
   app: { mode: "none" },
-  versions: {
-    engine: "0.4.2",
-    server: "0.1.0",
-    postgres: "17",
-    deno: "2.2.0",
-  },
+  // No `versions` here on purpose: a pin in a committed example is a pin that
+  // goes stale, and these two named a server and an engine that were never
+  // published, so the example could not start at all. Pin machine-local
+  // component builds in `supatype.local.config.ts` (gitignored) instead.
   schema: { path: "schema/index.ts" },
   output: {
     types: "supatype/generated/database.ts",

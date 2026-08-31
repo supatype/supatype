@@ -13,12 +13,10 @@ export default defineConfig({
     mode: "proxy",
     upstream: "http://host.docker.internal:3000",
   },
-  versions: {
-    engine: "0.4.2",
-    server: "0.1.0",
-    postgres: "17.2",
-    deno: "2.2.0",
-  },
+  // No `versions` here on purpose: a pin in a committed example is a pin that
+  // goes stale, and these two named a server and an engine that were never
+  // published, so the example could not start at all. Pin machine-local
+  // component builds in `supatype.local.config.ts` (gitignored) instead.
   email: { provider: "console" },
   storage: { provider: "local", local_path: ".supatype/storage" },
   schema: { path: "schema/index.ts", pg_schema: "public" },
