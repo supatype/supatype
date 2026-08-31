@@ -12,7 +12,12 @@ import { defineConfig, devices } from "@playwright/test"
  * and nothing here is testing browser differences: it is testing that the UI is
  * wired to a server.
  */
-const BASE_URL = process.env.E2E_BASE_URL ?? `http://127.0.0.1:${process.env.SUPATYPE_KONG_PORT ?? "18473"}`
+// localhost, not 127.0.0.1: Studio is configured with an API URL, and the
+// browser must be on that same origin. Serve the page from 127.0.0.1 while the
+// config says localhost and they are different origins, so every credentialed
+// request Studio makes through /studio/proxy is refused by CORS and each view
+// reads "Failed to fetch" — which looks exactly like a broken view.
+const BASE_URL = process.env.E2E_BASE_URL ?? `http://localhost:${process.env.SUPATYPE_KONG_PORT ?? "18473"}`
 
 export default defineConfig({
   testDir: "./specs",

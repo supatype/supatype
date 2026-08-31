@@ -16,7 +16,18 @@ ROOT_DIR="$(cd "$INTEGRATION_DIR/../.." && pwd)"
 E2E_DIR="$ROOT_DIR/tests/e2e"
 CLI_BIN="$ROOT_DIR/packages/cli/bin/supatype.js"
 KONG_PORT="${SUPATYPE_KONG_PORT:-18473}"
+# Two URLs for one stack, deliberately.
+#
+# The health polling uses 127.0.0.1, because `localhost` resolves to ::1 first on
+# some hosts where Docker's IPv6 forwarder accepts and then resets.
+#
+# The browser uses localhost, because Studio is configured with an API URL and
+# has to be opened on that same origin. Serve the page from 127.0.0.1 while the
+# config says localhost and they are different origins: every credentialed
+# request through /studio/proxy is then refused by CORS and each view reads
+# "Failed to fetch", which is indistinguishable from a broken view.
 BASE_URL="http://127.0.0.1:${KONG_PORT}"
+BROWSER_URL="http://localhost:${KONG_PORT}"
 MAX_WAIT="${STUDIO_UI_MAX_WAIT:-300}"
 
 # A fresh admin per run: the sign-in test asserts a session is accepted, and
@@ -57,10 +68,24 @@ if ! wait_until 120 "$BASE_URL/studio/" studio_ready; then
   exit 1
 fi
 
+# Studio reads its model and database views from the admin config the engine
+# writes on push. Without it every view is the "No schema has been pushed yet"
+# screen, and the specs fail for a reason that has nothing to do with the UI.
+echo "==> Making sure the schema is pushed"
+if [[ ! -f "$INTEGRATION_DIR/.supatype/admin-config.json" ]]; then
+  (cd "$INTEGRATION_DIR" && node "$CLI_BIN" push --yes)
+fi
+if [[ ! -f "$INTEGRATION_DIR/.supatype/admin-config.json" ]]; then
+  echo "ERROR: no .supatype/admin-config.json after push."
+  echo "       The host engine must be downloadable: set SUPATYPE_RELEASE_PUBLIC_KEY,"
+  echo "       or SUPATYPE_ALLOW_UNVERIFIED_DOWNLOADS=1 locally."
+  exit 1
+fi
+
 echo "==> Creating the Studio admin"
 (cd "$INTEGRATION_DIR" && node "$CLI_BIN" admin create-user \
   --email "$STUDIO_E2E_EMAIL" --password "$STUDIO_E2E_PASSWORD" --role admin)
 
 echo "==> Driving the browser"
 cd "$E2E_DIR"
-E2E_BASE_URL="$BASE_URL" npx playwright test
+E2E_BASE_URL="$BROWSER_URL" npx playwright test
