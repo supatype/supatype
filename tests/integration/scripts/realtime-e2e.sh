@@ -49,6 +49,13 @@ if ! wait_until "$MAX_WAIT" "$BASE_URL/auth/v1/health" ready; then
   exit 1
 fi
 
-echo "==> Subscribe, write, wait"
+echo "==> postgres_changes: subscribe, write, wait"
 cd "$EXAMPLE_DIR"
 SUPATYPE_URL="$BASE_URL" npx tsx verify.ts
+
+echo ""
+echo "==> broadcast and presence, between two clients"
+# Separate from the change subscription on purpose: neither touches the
+# database, so a stack with broken replication still serves them, and a stack
+# with a healthy socket can still fail them.
+SUPATYPE_URL="$BASE_URL" npx tsx verify-channels.ts

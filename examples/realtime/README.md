@@ -48,7 +48,28 @@ timeout with nothing to say why. Wait for `SUBSCRIBED` before writing the row
 you expect to be told about, or the write races the subscription and the event
 is missed for a reason that has nothing to do with realtime.
 
+## Broadcast and presence
+
+```sh
+pnpm verify:channels
+```
+
+The other two channel features, asserted between **two** clients, because one
+that only works when sender and receiver share a connection is not a feature
+anyone can use:
+
+```
+  ok   broadcast reached the other client: {"from":"sender","at":1788159108931}
+  ok   presence join seen by the other client: [{"user_id":"anonymous","who":"sender"}]
+PASS: broadcast and presence both delivered between two clients
+```
+
+Neither touches the database, so they are checked separately from
+`postgres_changes`: a stack whose replication is broken still serves them, and a
+stack whose socket is fine can still fail them.
+
 ## What it does not cover
 
-Presence and broadcast, which are separate channel features, and row-level
-filtering of change events. This example is about delivery.
+Row-level filtering of change events, and change events for a user whose access
+rules hide the row. Everything here is public, so absence of an event would be
+ambiguous; access control has its own examples.

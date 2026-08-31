@@ -19,6 +19,7 @@
     "schema",
     "supatype.config.ts",
     "verify.ts",
+    "verify-channels.ts",
     "supatype/generated"
   ],
   "exclude": [
