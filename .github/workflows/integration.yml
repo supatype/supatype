@@ -130,6 +130,47 @@ jobs:
   # every defect in this feature has actually been. A validator map the CLI built and nothing wrote,
   # a manifest key the compose path never set, a Studio normalizer that dropped the rules: all had
   # green tests and none survived a request.
+  # Realtime is on by default, so every job above already starts the service, and
+  # none of them ever subscribed. What they proved is that the gateway upgrades a
+  # WebSocket, which a broken realtime does too: the socket opens and no row
+  # arrives. This subscribes, writes, and waits with a deadline.
+  #
+  # Runs on pull_request, unlike the validation job below, because it needs
+  # nothing that is not published: realtime decodes WAL from a replication slot,
+  # so there is no per-table opt-in and no unreleased image in the path.
+  realtime-e2e:
+    name: realtime (live stack)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript packages
+        run: pnpm build
+
+      - name: Run the realtime e2e
+        run: bash tests/integration/scripts/realtime-e2e.sh
+
+      - name: Upload stack logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: realtime-e2e-logs
+          path: |
+            examples/realtime/.supatype/**/*.log
+          if-no-files-found: ignore
+
   validation-e2e:
     name: field validation (live stack)
     # Dispatch and schedule only, for now. The stack it needs is not published yet: this asserts a

@@ -195,6 +195,28 @@ importers:
         specifier: ^5
         version: 5.9.3
 
+  examples/realtime:
+    dependencies:
+      '@supatype/cli':
+        specifier: workspace:*
+        version: link:../../packages/cli
+      '@supatype/client':
+        specifier: workspace:*
+        version: link:../../packages/client
+      '@supatype/types':
+        specifier: workspace:*
+        version: link:../../packages/types
+    devDependencies:
+      '@types/node':
+        specifier: ^22
+        version: 22.19.13
+      tsx:
+        specifier: ^4
+        version: 4.21.0
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
   examples/self-host:
     dependencies:
       '@supatype/cli':

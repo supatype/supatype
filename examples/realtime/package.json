@@ -1,0 +1,24 @@
+{
+  "name": "@supatype/example-realtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Realtime end to end: subscribe to a table, write a row, receive the change",
+  "scripts": {
+    "dev": "supatype dev",
+    "push": "supatype push --yes",
+    "keys": "supatype keys",
+    "verify": "tsx verify.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@supatype/cli": "workspace:*",
+    "@supatype/client": "workspace:*",
+    "@supatype/types": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4",
+    "typescript": "^5",
+    "@types/node": "^22"
+  }
+}
