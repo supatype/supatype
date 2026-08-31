@@ -579,6 +579,18 @@ ${appEnv}
       SUPATYPE_JWT_DEFAULT_GROUP_NAME: authenticated
       SUPATYPE_JWT_ADMIN_ROLES: service_role,supatype_admin
       SUPATYPE_MAILER_AUTOCONFIRM: \${SUPATYPE_MAILER_AUTOCONFIRM:-true}
+      # email.provider and email.smtp are config, and nothing used to carry
+      # them here: with no provider and no SMTP host the auth service falls
+      # through to its noop client, so every message was dropped in silence and
+      # a project asking for smtp got the same nothing as one asking for console.
+      # The name really is MAILER_MAILER: the field is Mailer.MailerProvider.
+      SUPATYPE_MAILER_MAILER_PROVIDER: \${SUPATYPE_MAILER_MAILER_PROVIDER:-console}
+      SUPATYPE_SMTP_HOST: \${SUPATYPE_SMTP_HOST:-}
+      SUPATYPE_SMTP_PORT: \${SUPATYPE_SMTP_PORT:-}
+      SUPATYPE_SMTP_USER: \${SUPATYPE_SMTP_USER:-}
+      SUPATYPE_SMTP_PASS: \${SUPATYPE_SMTP_PASS:-}
+      SUPATYPE_SMTP_ADMIN_EMAIL: \${SUPATYPE_SMTP_ADMIN_EMAIL:-}
+      SUPATYPE_SMTP_SENDER_NAME: \${SUPATYPE_SMTP_SENDER_NAME:-}
       SUPATYPE_DISABLE_SIGNUP: \${DISABLE_SIGNUP:-false}
 ${devLocal ? "      STUDIO_OPEN_DEV: \"1\"\n" : ""}
     depends_on:
