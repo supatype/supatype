@@ -135,11 +135,20 @@ jobs:
   # WebSocket, which a broken realtime does too: the socket opens and no row
   # arrives. This subscribes, writes, and waits with a deadline.
   #
-  # Runs on pull_request, unlike the validation job below, because it needs
-  # nothing that is not published: realtime decodes WAL from a replication slot,
-  # so there is no per-table opt-in and no unreleased image in the path.
+  # Dispatch and schedule only, for the same reason as the validation job below,
+  # and only until the same release ships. Realtime itself needs nothing
+  # unpublished: it decodes WAL from a replication slot, so there is no
+  # per-table opt-in. The server in front of it does. This branch's CLI writes
+  # SUPATYPE_* and the published `supatype/server:latest` still reads GOTRUE_*,
+  # so the stack does not come up at all and the failure says nothing about
+  # realtime.
+  #
+  # **Add `pull_request` here once a `supatype/server` release carrying the
+  # SUPATYPE_ prefix is on Docker Hub.** Nothing else blocks it; verified green
+  # against a locally built server image.
   realtime-e2e:
     name: realtime (live stack)
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: ubuntu-22.04
     timeout-minutes: 20
 
