@@ -1,0 +1,7 @@
+node_modules/
+# Playwright's own output: traces, screenshots and the HTML report are all
+# artefacts of a run, and the report is tens of megabytes.
+test-results/
+playwright-report/
+blob-report/
+.playwright/

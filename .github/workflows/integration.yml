@@ -146,6 +146,56 @@ jobs:
   # **Add `pull_request` here once a `supatype/server` release carrying the
   # SUPATYPE_ prefix is on Docker Hub.** Nothing else blocks it; verified green
   # against a locally built server image.
+  # Studio in a browser. Everything else tests its server surface, which stays
+  # green through a bundle that loads and then throws, an asset referenced at the
+  # wrong base path, or a sign-in form wired to nothing.
+  #
+  # Gated for the same reason and until the same release as the two jobs below:
+  # the stack in front of Studio is supatype/server:latest, which still reads the
+  # old prefix while this branch's CLI writes the new one.
+  #
+  # **Add `pull_request` here once a `supatype/server` release carrying the
+  # SUPATYPE_ prefix is on Docker Hub.**
+  studio-ui-e2e:
+    name: studio UI (browser)
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript packages
+        run: pnpm build
+
+      # Chromium only: a second engine doubles the download and the minutes, and
+      # nothing here tests browser differences.
+      - name: Install Chromium
+        run: pnpm --filter supatype-e2e exec playwright install --with-deps chromium
+
+      - name: Run the Studio UI e2e
+        run: bash tests/integration/scripts/studio-ui-e2e.sh
+
+      - name: Upload the Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-ui-playwright-report
+          path: |
+            tests/e2e/playwright-report/**
+            tests/e2e/test-results/**
+          if-no-files-found: ignore
+
   realtime-e2e:
     name: realtime (live stack)
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
