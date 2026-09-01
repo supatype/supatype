@@ -571,7 +571,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
           cwd,
           studioOverride,
           pidDir,
-          serviceRoleKey,
+          anonKey,
           proxyTarget: `http://localhost:${serverPort}`,
           viteSupatypeUrl: `http://localhost:${studioPort}`,
         })
