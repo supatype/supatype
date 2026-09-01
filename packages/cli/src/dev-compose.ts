@@ -452,19 +452,29 @@ async function fetchWithin(url: string, ms: number, init?: RequestInit): Promise
 
 async function waitKongReady(kongPort: number, maxSec: number): Promise<void> {
   const base = loopbackBase(kongPort)
+  // Remembered so the failure can name the unhealthy upstream. Blaming "the
+  // Kong gateway" sent more than one investigation after Kong when Kong was
+  // fine and a service behind it was not.
+  let lastAuth = "no response"
+  let lastRealtime = "no response"
   for (let i = 0; i < maxSec; i++) {
     try {
       const [auth, realtime] = await Promise.all([
         fetchWithin(`${base}/auth/v1/health`, 2000),
         fetchWithin(`${base}/realtime/v1/health`, 2000),
       ])
+      lastAuth = `HTTP ${auth.status}`
+      lastRealtime = `HTTP ${realtime.status}`
       if (auth.ok && realtime.ok) return
-    } catch {
-      /* retry */
+    } catch (err) {
+      lastAuth = lastRealtime = err instanceof Error ? err.message : String(err)
     }
     await new Promise((r) => setTimeout(r, 1000))
   }
-  throw new Error(`Kong gateway at ${base} did not become ready within ${maxSec}s`)
+  throw new Error(
+    `Gateway at ${base} did not become ready within ${maxSec}s ` +
+      `(auth/v1/health: ${lastAuth}, realtime/v1/health: ${lastRealtime})`,
+  )
 }
 
 /** Kong may be up while server → storage is still starting (503 or upstream errors). */
