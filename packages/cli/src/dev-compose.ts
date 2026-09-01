@@ -450,7 +450,44 @@ async function fetchWithin(url: string, ms: number, init?: RequestInit): Promise
   return await fetch(url, { ...init, signal: AbortSignal.timeout(ms) })
 }
 
-async function waitKongReady(kongPort: number, maxSec: number): Promise<void> {
+/**
+ * Print what the stack is doing when the gateway never comes up.
+ *
+ * A 503 through the gateway means Kong is running and something behind it is
+ * not, and until now the only thing said was that the gateway was not ready.
+ * That sends people to look at Kong, which is almost never the problem, and in
+ * CI the containers are gone by the time anything else can inspect them.
+ */
+function reportUnhealthyStack(composePath: string, cwd: string, project: string): void {
+  const capture = (args: string[]): string => {
+    const result = spawnSync("docker", ["compose", "-p", project, "--project-directory", cwd, "-f", composePath, ...args], {
+      encoding: "utf8",
+      cwd,
+    })
+    return `${result.stdout ?? ""}${result.stderr ?? ""}`.trim()
+  }
+
+  console.error("")
+  console.error("[supatype] The gateway is up but a service behind it is not. Container state:")
+  const state = capture(["ps", "-a"])
+  console.error(state === "" ? "  (no containers)" : state)
+
+  // The two the gateway health check depends on, and db because both need it.
+  for (const service of ["server", "realtime", "db"]) {
+    const logs = capture(["logs", "--no-color", "--tail", "40", service])
+    if (logs === "") continue
+    console.error("")
+    console.error(`[supatype] last 40 lines from ${service}:`)
+    console.error(logs)
+  }
+  console.error("")
+}
+
+async function waitKongReady(
+  kongPort: number,
+  maxSec: number,
+  stack?: { composePath: string; cwd: string; project: string },
+): Promise<void> {
   const base = loopbackBase(kongPort)
   // Remembered so the failure can name the unhealthy upstream. Blaming "the
   // Kong gateway" sent more than one investigation after Kong when Kong was
@@ -470,6 +507,9 @@ async function waitKongReady(kongPort: number, maxSec: number): Promise<void> {
       lastAuth = lastRealtime = err instanceof Error ? err.message : String(err)
     }
     await new Promise((r) => setTimeout(r, 1000))
+  }
+  if (stack !== undefined) {
+    reportUnhealthyStack(stack.composePath, stack.cwd, stack.project)
   }
   throw new Error(
     `Gateway at ${base} did not become ready within ${maxSec}s ` +
@@ -915,7 +955,7 @@ export async function pushSchemaDocker(cwd: string, config: SupatypeProjectConfi
   if (upGateway !== 0) {
     exitComposeFailed(upGateway, "Could not start the Compose gateway stack.", pushBrand)
   }
-  await waitKongReady(kongPort, 120)
+  await waitKongReady(kongPort, 120, { composePath: paths.composePath, cwd, project })
   await waitStorageApiReady(kongPort, serviceRoleKey, 90)
   await provisionDockerStorageBuckets(ast, kongPort, serviceRoleKey)
 
@@ -1092,7 +1132,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   }
 
   console.log("[supatype] Waiting for API gateway...")
-  await waitKongReady(kongPort, 120)
+  await waitKongReady(kongPort, 120, { composePath: paths.composePath, cwd, project })
   console.log("[supatype] Waiting for storage API...")
   await waitStorageApiReady(kongPort, serviceRoleKey, 90)
 
