@@ -586,7 +586,11 @@ ${appEnv}
       # The name really is MAILER_MAILER: the field is Mailer.MailerProvider.
       SUPATYPE_MAILER_MAILER_PROVIDER: \${SUPATYPE_MAILER_MAILER_PROVIDER:-console}
       SUPATYPE_SMTP_HOST: \${SUPATYPE_SMTP_HOST:-}
-      SUPATYPE_SMTP_PORT: \${SUPATYPE_SMTP_PORT:-}
+      # 587, not empty: this one is an int on the server, and compose
+      # substitutes an unset variable as "", which fails to parse and takes
+      # the whole service down on boot. 587 is the server's own default, so
+      # leaving it unset now behaves exactly as it would with no value at all.
+      SUPATYPE_SMTP_PORT: \${SUPATYPE_SMTP_PORT:-587}
       SUPATYPE_SMTP_USER: \${SUPATYPE_SMTP_USER:-}
       SUPATYPE_SMTP_PASS: \${SUPATYPE_SMTP_PASS:-}
       SUPATYPE_SMTP_ADMIN_EMAIL: \${SUPATYPE_SMTP_ADMIN_EMAIL:-}
