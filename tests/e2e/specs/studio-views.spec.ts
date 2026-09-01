@@ -95,9 +95,18 @@ test.describe("Studio views", () => {
     await page.goto("/studio/database/tables", { waitUntil: "networkidle" })
 
     await expect(page.getByRole("heading", { name: /^tables$/i }).first()).toBeVisible()
-    // Schemas only a real introspection knows about.
-    await expect(page.locator("body")).toContainText(/graphql_public/)
-    await expect(page.locator("body")).toContainText(/pgbouncer/)
+
+    // The schema picker offers what introspection found, which is the part no
+    // amount of chrome can fake. auth and storage are there because the stack
+    // created them, not because this project declared them.
+    //
+    // Not graphql_public or pgbouncer, which an earlier version of this test
+    // asserted: the picker lists only schemas holding base tables, and those
+    // two hold none, so they can never appear however healthy the view is.
+    const schemaPicker = page.locator("select").first()
+    await expect(schemaPicker).toBeVisible()
+    const offered = await schemaPicker.locator("option").allTextContents()
+    expect(offered, "schemas the picker offers").toEqual(expect.arrayContaining(["public", "auth", "storage"]))
 
     // A row per table, carrying an on-disk size.
     const rows = page.locator("tbody tr")
