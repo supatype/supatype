@@ -546,6 +546,14 @@ ${realtimeBlock}
 ${dbDependency}
   server:
     image: \${SUPATYPE_SERVER_IMAGE:-\${SUPATYPE_AUTH_IMAGE:-supatype/server:latest}}
+    # The server runs its migrations at boot on a connection of their own,
+    # and that path does not wait out a database that is still in recovery:
+    # it exits. Waiting for db to report healthy is not enough, because
+    # Postgres says healthy before it will accept these connections, and
+    # on a slow host the gap is wide enough to lose it for good. Bounded
+    # rather than unlimited, so a real misconfiguration still stops and
+    # stays visible instead of hiding in a crash loop.
+    restart: on-failure:5
 ${serverPorts}    volumes:
       - ${projectMount}:/project:ro
     working_dir: /project
