@@ -161,6 +161,13 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: ubuntu-22.04
     timeout-minutes: 25
+    env:
+      # Studio reads its model and database views from the admin config the
+      # engine writes on push, so this job pushes, and pushing downloads the
+      # host engine. Without the key the download refuses to verify the
+      # release and the push writes no config, which then presents as every
+      # Studio view being empty rather than as a missing secret.
+      SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
 
     steps:
       - uses: actions/checkout@v4
