@@ -8,7 +8,7 @@ import {
   secureStoreAdapter,
 } from "../src/index.js"
 
-const GOTRUE = "http://localhost:9999"
+const AUTH_URL = "http://localhost:9999"
 const ANON = "test-anon"
 
 function memorySecureStore() {
@@ -55,7 +55,7 @@ describe("createNativeClient", () => {
   it("injects secureStore as auth.storage", async () => {
     const ss = memorySecureStore()
     const client = createNativeClient({
-      url: GOTRUE,
+      url: AUTH_URL,
       anonKey: ANON,
       secureStore: ss,
     })
@@ -91,7 +91,7 @@ describe("createNativeClient", () => {
 
   it("throws when no storage module is provided", () => {
     expect(() =>
-      createNativeClient({ url: GOTRUE, anonKey: ANON }),
+      createNativeClient({ url: AUTH_URL, anonKey: ANON }),
     ).toThrow(/secureStore/)
   })
 })
@@ -101,7 +101,7 @@ describe("openOAuth", () => {
 
   it("uses PKCE by default and exchanges success URL", async () => {
     const ss = memorySecureStore()
-    const auth = new AuthClient(`${GOTRUE}/auth/v1`, {
+    const auth = new AuthClient(`${AUTH_URL}/auth/v1`, {
       apikey: ANON,
       "Content-Type": "application/json",
     }, { storage: secureStoreAdapter(ss) })
@@ -154,7 +154,7 @@ describe("openOAuth", () => {
   })
 
   it("returns cancelled when browser is dismissed", async () => {
-    const auth = new AuthClient(`${GOTRUE}/auth/v1`, {
+    const auth = new AuthClient(`${AUTH_URL}/auth/v1`, {
       apikey: ANON,
       "Content-Type": "application/json",
     })
@@ -176,7 +176,7 @@ describe("openOAuth", () => {
 describe("createAuthUrlListener", () => {
   it("handles initial URL with code", async () => {
     const ss = memorySecureStore()
-    const auth = new AuthClient(`${GOTRUE}/auth/v1`, {
+    const auth = new AuthClient(`${AUTH_URL}/auth/v1`, {
       apikey: ANON,
       "Content-Type": "application/json",
     }, { storage: secureStoreAdapter(ss) })

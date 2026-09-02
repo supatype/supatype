@@ -3,7 +3,7 @@ import { AuthClient } from "../src/auth.js"
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const GOTRUE_URL = "http://localhost:9999"
+const SUPATYPE_URL = "http://localhost:9999"
 const HEADERS = { apikey: "test-anon-key", "Content-Type": "application/json" }
 
 const RAW_USER = {
@@ -34,7 +34,7 @@ function mockFetch(body: unknown, ok = true, status?: number): ReturnType<typeof
 }
 
 function freshClient(): AuthClient {
-  return new AuthClient(GOTRUE_URL, HEADERS)
+  return new AuthClient(SUPATYPE_URL, HEADERS)
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -50,7 +50,7 @@ describe("AuthClient.signUp()", () => {
 
     expect(error).toBeNull()
     expect(fetch).toHaveBeenCalledWith(
-      `${GOTRUE_URL}/signup`,
+      `${SUPATYPE_URL}/signup`,
       expect.objectContaining({ method: "POST" }),
     )
   })
@@ -111,7 +111,7 @@ describe("AuthClient.signInAnonymously()", () => {
 
     expect(error).toBeNull()
     expect(fetch).toHaveBeenCalledWith(
-      `${GOTRUE_URL}/signup`,
+      `${SUPATYPE_URL}/signup`,
       expect.objectContaining({ method: "POST" }),
     )
     const [, opts] = fetch.mock.calls[0] as [string, RequestInit]
@@ -131,7 +131,7 @@ describe("AuthClient.signInAnonymously()", () => {
     const [, opts] = fetch.mock.calls[0] as [string, RequestInit]
     const body = JSON.parse(opts.body as string) as Record<string, unknown>
     expect(body["data"]).toEqual({ guest: true })
-    expect(body["gotrue_meta_security"]).toEqual({ captcha_token: "captcha-123" })
+    expect(body["supatype_meta_security"]).toEqual({ captcha_token: "captcha-123" })
   })
 
   it("parses isAnonymous from response", async () => {
@@ -168,7 +168,7 @@ describe("AuthClient.signInWithPassword()", () => {
     await freshClient().signInWithPassword({ email: "a@b.com", password: "pass" })
 
     const [url] = fetch.mock.calls[0] as [string, unknown]
-    expect(url).toBe(`${GOTRUE_URL}/token?grant_type=password`)
+    expect(url).toBe(`${SUPATYPE_URL}/token?grant_type=password`)
   })
 
   it("returns error on invalid credentials", async () => {
@@ -230,7 +230,7 @@ describe("AuthClient.signOut()", () => {
     await client.signOut()
 
     const [url, opts] = logoutFetch.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe(`${GOTRUE_URL}/logout`)
+    expect(url).toBe(`${SUPATYPE_URL}/logout`)
     expect(opts.method).toBe("POST")
   })
 
@@ -399,7 +399,7 @@ describe("AuthClient custom storage", () => {
       removeItem: vi.fn().mockResolvedValue(undefined),
     }
     const events: string[] = []
-    const client = new AuthClient(GOTRUE_URL, HEADERS, { storage })
+    const client = new AuthClient(SUPATYPE_URL, HEADERS, { storage })
     client.onAuthStateChange((event) => events.push(event))
 
     await client.whenReady()
@@ -415,7 +415,7 @@ describe("AuthClient custom storage", () => {
       setItem: vi.fn().mockResolvedValue(undefined),
       removeItem: vi.fn().mockResolvedValue(undefined),
     }
-    const client = new AuthClient(GOTRUE_URL, HEADERS, { storage })
+    const client = new AuthClient(SUPATYPE_URL, HEADERS, { storage })
     await client.whenReady()
 
     vi.stubGlobal("fetch", mockFetch(TOKEN_RESPONSE))
@@ -433,7 +433,7 @@ describe("AuthClient custom storage", () => {
       setItem: vi.fn(),
       removeItem: vi.fn(),
     }
-    const client = new AuthClient(GOTRUE_URL, HEADERS, { storage })
+    const client = new AuthClient(SUPATYPE_URL, HEADERS, { storage })
 
     await expect(client.whenReady()).resolves.toBeUndefined()
     const { data } = await client.getSession()
@@ -446,7 +446,7 @@ describe("AuthClient custom storage", () => {
       setItem: vi.fn(),
       removeItem: vi.fn(),
     }
-    const client = new AuthClient(GOTRUE_URL, HEADERS, { storage, persistSession: false })
+    const client = new AuthClient(SUPATYPE_URL, HEADERS, { storage, persistSession: false })
     await client.whenReady()
 
     expect(storage.getItem).not.toHaveBeenCalled()
@@ -473,7 +473,7 @@ describe("AuthClient OAuth session completion", () => {
       setItem: vi.fn().mockResolvedValue(undefined),
       removeItem: vi.fn().mockResolvedValue(undefined),
     }
-    const client = new AuthClient(GOTRUE_URL, HEADERS, { storage })
+    const client = new AuthClient(SUPATYPE_URL, HEADERS, { storage })
     await client.whenReady()
 
     const { data, error } = await client.signInWithOAuth({
@@ -498,7 +498,7 @@ describe("AuthClient OAuth session completion", () => {
       setItem: vi.fn().mockResolvedValue(undefined),
       removeItem: vi.fn().mockResolvedValue(undefined),
     }
-    const client = new AuthClient(GOTRUE_URL, HEADERS, { storage })
+    const client = new AuthClient(SUPATYPE_URL, HEADERS, { storage })
     await client.whenReady()
     await client.signInWithOAuth({ provider: "google", options: { flowType: "pkce" } })
 
@@ -510,7 +510,7 @@ describe("AuthClient OAuth session completion", () => {
     expect(error).toBeNull()
     expect(data.session?.accessToken).toBe("access-token-123")
     expect(fetch).toHaveBeenCalledWith(
-      `${GOTRUE_URL}/token?grant_type=pkce`,
+      `${SUPATYPE_URL}/token?grant_type=pkce`,
       expect.objectContaining({ method: "POST" }),
     )
     const [, opts] = fetch.mock.calls[0] as [string, RequestInit]
@@ -526,7 +526,7 @@ describe("AuthClient OAuth session completion", () => {
       setItem: vi.fn().mockResolvedValue(undefined),
       removeItem: vi.fn().mockResolvedValue(undefined),
     }
-    const client = new AuthClient(GOTRUE_URL, HEADERS, { storage })
+    const client = new AuthClient(SUPATYPE_URL, HEADERS, { storage })
     await client.whenReady()
     await client.signInWithOAuth({ provider: "google", options: { flowType: "pkce" } })
 
@@ -612,7 +612,7 @@ describe("AuthClient stale persisted session", () => {
     store.set("supatype.auth.session", JSON.stringify(expiredSession))
 
     const events: string[] = []
-    const client = new AuthClient(GOTRUE_URL, HEADERS)
+    const client = new AuthClient(SUPATYPE_URL, HEADERS)
     client.onAuthStateChange((event) => events.push(event))
 
     vi.stubGlobal("fetch", mockFetch({ error_description: "Invalid Refresh Token" }, false, 400))

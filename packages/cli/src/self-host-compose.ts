@@ -297,11 +297,11 @@ export function renderSelfHostCompose(
   const kongMount = kongMountPath(cwd)
   const external = usesExternalDatabase(config)
   const ownerUrl = ownerDatabaseUrl(config)
-  // GoTrue's driver wants the `postgres://` spelling; an external URL is used as given.
-  const gotrueUrl = external ? ownerUrl : ownerDatabaseUrl(config, "postgres")
+  // the auth driver wants the `postgres://` spelling; an external URL is used as given.
+  const authUrl = external ? ownerUrl : ownerDatabaseUrl(config, "postgres")
   // An external URL may already carry query parameters (`?sslmode=require` is common on managed
   // providers), and appending a second `?` produces a DSN that fails to parse.
-  const gotrueSearchPathSeparator = externalDatabaseUrl(config)?.includes("?") ? "&" : "?"
+  const authSearchPathSeparator = externalDatabaseUrl(config)?.includes("?") ? "&" : "?"
   const postgrestUrl = postgrestDatabaseUrl(config)
   const devLocal = options?.devLocal === true
   const tlsEnabled = selfHostTlsEnabled(config, devLocal)
@@ -546,6 +546,14 @@ ${realtimeBlock}
 ${dbDependency}
   server:
     image: \${SUPATYPE_SERVER_IMAGE:-\${SUPATYPE_AUTH_IMAGE:-supatype/server:latest}}
+    # The server runs its migrations at boot on a connection of their own,
+    # and that path does not wait out a database that is still in recovery:
+    # it exits. Waiting for db to report healthy is not enough, because
+    # Postgres says healthy before it will accept these connections, and
+    # on a slow host the gap is wide enough to lose it for good. Bounded
+    # rather than unlimited, so a real misconfiguration still stops and
+    # stays visible instead of hiding in a crash loop.
+    restart: on-failure:5
 ${serverPorts}    volumes:
       - ${projectMount}:/project:ro
     working_dir: /project
@@ -567,20 +575,35 @@ ${realtimeServerEnv}
       SUPATYPE_CONTROL_PLANE_URL: http://control-plane:8080
       SUPATYPE_VALKEY_ADDR: valkey:6379
 ${appEnv}
-      GOTRUE_API_HOST: 0.0.0.0
-      GOTRUE_API_PORT: 9999
-      API_EXTERNAL_URL: \${API_EXTERNAL_URL:-${externalUrlFallback}}
-      GOTRUE_API_EXTERNAL_URL: \${API_EXTERNAL_URL:-${externalUrlFallback}}
-      GOTRUE_DB_DRIVER: postgres
-      GOTRUE_DB_DATABASE_URL: "${gotrueUrl}${gotrueSearchPathSeparator}search_path=auth"
-      GOTRUE_SITE_URL: \${SITE_URL:-${siteUrlFallback}}
-      GOTRUE_JWT_SECRET: \${JWT_SECRET:?JWT_SECRET is missing from .env}
-      GOTRUE_JWT_EXP: 3600
-      GOTRUE_JWT_AUD: authenticated
-      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
-      GOTRUE_JWT_ADMIN_ROLES: service_role,supatype_admin
-      GOTRUE_MAILER_AUTOCONFIRM: \${GOTRUE_MAILER_AUTOCONFIRM:-true}
-      GOTRUE_DISABLE_SIGNUP: \${DISABLE_SIGNUP:-false}
+      SUPATYPE_API_HOST: 0.0.0.0
+      SUPATYPE_API_PORT: 9999
+      SUPATYPE_API_EXTERNAL_URL: \${API_EXTERNAL_URL:-${externalUrlFallback}}
+      SUPATYPE_DB_DRIVER: postgres
+      SUPATYPE_DB_DATABASE_URL: "${authUrl}${authSearchPathSeparator}search_path=auth"
+      SUPATYPE_SITE_URL: \${SITE_URL:-${siteUrlFallback}}
+      SUPATYPE_JWT_SECRET: \${JWT_SECRET:?JWT_SECRET is missing from .env}
+      SUPATYPE_JWT_EXP: 3600
+      SUPATYPE_JWT_AUD: authenticated
+      SUPATYPE_JWT_DEFAULT_GROUP_NAME: authenticated
+      SUPATYPE_JWT_ADMIN_ROLES: service_role,supatype_admin
+      SUPATYPE_MAILER_AUTOCONFIRM: \${SUPATYPE_MAILER_AUTOCONFIRM:-true}
+      # email.provider and email.smtp are config, and nothing used to carry
+      # them here: with no provider and no SMTP host the auth service falls
+      # through to its noop client, so every message was dropped in silence and
+      # a project asking for smtp got the same nothing as one asking for console.
+      # The name really is MAILER_MAILER: the field is Mailer.MailerProvider.
+      SUPATYPE_MAILER_MAILER_PROVIDER: \${SUPATYPE_MAILER_MAILER_PROVIDER:-console}
+      SUPATYPE_SMTP_HOST: \${SUPATYPE_SMTP_HOST:-}
+      # 587, not empty: this one is an int on the server, and compose
+      # substitutes an unset variable as "", which fails to parse and takes
+      # the whole service down on boot. 587 is the server's own default, so
+      # leaving it unset now behaves exactly as it would with no value at all.
+      SUPATYPE_SMTP_PORT: \${SUPATYPE_SMTP_PORT:-587}
+      SUPATYPE_SMTP_USER: \${SUPATYPE_SMTP_USER:-}
+      SUPATYPE_SMTP_PASS: \${SUPATYPE_SMTP_PASS:-}
+      SUPATYPE_SMTP_ADMIN_EMAIL: \${SUPATYPE_SMTP_ADMIN_EMAIL:-}
+      SUPATYPE_SMTP_SENDER_NAME: \${SUPATYPE_SMTP_SENDER_NAME:-}
+      SUPATYPE_DISABLE_SIGNUP: \${DISABLE_SIGNUP:-false}
 ${devLocal ? "      STUDIO_OPEN_DEV: \"1\"\n" : ""}
     depends_on:
 ${dbDependencyClause}      valkey:
@@ -697,7 +720,7 @@ function ensureProjectFunctionsDir(cwd: string, config: SupatypeProjectConfig): 
  *
  * The CLI resolves the URL from config; Compose substitutes `.env` at up-time. If the two disagree,
  * `push` migrates one database while the services serve another, which reads as data loss and
- * isn't. It also makes the generated GoTrue DSN wrong, since whether to append `search_path` with
+ * isn't. It also makes the generated auth DSN wrong, since whether to append `search_path` with
  * `?` or `&` is decided from the config URL's query string.
  */
 function assertExternalUrlMatchesEnv(cwd: string, config: SupatypeProjectConfig): void {

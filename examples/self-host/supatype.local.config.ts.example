@@ -1,0 +1,22 @@
+import type { SupatypeProjectConfig } from "@supatype/cli"
+
+/**
+ * Copy to `supatype.local.config.ts` (gitignored). Merged on top of
+ * `supatype.config.ts`.
+ *
+ * This is where component versions and local binary paths belong: they describe
+ * one machine, or one moment, and a committed pin becomes a version nobody
+ * publishes any more.
+ */
+const local: Partial<SupatypeProjectConfig> = {
+  versions: {
+    server: "1.5.0",
+    engine: "0.2.0",
+  },
+  overrides: {
+    engine: "C:/path/to/supatype-schema-engine/target/release/supatype-engine",
+    server: "C:/path/to/supatype-auth/supatype-server",
+  },
+}
+
+export default local

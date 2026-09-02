@@ -1,0 +1,19 @@
+{
+  "name": "supatype-e2e",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Browser end-to-end tests: the UI, driven as a person drives it",
+  "scripts": {
+    "report": "playwright show-report",
+    "install:browser": "playwright install --with-deps chromium",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "e2e": "playwright test",
+    "e2e:headed": "playwright test --headed"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0",
+    "@types/node": "^22",
+    "typescript": "^5"
+  }
+}

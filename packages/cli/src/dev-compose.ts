@@ -192,6 +192,36 @@ export async function resolveHostEngineDatabaseUrl(
   return connectionString(config)
 }
 
+/**
+ * `email.provider` and `email.smtp` for the compose server service.
+ *
+ * The native dev path has mapped these since it existed; the compose path never
+ * did, so a project that asked for smtp got the auth service's noop client and
+ * no message at all. Console is the documented default, and it at least says
+ * that a message would have been sent.
+ */
+function composeMailerEnv(config: SupatypeProjectConfig): Record<string, string> {
+  const email = config.email
+  const out: Record<string, string> = {
+    // Mailer.MailerProvider, so the doubled word is the real name.
+    SUPATYPE_MAILER_MAILER_PROVIDER: email?.provider ?? "console",
+  }
+  const smtp = email?.smtp
+  if (email?.provider !== "smtp" || smtp === undefined) return out
+
+  if (smtp.host !== undefined && smtp.host !== "") out.SUPATYPE_SMTP_HOST = smtp.host
+  if (smtp.port !== undefined) out.SUPATYPE_SMTP_PORT = String(smtp.port)
+  if (smtp.user !== undefined && smtp.user !== "") out.SUPATYPE_SMTP_USER = smtp.user
+  if (smtp.pass !== undefined && smtp.pass !== "") out.SUPATYPE_SMTP_PASS = smtp.pass
+  if (smtp.admin_email !== undefined && smtp.admin_email !== "") {
+    out.SUPATYPE_SMTP_ADMIN_EMAIL = smtp.admin_email
+  }
+  if (smtp.sender_name !== undefined && smtp.sender_name !== "") {
+    out.SUPATYPE_SMTP_SENDER_NAME = smtp.sender_name
+  }
+  return out
+}
+
 async function resolveKongPort(cwd: string, composeProject?: string): Promise<number> {
   // The compose project is passed so an already-running stack of *this* project counts as
   // available rather than as a collision.
@@ -267,7 +297,8 @@ export function upsertDevComposeEnv(
     SUPATYPE_KONG_PORT: String(kongPort),
     API_EXTERNAL_URL: apiUrl,
     SITE_URL: apiUrl,
-    GOTRUE_MAILER_AUTOCONFIRM: "true",
+    SUPATYPE_MAILER_AUTOCONFIRM: "true",
+    ...composeMailerEnv(config),
     ...imagePins,
   }
   // Never for an external database: this URL describes the `db` container, which that project does
@@ -419,21 +450,71 @@ async function fetchWithin(url: string, ms: number, init?: RequestInit): Promise
   return await fetch(url, { ...init, signal: AbortSignal.timeout(ms) })
 }
 
-async function waitKongReady(kongPort: number, maxSec: number): Promise<void> {
+/**
+ * Print what the stack is doing when the gateway never comes up.
+ *
+ * A 503 through the gateway means Kong is running and something behind it is
+ * not, and until now the only thing said was that the gateway was not ready.
+ * That sends people to look at Kong, which is almost never the problem, and in
+ * CI the containers are gone by the time anything else can inspect them.
+ */
+function reportUnhealthyStack(composePath: string, cwd: string, project: string): void {
+  const capture = (args: string[]): string => {
+    const result = spawnSync("docker", ["compose", "-p", project, "--project-directory", cwd, "-f", composePath, ...args], {
+      encoding: "utf8",
+      cwd,
+    })
+    return `${result.stdout ?? ""}${result.stderr ?? ""}`.trim()
+  }
+
+  console.error("")
+  console.error("[supatype] The gateway is up but a service behind it is not. Container state:")
+  const state = capture(["ps", "-a"])
+  console.error(state === "" ? "  (no containers)" : state)
+
+  // The two the gateway health check depends on, and db because both need it.
+  for (const service of ["server", "realtime", "db"]) {
+    const logs = capture(["logs", "--no-color", "--tail", "40", service])
+    if (logs === "") continue
+    console.error("")
+    console.error(`[supatype] last 40 lines from ${service}:`)
+    console.error(logs)
+  }
+  console.error("")
+}
+
+async function waitKongReady(
+  kongPort: number,
+  maxSec: number,
+  stack?: { composePath: string; cwd: string; project: string },
+): Promise<void> {
   const base = loopbackBase(kongPort)
+  // Remembered so the failure can name the unhealthy upstream. Blaming "the
+  // Kong gateway" sent more than one investigation after Kong when Kong was
+  // fine and a service behind it was not.
+  let lastAuth = "no response"
+  let lastRealtime = "no response"
   for (let i = 0; i < maxSec; i++) {
     try {
       const [auth, realtime] = await Promise.all([
         fetchWithin(`${base}/auth/v1/health`, 2000),
         fetchWithin(`${base}/realtime/v1/health`, 2000),
       ])
+      lastAuth = `HTTP ${auth.status}`
+      lastRealtime = `HTTP ${realtime.status}`
       if (auth.ok && realtime.ok) return
-    } catch {
-      /* retry */
+    } catch (err) {
+      lastAuth = lastRealtime = err instanceof Error ? err.message : String(err)
     }
     await new Promise((r) => setTimeout(r, 1000))
   }
-  throw new Error(`Kong gateway at ${base} did not become ready within ${maxSec}s`)
+  if (stack !== undefined) {
+    reportUnhealthyStack(stack.composePath, stack.cwd, stack.project)
+  }
+  throw new Error(
+    `Gateway at ${base} did not become ready within ${maxSec}s ` +
+      `(auth/v1/health: ${lastAuth}, realtime/v1/health: ${lastRealtime})`,
+  )
 }
 
 /** Kong may be up while server → storage is still starting (503 or upstream errors). */
@@ -874,7 +955,7 @@ export async function pushSchemaDocker(cwd: string, config: SupatypeProjectConfi
   if (upGateway !== 0) {
     exitComposeFailed(upGateway, "Could not start the Compose gateway stack.", pushBrand)
   }
-  await waitKongReady(kongPort, 120)
+  await waitKongReady(kongPort, 120, { composePath: paths.composePath, cwd, project })
   await waitStorageApiReady(kongPort, serviceRoleKey, 90)
   await provisionDockerStorageBuckets(ast, kongPort, serviceRoleKey)
 
@@ -1051,7 +1132,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   }
 
   console.log("[supatype] Waiting for API gateway...")
-  await waitKongReady(kongPort, 120)
+  await waitKongReady(kongPort, 120, { composePath: paths.composePath, cwd, project })
   console.log("[supatype] Waiting for storage API...")
   await waitStorageApiReady(kongPort, serviceRoleKey, 90)
 
@@ -1091,7 +1172,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
       cwd,
       studioOverride,
       pidDir,
-      serviceRoleKey,
+      anonKey,
       proxyTarget: `http://localhost:${kongPort}`,
       viteSupatypeUrl: `http://localhost:${STUDIO_DEV_PORT}`,
       basePath: "/studio/",

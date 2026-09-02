@@ -1226,7 +1226,7 @@ JWT_SECRET=${randomBytes(48).toString("base64url")}
 ANON_KEY=
 SERVICE_ROLE_KEY=`)
 
-  sections.push(`# Site URL (used by GoTrue for email redirects)
+  sections.push(`# Site URL (used for email redirects)
 SITE_URL=http://localhost:3000`)
 
   if (opts.provider === "docker" && opts.kongPort !== undefined) {
