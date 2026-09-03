@@ -118,7 +118,7 @@ describe("the exposed schema list", () => {
   it("serves from api under tier 2, and drops the managed schema", () => {
     // Both halves matter. A client picks its schema per request with `Accept-Profile`, so leaving the
     // managed schema exposed would let any caller read the unmasked table.
-    const list = apiSchemaList(project({ provider: "native" }), "views")
+    const list = apiSchemaList(project({ provider: "native" }), { tier: "views" })
     expect(list).toBe("api, supatype, graphql_public, auth")
     // Entries, not substrings: `graphql_public` legitimately contains "public".
     expect(list.split(", ")).not.toContain("public")
@@ -126,7 +126,7 @@ describe("the exposed schema list", () => {
 
   it("is unchanged for tier 1 and for a schema with no field rules", () => {
     for (const tier of ["extension", "none", undefined] as const) {
-      expect(apiSchemaList(project({ provider: "docker" }), tier)).toBe(
+      expect(apiSchemaList(project({ provider: "docker" }), { tier })).toBe(
         "public, supatype, graphql_public, auth",
       )
     }
@@ -138,7 +138,7 @@ describe("the exposed schema list", () => {
     const cfg = project({ external: { url: "postgres://u@h:5432/d" } }, {
       schema: { api_schemas: ["public", "supatype"] },
     })
-    expect(apiSchemaList(cfg, "views")).toBe("public, supatype")
+    expect(apiSchemaList(cfg, { tier: "views" })).toBe("public, supatype")
   })
 })
 

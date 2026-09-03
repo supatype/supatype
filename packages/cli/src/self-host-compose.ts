@@ -18,6 +18,7 @@ import { hasEngineOverride, hasStudioOverride, pinnedVersion, fetchLatestVersion
 import { buildKongDeclarative } from "./kong-config.js"
 import { readEnvFile } from "./env-file.js"
 import { fieldMaskingTierFromProject, type FieldMaskingTier } from "./field-masking-tier.js"
+import { projectHasVersionedModels } from "./model-versioning.js"
 
 /** Env keys written when `versions` pins exist in supatype.config.ts. */
 export const COMPOSE_PINNED_IMAGE_ENV_KEYS = [
@@ -286,6 +287,14 @@ export interface SelfHostComposeOptions {
    * rules and for every project on `supatype/postgres`.
    */
   fieldMaskingTier?: FieldMaskingTier
+  /**
+   * Whether any model declares `versions`, which puts the generated `draft` schema on the exposed
+   * list.
+   *
+   * Same reasoning as the tier above: only a caller that has loaded the schema can say, and left
+   * unset the list is today's, which is correct for every project with no versioned model.
+   */
+  drafts?: boolean
 }
 
 export function renderSelfHostCompose(
@@ -296,6 +305,12 @@ export function renderSelfHostCompose(
   const projectMount = projectMountPath(cwd)
   const kongMount = kongMountPath(cwd)
   const external = usesExternalDatabase(config)
+  // Both halves come from the caller because both need the schema loaded, which this renderer does
+  // not do. See `SelfHostComposeOptions`.
+  const restSchemas = apiSchemaList(config, {
+    ...(options?.fieldMaskingTier !== undefined && { tier: options.fieldMaskingTier }),
+    drafts: options?.drafts === true,
+  })
   const ownerUrl = ownerDatabaseUrl(config)
   // GoTrue's driver wants the `postgres://` spelling; an external URL is used as given.
   const gotrueUrl = external ? ownerUrl : ownerDatabaseUrl(config, "postgres")
@@ -477,7 +492,7 @@ ${dbServiceBlock}  postgrest:
       # Derived from schema.pg_schema (or schema.api_schemas). Hardcoding this is why choosing a
       # non-public pg_schema used to give a correct push and an API that answered PGRST106 for
       # everything: the engine moved and PostgREST was never told.
-      PGRST_DB_SCHEMA: "${apiSchemaList(config, options?.fieldMaskingTier)}"
+      PGRST_DB_SCHEMA: "${restSchemas}"
       PGRST_DB_ANON_ROLE: anon
       PGRST_JWT_SECRET: \${JWT_SECRET:?JWT_SECRET is missing from .env}
       PGRST_DB_EXTRA_SEARCH_PATH: public,extensions
@@ -798,6 +813,21 @@ function resolveFieldMaskingTier(
   return fieldMaskingTierFromProject(cwd, config)
 }
 
+/**
+ * Whether this project has a versioned model, unless the caller already knows.
+ *
+ * Same seam as the tier above, and the same reason: the renderer does not load the schema, so a
+ * caller that has can say, and `writeSelfHostCompose` answers for the callers that have not.
+ */
+function resolveDrafts(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  options?: SelfHostComposeOptions,
+): boolean {
+  if (options?.drafts !== undefined) return options.drafts
+  return projectHasVersionedModels(cwd, config)
+}
+
 export function writeSelfHostCompose(
   cwd: string,
   config: SupatypeProjectConfig,
@@ -808,6 +838,7 @@ export function writeSelfHostCompose(
   const resolved: SelfHostComposeOptions = {
     ...options,
     ...(tier !== undefined && { fieldMaskingTier: tier }),
+    drafts: resolveDrafts(cwd, config, options),
   }
   assertExternalUrlReachableFromContainers(config)
   const paths = selfHostComposePaths(cwd)

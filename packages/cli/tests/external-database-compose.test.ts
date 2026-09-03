@@ -182,3 +182,19 @@ describe("a loopback external URL", () => {
     expect(loopbackExternalHost(managed())).toBeUndefined()
   })
 })
+
+describe("the draft schema in generated compose", () => {
+  it("reaches PGRST_DB_SCHEMA when a model is versioned", () => {
+    // The wiring, not the list: a correct `apiSchemaList` behind a placeholder that never gets the
+    // flag is exactly the failure shape this project has hit before, and it reads as "there is no
+    // draft" rather than as an error.
+    const compose = renderSelfHostCompose(managed(), process.cwd(), { drafts: true })
+    expect(compose).toMatch(/PGRST_DB_SCHEMA: "public, draft, /)
+  })
+
+  it("leaves it off when nothing is versioned", () => {
+    const compose = renderSelfHostCompose(managed(), process.cwd(), { drafts: false })
+    expect(compose).toContain('PGRST_DB_SCHEMA: "public, supatype, graphql_public, auth"')
+    expect(compose).not.toContain("draft")
+  })
+})

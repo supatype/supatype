@@ -225,6 +225,51 @@ export interface SupatypeProjectConfig {
      */
     api_schemas?: readonly string[]
   }
+  /**
+   * Drafts and preview links, for the models that declare `versions`.
+   *
+   * Project-wide rather than per model: a draft is a draft whichever model it belongs to, and a
+   * reviewer granted sight of one is not granted it a table at a time.
+   */
+  publishing?: {
+    /**
+     * Studio roles that see every unpublished draft and its history, beyond the record's own
+     * creator. Defaults to `["admin", "developer"]`.
+     *
+     * The record's creator always sees their own drafts and is not listed here. Adding `editor`
+     * makes drafts visible across an editorial team, which is the usual reason to widen this; an
+     * empty list narrows it to creators alone.
+     *
+     * `anon` is never on this list and cannot be put on it. A draft schema readable without
+     * credentials would make publishing mean nothing.
+     *
+     * Studio can override this at runtime for a project that needs to change it without a push.
+     * This is the reviewable default that lives in git.
+     */
+    draft_visibility?: readonly ("admin" | "developer" | "editor")[]
+    /** Signed, expiring links that let someone without an account read a draft. */
+    preview?: {
+      /** Lifetime of a minted link when the request does not ask for one, in seconds. Default 900. */
+      default_ttl?: number
+      /** Ceiling for a link covering one record, in seconds. Default 604800, seven days. */
+      max_record_ttl?: number
+      /**
+       * Ceiling for a link covering every draft in the project, in seconds. Default 86400, one day.
+       *
+       * Shorter than a record link on purpose: the blast radius is every unpublished draft there is,
+       * so the window in which a leaked link is still worth anything should be smaller.
+       */
+      max_project_ttl?: number
+      /**
+       * Whether project-scoped links may be minted at all. Default true.
+       *
+       * Set false for a project where nothing should ever be shareable in bulk; record links keep
+       * working. Minting one is already restricted to `admin` and `developer`, since nobody can
+       * grant sight of drafts they cannot see themselves.
+       */
+      allow_project_scope?: boolean
+    }
+  }
   functions?: {
     /** Path to edge functions directory, relative to `supatype.root` when not absolute. */
     path?: string
@@ -636,6 +681,22 @@ export function pgSchema(cfg: SupatypeProjectConfig): string {
 export const STACK_API_SCHEMAS = ["supatype", "graphql_public", "auth"] as const
 
 /**
+ * The schema holding generated draft views, one per versioned model.
+ *
+ * Its own schema rather than a suffix on the table name, so a draft has the same table name and the
+ * same row type as what it is a draft of, and a client reaches it by switching profile.
+ */
+export const DRAFT_SCHEMA = "draft"
+
+/** What shapes the exposed-schema list, beyond the config itself. */
+export type ApiSchemaOptions = {
+  /** How field rules will be enforced here. `views` moves the managed schema off the list. */
+  tier?: "none" | "extension" | "views" | undefined
+  /** True when any model declares `versions`, which is what puts the `draft` schema on the list. */
+  drafts?: boolean | undefined
+}
+
+/**
  * Schemas to expose over REST, as `PGRST_DB_SCHEMA` wants them.
  *
  * The managed schema first, then what the stack needs for itself. Derived rather than hardcoded
@@ -644,18 +705,24 @@ export const STACK_API_SCHEMAS = ["supatype", "graphql_public", "auth"] as const
  * output mentioned the setting that caused it.
  *
  * `api_schemas` replaces the whole list when stated, including the stack schemas, so dropping
- * `supatype` from it is a supported way to stop exposing Studio's views. Order is preserved and
- * duplicates removed: PostgREST serves the first entry as the default profile, so the managed
- * schema has to lead.
+ * `supatype` from it is a supported way to stop exposing Studio's views. That holds for `draft` too:
+ * an explicit list has to name it, and `db check` reports a project whose models declare `versions`
+ * against a list that does not. Order is preserved and duplicates removed: PostgREST serves the first
+ * entry as the default profile, so the managed schema has to lead.
  */
-export function apiSchemas(cfg: SupatypeProjectConfig, tier?: "none" | "extension" | "views"): string[] {
+export function apiSchemas(cfg: SupatypeProjectConfig, options?: ApiSchemaOptions): string[] {
   const explicit = cfg.schema?.api_schemas
   // Tier-2 field masking serves from `api`, and the managed schema must come **off** the list: a
   // client picks its schema per request with `Accept-Profile`, so leaving it exposed would let any
   // caller read the unmasked table and make the mask opt-out. The API roles hold no privileges there
   // under tier 2 either, so exposing it would only produce denials.
-  const managed = tier === "views" ? "api" : pgSchema(cfg)
-  const list = explicit && explicit.length > 0 ? explicit : [managed, ...STACK_API_SCHEMAS]
+  const managed = options?.tier === "views" ? "api" : pgSchema(cfg)
+  // `draft` sits behind the managed schema and never in front of it: the first entry is the default
+  // profile, and a client that named no profile reading drafts by default would invert the feature.
+  const derived = options?.drafts === true
+    ? [managed, DRAFT_SCHEMA, ...STACK_API_SCHEMAS]
+    : [managed, ...STACK_API_SCHEMAS]
+  const list = explicit && explicit.length > 0 ? explicit : derived
 
   const seen = new Set<string>()
   const out: string[] = []
@@ -669,9 +736,79 @@ export function apiSchemas(cfg: SupatypeProjectConfig, tier?: "none" | "extensio
 }
 
 /** `PGRST_DB_SCHEMA` value: comma-separated, in order. */
-export function apiSchemaList(
-  cfg: SupatypeProjectConfig,
-  tier?: "none" | "extension" | "views",
-): string {
-  return apiSchemas(cfg, tier).join(", ")
+export function apiSchemaList(cfg: SupatypeProjectConfig, options?: ApiSchemaOptions): string {
+  return apiSchemas(cfg, options).join(", ")
+}
+
+/**
+ * Studio roles that see every draft, beyond each record's own creator.
+ *
+ * The creator is not in this list and cannot be removed from it: they wrote the draft, and a system
+ * where you cannot read back what you just saved is broken rather than secure. An empty configured
+ * list is honoured and means creators only, which is why this cannot fall back on emptiness.
+ */
+export const DEFAULT_DRAFT_VISIBILITY = ["admin", "developer"] as const
+
+/** Studio roles a Supatype project understands, most privileged first. */
+export const STUDIO_ROLES = ["admin", "developer", "editor"] as const
+
+/**
+ * The configured draft-visibility roles, or the default when the project states none.
+ *
+ * An unknown role name is dropped rather than passed through to a policy, where it would be a role
+ * nothing can ever hold: a typo would then read as a working setting that silently grants nobody.
+ */
+export function draftVisibilityRoles(cfg: SupatypeProjectConfig): string[] {
+  const declared = cfg.publishing?.draft_visibility
+  if (declared === undefined) return [...DEFAULT_DRAFT_VISIBILITY]
+  const known = new Set<string>(STUDIO_ROLES)
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const raw of declared) {
+    const role = raw.trim().toLowerCase()
+    if (!known.has(role) || seen.has(role)) continue
+    seen.add(role)
+    out.push(role)
+  }
+  return out
+}
+
+/** Bounds on a minted preview link, in seconds. */
+export type PreviewLimits = {
+  defaultTtl: number
+  maxRecordTtl: number
+  maxProjectTtl: number
+  allowProjectScope: boolean
+}
+
+export const PREVIEW_DEFAULTS: PreviewLimits = {
+  defaultTtl: 900,
+  maxRecordTtl: 604800,
+  maxProjectTtl: 86400,
+  allowProjectScope: true,
+}
+
+/**
+ * The project's preview-link bounds, defaults filled in.
+ *
+ * A stated value is clamped to at least a second and, for the default lifetime, to no more than the
+ * ceiling it would be issued against: a `default_ttl` above `max_record_ttl` would otherwise mint
+ * links that the same config refuses to honour.
+ */
+export function previewLimits(cfg: SupatypeProjectConfig): PreviewLimits {
+  const declared = cfg.publishing?.preview
+  const positive = (value: number | undefined, fallback: number): number =>
+    typeof value === "number" && Number.isFinite(value) && value >= 1 ? Math.floor(value) : fallback
+
+  const maxRecordTtl = positive(declared?.max_record_ttl, PREVIEW_DEFAULTS.maxRecordTtl)
+  const maxProjectTtl = positive(declared?.max_project_ttl, PREVIEW_DEFAULTS.maxProjectTtl)
+  return {
+    defaultTtl: Math.min(
+      positive(declared?.default_ttl, PREVIEW_DEFAULTS.defaultTtl),
+      Math.max(maxRecordTtl, maxProjectTtl),
+    ),
+    maxRecordTtl,
+    maxProjectTtl,
+    allowProjectScope: declared?.allow_project_scope ?? PREVIEW_DEFAULTS.allowProjectScope,
+  }
 }

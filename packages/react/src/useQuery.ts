@@ -21,6 +21,21 @@ export interface UseQueryOptions {
   refetchInterval?: number | undefined
   /** In-memory GET cache; pass `{ server: true }` for Valkey-backed server cache */
   cache?: QueryCacheOptions | undefined
+  /**
+   * Read the pending draft instead of what is published.
+   *
+   * For a model that declares `versions`. The rows come back with the same shape, so a preview
+   * screen is the published screen with this flag set, rather than a second component.
+   *
+   * **Not the read rule.** A draft is visible to the record's creator, to the project's elevated
+   * Studio roles, or to a caller holding a signed preview link; a caller entitled to published
+   * content is not thereby entitled to unpublished edits. A model with no draft view answers
+   * `PGRST106`, which arrives here as `error`.
+   *
+   * This is the *saved* draft. For unsaved keystrokes streamed out of an open Studio tab, see
+   * `useLivePreview`, which is a different mechanism answering a different question.
+   */
+  draft?: boolean | undefined
 }
 
 export interface UseQueryResult<TRow> {
@@ -68,8 +83,16 @@ export function useQuery<
     }
     setLoading(true)
 
+    // `any` here and below is pre-existing: the generated row types do not survive the dynamic
+    // table name, and narrowing them is a separate piece of work from this one.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let query: any = (client.from(table) as any).select(options?.select ?? "*")
+    const source: any = client.from(table)
+    // A draft read is the same request against a different schema, so it branches here rather than
+    // duplicating every filter below.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let query: any = (options?.draft === true ? source.draft() : source).select(
+      options?.select ?? "*",
+    )
 
     if (options?.filter !== undefined) {
       for (const [col, val] of Object.entries(options.filter)) {

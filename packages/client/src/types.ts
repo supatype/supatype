@@ -276,9 +276,27 @@ export interface AuthStorage {
   removeItem(key: string): void | Promise<void>
 }
 
+/**
+ * The schema holding one draft view per versioned model, selected by `Accept-Profile`.
+ *
+ * Stated here as well as in the CLI (`project-config.ts`, which puts it on `PGRST_DB_SCHEMA`) and
+ * the engine (which creates the views), because the SDK ships standalone and depending on a
+ * workspace package for one identifier would be a worse trade than three call sites naming it.
+ * Changing it means changing all three, the same as `api` for the field-masking views.
+ */
+export const DRAFT_SCHEMA = "draft"
+
 export interface SelectQueryOptions {
   count?: "exact" | "planned" | "estimated" | undefined
   head?: boolean | undefined
+  /**
+   * PostgREST schema to read from, sent as `Accept-Profile`.
+   *
+   * Set by `.draft()` rather than by hand: the point of a profile here is that a draft has the same
+   * table name and the same row type as what it is a draft of, so the only thing that changes
+   * between reading live content and reading the pending edit is which schema answers.
+   */
+  profile?: string | undefined
 }
 
 export interface SupatypeClientConfig {

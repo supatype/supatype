@@ -17,6 +17,7 @@ import type {
   SupatypeError,
   SelectQueryOptions,
 } from "./types.js"
+import { DRAFT_SCHEMA } from "./types.js"
 
 export type {
   User,
@@ -44,6 +45,7 @@ export {
   createCodeChallengeS256,
   PKCE_METHOD_S256,
 } from "./pkce.js"
+export { DRAFT_SCHEMA } from "./types.js"
 export type { QueryCacheOptions, CacheStatus } from "./query-cache.js"
 export { AuthClient } from "./auth.js"
 export { QueryBuilder, MutationBuilder, type HeadersProvider } from "./query.js"
@@ -78,6 +80,14 @@ class TableClient<TDef extends TableDef> {
   private readonly onUnauthorized: (() => Promise<void>) | undefined
   private readonly queryCache: QueryCache
   private readonly realtime: RealtimeClient
+  /**
+   * The schema this table's reads come from, set by `draft()`.
+   *
+   * Mutable, and safe to be: `from()` builds a fresh client per call, so nothing is shared between
+   * two queries. Reads only; a draft view is not writable and a write is an ordinary update that
+   * records a new version.
+   */
+  private profile: string | undefined
 
   constructor(
     baseUrl: string,
@@ -96,6 +106,28 @@ class TableClient<TDef extends TableDef> {
     this.queryCache = queryCache
   }
 
+  /**
+   * Read the pending draft instead of what is published.
+   *
+   * ```typescript
+   * const { data } = await supatype.from("posts").draft().select("id, title, body")
+   * ```
+   *
+   * Selects the generated `draft` schema, whose views carry the same row type as the table, so the
+   * only thing that changes is which schema answers. Available on models that declare `versions`;
+   * anything else has no draft view and answers `PGRST106`.
+   *
+   * **Read-only, and permission is not the read rule.** A draft is visible to the record's creator
+   * and to the project's elevated Studio roles, or to a caller holding a signed preview link. A
+   * caller who may read published content is not thereby entitled to read what has not been
+   * published. Write with the ordinary `update`, which records a new draft version; publish with
+   * `supatype.publish`.
+   */
+  draft(): this {
+    this.profile = DRAFT_SCHEMA
+    return this
+  }
+
   select<TResult = TDef["Row"]>(
     columns?: string | undefined,
     options?: SelectQueryOptions | undefined,
@@ -107,7 +139,9 @@ class TableClient<TDef extends TableDef> {
       columns,
       this.queryCache,
       this.onUnauthorized,
-      options,
+      // The profile joins the select options rather than riding a longer constructor: it is a
+      // property of the request being described, like `count` and `head` beside it.
+      { ...options, ...(this.profile !== undefined && { profile: this.profile }) },
     )
   }
 

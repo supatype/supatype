@@ -125,6 +125,12 @@ export class QueryBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
     if (this.countMode !== undefined) {
       this.extraHeaders["Prefer"] = `count=${this.countMode}`
     }
+    // A profile picks the schema that answers, which is how a draft is read: same table name, same
+    // row type, one header. Set at construction rather than as a chainable step, so it cannot be
+    // added to a request that has already been described.
+    if (selectOptions?.profile !== undefined) {
+      this.extraHeaders["Accept-Profile"] = selectOptions.profile
+    }
   }
 
   /** Enable GET caching. Use `{ server: true }` for Valkey-backed server cache. */
