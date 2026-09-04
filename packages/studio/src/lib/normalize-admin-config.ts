@@ -1,4 +1,11 @@
-import type { AdminConfig, FieldConfig, GlobalConfig, ModelConfig, NavGroup } from "../config.js"
+import type {
+  AdminConfig,
+  FieldConfig,
+  GlobalConfig,
+  ModelConfig,
+  ModelVersionsConfig,
+  NavGroup,
+} from "../config.js"
 
 function humanize(name: string): string {
   return name
@@ -67,7 +74,7 @@ export function normalizeAdminConfig(raw: unknown): AdminConfig {
       listColumns: (mo["listColumns"] as string[]) ?? [],
       searchFields: (mo["searchFields"] as string[]) ?? [],
       publishable: Boolean(mo["publishable"] ?? mo["publishing"] ?? false),
-      versioning: Boolean(mo["versioning"] ?? false),
+      versions: normalizeVersions(mo["versions"]),
       softDelete: Boolean(mo["softDelete"] ?? false),
       timestamps: Boolean(mo["timestamps"] ?? false),
       hasHooks: Boolean(mo["hasHooks"] ?? false),
@@ -168,4 +175,26 @@ export function normalizeAdminConfig(raw: unknown): AdminConfig {
 
 function toGlobalSuffix(name: string): string {
   return name.replace(/([A-Z])/g, "_$1").replace(/^_/, "").toLowerCase()
+}
+
+/**
+ * The model's `versions` object, or `null` when it declares none.
+ *
+ * Defensive about the shape rather than trusting it: this config is fetched at runtime and an older
+ * engine sends no `versions` key at all, in which case the version UI should be absent rather than
+ * half-rendered against undefined.
+ */
+function normalizeVersions(raw: unknown): ModelVersionsConfig | null {
+  if (typeof raw !== "object" || raw === null) return null
+  const value = raw as Record<string, unknown>
+  const versionsTable = value["versionsTable"]
+  if (typeof versionsTable !== "string" || versionsTable.length === 0) return null
+  return {
+    drafts: value["drafts"] !== false,
+    keep: typeof value["keep"] === "number" && value["keep"] >= 1 ? value["keep"] : 20,
+    versionsTable,
+    localizedColumns: Array.isArray(value["localizedColumns"])
+      ? value["localizedColumns"].filter((c): c is string => typeof c === "string")
+      : [],
+  }
 }
