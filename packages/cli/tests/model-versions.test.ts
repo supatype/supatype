@@ -182,8 +182,10 @@ describe("the exposed schema list with drafts", () => {
 })
 
 describe("draft visibility", () => {
-  it("defaults to the elevated roles, with the creator implicit", () => {
-    expect(draftVisibilityRoles(project())).toEqual(["admin", "developer"])
+  it("defaults to every Studio role, so seeing and acting line up", () => {
+    // Narrower than this put two decisions in conflict: whoever may update a record may draft it,
+    // so a role that can edit but cannot see drafts saves over a colleague's pending work.
+    expect(draftVisibilityRoles(project())).toEqual(["admin", "developer", "editor"])
   })
 
   it("honours an empty list as creators only", () => {

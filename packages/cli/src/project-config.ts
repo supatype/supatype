@@ -234,11 +234,14 @@ export interface SupatypeProjectConfig {
   publishing?: {
     /**
      * Studio roles that see every unpublished draft and its history, beyond the record's own
-     * creator. Defaults to `["admin", "developer"]`.
+     * creator. Defaults to all three, `["admin", "developer", "editor"]`.
      *
-     * The record's creator always sees their own drafts and is not listed here. Adding `editor`
-     * makes drafts visible across an editorial team, which is the usual reason to widen this; an
-     * empty list narrows it to creators alone.
+     * The record's creator always sees their own drafts and is not listed here. Narrowing this is
+     * the interesting case, and it has a trap: whoever may **update** a record may draft and publish
+     * it, so a role that can edit but cannot see drafts will build its save on the live row and
+     * discard a colleague's pending work. Take a role off this list only where it also cannot edit.
+     *
+     * An empty list narrows visibility to creators alone.
      *
      * `anon` is never on this list and cannot be put on it. A draft schema readable without
      * credentials would make publishing mean nothing.
@@ -743,11 +746,20 @@ export function apiSchemaList(cfg: SupatypeProjectConfig, options?: ApiSchemaOpt
 /**
  * Studio roles that see every draft, beyond each record's own creator.
  *
+ * All three of them, which is to say anyone with Studio write access. It was narrower, `admin` and
+ * `developer` only, and that put two decisions in conflict: whoever may **update** a record may
+ * draft and publish it, so an `editor` could edit a record whose pending draft they could not see,
+ * and their save would be built on the live row and silently discard a colleague's work. Two editors
+ * on one post is the ordinary editorial case, not an exotic one. Seeing and acting line up instead.
+ *
  * The creator is not in this list and cannot be removed from it: they wrote the draft, and a system
  * where you cannot read back what you just saved is broken rather than secure. An empty configured
  * list is honoured and means creators only, which is why this cannot fall back on emptiness.
+ *
+ * `anon` is not a Studio role and can never be here. A draft readable without credentials would make
+ * publishing mean nothing.
  */
-export const DEFAULT_DRAFT_VISIBILITY = ["admin", "developer"] as const
+export const DEFAULT_DRAFT_VISIBILITY = ["admin", "developer", "editor"] as const
 
 /** Studio roles a Supatype project understands, most privileged first. */
 export const STUDIO_ROLES = ["admin", "developer", "editor"] as const
