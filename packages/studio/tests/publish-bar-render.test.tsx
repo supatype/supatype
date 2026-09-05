@@ -70,7 +70,7 @@ describe("the publish bar", () => {
   it("renders a single row for a model with no localized field", () => {
     // Nobody without translations should have to read a locale column.
     const html = render(
-      <PublishBar model={model()} recordId="r1" savedAt={0} onNavigate={() => {}} />,
+      <PublishBar model={model()} recordId="r1" savedAt={0} seesDrafts onNavigate={() => {}} />,
     )
     expect(html).toContain("Publishing")
     expect(html).toContain("This record")
@@ -90,6 +90,7 @@ describe("the publish bar", () => {
         })}
         recordId="r1"
         savedAt={0}
+        seesDrafts
         onNavigate={() => {}}
       />,
     )
@@ -105,6 +106,7 @@ describe("the publish bar", () => {
         model={model({ versions: null })}
         recordId="r1"
         savedAt={0}
+        seesDrafts
         onNavigate={() => {}}
       />,
     )
@@ -124,6 +126,7 @@ describe("the publish bar", () => {
         })}
         recordId="r1"
         savedAt={0}
+        seesDrafts
         onNavigate={() => {}}
       />,
     )
@@ -132,9 +135,40 @@ describe("the publish bar", () => {
 
   it("offers a share control, since the link is the point of the feature", () => {
     const html = render(
-      <PublishBar model={model()} recordId="r1" savedAt={0} onNavigate={() => {}} />,
+      <PublishBar model={model()} recordId="r1" savedAt={0} seesDrafts onNavigate={() => {}} />,
     )
     expect(html).toContain("Share a preview")
+  })
+
+  it("shows nothing to a caller who does not see drafts", () => {
+    // Row level security cannot enforce this here: Studio's data plane goes through the proxy with
+    // the service role, which bypasses policies. A project that narrows draft visibility relies on
+    // this being the place the narrowing binds.
+    const html = render(
+      <PublishBar
+        model={model()}
+        recordId="r1"
+        savedAt={0}
+        seesDrafts={false}
+        onNavigate={() => {}}
+      />,
+    )
+    expect(html).toBe("")
+  })
+
+  it("hides itself until capability resolves, rather than showing and retracting", () => {
+    // `seesDrafts` starts false and becomes true once the server answers. Failing closed for that
+    // moment is right: the alternative flashes draft controls at someone who may not have them.
+    const html = render(
+      <PublishBar
+        model={model()}
+        recordId="r1"
+        savedAt={0}
+        seesDrafts={false}
+        onNavigate={() => {}}
+      />,
+    )
+    expect(html).not.toContain("Publishing")
   })
 })
 

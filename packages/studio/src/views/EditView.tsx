@@ -16,6 +16,7 @@ import {
   needsPerRecordCheck,
   useStudioFieldAccess,
 } from "../hooks/useStudioFieldAccess.js"
+import { useStudioCapability } from "../hooks/useStudioCapability.js"
 import { serializeRecordForApi } from "../lib/recordValues.js"
 import { describeViolations, validateRecord } from "../lib/validate-record.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
@@ -50,6 +51,7 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
 
   const isCreate = recordId === undefined
   const fieldAccess = useStudioFieldAccess()
+  const capability = useStudioCapability()
   // null = not asked or not answerable. Only ever set from the database's own answer.
   const [recordDeletable, setRecordDeletable] = useState<boolean | null>(null)
 
@@ -308,6 +310,7 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
           model={model}
           recordId={recordId}
           savedAt={savedAt}
+          seesDrafts={capability.seesDrafts}
           {...(livePreviewConfig && {
             previewUrl: previewUrlFor(livePreviewConfig, values),
           })}

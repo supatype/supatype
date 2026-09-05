@@ -17,6 +17,18 @@ export interface StudioCapability {
   /** Whether this role may switch modes at all. */
   canElevate: boolean
   canManageMembers: boolean
+  /**
+   * Whether this caller sees other people's unpublished work.
+   *
+   * From the server, not inferred here, and it needs its own field because row level security
+   * cannot supply it: Studio's data plane goes through the proxy with the service role, which
+   * bypasses policies. The draft-visibility setting compiles into those policies, so it binds the
+   * API and would not bind the UI. The server answers from the same stored setting, so one source
+   * of truth reaches both.
+   *
+   * False for a project with no versioned models, which has no drafts to show.
+   */
+  seesDrafts: boolean
   permissions: Record<string, boolean>
 }
 
@@ -26,6 +38,7 @@ const UNRESOLVED: StudioCapability = {
   mode: "self",
   canElevate: false,
   canManageMembers: false,
+  seesDrafts: false,
   permissions: {},
 }
 
@@ -57,6 +70,7 @@ export function useStudioCapability(): StudioCapability {
           role?: string
           mode?: string
           canElevate?: boolean
+          seesDrafts?: boolean
           permissions?: Record<string, boolean>
         }
         if (cancelled) return
@@ -68,6 +82,7 @@ export function useStudioCapability(): StudioCapability {
           mode: json.mode === "elevated" ? "elevated" : "self",
           canElevate: json.canElevate === true,
           canManageMembers: permissions["manageMembers"] === true,
+          seesDrafts: json.seesDrafts === true,
           permissions,
         })
       } catch {

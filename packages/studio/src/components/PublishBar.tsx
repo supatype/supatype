@@ -25,6 +25,19 @@ interface PublishBarProps {
   savedAt: number
   /** Where this record renders, when the project has said. */
   previewUrl?: string | undefined
+  /**
+   * Whether this caller sees other people's unpublished work.
+   *
+   * Passed in rather than read here, for the reason every other capability in Studio is: the view
+   * resolves it once and hands it down, so a component can be rendered and reasoned about without
+   * a network round trip deciding whether it exists.
+   *
+   * It has to be asked at all because row level security cannot answer it. Studio's data plane goes
+   * through the proxy with the service role, which bypasses policies, so the draft-visibility
+   * setting that compiles into them binds the API and not this. The server answers from the same
+   * stored setting, so one source of truth reaches both.
+   */
+  seesDrafts: boolean
   onNavigate: (path: string) => void
 }
 
@@ -46,6 +59,7 @@ export function PublishBar({
   recordId,
   savedAt,
   previewUrl,
+  seesDrafts,
   onNavigate,
 }: PublishBarProps): React.ReactElement | null {
   const client = useAdminClient()
@@ -70,6 +84,10 @@ export function PublishBar({
   }, [reload])
 
   if (model.versions === null || !model.versions.drafts) return null
+  // A project can narrow who sees drafts, and Studio's data plane goes through the proxy with the
+  // service role, so no policy stops this component reading them. The server answers from the same
+  // stored setting the policies compile in, and this is where that answer binds.
+  if (!seesDrafts) return null
 
   const locales = publishableLocales(
     model.versions,
