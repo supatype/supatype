@@ -15,7 +15,9 @@ export default defineConfig({
   server: { mode: "dev", port: 54399 },
   app: { mode: "none" },
   versions: {
-    engine: "0.4.2",
+    // The publishing layer needs 0.3.0+. Point at a local build with `supatype.local.config.ts`
+    // until it is released; see `supatype.local.config.ts.example`.
+    engine: "0.3.0",
     server: "0.1.0",
     postgres: "17",
     deno: "2.2.0",

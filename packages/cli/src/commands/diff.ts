@@ -1,3 +1,4 @@
+import { withPublishing } from "../model-versioning.js"
 import type { Command } from "commander"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { resolveRuntimeProvider, schemaPathFromProject } from "../project-config.js"
@@ -19,7 +20,7 @@ export function registerDiff(program: Command): void {
       const pgSchema = schemaPgSchema(cwd)
 
       const ast = await withSpinner("Loading schema", async () =>
-        loadSchemaAst(schemaPathFromProject(config, cwd), cwd),
+        withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config),
       )
 
       const linked = loadProjectLink(cwd)

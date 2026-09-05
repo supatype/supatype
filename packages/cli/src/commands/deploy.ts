@@ -11,6 +11,7 @@
  *   supatype deploy logs <version>, show build logs
  */
 
+import { withPublishing } from "../model-versioning.js"
 import type { Command } from "commander"
 import { existsSync, readdirSync, statSync, createReadStream, mkdirSync, cpSync } from "node:fs"
 import { join, relative } from "node:path"
@@ -74,7 +75,7 @@ export function registerDeploy(program: Command): void {
 
       // Step 1: Schema push (unless --app-only or --skip-build, or already done via cloud.json)
       if (!opts.appOnly && !opts.skipBuild && !schemaDone) {
-        const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
+        const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
 
         if (opts.local) {
           step("Schema Push (local)")

@@ -13,7 +13,8 @@
 import { existsSync } from "node:fs"
 import { loadSchemaAst } from "./config.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
-import { schemaPathFromProject } from "./project-config.js"
+import type { ExtractedSchemaAstV2 } from "./schema-ast-v2.js"
+import { draftVisibilityRoles, previewLimits, schemaPathFromProject } from "./project-config.js"
 
 /** Versions kept per record when the model states no retention. */
 export const DEFAULT_VERSIONS_KEPT = 20
@@ -131,5 +132,36 @@ export function projectHasVersionedModels(cwd: string, config: SupatypeProjectCo
     return schemaHasVersionedModels(loadSchemaAst(schemaPath, cwd))
   } catch {
     return false
+  }
+}
+
+/**
+ * The AST with this project's publishing settings attached, when anything is versioned.
+ *
+ * The engine compiles draft visibility into the generated policies, and it **refuses** a push whose
+ * schema has versioned models and carries no settings rather than applying a default. That refusal
+ * is the reason this is safe to add at a handful of call sites instead of somewhere unmissable: a
+ * path that forgets fails loudly at push time, naming what is missing, rather than quietly
+ * narrowing or widening who can read unpublished content.
+ *
+ * Returns the AST untouched for a project with no versioned model, so nothing else grows a key it
+ * has no use for.
+ */
+export function withPublishing(
+  ast: ExtractedSchemaAstV2,
+  config: SupatypeProjectConfig,
+): ExtractedSchemaAstV2 {
+  if (!schemaHasVersionedModels(ast)) return ast
+
+  const limits = previewLimits(config)
+  return {
+    ...ast,
+    publishing: {
+      draftVisibility: draftVisibilityRoles(config),
+      previewDefaultTtl: limits.defaultTtl,
+      previewMaxRecordTtl: limits.maxRecordTtl,
+      previewMaxProjectTtl: limits.maxProjectTtl,
+      previewAllowProjectScope: limits.allowProjectScope,
+    },
   }
 }

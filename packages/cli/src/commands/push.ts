@@ -1,3 +1,4 @@
+import { withPublishing } from "../model-versioning.js"
 import type { Command } from "commander"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
@@ -71,7 +72,7 @@ export function registerPush(program: Command): void {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
       const pgSchema = schemaPgSchema(cwd)
-      const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
+      const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
       assertModelHooksResolve(cwd, config, ast)
       assertServiceRoleGrantsResolve(cwd, config)
       assertEngineSupportsSchema(ast, pinnedVersion("engine", config))

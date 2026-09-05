@@ -365,6 +365,22 @@ export interface SupatypeClientConfig {
    */
   initialSession?: Session | undefined
   /**
+   * A signed preview link's token, used as this client's whole credential.
+   *
+   * Set it on a client built to serve one preview request. The link names the record it covers and
+   * carries no subject, so the bearer is nobody in particular: the database's own policy decides
+   * what they may read, and there is no admin key anywhere on the path.
+   *
+   * **It wins over a signed-in session, deliberately.** A preview route is opened by whoever was
+   * sent the link, and some of them will already be logged in as someone with no access to the
+   * draft. Falling back to that session would show them "not found" and send them to ask why the
+   * post had been deleted.
+   *
+   * Refused alongside `serviceRoleKey`: a route that has both is a route sending admin credentials
+   * down a path meant for strangers, which is the mistake this feature exists to remove.
+   */
+  previewToken?: string | undefined
+  /**
    * Extra headers merged into every request (e.g. Studio `X-Supatype-Environment`).
    */
   headers?: Record<string, string> | undefined

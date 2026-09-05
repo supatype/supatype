@@ -43,9 +43,7 @@ declare module "@supatype/client" {
   feedCaption: string | null
   id: string
   published_at: string | null
-  scheduled_at: string | null
   slug: string | null
-  status: "draft" | "published" | "scheduled" | "archived"
   teaser: string | null
   title: string
   updated_at: string
@@ -61,9 +59,7 @@ declare module "@supatype/client" {
   feedCaption?: string | null
   id?: string
   published_at?: string | null
-  scheduled_at?: string | null
   slug?: string | null
-  status: "draft" | "published" | "scheduled" | "archived"
   teaser?: string | null
   title: string
   updated_at?: string
@@ -79,9 +75,7 @@ declare module "@supatype/client" {
   feedCaption?: string | null
   id?: string
   published_at?: string | null
-  scheduled_at?: string | null
   slug?: string | null
-  status?: "draft" | "published" | "scheduled" | "archived"
   teaser?: string | null
   title?: string
   updated_at?: string

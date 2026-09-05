@@ -2,6 +2,7 @@
  * `supatype dev` when `provider: docker`, full self-host Compose stack (Kong gateway).
  */
 
+import { withPublishing } from "./model-versioning.js"
 import { existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join, resolve } from "node:path"
@@ -554,7 +555,7 @@ async function runComposeSchemaPush(
   schemaPath: string,
   composeProject: string,
 ): Promise<void> {
-  const ast = loadSchemaAst(schemaPath, cwd)
+  const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
   const astJson = JSON.stringify(ast)
 
   const supatypeDir = join(cwd, ".supatype")
@@ -787,7 +788,7 @@ export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfi
     const brand = { intro: "Schema diff" }
     await ensureDockerDbPublishedForHostEngine(cwd, config, brand)
     const schemaPath = schemaPathFromProject(config, cwd)
-    const ast = loadSchemaAst(schemaPath, cwd)
+    const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
     await ensureEngine()
     return engineRequest<DiffResult>("/diff", {
       ast,
@@ -809,7 +810,7 @@ export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfi
   await startComposeDatabase(config, paths, cwd, project, diffBrand)
 
   const schemaPath = schemaPathFromProject(config, cwd)
-  const ast = loadSchemaAst(schemaPath, cwd)
+  const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
 
   const supatypeDir = join(cwd, ".supatype")
   mkdirSync(supatypeDir, { recursive: true })
@@ -864,7 +865,7 @@ export async function pushSchemaDocker(cwd: string, config: SupatypeProjectConfi
   await startComposeDatabase(config, paths, cwd, project, pushBrand)
 
   const schemaPath = schemaPathFromProject(config, cwd)
-  const ast = loadSchemaAst(schemaPath, cwd)
+  const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
   await runComposeSchemaPush(cwd, config, paths, schemaPath, project)
 
   const upGateway = runDockerCompose(paths.composePath, ["up", "-d"], cwd, project, {
@@ -1076,7 +1077,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
     startedAt: new Date().toISOString(),
   })
 
-  const ast = loadSchemaAst(schemaPath, cwd)
+  const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
   await provisionDockerStorageBuckets(ast, kongPort, serviceRoleKey)
 
   const pidDir = join(homedir(), ".supatype", "projects", config.project.name, "pid")

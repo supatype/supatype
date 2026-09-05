@@ -101,3 +101,41 @@ describe("calling a function outside the default schema", () => {
     expect(captured.headers()["Content-Profile"]).toBeUndefined()
   })
 })
+
+describe("a preview link as the client's credential", () => {
+  beforeEach(() => vi.restoreAllMocks())
+
+  it("is sent as the Authorization header", async () => {
+    const captured = captureHeaders()
+    const client = createClient({ url: BASE, anonKey: "anon-key", previewToken: "preview.jwt" })
+    await client.from("posts").draft().select("id")
+    expect(captured.headers()["Authorization"]).toBe("Bearer preview.jwt")
+  })
+
+  it("keeps the anon apikey beside it, which the gateway still wants", async () => {
+    const captured = captureHeaders()
+    const client = createClient({ url: BASE, anonKey: "anon-key", previewToken: "preview.jwt" })
+    await client.from("posts").draft().select("id")
+    expect(captured.headers()["apikey"]).toBe("anon-key")
+  })
+
+  it("refuses to be built beside a service role key", () => {
+    // The two are never both correct: a route with both is sending admin credentials down a path
+    // meant for strangers, which is what the preview link exists to remove.
+    expect(() =>
+      createClient({
+        url: BASE,
+        anonKey: "anon-key",
+        previewToken: "preview.jwt",
+        serviceRoleKey: "service.jwt",
+      }),
+    ).toThrow(/cannot carry both/)
+  })
+
+  it("leaves an ordinary client alone", async () => {
+    const captured = captureHeaders()
+    const client = createClient({ url: BASE, anonKey: "anon-key" })
+    await client.from("posts").select("id")
+    expect(captured.headers()["Authorization"]).toBe("Bearer anon-key")
+  })
+})

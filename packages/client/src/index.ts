@@ -464,6 +464,17 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
   // Warn early if a direct Postgres URL is used in a serverless environment
   warnIfServerlessDirectConnection(config.url)
 
+  // A client with both is a route sending admin credentials down a path meant for strangers, which
+  // is precisely what the preview link exists to remove. Thrown rather than warned: the two are
+  // never both correct, and a warning in a server log is not read by whoever wrote the route.
+  if (config.previewToken !== undefined && config.serviceRoleKey !== undefined) {
+    throw new Error(
+      "A Supatype client cannot carry both `previewToken` and `serviceRoleKey`. A preview link is " +
+        "the bearer's whole credential and needs no admin key; sending one anyway would let " +
+        "anybody who reached that route read everything.",
+    )
+  }
+
   const baseHeaders: Record<string, string> = {
     apikey: config.anonKey,
     Authorization: `Bearer ${config.anonKey}`,
@@ -509,6 +520,12 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
         "Content-Type": "application/json",
         ...config.headers,
       }
+    }
+    // A preview link is the whole credential, and it comes before any session on purpose: whoever
+    // opened the link may well be signed in as someone with no access to the draft, and quietly
+    // using that identity would show them "not found".
+    if (config.previewToken) {
+      return { ...baseHeaders, Authorization: `Bearer ${config.previewToken}` }
     }
     await auth.ensureValidSession()
     const token = auth.currentAccessToken
