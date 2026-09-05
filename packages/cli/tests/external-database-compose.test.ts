@@ -198,3 +198,46 @@ describe("the draft schema in generated compose", () => {
     expect(compose).not.toContain("draft")
   })
 })
+
+describe("the server's own configuration keys", () => {
+  it("uses the SUPATYPE_ prefix the server actually reads", () => {
+    // The server's config prefix is "supatype", so a GOTRUE_ key is read by nothing. It does not
+    // warn about the ones it ignores: it dies on the first *required* key it cannot find, so
+    // self-host failed to start with a message naming a variable that was present in .env under
+    // another spelling, and no test noticed because none asserted these.
+    const compose = renderSelfHostCompose(managed())
+    for (const key of [
+      "SUPATYPE_API_EXTERNAL_URL",
+      "SUPATYPE_API_HOST",
+      "SUPATYPE_API_PORT",
+      "SUPATYPE_DB_DRIVER",
+      "SUPATYPE_DB_DATABASE_URL",
+      "SUPATYPE_SITE_URL",
+      "SUPATYPE_JWT_SECRET",
+      "SUPATYPE_DISABLE_SIGNUP",
+      "SUPATYPE_MAILER_AUTOCONFIRM",
+    ]) {
+      expect(compose).toContain(`${key}:`)
+    }
+  })
+
+  it("sets no GOTRUE_ key on the server, since none of them are read", () => {
+    const compose = renderSelfHostCompose(managed())
+    const serverBlock = compose.split("\n  server:")[1]?.split("\n  kong:")[0] ?? ""
+    const stale = serverBlock
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => /^GOTRUE_[A-Z_]+:/.test(line))
+    expect(stale).toEqual([])
+  })
+
+  it("reads its override from the current name too, not the retired one", () => {
+    // Interpolating from GOTRUE_MAILER_AUTOCONFIRM would require the operator to keep that key in
+    // `.env` — and the server reads config files into its environment before checking for retired
+    // names, so its presence there is fatal. The old spelling cannot be the escape hatch when
+    // having it set at all is the failure.
+    const compose = renderSelfHostCompose(managed())
+    expect(compose).toContain("SUPATYPE_MAILER_AUTOCONFIRM: ${SUPATYPE_MAILER_AUTOCONFIRM:-true}")
+    expect(compose).not.toContain("${GOTRUE_MAILER_AUTOCONFIRM")
+  })
+})

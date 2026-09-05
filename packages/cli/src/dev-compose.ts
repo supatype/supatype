@@ -267,8 +267,11 @@ export function upsertDevComposeEnv(
     EXPO_PUBLIC_SUPATYPE_URL: apiUrl,
     SUPATYPE_KONG_PORT: String(kongPort),
     API_EXTERNAL_URL: apiUrl,
-    SITE_URL: apiUrl,
-    GOTRUE_MAILER_AUTOCONFIRM: "true",
+    // Not GOTRUE_MAILER_AUTOCONFIRM. The server reads its config files *into* the process
+    // environment before checking for retired names, so a stale key in `.env` is as fatal as one
+    // in the container's own environment: it refuses to start and names the rename. That is the
+    // right behaviour on its side, and it means this file must be written in the current spelling.
+    SUPATYPE_MAILER_AUTOCONFIRM: "true",
     ...imagePins,
   }
   // Never for an external database: this URL describes the `db` container, which that project does
@@ -298,13 +301,23 @@ export function upsertDevComposeEnv(
     (key) => !(wantsLocalServer && key === "SUPATYPE_SERVER_IMAGE"),
   )
   const removeImageKeys = managedImageKeys.filter((key) => !(key in imagePins))
+  // The server refuses to start when *any* retired name is in scope, and it reads the project's
+  // config files into its environment before checking, so a `.env` this CLI wrote under the old
+  // spelling is fatal to a stack that has otherwise been upgraded. Only the key this file used to
+  // write is removed: an operator's own GOTRUE_ variable is theirs, and the server's error names it
+  // and its replacement precisely enough to fix by hand.
+  const retiredKeys = ["GOTRUE_MAILER_AUTOCONFIRM"]
   upsertEnvFile(cwd, updates, {
     removeManaged: removeImageKeys,
     managed: managedImageKeys,
     // A local image left in `.env` after the project stopped asking for one would keep pointing
     // compose at a stale build, and it carries no marker for `removeManaged` to act on.
-    ...(!wantsLocalServer &&
-      !("SUPATYPE_SERVER_IMAGE" in imagePins) && { remove: ["SUPATYPE_SERVER_IMAGE"] }),
+    remove: [
+      ...retiredKeys,
+      ...(!wantsLocalServer && !("SUPATYPE_SERVER_IMAGE" in imagePins)
+        ? ["SUPATYPE_SERVER_IMAGE"]
+        : []),
+    ],
   })
 }
 

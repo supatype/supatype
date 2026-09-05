@@ -14,8 +14,8 @@ export default defineConfig({
     upstream: "http://host.docker.internal:3000",
   },
   versions: {
-    engine: "0.4.2",
-    server: "0.1.0",
+    engine: "0.3.0",
+    server: "2.0.1",
     postgres: "17.2",
     deno: "2.2.0",
   },

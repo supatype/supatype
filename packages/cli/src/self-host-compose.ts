@@ -582,20 +582,26 @@ ${realtimeServerEnv}
       SUPATYPE_CONTROL_PLANE_URL: http://control-plane:8080
       SUPATYPE_VALKEY_ADDR: valkey:6379
 ${appEnv}
-      GOTRUE_API_HOST: 0.0.0.0
-      GOTRUE_API_PORT: 9999
-      API_EXTERNAL_URL: \${API_EXTERNAL_URL:-${externalUrlFallback}}
-      GOTRUE_API_EXTERNAL_URL: \${API_EXTERNAL_URL:-${externalUrlFallback}}
-      GOTRUE_DB_DRIVER: postgres
-      GOTRUE_DB_DATABASE_URL: "${gotrueUrl}${gotrueSearchPathSeparator}search_path=auth"
-      GOTRUE_SITE_URL: \${SITE_URL:-${siteUrlFallback}}
-      GOTRUE_JWT_SECRET: \${JWT_SECRET:?JWT_SECRET is missing from .env}
-      GOTRUE_JWT_EXP: 3600
-      GOTRUE_JWT_AUD: authenticated
-      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
-      GOTRUE_JWT_ADMIN_ROLES: service_role,supatype_admin
-      GOTRUE_MAILER_AUTOCONFIRM: \${GOTRUE_MAILER_AUTOCONFIRM:-true}
-      GOTRUE_DISABLE_SIGNUP: \${DISABLE_SIGNUP:-false}
+      # The auth half of the server reads SUPATYPE_* keys, not GOTRUE_* ones.
+      #
+      # Its config prefix is "supatype" (EnvPrefix in the server's conf package), so every GOTRUE_
+      # key this file used to emit was read by nothing at all. The server did not warn about them:
+      # it died on the first *required* key it could not find, SUPATYPE_API_EXTERNAL_URL, before it
+      # ever got as far as ignoring the rest. Self-host has therefore been unable to start since the
+      # rename, and the failure named a variable that was present in .env under another spelling.
+      SUPATYPE_API_HOST: 0.0.0.0
+      SUPATYPE_API_PORT: 9999
+      SUPATYPE_API_EXTERNAL_URL: \${API_EXTERNAL_URL:-${externalUrlFallback}}
+      SUPATYPE_DB_DRIVER: postgres
+      SUPATYPE_DB_DATABASE_URL: "${gotrueUrl}${gotrueSearchPathSeparator}search_path=auth"
+      SUPATYPE_SITE_URL: \${SITE_URL:-${siteUrlFallback}}
+      SUPATYPE_JWT_SECRET: \${JWT_SECRET:?JWT_SECRET is missing from .env}
+      SUPATYPE_JWT_EXP: 3600
+      SUPATYPE_JWT_AUD: authenticated
+      SUPATYPE_JWT_DEFAULT_GROUP_NAME: authenticated
+      SUPATYPE_JWT_ADMIN_ROLES: service_role,supatype_admin
+      SUPATYPE_MAILER_AUTOCONFIRM: \${SUPATYPE_MAILER_AUTOCONFIRM:-true}
+      SUPATYPE_DISABLE_SIGNUP: \${DISABLE_SIGNUP:-false}
 ${devLocal ? "      STUDIO_OPEN_DEV: \"1\"\n" : ""}
     depends_on:
 ${dbDependencyClause}      valkey:

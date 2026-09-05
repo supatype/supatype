@@ -18,7 +18,7 @@ export default defineConfig({
     // The publishing layer needs 0.3.0+. Point at a local build with `supatype.local.config.ts`
     // until it is released; see `supatype.local.config.ts.example`.
     engine: "0.3.0",
-    server: "0.1.0",
+    server: "2.0.1",
     postgres: "17",
     deno: "2.2.0",
   },
