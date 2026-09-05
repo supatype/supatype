@@ -29,17 +29,32 @@ export function ScheduleControl({
   onCancel,
 }: ScheduleControlProps): React.ReactElement {
   const [value, setValue] = useState("")
+  const [open, setOpen] = useState(false)
 
   if (scheduledFor !== null) {
     return (
       <div className="flex items-center gap-2 text-xs">
-        <span className="text-muted-foreground">
-          Goes live {formatWhen(scheduledFor)}
-        </span>
+        <span className="text-muted-foreground">Goes live {formatWhen(scheduledFor)}</span>
         <Button size="xs" variant="ghost" disabled={busy} onClick={onCancel}>
           Cancel
         </Button>
       </div>
+    )
+  }
+
+  // Closed until asked for. Rendering the picker inline meant a record with two locales opened with
+  // two date inputs in a summary bar, before anyone had said they wanted to schedule anything: the
+  // bar is meant to answer "what does the world see", and a form is not an answer.
+  if (!open) {
+    return (
+      <Button
+        size="xs"
+        variant="ghost"
+        disabled={busy}
+        onClick={() => { setOpen(true) }}
+      >
+        Schedule instead
+      </Button>
     )
   }
 
@@ -64,6 +79,9 @@ export function ScheduleControl({
         }}
       >
         Schedule
+      </Button>
+      <Button size="xs" variant="ghost" disabled={busy} onClick={() => { setOpen(false) }}>
+        Cancel
       </Button>
       {value !== "" && !valid && (
         <span className="text-xs text-muted-foreground">Pick a time in the future.</span>
