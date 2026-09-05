@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  fetchPendingDraftIds,
   publishableLocales,
   publishingState,
   WHOLE_RECORD,
@@ -131,5 +132,69 @@ describe("what the history says about a record", () => {
     expect(state.newest).toBeNull()
     expect(state.hasPendingDraft).toBe(false)
     expect(state.locales[WHOLE_RECORD]).toBe("absent")
+  })
+})
+
+describe("which records have an edit waiting", () => {
+  const model = {
+    tableName: "posts",
+    primaryKey: "id",
+    versions: versions({ versionsTable: "posts_versions" }),
+  } as unknown as Parameters<typeof fetchPendingDraftIds>[1]
+
+  function clientReturning(rows: unknown[]): Parameters<typeof fetchPendingDraftIds>[0] {
+    const chain = {
+      select: () => chain,
+      in: () => chain,
+      order: () => Promise.resolve({ data: rows, error: null }),
+    }
+    return { from: () => chain } as unknown as Parameters<typeof fetchPendingDraftIds>[0]
+  }
+
+  it("counts a record whose newest version is above the live one", async () => {
+    const pending = await fetchPendingDraftIds(
+      clientReturning([
+        { record_id: "a", version: 2, published_locales: {} },
+        { record_id: "a", version: 1, published_locales: { en: "2026-09-05T09:00:00Z" } },
+      ]),
+      model,
+      ["a"],
+    )
+    expect([...pending]).toEqual(["a"])
+  })
+
+  it("counts a record that has never been published", async () => {
+    // There is content nobody outside can see, which is the thing the badge is for.
+    const pending = await fetchPendingDraftIds(
+      clientReturning([{ record_id: "b", version: 1, published_locales: {} }]),
+      model,
+      ["b"],
+    )
+    expect([...pending]).toEqual(["b"])
+  })
+
+  it("leaves out a record whose newest version is the live one", async () => {
+    const pending = await fetchPendingDraftIds(
+      clientReturning([
+        { record_id: "c", version: 2, published_locales: { en: "2026-09-05T09:00:00Z" } },
+        { record_id: "c", version: 1, published_locales: {} },
+      ]),
+      model,
+      ["c"],
+    )
+    expect(pending.size).toBe(0)
+  })
+
+  it("asks nothing of the server when there is nothing to ask about", async () => {
+    // A list of fifty records should cost one request; an empty page should cost none.
+    let called = false
+    const client = {
+      from: () => {
+        called = true
+        return { select: () => ({ in: () => ({ order: () => Promise.resolve({ data: [], error: null }) }) }) }
+      },
+    } as unknown as Parameters<typeof fetchPendingDraftIds>[0]
+    expect((await fetchPendingDraftIds(client, model, [])).size).toBe(0)
+    expect(called).toBe(false)
   })
 })

@@ -1,5 +1,6 @@
 import React, { useRef, useEffect } from "react"
 import type { LivePreviewConfig, ModelConfig } from "../config.js"
+import { previewUrlFor } from "../lib/preview-url.js"
 
 interface LivePreviewPaneProps {
   config: LivePreviewConfig
@@ -10,13 +11,9 @@ interface LivePreviewPaneProps {
 export function LivePreviewPane({ config, values, model }: LivePreviewPaneProps): React.ReactElement {
   const iframeRef = useRef<HTMLIFrameElement>(null)
 
-  // Build preview URL from pattern
-  const previewUrl = config.urlPattern
-    ? config.urlPattern.replace(
-        /\{(\w+)\}/g,
-        (_, field: string) => encodeURIComponent(String(values[field] ?? "")),
-      )
-    : config.url
+  // Where this record renders. Shared with the preview-link control, which points somebody with no
+  // account at the same address.
+  const previewUrl = previewUrlFor(config, values)
 
   // PostMessage sync: send form data to the iframe on every change
   useEffect(() => {

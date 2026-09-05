@@ -295,3 +295,54 @@ export async function fetchRecordForEditing(
   }
   return { values: row, fromDraft: false, error: null }
 }
+
+/**
+ * Which of these records have an edit waiting.
+ *
+ * One query for the page rather than one per row: a list of fifty records should cost one request,
+ * and the alternative is fifty round trips to render a badge.
+ *
+ * Only the three columns the answer needs, and deliberately **not** `data`: a page of records with
+ * twenty versions each would otherwise pull every snapshot of every one of them across the wire to
+ * decide whether to draw a dot.
+ *
+ * Returns an empty set on any failure. A missing badge is a smaller wrong than a list that will not
+ * render, and the record's own editor is authoritative about its state anyway.
+ */
+export async function fetchPendingDraftIds(
+  client: SupatypeClient,
+  model: ModelConfig,
+  recordIds: string[],
+): Promise<Set<string>> {
+  const versions = model.versions
+  if (versions === null || !versions.drafts || recordIds.length === 0) return new Set()
+
+  const result = await client
+    .from(versions.versionsTable as never)
+    .select("record_id, version, published_locales")
+    .in("record_id", recordIds)
+    .order("version", { ascending: false })
+
+  if (result.error !== null || result.data === null) return new Set()
+
+  const newest = new Map<string, number>()
+  const live = new Map<string, number>()
+  for (const raw of result.data as unknown as Array<{
+    record_id: string
+    version: number
+    published_locales: Record<string, string> | null
+  }>) {
+    const id = String(raw.record_id)
+    newest.set(id, Math.max(newest.get(id) ?? 0, raw.version))
+    if (raw.published_locales !== null && Object.keys(raw.published_locales).length > 0) {
+      live.set(id, Math.max(live.get(id) ?? 0, raw.version))
+    }
+  }
+
+  const pending = new Set<string>()
+  for (const [id, version] of newest) {
+    // Never published counts as waiting: there is content nobody outside can see.
+    if (version > (live.get(id) ?? 0)) pending.add(id)
+  }
+  return pending
+}

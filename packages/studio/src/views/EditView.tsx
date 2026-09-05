@@ -5,6 +5,7 @@ import { useAdminClient } from "../hooks/useAdminClient.js"
 import { useLocale } from "../hooks/useLocale.js"
 import { LivePreviewPane } from "../components/LivePreviewPane.js"
 import { PublishBar } from "../components/PublishBar.js"
+import { previewUrlFor } from "../lib/preview-url.js"
 import type { ModelConfig } from "../config.js"
 import { useAdminConfig } from "../hooks/useAdminConfig.js"
 import { splitEditFields } from "../lib/edit-field-layout.js"
@@ -307,6 +308,9 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
           model={model}
           recordId={recordId}
           savedAt={savedAt}
+          {...(livePreviewConfig && {
+            previewUrl: previewUrlFor(livePreviewConfig, values),
+          })}
           onNavigate={onNavigate}
         />
       )}

@@ -11,6 +11,8 @@ import {
   type CellAccess,
 } from "../hooks/useStudioFieldAccess.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
+import { Badge } from "../components/ui.js"
+import { fetchPendingDraftIds } from "../lib/publishing.js"
 
 interface ListViewProps {
   model: ModelConfig
@@ -84,6 +86,21 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
       return { field: fieldName, direction: "asc" }
     })
   }
+
+  // Which rows have an edit nobody outside can see yet. One query for the page, and a failure just
+  // means no badges: the record's own editor is authoritative about its state.
+  const [pendingDrafts, setPendingDrafts] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const ids = rows.map((r) => String(r[model.primaryKey]))
+      const pending = await fetchPendingDraftIds(client, model, ids)
+      if (!cancelled) setPendingDrafts(pending)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [client, model, rows])
 
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
@@ -214,7 +231,7 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
                         aria-label={`Select row ${id}`}
                       />
                     </td>
-                    {columns.map((col) => (
+                    {columns.map((col, index) => (
                       <td key={col.name} className="st-table-cell">
                         <AccessAwareCell
                           access={cellAccess(fieldAccess, model.tableName, col.name, row[col.name])}
@@ -226,6 +243,14 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
                             defaultLocale={defaultLocale}
                           />
                         </AccessAwareCell>
+                        {/* On the first column, so it reads as a property of the record rather than
+                            of a field. An editor scanning a list needs to see that something is
+                            waiting without opening every row to find out. */}
+                        {index === 0 && pendingDrafts.has(id) && (
+                          <Badge variant="yellow" className="ml-2">
+                            Draft
+                          </Badge>
+                        )}
                       </td>
                     ))}
                   </tr>
