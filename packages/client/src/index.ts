@@ -15,6 +15,7 @@ import type {
   SupatypeFunctions,
   SupatypeClientConfig,
   SupatypeError,
+  RpcOptions,
   SelectQueryOptions,
 } from "./types.js"
 import { DRAFT_SCHEMA } from "./types.js"
@@ -32,6 +33,7 @@ export type {
   SupatypeClientConfig,
   FunctionDef,
   AuthStorage,
+  RpcOptions,
   SelectQueryOptions,
   TableDef,
   TableInsert,
@@ -452,7 +454,7 @@ export interface SupatypeClient<TDatabase extends AnyDatabase = AugmentedDatabas
   rpc<TFn extends FunctionNames<TDatabase>>(
     fn: TFn,
     params?: FunctionArgs<TDatabase, TFn> | undefined,
-    options?: { head?: boolean | undefined; count?: "exact" | "planned" | "estimated" | undefined } | undefined,
+    options?: RpcOptions | undefined,
   ): Promise<RpcResult<FunctionReturns<TDatabase, TFn>>>
 }
 
@@ -610,13 +612,19 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
     async rpc<TFn extends FunctionNames<TDatabase>>(
       fn: TFn,
       params?: FunctionArgs<TDatabase, TFn> | undefined,
-      options?: { head?: boolean | undefined; count?: "exact" | "planned" | "estimated" | undefined } | undefined,
+      options?: RpcOptions | undefined,
     ): Promise<RpcResult<FunctionReturns<TDatabase, TFn>>> {
       const headers: Record<string, string> = { ...(await getAuthHeaders()) }
       const method = options?.head === true ? "HEAD" : "POST"
 
       if (options?.count !== undefined) {
         headers["Prefer"] = `count=${options.count}`
+      }
+      // PostgREST resolves `/rpc/<name>` against the default profile, so a function in any other
+      // schema is unreachable without this. `Content-Profile` rather than `Accept-Profile`, because
+      // an RPC call is a POST and PostgREST reads the write-side header for it.
+      if (options?.schema !== undefined) {
+        headers["Content-Profile"] = options.schema
       }
 
       let res: Response

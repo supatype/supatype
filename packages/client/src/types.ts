@@ -177,6 +177,23 @@ export interface QueryResult<TData> {
 
 // ─── RPC result ──────────────────────────────────────────────────────────────
 
+/**
+ * Options for {@link SupatypeClient.rpc}.
+ *
+ * `schema` is not decoration. PostgREST resolves `/rpc/<name>` against the
+ * **default profile**, which is the first schema on the exposed list, so a
+ * function living anywhere else is unreachable without naming its schema. The
+ * generated publishing functions live in `supatype` for exactly the reason they
+ * are generated at all: they are the stack's, not the project's, and putting them
+ * in the managed schema would collide with a model called `publish`.
+ */
+export interface RpcOptions {
+  head?: boolean | undefined
+  count?: "exact" | "planned" | "estimated" | undefined
+  /** Postgres schema holding the function, sent as `Content-Profile`. */
+  schema?: string | undefined
+}
+
 export interface RpcResult<TData> {
   data: TData | null
   error: SupatypeError | null

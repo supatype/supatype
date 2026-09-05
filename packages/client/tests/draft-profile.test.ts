@@ -79,3 +79,25 @@ describe("the draft profile", () => {
     expect(captured.headers()["Prefer"]).toBe("count=exact")
   })
 })
+
+describe("calling a function outside the default schema", () => {
+  beforeEach(() => vi.restoreAllMocks())
+
+  it("sends Content-Profile so PostgREST looks in the right schema", async () => {
+    // Without this the generated publishing functions are unreachable: PostgREST resolves
+    // `/rpc/<name>` against the first schema on the exposed list, and `supatype.publish` is not
+    // in it. The failure is a 404 that reads as "no such function" rather than as a routing
+    // mistake.
+    const captured = captureHeaders()
+    const client = createClient({ url: BASE, anonKey: "anon-key" })
+    await client.rpc("publish" as never, { model_table: "posts" } as never, { schema: "supatype" })
+    expect(captured.headers()["Content-Profile"]).toBe("supatype")
+  })
+
+  it("sends none for a function in the default schema", async () => {
+    const captured = captureHeaders()
+    const client = createClient({ url: BASE, anonKey: "anon-key" })
+    await client.rpc("calculate_shipping" as never, {} as never)
+    expect(captured.headers()["Content-Profile"]).toBeUndefined()
+  })
+})

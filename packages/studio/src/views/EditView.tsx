@@ -4,6 +4,7 @@ import { EditFormLayout } from "../components/EditFormLayout.js"
 import { useAdminClient } from "../hooks/useAdminClient.js"
 import { useLocale } from "../hooks/useLocale.js"
 import { LivePreviewPane } from "../components/LivePreviewPane.js"
+import { PublishBar } from "../components/PublishBar.js"
 import type { ModelConfig } from "../config.js"
 import { useAdminConfig } from "../hooks/useAdminConfig.js"
 import { splitEditFields } from "../lib/edit-field-layout.js"
@@ -17,6 +18,7 @@ import {
 import { serializeRecordForApi } from "../lib/recordValues.js"
 import { describeViolations, validateRecord } from "../lib/validate-record.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
+import { createDraft, fetchRecordForEditing } from "../lib/publishing.js"
 
 interface EditViewProps {
   model: ModelConfig
@@ -39,6 +41,9 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
   // Keyed by column. Both sources land here: a bound or constraint Studio checked itself, and a
   // field validator's refusal from the server, which names the column it refused.
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+  // Bumped on every successful save, so the publish bar re-reads the history it summarises. A
+  // saved draft changes what that bar should say, and nothing else tells it.
+  const [savedAt, setSavedAt] = useState(0)
   const isDirty = useRef(false)
   const createTimestampDefaultsApplied = useRef(false)
 
@@ -110,23 +115,14 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
     setLoading(true)
     void (async () => {
       try {
-        const result = await client
-          .from(model.tableName as never)
-          .select()
-          .eq(model.primaryKey, recordId)
-          .single()
-
-        if (result.error) {
-          setError(result.error.message)
-        } else if (result.data) {
-          // Proxy may drop Accept: object+json and return a one-row array, unwrap it.
-          const raw = result.data as unknown
-          const data = (Array.isArray(raw) ? raw[0] : raw) as Record<string, unknown> | undefined
-          if (data && typeof data === "object") {
-            setValues(data)
-          } else {
-            setError("Record not found")
-          }
+        // The pending draft when the model has one, because that is what an editor is editing.
+        // The live row is what the world sees, and opening it would show the author their own
+        // unsaved-to-the-world content replaced by what they last published.
+        const loaded = await fetchRecordForEditing(client, model, recordId)
+        if (loaded.error !== null) {
+          setError(loaded.error)
+        } else if (loaded.values !== null) {
+          setValues(loaded.values)
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load record")
@@ -134,7 +130,7 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
         setLoading(false)
       }
     })()
-  }, [client, model.tableName, model.primaryKey, recordId])
+  }, [client, model, recordId])
 
   /**
    * Put a refused write's message on the input it names.
@@ -195,6 +191,23 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
         }
       } else {
         const { [model.primaryKey]: _pk, ...updateValues } = serializeRecordForApi(model, values)
+
+        // On a versioned model, saving records a draft and the live row does not move. That is the
+        // largest single change this feature makes to Studio, and it is the point of it: an author
+        // can save work in progress on a published record without the world seeing it, and
+        // publishing is a separate decision made from the bar above.
+        if (model.versions?.drafts === true) {
+          const drafted = await createDraft(client, model, recordId!, updateValues)
+          if (drafted.error !== null) {
+            setError(drafted.error)
+          } else {
+            isDirty.current = false
+            setSavedAt(Date.now())
+          }
+          setSaving(false)
+          return
+        }
+
         const result = await client
           .from(model.tableName as never)
           .update(updateValues as never)
@@ -205,6 +218,7 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
           noteFieldError(result.error)
         } else {
           isDirty.current = false
+          setSavedAt(Date.now())
         }
       }
     } catch (err) {
@@ -286,6 +300,17 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
 
       {error && <div className="st-error" role="alert">{error}</div>}
 
+      {/* Only on an existing record: a record that does not exist yet has nothing to publish, and
+          the first save creates both the row and its first draft. */}
+      {!isCreate && recordId !== undefined && (
+        <PublishBar
+          model={model}
+          recordId={recordId}
+          savedAt={savedAt}
+          onNavigate={onNavigate}
+        />
+      )}
+
       <EditFormLayout
         mainFields={accessibleMainFields}
         metaFields={accessibleMetaFields}
@@ -299,7 +324,6 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
         saving={saving}
         onSave={() => { void handleSave() }}
         isCreate={isCreate}
-        {...(Object.keys(fieldErrors).length > 0 && { fieldErrors })}
         {...(Object.keys(fieldErrors).length > 0 && { fieldErrors })}
         {...(!isCreate && {
           onDuplicate: () => { void handleDuplicate() },
