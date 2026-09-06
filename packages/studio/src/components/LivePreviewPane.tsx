@@ -1,19 +1,16 @@
 import React, { useRef, useEffect } from "react"
-import type { LivePreviewConfig, ModelConfig } from "../config.js"
-import { previewUrlFor } from "../lib/preview-url.js"
+import type { ModelConfig } from "../config.js"
 
 interface LivePreviewPaneProps {
-  config: LivePreviewConfig
+  /** Where this record renders, resolved by the view so both halves agree on one address. */
+  previewUrl: string
   values: Record<string, unknown>
   model: ModelConfig
 }
 
-export function LivePreviewPane({ config, values, model }: LivePreviewPaneProps): React.ReactElement {
+export function LivePreviewPane({ previewUrl, values, model }: LivePreviewPaneProps): React.ReactElement {
   const iframeRef = useRef<HTMLIFrameElement>(null)
 
-  // Where this record renders. Shared with the preview-link control, which points somebody with no
-  // account at the same address.
-  const previewUrl = previewUrlFor(config, values)
 
   // PostMessage sync: send form data to the iframe on every change
   useEffect(() => {

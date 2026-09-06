@@ -20,6 +20,10 @@ import {
 } from "../project-config.js"
 import { ensureEngine, engineRequest, type DiffResult } from "../engine-client.js"
 import { assertEngineSupportsSchema } from "../engine-floor.js"
+import {
+  modelsWithUnresolvablePreview,
+  unresolvablePreviewMessage,
+} from "../preview-config-check.js"
 import { pinnedVersion } from "../binary-cache.js"
 import { printDiffOperations, printDiffWarnings } from "../diff-output.js"
 import { signJwt } from "../jwt.js"
@@ -76,6 +80,7 @@ export function registerPush(program: Command): void {
       assertModelHooksResolve(cwd, config, ast)
       assertServiceRoleGrantsResolve(cwd, config)
       assertEngineSupportsSchema(ast, pinnedVersion("engine", config))
+      assertPreviewAddressesResolve(config)
 
       const linked = loadProjectLink(cwd)
       const useDirect = opts.direct || opts.local || Boolean(opts.connection)
@@ -294,6 +299,21 @@ async function writeLocalAdminConfig(ast: unknown, config: SupatypeProjectConfig
   const admin = withAdminRoles(await engineRequest<unknown>("/admin", { ast }), config)
   restoreSystemRelationTargets(admin, ast)
   writeFileSync(join(dir, "admin-config.json"), `${JSON.stringify(admin, null, 2)}\n`)
+}
+
+/**
+ * Stop the push when a preview address could never open.
+ *
+ * Refused here rather than left to fail later, because later means in front of whoever was sent the
+ * link, not in front of whoever configured it.
+ */
+function assertPreviewAddressesResolve(config: SupatypeProjectConfig): void {
+  const models = modelsWithUnresolvablePreview(config)
+  if (models.length === 0) return
+  fatalError(unresolvablePreviewMessage(models), [
+    'Give an absolute URL: urlPattern: "https://example.com/preview/{slug}"',
+    'Or set app.mode to "static" or "proxy", if this deployment should serve the app.',
+  ])
 }
 
 /**

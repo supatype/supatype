@@ -27,4 +27,17 @@ export default defineConfig({
     types: "supatype/generated/database.ts",
     client: "supatype/generated/index.d.ts",
   },
+  admin: {
+    // Where a post renders, so Studio can build a preview link that opens somewhere.
+    //
+    // Without this Studio has no address to attach a code to, and says so rather than handing over
+    // the bare credential. `{slug}` is filled from the record being edited, so a link points at the
+    // address the post's *current* slug implies rather than the one it had when the form loaded.
+    livePreview: {
+      Post: {
+        url: "http://localhost:3000",
+        urlPattern: "http://localhost:3000/preview/{slug}",
+      },
+    },
+  },
 })

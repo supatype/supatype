@@ -181,8 +181,18 @@ export interface BrandingConfig {
 }
 
 export interface LivePreviewConfig {
-  url: string
-  /** URL pattern with {field} placeholders, e.g. "/blog/{slug}" */
+  /**
+   * Where the project's app lives, when it is not this deployment.
+   *
+   * Optional: with `app.mode` set to `static` or `proxy` the app is served at `/` on the same
+   * origin as the API, which Studio already knows, so stating it again only risks it going stale.
+   */
+  url?: string
+  /**
+   * Path or URL with {field} placeholders, e.g. "/blog/{slug}".
+   *
+   * A path is resolved against the origin Studio is served from; an absolute URL is used as given.
+   */
   urlPattern?: string
 }
 

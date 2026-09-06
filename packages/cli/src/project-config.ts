@@ -334,6 +334,37 @@ export interface SupatypeProjectConfig {
   admin?: {
     /** JWT `app_metadata.role` values allowed to use Studio. Default: admin, supatype_admin */
     roles?: string[]
+    /**
+     * Where each model renders in your own front end, keyed by model name.
+     *
+     * Studio needs this for two things that look alike and are not: the live preview pane, which
+     * streams unsaved keystrokes into an iframe, and a shared preview link, which points somebody
+     * with no account at a saved draft. Both need the same answer to "what is the address of this
+     * record", and neither can guess it.
+     *
+     * Without it there is no share link to give out. Studio says so rather than handing over the
+     * bare code, because a credential with nowhere to open it reads as a bug.
+     *
+     * `urlPattern` names fields in braces and they are filled from the record in hand, so a post
+     * previews at the address its current slug implies.
+     *
+     * **A path is enough when this deployment serves the app.** With `app.mode` set to `static` or
+     * `proxy`, the app is served at `/` on the same origin as the API, and Studio resolves a path
+     * against the origin it is loaded from. Writing the origin out again only risks it going stale:
+     *
+     * ```ts
+     * admin: { livePreview: { Post: { urlPattern: "/preview/{slug}" } } }
+     * ```
+     *
+     * With `app.mode: "none"` the app is somewhere else and no deployment fact can say where, so
+     * give an absolute URL. `supatype push` refuses a path-only pattern in that mode rather than
+     * letting it become a link that resolves to nothing.
+     *
+     * ```ts
+     * admin: { livePreview: { Post: { urlPattern: "https://example.com/preview/{slug}" } } }
+     * ```
+     */
+    livePreview?: Record<string, { url?: string; urlPattern?: string }>
   }
 }
 

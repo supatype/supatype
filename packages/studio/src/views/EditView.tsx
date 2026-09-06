@@ -6,6 +6,7 @@ import { useLocale } from "../hooks/useLocale.js"
 import { LivePreviewPane } from "../components/LivePreviewPane.js"
 import { PublishBar } from "../components/PublishBar.js"
 import { previewUrlFor } from "../lib/preview-url.js"
+import { appOrigin } from "../lib/membership-url.js"
 import type { ModelConfig } from "../config.js"
 import { useAdminConfig } from "../hooks/useAdminConfig.js"
 import { splitEditFields } from "../lib/edit-field-layout.js"
@@ -286,13 +287,36 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
   const accessibleMetaFields = applyFieldAccess(metaFields, fieldAccess, model.tableName, isCreate)
 
   const livePreviewConfig = config.livePreview?.[model.name]
+  // Where this record renders, or "" when the project named no address for it. Computed once and
+  // shared: the pane and the share control must agree, and the pane must not mount without one.
+  // `<iframe src="">` resolves against the document's own base, which is Studio, so an entry naming
+  // neither a url nor a pattern booted a second copy of Studio inside the edit form.
+  const previewUrl =
+    livePreviewConfig === undefined
+      ? ""
+      : previewUrlFor(livePreviewConfig, values, appOrigin(client.url))
 
   if (loading) {
     return <div className="st-edit-view st-edit-loading">Loading...</div>
   }
 
+  // Publishing lives in the sidebar beside the record's other metadata rather than as a banner
+  // above the form. Only on an existing record: one that does not exist yet has nothing to publish,
+  // and the first save creates both the row and its first draft.
+  const publishing =
+    isCreate || recordId === undefined ? null : (
+      <PublishBar
+        model={model}
+        recordId={recordId}
+        savedAt={savedAt}
+        seesDrafts={capability.seesDrafts}
+        {...(previewUrl !== "" && { previewUrl })}
+        onNavigate={onNavigate}
+      />
+    )
+
   return (
-    <div className={`st-edit-view${livePreviewConfig ? " st-edit-view--with-preview" : ""}`}>
+    <div className={`st-edit-view${previewUrl !== "" ? " st-edit-view--with-preview" : ""}`}>
       <Header title={isCreate ? `Create ${model.label}` : `Edit ${model.label}`} />
 
       {model.hasHooks && (
@@ -303,22 +327,8 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
 
       {error && <div className="st-error" role="alert">{error}</div>}
 
-      {/* Only on an existing record: a record that does not exist yet has nothing to publish, and
-          the first save creates both the row and its first draft. */}
-      {!isCreate && recordId !== undefined && (
-        <PublishBar
-          model={model}
-          recordId={recordId}
-          savedAt={savedAt}
-          seesDrafts={capability.seesDrafts}
-          {...(livePreviewConfig && {
-            previewUrl: previewUrlFor(livePreviewConfig, values),
-          })}
-          onNavigate={onNavigate}
-        />
-      )}
-
       <EditFormLayout
+        publishing={publishing}
         mainFields={accessibleMainFields}
         metaFields={accessibleMetaFields}
         values={values}
@@ -342,8 +352,8 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
             }),
         })}
         preview={
-          livePreviewConfig ? (
-            <LivePreviewPane config={livePreviewConfig} values={values} model={model} />
+          livePreviewConfig !== undefined && previewUrl !== "" ? (
+            <LivePreviewPane previewUrl={previewUrl} values={values} model={model} />
           ) : undefined
         }
       />

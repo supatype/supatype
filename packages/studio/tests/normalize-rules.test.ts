@@ -56,3 +56,52 @@ describe("normalizing the engine's admin config", () => {
     expect(indexes[0]?.name).toBeTruthy()
   })
 })
+
+describe("what crosses the CLI to Studio boundary", () => {
+  // This function is the boundary. The CLI writes keys into `admin-config.json`; Studio only ever
+  // sees what is rebuilt here. A key added to the file and not added here is not a broken feature
+  // with an error, it is a feature that silently does nothing.
+  //
+  // That is exactly what happened: `livePreview` was written by the CLI, asserted present in the
+  // file by a CLI test, and dropped here. The live preview pane and every preview link were dead on
+  // self-host while the config on disk looked perfectly correct, and nothing on either side failed.
+
+  const base = { models: [], globals: [], navigation: [] }
+
+  it("carries livePreview through, since Studio cannot see the file", () => {
+    const out = normalizeAdminConfig({
+      ...base,
+      livePreview: { Post: { urlPattern: "/preview/{slug}" } },
+    })
+    expect(out.livePreview).toEqual({ Post: { urlPattern: "/preview/{slug}" } })
+  })
+
+  it("keeps both an address and a pattern when a model gives both", () => {
+    const out = normalizeAdminConfig({
+      ...base,
+      livePreview: { Post: { url: "https://example.com", urlPattern: "/p/{slug}" } },
+    })
+    expect(out.livePreview?.["Post"]).toEqual({
+      url: "https://example.com",
+      urlPattern: "/p/{slug}",
+    })
+  })
+
+  it("drops an entry that names neither, rather than offering a link to nowhere", () => {
+    const out = normalizeAdminConfig({ ...base, livePreview: { Post: {}, Page: { url: "" } } })
+    expect(out.livePreview).toBeUndefined()
+  })
+
+  it("ignores rubbish in the file without taking the rest of the config down", () => {
+    // The file is generated, but it is also on disk where anyone can edit it.
+    const out = normalizeAdminConfig({
+      ...base,
+      livePreview: { Post: { urlPattern: 42 }, Page: { urlPattern: "/ok" } },
+    })
+    expect(out.livePreview).toEqual({ Page: { urlPattern: "/ok" } })
+  })
+
+  it("says nothing when the project configured nothing", () => {
+    expect(normalizeAdminConfig(base).livePreview).toBeUndefined()
+  })
+})

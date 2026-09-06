@@ -160,6 +160,37 @@ export function normalizeAdminConfig(raw: unknown): AdminConfig {
       }
     : undefined
 
+  // Where each model renders, when the project has said.
+  //
+  // Carried through explicitly, because this function is the boundary: the CLI writes a key into
+  // `admin-config.json` and Studio only ever sees what is rebuilt here. A key added to the file and
+  // not added here is not a broken feature with an error, it is a feature that silently does
+  // nothing, which is how the live preview pane and every preview link were dead on self-host while
+  // the config file on disk looked exactly right.
+  //
+  // Entries are filtered rather than trusted: a model naming neither an address nor a pattern
+  // configures nothing, and keeping it would make Studio offer a share link that resolves nowhere.
+  const rawPreview = r["livePreview"] as Record<string, unknown> | undefined
+  const livePreview =
+    rawPreview !== null && typeof rawPreview === "object"
+      ? Object.fromEntries(
+          Object.entries(rawPreview)
+            .map(([model, entry]) => [model, entry as Record<string, unknown>] as const)
+            .filter(([, entry]) => entry !== null && typeof entry === "object")
+            .map(([model, entry]) => {
+              // Empty counts as absent, the same way the resolver treats it. A model whose only
+              // address is "" names nowhere, and keeping it would put a share control on screen
+              // that mints a credential no link can carry.
+              const text = (value: unknown): string | undefined =>
+                typeof value === "string" && value !== "" ? value : undefined
+              const url = text(entry["url"])
+              const urlPattern = text(entry["urlPattern"])
+              return [model, { ...(url !== undefined && { url }), ...(urlPattern !== undefined && { urlPattern }) }] as const
+            })
+            .filter(([, entry]) => entry.url !== undefined || entry.urlPattern !== undefined),
+        )
+      : undefined
+
   const adminRoles = Array.isArray(r["adminRoles"])
     ? (r["adminRoles"] as string[]).filter((role) => typeof role === "string" && role.length > 0)
     : undefined
@@ -170,6 +201,7 @@ export function normalizeAdminConfig(raw: unknown): AdminConfig {
     navigation,
     ...(locale !== undefined && { locale }),
     ...(adminRoles !== undefined && adminRoles.length > 0 && { adminRoles }),
+    ...(livePreview !== undefined && Object.keys(livePreview).length > 0 && { livePreview }),
   }
 }
 
