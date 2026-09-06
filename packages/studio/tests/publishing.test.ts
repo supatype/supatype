@@ -3,7 +3,10 @@ import {
   fetchPendingDraftIds,
   publishableLocales,
   publishingState,
+  publishingSummary,
   WHOLE_RECORD,
+  type LocaleState,
+  type PublishingState,
   type RecordVersion,
 } from "../src/lib/publishing.js"
 import type { ModelVersionsConfig } from "../src/config.js"
@@ -196,5 +199,43 @@ describe("which records have an edit waiting", () => {
     } as unknown as Parameters<typeof fetchPendingDraftIds>[0]
     expect((await fetchPendingDraftIds(client, model, [])).size).toBe(0)
     expect(called).toBe(false)
+  })
+})
+
+describe("the state a shut publishing section stands for", () => {
+  function state(locales: Record<string, LocaleState>): PublishingState {
+    return { locales, newest: null } as unknown as PublishingState
+  }
+
+  // It returns a state rather than a label. The words live in one table beside the badge that
+  // renders them, so the header and the rows six pixels below it cannot end up calling the same
+  // state by two different names. They briefly did: "Edit" against "Edit waiting".
+
+  it("says live only when every locale is", () => {
+    // The header is the whole answer while the section is collapsed, so "live" has to mean all of
+    // it. One unpublished translation under a green badge is the lie the per-locale design exists
+    // to prevent.
+    expect(publishingSummary(state({ en: "live", fr: "live" }), ["en", "fr"])).toBe("live")
+    expect(publishingSummary(state({ en: "live", fr: "absent" }), ["en", "fr"])).not.toBe("live")
+  })
+
+  it("puts a waiting edit ahead of a schedule", () => {
+    // A schedule is a decision somebody already made. An unpublished edit is one nobody has made
+    // yet, so it is the thing worth surfacing when only one can be.
+    expect(publishingSummary(state({ en: "pending", fr: "scheduled" }), ["en", "fr"])).toBe(
+      "pending",
+    )
+  })
+
+  it("reports a locale it has no state for as unpublished", () => {
+    // The first render has no data yet. Failing towards "not published" is right: claiming a record
+    // is live before asking is the one error that cannot be walked back.
+    expect(publishingSummary(null, ["en"])).toBe("absent")
+    expect(publishingSummary(state({}), ["en"])).toBe("absent")
+  })
+
+  it("does not call a record with no locales live", () => {
+    // Vacuous truth would make `every` return true over an empty list and paint it green.
+    expect(publishingSummary(state({}), [])).not.toBe("live")
   })
 })

@@ -92,8 +92,11 @@
 .st-edit-layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 1.5rem; align-items: start; }
 .st-edit-main { min-width: 0; }
 .st-edit-sidebar { position: sticky; top: 1rem; display: flex; flex-direction: column; gap: 1rem; padding: 1rem; background: hsl(var(--card)); border: 1px solid hsl(var(--border)); border-radius: 8px; }
-.st-edit-sidebar-title { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: hsl(var(--muted-foreground)); margin-bottom: 0.75rem; }
-.st-edit-sidebar-section { border-bottom: 1px solid hsl(var(--border)); padding-bottom: 0.5rem; }
+/* Typography only. It used to carry `margin-bottom` too, which meant the first heading placed in
+   a row rather than above a stack had to cancel it with a utility class at the call site: a
+   global rule with an invisible exception living in another file. The section owns the spacing. */
+.st-edit-sidebar-title { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: hsl(var(--muted-foreground)); }
+.st-edit-sidebar-section { display: flex; flex-direction: column; gap: 0.75rem; border-bottom: 1px solid hsl(var(--border)); padding-bottom: 0.5rem; }
 .st-edit-sidebar-actions { display: flex; flex-direction: column; gap: 0.5rem; }
 .st-edit-sidebar-actions .st-btn { width: 100%; justify-content: center; }
 .st-edit-view--with-preview .st-edit-main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1.5rem; align-items: start; }

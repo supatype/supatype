@@ -143,6 +143,30 @@ export async function fetchDraft(
   return (result.data as Record<string, unknown> | null) ?? null
 }
 
+/**
+ * The one state that stands for a whole record.
+ *
+ * Used by the publishing section's header, which is what somebody sees while the section is shut.
+ * It returns a state rather than a label on purpose: the words live in one table beside the badge
+ * that renders them, so the header and the rows underneath it cannot end up calling the same thing
+ * by two different names. They briefly did, in the same 280px column.
+ *
+ * Order matters. An edit waiting outranks a schedule, because a schedule is a decision already
+ * taken and an unpublished edit is one nobody has made yet. `live` requires unanimity: one
+ * unpublished translation under a green badge is the exact lie the per-locale design exists to
+ * prevent, and an empty locale list must not reach it through a vacuous `every`.
+ */
+export function publishingSummary(
+  state: PublishingState | null,
+  locales: string[],
+): LocaleState {
+  const states = locales.map((locale) => state?.locales[locale] ?? "absent")
+  if (states.length > 0 && states.every((s) => s === "live")) return "live"
+  if (states.some((s) => s === "pending")) return "pending"
+  if (states.some((s) => s === "scheduled")) return "scheduled"
+  return "absent"
+}
+
 /** The schema a read of this model should come from, given whether the editor wants the draft. */
 export function profileFor(model: ModelConfig, wantDraft: boolean): string | undefined {
   return wantDraft && model.versions?.drafts === true ? DRAFT_SCHEMA : undefined

@@ -1,9 +1,18 @@
-import React, { useState } from "react"
+import React, { useCallback, useEffect, useState } from "react"
 import { Button, Input, Select } from "./ui.js"
-import { usePreviewLinks, type PreviewScope } from "../hooks/usePreviewLinks.js"
+import { usePreviewLinks, type PreviewLinkSummary } from "../hooks/usePreviewLinks.js"
+import { formatTimestamp } from "../lib/utils.js"
 
 interface SharePreviewProps {
-  /** The model's table name, which is what the claim names. */
+  /**
+   * The model's name, which is the key `admin.livePreview` is written under.
+   *
+   * Distinct from the table name below, and the distinction matters: this message used to name the
+   * table, so following it produced a config keyed on `posts` while Studio reads `Post`, and the
+   * setting silently configured nothing.
+   */
+  modelName: string
+  /** The model's table name, which is what the preview claim names. */
   modelTable: string
   recordId: string
   /** Where a preview of this record lives, if the project told Studio. */
@@ -20,9 +29,9 @@ const TTL_CHOICES: Array<{ label: string; seconds: number }> = [
 /**
  * Hand a draft to someone who has no account.
  *
- * The link is the whole of their credential: a JWT signed with the project's own secret, carrying a
- * claim that names this one record and nothing else, and no subject at all, so holding it makes them
- * nobody rather than making them you.
+ * The link is the whole of their credential: a short code naming a row the project can revoke,
+ * which the reader's browser exchanges for a token that lives about a minute and carries no
+ * subject, so holding the link makes them nobody rather than making them you.
  *
  * **The scope choice is deliberately not a toggle in the same place as the record link.** A project
  * link covers every unpublished draft there is, so it is not a slightly larger version of this
@@ -30,21 +39,49 @@ const TTL_CHOICES: Array<{ label: string; seconds: number }> = [
  * project-wide things live.
  */
 export function SharePreview({
+  modelName,
   modelTable,
   recordId,
   previewUrl,
 }: SharePreviewProps): React.ReactElement {
-  const { mint, minting, error } = usePreviewLinks()
+  const { mint, list, revoke, minting, error } = usePreviewLinks()
   const [ttl, setTtl] = useState(TTL_CHOICES[0]?.seconds ?? 900)
   const [link, setLink] = useState<{ url: string; expiresAt: string } | null>(null)
   const [copied, setCopied] = useState(false)
+  const [existing, setExisting] = useState<PreviewLinkSummary[]>([])
 
-  const share = async () => {
+  const configured = previewUrl !== undefined && previewUrl.trim() !== ""
+
+  const reload = useCallback(async () => {
+    // A model the project has not pointed anywhere renders the message below and can never show a
+    // link, so asking for its links is a round trip answered into a void.
+    if (!configured) return
+    setExisting(await list(modelTable, recordId))
+  }, [configured, list, modelTable, recordId])
+
+  useEffect(() => {
+    void reload()
+  }, [reload])
+
+  // Studio has no business guessing at somebody's front end, and a wrong URL is worse than none: it
+  // looks like it should work. Handing over the bare code instead was worse still, because it looks
+  // like a mistake and cannot be opened at all.
+  if (!configured) {
+    return (
+      <div className="text-xs text-muted-foreground">
+        To share a preview, tell Studio where this model renders: set{" "}
+        <code>admin.livePreview</code> for <code>{modelName}</code> in your Supatype config.
+      </div>
+    )
+  }
+
+  const share = async (): Promise<void> => {
     setLink(null)
     setCopied(false)
     const minted = await mint({ scope: "record", model: modelTable, recordId, ttl })
     if (minted === null) return
-    setLink({ url: previewLinkUrl(minted.token, previewUrl), expiresAt: minted.expiresAt })
+    setLink({ url: previewLinkUrl(minted.code, previewUrl), expiresAt: minted.expiresAt })
+    await reload()
   }
 
   return (
@@ -52,7 +89,9 @@ export function SharePreview({
       <div className="flex items-center gap-2">
         <Select
           value={String(ttl)}
-          onChange={(e) => { setTtl(Number(e.target.value)) }}
+          onChange={(e) => {
+            setTtl(Number(e.target.value))
+          }}
           aria-label="How long the link lives"
         >
           {TTL_CHOICES.map((choice) => (
@@ -61,7 +100,14 @@ export function SharePreview({
             </option>
           ))}
         </Select>
-        <Button size="sm" variant="secondary" disabled={minting} onClick={() => { void share() }}>
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={minting}
+          onClick={() => {
+            void share()
+          }}
+        >
           {minting ? "Making a link…" : "Share a preview"}
         </Button>
       </div>
@@ -71,14 +117,24 @@ export function SharePreview({
       {link !== null && (
         <div className="space-y-1">
           <div className="flex items-center gap-2">
-            <Input readOnly value={link.url} onFocus={(e) => { e.target.select() }} />
+            <Input
+              readOnly
+              value={link.url}
+              onFocus={(e) => {
+                e.target.select()
+              }}
+            />
             <Button
               size="sm"
               variant="secondary"
               onClick={() => {
                 void navigator.clipboard.writeText(link.url).then(
-                  () => { setCopied(true) },
-                  () => { setCopied(false) },
+                  () => {
+                    setCopied(true)
+                  },
+                  () => {
+                    setCopied(false)
+                  },
                 )
               }}
             >
@@ -86,9 +142,37 @@ export function SharePreview({
             </Button>
           </div>
           <div className="text-xs text-muted-foreground">
-            Anyone with this link can read the draft until {formatExpiry(link.expiresAt)}. It is
+            Anyone with this link can read the draft until {formatTimestamp(link.expiresAt)}. It is
             shown once: Studio does not keep it, because keeping it would be keeping a credential.
           </div>
+        </div>
+      )}
+
+      {existing.length > 0 && (
+        <div className="space-y-1 pt-1">
+          <div className="text-xs font-medium text-muted-foreground">Shared links</div>
+          {/* Ids and times, never codes. The credential was shown once at mint; this exists so that
+              somebody can see what they have given out and take one back, not so they can recover
+              something they did not keep. */}
+          {existing.map((row) => (
+            <div key={row.id} className="flex items-center justify-between gap-2">
+              <span className="text-xs text-muted-foreground">
+                {row.scope === "project" ? "Whole project" : "This record"}, until{" "}
+                {formatTimestamp(row.expiresAt)}
+              </span>
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={() => {
+                  // Only re-read when something actually changed. Reloading after a refusal hides
+                  // the refusal behind an unchanged list.
+                  void revoke(row.id).then((done) => (done ? reload() : undefined))
+                }}
+              >
+                Revoke
+              </Button>
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -98,18 +182,11 @@ export function SharePreview({
 /**
  * The address to hand over.
  *
- * When the project has told Studio where previews are rendered, the token rides as a query
- * parameter on that page. Otherwise the token itself is the thing to share, because Studio has no
- * business guessing at somebody's front end and a wrong URL is worse than a bare token: it looks
- * like it should work.
+ * The code rides as a query parameter on the page the project said renders this model. It is short
+ * enough to survive being pasted into a message, which the signed token it replaced was not: that
+ * ran to about 400 characters and wrapped into something unusable in mail.
  */
-function previewLinkUrl(token: string, previewUrl?: string): string {
-  if (previewUrl === undefined || previewUrl.trim() === "") return token
+function previewLinkUrl(code: string, previewUrl: string): string {
   const separator = previewUrl.includes("?") ? "&" : "?"
-  return `${previewUrl}${separator}preview_token=${encodeURIComponent(token)}`
-}
-
-function formatExpiry(value: string): string {
-  const at = new Date(value)
-  return Number.isNaN(at.getTime()) ? value : at.toLocaleString()
+  return `${previewUrl}${separator}preview=${encodeURIComponent(code)}`
 }

@@ -1,5 +1,6 @@
 import React, { useState } from "react"
 import { Button, Input } from "./ui.js"
+import { formatTimestamp } from "../lib/utils.js"
 
 interface ScheduleControlProps {
   /** ISO timestamp of the schedule already set, or null. */
@@ -11,6 +12,11 @@ interface ScheduleControlProps {
 
 /**
  * Put a time on a pending edit, or take one off.
+ *
+ * **Shown by whoever mounts it.** It used to own that decision itself and rendered a "Schedule
+ * instead" button when closed; once the locale row grew a clock glyph that mounts this, there were
+ * two disclosures for one intent, and clicking the clock revealed a button you had to click again
+ * to reach a date field.
  *
  * **This is a real scheduler, not a rule about a timestamp.** Without versions, scheduling needed no
  * machinery: the access rule compared `published_at <= now()`, so a future date simply hid the row
@@ -29,32 +35,15 @@ export function ScheduleControl({
   onCancel,
 }: ScheduleControlProps): React.ReactElement {
   const [value, setValue] = useState("")
-  const [open, setOpen] = useState(false)
 
   if (scheduledFor !== null) {
     return (
       <div className="flex items-center gap-2 text-xs">
-        <span className="text-muted-foreground">Goes live {formatWhen(scheduledFor)}</span>
+        <span className="text-muted-foreground">Goes live {formatTimestamp(scheduledFor)}</span>
         <Button size="xs" variant="ghost" disabled={busy} onClick={onCancel}>
           Cancel
         </Button>
       </div>
-    )
-  }
-
-  // Closed until asked for. Rendering the picker inline meant a record with two locales opened with
-  // two date inputs in a summary bar, before anyone had said they wanted to schedule anything: the
-  // bar is meant to answer "what does the world see", and a form is not an answer.
-  if (!open) {
-    return (
-      <Button
-        size="xs"
-        variant="ghost"
-        disabled={busy}
-        onClick={() => { setOpen(true) }}
-      >
-        Schedule instead
-      </Button>
     )
   }
 
@@ -80,17 +69,9 @@ export function ScheduleControl({
       >
         Schedule
       </Button>
-      <Button size="xs" variant="ghost" disabled={busy} onClick={() => { setOpen(false) }}>
-        Cancel
-      </Button>
       {value !== "" && !valid && (
         <span className="text-xs text-muted-foreground">Pick a time in the future.</span>
       )}
     </div>
   )
-}
-
-function formatWhen(value: string): string {
-  const at = new Date(value)
-  return Number.isNaN(at.getTime()) ? value : at.toLocaleString()
 }

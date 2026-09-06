@@ -3,6 +3,14 @@ import type { FieldConfig } from "../config.js"
 import { EditFormFieldList } from "./EditFormFieldList.js"
 
 export interface EditFormSidebarProps {
+  /**
+   * Publishing controls, when the view has them.
+   *
+   * A slot rather than a rendered section: what goes here decides for itself whether it has
+   * anything to say, and supplies its own heading, so a model that keeps no versions leaves no
+   * empty titled block behind.
+   */
+  publishing?: React.ReactNode
   metaFields: FieldConfig[]
   values: Record<string, unknown>
   onChange: (fieldName: string, value: unknown) => void
@@ -18,6 +26,7 @@ export interface EditFormSidebarProps {
 }
 
 export function EditFormSidebar({
+  publishing,
   metaFields,
   values,
   onChange,
@@ -33,6 +42,7 @@ export function EditFormSidebar({
 }: EditFormSidebarProps): React.ReactElement {
   return (
     <aside className="st-edit-sidebar" aria-label="Record metadata">
+      {publishing}
       {metaFields.length > 0 && (
         <div className="st-edit-sidebar-section">
           <h3 className="st-edit-sidebar-title">Record info</h3>

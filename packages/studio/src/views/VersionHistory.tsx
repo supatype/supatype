@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react"
+import { formatTimestamp } from "../lib/utils.js"
 import { Header } from "../components/Header.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
@@ -141,7 +142,10 @@ export function VersionHistory({
                   <Td>
                     <VersionState version={version} newest={state.newest} locales={locales} />
                   </Td>
-                  <Td className="text-muted-foreground">{formatWhen(version.created_at)}</Td>
+                  {/* `created_at`, not `createdAt`. PostgREST returns column names as they are and
+                      nothing camel-cases them on the way through; this view read the camel form
+                      for as long as it existed and rendered "Invalid Date" for every row. */}
+                  <Td className="text-muted-foreground">{formatTimestamp(version.created_at)}</Td>
                   <Td className="text-muted-foreground font-mono text-xs">
                     {version.created_by ?? "—"}
                   </Td>
@@ -274,18 +278,6 @@ function VersionDiff({
       </table>
     </Card>
   )
-}
-
-/**
- * A timestamp an editor can read.
- *
- * The column is `created_at`. This view read `createdAt` for as long as it existed, so every row
- * would have rendered "Invalid Date" the moment the table it queries started existing: PostgREST
- * returns column names as they are, and nothing camel-cases them on the way through.
- */
-function formatWhen(value: string): string {
-  const at = new Date(value)
-  return Number.isNaN(at.getTime()) ? value : at.toLocaleString()
 }
 
 function formatValue(value: unknown): string {
