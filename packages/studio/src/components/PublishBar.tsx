@@ -12,12 +12,14 @@ import {
   publish,
   publishableLocales,
   publishingState,
+  liveLocales,
   publishingSummary,
   schedulePublish,
   unpublish,
   unschedulePublish,
   WHOLE_RECORD,
   type LocaleState,
+  type RecordState,
   type PublishingState,
 } from "../lib/publishing.js"
 
@@ -119,6 +121,7 @@ export function PublishBar({
   // shut it again under the reader when a fully published one answered.
   const expanded = open ?? (state !== null && unpublished.length > 0)
   const headline = stateLabels[publishingSummary(state, locales)]
+  const detail = summaryDetail(state, locales, wholeRecord)
 
   const run = async (act: () => Promise<{ error: string | null }>) => {
     setBusy(true)
@@ -152,6 +155,12 @@ export function PublishBar({
           <Badge variant={headline.variant} title={headline.title}>
             {headline.long}
           </Badge>
+          {/* The badge raises the question; this answers it. With two or three languages the
+              specifics fit, and "live in some, never in others" is not something a single word can
+              say without hiding which. */}
+          {detail !== null && (
+            <span className="text-[11px] text-muted-foreground truncate">{detail}</span>
+          )}
         </button>
         <IconAction
           icon={<IconHistory />}
@@ -294,14 +303,35 @@ export function PublishBarBody({
 }
 
 /**
- * The one vocabulary for the four states, short and long.
+ * Which languages the world can read, said plainly beside the badge.
  *
- * Both spellings live here together because the header badge and the row badge sit in the same
- * 280px column, six pixels apart. They briefly came from two different tables and called the same
- * state "Edit" in one and "Edit waiting" in the other.
+ * Only where it adds something: a model with no localized field has one state and no languages to
+ * distinguish, and a record that is uniformly live or uniformly unpublished is fully described by
+ * its badge already.
  */
-const stateLabels: Record<
-  LocaleState,
+function summaryDetail(
+  state: PublishingState | null,
+  locales: string[],
+  wholeRecord: boolean,
+): string | null {
+  if (wholeRecord) return null
+  const live = liveLocales(state, locales)
+  if (live.length === 0 || live.length === locales.length) return null
+  const notLive = locales.filter((l) => !live.includes(l))
+  return `${live.join(", ")} live · ${notLive.join(", ")} not`
+}
+
+/**
+ * The one vocabulary, for a locale and for a whole record.
+ *
+ * Both spellings live here together because the list, the collapsed header and the row underneath
+ * it sit within two clicks of each other. They came from separate tables once and used "Draft" for
+ * two different things: a record with an unpublished edit in the list, and a locale that had never
+ * been published at all in the editor. A post whose English was being read by the public was
+ * labelled the same as one nobody had ever seen.
+ */
+export const stateLabels: Record<
+  RecordState,
   { short: string; long: string; variant: BadgeVariant; title: string }
 > = {
   live: {
@@ -315,6 +345,12 @@ const stateLabels: Record<
     long: "Edit waiting",
     variant: "yellow",
     title: "Published, with a newer edit not yet live",
+  },
+  partial: {
+    short: "Partly",
+    long: "Partly published",
+    variant: "yellow",
+    title: "Live in some languages and never published in others",
   },
   scheduled: {
     short: "Timed",

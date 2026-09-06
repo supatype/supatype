@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest"
 import {
-  fetchPendingDraftIds,
+  fetchRecordStates,
   publishableLocales,
   publishingState,
+  liveLocales,
   publishingSummary,
   WHOLE_RECORD,
   type LocaleState,
@@ -138,54 +139,66 @@ describe("what the history says about a record", () => {
   })
 })
 
-describe("which records have an edit waiting", () => {
+describe("what a list says each record is", () => {
   const model = {
     tableName: "posts",
     primaryKey: "id",
-    versions: versions({ versionsTable: "posts_versions" }),
-  } as unknown as Parameters<typeof fetchPendingDraftIds>[1]
+    versions: versions({ versionsTable: "posts_versions", localizedColumns: ["body"] }),
+  } as unknown as Parameters<typeof fetchRecordStates>[1]
 
-  function clientReturning(rows: unknown[]): Parameters<typeof fetchPendingDraftIds>[0] {
+  function clientReturning(rows: unknown[]): Parameters<typeof fetchRecordStates>[0] {
     const chain = {
       select: () => chain,
       in: () => chain,
       order: () => Promise.resolve({ data: rows, error: null }),
     }
-    return { from: () => chain } as unknown as Parameters<typeof fetchPendingDraftIds>[0]
+    return { from: () => chain } as unknown as Parameters<typeof fetchRecordStates>[0]
   }
 
-  it("counts a record whose newest version is above the live one", async () => {
-    const pending = await fetchPendingDraftIds(
-      clientReturning([
-        { record_id: "a", version: 2, published_locales: {} },
-        { record_id: "a", version: 1, published_locales: { en: "2026-09-05T09:00:00Z" } },
-      ]),
-      model,
-      ["a"],
-    )
-    expect([...pending]).toEqual(["a"])
+  const LIVE = "2026-09-05T09:00:00Z"
+
+  async function stateOf(rows: unknown[], locales = ["en", "fr"]): Promise<string | undefined> {
+    const states = await fetchRecordStates(clientReturning(rows), model, ["a"], locales)
+    return states.get("a")
+  }
+
+  it("calls a record with an unpublished edit published, because it is", async () => {
+    // This is the case that made the old badge wrong. The record's English is live and being read;
+    // the list called it "Draft", which is what the editor calls a language nobody has ever seen.
+    expect(
+      await stateOf(
+        [
+          { record_id: "a", version: 2, published_locales: {}, scheduled_locales: {} },
+          { record_id: "a", version: 1, published_locales: { en: LIVE, fr: LIVE }, scheduled_locales: {} },
+        ],
+      ),
+    ).toBe("pending")
   })
 
-  it("counts a record that has never been published", async () => {
-    // There is content nobody outside can see, which is the thing the badge is for.
-    const pending = await fetchPendingDraftIds(
-      clientReturning([{ record_id: "b", version: 1, published_locales: {} }]),
-      model,
-      ["b"],
-    )
-    expect([...pending]).toEqual(["b"])
+  it("says partly published when one language is live and another never was", async () => {
+    // The state a per-locale design needs and a per-locale word cannot say. Reported as "Not
+    // published" before, over a post the public was reading in English.
+    expect(
+      await stateOf([
+        { record_id: "a", version: 1, published_locales: { en: LIVE }, scheduled_locales: {} },
+      ]),
+    ).toBe("partial")
   })
 
-  it("leaves out a record whose newest version is the live one", async () => {
-    const pending = await fetchPendingDraftIds(
-      clientReturning([
-        { record_id: "c", version: 2, published_locales: { en: "2026-09-05T09:00:00Z" } },
-        { record_id: "c", version: 1, published_locales: {} },
+  it("says not published when no language ever was", async () => {
+    expect(
+      await stateOf([
+        { record_id: "a", version: 1, published_locales: {}, scheduled_locales: {} },
       ]),
-      model,
-      ["c"],
-    )
-    expect(pending.size).toBe(0)
+    ).toBe("absent")
+  })
+
+  it("says live only when every language is current", async () => {
+    expect(
+      await stateOf([
+        { record_id: "a", version: 1, published_locales: { en: LIVE, fr: LIVE }, scheduled_locales: {} },
+      ]),
+    ).toBe("live")
   })
 
   it("asks nothing of the server when there is nothing to ask about", async () => {
@@ -196,8 +209,8 @@ describe("which records have an edit waiting", () => {
         called = true
         return { select: () => ({ in: () => ({ order: () => Promise.resolve({ data: [], error: null }) }) }) }
       },
-    } as unknown as Parameters<typeof fetchPendingDraftIds>[0]
-    expect((await fetchPendingDraftIds(client, model, [])).size).toBe(0)
+    } as unknown as Parameters<typeof fetchRecordStates>[0]
+    expect((await fetchRecordStates(client, model, [], ["en"])).size).toBe(0)
     expect(called).toBe(false)
   })
 })
@@ -237,5 +250,38 @@ describe("the state a shut publishing section stands for", () => {
   it("does not call a record with no locales live", () => {
     // Vacuous truth would make `every` return true over an empty list and paint it green.
     expect(publishingSummary(state({}), [])).not.toBe("live")
+  })
+})
+
+describe("partly published", () => {
+  function state(locales: Record<string, LocaleState>): PublishingState {
+    return { locales, newest: null } as unknown as PublishingState
+  }
+
+  it("outranks every other state, because every other word hides it", () => {
+    // A post live in English with no French translation reported "Not published" while the public
+    // was reading it, and "Edit waiting" once a revision existed. Both are true of some locale and
+    // false of the record.
+    expect(publishingSummary(state({ en: "live", fr: "absent" }), ["en", "fr"])).toBe("partial")
+    expect(publishingSummary(state({ en: "pending", fr: "absent" }), ["en", "fr"])).toBe("partial")
+    expect(publishingSummary(state({ en: "scheduled", fr: "absent" }), ["en", "fr"])).toBe("partial")
+  })
+
+  it("is not reached when every language has been published at some point", () => {
+    // All published, one revised: that is an edit waiting, not a partial publication. Nothing is
+    // missing from what a reader sees, it is merely older than the draft.
+    expect(publishingSummary(state({ en: "live", fr: "pending" }), ["en", "fr"])).toBe("pending")
+  })
+
+  it("is not reached when nothing has ever been published", () => {
+    expect(publishingSummary(state({ en: "absent", fr: "absent" }), ["en", "fr"])).toBe("absent")
+  })
+
+  it("names the languages a reader can and cannot reach", () => {
+    // Pending counts as live: an older version of that language is being served. Scheduled does
+    // not, because nothing of it is public yet.
+    expect(liveLocales(state({ en: "live", fr: "absent" }), ["en", "fr"])).toEqual(["en"])
+    expect(liveLocales(state({ en: "pending", fr: "absent" }), ["en", "fr"])).toEqual(["en"])
+    expect(liveLocales(state({ en: "scheduled", fr: "absent" }), ["en", "fr"])).toEqual([])
   })
 })

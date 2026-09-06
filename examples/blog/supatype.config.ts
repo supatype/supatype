@@ -13,7 +13,19 @@ export default defineConfig({
   project: { name: "blog" },
   database: { provider: "docker" },
   server: { mode: "dev", port: 54399 },
-  app: { mode: "none" },
+  // Served through the deployment rather than beside it.
+  //
+  // `proxy` puts the Next app at / on the same origin as the API, so a reader reaches the blog and
+  // Studio reaches the API through one gateway, and a preview link needs no origin of its own.
+  //
+  // The host is named explicitly rather than as localhost: the CLI rewrites localhost to
+  // host.docker.internal only for a dev-rendered compose, and a self-host stack renders standalone,
+  // where localhost is the server container's own loopback and nothing is listening on it.
+  app: {
+    mode: "proxy",
+    upstream: "http://host.docker.internal:3001",
+    start: "dev",
+  },
   // No `server` or `engine` pin here on purpose: the ones that used to be
   // here named supatype/server 0.1.0 and supatype/schema-engine 0.4.2, neither
   // of which was ever published, so this example could not start at all. Pin a
@@ -31,16 +43,13 @@ export default defineConfig({
     client: "supatype/generated/index.d.ts",
   },
   admin: {
-    // Where a post renders, so Studio can build a preview link that opens somewhere.
+    // Where a post renders. A path, not a URL: this deployment serves the app, so Studio resolves
+    // it against the origin it is loaded from and there is no origin here to go stale.
     //
-    // Without this Studio has no address to attach a code to, and says so rather than handing over
-    // the bare credential. `{slug}` is filled from the record being edited, so a link points at the
-    // address the post's *current* slug implies rather than the one it had when the form loaded.
+    // `{slug}` is filled from the record being edited, so a link points at the address the post's
+    // *current* slug implies rather than the one it had when the form loaded.
     livePreview: {
-      Post: {
-        url: "http://localhost:3000",
-        urlPattern: "http://localhost:3000/preview/{slug}",
-      },
+      Post: { urlPattern: "/preview/{slug}" },
     },
   },
 })

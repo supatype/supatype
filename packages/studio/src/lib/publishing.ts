@@ -144,27 +144,59 @@ export async function fetchDraft(
 }
 
 /**
- * The one state that stands for a whole record.
+ * What a whole record is, as opposed to what one locale is.
  *
- * Used by the publishing section's header, which is what somebody sees while the section is shut.
- * It returns a state rather than a label on purpose: the words live in one table beside the badge
- * that renders them, so the header and the rows underneath it cannot end up calling the same thing
- * by two different names. They briefly did, in the same 280px column.
+ * `partial` is the state a per-locale design needs and a per-locale vocabulary cannot say: some
+ * languages are live and others have never been published. Without it the summary had to pick the
+ * worst single locale, so a post live in English with no French translation reported as "Not
+ * published", and the list called the same record "Draft" while its English was being read by the
+ * public.
+ */
+export type RecordState = LocaleState | "partial"
+
+/**
+ * The state that stands for a whole record.
  *
- * Order matters. An edit waiting outranks a schedule, because a schedule is a decision already
- * taken and an unpublished edit is one nobody has made yet. `live` requires unanimity: one
- * unpublished translation under a green badge is the exact lie the per-locale design exists to
- * prevent, and an empty locale list must not reach it through a vacuous `every`.
+ * Returns a state rather than a label: the words live in one table beside the badge that renders
+ * them, so the list, the collapsed header and the row underneath it cannot end up calling the same
+ * thing by different names. They did, and two of the names were "Draft".
+ *
+ * Order matters, and `partial` outranks the rest for a reason. "Some of this is public and some of
+ * it has never been" is the fact an editor most needs and the one every other label hides.
+ * Otherwise an edit waiting outranks a schedule, because a schedule is a decision already taken and
+ * an unpublished edit is one nobody has made yet. `live` requires unanimity: one unpublished
+ * translation under a green badge is exactly the lie this exists to prevent, and an empty locale
+ * list must not reach it through a vacuous `every`.
  */
 export function publishingSummary(
   state: PublishingState | null,
   locales: string[],
-): LocaleState {
+): RecordState {
   const states = locales.map((locale) => state?.locales[locale] ?? "absent")
-  if (states.length > 0 && states.every((s) => s === "live")) return "live"
+  if (states.length === 0) return "absent"
+  if (states.every((s) => s === "live")) return "live"
+
+  const anyPublished = states.some((s) => s !== "absent")
+  const anyNeverPublished = states.some((s) => s === "absent")
+  if (anyPublished && anyNeverPublished) return "partial"
+
   if (states.some((s) => s === "pending")) return "pending"
   if (states.some((s) => s === "scheduled")) return "scheduled"
   return "absent"
+}
+
+/**
+ * Which locales the world can currently read, for the detail beside a summary badge.
+ *
+ * With two or three languages the specifics fit and are what an editor actually wants: "en live, fr
+ * not" answers the question the badge only raises.
+ */
+export function liveLocales(state: PublishingState | null, locales: string[]): string[] {
+  return locales.filter((locale) => {
+    const s = state?.locales[locale]
+    // Scheduled is not live yet, and pending means an older version of it is: both are readable.
+    return s === "live" || s === "pending"
+  })
 }
 
 /** The schema a read of this model should come from, given whether the editor wants the draft. */
@@ -321,52 +353,61 @@ export async function fetchRecordForEditing(
 }
 
 /**
- * Which of these records have an edit waiting.
+ * What each of these records is, for a list that has to say so without opening any of them.
  *
- * One query for the page rather than one per row: a list of fifty records should cost one request,
- * and the alternative is fifty round trips to render a badge.
+ * It used to answer a boolean: does this record have an unpublished edit. The list rendered that as
+ * a badge reading "Draft", which was wrong for the common case, a post whose English is live and
+ * whose latest edit is not: the record is published and the word said it was not. Meanwhile the
+ * editor two clicks away used "Draft" for a locale that had never been published at all, so the
+ * same word meant opposite things on the same screen.
  *
- * Only the three columns the answer needs, and deliberately **not** `data`: a page of records with
- * twenty versions each would otherwise pull every snapshot of every one of them across the wire to
- * decide whether to draw a dot.
- *
- * Returns an empty set on any failure. A missing badge is a smaller wrong than a list that will not
- * render, and the record's own editor is authoritative about its state anyway.
+ * The query already selected `published_locales` and threw it away. This keeps it, so the list can
+ * tell "never published" from "published, with an edit waiting" from "live in one language and
+ * never published in another".
  */
-export async function fetchPendingDraftIds(
+export async function fetchRecordStates(
   client: SupatypeClient,
   model: ModelConfig,
   recordIds: string[],
-): Promise<Set<string>> {
+  locales: string[],
+): Promise<Map<string, RecordState>> {
   const versions = model.versions
-  if (versions === null || !versions.drafts || recordIds.length === 0) return new Set()
+  if (versions === null || !versions.drafts || recordIds.length === 0) return new Map()
 
   const result = await client
     .from(versions.versionsTable as never)
-    .select("record_id, version, published_locales")
+    .select("record_id, version, published_locales, scheduled_locales")
     .in("record_id", recordIds)
     .order("version", { ascending: false })
 
-  if (result.error !== null || result.data === null) return new Set()
+  if (result.error !== null || result.data === null) return new Map()
 
-  const newest = new Map<string, number>()
-  const live = new Map<string, number>()
-  for (const raw of result.data as unknown as Array<{
+  // Only the columns the derivation reads. Selecting `data` for every version of every row on
+  // screen would pull the whole table through the list.
+  type StateRow = {
     record_id: string
     version: number
     published_locales: Record<string, string> | null
-  }>) {
-    const id = String(raw.record_id)
-    newest.set(id, Math.max(newest.get(id) ?? 0, raw.version))
-    if (raw.published_locales !== null && Object.keys(raw.published_locales).length > 0) {
-      live.set(id, Math.max(live.get(id) ?? 0, raw.version))
-    }
+    scheduled_locales: Record<string, string> | null
   }
 
-  const pending = new Set<string>()
-  for (const [id, version] of newest) {
-    // Never published counts as waiting: there is content nobody outside can see.
-    if (version > (live.get(id) ?? 0)) pending.add(id)
+  const rows = new Map<string, RecordVersion[]>()
+  for (const raw of result.data as unknown as StateRow[]) {
+    const id = String(raw.record_id)
+    const list = rows.get(id) ?? []
+    list.push({
+      version: raw.version,
+      published_locales: raw.published_locales ?? {},
+      scheduled_locales: raw.scheduled_locales ?? {},
+    } as RecordVersion)
+    rows.set(id, list)
   }
-  return pending
+
+  const states = new Map<string, RecordState>()
+  for (const [id, list] of rows) {
+    // Reuses the per-locale derivation rather than repeating it, so a list badge and the editor's
+    // own badge cannot disagree about the same record.
+    states.set(id, publishingSummary(publishingState(list, locales), locales))
+  }
+  return states
 }
