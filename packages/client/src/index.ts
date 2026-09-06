@@ -1,4 +1,5 @@
 import { AuthClient } from "./auth.js"
+import { PreviewCredential } from "./preview.js"
 import { QueryBuilder, MutationBuilder, type HeadersProvider } from "./query.js"
 import { defaultQueryCache, type QueryCache } from "./query-cache.js"
 import { StorageClient } from "./storage.js"
@@ -65,6 +66,7 @@ export { ERROR_CODES_DOCUMENTATION, getErrorDocumentation, getErrorCodesByCatego
 export type { ErrorCodeEntry } from "./error-codes-doc.js"
 export { CONNECTION_MODES, SERVERLESS_CONNECTION_WARNING, CONNECTION_FAQ } from "./serverless-docs.js"
 export type { ConnectionModeDoc } from "./serverless-docs.js"
+export { PreviewLinkError } from "./preview.js"
 
 // ─── Table client ─────────────────────────────────────────────────────────────
 
@@ -467,13 +469,20 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
   // A client with both is a route sending admin credentials down a path meant for strangers, which
   // is precisely what the preview link exists to remove. Thrown rather than warned: the two are
   // never both correct, and a warning in a server log is not read by whoever wrote the route.
-  if (config.previewToken !== undefined && config.serviceRoleKey !== undefined) {
+  if (config.previewCode !== undefined && config.serviceRoleKey !== undefined) {
     throw new Error(
-      "A Supatype client cannot carry both `previewToken` and `serviceRoleKey`. A preview link is " +
+      "A Supatype client cannot carry both `previewCode` and `serviceRoleKey`. A preview link is " +
         "the bearer's whole credential and needs no admin key; sending one anyway would let " +
         "anybody who reached that route read everything.",
     )
   }
+
+  // Built once and shared by every request this client makes, so a page rendering several queries
+  // exchanges the code once rather than once per table.
+  const previewCredential =
+    config.previewCode === undefined || config.previewCode === ""
+      ? null
+      : new PreviewCredential(config.url, config.previewCode)
 
   const baseHeaders: Record<string, string> = {
     apikey: config.anonKey,
@@ -524,8 +533,10 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
     // A preview link is the whole credential, and it comes before any session on purpose: whoever
     // opened the link may well be signed in as someone with no access to the draft, and quietly
     // using that identity would show them "not found".
-    if (config.previewToken) {
-      return { ...baseHeaders, Authorization: `Bearer ${config.previewToken}` }
+    if (previewCredential !== null) {
+      // Throws when the link will not resolve. The query layer turns that into an ordinary
+      // `{ data: null, error }`, so a revoked link reads as a message rather than as a crash.
+      return { ...baseHeaders, Authorization: `Bearer ${await previewCredential.token()}` }
     }
     await auth.ensureValidSession()
     const token = auth.currentAccessToken

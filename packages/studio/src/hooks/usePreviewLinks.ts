@@ -7,11 +7,23 @@ import { useAdminClient } from "./useAdminClient.js"
 /** What one link covers. */
 export type PreviewScope = "record" | "project"
 
-export interface PreviewLink {
-  token: string
+/** A freshly minted link. The code is in it exactly once. */
+export interface MintedPreviewLink {
+  /** The credential. Shown once and never stored: this is the only time Studio holds it. */
+  code: string
+  /** The link's public identity, which is what a later revoke names. */
+  id: string
   /** ISO timestamp. */
   expiresAt: string
   scope: PreviewScope
+}
+
+/** An outstanding link, as listed. It carries no credential. */
+export interface PreviewLinkSummary {
+  id: string
+  scope: PreviewScope
+  createdAt: string
+  expiresAt: string
 }
 
 export interface UsePreviewLinksReturn {
@@ -23,12 +35,14 @@ export interface UsePreviewLinksReturn {
     model?: string
     recordId?: string
     ttl?: number
-  }) => Promise<PreviewLink | null>
+  }) => Promise<MintedPreviewLink | null>
+  list: (model: string, recordId: string) => Promise<PreviewLinkSummary[]>
+  revoke: (id: string) => Promise<boolean>
   revokeAll: () => Promise<boolean>
 }
 
 /**
- * Mint and withdraw the links that let someone without an account read a draft.
+ * Mint, list and withdraw the links that let someone without an account read a draft.
  *
  * Not data-plane traffic, so it goes beside `/studio/proxy` rather than through it, the same
  * journey Studio membership takes. The server is the authority on every refusal: whether this
@@ -36,10 +50,11 @@ export interface UsePreviewLinksReturn {
  * requested lifetime is past the ceiling. A client-side copy of those rules would drift, and the
  * one thing worse than refusing a link is refusing it for the wrong reason.
  *
- * **Revocation is all links at once.** A signed token carries no identity a server could revoke
- * individually without keeping a list of every link ever minted, which is a database of secrets to
- * protect in exchange for a control nobody asked for. Links are short-lived by construction, so
- * re-sharing after a revocation costs a click.
+ * **A link can be revoked on its own.** It used to be all or nothing: the link was a signed token,
+ * which cannot be recalled, so withdrawing one meant bumping a counter that stranded every other
+ * link in the project. Sending a link to the wrong person therefore broke everyone else's. A link
+ * is now an id and a secret with only the id kept, so there is something to name and take back, and
+ * `revokeAll` survives as the panic button rather than as the only button.
  */
 export function usePreviewLinks(): UsePreviewLinksReturn {
   const client = useAdminClient()
@@ -49,16 +64,21 @@ export function usePreviewLinks(): UsePreviewLinksReturn {
   const base = useMemo(() => membershipBase(client.url), [client.url])
 
   const request = useCallback(
-    async (path: string, body: Record<string, unknown>): Promise<Record<string, unknown>> => {
+    async (
+      path: string,
+      init: { method: "GET" | "POST"; body?: Record<string, unknown> },
+    ): Promise<Record<string, unknown>> => {
       const res = await fetch(`${base}${path}`, {
-        method: "POST",
+        method: init.method,
         credentials: "include",
         headers: {
-          "Content-Type": "application/json",
+          // Only where there is a body to describe. On a GET it says nothing, and it is not a
+          // CORS-safelisted value, so it is pure weight on a cross-origin deployment.
+          ...(init.body !== undefined && { "Content-Type": "application/json" }),
           ...studioGatewayHeaders(),
           ...studioAuthHeaders(client),
         },
-        body: JSON.stringify(body),
+        ...(init.body !== undefined && { body: JSON.stringify(init.body) }),
       })
       const json = (await res.json().catch(() => ({}))) as Record<string, unknown>
       if (!res.ok) {
@@ -79,13 +99,17 @@ export function usePreviewLinks(): UsePreviewLinksReturn {
       setError(null)
       try {
         const body = await request("/preview-links", {
-          scope: options.scope,
-          ...(options.model !== undefined && { model: options.model }),
-          ...(options.recordId !== undefined && { recordId: options.recordId }),
-          ...(options.ttl !== undefined && { ttl: options.ttl }),
+          method: "POST",
+          body: {
+            scope: options.scope,
+            ...(options.model !== undefined && { model: options.model }),
+            ...(options.recordId !== undefined && { recordId: options.recordId }),
+            ...(options.ttl !== undefined && { ttl: options.ttl }),
+          },
         })
         return {
-          token: String(body["token"] ?? ""),
+          code: String(body["code"] ?? ""),
+          id: String(body["id"] ?? ""),
           expiresAt: String(body["expiresAt"] ?? ""),
           scope: options.scope,
         }
@@ -99,10 +123,47 @@ export function usePreviewLinks(): UsePreviewLinksReturn {
     [request],
   )
 
+  const list = useCallback<UsePreviewLinksReturn["list"]>(
+    async (model, recordId) => {
+      try {
+        const query = `?model=${encodeURIComponent(model)}&recordId=${encodeURIComponent(recordId)}`
+        const body = await request(`/preview-links${query}`, { method: "GET" })
+        const rows = Array.isArray(body["links"]) ? (body["links"] as Record<string, unknown>[]) : []
+        return rows.map((row) => ({
+          id: String(row["id"] ?? ""),
+          scope: (String(row["scope"] ?? "record") === "project"
+            ? "project"
+            : "record") as PreviewScope,
+          createdAt: String(row["createdAt"] ?? ""),
+          expiresAt: String(row["expiresAt"] ?? ""),
+        }))
+      } catch {
+        // Not surfaced as the panel's error: failing to list is not failing to share, and putting
+        // it in the same place would make a read problem look like the mint being refused.
+        return []
+      }
+    },
+    [request],
+  )
+
+  const revoke = useCallback<UsePreviewLinksReturn["revoke"]>(
+    async (id) => {
+      setError(null)
+      try {
+        await request(`/preview-links/${encodeURIComponent(id)}/revoke`, { method: "POST" })
+        return true
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not revoke that preview link")
+        return false
+      }
+    },
+    [request],
+  )
+
   const revokeAll = useCallback(async (): Promise<boolean> => {
     setError(null)
     try {
-      await request("/preview-links/revoke", {})
+      await request("/preview-links/revoke", { method: "POST", body: {} })
       return true
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not revoke preview links")
@@ -110,5 +171,5 @@ export function usePreviewLinks(): UsePreviewLinksReturn {
     }
   }, [request])
 
-  return { minting, error, mint, revokeAll }
+  return { minting, error, mint, list, revoke, revokeAll }
 }
