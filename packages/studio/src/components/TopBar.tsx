@@ -5,7 +5,7 @@ import { useLocation } from "react-router-dom"
 import type { AdminConfig } from "../config.js"
 import { LocaleSwitcher } from "./LocaleSwitcher.js"
 import { SupatypeIcon } from "./SupatypeLogo.js"
-import { Badge } from "./ui/badge.js"
+import { Badge } from "./ui.js"
 import { ConnectModal } from "./ConnectModal.js"
 import { JumpToSearch } from "./JumpToSearch.js"
 import { UserAccountMenu } from "./UserAccountMenu.js"
@@ -136,7 +136,7 @@ export function TopBar({ config, leftItems, extraItems, demoMode, onToggleSideba
       )}
 
       {demoMode && (
-        <Badge variant="secondary" className="shrink-0 text-[11px] border-primary/40 text-primary">
+        <Badge variant="outline" className="shrink-0 border-primary/40 text-primary">
           Demo
         </Badge>
       )}

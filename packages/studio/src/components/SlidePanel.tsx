@@ -1,6 +1,7 @@
 import React, { useEffect } from "react"
 import { createPortal } from "react-dom"
 import { cn } from "../lib/utils.js"
+import { IconX } from "./icons.js"
 
 interface SlidePanelProps {
   open: boolean
@@ -10,14 +11,6 @@ interface SlidePanelProps {
   /** Tailwind max-w-* class. Defaults to "max-w-[480px]". */
   width?: string
   children: React.ReactNode
-}
-
-function CloseIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-    </svg>
-  )
 }
 
 export function SlidePanel({
@@ -73,7 +66,7 @@ export function SlidePanel({
             className="flex items-center justify-center w-7 h-7 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors -mr-1"
             aria-label="Close panel"
           >
-            <CloseIcon />
+            <IconX />
           </button>
         </div>
 

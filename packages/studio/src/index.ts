@@ -41,7 +41,8 @@ export { AdminClientContext, useAdminClient } from "./hooks/useAdminClient.js"
 export { LocaleContext, useLocale, useLocaleState } from "./hooks/useLocale.js"
 
 // Components
-export { Sidebar, Icon, getPageTitle } from "./components/Sidebar.js"
+export { Sidebar, getPageTitle } from "./components/Sidebar.js"
+export { Icon } from "./components/icons.js"
 export { TopBar } from "./components/TopBar.js"
 export { StudioConfigError } from "./components/StudioConfigError.js"
 export type { StudioConfigErrorKind, StudioConfigErrorProps } from "./components/StudioConfigError.js"
@@ -52,10 +53,17 @@ export { LivePreviewPane } from "./components/LivePreviewPane.js"
 export { SupatypeIcon, SupatypeWordmark } from "./components/SupatypeLogo.js"
 
 // UI primitives
-export { Button } from "./components/ui/button.js"
-export { Input } from "./components/ui/input.js"
-export { Badge } from "./components/ui/badge.js"
-export { Card, CardHeader, CardTitle, CardDescription, CardContent } from "./components/ui/card.js"
+// The primitives Studio is actually built from.
+//
+// There used to be two of each: a shadcn copy under components/ui/ that this file exported, and the
+// one every view imports. Nothing in Studio, the cloud app or this monorepo imported the exported
+// pair, so the package advertised components nobody used while the ones it is made of were not
+// exported at all. They had already drifted apart on `sm`, `ghost` and `secondary`, and `icon` came
+// to mean a 40px square in one and a shrink-wrapped glyph in the other.
+//
+// Removing them drops CardHeader/CardTitle/CardDescription/CardContent, which have no equivalent
+// here and no caller anywhere.
+export { Badge, Button, Card, Input } from "./components/ui.js"
 
 // Widgets
 export { FieldWidget } from "./widgets/FieldWidget.js"
