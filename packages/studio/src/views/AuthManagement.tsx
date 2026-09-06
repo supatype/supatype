@@ -39,9 +39,9 @@ interface AuthIdentity {
 interface MfaFactor {
   id: string
   /**
-   * The factor kind GoTrue enrolled, rendered verbatim.
+   * The factor kind that was enrolled, rendered verbatim.
    *
-   * Not narrowed to `"totp"`: GoTrue also enrols phone factors, and the mapper was casting through
+   * Not narrowed to `"totp"`: phone factors are enrolled too, and the mapper was casting through
    * `any` to satisfy a literal it could not honour. A card reading "phone" is right; one reading
    * "totp" over a phone factor is a lie about someone's second factor.
    */
@@ -402,13 +402,16 @@ function InviteUserForm({
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 /**
- * A user as GoTrue's admin API returns it.
+ * A user as the auth admin API returns it, which is not the AuthUser above: that
+ * one is what this view renders, with the fields it needs and no nulls. Sharing
+ * the name merged the two declarations and made every field of the rendered user
+ * optional.
  *
  * Every field optional, because this describes someone else's JSON rather than a value we
  * constructed: a server that stops sending `factors` should narrow what Studio can show, not throw
  * while mapping. `any` here would have hidden exactly that.
  */
-interface GoTrueUser {
+interface AuthUserResponse {
   id: string
   email?: string | null
   phone?: string | null
@@ -419,18 +422,18 @@ interface GoTrueUser {
   created_at: string
   updated_at: string
   user_metadata?: Record<string, unknown> | null
-  identities?: GoTrueIdentity[] | null
-  factors?: GoTrueFactor[] | null
+  identities?: AuthIdentityResponse[] | null
+  factors?: AuthFactorResponse[] | null
 }
 
-interface GoTrueIdentity {
+interface AuthIdentityResponse {
   provider: string
   identity_id?: string | null
   id?: string | null
   created_at: string
 }
 
-interface GoTrueFactor {
+interface AuthFactorResponse {
   id: string
   factor_type?: string | null
   type?: string | null
@@ -439,7 +442,7 @@ interface GoTrueFactor {
   status?: string | null
 }
 
-function mapGoTrueUser(raw: GoTrueUser): AuthUser {
+function mapAuthUser(raw: AuthUserResponse): AuthUser {
   return {
     id: raw.id,
     email: raw.email ?? "",
@@ -503,7 +506,7 @@ export function AuthManagement(): React.ReactElement {
   const { data: usersData, loading, error, refetch } = useApiQuery(
     async () => {
       const json = await authAdminFetch("/users?page=1&per_page=50")
-      return (json.users as GoTrueUser[]).map(mapGoTrueUser)
+      return (json.users as AuthUserResponse[]).map(mapAuthUser)
     },
     [authAdminFetch],
   )
@@ -563,7 +566,7 @@ export function AuthManagement(): React.ReactElement {
     }
     if (loading) return
     void authAdminFetch(`/users/${encodeURIComponent(userIdParam)}`)
-      .then((raw) => setSelectedUser(mapGoTrueUser(raw)))
+      .then((raw) => setSelectedUser(mapAuthUser(raw)))
       .catch(() => {
         setSearchParams({}, { replace: true })
       })
@@ -621,7 +624,7 @@ export function AuthManagement(): React.ReactElement {
     })) as { id?: string }
 
     // Two calls because they are two different things: the account lives in `auth.users`, the
-    // Studio grant lives in `_supatype.studio_members`, and only the first is GoTrue's to create.
+    // Studio grant lives in `_supatype.studio_members`, and only the first is the auth service’s to create.
     // A failure here leaves a real user with no Studio access, which is the safe half to be left
     // holding: the alternative is a grant pointing at a user that does not exist.
     if (data.studioRole !== undefined && typeof created.id === "string") {

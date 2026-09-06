@@ -176,7 +176,15 @@ compose_args() {
   printf '%s\n' "${args[@]}"
 }
 
-# Dump db logs / ps / dmesg before compose down so CI artifacts retain crash evidence.
+# Dump every service's logs and state before compose down, so a CI failure can
+# be diagnosed from the run alone.
+#
+# This used to capture only `db`, which meant a stack that failed anywhere else
+# left no evidence at all: the gateway timing out looked identical whether Kong
+# never started, the server refused its configuration, or an image failed to
+# pull. Everything is also echoed inline, because the artifact upload has
+# silently found nothing more than once and a log you cannot retrieve is not a
+# log.
 dump_compose_diagnostics() {
   local out="$INTEGRATION_DIR/.supatype/ci-logs"
   mkdir -p "$out"
@@ -187,11 +195,23 @@ dump_compose_diagnostics() {
   local args
   mapfile -t args < <(compose_args)
   echo "==> Dumping compose diagnostics to $out"
-  docker "${args[@]}" logs --no-color --timestamps --tail 800 db >"$out/db.log" 2>&1 || true
+
   docker "${args[@]}" ps -a >"$out/ps.txt" 2>&1 || true
+  echo "--- compose ps ---"
+  cat "$out/ps.txt" 2>/dev/null || true
+
+  # Ordered so the most likely culprit for a gateway timeout comes first.
+  local service
+  for service in kong server realtime db postgrest storage control-plane studio functions-worker minio valkey; do
+    docker "${args[@]}" logs --no-color --timestamps --tail 400 "$service" \
+      >"$out/$service.log" 2>&1 || true
+    if [[ -s "$out/$service.log" ]]; then
+      echo "--- last 60 lines: $service ---"
+      tail -n 60 "$out/$service.log" 2>/dev/null || true
+    fi
+  done
+
   dmesg -T 2>/dev/null | tail -n 100 >"$out/dmesg-tail.txt" || true
-  echo "--- last 200 lines of db logs ---"
-  tail -n 200 "$out/db.log" 2>/dev/null || true
 }
 
 stop_compose_stack() {

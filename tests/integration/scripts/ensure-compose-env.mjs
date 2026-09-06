@@ -45,7 +45,7 @@ const updates = {
   SUPATYPE_KONG_PORT: String(kongPort),
   API_EXTERNAL_URL: apiUrl,
   SITE_URL: apiUrl,
-  GOTRUE_MAILER_AUTOCONFIRM: "true",
+  SUPATYPE_MAILER_AUTOCONFIRM: "true",
 }
 
 const keys = new Set(Object.keys(updates))

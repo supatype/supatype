@@ -157,13 +157,13 @@ export interface SupatypeProjectConfig {
     /**
      * Email delivery provider.
      * "console" = log to stdout (default for dev)
-     * "smtp"    = SMTP (set `smtp` below and/or GOTRUE_SMTP_* in `.env`)
+     * "smtp"    = SMTP (set `smtp` below and/or SUPATYPE_SMTP_* in `.env`)
      * "resend"  = Resend API (requires RESEND_API_KEY, RESEND_FROM)
      * "ses"     = AWS SES v2 (ambient credentials, requires SES_FROM)
      */
     provider: "console" | "smtp" | "resend" | "ses"
     /**
-     * SMTP settings for provider=smtp (merged into process env as GOTRUE_SMTP_*).
+     * SMTP settings for provider=smtp (merged into process env as SUPATYPE_SMTP_*).
      * Omitted keys can still be set via `.env` / shell.
      */
     smtp?: {
@@ -181,9 +181,9 @@ export interface SupatypeProjectConfig {
     /** From address for SES (provider=ses, or set SES_FROM env var). */
     ses_from?: string
     /**
-     * When true, `supatype dev` enables the GoTrue send-email HTTP hook pointing at this
+     * When true, `supatype dev` enables the send-email HTTP hook pointing at this
      * server's POST `/internal/v0hooks/send-email` (signed delivery, dev-only secret).
-     * Override `GOTRUE_HOOK_SEND_EMAIL_*` in `.env` if needed.
+     * Override `SUPATYPE_HOOK_SEND_EMAIL_*` in `.env` if needed.
      */
     send_email_hook?: boolean
     /**

@@ -543,7 +543,7 @@ export function ApiDocs(): React.ReactElement {
   const config = useContext(AdminConfigContext)
 
   // Endpoints are built from the admin config (user models + hardcoded auth/storage).
-  // No DB introspection needed, that prevents GoTrue internal tables from leaking in.
+  // No DB introspection needed, that prevents the auth service internal tables from leaking in.
   const endpoints = useMemo(
     () => buildEndpointsFromModels(config?.models),
     [config],

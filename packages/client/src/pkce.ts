@@ -1,7 +1,7 @@
 import { sha256 } from "@noble/hashes/sha2.js"
 import { utf8ToBytes } from "@noble/hashes/utils.js"
 
-/** RFC 7636 code_challenge_method value expected by GoTrue. */
+/** RFC 7636 code_challenge_method value expected by the auth service. */
 export const PKCE_METHOD_S256 = "s256"
 
 /**

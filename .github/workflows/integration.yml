@@ -130,6 +130,113 @@ jobs:
   # every defect in this feature has actually been. A validator map the CLI built and nothing wrote,
   # a manifest key the compose path never set, a Studio normalizer that dropped the rules: all had
   # green tests and none survived a request.
+  # Realtime is on by default, so every job above already starts the service, and
+  # none of them ever subscribed. What they proved is that the gateway upgrades a
+  # WebSocket, which a broken realtime does too: the socket opens and no row
+  # arrives. This subscribes, writes, and waits with a deadline.
+  #
+  # Dispatch and schedule only, for the same reason as the validation job below,
+  # and only until the same release ships. Realtime itself needs nothing
+  # unpublished: it decodes WAL from a replication slot, so there is no
+  # per-table opt-in. The server in front of it does. This branch's CLI writes
+  # SUPATYPE_* and the published `supatype/server:latest` still reads GOTRUE_*,
+  # so the stack does not come up at all and the failure says nothing about
+  # realtime.
+  #
+  # **Add `pull_request` here once a `supatype/server` release carrying the
+  # SUPATYPE_ prefix is on Docker Hub.** Nothing else blocks it; verified green
+  # against a locally built server image.
+  # Studio in a browser. Everything else tests its server surface, which stays
+  # green through a bundle that loads and then throws, an asset referenced at the
+  # wrong base path, or a sign-in form wired to nothing.
+  #
+  # Gated for the same reason and until the same release as the two jobs below:
+  # the stack in front of Studio is supatype/server:latest, which still reads the
+  # old prefix while this branch's CLI writes the new one.
+  #
+  # **Add `pull_request` here once a `supatype/server` release carrying the
+  # SUPATYPE_ prefix is on Docker Hub.**
+  studio-ui-e2e:
+    name: studio UI (browser)
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    env:
+      # Studio reads its model and database views from the admin config the
+      # engine writes on push, so this job pushes, and pushing downloads the
+      # host engine. Without the key the download refuses to verify the
+      # release and the push writes no config, which then presents as every
+      # Studio view being empty rather than as a missing secret.
+      SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript packages
+        run: pnpm build
+
+      # Chromium only: a second engine doubles the download and the minutes, and
+      # nothing here tests browser differences.
+      - name: Install Chromium
+        run: pnpm --filter supatype-e2e exec playwright install --with-deps chromium
+
+      - name: Run the Studio UI e2e
+        run: bash tests/integration/scripts/studio-ui-e2e.sh
+
+      - name: Upload the Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-ui-playwright-report
+          path: |
+            tests/e2e/playwright-report/**
+            tests/e2e/test-results/**
+          if-no-files-found: ignore
+
+  realtime-e2e:
+    name: realtime (live stack)
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript packages
+        run: pnpm build
+
+      - name: Run the realtime e2e
+        run: bash tests/integration/scripts/realtime-e2e.sh
+
+      - name: Upload stack logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: realtime-e2e-logs
+          path: |
+            examples/realtime/.supatype/**/*.log
+          if-no-files-found: ignore
+
   validation-e2e:
     name: field validation (live stack)
     # Dispatch and schedule only, for now. The stack it needs is not published yet: this asserts a

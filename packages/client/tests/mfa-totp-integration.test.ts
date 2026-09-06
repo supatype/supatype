@@ -10,7 +10,7 @@ import { AuthClient } from "../src/auth.js"
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const GOTRUE_URL = "http://localhost:9999"
+const SUPATYPE_URL = "http://localhost:9999"
 const HEADERS = { apikey: "test-anon-key", "Content-Type": "application/json" }
 
 const FACTOR_ID = "factor-totp-001"
@@ -69,7 +69,7 @@ function mockFetch(body: unknown, ok = true, status?: number): ReturnType<typeof
 }
 
 function freshClient(): AuthClient {
-  return new AuthClient(GOTRUE_URL, HEADERS)
+  return new AuthClient(SUPATYPE_URL, HEADERS)
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -111,7 +111,7 @@ describe("Task 89: MFA TOTP integration", () => {
 
       // Verify POST was sent to /factors
       const [url, opts] = enrollFetch.mock.calls[0] as [string, RequestInit]
-      expect(url).toBe(`${GOTRUE_URL}/factors`)
+      expect(url).toBe(`${SUPATYPE_URL}/factors`)
       expect(opts.method).toBe("POST")
       const body = JSON.parse(opts.body as string) as Record<string, string>
       expect(body["factor_type"]).toBe("totp")
@@ -337,7 +337,7 @@ describe("Task 89: MFA TOTP integration", () => {
       expect(data!.id).toBe(FACTOR_ID)
 
       const [url, opts] = unenrollFetch.mock.calls[0] as [string, RequestInit]
-      expect(url).toBe(`${GOTRUE_URL}/factors/${FACTOR_ID}`)
+      expect(url).toBe(`${SUPATYPE_URL}/factors/${FACTOR_ID}`)
       expect(opts.method).toBe("DELETE")
     })
 

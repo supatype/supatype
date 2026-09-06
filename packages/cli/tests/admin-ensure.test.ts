@@ -4,8 +4,8 @@ import {
   ADMIN_PASSWORD_ENV,
   clearAdminSeedPassword,
   composePostgresPassword,
-  GOTRUE_NIL_INSTANCE_ID,
-  gotrueJwtAud,
+  SUPATYPE_NIL_INSTANCE_ID,
+  authJwtAud,
   hashPasswordForAuth,
   resolveAuthConfirmedAtColumn,
 } from "../src/commands/admin.js"
@@ -65,13 +65,13 @@ describe("composePostgresPassword", () => {
   })
 })
 
-describe("gotrueJwtAud", () => {
-  it("reads GOTRUE_JWT_AUD from .env", () => {
+describe("authJwtAud", () => {
+  it("reads SUPATYPE_JWT_AUD from .env", () => {
     const dir = join(tmpdir(), `supatype-admin-aud-${Date.now()}`)
     mkdirSync(dir, { recursive: true })
-    writeFileSync(join(dir, ".env"), "GOTRUE_JWT_AUD=custom-aud\n", "utf8")
+    writeFileSync(join(dir, ".env"), "SUPATYPE_JWT_AUD=custom-aud\n", "utf8")
     try {
-      expect(gotrueJwtAud(dir)).toBe("custom-aud")
+      expect(authJwtAud(dir)).toBe("custom-aud")
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
@@ -81,16 +81,16 @@ describe("gotrueJwtAud", () => {
     const dir = join(tmpdir(), `supatype-admin-aud-default-${Date.now()}`)
     mkdirSync(dir, { recursive: true })
     try {
-      expect(gotrueJwtAud(dir)).toBe("authenticated")
+      expect(authJwtAud(dir)).toBe("authenticated")
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
   })
 })
 
-describe("GOTRUE_NIL_INSTANCE_ID", () => {
-  it("is the nil UUID GoTrue uses for lookup", () => {
-    expect(GOTRUE_NIL_INSTANCE_ID).toBe("00000000-0000-0000-0000-000000000000")
+describe("SUPATYPE_NIL_INSTANCE_ID", () => {
+  it("is the nil UUID the auth service uses for lookup", () => {
+    expect(SUPATYPE_NIL_INSTANCE_ID).toBe("00000000-0000-0000-0000-000000000000")
   })
 })
 

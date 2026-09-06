@@ -44,7 +44,7 @@ export interface DeployTarget {
   apiBaseUrl: string
   apiPrefix: "/api/v1" | "/platform/v1"
   token?: string | undefined
-  /** Cloud GoTrue refresh token (mode === "cloud" only). */
+  /** Cloud auth refresh token (mode === "cloud" only). */
   refreshToken?: string | undefined
   orgId?: string | undefined
   link: ProjectLink | null

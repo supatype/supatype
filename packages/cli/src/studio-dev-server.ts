@@ -9,7 +9,14 @@ export interface StudioDevServerOptions {
   cwd: string
   studioOverride: string
   pidDir: string
-  serviceRoleKey: string
+  /**
+   * The anon key, and only the anon key. Studio in the browser is an untrusted
+   * client: privileged calls go through /studio/proxy, which holds the service
+   * role key server-side and applies membership, role permissions and the audit
+   * trail. Studio refuses a service role key handed to the browser and says so
+   * loudly, which is what this used to trigger on every dev start.
+   */
+  anonKey: string
   /**
    * Where Vite proxies API requests (Kong gateway port for compose dev, or
    * supatype-server port for native `supatype dev`).
@@ -45,8 +52,7 @@ export function startStudioViteDevServer(opts: StudioDevServerOptions): ProcessM
       env: {
         VITE_SUPATYPE_URL: opts.viteSupatypeUrl,
         SUPATYPE_PROXY_TARGET: opts.proxyTarget,
-        VITE_SUPATYPE_ANON_KEY: opts.serviceRoleKey,
-        VITE_SUPATYPE_SERVICE_ROLE_KEY: opts.serviceRoleKey,
+        VITE_SUPATYPE_ANON_KEY: opts.anonKey,
         VITE_BASE_PATH: basePath,
       },
     },

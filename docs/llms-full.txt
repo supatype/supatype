@@ -12,7 +12,7 @@ Supatype lets developers define backend data models as TypeScript `Model<>` type
 - Row Level Security (RLS) policies from declarative access rules on models
 - REST (PostgREST) and GraphQL (pg_graphql) APIs
 - Typed client SDKs for application code
-- Auth (GoTrue-compatible path in the stack)
+- Auth
 - File/object storage buckets from file/image fields
 - Realtime WebSocket change streams (postgres_changes, plus presence/broadcast in the product path)
 - Studio: schema-generated admin / content CMS UI

@@ -26,13 +26,13 @@ export interface RelationDisplay {
   initials: string
 }
 
-type GoTrueUser = {
+type AuthUser = {
   id: string
   email?: string
   user_metadata?: Record<string, unknown>
 }
 
-export function authUserSummary(raw: GoTrueUser): AuthUserSummary {
+export function authUserSummary(raw: AuthUser): AuthUserSummary {
   const name = String(raw.user_metadata?.["name"] ?? raw.user_metadata?.["full_name"] ?? "").trim()
   return { id: raw.id, email: raw.email ?? "", name }
 }
@@ -68,7 +68,7 @@ export async function fetchAuthUsers(
 ): Promise<AuthUserSummary[]> {
   const res = await authAdminFetch(client, "/users?page=1&per_page=200")
   if (!res.ok) return []
-  const data = await res.json() as { users?: GoTrueUser[] }
+  const data = await res.json() as { users?: AuthUser[] }
   const q = term.trim().toLowerCase()
   const results: AuthUserSummary[] = []
   for (const raw of data.users ?? []) {
@@ -89,7 +89,7 @@ export async function fetchAuthUserById(
 ): Promise<AuthUserSummary | null> {
   const res = await authAdminFetch(client, `/users/${encodeURIComponent(id)}`)
   if (!res.ok) return null
-  return authUserSummary(await res.json() as GoTrueUser)
+  return authUserSummary(await res.json() as AuthUser)
 }
 
 export async function fetchAuthUsersByIds(

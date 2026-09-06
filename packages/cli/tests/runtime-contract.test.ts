@@ -163,7 +163,7 @@ describe("runtime contract", () => {
   })
 
   // The whole point of requiring them: a service must never fall back to a secret published in
-  // this repository. That default used to reach PostgREST, storage and GoTrue.
+  // this repository. That default used to reach PostgREST, storage and auth.
   it("never defaults a secret to a published constant", () => {
     const compose = renderSelfHostCompose(baseConfig)
     expect(compose).not.toContain("super-secret-jwt-token")

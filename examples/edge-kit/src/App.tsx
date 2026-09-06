@@ -114,7 +114,7 @@ const scenarios: Scenario[] = [
       const { data: signData, error: signErr } = await client.auth.signUp({ email, password })
       if (signErr) throw new Error(signErr.message)
       if (!signData.session) {
-        throw new Error("signUp returned no session, is GOTRUE_MAILER_AUTOCONFIRM=true?")
+        throw new Error("signUp returned no session, is SUPATYPE_MAILER_AUTOCONFIRM=true?")
       }
       setSessionEmail(email)
       const { data, error } = await client.functions.invoke("auth-required", { body: {} })

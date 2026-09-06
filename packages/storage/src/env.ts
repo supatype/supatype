@@ -14,7 +14,7 @@ export const config = {
   ),
 
   /**
-   * JWT secret shared with GoTrue / Kong.
+   * JWT secret shared with the auth service and Kong.
    *
    * **No fallback, deliberately.** This validates every caller's token, and the value it used
    * to default to is published in this repository, so a deployment that forgot to set
