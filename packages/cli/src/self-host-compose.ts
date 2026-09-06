@@ -640,6 +640,16 @@ ${dbDependency}${studioBlock}${valkeyBlock}${tlsHintComment}  kong:
       KONG_ADMIN_ACCESS_LOG: /dev/stdout
       KONG_PROXY_ERROR_LOG: /dev/stderr
       KONG_ADMIN_ERROR_LOG: /dev/stderr
+      # Cookies are not scoped by port, so every project a developer runs on localhost shares one
+      # cookie jar and every request through this gateway carries the lot, which overruns nginx's
+      # default buffers and answers "Request header or cookie too large" about cookies belonging to
+      # something else entirely.
+      #
+      # Kept equal to large_client_header_buffers in packages/studio/nginx.conf, where the reason
+      # for the two numbers is written down. Both hops need it and they need the same value: this
+      # one carries API calls, that one the page, and a request that clears one and fails the other
+      # is worse to diagnose than one that fails outright.
+      KONG_NGINX_HTTP_LARGE_CLIENT_HEADER_BUFFERS: "4 32k"
 ${kongTlsEnv}    volumes:
       - ${kongMount}:/etc/kong/kong.yml:ro
     ports:

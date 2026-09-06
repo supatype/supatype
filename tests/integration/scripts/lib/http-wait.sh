@@ -30,6 +30,21 @@ http_status() {
   printf '%s' "${code:-000}"
 }
 
+# http_header <name> <curl-args...> - prints one response header's value, or nothing when the
+# header is absent. The name is matched case-insensitively, because which case a proxy sends is
+# its business. Bounded like the rest: a header nobody sends must not hang the script.
+http_header() {
+  local name="$1"
+  shift
+  curl -s -D - -o /dev/null --connect-timeout 3 --max-time 5 "$@" 2>/dev/null \
+    | tr -d '\r' \
+    | awk -v want="$name" 'BEGIN { want = tolower(want) }
+        index($0, ":") > 0 {
+          key = tolower(substr($0, 1, index($0, ":") - 1))
+          if (key == want) { sub(/^[^:]*:[ \t]*/, "", $0); print; exit }
+        }'
+}
+
 # wait_until <seconds> <label> <predicate> - polls the predicate once a second until it
 # succeeds. Returns 0 with the real elapsed time reported, or 1 once the deadline passes.
 # <predicate> is the name of a shell function; it decides what "ready" means, so a caller

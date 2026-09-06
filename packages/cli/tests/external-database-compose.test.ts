@@ -200,12 +200,15 @@ describe("the draft schema in generated compose", () => {
 })
 
 describe("the server's own configuration keys", () => {
+  // `renderSelfHostCompose` is pure over its config, so one render serves every
+  // assertion here and the fixture lives in one place.
+  const compose = renderSelfHostCompose(managed())
+
   it("uses the SUPATYPE_ prefix the server actually reads", () => {
     // The server's config prefix is "supatype", so a GOTRUE_ key is read by nothing. It does not
     // warn about the ones it ignores: it dies on the first *required* key it cannot find, so
     // self-host failed to start with a message naming a variable that was present in .env under
     // another spelling, and no test noticed because none asserted these.
-    const compose = renderSelfHostCompose(managed())
     for (const key of [
       "SUPATYPE_API_EXTERNAL_URL",
       "SUPATYPE_API_HOST",
@@ -222,7 +225,6 @@ describe("the server's own configuration keys", () => {
   })
 
   it("sets no GOTRUE_ key on the server, since none of them are read", () => {
-    const compose = renderSelfHostCompose(managed())
     const serverBlock = compose.split("\n  server:")[1]?.split("\n  kong:")[0] ?? ""
     const stale = serverBlock
       .split("\n")
@@ -236,8 +238,18 @@ describe("the server's own configuration keys", () => {
     // `.env` — and the server reads config files into its environment before checking for retired
     // names, so its presence there is fatal. The old spelling cannot be the escape hatch when
     // having it set at all is the failure.
-    const compose = renderSelfHostCompose(managed())
     expect(compose).toContain("SUPATYPE_MAILER_AUTOCONFIRM: ${SUPATYPE_MAILER_AUTOCONFIRM:-true}")
     expect(compose).not.toContain("${GOTRUE_MAILER_AUTOCONFIRM")
+  })
+
+  it("raises the header buffer, because localhost cookies are not port-scoped", () => {
+    // Every project a developer runs on localhost shares one cookie jar, so this gateway is sent
+    // cookies belonging to entirely unrelated stacks, and nginx's default buffers are not sized for
+    // that. The answer is "Request header or cookie too large" from a component nobody configured.
+    //
+    // The value is pinned rather than merely present, because Studio's own nginx must carry the
+    // same one: a request that clears the gateway and fails at the page is worse to diagnose than
+    // one that fails outright. packages/studio/nginx.conf holds the reasoning and its own test.
+    expect(compose).toContain('KONG_NGINX_HTTP_LARGE_CLIENT_HEADER_BUFFERS: "4 32k"')
   })
 })
