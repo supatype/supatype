@@ -425,7 +425,11 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
                 <Route path="logs/api"       element={<LogsViewer />} />
                 <Route path="logs/auth"      element={<ComingSoon title="Auth Logs" description="Auth event logging coming in Phase 30." />} />
                 <Route path="logs/storage"   element={<ComingSoon title="Storage Logs" description="Storage access logging coming in Phase 30." />} />
-                <Route path="logs/functions" element={<ComingSoon title="Edge Function Logs" description="Real-time function log streaming coming in Phase 30." />} />
+                {/* Shipped: the tail lives on the function itself, beside invoke and env, because a
+                    log is about one function rather than about the project. This route existed
+                    saying the feature was "coming in Phase 30", which is now simply false, so it
+                    sends people to the thing that works. */}
+                <Route path="logs/functions" element={<Navigate to="/edge-functions" replace />} />
                 <Route path="logs/realtime"  element={<ComingSoon title="Realtime Logs" description="Realtime connection logs coming in Phase 30." />} />
                 <Route path="logs/postgres"  element={<ComingSoon title="Postgres Logs" description="Database server logs coming in Phase 30." />} />
                 <Route path="metrics"   element={<ComingSoon title="Metrics" description="Metrics, traces, and alerts for your database and API infrastructure. Coming in Phase 30." />} />
