@@ -13,7 +13,8 @@ const STORAGE_URL = "http://localhost:18473/storage/v1"
 const HEADERS = { apikey: "test-anon-key", Authorization: "Bearer test-token" }
 
 function freshClient(): StorageClient {
-  return new StorageClient(STORAGE_URL, HEADERS)
+  // Headers are asked for per request now, so a session arriving after construction is used.
+  return new StorageClient(STORAGE_URL, () => Promise.resolve(HEADERS))
 }
 
 function createMockBlob(sizeBytes: number): Blob {

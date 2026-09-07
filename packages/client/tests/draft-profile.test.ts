@@ -30,6 +30,11 @@ function captureHeaders(): {
   }
 }
 
+const SESSION_JWT =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9." +
+  // { "sub": "u1", "role": "authenticated" }
+  "eyJzdWIiOiJ1MSIsInJvbGUiOiJhdXRoZW50aWNhdGVkIn0.sig"
+
 describe("the draft profile", () => {
   beforeEach(() => vi.restoreAllMocks())
 
@@ -229,5 +234,63 @@ describe("a preview link as the client's credential", () => {
     const client = createClient({ url: BASE, anonKey: "anon-key" })
     await client.from("posts").select("id")
     expect(captured.headers()["Authorization"]).toBe("Bearer anon-key")
+  })
+})
+
+describe("what storage sends as its credential", () => {
+  // Storage was handed a plain headers object built when the client was constructed — before
+  // anybody has signed in. Every storage request therefore carried the anon key for the life of the
+  // page: an app's per-user storage policies saw `anon` rather than the caller, and through Studio's
+  // proxy the request was refused outright, because an anon key carries no `sub` and the proxy
+  // requires one. The symptom was "Token missing subject claim" on a page that lists buckets.
+  //
+  // Every other client on the object already resolved its headers per request. Storage was the one
+  // that did not.
+
+  function captureHeaders(): { headers: () => Record<string, string> } {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue([]),
+      headers: { get: () => null },
+    })
+    vi.stubGlobal("fetch", fetchMock)
+    return {
+      headers: () => {
+        const call = fetchMock.mock.calls[0] as [string, { headers: Record<string, string> }]
+        return call[1].headers
+      },
+    }
+  }
+
+  it("uses the signed-in session, not the anon key it was built with", async () => {
+    const captured = captureHeaders()
+    const client = createClient({ url: BASE, anonKey: "anon-key" })
+    // A session arriving after construction, which is the ordinary case: the client is built while
+    // the page loads and the person signs in afterwards.
+    ;(client.auth as unknown as { currentSession: unknown }).currentSession = {
+      accessToken: SESSION_JWT,
+      refreshToken: "r",
+      expiresAt: Math.floor(Date.now() / 1000) + 3600,
+      user: { id: "u1" },
+    }
+
+    await client.storage.listBuckets()
+    expect(captured.headers()["Authorization"]).toBe(`Bearer ${SESSION_JWT}`)
+  })
+
+  it("falls back to the anon key when nobody is signed in", async () => {
+    const captured = captureHeaders()
+    const client = createClient({ url: BASE, anonKey: "anon-key" })
+    await client.storage.listBuckets()
+    expect(captured.headers()["Authorization"]).toBe("Bearer anon-key")
+  })
+
+  it("uses the service role when the caller holds one", async () => {
+    // Studio's own admin tooling, and anything else listing every bucket regardless of policy.
+    const captured = captureHeaders()
+    const client = createClient({ url: BASE, anonKey: "anon-key", serviceRoleKey: "service.jwt" })
+    await client.storage.listBuckets()
+    expect(captured.headers()["Authorization"]).toBe("Bearer service.jwt")
   })
 })

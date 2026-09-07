@@ -504,18 +504,6 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
     cookiePrefix: config.auth?.cookiePrefix,
     storage: config.auth?.storage,
   })
-  // Storage admin operations (listBuckets, createBucket, etc.) require service_role.
-  // When a service role key is provided (developer tools like Studio), use it for
-  // storage so admin calls are authorised; otherwise fall back to the anon headers.
-  const storageHeaders: Record<string, string> = config.serviceRoleKey
-    ? {
-        apikey: config.serviceRoleKey,
-        Authorization: `Bearer ${config.serviceRoleKey}`,
-        "Content-Type": "application/json",
-        ...config.headers,
-      }
-    : baseHeaders
-  const storage = new StorageClient(`${config.url}/storage/v1`, storageHeaders)
   const realtime = new RealtimeClient(`${config.url}/realtime/v1`, baseHeaders)
   const queryCache = config.queryCache ?? defaultQueryCache
 
@@ -550,6 +538,14 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
     }
     return baseHeaders
   }
+
+  // Storage asks for headers per request, like every other client here.
+  //
+  // It used to be handed a plain object built above, before anybody had signed in, so every storage
+  // request carried the anon key for the life of the page. An app's per-user storage policies saw
+  // `anon` rather than the caller, and through Studio's proxy the request was refused outright,
+  // because an anon key carries no `sub` and the proxy requires one.
+  const storage = new StorageClient(`${config.url}/storage/v1`, getAuthHeaders)
 
   const onUnauthorized = config.serviceRoleKey
     ? undefined
