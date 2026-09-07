@@ -4,6 +4,7 @@ import { useNavigate, useParams } from "react-router-dom"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import { Badge, Button, Card, Input, Th, Td } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
+import { useFunctionLogTail } from "../hooks/useFunctionLogTail.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { cn } from "../lib/utils.js"
 import { studioAuthHeaders, usesSessionProxy } from "../lib/studio-auth-headers.js"
@@ -224,76 +225,120 @@ function LogsTab({
 }): React.ReactElement {
   const [since, setSince] = useState("1h")
   const [autoRefresh, setAutoRefresh] = useState(false)
+  // Live by default. The query below answers from the server's own Deno manager, which exists only
+  // when the server supervises Deno itself: in Compose and on cloud the functions run in a separate
+  // worker and it returns nothing at all. The tail is where the lines actually are.
+  const [live, setLive] = useState(true)
+
+  const tail = useFunctionLogTail(functionName, live, adminFetch)
+  // A deployment running functions in-process has no worker to tail, and the query is the right
+  // answer there. Falling back rather than reporting a failure means neither shape has to be
+  // configured by hand.
+  const tailing = live && tail.state.kind !== "unsupported"
 
   const { data, loading, error, refetch } = useApiQuery<LogEntry[]>(
     async () => {
+      if (tailing) return []
       const res = await adminFetch(`/${encodeURIComponent(functionName)}/logs?since=${since}`)
       if (!res.ok) return []
-      const json = await res.json() as { data: LogEntry[] }
+      const json = (await res.json()) as { data: LogEntry[] }
       return json.data ?? []
     },
-    [functionName, since],
+    [functionName, since, tailing],
   )
 
   // Auto-refresh every 10s
   const refetchRef = useRef(refetch)
   refetchRef.current = refetch
   useEffect(() => {
-    if (!autoRefresh) return
+    if (!autoRefresh || tailing) return
     const id = setInterval(() => refetchRef.current(), 10_000)
     return () => clearInterval(id)
-  }, [autoRefresh])
+  }, [autoRefresh, tailing])
 
-  const logs = data ?? []
+  const logs: LogEntry[] = tailing ? tail.lines : data ?? []
 
   return (
     <div>
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <div className="flex items-center gap-1">
-          {TIME_RANGES.map((tr) => (
-            <button
-              key={tr.value}
-              type="button"
-              onClick={() => setSince(tr.value)}
-              className={cn(
-                "px-2.5 py-1 text-xs rounded transition-colors",
-                since === tr.value
-                  ? "bg-primary text-primary-foreground"
-                  : "border border-border text-muted-foreground hover:bg-accent",
-              )}
-            >
-              {tr.label}
-            </button>
-          ))}
+          {/* A time range is a question about history, and a live tail keeps none, so the control
+              is hidden rather than shown doing nothing. */}
+          {!tailing &&
+            TIME_RANGES.map((tr) => (
+              <button
+                key={tr.value}
+                type="button"
+                onClick={() => setSince(tr.value)}
+                className={cn(
+                  "px-2.5 py-1 text-xs rounded transition-colors",
+                  since === tr.value
+                    ? "bg-primary text-primary-foreground"
+                    : "border border-border text-muted-foreground hover:bg-accent",
+                )}
+              >
+                {tr.label}
+              </button>
+            ))}
+          {tailing && (
+            <Badge variant={tail.state.kind === "streaming" ? "green" : "yellow"}>
+              {tail.state.kind === "streaming" ? "Live" : "Connecting…"}
+            </Badge>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
             <input
               type="checkbox"
-              checked={autoRefresh}
-              onChange={(e) => setAutoRefresh(e.target.checked)}
+              checked={live}
+              onChange={(e) => setLive(e.target.checked)}
               className="rounded"
             />
-            Auto-refresh
+            Live tail
           </label>
-          <Button size="xs" onClick={refetch}>Refresh</Button>
+          {!tailing && (
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={autoRefresh}
+                onChange={(e) => setAutoRefresh(e.target.checked)}
+                className="rounded"
+              />
+              Auto-refresh
+            </label>
+          )}
+          <Button size="xs" onClick={tailing ? tail.clear : refetch}>
+            {tailing ? "Clear" : "Refresh"}
+          </Button>
         </div>
       </div>
 
-      {error && <ErrorBanner message={error} />}
+      {error && !tailing && <ErrorBanner message={error} />}
+      {tailing && tail.state.kind === "error" && <ErrorBanner message={tail.state.message} />}
 
-      {loading && (
+      {live && tail.state.kind === "unsupported" && (
+        <div className="mb-3 text-xs text-muted-foreground">
+          This deployment runs functions in the server process, so there is no worker to tail.
+          Showing recent logs instead.
+        </div>
+      )}
+
+      {loading && !tailing && (
         <div className="text-center py-8 text-xs text-muted-foreground">Loading logs…</div>
       )}
 
-      {!loading && logs.length === 0 && (
+      {logs.length === 0 && !(loading && !tailing) && (
         <EmptyState
-          title="No logs"
-          description={`No log entries found in the last ${since}.`}
+          title={tailing ? "Waiting for output" : "No logs"}
+          description={
+            tailing
+              ? `Nothing logged yet. Invoke ${functionName} and its output appears here.`
+              : `No log entries found in the last ${since}.`
+          }
         />
       )}
 
-      {!loading && logs.length > 0 && (
+      {logs.length > 0 && (
         <Card className="overflow-auto">
           <table className="w-full">
             <thead>

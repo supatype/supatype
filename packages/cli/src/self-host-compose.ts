@@ -525,6 +525,10 @@ ${dbDependency}
       # outside. One worker rather than two: a second container would cost a pod per project on
       # cloud, for isolation the route boundary already provides.
       SUPATYPE_HOOKS_ROOT: /project/hooks
+      # Every log line the worker writes carries this, and on cloud it is the label Loki indexes
+      # each project's logs under. Without it a line is collected and filed under no project, which
+      # is the same as losing it.
+      SUPATYPE_PROJECT_REF: ${JSON.stringify(config.project.name)}
       PORT: "8001"
       # In-compose loopback to Kong (not API_EXTERNAL_URL / localhost, unreachable from this container).
       SUPATYPE_URL: http://kong:8000
