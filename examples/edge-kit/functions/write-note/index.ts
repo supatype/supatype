@@ -1,3 +1,4 @@
+import type { FunctionContext } from "../_shared/context.ts"
 import { apiBaseUrl } from "../_shared/api.ts"
 import { handleOptions, json } from "../_shared/cors.ts"
 
@@ -5,7 +6,7 @@ import { handleOptions, json } from "../_shared/cors.ts"
  * Inserts a Note row via PostgREST using the service-role key from Deno.env.
  * Exercises env injection + outbound fetch from the worker.
  */
-export default async function handler(req: Request): Promise<Response> {
+export default async function handler(req: Request, ctx: FunctionContext): Promise<Response> {
   const preflight = handleOptions(req)
   if (preflight) return preflight
 
@@ -13,7 +14,7 @@ export default async function handler(req: Request): Promise<Response> {
     return json({ error: "method_not_allowed" }, 405)
   }
 
-  const serviceKey = Deno.env.get("SUPATYPE_SERVICE_ROLE_KEY")
+  const serviceKey = ctx.serviceRoleKey
   if (!serviceKey) {
     return json(
       {

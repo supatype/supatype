@@ -3,7 +3,32 @@
  * Routing contract matches CLI-generated `.supatype/functions-router.ts`.
  */
 
-type Handler = (req: Request) => Response | Promise<Response>
+import {
+  currentHookDepth,
+  runInvocation,
+  type FunctionContext,
+} from "./invocation.ts"
+import {
+  installStructuredLogging,
+  log,
+  tailResponse,
+} from "./logging.ts"
+
+installStructuredLogging()
+// Once, at startup. Hook depth then comes from the invocation store rather than from a patch
+// applied and reverted around every call.
+installHookDepthPropagation()
+
+/**
+ * Route names the worker answers itself.
+ *
+ * Underscore-prefixed, the convention Deno Deploy and Supabase both use, so a reserved route cannot
+ * collide with a function somebody has already deployed. Discovery warns if one is shadowed rather
+ * than silently winning.
+ */
+const RESERVED_ROUTES = new Set(["_logs"])
+
+type Handler = (req: Request, ctx: FunctionContext) => Response | Promise<Response>
 
 interface DiscoveredRoute {
   name: string
@@ -152,6 +177,14 @@ async function loadHandlers(routes: DiscoveredRoute[]): Promise<Record<string, H
   const handlers: Record<string, Handler> = {}
 
   for (const route of routes) {
+    // The reserved route wins, because the worker answers it before the handler lookup. Say so
+    // rather than leaving an author wondering why their function returns an event stream.
+    if (RESERVED_ROUTES.has(route.name)) {
+      log("warn", `Function "${route.name}" is shadowed: the worker reserves that route`, {
+        function: route.name,
+      })
+      continue
+    }
     const mod = await import(entrypointImportUrl(route.entrypoint))
     const handler = mod.default ?? mod.handler
     if (typeof handler !== "function") {
@@ -210,21 +243,7 @@ const normalizedFunctionsDir = root || hooksDir
 const sharedEnvPath =
   Deno.env.get("SUPATYPE_SHARED_ENV_FILE") ?? `${normalizedFunctionsDir}/.env.local`
 
-let envLock: Promise<void> = Promise.resolve()
 
-async function withEnvLock<T>(run: () => Promise<T>): Promise<T> {
-  const prev = envLock
-  let release: () => void = () => {}
-  envLock = new Promise<void>((resolve) => {
-    release = resolve
-  })
-  await prev
-  try {
-    return await run()
-  } finally {
-    release()
-  }
-}
 
 async function readEnvFile(path: string): Promise<Record<string, string>> {
   if (!path) return {}
@@ -254,30 +273,22 @@ async function scopedEnvForFunction(fnName: string): Promise<Record<string, stri
 const HOOK_DEPTH_HEADER = "x-supatype-hook-depth"
 
 /**
- * Carry the hook chain's depth onto whatever the handler calls the stack with.
+ * Carry the hook-depth header onto calls a hook makes back into the stack.
  *
- * A hook receives the service-role key, so a hook that writes to its own table re-enters the API and
- * calls itself again: `service_role` decides what Postgres permits, not whether the hook middleware
- * runs. The server refuses past a small depth, but only if the count survives the hop through a
- * handler, and a handler writes with whatever client it likes.
+ * Patched once, at startup, rather than per invocation. The old version replaced `globalThis.fetch`
+ * for the duration of a call and restored it afterwards, which is only safe while exactly one
+ * invocation runs at a time: two concurrent hooks would patch over each other, and the first to
+ * finish would restore the other's patch. That mutation was half the reason for the lock.
  *
- * So the count is attached here rather than asked of the handler: `fetch` is what every client is built
- * on, and patching it for the invocation means a hook cannot skip the guard by accident. Scoped and
- * restored like the environment above, and safe for the same reason, invocations hold the env lock, so
- * one runs at a time.
- *
- * Only for hooks, and only for requests to this stack: a handler calling a payment API must not leak
- * an internal header to it.
+ * Depth comes from the invocation store, so this closure holds no per-call state at all.
  */
-function carryHookDepth(req: Request, fnName: string): () => void {
-  const depth = req.headers.get(HOOK_DEPTH_HEADER)
-  if (!fnName.startsWith(HOOKS_ROUTE_PREFIX) || depth === null) return () => {}
-
-  const stack = stackOrigin()
-  if (stack === null) return () => {}
-
+function installHookDepthPropagation(): void {
   const original = globalThis.fetch
   globalThis.fetch = (input: Request | URL | string, init?: RequestInit): Promise<Response> => {
+    const depth = currentHookDepth()
+    const stack = stackOrigin()
+    if (depth === null || stack === null) return original(input, init)
+
     const url = input instanceof Request ? input.url : String(input)
     if (!url.startsWith(stack)) return original(input, init)
 
@@ -285,12 +296,15 @@ function carryHookDepth(req: Request, fnName: string): () => void {
     request.headers.set(HOOK_DEPTH_HEADER, depth)
     return original(request)
   }
-  return () => {
-    globalThis.fetch = original
-  }
 }
 
 /** The stack's own origin, or null when this worker was not told how to reach it. */
+/** The database URL a function may use, when the deployment gave the worker one. */
+function dbUrlForFunctions(): string | undefined {
+  const raw = Deno.env.get("SUPATYPE_DB_URL") ?? Deno.env.get("DATABASE_URL")
+  return raw === undefined || raw.trim() === "" ? undefined : raw
+}
+
 function stackOrigin(): string | null {
   const raw = Deno.env.get("SUPATYPE_INTERNAL_URL") ?? Deno.env.get("SUPATYPE_URL")
   if (raw === undefined || raw.trim() === "") return null
@@ -301,27 +315,16 @@ function stackOrigin(): string | null {
   }
 }
 
-async function runWithScopedEnv<T>(fnName: string, run: () => Promise<T>): Promise<T> {
-  return withEnvLock(async () => {
-    const scoped = await scopedEnvForFunction(fnName)
-    const prev = new Map<string, string | undefined>()
-    for (const [k, v] of Object.entries(scoped)) {
-      prev.set(k, Deno.env.get(k))
-      Deno.env.set(k, v)
-    }
-    try {
-      return await run()
-    } finally {
-      for (const k of Object.keys(scoped)) {
-        const old = prev.get(k)
-        if (old === undefined) Deno.env.delete(k)
-        else Deno.env.set(k, old)
-      }
-    }
-  })
-}
 
-Deno.serve({ port }, async (req: Request): Promise<Response> => {
+// `onListen` is supplied so Deno does not print its own "Listening on …" line. That line goes to
+// stderr, which this worker's patched console reports as `level: "error"` — and on cloud `level` is
+// a Loki label, so every startup would appear in the dashboards as an error.
+Deno.serve({
+  port,
+  onListen: ({ hostname, port: bound }) => {
+    log("info", `functions-worker listening on http://${hostname}:${bound}`)
+  },
+}, async (req: Request): Promise<Response> => {
   const url = new URL(req.url)
   const pathParts = url.pathname.replace(/^\/functions\/v1\/?/, "").split("/").filter(Boolean)
   // A hook is addressed as `hooks/<name>`, so the first segment alone is not the handler key.
@@ -329,6 +332,12 @@ Deno.serve({ port }, async (req: Request): Promise<Response> => {
     pathParts[0] === "hooks" && pathParts[1]
       ? HOOKS_ROUTE_PREFIX + pathParts[1]
       : pathParts[0] ?? ""
+
+  // Answered by the worker itself, before the handler lookup, so a project with no functions at all
+  // still has a tail.
+  if (RESERVED_ROUTES.has(fnName)) {
+    if (fnName === "_logs") return tailResponse()
+  }
 
   if (!fnName || !handlers[fnName]) {
     return new Response(
@@ -341,64 +350,43 @@ Deno.serve({ port }, async (req: Request): Promise<Response> => {
     )
   }
 
+  // Nothing goes into the process environment, so nothing has to be taken back out and nothing has
+  // to be serialised. This used to hold a lock across the whole handler, which meant the worker ran
+  // one invocation at a time: a function waiting on a third-party API blocked every other function
+  // in the project for as long as it waited.
+  const context: FunctionContext = {
+    executionId: crypto.randomUUID(),
+    functionName: fnName,
+    url: Deno.env.get("SUPATYPE_URL") ?? "",
+    anonKey: Deno.env.get("SUPATYPE_ANON_KEY") ?? "",
+    // From the closure, not the environment: the key was withheld before any handler was imported,
+    // and only a route the project granted it receives it here.
+    ...(serviceRoleKey && serviceRoleGranted(fnName) && { serviceRoleKey }),
+    ...(dbUrlForFunctions() !== undefined && { dbUrl: dbUrlForFunctions() }),
+    region: Deno.env.get("SUPATYPE_REGION") ?? "local",
+    env: await scopedEnvForFunction(fnName),
+  }
+
+  const start = performance.now()
+
   try {
-    const start = performance.now()
-    const response = await runWithScopedEnv(fnName, async () => {
-      const prev = new Map<string, string | undefined>()
-      const setScoped = (key: string, value: string | undefined) => {
-        if (value === undefined || value.length === 0) return
-        prev.set(key, Deno.env.get(key))
-        Deno.env.set(key, value)
-      }
-
-      const supatypeUrl = Deno.env.get("SUPATYPE_URL")
-      const supatypeAnon = Deno.env.get("SUPATYPE_ANON_KEY")
-      // The key is not in the process environment, it was withheld before any handler was imported.
-      // It comes from the closure, and only for a route that asked for it.
-      //
-      // Read from the closure rather than re-injected before this block: `setScoped` captures the
-      // *current* value as the one to restore afterwards, so injecting first made the restore put the
-      // grant back permanently: a leak into every later call, which is what the test caught.
-      const supatypeServiceRole = serviceRoleKey && serviceRoleGranted(fnName) ? serviceRoleKey : undefined
-      const supatypeDbUrl = Deno.env.get("SUPATYPE_DB_URL") ?? Deno.env.get("DATABASE_URL")
-      // No SUPATYPE_JWKS. It was read here and set by nothing, and the shape is a trap: with the
-      // default HS256 signing the only "key" to put in it is the symmetric secret, which is the power
-      // to *mint* a service_role token, not merely to verify one, strictly worse than the ambient
-      // service-role key removed in this same series. A function verifies a caller by asking
-      // `/auth/v1/user`, or simply acts as the caller and lets RLS answer. Where a project configures
-      // asymmetric JWT keys, `/auth/v1/.well-known/jwks.json` serves the public half and rotates.
-
-      setScoped("SUPATYPE_URL", supatypeUrl)
-      setScoped("SUPATYPE_ANON_KEY", supatypeAnon)
-      setScoped("SUPATYPE_SERVICE_ROLE_KEY", supatypeServiceRole)
-      setScoped("SUPATYPE_DB_URL", supatypeDbUrl)
-      if (!Deno.env.get("SUPATYPE_PUBLISHABLE_KEYS") && supatypeAnon) {
-        setScoped("SUPATYPE_PUBLISHABLE_KEYS", JSON.stringify({ anon: supatypeAnon }))
-      }
-      if (!Deno.env.get("SUPATYPE_SECRET_KEYS") && supatypeServiceRole) {
-        setScoped("SUPATYPE_SECRET_KEYS", JSON.stringify({ service_role: supatypeServiceRole }))
-      }
-
-      setScoped("SUPATYPE_REGION", Deno.env.get("SUPATYPE_REGION") ?? "local")
-      setScoped("SUPATYPE_EXECUTION_ID", crypto.randomUUID())
-      setScoped("DENO_DEPLOYMENT_ID", Deno.env.get("DENO_DEPLOYMENT_ID") ?? "local-dev")
-
-      const restoreFetch = carryHookDepth(req, fnName)
-      try {
-        return await handlers[fnName]!(req)
-      } finally {
-        restoreFetch()
-        for (const [key, old] of prev.entries()) {
-          if (old === undefined) Deno.env.delete(key)
-          else Deno.env.set(key, old)
-        }
-      }
+    const response = await runInvocation(context, req.headers.get(HOOK_DEPTH_HEADER), async () =>
+      handlers[fnName]!(req, context),
+    )
+    log("info", `${req.method} /functions/v1/${fnName} → ${response.status}`, {
+      request_id: context.executionId,
+      function: fnName,
+      status: response.status,
+      duration_ms: Number((performance.now() - start).toFixed(1)),
     })
-    const duration = (performance.now() - start).toFixed(1)
-    console.log(`${req.method} /functions/v1/${fnName} → ${response.status} (${duration}ms)`)
     return response
   } catch (err) {
-    console.error(`Error in function "${fnName}":`, err)
+    log("error", err instanceof Error ? err.message : "Unknown error", {
+      request_id: context.executionId,
+      function: fnName,
+      status: 500,
+      duration_ms: Number((performance.now() - start).toFixed(1)),
+    })
     return new Response(
       JSON.stringify({
         error: "function_error",

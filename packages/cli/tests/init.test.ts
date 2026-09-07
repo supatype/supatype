@@ -291,7 +291,11 @@ describe("scaffold()", () => {
     expect(existsSync(join(tmpRoot, "functions/.env.local"))).toBe(true)
     expect(existsSync(join(tmpRoot, "functions/deno.d.ts"))).toBe(true)
     expect(existsSync(join(tmpRoot, "functions/tsconfig.json"))).toBe(true)
-    expect(readFileSync(join(tmpRoot, "functions/hello/index.ts"), "utf8")).toContain("Deno.env.get")
+    // The scaffold teaches the context, not the environment. It used to read Deno.env.get, which is
+    // the process-global delivery that forced the worker to run one invocation at a time.
+    const hello = readFileSync(join(tmpRoot, "functions/hello/index.ts"), "utf8")
+    expect(hello).toContain("ctx: FunctionContext")
+    expect(hello).not.toContain("Deno.env.get")
     const pkg = readFileSync(join(tmpRoot, "package.json"), "utf8")
     expect(pkg).toContain("supatype functions serve")
   })

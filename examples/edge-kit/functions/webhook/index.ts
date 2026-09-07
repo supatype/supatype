@@ -1,3 +1,4 @@
+import type { FunctionContext } from "../_shared/context.ts"
 import { handleOptions, json } from "../_shared/cors.ts"
 import { hmacSha256Hex, timingSafeEqual } from "../_shared/hmac.ts"
 
@@ -5,7 +6,7 @@ import { hmacSha256Hex, timingSafeEqual } from "../_shared/hmac.ts"
  * Verifies `x-webhook-signature` = hex HMAC-SHA256(body, WEBHOOK_SECRET).
  * Set WEBHOOK_SECRET in functions/.env.local (see .env.local.example).
  */
-export default async function handler(req: Request): Promise<Response> {
+export default async function handler(req: Request, ctx: FunctionContext): Promise<Response> {
   const preflight = handleOptions(req)
   if (preflight) return preflight
 
@@ -13,7 +14,7 @@ export default async function handler(req: Request): Promise<Response> {
     return json({ error: "method_not_allowed" }, 405)
   }
 
-  const secret = Deno.env.get("WEBHOOK_SECRET")
+  const secret = ctx.env["WEBHOOK_SECRET"]
   if (!secret) {
     return json(
       {

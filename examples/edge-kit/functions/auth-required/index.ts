@@ -1,10 +1,11 @@
+import type { FunctionContext } from "../_shared/context.ts"
 import { handleOptions, json } from "../_shared/cors.ts"
 
 /**
  * Requires a Bearer token that is not the project anon key.
  * Use the UI "with session" path (sign-up) or pass a user JWT.
  */
-export default async function handler(req: Request): Promise<Response> {
+export default async function handler(req: Request, ctx: FunctionContext): Promise<Response> {
   const preflight = handleOptions(req)
   if (preflight) return preflight
 
@@ -18,7 +19,7 @@ export default async function handler(req: Request): Promise<Response> {
   }
 
   const token = match[1]!.trim()
-  const anon = Deno.env.get("SUPATYPE_ANON_KEY")
+  const anon = ctx.anonKey
   if (anon !== undefined && anon.length > 0 && token === anon) {
     return json(
       {
