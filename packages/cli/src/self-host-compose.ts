@@ -35,6 +35,7 @@ export const COMPOSE_IMAGE_ENV_KEYS = [
   "SUPATYPE_STUDIO_IMAGE",
   "SUPATYPE_STORAGE_IMAGE",
   "SUPATYPE_FUNCTIONS_WORKER_IMAGE",
+  "SUPATYPE_MINIO_IMAGE",
 ] as const
 
 type DockerPinComponent = "engine" | "server" | "postgres"
@@ -637,7 +638,13 @@ ${realtimeDependency}      control-plane:
         condition: service_started
 
   minio:
-    image: minio/minio:RELEASE.2024-11-07T00-52-20Z
+    # Stopgap, not a considered default. minio/minio was withdrawn from Docker Hub when the
+    # community edition was archived and became source-only, so a pull by that name now fails
+    # and takes the whole stack down before any container starts. quay.io still serves the exact
+    # release we already ran, pinned by digest here because a tag we believed immutable was
+    # removed once already. The image is unmaintained and will not receive security fixes: this
+    # is carried only until the backend moves to SeaweedFS.
+    image: \${SUPATYPE_MINIO_IMAGE:-quay.io/minio/minio:RELEASE.2024-11-07T00-52-20Z@sha256:ac591851803a79aee64bc37f66d77c56b0a4b6e12d9e5356380f4105510f2332}
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: supatype
