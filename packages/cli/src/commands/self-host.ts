@@ -13,6 +13,7 @@ import { spawnSync } from "node:child_process"
 import { gzipSync } from "node:zlib"
 import { loadConfig } from "../config.js"
 import { connectionString } from "../project-config.js"
+import { fillMissingKeys } from "./keys.js"
 import { resolveBinary } from "../binary-cache.js"
 import { generateUnits } from "../systemd.js"
 import { readPid } from "../process-manager.js"
@@ -51,6 +52,14 @@ export function registerSelfHost(program: Command): void {
       const config = loadConfig(cwd)
       const project = composeProjectName(config.project.name)
       const args = opts.detach ? ["up", "-d"] : ["up"]
+      // A .env copied from the template arrives with both keys blank, and the
+      // server will not serve without a service role key outside dev mode.
+      // Only blanks are filled: reissuing a key an operator is already using
+      // would lock out every client holding the old one.
+      const filled = fillMissingKeys(cwd)
+      if (filled.length > 0) {
+        console.log(`[supatype] Minted ${filled.join(" and ")} in .env from JWT_SECRET.`)
+      }
       const brand = { intro: "Self-host deployment" }
       const status = await withSpinner("Starting self-host Compose stack", async () => {
         const out = writeSelfHostCompose(cwd, config)

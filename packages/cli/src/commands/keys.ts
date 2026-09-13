@@ -122,3 +122,43 @@ export function resolveSecret(dir: string = process.cwd()): string | undefined {
   }
   return undefined
 }
+
+/**
+ * Mint ANON_KEY / SERVICE_ROLE_KEY into `dir`'s .env only where they are
+ * missing or blank, and report which ones were filled.
+ *
+ * Deliberately not `generateAndWriteKeys`, which rewrites them unconditionally.
+ * That is right for `init`, where the project is new, and wrong for anything
+ * that runs on an existing deployment: reissuing the anon key on every start
+ * would lock out every client already holding one.
+ *
+ * A self-host `.env` copied from the template arrives with both keys empty, and
+ * the server refuses to serve without a service role key outside dev mode. That
+ * left the documented quick start unable to start at all.
+ */
+export function fillMissingKeys(dir: string, expYears = 10): string[] {
+  const envPath = resolve(dir, ".env")
+  if (!existsSync(envPath)) return []
+
+  const content = readFileSync(envPath, "utf8")
+  const blank = (name: string): boolean => {
+    const current = readEnvVar(content, name)
+    return current === undefined || current.trim() === ""
+  }
+
+  const needed = ["ANON_KEY", "SERVICE_ROLE_KEY"].filter(blank)
+  if (needed.length === 0) return []
+
+  const secret = resolveSecret(dir)
+  if (!secret) return []
+
+  const { anonKey, serviceKey } = signKeyPair(secret, expYears)
+  const minted: Record<string, string> = { ANON_KEY: anonKey, SERVICE_ROLE_KEY: serviceKey }
+
+  let next = content
+  for (const name of needed) {
+    next = upsertEnvVar(next, name, minted[name] as string)
+  }
+  writeFileSync(envPath, next, "utf8")
+  return needed
+}
