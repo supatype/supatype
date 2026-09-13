@@ -1,3 +1,4 @@
+import { withPublishing } from "../model-versioning.js"
 import type { Command } from "commander"
 import { join } from "node:path"
 import { loadConfig, loadSchemaAst } from "../config.js"
@@ -149,7 +150,7 @@ export function registerMigrate(program: Command): void {
       const cwd = process.cwd()
 
       await ensureEngine()
-      const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
+      const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
       const result = await engineRequest<{ message?: string }>("/push", {
         ast,
         database_url: connection,

@@ -1604,6 +1604,47 @@ function parseAssetFieldOptions(
   return { localized: false }
 }
 
+/** What `versions` resolved to on a model, or absent when the model declares none. */
+type ParsedVersions = { drafts: boolean; keep: number }
+
+/** Versions kept per record when a model states no retention. Mirrors `model-versioning.ts`. */
+const DEFAULT_VERSIONS_KEPT = 20
+
+/**
+ * `versions: true` or `versions: { drafts, keep }`.
+ *
+ * A malformed member is ignored rather than fatal, matching every other key here: the declaration is
+ * a *type*, so TypeScript has already refused anything `ModelVersionsOptions` does not allow, and
+ * this parser's job is reading what compiled rather than validating it a second time.
+ */
+function parseVersions(typeNode: ts.TypeNode): ParsedVersions | undefined {
+  if (isBooleanLiteralType(typeNode, true)) {
+    return { drafts: true, keep: DEFAULT_VERSIONS_KEPT }
+  }
+  if (isBooleanLiteralType(typeNode, false)) return undefined
+  if (!ts.isTypeLiteralNode(typeNode)) return undefined
+
+  const parsed: ParsedVersions = { drafts: true, keep: DEFAULT_VERSIONS_KEPT }
+  for (const member of typeNode.members) {
+    if (!ts.isPropertySignature(member) || !member.type) continue
+    const key = getPropertyName(member.name)
+    if (key === "drafts") {
+      if (isBooleanLiteralType(member.type, false)) parsed.drafts = false
+      if (isBooleanLiteralType(member.type, true)) parsed.drafts = true
+    } else if (
+      key === "keep" &&
+      ts.isLiteralTypeNode(member.type) &&
+      ts.isNumericLiteral(member.type.literal)
+    ) {
+      const keep = Number(member.type.literal.text)
+      // A retention of zero would prune the draft being edited, so it reads as "unstated" rather
+      // than as an instruction to keep nothing.
+      if (Number.isFinite(keep) && keep >= 1) parsed.keep = Math.floor(keep)
+    }
+  }
+  return parsed
+}
+
 function parseMetaLiteral(
   metaArg: ts.TypeNode | undefined,
   sourceFile: ts.SourceFile,
@@ -1613,6 +1654,7 @@ function parseMetaLiteral(
   timestamps?: boolean
   softDelete?: boolean
   autoLocalize?: boolean
+  versions?: ParsedVersions
 } {
   const result: {
     tableName?: string
@@ -1620,6 +1662,7 @@ function parseMetaLiteral(
     timestamps?: boolean
     softDelete?: boolean
     autoLocalize?: boolean
+    versions?: ParsedVersions
   } = {}
 
   if (!metaArg || !ts.isTypeLiteralNode(metaArg)) return result
@@ -1639,6 +1682,9 @@ function parseMetaLiteral(
       if (isBooleanLiteralType(member.type, false)) result.softDelete = false
     } else if (key === "autoLocalize" && isBooleanLiteralType(member.type, true)) {
       result.autoLocalize = true
+    } else if (key === "versions") {
+      const versions = parseVersions(member.type)
+      if (versions !== undefined) result.versions = versions
     } else if (
       key === "tableName" &&
       ts.isLiteralTypeNode(member.type) &&
@@ -1700,16 +1746,47 @@ function parseModelMeta(
   if (timestamps) options.timestamps = true
   if (softDelete) options.softDelete = true
   if (literal.autoLocalize === true) options.autoLocalize = true
+  if (literal.versions !== undefined) options.versions = literal.versions
+
+  const access = parseModelAccess(metaArg, sourceFile, modelName, fields, resolveCtx)
+  if (literal.versions !== undefined) assertVersionsWithoutFieldRules(access, modelName)
 
   return {
     tableName,
-    access: parseModelAccess(metaArg, sourceFile, modelName, fields, resolveCtx),
+    access,
     options,
     indexes: parseModelIndexes(metaArg, sourceFile, fields),
     constraints: parseModelConstraints(metaArg, sourceFile, modelName, fields, resolveCtx),
     hooks: parseModelHooks(metaArg, sourceFile),
     validators: parseModelValidators(metaArg, sourceFile, modelName, fields),
   }
+}
+
+/**
+ * Refuse a model that declares both `versions` and per-column rules.
+ *
+ * A version snapshot is opaque `jsonb`. `supatype_mask` is driven by security labels on a specific
+ * table's column and rewrites references to *that* column; the view tier puts the same expression in
+ * a view over the real columns. Neither can see inside a snapshot, so a masked value would sit in
+ * plain sight in `<table>_versions` for anyone able to read it, and there is no narrower grant to
+ * hide it behind now that drafts are visible to the record's creator.
+ *
+ * Refused here rather than left to the engine for the same reason the constraint operands are: the
+ * message can name the model and the columns the author wrote.
+ */
+function assertVersionsWithoutFieldRules(access: Record<string, unknown>, model: string): void {
+  const fields = access["fields"]
+  if (typeof fields !== "object" || fields === null) return
+  const masked = Object.keys(fields)
+  if (masked.length === 0) return
+
+  throw new Error(
+    `Model "${model}": \`versions\` and \`access.fields\` cannot both be declared. ` +
+      `A version snapshot is opaque JSONB, so the per-column rules on ` +
+      `${masked.map((c) => `\`${c}\``).join(", ")} cannot be enforced inside it and the value would ` +
+      `be readable in the versions table. Drop one: keep the field rules, or version a model that ` +
+      `does not mask a column.`,
+  )
 }
 
 /**

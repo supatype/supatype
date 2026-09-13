@@ -4,6 +4,8 @@ import {
   boundsRequiringHelpers,
   compareVersions,
   ENGINE_MIN_FOR_BOUNDS,
+  ENGINE_MIN_FOR_VERSIONS,
+  modelsRequiringVersions,
 } from "../src/engine-floor.js"
 import type { ExtractedSchemaAstV2, FieldAstV2, ModelAstV2 } from "../src/schema-ast-v2.js"
 
@@ -98,5 +100,46 @@ describe("assertEngineSupportsSchema", () => {
     expect(() => assertEngineSupportsSchema(WITH_BOUND, ENGINE_MIN_FOR_BOUNDS)).not.toThrow()
     expect(() => assertEngineSupportsSchema(WITH_BOUND, "0.3.1")).not.toThrow()
     expect(() => assertEngineSupportsSchema(WITH_BOUND, "1.0.0")).not.toThrow()
+  })
+})
+
+describe("the versions floor", () => {
+  const versionedModel = (): ModelAstV2 => ({
+    ...model("Post", { title: field() }),
+    options: { versions: { drafts: true, keep: 20 } },
+  })
+  const VERSIONED = schema([versionedModel()])
+  const PLAIN = schema([model("Post", { title: field() })])
+
+  it("names the models that declare it", () => {
+    expect(modelsRequiringVersions(VERSIONED)).toEqual(["Post"])
+    expect(modelsRequiringVersions(PLAIN)).toEqual([])
+  })
+
+  it("refuses a pin older than the release that emits the layer", () => {
+    // The failure this guards is *silent*: an older engine does not reject `versions`, it ignores
+    // the key, so the push reports success and the model has no snapshot table and no drafts.
+    expect(() => { assertEngineSupportsSchema(VERSIONED, "0.2.0") }).toThrow(
+      /`versions`[\s\S]*0\.3\.0[\s\S]*saves into nothing/,
+    )
+  })
+
+  it("allows the release itself and anything newer", () => {
+    expect(() => { assertEngineSupportsSchema(VERSIONED, ENGINE_MIN_FOR_VERSIONS) }).not.toThrow()
+    expect(() => { assertEngineSupportsSchema(VERSIONED, "1.0.0") }).not.toThrow()
+  })
+
+  it("says nothing about a schema that declares no versions", () => {
+    // The floor must not spread to projects that never asked for the feature.
+    expect(() => { assertEngineSupportsSchema(PLAIN, "0.1.0") }).not.toThrow()
+  })
+
+  it("leaves an unpinned or local project alone", () => {
+    expect(() => { assertEngineSupportsSchema(VERSIONED, undefined) }).not.toThrow()
+    expect(() => { assertEngineSupportsSchema(VERSIONED, "local") }).not.toThrow()
+  })
+
+  it("still refuses bounds on an older pin, so the second rule did not shadow the first", () => {
+    expect(() => { assertEngineSupportsSchema(WITH_BOUND, "0.1.9") }).toThrow(/bounds/)
   })
 })

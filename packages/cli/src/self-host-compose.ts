@@ -18,6 +18,7 @@ import { hasEngineOverride, hasStudioOverride, pinnedVersion, fetchLatestVersion
 import { buildKongDeclarative } from "./kong-config.js"
 import { readEnvFile } from "./env-file.js"
 import { fieldMaskingTierFromProject, type FieldMaskingTier } from "./field-masking-tier.js"
+import { projectHasVersionedModels } from "./model-versioning.js"
 
 /** Env keys written when `versions` pins exist in supatype.config.ts. */
 export const COMPOSE_PINNED_IMAGE_ENV_KEYS = [
@@ -287,6 +288,14 @@ export interface SelfHostComposeOptions {
    * rules and for every project on `supatype/postgres`.
    */
   fieldMaskingTier?: FieldMaskingTier
+  /**
+   * Whether any model declares `versions`, which puts the generated `draft` schema on the exposed
+   * list.
+   *
+   * Same reasoning as the tier above: only a caller that has loaded the schema can say, and left
+   * unset the list is today's, which is correct for every project with no versioned model.
+   */
+  drafts?: boolean
 }
 
 export function renderSelfHostCompose(
@@ -297,6 +306,12 @@ export function renderSelfHostCompose(
   const projectMount = projectMountPath(cwd)
   const kongMount = kongMountPath(cwd)
   const external = usesExternalDatabase(config)
+  // Both halves come from the caller because both need the schema loaded, which this renderer does
+  // not do. See `SelfHostComposeOptions`.
+  const restSchemas = apiSchemaList(config, {
+    ...(options?.fieldMaskingTier !== undefined && { tier: options.fieldMaskingTier }),
+    drafts: options?.drafts === true,
+  })
   const ownerUrl = ownerDatabaseUrl(config)
   // the auth driver wants the `postgres://` spelling; an external URL is used as given.
   const authUrl = external ? ownerUrl : ownerDatabaseUrl(config, "postgres")
@@ -478,7 +493,7 @@ ${dbServiceBlock}  postgrest:
       # Derived from schema.pg_schema (or schema.api_schemas). Hardcoding this is why choosing a
       # non-public pg_schema used to give a correct push and an API that answered PGRST106 for
       # everything: the engine moved and PostgREST was never told.
-      PGRST_DB_SCHEMA: "${apiSchemaList(config, options?.fieldMaskingTier)}"
+      PGRST_DB_SCHEMA: "${restSchemas}"
       PGRST_DB_ANON_ROLE: anon
       PGRST_JWT_SECRET: \${JWT_SECRET:?JWT_SECRET is missing from .env}
       PGRST_DB_EXTRA_SEARCH_PATH: public,extensions
@@ -511,6 +526,10 @@ ${dbDependency}
       # outside. One worker rather than two: a second container would cost a pod per project on
       # cloud, for isolation the route boundary already provides.
       SUPATYPE_HOOKS_ROOT: /project/hooks
+      # Every log line the worker writes carries this, and on cloud it is the label Loki indexes
+      # each project's logs under. Without it a line is collected and filed under no project, which
+      # is the same as losing it.
+      SUPATYPE_PROJECT_REF: ${JSON.stringify(config.project.name)}
       PORT: "8001"
       # In-compose loopback to Kong (not API_EXTERNAL_URL / localhost, unreachable from this container).
       SUPATYPE_URL: http://kong:8000
@@ -649,6 +668,16 @@ ${dbDependency}${studioBlock}${valkeyBlock}${tlsHintComment}  kong:
       KONG_ADMIN_ACCESS_LOG: /dev/stdout
       KONG_PROXY_ERROR_LOG: /dev/stderr
       KONG_ADMIN_ERROR_LOG: /dev/stderr
+      # Cookies are not scoped by port, so every project a developer runs on localhost shares one
+      # cookie jar and every request through this gateway carries the lot, which overruns nginx's
+      # default buffers and answers "Request header or cookie too large" about cookies belonging to
+      # something else entirely.
+      #
+      # Kept equal to large_client_header_buffers in packages/studio/nginx.conf, where the reason
+      # for the two numbers is written down. Both hops need it and they need the same value: this
+      # one carries API calls, that one the page, and a request that clears one and fails the other
+      # is worse to diagnose than one that fails outright.
+      KONG_NGINX_HTTP_LARGE_CLIENT_HEADER_BUFFERS: "4 32k"
 ${kongTlsEnv}    volumes:
       - ${kongMount}:/etc/kong/kong.yml:ro
     ports:
@@ -828,6 +857,21 @@ function resolveFieldMaskingTier(
   return fieldMaskingTierFromProject(cwd, config)
 }
 
+/**
+ * Whether this project has a versioned model, unless the caller already knows.
+ *
+ * Same seam as the tier above, and the same reason: the renderer does not load the schema, so a
+ * caller that has can say, and `writeSelfHostCompose` answers for the callers that have not.
+ */
+function resolveDrafts(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  options?: SelfHostComposeOptions,
+): boolean {
+  if (options?.drafts !== undefined) return options.drafts
+  return projectHasVersionedModels(cwd, config)
+}
+
 export function writeSelfHostCompose(
   cwd: string,
   config: SupatypeProjectConfig,
@@ -838,6 +882,7 @@ export function writeSelfHostCompose(
   const resolved: SelfHostComposeOptions = {
     ...options,
     ...(tier !== undefined && { fieldMaskingTier: tier }),
+    drafts: resolveDrafts(cwd, config, options),
   }
   assertExternalUrlReachableFromContainers(config)
   const paths = selfHostComposePaths(cwd)

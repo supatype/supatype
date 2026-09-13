@@ -182,3 +182,74 @@ describe("a loopback external URL", () => {
     expect(loopbackExternalHost(managed())).toBeUndefined()
   })
 })
+
+describe("the draft schema in generated compose", () => {
+  it("reaches PGRST_DB_SCHEMA when a model is versioned", () => {
+    // The wiring, not the list: a correct `apiSchemaList` behind a placeholder that never gets the
+    // flag is exactly the failure shape this project has hit before, and it reads as "there is no
+    // draft" rather than as an error.
+    const compose = renderSelfHostCompose(managed(), process.cwd(), { drafts: true })
+    expect(compose).toMatch(/PGRST_DB_SCHEMA: "public, draft, /)
+  })
+
+  it("leaves it off when nothing is versioned", () => {
+    const compose = renderSelfHostCompose(managed(), process.cwd(), { drafts: false })
+    expect(compose).toContain('PGRST_DB_SCHEMA: "public, supatype, graphql_public, auth"')
+    expect(compose).not.toContain("draft")
+  })
+})
+
+describe("the server's own configuration keys", () => {
+  // `renderSelfHostCompose` is pure over its config, so one render serves every
+  // assertion here and the fixture lives in one place.
+  const compose = renderSelfHostCompose(managed())
+
+  it("uses the SUPATYPE_ prefix the server actually reads", () => {
+    // The server's config prefix is "supatype", so a GOTRUE_ key is read by nothing. It does not
+    // warn about the ones it ignores: it dies on the first *required* key it cannot find, so
+    // self-host failed to start with a message naming a variable that was present in .env under
+    // another spelling, and no test noticed because none asserted these.
+    for (const key of [
+      "SUPATYPE_API_EXTERNAL_URL",
+      "SUPATYPE_API_HOST",
+      "SUPATYPE_API_PORT",
+      "SUPATYPE_DB_DRIVER",
+      "SUPATYPE_DB_DATABASE_URL",
+      "SUPATYPE_SITE_URL",
+      "SUPATYPE_JWT_SECRET",
+      "SUPATYPE_DISABLE_SIGNUP",
+      "SUPATYPE_MAILER_AUTOCONFIRM",
+    ]) {
+      expect(compose).toContain(`${key}:`)
+    }
+  })
+
+  it("sets no GOTRUE_ key on the server, since none of them are read", () => {
+    const serverBlock = compose.split("\n  server:")[1]?.split("\n  kong:")[0] ?? ""
+    const stale = serverBlock
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => /^GOTRUE_[A-Z_]+:/.test(line))
+    expect(stale).toEqual([])
+  })
+
+  it("reads its override from the current name too, not the retired one", () => {
+    // Interpolating from GOTRUE_MAILER_AUTOCONFIRM would require the operator to keep that key in
+    // `.env` — and the server reads config files into its environment before checking for retired
+    // names, so its presence there is fatal. The old spelling cannot be the escape hatch when
+    // having it set at all is the failure.
+    expect(compose).toContain("SUPATYPE_MAILER_AUTOCONFIRM: ${SUPATYPE_MAILER_AUTOCONFIRM:-true}")
+    expect(compose).not.toContain("${GOTRUE_MAILER_AUTOCONFIRM")
+  })
+
+  it("raises the header buffer, because localhost cookies are not port-scoped", () => {
+    // Every project a developer runs on localhost shares one cookie jar, so this gateway is sent
+    // cookies belonging to entirely unrelated stacks, and nginx's default buffers are not sized for
+    // that. The answer is "Request header or cookie too large" from a component nobody configured.
+    //
+    // The value is pinned rather than merely present, because Studio's own nginx must carry the
+    // same one: a request that clears the gateway and fails at the page is worse to diagnose than
+    // one that fails outright. packages/studio/nginx.conf holds the reasoning and its own test.
+    expect(compose).toContain('KONG_NGINX_HTTP_LARGE_CLIENT_HEADER_BUFFERS: "4 32k"')
+  })
+})

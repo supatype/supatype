@@ -7,8 +7,12 @@ import type {
   FileAsset,
   ImageAsset,
   LoggedIn,
+  Localized,
+  LocaleConfig,
+  Lte,
   MaxLength,
   Model,
+  Now,
   Optional,
   Owner,
   OwnerFrom,
@@ -23,6 +27,14 @@ import type {
   Unique
 } from "@supatype/types"
 
+
+/**
+ * The languages this blog publishes in.
+ *
+ * Two is enough to make per-locale publishing real: with one, "publish English" and "publish" are
+ * the same button and the feature looks like decoration.
+ */
+export type Locales = LocaleConfig<["en", "fr"], "en">
 export type userAvatars = Bucket<"user-avatars", {
   accessMode: "public"
   accept: ["image/png", "image/jpeg", "image/webp"]
@@ -88,19 +100,42 @@ export type Post = Model<{
   excerpt: Optional<MaxLength<ComputedFrom<string, readonly ["title", "body"]>, 320>>
   /** Sharing line: illustrates `{field}`, `{truncate(…)}`, and `\n` in the format string. */
   feedCaption: Optional<ComputedFrom<string, "Post: {title} | {published_at}\n{truncate(body, 80)}">>
-  body: RichText
+  /**
+   * Localized, so the example demonstrates publishing one language before another.
+   *
+   * The column holds every locale at once. Publishing `en` writes the English key into the live row
+   * and leaves the French exactly as it was, so an untranslated or unapproved language is *absent*
+   * from what readers get rather than hidden from them.
+   */
+  body: Localized<RichText>
   coverImage: Optional<ImageAsset<postCovers>>
   attachment: Optional<FileAsset<postAttachments>>
   authUser: RelatedTo<SupatypeAuthUser>
   authorProfile: RelatedTo<User>
-  status: "draft" | "published" | "scheduled" | "archived"
-  published_at: Optional<string>
-  scheduled_at: Optional<string>
+  /** Set by `supatype.publish`, cleared by `unpublish`. Nothing else writes it. */
+  published_at: Optional<Timestamp>
   created_at: Timestamp
   updated_at: Timestamp
 }, {
+  /**
+   * Drafts, history and publishing.
+   *
+   * This model used to carry `status: "draft" | "published" | "scheduled" | "archived"` and a
+   * `scheduled_at` column, which is the shape `versions` replaces. A single row holds one copy of
+   * the content, so editing a published post either destroyed what was live or withheld the edit:
+   * there was nowhere for "published" and "next" to both exist. Now the row *is* what is published
+   * and the pending edit lives in `post_versions`.
+   */
+  versions: { drafts: true, keep: 20 }
   access: {
-    read: Public
+    /**
+     * Only published posts, and the rule is the whole filter.
+     *
+     * The app used to say `.eq("status", "published")` on every query, which is a filter an author
+     * has to remember on each one. The unpublished row is now unreadable rather than merely
+     * unselected.
+     */
+    read: Lte<"published_at", Now>
     create: LoggedIn
     update: OwnerFrom<"authUser">
     delete: OwnerFrom<"authUser">

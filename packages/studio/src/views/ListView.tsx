@@ -11,6 +11,14 @@ import {
   type CellAccess,
 } from "../hooks/useStudioFieldAccess.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
+import { Badge } from "../components/ui.js"
+import {
+  fetchRecordStates,
+  publishableLocales,
+  WHOLE_RECORD,
+  type RecordState,
+} from "../lib/publishing.js"
+import { stateLabels } from "../components/PublishBar.js"
 
 interface ListViewProps {
   model: ModelConfig
@@ -28,7 +36,7 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
   useShowsProjectRows()
 
   const client = useAdminClient()
-  const { currentLocale, defaultLocale } = useLocale()
+  const { currentLocale, defaultLocale, locales: projectLocales } = useLocale()
   const fieldAccess = useStudioFieldAccess()
   const [rows, setRows] = useState<Record<string, unknown>[]>([])
   const [loading, setLoading] = useState(true)
@@ -84,6 +92,31 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
       return { field: fieldName, direction: "asc" }
     })
   }
+
+  // What each row on this page currently is. One query for the page, and a failure just means no
+  // badges: the record's own editor is authoritative about its state.
+  //
+  // The state, not a boolean. This said "Draft" for any record with an unpublished edit, which is
+  // wrong for the ordinary case of a published post being revised, and used the same word the
+  // editor uses for a language that has never been published at all.
+  const [recordStates, setRecordStates] = useState<Map<string, RecordState>>(new Map())
+  const localeCodes = projectLocales.map((l) => l.code).join(",")
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const ids = rows.map((r) => String(r[model.primaryKey]))
+      const codes = localeCodes === "" ? [] : localeCodes.split(",")
+      const publishable =
+        model.versions === null ? [WHOLE_RECORD] : publishableLocales(model.versions, codes)
+      const states = await fetchRecordStates(client, model, ids, publishable)
+      if (!cancelled) setRecordStates(states)
+    })()
+    return () => {
+      cancelled = true
+    }
+    // `localeCodes` is a joined string rather than the array, so a stable locale list does not
+    // re-fire this on every render.
+  }, [client, model, rows, localeCodes])
 
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
@@ -214,7 +247,7 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
                         aria-label={`Select row ${id}`}
                       />
                     </td>
-                    {columns.map((col) => (
+                    {columns.map((col, index) => (
                       <td key={col.name} className="st-table-cell">
                         <AccessAwareCell
                           access={cellAccess(fieldAccess, model.tableName, col.name, row[col.name])}
@@ -226,6 +259,26 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
                             defaultLocale={defaultLocale}
                           />
                         </AccessAwareCell>
+                        {/* On the first column, so it reads as a property of the record rather than
+                            of a field. An editor scanning a list needs to see that something is
+                            waiting without opening every row to find out. */}
+                        {index === 0 &&
+                          (() => {
+                            const state = recordStates.get(id)
+                            // Live needs no badge: it is the state a reader would assume, and a
+                            // badge on every row is a badge nobody reads.
+                            if (state === undefined || state === "live") return null
+                            const label = stateLabels[state]
+                            return (
+                              <Badge
+                                variant={label.variant}
+                                className="ml-2"
+                                title={label.title}
+                              >
+                                {label.long}
+                              </Badge>
+                            )
+                          })()}
                       </td>
                     ))}
                   </tr>

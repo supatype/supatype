@@ -177,6 +177,23 @@ export interface QueryResult<TData> {
 
 // ─── RPC result ──────────────────────────────────────────────────────────────
 
+/**
+ * Options for {@link SupatypeClient.rpc}.
+ *
+ * `schema` is not decoration. PostgREST resolves `/rpc/<name>` against the
+ * **default profile**, which is the first schema on the exposed list, so a
+ * function living anywhere else is unreachable without naming its schema. The
+ * generated publishing functions live in `supatype` for exactly the reason they
+ * are generated at all: they are the stack's, not the project's, and putting them
+ * in the managed schema would collide with a model called `publish`.
+ */
+export interface RpcOptions {
+  head?: boolean | undefined
+  count?: "exact" | "planned" | "estimated" | undefined
+  /** Postgres schema holding the function, sent as `Content-Profile`. */
+  schema?: string | undefined
+}
+
 export interface RpcResult<TData> {
   data: TData | null
   error: SupatypeError | null
@@ -276,9 +293,27 @@ export interface AuthStorage {
   removeItem(key: string): void | Promise<void>
 }
 
+/**
+ * The schema holding one draft view per versioned model, selected by `Accept-Profile`.
+ *
+ * Stated here as well as in the CLI (`project-config.ts`, which puts it on `PGRST_DB_SCHEMA`) and
+ * the engine (which creates the views), because the SDK ships standalone and depending on a
+ * workspace package for one identifier would be a worse trade than three call sites naming it.
+ * Changing it means changing all three, the same as `api` for the field-masking views.
+ */
+export const DRAFT_SCHEMA = "draft"
+
 export interface SelectQueryOptions {
   count?: "exact" | "planned" | "estimated" | undefined
   head?: boolean | undefined
+  /**
+   * PostgREST schema to read from, sent as `Accept-Profile`.
+   *
+   * Set by `.draft()` rather than by hand: the point of a profile here is that a draft has the same
+   * table name and the same row type as what it is a draft of, so the only thing that changes
+   * between reading live content and reading the pending edit is which schema answers.
+   */
+  profile?: string | undefined
 }
 
 export interface SupatypeClientConfig {
@@ -329,6 +364,23 @@ export interface SupatypeClientConfig {
    * before any requests are made.
    */
   initialSession?: Session | undefined
+  /**
+   * A preview link's code, used as this client's whole credential.
+   *
+   * Set it on a client built to serve one preview request. The code names a link the project can
+   * revoke, and the client exchanges it for a token that lives about a minute. That token carries
+   * no subject, so the bearer is nobody in particular: the database's own policy decides what they
+   * may read, and there is no admin key anywhere on the path.
+   *
+   * **It wins over a signed-in session, deliberately.** A preview route is opened by whoever was
+   * sent the link, and some of them will already be logged in as someone with no access to the
+   * draft. Falling back to that session would show them "not found" and send them to ask why the
+   * post had been deleted.
+   *
+   * Refused alongside `serviceRoleKey`: a route that has both is a route sending admin credentials
+   * down a path meant for strangers, which is the mistake this feature exists to remove.
+   */
+  previewCode?: string | undefined
   /**
    * Extra headers merged into every request (e.g. Studio `X-Supatype-Environment`).
    */

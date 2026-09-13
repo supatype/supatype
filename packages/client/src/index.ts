@@ -1,4 +1,5 @@
 import { AuthClient } from "./auth.js"
+import { PreviewCredential } from "./preview.js"
 import { QueryBuilder, MutationBuilder, type HeadersProvider } from "./query.js"
 import { defaultQueryCache, type QueryCache } from "./query-cache.js"
 import { StorageClient } from "./storage.js"
@@ -15,8 +16,10 @@ import type {
   SupatypeFunctions,
   SupatypeClientConfig,
   SupatypeError,
+  RpcOptions,
   SelectQueryOptions,
 } from "./types.js"
+import { DRAFT_SCHEMA } from "./types.js"
 
 export type {
   User,
@@ -31,6 +34,7 @@ export type {
   SupatypeClientConfig,
   FunctionDef,
   AuthStorage,
+  RpcOptions,
   SelectQueryOptions,
   TableDef,
   TableInsert,
@@ -44,6 +48,7 @@ export {
   createCodeChallengeS256,
   PKCE_METHOD_S256,
 } from "./pkce.js"
+export { DRAFT_SCHEMA } from "./types.js"
 export type { QueryCacheOptions, CacheStatus } from "./query-cache.js"
 export { AuthClient } from "./auth.js"
 export { QueryBuilder, MutationBuilder, type HeadersProvider } from "./query.js"
@@ -61,6 +66,7 @@ export { ERROR_CODES_DOCUMENTATION, getErrorDocumentation, getErrorCodesByCatego
 export type { ErrorCodeEntry } from "./error-codes-doc.js"
 export { CONNECTION_MODES, SERVERLESS_CONNECTION_WARNING, CONNECTION_FAQ } from "./serverless-docs.js"
 export type { ConnectionModeDoc } from "./serverless-docs.js"
+export { PreviewLinkError } from "./preview.js"
 
 // ─── Table client ─────────────────────────────────────────────────────────────
 
@@ -78,6 +84,14 @@ class TableClient<TDef extends TableDef> {
   private readonly onUnauthorized: (() => Promise<void>) | undefined
   private readonly queryCache: QueryCache
   private readonly realtime: RealtimeClient
+  /**
+   * The schema this table's reads come from, set by `draft()`.
+   *
+   * Mutable, and safe to be: `from()` builds a fresh client per call, so nothing is shared between
+   * two queries. Reads only; a draft view is not writable and a write is an ordinary update that
+   * records a new version.
+   */
+  private profile: string | undefined
 
   constructor(
     baseUrl: string,
@@ -96,6 +110,28 @@ class TableClient<TDef extends TableDef> {
     this.queryCache = queryCache
   }
 
+  /**
+   * Read the pending draft instead of what is published.
+   *
+   * ```typescript
+   * const { data } = await supatype.from("posts").draft().select("id, title, body")
+   * ```
+   *
+   * Selects the generated `draft` schema, whose views carry the same row type as the table, so the
+   * only thing that changes is which schema answers. Available on models that declare `versions`;
+   * anything else has no draft view and answers `PGRST106`.
+   *
+   * **Read-only, and permission is not the read rule.** A draft is visible to the record's creator
+   * and to the project's elevated Studio roles, or to a caller holding a signed preview link. A
+   * caller who may read published content is not thereby entitled to read what has not been
+   * published. Write with the ordinary `update`, which records a new draft version; publish with
+   * `supatype.publish`.
+   */
+  draft(): this {
+    this.profile = DRAFT_SCHEMA
+    return this
+  }
+
   select<TResult = TDef["Row"]>(
     columns?: string | undefined,
     options?: SelectQueryOptions | undefined,
@@ -107,7 +143,9 @@ class TableClient<TDef extends TableDef> {
       columns,
       this.queryCache,
       this.onUnauthorized,
-      options,
+      // The profile joins the select options rather than riding a longer constructor: it is a
+      // property of the request being described, like `count` and `head` beside it.
+      { ...options, ...(this.profile !== undefined && { profile: this.profile }) },
     )
   }
 
@@ -418,7 +456,7 @@ export interface SupatypeClient<TDatabase extends AnyDatabase = AugmentedDatabas
   rpc<TFn extends FunctionNames<TDatabase>>(
     fn: TFn,
     params?: FunctionArgs<TDatabase, TFn> | undefined,
-    options?: { head?: boolean | undefined; count?: "exact" | "planned" | "estimated" | undefined } | undefined,
+    options?: RpcOptions | undefined,
   ): Promise<RpcResult<FunctionReturns<TDatabase, TFn>>>
 }
 
@@ -427,6 +465,24 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
 ): SupatypeClient<TDatabase> {
   // Warn early if a direct Postgres URL is used in a serverless environment
   warnIfServerlessDirectConnection(config.url)
+
+  // A client with both is a route sending admin credentials down a path meant for strangers, which
+  // is precisely what the preview link exists to remove. Thrown rather than warned: the two are
+  // never both correct, and a warning in a server log is not read by whoever wrote the route.
+  if (config.previewCode !== undefined && config.serviceRoleKey !== undefined) {
+    throw new Error(
+      "A Supatype client cannot carry both `previewCode` and `serviceRoleKey`. A preview link is " +
+        "the bearer's whole credential and needs no admin key; sending one anyway would let " +
+        "anybody who reached that route read everything.",
+    )
+  }
+
+  // Built once and shared by every request this client makes, so a page rendering several queries
+  // exchanges the code once rather than once per table.
+  const previewCredential =
+    config.previewCode === undefined || config.previewCode === ""
+      ? null
+      : new PreviewCredential(config.url, config.previewCode)
 
   const baseHeaders: Record<string, string> = {
     apikey: config.anonKey,
@@ -448,18 +504,6 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
     cookiePrefix: config.auth?.cookiePrefix,
     storage: config.auth?.storage,
   })
-  // Storage admin operations (listBuckets, createBucket, etc.) require service_role.
-  // When a service role key is provided (developer tools like Studio), use it for
-  // storage so admin calls are authorised; otherwise fall back to the anon headers.
-  const storageHeaders: Record<string, string> = config.serviceRoleKey
-    ? {
-        apikey: config.serviceRoleKey,
-        Authorization: `Bearer ${config.serviceRoleKey}`,
-        "Content-Type": "application/json",
-        ...config.headers,
-      }
-    : baseHeaders
-  const storage = new StorageClient(`${config.url}/storage/v1`, storageHeaders)
   const realtime = new RealtimeClient(`${config.url}/realtime/v1`, baseHeaders)
   const queryCache = config.queryCache ?? defaultQueryCache
 
@@ -474,6 +518,14 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
         ...config.headers,
       }
     }
+    // A preview link is the whole credential, and it comes before any session on purpose: whoever
+    // opened the link may well be signed in as someone with no access to the draft, and quietly
+    // using that identity would show them "not found".
+    if (previewCredential !== null) {
+      // Throws when the link will not resolve. The query layer turns that into an ordinary
+      // `{ data: null, error }`, so a revoked link reads as a message rather than as a crash.
+      return { ...baseHeaders, Authorization: `Bearer ${await previewCredential.token()}` }
+    }
     await auth.ensureValidSession()
     const token = auth.currentAccessToken
     if (token !== null) {
@@ -486,6 +538,14 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
     }
     return baseHeaders
   }
+
+  // Storage asks for headers per request, like every other client here.
+  //
+  // It used to be handed a plain object built above, before anybody had signed in, so every storage
+  // request carried the anon key for the life of the page. An app's per-user storage policies saw
+  // `anon` rather than the caller, and through Studio's proxy the request was refused outright,
+  // because an anon key carries no `sub` and the proxy requires one.
+  const storage = new StorageClient(`${config.url}/storage/v1`, getAuthHeaders)
 
   const onUnauthorized = config.serviceRoleKey
     ? undefined
@@ -576,13 +636,19 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
     async rpc<TFn extends FunctionNames<TDatabase>>(
       fn: TFn,
       params?: FunctionArgs<TDatabase, TFn> | undefined,
-      options?: { head?: boolean | undefined; count?: "exact" | "planned" | "estimated" | undefined } | undefined,
+      options?: RpcOptions | undefined,
     ): Promise<RpcResult<FunctionReturns<TDatabase, TFn>>> {
       const headers: Record<string, string> = { ...(await getAuthHeaders()) }
       const method = options?.head === true ? "HEAD" : "POST"
 
       if (options?.count !== undefined) {
         headers["Prefer"] = `count=${options.count}`
+      }
+      // PostgREST resolves `/rpc/<name>` against the default profile, so a function in any other
+      // schema is unreachable without this. `Content-Profile` rather than `Accept-Profile`, because
+      // an RPC call is a POST and PostgREST reads the write-side header for it.
+      if (options?.schema !== undefined) {
+        headers["Content-Profile"] = options.schema
       }
 
       let res: Response

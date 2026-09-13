@@ -1,3 +1,4 @@
+import { withPublishing } from "../model-versioning.js"
 import type { Command } from "commander"
 import { readFileSync, writeFileSync, existsSync } from "node:fs"
 import { resolve } from "node:path"
@@ -91,7 +92,7 @@ export async function pushSchemaToLinkedProject(
     process.exit(1)
   }
 
-  const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
+  const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
   info(`Pushing schema to ${target.mode} project ${target.projectRef} (${target.environment})...`)
 
   const result = await targetSchemaPush(target, ast, {

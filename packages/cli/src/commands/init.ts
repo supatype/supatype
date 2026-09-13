@@ -1372,9 +1372,13 @@ function helloFunctionTemplate(): string {
   return `// hello: Supatype Edge Function
 // Docs: https://supatype.com/docs/edge-functions
 
-export default async function handler(req: Request): Promise<Response> {
+import type { FunctionContext } from "../_shared/context.ts"
+
+export default async function handler(req: Request, ctx: FunctionContext): Promise<Response> {
   const { method } = req
-  const url = Deno.env.get("SUPATYPE_URL")
+  // From the context, not the environment. Per-invocation values are passed in, which is what lets
+  // the worker run your functions concurrently instead of one at a time.
+  const { url } = ctx
 
   if (method === "POST") {
     const body = await req.json()

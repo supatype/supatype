@@ -193,6 +193,21 @@ export interface ExtractedSchemaAstV2 {
   storageBuckets?: ExtractedStorageBucketAst[]
   locales?: string[]
   defaultLocale?: string
+  /**
+   * Draft visibility and preview-link bounds, from `supatype.config.ts`.
+   *
+   * Not extracted from the schema like everything else here: it is a project setting that the
+   * engine needs at the moment it compiles the draft policies, so it rides the same payload rather
+   * than growing a delivery path of its own. Attached by `withPublishing`, and absent for a project
+   * with no versioned model.
+   */
+  publishing?: {
+    draftVisibility: string[]
+    previewDefaultTtl: number
+    previewMaxRecordTtl: number
+    previewMaxProjectTtl: number
+    previewAllowProjectScope: boolean
+  }
 }
 
 const DEFAULT_DB_BY_KIND: Partial<Record<FieldKind, Partial<DbFieldAnnotations>>> = {

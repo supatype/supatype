@@ -17,7 +17,6 @@ export default async function PostPage({ params }: Props): Promise<React.ReactEl
     .from("post")
     .select()
     .eq("slug", slug)
-    .eq("status", "published")
     .limit(1)
 
   if (error !== null) return <p className="error">Error: {error.message}</p>

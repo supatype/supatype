@@ -1020,6 +1020,54 @@ export type ModelMeta<TFields extends Record<string, unknown>> = {
    * one would make a row that was valid on insert invalid on update. Push fails naming the node.
    */
   constraints?: readonly unknown[]
+
+  /**
+   * Drafts, version history and publishing for this model.
+   *
+   * ```typescript
+   * versions: { drafts: true, keep: 20 }
+   * ```
+   *
+   * `true` is shorthand for `{ drafts: true }` with the default retention.
+   *
+   * **The table stays the published state.** Snapshots live in a companion `<table>_versions`
+   * table, one of which may be a newer draft, so constraints, foreign keys, indexes, access rules
+   * and realtime on the model's own table are untouched: it is still an ordinary table holding one
+   * row per document. That is what lets a published version stay live while a newer unpublished one
+   * exists, which a `status` column cannot do, because a single row holds one copy of the content.
+   *
+   * **Editing writes a draft, and the live row changes only when something is published.** Read the
+   * pending draft with `.draft()` on the query builder, which selects a generated `draft` schema
+   * carrying the same row type. Publish with the generated `supatype.publish(table, id)`, which runs
+   * as the caller, so the rule that already governs editing governs publishing.
+   *
+   * Opt in per model, because versioning doubles writes and adds a table: a telemetry model wants
+   * none of it.
+   *
+   * **Cannot be combined with {@link ModelMeta.access}'s `fields`**, and push refuses the pair. A
+   * snapshot is opaque `jsonb`, so the per-column masking that rewrites references to a real column
+   * cannot see inside it, and a masked value would sit in plain sight for anyone who can read the
+   * versions table.
+   */
+  versions?: true | ModelVersionsOptions
+}
+
+/** Retention and behaviour for a versioned model. See {@link ModelMeta.versions}. */
+export type ModelVersionsOptions = {
+  /**
+   * Editing writes a draft version rather than the live row. Default `true`.
+   *
+   * `false` keeps the version history and writes straight through, which is the audit-trail case:
+   * every change recorded, nothing withheld from readers.
+   */
+  readonly drafts?: boolean
+  /**
+   * Versions kept per record, oldest pruned beyond it. Default 20.
+   *
+   * Unbounded history is a slow leak on a busy table, so there is no "keep everything" value here.
+   * Pruning runs on the same schedule as scheduled publishing.
+   */
+  readonly keep?: number
 }
 
 /**

@@ -19,6 +19,8 @@ export interface EditFormLayoutProps {
   onDuplicate?: () => void
   onDelete?: () => void
   preview?: React.ReactNode
+  /** Publishing controls, rendered at the top of the sidebar. */
+  publishing?: React.ReactNode
   /** Per-field messages from the last refused save, keyed by column. */
   fieldErrors?: Record<string, string>
   className?: string
@@ -40,6 +42,7 @@ export function EditFormLayout({
   onDuplicate,
   onDelete,
   preview,
+  publishing,
   fieldErrors,
   className,
 }: EditFormLayoutProps): React.ReactElement {
@@ -71,6 +74,7 @@ export function EditFormLayout({
       </div>
       {showSidebar && (
         <EditFormSidebar
+          publishing={publishing}
           metaFields={metaFields}
           values={values}
           onChange={onChange}

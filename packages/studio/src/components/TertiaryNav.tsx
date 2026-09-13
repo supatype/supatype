@@ -6,7 +6,18 @@ import { cn } from "../lib/utils.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type NavItem = { label: string; href: string; activeWhen?: (path: string) => boolean }
+type NavItem = {
+  label: string
+  href: string
+  activeWhen?: (path: string) => boolean
+  /**
+   * Why this tab cannot be opened here, when it cannot.
+   *
+   * The tab stays and says so. Removing it leaves somebody concluding the product has no Postgres
+   * logs, rather than that this build does not.
+   */
+  unavailable?: { note: string }
+}
 type NavGroup = { label?: string; items: NavItem[] }
 
 // ─── Tertiary tab groups per route ────────────────────────────────────────────
@@ -22,12 +33,12 @@ function getTertiaryGroups(path: string): NavGroup[] | null {
   if (path === "/observability/logs" || path.startsWith("/observability/logs/")) {
     return [{
       items: [
-        { label: "API",            href: "/observability/logs/api",       activeWhen: (p) => p === "/observability/logs/api" },
-        { label: "Auth",           href: "/observability/logs/auth",      activeWhen: (p) => p === "/observability/logs/auth" },
-        { label: "Storage",        href: "/observability/logs/storage",   activeWhen: (p) => p === "/observability/logs/storage" },
+        { label: "API",            href: "/observability/logs/api",       activeWhen: (p) => p === "/observability/logs/api", unavailable: { note: "Request logging is not built yet" } },
+        { label: "Auth",           href: "/observability/logs/auth",      activeWhen: (p) => p === "/observability/logs/auth" , unavailable: { note: "Auth event logging is not built yet" } },
+        { label: "Storage",        href: "/observability/logs/storage",   activeWhen: (p) => p === "/observability/logs/storage" , unavailable: { note: "Storage access logging is not built yet" } },
         { label: "Edge Functions", href: "/observability/logs/functions", activeWhen: (p) => p === "/observability/logs/functions" },
-        { label: "Realtime",       href: "/observability/logs/realtime",  activeWhen: (p) => p === "/observability/logs/realtime" },
-        { label: "Postgres",       href: "/observability/logs/postgres",  activeWhen: (p) => p === "/observability/logs/postgres" },
+        { label: "Realtime",       href: "/observability/logs/realtime",  activeWhen: (p) => p === "/observability/logs/realtime" , unavailable: { note: "Realtime connection logging is not built yet" } },
+        { label: "Postgres",       href: "/observability/logs/postgres",  activeWhen: (p) => p === "/observability/logs/postgres" , unavailable: { note: "Database server logs are not built yet" } },
       ],
     }]
   }
@@ -225,6 +236,23 @@ export function TertiaryNav(): React.ReactElement | null {
             )}
             {group.items.map((item) => {
               const active = item.activeWhen ? item.activeWhen(path) : path === item.href
+              if (item.unavailable !== undefined) {
+                // Disabled rather than absent. A tab that vanishes teaches nothing: somebody looking
+                // for Postgres logs concludes there are none, rather than that they are not built.
+                return (
+                  <span
+                    key={item.href}
+                    title={item.unavailable.note}
+                    aria-disabled="true"
+                    className={cn(
+                      "relative h-10 px-3 text-[13px] whitespace-nowrap flex items-center",
+                      "text-muted-foreground/50 cursor-not-allowed select-none",
+                    )}
+                  >
+                    {item.label}
+                  </span>
+                )
+              }
               return (
                 <button
                   key={item.href}

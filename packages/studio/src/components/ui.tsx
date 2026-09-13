@@ -3,7 +3,7 @@ import { cn } from "../lib/utils.js"
 
 /* ─── Badge / Pill ─── */
 
-type BadgeVariant = "green" | "red" | "yellow" | "indigo" | "blue"
+export type BadgeVariant = "green" | "red" | "yellow" | "indigo" | "blue" | "outline"
 
 const badgeColors: Record<BadgeVariant, string> = {
   green: "bg-green-500/15 text-green-400",
@@ -11,6 +11,9 @@ const badgeColors: Record<BadgeVariant, string> = {
   yellow: "bg-yellow-500/15 text-yellow-400",
   indigo: "bg-indigo-500/15 text-indigo-400",
   blue: "bg-blue-500/15 text-blue-400",
+  // No colour of its own: an outline badge is for callers that supply their own border and
+  // text colour. It replaced a second Badge component that existed only for this one use.
+  outline: "border border-border bg-transparent text-foreground",
 }
 
 export function Badge({
@@ -33,7 +36,7 @@ export function Badge({
 /* ─── Button ─── */
 
 type ButtonVariant = "secondary" | "primary" | "destructive" | "ghost"
-type ButtonSize = "sm" | "md" | "xs"
+type ButtonSize = "sm" | "md" | "xs" | "icon"
 
 const buttonVariants: Record<ButtonVariant, string> = {
   secondary: "border border-border bg-secondary text-foreground hover:bg-accent",
@@ -43,6 +46,15 @@ const buttonVariants: Record<ButtonVariant, string> = {
 }
 
 const buttonSizes: Record<ButtonSize, string> = {
+  // Square, for a button whose whole label is its glyph. The text sizes carry horizontal padding
+  // meant for words, which around an icon reads as a gap rather than as a target. Sized to match
+  // the icon buttons already in the top bar, and given a floor so a 12px glyph still has something
+  // to hit.
+  //
+  // Note there is a second, unrelated `Button` in ./ui/button.tsx, which is what the package
+  // exports publicly, and its `size="icon"` is a 40px square. The two components already disagree
+  // about `sm`, `ghost` and `secondary`; this is one more name they share and do not agree on.
+  icon: "h-7 w-7 justify-center shrink-0",
   xs: "px-2 py-1 text-[0.7rem]",
   sm: "px-3 py-1.5 text-xs",
   md: "px-4 py-2 text-sm",

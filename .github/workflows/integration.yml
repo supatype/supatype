@@ -110,10 +110,25 @@ jobs:
             -f packages/self-host-control/Dockerfile \
             packages/self-host-control
 
+      # The caching and header-buffer assertions below test packages/studio/nginx.conf, so the
+      # image under test has to be built from this checkout. Pulling supatype/studio:latest tested
+      # whatever was last published instead: the config in that image is fourteen lines with no
+      # Cache-Control at all, so the assertions could not pass however correct the repo was, and a
+      # future change to nginx.conf would pass or fail for reasons unconnected to the change.
+      # Root context, not the package directory: the Dockerfile copies the lockfile and
+      # packages/client alongside packages/studio.
+      - name: Build Studio image for compose smoke
+        run: |
+          docker build \
+            -t supatype/studio:ci \
+            -f packages/studio/Dockerfile \
+            .
+
       - name: Run compose image smoke test
         run: bash tests/integration/scripts/compose-smoke.sh
         env:
           SUPATYPE_CONTROL_PLANE_IMAGE: supatype/control-plane:ci
+          SUPATYPE_STUDIO_IMAGE: supatype/studio:ci
 
       - name: Upload compose logs on failure
         if: failure()

@@ -50,7 +50,16 @@ export function ModelSchema({ model }: ModelSchemaProps): React.ReactElement {
           <MetaRow label="Table"       value={model.tableName} mono />
           <MetaRow label="Primary key" value={model.primaryKey} mono />
           <MetaRow label="Timestamps"  value={model.timestamps ? "Enabled" : "Disabled"} />
-          <MetaRow label="Versioning"  value={model.versioning ? "Enabled" : "Disabled"} />
+          <MetaRow
+            label="Versioning"
+            value={
+              model.versions === null
+                ? "Disabled"
+                : model.versions.drafts
+                  ? `Drafts, keeping ${String(model.versions.keep)}`
+                  : `History only, keeping ${String(model.versions.keep)}`
+            }
+          />
           <MetaRow label="Soft delete" value={model.softDelete ? "Enabled" : "Disabled"} />
           <MetaRow label="Publishable" value={model.publishable ? "Enabled" : "Disabled"} />
         </div>

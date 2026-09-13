@@ -28,6 +28,15 @@ import type { ExtractedSchemaAstV2, ModelAstV2 } from "./schema-ast-v2.js"
 export const ENGINE_MIN_FOR_BOUNDS = "0.2.0"
 
 /**
+ * First engine release that emits the drafts and publishing layer (schema-engine v0.3.0).
+ *
+ * The failure this guards is silent rather than loud, which is why it is worth a check of its own:
+ * an older engine does not reject `versions`, it ignores the key. The push succeeds, the model has
+ * no snapshot table, and Studio saves drafts into nothing.
+ */
+export const ENGINE_MIN_FOR_VERSIONS = "0.3.0"
+
+/**
  * Compare two dotted versions numerically. Returns <0, 0 or >0.
  *
  * Pre-release suffixes are dropped before comparing, so `0.2.0-rc.1` counts as `0.2.0`. That is
@@ -80,8 +89,55 @@ export function boundsRequiringHelpers(ast: ExtractedSchemaAstV2): string[] {
   return [...fieldsWithBounds(ast.models), ...modelsWithConstraints(ast.models)]
 }
 
+/** Models declaring `versions`, which needs a whole layer only a new enough engine emits. */
+export function modelsRequiringVersions(ast: ExtractedSchemaAstV2): string[] {
+  return ast.models
+    .filter((model) => model.options["versions"] !== undefined)
+    .map((model) => model.name)
+}
+
 /**
- * Refuse a push whose schema needs helpers this engine does not create.
+ * One thing a schema can declare that an older engine cannot apply.
+ *
+ * A table rather than a second copy of the check, because there will be a third: every feature that
+ * puts something in the database which only the engine creates lands here, and the shape of the
+ * refusal should not be rewritten each time.
+ */
+interface EngineRequirement {
+  /** First engine release that can apply it. */
+  since: string
+  /** What in this schema needs it, named so the message can point at it. */
+  declaredBy: (ast: ExtractedSchemaAstV2) => string[]
+  /** What the author wrote. */
+  feature: string
+  /** What happens if it is applied anyway, in the words the failure would use. */
+  consequence: string
+}
+
+const ENGINE_REQUIREMENTS: EngineRequirement[] = [
+  {
+    since: ENGINE_MIN_FOR_BOUNDS,
+    declaredBy: boundsRequiringHelpers,
+    feature: "bounds",
+    consequence:
+      `Bounds compile to CHECK constraints that call helpers in the _supatype schema, and only ` +
+      `engine ${ENGINE_MIN_FOR_BOUNDS}+ creates them. Applying this would fail inside Postgres ` +
+      `with "function _supatype.richtext_text(jsonb) does not exist".`,
+  },
+  {
+    since: ENGINE_MIN_FOR_VERSIONS,
+    declaredBy: modelsRequiringVersions,
+    feature: "`versions`",
+    consequence:
+      `Only engine ${ENGINE_MIN_FOR_VERSIONS}+ emits the snapshot tables, the draft views and the ` +
+      `publish functions. An older engine ignores the declaration and applies the rest, so the ` +
+      `push reports success and you get a model with no history, no drafts and an editor that ` +
+      `saves into nothing. That silence is the reason this refuses.`,
+  },
+]
+
+/**
+ * Refuse a push whose schema needs something this engine cannot apply.
  *
  * Takes the pin from `versions.engine`, or undefined when unpinned. See the note above on why
  * that is the right source rather than the binary's own `--version`.
@@ -93,21 +149,22 @@ export function assertEngineSupportsSchema(
   // Unpinned resolves to latest, and `local` points at a build whose version the config does not
   // know. Neither can be compared, and neither is the case that breaks.
   if (pinnedEngineVersion === undefined || pinnedEngineVersion === "local") return
-  if (compareVersions(pinnedEngineVersion, ENGINE_MIN_FOR_BOUNDS) >= 0) return
 
-  const needed = boundsRequiringHelpers(ast)
-  if (needed.length === 0) return
+  for (const requirement of ENGINE_REQUIREMENTS) {
+    if (compareVersions(pinnedEngineVersion, requirement.since) >= 0) continue
 
-  const shown = needed.slice(0, 3).join(", ")
-  const more = needed.length > 3 ? `, and ${needed.length - 3} more` : ""
-  throw new Error(
-    `This schema declares bounds that need schema-engine ${ENGINE_MIN_FOR_BOUNDS} or newer, ` +
-      `and this project pins ${pinnedEngineVersion}.\n\n` +
-      `  Declared on: ${shown}${more}\n\n` +
-      `Bounds compile to CHECK constraints that call helpers in the _supatype schema, and only ` +
-      `engine ${ENGINE_MIN_FOR_BOUNDS}+ creates them. Applying this would fail inside Postgres ` +
-      `with "function _supatype.richtext_text(jsonb) does not exist".\n\n` +
-      `Raise or remove the pin in supatype.config.ts:\n` +
-      `  versions: { engine: "${ENGINE_MIN_FOR_BOUNDS}" }   // or omit it to track latest`,
-  )
+    const needed = requirement.declaredBy(ast)
+    if (needed.length === 0) continue
+
+    const shown = needed.slice(0, 3).join(", ")
+    const more = needed.length > 3 ? `, and ${needed.length - 3} more` : ""
+    throw new Error(
+      `This schema declares ${requirement.feature}, which needs schema-engine ` +
+        `${requirement.since} or newer, and this project pins ${pinnedEngineVersion}.\n\n` +
+        `  Declared on: ${shown}${more}\n\n` +
+        `${requirement.consequence}\n\n` +
+        `Raise or remove the pin in supatype.config.ts:\n` +
+        `  versions: { engine: "${requirement.since}" }   // or omit it to track latest`,
+    )
+  }
 }

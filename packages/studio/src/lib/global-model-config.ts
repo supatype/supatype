@@ -16,7 +16,7 @@ export function globalConfigAsModel(global: GlobalConfig): ModelConfig {
     listColumns: [],
     searchFields: [],
     publishable: false,
-    versioning: false,
+    versions: null,
     softDelete: false,
     timestamps,
     hasHooks: false,

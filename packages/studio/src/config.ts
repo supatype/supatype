@@ -108,8 +108,13 @@ export interface ModelConfig {
   searchFields: string[]
   /** Whether this model has publishable workflow. */
   publishable: boolean
-  /** Whether this model has versioning enabled. */
-  versioning: boolean
+  /**
+   * Drafts and version history, when the model declares `versions`.
+   *
+   * `null` for a model that does not. Replaces a `versioning: boolean` that read a key the engine
+   * never emitted, so it was false everywhere and the version UI was unreachable by construction.
+   */
+  versions: ModelVersionsConfig | null
   /** Whether this model has soft delete. */
   softDelete: boolean
   /** Whether this model has timestamps. */
@@ -176,8 +181,18 @@ export interface BrandingConfig {
 }
 
 export interface LivePreviewConfig {
-  url: string
-  /** URL pattern with {field} placeholders, e.g. "/blog/{slug}" */
+  /**
+   * Where the project's app lives, when it is not this deployment.
+   *
+   * Optional: with `app.mode` set to `static` or `proxy` the app is served at `/` on the same
+   * origin as the API, which Studio already knows, so stating it again only risks it going stale.
+   */
+  url?: string
+  /**
+   * Path or URL with {field} placeholders, e.g. "/blog/{slug}".
+   *
+   * A path is resolved against the origin Studio is served from; an absolute URL is used as given.
+   */
   urlPattern?: string
 }
 
@@ -218,4 +233,27 @@ export interface DashboardView {
 /** Legacy single-widget list: still accepted for static config overrides. */
 export interface DashboardConfig {
   widgets?: DashboardBlock[]
+}
+
+/**
+ * What a versioned model's editor needs to know.
+ *
+ * Mirrors the `versions` object the engine puts in the admin config. `drafts: false` is the
+ * audit-trail case: history is recorded and nothing is withheld, so the editor writes the table
+ * directly and offers no publish control.
+ */
+export interface ModelVersionsConfig {
+  /** Editing writes a draft version rather than the live row. */
+  drafts: boolean
+  /** Versions kept per record. */
+  keep: number
+  /** The companion table holding the snapshots. */
+  versionsTable: string
+  /**
+   * Columns holding one value per locale.
+   *
+   * Publishing is per locale, so a control that says "publish English" has to know which columns
+   * English is a key of. Empty for a model with no localized field, which publishes as a whole.
+   */
+  localizedColumns: string[]
 }

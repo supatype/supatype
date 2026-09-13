@@ -86,6 +86,16 @@ echo "==> Creating the Studio admin"
 (cd "$INTEGRATION_DIR" && node "$CLI_BIN" admin create-user \
   --email "$STUDIO_E2E_EMAIL" --password "$STUDIO_E2E_PASSWORD" --role admin)
 
+# The function-logs spec invokes a function to make it log, and the gateway wants an apikey for
+# that. Read from the .env this project just generated rather than hardcoded: the key is per
+# project and regenerated on init.
+SUPATYPE_ANON_KEY="$(grep -E '^ANON_KEY=' "$INTEGRATION_DIR/.env" | cut -d= -f2- || true)"
+if [[ -z "$SUPATYPE_ANON_KEY" ]]; then
+  echo "ERROR: no ANON_KEY in $INTEGRATION_DIR/.env; the function-logs spec cannot invoke anything."
+  exit 1
+fi
+export SUPATYPE_ANON_KEY
+
 echo "==> Driving the browser"
 cd "$E2E_DIR"
 E2E_BASE_URL="$BROWSER_URL" npx playwright test

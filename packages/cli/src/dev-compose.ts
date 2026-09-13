@@ -2,6 +2,7 @@
  * `supatype dev` when `provider: docker`, full self-host Compose stack (Kong gateway).
  */
 
+import { withPublishing } from "./model-versioning.js"
 import { existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join, resolve } from "node:path"
@@ -328,13 +329,23 @@ export function upsertDevComposeEnv(
     (key) => !(wantsLocalServer && key === "SUPATYPE_SERVER_IMAGE"),
   )
   const removeImageKeys = managedImageKeys.filter((key) => !(key in imagePins))
+  // The server refuses to start when *any* retired name is in scope, and it reads the project's
+  // config files into its environment before checking, so a `.env` this CLI wrote under the old
+  // spelling is fatal to a stack that has otherwise been upgraded. Only the key this file used to
+  // write is removed: an operator's own GOTRUE_ variable is theirs, and the server's error names it
+  // and its replacement precisely enough to fix by hand.
+  const retiredKeys = ["GOTRUE_MAILER_AUTOCONFIRM"]
   upsertEnvFile(cwd, updates, {
     removeManaged: removeImageKeys,
     managed: managedImageKeys,
     // A local image left in `.env` after the project stopped asking for one would keep pointing
     // compose at a stale build, and it carries no marker for `removeManaged` to act on.
-    ...(!wantsLocalServer &&
-      !("SUPATYPE_SERVER_IMAGE" in imagePins) && { remove: ["SUPATYPE_SERVER_IMAGE"] }),
+    remove: [
+      ...retiredKeys,
+      ...(!wantsLocalServer && !("SUPATYPE_SERVER_IMAGE" in imagePins)
+        ? ["SUPATYPE_SERVER_IMAGE"]
+        : []),
+    ],
   })
 }
 
@@ -635,7 +646,7 @@ async function runComposeSchemaPush(
   schemaPath: string,
   composeProject: string,
 ): Promise<void> {
-  const ast = loadSchemaAst(schemaPath, cwd)
+  const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
   const astJson = JSON.stringify(ast)
 
   const supatypeDir = join(cwd, ".supatype")
@@ -868,7 +879,7 @@ export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfi
     const brand = { intro: "Schema diff" }
     await ensureDockerDbPublishedForHostEngine(cwd, config, brand)
     const schemaPath = schemaPathFromProject(config, cwd)
-    const ast = loadSchemaAst(schemaPath, cwd)
+    const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
     await ensureEngine()
     return engineRequest<DiffResult>("/diff", {
       ast,
@@ -890,7 +901,7 @@ export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfi
   await startComposeDatabase(config, paths, cwd, project, diffBrand)
 
   const schemaPath = schemaPathFromProject(config, cwd)
-  const ast = loadSchemaAst(schemaPath, cwd)
+  const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
 
   const supatypeDir = join(cwd, ".supatype")
   mkdirSync(supatypeDir, { recursive: true })
@@ -945,7 +956,7 @@ export async function pushSchemaDocker(cwd: string, config: SupatypeProjectConfi
   await startComposeDatabase(config, paths, cwd, project, pushBrand)
 
   const schemaPath = schemaPathFromProject(config, cwd)
-  const ast = loadSchemaAst(schemaPath, cwd)
+  const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
   await runComposeSchemaPush(cwd, config, paths, schemaPath, project)
 
   const upGateway = runDockerCompose(paths.composePath, ["up", "-d"], cwd, project, {
@@ -1157,7 +1168,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
     startedAt: new Date().toISOString(),
   })
 
-  const ast = loadSchemaAst(schemaPath, cwd)
+  const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
   await provisionDockerStorageBuckets(ast, kongPort, serviceRoleKey)
 
   const pidDir = join(homedir(), ".supatype", "projects", config.project.name, "pid")

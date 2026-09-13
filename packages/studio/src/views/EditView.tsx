@@ -4,6 +4,9 @@ import { EditFormLayout } from "../components/EditFormLayout.js"
 import { useAdminClient } from "../hooks/useAdminClient.js"
 import { useLocale } from "../hooks/useLocale.js"
 import { LivePreviewPane } from "../components/LivePreviewPane.js"
+import { PublishBar } from "../components/PublishBar.js"
+import { previewUrlFor } from "../lib/preview-url.js"
+import { appOrigin } from "../lib/membership-url.js"
 import type { ModelConfig } from "../config.js"
 import { useAdminConfig } from "../hooks/useAdminConfig.js"
 import { splitEditFields } from "../lib/edit-field-layout.js"
@@ -14,9 +17,11 @@ import {
   needsPerRecordCheck,
   useStudioFieldAccess,
 } from "../hooks/useStudioFieldAccess.js"
+import { useStudioCapability } from "../hooks/useStudioCapability.js"
 import { serializeRecordForApi } from "../lib/recordValues.js"
 import { describeViolations, validateRecord } from "../lib/validate-record.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
+import { createDraft, fetchRecordForEditing } from "../lib/publishing.js"
 
 interface EditViewProps {
   model: ModelConfig
@@ -39,11 +44,15 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
   // Keyed by column. Both sources land here: a bound or constraint Studio checked itself, and a
   // field validator's refusal from the server, which names the column it refused.
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+  // Bumped on every successful save, so the publish bar re-reads the history it summarises. A
+  // saved draft changes what that bar should say, and nothing else tells it.
+  const [savedAt, setSavedAt] = useState(0)
   const isDirty = useRef(false)
   const createTimestampDefaultsApplied = useRef(false)
 
   const isCreate = recordId === undefined
   const fieldAccess = useStudioFieldAccess()
+  const capability = useStudioCapability()
   // null = not asked or not answerable. Only ever set from the database's own answer.
   const [recordDeletable, setRecordDeletable] = useState<boolean | null>(null)
 
@@ -110,23 +119,14 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
     setLoading(true)
     void (async () => {
       try {
-        const result = await client
-          .from(model.tableName as never)
-          .select()
-          .eq(model.primaryKey, recordId)
-          .single()
-
-        if (result.error) {
-          setError(result.error.message)
-        } else if (result.data) {
-          // Proxy may drop Accept: object+json and return a one-row array, unwrap it.
-          const raw = result.data as unknown
-          const data = (Array.isArray(raw) ? raw[0] : raw) as Record<string, unknown> | undefined
-          if (data && typeof data === "object") {
-            setValues(data)
-          } else {
-            setError("Record not found")
-          }
+        // The pending draft when the model has one, because that is what an editor is editing.
+        // The live row is what the world sees, and opening it would show the author their own
+        // unsaved-to-the-world content replaced by what they last published.
+        const loaded = await fetchRecordForEditing(client, model, recordId)
+        if (loaded.error !== null) {
+          setError(loaded.error)
+        } else if (loaded.values !== null) {
+          setValues(loaded.values)
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load record")
@@ -134,7 +134,7 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
         setLoading(false)
       }
     })()
-  }, [client, model.tableName, model.primaryKey, recordId])
+  }, [client, model, recordId])
 
   /**
    * Put a refused write's message on the input it names.
@@ -195,6 +195,23 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
         }
       } else {
         const { [model.primaryKey]: _pk, ...updateValues } = serializeRecordForApi(model, values)
+
+        // On a versioned model, saving records a draft and the live row does not move. That is the
+        // largest single change this feature makes to Studio, and it is the point of it: an author
+        // can save work in progress on a published record without the world seeing it, and
+        // publishing is a separate decision made from the bar above.
+        if (model.versions?.drafts === true) {
+          const drafted = await createDraft(client, model, recordId!, updateValues)
+          if (drafted.error !== null) {
+            setError(drafted.error)
+          } else {
+            isDirty.current = false
+            setSavedAt(Date.now())
+          }
+          setSaving(false)
+          return
+        }
+
         const result = await client
           .from(model.tableName as never)
           .update(updateValues as never)
@@ -205,6 +222,7 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
           noteFieldError(result.error)
         } else {
           isDirty.current = false
+          setSavedAt(Date.now())
         }
       }
     } catch (err) {
@@ -269,13 +287,36 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
   const accessibleMetaFields = applyFieldAccess(metaFields, fieldAccess, model.tableName, isCreate)
 
   const livePreviewConfig = config.livePreview?.[model.name]
+  // Where this record renders, or "" when the project named no address for it. Computed once and
+  // shared: the pane and the share control must agree, and the pane must not mount without one.
+  // `<iframe src="">` resolves against the document's own base, which is Studio, so an entry naming
+  // neither a url nor a pattern booted a second copy of Studio inside the edit form.
+  const previewUrl =
+    livePreviewConfig === undefined
+      ? ""
+      : previewUrlFor(livePreviewConfig, values, appOrigin(client.url))
 
   if (loading) {
     return <div className="st-edit-view st-edit-loading">Loading...</div>
   }
 
+  // Publishing lives in the sidebar beside the record's other metadata rather than as a banner
+  // above the form. Only on an existing record: one that does not exist yet has nothing to publish,
+  // and the first save creates both the row and its first draft.
+  const publishing =
+    isCreate || recordId === undefined ? null : (
+      <PublishBar
+        model={model}
+        recordId={recordId}
+        savedAt={savedAt}
+        seesDrafts={capability.seesDrafts}
+        {...(previewUrl !== "" && { previewUrl })}
+        onNavigate={onNavigate}
+      />
+    )
+
   return (
-    <div className={`st-edit-view${livePreviewConfig ? " st-edit-view--with-preview" : ""}`}>
+    <div className={`st-edit-view${previewUrl !== "" ? " st-edit-view--with-preview" : ""}`}>
       <Header title={isCreate ? `Create ${model.label}` : `Edit ${model.label}`} />
 
       {model.hasHooks && (
@@ -287,6 +328,7 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
       {error && <div className="st-error" role="alert">{error}</div>}
 
       <EditFormLayout
+        publishing={publishing}
         mainFields={accessibleMainFields}
         metaFields={accessibleMetaFields}
         values={values}
@@ -300,7 +342,6 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
         onSave={() => { void handleSave() }}
         isCreate={isCreate}
         {...(Object.keys(fieldErrors).length > 0 && { fieldErrors })}
-        {...(Object.keys(fieldErrors).length > 0 && { fieldErrors })}
         {...(!isCreate && {
           onDuplicate: () => { void handleDuplicate() },
           // Two layers: the table-level verdict withdraws the control where it is settled, and
@@ -311,8 +352,8 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
             }),
         })}
         preview={
-          livePreviewConfig ? (
-            <LivePreviewPane config={livePreviewConfig} values={values} model={model} />
+          livePreviewConfig !== undefined && previewUrl !== "" ? (
+            <LivePreviewPane previewUrl={previewUrl} values={values} model={model} />
           ) : undefined
         }
       />

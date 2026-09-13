@@ -1,4 +1,11 @@
-import type { AdminConfig, FieldConfig, GlobalConfig, ModelConfig, NavGroup } from "../config.js"
+import type {
+  AdminConfig,
+  FieldConfig,
+  GlobalConfig,
+  ModelConfig,
+  ModelVersionsConfig,
+  NavGroup,
+} from "../config.js"
 
 function humanize(name: string): string {
   return name
@@ -67,7 +74,7 @@ export function normalizeAdminConfig(raw: unknown): AdminConfig {
       listColumns: (mo["listColumns"] as string[]) ?? [],
       searchFields: (mo["searchFields"] as string[]) ?? [],
       publishable: Boolean(mo["publishable"] ?? mo["publishing"] ?? false),
-      versioning: Boolean(mo["versioning"] ?? false),
+      versions: normalizeVersions(mo["versions"]),
       softDelete: Boolean(mo["softDelete"] ?? false),
       timestamps: Boolean(mo["timestamps"] ?? false),
       hasHooks: Boolean(mo["hasHooks"] ?? false),
@@ -153,6 +160,37 @@ export function normalizeAdminConfig(raw: unknown): AdminConfig {
       }
     : undefined
 
+  // Where each model renders, when the project has said.
+  //
+  // Carried through explicitly, because this function is the boundary: the CLI writes a key into
+  // `admin-config.json` and Studio only ever sees what is rebuilt here. A key added to the file and
+  // not added here is not a broken feature with an error, it is a feature that silently does
+  // nothing, which is how the live preview pane and every preview link were dead on self-host while
+  // the config file on disk looked exactly right.
+  //
+  // Entries are filtered rather than trusted: a model naming neither an address nor a pattern
+  // configures nothing, and keeping it would make Studio offer a share link that resolves nowhere.
+  const rawPreview = r["livePreview"] as Record<string, unknown> | undefined
+  const livePreview =
+    rawPreview !== null && typeof rawPreview === "object"
+      ? Object.fromEntries(
+          Object.entries(rawPreview)
+            .map(([model, entry]) => [model, entry as Record<string, unknown>] as const)
+            .filter(([, entry]) => entry !== null && typeof entry === "object")
+            .map(([model, entry]) => {
+              // Empty counts as absent, the same way the resolver treats it. A model whose only
+              // address is "" names nowhere, and keeping it would put a share control on screen
+              // that mints a credential no link can carry.
+              const text = (value: unknown): string | undefined =>
+                typeof value === "string" && value !== "" ? value : undefined
+              const url = text(entry["url"])
+              const urlPattern = text(entry["urlPattern"])
+              return [model, { ...(url !== undefined && { url }), ...(urlPattern !== undefined && { urlPattern }) }] as const
+            })
+            .filter(([, entry]) => entry.url !== undefined || entry.urlPattern !== undefined),
+        )
+      : undefined
+
   const adminRoles = Array.isArray(r["adminRoles"])
     ? (r["adminRoles"] as string[]).filter((role) => typeof role === "string" && role.length > 0)
     : undefined
@@ -163,9 +201,32 @@ export function normalizeAdminConfig(raw: unknown): AdminConfig {
     navigation,
     ...(locale !== undefined && { locale }),
     ...(adminRoles !== undefined && adminRoles.length > 0 && { adminRoles }),
+    ...(livePreview !== undefined && Object.keys(livePreview).length > 0 && { livePreview }),
   }
 }
 
 function toGlobalSuffix(name: string): string {
   return name.replace(/([A-Z])/g, "_$1").replace(/^_/, "").toLowerCase()
+}
+
+/**
+ * The model's `versions` object, or `null` when it declares none.
+ *
+ * Defensive about the shape rather than trusting it: this config is fetched at runtime and an older
+ * engine sends no `versions` key at all, in which case the version UI should be absent rather than
+ * half-rendered against undefined.
+ */
+function normalizeVersions(raw: unknown): ModelVersionsConfig | null {
+  if (typeof raw !== "object" || raw === null) return null
+  const value = raw as Record<string, unknown>
+  const versionsTable = value["versionsTable"]
+  if (typeof versionsTable !== "string" || versionsTable.length === 0) return null
+  return {
+    drafts: value["drafts"] !== false,
+    keep: typeof value["keep"] === "number" && value["keep"] >= 1 ? value["keep"] : 20,
+    versionsTable,
+    localizedColumns: Array.isArray(value["localizedColumns"])
+      ? value["localizedColumns"].filter((c): c is string => typeof c === "string")
+      : [],
+  }
 }
