@@ -568,6 +568,12 @@ export default defineConfig({
       expect(compose).toContain("${SUPATYPE_SERVER_IMAGE:-${SUPATYPE_AUTH_IMAGE:-supatype/server:latest}}")
       expect(compose).toContain("${SUPATYPE_STORAGE_IMAGE:-supatype/storage:latest}")
       expect(compose).toContain("${SUPATYPE_STUDIO_IMAGE:-supatype/studio:latest}")
+      // minio/minio was withdrawn from Docker Hub, so a bare reference to it stops the stack
+      // before any container starts. The digest is pinned because the tag proved not to be.
+      expect(compose).toContain(
+        "${SUPATYPE_MINIO_IMAGE:-quay.io/minio/minio:RELEASE.2024-11-07T00-52-20Z@sha256:ac591851803a79aee64bc37f66d77c56b0a4b6e12d9e5356380f4105510f2332}",
+      )
+      expect(compose).not.toMatch(/image:\s*minio\/minio/)
       expect(compose).toContain("SUPATYPE_POSTGREST_URL: http://postgrest:3000")
       expect(compose).toContain("unified gateway")
       const kong = readFileSync(out.kongPath, "utf8")
