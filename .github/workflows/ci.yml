@@ -51,6 +51,19 @@ jobs:
       - name: Test
         run: pnpm turbo run test
 
+      # The two examples that ship a front end and never proved it compiles.
+      #
+      # `blog` is typechecked and was never built, which cannot see a Server Component importing a
+      # client-only API or a broken "use client" boundary. `supabucks` has no typecheck script, so
+      # root turbo skips it entirely, and its `dist/` is what `app.mode = "static"` serves: a build
+      # that emits nothing leaves the example's headline feature broken and silent. A build is not a
+      # typecheck — Vite does not typecheck — but it is the difference between an example that
+      # compiles and one nobody has run since it was written.
+      - name: Example front ends build
+        run: |
+          pnpm --filter @supatype/example-supabucks build
+          pnpm --filter @supatype/example-blog build
+
   docker:
     runs-on: ubuntu-latest
     steps:

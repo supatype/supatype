@@ -4,3 +4,6 @@ node_modules/
 supatype.local.config.ts
 # Engine-generated row types (regenerate with `supatype generate`)
 supatype/generated/database.ts
+# Local env: both hold a signed key
+.env
+.env.local

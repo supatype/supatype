@@ -8,7 +8,8 @@
     "dev": "supatype dev",
     "build": "vite build",
     "push": "supatype push",
-    "seed": "tsx seed.ts"
+    "seed": "tsx seed.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@supatype/cli": "workspace:*",

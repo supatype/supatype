@@ -61,6 +61,23 @@ jobs:
           # From-source CLI builds have no embedded key; map the release secret.
           SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
 
+      # Generated types drifting from the schema is a real class of rot: a schema change lands, the
+      # committed types keep the old shape, and every example compiles against a lie. It lives here
+      # rather than in the cheap CI job because `generate` needs the engine binary, which the step
+      # above has just fetched. Files an example gitignores never show in the diff, so this runs over
+      # all of them without needing to know which commits what.
+      - name: Generated types are up to date
+        run: |
+          for dir in examples/*/; do
+            [ -f "$dir/supatype.config.ts" ] || continue
+            echo "==> $dir"
+            (cd "$dir" && node ../../packages/cli/bin/supatype.js generate)
+          done
+          git diff --exit-code -- examples/ \
+            || { echo "::error::Generated types are stale. Run 'supatype generate' in the example above and commit the result."; exit 1; }
+        env:
+          SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
+
       - name: Run supatype dev integration tests
         run: bash tests/integration/scripts/integration-test.sh --skip-build
         env:
@@ -303,6 +320,86 @@ jobs:
             examples/validation/.supatype/
             examples/validation/*.log
           retention-days: 3
+
+  supabucks-e2e:
+    name: static app (live stack)
+    # Dispatch and schedule only, for now, on the same condition the validation job documents: this
+    # asserts a served SPA, which needs a published `supatype/server` carrying static mode and its
+    # fallback route. Promote to `pull_request` once that is on Docker Hub.
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript packages
+        run: pnpm build
+
+      - name: Run the supabucks e2e
+        run: bash tests/integration/scripts/supabucks-e2e.sh
+
+      - name: Upload stack logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: supabucks-e2e-logs
+          path: |
+            examples/supabucks/.supatype/**/*.log
+            examples/supabucks/*.log
+          if-no-files-found: ignore
+          retention-days: 3
+
+  blog-e2e:
+    name: server-rendered app (live stack)
+    # Dispatch and schedule only, for now. Two reasons, both outside this script: the stack must
+    # carry the functions worker that serves `greet`, and `app.mode = "proxy"` points at
+    # host.docker.internal, which a Linux runner only resolves when the rendered compose maps it to
+    # the host gateway. Promote to `pull_request` once both hold on a scheduled run.
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript packages
+        run: pnpm build
+
+      - name: Run the blog e2e
+        run: bash tests/integration/scripts/blog-e2e.sh
+
+      - name: Upload stack logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blog-e2e-logs
+          path: |
+            examples/blog/.supatype/**/*.log
+            examples/blog/*.log
+          if-no-files-found: ignore
+          retention-days: 3
+
   # Zero to running, from the workspace build: init (docker) → dev → an API that answers.
   # Phase-10.6 row C21, kept here as provenance, the job is named for what it does.
   # macOS runners have no Docker Desktop; Colima provides the daemon.
