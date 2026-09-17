@@ -235,6 +235,41 @@ jobs:
             tests/e2e/test-results/**
           if-no-files-found: ignore
 
+  storage-backend:
+    name: storage backend (S3 compatibility)
+    # Runs on pull requests, unlike the live-stack jobs below: it starts one container rather than
+    # a stack, and it is the only coverage packages/storage has. Both backends, because a
+    # compatibility claim about SeaweedFS is only worth anything beside the backend it replaces.
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [seaweedfs, minio]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript packages
+        run: pnpm build
+
+      - name: Drive packages/storage against ${{ matrix.backend }}
+        run: bash tests/integration/scripts/storage-backend-e2e.sh
+        env:
+          STORAGE_BACKEND: ${{ matrix.backend }}
+
   realtime-e2e:
     name: realtime (live stack)
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
