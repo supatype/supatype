@@ -11,6 +11,8 @@ export interface EditFormSidebarProps {
    * empty titled block behind.
    */
   publishing?: React.ReactNode
+  /** Opens the preview slide-over, above the publishing controls it previews the result of. */
+  previewAction?: React.ReactNode
   metaFields: FieldConfig[]
   values: Record<string, unknown>
   onChange: (fieldName: string, value: unknown) => void
@@ -27,6 +29,7 @@ export interface EditFormSidebarProps {
 
 export function EditFormSidebar({
   publishing,
+  previewAction,
   metaFields,
   values,
   onChange,
@@ -42,6 +45,9 @@ export function EditFormSidebar({
 }: EditFormSidebarProps): React.ReactElement {
   return (
     <aside className="st-edit-sidebar" aria-label="Record metadata">
+      {previewAction !== undefined && (
+        <div className="st-edit-sidebar-section">{previewAction}</div>
+      )}
       {publishing}
       {metaFields.length > 0 && (
         <div className="st-edit-sidebar-section">
