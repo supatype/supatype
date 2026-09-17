@@ -5,6 +5,8 @@ import { useAdminClient } from "../hooks/useAdminClient.js"
 import { useLocale } from "../hooks/useLocale.js"
 import { LivePreviewPane } from "../components/LivePreviewPane.js"
 import { PublishBar } from "../components/PublishBar.js"
+import { Slideover } from "../components/Slideover.js"
+import { Button } from "../components/ui.js"
 import { previewUrlFor } from "../lib/preview-url.js"
 import { appOrigin } from "../lib/membership-url.js"
 import type { ModelConfig } from "../config.js"
@@ -44,6 +46,7 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
   // Keyed by column. Both sources land here: a bound or constraint Studio checked itself, and a
   // field validator's refusal from the server, which names the column it refused.
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+  const [previewOpen, setPreviewOpen] = useState(false)
   // Bumped on every successful save, so the publish bar re-reads the history it summarises. A
   // saved draft changes what that bar should say, and nothing else tells it.
   const [savedAt, setSavedAt] = useState(0)
@@ -190,6 +193,25 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
           const data = rows[0]
           const newId = data ? String(data[model.primaryKey]) : undefined
           if (!newId) { setError("No data returned"); setSaving(false); return }
+
+          // The first save creates the row and its first draft. Creating only the row left a
+          // versioned record with no version at all: its history was empty, and a preview link
+          // minted against it resolved correctly and found nothing, so the reader was told "no
+          // draft to preview" about a record that plainly had content. Only editing an existing
+          // record made a draft, so a record had to be saved twice before it could be previewed
+          // once.
+          if (model.versions?.drafts === true) {
+            const drafted = await createDraft(client, model, newId, insertValues)
+            if (drafted.error !== null) {
+              // The row exists either way, so navigate to it rather than stranding the author on a
+              // create form whose save did in fact write something.
+              setError(drafted.error)
+              setSaving(false)
+              onNavigate(`/models/${model.name}/${newId}`)
+              return
+            }
+          }
+
           isDirty.current = false
           onNavigate(`/models/${model.name}/${newId}`)
         }
@@ -303,20 +325,24 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
   // Publishing lives in the sidebar beside the record's other metadata rather than as a banner
   // above the form. Only on an existing record: one that does not exist yet has nothing to publish,
   // and the first save creates both the row and its first draft.
-  const publishing =
-    isCreate || recordId === undefined ? null : (
-      <PublishBar
-        model={model}
-        recordId={recordId}
-        savedAt={savedAt}
-        seesDrafts={capability.seesDrafts}
-        {...(previewUrl !== "" && { previewUrl })}
-        onNavigate={onNavigate}
-      />
-    )
+  //
+  // Named once because two things read it. The preview pane has to explain the publish controls'
+  // absence, and when the two asked the question separately the pane embedded a preview page whose
+  // advice was to use a control that was not on the screen.
+  const awaitingFirstSave = isCreate || recordId === undefined
+  const publishing = awaitingFirstSave ? null : (
+    <PublishBar
+      model={model}
+      recordId={recordId}
+      savedAt={savedAt}
+      seesDrafts={capability.seesDrafts}
+      {...(previewUrl !== "" && { previewUrl })}
+      onNavigate={onNavigate}
+    />
+  )
 
   return (
-    <div className={`st-edit-view${previewUrl !== "" ? " st-edit-view--with-preview" : ""}`}>
+    <div className="st-edit-view">
       <Header title={isCreate ? `Create ${model.label}` : `Edit ${model.label}`} />
 
       {model.hasHooks && (
@@ -351,12 +377,35 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
               onDelete: () => { void handleDelete() },
             }),
         })}
-        preview={
+        previewAction={
           livePreviewConfig !== undefined && previewUrl !== "" ? (
-            <LivePreviewPane previewUrl={previewUrl} values={values} model={model} />
+            <Button onClick={() => { setPreviewOpen(true) }}>
+              Live preview
+            </Button>
           ) : undefined
         }
       />
+
+      {/*
+        The preview is a slide-over rather than a second column. It costs the form half its width
+        whenever a project configures one, and most of editing is not previewing, so it is opened
+        when wanted and out of the way otherwise. Mounted only while open so the iframe is not
+        loading a page nobody is looking at.
+      */}
+      {livePreviewConfig !== undefined && previewUrl !== "" && previewOpen && (
+        <Slideover
+          open={previewOpen}
+          onClose={() => { setPreviewOpen(false) }}
+          title={`Preview: ${model.label}`}
+        >
+          <LivePreviewPane
+            previewUrl={previewUrl}
+            values={values}
+            model={model}
+            awaitingFirstSave={awaitingFirstSave}
+          />
+        </Slideover>
+      )}
     </div>
   )
 }
