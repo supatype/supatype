@@ -7,7 +7,6 @@ import {
   apiSchemaList,
   externalDatabaseUrl,
   hooksPathFromProject,
-  objectStore,
   preferredFunctionsPathFromProject,
   realtimeEnabled,
   serviceRoleRoutes,
@@ -36,17 +35,10 @@ export const COMPOSE_IMAGE_ENV_KEYS = [
   "SUPATYPE_STUDIO_IMAGE",
   "SUPATYPE_STORAGE_IMAGE",
   "SUPATYPE_FUNCTIONS_WORKER_IMAGE",
-  "SUPATYPE_MINIO_IMAGE",
   "SUPATYPE_SEAWEEDFS_IMAGE",
 ] as const
 
-/**
- * Object store images, pinned by digest where the registry has proved it can lose a tag.
- *
- * MinIO is the withdrawn community build served from quay; SeaweedFS is where storage is going.
- */
-const MINIO_IMAGE =
-  "quay.io/minio/minio:RELEASE.2024-11-07T00-52-20Z@sha256:ac591851803a79aee64bc37f66d77c56b0a4b6e12d9e5356380f4105510f2332"
+/** Pinned by digest, because the registry this replaced proved a tag can be taken away. */
 const SEAWEEDFS_IMAGE =
   "chrislusf/seaweedfs:4.46@sha256:08d516132314207d10c8e37cbffc1f32b147d870169688734cc61c6231625b62"
 
@@ -191,7 +183,7 @@ export interface SelfHostComposePaths {
   composePath: string
   kongPath: string
   nginxPath: string
-  /** SeaweedFS identities. Written only when the project runs that object store. */
+  /** SeaweedFS identities, rendered beside the compose file the server reads them through. */
   s3ConfigPath: string
 }
 
@@ -406,23 +398,14 @@ ${studioService}
     : `    ports:
       - "9999:9999"
 `
-  const minioPorts = devLocal
-    ? ""
-    : `    ports:
-      - "9000:9000"
-      - "9001:9001"
-`
   const seaweedPorts = devLocal
     ? ""
     : `    ports:
       - "8333:8333"
 `
-  const store = objectStore(config)
   // One source for the credentials: the server is configured with them and the storage service is
   // handed them, and a mismatch does not fail at start, it fails at the first upload.
-  const objectStoreBlock =
-    store === "seaweedfs"
-      ? `  seaweedfs:
+  const objectStoreBlock = `  seaweedfs:
     # Identities come from a config file rather than env vars, and the anonymous identity is
     # deliberately absent: a bucket is public because of its policy, never because the server is
     # open. Written beside this file by the same generator, so the two cannot drift.
@@ -432,24 +415,6 @@ ${studioService}
       - storage-data:/data
       - ${SEAWEED_CONFIG_MOUNT}:/etc/seaweedfs/s3.json:ro
 ${seaweedPorts}`
-      : `  minio:
-    # Stopgap, not a considered default. minio/minio was withdrawn from Docker Hub when the
-    # community edition was archived and became source-only, so a pull by that name now fails
-    # and takes the whole stack down before any container starts. quay.io still serves the exact
-    # release we already ran, pinned by digest here because a tag we believed immutable was
-    # removed once already. The image is unmaintained and will not receive security fixes: set
-    # \`storage.object_store: "seaweedfs"\` to run the backend that replaces it.
-    image: \${SUPATYPE_MINIO_IMAGE:-${MINIO_IMAGE}}
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${OBJECT_STORE_ACCESS_KEY}
-      MINIO_ROOT_PASSWORD: ${OBJECT_STORE_SECRET_KEY}
-${minioPorts}    volumes:
-      - minio-data:/data
-`
-  const objectStoreEndpoint =
-    store === "seaweedfs" ? "http://seaweedfs:8333" : "http://minio:9000"
-  const objectStoreVolume = store === "seaweedfs" ? "storage-data" : "minio-data"
   const kongTlsEnv = tlsEnabled
     ? `      KONG_PROXY_LISTEN: "0.0.0.0:8000, 0.0.0.0:8443 ssl"
       KONG_LUA_SSL_TRUSTED_CERTIFICATE: system
@@ -478,7 +443,7 @@ ${minioPorts}    volumes:
 `
   // An external database is not ours to declare a volume for.
   const volumesBlock = `volumes:
-${external ? "" : "  db-data:\n"}  ${objectStoreVolume}:
+${external ? "" : "  db-data:\n"}  storage-data:
   valkey-data:
 `
 
@@ -590,7 +555,7 @@ ${dbDependency}
       PORT: 5000
       DATABASE_URL: "${ownerUrl}"
       JWT_SECRET: \${JWT_SECRET:?JWT_SECRET is missing from .env}
-      S3_ENDPOINT: ${objectStoreEndpoint}
+      S3_ENDPOINT: http://seaweedfs:8333
       S3_REGION: us-east-1
       S3_ACCESS_KEY: ${OBJECT_STORE_ACCESS_KEY}
       S3_SECRET_KEY: ${OBJECT_STORE_SECRET_KEY}
@@ -959,9 +924,7 @@ export function writeSelfHostCompose(
   ensureProjectFunctionsDir(cwd, config)
   ensureComposeManifest(cwd, config)
   writeFileSync(paths.composePath, renderSelfHostCompose(config, cwd, resolved), "utf8")
-  if (objectStore(config) === "seaweedfs") {
-    writeFileSync(paths.s3ConfigPath, renderSeaweedIdentities(), "utf8")
-  }
+  writeFileSync(paths.s3ConfigPath, renderSeaweedIdentities(), "utf8")
   const studioHostDev = options?.devLocal === true && hasStudioOverride(config)
   const tlsEnabled = selfHostTlsEnabled(config, options?.devLocal === true)
   const domain = config.server.domain?.trim()

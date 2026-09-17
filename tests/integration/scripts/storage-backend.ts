@@ -1,5 +1,5 @@
 /**
- * Phase 1 of the SeaweedFS migration: prove the S3 surface `packages/storage` actually uses.
+ * Prove the S3 surface `packages/storage` actually uses, against the object store the stack runs.
  *
  * This drives the shipped functions from `packages/storage/dist/s3.js` rather than hand-written
  * requests, because the thing under test is whether *our code* works against the backend, not

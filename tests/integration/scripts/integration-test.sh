@@ -202,7 +202,7 @@ dump_compose_diagnostics() {
 
   # Ordered so the most likely culprit for a gateway timeout comes first.
   local service
-  for service in kong server realtime db postgrest storage control-plane studio functions-worker minio valkey; do
+  for service in kong server realtime db postgrest storage control-plane studio functions-worker seaweedfs valkey; do
     docker "${args[@]}" logs --no-color --timestamps --tail 400 "$service" \
       >"$out/$service.log" 2>&1 || true
     if [[ -s "$out/$service.log" ]]; then
