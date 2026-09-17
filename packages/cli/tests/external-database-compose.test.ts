@@ -61,7 +61,7 @@ describe("external database: compose", () => {
   it("interpolates the URL rather than baking the password into the file", () => {
     // The compose file is generated into .supatype/, which operators do commit.
     const compose = renderSelfHostCompose(external())
-    // "secret" alone would match minio's own S3 credentials, so match the userinfo form.
+    // "secret" alone would match the object store's own S3 credentials, so match the userinfo form.
     expect(compose).not.toContain("owner:secret@")
     expect(compose).not.toContain("://owner")
     expect(compose).toContain("${DATABASE_URL:?DATABASE_URL is missing from .env")
@@ -122,7 +122,7 @@ describe("external database: compose", () => {
 
   it("still declares the volumes it does own", () => {
     const compose = renderSelfHostCompose(external())
-    expect(compose).toContain("  minio-data:")
+    expect(compose).toContain("  storage-data:")
     expect(compose).toContain("  valkey-data:")
   })
 
@@ -137,7 +137,7 @@ describe("external database: compose", () => {
       "realtime:",
       "control-plane:",
       "server:",
-      "minio:",
+      "seaweedfs:",
       "schema-engine:",
       "studio:",
       "valkey:",

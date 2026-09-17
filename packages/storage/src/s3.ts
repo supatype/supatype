@@ -15,7 +15,7 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 import { config } from "./env.js"
 
-export const s3 = new S3Client({
+const clientConfig = {
   endpoint: config.s3Endpoint,
   region: config.s3Region,
   credentials: {
@@ -23,7 +23,25 @@ export const s3 = new S3Client({
     secretAccessKey: config.s3SecretKey,
   },
   forcePathStyle: config.s3ForcePathStyle,
-})
+}
+
+export const s3 = new S3Client(clientConfig)
+
+/**
+ * The client that signs upload URLs, and the only difference is that it computes no checksum.
+ *
+ * A presigned `PutObject` is signed from a command with **no body**, so the default setting
+ * (`WHEN_SUPPORTED`) hashes nothing and writes the result into the URL as
+ * `x-amz-checksum-crc32=AAAAAA==`, the CRC32 of zero bytes. The client then uploads real bytes
+ * against a URL that promises empty ones. A backend that checks rejects it, correctly, and one that
+ * ignores a checksum in the query string accepts it: MinIO ignored it, SeaweedFS refused with
+ * `BadDigest`, so every upload URL we have ever minted was wrong and only the backend hid it.
+ *
+ * Scoped to presigning rather than set on the shared client above, because `WHEN_REQUIRED` would
+ * also drop the checksum from ordinary `putObject` calls, where it is computed over the real body
+ * and is worth keeping.
+ */
+const presigner = new S3Client({ ...clientConfig, requestChecksumCalculation: "WHEN_REQUIRED" })
 
 // ─── Bucket operations ─────────────────────────────────────────────────────────
 
@@ -219,7 +237,7 @@ export async function createSignedUploadUrl(
   contentType?: string,
 ): Promise<string> {
   return getSignedUrl(
-    s3,
+    presigner,
     new PutObjectCommand({
       Bucket: bucket,
       Key: key,
