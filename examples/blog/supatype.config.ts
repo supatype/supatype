@@ -37,6 +37,10 @@ export default defineConfig({
     postgres: "17",
     deno: "2.2.0",
   },
+  // Opted in ahead of the default flip: MinIO's community edition is archived and its batch delete
+  // already fails against the last build it published, so this example runs the backend that
+  // replaces it.
+  storage: { provider: "s3", object_store: "seaweedfs" },
   schema: { path: "schema/index.ts" },
   output: {
     types: "supatype/generated/database.ts",

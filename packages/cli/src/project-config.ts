@@ -206,6 +206,16 @@ export interface SupatypeProjectConfig {
     provider: "local" | "s3"
     /** Local directory to store objects in (provider=local). */
     local_path?: string
+    /**
+     * Which S3 server the self-host stack runs. Not the same question as `provider`, which is how
+     * the storage service talks to it.
+     *
+     * "minio" is the default and is on its way out: MinIO's community edition is archived, its
+     * image was withdrawn from Docker Hub, and batch delete already fails against the last build
+     * it published. "seaweedfs" is where this is going; it is opt-in while the migration is
+     * proven, and becomes the default once it is.
+     */
+    object_store?: "minio" | "seaweedfs"
   }
   schema?: {
     /** Path (or glob) to the schema entry point. Defaults to "schema/index.ts". */
@@ -698,6 +708,16 @@ export function externalDatabaseUrl(cfg: SupatypeProjectConfig): string | undefi
  */
 export function realtimeEnabled(cfg: SupatypeProjectConfig): boolean {
   return cfg.database.external?.realtime ?? true
+}
+
+export type ObjectStore = "minio" | "seaweedfs"
+
+/**
+ * Which S3 server the stack renders. Defaults to MinIO until the SeaweedFS migration flips it,
+ * so an existing project keeps the stack it already has until it asks for the other one.
+ */
+export function objectStore(cfg: SupatypeProjectConfig): ObjectStore {
+  return cfg.storage?.object_store ?? "minio"
 }
 
 /** The Postgres schema Supatype manages. */

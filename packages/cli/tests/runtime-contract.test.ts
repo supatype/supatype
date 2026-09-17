@@ -574,12 +574,52 @@ export default defineConfig({
         "${SUPATYPE_MINIO_IMAGE:-quay.io/minio/minio:RELEASE.2024-11-07T00-52-20Z@sha256:ac591851803a79aee64bc37f66d77c56b0a4b6e12d9e5356380f4105510f2332}",
       )
       expect(compose).not.toMatch(/image:\s*minio\/minio/)
+      expect(compose).toContain("S3_ENDPOINT: http://minio:9000")
+      // The service, not the word: the minio block's own comment names seaweedfs as the way out.
+      expect(compose).not.toContain("  seaweedfs:")
       expect(compose).toContain("SUPATYPE_POSTGREST_URL: http://postgrest:3000")
       expect(compose).toContain("unified gateway")
       const kong = readFileSync(out.kongPath, "utf8")
       expect(kong).toContain("http://server:9999")
       expect(kong).toContain("http://postgrest:3000/rpc/graphql")
       expect(kong).toContain("Content-Profile:graphql_public")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("renders SeaweedFS, its identities, and its own volume when the project opts in", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-seaweed-"))
+    try {
+      const out = writeSelfHostCompose(dir, {
+        ...baseConfig,
+        app: { mode: "none" },
+        storage: { provider: "s3", object_store: "seaweedfs" },
+      })
+      const compose = readFileSync(out.composePath, "utf8")
+
+      expect(compose).toContain("  seaweedfs:")
+      expect(compose).not.toContain("  minio:")
+      // The storage service has to be pointed at the server that is actually running. Getting this
+      // wrong renders a stack that starts cleanly and fails on the first upload.
+      expect(compose).toContain("S3_ENDPOINT: http://seaweedfs:8333")
+      expect(compose).toContain("-s3.config=/etc/seaweedfs/s3.json")
+      expect(compose).toContain(".supatype/self-host/s3.json:/etc/seaweedfs/s3.json:ro")
+      // A separate volume, so switching backends cannot hand one server the other's data directory.
+      expect(compose).toContain("  storage-data:")
+      expect(compose).not.toContain("minio-data")
+
+      // Same credentials in both halves, checked rather than assumed: a mismatch here does not
+      // fail at start, it fails at the first upload, which is a much worse place to find it.
+      const identities = JSON.parse(readFileSync(out.s3ConfigPath, "utf8")) as {
+        identities: { name: string; credentials: { accessKey: string; secretKey: string }[] }[]
+      }
+      const credential = identities.identities[0]?.credentials[0]
+      expect(compose).toContain(`S3_ACCESS_KEY: ${credential?.accessKey}`)
+      expect(compose).toContain(`S3_SECRET_KEY: ${credential?.secretKey}`)
+
+      // No anonymous identity: a bucket is public because of its policy, not because the server is.
+      expect(identities.identities.map((i) => i.name)).not.toContain("anonymous")
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
