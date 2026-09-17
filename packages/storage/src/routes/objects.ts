@@ -307,6 +307,23 @@ export async function listObjects(ctx: RequestContext): Promise<void> {
 
 // ─── Shared: serve an object with optional transforms ───────────────────────────
 
+/**
+ * Does this error mean the object is not there?
+ *
+ * Read from the error's name and HTTP status, not from its prose. This used to match the *message*
+ * against "NoSuchKey", "not found" and "NotFound", and the SDK's message is "The specified key does
+ * not exist.", which contains none of them: the name carries `NoSuchKey`. So every request for a
+ * missing object in a public bucket answered 500, and a broken image URL looked like a server
+ * fault to every cache and CDN in front of it.
+ */
+function isMissingObject(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false
+  const { name } = err as { name?: unknown }
+  if (name === "NoSuchKey" || name === "NotFound" || name === "NoSuchBucket") return true
+  const { $metadata } = err as { $metadata?: { httpStatusCode?: number } }
+  return $metadata?.httpStatusCode === 404
+}
+
 async function serveObject(ctx: RequestContext, bucketId: string, objectPath: string): Promise<void> {
   // Touch last_accessed_at
   await db.touchObject(bucketId, objectPath)
@@ -333,8 +350,7 @@ async function serveObject(ctx: RequestContext, bucketId: string, objectPath: st
       ctx.res.end(obj.body)
     }
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    if (msg.includes("NoSuchKey") || msg.includes("not found") || msg.includes("NotFound")) {
+    if (isMissingObject(err)) {
       sendJson(ctx.res, 404, { error: "Object not found" })
     } else {
       throw err
