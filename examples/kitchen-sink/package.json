@@ -1,0 +1,23 @@
+{
+  "name": "@supatype/example-kitchen-sink",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Every Supatype feature in one project: a marketing site an editor publishes and an app an attendee signs in to",
+  "scripts": {
+    "dev": "supatype dev",
+    "push": "supatype push --yes",
+    "keys": "supatype keys",
+    "generate": "supatype generate",
+    "doctor": "supatype doctor",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@supatype/cli": "workspace:*",
+    "@supatype/client": "workspace:*",
+    "@supatype/types": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5"
+  }
+}
