@@ -13,8 +13,14 @@ realtime, storage uploads, per-row access, functions.
 
 ## Status
 
-**Both front ends are in.** What is not yet: the mode-switch scripts, the edge functions, the seed
-and the verify scripts.
+**Everything described below is in the tree**: the schema, the generated types, both front ends,
+the edge functions, two field validators, the seed, the headless verify and the CI job that runs it
+against a live stack.
+
+**What has not happened is the running.** That CI job is dispatch-gated like the other live-stack
+jobs, so it has never executed; every claim here is backed by code that typechecks and builds, and
+by assertions written to fail loudly, but not yet by a green run. The first dispatch or scheduled
+run is where that changes.
 
 `apps/app` (Vite SPA, `app.mode = "static"`) is the session-shaped half: auth through
 `@supatype/react-auth`'s prebuilt forms, `useQuery` against the published schedule, and in the
@@ -53,12 +59,26 @@ Each screen and route states the surface it proves; one that cannot is not worth
 
 `app` is a single object with one `mode`, and the server serves one thing at `/`, so the two apps
 take turns rather than running side by side. That is a feature to prove, not a problem to route
-around: `verify:modes` will assert `static` serves the SPA with fallback routing, `proxy` serves the
-marketing site with its tags rendered server-side, and `none` returns 404.
+around.
 
-Day to day, `dev:app` and `dev:marketing` will write `supatype.local.config.ts` — gitignored and
-deep-merged — to pick which one you are working on. The committed default is the SPA, because that
-is the deployment most projects ship.
+Three scripts switch between them, and each is a real `supatype app` invocation rather than a
+config edit of our own:
+
+```bash
+pnpm mode:app         # supatype app add --static ./apps/app/dist
+pnpm mode:marketing   # supatype app add --upstream http://host.docker.internal:3006
+pnpm mode:none        # supatype app remove
+```
+
+**They rewrite `supatype.config.ts` in place**, because that is what the command does. Expect a
+dirty config after switching, and do not commit it unless you meant to. The committed default is
+the SPA, because that is the deployment most projects ship.
+
+`tests/integration/scripts/kitchen-sink-e2e.sh` walks that in CI: `static` serves the SPA and a
+path with no file behind it falls back to the shell, `none` returns 404 while the API keeps
+answering, and switching back works. `proxy` is not in the walk yet — it needs `next dev` beside
+the stack and a `host.docker.internal` that resolves on a Linux runner, the same pair that gates
+`blog-e2e` — so `pnpm mode:marketing` is how you exercise it locally.
 
 ## What the schema covers
 
@@ -70,7 +90,7 @@ is the deployment most projects ship.
 | Blocks | `Block` / `Blocks` — a closed vocabulary of page sections, not a rich-text column |
 | Buckets | public (headshots), private (ticket PDFs), custom + role (sponsor artwork) |
 | Access | `Public`, `LoggedIn`, `Owner`, `OwnerFrom`, `Role`, and `Lte<"published_at", Now>` as the read rule |
-| Constraints | `Lte<"starts_at","ends_at">` on `Talk`, plus a composite index |
+| Constraints | `Lte<"starts_at","ends_at">` on `Talk` and `Gte<Length<"body">, Literal<2>>` on `ChatMessage`, plus a composite index |
 | Publishing | `versions: { drafts, keep }` on `Page`, `Speaker` and `Talk` |
 | Singleton | `SiteSettings`, one row, edited in Studio |
 
@@ -78,10 +98,12 @@ is the deployment most projects ship.
 you the worker itself is wrong, and `issue-ticket`, which gates on the caller's own token and then
 writes with the service role — issuing is server work even though reading a ticket is the owner's.
 
-`hooks/validate-talk-title` is the third way to refuse a value, and the only one that can name the
-field back to the caller. Bounds and constraints hold for every writer including `psql`; a
-validator runs on the API write path only, so it is here for a rule a `CHECK` genuinely cannot
-express.
+`hooks/` holds two validators — the third way to refuse a value, and the only one that can name the
+field back to the caller. `validate-talk-title` guards an editor-written field;
+`validate-chat-body` guards one an attendee writes, which is what lets the app's rules screen
+trigger all three refusals rather than describing them. Bounds and constraints hold for every
+writer including `psql`; a validator runs on the API write path only, so both are rules a `CHECK`
+genuinely cannot express.
 
 Two things are still absent, both for reasons outside this example:
 
@@ -99,7 +121,25 @@ separately, so a search box in Studio needs an engine carrying it.
 
 ```bash
 pnpm install
-pnpm --filter @supatype/example-kitchen-sink typecheck
+pnpm keys            # mints ANON_KEY / SERVICE_ROLE_KEY into .env
+pnpm build:app       # app.mode is "static", so the SPA must exist before the stack serves it
+pnpm dev             # Postgres, the schema, the whole stack
 ```
 
-`supatype dev` will start the stack once there is a front end for it to serve.
+Then, in another terminal:
+
+```bash
+pnpm seed            # one page, one speaker, two talks (one published), one sponsor
+pnpm verify          # the assertions a browser cannot make
+```
+
+The marketing site runs beside the stack rather than inside it:
+
+```bash
+pnpm mode:marketing && pnpm build:marketing
+pnpm --filter @supatype/example-kitchen-sink-marketing dev
+```
+
+`pnpm typecheck` covers all three TypeScript projects here — the schema and scripts, `functions/`,
+and `hooks/` — because the Deno-typed directories need their own configs and a config nobody runs
+checks nothing.
