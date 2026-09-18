@@ -91,6 +91,19 @@ async function main(): Promise<void> {
   if (insertError) throw new Error(`writing a chat message: ${insertError.message}`)
   check(await arrived, "the insert reached the subscriber", `within ${DEADLINE_MS}ms`)
 
+  console.log("\n==> three refusals, in three different places")
+  // All three must refuse. A write that succeeds here is the interesting failure: it means a rule
+  // the schema states is not being enforced, which no amount of sending valid values would reveal.
+  const refusals: [string, string][] = [
+    ["a bound (MaxLength)", "x".repeat(600)],
+    ["a model constraint (Length >= 2)", "x"],
+    ["a validator (no shouting)", "HELLO EVERYONE"],
+  ]
+  for (const [what, body] of refusals) {
+    const { error: refused } = await anon.from("chat_message").insert({ room: "lobby", body })
+    check(refused !== null, `${what} refuses the write`, "the write was ACCEPTED")
+  }
+
   console.log("\n==> realtime: what is not a row")
   // postgres_changes above carried what was written down. These carry what was not: presence is
   // who is here now, broadcast is a message with no database behind it. Both are separate paths

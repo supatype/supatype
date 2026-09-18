@@ -5,6 +5,7 @@ import { ScheduleScreen } from "./ScheduleScreen.js"
 import { LobbyScreen } from "./LobbyScreen.js"
 import { TicketScreen } from "./TicketScreen.js"
 import { MediaScreen } from "./MediaScreen.js"
+import { RulesScreen } from "./RulesScreen.js"
 
 /**
  * The attendee app: the session-shaped half of the kitchen sink.
@@ -20,6 +21,7 @@ const SCREENS = [
   { id: "lobby", label: "Lobby", proves: "realtime: subscribe, then write" },
   { id: "ticket", label: "My ticket", proves: "per-row access: OwnerFrom" },
   { id: "media", label: "Media", proves: "storage: upload, then transform on read" },
+  { id: "rules", label: "Rules", proves: "three refusals: bound, constraint, validator" },
 ] as const
 
 type ScreenId = (typeof SCREENS)[number]["id"]
@@ -64,6 +66,7 @@ export function App(): React.ReactElement {
       {screen === "lobby" && <LobbyScreen />}
       {screen === "ticket" && <TicketScreen userId={user.id} />}
       {screen === "media" && <MediaScreen />}
+      {screen === "rules" && <RulesScreen />}
     </main>
   )
 }

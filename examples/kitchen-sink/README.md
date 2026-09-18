@@ -23,7 +23,10 @@ here now, broadcast for a "typing…" that is deliberately not a row. The ticket
 per-row access (`OwnerFrom` with no client-side filter), `useFunction` for work this client cannot
 do (issuing gates on your token then writes with the service role), and a signed URL into a
 private bucket, which a public URL cannot reach. The media screen covers storage: upload, then the
-same object read back both as uploaded and transformed on read.
+same object read back both as uploaded and transformed on read. The rules screen meets all three
+ways of refusing a value — a bound, a model constraint and a validator — on a model a signed-in
+caller may actually write, because a refusal nobody can trigger teaches nothing about how they
+differ.
 
 The storage and signed-URL paths close a gap nothing in this repository covered: `blog` declares
 buckets and never uploads, so before this the runtime path was typechecked and never run.

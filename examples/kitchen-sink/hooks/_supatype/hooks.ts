@@ -28,6 +28,32 @@
 export type RichTextValue = { readonly root: { readonly children: readonly unknown[] } } | string
 
 export interface HookTables {
+  "chat_message": {
+    Row: {
+      authorName: string | null
+      authUser: Record<string, unknown> | null
+      body: string
+      created_at: string
+      id: string
+      room: string
+    }
+    Insert: {
+      authorName?: string | null
+      authUser?: Record<string, unknown> | null
+      body: string
+      created_at?: string
+      id?: string
+      room: string
+    }
+    Update: {
+      authorName?: string | null
+      authUser?: Record<string, unknown> | null
+      body?: string
+      created_at?: string
+      id?: string
+      room?: string
+    }
+  }
   "talk": {
     Row: {
       abstract: (RichTextValue | string) | null

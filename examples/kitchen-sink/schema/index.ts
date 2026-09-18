@@ -33,6 +33,9 @@ import type {
   ImageAsset,
   Indexed,
   Int,
+  Gte,
+  Length,
+  Literal,
   JSON,
   LocaleConfig,
   Localized,
@@ -317,15 +320,35 @@ export type Ticket = Model<{
   }
 }>
 
-/** Lobby chat: what the realtime half of the app subscribes to. */
+/**
+ * Lobby chat: what the realtime half of the app subscribes to, and where an attendee can meet all
+ * three ways of refusing a value.
+ *
+ * The three deliberately live on a model a signed-in caller may write. Putting them on an
+ * editor-only model would make them unreachable from the app, and a refusal nobody can trigger
+ * teaches nothing about how the three differ.
+ */
 export type ChatMessage = Model<{
   id: UUID
   room: Indexed<string>
+  /** A bound: compiled to a `CHECK`, so it holds for `psql` and seeds as much as for the API. */
   body: MaxLength<string, 500>
   authUser: RelatedTo<SupatypeAuthUser>
   authorName: Optional<string>
   created_at: Timestamp
 }, {
+  /**
+   * A model constraint: also a `CHECK`, but one a field modifier cannot express, because it reads
+   * the column rather than bounding its declaration.
+   */
+  constraints: [
+    Gte<Length<"body">, Literal<2>>,
+  ]
+  /**
+   * A validator: the only one of the three that can name the field back to the caller, and the
+   * only one direct SQL bypasses. Here for a rule a `CHECK` cannot state.
+   */
+  validate: { body: "validate-chat-body" }
   access: {
     read: LoggedIn
     create: LoggedIn
