@@ -348,6 +348,55 @@ jobs:
             examples/validation/*.log
           retention-days: 3
 
+  kitchen-sink-e2e:
+    name: kitchen sink (live stack)
+    # Dispatch and schedule only, for now, like the other live-stack jobs: this asserts a served
+    # SPA with fallback routing, realtime delivery, a storage round trip with a real transform and
+    # an edge function, so it needs published images carrying all four. Promote to `pull_request`
+    # once they are on Docker Hub.
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript packages
+        run: pnpm build
+
+      # Built here, not pulled: the example declares a per-field validator, and the published worker
+      # predates the `hooks/` route prefix, so it would serve no hook at all. Same reason the
+      # validation job builds it.
+      - name: Build functions-worker from source
+        run: |
+          docker build -t supatype/functions-worker:ci -f packages/functions-worker/Dockerfile packages/functions-worker
+
+      - name: Run the kitchen sink e2e
+        run: bash tests/integration/scripts/kitchen-sink-e2e.sh
+        env:
+          SUPATYPE_FUNCTIONS_WORKER_IMAGE: supatype/functions-worker:ci
+
+      - name: Upload stack logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kitchen-sink-e2e-logs
+          path: |
+            examples/kitchen-sink/.supatype/**/*.log
+            examples/kitchen-sink/*.log
+          if-no-files-found: ignore
+          retention-days: 3
+
   supabucks-e2e:
     name: static app (live stack)
     # Dispatch and schedule only, for now, on the same condition the validation job documents: this

@@ -13,9 +13,19 @@ import { sql } from "@supatype/cli/seed"
  * nothing else's; a seed is not going through the API, and a fixture nobody can read is not a
  * fixture. Seeding published rows is how both apps have anything to render on first run.
  */
+/**
+ * Where `supatype dev` actually puts the database on a Compose stack: port 54329 on the host, and
+ * the database is named `supatype` rather than the project. Guessing 5432 and the project name
+ * gives "pool timed out while waiting for an open connection", which says nothing about the URL
+ * being wrong.
+ */
 const db = sql(
   process.env["DATABASE_URL"] ??
-    "postgresql://supatype_admin:postgres@localhost:5432/kitchen-sink",
+    `postgresql://${process.env["POSTGRES_USER"] ?? "supatype_admin"}:${
+      process.env["POSTGRES_PASSWORD"] ?? "postgres"
+    }@127.0.0.1:${process.env["SUPATYPE_DEV_DB_PORT"] ?? "54329"}/${
+      process.env["POSTGRES_DB"] ?? "supatype"
+    }?sslmode=disable`,
 )
 
 const HERO = {
