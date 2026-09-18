@@ -57,9 +57,17 @@ is the deployment most projects ship.
 | Publishing | `versions: { drafts, keep }` on `Page`, `Speaker` and `Talk` |
 | Singleton | `SiteSettings`, one row, edited in Studio |
 
-Two things are deliberately absent until they can be shown working: the `plugin-seo` composite
-(schema-side plugin registration needs a spike first) and a per-field `validate` hook (it wants its
-`hooks/` function alongside it, which lands with the functions).
+`functions/` holds two edge functions: `ping`, which cannot fail for its own reasons and so tells
+you the worker itself is wrong, and `issue-ticket`, which gates on the caller's own token and then
+writes with the service role — issuing is server work even though reading a ticket is the owner's.
+
+`hooks/validate-talk-title` is the third way to refuse a value, and the only one that can name the
+field back to the caller. Bounds and constraints hold for every writer including `psql`; a
+validator runs on the API write path only, so it is here for a rule a `CHECK` genuinely cannot
+express.
+
+One thing is still deliberately absent: the `plugin-seo` composite, because schema-side plugin
+registration needs a spike first.
 
 `Searchable` is here in both its spellings — the modifier on `Speaker.name`, the ordered model-level
 list on `Talk` — and building this example is what turned up the fact that the CLI was discarding

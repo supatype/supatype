@@ -231,6 +231,13 @@ export type Talk = Model<{
   versions: { drafts: true, keep: 10 }
   /** Named explicitly because the list view filters on the first entry, and title is the one. */
   searchable: ["title"]
+  /**
+   * The third way to refuse a value, and the only one that can name the field back to the caller.
+   *
+   * Bounds and constraints hold for every writer including `psql`; this runs on the API write path
+   * only. It is here for a rule a `CHECK` genuinely cannot express — see the function itself.
+   */
+  validate: { title: "validate-talk-title" }
   indexes: [{ fields: ["day", "starts_at"] }]
   constraints: [
     Lte<"starts_at", "ends_at">,

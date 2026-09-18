@@ -6,11 +6,16 @@
   "description": "Every Supatype feature in one project: a marketing site an editor publishes and an app an attendee signs in to",
   "scripts": {
     "dev": "supatype dev",
+    "build:app": "pnpm --filter @supatype/example-kitchen-sink-app build",
+    "build:marketing": "pnpm --filter @supatype/example-kitchen-sink-marketing build",
+    "mode:app": "supatype app add --static ./apps/app/dist",
+    "mode:marketing": "supatype app add --upstream http://host.docker.internal:3006",
+    "mode:none": "supatype app remove",
     "push": "supatype push --yes",
     "keys": "supatype keys",
     "generate": "supatype generate",
     "doctor": "supatype doctor",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p functions/tsconfig.json --noEmit && tsc -p hooks/tsconfig.json --noEmit"
   },
   "dependencies": {
     "@supatype/cli": "workspace:*",
