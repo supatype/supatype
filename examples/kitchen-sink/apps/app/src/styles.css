@@ -1,0 +1,100 @@
+:root {
+  color-scheme: light dark;
+  --ks-bg: #fbfbfa;
+  --ks-fg: #1c1c1a;
+  --ks-muted: #6b6b66;
+  --ks-line: #e3e3df;
+  --ks-card: #ffffff;
+  --ks-accent: #00684a;
+  --ks-error: #a4262c;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ks-bg: #16171a;
+    --ks-fg: #ececea;
+    --ks-muted: #9a9a94;
+    --ks-line: #2b2c30;
+    --ks-card: #1e1f23;
+    --ks-accent: #4fc39a;
+    --ks-error: #ef9a9a;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--ks-bg);
+  color: var(--ks-fg);
+  font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.ks-shell { max-width: 720px; margin: 0 auto; padding: 24px 16px 64px; }
+.ks-shell--narrow { max-width: 420px; }
+
+.ks-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.ks-header h1 { font-size: 20px; margin: 0; }
+
+.ks-muted { color: var(--ks-muted); margin: 4px 0; }
+.ks-error { color: var(--ks-error); }
+
+.ks-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0 8px; }
+.ks-tab {
+  border: 1px solid var(--ks-line);
+  background: transparent;
+  color: inherit;
+  border-radius: 999px;
+  padding: 6px 14px;
+  cursor: pointer;
+  font: inherit;
+}
+.ks-tab--active { border-color: var(--ks-accent); color: var(--ks-accent); }
+
+.ks-proves {
+  color: var(--ks-muted);
+  font-size: 13px;
+  border-left: 2px solid var(--ks-line);
+  padding-left: 10px;
+  margin: 0 0 20px;
+}
+
+.ks-card {
+  background: var(--ks-card);
+  border: 1px solid var(--ks-line);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+}
+.ks-card h3 { margin: 0 0 4px; font-size: 16px; }
+
+.ks-list { list-style: none; padding: 0; margin: 0; }
+.ks-list--chat li { padding: 6px 0; border-bottom: 1px solid var(--ks-line); }
+
+.ks-facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; margin: 8px 0; }
+.ks-facts dt { color: var(--ks-muted); }
+.ks-facts dd { margin: 0; }
+
+.ks-row { display: flex; gap: 8px; margin-top: 16px; }
+.ks-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--ks-line);
+  border-radius: 8px;
+  background: var(--ks-card);
+  color: inherit;
+  font: inherit;
+}
+.ks-row button, .ks-ghost {
+  border: 1px solid var(--ks-line);
+  background: transparent;
+  color: inherit;
+  border-radius: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+  font: inherit;
+}
+.ks-row button:disabled { opacity: 0.5; cursor: default; }
+
+code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.92em; }

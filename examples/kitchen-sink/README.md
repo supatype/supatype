@@ -13,14 +13,14 @@ realtime, storage uploads, per-row access, functions.
 
 ## Status
 
-**The schema is in. The two front ends are not yet.** This directory currently holds the project —
-`supatype.config.ts`, `schema/index.ts` — and nothing that runs against it. That is deliberate: the
-apps import generated types, and the types come from the schema, so the schema goes first and gets
-verified on its own.
+**The schema, the generated types and `apps/app` are in. `apps/marketing` is not yet.**
 
-What lands next, in order: the generated types (committed, so the drift check in CI covers them),
-`apps/app` (Vite SPA, `app.mode = "static"`), then `apps/marketing` (Next.js, `app.mode = "proxy"`),
-then the edge functions, the seed, and the verify scripts.
+`apps/app` covers auth (via `@supatype/react-auth`'s prebuilt forms), `useQuery` against the
+published schedule, realtime INSERTs in the lobby, and a ticket reachable only by its owner. Each
+screen states the surface it proves; one that cannot is not worth a screen.
+
+What lands next, in order: storage upload and transform on this app, `apps/marketing` (Next.js,
+`app.mode = "proxy"`), the edge functions, the seed, and the verify scripts.
 
 ## The `app.mode` constraint
 
