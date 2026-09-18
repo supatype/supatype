@@ -16,11 +16,15 @@ realtime, storage uploads, per-row access, functions.
 **The schema, the generated types and `apps/app` are in. `apps/marketing` is not yet.**
 
 `apps/app` covers auth (via `@supatype/react-auth`'s prebuilt forms), `useQuery` against the
-published schedule, realtime INSERTs in the lobby, and a ticket reachable only by its owner. Each
+published schedule, realtime INSERTs in the lobby, a ticket reachable only by its owner, and
+storage — upload, then the same object read back both as uploaded and transformed on read. Each
 screen states the surface it proves; one that cannot is not worth a screen.
 
-What lands next, in order: storage upload and transform on this app, `apps/marketing` (Next.js,
-`app.mode = "proxy"`), the edge functions, the seed, and the verify scripts.
+The storage screen closes a gap nothing in this repository covered: `blog` declares buckets and
+never uploads, so before this the runtime path was typechecked and never run.
+
+What lands next, in order: `apps/marketing` (Next.js, `app.mode = "proxy"`), the edge functions,
+the seed, and the verify scripts.
 
 ## The `app.mode` constraint
 
