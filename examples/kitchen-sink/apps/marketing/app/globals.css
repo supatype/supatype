@@ -21,3 +21,5 @@ h1 { font-size: 30px; line-height: 1.2; }
 .ks-talks li { border-bottom: 1px solid var(--line); padding: 12px 0; }
 .ks-talks h2 { font-size: 19px; margin: 0 0 4px; }
 code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; }
+.ks-banner { border: 1px dashed var(--line); border-radius: 8px; padding: 8px 12px; margin-bottom: 20px; color: var(--muted); font: 13px/1.5 ui-sans-serif, system-ui, sans-serif; }
+.ks-banner--live { border-style: solid; border-color: var(--accent); color: var(--accent); }

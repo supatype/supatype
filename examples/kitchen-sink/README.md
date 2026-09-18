@@ -17,18 +17,32 @@ realtime, storage uploads, per-row access, functions.
 and the verify scripts.
 
 `apps/app` (Vite SPA, `app.mode = "static"`) is the session-shaped half: auth through
-`@supatype/react-auth`'s prebuilt forms, `useQuery` against the published schedule, realtime
-INSERTs in the lobby, a ticket reachable only by its owner, and storage — upload, then the same
-object read back both as uploaded and transformed on read. The storage screen closes a gap nothing
-in this repository covered: `blog` declares buckets and never uploads, so before it the runtime
-path was typechecked and never run.
+`@supatype/react-auth`'s prebuilt forms, `useQuery` against the published schedule, and in the
+lobby all three realtime paths — `postgres_changes` for what was written down, presence for who is
+here now, broadcast for a "typing…" that is deliberately not a row. The ticket screen covers
+per-row access (`OwnerFrom` with no client-side filter), `useFunction` for work this client cannot
+do (issuing gates on your token then writes with the service role), and a signed URL into a
+private bucket, which a public URL cannot reach. The media screen covers storage: upload, then the
+same object read back both as uploaded and transformed on read.
+
+The storage and signed-URL paths close a gap nothing in this repository covered: `blog` declares
+buckets and never uploads, so before this the runtime path was typechecked and never run.
 
 `apps/marketing` (Next.js, `app.mode = "proxy"`) is the content-shaped half: `@supatype/ssr`
 reading the caller's session off request cookies, a home page assembled from the schema's block
-vocabulary, a server-rendered talks listing, the same read again through a Route Handler, and
-middleware that picks the reader's locale on the edge. Every route is dynamic on purpose — an
-editor previewing a draft and a reader seeing only what is live are the same code path,
-distinguished by who the request is from, which a static build cannot do.
+vocabulary, a talks listing and a talk page whose `generateMetadata` builds real `og:` tags with an
+image transformed on read, the same read again through a Route Handler, and middleware picking the
+reader's locale on the edge — which the talk page then honours, rendering an untranslated abstract
+as *absent* rather than silently falling back to English.
+
+`/preview/[slug]` covers both things called preview, because they answer different questions: the
+**saved draft**, read on the server with `.draft()` and a preview code that is the whole credential,
+and **unsaved keystrokes**, streamed from an open Studio tab by `useLivePreview`. Nothing else in
+this repository exercises the second.
+
+Every route is dynamic on purpose — an editor previewing a draft and a reader seeing only what is
+live are the same code path, distinguished by who the request is from, which a static build cannot
+do.
 
 Each screen and route states the surface it proves; one that cannot is not worth having.
 
@@ -66,8 +80,12 @@ field back to the caller. Bounds and constraints hold for every writer including
 validator runs on the API write path only, so it is here for a rule a `CHECK` genuinely cannot
 express.
 
-One thing is still deliberately absent: the `plugin-seo` composite, because schema-side plugin
-registration needs a spike first.
+Two things are still absent, both for reasons outside this example:
+
+- the `plugin-seo` composite, because schema-side plugin registration needs a spike first
+- a publish button, because `supatype.publish(table, id)` is documented in `@supatype/types` and
+  implemented nowhere — the client exposes `.draft()` for reading but nothing for publishing, so
+  publishing happens in Studio and this example reads the result
 
 `Searchable` is here in both its spellings — the modifier on `Speaker.name`, the ordered model-level
 list on `Talk` — and building this example is what turned up the fact that the CLI was discarding

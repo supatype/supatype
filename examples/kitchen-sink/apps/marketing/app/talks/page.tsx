@@ -23,7 +23,7 @@ export default async function TalksPage(): Promise<React.ReactElement> {
       <ul className="ks-talks">
         {talks.map((talk) => (
           <li key={talk.id}>
-            <h2>{talk.title}</h2>
+            <h2><a href={`/talks/${talk.slug}`}>{talk.title}</a></h2>
             <p className="ks-muted">
               {new Date(talk.starts_at).toLocaleString("en-GB", {
                 weekday: "long",

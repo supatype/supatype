@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react"
 import { useMutation, useQuery, useSubscription } from "@supatype/react"
+import { supatype } from "./client.js"
 import type { Database } from "../../../supatype/generated/database"
 
 type ChatMessage = Database["public"]["Tables"]["chat_message"]["Row"]
@@ -16,6 +17,8 @@ const ROOM = "lobby"
 export function LobbyScreen(): React.ReactElement {
   const [live, setLive] = useState<ChatMessage[]>([])
   const [draft, setDraft] = useState("")
+  const [here, setHere] = useState(0)
+  const [typing, setTyping] = useState<string | null>(null)
 
   // The backlog, once. Everything after it arrives on the socket.
   const { data: history } = useQuery<Database, "chat_message", ChatMessage>("chat_message", {
@@ -40,6 +43,36 @@ export function LobbyScreen(): React.ReactElement {
     },
   })
 
+  /**
+   * Who else is in the room, and who is typing — neither of which is a row.
+   *
+   * `postgres_changes` above carries what was written down. These two carry what was not: presence
+   * is who is here *now*, broadcast is a message with no database behind it. A chat that stored
+   * "typing…" as a row would be writing to disk on every keystroke to display something true for
+   * two seconds.
+   */
+  useEffect(() => {
+    const channel = supatype.realtime.channel(`lobby:${ROOM}`)
+
+    channel.onPresence((event) => {
+      setHere((count) => count + event.joins.length - event.leaves.length)
+    })
+    channel.onBroadcast("typing", (payload) => {
+      const who = (payload as { who?: string }).who ?? "someone"
+      setTyping(who)
+      setTimeout(() => setTyping(null), 2_000)
+    })
+    channel.subscribe((status) => {
+      if (status === "SUBSCRIBED") channel.track({ at: Date.now() })
+    })
+
+    return () => channel.unsubscribe()
+  }, [])
+
+  function announceTyping(): void {
+    supatype.realtime.channel(`lobby:${ROOM}`).broadcast("typing", { who: "someone" })
+  }
+
   const { mutate, loading } = useMutation<Database, "chat_message", ChatMessage>(
     "chat_message",
     "insert",
@@ -59,6 +92,11 @@ export function LobbyScreen(): React.ReactElement {
         Socket: <strong>{status}</strong> — and a status of SUBSCRIBED proves only that the gateway
         upgraded the connection. The messages below are what proves delivery.
       </p>
+      <p className="ks-muted">
+        {here > 0 ? `${here} here now` : "nobody else here"}
+        {typing !== null && ` · ${typing} is typing`} — presence and broadcast, neither of which is
+        a row in the database.
+      </p>
 
       <ul className="ks-list ks-list--chat">
         {live.map((message) => (
@@ -71,7 +109,10 @@ export function LobbyScreen(): React.ReactElement {
       <form className="ks-row" onSubmit={(e) => void send(e)}>
         <input
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) => {
+            setDraft(e.target.value)
+            announceTyping()
+          }}
           placeholder="Say something to the lobby"
           maxLength={500}
         />

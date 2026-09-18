@@ -91,6 +91,30 @@ async function main(): Promise<void> {
   if (insertError) throw new Error(`writing a chat message: ${insertError.message}`)
   check(await arrived, "the insert reached the subscriber", `within ${DEADLINE_MS}ms`)
 
+  console.log("\n==> realtime: what is not a row")
+  // postgres_changes above carried what was written down. These carry what was not: presence is
+  // who is here now, broadcast is a message with no database behind it. Both are separate paths
+  // through the socket, and a stack with healthy replication can still fail them.
+  const room = `lobby:verify-${Date.now()}`
+  const rx = anon.realtime.channel(room)
+  const gotBroadcast = new Promise<boolean>((res) => {
+    rx.onBroadcast("typing", () => res(true))
+    setTimeout(() => res(false), DEADLINE_MS)
+  })
+  const gotPresence = new Promise<boolean>((res) => {
+    rx.onPresence((event) => { if (event.joins.length > 0) res(true) })
+    setTimeout(() => res(false), DEADLINE_MS)
+  })
+  await new Promise<void>((res) => {
+    rx.subscribe((s) => { if (s === "SUBSCRIBED") res() })
+    setTimeout(res, 15_000)
+  })
+  rx.track({ who: "verify" })
+  rx.broadcast("typing", { who: "verify" })
+  check(await gotPresence, "a presence join is delivered", `within ${DEADLINE_MS}ms`)
+  check(await gotBroadcast, "a broadcast is delivered", `within ${DEADLINE_MS}ms`)
+  rx.unsubscribe()
+
   console.log("\n==> storage: upload, transform, remove")
   const bucket = anon.storage.from("speaker-headshots")
   const path = `verify/${Date.now()}.png`
@@ -122,6 +146,31 @@ async function main(): Promise<void> {
   const { error: removeError } = await bucket.remove([path])
   check(removeError === null, "removed it again", removeError?.message)
 
+  console.log("\n==> a private bucket is private")
+  // The public bucket above is reachable by URL alone. This one must not be: a public URL into
+  // `ticket-files` is a 400 or 403 for everybody, and a signed URL is the only way in. Asserting
+  // the refusal matters more than asserting the success — a bucket that reads as public would pass
+  // every happy-path test ever written against it.
+  const tickets = anon.storage.from("ticket-files")
+  const privatePath = `verify/${Date.now()}.pdf`
+  const { error: pdfUploadError } = await tickets.upload(
+    privatePath,
+    new Blob([new Uint8Array([0x25, 0x50, 0x44, 0x46])], { type: "application/pdf" }),
+    { contentType: "application/pdf", upsert: true },
+  )
+  check(pdfUploadError === null, "a signed-in caller can write to the private bucket", pdfUploadError?.message)
+
+  const publicAttempt = await fetch(tickets.getPublicUrl(privatePath).data.publicUrl)
+  check(!publicAttempt.ok, "the public URL into a private bucket is refused", String(publicAttempt.status))
+
+  const { data: signed, error: signError } = await tickets.createSignedUrl(privatePath, 60)
+  check(signError === null && typeof signed?.signedUrl === "string", "a signed URL is minted", signError?.message)
+  if (signed?.signedUrl) {
+    const viaSigned = await fetch(signed.signedUrl)
+    check(viaSigned.ok, "the signed URL reaches the object", String(viaSigned.status))
+  }
+  await tickets.remove([privatePath])
+
   console.log("\n==> the edge function answers")
   const ping = await fetch(`${URL}/functions/v1/ping`, {
     method: "POST",
@@ -129,6 +178,16 @@ async function main(): Promise<void> {
     body: "{}",
   })
   check(ping.ok, "ping invoked", String(ping.status))
+
+  // The gate, not the happy path: issue-ticket refuses an anon Bearer with a 401 rather than
+  // writing a ticket owned by nobody. A function that wrote first and checked later would pass a
+  // test that only looked for a 2xx.
+  const anonIssue = await fetch(`${URL}/functions/v1/issue-ticket`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: "{}",
+  })
+  check(anonIssue.status === 401, "issue-ticket refuses an anon caller", String(anonIssue.status))
 
   console.log("")
   if (failures.length > 0) {
