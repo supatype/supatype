@@ -9,6 +9,6 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["schema", "supatype.config.ts"],
+  "include": ["schema", "supatype.config.ts", "supatype/generated"],
   "exclude": ["node_modules", "apps", "functions", "hooks"]
 }
