@@ -13,18 +13,24 @@ realtime, storage uploads, per-row access, functions.
 
 ## Status
 
-**The schema, the generated types and `apps/app` are in. `apps/marketing` is not yet.**
+**Both front ends are in.** What is not yet: the mode-switch scripts, the edge functions, the seed
+and the verify scripts.
 
-`apps/app` covers auth (via `@supatype/react-auth`'s prebuilt forms), `useQuery` against the
-published schedule, realtime INSERTs in the lobby, a ticket reachable only by its owner, and
-storage — upload, then the same object read back both as uploaded and transformed on read. Each
-screen states the surface it proves; one that cannot is not worth a screen.
+`apps/app` (Vite SPA, `app.mode = "static"`) is the session-shaped half: auth through
+`@supatype/react-auth`'s prebuilt forms, `useQuery` against the published schedule, realtime
+INSERTs in the lobby, a ticket reachable only by its owner, and storage — upload, then the same
+object read back both as uploaded and transformed on read. The storage screen closes a gap nothing
+in this repository covered: `blog` declares buckets and never uploads, so before it the runtime
+path was typechecked and never run.
 
-The storage screen closes a gap nothing in this repository covered: `blog` declares buckets and
-never uploads, so before this the runtime path was typechecked and never run.
+`apps/marketing` (Next.js, `app.mode = "proxy"`) is the content-shaped half: `@supatype/ssr`
+reading the caller's session off request cookies, a home page assembled from the schema's block
+vocabulary, a server-rendered talks listing, the same read again through a Route Handler, and
+middleware that picks the reader's locale on the edge. Every route is dynamic on purpose — an
+editor previewing a draft and a reader seeing only what is live are the same code path,
+distinguished by who the request is from, which a static build cannot do.
 
-What lands next, in order: `apps/marketing` (Next.js, `app.mode = "proxy"`), the edge functions,
-the seed, and the verify scripts.
+Each screen and route states the surface it proves; one that cannot is not worth having.
 
 ## The `app.mode` constraint
 

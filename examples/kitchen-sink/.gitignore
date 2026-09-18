@@ -7,3 +7,5 @@ supatype.local.config.js
 supatype.local.config.mjs
 functions/.env.local
 *.log
+.next/
+out/
