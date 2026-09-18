@@ -1,5 +1,5 @@
 import React, { useState } from "react"
-import { LoginForm, SignUpForm } from "@supatype/react-auth"
+import { LoginForm, OAuthButton, SignUpForm } from "@supatype/react-auth"
 
 /**
  * Auth, using the prebuilt forms rather than a hand-rolled pair.
@@ -9,6 +9,7 @@ import { LoginForm, SignUpForm } from "@supatype/react-auth"
  */
 export function AuthScreen(): React.ReactElement {
   const [mode, setMode] = useState<"signIn" | "signUp">("signUp")
+  const [oauthError, setOauthError] = useState<string | null>(null)
 
   return (
     <main className="ks-shell ks-shell--narrow">
@@ -20,6 +21,21 @@ export function AuthScreen(): React.ReactElement {
 
       <div className="ks-card">
         {mode === "signUp" ? <SignUpForm /> : <LoginForm />}
+
+        <p className="ks-muted">or</p>
+
+        {/*
+          The redirect comes back to this origin because Supatype serves this build: there is no
+          second host to register with the provider, and the callback lands where the app already
+          is. A provider not configured in the project answers with an error rather than a blank
+          page, which is what onError surfaces.
+        */}
+        <OAuthButton
+          provider="github"
+          className="ks-ghost"
+          onError={(e) => setOauthError(e.message)}
+        />
+        {oauthError !== null && <p className="ks-error">{oauthError}</p>}
       </div>
 
       <button className="ks-ghost" onClick={() => setMode(mode === "signUp" ? "signIn" : "signUp")}>
