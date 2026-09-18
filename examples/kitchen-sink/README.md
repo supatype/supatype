@@ -38,7 +38,7 @@ is the deployment most projects ship.
 | | |
 |---|---|
 | Primitives | `UUID`, `Slug`, `RichText`, `Markdown`, `Currency`, `Decimal`, `Int`, `DateOnly`, `Timestamp`, `Duration`, `Email`, `URL`, `PhoneNumber`, `Color`, `JSON<T>`, `GeoPoint`, `Vector`, `Button` |
-| Modifiers | `Optional`, `Unique`, `Indexed`, `MaxLength`, `MaxItems`, `Between`, `ComputedFrom` |
+| Modifiers | `Optional`, `Unique`, `Indexed`, `Searchable`, `MaxLength`, `MaxItems`, `Between`, `ComputedFrom` |
 | Localization | `LocaleConfig<["en","fr"],"en">`, `Localized`, `NotLocalized` |
 | Blocks | `Block` / `Blocks` — a closed vocabulary of page sections, not a rich-text column |
 | Buckets | public (headshots), private (ticket PDFs), custom + role (sponsor artwork) |
@@ -51,9 +51,10 @@ Two things are deliberately absent until they can be shown working: the `plugin-
 (schema-side plugin registration needs a spike first) and a per-field `validate` hook (it wants its
 `hooks/` function alongside it, which lands with the functions).
 
-`Searchable` is also absent, despite being exported by `@supatype/types`: the CLI has no handling
-for it at all, so a schema that declares it compiles and gets nothing. Declaring it here would
-document a feature that does not exist.
+`Searchable` is here in both its spellings — the modifier on `Speaker.name`, the ordered model-level
+list on `Talk` — and building this example is what turned up the fact that the CLI was discarding
+it. That is fixed; the last link, the engine forwarding it into `admin-config.json`, ships
+separately, so a search box in Studio needs an engine carrying it.
 
 ## Running it
 

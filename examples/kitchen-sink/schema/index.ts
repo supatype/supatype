@@ -52,6 +52,7 @@ import type {
   RelatedTo,
   RichText,
   Role,
+  Searchable,
   Slug,
   SupatypeAuthUser,
   SupatypeAuthUserId,
@@ -163,7 +164,8 @@ export type Page = Model<{
 
 export type Speaker = Model<{
   id: UUID
-  name: string
+  /** `Searchable` alone is enough: Studio searches every column that carries it. */
+  name: Searchable<string>
   slug: Unique<Slug<"name">>
   /** Localized, so a French reader gets a French bio or none — never an English one in its place. */
   bio: Optional<Localized<RichText>>
@@ -210,7 +212,7 @@ export type Room = Model<{
  */
 export type Talk = Model<{
   id: UUID
-  title: NotLocalized<string>
+  title: NotLocalized<Searchable<string>>
   slug: Unique<Slug<"title">>
   abstract: Optional<Localized<RichText>>
   speaker: RelatedTo<Speaker>
@@ -227,6 +229,8 @@ export type Talk = Model<{
   updated_at: Timestamp
 }, {
   versions: { drafts: true, keep: 10 }
+  /** Named explicitly because the list view filters on the first entry, and title is the one. */
+  searchable: ["title"]
   indexes: [{ fields: ["day", "starts_at"] }]
   constraints: [
     Lte<"starts_at", "ends_at">,
