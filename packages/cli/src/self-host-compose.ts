@@ -425,7 +425,16 @@ ${seaweedPorts}`
     ? `      - "80:8000"
       - "443:8443"`
     : `      - "\${SUPATYPE_KONG_PORT:-18473}:8000"`
-  const valkeyBlock = `
+  // The RESP server the response cache and Kong's ACME certificates use.
+  // Either a Valkey sidecar, or pg_keyspace inside the Postgres container --
+  // one stateful service instead of two.
+  const keyspaceInPg = config.cache?.provider === "pg_keyspace"
+  const respHost = keyspaceInPg ? "db" : "valkey"
+  const valkeyBlock = keyspaceInPg
+    ? `  # No \`valkey\` service: cache.provider is "pg_keyspace", so the RESP keyspace is
+  # served by the \`db\` container on :6379. See extensions/pg_keyspace in supatype/postgres.
+`
+    : `
   valkey:
     image: \${SUPATYPE_VALKEY_IMAGE:-valkey/valkey:8-alpine}
     command: ["valkey-server", "--appendonly", "yes"]
@@ -434,7 +443,9 @@ ${seaweedPorts}`
     volumes:
       - valkey-data:/data
 `
-  const kongValkeyDepends = "\n      - valkey"
+  // With the keyspace inside Postgres, waiting on `db` is already what every
+  // other service does, so Kong needs no extra dependency of its own.
+  const kongValkeyDepends = keyspaceInPg ? "" : "\n      - valkey"
   const tlsHintComment = tlsEnabled
     ? ""
     : `  # HTTPS is off. To enable automatic TLS (Let's Encrypt) for production, set in supatype.config.ts:
@@ -444,8 +455,7 @@ ${seaweedPorts}`
   // An external database is not ours to declare a volume for.
   const volumesBlock = `volumes:
 ${external ? "" : "  db-data:\n"}  storage-data:
-  valkey-data:
-`
+${keyspaceInPg ? "" : "  valkey-data:\n"}`
 
   // `depends_on` for the services that talk to Postgres. With an external database there is no
   // container to wait on, so the clause disappears entirely and each service retries on connect
@@ -490,6 +500,39 @@ ${dbDependency}`
     : ""
   const realtimeServerEnv = realtime ? "      SUPATYPE_REALTIME_URL: http://realtime:4000" : ""
 
+  // pg_keyspace registers background workers and requests shared memory at
+  // postmaster start, so it has to be in `shared_preload_libraries` -- there
+  // is no runtime toggle. The image ships it built but NOT loaded, and its
+  // postgresql.conf names the other libraries, so the list is restated here in
+  // full. That duplication is the cost of turning it on from outside the
+  // image; SUPATYPE_SHARED_PRELOAD_LIBRARIES is the escape hatch if the
+  // image's own list ever moves ahead of this one.
+  //
+  // Order matters: pg_keyspace goes BEFORE supatype_mask, so the mask stays
+  // outermost and pg_keyspace.require_mask = on (the image default) is
+  // satisfied rather than refusing to serve.
+  //
+  // Durability is `durable` for everything by default, which is parity with
+  // the Valkey sidecar this replaces -- that runs --appendonly yes, so today's
+  // self-host already persists its whole keyspace. cache.ephemeralPrefixes is
+  // what makes the response cache free: those keys stay in shared memory
+  // instead of going through the WAL, which is the point of per-key
+  // durability. Kong's ACME certificates need no entry precisely because
+  // anything unnamed stays durable -- the safe direction to be wrong in.
+  const ephemeralPrefixes = config.cache?.ephemeralPrefixes ?? []
+  const durabilityOverrides = ephemeralPrefixes.map((p) => `${p}=ephemeral`).join(", ")
+  const keyspaceCommand = keyspaceInPg
+    ? `    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=\${SUPATYPE_SHARED_PRELOAD_LIBRARIES:-pg_stat_statements, pg_cron, pg_net, plan_filter, safeupdate, pg_keyspace, supatype_mask}
+      - -c
+      - pg_keyspace.durability=durable
+${durabilityOverrides ? `      - -c\n      - pg_keyspace.durability_overrides=${durabilityOverrides}\n` : ""}    expose:
+      - "6379"
+`
+    : ""
+
   const dbServiceBlock = external
     ? `  # No \`db\` service: database.external points this stack at a Postgres it does not manage.
   # Every service reads \${DATABASE_URL} from .env, and \`supatype db check\` reports what that
@@ -503,7 +546,7 @@ ${dbDependency}`
       POSTGRES_DB: \${POSTGRES_DB:-supatype}
       # Read by the image's init to password the \`authenticator\` role PostgREST connects as.
       AUTHENTICATOR_PASSWORD: \${AUTHENTICATOR_PASSWORD:?AUTHENTICATOR_PASSWORD is missing from .env}
-${dbPorts}    volumes:
+${keyspaceCommand}${dbPorts}    volumes:
       - db-data:/var/lib/postgresql/data
     healthcheck:
       # -h 127.0.0.1 forces TCP. Without it \`pg_isready\` uses the Unix socket, which the
@@ -641,7 +684,7 @@ ${serverPorts}    volumes:
       SUPATYPE_FUNCTIONS_WORKER_URL: http://functions-worker:8001
 ${realtimeServerEnv}
       SUPATYPE_CONTROL_PLANE_URL: http://control-plane:8080
-      SUPATYPE_VALKEY_ADDR: valkey:6379
+      SUPATYPE_VALKEY_ADDR: ${respHost}:6379
 ${appEnv}
       SUPATYPE_API_HOST: 0.0.0.0
       SUPATYPE_API_PORT: 9999
@@ -674,9 +717,7 @@ ${appEnv}
       SUPATYPE_DISABLE_SIGNUP: \${DISABLE_SIGNUP:-false}
 ${devLocal ? "      STUDIO_OPEN_DEV: \"1\"\n" : ""}
     depends_on:
-${dbDependencyClause}      valkey:
-        condition: service_started
-      postgrest:
+${dbDependencyClause}${keyspaceInPg ? "" : "      valkey:\n        condition: service_started\n"}      postgrest:
         condition: service_started
       storage:
         condition: service_started
@@ -937,8 +978,18 @@ export function writeSelfHostCompose(
         studioServiceUrl: COMPOSE_STUDIO_HOST_URL,
         studioStripPath: false,
       }),
+      // Kong stores its certificates wherever the RESP server is. With
+      // pg_keyspace that is the database container, and they are durable
+      // there because the keyspace defaults to durable and nothing names
+      // Kong's keys as an exception.
       ...(tlsEnabled && domain && acmeEmail
-        ? { acme: { email: acmeEmail, domain, redisHost: "valkey" } }
+        ? {
+            acme: {
+              email: acmeEmail,
+              domain,
+              redisHost: config.cache?.provider === "pg_keyspace" ? "db" : "valkey",
+            },
+          }
         : {}),
     }),
     "utf8",

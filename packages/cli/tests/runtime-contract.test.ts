@@ -640,6 +640,43 @@ export default defineConfig({
     expect(compose).toMatch(/^\s{2}valkey-data:/m)
   })
 
+  it("self-host compose serves the keyspace from Postgres when cache.provider is pg_keyspace", () => {
+    const compose = renderSelfHostCompose({
+      ...baseConfig,
+      cache: { provider: "pg_keyspace" },
+    })
+    // No second stateful service, and nothing left pointing at one.
+    expect(compose).not.toContain("\n  valkey:\n")
+    expect(compose).not.toContain("valkey/valkey:8-alpine")
+    expect(compose).not.toMatch(/^\s{2}valkey-data:/m)
+    expect(compose).not.toContain("      valkey:\n        condition: service_started")
+    expect(compose).toContain("SUPATYPE_VALKEY_ADDR: db:6379")
+    // pg_keyspace has no runtime toggle, so it has to be preloaded -- and
+    // BEFORE supatype_mask, or require_mask refuses to serve.
+    expect(compose).toContain("shared_preload_libraries=")
+    expect(compose).toMatch(/pg_keyspace,\s*supatype_mask/)
+    // Parity with the sidecar's --appendonly yes, not a new promise.
+    expect(compose).toContain("pg_keyspace.durability=durable")
+    expect(compose).not.toContain("pg_keyspace.durability_overrides")
+  })
+
+  it("self-host compose keeps Valkey unless the project asks for pg_keyspace", () => {
+    for (const cache of [undefined, { provider: "valkey" as const }]) {
+      const compose = renderSelfHostCompose({ ...baseConfig, ...(cache ? { cache } : {}) })
+      expect(compose).toContain("\n  valkey:\n")
+      expect(compose).not.toContain("shared_preload_libraries=")
+    }
+  })
+
+  it("self-host compose makes only the named prefixes ephemeral", () => {
+    const compose = renderSelfHostCompose({
+      ...baseConfig,
+      cache: { provider: "pg_keyspace", ephemeralPrefixes: ["rest:", "rowcache:"] },
+    })
+    expect(compose).toContain("pg_keyspace.durability=durable")
+    expect(compose).toContain("pg_keyspace.durability_overrides=rest:=ephemeral, rowcache:=ephemeral")
+  })
+
   it("self-host compose stays plain HTTP with a discoverable hint when TLS is off", () => {
     const compose = renderSelfHostCompose(baseConfig)
     expect(compose).not.toContain('- "443:8443"')
