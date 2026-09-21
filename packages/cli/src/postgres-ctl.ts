@@ -16,6 +16,15 @@ export interface PgOptions {
   port: number
   /** Path to write the postgres log file. */
   logPath?: string
+  /**
+   * Port for the RESP keyspace, when the native install carries pg_keyspace.
+   *
+   * Absent means do not serve RESP at all: `supatype dev` then starts the
+   * Valkey sidecar instead, as it always has.
+   */
+  keyspacePort?: number
+  /** Database durable keys are written to. Ignored while everything is ephemeral. */
+  keyspaceDatabase?: string
 }
 
 /**
@@ -83,31 +92,116 @@ export function initdb(opts: PgOptions): void {
  * `lib/postgresql/`.
  */
 export function nativeMaskLibraryPresent(pgBinDir: string | null | undefined): boolean {
+  return nativeLibraryPresent(pgBinDir, "supatype_mask")
+}
+
+/**
+ * Whether a native Postgres install carries the RESP keyspace.
+ *
+ * Asked of the filesystem for the same reason as the mask: an archive
+ * downloaded before pg_keyspace was bundled has a Postgres without it, and the
+ * Windows archive has none at all — pgrx has no Windows target. Naming it in
+ * `shared_preload_libraries` anyway would stop the server starting with "could
+ * not access file", which would turn a missing cache into no database.
+ */
+export function nativeKeyspaceLibraryPresent(pgBinDir: string | null | undefined): boolean {
+  return nativeLibraryPresent(pgBinDir, "pg_keyspace")
+}
+
+/**
+ * Two layouts: Linux and macOS put extension libraries in `lib/`, the Windows
+ * archive in `lib/postgresql/`.
+ */
+function nativeLibraryPresent(pgBinDir: string | null | undefined, stem: string): boolean {
   if (!pgBinDir) return false
   const prefix = resolvePath(pgBinDir, "..")
-  return ["supatype_mask.so", "supatype_mask.dylib", "supatype_mask.dll"].some(
+  return [`${stem}.so`, `${stem}.dylib`, `${stem}.dll`].some(
     (lib) =>
       existsSync(join(prefix, "lib", lib)) || existsSync(join(prefix, "lib", "postgresql", lib)),
   )
+}
+
+/**
+ * Where the native RESP keyspace looks for a free port, and how far it looks.
+ *
+ * 6379 first, because that is what a developer's tooling and the Valkey
+ * sidecar before it both used, so the familiar port stays the usual answer.
+ */
+export const KEYSPACE_PORT_BASE = 6379
+export const KEYSPACE_PORT_SPAN = 10
+
+/**
+ * The first free port in [base, base + span), or null when they are all taken.
+ *
+ * Binding a port something else already holds would leave Postgres up and the
+ * keyspace silently dead — the failure lands in the postmaster log and nowhere
+ * a developer is looking — so the port is chosen before the server starts
+ * rather than fixed and hoped for.
+ */
+export async function firstFreePort(base: number, span: number): Promise<number | null> {
+  for (let port = base; port < base + span; port++) {
+    if (!(await isPortInUse(port))) return port
+  }
+  return null
+}
+
+/**
+ * The `-o` options pg_ctl passes to the server.
+ *
+ * Separated from the spawn so the decision is testable. What goes in here is
+ * decided by which libraries the archive happens to carry, which is exactly
+ * the kind of thing that is wrong in one combination nobody runs locally.
+ *
+ * Order in `shared_preload_libraries` is load-bearing: pg_keyspace first, then
+ * supatype_mask, so the mask stays outermost. pg_keyspace checks this itself
+ * and refuses to serve when the order is wrong — deliberately, since RESP
+ * would otherwise hand back rows the mask never rewrote.
+ *
+ * The sizing is the measured dev profile: ~60 MiB of shared memory, against
+ * the extension's own defaults of ~689 MiB before rings and row cache. It is
+ * reserved at postmaster start whether or not anything caches, so a local
+ * Postgres should not ask for a production keyspace. Durability is ephemeral
+ * throughout: nothing in a dev keyspace is the only copy of anything.
+ */
+export function pgServerOptions(opts: PgOptions): string {
+  const mask = nativeMaskLibraryPresent(opts.pgBinDir)
+  const keyspace = opts.keyspacePort !== undefined && nativeKeyspaceLibraryPresent(opts.pgBinDir)
+
+  const libs = [...(keyspace ? ["pg_keyspace"] : []), ...(mask ? ["supatype_mask"] : [])]
+  const parts = [`-p ${opts.port}`]
+  if (libs.length > 0) parts.push(`-c shared_preload_libraries=${libs.join(",")}`)
+  if (keyspace) {
+    parts.push(
+      `-c pg_keyspace.port=${opts.keyspacePort}`,
+      "-c pg_keyspace.durability=ephemeral",
+      "-c pg_keyspace.keys=50000",
+      "-c pg_keyspace.ring_mb=8",
+      "-c pg_keyspace.rowcache_mb=1",
+    )
+    if (opts.keyspaceDatabase) {
+      parts.push(`-c pg_keyspace.database=${opts.keyspaceDatabase}`)
+    }
+  }
+  return parts.join(" ")
 }
 
 export function start(opts: PgOptions): void {
   const bin = pgBin(opts.pgBinDir, "pg_ctl")
   const logPath = opts.logPath ?? join(opts.dataDir, "postgres.log")
 
-  // `supatype_mask` is a planner hook, so it has to be preloaded, `CREATE EXTENSION` alone does
-  // nothing without it. Only when the archive actually carries the library: an install downloaded
-  // before it was bundled would fail to start with "could not access file".
+  // `supatype_mask` is a planner hook and pg_keyspace registers background
+  // workers and shared memory, so both have to be preloaded — `CREATE
+  // EXTENSION` alone does nothing for either. Only when the archive actually
+  // carries them; see pgServerOptions.
   //
-  // Native Postgres was started with no preloaded libraries at all until now, which is why field
-  // rules could not be enforced on the default `supatype dev`.
-  const preload = nativeMaskLibraryPresent(opts.pgBinDir) ? " -c shared_preload_libraries=supatype_mask" : ""
-
+  // Native Postgres was started with no preloaded libraries at all until the
+  // mask, which is why field rules could not be enforced on the default
+  // `supatype dev`.
   const args = [
     "start",
     "-D", opts.dataDir,
     "-l", logPath,
-    "-o", `-p ${opts.port}${preload}`,
+    "-o", pgServerOptions(opts),
     "--wait",
   ]
 
