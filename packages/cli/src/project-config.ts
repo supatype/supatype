@@ -118,15 +118,20 @@ export interface SupatypeProjectConfig {
      */
     provider?: "valkey" | "pg_keyspace"
     /**
-     * Key prefixes to keep ephemeral when `provider` is "pg_keyspace".
+     * Extra key prefixes to persist when `provider` is "pg_keyspace".
      *
-     * Everything else is durable, which is what the Valkey sidecar already
-     * does (`--appendonly yes`), so the default is parity rather than a new
-     * promise. Naming the response cache here is what makes those writes free:
-     * they stay in shared memory instead of going through the WAL. Each entry
-     * is a prefix of the key as stored — see `pg_keyspace.durability_overrides`.
+     * The keyspace is a cache: everything is ephemeral, living in shared
+     * memory and not surviving a restart of the database. The exception is
+     * Kong's ACME certificates, which are always kept — you do not have to
+     * name them, and re-issuing them on every restart would meet Let's
+     * Encrypt's rate limits.
+     *
+     * List a prefix here only for something you are storing yourself that
+     * must outlive a restart. Each durable write goes through the WAL, which
+     * is the cost being avoided everywhere else. Each entry is a prefix of the
+     * key as stored — see `pg_keyspace.durability_overrides`.
      */
-    ephemeralPrefixes?: string[]
+    durablePrefixes?: string[]
   }
   app: {
     /**
@@ -543,10 +548,10 @@ function validateCache(cfg: Record<string, unknown>, filename: string): void {
         `a database.external one. Use cache.provider = "valkey", or drop database.external.`,
     )
   }
-  const prefixes = cache["ephemeralPrefixes"]
+  const prefixes = cache["durablePrefixes"]
   if (prefixes !== undefined) {
     if (!Array.isArray(prefixes) || prefixes.some((p) => typeof p !== "string" || p.length === 0)) {
-      throw new Error(`${filename}: cache.ephemeralPrefixes must be an array of non-empty strings`)
+      throw new Error(`${filename}: cache.durablePrefixes must be an array of non-empty strings`)
     }
     // `,` separates entries and `=` separates a prefix from its tier in
     // pg_keyspace.durability_overrides, so a prefix containing either would be
@@ -555,7 +560,7 @@ function validateCache(cfg: Record<string, unknown>, filename: string): void {
     const bad = (prefixes as string[]).find((p) => p.includes(",") || p.includes("="))
     if (bad) {
       throw new Error(
-        `${filename}: cache.ephemeralPrefixes entry ${JSON.stringify(bad)} cannot contain "," or "=" — ` +
+        `${filename}: cache.durablePrefixes entry ${JSON.stringify(bad)} cannot contain "," or "=" — ` +
           `both are separators in pg_keyspace.durability_overrides`,
       )
     }

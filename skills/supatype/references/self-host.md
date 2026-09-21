@@ -98,27 +98,56 @@ the stack runs one stateful service rather than two:
 cache: { provider: "pg_keyspace" },
 ```
 
-The `db` service is then started with `pg_keyspace` in
-`shared_preload_libraries` (before `supatype_mask`, which has to stay
-outermost), serving RESP on `db:6379`; the `valkey` service and its volume are
-not generated, and both the server and Kong are pointed at `db`.
+The `db` service is then started with the keyspace turned on
+(`SUPATYPE_KEYSPACE_ENABLED=1`, which the image reads before any server
+starts), serving RESP on `db:6379`; the `valkey` service and its volume are not
+generated, and both the server and Kong are pointed at `db`. The port is
+exposed to the compose network only — RESP on a public interface is an
+unauthenticated read of every cached response.
 
-**Durability is `durable` for every key by default.** That is parity with the
-Valkey sidecar it replaces, which runs `--appendonly yes` — the whole keyspace
-is already persisted today. What changes is that it no longer has to be:
+**Requires a `supatype/postgres` image that supports the toggle.** Older images
+ignore `SUPATYPE_KEYSPACE_ENABLED` and start without a RESP listener, which
+looks like a cache that never hits and, with TLS on, a Kong that cannot store
+its certificate. Pin `versions.postgres` to a release at or after the one that
+introduced it, or leave it unpinned to track the latest.
+
+### What survives a restart, and what does not
+
+**The keyspace is a cache.** Everything in it lives in shared memory and is
+gone when the database restarts — which is the point: a response cache that
+went through the WAL would put this stack's busiest write on disk to keep a
+copy of something that expires in seconds.
+
+**Kong's certificates are the exception, and they are kept for you.** They are
+stored under `kong_acme:`, which the generated stack always names as durable —
+whether or not TLS is on today, so enabling it later needs no database restart.
+You do not have to configure this, and it is not a guess about someone else's
+internals: Kong's ACME plugin enforces that prefix itself, and the arrangement
+was verified on a live instance, where the certificates survived `kill -9` and
+a cached response beside them did not.
+
+If you store something of your own in the keyspace that must outlive a
+restart, name its prefix:
 
 ```ts
 cache: {
   provider: "pg_keyspace",
-  ephemeralPrefixes: ["rest:"],
+  durablePrefixes: ["session:"],
 },
 ```
 
-Keys under a listed prefix stay in shared memory instead of going through the
-WAL, which is what makes a response cache free to write. Everything not listed
-stays durable, so Kong's certificates need no entry — the default is the safe
-direction to be wrong in. See `pg_keyspace.durability_overrides` in the
+Each durable write goes through the WAL, which is the cost being avoided
+everywhere else — so this list should stay short. See
+`pg_keyspace.durability_overrides` in the
 [pg_keyspace README](https://github.com/supatype/postgres/tree/develop/extensions/pg_keyspace).
+
+### Memory
+
+The keyspace reserves shared memory at postmaster start whether or not it is
+used. The generated configuration sizes it for a self-hosted stack — 200,000
+keys, a 16 MiB ring and a 64 MiB row cache, about **235 MiB** measured — rather
+than the extension's own defaults, which reserve roughly 689 MiB before rings
+and row cache. Budget for it alongside `shared_buffers` on a small host.
 
 `cache.provider = "pg_keyspace"` is rejected with `database.external`: it is
 loaded through `shared_preload_libraries`, which is not something Supatype can

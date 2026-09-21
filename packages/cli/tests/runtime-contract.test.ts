@@ -651,30 +651,59 @@ export default defineConfig({
     expect(compose).not.toMatch(/^\s{2}valkey-data:/m)
     expect(compose).not.toContain("      valkey:\n        condition: service_started")
     expect(compose).toContain("SUPATYPE_VALKEY_ADDR: db:6379")
-    // pg_keyspace has no runtime toggle, so it has to be preloaded -- and
-    // BEFORE supatype_mask, or require_mask refuses to serve.
-    expect(compose).toContain("shared_preload_libraries=")
-    expect(compose).toMatch(/pg_keyspace,\s*supatype_mask/)
-    // Parity with the sidecar's --appendonly yes, not a new promise.
-    expect(compose).toContain("pg_keyspace.durability=durable")
-    expect(compose).not.toContain("pg_keyspace.durability_overrides")
+    // Turned on from the environment, so the image owns its own preload list.
+    // A copy of that list here would go stale the first time it gains a library.
+    expect(compose).toContain('SUPATYPE_KEYSPACE_ENABLED: "1"')
+    expect(compose).not.toContain("shared_preload_libraries")
+    // Durable keys are rows in a database, and it has to be this one.
+    expect(compose).toContain("SUPATYPE_KEYSPACE_DATABASE: ${POSTGRES_DB:-supatype}")
+    // A cache by default, with certificates the one thing kept.
+    expect(compose).toContain("SUPATYPE_KEYSPACE_DURABILITY: ephemeral")
+    expect(compose).toContain('SUPATYPE_KEYSPACE_DURABILITY_OVERRIDES: "kong_acme:=durable"')
+    // Shared memory is reserved at postmaster start whether or not it is used,
+    // so an unsized keyspace is memory a small host does not have.
+    expect(compose).toContain('SUPATYPE_KEYSPACE_KEYS: "200000"')
+    expect(compose).toContain('SUPATYPE_KEYSPACE_RING_MB: "16"')
+    expect(compose).toContain('SUPATYPE_KEYSPACE_ROWCACHE_MB: "64"')
+    // Reachable to the compose network, not published: RESP on a public
+    // interface is an unauthenticated read of every cached response.
+    expect(compose).toMatch(/expose:\n\s+- "6379"/)
+    expect(compose).not.toMatch(/- "\d+:6379"/)
+  })
+
+  it("self-host compose keeps the certificates durable whether or not TLS is on today", () => {
+    // The override costs nothing while no key matches it, and turning TLS on
+    // later should not need a database restart to make certificates safe.
+    for (const tls of [false, true]) {
+      const compose = renderSelfHostCompose({
+        ...baseConfig,
+        ...(tls
+          ? { server: { ...baseConfig.server, mode: "standalone" as const, domain: "example.test", tls: { email: "ops@example.test" } } }
+          : {}),
+        cache: { provider: "pg_keyspace" },
+      })
+      expect(compose).toContain('SUPATYPE_KEYSPACE_DURABILITY_OVERRIDES: "kong_acme:=durable"')
+    }
   })
 
   it("self-host compose keeps Valkey unless the project asks for pg_keyspace", () => {
     for (const cache of [undefined, { provider: "valkey" as const }]) {
       const compose = renderSelfHostCompose({ ...baseConfig, ...(cache ? { cache } : {}) })
       expect(compose).toContain("\n  valkey:\n")
-      expect(compose).not.toContain("shared_preload_libraries=")
+      expect(compose).not.toContain("SUPATYPE_KEYSPACE_ENABLED")
     }
   })
 
-  it("self-host compose makes only the named prefixes ephemeral", () => {
+  it("self-host compose persists the named prefixes alongside the certificates", () => {
     const compose = renderSelfHostCompose({
       ...baseConfig,
-      cache: { provider: "pg_keyspace", ephemeralPrefixes: ["rest:", "rowcache:"] },
+      cache: { provider: "pg_keyspace", durablePrefixes: ["session:", "flag:"] },
     })
-    expect(compose).toContain("pg_keyspace.durability=durable")
-    expect(compose).toContain("pg_keyspace.durability_overrides=rest:=ephemeral, rowcache:=ephemeral")
+    expect(compose).toContain("SUPATYPE_KEYSPACE_DURABILITY: ephemeral")
+    // ACME first: a project cannot displace it by naming prefixes of its own.
+    expect(compose).toContain(
+      'SUPATYPE_KEYSPACE_DURABILITY_OVERRIDES: "kong_acme:=durable, session:=durable, flag:=durable"',
+    )
   })
 
   it("self-host compose stays plain HTTP with a discoverable hint when TLS is off", () => {
