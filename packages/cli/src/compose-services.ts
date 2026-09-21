@@ -4,7 +4,8 @@
  * `status` and `logs` each used to carry a hardcoded list of container names.
  * Both lists were wrong: they named containers the compose file does not create
  * (`supatype-postgres`, `supatype-kong`), omitted every service it does create
- * (`server`, `storage`, `functions-worker`, `schema-engine`, `valkey`), and used
+ * (`server`, `storage`, `functions-worker`, `schema-engine`, and `valkey` when the
+ * stack runs one), and used
  * a naming scheme the compose file never applies, since it sets no
  * `container_name` and Docker therefore names containers
  * `<project>-<service>-<n>`.

@@ -65,8 +65,14 @@ function formatCacheApiError(
   if (status === 403 && trimmed.includes("rest_cache_not_available")) {
     return "REST server cache is not available on this plan or deployment."
   }
-  if (status === 503 && trimmed.includes("valkey")) {
-    return "Valkey is not configured, server-side REST cache requires Valkey (supatype dev with docker)."
+  // Both spellings: the server answers "keyspace not configured" now and
+  // "valkey not configured" before the rename, and a CLI is routinely newer
+  // than the deployment it is pointed at.
+  if (status === 503 && (trimmed.includes("keyspace") || trimmed.includes("valkey"))) {
+    return (
+      "No cache server is configured — server-side REST caching needs one. " +
+      "`supatype dev` starts it for you; on a self-hosted stack, check the `db` or `valkey` service."
+    )
   }
   return `${operation} failed (${status}): ${trimmed || "(empty body)"}`
 }

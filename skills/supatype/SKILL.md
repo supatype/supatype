@@ -19,7 +19,7 @@ Guide for working with Supatype projects. If unsure about a command or flag, run
 | Schema and access rules | [references/schema.md](references/schema.md) |
 | CLI commands | [references/cli.md](references/cli.md) |
 | Frontend, client, React hooks + auth components | [references/frontend.md](references/frontend.md) |
-| REST GET caching (client + Valkey) | [references/caching.md](references/caching.md) |
+| REST GET caching (client + server) | [references/caching.md](references/caching.md) |
 | Self-host production | [references/self-host.md](references/self-host.md) |
 
 ## Prerequisites

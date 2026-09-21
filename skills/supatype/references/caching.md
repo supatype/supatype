@@ -5,9 +5,9 @@ Opt-in caching for PostgREST table reads (`GET /rest/v1/*`). Two layers:
 | Layer | Storage | Scope | Availability |
 |-------|---------|--------|--------------|
 | **Client** | In-memory (`@supatype/client`) | Same browser tab / Node process | All deployments |
-| **Server** | Valkey | All users, tabs, and replicas (when `public`) | **Self-host** + **paid Cloud**; not Cloud free tier |
+| **Server** | A RESP keyspace | All users, tabs, and replicas (when `public`) | **Self-host** + **paid Cloud**; not Cloud free tier |
 
-Server cache requires **Valkey** (self-host compose, native `supatype dev` sidecar, per-project Valkey on paid Cloud). On **Cloud free tier**, server cache is disabled (`rest_cache_enabled: false`); client `.cache({ ttl })` without `server: true` still works.
+Server cache needs a RESP keyspace to store responses in. Which one depends on the deployment — `pg_keyspace` inside the project's own Postgres, or a Valkey server — and nothing above this line changes with the answer. On **Cloud free tier**, server cache is disabled (`rest_cache_enabled: false`); client `.cache({ ttl })` without `server: true` still works.
 
 **Default:** all tables are **uncached** until enabled in admin config (`cache_tables`) with `cache_max_ttl > 0` (where server cache is offered).
 
@@ -20,7 +20,7 @@ const { data } = await supatype
   .select("id, title")
   .cache({ ttl: 30_000 }) // milliseconds
 
-// Server Valkey cache (paid Cloud + self-host; table must be allowlisted)
+// Server-side cache (paid Cloud + self-host; table must be allowlisted)
 const { data } = await supatype
   .from("posts")
   .select()
@@ -111,12 +111,13 @@ Cloud free projects see an upgrade notice; client-only caching remains available
 
 ## Infrastructure
 
-- **Self-host:** Valkey in `supatype self-host compose` stack; `SUPATYPE_VALKEY_ADDR` on server.
-- **Cloud paid:** per-project Valkey (target); `tenant:{ref}:config.rest_cache_enabled: true`.
-- **Cloud free:** server bypasses Valkey REST cache regardless of client `server: true`.
+- **Self-host (compose):** `pg_keyspace` inside the `db` container with `cache.provider = "pg_keyspace"`, or a `valkey` service by default. See [self-host.md](self-host.md).
+- **Self-host (native `supatype dev`):** the keyspace in the Postgres it already starts, when the downloaded archive carries the library; a Valkey container beside it when not.
+- **Cloud paid:** a keyspace per project; `tenant:{ref}:config.rest_cache_enabled: true`.
+- **Cloud free:** the server bypasses the cache regardless of client `server: true`.
 
-If Valkey is unavailable, server cache **bypasses**. Client in-memory cache still works.
+The response cache is ephemeral wherever it lives — restarting the store loses it, which costs a round trip to PostgREST and nothing else. If the store is unavailable entirely, server cache **bypasses** and the client in-memory cache still works.
 
 ## Architecture
 
-See `plans/Cloud-Tenant-Gateway-Architecture.md` for platform vs tenant gateway and Valkey key layout.
+See `plans/Cloud-Tenant-Gateway-Architecture.md` for platform vs tenant gateway and the keyspace key layout.

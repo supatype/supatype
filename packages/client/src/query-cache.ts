@@ -4,7 +4,7 @@ import { sha256Hex } from "./sha256-hex.js"
 export interface QueryCacheOptions {
   /** Client-side TTL in milliseconds. */
   ttl: number
-  /** When true, send `X-Supatype-Cache: max-age=N` for server-side Valkey caching. */
+  /** When true, send `X-Supatype-Cache: max-age=N` so the server caches the response too. */
   server?: boolean | undefined
   /** When true (with server), request shared public cache scope when allowed for the table. */
   public?: boolean | undefined

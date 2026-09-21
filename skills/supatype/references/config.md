@@ -122,7 +122,7 @@ For Docker dev, `supatype dev` may rewrite `DATABASE_URL` to the host-published 
 
 ## Self-host HTTPS (custom domain)
 
-`supatype add domain` writes this block; the self-host compose stack then publishes Kong on `:80`/`:443`, adds a Valkey cert store, and issues a Let's Encrypt certificate automatically:
+`supatype add domain` writes this block; the self-host compose stack then publishes Kong on `:80`/`:443`, gives it a RESP store for its certificates, and issues a Let's Encrypt certificate automatically:
 
 ```typescript
 server: {

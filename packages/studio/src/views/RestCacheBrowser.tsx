@@ -58,7 +58,7 @@ export interface RestCacheBrowserProps {
 export function RestCacheBrowser({
   tableFilter,
   title = "REST Cache",
-  description = "Valkey-backed GET response cache. Entries appear when a client uses .cache({ server: true }) on an allowlisted table.",
+  description = "Server-side GET response cache. Entries appear when a client uses .cache({ server: true }) on an allowlisted table.",
   showTableSettings = false,
 }: RestCacheBrowserProps): React.ReactElement {
   const client = useStudioClient()
@@ -214,8 +214,8 @@ export function RestCacheBrowser({
           <div className="px-4 py-6 space-y-3">
             <h2 className="text-sm font-semibold">No server-side cache on Free</h2>
             <p className="text-sm text-muted-foreground">
-              Free projects do <strong className="font-medium text-foreground">not</strong> get Valkey-backed
-              caching. There is no in-memory cache on the server either, every API request is proxied to PostgREST,
+              Free projects do <strong className="font-medium text-foreground">not</strong> get server-side
+              caching. Every API request is proxied to PostgREST,
               even when the client sends <code className="text-xs font-mono">.cache(&#123; server: true &#125;)</code>{" "}
               (the server responds with <code className="text-xs font-mono">X-Supatype-Cache-Status: BYPASS</code>).
             </p>
@@ -226,7 +226,7 @@ export function RestCacheBrowser({
               <code className="text-xs font-mono">server: true</code>.
             </p>
             <p className="text-sm text-muted-foreground">
-              Upgrade to Pro for shared Valkey cache, per-table allowlists, and cache management in Studio.
+              Upgrade to Pro for a shared server-side cache, per-table allowlists, and cache management in Studio.
             </p>
           </div>
         </Card>

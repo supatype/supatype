@@ -1,5 +1,5 @@
 /**
- * supatype cache: list and clean cached component binaries + REST Valkey cache.
+ * supatype cache: list and clean cached component binaries + the REST response cache.
  */
 
 import type { Command } from "commander"
@@ -135,7 +135,7 @@ export function registerCache(program: Command): void {
 
   const rest = cache
     .command("rest")
-    .description("Manage REST API response cache in Valkey")
+    .description("Manage the server-side REST API response cache")
 
   rest
     .command("list")
@@ -170,7 +170,7 @@ export function registerCache(program: Command): void {
 
   rest
     .command("get <key>")
-    .description("Show one cache entry (full Valkey key)")
+    .description("Show one cache entry (full key)")
     .option("--json", "Output JSON")
     .action(async (key: string, opts: { json?: boolean }) => {
       const cwd = process.cwd()
