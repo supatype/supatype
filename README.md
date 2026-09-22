@@ -33,7 +33,7 @@ pnpm turbo run typecheck
 pnpm --filter @supatype/cli test
 ```
 
-For full app fixtures, see `examples/self-host/` or `examples/blog/`.
+For a tour of everything the platform does, see **`examples/kitchen-sink/`**; `examples/README.md` indexes the rest.
 
 Overrides: `supatype.local.config.ts` beside `supatype.config.ts` (gitignored, deep-merged for local dev).
 
