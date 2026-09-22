@@ -22,6 +22,19 @@ const baseConfig: SupatypeProjectConfig = {
   },
 }
 
+/**
+ * The same project with no `versions.postgres` pin.
+ *
+ * The keyspace is served by the image, and an image pinned to a release older than the toggle
+ * ignores `SUPATYPE_KEYSPACE_ENABLED` and comes up with no RESP listener — which is not an error
+ * anywhere. So a pin resolves the default to Valkey, and the tests about the default have to say
+ * which world they are in rather than inheriting one by accident.
+ */
+const unpinnedPostgres = (config: SupatypeProjectConfig): SupatypeProjectConfig => {
+  const { postgres: _dropped, ...rest } = config.versions ?? {}
+  return { ...config, versions: rest }
+}
+
 describe("runtime contract", () => {
   it("includes core route families", () => {
     const paths = runtimeRouteSpec().flatMap((r) => r.paths)
@@ -619,32 +632,39 @@ export default defineConfig({
     server: { mode: "standalone", domain: "api.example.com", tls: { email: "ops@example.com" } },
   }
 
-  it("self-host compose renders Kong TLS + Valkey when standalone domain + email are set", () => {
-    const compose = renderSelfHostCompose(tlsConfig)
-    expect(compose).toContain("\n  valkey:\n")
-    expect(compose).toContain("valkey/valkey:8-alpine")
+  it("self-host compose renders Kong TLS with the certificate store in Postgres", () => {
+    const compose = renderSelfHostCompose(unpinnedPostgres(tlsConfig))
     expect(compose).toContain('- "80:8000"')
     expect(compose).toContain('- "443:8443"')
     expect(compose).toContain("KONG_PROXY_LISTEN")
-    expect(compose).toContain("- valkey")
     expect(compose).toContain("https://api.example.com")
-    expect(compose).toMatch(/^\s{2}valkey-data:/m)
     expect(compose).not.toContain("HTTPS is off")
+    // The cert store is the db container, which Kong now depends on instead of a sidecar.
+    expect(compose).toContain("SUPATYPE_VALKEY_ADDR: db:6379")
+    expect(compose).not.toContain("\n  valkey:\n")
   })
 
-  it("self-host compose always includes Valkey and SUPATYPE_VALKEY_ADDR on server", () => {
-    const compose = renderSelfHostCompose(baseConfig)
+  it("self-host compose renders Kong TLS + Valkey where the project keeps the sidecar", () => {
+    const compose = renderSelfHostCompose({ ...tlsConfig, cache: { provider: "valkey" } })
+    expect(compose).toContain("\n  valkey:\n")
+    expect(compose).toContain("valkey/valkey:8-alpine")
+    expect(compose).toContain("- valkey")
+    expect(compose).toMatch(/^\s{2}valkey-data:/m)
+    expect(compose).toContain('- "443:8443"')
+  })
+
+  it("self-host compose includes Valkey and SUPATYPE_VALKEY_ADDR when it is the chosen provider", () => {
+    const compose = renderSelfHostCompose({ ...baseConfig, cache: { provider: "valkey" } })
     expect(compose).toContain("\n  valkey:\n")
     expect(compose).toContain("valkey/valkey:8-alpine")
     expect(compose).toContain("SUPATYPE_VALKEY_ADDR: valkey:6379")
     expect(compose).toMatch(/^\s{2}valkey-data:/m)
   })
 
-  it("self-host compose serves the keyspace from Postgres when cache.provider is pg_keyspace", () => {
-    const compose = renderSelfHostCompose({
-      ...baseConfig,
-      cache: { provider: "pg_keyspace" },
-    })
+  it("self-host compose serves the keyspace from Postgres, which is what it does by default", () => {
+    // Asserted without a `cache` section at all: the default is the behaviour, and a test that
+    // only ever passed `provider: "pg_keyspace"` would go on passing after the default moved back.
+    const compose = renderSelfHostCompose(unpinnedPostgres(baseConfig))
     // No second stateful service, and nothing left pointing at one.
     expect(compose).not.toContain("\n  valkey:\n")
     expect(compose).not.toContain("valkey/valkey:8-alpine")
@@ -686,12 +706,38 @@ export default defineConfig({
     }
   })
 
-  it("self-host compose keeps Valkey unless the project asks for pg_keyspace", () => {
-    for (const cache of [undefined, { provider: "valkey" as const }]) {
-      const compose = renderSelfHostCompose({ ...baseConfig, ...(cache ? { cache } : {}) })
-      expect(compose).toContain("\n  valkey:\n")
-      expect(compose).not.toContain("SUPATYPE_KEYSPACE_ENABLED")
-    }
+  it("self-host compose keeps Valkey where the project asks for it", () => {
+    // Selectable, not deprecated: a project that wrote this down keeps the sidecar, and the
+    // Postgres it runs beside is left without a keyspace rather than quietly serving one too.
+    const compose = renderSelfHostCompose({ ...baseConfig, cache: { provider: "valkey" } })
+    expect(compose).toContain("\n  valkey:\n")
+    expect(compose).not.toContain("SUPATYPE_KEYSPACE_ENABLED")
+  })
+
+  it("self-host compose keeps Valkey for a project that pins its Postgres image", () => {
+    // The toggle is honoured by the image, from the release that introduced it. An older pinned
+    // image ignores it and starts with no RESP listener — a stack that comes up, and a cache that
+    // never hits. A pin says the image is fixed, and a default must not assume something about a
+    // fixed image it cannot check; `cache: { provider: "pg_keyspace" }` is how a project on a
+    // capable pin says so.
+    const compose = renderSelfHostCompose(baseConfig)
+    expect(compose).toContain("\n  valkey:\n")
+    expect(compose).not.toContain("SUPATYPE_KEYSPACE_ENABLED")
+
+    const asked = renderSelfHostCompose({ ...baseConfig, cache: { provider: "pg_keyspace" } })
+    expect(asked).toContain('SUPATYPE_KEYSPACE_ENABLED: "1"')
+  })
+
+  it("self-host compose gives an external database Valkey, because nothing else can run", () => {
+    // pg_keyspace is loaded through shared_preload_libraries, which is a property of a Postgres
+    // this stack starts. The default has to resolve by itself here: an absent `cache.provider`
+    // cannot mean the same thing beside a managed database and an unmanaged one.
+    const compose = renderSelfHostCompose({
+      ...unpinnedPostgres(baseConfig),
+      database: { external: { url: "postgres://u:p@h:5432/d" } },
+    })
+    expect(compose).toContain("\n  valkey:\n")
+    expect(compose).not.toContain("SUPATYPE_KEYSPACE_ENABLED")
   })
 
   it("self-host compose persists the named prefixes alongside the certificates", () => {
@@ -718,23 +764,30 @@ export default defineConfig({
       ...baseConfig,
       server: { mode: "standalone", domain: "api.example.com" },
     })
-    expect(compose).toContain("\n  valkey:\n")
     expect(compose).not.toContain('- "443:8443"')
   })
 
-  it("writeSelfHostCompose emits a Kong acme plugin backed by Valkey when TLS is on", () => {
-    const dir = mkdtempSync(join(tmpdir(), "supatype-tls-"))
-    try {
-      const out = writeSelfHostCompose(dir, tlsConfig)
-      const kong = readFileSync(out.kongPath, "utf8")
-      expect(kong).toContain("name: acme")
-      expect(kong).toContain('account_email: "ops@example.com"')
-      expect(kong).toContain("tos_accepted: true")
-      expect(kong).toContain('- "api.example.com"')
-      expect(kong).toContain("storage: redis")
-      expect(kong).toContain('host: "valkey"')
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
+  it("writeSelfHostCompose emits a Kong acme plugin pointed at whichever RESP server runs", () => {
+    // The certificates are the one thing in the keyspace that must survive a restart, so the host
+    // Kong is told about has to be the one the stack actually started. Both directions asserted:
+    // a mismatch here is a Kong that cannot store its certificate, found on the first renewal.
+    for (const { cache, host } of [
+      { cache: undefined, host: "db" },
+      { cache: { provider: "valkey" as const }, host: "valkey" },
+    ]) {
+      const dir = mkdtempSync(join(tmpdir(), "supatype-tls-"))
+      try {
+        const out = writeSelfHostCompose(dir, { ...unpinnedPostgres(tlsConfig), ...(cache ? { cache } : {}) })
+        const kong = readFileSync(out.kongPath, "utf8")
+        expect(kong).toContain("name: acme")
+        expect(kong).toContain('account_email: "ops@example.com"')
+        expect(kong).toContain("tos_accepted: true")
+        expect(kong).toContain('- "api.example.com"')
+        expect(kong).toContain("storage: redis")
+        expect(kong).toContain(`host: "${host}"`)
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
     }
   })
 

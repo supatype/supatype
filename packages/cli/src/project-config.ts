@@ -107,14 +107,19 @@ export interface SupatypeProjectConfig {
    */
   cache?: {
     /**
-     * "valkey" (default) = a Valkey sidecar container.
-     * "pg_keyspace"      = the RESP keyspace inside the Postgres container, so
-     *                      the stack runs one stateful service instead of two.
+     * "pg_keyspace" (default) = the RESP keyspace inside the Postgres
+     *                           container, so the stack runs one stateful
+     *                           service instead of two.
+     * "valkey"                = a Valkey sidecar container.
      *
      * pg_keyspace needs `shared_preload_libraries`, which is a property of the
      * Postgres this stack starts — so it is only available when Supatype
-     * provisions the database. With `database.external` there is no container
-     * to configure and the setting is rejected rather than ignored.
+     * provisions the database. With `database.external` the default resolves
+     * to Valkey, because there is no container to configure; asking for
+     * pg_keyspace explicitly there is rejected rather than ignored.
+     *
+     * Set "valkey" to keep the sidecar. Nothing about the cache's behaviour
+     * changes with the answer — both speak RESP and both hold the same keys.
      */
     provider?: "valkey" | "pg_keyspace"
     /**

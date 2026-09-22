@@ -10,6 +10,7 @@
  * Deno is not provisioned by the CLI on those paths.
  */
 
+import { keyspaceInPostgres } from "../cache-provider.js"
 import type { Command } from "commander"
 import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
@@ -212,10 +213,17 @@ export function registerDev(program: Command): void {
         // fixed because 6379 is the first thing a developer's own Redis or a
         // leftover sidecar takes, and a keyspace that cannot bind its port
         // fails inside the postmaster log where nobody is looking.
-        keyspacePort = nativeKeyspaceLibraryPresent(pgBinDir)
-          ? await firstFreePort(KEYSPACE_PORT_BASE, KEYSPACE_PORT_SPAN)
-          : null
-        if (nativeKeyspaceLibraryPresent(pgBinDir) && keyspacePort === null) {
+        //
+        // `cache.provider: "valkey"` is honoured here too, and this is the only place it could
+        // be: the native path asks the archive what it carries rather than the config what it
+        // wants, so a project that deliberately kept the sidecar would otherwise find Postgres
+        // serving RESP anyway and the sidecar never started.
+        const wantsPgKeyspace = keyspaceInPostgres(config)
+        keyspacePort =
+          wantsPgKeyspace && nativeKeyspaceLibraryPresent(pgBinDir)
+            ? await firstFreePort(KEYSPACE_PORT_BASE, KEYSPACE_PORT_SPAN)
+            : null
+        if (wantsPgKeyspace && nativeKeyspaceLibraryPresent(pgBinDir) && keyspacePort === null) {
           console.warn(
             `[supatype] ⚠  No free port in ${KEYSPACE_PORT_BASE}-${KEYSPACE_PORT_BASE + KEYSPACE_PORT_SPAN - 1} ` +
               "for the Postgres keyspace — starting without it.",

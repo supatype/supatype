@@ -111,7 +111,7 @@ Cloud free projects see an upgrade notice; client-only caching remains available
 
 ## Infrastructure
 
-- **Self-host (compose):** `pg_keyspace` inside the `db` container with `cache.provider = "pg_keyspace"`, or a `valkey` service by default. See [self-host.md](self-host.md).
+- **Self-host (compose):** `pg_keyspace` inside the `db` container by default, or a `valkey` service with `cache.provider = "valkey"` (which is also what `database.external` gets, since pg_keyspace needs a Postgres this stack starts). See [self-host.md](self-host.md).
 - **Self-host (native `supatype dev`):** the keyspace in the Postgres it already starts, when the downloaded archive carries the library; a Valkey container beside it when not.
 - **Cloud paid:** a keyspace per project; `tenant:{ref}:config.rest_cache_enabled: true`.
 - **Cloud free:** the server bypasses the cache regardless of client `server: true`.
