@@ -1,0 +1,25 @@
+:root { color-scheme: light dark; --fg: #1c1c1a; --bg: #fbfbfa; --muted: #6b6b66; --line: #e3e3df; --accent: #00684a; --error: #a4262c; }
+@media (prefers-color-scheme: dark) {
+  :root { --fg: #ececea; --bg: #16171a; --muted: #9a9a94; --line: #2b2c30; --accent: #4fc39a; --error: #ef9a9a; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 ui-serif, Georgia, serif; }
+a { color: inherit; }
+.ks-top { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; align-items: center; padding: 16px; border-bottom: 1px solid var(--line); font-family: ui-sans-serif, system-ui, sans-serif; }
+.ks-top nav { display: flex; gap: 16px; }
+.ks-main { max-width: 720px; margin: 0 auto; padding: 32px 16px 64px; }
+.ks-foot { border-top: 1px solid var(--line); padding: 16px; color: var(--muted); font: 13px/1.5 ui-sans-serif, system-ui, sans-serif; }
+h1 { font-size: 30px; line-height: 1.2; }
+.ks-lede { color: var(--muted); font-size: 18px; }
+.ks-muted { color: var(--muted); }
+.ks-error { color: var(--error); }
+.ks-hero { border-left: 3px solid var(--accent); padding-left: 16px; margin: 24px 0; }
+.ks-cta { display: inline-block; margin-top: 8px; border: 1px solid var(--accent); color: var(--accent); border-radius: 8px; padding: 6px 14px; text-decoration: none; font-family: ui-sans-serif, system-ui, sans-serif; }
+.ks-prose { margin: 20px 0; }
+.ks-grid { margin: 24px 0; }
+.ks-talks { list-style: none; padding: 0; }
+.ks-talks li { border-bottom: 1px solid var(--line); padding: 12px 0; }
+.ks-talks h2 { font-size: 19px; margin: 0 0 4px; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; }
+.ks-banner { border: 1px dashed var(--line); border-radius: 8px; padding: 8px 12px; margin-bottom: 20px; color: var(--muted); font: 13px/1.5 ui-sans-serif, system-ui, sans-serif; }
+.ks-banner--live { border-style: solid; border-color: var(--accent); color: var(--accent); }

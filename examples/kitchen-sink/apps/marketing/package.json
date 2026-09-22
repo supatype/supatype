@@ -1,0 +1,27 @@
+{
+  "name": "@supatype/example-kitchen-sink-marketing",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The marketing site: server rendering, blocks, translations and publishing",
+  "scripts": {
+    "dev": "next dev -p 3006",
+    "build": "next build",
+    "start": "next start -p 3006",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@supatype/client": "workspace:*",
+    "@supatype/react": "workspace:*",
+    "@supatype/ssr": "workspace:*",
+    "@supatype/types": "workspace:*",
+    "next": "^15.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "typescript": "^5"
+  }
+}
