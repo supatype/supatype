@@ -143,6 +143,18 @@ export interface KernelFieldFacts {
   index?: boolean
 }
 
+/**
+ * The `cache` declaration as it reaches the AST. See `ModelMeta.cache` in `@supatype/types` for
+ * what each setting means; this is the wire shape, kept narrow so a typo in the extractor is a
+ * type error rather than an extra key nobody reads.
+ */
+export interface ModelCacheAst {
+  enabled?: boolean
+  maxTtl?: number
+  public?: boolean
+  rows?: boolean
+}
+
 /** Internal parse result: not serialized. */
 export interface ParsedField {
   kind: FieldKind
@@ -173,6 +185,7 @@ export interface ModelAstV2 {
       access: Record<string, unknown>
       hooks?: Record<string, unknown>
       validate?: Record<string, unknown>
+      cache?: ModelCacheAst
     }
   }
 }
@@ -406,6 +419,7 @@ export function emitModel(
   hooks: Record<string, unknown> = {},
   constraints: unknown[] = [],
   validators: Record<string, unknown> = {},
+  cache?: ModelCacheAst | undefined,
 ): ModelAstV2 {
   return {
     name,
@@ -423,6 +437,14 @@ export function emitModel(
         access,
         ...(Object.keys(hooks).length > 0 && { hooks }),
         ...(Object.keys(validators).length > 0 && { validate: validators }),
+        // Cache sits in `platform` beside `hooks` for the same reason, and travels the same way:
+        // the route manifest, not this AST. The schema engine re-serialises its own parsed struct
+        // when it writes `ast_snapshot`, and its `PlatformModelAnnotations` knows only `access`
+        // and `searchFields` — so this key, like `hooks` above it, does not survive that round
+        // trip and the manifest is what the server actually reads. Kept here because the AST is
+        // the schema's own description of itself, and a reader looking for the declaration should
+        // find it next to the other API-layer concerns.
+        ...(cache !== undefined && { cache }),
       },
     },
   }

@@ -1050,6 +1050,68 @@ export type ModelMeta<TFields extends Record<string, unknown>> = {
    * versions table.
    */
   versions?: true | ModelVersionsOptions
+  /**
+   * What this model's reads may be cached as, and where.
+   *
+   * ```typescript
+   * cache: { enabled: true, maxTtl: 60, public: true, rows: true }
+   * ```
+   *
+   * **The declaration is a ceiling; runtime may only narrow it.** Studio and the admin API decide
+   * what is *active* and can lower `maxTtl` from 60 to 10, or switch a table off entirely — they
+   * cannot raise a cap or cache a model that declared nothing. So the schema stays an honest
+   * description of what the system may do, and an operator keeps a lever they can pull during an
+   * incident without a schema push. Drift is bounded and always in the safe direction.
+   *
+   * A model with no `cache` block is not cacheable by anyone, which is the default.
+   */
+  cache?: ModelCacheOptions
+}
+
+/**
+ * See {@link ModelMeta.cache}. Two caches are configured here and they are not the same cache.
+ *
+ * `enabled` and `public` govern the **response cache**: whole GET responses, keyed by the request.
+ * `rows` governs the **row cache**: individual rows served from shared memory on a primary-key
+ * lookup, underneath the query, invalidated by decoding the WAL.
+ */
+export type ModelCacheOptions = {
+  /** Eligible for the server-side response cache. Without this nothing else here applies. */
+  enabled?: boolean
+  /**
+   * Ceiling in seconds on how long a response may be held.
+   *
+   * The effective TTL is `min(client max-age, project cache_max_ttl, this)`, so every writer can
+   * only shorten it.
+   */
+  maxTtl?: number
+  /**
+   * Share one cache entry across all callers, instead of keying it per user.
+   *
+   * **This is a data-leak switch, and the model is the only place it can be checked.** A public
+   * entry is global — one response served to everyone. On a table whose read rule varies by *who*
+   * is asking, that serves one user's rows to another. Because `access.read` is right here in the
+   * same object, `supatype push` refuses the combination by name rather than leaving it to be
+   * noticed in production.
+   *
+   * Row-dependence is not the same question and is not refused: `Lte<"published_at", Now>` varies
+   * by row and by time but not by caller, so a shared entry is exactly right for it — that is the
+   * case public caching exists to serve.
+   */
+  public?: boolean
+  /**
+   * Serve primary-key reads from the row cache (Mode B).
+   *
+   * **Declaration-only, with no runtime switch**, unlike everything else here. The row cache is
+   * *eventual with a bound, not read-your-writes*: a write on one connection followed by a read on
+   * another can return the previous row for up to the staleness window. Whether a table tolerates
+   * that is a design-time invariant its author knows and an operator flipping a toggle at 3am does
+   * not. Studio shows the state and the health and points back at the schema to change it.
+   *
+   * Push refuses what the row cache cannot serve — a table with no primary key — because its cache
+   * key *is* the primary key.
+   */
+  rows?: boolean
 }
 
 /** Retention and behaviour for a versioned model. See {@link ModelMeta.versions}. */
