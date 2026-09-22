@@ -7,6 +7,7 @@ import { Button, Card } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { SlidePanel } from "../components/SlidePanel.js"
+import { CacheHealthPanels } from "./CacheHealthPanels.js"
 import { cn } from "../lib/utils.js"
 
 export interface RestTableCacheConfig {
@@ -249,6 +250,13 @@ export function RestCacheBrowser({
 
       {error && <ErrorBanner message={error} />}
       {actionError && <ErrorBanner message={actionError} />}
+
+      {/*
+        Only on the project-wide screen. The per-model view is filtered to one table, and every
+        number these panels show is per keyspace or per database — an arena fill or a coherence
+        state shown under a table's name reads as that table's, and is not.
+      */}
+      {!tableFilter && <CacheHealthPanels />}
 
       {showTableSettings && tableFilter && (
         <Card>
