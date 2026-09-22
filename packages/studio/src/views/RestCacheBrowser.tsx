@@ -9,9 +9,17 @@ import { ErrorBanner } from "../components/ErrorBanner.js"
 import { SlidePanel } from "../components/SlidePanel.js"
 import { CacheHealthPanels } from "./CacheHealthPanels.js"
 import { useCacheHealth } from "../hooks/useCacheHealth.js"
-import { describeStaleness, reconcileNoteFor, showsStalenessPromise } from "../lib/cache-health.js"
+import { describeStaleness, reconcileNoteFor } from "../lib/cache-health.js"
 import type { ReconcileNote, RowCacheReconcile } from "../lib/cache-health.js"
+import { controlsFor, rowCacheLine } from "../lib/cache-declaration.js"
+import type { DeclaredCache } from "../lib/cache-declaration.js"
 import { cn } from "../lib/utils.js"
+
+/** One thing the schema's ceiling refused or reduced, as the admin API reports it. */
+export interface CacheAdjustment {
+  table: string
+  reason: string
+}
 
 export interface RestTableCacheConfig {
   enabled: boolean
@@ -77,6 +85,11 @@ export function RestCacheBrowser({
   const [cacheMaxTTL, setCacheMaxTTL] = useState(0)
   const [settingsSaving, setSettingsSaving] = useState(false)
   const [rowCacheNote, setRowCacheNote] = useState<ReconcileNote | null>(null)
+  // What the schema permits, which is what decides whether each control below may be moved at
+  // all. Undefined until the first read: a screen that assumed "everything" would offer controls
+  // the server refuses, and one that assumed "nothing" would flash every table as undeclared.
+  const [declared, setDeclared] = useState<DeclaredCache | undefined>(undefined)
+  const [adjustments, setAdjustments] = useState<CacheAdjustment[]>([])
 
   // Only on the per-table screen, and only to read the staleness window. The
   // project-wide screen gets the panels instead, and the two never render
@@ -108,8 +121,10 @@ export function RestCacheBrowser({
     const json = (await r.json()) as {
       cache_max_ttl?: number
       cache_tables?: Record<string, RestTableCacheConfig>
+      declared?: DeclaredCache
     }
     setCacheMaxTTL(json.cache_max_ttl ?? 0)
+    setDeclared(json.declared ?? {})
     const tc = json.cache_tables?.[tableFilter]
     setTableCfg(tc ?? { enabled: false, allow_public: false })
   }, [client, showTableSettings, tableFilter])
@@ -204,8 +219,12 @@ export function RestCacheBrowser({
       // The save succeeded; what the row cache made of it comes back in the
       // same body and is a note, never an error. The response cache is already
       // live either way.
-      const saved = (await r.json().catch(() => ({}))) as { row_cache?: RowCacheReconcile }
+      const saved = (await r.json().catch(() => ({}))) as {
+        row_cache?: RowCacheReconcile
+        adjusted?: CacheAdjustment[]
+      }
       setRowCacheNote(reconcileNoteFor(tableFilter, saved.row_cache))
+      setAdjustments((saved.adjusted ?? []).filter((a) => a.table === tableFilter || a.table === "*"))
       await loadSettings()
     } catch (e) {
       setActionError(e instanceof Error ? e.message : "Save failed")
@@ -215,6 +234,11 @@ export function RestCacheBrowser({
   }
 
   const entries = data?.entries ?? []
+
+  // Computed rather than stored: both are a pure function of what the last read and the last save
+  // returned, and a copy in state is a copy that can go stale against them.
+  const controls = controlsFor(declared, tableFilter ?? "")
+  const rowCache = rowCacheLine(declared, tableFilter ?? "", tableHealth.rowCache, describeStaleness)
 
   if (!serverCacheOffered) {
     return (
@@ -277,53 +301,58 @@ export function RestCacheBrowser({
           <div className="px-4 py-3 border-b border-border">
             <h2 className="text-sm font-semibold">Cache settings, {tableFilter}</h2>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Server cache is off by default. Enable here, then use{" "}
-              <code className="font-mono">.cache(&#123; ttl, server: true &#125;)</code> in your app.
+              Your schema decides what may be cached; this decides what is. These controls can
+              narrow the declaration and never widen it.
             </p>
           </div>
           <div className="divide-y divide-border px-4 py-2 space-y-2">
-            <label className="flex items-center gap-2 text-sm">
+            <label className={cn("flex items-center gap-2 text-sm", !controls.canEnable && "text-muted-foreground")}>
               <input
                 type="checkbox"
                 checked={tableCfg.enabled}
+                /*
+                  Disabled rather than left to fail on save. The server narrows a request it does
+                  not permit and reports the adjustment, so a tick here would survive exactly until
+                  the save came back and then untick itself — which teaches an operator that the
+                  screen is broken rather than that their schema said no.
+                */
+                disabled={!controls.canEnable}
                 onChange={(e) => setTableCfg((c) => ({ ...c, enabled: e.target.checked }))}
               />
               Enable server cache for this table
             </label>
-            {/*
-              §12.2: the staleness window is a promise to a user, not an ops metric, and it belongs
-              at the point of enabling rather than on a dashboard. Read live from the row cache —
-              it grows past the 200ms default once participating databases outnumber the
-              invalidation pool, so a hardcoded sentence here would understate what is promised.
-
-              Shown only when the row cache is actually serving. With it off or unavailable the
-              response cache is the whole feature, and it has no staleness window of its own beyond
-              the TTL below — saying otherwise would invent a caveat.
-            */}
-            {tableCfg.enabled && showsStalenessPromise(tableHealth.rowCache) && (
-              <p className="text-xs text-muted-foreground pl-6">
-                {describeStaleness(tableHealth.rowCache!.stale_after_ms)}
-              </p>
+            {controls.reason.enable && (
+              <p className="text-xs text-muted-foreground pl-6">{controls.reason.enable}</p>
             )}
-            <label className="flex items-center gap-2 text-sm">
+            <label
+              className={cn(
+                "flex items-center gap-2 text-sm",
+                (!tableCfg.enabled || !controls.canAllowPublic) && "text-muted-foreground",
+              )}
+            >
               <input
                 type="checkbox"
                 checked={tableCfg.allow_public}
-                disabled={!tableCfg.enabled}
+                disabled={!tableCfg.enabled || !controls.canAllowPublic}
                 onChange={(e) => setTableCfg((c) => ({ ...c, allow_public: e.target.checked }))}
               />
               Allow <code className="font-mono text-xs">public</code> scope (shared across users)
             </label>
+            {controls.reason.allowPublic && tableCfg.enabled && (
+              <p className="text-xs text-muted-foreground pl-6">{controls.reason.allowPublic}</p>
+            )}
             <div className="flex items-center gap-2 text-sm pt-1">
               <span className="text-muted-foreground">Max TTL (seconds)</span>
               <input
                 className="w-24 rounded border border-border bg-background px-2 py-1 text-sm font-mono"
                 type="number"
                 min={0}
+                max={controls.ttlCeiling ?? undefined}
                 value={cacheMaxTTL}
                 onChange={(e) => setCacheMaxTTL(parseInt(e.target.value, 10) || 0)}
               />
             </div>
+            {controls.reason.ttl && <p className="text-xs text-muted-foreground">{controls.reason.ttl}</p>}
             <Button size="xs" variant="primary" disabled={settingsSaving} onClick={() => void saveTableSettings()}>
               {settingsSaving ? "Saving…" : "Save cache settings"}
             </Button>
@@ -345,6 +374,42 @@ export function RestCacheBrowser({
                 {rowCacheNote.text}
               </p>
             )}
+            {/*
+              What the save was refused, if anything. The server narrows before it stores, so this
+              is the only account of the difference between what was asked for and what is now
+              true — and the controls above are disabled precisely so it stays empty.
+            */}
+            {adjustments.length > 0 && (
+              <ul className="text-xs text-yellow-400 space-y-0.5">
+                {adjustments.map((a) => (
+                  <li key={`${a.table}:${a.reason}`}>
+                    {a.table === "*" ? "" : `${a.table}: `}
+                    {a.reason}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {/*
+              Mode B, which has no control here and is not going to get one (§13.3). The row cache
+              is eventual with a bound rather than read-your-writes, and whether a table tolerates
+              that is a design-time invariant — so this says what is happening and where to change
+              it. The staleness window is read live rather than hardcoded at 200ms: it grows to the
+              invalidation cycle time once participating databases outnumber the worker pool, and a
+              promise that understates itself is worse than none.
+            */}
+            <div className="pt-1">
+              <p
+                className={cn(
+                  "text-xs",
+                  rowCache.tone === "good" && "text-muted-foreground",
+                  rowCache.tone === "warn" && "text-yellow-400",
+                  rowCache.tone === "neutral" && "text-muted-foreground",
+                )}
+              >
+                <span className="font-medium text-foreground">Row cache: </span>
+                {rowCache.text}
+              </p>
+            </div>
           </div>
         </Card>
       )}

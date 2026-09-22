@@ -6,7 +6,6 @@ import {
   hitRateOver,
   reconcileNoteFor,
   rowCacheHeadline,
-  showsStalenessPromise,
   type RowCacheStatus,
 } from "../src/lib/cache-health.js"
 
@@ -215,29 +214,5 @@ describe("what a save reports back about the row cache", () => {
       skipped: [{ table: "events", reason: "no primary key" }],
     })
     expect(note?.text).toContain("no primary key")
-  })
-})
-
-describe("when the staleness promise is shown", () => {
-  it("is shown while the row cache is serving, and while it is waiting for tables", () => {
-    // idle is the state every project is in before its first table is enabled,
-    // which is the moment this sentence is most worth reading.
-    expect(showsStalenessPromise(status({ state: "participating" }))).toBe(true)
-    expect(showsStalenessPromise(status({ state: "idle", registrations: 0 }))).toBe(true)
-  })
-
-  it("is not shown when the row cache is not what is serving reads", () => {
-    // The response cache has no staleness window of its own beyond its TTL.
-    // Promising one here would invent a caveat — and on the incoherent path it
-    // would promise a bound that is precisely the thing not being met.
-    for (const state of ["off", "unavailable", "incoherent"] as const) {
-      expect(showsStalenessPromise(status({ state }))).toBe(false)
-    }
-  })
-
-  it("is not shown before anything is known", () => {
-    // Printing the 200ms default while the real number is still in flight is
-    // rule 3's failure in its quietest form.
-    expect(showsStalenessPromise(null)).toBe(false)
   })
 })
