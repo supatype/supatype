@@ -1371,4 +1371,117 @@ export type Review = Model<{
     // A field with no constraint modifier carries no validation key at all.
     expect(review?.fields["note"]?.["validation"]).toBeUndefined()
   })
+
+  it("carries Searchable through to the model's searchFields", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-types-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, UUID, Optional, Searchable, Public } from "@supatype/types"
+
+export type Article = Model<{
+  id: UUID
+  title: Searchable<string>
+  subtitle: Optional<Searchable<string>>
+  views: number
+}, {
+  access: { read: Public }
+}>
+`,
+      "utf8",
+    )
+
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const article = ast?.models.find((m) => m.name === "Article")
+
+    // The flag reaches the field, and the model gains the list Studio reads to decide whether to
+    // render its search box at all. This used to be dropped on the floor by the extractor.
+    expect(article?.fields["title"]?.annotations?.platform?.searchable).toBe(true)
+    expect(article?.annotations.platform.searchFields).toEqual(["title", "subtitle"])
+    expect(article?.fields["views"]?.annotations?.platform?.searchable).toBeUndefined()
+
+    // Unwrapping still happens: Searchable<string> is a text column, not a wrapper type.
+    expect(article?.fields["title"]).toMatchObject({ kind: "text" })
+    expect(article?.fields["subtitle"]).toMatchObject({ kind: "text", required: false })
+  })
+
+  it("lets a model order its search fields explicitly", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-types-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, UUID, Searchable, Public } from "@supatype/types"
+
+export type Person = Model<{
+  id: UUID
+  email: Searchable<string>
+  name: string
+}, {
+  searchable: ["name"]
+  access: { read: Public }
+}>
+`,
+      "utf8",
+    )
+
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const person = ast?.models.find((m) => m.name === "Person")
+
+    // The declared order wins, because the list view filters on the first entry, and a field
+    // flagged but unlisted still follows rather than being lost.
+    expect(person?.annotations.platform.searchFields).toEqual(["name", "email"])
+  })
+
+  it("refuses a searchable column that is not a field", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-types-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, UUID, Public } from "@supatype/types"
+
+export type Widget = Model<{
+  id: UUID
+  label: string
+}, {
+  searchable: ["lable"]
+  access: { read: Public }
+}>
+`,
+      "utf8",
+    )
+
+    // A typo here used to compile and produce a model with no search at all. Naming the column
+    // and the alternatives is the whole point: the failure is otherwise invisible.
+    expect(() => extractSchemaAstFromTypes(schemaPath, dir)).toThrow(/"lable"/)
+  })
+
+  it("omits searchFields entirely when nothing is searchable", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-types-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, UUID, Public } from "@supatype/types"
+
+export type Event = Model<{
+  id: UUID
+  name: string
+}, {
+  access: { read: Public }
+}>
+`,
+      "utf8",
+    )
+
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const event = ast?.models.find((m) => m.name === "Event")
+    expect(event?.annotations.platform.searchFields).toBeUndefined()
+  })
 })

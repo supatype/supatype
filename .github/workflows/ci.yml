@@ -51,6 +51,17 @@ jobs:
       - name: Test
         run: pnpm turbo run test
 
+      # What the examples import, against what the packages export. Report-only by design: whether
+      # an exotic primitive deserves an example is a judgement, and forcing one would produce the
+      # forty-field model the kitchen sink argues against. What is gated is that the ledger stays
+      # current — add an export and the committed numbers go stale, so the gap arrives in a diff
+      # where a person decides.
+      - name: Example coverage ledger is up to date
+        run: |
+          node scripts/check-example-coverage.mjs --write
+          git diff --exit-code -- examples/COVERAGE.md \
+            || { echo "::error::examples/COVERAGE.md is stale. Run 'node scripts/check-example-coverage.mjs --write' and commit it."; exit 1; }
+
       # The two examples that ship a front end and never proved it compiles.
       #
       # `blog` is typechecked and was never built, which cannot see a Server Component importing a
