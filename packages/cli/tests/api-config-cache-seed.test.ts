@@ -30,8 +30,11 @@ function project(apiConfig: unknown | null): string {
   return dir
 }
 
-const read = (dir: string): Record<string, never> =>
-  JSON.parse(readFileSync(join(dir, ".supatype", "api-config.json"), "utf8")) as Record<string, never>
+/** The file as it now stands, typed loosely because these assertions are about what is in it. */
+const read = (dir: string): { rest?: { cache_tables?: Record<string, unknown>; cache_max_ttl?: unknown } } =>
+  JSON.parse(readFileSync(join(dir, ".supatype", "api-config.json"), "utf8")) as {
+    rest?: { cache_tables?: Record<string, unknown>; cache_max_ttl?: unknown }
+  }
 
 const ast = (cache: unknown, table = "posts") => ({
   models: [{ name: "Post", annotations: { db: { tableName: table }, platform: { cache } } }],
@@ -49,7 +52,7 @@ describe("what a push switches on", () => {
     const result = seedApiConfigCache(dir, ast({ enabled: true }))
 
     expect(result?.seeded).toEqual(["posts"])
-    expect(read(dir)["rest"]["cache_tables"]).toEqual({ posts: { enabled: true, allow_public: false } })
+    expect(read(dir).rest?.cache_tables).toEqual({ posts: { enabled: true, allow_public: false } })
   })
 
   it("follows the schema on public rather than defaulting it off", () => {
@@ -60,7 +63,7 @@ describe("what a push switches on", () => {
 
     seedApiConfigCache(dir, ast({ enabled: true, public: true }))
 
-    expect(read(dir)["rest"]["cache_tables"]).toEqual({ posts: { enabled: true, allow_public: true } })
+    expect(read(dir).rest?.cache_tables).toEqual({ posts: { enabled: true, allow_public: true } })
   })
 
   it("never rewrites an entry that already exists", () => {
@@ -72,7 +75,7 @@ describe("what a push switches on", () => {
     const result = seedApiConfigCache(dir, ast({ enabled: true, public: true }))
 
     expect(result?.seeded).toEqual([])
-    expect(read(dir)["rest"]["cache_tables"]).toEqual({ posts: { enabled: false, allow_public: false } })
+    expect(read(dir).rest?.cache_tables).toEqual({ posts: { enabled: false, allow_public: false } })
   })
 
   it("leaves a hard opt-out switched off", () => {
@@ -82,7 +85,7 @@ describe("what a push switches on", () => {
     const result = seedApiConfigCache(dir, ast({ enabled: false }))
 
     expect(result?.seeded).toEqual([])
-    expect(read(dir)["rest"]["cache_tables"]).toEqual({})
+    expect(read(dir).rest?.cache_tables).toEqual({})
   })
 
   it("leaves an entry whose declaration has gone, and does not need to remove it", () => {
@@ -93,7 +96,7 @@ describe("what a push switches on", () => {
 
     seedApiConfigCache(dir, ast({ enabled: true }))
 
-    const tables = read(dir)["rest"]["cache_tables"] as unknown as Record<string, unknown>
+    const tables = read(dir).rest?.cache_tables ?? {}
     expect(tables["legacy"]).toEqual({ enabled: true, allow_public: false })
     expect(tables["posts"]).toEqual({ enabled: true, allow_public: false })
   })
@@ -109,7 +112,7 @@ describe("what it reports rather than fixes", () => {
     const result = seedApiConfigCache(dir, ast({ enabled: true }))
 
     expect(result?.ttlIsOff).toBe(true)
-    expect(read(dir)["rest"]["cache_max_ttl"]).toBe(0)
+    expect(read(dir).rest?.cache_max_ttl).toBe(0)
   })
 
   it("says nothing about the TTL when no table declares a cache", () => {
@@ -135,7 +138,7 @@ describe("files it will not touch", () => {
   it("does not invent a rest section in a file that has none", () => {
     const dir = project({ graphql: { introspection: true } })
     expect(seedApiConfigCache(dir, ast({ enabled: true }))).toBeNull()
-    expect(read(dir)["rest"]).toBeUndefined()
+    expect(read(dir).rest).toBeUndefined()
   })
 })
 
