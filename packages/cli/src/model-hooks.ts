@@ -11,6 +11,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { join, relative } from "node:path"
 import { generateHooksModule } from "./hooks-generator.js"
+import { manifestCache } from "./model-cache.js"
 
 export interface DeclaredHook {
   model: string
@@ -281,6 +282,11 @@ export const DEFAULT_HOOK_TIMEOUT_MS = 2000
  * the worse half of that: the schema says the field is checked, and no error appears anywhere,
  * because the write simply succeeds.
  *
+ * `cache` is here for a third reason of the same kind: the declaration is a ceiling the server
+ * enforces, and a manifest carrying a stale one lets a table be cached that the schema has since
+ * stopped permitting — or stops one the schema now allows, which is merely slow rather than wrong.
+ * The first of those is why it is written at push and not left to drift.
+ *
  * **Only updates a manifest that is already there.** Creating one from scratch here would be a
  * hazard: `functions_enabled` is a plain bool on the server's side, so a manifest carrying only
  * hooks would read as functions *disabled*, the exact defect this repo fixed a commit ago, arriving
@@ -302,7 +308,8 @@ export function syncManifestHooks(cwd: string, ast: unknown): boolean {
 
   const changedHooks = applyManifestMap(parsed, "hooks", manifestHooks(ast))
   const changedValidators = applyManifestMap(parsed, "validators", manifestValidators(ast))
-  if (!changedHooks && !changedValidators) return false
+  const changedCache = applyManifestMap(parsed, "cache", manifestCache(ast))
+  if (!changedHooks && !changedValidators && !changedCache) return false
 
   writeFileSync(manifestPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8")
   return true
@@ -315,10 +322,15 @@ export function syncManifestHooks(cwd: string, ast: unknown): boolean {
  * when it decides whether the manifest predates the feature, and an empty object left behind by a
  * schema that no longer declares any is not the same statement.
  */
+/**
+ * `Record<string, unknown>` rather than a hook map: this never looks inside a value, it compares
+ * the serialised form and swaps it. It was typed to hooks only because hooks were the first caller,
+ * and that narrowness is what a third key would otherwise have had to work around.
+ */
 function applyManifestMap(
   manifest: Record<string, unknown>,
   key: string,
-  map: Record<string, Record<string, ManifestHookEntry>>,
+  map: Record<string, unknown>,
 ): boolean {
   const next = JSON.stringify(map)
   if (next === JSON.stringify(manifest[key] ?? {})) return false
