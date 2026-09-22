@@ -199,3 +199,83 @@ export function arenaFillPct(used: number, capacity: number): number | null {
   if (capacity <= 0) return null
   return Math.round((used * 1000) / capacity) / 10
 }
+
+/**
+ * What a `PATCH /admin/v1/config/rest` reports back about the row cache.
+ *
+ * §12.2 chose one switch for both caches, so enabling a table in the REST
+ * allowlist also registers it for the row cache. The two are still different
+ * things — the response cache takes any table, the row cache needs a primary
+ * key — and this is where the difference reaches a user.
+ */
+export interface RowCacheReconcile {
+  registered?: string[]
+  unregistered?: string[]
+  skipped?: { table: string; reason: string }[]
+  /** The database has no row cache: pg_keyspace absent, or no pg_monitor grant. */
+  unavailable?: boolean
+  error?: string
+}
+
+export interface ReconcileNote {
+  tone: "good" | "warn" | "neutral"
+  text: string
+}
+
+/**
+ * What the save just did to one table, in a sentence, or null when there is
+ * nothing worth saying.
+ *
+ * Null is the common case and the important one: a save that registered the
+ * table it was asked to is the outcome the user already expects, and a green
+ * banner confirming it on every save is noise that teaches people to stop
+ * reading the banner. Only the surprises get a sentence.
+ */
+export function reconcileNoteFor(table: string, r: RowCacheReconcile | undefined): ReconcileNote | null {
+  if (!r) return null
+  if (r.error) {
+    return {
+      tone: "warn",
+      // Deliberately explicit that the setting saved. The response cache is
+      // already live by the time the row cache is reconciled, and a message
+      // that only said "failed" would read as though nothing took effect.
+      text: `Cache settings saved, but the row cache could not be updated: ${r.error}`,
+    }
+  }
+  const skip = r.skipped?.find(s => s.table === table)
+  if (skip) {
+    return { tone: "warn", text: `Response cache enabled. Row cache not enabled: ${skip.reason}` }
+  }
+  if (r.unavailable) {
+    // Not a failure and not worth alarming anyone: self-host without
+    // pg_keyspace, or a role that cannot read its catalogue. The response cache
+    // is the whole feature on such a deployment and it works.
+    return { tone: "neutral", text: "Response cache enabled. The row cache is not available on this database." }
+  }
+  if (r.unregistered?.includes(table)) {
+    return { tone: "neutral", text: "Caching disabled for this table, and its rows are no longer cached in memory." }
+  }
+  return null
+}
+
+/**
+ * Whether to show the staleness promise beside the enable toggle.
+ *
+ * Only when the row cache is actually the thing serving reads. With it off, or
+ * unavailable, or incoherent, the response cache is the whole feature and it
+ * has no staleness window of its own beyond its TTL — promising one would
+ * invent a caveat, and §12.2's rule is that this sentence is a promise rather
+ * than a readout.
+ *
+ * `idle` counts: the cache is running and this table is about to be registered,
+ * so the window applies to what the user is in the middle of turning on. That
+ * is the state every project sits in before its first table is enabled, and it
+ * is the moment the sentence is most worth reading.
+ *
+ * A rule rather than an inline condition because it is the third of the four,
+ * and the other three are here with tests on them.
+ */
+export function showsStalenessPromise(status: RowCacheStatus | null): boolean {
+  if (!status) return false
+  return status.state === "participating" || status.state === "idle"
+}

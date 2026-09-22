@@ -4,7 +4,9 @@ import {
   describeStaleness,
   formatPct,
   hitRateOver,
+  reconcileNoteFor,
   rowCacheHeadline,
+  showsStalenessPromise,
   type RowCacheStatus,
 } from "../src/lib/cache-health.js"
 
@@ -152,5 +154,90 @@ describe("a percentage nobody has measured yet", () => {
     expect(arenaFillPct(0, 0)).toBeNull()
     expect(arenaFillPct(0, 1024)).toBe(0)
     expect(arenaFillPct(512, 1024)).toBe(50)
+  })
+})
+
+// ─── one switch, two caches: what the save says about the difference ─────────
+
+describe("what a save reports back about the row cache", () => {
+  it("says nothing when it did exactly what was asked", () => {
+    // A confirmation on every save is what teaches people to stop reading the
+    // line. Only the surprises get a sentence.
+    expect(reconcileNoteFor("orders", { registered: ["orders"] })).toBeNull()
+    expect(reconcileNoteFor("orders", undefined)).toBeNull()
+    expect(reconcileNoteFor("orders", {})).toBeNull()
+  })
+
+  it("says so when the table has no primary key", () => {
+    // The one case where one switch turns on one cache and not the other, and
+    // the only place a user can ever learn it. Silence here leaves someone
+    // believing they enabled something they did not.
+    const note = reconcileNoteFor("events", {
+      registered: ["orders"],
+      skipped: [{ table: "events", reason: "no primary key, so there is no row key to cache by" }],
+    })
+    expect(note?.tone).toBe("warn")
+    expect(note?.text).toContain("Response cache enabled")
+    expect(note?.text).toContain("no primary key")
+  })
+
+  it("does not report another table's skip as this table's", () => {
+    expect(reconcileNoteFor("orders", { skipped: [{ table: "events", reason: "no primary key" }] })).toBeNull()
+  })
+
+  it("keeps a failed reconcile from reading as a failed save", () => {
+    // The allowlist is saved and the response cache is live before the row
+    // cache is touched. A message that only said "failed" would read as though
+    // nothing took effect.
+    const note = reconcileNoteFor("orders", { error: "canceling statement due to statement timeout" })
+    expect(note?.tone).toBe("warn")
+    expect(note?.text).toMatch(/saved/)
+    expect(note?.text).toContain("canceling statement")
+  })
+
+  it("treats a database with no row cache as ordinary, not as a fault", () => {
+    // Self-host without pg_keyspace, or a role with no pg_monitor grant. The
+    // response cache is the whole feature there and it works.
+    const note = reconcileNoteFor("orders", { unavailable: true })
+    expect(note?.tone).toBe("neutral")
+    expect(note?.text).toContain("not available")
+  })
+
+  it("confirms the off case, where something did stop happening", () => {
+    const note = reconcileNoteFor("orders", { unregistered: ["orders"] })
+    expect(note?.tone).toBe("neutral")
+    expect(note?.text).toMatch(/no longer cached/)
+  })
+
+  it("reports a skip ahead of unavailable, because the skip is the specific answer", () => {
+    const note = reconcileNoteFor("events", {
+      unavailable: true,
+      skipped: [{ table: "events", reason: "no primary key" }],
+    })
+    expect(note?.text).toContain("no primary key")
+  })
+})
+
+describe("when the staleness promise is shown", () => {
+  it("is shown while the row cache is serving, and while it is waiting for tables", () => {
+    // idle is the state every project is in before its first table is enabled,
+    // which is the moment this sentence is most worth reading.
+    expect(showsStalenessPromise(status({ state: "participating" }))).toBe(true)
+    expect(showsStalenessPromise(status({ state: "idle", registrations: 0 }))).toBe(true)
+  })
+
+  it("is not shown when the row cache is not what is serving reads", () => {
+    // The response cache has no staleness window of its own beyond its TTL.
+    // Promising one here would invent a caveat — and on the incoherent path it
+    // would promise a bound that is precisely the thing not being met.
+    for (const state of ["off", "unavailable", "incoherent"] as const) {
+      expect(showsStalenessPromise(status({ state }))).toBe(false)
+    }
+  })
+
+  it("is not shown before anything is known", () => {
+    // Printing the 200ms default while the real number is still in flight is
+    // rule 3's failure in its quietest form.
+    expect(showsStalenessPromise(null)).toBe(false)
   })
 })
