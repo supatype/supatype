@@ -95,6 +95,8 @@ export interface DbFieldAnnotations {
 export interface PlatformFieldAnnotations {
   editor?: string
   readOnly?: boolean
+  /** Studio searches this column in the list view. Set by `Searchable<T>`. */
+  searchable?: boolean
 }
 
 export interface FieldAnnotations {
@@ -185,6 +187,8 @@ export interface ModelAstV2 {
       access: Record<string, unknown>
       hooks?: Record<string, unknown>
       validate?: Record<string, unknown>
+      /** Columns Studio's list view searches. See {@link emitModel}. */
+      searchFields?: string[]
       cache?: ModelCacheAst
     }
   }
@@ -419,6 +423,7 @@ export function emitModel(
   hooks: Record<string, unknown> = {},
   constraints: unknown[] = [],
   validators: Record<string, unknown> = {},
+  searchFields: string[] = [],
   cache?: ModelCacheAst | undefined,
 ): ModelAstV2 {
   return {
@@ -433,10 +438,15 @@ export function emitModel(
       // supatype-server reads them, Postgres never sees them.
       // Validators sit in `platform` beside `hooks`: both are enforced by the API layer on the
       // write path, and neither is something Postgres knows about.
+      // `searchFields` sits in `platform` because it is an admin-UI concern: Studio's list view
+      // renders its search box when a model has them and filters on the first. Postgres knows
+      // nothing about it, which is why it is not in `db` beside `indexes` — searching a column and
+      // indexing one are different asks, and `Indexed` already covers the latter.
       platform: {
         access,
         ...(Object.keys(hooks).length > 0 && { hooks }),
         ...(Object.keys(validators).length > 0 && { validate: validators }),
+        ...(searchFields.length > 0 && { searchFields }),
         // Cache sits in `platform` beside `hooks` for the same reason, and travels the same way:
         // the route manifest, not this AST. The schema engine re-serialises its own parsed struct
         // when it writes `ast_snapshot`, and its `PlatformModelAnnotations` knows only `access`

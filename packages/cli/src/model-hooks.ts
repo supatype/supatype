@@ -26,6 +26,8 @@ export function declaredHooks(ast: unknown): DeclaredHook[] {
 
   const out: DeclaredHook[] = []
   for (const model of models) {
+    // Guarded before the optional chains, not by them: see manifestHooks.
+    if (typeof model !== "object" || model === null) continue
     const shaped = model as {
       name?: string
       annotations?: { platform?: { hooks?: Record<string, unknown> } }
@@ -133,6 +135,10 @@ export function manifestHooks(ast: unknown): Record<string, Record<string, Manif
 
   const out: Record<string, Record<string, ManifestHookEntry>> = {}
   for (const model of models) {
+    // Guarded before the optional chains, not by them: `x?.y` protects against `x.y` being
+    // nullish, not against `x` itself being null, so a malformed entry in the models array would
+    // throw a TypeError out of `supatype push` rather than being skipped.
+    if (typeof model !== "object" || model === null) continue
     const shaped = model as {
       annotations?: {
         db?: { tableName?: string }
@@ -180,6 +186,8 @@ export function declaredValidators(ast: unknown): DeclaredValidator[] {
 
   const out: DeclaredValidator[] = []
   for (const model of models) {
+    // Guarded before the optional chains, not by them: see manifestHooks.
+    if (typeof model !== "object" || model === null) continue
     const shaped = model as {
       name?: string
       annotations?: { platform?: { validate?: Record<string, unknown> } }
@@ -211,6 +219,10 @@ export function manifestValidators(ast: unknown): Record<string, Record<string, 
 
   const out: Record<string, Record<string, ManifestHookEntry>> = {}
   for (const model of models) {
+    // Guarded before the optional chains, not by them: `x?.y` protects against `x.y` being
+    // nullish, not against `x` itself being null, so a malformed entry in the models array would
+    // throw a TypeError out of `supatype push` rather than being skipped.
+    if (typeof model !== "object" || model === null) continue
     const shaped = model as {
       annotations?: {
         db?: { tableName?: string }

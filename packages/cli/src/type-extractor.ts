@@ -108,7 +108,17 @@ export function extractSchemaAstFromTypes(
         )
       }
 
-      const { tableName, access, options, indexes, constraints, hooks, validators, cache } =
+      const {
+        tableName,
+        access,
+        options,
+        indexes,
+        constraints,
+        hooks,
+        validators,
+        searchFields,
+        cache,
+      } =
         parseModelMeta(
         metaArg,
         sourceFile,
@@ -129,6 +139,7 @@ export function extractSchemaAstFromTypes(
           hooks,
           constraints,
           validators,
+          searchFields,
           cache,
         ),
       )
@@ -476,6 +487,7 @@ function parseFieldType(
     fieldDefault: undefined as string | number | boolean | null | undefined,
     localized: false,
     notLocalized: false,
+    searchable: false,
     bounds: {} as DeclaredBounds,
   }
 
@@ -524,6 +536,10 @@ function parseFieldType(
         continue
       }
       case "Searchable":
+        // Used to unwrap and drop the declaration on the floor, so a schema saying a column was
+        // searchable compiled, pushed, and produced a Studio list view with no search box: the
+        // engine was never told, so the admin config carried no `searchFields` for Studio to read.
+        flags.searchable = true
         current = current.typeArguments?.[0] ?? current
         continue
       case "EditorReadOnly":
@@ -676,6 +692,7 @@ function parseFieldType(
     platform: {
       ...scalarBase.platform,
       ...(flags.editorReadOnly && { readOnly: true }),
+      ...(flags.searchable && { searchable: true }),
     },
   }
 
@@ -1657,6 +1674,7 @@ function parseMetaLiteral(
   softDelete?: boolean
   autoLocalize?: boolean
   versions?: ParsedVersions
+  searchable?: string[]
 } {
   const result: {
     tableName?: string
@@ -1665,6 +1683,7 @@ function parseMetaLiteral(
     softDelete?: boolean
     autoLocalize?: boolean
     versions?: ParsedVersions
+    searchable?: string[]
   } = {}
 
   if (!metaArg || !ts.isTypeLiteralNode(metaArg)) return result
@@ -1684,6 +1703,10 @@ function parseMetaLiteral(
       if (isBooleanLiteralType(member.type, false)) result.softDelete = false
     } else if (key === "autoLocalize" && isBooleanLiteralType(member.type, true)) {
       result.autoLocalize = true
+    } else if (key === "searchable" && ts.isTupleTypeNode(member.type)) {
+      result.searchable = member.type.elements
+        .map((el) => (ts.isLiteralTypeNode(el) && ts.isStringLiteral(el.literal) ? el.literal.text : null))
+        .filter((name): name is string => name !== null)
     } else if (key === "versions") {
       const versions = parseVersions(member.type)
       if (versions !== undefined) result.versions = versions
@@ -1728,6 +1751,7 @@ function parseModelMeta(
   constraints: unknown[]
   hooks: Record<string, ParsedModelHook>
   validators: Record<string, ParsedModelHook>
+  searchFields: string[]
   cache: ParsedModelCache | undefined
 } {
   const literal = parseMetaLiteral(metaArg, sourceFile)
@@ -1761,6 +1785,7 @@ function parseModelMeta(
     tableName,
     access,
     options,
+    searchFields: resolveSearchFields(literal.searchable, fields, modelName),
     indexes: parseModelIndexes(metaArg, sourceFile, fields),
     constraints: parseModelConstraints(metaArg, sourceFile, modelName, fields, resolveCtx),
     hooks: parseModelHooks(metaArg, sourceFile),
@@ -1811,6 +1836,42 @@ function assertCacheIsServable(
       )
     }
   }
+}
+
+/**
+ * The columns Studio's list view searches, from either way of saying so.
+ *
+ * Two spellings, because they answer different questions: `Searchable<string>` on the field says
+ * *this column is worth searching*, and `searchable: ["title", "name"]` on the model says *search
+ * these, in this order*, which matters because the list view filters on the first one. A model
+ * using both gets the explicit order first and any remaining flagged columns after it.
+ *
+ * A name that matches no field throws rather than being dropped. Silently ignoring it is how this
+ * whole feature came to be inert: the declaration compiled and nothing downstream ever saw it.
+ */
+function resolveSearchFields(
+  declared: string[] | undefined,
+  fields: Record<string, FieldAstV2>,
+  modelName: string,
+): string[] {
+  const ordered: string[] = []
+
+  for (const name of declared ?? []) {
+    if (fields[name] === undefined) {
+      throw new Error(
+        `Model "${modelName}": \`searchable\` names "${name}", which is not a field on this model. ` +
+          `Searchable columns are: ${Object.keys(fields).join(", ")}.`,
+      )
+    }
+    if (!ordered.includes(name)) ordered.push(name)
+  }
+
+  for (const [name, field] of Object.entries(fields)) {
+    if (field.annotations?.platform?.searchable !== true) continue
+    if (!ordered.includes(name)) ordered.push(name)
+  }
+
+  return ordered
 }
 
 /**
