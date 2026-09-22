@@ -1811,7 +1811,37 @@ function assertCacheIsServable(
       )
     }
   }
+
+  assertTtlIsInRange(cache.maxTtl, model)
 }
+
+/**
+ * The bounds the admin API already enforces, enforced where the number was written.
+ *
+ * `cache_max_ttl` is refused outside 0–86400 by `PATCH /admin/v1/config/rest`, and a declared cap
+ * is the same quantity. Left to the server, an out-of-range `maxTtl` reaches it as part of a
+ * manifest rather than a request — nothing refuses a manifest — and the ceiling it produces is
+ * whatever the arithmetic makes of it: a negative cap reads as "no cap declared" and permits more
+ * than the author asked for, which is the one direction a ceiling must never move in.
+ */
+function assertTtlIsInRange(ttl: number | undefined, model: string): void {
+  if (ttl === undefined) return
+  if (!Number.isInteger(ttl)) {
+    throw new Error(
+      `Model "${model}": \`cache.maxTtl\` must be a whole number of seconds, not ${ttl}.`,
+    )
+  }
+  if (ttl < 0 || ttl > MAX_CACHE_TTL_SECONDS) {
+    throw new Error(
+      `Model "${model}": \`cache.maxTtl\` must be between 0 and ${MAX_CACHE_TTL_SECONDS} seconds ` +
+        `(24 hours), not ${ttl}. That is the same bound the admin API enforces on the project-wide ` +
+        `cache TTL, and a declaration outside it is not a cap the runtime can apply.`,
+    )
+  }
+}
+
+/** The admin API's bound on a cache TTL, in seconds. */
+const MAX_CACHE_TTL_SECONDS = 86_400
 
 /**
  * Refuse a model that declares both `versions` and per-column rules.

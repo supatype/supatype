@@ -32,6 +32,7 @@ import type { ExtractedSchemaAstV2 } from "../schema-ast-v2.js"
 import { ensureFirstAdminUser } from "./admin.js"
 import { withAdminRoles } from "../studio-admin-roles.js"
 import { restoreSystemRelationTargets } from "../restore-system-relation-targets.js"
+import { freeTierCacheNote, seedApiConfigCache } from "../api-config-cache.js"
 import type { SupatypeProjectConfig } from "../project-config.js"
 import {
   resolveTarget,
@@ -181,6 +182,7 @@ async function pushViaTarget(
     }
     await generateTypesLocal(ast, config)
     await provisionLocalStorage(ast, config)
+    reportCacheSeeding(cwd, ast)
 
     // Local Studio only: a cloud/self-host push must not advertise the local
     // gateway URL from config, which may not even be running.
@@ -192,6 +194,12 @@ async function pushViaTarget(
   }
 
   info(`Pushed to ${target.mode} (${target.environment}).`)
+  // Cloud only. A self-host control plane has tiers too and they mean nothing there, so the same
+  // sentence would be telling a self-hosted project to upgrade something it already has.
+  if (target.mode === "cloud") {
+    const note = freeTierCacheNote((pushResult as { cache?: { tables?: string[]; honoured?: boolean } }).cache)
+    if (note) info(note)
+  }
   const envUrl = target.link?.environments?.[target.environment]?.apiUrl?.replace(/\/$/, "")
   if (envUrl) {
     plain(`\nProject API: ${envUrl}`)
@@ -243,6 +251,33 @@ async function deployHooksToTarget(
       environment: target.mode === "cloud" ? target.environment : undefined,
     }),
   ).then(() => info(`Deployed ${upload.handlers.length} hook(s)`))
+}
+
+/**
+ * Switch on what the schema newly declares, and say what is still in the way.
+ *
+ * Two things have to be true for a local `.cache({ server: true })` to be served: the schema
+ * declares the table, and the runtime allowlist has it on. A push writes the first, so without
+ * this the second is a trip to Studio that nothing in the output asks for — the symptom being a
+ * BYPASS header and a declaration that appears to do nothing.
+ *
+ * Never an error, and never a rewrite of an entry that already exists. See `seedApiConfigCache`.
+ */
+function reportCacheSeeding(cwd: string, ast: unknown): void {
+  const result = seedApiConfigCache(cwd, ast)
+  if (result === null) return
+
+  if (result.seeded.length > 0) {
+    info(`Server cache enabled for ${result.seeded.join(", ")} in .supatype/api-config.json`)
+  }
+  if (result.ttlIsOff) {
+    // A note rather than a fix. Zero is an off switch someone may have chosen, and a push that
+    // turned caching on project-wide would be overriding a decision rather than filling in a blank.
+    info(
+      `${result.declared.length} table(s) declare a cache, but cache_max_ttl is 0 — nothing is ` +
+        `cached until it is set, under API → REST → Settings or in .supatype/api-config.json.`,
+    )
+  }
 }
 
 /** The generated adapter, flattened to the name handlers were rewritten to import. */
