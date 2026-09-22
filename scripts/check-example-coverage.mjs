@@ -62,9 +62,6 @@ const CONSTANT = /^[A-Z0-9_]+$/
  * gap is known and names what closing it would take. Delete the line when an example covers it.
  */
 const ALLOWLIST = {
-  "@supatype/vue": "no example: the Vue bindings want a parity example alongside svelte and solid",
-  "@supatype/svelte": "no example: see @supatype/vue",
-  "@supatype/solid": "no example: see @supatype/vue",
   "@supatype/plugin-sdk": "no example: schema-side plugin registration needs a spike first",
   "@supatype/react-native": "covered by examples/expo-auth, which imports a subset",
   "@supatype/react-native-auth": "covered by examples/expo-auth, which imports a subset",
@@ -75,7 +72,9 @@ function walk(dir, out = []) {
     if (entry === "node_modules" || entry === "dist" || entry === ".next" || entry === ".supatype") continue
     const path = join(dir, entry)
     if (statSync(path).isDirectory()) walk(path, out)
-    else if (/\.(ts|tsx|mts)$/.test(entry) && !path.includes("/generated/")) out.push(path)
+    // `.vue` and `.svelte` count: their `<script>` blocks are where those bindings are imported,
+    // so skipping them would report the parity example as covering neither framework it covers.
+    else if (/\.(ts|tsx|mts|vue|svelte)$/.test(entry) && !path.includes("/generated/")) out.push(path)
   }
   return out
 }

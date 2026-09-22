@@ -14,9 +14,9 @@ never called still counts here: proving an example *runs* is what the live-stack
 | `@supatype/react-auth` | 3 | 3 | complete |
 | `@supatype/react-native` | 2 | 2 | covered by examples/expo-auth, which imports a subset |
 | `@supatype/react-native-auth` | 10 | 7 | covered by examples/expo-auth, which imports a subset |
-| `@supatype/vue` | 8 | 0 | no example: the Vue bindings want a parity example alongside svelte and solid |
-| `@supatype/svelte` | 11 | 0 | no example: see @supatype/vue |
-| `@supatype/solid` | 8 | 0 | no example: see @supatype/vue |
+| `@supatype/vue` | 8 | 6 | 2 not imported |
+| `@supatype/svelte` | 11 | 5 | 6 not imported |
+| `@supatype/solid` | 8 | 6 | 2 not imported |
 | `@supatype/plugin-sdk` | 18 | 0 | no example: schema-side plugin registration needs a spike first |
 
 ## Names no example imports
@@ -33,11 +33,11 @@ either deserves an example or deserves saying why not.
 
 **`@supatype/react-native-auth`** — `AuthThemeTokens`, `defaultAuthTheme`, `useAuthTheme`
 
-**`@supatype/vue`** — `MutationOperation`, `supatypePlugin`, `useAuth`, `useFunction`, `useMutation`, `useQuery`, `useSubscription`, `useSupatype`
+**`@supatype/vue`** — `MutationOperation`, `useSupatype`
 
-**`@supatype/svelte`** — `AuthStore`, `FunctionStore`, `MutationOperation`, `MutationStore`, `QueryStore`, `SubscriptionStore`, `createAuth`, `createFunction`, `createMutation`, `createQuery`, `createSubscription`
+**`@supatype/svelte`** — `AuthStore`, `FunctionStore`, `MutationOperation`, `MutationStore`, `QueryStore`, `SubscriptionStore`
 
-**`@supatype/solid`** — `MutationOperation`, `SupatypeContext`, `createAuth`, `createFunction`, `createMutation`, `createQuery`, `createSubscription`, `useSupatype`
+**`@supatype/solid`** — `MutationOperation`, `useSupatype`
 
 **`@supatype/plugin-sdk`** — `checkPluginApiVersion`, `clearPluginRegistry`, `defineComposite`, `defineProvider`, `defineWidget`, `detectConflicts`, `expandPluginComposites`, `generatePluginDocs`, `getFieldTypePlugin`, `getPluginFieldPgTypeMap`, `getPluginFieldTypeMap`, `getProviderPlugin`, `getRegisteredPlugins`, `isPluginDefinition`, `isSupatypePlugin`, `registerPlugin`, `sortByLoadOrder`, `validateProviders`
 
