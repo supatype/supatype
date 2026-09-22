@@ -43,6 +43,7 @@ export function mapEngineFields(rawFields: unknown): FieldConfig[] {
       ...(fi["options"] !== undefined ? { options: fi["options"] as Record<string, unknown> } : {}),
       ...(fi["readOnly"] !== undefined ? { readOnly: Boolean(fi["readOnly"]) } : {}),
       ...(fi["hidden"] !== undefined ? { hidden: Boolean(fi["hidden"]) } : {}),
+      ...(fi["searchable"] !== undefined ? { searchable: Boolean(fi["searchable"]) } : {}),
       // The field's declared bounds, carried through rather than rebuilt. Studio checks these
       // before it sends a write, so a dropped `validation` is a form that accepts a value the
       // database is about to refuse, and a Rules tab that reports a bounded field as unbounded.
@@ -72,7 +73,12 @@ export function normalizeAdminConfig(raw: unknown): AdminConfig {
       primaryKey: String(mo["primaryKey"] ?? "id"),
       fields,
       listColumns: (mo["listColumns"] as string[]) ?? [],
-      searchFields: (mo["searchFields"] as string[]) ?? [],
+      // A model may say which columns to search, or the columns may say it themselves with
+      // `Searchable<T>`. The explicit list wins where it exists — its order is meaningful, the
+      // list view filters on the first — and the field flags are the fallback, so a schema that
+      // only marks fields still gets a search box rather than silently getting none.
+      searchFields: (mo["searchFields"] as string[])
+        ?? fields.filter((f) => f.searchable === true).map((f) => f.name),
       publishable: Boolean(mo["publishable"] ?? mo["publishing"] ?? false),
       versions: normalizeVersions(mo["versions"]),
       softDelete: Boolean(mo["softDelete"] ?? false),

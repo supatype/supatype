@@ -5,7 +5,9 @@ import { afterEach, describe, expect, it } from "vitest"
 import {
   DEFAULT_HOOK_TIMEOUT_MS,
   declaredHooks,
+  declaredValidators,
   manifestHooks,
+  manifestValidators,
   syncManifestHooks,
   hooksReport,
   validateModelHooks,
@@ -374,5 +376,58 @@ export type Post = Model<{ id: UUID }, { tableName: "posts" }>
 
     const report = hooksReport(dir, join(dir, "functions"), ast)
     expect(report).toMatchObject({ missing: [], functionsDisabled: false, mapMissing: false })
+  })
+})
+
+describe("a models array with something malformed in it", () => {
+  /*
+   * `x?.y` guards `x.y` being nullish, not `x` itself being null — so every one of these read
+   * `model.annotations` off a null and threw a TypeError out of `supatype push`. Not reachable
+   * from our own extractor, which never emits a null model; reachable from a hand-edited or
+   * third-party AST, and the failure is a stack trace rather than the entry being skipped.
+   *
+   * Asserted over all four readers at once, because the hole was copied between them: three
+   * already had it when the fourth was written, and only the fourth's own test found it.
+   */
+  const malformed = {
+    models: [
+      null,
+      undefined,
+      "posts",
+      42,
+      [],
+      { annotations: null },
+      { annotations: { db: null, platform: null } },
+      // One real model at the end, so a reader that bailed out of the loop rather than skipping
+      // the entry would be caught too.
+      {
+        name: "Post",
+        annotations: {
+          db: { tableName: "posts" },
+          platform: {
+            hooks: { beforeChange: { function: "moderate-post" } },
+            validate: { title: { function: "check-title" } },
+          },
+        },
+      },
+    ],
+  }
+
+  it("skips the bad entries rather than throwing", () => {
+    expect(() => declaredHooks(malformed)).not.toThrow()
+    expect(() => manifestHooks(malformed)).not.toThrow()
+    expect(() => declaredValidators(malformed)).not.toThrow()
+    expect(() => manifestValidators(malformed)).not.toThrow()
+  })
+
+  it("still reads the models that are well formed", () => {
+    expect(declaredHooks(malformed)).toEqual([
+      { model: "Post", event: "beforeChange", function: "moderate-post" },
+    ])
+    expect(manifestHooks(malformed)["posts"]?.["beforeChange"]?.function).toBe("moderate-post")
+    expect(declaredValidators(malformed)).toEqual([
+      { model: "Post", field: "title", function: "check-title" },
+    ])
+    expect(manifestValidators(malformed)["posts"]?.["title"]?.function).toBe("check-title")
   })
 })
