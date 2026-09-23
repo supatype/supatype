@@ -1,4 +1,5 @@
 import { AuthClient } from "./auth.js"
+import { onIdentityChange } from "./identity.js"
 import { PreviewCredential } from "./preview.js"
 import { QueryBuilder, MutationBuilder, type HeadersProvider } from "./query.js"
 import { defaultQueryCache, type QueryCache } from "./query-cache.js"
@@ -49,8 +50,24 @@ export {
   PKCE_METHOD_S256,
 } from "./pkce.js"
 export { DRAFT_SCHEMA } from "./types.js"
+
+/**
+ * A client whose database type the holder does not know.
+ *
+ * What every framework binding's context, provider or injection key is typed at. A context is one
+ * value shared by many consumers, so it cannot be generic, and at the `AugmentedDatabase` default
+ * it rejected `createClient<Database>(...)`, the client every real project builds. `AnyDatabase` is
+ * the constraint every generated database satisfies, so the typed client goes in unchanged and each
+ * binding's `useSupatype<TDatabase>()` narrows it on the way back out.
+ *
+ * Named here rather than spelled out in four packages so the decision has one home. It is also not
+ * `any`: that widening is one TypeScript already allows, so `any` bought nothing and cost every
+ * consumer its checking.
+ */
+export type AnyClient = SupatypeClient<AnyDatabase>
 export type { QueryCacheOptions, CacheStatus } from "./query-cache.js"
 export { AuthClient } from "./auth.js"
+export { onIdentityChange, type IdentitySource } from "./identity.js"
 export { QueryBuilder, MutationBuilder, type HeadersProvider } from "./query.js"
 export { QueryCache, defaultQueryCache } from "./query-cache.js"
 export { StorageClient, BucketClient } from "./storage.js"
@@ -504,7 +521,6 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
     cookiePrefix: config.auth?.cookiePrefix,
     storage: config.auth?.storage,
   })
-  const realtime = new RealtimeClient(`${config.url}/realtime/v1`, baseHeaders)
   const queryCache = config.queryCache ?? defaultQueryCache
 
   const getAuthHeaders = async (): Promise<Record<string, string>> => {
@@ -547,11 +563,36 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
   // because an anon key carries no `sub` and the proxy requires one.
   const storage = new StorageClient(`${config.url}/storage/v1`, getAuthHeaders)
 
+  // The same provider the other sub-clients get, not `baseHeaders`.
+  //
+  // `baseHeaders` is built once and never mutated, so handing it over pinned every socket to the
+  // anon key for the life of the page. Realtime enforces RLS, so on a table that is not
+  // anon-readable the socket reported SUBSCRIBED and delivered nothing, which is exactly the
+  // failure the storage note above describes.
+  const realtime = new RealtimeClient(`${config.url}/realtime/v1`, getAuthHeaders)
+
   const onUnauthorized = config.serviceRoleKey
     ? undefined
     : (): Promise<void> => auth.ensureValidSession()
 
   const functions = new FunctionsClient(config.url, getAuthHeaders, doFetch, onUnauthorized)
+
+  // Signing in has to reach an already-open socket.
+  //
+  // Every binding subscribes when its component mounts, which is before the user has signed in, so
+  // the socket that matters is always one opened while signed out. Resolving the token per
+  // connection is not enough on its own; something has to tell the connection it is now stale.
+  //
+  // `onIdentityChange`, not `onAuthStateChange`: a refreshed token is a different string for the
+  // same person, and reconnecting on it would close and re-open the socket once an hour for the
+  // life of the tab, losing every change committed in the gap. That is the silent miss this whole
+  // change exists to remove, so it must not be reintroduced by the fix.
+  //
+  // The subscription is never torn down. The listener is held by `auth` and closes over `realtime`,
+  // both owned by this client, so the cycle is collected whole when the client is dropped.
+  onIdentityChange(auth, () => {
+    void realtime.reauthenticate()
+  })
 
   return {
     url: config.url,

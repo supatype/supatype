@@ -1,3 +1,5 @@
+import { asHeadersProvider, bearerToken, type HeadersProvider } from "./query.js"
+
 export type RealtimeEvent = "INSERT" | "UPDATE" | "DELETE" | "*"
 
 export interface RealtimePayload<TRow> {
@@ -86,18 +88,100 @@ type ServerMessage = ServerChangeMessage | ServerPresenceMessage | ServerBroadca
 
 export class RealtimeClient {
   private readonly url: string
-  private readonly headers: Record<string, string>
+  private readonly getHeaders: HeadersProvider
   private ws: WebSocket | null = null
   private channels = new Map<string, ChannelState>()
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private reconnectAttempts = 0
   private maxReconnectAttempts = 10
   private baseReconnectDelay = 1000
+  /** The token the live socket was opened with, so an auth change can tell whether it still holds. */
+  private currentToken: string | undefined
+  /**
+   * The connect in flight, used as its own identity.
+   *
+   * A counter was tried first and produced a socket that never came back: abandoning an attempt
+   * bumped the counter but left this field set, so the replacement connect returned at the
+   * one-at-a-time guard, and the abandoned attempt then bailed on the counter. Nothing was
+   * connected and nothing was scheduled. Clearing this field both abandons an attempt and unblocks
+   * the next one, so the two cannot disagree.
+   */
+  private attempt: Promise<void> | null = null
 
-  constructor(url: string, headers: Record<string, string>) {
+  /**
+   * `auth` is either a headers provider or a fixed set of headers: the same pair `QueryBuilder` and
+   * `MutationBuilder` accept, normalised by the same helper.
+   *
+   * The provider is what `createClient` passes, and it is why this takes two shapes. A fixed set of
+   * headers is read once at construction, so a socket opened before anybody signed in stayed anon
+   * for the life of the page: on a table that is not anon-readable it reported SUBSCRIBED and then
+   * delivered nothing, which is indistinguishable from a quiet table.
+   */
+  constructor(url: string, auth: Record<string, string> | HeadersProvider) {
     // Convert http(s) URL to ws(s) URL
     this.url = url.replace(/^http/, "ws")
-    this.headers = headers
+    this.getHeaders = asHeadersProvider(auth)
+  }
+
+  /** The token this socket should authenticate with, or undefined when there is none. */
+  private async resolveToken(): Promise<string | undefined> {
+    const token = bearerToken(await this.getHeaders())
+    return token === "" ? undefined : token
+  }
+
+  /**
+   * Re-open the socket if the token it was opened with is no longer the current one.
+   *
+   * `createClient` calls this on every auth change. Without it the token preference above would
+   * still not be enough: every binding subscribes on mount, which is before the user has signed in,
+   * so the socket that matters is always one that was opened while signed out.
+   */
+  async reauthenticate(): Promise<void> {
+    if (this.ws === null && this.attempt === null) return
+    let token: string | undefined
+    try {
+      token = await this.resolveToken()
+    } catch {
+      return
+    }
+    if (token === this.currentToken) return
+    // Passed on rather than resolved a second time, so the socket opens with the token that
+    // justified opening it. Resolving twice left `currentToken` describing a token nobody checked.
+    this.cycleConnection(token)
+  }
+
+  /** Abandon the current socket and immediately open a replacement, keeping every channel. */
+  private cycleConnection(token: string | undefined): void {
+    this.abandonSocket("reauthenticating")
+    for (const state of this.channels.values()) {
+      state.subscribed = false
+    }
+    this.ensureConnection(token)
+  }
+
+  /**
+   * Drop the socket and any connect in flight, without deciding what happens next.
+   *
+   * Handlers are detached before closing, because `onclose` schedules a backoff reconnect that
+   * would otherwise race whatever the caller does instead.
+   */
+  private abandonSocket(reason: string): void {
+    this.attempt = null
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+    const old = this.ws
+    this.ws = null
+    this.currentToken = undefined
+    if (old !== null) {
+      old.onopen = null
+      old.onmessage = null
+      old.onclose = null
+      old.onerror = null
+      old.close(1000, reason)
+    }
+    this.reconnectAttempts = 0
   }
 
   channel<TRow = Record<string, unknown>>(name: string): ChannelSubscription<TRow> {
@@ -184,17 +268,16 @@ export class RealtimeClient {
     }
   }
 
-  /** Disconnect the WebSocket entirely. */
+  /**
+   * Disconnect the WebSocket entirely.
+   *
+   * Shares `abandonSocket` with the re-authentication path, which is what stops an explicit
+   * disconnect from scheduling its own reconnect: the close handler is detached first. It also
+   * cancels a connect still waiting on its token, which would otherwise install a socket after the
+   * caller asked for none.
+   */
   disconnect(): void {
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer)
-      this.reconnectTimer = null
-    }
-    if (this.ws) {
-      this.ws.close(1000, "client disconnect")
-      this.ws = null
-    }
-    this.reconnectAttempts = 0
+    this.abandonSocket("client disconnect")
   }
 
   // ─── Internal ──────────────────────────────────────────────────────────
@@ -215,18 +298,65 @@ export class RealtimeClient {
     return state
   }
 
-  private ensureConnection(): void {
-    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
-      return
+  /** True while a socket exists and is usable. */
+  private isLive(): boolean {
+    if (this.ws === null) return false
+    return this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING
+  }
+
+  private ensureConnection(token?: string | undefined): void {
+    // One connect at a time: resolving the token is asynchronous, so two subscribes in the same
+    // tick would otherwise each open a socket and the second would orphan the first.
+    if (this.isLive() || this.attempt !== null) return
+
+    let attempt: Promise<void>
+    const isCurrent = (): boolean => this.attempt === attempt
+    // Started on a microtask so `this.attempt` is assigned before `openSocket` can ask whether it
+    // is still the current one. Called directly, the path that already has a token reaches that
+    // question with no await in front of it, compares against a handle nobody had stored yet, and
+    // abandons itself.
+    attempt = Promise.resolve().then(() => this.openSocket(isCurrent, token))
+    this.attempt = attempt
+    void attempt.finally(() => {
+      // Only if it is still ours. An attempt abandoned mid-flight must not clear the handle of the
+      // replacement that took its place.
+      if (this.attempt === attempt) this.attempt = null
+    })
+  }
+
+  /**
+   * Resolve a token, then open the socket with it.
+   *
+   * Split out of ensureConnection because the token is asynchronous: the session may have to be
+   * refreshed before it is known. `epoch` is read before the await so a socket abandoned in the
+   * meantime, by disconnect() or by reauthenticate(), does not install itself afterwards.
+   */
+  private async openSocket(
+    isCurrent: () => boolean,
+    known?: string | undefined,
+  ): Promise<void> {
+    let token = known
+    if (token === undefined) {
+      try {
+        token = await this.resolveToken()
+      } catch {
+        // A token that cannot be resolved is not a reason to open an unauthenticated socket: the
+        // server would accept it and deliver nothing, which reads as a broken table rather than a
+        // failed sign-in. Let the backoff try again.
+        if (isCurrent() && this.channels.size > 0) this.scheduleReconnect()
+        return
+      }
     }
+    // Abandoned while the token was resolving, by disconnect() or by a re-authentication that has
+    // already started its own attempt. Installing this socket now would orphan that one.
+    if (!isCurrent()) return
 
-    // Build URL with token from apikey header
-    const token = this.headers["apikey"] ?? this.headers["Authorization"]?.replace("Bearer ", "")
+    this.currentToken = token
     const wsUrl = token ? `${this.url}?token=${encodeURIComponent(token)}` : this.url
+    const ws = new WebSocket(wsUrl)
+    this.ws = ws
 
-    this.ws = new WebSocket(wsUrl)
-
-    this.ws.onopen = () => {
+    ws.onopen = () => {
       this.reconnectAttempts = 0
       // Re-subscribe all channels
       for (const state of this.channels.values()) {
@@ -236,7 +366,7 @@ export class RealtimeClient {
       }
     }
 
-    this.ws.onmessage = (event) => {
+    ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(String(event.data)) as ServerMessage
         this.handleServerMessage(msg)
@@ -245,7 +375,7 @@ export class RealtimeClient {
       }
     }
 
-    this.ws.onclose = () => {
+    ws.onclose = () => {
       this.ws = null
       // Mark all channels as unsubscribed
       for (const state of this.channels.values()) {
@@ -257,7 +387,7 @@ export class RealtimeClient {
       }
     }
 
-    this.ws.onerror = () => {
+    ws.onerror = () => {
       // onclose will fire after onerror
     }
   }
