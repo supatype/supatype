@@ -17,7 +17,7 @@
     "mode:svelte": "supatype app add --static ./dist/svelte",
     "mode:solid": "supatype app add --static ./dist/solid",
     "push": "supatype push --yes",
-    "keys": "supatype keys",
+    "keys": "supatype keys --write",
     "generate": "supatype generate",
     "typecheck": "tsc -p tsconfig.json --noEmit && vue-tsc -p tsconfig.vue.json --noEmit && svelte-check --tsconfig tsconfig.svelte.json && tsc -p tsconfig.solid.json --noEmit && tsc -p functions/tsconfig.json --noEmit"
   },

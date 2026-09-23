@@ -12,7 +12,7 @@
     "mode:marketing": "supatype app add --upstream http://host.docker.internal:3006",
     "mode:none": "supatype app remove",
     "push": "supatype push --yes",
-    "keys": "supatype keys",
+    "keys": "supatype keys --write",
     "generate": "supatype generate",
     "seed": "tsx --env-file-if-exists=.env seed.ts",
     "verify": "tsx --env-file-if-exists=.env verify.ts",
