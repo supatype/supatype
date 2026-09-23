@@ -10,7 +10,8 @@ export function registerKeys(program: Command): void {
     .description("Generate ANON_KEY and SERVICE_ROLE_KEY JWTs from your JWT_SECRET")
     .option("--secret <secret>", "JWT secret (defaults to JWT_SECRET env var or value in .env)")
     .option("--exp-years <years>", "Token expiry in years (default: 10)", "10")
-    .action((opts: { secret?: string; expYears: string }) => {
+    .option("--force", "Overwrite ANON_KEY / SERVICE_ROLE_KEY that already hold a value")
+    .action((opts: { secret?: string; expYears: string; force?: boolean }) => {
       const secret = opts.secret ?? resolveSecret()
       if (!secret) {
         error("JWT_SECRET not found. Set it in .env or pass --secret <value>")
@@ -23,17 +24,95 @@ export function registerKeys(program: Command): void {
         process.exit(1)
       }
 
-      const now = Math.floor(Date.now() / 1000)
-      const exp = now + expYears * 365 * 24 * 60 * 60
-
-      const anonKey = signJwt({ iss: "supatype", role: "anon", iat: now, exp }, secret)
-      const serviceKey = signJwt({ iss: "supatype", role: "service_role", iat: now, exp }, secret)
+      const { anonKey, serviceKey } = signKeyPair(secret, expYears)
 
       plain(`\nGenerated keys (valid for ${expYears} years):\n`)
       plain("ANON_KEY=" + anonKey)
       plain("SERVICE_ROLE_KEY=" + serviceKey)
-      plain("\nAdd these to your .env file. Do not commit .env to source control.")
+      plain("")
+
+      const written = writeKeysToEnv(process.cwd(), { anonKey, serviceKey }, opts.force === true)
+      if (written.path === null) {
+        plain("No .env here. Add these to one, and do not commit it to source control.")
+        return
+      }
+      if (written.names.length > 0) {
+        plain(`Written to .env: ${written.names.join(", ")}.`)
+      }
+      if (written.skipped.length > 0) {
+        plain(
+          `Left alone in .env: ${written.skipped.join(", ")} (already set). ` +
+            "Re-run with --force to replace them.",
+        )
+      }
+      plain("Do not commit .env to source control.")
     })
+}
+
+/**
+ * The env names each minted key is written to.
+ *
+ * The first is canonical and is always written; the rest are a front end's own spelling of the
+ * same value, and are only updated when the project already declares them.
+ */
+const KEY_ALIASES = {
+  anonKey: [
+    "ANON_KEY",
+    "VITE_SUPATYPE_ANON_KEY",
+    "PUBLIC_SUPATYPE_ANON_KEY",
+    "EXPO_PUBLIC_SUPATYPE_ANON_KEY",
+  ],
+  serviceKey: ["SERVICE_ROLE_KEY"],
+} as const satisfies Record<"anonKey" | "serviceKey", readonly string[]>
+
+export interface WriteKeysResult {
+  /** The .env written, or null when there is none here to write. */
+  path: string | null
+  names: string[]
+  skipped: string[]
+}
+
+/**
+ * Write a minted pair into `dir`'s .env, filling blanks and leaving set values alone.
+ *
+ * This command printed the pair and wrote nothing, while every README in this repository says it
+ * mints the keys into .env. Following the docs therefore produced a front end built with
+ * `anonKey: undefined` and a gateway refusing its every request, with nothing in the output
+ * saying so.
+ *
+ * Blanks only by default, for the reason {@link fillMissingKeys} gives: an anon key already in
+ * use is held by clients this command cannot reach, and silently reissuing it locks them out.
+ * `--force` is how someone says they meant to rotate.
+ */
+export function writeKeysToEnv(
+  dir: string,
+  keys: { anonKey: string; serviceKey: string },
+  force: boolean,
+): WriteKeysResult {
+  const envPath = resolve(dir, ".env")
+  if (!existsSync(envPath)) return { path: null, names: [], skipped: [] }
+
+  let content = readFileSync(envPath, "utf8")
+  const names: string[] = []
+  const skipped: string[] = []
+
+  for (const key of ["anonKey", "serviceKey"] as const) {
+    for (const [index, name] of KEY_ALIASES[key].entries()) {
+      // Presence of the line, not of a value: an alias declared and left blank is exactly the
+      // one to fill, and `readEnvVar` reports blank as undefined, so it cannot answer this.
+      if (index > 0 && !hasEnvLine(content, name)) continue
+      const current = readEnvVar(content, name)
+      if (current !== undefined && !force) {
+        skipped.push(name)
+        continue
+      }
+      content = upsertEnvVar(content, name, keys[key])
+      names.push(name)
+    }
+  }
+
+  if (names.length > 0) writeFileSync(envPath, content, "utf8")
+  return { path: envPath, names, skipped }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -89,6 +168,11 @@ function upsertEnvVar(content: string, key: string, value: string): string {
   if (re.test(content)) return content.replace(re, `${key}=${value}`)
   const sep = content.endsWith("\n") || content.length === 0 ? "" : "\n"
   return `${content}${sep}${key}=${value}\n`
+}
+
+/** Whether `.env` declares `key` at all, with or without a value. */
+function hasEnvLine(content: string, key: string): boolean {
+  return new RegExp(`^${key}=`, "m").test(content)
 }
 
 function readEnvVar(content: string, key: string): string | undefined {
