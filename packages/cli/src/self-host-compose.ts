@@ -16,6 +16,7 @@ import {
 } from "./project-config.js"
 import { hasEngineOverride, hasStudioOverride, pinnedVersion, fetchLatestVersion, VERSION_PIN_LOCAL } from "./binary-cache.js"
 import { buildKongDeclarative } from "./kong-config.js"
+import { keyspaceInPostgres } from "./cache-provider.js"
 import { readEnvFile } from "./env-file.js"
 import { fieldMaskingTierFromProject, type FieldMaskingTier } from "./field-masking-tier.js"
 import { projectHasVersionedModels } from "./model-versioning.js"
@@ -439,7 +440,7 @@ ${seaweedPorts}`
   // The RESP server the response cache and Kong's ACME certificates use.
   // Either a Valkey sidecar, or pg_keyspace inside the Postgres container --
   // one stateful service instead of two.
-  const keyspaceInPg = config.cache?.provider === "pg_keyspace"
+  const keyspaceInPg = keyspaceInPostgres(config)
   const respHost = keyspaceInPg ? "db" : "valkey"
   const valkeyBlock = keyspaceInPg
     ? `  # No \`valkey\` service: cache.provider is "pg_keyspace", so the RESP keyspace is
@@ -1025,7 +1026,7 @@ export function writeSelfHostCompose(
             acme: {
               email: acmeEmail,
               domain,
-              redisHost: config.cache?.provider === "pg_keyspace" ? "db" : "valkey",
+              redisHost: keyspaceInPostgres(config) ? "db" : "valkey",
             },
           }
         : {}),

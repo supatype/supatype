@@ -78,7 +78,7 @@ supatype self-host compose up -d
 When `mode = "standalone"` + `domain` + `tls.email` are all set, the generated stack:
 
 - publishes **Kong on `:80` and `:443`** (instead of the local `:18473`),
-- adds the RESP cert store the `acme` plugin needs — a **Valkey** service by default (persisted in the `valkey-data` volume), or the `db` container itself when `cache.provider` is `pg_keyspace` (see below),
+- adds the RESP cert store the `acme` plugin needs — served by the **`db` container itself** by default, or a **Valkey** service (persisted in the `valkey-data` volume) when `cache.provider` is `valkey` (see below),
 - enables Kong's global **`acme`** plugin, which provisions a Let's Encrypt certificate on the first HTTPS request and auto-renews it.
 
 Prerequisites: point the domain's DNS **A record** at the server's public IP and open ports **80** and **443** (HTTP-01 challenge needs `:80`). Everything — your app, REST, Auth, Storage, Realtime, Functions, and Studio — is then served behind `https://<domain>`.
@@ -87,29 +87,54 @@ Set `server.tls.provider = "none"` to keep a domain configured but stay on plain
 
 > A `supatype.local.config.ts` override with `server: { mode: "dev" }` keeps local `supatype dev` on HTTP. That file is gitignored, so HTTPS still activates on the production server where it does not exist.
 
-## Cache provider: Valkey or pg_keyspace
+## Cache provider: pg_keyspace or Valkey
 
 The REST response cache and Kong's ACME certificates both speak RESP, so the
-stack needs one RESP server. By default that is a Valkey sidecar. It can
-instead be `pg_keyspace`, the RESP keyspace inside the Postgres container, so
-the stack runs one stateful service rather than two:
+stack needs one RESP server. **By default that is `pg_keyspace`, inside the
+Postgres container** — one stateful service instead of two, one image to keep
+patched instead of two, and a cache whose memory is accounted for in the
+database's own reservation.
+
+The `db` service is started with the keyspace turned on
+(`SUPATYPE_KEYSPACE_ENABLED=1`, which the image reads before any server
+starts), serving RESP on `db:6379`; no `valkey` service or volume is generated,
+and both the server and Kong are pointed at `db`. The port is exposed to the
+compose network only — RESP on a public interface is an unauthenticated read of
+every cached response.
+
+To keep the Valkey sidecar instead:
 
 ```ts
-cache: { provider: "pg_keyspace" },
+cache: { provider: "valkey" },
 ```
 
-The `db` service is then started with the keyspace turned on
-(`SUPATYPE_KEYSPACE_ENABLED=1`, which the image reads before any server
-starts), serving RESP on `db:6379`; the `valkey` service and its volume are not
-generated, and both the server and Kong are pointed at `db`. The port is
-exposed to the compose network only — RESP on a public interface is an
-unauthenticated read of every cached response.
+Nothing about the cache's behaviour changes with the answer: both speak RESP
+and both hold the same keys. What changes is how many stateful services the
+stack runs, and where the memory comes from.
 
-**Requires a `supatype/postgres` image that supports the toggle.** Older images
-ignore `SUPATYPE_KEYSPACE_ENABLED` and start without a RESP listener, which
-looks like a cache that never hits and, with TLS on, a Kong that cannot store
-its certificate. Pin `versions.postgres` to a release at or after the one that
-introduced it, or leave it unpinned to track the latest.
+**`database.external` gets Valkey, and cannot get anything else.** pg_keyspace
+is loaded through `shared_preload_libraries`, which is a property of a Postgres
+this stack starts — against a database Supatype does not manage there is
+nothing to configure. The default resolves to Valkey there on its own; asking
+for `pg_keyspace` explicitly is refused rather than quietly downgraded, because
+a stack that runs the thing you switched away from is worse than one that will
+not start.
+
+**A pinned `versions.postgres` keeps Valkey.** The keyspace is served by the
+image, and the entrypoint honours `SUPATYPE_KEYSPACE_ENABLED` only from the
+release that introduced it. An older image ignores the variable and starts with
+no RESP listener — which is not an error anywhere: the stack comes up, the cache
+never hits, and with TLS on Kong cannot store its certificate. A pin says this
+project's image is fixed, and the default does not assume something about a
+fixed image it cannot check.
+
+So an unpinned project (tracking latest) gets the keyspace, and a pinned one
+keeps the sidecar until it says otherwise:
+
+```ts
+versions: { postgres: "17.2.9" },
+cache: { provider: "pg_keyspace" },
+```
 
 ### What survives a restart, and what does not
 
