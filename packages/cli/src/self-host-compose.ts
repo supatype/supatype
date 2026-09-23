@@ -582,6 +582,18 @@ ${dbDependency}`
       # WAL behind a replication slot it never reads.
       SUPATYPE_KEYSPACE_ROWCACHE_DECODE: "\${SUPATYPE_KEYSPACE_ROWCACHE_DECODE:-0}"
       SUPATYPE_KEYSPACE_ROWCACHE_READTHROUGH: "\${SUPATYPE_KEYSPACE_ROWCACHE_READTHROUGH:-0}"
+      # Both decoders this stack runs, because the image's setting REPLACES the allowlist.
+      #
+      # Turning the row cache on makes the entrypoint write
+      # \`output_plugin_libraries = 'supacache_keys'\`, and PostgreSQL then refuses every other
+      # plugin. Realtime decodes with wal2json, so a project that declared \`cache: { rows: true }\`
+      # silently lost realtime: the service stayed up, answered /health/ready with 200, and logged
+      # \`library "wal2json" may not be used as an output plugin\` once a second while every
+      # subscription reported SUBSCRIBED and delivered nothing.
+      #
+      # Named here rather than left to the image because only this file knows both features are in
+      # the same stack.
+      SUPATYPE_KEYSPACE_OUTPUT_PLUGIN_LIBRARIES: "supacache_keys, wal2json"
 `
     : ""
 
