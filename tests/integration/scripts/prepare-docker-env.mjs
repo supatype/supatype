@@ -16,6 +16,8 @@ const updates = {
   SUPATYPE_SERVER_IMAGE: process.env.SUPATYPE_SERVER_IMAGE ?? "supatype/server:local-dev",
   SUPATYPE_REALTIME_IMAGE: process.env.SUPATYPE_REALTIME_IMAGE ?? "supatype/realtime:ci-dev",
   SUPATYPE_CONTROL_PLANE_IMAGE: process.env.SUPATYPE_CONTROL_PLANE_IMAGE ?? "supatype/control-plane:ci-dev",
+  SUPATYPE_FUNCTIONS_WORKER_IMAGE:
+    process.env.SUPATYPE_FUNCTIONS_WORKER_IMAGE ?? "supatype/functions-worker:ci-dev",
 }
 
 let existing = ""
