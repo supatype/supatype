@@ -1,0 +1,42 @@
+{
+  "_comment": "Shared corpus for the identity-dependence rule, which exists twice: here, for supatype push (packages/cli/src/cache-identity-scope.ts), and in supatype-server (internal/studiobootstrap.IsIdentityDependent) for the runtime cache-scope decision. Two implementations of one rule drift silently — a push that says 'shareable' against a runtime that says 'not', or the reverse, which is a data leak. Both sides run these cases. Add a case here when you change either.",
+  "cases": [
+    { "name": "no rule at all",              "rule": null,                                                         "identityDependent": false },
+    { "name": "Public",                      "rule": { "type": "public" },                                          "identityDependent": false },
+    { "name": "Private",                     "rule": { "type": "private" },                                         "identityDependent": false },
+
+    { "name": "LoggedIn",                    "rule": { "type": "authenticated" },                                   "identityDependent": true },
+    { "name": "Role<admin>",                 "rule": { "type": "role" },                                            "identityDependent": true },
+    { "name": "Owner<user_id>",              "rule": { "type": "owner", "field": "user_id" },                       "identityDependent": true },
+    { "name": "In<...>",                     "rule": { "type": "in" },                                              "identityDependent": true },
+    { "name": "Exists<...>",                 "rule": { "type": "exists" },                                          "identityDependent": true },
+
+    { "name": "Eq<user_id, CurrentUser>",    "rule": { "type": "compare", "left": { "kind": "column" }, "right": { "kind": "authUid" } },   "identityDependent": true },
+    { "name": "CurrentUser on the left",     "rule": { "type": "compare", "left": { "kind": "authUid" }, "right": { "kind": "column" } },   "identityDependent": true },
+    { "name": "compare against a claim",     "rule": { "type": "compare", "left": { "kind": "column" }, "right": { "kind": "claim" } },     "identityDependent": true },
+    { "name": "compare against authRole",    "rule": { "type": "compare", "left": { "kind": "column" }, "right": { "kind": "authRole" } },  "identityDependent": true },
+
+    { "name": "Lte<published_at, Now> — row-dependent but shareable", "rule": { "type": "compare", "left": { "kind": "column" }, "right": { "kind": "now" } }, "identityDependent": false },
+    { "name": "column vs literal",           "rule": { "type": "compare", "left": { "kind": "column" }, "right": { "kind": "literal" } },   "identityDependent": false },
+    { "name": "column vs column",            "rule": { "type": "compare", "left": { "kind": "column" }, "right": { "kind": "column" } },    "identityDependent": false },
+
+    { "name": "IsNull on a column",          "rule": { "type": "nullCheck", "operand": { "kind": "column" } },       "identityDependent": false },
+    { "name": "IsNull on a claim",           "rule": { "type": "nullCheck", "operand": { "kind": "claim" } },        "identityDependent": true },
+
+    { "name": "Any of two shareable",        "rule": { "type": "any", "rules": [ { "type": "public" }, { "type": "compare", "left": { "kind": "column" }, "right": { "kind": "now" } } ] }, "identityDependent": false },
+    { "name": "Any with one caller-varying", "rule": { "type": "any", "rules": [ { "type": "public" }, { "type": "owner" } ] },             "identityDependent": true },
+    { "name": "All of two shareable",        "rule": { "type": "all", "rules": [ { "type": "public" }, { "type": "private" } ] },           "identityDependent": false },
+    { "name": "All with one caller-varying", "rule": { "type": "all", "rules": [ { "type": "public" }, { "type": "authenticated" } ] },     "identityDependent": true },
+    { "name": "Any with no rules",           "rule": { "type": "any", "rules": [] },                                 "identityDependent": false },
+
+    { "name": "Not over shareable",          "rule": { "type": "not", "rule": { "type": "public" } },                "identityDependent": false },
+    { "name": "Not over caller-varying",     "rule": { "type": "not", "rule": { "type": "owner" } },                 "identityDependent": true },
+    { "name": "Not over nothing",            "rule": { "type": "not" },                                              "identityDependent": false },
+
+    { "name": "nested any/all/not, shareable throughout", "rule": { "type": "all", "rules": [ { "type": "any", "rules": [ { "type": "public" } ] }, { "type": "not", "rule": { "type": "compare", "left": { "kind": "column" }, "right": { "kind": "now" } } } ] }, "identityDependent": false },
+    { "name": "caller-varying buried three deep",         "rule": { "type": "all", "rules": [ { "type": "any", "rules": [ { "type": "not", "rule": { "type": "compare", "left": { "kind": "column" }, "right": { "kind": "authUid" } } } ] } ] }, "identityDependent": true },
+
+    { "name": "unrecognised rule type",      "rule": { "type": "somethingNew" },                                     "identityDependent": true },
+    { "name": "rule with no type",           "rule": {},                                                             "identityDependent": true }
+  ]
+}

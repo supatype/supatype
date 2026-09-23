@@ -2,6 +2,7 @@ import { existsSync, readFileSync, realpathSync } from "node:fs"
 import { createHash } from "node:crypto"
 import { dirname, isAbsolute, relative, resolve } from "node:path"
 import ts from "typescript"
+import { isIdentityDependent, type AccessRuleNode } from "./cache-identity-scope.js"
 import {
   applyImportRename,
   createResolveContext,
@@ -107,7 +108,17 @@ export function extractSchemaAstFromTypes(
         )
       }
 
-      const { tableName, access, options, indexes, constraints, hooks, validators, searchFields } =
+      const {
+        tableName,
+        access,
+        options,
+        indexes,
+        constraints,
+        hooks,
+        validators,
+        searchFields,
+        cache,
+      } =
         parseModelMeta(
         metaArg,
         sourceFile,
@@ -129,6 +140,7 @@ export function extractSchemaAstFromTypes(
           constraints,
           validators,
           searchFields,
+          cache,
         ),
       )
     }
@@ -1740,6 +1752,7 @@ function parseModelMeta(
   hooks: Record<string, ParsedModelHook>
   validators: Record<string, ParsedModelHook>
   searchFields: string[]
+  cache: ParsedModelCache | undefined
 } {
   const literal = parseMetaLiteral(metaArg, sourceFile)
   const singleton = literal.singleton === true
@@ -1765,6 +1778,9 @@ function parseModelMeta(
   const access = parseModelAccess(metaArg, sourceFile, modelName, fields, resolveCtx)
   if (literal.versions !== undefined) assertVersionsWithoutFieldRules(access, modelName)
 
+  const cache = parseModelCache(metaArg, sourceFile)
+  if (cache !== undefined) assertCacheIsServable(cache, access, fields, modelName)
+
   return {
     tableName,
     access,
@@ -1774,6 +1790,51 @@ function parseModelMeta(
     constraints: parseModelConstraints(metaArg, sourceFile, modelName, fields, resolveCtx),
     hooks: parseModelHooks(metaArg, sourceFile),
     validators: parseModelValidators(metaArg, sourceFile, modelName, fields),
+    // Always present, possibly undefined: a conditional spread here infers the key away entirely
+    // and the caller cannot destructure it. emitModel is what decides whether it reaches the AST.
+    cache,
+  }
+}
+
+/**
+ * Refuse a cache declaration the runtime cannot honour, naming the model and the reason.
+ *
+ * Both checks exist because the failure they prevent is silent. A public entry on a caller-varying
+ * table serves one user's rows to another and looks like a cache hit. `rows: true` on a table with
+ * no primary key is simply never registered, and reads stay exactly as fast as they were with a
+ * setting in the schema saying otherwise.
+ *
+ * Checked here rather than left to the server for the same reason the constraint operands are: the
+ * message can name what the author wrote.
+ */
+function assertCacheIsServable(
+  cache: ParsedModelCache,
+  access: Record<string, unknown>,
+  fields: Record<string, FieldAstV2>,
+  model: string,
+): void {
+  if (cache.public === true) {
+    const read = access["read"] as AccessRuleNode | undefined
+    if (isIdentityDependent(read)) {
+      throw new Error(
+        `Model "${model}": \`cache.public\` cannot be used with an \`access.read\` rule that ` +
+          `varies by caller. A public cache entry is shared by everyone, so one caller's rows ` +
+          `would be served to another. Use \`cache: { enabled: true }\` for per-user entries, or ` +
+          `make the read rule row-independent — a rule like \`Lte<"published_at", Now>\` varies by ` +
+          `row without varying by caller and is safe to share.`,
+      )
+    }
+  }
+
+  if (cache.rows === true) {
+    const keyed = Object.keys(fields).filter((f) => fields[f]?.["primaryKey"] === true)
+    if (keyed.length === 0) {
+      throw new Error(
+        `Model "${model}": \`cache.rows\` needs a primary key, because the row cache's key IS the ` +
+          `primary key — there is nothing to cache by. Declare one, or drop \`rows\` and keep the ` +
+          `response cache, which has no such requirement.`,
+      )
+    }
   }
 }
 
@@ -3107,4 +3168,64 @@ function resolveIndexedAccessRule(
     }
   }
   return undefined
+}
+
+// ─── cache declaration (P8, plan §13) ────────────────────────────────────────
+
+/** The parsed `cache` block. Absent entirely when the model declared none. */
+export interface ParsedModelCache {
+  enabled?: boolean
+  maxTtl?: number
+  public?: boolean
+  rows?: boolean
+}
+
+/**
+ * Parse `cache: { ... }` off a model's meta argument.
+ *
+ * Shaped like `parseModelHooks`, and travelling the same way: onto the route manifest beside
+ * `hooks`, not into `annotations.platform`. The schema engine re-serialises its own parsed AST
+ * (`serde_json::to_value(&ast)`), and `PlatformModelAnnotations` carries only `access` and
+ * `search_fields` with no catch-all — so a key placed there is silently dropped on the way to the
+ * server rather than riding through. Verified rather than assumed; see plan §13.1.
+ */
+function parseModelCache(
+  metaArg: ts.TypeNode | undefined,
+  sourceFile: ts.SourceFile,
+): ParsedModelCache | undefined {
+  if (!metaArg || !ts.isTypeLiteralNode(metaArg)) return undefined
+
+  const prop = metaArg.members.find(
+    (member) => ts.isPropertySignature(member) && getPropertyName(member.name) === "cache",
+  )
+  if (!prop || !ts.isPropertySignature(prop) || !prop.type) return undefined
+  if (!ts.isTypeLiteralNode(prop.type)) return undefined
+
+  const parsed: ParsedModelCache = {}
+  for (const member of prop.type.members) {
+    if (!ts.isPropertySignature(member) || !member.type) continue
+    switch (getPropertyName(member.name)) {
+      case "enabled":
+        if (isBooleanLiteralType(member.type, true)) parsed.enabled = true
+        else if (isBooleanLiteralType(member.type, false)) parsed.enabled = false
+        break
+      case "public":
+        if (isBooleanLiteralType(member.type, true)) parsed.public = true
+        else if (isBooleanLiteralType(member.type, false)) parsed.public = false
+        break
+      case "rows":
+        if (isBooleanLiteralType(member.type, true)) parsed.rows = true
+        else if (isBooleanLiteralType(member.type, false)) parsed.rows = false
+        break
+      case "maxTtl": {
+        const ttl = parseNumericTypeArg(member.type, sourceFile)
+        if (ttl !== undefined) parsed.maxTtl = ttl
+        break
+      }
+    }
+  }
+  // A `cache: {}` with nothing readable in it is not a declaration. Returning an empty object
+  // would make the model "declared but permitting nothing", which reads the same as no block at
+  // all and would put an empty entry in every manifest.
+  return Object.keys(parsed).length > 0 ? parsed : undefined
 }
