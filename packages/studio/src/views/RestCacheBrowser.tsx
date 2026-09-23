@@ -7,6 +7,10 @@ import { Button, Card } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { SlidePanel } from "../components/SlidePanel.js"
+import { CacheHealthPanels } from "./CacheHealthPanels.js"
+import { useCacheHealth } from "../hooks/useCacheHealth.js"
+import { describeStaleness, reconcileNoteFor, showsStalenessPromise } from "../lib/cache-health.js"
+import type { ReconcileNote, RowCacheReconcile } from "../lib/cache-health.js"
 import { cn } from "../lib/utils.js"
 
 export interface RestTableCacheConfig {
@@ -72,6 +76,12 @@ export function RestCacheBrowser({
   const [tableCfg, setTableCfg] = useState<RestTableCacheConfig>({ enabled: false, allow_public: false })
   const [cacheMaxTTL, setCacheMaxTTL] = useState(0)
   const [settingsSaving, setSettingsSaving] = useState(false)
+  const [rowCacheNote, setRowCacheNote] = useState<ReconcileNote | null>(null)
+
+  // Only on the per-table screen, and only to read the staleness window. The
+  // project-wide screen gets the panels instead, and the two never render
+  // together — so this does not double the polling, it moves it.
+  const tableHealth = useCacheHealth(Boolean(showTableSettings && tableFilter))
 
   const listUrl = (() => {
     const params = new URLSearchParams({ limit: "50", cursor })
@@ -191,6 +201,11 @@ export function RestCacheBrowser({
         }),
       })
       if (!r.ok) throw new Error(String(r.status))
+      // The save succeeded; what the row cache made of it comes back in the
+      // same body and is a note, never an error. The response cache is already
+      // live either way.
+      const saved = (await r.json().catch(() => ({}))) as { row_cache?: RowCacheReconcile }
+      setRowCacheNote(reconcileNoteFor(tableFilter, saved.row_cache))
       await loadSettings()
     } catch (e) {
       setActionError(e instanceof Error ? e.message : "Save failed")
@@ -250,6 +265,13 @@ export function RestCacheBrowser({
       {error && <ErrorBanner message={error} />}
       {actionError && <ErrorBanner message={actionError} />}
 
+      {/*
+        Only on the project-wide screen. The per-model view is filtered to one table, and every
+        number these panels show is per keyspace or per database — an arena fill or a coherence
+        state shown under a table's name reads as that table's, and is not.
+      */}
+      {!tableFilter && <CacheHealthPanels />}
+
       {showTableSettings && tableFilter && (
         <Card>
           <div className="px-4 py-3 border-b border-border">
@@ -268,6 +290,21 @@ export function RestCacheBrowser({
               />
               Enable server cache for this table
             </label>
+            {/*
+              §12.2: the staleness window is a promise to a user, not an ops metric, and it belongs
+              at the point of enabling rather than on a dashboard. Read live from the row cache —
+              it grows past the 200ms default once participating databases outnumber the
+              invalidation pool, so a hardcoded sentence here would understate what is promised.
+
+              Shown only when the row cache is actually serving. With it off or unavailable the
+              response cache is the whole feature, and it has no staleness window of its own beyond
+              the TTL below — saying otherwise would invent a caveat.
+            */}
+            {tableCfg.enabled && showsStalenessPromise(tableHealth.rowCache) && (
+              <p className="text-xs text-muted-foreground pl-6">
+                {describeStaleness(tableHealth.rowCache!.stale_after_ms)}
+              </p>
+            )}
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
@@ -290,6 +327,24 @@ export function RestCacheBrowser({
             <Button size="xs" variant="primary" disabled={settingsSaving} onClick={() => void saveTableSettings()}>
               {settingsSaving ? "Saving…" : "Save cache settings"}
             </Button>
+            {/*
+              One switch, two caches. A table with no primary key gets the response cache and not
+              the row cache, and this is the only place that difference is ever visible — silence
+              would leave someone believing they had turned on something they had not.
+
+              Nothing is said when the save did exactly what was asked: a confirmation on every
+              save is what teaches people to stop reading the line.
+            */}
+            {rowCacheNote && (
+              <p
+                className={cn(
+                  "text-xs",
+                  rowCacheNote.tone === "warn" ? "text-yellow-400" : "text-muted-foreground",
+                )}
+              >
+                {rowCacheNote.text}
+              </p>
+            )}
           </div>
         </Card>
       )}
