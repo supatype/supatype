@@ -121,6 +121,17 @@ function StudioShell({ client, apiBaseUrl, demoMode, onEnterDemo }: StudioShellP
           setLoadState("error")
           return
         }
+        // A refused session, not a broken deployment. This used to fall through to "unknown",
+        // whose heading is "Could not load Studio config" — which reads as a fault in the stack
+        // and sends people to look at their schema, their engine and their containers. The config
+        // API is answering perfectly well; it is this browser's token that is no longer valid, and
+        // a server restart is enough to get here.
+        if (res.status === 401 || res.status === 403) {
+          setErrorKind("signed_out")
+          setErrorDetail(`HTTP_${res.status}`)
+          setLoadState("error")
+          return
+        }
         setErrorKind("unknown")
         setErrorDetail(`HTTP_${res.status}`)
         setLoadState("error")

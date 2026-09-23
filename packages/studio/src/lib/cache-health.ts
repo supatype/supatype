@@ -57,7 +57,8 @@ export interface RowCacheStatus {
   slot_lost: boolean
   beat_age_ms: number | null
   registrations: number
-  registrations_loaded: number
+  /** `boolean` in the extension's view, and on the wire. It was typed as a number here too. */
+  registrations_loaded: boolean
   entries: number
   hits_total: number
   misses_total: number

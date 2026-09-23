@@ -11,6 +11,7 @@ import { PlatformCtx } from "./hooks/usePlatform.js"
 import { Sidebar, getPageBreadcrumbs } from "./components/Sidebar.js"
 import { SecondaryPanel } from "./components/SecondaryPanel.js"
 import { TertiaryNav } from "./components/TertiaryNav.js"
+import { IconList } from "./components/icons.js"
 import { TopBar } from "./components/TopBar.js"
 import {
   ElevatedModeBanner,
@@ -82,6 +83,9 @@ function StudioLayout({ extensions, demoMode }: StudioLayoutProps): React.ReactE
   const location = useLocation()
   const configCtx = React.useContext(AdminConfigContext)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  // Tier 2 is docked from `md` up; below that it is an overlay this owns, because the
+  // toggle lives in the tier-3 rail and the panel is a sibling of it.
+  const [sectionPanelOpen, setSectionPanelOpen] = useState(false)
 
   // Close mobile sidebar on navigation
   useEffect(() => {
@@ -141,12 +145,27 @@ function StudioLayout({ extensions, demoMode }: StudioLayoutProps): React.ReactE
         )}
 
         {/* Tier 2: vertical secondary panel (section-specific items) */}
-        <SecondaryPanel />
+        <SecondaryPanel
+          open={sectionPanelOpen}
+          onClose={() => setSectionPanelOpen(false)}
+        />
 
         {/* Tier 3 + content column */}
         <div className="flex flex-col flex-1 overflow-hidden">
           {/* Tier 3: horizontal tertiary nav (sub-items within a section item) */}
-          <TertiaryNav />
+          <TertiaryNav
+            leading={
+              <button
+                type="button"
+                onClick={() => setSectionPanelOpen((v) => !v)}
+                aria-expanded={sectionPanelOpen}
+                aria-label="Toggle section navigation"
+                className="md:hidden mr-1 h-8 w-8 shrink-0 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent"
+              >
+                <IconList size={16} />
+              </button>
+            }
+          />
           <main
             id="studio-main"
             className="flex-1 overflow-y-auto p-6 bg-[hsl(var(--canvas))]"

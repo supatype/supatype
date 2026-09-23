@@ -3,7 +3,7 @@
 import React from "react"
 import type { AdminConfig } from "../config.js"
 
-export type StudioConfigErrorKind = "network" | "not_pushed" | "unknown"
+export type StudioConfigErrorKind = "network" | "not_pushed" | "signed_out" | "unknown"
 
 export interface StudioConfigErrorProps {
   kind: StudioConfigErrorKind
@@ -29,7 +29,9 @@ export function StudioConfigError({
       ? "Cannot reach Studio config API"
       : kind === "not_pushed"
         ? "No schema has been pushed yet"
-        : "Could not load Studio config"
+        : kind === "signed_out"
+          ? "Your session has expired"
+          : "Could not load Studio config"
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background px-6 py-12 text-center">
@@ -53,6 +55,13 @@ export function StudioConfigError({
             <li>Refresh this page.</li>
           </ol>
         )}
+        {kind === "signed_out" && (
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            The config API refused this session rather than failing to answer. Sign in again to
+            reload Studio. Nothing is wrong with your schema or your stack, and a restarted server
+            is enough to get here.
+          </p>
+        )}
         {kind === "unknown" && message && (
           <p className="text-sm text-muted-foreground whitespace-pre-wrap">{message}</p>
         )}
@@ -62,7 +71,7 @@ export function StudioConfigError({
             onClick={onRetry}
             className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
           >
-            Retry
+            {kind === "signed_out" ? "Sign in again" : "Retry"}
           </button>
           {onTryDemo != null && demoConfig != null && (
             <button

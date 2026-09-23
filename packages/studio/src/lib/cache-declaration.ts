@@ -162,6 +162,15 @@ export function rowCacheLine(
   table: string,
   live: RowCacheLiveState | null,
   staleness: (ms: number) => string,
+  /**
+   * Why the status could not be read, when it could not.
+   *
+   * Absent status and failed status are different answers and were rendered as the same one. The
+   * row-cache endpoint answered 502 for a while on every database where the feature was actually
+   * on, and the panel reported that as "the row cache is not running" — the exact words it uses
+   * for a database where it is off, on the one database where it was working.
+   */
+  readError?: string | null,
 ): RowCacheLine {
   if (declared?.[table]?.rows !== true) {
     return {
@@ -177,6 +186,17 @@ export function rowCacheLine(
   // Declared, so the rest is about whether it is actually happening — which is not the same
   // question, and a screen that answered only the first would report a stalled cache as a working
   // one on the strength of a line of schema.
+  if (!live && readError) {
+    return {
+      tone: "warn",
+      text:
+        `Your schema declares \`cache: { rows: true }\` for ${table}, but this screen could not ` +
+        `read the row cache's status: ${readError}. That is a fault in the status endpoint, not a ` +
+        `statement about the cache — it may well be running. Check the server logs rather than ` +
+        `the schema.`,
+    }
+  }
+
   if (!live || live.state === "unavailable" || live.state === "off") {
     return {
       tone: "warn",
