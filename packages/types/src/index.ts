@@ -149,7 +149,7 @@ export type BucketConfig<
   accept?: readonly string[]
   /** When set with `access`, drives `storage.objects` RLS for this bucket instead of model `access`. */
   access?: BucketStorageAccess
-  /** Raw AWS S3 / MinIO bucket policy JSON string; when set, overrides the default policy for public/custom flows. */
+  /** Raw AWS S3 / S3-compatible bucket policy JSON string; when set, overrides the default policy for public/custom flows. */
   s3BucketPolicy?: string
 }
 

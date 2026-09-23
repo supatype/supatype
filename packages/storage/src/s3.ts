@@ -59,7 +59,7 @@ export async function deleteBucket(name: string): Promise<void> {
 
 /**
  * Apply a public-read bucket policy so objects are directly accessible
- * at the S3/MinIO URL without going through the storage proxy.
+ * at the object store's URL without going through the storage proxy.
  * Called when a bucket is created or updated with public: true.
  */
 /** Apply a caller-supplied bucket policy document (must be valid IAM JSON). */
@@ -84,7 +84,7 @@ export async function applyRawBucketPolicy(name: string, policyJson: string): Pr
 
 export async function applyPublicPolicy(name: string): Promise<void> {
   // AWS requires BlockPublicPolicy/RestrictPublicBuckets to be off before a
-  // public bucket policy can be applied. MinIO ignores this call safely.
+  // public bucket policy can be applied. SeaweedFS ignores this call safely.
   try {
     await s3.send(new PutPublicAccessBlockCommand({
       Bucket: name,
