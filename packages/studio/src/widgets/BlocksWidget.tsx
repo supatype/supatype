@@ -1,7 +1,11 @@
 import React, { useState } from "react"
 import type { WidgetProps } from "./FieldWidget.js"
 import type { BlockTypeConfig, FieldConfig } from "../config.js"
-import { getLocalizedFieldValue, setLocalizedFieldValue } from "../lib/localized-field.js"
+import {
+  getLocalizedEditValue,
+  getLocalizedFallbackPlaceholder,
+  setLocalizedFieldValue,
+} from "../lib/localized-field.js"
 import { FieldWidget as FieldWidgetComponent } from "./FieldWidget.js"
 
 interface BlockEntry {
@@ -13,9 +17,21 @@ function resolveBlockSubFieldValue(
   blockData: Record<string, unknown>,
   fieldConfig: FieldConfig,
   currentLocale: string,
-  defaultLocale: string,
 ): unknown {
-  return getLocalizedFieldValue(
+  return getLocalizedEditValue(
+    blockData[fieldConfig.name],
+    fieldConfig.localized,
+    currentLocale,
+  )
+}
+
+function resolveBlockSubFieldPlaceholder(
+  blockData: Record<string, unknown>,
+  fieldConfig: FieldConfig,
+  currentLocale: string,
+  defaultLocale: string,
+): string | undefined {
+  return getLocalizedFallbackPlaceholder(
     blockData[fieldConfig.name],
     fieldConfig.localized,
     currentLocale,
@@ -48,11 +64,10 @@ export function BlocksWidget({
   currentLocale = "en",
   defaultLocale = "en",
 }: WidgetProps): React.ReactElement {
-  const blocksValue = getLocalizedFieldValue(
+  const blocksValue = getLocalizedEditValue(
     value,
     config.localized,
     currentLocale,
-    defaultLocale,
   )
   const blocks = (Array.isArray(blocksValue) ? blocksValue : []) as BlockEntry[]
   const blockTypes = (config.options?.["blockTypes"] ?? []) as BlockTypeConfig[]
@@ -110,8 +125,26 @@ export function BlocksWidget({
     setExpandedIndex(index + 1)
   }
 
+  // An item count has no native input attribute to lean on, so the bound has to be visible or the
+  // author only learns about it when the save is refused.
+  const { minItems, maxItems } = config.validation ?? {}
+  const itemBound =
+    minItems !== undefined || maxItems !== undefined
+      ? [
+          minItems !== undefined ? `at least ${minItems}` : null,
+          maxItems !== undefined ? `at most ${maxItems}` : null,
+        ]
+          .filter(Boolean)
+          .join(", ")
+      : null
+
   return (
     <div className="st-blocks-widget">
+      {itemBound !== null && (
+        <span className="st-char-count">
+          {blocks.length} block{blocks.length === 1 ? "" : "s"} ({itemBound})
+        </span>
+      )}
       {blocks.map((block, index) => {
         const blockType = blockTypes.find((bt) => bt.name === block.type)
         const isExpanded = expandedIndex === index
@@ -175,6 +208,11 @@ export function BlocksWidget({
                     key={`${fieldConfig.name}-${currentLocale}`}
                     config={fieldConfig}
                     value={resolveBlockSubFieldValue(
+                      block.data,
+                      fieldConfig,
+                      currentLocale,
+                    )}
+                    localePlaceholder={resolveBlockSubFieldPlaceholder(
                       block.data,
                       fieldConfig,
                       currentLocale,

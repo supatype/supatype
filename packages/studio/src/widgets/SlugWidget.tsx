@@ -16,7 +16,7 @@ export function SlugWidget({
 }: WidgetProps): React.ReactElement {
   const fromField = (config.options?.["from"] as string | undefined) ?? "title"
   const strValue = value === null || value === undefined ? "" : String(value)
-  const maxLength = config.validation?.["maxLength"] as number | undefined
+  const maxLength = config.validation?.maxLength
 
   /** User edited the slug input; while true, live title→slug sync is paused (create only). */
   const manualRef = useRef(false)

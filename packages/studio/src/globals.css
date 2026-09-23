@@ -4,9 +4,9 @@
 
 @layer base {
   :root {
-    --background: 240 10% 3.9%;
-    /** Main workspace — slightly deeper than chrome (sidebar / header). */
-    --canvas: 240 12% 2.8%;
+    /** Page chrome + main workspace (unified — no sidebar/content seam). */
+    --background: 240 8% 6%;
+    --canvas: 240 8% 6%;
     --foreground: 0 0% 98%;
     --card: 240 8% 6%;
     --card-foreground: 0 0% 98%;
@@ -73,6 +73,7 @@
 
 /* Inputs */
 .st-input, .st-textarea, .st-select, .st-search-input { width: 100%; padding: 0.5rem 0.75rem; border: 1px solid hsl(var(--border)); border-radius: 6px; font-size: 0.875rem; font-family: inherit; background: hsl(var(--background)); color: hsl(var(--foreground)); }
+.st-input::placeholder, .st-textarea::placeholder { color: hsl(var(--muted-foreground)); opacity: 0.75; }
 .st-input:focus, .st-textarea:focus, .st-select:focus, .st-search-input:focus { outline: none; border-color: hsl(var(--ring)); box-shadow: 0 0 0 3px hsla(var(--ring), 0.2); }
 .st-input-sm { padding: 0.3rem 0.5rem; font-size: 0.75rem; }
 .st-textarea { min-height: 100px; resize: vertical; }
@@ -81,7 +82,8 @@
 /* Fields / Forms */
 .st-field-label { display: block; font-size: 0.8rem; font-weight: 600; color: hsl(var(--foreground)); margin-bottom: 0.25rem; }
 .st-field-required { color: hsl(var(--destructive)); }
-.st-field-localized { color: hsl(var(--primary)); font-size: 0.7rem; margin-left: 0.25rem; }
+.st-field-localized { display: inline-flex; align-items: center; color: hsl(var(--primary)); margin-left: 0.25rem; vertical-align: middle; }
+.st-field-localized-icon { display: block; }
 .st-field-input { margin-bottom: 1rem; }
 .st-field--meta .st-field-label { font-size: 0.7rem; font-weight: 500; color: hsl(var(--muted-foreground)); text-transform: uppercase; letter-spacing: 0.04em; }
 .st-field--meta .st-field-input { margin-bottom: 0.75rem; }
@@ -90,15 +92,16 @@
 .st-edit-layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 1.5rem; align-items: start; }
 .st-edit-main { min-width: 0; }
 .st-edit-sidebar { position: sticky; top: 1rem; display: flex; flex-direction: column; gap: 1rem; padding: 1rem; background: hsl(var(--card)); border: 1px solid hsl(var(--border)); border-radius: 8px; }
-.st-edit-sidebar-title { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: hsl(var(--muted-foreground)); margin-bottom: 0.75rem; }
-.st-edit-sidebar-section { border-bottom: 1px solid hsl(var(--border)); padding-bottom: 0.5rem; }
+/* Typography only. It used to carry `margin-bottom` too, which meant the first heading placed in
+   a row rather than above a stack had to cancel it with a utility class at the call site: a
+   global rule with an invisible exception living in another file. The section owns the spacing. */
+.st-edit-sidebar-title { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: hsl(var(--muted-foreground)); }
+.st-edit-sidebar-section { display: flex; flex-direction: column; gap: 0.75rem; border-bottom: 1px solid hsl(var(--border)); padding-bottom: 0.5rem; }
 .st-edit-sidebar-actions { display: flex; flex-direction: column; gap: 0.5rem; }
 .st-edit-sidebar-actions .st-btn { width: 100%; justify-content: center; }
-.st-edit-view--with-preview .st-edit-main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1.5rem; align-items: start; }
 @media (max-width: 1024px) {
   .st-edit-layout { grid-template-columns: 1fr; }
   .st-edit-sidebar { position: static; }
-  .st-edit-view--with-preview .st-edit-main { grid-template-columns: 1fr; }
 }
 
 /* Tables */
@@ -107,6 +110,7 @@
 .st-table th, .st-table td { text-align: left; padding: 0.625rem 0.75rem; border-bottom: 1px solid hsl(var(--border)); font-size: 0.875rem; }
 .st-table th { font-weight: 600; color: hsl(var(--muted-foreground)); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; cursor: pointer; user-select: none; }
 .st-table tr:hover td { background: hsl(var(--accent)); }
+.st-table-row { cursor: pointer; }
 .st-table-check { width: 2.5rem; text-align: center; }
 .st-table-loading, .st-table-empty { text-align: center; padding: 2rem; color: hsl(var(--muted-foreground)); }
 .st-sort-indicator { font-size: 0.7rem; margin-left: 0.25rem; }
@@ -162,8 +166,12 @@
 .st-live-preview-header { display: flex; align-items: center; justify-content: space-between; padding: 0.5rem 0.75rem; background: hsl(var(--secondary)); border-bottom: 1px solid hsl(var(--border)); }
 .st-live-preview-label { font-size: 0.75rem; font-weight: 600; color: hsl(var(--muted-foreground)); }
 .st-live-preview-iframe { width: 100%; height: 500px; border: none; }
+.st-live-preview-empty { text-align: center; padding: 2rem; color: hsl(var(--muted-foreground)); font-size: 0.875rem; }
 
 /* Widgets */
+.st-field-error { font-size: 0.75rem; color: hsl(var(--destructive)); margin-top: 0.25rem; }
+.st-field--invalid .st-input,
+.st-field--invalid .st-textarea { border-color: hsl(var(--destructive)); }
 .st-char-count { font-size: 0.7rem; color: hsl(var(--muted-foreground)); float: right; margin-top: 0.25rem; }
 .st-widget-slug-row { display: flex; align-items: center; gap: 0.5rem; width: 100%; }
 .st-widget-slug-input { flex: 1; min-width: 0; }
@@ -180,8 +188,12 @@
 
 /* Image widget */
 .st-image-preview { display: flex; align-items: center; gap: 0.75rem; }
+.st-image-preview--fallback { opacity: 0.85; }
 .st-image-preview-actions { display: flex; flex-direction: column; gap: 0.375rem; }
 .st-image-thumb { width: 80px; height: 80px; object-fit: cover; border-radius: 6px; border: 1px solid hsl(var(--border)); }
+.st-image-thumb--fallback { opacity: 0.55; }
+.st-image-fallback-hint { display: flex; flex-direction: column; gap: 0.5rem; }
+.st-image-fallback-text { font-size: 0.8rem; color: hsl(var(--muted-foreground)); max-width: 14rem; }
 .st-image-upload { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; padding: 1.5rem; border: 2px dashed hsl(var(--border)); border-radius: 8px; color: hsl(var(--muted-foreground)); justify-content: center; }
 .st-image-widget--dragover { border-color: hsl(var(--primary)); }
 

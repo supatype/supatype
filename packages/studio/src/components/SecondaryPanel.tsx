@@ -5,6 +5,8 @@ import { useNavigate, useLocation } from "react-router-dom"
 import { AdminConfigContext } from "../hooks/useAdminConfig.js"
 import { useStudioClient } from "../StudioCore.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
+import { usePlatform } from "../hooks/usePlatform.js"
+import { Badge } from "./ui.js"
 import type { AdminConfig } from "../config.js"
 import { cn } from "../lib/utils.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
@@ -12,7 +14,26 @@ import { Button } from "./ui.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type NavItem = { label: string; href: string; activeWhen?: (path: string, search: string) => boolean }
+/**
+ * Why a destination cannot be reached from this deployment.
+ *
+ * Neither kind is hidden. An entry that vanishes teaches nothing: somebody looking for backups
+ * concludes Supatype has none, rather than that this deployment does not. So the item stays, cannot
+ * be clicked, and says which of the two it is.
+ *
+ *   - `cloud` — the feature exists, on Supatype Cloud. Self-host is not going to grow read replicas
+ *     or point-in-time backups, so "coming soon" would be a lie; this is where it is.
+ *   - `planned` — not built yet, anywhere. The nav is the roadmap people actually read.
+ */
+type Availability = { kind: "cloud" } | { kind: "planned"; note: string }
+
+type NavItem = {
+  label: string
+  href: string
+  activeWhen?: (path: string, search: string) => boolean
+  /** Absent when the item works here, which is the common case. */
+  unavailable?: Availability
+}
 type NavGroup = { label?: string; items: NavItem[] }
 type SectionDef = { title: string; groups: NavGroup[] }
 interface FunctionMeta {
@@ -35,8 +56,10 @@ const STATIC_SECTIONS: Record<string, SectionDef> = {
           { label: "Overview",   href: "/database/overview" },
           { label: "Tables",     href: "/database/tables" },
           { label: "Views",      href: "/database/views" },
-          { label: "Functions",  href: "/database/functions" },
+          { label: "Functions",  href: "/database/functions", unavailable: { kind: "planned", note: "Database function browser is not built yet" } },
           { label: "Triggers",   href: "/database/triggers" },
+          { label: "Indexes",    href: "/database/indexes" },
+          { label: "Constraints", href: "/database/constraints" },
           { label: "Types",      href: "/database/types" },
           { label: "Roles",      href: "/database/roles" },
           { label: "Extensions", href: "/database/extensions" },
@@ -52,10 +75,10 @@ const STATIC_SECTIONS: Record<string, SectionDef> = {
       {
         label: "Coming Soon",
         items: [
-          { label: "Wrappers",    href: "/database/wrappers" },
-          { label: "Replication", href: "/database/replication" },
-          { label: "Warehouse",   href: "/database/warehouse" },
-          { label: "Backups",     href: "/database/backups" },
+          { label: "Wrappers",    href: "/database/wrappers", unavailable: { kind: "planned", note: "Foreign data wrappers are not built yet" } },
+          { label: "Replication", href: "/database/replication", unavailable: { kind: "cloud" } },
+          { label: "Warehouse",   href: "/database/warehouse", unavailable: { kind: "cloud" } },
+          { label: "Backups",     href: "/database/backups", unavailable: { kind: "cloud" } },
         ],
       },
     ],
@@ -92,9 +115,9 @@ const STATIC_SECTIONS: Record<string, SectionDef> = {
       {
         label: "Coming Soon",
         items: [
-          { label: "Hooks",    href: "/authentication/hooks" },
-          { label: "SSO",      href: "/authentication/sso" },
-          { label: "Security", href: "/authentication/security" },
+          { label: "Hooks",    href: "/authentication/hooks", unavailable: { kind: "planned", note: "Auth hooks are not built yet" } },
+          { label: "SSO",      href: "/authentication/sso", unavailable: { kind: "cloud" } },
+          { label: "Security", href: "/authentication/security", unavailable: { kind: "planned", note: "Attack protection settings are not built yet" } },
         ],
       },
     ],
@@ -108,8 +131,8 @@ const STATIC_SECTIONS: Record<string, SectionDef> = {
     groups: [{
       items: [
         { label: "Logs",     href: "/observability/logs" },
-        { label: "Metrics",  href: "/observability/metrics" },
-        { label: "Advisors", href: "/observability/advisors" },
+        { label: "Metrics",  href: "/observability/metrics", unavailable: { kind: "planned", note: "Metrics are not built yet" } },
+        { label: "Advisors", href: "/observability/advisors", unavailable: { kind: "planned", note: "Advisors are not built yet" } },
       ],
     }],
   },
@@ -117,10 +140,10 @@ const STATIC_SECTIONS: Record<string, SectionDef> = {
     title: "Intelligence",
     groups: [{
       items: [
-        { label: "Usage",   href: "/ai/usage" },
-        { label: "Vectors", href: "/ai/vectors" },
-        { label: "RAG",     href: "/ai/rag" },
-        { label: "Agents",  href: "/ai/agents/list" },
+        { label: "Usage",   href: "/ai/usage", unavailable: { kind: "cloud" } },
+        { label: "Vectors", href: "/ai/vectors", unavailable: { kind: "planned", note: "Vector management is not built yet" } },
+        { label: "RAG",     href: "/ai/rag", unavailable: { kind: "planned", note: "RAG pipelines are not built yet" } },
+        { label: "Agents",  href: "/ai/agents/list", unavailable: { kind: "planned", note: "Agents are not built yet" } },
       ],
     }],
   },
@@ -211,6 +234,9 @@ function buildModelsSection(config: AdminConfig | null): SectionDef {
 export function SecondaryPanel(): React.ReactElement | null {
   const location = useLocation()
   const navigate = useNavigate()
+  // Cloud sets both; outside cloud there is no platform to ask, which is the signal.
+  const platform = usePlatform()
+  const onCloud = platform.platformUrl !== undefined && platform.projectRef !== undefined
   const client = useStudioClient()
   const config = React.useContext(AdminConfigContext)
   const path = location.pathname
@@ -348,6 +374,37 @@ export function SecondaryPanel(): React.ReactElement | null {
                   path.startsWith(item.href + "/") ||
                   path.startsWith(item.href + "?")
                 )
+
+              // Cloud runs these already, so on cloud they are ordinary entries. It is only
+              // self-host where the destination does not exist.
+              const blocked =
+                item.unavailable?.kind === "cloud" && onCloud ? undefined : item.unavailable
+
+              if (blocked !== undefined) {
+                const note =
+                  blocked.kind === "cloud"
+                    ? "Available on Supatype Cloud"
+                    : blocked.note
+                return (
+                  <span
+                    key={item.href}
+                    title={note}
+                    aria-disabled="true"
+                    className={cn(
+                      "flex items-center justify-between w-full px-4 py-1.5 text-[13px]",
+                      "text-muted-foreground/50 cursor-not-allowed select-none",
+                    )}
+                  >
+                    {item.label}
+                    {blocked.kind === "cloud" && (
+                      <Badge variant="blue" className="ml-2 shrink-0">
+                        Cloud
+                      </Badge>
+                    )}
+                  </span>
+                )
+              }
+
               return (
                 <button
                   key={item.href}

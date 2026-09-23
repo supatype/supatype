@@ -98,7 +98,7 @@ describe("VERSION_PIN_LOCAL + resolveBinary", () => {
 
   it("throws when versions.engine is local without overrides.engine", async () => {
     const cfg = baseConfig()
-    cfg.versions.engine = VERSION_PIN_LOCAL
+    cfg.versions!.engine = VERSION_PIN_LOCAL
     await expect(resolveBinary("engine", cfg)).rejects.toThrow(/overrides\.engine/)
   })
 
@@ -106,7 +106,7 @@ describe("VERSION_PIN_LOCAL + resolveBinary", () => {
     const fakeBin = join(tmp, "supatype-engine-local")
     writeFileSync(fakeBin, "#")
     const cfg = baseConfig({ engine: fakeBin })
-    cfg.versions.engine = VERSION_PIN_LOCAL
+    cfg.versions!.engine = VERSION_PIN_LOCAL
     const p = await resolveBinary("engine", cfg)
     expect(p.replace(/\\/g, "/")).toContain("supatype-engine-local")
   })

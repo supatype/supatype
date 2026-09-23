@@ -1,28 +1,31 @@
 import type {
   AuthChangeEvent,
+  AuthFlowType,
   AuthMFAChallengeResponse,
   AuthMFAEnrollResponse,
   AuthMFAListFactorsResponse,
+  AuthStorage,
   Factor,
   OtpType,
   Session,
   SupatypeError,
   User,
 } from "./types.js"
+import {
+  createCodeChallengeS256,
+  generateCodeVerifier,
+  PKCE_METHOD_S256,
+} from "./pkce.js"
 
 type AuthListener = (event: AuthChangeEvent, session: Session | null) => void
-
-interface AuthStorageAdapter {
-  getItem(key: string): string | null
-  setItem(key: string, value: string): void
-  removeItem(key: string): void
-}
 
 interface AuthClientOptions {
   initialSession?: Session | undefined
   persistSession?: boolean | undefined
   storageKey?: string | undefined
   cookiePrefix?: string | undefined
+  /** Custom session store (replaces browser localStorage/cookies when set). */
+  storage?: AuthStorage | undefined
 }
 
 const DEFAULT_STORAGE_KEY = "supatype.auth.session"
@@ -38,9 +41,17 @@ export class AuthClient {
   private readonly persistSession: boolean
   private readonly storageKey: string
   private readonly cookieName: string
-  private readonly storage: AuthStorageAdapter | null
+  private readonly storage: AuthStorage | null
+  /** When true, session is also mirrored to document.cookie (browser default path only). */
+  private readonly useCookies: boolean
+  /** Resolves when async storage hydration completes (immediate when not used). */
+  private readonly ready: Promise<void>
   /** Pending auto-refresh timer; refreshes the access token shortly before it expires. */
   private refreshTimer: ReturnType<typeof setTimeout> | null = null
+  /** Dedupes concurrent refresh attempts (getSession + auto-refresh). */
+  private refreshInFlight: Promise<void> | null = null
+  /** In-memory PKCE code_verifier for the in-flight OAuth / OTP redirect. */
+  private codeVerifier: string | null = null
 
   constructor(url: string, baseHeaders: Record<string, string>, opts: AuthClientOptions = {}) {
     this.url = url
@@ -49,10 +60,12 @@ export class AuthClient {
     this.storageKey = opts.storageKey ?? DEFAULT_STORAGE_KEY
     const cookiePrefix = opts.cookiePrefix ?? DEFAULT_COOKIE_PREFIX
     this.cookieName = `${cookiePrefix}-auth-token`
-    this.storage = this.getBrowserStorage()
+    this.useCookies = opts.storage === undefined
+    this.storage = opts.storage ?? this.getBrowserStorage()
 
     if (opts.initialSession !== undefined) {
       this.currentSession = opts.initialSession
+      this.ready = Promise.resolve()
       if (DEBUG_AUTH) {
         console.debug("[supatype:auth] constructor initialSession provided", {
           hasSession: true,
@@ -60,19 +73,110 @@ export class AuthClient {
         })
       }
     } else if (this.persistSession) {
-      this.currentSession = this.loadPersistedSession()
-      if (DEBUG_AUTH) {
-        console.debug("[supatype:auth] constructor loaded persisted session", {
-          hasSession: this.currentSession !== null,
-          userId: this.currentSession?.user.id ?? null,
-          storageKey: this.storageKey,
-          cookieName: this.cookieName,
-        })
+      if (opts.storage !== undefined) {
+        this.ready = this.hydrateFromStorage()
+      } else {
+        this.currentSession = this.loadPersistedSession()
+        this.ready = Promise.resolve()
+        if (DEBUG_AUTH) {
+          console.debug("[supatype:auth] constructor loaded persisted session", {
+            hasSession: this.currentSession !== null,
+            userId: this.currentSession?.user.id ?? null,
+            storageKey: this.storageKey,
+            cookieName: this.cookieName,
+          })
+        }
       }
+    } else {
+      this.ready = Promise.resolve()
     }
     // Keep the access token fresh while the app is open (and refresh immediately
     // if a persisted session loaded already expired).
     this.scheduleAutoRefresh()
+    if (this.currentSession !== null && this.isAccessTokenExpired(this.currentSession)) {
+      void this.ensureValidSession()
+    }
+  }
+
+  /** Resolves when custom storage hydration finishes (no-op resolve when sync). */
+  whenReady(): Promise<void> {
+    return this.ready
+  }
+
+  private async hydrateFromStorage(): Promise<void> {
+    try {
+      const session = await this.loadPersistedSessionAsync()
+      if (session === null) return
+      this.currentSession = session
+      this.scheduleAutoRefresh()
+      if (this.isAccessTokenExpired(session)) {
+        await this.ensureValidSessionInternal()
+      }
+      this._emitEvent("SIGNED_IN", session)
+      if (DEBUG_AUTH) {
+        console.debug("[supatype:auth] hydrated session from custom storage", {
+          userId: session.user.id,
+          storageKey: this.storageKey,
+        })
+      }
+    } catch {
+      // Corrupt or unavailable storage, treat as signed out.
+    }
+  }
+
+  /** Milliseconds since epoch when the access token expires (with optional skew). */
+  private sessionExpiresAtMs(session: Session): number | null {
+    if (session.expiresAt !== undefined) return session.expiresAt * 1000
+    const exp = this.jwtExpMs(session.accessToken)
+    if (exp !== null) return exp
+    return null
+  }
+
+  private jwtExpMs(accessToken: string): number | null {
+    const parts = accessToken.split(".")
+    if (parts.length !== 3) return null
+    try {
+      const payload = JSON.parse(atob(parts[1]!)) as Record<string, unknown>
+      const exp = payload["exp"]
+      return typeof exp === "number" ? exp * 1000 : null
+    } catch {
+      return null
+    }
+  }
+
+  private isAccessTokenExpired(session: Session, skewMs = 0): boolean {
+    const expiresAtMs = this.sessionExpiresAtMs(session)
+    if (expiresAtMs === null) return false
+    return Date.now() >= expiresAtMs - skewMs
+  }
+
+  /**
+   * Refresh when the access token is expired. Clears the session if refresh fails
+   * so callers never keep using a dead JWT (avoids stuck authenticated UI state).
+   * Safe to call before REST/RPC requests; no-op when signed out or token is valid.
+   */
+  async ensureValidSession(): Promise<void> {
+    await this.ready
+    return this.ensureValidSessionInternal()
+  }
+
+  private async ensureValidSessionInternal(): Promise<void> {
+    const session = this.currentSession
+    if (session === null || !this.isAccessTokenExpired(session)) return
+    if (!session.refreshToken?.trim()) {
+      this._setSession(null)
+      return
+    }
+    if (this.refreshInFlight) {
+      await this.refreshInFlight
+      return
+    }
+    this.refreshInFlight = this.refreshSession()
+      .then(() => undefined)
+      .finally(() => {
+        this.refreshInFlight = null
+      })
+    await this.refreshInFlight
   }
 
   /** Schedule a token refresh ~60s before the current session expires. */
@@ -85,16 +189,15 @@ export class AuthClient {
     const session = this.currentSession
     if (session === null || !session.refreshToken) return
 
-    const expiryMs =
-      session.expiresAt !== undefined
-        ? session.expiresAt * 1000
-        : Date.now() + (session.expiresIn || 3600) * 1000
-    const delay = Math.max(0, expiryMs - Date.now() - 60_000)
+    const expiryMs = this.sessionExpiresAtMs(session)
+    const delay =
+      expiryMs === null
+        ? Math.max(0, (session.expiresIn || 3600) * 1000 - 60_000)
+        : Math.max(0, expiryMs - Date.now() - 60_000)
 
     this.refreshTimer = setTimeout(() => {
       this.refreshTimer = null
-      // refreshSession() flows through _setSession on success, which reschedules.
-      void this.refreshSession().catch(() => undefined)
+      void this.ensureValidSession()
     }, delay)
     // Avoid keeping a Node process alive for this timer (no-op in browsers).
     ;(this.refreshTimer as unknown as { unref?: () => void }).unref?.()
@@ -155,7 +258,7 @@ export class AuthClient {
       body["data"] = credentials.options.data
     }
     if (credentials?.options?.captchaToken !== undefined) {
-      body["gotrue_meta_security"] = { captcha_token: credentials.options.captchaToken }
+      body["supatype_meta_security"] = { captcha_token: credentials.options.captchaToken }
     }
     const res = await fetch(`${this.url}/signup`, {
       method: "POST",
@@ -167,7 +270,12 @@ export class AuthClient {
 
   async signInWithOAuth(opts: {
     provider: string
-    options?: { redirectTo?: string | undefined } | undefined
+    options?: {
+      redirectTo?: string | undefined
+      /** Default: `implicit` (web-compatible). Pass `pkce` for mobile / RN. */
+      flowType?: AuthFlowType | undefined
+      scopes?: string | undefined
+    } | undefined
   }): Promise<{
     data: { url: string; provider: string }
     error: SupatypeError | null
@@ -177,7 +285,145 @@ export class AuthClient {
     if (opts.options?.redirectTo !== undefined) {
       url.searchParams.set("redirect_to", opts.options.redirectTo)
     }
+    if (opts.options?.scopes !== undefined) {
+      url.searchParams.set("scopes", opts.options.scopes)
+    }
+    const flowType = opts.options?.flowType ?? "implicit"
+    if (flowType === "pkce") {
+      await this.beginPkce()
+      url.searchParams.set("code_challenge", createCodeChallengeS256(this.codeVerifier!))
+      url.searchParams.set("code_challenge_method", PKCE_METHOD_S256)
+    }
     return { data: { url: url.toString(), provider: opts.provider }, error: null }
+  }
+
+  /**
+   * Apply tokens from an OAuth / deep-link redirect (implicit grant) or restore a session.
+   * Fetches `/user` to hydrate the user object, then persists via the configured storage.
+   */
+  async setSession(params: {
+    accessToken: string
+    refreshToken: string
+  }): Promise<{
+    data: { session: Session | null; user: User | null }
+    error: SupatypeError | null
+  }> {
+    const res = await fetch(`${this.url}/user`, {
+      headers: {
+        ...this.baseHeaders,
+        Authorization: `Bearer ${params.accessToken}`,
+      },
+    })
+    if (!res.ok) {
+      return {
+        data: { session: null, user: null },
+        error: await this._parseError(res),
+      }
+    }
+    const raw = await res.json() as Record<string, unknown>
+    const user = this._parseUser(raw)
+    const session: Session = {
+      accessToken: params.accessToken,
+      refreshToken: params.refreshToken,
+      tokenType: "bearer",
+      expiresIn: 3600,
+      user,
+    }
+    const exp = this.decodeJwtExp(params.accessToken)
+    if (exp !== null) {
+      session.expiresAt = exp
+      session.expiresIn = Math.max(0, exp - Math.floor(Date.now() / 1000))
+    }
+    this._setSession(session)
+    return { data: { session, user }, error: null }
+  }
+
+  /**
+   * Exchange a PKCE auth code for a session (`POST /token?grant_type=pkce`).
+   * Requires a prior `signInWithOAuth({ options: { flowType: "pkce" } })` (or OTP with PKCE)
+   * so the matching `code_verifier` is available in memory / storage.
+   */
+  async exchangeCodeForSession(authCode: string): Promise<{
+    data: { session: Session | null; user: User | null }
+    error: SupatypeError | null
+  }> {
+    const verifier = await this.readCodeVerifier()
+    if (verifier === null) {
+      return {
+        data: { session: null, user: null },
+        error: {
+          message: "Missing PKCE code_verifier. Start OAuth with flowType: \"pkce\" first.",
+          status: 400,
+        },
+      }
+    }
+    const res = await fetch(`${this.url}/token?grant_type=pkce`, {
+      method: "POST",
+      headers: this.baseHeaders,
+      body: JSON.stringify({
+        auth_code: authCode,
+        code_verifier: verifier,
+      }),
+    })
+    await this.clearCodeVerifier()
+    return this._parseAuthResponse(res)
+  }
+
+  /**
+   * Parse an OAuth / magic-link redirect URL and establish a session.
+   * Supports PKCE (`?code=`) and implicit (`#access_token=` / query tokens).
+   */
+  async getSessionFromUrl(url: string): Promise<{
+    data: { session: Session | null; user: User | null }
+    error: SupatypeError | null
+  }> {
+    let parsed: URL
+    try {
+      parsed = new URL(url)
+    } catch {
+      return {
+        data: { session: null, user: null },
+        error: { message: `Invalid redirect URL: ${url}`, status: 400 },
+      }
+    }
+
+    const query = parsed.searchParams
+    const hashParams = new URLSearchParams(
+      parsed.hash.startsWith("#") ? parsed.hash.slice(1) : parsed.hash,
+    )
+
+    const errorDescription =
+      query.get("error_description") ??
+      hashParams.get("error_description") ??
+      query.get("error") ??
+      hashParams.get("error")
+    if (errorDescription !== null && errorDescription !== "") {
+      return {
+        data: { session: null, user: null },
+        error: { message: errorDescription, status: 400 },
+      }
+    }
+
+    const code = query.get("code") ?? hashParams.get("code")
+    if (code !== null && code !== "") {
+      return this.exchangeCodeForSession(code)
+    }
+
+    const accessToken =
+      hashParams.get("access_token") ?? query.get("access_token")
+    const refreshToken =
+      hashParams.get("refresh_token") ?? query.get("refresh_token")
+    if (accessToken !== null && accessToken !== "" && refreshToken !== null && refreshToken !== "") {
+      return this.setSession({ accessToken, refreshToken })
+    }
+
+    return {
+      data: { session: null, user: null },
+      error: {
+        message: "No auth code or tokens found in redirect URL",
+        status: 400,
+      },
+    }
   }
 
   async signInWithOtp(opts: {
@@ -243,6 +489,8 @@ export class AuthClient {
     data: { session: Session | null }
     error: SupatypeError | null
   }> {
+    await this.ready
+    await this.ensureValidSessionInternal()
     return { data: { session: this.currentSession }, error: null }
   }
 
@@ -276,13 +524,27 @@ export class AuthClient {
     if (this.currentSession === null) {
       return { data: { session: null }, error: { message: "No active session" } }
     }
-    const res = await fetch(`${this.url}/token?grant_type=refresh_token`, {
-      method: "POST",
-      headers: this.baseHeaders,
-      body: JSON.stringify({ refresh_token: this.currentSession.refreshToken }),
-    })
-    const result = await this._parseAuthResponse(res)
-    return { data: { session: result.data.session }, error: result.error }
+    if (!this.currentSession.refreshToken?.trim()) {
+      this._setSession(null)
+      return { data: { session: null }, error: { message: "No refresh token" } }
+    }
+    try {
+      const res = await fetch(`${this.url}/token?grant_type=refresh_token`, {
+        method: "POST",
+        headers: this.baseHeaders,
+        body: JSON.stringify({ refresh_token: this.currentSession.refreshToken }),
+      })
+      if (!res.ok) {
+        const error = await this._parseError(res)
+        this._setSession(null)
+        return { data: { session: null }, error }
+      }
+      return await this._parseAuthResponse(res)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Refresh failed"
+      this._setSession(null)
+      return { data: { session: null }, error: { message } }
+    }
   }
 
   async resetPasswordForEmail(
@@ -722,7 +984,7 @@ export class AuthClient {
     return this.currentSession?.accessToken ?? null
   }
 
-  private getBrowserStorage(): AuthStorageAdapter | null {
+  private getBrowserStorage(): AuthStorage | null {
     if (typeof window === "undefined") return null
     try {
       return window.localStorage
@@ -731,8 +993,87 @@ export class AuthClient {
     }
   }
 
+  private codeVerifierStorageKey(): string {
+    return `${this.storageKey}-code-verifier`
+  }
+
+  private async beginPkce(): Promise<void> {
+    const verifier = generateCodeVerifier()
+    this.codeVerifier = verifier
+    if (!this.persistSession || this.storage === null) return
+    try {
+      await this.storage.setItem(this.codeVerifierStorageKey(), verifier)
+    } catch {
+      // Ignore storage write failures, in-memory verifier still works for same-process flows.
+    }
+  }
+
+  private async readCodeVerifier(): Promise<string | null> {
+    if (this.codeVerifier !== null) return this.codeVerifier
+    if (this.storage === null) return null
+    try {
+      const stored = await this.storage.getItem(this.codeVerifierStorageKey())
+      if (stored !== null && stored !== "") {
+        this.codeVerifier = stored
+        return stored
+      }
+    } catch {
+      // fall through
+    }
+    return null
+  }
+
+  private async clearCodeVerifier(): Promise<void> {
+    this.codeVerifier = null
+    if (this.storage === null) return
+    try {
+      await this.storage.removeItem(this.codeVerifierStorageKey())
+    } catch {
+      // Ignore
+    }
+  }
+
+  /** Decode JWT `exp` claim without verifying the signature. */
+  private decodeJwtExp(accessToken: string): number | null {
+    const parts = accessToken.split(".")
+    if (parts.length < 2) return null
+    try {
+      const payload = parts[1]!
+      const padded = payload + "=".repeat((4 - (payload.length % 4)) % 4)
+      const b64 = padded.replace(/-/g, "+").replace(/_/g, "/")
+      const json =
+        typeof atob === "function"
+          ? atob(b64)
+          : Buffer.from(b64, "base64").toString("utf8")
+      const claims = JSON.parse(json) as { exp?: unknown }
+      return typeof claims.exp === "number" ? claims.exp : null
+    } catch {
+      return null
+    }
+  }
+
+  private async readStorageItem(key: string): Promise<string | null> {
+    if (this.storage === null) return null
+    return await this.storage.getItem(key)
+  }
+
+  private async loadPersistedSessionAsync(): Promise<Session | null> {
+    const fromStorage = await this.readStorageItem(this.storageKey)
+    if (fromStorage !== null) {
+      const parsed = this.parsePersistedSession(fromStorage)
+      if (parsed !== null) return parsed
+    }
+    return null
+  }
+
   private loadPersistedSession(): Session | null {
-    const fromStorage = this.storage?.getItem(this.storageKey) ?? null
+    const raw = this.storage?.getItem(this.storageKey)
+    const fromStorage =
+      raw === null || raw === undefined
+        ? null
+        : typeof raw === "string"
+          ? raw
+          : null
     if (fromStorage !== null) {
       const parsed = this.parsePersistedSession(fromStorage)
       if (DEBUG_AUTH) {
@@ -743,7 +1084,7 @@ export class AuthClient {
       }
       if (parsed !== null) return parsed
     }
-    if (typeof document !== "undefined") {
+    if (this.useCookies && typeof document !== "undefined") {
       const fromCookie = this.readCookie(this.cookieName)
       if (fromCookie !== null) {
         const parsed = this.parsePersistedSession(fromCookie)
@@ -830,15 +1171,20 @@ export class AuthClient {
 
   private syncPersistedSession(session: Session | null): void {
     if (!this.persistSession) return
+    void this.writePersistedSession(session)
+  }
+
+  private async writePersistedSession(session: Session | null): Promise<void> {
     const storage = this.storage
-    const cookieExpires = session?.expiresAt
     if (session === null) {
       try {
-        storage?.removeItem(this.storageKey)
+        await storage?.removeItem(this.storageKey)
       } catch {
         // Ignore storage write failures.
       }
-      this.writeCookie(this.cookieName, "", -1)
+      if (this.useCookies) {
+        this.writeCookie(this.cookieName, "", -1)
+      }
       if (DEBUG_AUTH) {
         console.debug("[supatype:auth] cleared persisted session", {
           storageKey: this.storageKey,
@@ -858,11 +1204,13 @@ export class AuthClient {
       user: this.serializeUserForCookie(session.user),
     })
     try {
-      storage?.setItem(this.storageKey, json)
+      await storage?.setItem(this.storageKey, json)
     } catch {
       // Ignore storage write failures.
     }
-    this.writeCookie(this.cookieName, cookiePayload, cookieExpires)
+    if (this.useCookies) {
+      this.writeCookie(this.cookieName, cookiePayload, session.expiresAt)
+    }
     if (DEBUG_AUTH) {
       console.debug("[supatype:auth] persisted session", {
         userId: session.user.id,

@@ -1,9 +1,81 @@
 /**
- * AST v2 wire format — canonical types and emitters.
+ * AST v2 wire format, canonical types and emitters.
  * Parsers build {@link ParsedField}; only `emitField` / `emitModel` / `emitSchema` produce JSON.
  */
 
+import type { FieldValidation } from "@supatype/types"
+
+// Re-exported so consumers of these AST types need no second import for the one field that is
+// declared elsewhere: the bound contract lives beside the modifiers that compile into it.
+export type { FieldValidation }
+
 export const AST_VERSION = 2 as const
+
+/**
+ * Every field kind the extractor can produce. **The registry, not a list.**
+ *
+ * A kind used to exist the moment someone wrote `scalar("newThing")` in the extractor's type switch,
+ * with nothing anywhere enumerating the set. That is how nine kinds came to accept a declared bound
+ * and silently enforce nothing: no code and no test could ask "what are all the kinds", so each was
+ * handled wherever someone happened to look.
+ *
+ * Naming a kind here is now the only way to create one, because {@link scalar} takes a `FieldKind`.
+ * Anything keyed by `Record<FieldKind, T>` is then exhaustive by the compiler rather than by
+ * somebody remembering: `BOUNDS_BY_KIND` in `field-bounds.ts` is the first such consumer, so adding
+ * a kind here fails the build until it is classified there.
+ */
+export const FIELD_KINDS = [
+  // Text-shaped
+  "text",
+  "email",
+  "url",
+  "slug",
+  "color",
+  "xml",
+  "ip",
+  "cidr",
+  "macaddr",
+  "tsQuery",
+  "tsVector",
+  "richText",
+  "bytes",
+  // Numeric
+  "integer",
+  "smallInt",
+  "bigInt",
+  "float",
+  "serial",
+  "bigSerial",
+  "decimal",
+  "money",
+  // Temporal
+  "datetime",
+  "timestamp",
+  "date",
+  "interval",
+  // Collections and structured values
+  "array",
+  "blocks",
+  "json",
+  "button",
+  "enum",
+  // Fixed-shape scalars
+  "boolean",
+  "uuid",
+  // Storage, spatial, plugin
+  "image",
+  "file",
+  "geo",
+  "vector",
+  "relation",
+  "custom",
+  // Composites, expanded into real columns before they reach a table
+  "timestamps",
+  "publishable",
+  "softDelete",
+] as const
+
+export type FieldKind = (typeof FIELD_KINDS)[number]
 
 export type DefaultAst =
   | { kind: "value"; value: string | number | boolean | null }
@@ -23,6 +95,8 @@ export interface DbFieldAnnotations {
 export interface PlatformFieldAnnotations {
   editor?: string
   readOnly?: boolean
+  /** Studio searches this column in the list view. Set by `Searchable<T>`. */
+  searchable?: boolean
 }
 
 export interface FieldAnnotations {
@@ -30,7 +104,7 @@ export interface FieldAnnotations {
   platform?: PlatformFieldAnnotations
 }
 
-/** Kernel facts only — never db/platform keys at this layer. */
+/** Kernel facts only: never db/platform keys at this layer. */
 export interface KernelFieldFacts {
   required?: boolean
   primaryKey?: boolean
@@ -49,6 +123,15 @@ export interface KernelFieldFacts {
   dimensions?: number
   blocks?: BlockDefinitionAst[]
   check?: string
+  validation?: FieldValidation
+  /**
+   * `JSON<T[]>` rather than `JSON<{...}>`, read from the declared type argument.
+   *
+   * Persisted because a model constraint naming this column with `ItemCount<>` has to resolve the
+   * same measure the field's own `MaxItems` would, and by then the type node is long gone. The
+   * engine never reads it: it receives the measure already resolved.
+   */
+  jsonArray?: boolean
   precision?: number
   scale?: number
   references?: string
@@ -62,9 +145,21 @@ export interface KernelFieldFacts {
   index?: boolean
 }
 
-/** Internal parse result — not serialized. */
+/**
+ * The `cache` declaration as it reaches the AST. See `ModelMeta.cache` in `@supatype/types` for
+ * what each setting means; this is the wire shape, kept narrow so a typo in the extractor is a
+ * type error rather than an extra key nobody reads.
+ */
+export interface ModelCacheAst {
+  enabled?: boolean
+  maxTtl?: number
+  public?: boolean
+  rows?: boolean
+}
+
+/** Internal parse result: not serialized. */
 export interface ParsedField {
-  kind: string
+  kind: FieldKind
   kernel: KernelFieldFacts
   db: DbFieldAnnotations
   platform: PlatformFieldAnnotations
@@ -87,8 +182,15 @@ export interface ModelAstV2 {
   fields: Record<string, FieldAstV2>
   options: Record<string, unknown>
   annotations: {
-    db: { tableName: string; indexes: unknown[] }
-    platform: { access: Record<string, unknown> }
+    db: { tableName: string; indexes: unknown[]; constraints?: unknown[] }
+    platform: {
+      access: Record<string, unknown>
+      hooks?: Record<string, unknown>
+      validate?: Record<string, unknown>
+      /** Columns Studio's list view searches. See {@link emitModel}. */
+      searchFields?: string[]
+      cache?: ModelCacheAst
+    }
   }
 }
 
@@ -108,9 +210,24 @@ export interface ExtractedSchemaAstV2 {
   storageBuckets?: ExtractedStorageBucketAst[]
   locales?: string[]
   defaultLocale?: string
+  /**
+   * Draft visibility and preview-link bounds, from `supatype.config.ts`.
+   *
+   * Not extracted from the schema like everything else here: it is a project setting that the
+   * engine needs at the moment it compiles the draft policies, so it rides the same payload rather
+   * than growing a delivery path of its own. Attached by `withPublishing`, and absent for a project
+   * with no versioned model.
+   */
+  publishing?: {
+    draftVisibility: string[]
+    previewDefaultTtl: number
+    previewMaxRecordTtl: number
+    previewMaxProjectTtl: number
+    previewAllowProjectScope: boolean
+  }
 }
 
-const DEFAULT_DB_BY_KIND: Record<string, Partial<DbFieldAnnotations>> = {
+const DEFAULT_DB_BY_KIND: Partial<Record<FieldKind, Partial<DbFieldAnnotations>>> = {
   text: { pgType: "TEXT" },
   richText: { pgType: "JSONB" },
   integer: { pgType: "INTEGER" },
@@ -147,7 +264,7 @@ const DEFAULT_DB_BY_KIND: Record<string, Partial<DbFieldAnnotations>> = {
   blocks: { pgType: "JSONB" },
 }
 
-const DEFAULT_PLATFORM_BY_KIND: Record<string, Partial<PlatformFieldAnnotations>> = {
+const DEFAULT_PLATFORM_BY_KIND: Partial<Record<FieldKind, Partial<PlatformFieldAnnotations>>> = {
   richText: { editor: "rich" },
 }
 
@@ -165,9 +282,15 @@ function stripUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
   return out as Partial<T>
 }
 
-/** Start a parsed field with kind defaults for db/platform namespaces. */
+/**
+ * Start a parsed field with kind defaults for db/platform namespaces.
+ *
+ * Takes a plain `string` rather than a `FieldKind` because it is also called with a kind read back
+ * off the wire, where the value came from JSON and carries no compile-time guarantee. The optional
+ * lookup plus the fallback is what makes an unrecognised one safe.
+ */
 export function defaultPgTypeForKind(kind: string): string {
-  return DEFAULT_DB_BY_KIND[kind]?.pgType ?? "TEXT"
+  return DEFAULT_DB_BY_KIND[kind as FieldKind]?.pgType ?? "TEXT"
 }
 
 /** Flat wire shape for fields nested inside `blocks` definitions (engine FieldAst serde). */
@@ -195,6 +318,7 @@ export function emitBlockNestedField(field: FieldAstV2): FieldAstV2 {
   if (field.srid !== undefined) wire.srid = field.srid
   if (field.dimensions !== undefined) wire.dimensions = field.dimensions
   if (field.check !== undefined) wire.check = field.check
+  if (field.validation !== undefined) wire.validation = field.validation
   if (field.precision !== undefined) wire.precision = field.precision
   if (field.scale !== undefined) wire.scale = field.scale
   if (field.sources !== undefined) wire.sources = field.sources
@@ -207,7 +331,7 @@ export function emitBlockNestedField(field: FieldAstV2): FieldAstV2 {
 }
 
 export function scalar(
-  kind: string,
+  kind: FieldKind,
   extra?: {
     kernel?: Partial<KernelFieldFacts>
     db?: Partial<DbFieldAnnotations>
@@ -267,6 +391,8 @@ export function emitField(parsed: ParsedField): FieldAstV2 {
     }))
   }
   if (kernel.check !== undefined) wire.check = kernel.check
+  if (kernel.validation !== undefined) wire.validation = kernel.validation
+  if (kernel.jsonArray === true) wire.jsonArray = true
   if (kernel.precision !== undefined) wire.precision = kernel.precision
   if (kernel.scale !== undefined) wire.scale = kernel.scale
   if (kernel.references !== undefined) wire.references = kernel.references
@@ -294,14 +420,42 @@ export function emitModel(
   tableName: string,
   access: Record<string, unknown>,
   indexes: unknown[] = [],
+  hooks: Record<string, unknown> = {},
+  constraints: unknown[] = [],
+  validators: Record<string, unknown> = {},
+  searchFields: string[] = [],
+  cache?: ModelCacheAst | undefined,
 ): ModelAstV2 {
   return {
     name,
     fields,
     options,
     annotations: {
-      db: { tableName, indexes },
-      platform: { access },
+      // Constraints sit in `db` beside `indexes`: both are things Postgres holds, unlike `access`
+      // and `hooks`, which the API layer enforces.
+      db: { tableName, indexes, ...(constraints.length > 0 && { constraints }) },
+      // Hooks sit in `platform` beside `access`: they are an API-layer concern, not a column one,
+      // supatype-server reads them, Postgres never sees them.
+      // Validators sit in `platform` beside `hooks`: both are enforced by the API layer on the
+      // write path, and neither is something Postgres knows about.
+      // `searchFields` sits in `platform` because it is an admin-UI concern: Studio's list view
+      // renders its search box when a model has them and filters on the first. Postgres knows
+      // nothing about it, which is why it is not in `db` beside `indexes` — searching a column and
+      // indexing one are different asks, and `Indexed` already covers the latter.
+      platform: {
+        access,
+        ...(Object.keys(hooks).length > 0 && { hooks }),
+        ...(Object.keys(validators).length > 0 && { validate: validators }),
+        ...(searchFields.length > 0 && { searchFields }),
+        // Cache sits in `platform` beside `hooks` for the same reason, and travels the same way:
+        // the route manifest, not this AST. The schema engine re-serialises its own parsed struct
+        // when it writes `ast_snapshot`, and its `PlatformModelAnnotations` knows only `access`
+        // and `searchFields` — so this key, like `hooks` above it, does not survive that round
+        // trip and the manifest is what the server actually reads. Kept here because the AST is
+        // the schema's own description of itself, and a reader looking for the declaration should
+        // find it next to the other API-layer concerns.
+        ...(cache !== undefined && { cache }),
+      },
     },
   }
 }

@@ -5,6 +5,7 @@ import { useAdminConfig } from "../hooks/useAdminConfig.js"
 import type { ModelConfig } from "../config.js"
 import type { SupatypeClient } from "@supatype/client"
 import { studioRestHeaders } from "../lib/studio-auth-headers.js"
+import { IconX } from "./icons.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -88,7 +89,7 @@ async function searchLiveData(
   const results: SearchItem[] = []
 
   await Promise.allSettled([
-    // Auth users — search by email and display name
+    // Auth users: search by email and display name
     (async () => {
       const res = await fetch(`${client.url}/auth/v1/admin/users?per_page=200`, { headers, signal })
       if (!res.ok) return
@@ -111,7 +112,7 @@ async function searchLiveData(
       }
     })(),
 
-    // Model records — use each model's configured search fields
+    // Model records: use each model's configured search fields
     ...models.slice(0, 5).map(async (model) => {
       const fields = model.searchFields.length > 0
         ? model.searchFields
@@ -144,7 +145,7 @@ async function searchLiveData(
 // ─── Component ────────────────────────────────────────────────────────────────
 
 interface JumpToSearchProps {
-  /** Compact variant for the header — smaller padding, narrower placeholder */
+  /** Compact variant for the header, smaller padding, narrower placeholder */
   compact?: boolean
 }
 
@@ -229,7 +230,7 @@ export function JumpToSearch({ compact = false }: JumpToSearchProps): React.Reac
   const hasResults = results.length > 0
   const noResults = !searching && query.trim().length >= 2 && results.length === 0
 
-  // Index of first "record" result — used to draw a separator
+  // Index of first "record" result, used to draw a separator
   const firstRecordIndex = results.findIndex((r) => r.kind === "record")
 
   return (
@@ -254,7 +255,7 @@ export function JumpToSearch({ compact = false }: JumpToSearchProps): React.Reac
             className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
             onMouseDown={(e) => { e.preventDefault(); setQuery(""); setOpen(false); setLiveResults([]) }}
           >
-            <XIcon />
+            <IconX />
           </button>
         )}
       </div>
@@ -312,11 +313,3 @@ function SpinnerIcon(): React.ReactElement {
   )
 }
 
-function XIcon(): React.ReactElement {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="18" y1="6" x2="6" y2="18" />
-      <line x1="6" y1="6" x2="18" y2="18" />
-    </svg>
-  )
-}

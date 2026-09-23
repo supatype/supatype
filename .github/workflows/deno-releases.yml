@@ -65,10 +65,10 @@ jobs:
 
           if aws s3 ls "${KEY}" --endpoint-url "${EP}" >/dev/null 2>&1; then
             echo "publish=false" >> "$GITHUB_OUTPUT"
-            echo "Already on CDN: deno/v${VERSION}/ — skipping (use workflow_dispatch + force to re-upload)."
+            echo "Already on CDN: deno/v${VERSION}/, skipping (use workflow_dispatch + force to re-upload)."
           else
             echo "publish=true" >> "$GITHUB_OUTPUT"
-            echo "Not on CDN yet — will mirror deno/v${VERSION}/."
+            echo "Not on CDN yet, will mirror deno/v${VERSION}/."
           fi
 
       - name: Download and package Deno binaries

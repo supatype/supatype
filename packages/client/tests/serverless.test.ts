@@ -81,7 +81,7 @@ describe("warnIfServerlessDirectConnection", () => {
     warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
     // Reset the one-time guard between tests by re-importing.
     // Since the guard is module-level state, we need to reset it.
-    // We do this by directly resetting via a dynamic import trick — but
+    // We do this by directly resetting via a dynamic import trick, but
     // the simplest approach is to just accept the guard fires once per
     // describe block. Instead, let's reset it manually.
   })

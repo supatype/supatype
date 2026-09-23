@@ -1,63 +1,166 @@
 # Frontend integration
 
+Reference layout: `supatype init --mode standalone` (static site + `vite_dev_url`). Maintainer fixture: **`examples/self-host/`** in the Supatype repo (compose-first, proxy mode).
+
 ## Add dependencies
 
 ```bash
-npm install @supatype/client
-# plus your framework: astro, next, vite, etc.
+npm install @supatype/client @supatype/cli @supatype/types
+npm install -D vite @vitejs/plugin-react typescript  # Vite + React example
 ```
 
-## Configure types output
+Install matching versions from npm:
 
-In `supatype.config.ts`:
+```bash
+npm view @supatype/cli dist-tags    # compare latest vs alpha
+npm install @supatype/cli@latest @supatype/client@latest @supatype/types@latest
+```
+
+Use `@alpha` only when the alpha tag is newer than `latest`:
+
+```bash
+npm install @supatype/cli@alpha @supatype/client@alpha @supatype/types@alpha
+```
+
+Pin all `@supatype/*` packages to the **same version**. Use `file:` links only when developing the CLI itself.
+
+## Self-host + local dev config split
+
+Committed `supatype.config.ts` targets production; `supatype.local.config.ts` (gitignored) keeps local HTTP:
 
 ```typescript
+// supatype.config.ts — committed
 export default defineConfig({
-  // ...
-  output: { types: "src/lib/database.ts" },
-  app: {
-    mode: "static",       // or "proxy" for SSR/dev server
-    static_dir: "./dist", // build output directory
+  project: { name: "my-app" },
+  provider: "docker",
+  database: { provider: "docker" },
+  server: {
+    mode: "standalone",
+    port: 54321,
+    domain: "demo.supatype.com",
+    tls: { email: "you@example.com", provider: "kong" },
   },
+  app: {
+    mode: "static",
+    static_dir: "./dist",
+    vite_dev_url: "http://127.0.0.1:5173",  // local HMR through Kong
+  },
+  environments: { default: "production" },
+  email: { provider: "console" },
+  storage: { provider: "local", local_path: ".supatype/storage" },
+  schema: { path: "schema/index.ts", pg_schema: "public" },
+  output: { types: "supatype/generated/database.ts" },
+  // Optional — for `supatype deploy`:
   build: {
-    framework: "astro",   // astro | vite | nextjs | sveltekit | nuxt | static
-    buildCommand: "astro build",
+    framework: "vite",
+    buildCommand: "vite build",
     outputDirectory: "dist",
-    env: {
-      PUBLIC_SUPATYPE_URL: process.env["PUBLIC_SUPATYPE_URL"] ?? "",
-      PUBLIC_SUPATYPE_ANON_KEY: process.env["ANON_KEY"] ?? "",
-    },
+    env: { VITE_SUPATYPE_ANON_KEY: process.env["ANON_KEY"] ?? "" },
   },
 })
+
+// supatype.local.config.ts — gitignored
+export default { server: { mode: "dev" } } satisfies Partial<SupatypeConfig>
 ```
+
+**Do not pin `versions` for Docker** unless you need a specific release — omit the block so compose uses `:latest` image tags.
 
 Run `supatype push` after schema changes to refresh types.
 
-## Client setup
+## Client setup (static / same-origin)
+
+When Kong serves the SPA and API together, use the page origin (no CORS):
 
 ```typescript
 import { createClient } from "@supatype/client"
-import type { Database } from "../lib/database"
+import type { Database } from "../supatype/generated/database"
 
 export const supatype = createClient<Database>({
-  url: import.meta.env.PUBLIC_SUPATYPE_URL,
-  anonKey: import.meta.env.PUBLIC_SUPATYPE_ANON_KEY,
+  url: typeof window !== "undefined" ? window.location.origin : "http://localhost:18473",
+  anonKey: import.meta.env.VITE_SUPATYPE_ANON_KEY as string,
 })
 ```
+
+Ensure `.env` has `VITE_SUPATYPE_ANON_KEY` (copy from `ANON_KEY` after `supatype keys`). `supatype dev` may also write `PUBLIC_SUPATYPE_ANON_KEY`.
+
+## Vite config
+
+```typescript
+// vite.config.ts
+export default defineConfig({
+  plugins: [react()],
+  build: { outDir: "dist", emptyOutDir: true },
+  server: { host: "127.0.0.1", port: 5173, strictPort: true },
+})
+```
+
+## package.json scripts
+
+From `supatype init`:
+
+```json
+{
+  "scripts": {
+    "dev": "supatype dev",
+    "vite": "vite",
+    "build": "vite build",
+    "push": "supatype push",
+    "seed": "tsx seed.ts"
+  }
+}
+```
+
+## Local dev workflow (Vite)
+
+**Production** (`supatype.config.ts`): `app.mode: "static"`, `static_dir: "./dist"`.
+
+**Local** (`supatype.local.config.ts`): override to **proxy** so `supatype dev` starts Vite and Kong forwards app traffic:
+
+```typescript
+// supatype.local.config.ts
+export default {
+  server: { mode: "dev" },
+  app: {
+    mode: "proxy",
+    upstream: "http://127.0.0.1:5173",
+    start: "vite",
+    vite_dev_url: "http://127.0.0.1:5173",
+  },
+} satisfies Partial<SupatypeConfig>
+```
+
+```json
+{ "scripts": { "dev": "supatype dev", "vite": "vite", "build": "vite build" } }
+```
+
+1. `npm run dev` — one terminal: Supatype stack + auto-spawned Vite (when `app.mode` is `proxy` locally)
+2. Open **http://localhost:18473** — same origin as API; Docker rewrites upstream to `host.docker.internal:5173`
+
+For static-only local dev (no proxy), use `static` + `vite_dev_url` and run `npm run vite` in a second terminal instead.
+
+## Proxy mode (alternative)
+
+For SSR frameworks or when Supatype should spawn the dev server:
+
+1. `app.mode: "proxy"`, `upstream: "http://localhost:5173"`, `start: "vite"`
+2. `supatype dev` starts the `start` script and proxies through Kong
+3. `vite_dev_url` optional if upstream already points at Vite
+
+## Production static build
+
+```bash
+npm run build
+supatype self-host compose up -d
+```
+
+See [references/self-host.md](references/self-host.md) and `examples/self-host/README.md` for TLS, DNS, and compose.
 
 ## Query patterns
 
 ```typescript
-// Select
 const { data: posts } = await supatype.from("posts").select("*")
-
-// Insert
 await supatype.from("posts").insert({ title: "Hello", author_id: userId })
-
-// Update (with RLS enforced server-side)
 await supatype.from("posts").update({ title: "Updated" }).eq("id", postId)
-
-// Delete
 await supatype.from("posts").delete().eq("id", postId)
 ```
 
@@ -103,114 +206,55 @@ export function App() {
 }
 ```
 
-All hooks and `@supatype/react-auth` components must render inside this provider. The provider accepts `SupatypeClient<any>`, so any `createClient<Database>()` instance is fine.
+All hooks and `@supatype/react-auth` components must render inside this provider.
 
 ### Hooks
 
 ```tsx
 import { useAuth, useQuery, useMutation, useSubscription, useSupatype } from "@supatype/react"
 
-// Auth state + methods (subscribes to auth changes automatically)
 const { user, session, loading, signUp, signIn, signInWithOAuth, signInWithOtp, signOut } = useAuth()
-// signIn/signUp resolve to { data: { session, user }, error }
-await signIn({ email, password })
-await signUp({ email, password, options: { data: { display_name: "Ada" } } })
 
-// Reads — re-runs when options change; supports polling + pagination
-const { data, error, count, loading, refetch } = useQuery("check_in", {
+const { data, error, loading, refetch } = useQuery("posts", {
   select: "*",
-  filter: { team_id: teamId, day: today },     // simple equality filters
+  filter: { author_id: userId },
   order: { column: "created_at", ascending: false },
-  limit: 20,
-  offset: 0,
-  enabled: Boolean(teamId),                     // skip until ready
-  refetchInterval: 15000,                       // optional polling (ms)
+  enabled: Boolean(userId),
 })
 
-// Writes — insert | update | delete | upsert
-const { mutate: createCheckIn, loading: saving } = useMutation("check_in", "insert")
-await createCheckIn({ team_id, day, today_text })
+const { mutate: createPost, loading: saving } = useMutation("posts", "insert")
+await createPost({ title: "Hello", author_id: userId })
 
-const { mutate: removeCheckIn } = useMutation("check_in", "delete")
-await removeCheckIn(undefined, { filter: { id: checkInId } }) // filter required for update/delete
-
-// Realtime
-useSubscription<CheckIn>("feed", {
-  event: "INSERT",          // "*" | "INSERT" | "UPDATE" | "DELETE"
-  table: "check_in",
-  filter: `team_id=eq.${teamId}`,
+useSubscription<Post>("feed", {
+  event: "INSERT",
+  table: "posts",
   callback: (payload) => append(payload.new),
 })
 
-// Escape hatch — the raw typed client for anything the hooks don't cover
-const client = useSupatype<Database>()
+const client = useSupatype<Database>() // escape hatch
 ```
 
-`useQuery`/`useMutation` are generic over the table name and return `Row` types from your generated `Database`. The `mutate` filter only does equality (`.eq`); for richer filters use `useSupatype()` and the query builder directly.
-
 ## Auth UI components (`@supatype/react-auth`)
-
-Prebuilt, accessible forms wired to `useAuth()`. They render minimal semantic markup (`<form>` → `<h2>` title, `<label>`+`<input>` rows, submit `<button>`, and a `role="alert"` error line), so you style them via `className` and child selectors.
 
 ```tsx
 import { LoginForm, SignUpForm, OAuthButton } from "@supatype/react-auth"
 
 <LoginForm
   className="auth-form"
-  labels={{ title: "Welcome back", email: "Email", password: "Password", submit: "Sign in", errorPrefix: "" }}
   onSuccess={(session) => navigate("/")}
   onError={(err) => console.error(err.message)}
 />
 
 <SignUpForm
   className="auth-form"
-  labels={{ title: "Create account", submit: "Sign up", successMessage: "Check your email to confirm." }}
-  metadata={{ display_name }}      // → stored on user_metadata
-  onSuccess={(session) => {
-    if (session) navigate("/onboarding")
-    // session === null ⇒ email confirmation required; the form shows successMessage
-  }}
+  metadata={{ display_name }}
+  onSuccess={(session) => { if (session) navigate("/onboarding") }}
 />
 
 <OAuthButton provider="github" redirectTo="/dashboard" />
-<OAuthButton provider="google" popup />
-<OAuthButton provider="apple" className="dark-btn">Continue with Apple</OAuthButton>
 ```
 
-Component props:
-
-| Component | Props |
-|-----------|-------|
-| `LoginForm` | `onSuccess(session)`, `onError(error)`, `className`, `labels { title, email, password, submit, errorPrefix }` |
-| `SignUpForm` | `onSuccess(session \| null)`, `onError(error)`, `className`, `labels { title, email, password, submit, successMessage }`, `metadata` (→ `user_metadata`) |
-| `OAuthButton` | `provider` (e.g. `"github"`/`"google"`/`"apple"`), `redirectTo`, `popup`, `disabled`, `children`, `className`, `onError` |
-
-Styling notes:
-
-- The form components apply **no** styles of their own — pass `className` and target the `<h2>`, `label`, `input`, `button`, and `[role="alert"]` descendants from your CSS.
-- To hide the built-in heading, set `labels.title` to `""` (it still renders an empty `<h2>` — `display: none` it) and supply your own heading outside the form.
-- `OAuthButton` ships sensible inline default styles **only when no `className` is given**. Passing `className` removes all default styling (it's all-or-nothing), and built-in logo SVGs are included for `github`/`google`/`apple`.
-
-### Layering app profile data over `useAuth`
-
-`useAuth` is the source of truth for the session. For app-specific data (e.g. a `profile` row), wrap it in your own context rather than duplicating auth logic:
-
-```tsx
-import { useAuth as useSupatypeAuth } from "@supatype/react"
-
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const { user, loading, signOut } = useSupatypeAuth()
-  const userId = user?.id ?? null
-  const [profile, setProfile] = useState<Profile | null>(null)
-
-  useEffect(() => {
-    if (!userId) { setProfile(null); return }
-    void fetchProfile(userId).then(setProfile)
-  }, [userId])
-
-  // expose { userId, profile, loading, signOut, ... } via your own context
-}
-```
+Form components apply no styles of their own — pass `className` and style descendants. `OAuthButton` has default styles only when no `className` is given.
 
 ## Gotcha: keep a single `@supatype/client` version
 
@@ -230,37 +274,14 @@ Force one client version across the tree with an npm `overrides` entry in `packa
 }
 ```
 
-`$@supatype/client` pins the transitive copy to whatever version your app's direct dependency resolves to. Run `npm install` afterwards. (These packages are published as `0.1.0-alpha.*` prereleases, so version skew is common — pin deliberately.)
+`$@supatype/client` pins the transitive copy to whatever version your app's direct dependency resolves to. Run `npm install` afterwards. Pin `@supatype/*` packages to the same release when mixing CLI, client, types, and framework bindings.
 
-## Dev modes
+## Dev modes summary
 
-### Static site (Astro, Vite SSG)
+| Mode | Config | Use when |
+|------|--------|----------|
+| Static + `vite_dev_url` | `app.mode: "static"`, run Vite in second terminal | Simple SPA; Kong serves built assets in prod |
+| Proxy | `app.mode: "proxy"`, `upstream`, `start: "vite"` | One `supatype dev` command spawns Vite + stack |
+| Static SSG (Astro, etc.) | `build.framework`, `static_dir` | `npm run build` then compose serves `dist/` |
 
-1. Set `app.mode: "static"` and `static_dir` to build output
-2. `npm run build` then `supatype dev` or self-host compose serves static files via Kong
-
-### Proxy mode (SSR / dev server)
-
-1. Set `app.mode: "proxy"`, `upstream: "http://localhost:3000"`, `start: "dev"`
-2. `supatype dev` starts your app command and proxies through Kong
-3. For Vite HMR: `vite_dev_url: "http://127.0.0.1:5173"`
-
-## Local dev URL
-
-Docker default: `http://localhost:18473` (check `SUPATYPE_KONG_PORT` in `.env`).
-
-Set in `.env`:
-
-```bash
-PUBLIC_SUPATYPE_URL=http://localhost:18473
-```
-
-## Example: elmsideretreat pattern
-
-Real project using Astro + Docker self-host:
-
-- `provider: "docker"`
-- `app.mode: "static"`, `static_dir: "./dist"`
-- `build.framework: "astro"`
-- `output.types: "src/lib/database.ts"`
-- Production: `supatype self-host compose up -d`
+Local dev URL: `http://localhost:18473` (or `SUPATYPE_KONG_PORT` in `.env`).

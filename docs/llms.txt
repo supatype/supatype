@@ -1,0 +1,43 @@
+# Supatype
+
+> Type-first backend platform for PostgreSQL: define `Model<>` types in TypeScript and generate schema, migrations, RLS, REST/GraphQL API, auth, storage, realtime, and Studio CMS — self-hostable by default.
+
+Supatype is an open-source (MIT) TypeScript SDK and platform. The TypeScript schema is the source of truth; SQL, APIs, policies, and admin UI are generated from it rather than maintained by hand. Local development uses `supatype dev` (native or Docker Compose). Production can self-host (`supatype/server` on Docker Hub) or use Supatype Cloud.
+
+Primary audience: TypeScript developers and stack owners on Postgres who want end-to-end type safety without stitching Supabase-style infra, a separate CMS, and hand-written migrations.
+
+Official site: https://www.supatype.com/
+Organization: https://github.com/supatype
+Contact: see GitHub org and Discord linked from the site.
+
+## Product
+
+- [Home](https://www.supatype.com/): Marketing overview — schema-first Postgres platform, positioning vs Supabase / Payload / Convex, feature grid, local-dev walkthrough
+- [Full LLM context](https://www.supatype.com/llms-full.txt): Self-contained Markdown summary of product, stack, CLI, and differentiators for agents with limited round-trips
+- [Sitemap](https://www.supatype.com/sitemap.xml): Machine-readable list of public Pages URLs
+
+## Docs & guides
+
+- [Local development (on-page)](https://www.supatype.com/#local-dev): How `supatype init` / `supatype dev` run a full local stack
+- [VM deploy with GitHub Actions](https://www.supatype.com/deploy-vm-github-actions.html): Self-host deploy path using GitHub Actions onto a VM
+
+## Platform capabilities
+
+- [Schema-first migrations](https://www.supatype.com/#features): TypeScript schema drives forward/rollback SQL with risk analysis
+- [Auth & RLS](https://www.supatype.com/#features): Built-in auth; access rules on models generate Postgres RLS
+- [Storage](https://www.supatype.com/#features): File/image fields create buckets and permissions
+- [Realtime](https://www.supatype.com/#features): WebSocket subscriptions generated per model / table changes
+- [Studio CMS](https://www.supatype.com/#features): Schema-generated content admin (lists, forms, media)
+- [REST + GraphQL](https://www.supatype.com/#features): PostgREST and pg_graphql with typed clients
+
+## Community
+
+- [GitHub organization](https://github.com/supatype): Source repos (SDK monorepo, server, engine, Postgres images)
+- [supatype/supatype](https://github.com/supatype/supatype): Main monorepo — CLI, client, Studio, realtime package
+- [Discord](https://discord.gg/yaQrjQD4): Community and product discussion
+
+## Optional
+
+- [Robots policy](https://www.supatype.com/robots.txt): Allows search indexing and AI crawl/training/reference use
+- [Brand mark (SVG)](https://www.supatype.com/supatype.svg): Logo asset
+- [Icon (SVG)](https://www.supatype.com/supatype-icon.svg): Favicon / app icon

@@ -45,7 +45,7 @@ export function tierFor(lifetimeStars: number): Tier {
   return lifetimeStars >= GOLD_THRESHOLD ? "gold" : "green"
 }
 
-/** The next reward the customer can almost afford — drives the progress bar. */
+/** The next reward the customer can almost afford, drives the progress bar. */
 export function nextReward(stars: number): Reward | null {
   return REWARDS.find((r) => r.cost > stars) ?? null
 }

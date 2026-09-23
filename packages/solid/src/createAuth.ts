@@ -30,7 +30,7 @@ export function createAuth<TDatabase extends AnyDatabase = AnyDatabase>(): AuthR
         setUser(() => data.session!.user)
       }
     } catch {
-      // Ignore — user is not authenticated
+      // Ignore: user is not authenticated
     }
     setLoading(false)
 

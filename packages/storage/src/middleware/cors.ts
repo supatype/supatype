@@ -1,5 +1,5 @@
 /**
- * Storage CORS — Task 46
+ * Storage CORS: Task 46
  *
  * Public buckets: serve with `Access-Control-Allow-Origin: *`
  * Private buckets: no CORS headers (files accessed via pre-signed URLs which

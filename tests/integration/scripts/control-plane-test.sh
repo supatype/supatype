@@ -22,7 +22,7 @@ export SUPATYPE_SERVICE_ROLE_KEY="${SUPATYPE_SERVICE_ROLE_KEY:-${SERVICE_ROLE_KE
 export SUPATYPE_PROJECT_REF="${SUPATYPE_PROJECT_REF:-integration-test}"
 
 if [[ -z "$SUPATYPE_SERVICE_ROLE_KEY" ]]; then
-  echo "ERROR: SERVICE_ROLE_KEY not set — run supatype dev first or set SUPATYPE_SERVICE_ROLE_KEY"
+  echo "ERROR: SERVICE_ROLE_KEY not set, run supatype dev first or set SUPATYPE_SERVICE_ROLE_KEY"
   exit 1
 fi
 

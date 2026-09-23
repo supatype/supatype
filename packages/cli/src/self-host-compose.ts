@@ -1,9 +1,25 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join, relative, resolve } from "node:path"
 import { spawnSync } from "node:child_process"
-import { preferredFunctionsPathFromProject, type SupatypeProjectConfig } from "./project-config.js"
+import { requireDockerDaemon, type DockerBrandOptions } from "./docker-runtime.js"
+import { fatalError } from "./ui/fatal.js"
+import {
+  apiSchemaList,
+  externalDatabaseUrl,
+  hooksPathFromProject,
+  preferredFunctionsPathFromProject,
+  realtimeEnabled,
+  serviceRoleRoutes,
+  selfHostTlsEnabled,
+  usesExternalDatabase,
+  type SupatypeProjectConfig,
+} from "./project-config.js"
 import { hasEngineOverride, hasStudioOverride, pinnedVersion, fetchLatestVersion, VERSION_PIN_LOCAL } from "./binary-cache.js"
 import { buildKongDeclarative } from "./kong-config.js"
+import { keyspaceInPostgres } from "./cache-provider.js"
+import { readEnvFile } from "./env-file.js"
+import { fieldMaskingTierFromProject, type FieldMaskingTier } from "./field-masking-tier.js"
+import { projectHasVersionedModels } from "./model-versioning.js"
 
 /** Env keys written when `versions` pins exist in supatype.config.ts. */
 export const COMPOSE_PINNED_IMAGE_ENV_KEYS = [
@@ -20,7 +36,30 @@ export const COMPOSE_IMAGE_ENV_KEYS = [
   "SUPATYPE_STUDIO_IMAGE",
   "SUPATYPE_STORAGE_IMAGE",
   "SUPATYPE_FUNCTIONS_WORKER_IMAGE",
+  "SUPATYPE_SEAWEEDFS_IMAGE",
 ] as const
+
+/** Pinned by digest, because the registry this replaced proved a tag can be taken away. */
+const SEAWEEDFS_IMAGE =
+  "chrislusf/seaweedfs:4.46@sha256:08d516132314207d10c8e37cbffc1f32b147d870169688734cc61c6231625b62"
+
+/** Credentials the object store is configured with and the storage service is handed. */
+/**
+ * The prefix Kong's ACME plugin stores its certificates under.
+ *
+ * Not a guess and not configurable: the plugin prefixes every key it writes
+ * with this and enforces it in its own `reserved_words.lua`, so it is the one
+ * durable thing in a keyspace that is otherwise a cache. Verified on a live
+ * instance — both ACME keys survived `kill -9` with only this prefix named
+ * durable, and a response-cache key beside them did not.
+ */
+const ACME_KEY_PREFIX = "kong_acme:"
+
+const OBJECT_STORE_ACCESS_KEY = "supatype"
+const OBJECT_STORE_SECRET_KEY = "supatype-secret"
+
+/** Where the rendered SeaweedFS identity file sits, resolved from the project root like kong.yml. */
+const SEAWEED_CONFIG_MOUNT = ".supatype/self-host/s3.json"
 
 type DockerPinComponent = "engine" | "server" | "postgres"
 
@@ -116,7 +155,7 @@ export function composePullNeedsIgnoreFailures(
 /**
  * Schema-engine image for a one-off `docker compose run` when pushing schema.
  * Uses config pin when set; otherwise CDN engine semver (Docker Hub `:latest` can lag).
- * Does not touch `.env` — server/postgres still use compose `:latest` defaults.
+ * Does not touch `.env`, server/postgres still use compose `:latest` defaults.
  */
 export async function schemaEngineImageForPush(
   config: SupatypeProjectConfig,
@@ -128,11 +167,36 @@ export async function schemaEngineImageForPush(
   return dockerImageRef("engine", version)
 }
 
+/**
+ * SeaweedFS reads its identities from a file, so the stack's credentials are a generated artifact
+ * beside the compose file rather than two env vars inside it.
+ *
+ * There is deliberately no `anonymous` identity. Declaring one with `Read` would make every bucket
+ * world-readable and the per-bucket policy decorative, which is the opposite of what
+ * `applyPublicPolicy` is for: a bucket is public because its policy says so.
+ */
+export function renderSeaweedIdentities(): string {
+  const identities = {
+    identities: [
+      {
+        name: "supatype",
+        credentials: [
+          { accessKey: OBJECT_STORE_ACCESS_KEY, secretKey: OBJECT_STORE_SECRET_KEY },
+        ],
+        actions: ["Admin", "Read", "List", "Tagging", "Write"],
+      },
+    ],
+  }
+  return `${JSON.stringify(identities, null, 2)}\n`
+}
+
 export interface SelfHostComposePaths {
   dir: string
   composePath: string
   kongPath: string
   nginxPath: string
+  /** SeaweedFS identities, rendered beside the compose file the server reads them through. */
+  s3ConfigPath: string
 }
 
 export function selfHostComposePaths(cwd: string): SelfHostComposePaths {
@@ -142,6 +206,7 @@ export function selfHostComposePaths(cwd: string): SelfHostComposePaths {
     composePath: join(dir, "docker-compose.yml"),
     kongPath: join(dir, "kong.yml"),
     nginxPath: join(dir, "nginx.conf"),
+    s3ConfigPath: join(dir, "s3.json"),
   }
 }
 
@@ -160,7 +225,7 @@ export function staticDirForCompose(config: SupatypeProjectConfig): string | und
 /**
  * Bind-mount source for `/project` in generated compose files.
  * Paths are resolved from `--project-directory` (always the project root in `runDockerCompose`),
- * not from the compose file directory — use `.` not `../..`.
+ * not from the compose file directory, use `.` not `../..`.
  */
 function projectMountPath(_cwd: string): string {
   return "."
@@ -179,10 +244,51 @@ function kongMountPath(_cwd: string): string {
   return ".supatype/self-host/kong.yml"
 }
 
+/**
+ * The DSN every service uses for the schema-owning role.
+ *
+ * One expression instead of six identical constructions of `@db:5432`. With an external database it
+ * becomes `${DATABASE_URL:?…}`: the URL is the operator's, so there is nothing for the generator to
+ * build: and interpolating the value into the compose file would write a password into a generated
+ * file. Compose resolves the variable from `.env` at up-time, the same place the config's
+ * `process.env.DATABASE_URL` read it from.
+ */
+function ownerDatabaseUrl(config: SupatypeProjectConfig, scheme = "postgresql"): string {
+  if (usesExternalDatabase(config)) {
+    return "${DATABASE_URL:?DATABASE_URL is missing from .env, required by database.external}"
+  }
+  return (
+    `${scheme}://\${POSTGRES_USER:-supatype_admin}:` +
+    "\${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is missing from .env}" +
+    "@db:5432/\${POSTGRES_DB:-supatype}"
+  )
+}
+
+/**
+ * PostgREST's DSN, which connects as `authenticator` rather than the owner.
+ *
+ * For an external database the host, port, database and query string are taken from the operator's
+ * URL and only the password stays a variable. The alternative, a second full URL in `.env`, is one
+ * more thing to keep in step with the first, and two URLs that disagree about *which database* is a
+ * split-brain nobody notices until the API is serving one and migrations are landing in the other.
+ * A hostname is not the secret here; the password is, and it stays out of the generated file.
+ */
+function postgrestDatabaseUrl(config: SupatypeProjectConfig): string {
+  const password = "${AUTHENTICATOR_PASSWORD:?AUTHENTICATOR_PASSWORD is missing from .env}"
+  const externalUrl = externalDatabaseUrl(config)
+  if (externalUrl === undefined) {
+    return `postgresql://authenticator:${password}@db:5432/\${POSTGRES_DB:-supatype}`
+  }
+
+  const parsed = new URL(externalUrl)
+  const port = parsed.port ? `:${parsed.port}` : ""
+  return `postgresql://authenticator:${password}@${parsed.hostname}${port}${parsed.pathname}${parsed.search}`
+}
+
 /** Host Vite dev server as seen from Kong inside Docker Compose. */
 export const COMPOSE_STUDIO_HOST_URL = "http://host.docker.internal:3002"
 
-/** Studio container — always Docker Hub unless SUPATYPE_STUDIO_IMAGE is set in .env. */
+/** Studio container: always Docker Hub unless SUPATYPE_STUDIO_IMAGE is set in .env. */
 function studioServiceBlock(): string {
   return `    image: \${SUPATYPE_STUDIO_IMAGE:-supatype/studio:latest}`
 }
@@ -212,12 +318,33 @@ function serverAppEnvForCompose(config: SupatypeProjectConfig, devLocal: boolean
   } else if (mode === "proxy" && config.app.upstream?.trim()) {
     lines.push(`      SUPATYPE_APP_UPSTREAM: ${proxyUpstreamForCompose(config.app.upstream, devLocal)}`)
   }
+  if (config.app.vite_dev_url?.trim()) {
+    lines.push(
+      `      SUPATYPE_VITE_DEV_URL: ${proxyUpstreamForCompose(config.app.vite_dev_url, devLocal)}`,
+    )
+  }
   return lines.join("\n")
 }
 
 export interface SelfHostComposeOptions {
   /** `supatype dev` with provider docker: internal-only db/server; Kong on host :18473. */
   devLocal?: boolean
+  /**
+   * Which mechanism enforces per-column rules, when the caller knows.
+   *
+   * Only the call sites that have loaded the schema can say, see `field-masking-tier.ts`. Left
+   * unset, the exposed schema list is today's, which is correct for every project without field
+   * rules and for every project on `supatype/postgres`.
+   */
+  fieldMaskingTier?: FieldMaskingTier
+  /**
+   * Whether any model declares `versions`, which puts the generated `draft` schema on the exposed
+   * list.
+   *
+   * Same reasoning as the tier above: only a caller that has loaded the schema can say, and left
+   * unset the list is today's, which is correct for every project with no versioned model.
+   */
+  drafts?: boolean
 }
 
 export function renderSelfHostCompose(
@@ -227,7 +354,26 @@ export function renderSelfHostCompose(
 ): string {
   const projectMount = projectMountPath(cwd)
   const kongMount = kongMountPath(cwd)
+  const external = usesExternalDatabase(config)
+  // Both halves come from the caller because both need the schema loaded, which this renderer does
+  // not do. See `SelfHostComposeOptions`.
+  const restSchemas = apiSchemaList(config, {
+    ...(options?.fieldMaskingTier !== undefined && { tier: options.fieldMaskingTier }),
+    drafts: options?.drafts === true,
+  })
+  const ownerUrl = ownerDatabaseUrl(config)
+  // the auth driver wants the `postgres://` spelling; an external URL is used as given.
+  const authUrl = external ? ownerUrl : ownerDatabaseUrl(config, "postgres")
+  // An external URL may already carry query parameters (`?sslmode=require` is common on managed
+  // providers), and appending a second `?` produces a DSN that fails to parse.
+  const authSearchPathSeparator = externalDatabaseUrl(config)?.includes("?") ? "&" : "?"
+  const postgrestUrl = postgrestDatabaseUrl(config)
   const devLocal = options?.devLocal === true
+  const tlsEnabled = selfHostTlsEnabled(config, devLocal)
+  const domain = config.server.domain?.trim() ?? ""
+  // When TLS is on, default external URLs to https://<domain> so auth links/redirects use HTTPS.
+  const externalUrlFallback = tlsEnabled ? `https://${domain}` : "http://localhost:18473"
+  const siteUrlFallback = tlsEnabled ? `https://${domain}` : "http://localhost:3000"
   const studioHostDev = devLocal && hasStudioOverride(config)
   const appEnv = serverAppEnvForCompose(config, devLocal)
   const staticDir = staticDirForCompose(config) ?? "./dist"
@@ -239,7 +385,7 @@ export function renderSelfHostCompose(
   studio:
 ${studioService}
     environment:
-      SUPATYPE_CLOUD_JSON: '{"url":"\${API_EXTERNAL_URL:-http://localhost:18473}","anonKey":"\${ANON_KEY:-}"}'
+      SUPATYPE_CLOUD_JSON: '{"url":"\${API_EXTERNAL_URL:-${externalUrlFallback}}","anonKey":"\${ANON_KEY:-}"}'
     expose:
       - "3002"
 `
@@ -264,62 +410,239 @@ ${studioService}
     : `    ports:
       - "9999:9999"
 `
-  const minioPorts = devLocal
+  const seaweedPorts = devLocal
     ? ""
     : `    ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "8333:8333"
+`
+  // One source for the credentials: the server is configured with them and the storage service is
+  // handed them, and a mismatch does not fail at start, it fails at the first upload.
+  const objectStoreBlock = `  seaweedfs:
+    # Identities come from a config file rather than env vars, and the anonymous identity is
+    # deliberately absent: a bucket is public because of its policy, never because the server is
+    # open. Written beside this file by the same generator, so the two cannot drift.
+    image: \${SUPATYPE_SEAWEEDFS_IMAGE:-${SEAWEEDFS_IMAGE}}
+    command: server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json
+    volumes:
+      - storage-data:/data
+      - ${SEAWEED_CONFIG_MOUNT}:/etc/seaweedfs/s3.json:ro
+${seaweedPorts}`
+  const kongTlsEnv = tlsEnabled
+    ? `      KONG_PROXY_LISTEN: "0.0.0.0:8000, 0.0.0.0:8443 ssl"
+      KONG_LUA_SSL_TRUSTED_CERTIFICATE: system
+      KONG_LUA_SSL_VERIFY_DEPTH: "2"
+`
+    : ""
+  const kongPorts = tlsEnabled
+    ? `      - "80:8000"
+      - "443:8443"`
+    : `      - "\${SUPATYPE_KONG_PORT:-18473}:8000"`
+  // The RESP server the response cache and Kong's ACME certificates use.
+  // Either a Valkey sidecar, or pg_keyspace inside the Postgres container --
+  // one stateful service instead of two.
+  const keyspaceInPg = keyspaceInPostgres(config)
+  const respHost = keyspaceInPg ? "db" : "valkey"
+  const valkeyBlock = keyspaceInPg
+    ? `  # No \`valkey\` service: cache.provider is "pg_keyspace", so the RESP keyspace is
+  # served by the \`db\` container on :6379. See extensions/pg_keyspace in supatype/postgres.
+`
+    : `
+  valkey:
+    image: \${SUPATYPE_VALKEY_IMAGE:-valkey/valkey:8-alpine}
+    command: ["valkey-server", "--appendonly", "yes"]
+    expose:
+      - "6379"
+    volumes:
+      - valkey-data:/data
+`
+  // With the keyspace inside Postgres, waiting on `db` is already what every
+  // other service does, so Kong needs no extra dependency of its own.
+  const kongValkeyDepends = keyspaceInPg ? "" : "\n      - valkey"
+  const tlsHintComment = tlsEnabled
+    ? ""
+    : `  # HTTPS is off. To enable automatic TLS (Let's Encrypt) for production, set in supatype.config.ts:
+  #   server: { mode: "standalone", domain: "your.domain", tls: { email: "you@example.com" } }
+  # then re-run \`supatype self-host compose up -d\`. Kong publishes :80/:443 and provisions certs automatically.
+`
+  // An external database is not ours to declare a volume for.
+  const volumesBlock = `volumes:
+${external ? "" : "  db-data:\n"}  storage-data:
+${keyspaceInPg ? "" : "  valkey-data:\n"}`
+
+  // `depends_on` for the services that talk to Postgres. With an external database there is no
+  // container to wait on, so the clause disappears entirely and each service retries on connect
+  // instead: which is also what covers a database that restarts *after* boot, something no
+  // healthcheck ever did.
+  const dbDependencyClause = external
+    ? ""
+    : `      db:
+        condition: service_healthy
+`
+  const dbDependency = external ? "" : `    depends_on:\n${dbDependencyClause}`
+
+  // Realtime, omitted entirely when the project has turned it off.
+  //
+  // Not started-and-disabled: the service degrades gracefully on its own (it reports the reason on
+  // /health/ready rather than crash-looping), so this switch is for the operator who has read
+  // `supatype db check`, knows their database cannot do logical decoding, and would rather not run a
+  // container that can only report that. The server then has no realtime URL, which is what makes
+  // subscription requests fail with a clear route error instead of hanging against a dead upstream.
+  const realtime = realtimeEnabled(config)
+  const realtimeBlock = realtime
+    ? `  realtime:
+    image: \${SUPATYPE_REALTIME_IMAGE:-supatype/realtime:latest}
+    expose:
+      - "4000"
+    environment:
+      PORT: "4000"
+      DATABASE_URL: "${ownerUrl}"
+      JWT_SECRET: \${JWT_SECRET:?JWT_SECRET is missing from .env}
+      SLOT_NAME: supatype_realtime
+      # Matches the publication the supatype/postgres image creates. Read by nothing today,
+      # wal2json decodes from the slot, and kept for a future pgoutput decoder.
+      PUBLICATION_NAME: supatype_realtime
+${dbDependency}`
+    : `  # No \`realtime\` service: database.external.realtime is false. Subscriptions are
+  # unavailable; REST, storage, auth and functions are unaffected.
+`
+  const realtimeDependency = realtime
+    ? `      realtime:
+        condition: service_started
+`
+    : ""
+  const realtimeServerEnv = realtime ? "      SUPATYPE_REALTIME_URL: http://realtime:4000" : ""
+
+  // pg_keyspace registers background workers and requests shared memory at
+  // postmaster start, so it has to be in `shared_preload_libraries` -- there is
+  // no runtime toggle. The image turns it on from the environment
+  // (SUPATYPE_KEYSPACE_ENABLED) and writes the configuration itself, which is
+  // why this does not restate the preload list: the entrypoint appends
+  // pg_keyspace to the image's own list, in the right place (before
+  // supatype_mask, so the mask stays outermost and the image's
+  // pg_keyspace.require_mask = on is satisfied rather than refusing to serve).
+  // Restating it here would be a copy that goes stale the first time the image
+  // adds a library.
+  //
+  // Durability is `ephemeral` for everything, with ACME the one exception.
+  // A response cache that went through the WAL would put this stack's busiest
+  // write on disk to keep a copy of something that expires in seconds; a
+  // certificate that did not survive `docker compose restart db` would be
+  // re-issued against Let's Encrypt's rate limits, or fail. So the default is
+  // the cheap one and the certificates are named.
+  //
+  // `kong_acme:` is not a guess. Kong's ACME plugin prefixes every key it
+  // stores with it and enforces that prefix in its own reserved_words.lua;
+  // proven on a live instance, where both ACME keys survived `kill -9` under
+  // this exact configuration and the response-cache key did not.
+  //
+  // It is set whether or not TLS is on today. The override costs nothing when
+  // no key matches it, and a stack that turns TLS on later should not need a
+  // database restart before its certificates are safe to store.
+  const durablePrefixes = config.cache?.durablePrefixes ?? []
+  const durabilityOverrides = [ACME_KEY_PREFIX, ...durablePrefixes]
+    .map((prefix) => `${prefix}=durable`)
+    .join(", ")
+
+  // Sizing is shared memory, reserved at postmaster start whether or not the
+  // cache is used, so the defaults are a self-hosted stack's floor rather than
+  // the extension's own (1M keys x 512 B reserves ~689 MiB per worker before
+  // rings and row cache). These are measured on a live PG16 build, not derived:
+  // this profile reserves ~235 MiB, of which ~16 MiB is a fixed row-cache
+  // directory that rowcache_mb does not describe and cannot be declined.
+  const keyspaceDbEnv = keyspaceInPg
+    ? `      # The RESP keyspace, in place of a Valkey sidecar. The image writes
+      # /etc/postgresql-custom/pg_keyspace.conf from these before any server starts.
+      SUPATYPE_KEYSPACE_ENABLED: "1"
+      # Durable keys are rows in this database; without it they land in \`postgres\`.
+      SUPATYPE_KEYSPACE_DATABASE: \${POSTGRES_DB:-supatype}
+      SUPATYPE_KEYSPACE_DURABILITY: ephemeral
+      SUPATYPE_KEYSPACE_DURABILITY_OVERRIDES: "${durabilityOverrides}"
+      SUPATYPE_KEYSPACE_KEYS: "200000"
+      SUPATYPE_KEYSPACE_RING_MB: "16"
+      SUPATYPE_KEYSPACE_ROWCACHE_MB: "64"
+`
+    : ""
+
+  // Not published to the host: the keyspace is reachable to the compose network
+  // (server, Kong) and nothing else. A RESP port on a public interface is an
+  // unauthenticated read of every cached response.
+  const keyspaceExpose = keyspaceInPg
+    ? `    expose:
+      - "6379"
+`
+    : ""
+
+  const dbServiceBlock = external
+    ? `  # No \`db\` service: database.external points this stack at a Postgres it does not manage.
+  # Every service reads \${DATABASE_URL} from .env, and \`supatype db check\` reports what that
+  # database still needs (roles, extensions, wal_level for realtime).
+`
+    : `  db:
+    image: \${SUPATYPE_POSTGRES_IMAGE:-supatype/postgres:latest}
+    environment:
+      POSTGRES_USER: \${POSTGRES_USER:-supatype_admin}
+      POSTGRES_PASSWORD: \${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is missing from .env}
+      POSTGRES_DB: \${POSTGRES_DB:-supatype}
+      # Read by the image's init to password the \`authenticator\` role PostgREST connects as.
+      AUTHENTICATOR_PASSWORD: \${AUTHENTICATOR_PASSWORD:?AUTHENTICATOR_PASSWORD is missing from .env}
+${keyspaceDbEnv}${dbPorts}${keyspaceExpose}    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      # -h 127.0.0.1 forces TCP. Without it \`pg_isready\` uses the Unix socket, which the
+      # entrypoint's temporary init server is already listening on while TCP is still refused,
+      # so the container reported healthy, \`depends_on: service_healthy\` released, and every
+      # service that connects over the network died with ECONNREFUSED on first boot. PostgREST
+      # survived only because it retries. Observed on a clean stack: server, storage and
+      # realtime all exited 1 while db said "healthy".
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \${POSTGRES_USER:-supatype_admin} -d \${POSTGRES_DB:-supatype}"]
+      interval: 5s
+      timeout: 5s
+      # First boot runs initdb plus every bootstrap migration. Failures inside the start period
+      # do not count against retries, so a slow init waits rather than being declared unhealthy.
+      start_period: 90s
+      retries: 20
+
 `
 
   return `# Generated by supatype self-host compose
 # Kong → supatype-server (unified gateway) → internal PostgREST / storage / etc.
 services:
-  db:
-    image: \${SUPATYPE_POSTGRES_IMAGE:-supatype/postgres:latest}
-    environment:
-      POSTGRES_USER: \${POSTGRES_USER:-supatype_admin}
-      POSTGRES_PASSWORD: \${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: \${POSTGRES_DB:-supatype}
-${dbPorts}    volumes:
-      - db-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \${POSTGRES_USER:-supatype_admin}"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-
-  postgrest:
+${dbServiceBlock}  postgrest:
     image: postgrest/postgrest:v12.2.8
     expose:
       - "3000"
     environment:
-      PGRST_DB_URI: postgresql://\${POSTGRES_USER:-supatype_admin}:\${POSTGRES_PASSWORD:-postgres}@db:5432/\${POSTGRES_DB:-supatype}
-      PGRST_DB_SCHEMA: "public, supatype, graphql_public, auth"
+      # Connects as \`authenticator\`, not \${POSTGRES_USER}, which is a superuser, and a
+      # superuser session may SET ROLE to any role in the cluster, so a request whose JWT
+      # named one got it. \`authenticator\` is NOINHERIT with membership in only
+      # anon/authenticated/service_role, so the same SET ROLE is refused.
+      #
+      # Its own credential, not POSTGRES_PASSWORD: yours is for direct SQL access and
+      # rotating it must not take the REST API down. \`supatype init\` generates this.
+      PGRST_DB_URI: ${postgrestUrl}
+      # Derived from schema.pg_schema (or schema.api_schemas). Hardcoding this is why choosing a
+      # non-public pg_schema used to give a correct push and an API that answered PGRST106 for
+      # everything: the engine moved and PostgREST was never told.
+      PGRST_DB_SCHEMA: "${restSchemas}"
       PGRST_DB_ANON_ROLE: anon
-      PGRST_JWT_SECRET: \${JWT_SECRET:-super-secret-jwt-token-change-in-production}
+      PGRST_JWT_SECRET: \${JWT_SECRET:?JWT_SECRET is missing from .env}
       PGRST_DB_EXTRA_SEARCH_PATH: public,extensions
       PGRST_DB_POOL: 3
-    depends_on:
-      db:
-        condition: service_healthy
-
+${dbDependency}
   storage:
     image: \${SUPATYPE_STORAGE_IMAGE:-supatype/storage:latest}
     expose:
       - "5000"
     environment:
       PORT: 5000
-      DATABASE_URL: "postgresql://\${POSTGRES_USER:-supatype_admin}:\${POSTGRES_PASSWORD:-postgres}@db:5432/\${POSTGRES_DB:-supatype}"
-      JWT_SECRET: \${JWT_SECRET:-super-secret-jwt-token-change-in-production}
-      S3_ENDPOINT: http://minio:9000
+      DATABASE_URL: "${ownerUrl}"
+      JWT_SECRET: \${JWT_SECRET:?JWT_SECRET is missing from .env}
+      S3_ENDPOINT: http://seaweedfs:8333
       S3_REGION: us-east-1
-      S3_ACCESS_KEY: supatype
-      S3_SECRET_KEY: supatype-secret
+      S3_ACCESS_KEY: ${OBJECT_STORE_ACCESS_KEY}
+      S3_SECRET_KEY: ${OBJECT_STORE_SECRET_KEY}
       S3_FORCE_PATH_STYLE: "true"
-    depends_on:
-      db:
-        condition: service_healthy
-
+${dbDependency}
   functions-worker:
     image: \${SUPATYPE_FUNCTIONS_WORKER_IMAGE:-supatype/functions-worker:latest}
     expose:
@@ -329,17 +652,30 @@ ${dbPorts}    volumes:
     environment:
       SUPATYPE_FUNCTIONS_ROOT: /project/functions
       SUPATYPE_DENO_FUNCTIONS_DIR: /project/functions
+      # Model hooks, served by this same worker under a hooks/ route the gateway refuses from
+      # outside. One worker rather than two: a second container would cost a pod per project on
+      # cloud, for isolation the route boundary already provides.
+      SUPATYPE_HOOKS_ROOT: /project/hooks
+      # Every log line the worker writes carries this, and on cloud it is the label Loki indexes
+      # each project's logs under. Without it a line is collected and filed under no project, which
+      # is the same as losing it.
+      SUPATYPE_PROJECT_REF: ${JSON.stringify(config.project.name)}
       PORT: "8001"
-      SUPATYPE_URL: \${API_EXTERNAL_URL:-http://localhost:18473}
+      # In-compose loopback to Kong (not API_EXTERNAL_URL / localhost, unreachable from this container).
+      SUPATYPE_URL: http://kong:8000
+      SUPATYPE_INTERNAL_URL: http://kong:8000
       SUPATYPE_ANON_KEY: \${ANON_KEY:-}
+      # Present so the worker can hand it to hooks, which are procedural and unreachable from
+      # outside: and to the public functions named below. Withheld from every other handler before
+      # any of them is imported: a function is a public endpoint, and an ambient admin credential made
+      # each one able to read past every access rule in the schema.
       SUPATYPE_SERVICE_ROLE_KEY: \${SERVICE_ROLE_KEY:-}
+      SUPATYPE_SERVICE_ROLE_ROUTES: "${serviceRoleRoutes(config).join(",")}"
       STRIPE_SECRET_KEY: \${STRIPE_SECRET_KEY:-}
       STRIPE_WEBHOOK_SECRET: \${STRIPE_WEBHOOK_SECRET:-}
-      SITE_URL: \${SITE_URL:-\${API_EXTERNAL_URL:-http://localhost:18473}}
-    depends_on:
-      db:
-        condition: service_healthy
-
+      SITE_URL: \${SITE_URL:-\${API_EXTERNAL_URL:-${externalUrlFallback}}}
+${dbDependency}
+${realtimeBlock}
   control-plane:
     image: \${SUPATYPE_CONTROL_PLANE_IMAGE:-supatype/control-plane:latest}
     expose:
@@ -351,18 +687,23 @@ ${dbPorts}    volumes:
       PORT: "8080"
       SUPATYPE_PROJECT_REF: ${JSON.stringify(config.project.name)}
       SUPATYPE_PROJECT_ROOT: /project
-      DATABASE_URL: "postgresql://\${POSTGRES_USER:-supatype_admin}:\${POSTGRES_PASSWORD:-postgres}@db:5432/\${POSTGRES_DB:-supatype}"
+      DATABASE_URL: "${ownerUrl}"
       SUPATYPE_FUNCTIONS_ROOT: /project/functions
       SUPATYPE_STATIC_ROOT: /project/${staticDir.replace(/^\.\//, "")}
       SUPATYPE_DEPLOYMENTS_DIR: /project/.supatype/deployments
       COMPOSE_PROJECT_NAME: ${composeProject}
       SUPATYPE_ENGINE_BIN: supatype-engine
-    depends_on:
-      db:
-        condition: service_healthy
-
+${dbDependency}
   server:
     image: \${SUPATYPE_SERVER_IMAGE:-\${SUPATYPE_AUTH_IMAGE:-supatype/server:latest}}
+    # The server runs its migrations at boot on a connection of their own,
+    # and that path does not wait out a database that is still in recovery:
+    # it exits. Waiting for db to report healthy is not enough, because
+    # Postgres says healthy before it will accept these connections, and
+    # on a slow host the gap is wide enough to lose it for good. Bounded
+    # rather than unlimited, so a real misconfiguration still stops and
+    # stays visible instead of hiding in a crash loop.
+    restart: on-failure:5
 ${serverPorts}    volumes:
       - ${projectMount}:/project:ro
     working_dir: /project
@@ -374,50 +715,57 @@ ${serverPorts}    volumes:
       SUPATYPE_POSTGREST_URL: http://postgrest:3000
       SUPATYPE_GRAPHQL_URL: http://postgrest:3000
       SUPATYPE_STORAGE_URL: http://storage:5000
-      SUPATYPE_URL: \${API_EXTERNAL_URL:-http://localhost:18473}
+      SUPATYPE_URL: \${API_EXTERNAL_URL:-${externalUrlFallback}}
       SUPATYPE_ANON_KEY: \${ANON_KEY:-}
       SUPATYPE_SERVICE_ROLE_KEY: \${SERVICE_ROLE_KEY:-}
-      SUPATYPE_SQL_DATABASE_URL: "postgresql://\${POSTGRES_USER:-supatype_admin}:\${POSTGRES_PASSWORD:-postgres}@db:5432/\${POSTGRES_DB:-supatype}"
+      SUPATYPE_SQL_DATABASE_URL: "${ownerUrl}"
       SUPATYPE_DENO_FUNCTIONS_DIR: /project/functions
       SUPATYPE_FUNCTIONS_WORKER_URL: http://functions-worker:8001
+${realtimeServerEnv}
       SUPATYPE_CONTROL_PLANE_URL: http://control-plane:8080
+      SUPATYPE_VALKEY_ADDR: ${respHost}:6379
 ${appEnv}
-      GOTRUE_API_HOST: 0.0.0.0
-      GOTRUE_API_PORT: 9999
-      API_EXTERNAL_URL: \${API_EXTERNAL_URL:-http://localhost:18473}
-      GOTRUE_API_EXTERNAL_URL: \${API_EXTERNAL_URL:-http://localhost:18473}
-      GOTRUE_DB_DRIVER: postgres
-      GOTRUE_DB_DATABASE_URL: "postgres://\${POSTGRES_USER:-supatype_admin}:\${POSTGRES_PASSWORD:-postgres}@db:5432/\${POSTGRES_DB:-supatype}?search_path=auth"
-      GOTRUE_SITE_URL: \${SITE_URL:-http://localhost:3000}
-      GOTRUE_JWT_SECRET: \${JWT_SECRET:-super-secret-jwt-token-change-in-production}
-      GOTRUE_JWT_EXP: 3600
-      GOTRUE_JWT_AUD: authenticated
-      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
-      GOTRUE_JWT_ADMIN_ROLES: service_role,supatype_admin
-      GOTRUE_MAILER_AUTOCONFIRM: \${GOTRUE_MAILER_AUTOCONFIRM:-true}
-      GOTRUE_DISABLE_SIGNUP: \${DISABLE_SIGNUP:-false}
+      SUPATYPE_API_HOST: 0.0.0.0
+      SUPATYPE_API_PORT: 9999
+      SUPATYPE_API_EXTERNAL_URL: \${API_EXTERNAL_URL:-${externalUrlFallback}}
+      SUPATYPE_DB_DRIVER: postgres
+      SUPATYPE_DB_DATABASE_URL: "${authUrl}${authSearchPathSeparator}search_path=auth"
+      SUPATYPE_SITE_URL: \${SITE_URL:-${siteUrlFallback}}
+      SUPATYPE_JWT_SECRET: \${JWT_SECRET:?JWT_SECRET is missing from .env}
+      SUPATYPE_JWT_EXP: 3600
+      SUPATYPE_JWT_AUD: authenticated
+      SUPATYPE_JWT_DEFAULT_GROUP_NAME: authenticated
+      SUPATYPE_JWT_ADMIN_ROLES: service_role,supatype_admin
+      SUPATYPE_MAILER_AUTOCONFIRM: \${SUPATYPE_MAILER_AUTOCONFIRM:-true}
+      # email.provider and email.smtp are config, and nothing used to carry
+      # them here: with no provider and no SMTP host the auth service falls
+      # through to its noop client, so every message was dropped in silence and
+      # a project asking for smtp got the same nothing as one asking for console.
+      # The name really is MAILER_MAILER: the field is Mailer.MailerProvider.
+      SUPATYPE_MAILER_MAILER_PROVIDER: \${SUPATYPE_MAILER_MAILER_PROVIDER:-console}
+      SUPATYPE_SMTP_HOST: \${SUPATYPE_SMTP_HOST:-}
+      # 587, not empty: this one is an int on the server, and compose
+      # substitutes an unset variable as "", which fails to parse and takes
+      # the whole service down on boot. 587 is the server's own default, so
+      # leaving it unset now behaves exactly as it would with no value at all.
+      SUPATYPE_SMTP_PORT: \${SUPATYPE_SMTP_PORT:-587}
+      SUPATYPE_SMTP_USER: \${SUPATYPE_SMTP_USER:-}
+      SUPATYPE_SMTP_PASS: \${SUPATYPE_SMTP_PASS:-}
+      SUPATYPE_SMTP_ADMIN_EMAIL: \${SUPATYPE_SMTP_ADMIN_EMAIL:-}
+      SUPATYPE_SMTP_SENDER_NAME: \${SUPATYPE_SMTP_SENDER_NAME:-}
+      SUPATYPE_DISABLE_SIGNUP: \${DISABLE_SIGNUP:-false}
 ${devLocal ? "      STUDIO_OPEN_DEV: \"1\"\n" : ""}
     depends_on:
-      db:
-        condition: service_healthy
-      postgrest:
+${dbDependencyClause}${keyspaceInPg ? "" : "      valkey:\n        condition: service_started\n"}      postgrest:
         condition: service_started
       storage:
         condition: service_started
       functions-worker:
         condition: service_started
-      control-plane:
+${realtimeDependency}      control-plane:
         condition: service_started
 
-  minio:
-    image: minio/minio:RELEASE.2024-11-07T00-52-20Z
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: supatype
-      MINIO_ROOT_PASSWORD: supatype-secret
-${minioPorts}    volumes:
-      - minio-data:/data
-
+${objectStoreBlock}
   schema-engine:
     image: \${SUPATYPE_ENGINE_IMAGE:-supatype/schema-engine:latest}
     profiles: ["tools"]
@@ -425,11 +773,7 @@ ${minioPorts}    volumes:
     volumes:
       - ${projectMount}:/project
     working_dir: /project
-    depends_on:
-      db:
-        condition: service_healthy
-${studioBlock}
-  kong:
+${dbDependency}${studioBlock}${valkeyBlock}${tlsHintComment}  kong:
     image: kong:3.6
     environment:
       KONG_DATABASE: "off"
@@ -438,35 +782,208 @@ ${studioBlock}
       KONG_ADMIN_ACCESS_LOG: /dev/stdout
       KONG_PROXY_ERROR_LOG: /dev/stderr
       KONG_ADMIN_ERROR_LOG: /dev/stderr
-    volumes:
+      # Cookies are not scoped by port, so every project a developer runs on localhost shares one
+      # cookie jar and every request through this gateway carries the lot, which overruns nginx's
+      # default buffers and answers "Request header or cookie too large" about cookies belonging to
+      # something else entirely.
+      #
+      # Kept equal to large_client_header_buffers in packages/studio/nginx.conf, where the reason
+      # for the two numbers is written down. Both hops need it and they need the same value: this
+      # one carries API calls, that one the page, and a request that clears one and fails the other
+      # is worse to diagnose than one that fails outright.
+      KONG_NGINX_HTTP_LARGE_CLIENT_HEADER_BUFFERS: "4 32k"
+${kongTlsEnv}    volumes:
       - ${kongMount}:/etc/kong/kong.yml:ro
     ports:
-      - "\${SUPATYPE_KONG_PORT:-18473}:8000"
+${kongPorts}
     depends_on:
-${kongDependsOn}
+${kongDependsOn}${kongValkeyDepends}
 
-volumes:
-  db-data:
-  minio-data:
-`
+${volumesBlock}`
 }
 
-function ensureComposeManifest(cwd: string): void {
+/** In-compose worker address: matches the `functions-worker` service this file always generates. */
+const COMPOSE_FUNCTIONS_WORKER_URL = "http://functions-worker:8001"
+
+function ensureComposeManifest(cwd: string, config: SupatypeProjectConfig): void {
   const manifestPath = join(cwd, ".supatype", "manifest.json")
-  if (existsSync(manifestPath)) return
   mkdirSync(dirname(manifestPath), { recursive: true })
+
+  // The manifest is generated, not operator-authored, but `push` writes real values into it (the
+  // schema, for one), so an existing file is repaired rather than replaced.
+  if (existsSync(manifestPath)) {
+    repairComposeFunctionsFlag(manifestPath)
+    return
+  }
+
   const manifest = {
     schema: "public",
     postgrest_url: "http://postgrest:3000",
     storage_url: "http://storage:5000",
-    realtime_enabled: true,
-    functions_enabled: false,
+    // Matches the compose file: a manifest advertising a service that was not generated is how
+    // the server ends up proxying subscriptions to a host that does not resolve.
+    realtime_enabled: realtimeEnabled(config),
+    ...(realtimeEnabled(config) && { realtime_url: "http://realtime:4000" }),
+    // True because this file *always* generates a `functions-worker` service and hands the server
+    // `SUPATYPE_FUNCTIONS_WORKER_URL`. It said false, so the server answered 404 for every function
+    // in a stack that was running a worker for them, provisioned, then switched off.
+    functions_enabled: true,
+    functions_worker_url: COMPOSE_FUNCTIONS_WORKER_URL,
   }
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8")
 }
 
+/**
+ * Turn functions on in a manifest written by an older CLI, leaving every other key alone.
+ *
+ * Without this, only new projects get working functions: a stack generated before the flag was
+ * corrected keeps `functions_enabled: false` on disk, and regenerating the compose file, the
+ * obvious thing to try, does not fix it.
+ */
+function repairComposeFunctionsFlag(manifestPath: string): void {
+  let parsed: Record<string, unknown>
+  try {
+    parsed = JSON.parse(readFileSync(manifestPath, "utf8")) as Record<string, unknown>
+  } catch {
+    return // Malformed: leave it for the server to complain about rather than overwrite it here.
+  }
+  if (typeof parsed !== "object" || parsed === null) return
+  if (parsed["functions_enabled"] === true && parsed["functions_worker_url"] !== undefined) return
+
+  parsed["functions_enabled"] = true
+  if (parsed["functions_worker_url"] === undefined) {
+    parsed["functions_worker_url"] = COMPOSE_FUNCTIONS_WORKER_URL
+  }
+  writeFileSync(manifestPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8")
+}
+
 function ensureProjectFunctionsDir(cwd: string, config: SupatypeProjectConfig): void {
   mkdirSync(preferredFunctionsPathFromProject(config, cwd), { recursive: true })
+  // Both roots must exist before compose mounts the project read-only: a missing directory becomes
+  // a bind mount of a file that is not there, and the worker fails to start rather than serving the
+  // half it does have.
+  mkdirSync(hooksPathFromProject(config, cwd), { recursive: true })
+}
+
+/**
+ * The config's external URL and `.env`'s `DATABASE_URL` must be the same string.
+ *
+ * The CLI resolves the URL from config; Compose substitutes `.env` at up-time. If the two disagree,
+ * `push` migrates one database while the services serve another, which reads as data loss and
+ * isn't. It also makes the generated auth DSN wrong, since whether to append `search_path` with
+ * `?` or `&` is decided from the config URL's query string.
+ */
+function assertExternalUrlMatchesEnv(cwd: string, config: SupatypeProjectConfig): void {
+  const configured = externalDatabaseUrl(config)
+  if (configured === undefined) return
+
+  const fromEnv = readEnvFile(cwd)["DATABASE_URL"]
+  if (fromEnv === undefined) {
+    // Nothing to disagree with. Compose's own `:?` guard reports this at up-time, and the operator
+    // may be exporting the variable in their shell rather than keeping a file.
+    return
+  }
+  if (fromEnv.trim() === configured) return
+
+  fatalError(
+    "DATABASE_URL in .env does not match database.external.url",
+    [
+      `.env:    ${fromEnv.trim()}`,
+      `config:  ${configured}`,
+      "",
+      "The CLI connects using the config value and the stack connects using .env, so a push would",
+      "land in one database while the services serve the other.",
+      "Point the config at the same variable to keep them in step:",
+      "  database: { external: { url: process.env.DATABASE_URL! } }",
+    ],
+    { brand: { intro: "Self-host compose" } },
+  )
+}
+
+/**
+ * A loopback host in the external URL cannot work from inside a container.
+ *
+ * `127.0.0.1` means "this container" to every service in the stack, so an external database on the
+ * host machine is unreachable, while the *CLI* reaches it fine, because the CLI runs on the host.
+ * That asymmetry is the trap: `supatype db check` passes, `push` applies the schema, and then
+ * storage, realtime and the server all die with ECONNREFUSED against their own loopback. Found by
+ * rehearsing exactly that.
+ *
+ * Refused rather than rewritten. The compose file interpolates one `${DATABASE_URL}` for every
+ * service, so silently substituting a different host would mean the CLI and the stack no longer
+ * agree about which database they are talking to, the thing every other check here exists to
+ * prevent.
+ */
+export function loopbackExternalHost(config: SupatypeProjectConfig): string | undefined {
+  const url = externalDatabaseUrl(config)
+  if (url === undefined) return undefined
+
+  let host: string
+  try {
+    host = new URL(url).hostname.toLowerCase()
+  } catch {
+    return undefined // Shape is validated at config load; nothing useful to add here.
+  }
+  // Node strips the brackets from an IPv6 hostname, and 127.0.0.0/8 is all loopback.
+  const loopback =
+    host === "localhost" ||
+    host === "::1" ||
+    host === "[::1]" ||
+    /^127\.\d+\.\d+\.\d+$/.test(host)
+  return loopback ? host : undefined
+}
+
+function assertExternalUrlReachableFromContainers(config: SupatypeProjectConfig): void {
+  const host = loopbackExternalHost(config)
+  if (host === undefined) return
+
+  fatalError(
+    `database.external.url points at ${host}, which no container can reach`,
+    [
+      "Inside a container, localhost is that container, not the machine running Docker. Every",
+      "service in the stack would fail to connect, while the CLI succeeds because it runs on the host.",
+      "",
+      "Use a host the containers can resolve:",
+      "  host.docker.internal   (Docker Desktop on macOS and Windows)",
+      "  172.17.0.1             (the docker0 bridge on Linux, or add an extra_hosts entry)",
+      "  the database's LAN address or hostname",
+      "",
+      "The CLI reaches the same address, so one value keeps working for both.",
+    ],
+    { brand: { intro: "Self-host compose" } },
+  )
+}
+
+/**
+ * The tier to write into the compose file.
+ *
+ * Resolved here so every caller gets it, rather than threaded through four call sites that load the
+ * schema a moment later anyway. A schema that fails to load falls back to the default list: compose
+ * generation is the wrong place to report a syntax error, and `push`/`dev` do it properly seconds
+ * later with the file and line.
+ */
+function resolveFieldMaskingTier(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  options?: SelfHostComposeOptions,
+): FieldMaskingTier | undefined {
+  if (options?.fieldMaskingTier !== undefined) return options.fieldMaskingTier
+  return fieldMaskingTierFromProject(cwd, config)
+}
+
+/**
+ * Whether this project has a versioned model, unless the caller already knows.
+ *
+ * Same seam as the tier above, and the same reason: the renderer does not load the schema, so a
+ * caller that has can say, and `writeSelfHostCompose` answers for the callers that have not.
+ */
+function resolveDrafts(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  options?: SelfHostComposeOptions,
+): boolean {
+  if (options?.drafts !== undefined) return options.drafts
+  return projectHasVersionedModels(cwd, config)
 }
 
 export function writeSelfHostCompose(
@@ -474,12 +991,24 @@ export function writeSelfHostCompose(
   config: SupatypeProjectConfig,
   options?: SelfHostComposeOptions,
 ): SelfHostComposePaths {
+  assertExternalUrlMatchesEnv(cwd, config)
+  const tier = resolveFieldMaskingTier(cwd, config, options)
+  const resolved: SelfHostComposeOptions = {
+    ...options,
+    ...(tier !== undefined && { fieldMaskingTier: tier }),
+    drafts: resolveDrafts(cwd, config, options),
+  }
+  assertExternalUrlReachableFromContainers(config)
   const paths = selfHostComposePaths(cwd)
   mkdirSync(paths.dir, { recursive: true })
   ensureProjectFunctionsDir(cwd, config)
-  ensureComposeManifest(cwd)
-  writeFileSync(paths.composePath, renderSelfHostCompose(config, cwd, options), "utf8")
+  ensureComposeManifest(cwd, config)
+  writeFileSync(paths.composePath, renderSelfHostCompose(config, cwd, resolved), "utf8")
+  writeFileSync(paths.s3ConfigPath, renderSeaweedIdentities(), "utf8")
   const studioHostDev = options?.devLocal === true && hasStudioOverride(config)
+  const tlsEnabled = selfHostTlsEnabled(config, options?.devLocal === true)
+  const domain = config.server.domain?.trim()
+  const acmeEmail = config.server.tls?.email?.trim()
   writeFileSync(
     paths.kongPath,
     buildKongDeclarative({
@@ -488,6 +1017,19 @@ export function writeSelfHostCompose(
         studioServiceUrl: COMPOSE_STUDIO_HOST_URL,
         studioStripPath: false,
       }),
+      // Kong stores its certificates wherever the RESP server is. With
+      // pg_keyspace that is the database container, and they are durable
+      // there because the keyspace defaults to durable and nothing names
+      // Kong's keys as an exception.
+      ...(tlsEnabled && domain && acmeEmail
+        ? {
+            acme: {
+              email: acmeEmail,
+              domain,
+              redisHost: keyspaceInPostgres(config) ? "db" : "valkey",
+            },
+          }
+        : {}),
     }),
     "utf8",
   )
@@ -497,6 +1039,21 @@ export function writeSelfHostCompose(
 export interface RunDockerComposeOptions {
   /** Suppress docker compose progress UI (container status lines). */
   quiet?: boolean
+  /** Logo + Clack intro when Docker preflight fails (TTY). */
+  brand?: DockerBrandOptions
+}
+
+/** Exit with a friendly compose failure message. */
+export function exitComposeFailed(
+  status: number,
+  context: string,
+  brand?: DockerBrandOptions,
+): never {
+  fatalError(
+    `docker compose failed (exit ${status}).`,
+    [context, "Check logs: supatype self-host compose logs"],
+    { ...(brand !== undefined && { brand }), exitCode: status === 0 ? 1 : status },
+  )
 }
 
 export function runDockerCompose(
@@ -506,6 +1063,7 @@ export function runDockerCompose(
   composeProject?: string,
   options?: RunDockerComposeOptions,
 ): number {
+  requireDockerDaemon(options?.brand !== undefined ? { brand: options.brand } : undefined)
   const envFile = resolve(projectRoot, ".env")
   const composeArgs = ["compose"]
   if (options?.quiet) {
@@ -525,11 +1083,26 @@ export function runDockerCompose(
   const env: NodeJS.ProcessEnv = options?.quiet
     ? { ...process.env, COMPOSE_PROGRESS: "quiet" }
     : process.env
-  const result = spawnSync("docker", composeArgs, { stdio: "inherit", cwd: projectRoot, env })
+  const stdio = options?.quiet ? "pipe" : "inherit"
+  const result = spawnSync("docker", composeArgs, {
+    stdio,
+    cwd: projectRoot,
+    env,
+    ...(options?.quiet ? { encoding: "utf8" as const } : {}),
+  })
+  if (options?.quiet && result.status !== 0) {
+    const detail = [result.stderr, result.stdout]
+      .filter((s): s is string => typeof s === "string" && s.trim() !== "")
+      .join("\n")
+      .trim()
+    if (detail) {
+      console.error(`[supatype] docker compose: ${detail}`)
+    }
+  }
   return result.status ?? 1
 }
 
-/** Compose project name for a Supatype project — isolates docker state per project. */
+/** Compose project name for a Supatype project, isolates docker state per project. */
 export function composeProjectName(projectName: string): string {
   const slug = projectName.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "")
   return `supatype-${slug || "project"}`

@@ -13,14 +13,18 @@ export const config = {
     "postgresql://supatype_admin:postgres@localhost:5432/postgres",
   ),
 
-  /** JWT secret shared with GoTrue / Kong. */
-  jwtSecret: env(
-    "JWT_SECRET",
-    "super-secret-jwt-token-change-in-production",
-  ),
+  /**
+   * JWT secret shared with the auth service and Kong.
+   *
+   * **No fallback, deliberately.** This validates every caller's token, and the value it used
+   * to default to is published in this repository, so a deployment that forgot to set
+   * JWT_SECRET accepted tokens anyone could mint, and looked healthy doing it. Refusing to
+   * start is the only safe reading of a missing signing secret.
+   */
+  jwtSecret: env("JWT_SECRET"),
 
-  /** S3-compatible endpoint (MinIO for local dev). */
-  s3Endpoint: env("S3_ENDPOINT", "http://localhost:9000"),
+  /** S3-compatible endpoint (SeaweedFS for local dev). */
+  s3Endpoint: env("S3_ENDPOINT", "http://localhost:8333"),
 
   /** S3 region. */
   s3Region: env("S3_REGION", "us-east-1"),
@@ -31,16 +35,16 @@ export const config = {
   /** S3 secret key. */
   s3SecretKey: env("S3_SECRET_KEY", "supatype-secret"),
 
-  /** Whether to force path-style access (required for MinIO). */
+  /** Whether to force path-style access (required for SeaweedFS). */
   s3ForcePathStyle: env("S3_FORCE_PATH_STYLE", "true") === "true",
 
   /**
    * Publicly reachable base URL for S3 objects in public buckets.
-   * For MinIO in local dev this is the same as S3_ENDPOINT (e.g. http://localhost:9000).
+   * For SeaweedFS in local dev this is the same as S3_ENDPOINT (e.g. http://localhost:8333).
    * For AWS set this to your CloudFront domain or the bucket's public S3 URL.
    * Defaults to S3_ENDPOINT.
    */
-  s3PublicUrl: env("S3_PUBLIC_URL", env("S3_ENDPOINT", "http://localhost:9000")),
+  s3PublicUrl: env("S3_PUBLIC_URL", env("S3_ENDPOINT", "http://localhost:8333")),
 
   /** Maximum upload size in bytes (default 50 MB). */
   maxUploadSize: parseInt(env("MAX_UPLOAD_SIZE", String(50 * 1024 * 1024)), 10),
@@ -48,7 +52,7 @@ export const config = {
   /** Transform cache TTL in seconds (default 1 hour). */
   transformCacheTtl: parseInt(env("TRANSFORM_CACHE_TTL", "3600"), 10),
 
-  /** Project tier — injected at deploy time for per-file and quota enforcement. */
+  /** Project tier: injected at deploy time for per-file and quota enforcement. */
   projectTier: env("PROJECT_TIER", "free") as "free" | "pro" | "team" | "enterprise",
 
   /** Per-file upload limit for the current tier (bytes). Overrides maxUploadSize when set. -1 = unlimited. */
@@ -57,8 +61,8 @@ export const config = {
   /** Total storage quota for this project (bytes). -1 = unlimited. */
   storageQuota: parseInt(env("STORAGE_QUOTA", String(1024 * 1024 * 1024)), 10),
 
-  /** HMAC secret for pre-signed URL tokens. Falls back to JWT secret. */
-  signedUrlSecret: env("SIGNED_URL_SECRET", env("JWT_SECRET", "super-secret-jwt-token-change-in-production")),
+  /** HMAC secret for pre-signed URL tokens. Falls back to the JWT secret, which is required. */
+  signedUrlSecret: env("SIGNED_URL_SECRET", env("JWT_SECRET")),
 
   /** Default pre-signed URL expiry in seconds. */
   defaultSignedUrlExpiry: parseInt(env("DEFAULT_SIGNED_URL_EXPIRY", "3600"), 10),

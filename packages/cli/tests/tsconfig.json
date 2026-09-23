@@ -3,7 +3,13 @@
   "compilerOptions": {
     "noEmit": true,
     "composite": false,
-    "rootDir": ".."
+    "rootDir": "../.."
   },
-  "include": ["./**/*.ts"]
+  "include": [
+    "./**/*.ts",
+    "../src/**/*.ts",
+    "../../studio/src/lib/normalize-admin-config.ts",
+    "../../studio/src/config.ts"
+  ],
+  "exclude": ["engine-distribution.test.ts"]
 }

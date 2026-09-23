@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# test-cdn-server-linux.sh — verify supatype-server linux/amd64 from CDN inside Docker.
+# test-cdn-server-linux.sh: verify supatype-server linux/amd64 from CDN inside Docker.
 #
 # Run from Windows via Git Bash or WSL (requires Docker Desktop):
 #   ./scripts/test-cdn-server-linux.sh
@@ -49,7 +49,7 @@ describe_magic() {
   local magic="$1"
   case "$magic" in
     7f454c46) echo "ELF executable" ;;
-    213c6172) echo "Unix ar archive (Go c-archive — NOT runnable; release pipeline bug)" ;;
+    213c6172) echo "Unix ar archive (Go c-archive, NOT runnable; release pipeline bug)" ;;
     3c21646f|3c21444f) echo "HTML/text (likely CDN 404 or error page)" ;;
     4d5a9000) echo "PE/Windows (wrong platform for linux test)" ;;
     *) echo "unknown (magic=${magic})" ;;
@@ -91,7 +91,7 @@ fi
 printf '  SHA256 OK (matches checksums.sha256 on CDN)\n'
 
 MAGIC="$(file_magic "${WORKDIR}/${BIN_NAME}")"
-log "File magic: ${MAGIC} — $(describe_magic "$MAGIC")"
+log "File magic: ${MAGIC}, $(describe_magic "$MAGIC")"
 
 if [[ "$MAGIC" != "7f454c46" ]]; then
   if [[ "$MAGIC" == "213c6172" ]]; then

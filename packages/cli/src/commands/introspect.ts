@@ -4,6 +4,7 @@ import { loadProjectLink } from "../link.js"
 import { resolveTarget, targetSchemaIntrospect, schemaPgSchema } from "../resolve-target.js"
 import type { DatabaseStateJson } from "../pull-utils.js"
 import { printIntrospectSummary } from "../pull-utils.js"
+import { info, plain } from "../ui/messages.js"
 
 export function registerIntrospect(program: Command): void {
   program
@@ -33,12 +34,12 @@ export function registerIntrospect(program: Command): void {
 
       if (opts.out) {
         writeFileSync(opts.out, JSON.stringify(state, null, 2), "utf8")
-        console.log(`Wrote introspection to ${opts.out}`)
+        info(`Wrote introspection to ${opts.out}`)
         return
       }
 
       if (opts.json) {
-        console.log(JSON.stringify(state, null, 2))
+        plain(JSON.stringify(state, null, 2))
         return
       }
 

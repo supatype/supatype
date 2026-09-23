@@ -1,0 +1,16 @@
+{
+  "rest": {
+    "schema": "public",
+    "max_rows": 1000,
+    "cache_max_ttl": 300,
+    "cache_tables": {
+      "post": { "enabled": true, "allow_public": true },
+      "category": { "enabled": true, "allow_public": true }
+    }
+  },
+  "graphql": {
+    "introspection": true,
+    "max_query_depth": 10,
+    "max_rows": 1000
+  }
+}

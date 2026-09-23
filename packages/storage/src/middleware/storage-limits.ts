@@ -1,5 +1,5 @@
 /**
- * Storage limits middleware — Tasks 41-43
+ * Storage limits middleware: Tasks 41-43
  *
  * Enforces:
  * - Per-file upload size limits (task 41): bucket-level + tier-level

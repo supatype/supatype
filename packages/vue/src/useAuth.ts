@@ -51,7 +51,7 @@ export function useAuth<TDatabase extends AnyDatabase = AnyDatabase>(): UseAuthR
         user.value = data.session.user
       }
     } catch {
-      // Ignore — user is not authenticated
+      // Ignore: user is not authenticated
     }
     loading.value = false
 

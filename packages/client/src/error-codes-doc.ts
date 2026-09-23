@@ -1,5 +1,5 @@
 /**
- * Error codes documentation — Gap Appendices task 35
+ * Error codes documentation: Gap Appendices task 35
  *
  * Published list of all Supatype error codes with descriptions and suggested
  * fixes. Accessible at docs.supatype.com/errors.

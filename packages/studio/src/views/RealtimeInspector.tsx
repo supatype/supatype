@@ -89,7 +89,7 @@ function OverviewTab({
           {/* Connection limit gauge */}
           <Card className="p-4">
             <p className="text-xs text-muted-foreground mb-2">
-              Connection limit — {pct.toFixed(0)}% used
+              Connection limit: {pct.toFixed(0)}% used
             </p>
             <div className="h-2 w-full rounded-full bg-accent overflow-hidden">
               <div
@@ -429,7 +429,7 @@ export function RealtimeInspector(): React.ReactElement {
           "Live connection count with tier limit gauge",
           "Per-table event type controls (INSERT / UPDATE / DELETE)",
           "Channel authorisation mode (RLS / authenticated / public)",
-          "Broadcast tester — send messages to channels without writing code",
+          "Broadcast tester: send messages to channels without writing code",
           "RLS cache TTL and payload size configuration",
         ]}
       />

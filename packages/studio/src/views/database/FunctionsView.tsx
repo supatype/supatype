@@ -1,5 +1,6 @@
 import React, { useState } from "react"
 import { useProjectProxy } from "../../hooks/useProjectProxy.js"
+import { useSchemaPicker } from "../../hooks/useSchemaPicker.js"
 import { useApiQuery } from "../../hooks/useApiQuery.js"
 import { Badge, Button, Card, CodeBlock } from "../../components/ui.js"
 import { EmptyState } from "../../components/EmptyState.js"
@@ -16,14 +17,13 @@ const LIST_QUERY = (schema: string) => `
 
 export function FunctionsView(): React.ReactElement {
   const proxy = useProjectProxy()
-  const [schema, setSchema] = useState("public")
+  const { schemas, schema, setSchema } = useSchemaPicker()
   const [selected, setSelected] = useState<Record<string, unknown> | null>(null)
   const [sqlModal, setSqlModal] = useState(false)
   const [sqlText, setSqlText] = useState("")
   const [runError, setRunError] = useState<string | null>(null)
   const [runBusy, setRunBusy] = useState(false)
 
-  const { data: schemas } = useApiQuery(() => proxy.schemas(), [proxy])
   const { data: fns, loading, error, refetch } = useApiQuery(
     () => proxy.sql(LIST_QUERY(schema)).then((r) => r.rows),
     [proxy, schema],
@@ -49,7 +49,7 @@ export function FunctionsView(): React.ReactElement {
         <div className="flex items-center gap-3">
           <h1 className="text-xl font-semibold text-foreground">Functions</h1>
           <select value={schema} onChange={(e) => setSchema(e.target.value)} className="px-2 py-1 text-sm rounded-md border border-border bg-background text-foreground focus:outline-none">
-            {(schemas ?? ["public"]).map((s) => <option key={s} value={s}>{s}</option>)}
+            {(schemas.length > 0 ? schemas : [schema]).map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
         <Button variant="primary" onClick={() => { setSqlText(`CREATE OR REPLACE FUNCTION ${schema}.my_function()\nRETURNS void\nLANGUAGE plpgsql\nAS $$\nBEGIN\n  -- body\nEND;\n$$;`); setSqlModal(true) }}>Create function</Button>

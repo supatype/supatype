@@ -1,7 +1,7 @@
 import { defineConfig } from "@supatype/cli"
 
 /**
- * Supabucks — a coffee-shop loyalty app demo.
+ * Supabucks: a coffee-shop loyalty app demo.
  *
  * The frontend is a Vite + React SPA built to ./dist and served by Supatype
  * itself (app.mode: "static"). The app and the API share one origin
@@ -15,12 +15,6 @@ export default defineConfig({
   app: {
     mode: "static",
     static_dir: "./dist",
-  },
-  versions: {
-    engine: "0.1.1",
-    server: "1.0.5",
-    postgres: "17.2",
-    deno: "2.2.0",
   },
   email: { provider: "console" },
   storage: { provider: "local", local_path: ".supatype/storage" },

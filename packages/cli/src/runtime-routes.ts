@@ -17,7 +17,7 @@ export interface RuntimeRouteOptions {
   functionsServiceUrl?: string
   /**
    * Self-host Compose: Kong forwards API traffic to supatype-server (unified gateway),
-   * which proxies to internal services — same model as `supatype dev`.
+   * which proxies to internal services, same model as `supatype dev`.
    */
   unifiedGateway?: boolean
   /** Studio UI upstream (default: in-compose `studio:3002`). */
@@ -161,7 +161,7 @@ function runtimeRouteSpecUnified(opts: RuntimeRouteOptions): RuntimeRoute[] {
 
 /**
  * Legacy split-stack routes (PostgREST/storage/realtime directly from Kong).
- * Kept for tests or explicit opt-out only — self-host uses unifiedGateway.
+ * Kept for tests or explicit opt-out only, self-host uses unifiedGateway.
  */
 function runtimeRouteSpecSplit(opts: RuntimeRouteOptions): RuntimeRoute[] {
   const studioUrl = studioServiceUrl(opts)

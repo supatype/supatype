@@ -1,5 +1,5 @@
 /**
- * ProcessManager — spawn a child process, write its PID, stream logs with a
+ * ProcessManager: spawn a child process, write its PID, stream logs with a
  * colored prefix, and restart on crash with exponential backoff.
  */
 
@@ -73,7 +73,7 @@ export class ProcessManager {
     this.backoffMs = this.opts.initialBackoffMs
   }
 
-  /** Start the process. Returns immediately — the process runs in the background. */
+  /** Start the process. Returns immediately, the process runs in the background. */
   start(): void {
     this.stopped = false
     this.spawn()
@@ -201,7 +201,7 @@ export class ProcessManager {
       mkdirSync(this.opts.pidDir, { recursive: true })
       writeFileSync(join(this.opts.pidDir, `${this.opts.label}.pid`), String(pid))
     } catch {
-      // Non-fatal — PID tracking is best-effort.
+      // Non-fatal: PID tracking is best-effort.
     }
   }
 
@@ -209,7 +209,7 @@ export class ProcessManager {
     try {
       await unlink(join(this.opts.pidDir, `${this.opts.label}.pid`))
     } catch {
-      // Ignore — file may already be gone.
+      // Ignore: file may already be gone.
     }
   }
 }

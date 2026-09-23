@@ -311,7 +311,7 @@ export class RealtimeClient {
     }
 
     if (msg.status === "error") {
-      // Find which channel this error relates to — broadcast to all as fallback
+      // Find which channel this error relates to, broadcast to all as fallback
       for (const state of this.channels.values()) {
         state.statusCallback?.("CHANNEL_ERROR")
       }

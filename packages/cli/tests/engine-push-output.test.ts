@@ -38,7 +38,7 @@ describe("formatEnginePushMessage()", () => {
   it("formats up_to_date with admin refresh", () => {
     expect(
       formatEnginePushMessage({ status: "up_to_date", operations: 0, admin_refreshed: true }),
-    ).toBe("Schema up to date — Studio metadata synced.")
+    ).toBe("Schema up to date, Studio metadata synced.")
   })
 
   it("formats up_to_date without admin refresh", () => {

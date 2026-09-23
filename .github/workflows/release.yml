@@ -57,12 +57,26 @@ jobs:
             echo "::notice::Docker Hub latest=yes (version=${VERSION}, prerelease=${IS_PRE}, stable_tag_in_repo=${HAS_STABLE})"
           else
             echo "docker_push_latest=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Docker Hub latest=no — prerelease ${VERSION} will not move :latest while a stable vX.Y.Z tag exists"
+            echo "::notice::Docker Hub latest=no, prerelease ${VERSION} will not move :latest while a stable vX.Y.Z tag exists"
           fi
 
   # ── Build, test, and publish npm packages ───────────────────────────────────
-  npm:
+  # The standalone CLI, from the same tag and the same version as everything else.
+  #
+  # This runs before npm publishes, deliberately. Publishing to the CDN is additive and every
+  # path is immutable, so a bad attempt is superseded by the next version and costs nothing;
+  # an npm publish cannot be undone. Doing the reversible half first, and only reaching the
+  # irreversible half once the binaries have been compiled, signed and executed on real
+  # hardware, is the closest this can get to an atomic release.
+  cli:
     needs: prepare
+    uses: ./.github/workflows/cli-release.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+    secrets: inherit
+
+  npm:
+    needs: [prepare, cli]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -110,6 +124,8 @@ jobs:
             common
             react
             react-auth
+            react-native
+            react-native-auth
             ssr
             ui
             plugin-seo
@@ -282,7 +298,7 @@ jobs:
             type=raw,value=latest,enable=${{ needs.docker-latest-policy.outputs.docker_push_latest == 'true' }}
 
       # schema-engine is a separate repo with independent versioning, so the
-      # engine image tag is NOT the monorepo version — always use :latest.
+      # engine image tag is NOT the monorepo version, always use :latest.
       - uses: docker/build-push-action@v5
         with:
           context: packages/self-host-control
@@ -307,3 +323,122 @@ jobs:
           name: ${{ github.ref_name }}
           prerelease: ${{ contains(needs.prepare.outputs.version, 'alpha') || contains(needs.prepare.outputs.version, 'beta') || contains(needs.prepare.outputs.version, 'rc') }}
           generate_release_notes: true
+
+  # Homebrew lives here, not inside the reusable CLI workflow. It used to, and because npm
+  # depends on that workflow as a unit, a failure pushing a formula blocked the npm publish:
+  # v0.1.8 shipped to the CDN and to Docker Hub while npm stayed on 0.1.7. Publishing a
+  # formula is a post-release action, so it belongs beside github-release, where failing is
+  # loud without holding up a release that already succeeded.
+  #
+  # Gated on a repo variable, not on whether the token exists: secrets are unavailable in any
+  # `if:`, and inferring "configured" from a credential's presence reports an expired token as
+  # a green skip.
+  homebrew-formula:
+    name: Homebrew formula
+    needs: [prepare, cli]
+    runs-on: ubuntu-24.04
+    if: vars.HOMEBREW_TAP_REPO != ''
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # The manifest comes from the CDN, not from a build artefact. A formula should describe
+      # what was published rather than what a job happened to have on disk, and this job runs in
+      # the caller while the artefact was uploaded by a called workflow, which is a dependency
+      # worth not having. Fetching it also means a formula can be regenerated for an existing
+      # release without rebuilding anything.
+      - name: Fetch the published manifest and generate Formula/supatype.rb
+        run: |
+          set -euo pipefail
+          mkdir -p published homebrew-formula/Formula
+          MANIFEST="https://releases.supatype.com/cli/v${VERSION}/checksums.sha256"
+          if ! curl -fsSL "$MANIFEST" -o published/checksums.sha256; then
+            echo "::error::$MANIFEST is not readable, so the CLI publish did not complete."
+            exit 1
+          fi
+          curl -fsSL "${MANIFEST}.minisig" -o published/checksums.sha256.minisig
+
+          # Verified before it is trusted, since every hash in the formula comes from it. The key
+          # is the one committed in the installer, matched on its RW prefix: minisign public keys
+          # always start with that, and grep avoids a backreference that would need escaping.
+          KEY="$(grep -o 'RW[A-Za-z0-9+/=]\{40,\}' scripts/install.sh | head -1)"
+          if [ -z "$KEY" ]; then
+            echo "::error::could not read the release public key out of scripts/install.sh"
+            exit 1
+          fi
+          sudo apt-get install -y -qq minisign
+          printf 'untrusted comment: supatype release key\n%s\n' "$KEY" > published/key.pub
+          minisign -V -p published/key.pub -m published/checksums.sha256
+
+          cat published/checksums.sha256
+          HOMEBREW_FORMULA_OUT=homebrew-formula/Formula/supatype.rb \
+            node packages/cli/scripts/generate-homebrew-formula.mjs "${VERSION}" published
+
+      - name: Push formula to the tap
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO || 'supatype/homebrew-tap' }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "HOMEBREW_TAP_REPO is set but HOMEBREW_TAP_GITHUB_TOKEN is not." >&2
+            echo "Add the token, or clear the variable to disable Homebrew publishing." >&2
+            exit 1
+          fi
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${TAP_REPO}.git" tap
+          mkdir -p tap/Formula
+          cp homebrew-formula/Formula/supatype.rb tap/Formula/supatype.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/supatype.rb
+          git diff --staged --quiet && echo "No formula changes" && exit 0
+          git commit -m "supatype ${VERSION}"
+          git push origin HEAD:main
+
+  # A formula ships only once Homebrew has installed from it. Valid-looking Ruby proves nothing:
+  # the URLs have to resolve, the sha256 has to match what the CDN serves, and bin.install has to
+  # find that name inside the archive. Both arches, because the formula picks a different URL on
+  # each and only one can be wrong at a time.
+  verify-homebrew-install:
+    name: brew install (${{ matrix.arch }})
+    needs: [prepare, homebrew-formula]
+    if: vars.HOMEBREW_TAP_REPO != ''
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: intel
+            runner: macos-15-intel
+    steps:
+      - name: Install from the tap and run it
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          TAP: ${{ vars.HOMEBREW_TAP_REPO || 'supatype/homebrew-tap' }}
+        run: |
+          set -euo pipefail
+          # The tap name drops the homebrew- prefix: supatype/homebrew-tap taps as supatype/tap.
+          #
+          # Built from prefix removal rather than ${TAP/\/homebrew-/\/}: a backslash in a bash
+          # replacement is consumed by bash 5 and kept by the bash 3.2 macOS ships, so that form
+          # worked when tested on Linux and produced `supatype\/homebrew-tap` on the runner. These
+          # expansions contain no delimiter to escape, so they cannot differ between versions.
+          TAP_OWNER="${TAP%%/*}"
+          TAP_REPO_NAME="${TAP##*/}"
+          TAP_NAME="${TAP_OWNER}/${TAP_REPO_NAME#homebrew-}"
+          echo "tapping $TAP_NAME (from repository $TAP)"
+          brew tap "$TAP_NAME"
+          brew install --formula "$TAP_NAME/supatype"
+
+          got="$(supatype --version)"
+          if [ "$got" != "$VERSION" ]; then
+            echo "::error::brew installed $got, expected $VERSION"
+            exit 1
+          fi
+          echo "installed and running: $got"
+          supatype --help | head -3
+

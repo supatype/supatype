@@ -1,5 +1,5 @@
 /**
- * Integration test — Task 94: Realtime multi-tenant isolation
+ * Integration test: Task 94: Realtime multi-tenant isolation
  *
  * Tests: subscribe to project A -> insert in A -> event received ->
  * insert in B -> no event on A's subscription.
@@ -60,7 +60,7 @@ function simulateServerMessage(ws: MockWebSocketInstance, msg: Record<string, un
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
-describe("Task 94 — Realtime multi-tenant isolation", () => {
+describe("Task 94: Realtime multi-tenant isolation", () => {
   let MockWS: ReturnType<typeof createMockWebSocketClass>
 
   beforeEach(() => {
@@ -151,14 +151,14 @@ describe("Task 94 — Realtime multi-tenant isolation", () => {
       })
 
       // Now simulate a message from project B arriving on the same WebSocket
-      // (this would be the server-side routing — in a real system, the server
+      // (this would be the server-side routing, in a real system, the server
       // would NOT route project B events to project A's connection)
       simulateServerMessage(wsA, {
         type: "change",
         channel: "projectB:posts",   // Different channel
         event: "INSERT",
         payload: {
-          new: { id: 99, title: "Project B post — should not be received" },
+          new: { id: 99, title: "Project B post, should not be received" },
           old: null,
         },
         timestamp: "2024-01-01T00:00:02Z",

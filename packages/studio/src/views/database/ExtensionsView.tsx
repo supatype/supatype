@@ -81,7 +81,7 @@ export function ExtensionsView(): React.ReactElement {
                   <tr key={row["extname"] as string} className="border-b border-border last:border-0">
                     <td className="px-4 py-3 font-mono text-sm text-foreground">{row["extname"] as string}</td>
                     <td className="px-4 py-3"><Badge variant="blue">{row["extversion"] as string}</Badge></td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground">{(row["description"] as string | null) ?? "—"}</td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground">{(row["description"] as string | null) ?? "-"}</td>
                     <td className="px-4 py-3 text-right">
                       <Button
                         variant="destructive"

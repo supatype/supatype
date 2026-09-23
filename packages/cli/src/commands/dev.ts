@@ -1,15 +1,16 @@
 /**
- * supatype dev — start local Postgres, apply schema, run supatype-server.
+ * supatype dev: start local Postgres, apply schema, run supatype-server.
  *
  * Runtime provider (top-level `provider` or legacy `database.provider`):
- *   native — host Postgres + host server + host engine (default)
- *   docker — full self-host Compose stack (Kong :18473); see dev-compose.ts
+ *   native: host Postgres + host server + host engine (default)
+ *   docker: full self-host Compose stack (Kong :18473); see dev-compose.ts
  *
  * Edge functions (when a functions/ dir exists): Deno is resolved from the CDN cache
  * (auto-download on miss). Self-host/cloud Docker stacks use supatype-server in-container;
  * Deno is not provisioned by the CLI on those paths.
  */
 
+import { keyspaceInPostgres } from "../cache-provider.js"
 import type { Command } from "commander"
 import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
@@ -18,13 +19,22 @@ import { isAbsolute, join, relative, resolve } from "node:path"
 import { loadConfig } from "../config.js"
 import type { ExtractedSchemaAstV2 } from "../schema-ast-v2.js"
 import {
+  apiSchemaList,
   functionsPathCandidatesFromProject,
   resolveRuntimeProvider,
   schemaPathFromProject,
   type SupatypeProjectConfig,
 } from "../project-config.js"
 import { discoverTsFunctionsInDir, writeDevFunctionsRouter } from "../functions-router-gen.js"
+import { fieldMaskingTierFromProject } from "../field-masking-tier.js"
+import { projectHasVersionedModels } from "../model-versioning.js"
 import { signJwt } from "../jwt.js"
+import {
+  devAuthenticatorPassword,
+  devJwtSecret,
+  devPostgresPassword,
+  secretFingerprint,
+} from "../local-secrets.js"
 import {
   normalisePlatformPath,
   cachePath,
@@ -36,35 +46,81 @@ import {
 import { ensureBinary } from "../ensure-binary.js"
 import { startProxyDevApp } from "../app/proxy-dev-app.js"
 import { ProcessManager } from "../process-manager.js"
-import { startStudioViteDevServer } from "../studio-dev-server.js"
+import { STUDIO_DEV_PORT, startStudioViteDevServer } from "../studio-dev-server.js"
 import { restoreSystemRelationTargets } from "../restore-system-relation-targets.js"
 import { localStorageEnv } from "../local-storage.js"
 import { beginDevSession, endDevSession, resolveDevUiMode, startDevSession } from "../dev-session.js"
+import { publishDevReady } from "../dev-ready-panel.js"
+import { probeDockerDaemon, reportDockerUnavailable } from "../docker-runtime.js"
+import { fatalError } from "../ui/fatal.js"
 import { registerDevShutdown } from "../dev-shutdown.js"
+import { patchRouteManifest } from "../route-manifest.js"
+import { resolveRealtimeLaunch } from "../realtime-launch.js"
+import { writeAppViteEnv } from "../app-vite-env.js"
+import { ensureValkeySidecar, probeTcp, stopValkeySidecar } from "../valkey-sidecar.js"
 import {
+  firstFreePort,
   initdb,
+  KEYSPACE_PORT_BASE,
+  KEYSPACE_PORT_SPAN,
+  nativeKeyspaceLibraryPresent,
+  nativeMaskLibraryPresent,
   start as pgStart,
   stop as pgStop,
   waitReady as pgWaitReady,
   isPortInUse,
   pgSpawnEnv,
 } from "../postgres-ctl.js"
-/** Map `email.smtp` from supatype.config.ts into GOTRUE_SMTP_* for the embedded GoTrue process. */
-function gotrueSMTPFromEmailConfig(email: SupatypeProjectConfig["email"] | undefined): Record<string, string> {
+/** Map `email.smtp` from supatype.config.ts into SUPATYPE_SMTP_* for the embedded auth service. */
+function authSMTPFromEmailConfig(email: SupatypeProjectConfig["email"] | undefined): Record<string, string> {
   const s = email?.smtp
   if (!s) return {}
   const out: Record<string, string> = {}
   const host = s.host?.trim()
-  if (host) out.GOTRUE_SMTP_HOST = host
-  if (s.port !== undefined) out.GOTRUE_SMTP_PORT = String(s.port)
+  if (host) out.SUPATYPE_SMTP_HOST = host
+  if (s.port !== undefined) out.SUPATYPE_SMTP_PORT = String(s.port)
   const user = s.user?.trim()
-  if (user) out.GOTRUE_SMTP_USER = user
-  if (s.pass !== undefined && s.pass !== "") out.GOTRUE_SMTP_PASS = s.pass
+  if (user) out.SUPATYPE_SMTP_USER = user
+  if (s.pass !== undefined && s.pass !== "") out.SUPATYPE_SMTP_PASS = s.pass
   const admin = s.admin_email?.trim()
-  if (admin) out.GOTRUE_SMTP_ADMIN_EMAIL = admin
+  if (admin) out.SUPATYPE_SMTP_ADMIN_EMAIL = admin
   const sender = s.sender_name?.trim()
-  if (sender) out.GOTRUE_SMTP_SENDER_NAME = sender
+  if (sender) out.SUPATYPE_SMTP_SENDER_NAME = sender
   return out
+}
+
+const NATIVE_PG_PORT = 5432
+const REALTIME_PORT = "4000"
+
+function portCheckCommand(port: number): string {
+  return process.platform === "win32"
+    ? `netstat -ano | findstr :${port}`
+    : `lsof -i :${port}`
+}
+
+async function assertNativeDevPortsFree(serverPort: number, postgrestPort: number): Promise<void> {
+  const brand = { intro: "Local development" }
+  if (await isPortInUse(NATIVE_PG_PORT)) {
+    fatalError(
+      `Port ${NATIVE_PG_PORT} is already in use.`,
+      ["Another Postgres instance may be running.", `Check: ${portCheckCommand(NATIVE_PG_PORT)}`],
+      { brand },
+    )
+  }
+  if (await isPortInUse(serverPort)) {
+    fatalError(
+      `Port ${serverPort} is already in use.`,
+      ["Another supatype-server may be running.", `Check: ${portCheckCommand(serverPort)}`],
+      { brand },
+    )
+  }
+  if (await isPortInUse(postgrestPort)) {
+    fatalError(
+      `Port ${postgrestPort} is already in use.`,
+      ["Another service may be running.", `Check: ${portCheckCommand(postgrestPort)}`],
+      { brand },
+    )
+  }
 }
 
 export function registerDev(program: Command): void {
@@ -76,12 +132,28 @@ export function registerDev(program: Command): void {
     .option("--port <port>", "Port for supatype-server (overrides config)", String)
     .action(async (opts: { watch: boolean; stream?: boolean; port?: string }) => {
       const cwd = process.cwd()
-      beginDevSession(resolveDevUiMode(opts.stream === true))
 
-      // ── 1. Load project config ─────────────────────────────────────────────
+      // ── 1. Load project config (before TUI, fatal errors must hit real stderr) ──
       const config = loadConfig(cwd)
+      const provider = resolveRuntimeProvider(config)
 
-      startDevSession()
+      if (provider === "docker") {
+        const probe = probeDockerDaemon()
+        if (!probe.ok) {
+          reportDockerUnavailable(probe, { brand: { intro: "Local development" } })
+          process.exit(1)
+        }
+      }
+
+      const projectName = config.project.name
+      const serverPort = opts.port ?? String(config.server.port ?? 54321)
+      const postgrestPort = String(config.server.postgrestPort ?? 3001)
+
+      if (provider !== "docker") {
+        await assertNativeDevPortsFree(Number(serverPort), Number(postgrestPort))
+      }
+
+      beginDevSession(resolveDevUiMode(opts.stream === true))
       if (hasMeaningfulOverrides(config)) {
         console.warn("[supatype] Local binary overrides active:")
         for (const line of describeActiveOverrides(config)) {
@@ -89,10 +161,6 @@ export function registerDev(program: Command): void {
         }
         console.warn("")
       }
-      const projectName = config.project.name
-      const serverPort = opts.port ?? String(config.server.port ?? 54321)
-      const postgrestPort = String(config.server.postgrestPort ?? 3001)
-      const provider = resolveRuntimeProvider(config)
 
       if (provider === "docker") {
         const { runDevCompose } = await import("../dev-compose.js")
@@ -117,47 +185,60 @@ export function registerDev(program: Command): void {
         mkdirSync(d, { recursive: true })
       }
 
-      // ── 4. Port collision check ───────────────────────────────────────────
-      const pgPort = 5432
-      if (await isPortInUse(pgPort)) {
-        console.error(
-          `[supatype] Port ${pgPort} is already in use. Another Postgres instance may be running.\n` +
-            `  Check: lsof -i :${pgPort}`,
-        )
-        endDevSession()
-        process.exit(1)
-      }
-      if (await isPortInUse(Number(serverPort))) {
-        console.error(
-          `[supatype] Port ${serverPort} is already in use. Another supatype-server may be running.\n` +
-            `  Check: lsof -i :${serverPort}`,
-        )
-        endDevSession()
-        process.exit(1)
-      }
-      if (await isPortInUse(Number(postgrestPort))) {
-        console.error(
-          `[supatype] Port ${postgrestPort} is already in use. Another service may be running.\n` +
-            `  Check: lsof -i :${postgrestPort}`,
-        )
-        endDevSession()
-        process.exit(1)
-      }
-
       // ── 5–7. Start Postgres ───────────────────────────────────────────────
       let dbURL: string
+      /** What PostgREST connects as, deliberately not `dbURL`, which is a superuser. */
+      let postgrestDbURL: string
       let stopPostgres: () => void | Promise<void>
-      const pgPassword = "postgres"
+      const pgPort = NATIVE_PG_PORT
+      const pgPassword = devPostgresPassword(cwd)
+      // Distinct from pgPassword even locally, so the split the other paths enforce is the
+      // one developers see. Read from .env when present so it matches a stack the user has
+      // already provisioned.
+      const authenticatorPassword = devAuthenticatorPassword(cwd)
       // pgBinDir is set on the native path and used to add DLL search path for
       // PostgREST on Windows (PostgREST links against libpq + SSL from MinGW).
       let pgBinDir: string | null = null
+      // The port the native Postgres serves RESP on, or null when this archive
+      // has no pg_keyspace and the Valkey sidecar is what the cache talks to.
+      let keyspacePort: number | null = null
 
       {
-        // native — resolve pg bin dir and manage with pg_ctl
+        // native: resolve pg bin dir and manage with pg_ctl
         pgBinDir = await resolvePgBinDir(config)
         const dataDir = config.database.data_dir ?? join(stateRoot, "data")
         mkdirSync(dataDir, { recursive: true })
-        const pgOpts = { pgBinDir, dataDir, port: pgPort, logPath: join(logsDir, "postgres.log") }
+        // The RESP keyspace, when this archive carries it: one process instead
+        // of a Postgres and a Valkey container. The port is chosen rather than
+        // fixed because 6379 is the first thing a developer's own Redis or a
+        // leftover sidecar takes, and a keyspace that cannot bind its port
+        // fails inside the postmaster log where nobody is looking.
+        //
+        // `cache.provider: "valkey"` is honoured here too, and this is the only place it could
+        // be: the native path asks the archive what it carries rather than the config what it
+        // wants, so a project that deliberately kept the sidecar would otherwise find Postgres
+        // serving RESP anyway and the sidecar never started.
+        const wantsPgKeyspace = keyspaceInPostgres(config)
+        keyspacePort =
+          wantsPgKeyspace && nativeKeyspaceLibraryPresent(pgBinDir)
+            ? await firstFreePort(KEYSPACE_PORT_BASE, KEYSPACE_PORT_SPAN)
+            : null
+        if (wantsPgKeyspace && nativeKeyspaceLibraryPresent(pgBinDir) && keyspacePort === null) {
+          console.warn(
+            `[supatype] ⚠  No free port in ${KEYSPACE_PORT_BASE}-${KEYSPACE_PORT_BASE + KEYSPACE_PORT_SPAN - 1} ` +
+              "for the Postgres keyspace — starting without it.",
+          )
+        }
+
+        const pgOpts = {
+          pgBinDir,
+          dataDir,
+          port: pgPort,
+          logPath: join(logsDir, "postgres.log"),
+          ...(keyspacePort !== null
+            ? { keyspacePort, keyspaceDatabase: projectName }
+            : {}),
+        }
 
         console.log("[supatype] Initialising Postgres data directory...")
         initdb(pgOpts)
@@ -165,7 +246,8 @@ export function registerDev(program: Command): void {
         pgStart(pgOpts)
         await pgWaitReady(pgOpts, 15_000)
         console.log("[supatype] Postgres is ready.")
-        dbURL = `postgres://postgres:postgres@127.0.0.1:${pgPort}/${projectName}?sslmode=disable`
+        dbURL = `postgres://postgres:${pgPassword}@127.0.0.1:${pgPort}/${projectName}?sslmode=disable`
+        postgrestDbURL = `postgres://authenticator:${authenticatorPassword}@127.0.0.1:${pgPort}/${projectName}?sslmode=disable`
         stopPostgres = () => pgStop(pgOpts)
 
         // Create project database if it doesn't exist (native only).
@@ -192,8 +274,25 @@ export function registerDev(program: Command): void {
         //   anon          – unauthenticated requests (RLS enforced)
         //   authenticated – signed-in user requests  (RLS enforced)
         //   service_role  – developer/admin bypass   (BYPASSRLS)
+        //   authenticator – the role PostgREST *connects* as, and nothing else
+        //
+        // `authenticator` is NOINHERIT and holds no privileges of its own: it can only
+        // SET ROLE to the three above. That containment is the point. Connecting as
+        // `postgres`: a superuser: meant a request whose JWT named *any* role in the
+        // cluster got it, because a superuser may SET ROLE to anything. Verified: as
+        // postgres, `SET ROLE supatype_replication_admin` succeeds; as authenticator the
+        // same statement is refused. Mirrors the image, which has had this role all along.
+        // Created here rather than during the push, because the engine chooses how to enforce field
+        // rules from the extensions present *when it diffs*. Creating it later would leave the tier
+        // decided against a database that no longer looks like that.
+        //
+        // Conditional on the library being bundled: an archive downloaded before it was would fail
+        // the CREATE, and there is nothing the developer could do about it from here.
+        const maskSql = nativeMaskLibraryPresent(pgBinDir)
+          ? "CREATE EXTENSION IF NOT EXISTS supatype_mask;\n"
+          : ""
         const rolesSql = `
-CREATE SCHEMA IF NOT EXISTS auth;
+${maskSql}CREATE SCHEMA IF NOT EXISTS auth;
 DO $$ BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'anon')
     THEN CREATE ROLE anon NOLOGIN; END IF;
@@ -201,8 +300,11 @@ DO $$ BEGIN
     THEN CREATE ROLE authenticated NOLOGIN; END IF;
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'service_role')
     THEN CREATE ROLE service_role NOLOGIN BYPASSRLS; END IF;
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticator')
+    THEN CREATE ROLE authenticator LOGIN NOINHERIT PASSWORD '${authenticatorPassword}'; END IF;
 END $$;
 GRANT anon, authenticated, service_role TO postgres;
+GRANT anon, authenticated, service_role TO authenticator;
 GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
 -- Table-level privileges (RLS restricts rows; roles still need table access)
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon;
@@ -219,15 +321,15 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
           { stdio: "pipe", encoding: "utf8", env: pgEnv })
       }
 
-      const LOCAL_JWT_SECRET = "super-secret-jwt-token-with-at-least-32-characters-long"
+      const LOCAL_JWT_SECRET = devJwtSecret(cwd)
       const authDbURL = dbURL.includes("?")
         ? `${dbURL}&search_path=auth`
         : `${dbURL}?search_path=auth`
 
-      // ── 8. GoTrue migrations (auth.users before engine studio SQL) ─────────
-      console.log("[supatype] Running GoTrue migrations...")
-      const migrateEnv = gotrueMigrateEnv(serverPort, dbURL, LOCAL_JWT_SECRET)
-      runGotrueMigrations(serverBin, migrateEnv)
+      // ── 8. auth migrations (auth.users before engine studio SQL) ─────────
+      console.log("[supatype] Running auth migrations...")
+      const migrateEnv = authMigrateEnv(serverPort, dbURL, LOCAL_JWT_SECRET)
+      runAuthMigrations(serverBin, migrateEnv)
 
       // ── 9. Engine: apply schema ───────────────────────────────────────────
       const schemaPath = schemaPathFromProject(config, cwd)
@@ -237,12 +339,15 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
       mkdirSync(supatypeDir, { recursive: true })
 
       const localStoragePath = config.storage?.provider !== "s3" ? join(stateRoot, "storage") : undefined
-      // Native Postgres builds don't include PostGIS — skip geo fields rather than failing.
+      // Native Postgres builds don't include PostGIS, skip geo fields rather than failing.
       const skipFieldKinds: ReadonlySet<string> = new Set(["geo", "vector"])
 
       await runSchemaPush(cwd, engineBin, schemaPath, dbURL, manifestPath, adminConfigPath, localStoragePath, skipFieldKinds, config).catch(
         (e: unknown) => console.error("[supatype] Initial schema push failed:", (e as Error).message),
       )
+
+      const { ensureFirstAdminUser } = await import("./admin.js")
+      await ensureFirstAdminUser(dbURL, { cwd })
 
       // ── 10. Spawn supatype-server ─────────────────────────────────────────
 
@@ -275,14 +380,14 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
           }
         } catch (err) {
           console.warn(
-            `[supatype] ⚠  Found ${functionsDir} but could not provision Deno — edge functions will not run.\n` +
+            `[supatype] ⚠  Found ${functionsDir} but could not provision Deno, edge functions will not run.\n` +
               `  ${(err as Error).message}\n` +
               "  (Functions still appear in Studio; invocations need Deno.)",
           )
         }
       }
 
-      // Matches GOTRUE_HOOK_SEND_EMAIL_SECRETS symmetric format (dev only). Override via .env.
+      // Matches SUPATYPE_HOOK_SEND_EMAIL_SECRETS symmetric format (dev only). Override via .env.
       const LOCAL_SEND_EMAIL_HOOK_SECRETS =
         "v1,whsec_abcdefghijklmnopqrstuvwxyz01234567"
       const now = Math.floor(Date.now() / 1000)
@@ -290,9 +395,41 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
       const anonKey        = signJwt({ ...jwtBase, role: "anon" },         LOCAL_JWT_SECRET)
       const serviceRoleKey = signJwt({ ...jwtBase, role: "service_role" }, LOCAL_JWT_SECRET)
 
+      const realtimeUrl = `http://127.0.0.1:${REALTIME_PORT}`
+      patchRouteManifest(manifestPath, {
+        realtime_enabled: true,
+        realtime_url: realtimeUrl,
+      })
+
+      writeAppViteEnv(cwd, config, `http://localhost:${serverPort}`, anonKey)
+
+      let realtimeProc: ProcessManager | null = null
+      try {
+        const launch = await resolveRealtimeLaunch(config, cwd)
+        realtimeProc = new ProcessManager(launch.bin, launch.args, {
+          label: "realtime",
+          pidDir,
+          colour: "\x1b[35m",
+          env: {
+            DATABASE_URL: dbURL,
+            JWT_SECRET: LOCAL_JWT_SECRET,
+            PORT: REALTIME_PORT,
+            SLOT_NAME: "supatype_realtime",
+            PUBLICATION_NAME: "supatype_realtime",
+          },
+        })
+        realtimeProc.start()
+        console.log(`[supatype] Realtime service: ${realtimeUrl}`)
+      } catch (err) {
+        console.warn(
+          `[supatype] ⚠  Realtime unavailable, WebSocket subscriptions will not work.\n` +
+            `  ${(err as Error).message}`,
+        )
+      }
+
 
       const emailProvider = config.email?.provider ?? "console"
-      const gotrueMailerProvider =
+      const authMailerProvider =
         emailProvider === "console"
           ? "console"
           : emailProvider === "resend"
@@ -301,9 +438,33 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
               ? "ses"
               : "smtp"
 
+      // Postgres serves RESP itself when the archive had pg_keyspace and the
+      // port came up. The probe is not ceremony: shared memory limits, a
+      // preload ordering mistake or a port taken between the check and the
+      // start all leave a Postgres that is running and a keyspace that is not,
+      // and the difference is a cache that silently never hits.
+      const nativeKeyspaceAddr =
+        keyspacePort !== null && (await probeTcp("127.0.0.1", keyspacePort))
+          ? `127.0.0.1:${keyspacePort}`
+          : null
+      if (keyspacePort !== null && nativeKeyspaceAddr === null) {
+        console.warn(
+          `[supatype] ⚠  Postgres has pg_keyspace but is not serving RESP on :${keyspacePort} — ` +
+            "see logs/postgres.log. Falling back to the Valkey sidecar.",
+        )
+      }
+      if (nativeKeyspaceAddr) {
+        console.log(`[supatype] Keyspace served by Postgres (${nativeKeyspaceAddr}).`)
+      }
+      const valkeySidecar = nativeKeyspaceAddr
+        ? { addr: nativeKeyspaceAddr, containerName: null, started: false }
+        : ensureValkeySidecar(projectName)
+
       const serverEnv: Record<string, string> = {
         // supatype-server outer layer
         SUPATYPE_MODE: config.server.mode ?? "dev",
+        ...(valkeySidecar.addr ? { SUPATYPE_VALKEY_ADDR: valkeySidecar.addr } : {}),
+        SUPATYPE_MANAGED_PROJECT_REF: projectName,
         SUPATYPE_MANIFEST_PATH: manifestPath,
         SUPATYPE_ADMIN_CONFIG_PATH: adminConfigPath,
         SUPATYPE_POSTGREST_URL: `http://127.0.0.1:${postgrestPort}`,
@@ -314,6 +475,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
           ? { SUPATYPE_DENO_SERVE_SCRIPT: denoServeScriptAbs }
           : {}),
         SUPATYPE_URL: `http://localhost:${serverPort}`,
+        SUPATYPE_REALTIME_URL: realtimeUrl,
         SUPATYPE_ANON_KEY: anonKey,
         SUPATYPE_SERVICE_ROLE_KEY: serviceRoleKey,
         PORT: serverPort,
@@ -327,47 +489,47 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
         ...(config.app.vite_dev_url !== undefined && config.app.vite_dev_url.trim() !== ""
           ? { SUPATYPE_VITE_DEV_URL: config.app.vite_dev_url.trim() }
           : {}),
-        // GoTrue required fields (sensible local-dev defaults)
-        GOTRUE_DB_DATABASE_URL: authDbURL,
+        // Auth service required fields (sensible local-dev defaults)
+        SUPATYPE_DB_DATABASE_URL: authDbURL,
         DATABASE_URL: authDbURL,
         SUPATYPE_SQL_DATABASE_URL: dbURL,
         PGSSLMODE: "disable",
-        GOTRUE_DB_NAMESPACE: "auth",
-        GOTRUE_DB_DRIVER: "postgres",
-        GOTRUE_JWT_SECRET: LOCAL_JWT_SECRET,
-        GOTRUE_JWT_EXP: "3600",
-        GOTRUE_JWT_AUD: "authenticated",
-        GOTRUE_JWT_ADMIN_ROLES: "supatype_admin,service_role",
-        API_EXTERNAL_URL: `http://localhost:${serverPort}/auth/v1`,
-        GOTRUE_API_HOST: "localhost",
-        GOTRUE_SITE_URL: `http://localhost:${serverPort}`,
-        GOTRUE_MAILER_MAILER_PROVIDER: gotrueMailerProvider,
-        GOTRUE_MAILER_AUTOCONFIRM: "true",
-        GOTRUE_LOG_LEVEL: "info",
-        GOTRUE_DISABLE_SIGNUP: "false",
+        SUPATYPE_DB_NAMESPACE: "auth",
+        SUPATYPE_DB_DRIVER: "postgres",
+        SUPATYPE_JWT_SECRET: LOCAL_JWT_SECRET,
+        SUPATYPE_JWT_EXP: "3600",
+        SUPATYPE_JWT_AUD: "authenticated",
+        SUPATYPE_JWT_ADMIN_ROLES: "supatype_admin,service_role",
+        SUPATYPE_API_EXTERNAL_URL: `http://localhost:${serverPort}/auth/v1`,
+        SUPATYPE_API_HOST: "localhost",
+        SUPATYPE_SITE_URL: `http://localhost:${serverPort}`,
+        SUPATYPE_MAILER_MAILER_PROVIDER: authMailerProvider,
+        SUPATYPE_MAILER_AUTOCONFIRM: "true",
+        SUPATYPE_LOG_LEVEL: "info",
+        SUPATYPE_DISABLE_SIGNUP: "false",
         ...(config.email?.resend_api_key !== undefined && config.email.resend_api_key !== ""
           ? { RESEND_API_KEY: config.email.resend_api_key }
           : {}),
-        ...(gotrueMailerProvider === "resend" &&
+        ...(authMailerProvider === "resend" &&
         config.email?.resend_from !== undefined &&
         config.email.resend_from.trim() !== ""
           ? { RESEND_FROM: config.email.resend_from.trim() }
           : {}),
-        ...(gotrueMailerProvider === "ses" &&
+        ...(authMailerProvider === "ses" &&
         config.email?.ses_from !== undefined &&
         config.email.ses_from.trim() !== ""
           ? { SES_FROM: config.email.ses_from.trim() }
           : {}),
-        ...(gotrueMailerProvider === "smtp" ? gotrueSMTPFromEmailConfig(config.email) : {}),
+        ...(authMailerProvider === "smtp" ? authSMTPFromEmailConfig(config.email) : {}),
         ...(config.email?.send_email_hook === true
           ? {
-              GOTRUE_HOOK_SEND_EMAIL_ENABLED: "true",
-              GOTRUE_HOOK_SEND_EMAIL_URI:
+              SUPATYPE_HOOK_SEND_EMAIL_ENABLED: "true",
+              SUPATYPE_HOOK_SEND_EMAIL_URI:
                 config.email?.send_email_hook_uri !== undefined &&
                 config.email.send_email_hook_uri.trim() !== ""
                   ? config.email.send_email_hook_uri.trim()
                   : `http://127.0.0.1:${serverPort}/internal/v0hooks/send-email`,
-              GOTRUE_HOOK_SEND_EMAIL_SECRETS:
+              SUPATYPE_HOOK_SEND_EMAIL_SECRETS:
                 config.email?.send_email_hook_secrets !== undefined &&
                 config.email.send_email_hook_secrets.trim() !== ""
                   ? config.email.send_email_hook_secrets.trim()
@@ -405,12 +567,27 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
         }
 
         const postgrestEnv: Record<string, string> = {
-          PGRST_DB_URI: dbURL,
-          PGRST_DB_SCHEMA: "public, supatype, graphql_public",
+          PGRST_DB_URI: postgrestDbURL,
+          // Derived from schema.pg_schema (or schema.api_schemas), a hardcoded "public" here meant
+          // a non-default pg_schema pushed correctly and then answered PGRST106 on every request.
+          // Native dev has no masking extension either, so a schema with field rules is served from
+          // `api` here too: the case an "is the database external" rule would have got wrong.
+          PGRST_DB_SCHEMA: apiSchemaList(config, {
+            // The installed archive decides: one downloaded before the masking library was bundled
+            // has no extension, so its field rules are enforced by views instead.
+            tier: fieldMaskingTierFromProject(cwd, config, nativeMaskLibraryPresent(pgBinDir)),
+            // A versioned model adds the generated `draft` schema, or `.draft()` would answer
+            // PGRST106 against a stack that had migrated the views into place.
+            drafts: projectHasVersionedModels(cwd, config),
+          }),
+          // Parity with self-host, which has always set this. Unqualified names in column defaults
+          // (`uuid_generate_v4()`) resolve here, and with a non-public pg_schema the request schema
+          // alone does not reach them.
+          PGRST_DB_EXTRA_SEARCH_PATH: "public,extensions",
           PGRST_DB_ANON_ROLE: "anon",
           PGRST_SERVER_PORT: postgrestPort,
           PGRST_SERVER_HOST: "127.0.0.1",
-          PGRST_JWT_SECRET: serverEnv["GOTRUE_JWT_SECRET"] ?? "",
+          PGRST_JWT_SECRET: serverEnv["SUPATYPE_JWT_SECRET"] ?? "",
           PGRST_LOG_LEVEL: "warn",
           // On Windows, PostgREST (MinGW/GHC binary) needs libpq.dll and
           // OpenSSL DLLs. Prepend a Postgres bin dir which bundles these
@@ -446,7 +623,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
       }
 
       // ── 9d. Studio (optional) ─────────────────────────────────────────────
-      const studioPort = 3002
+      const studioPort = STUDIO_DEV_PORT
       let studioProc: ProcessManager | null = null
 
       const studioOverride = config.overrides?.studio
@@ -455,7 +632,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
           cwd,
           studioOverride,
           pidDir,
-          serviceRoleKey,
+          anonKey,
           proxyTarget: `http://localhost:${serverPort}`,
           viteSupatypeUrl: `http://localhost:${studioPort}`,
         })
@@ -464,35 +641,36 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
 
       const appProc = startProxyDevApp(cwd, config, pidDir)
 
-      // ── Print status ──────────────────────────────────────────────────────
-      console.log(`
-[supatype] Services running:
-  Postgres         ${dbURL}
-  supatype-server  http://localhost:${serverPort}
-    REST API       http://localhost:${serverPort}/rest/v1/
-    Auth           http://localhost:${serverPort}/auth/v1/
-    Storage        http://localhost:${serverPort}/storage/v1/
-    Realtime       ws://localhost:${serverPort}/realtime/v1/${studioProc ? `\n  Studio           http://localhost:${studioPort}` : ""}
+      const links = [
+        { label: "API", url: `http://localhost:${serverPort}` },
+        { label: "REST", url: `http://localhost:${serverPort}/rest/v1/` },
+        { label: "Auth", url: `http://localhost:${serverPort}/auth/v1/` },
+        { label: "Storage", url: `http://localhost:${serverPort}/storage/v1/` },
+        { label: "Realtime", url: `ws://localhost:${serverPort}/realtime/v1/` },
+      ]
+      if (studioProc) {
+        links.push({ label: "Studio", url: `http://localhost:${studioPort}` })
+      }
 
-  API keys (local dev only):
-    anon key       ${anonKey}
-    service_role   ${serviceRoleKey}
-
-  JWT secret: ${LOCAL_JWT_SECRET}
-
-  Press Ctrl+C to stop.
-`)
-
+      publishDevReady({
+        title: "Services running",
+        links,
+        anonKey,
+        serviceRoleKey,
+        hints: [`Postgres ${dbURL}`, `JWT secret: #${secretFingerprint(LOCAL_JWT_SECRET)} (in .env)`],
+      })
 
       // ── Shutdown handler ──────────────────────────────────────────────────
       registerDevShutdown(async () => {
         console.log("[supatype] Shutting down...")
         await Promise.all([
           serverProc.stop(),
+          realtimeProc?.stop(),
           postgrestProc?.stop(),
           studioProc?.stop(),
           appProc?.stop(),
         ])
+        stopValkeySidecar(valkeySidecar.containerName)
         await stopPostgres()
       })
 
@@ -527,9 +705,9 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
 // Schema push (engine subprocess)
 // ---------------------------------------------------------------------------
 
-// Last successfully-pushed AST JSON — used to skip no-op re-fires.
+// Last successfully-pushed AST JSON, used to skip no-op re-fires.
 let _lastPushedAst: string | null = null
-// AST that failed on its last attempt — always retried even if content is unchanged.
+// AST that failed on its last attempt, always retried even if content is unchanged.
 let _lastFailedAst: string | null = null
 
 async function runSchemaPush(
@@ -553,7 +731,7 @@ async function runSchemaPush(
     ast = filtered
     if (adapted.length > 0) {
       console.warn(
-        `[supatype] ⚠  ${adapted.length} field(s) replaced with JSONB — required extensions not available:\n` +
+        `[supatype] ⚠  ${adapted.length} field(s) replaced with JSONB, required extensions not available:\n` +
         adapted.map((s: string) => `    ${s}`).join("\n"),
       )
     }
@@ -627,7 +805,7 @@ async function runSchemaPush(
     { cwd, stdio: "pipe", encoding: "utf8" },
   )
   if (genResult.status !== 0) {
-    console.warn("[supatype] Manifest generation failed — server routing may be stale.")
+    console.warn("[supatype] Manifest generation failed, server routing may be stale.")
   }
 
   // Generate admin config (for Studio). Engine writes to stdout.
@@ -772,7 +950,7 @@ async function extractPostgresArchive(
 }
 
 // ---------------------------------------------------------------------------
-// PostgREST resolver — downloads from GitHub releases if not cached
+// PostgREST resolver: downloads from GitHub releases if not cached
 // ---------------------------------------------------------------------------
 
 const POSTGREST_DEFAULT_VERSION = "12.2.3"
@@ -913,12 +1091,12 @@ function repairWindowsPostgrestRuntime(cacheDir: string, archivePath: string, bi
 }
 
 // ---------------------------------------------------------------------------
-// Local-dev JWT generator (no external dep — pure crypto)
+// Local-dev JWT generator (no external dep, pure crypto)
 // ---------------------------------------------------------------------------
 
 
 // ---------------------------------------------------------------------------
-// AST adaptation — replace extension-dependent fields with JSONB fallbacks
+// AST adaptation: replace extension-dependent fields with JSONB fallbacks
 // ---------------------------------------------------------------------------
 
 interface AstField { kind: string; required?: boolean; [k: string]: unknown }
@@ -962,30 +1140,30 @@ function adaptUnsupportedKinds(
 // .env loader
 // ---------------------------------------------------------------------------
 
-/** Minimal GoTrue env for `migrate` (matches required fields in serverEnv below). */
-function gotrueMigrateEnv(
+/** Minimal auth env for `migrate` (matches required fields in serverEnv below). */
+function authMigrateEnv(
   serverPort: string,
   sqlDbURL: string,
   jwtSecret: string,
 ): Record<string, string> {
   const base = `http://localhost:${serverPort}`
   return {
-    // envconfig: gotrue + DB.DATABASE_URL → GOTRUE_DB_DATABASE_URL
-    GOTRUE_DB_DATABASE_URL: sqlDbURL,
+    // envconfig: the service prefix + DB.DATABASE_URL → SUPATYPE_DB_DATABASE_URL
+    SUPATYPE_DB_DATABASE_URL: sqlDbURL,
     DATABASE_URL: sqlDbURL,
-    GOTRUE_DB_DRIVER: "postgres",
-    GOTRUE_DB_NAMESPACE: "auth",
+    SUPATYPE_DB_DRIVER: "postgres",
+    SUPATYPE_DB_NAMESPACE: "auth",
     PGSSLMODE: "disable",
-    GOTRUE_JWT_SECRET: jwtSecret,
-    API_EXTERNAL_URL: `${base}/auth/v1`,
-    GOTRUE_API_HOST: "localhost",
-    GOTRUE_SITE_URL: base,
-    GOTRUE_MAILER_AUTOCONFIRM: "true",
+    SUPATYPE_JWT_SECRET: jwtSecret,
+    SUPATYPE_API_EXTERNAL_URL: `${base}/auth/v1`,
+    SUPATYPE_API_HOST: "localhost",
+    SUPATYPE_SITE_URL: base,
+    SUPATYPE_MAILER_AUTOCONFIRM: "true",
   }
 }
 
-/** Apply GoTrue DDL (auth.users, etc.) before engine push references auth schema. */
-function runGotrueMigrations(
+/** Apply auth DDL (auth.users, etc.) before engine push references auth schema. */
+function runAuthMigrations(
   serverBin: string,
   migrateEnv: Record<string, string>,
 ): void {
@@ -1000,7 +1178,7 @@ function runGotrueMigrations(
   if (result.status !== 0) {
     const detail = (result.stderr ?? result.stdout ?? "").trim()
     throw new Error(
-      `GoTrue migrations failed (exit ${result.status ?? "unknown"})` +
+      `auth migrations failed (exit ${result.status ?? "unknown"})` +
         (detail ? `:\n${detail}` : ""),
     )
   }

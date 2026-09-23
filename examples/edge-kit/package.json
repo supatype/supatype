@@ -1,0 +1,30 @@
+{
+  "name": "@supatype/example-edge-kit",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Edge functions kitchen sink — Deno types DX, invoke, auth, REST write, webhook HMAC",
+  "scripts": {
+    "dev": "supatype dev",
+    "vite": "vite",
+    "build": "vite build",
+    "push": "supatype push --yes",
+    "keys": "supatype keys",
+    "functions": "supatype functions serve",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p functions/tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@supatype/cli": "workspace:*",
+    "@supatype/client": "workspace:*",
+    "@supatype/types": "workspace:*",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5",
+    "vite": "^6.0.0"
+  }
+}

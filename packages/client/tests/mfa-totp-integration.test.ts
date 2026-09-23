@@ -1,5 +1,5 @@
 /**
- * Integration test — Task 89: MFA TOTP flow
+ * Integration test: Task 89: MFA TOTP flow
  *
  * Tests: enroll -> QR code -> verify code -> login requires 2 steps ->
  * JWT aal2 -> unenroll -> single step.
@@ -10,7 +10,7 @@ import { AuthClient } from "../src/auth.js"
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const GOTRUE_URL = "http://localhost:9999"
+const SUPATYPE_URL = "http://localhost:9999"
 const HEADERS = { apikey: "test-anon-key", "Content-Type": "application/json" }
 
 const FACTOR_ID = "factor-totp-001"
@@ -69,15 +69,15 @@ function mockFetch(body: unknown, ok = true, status?: number): ReturnType<typeof
 }
 
 function freshClient(): AuthClient {
-  return new AuthClient(GOTRUE_URL, HEADERS)
+  return new AuthClient(SUPATYPE_URL, HEADERS)
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
-describe("Task 89 — MFA TOTP integration", () => {
+describe("Task 89: MFA TOTP integration", () => {
   beforeEach(() => vi.restoreAllMocks())
 
-  describe("Step 1 — Enroll TOTP factor", () => {
+  describe("Step 1: Enroll TOTP factor", () => {
     it("calls POST /factors with factor_type=totp", async () => {
       // First sign in to have a session
       const client = freshClient()
@@ -111,7 +111,7 @@ describe("Task 89 — MFA TOTP integration", () => {
 
       // Verify POST was sent to /factors
       const [url, opts] = enrollFetch.mock.calls[0] as [string, RequestInit]
-      expect(url).toBe(`${GOTRUE_URL}/factors`)
+      expect(url).toBe(`${SUPATYPE_URL}/factors`)
       expect(opts.method).toBe("POST")
       const body = JSON.parse(opts.body as string) as Record<string, string>
       expect(body["factor_type"]).toBe("totp")
@@ -151,7 +151,7 @@ describe("Task 89 — MFA TOTP integration", () => {
     })
   })
 
-  describe("Step 2 — Verify TOTP code (challenge + verify)", () => {
+  describe("Step 2: Verify TOTP code (challenge + verify)", () => {
     it("creates a challenge and verifies the TOTP code", async () => {
       const client = freshClient()
       vi.stubGlobal("fetch", mockFetch(makeTokenResponse()))
@@ -169,7 +169,7 @@ describe("Task 89 — MFA TOTP integration", () => {
       expect(challengeResult.error).toBeNull()
       expect(challengeResult.data!.id).toBe(CHALLENGE_ID)
 
-      // Mock verify — returns AAL2 token
+      // Mock verify: returns AAL2 token
       const aal2Response = makeTokenResponse({
         access_token: makeAal2Token(),
       })
@@ -232,7 +232,7 @@ describe("Task 89 — MFA TOTP integration", () => {
     })
   })
 
-  describe("Step 3 — Login requires two steps with MFA enrolled", () => {
+  describe("Step 3: Login requires two steps with MFA enrolled", () => {
     it("first step: password login returns AAL1 session", async () => {
       const client = freshClient()
       const aal1Response = makeTokenResponse()
@@ -260,7 +260,7 @@ describe("Task 89 — MFA TOTP integration", () => {
       }))
       await client.mfa.challenge({ factorId: FACTOR_ID })
 
-      // Verify — AAL2
+      // Verify: AAL2
       const aal2Token = makeAal2Token()
       vi.stubGlobal("fetch", mockFetch(makeTokenResponse({ access_token: aal2Token })))
       const { data } = await client.mfa.verify({
@@ -279,7 +279,7 @@ describe("Task 89 — MFA TOTP integration", () => {
     })
   })
 
-  describe("Step 4 — getAuthenticatorAssuranceLevel", () => {
+  describe("Step 4: getAuthenticatorAssuranceLevel", () => {
     it("returns aal1 before TOTP verification", async () => {
       const client = freshClient()
       vi.stubGlobal("fetch", mockFetch(makeTokenResponse()))
@@ -321,7 +321,7 @@ describe("Task 89 — MFA TOTP integration", () => {
     })
   })
 
-  describe("Step 5 — Unenroll factor, back to single step", () => {
+  describe("Step 5: Unenroll factor, back to single step", () => {
     it("calls DELETE /factors/:id to unenroll", async () => {
       const client = freshClient()
       vi.stubGlobal("fetch", mockFetch(makeTokenResponse({ access_token: makeAal2Token() })))
@@ -337,7 +337,7 @@ describe("Task 89 — MFA TOTP integration", () => {
       expect(data!.id).toBe(FACTOR_ID)
 
       const [url, opts] = unenrollFetch.mock.calls[0] as [string, RequestInit]
-      expect(url).toBe(`${GOTRUE_URL}/factors/${FACTOR_ID}`)
+      expect(url).toBe(`${SUPATYPE_URL}/factors/${FACTOR_ID}`)
       expect(opts.method).toBe("DELETE")
     })
 

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { resolve } from "node:path"
 
-export const SUPATYPE_GITIGNORE_MARKER = "# Supatype — local runtime (contains secrets in link.json)"
+export const SUPATYPE_GITIGNORE_MARKER = "# Supatype, local runtime (contains secrets in link.json)"
 export const SUPATYPE_GITIGNORE_BLOCK = `${SUPATYPE_GITIGNORE_MARKER}
 .env
 .supatype/
@@ -34,7 +34,7 @@ export function ensureSupatypeGitignore(cwd: string, opts?: { silent?: boolean }
   }
 
   if (!opts?.silent) {
-    console.warn("Added .supatype/ to .gitignore (link.json contains secrets — never commit).")
+    console.warn("Added .supatype/ to .gitignore (link.json contains secrets, never commit).")
   }
   return true
 }
@@ -42,7 +42,7 @@ export function ensureSupatypeGitignore(cwd: string, opts?: { silent?: boolean }
 export function warnIfLinkNotGitignored(cwd: string): void {
   if (isSupatypeGitignored(cwd)) return
   console.warn(
-    "\n⚠  Warning: .supatype/ is not in .gitignore — link.json contains tokens and must not be committed.",
+    "\n⚠  Warning: .supatype/ is not in .gitignore, link.json contains tokens and must not be committed.",
   )
   console.warn("   Run with link --fix-gitignore to append the Supatype block.\n")
 }

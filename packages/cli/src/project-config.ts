@@ -21,7 +21,7 @@ export interface SupatypeProjectConfig {
     root?: string
   }
   project: {
-    /** Project name — used for per-project state dirs and logging. */
+    /** Project name: used for per-project state dirs and logging. */
     name: string
     /** Cloud project reference (set by `supatype link`). */
     ref?: string
@@ -31,8 +31,38 @@ export interface SupatypeProjectConfig {
      * Database backend.
      * "native" = supatype manages a native Postgres binary (downloaded from CDN).
      * "docker" = supatype runs supatype/postgres via Docker (includes all extensions).
+     *
+     * Omitted when `external` is set, there is no backend for Supatype to choose.
      */
-    provider: "native" | "docker"
+    provider?: "native" | "docker"
+    /**
+     * Point the stack at a Postgres that already exists, instead of provisioning one.
+     *
+     * The presence of this block is the switch: with it, no `db` service is generated and every
+     * service connects here. Deliberately not an overload of `connection`, which means something
+     * narrower (a DSN for CLI commands) and would become the third setting meaning two things.
+     *
+     * **Self-host only.** On the cloud path the database is part of what is being provided, so the
+     * block is rejected rather than ignored.
+     */
+    external?: {
+      /**
+       * Postgres URL for every service in the stack.
+       *
+       * The role in it owns the schema and runs migrations. PostgREST connects as `authenticator`
+       * separately: see `supatype db check`, which reports what this database is missing.
+       */
+      url: string
+      /**
+       * Force realtime off.
+       *
+       * Realtime needs logical replication (`wal_level = logical`, a replication slot, and
+       * `wal2json`), which a managed provider may not offer. Left unset, the stack probes for the
+       * capability and records the answer, so this is only for overriding a probe that says yes when
+       * you would rather it did not run.
+       */
+      realtime?: boolean
+    }
     /**
      * Directory where Postgres stores its data files (provider=native).
      * Defaults to ~/.supatype/projects/{name}/data when omitted.
@@ -59,6 +89,54 @@ export interface SupatypeProjectConfig {
     postgrestPort?: number
     /** Domain for ACME TLS certificate (mode=standalone). */
     domain?: string
+    /**
+     * TLS for self-host HTTPS (Kong ACME / Let's Encrypt).
+     * Requires `mode: "standalone"` and a non-empty `domain`.
+     */
+    tls?: {
+      /** ACME contact email for Let's Encrypt (required to enable HTTPS). */
+      email?: string
+      /** "kong" (default) = Kong acme plugin; "none" = stay HTTP even with a domain. */
+      provider?: "kong" | "none"
+    }
+  }
+  /**
+   * Where the REST response cache and Kong's ACME certificates live.
+   *
+   * Both speak RESP, so this is a choice of server rather than of feature.
+   */
+  cache?: {
+    /**
+     * "pg_keyspace" (default) = the RESP keyspace inside the Postgres
+     *                           container, so the stack runs one stateful
+     *                           service instead of two.
+     * "valkey"                = a Valkey sidecar container.
+     *
+     * pg_keyspace needs `shared_preload_libraries`, which is a property of the
+     * Postgres this stack starts — so it is only available when Supatype
+     * provisions the database. With `database.external` the default resolves
+     * to Valkey, because there is no container to configure; asking for
+     * pg_keyspace explicitly there is rejected rather than ignored.
+     *
+     * Set "valkey" to keep the sidecar. Nothing about the cache's behaviour
+     * changes with the answer — both speak RESP and both hold the same keys.
+     */
+    provider?: "valkey" | "pg_keyspace"
+    /**
+     * Extra key prefixes to persist when `provider` is "pg_keyspace".
+     *
+     * The keyspace is a cache: everything is ephemeral, living in shared
+     * memory and not surviving a restart of the database. The exception is
+     * Kong's ACME certificates, which are always kept — you do not have to
+     * name them, and re-issuing them on every restart would meet Let's
+     * Encrypt's rate limits.
+     *
+     * List a prefix here only for something you are storing yourself that
+     * must outlive a restart. Each durable write goes through the WAL, which
+     * is the cost being avoided everywhere else. Each entry is a prefix of the
+     * key as stored — see `pg_keyspace.durability_overrides`.
+     */
+    durablePrefixes?: string[]
   }
   app: {
     /**
@@ -106,6 +184,8 @@ export interface SupatypeProjectConfig {
     postgres_dir?: string
     /** Path to a local deno binary. */
     deno?: string
+    /** Path to a local supatype-realtime binary (or node entry script). */
+    realtime?: string
     /** Path to the @supatype/studio package directory (starts Vite dev server). */
     studio?: string
     /** Path to a local PostgREST binary. */
@@ -115,13 +195,13 @@ export interface SupatypeProjectConfig {
     /**
      * Email delivery provider.
      * "console" = log to stdout (default for dev)
-     * "smtp"    = SMTP (set `smtp` below and/or GOTRUE_SMTP_* in `.env`)
+     * "smtp"    = SMTP (set `smtp` below and/or SUPATYPE_SMTP_* in `.env`)
      * "resend"  = Resend API (requires RESEND_API_KEY, RESEND_FROM)
      * "ses"     = AWS SES v2 (ambient credentials, requires SES_FROM)
      */
     provider: "console" | "smtp" | "resend" | "ses"
     /**
-     * SMTP settings for provider=smtp (merged into process env as GOTRUE_SMTP_*).
+     * SMTP settings for provider=smtp (merged into process env as SUPATYPE_SMTP_*).
      * Omitted keys can still be set via `.env` / shell.
      */
     smtp?: {
@@ -139,9 +219,9 @@ export interface SupatypeProjectConfig {
     /** From address for SES (provider=ses, or set SES_FROM env var). */
     ses_from?: string
     /**
-     * When true, `supatype dev` enables the GoTrue send-email HTTP hook pointing at this
+     * When true, `supatype dev` enables the send-email HTTP hook pointing at this
      * server's POST `/internal/v0hooks/send-email` (signed delivery, dev-only secret).
-     * Override `GOTRUE_HOOK_SEND_EMAIL_*` in `.env` if needed.
+     * Override `SUPATYPE_HOOK_SEND_EMAIL_*` in `.env` if needed.
      */
     send_email_hook?: boolean
     /**
@@ -170,10 +250,84 @@ export interface SupatypeProjectConfig {
     path?: string
     /** Postgres schema name. Defaults to "public". */
     pg_schema?: string
+    /**
+     * Schemas the REST API exposes, in order (`PGRST_DB_SCHEMA`).
+     *
+     * Defaults to `pg_schema` plus the ones the stack needs for itself, `supatype` for Studio's
+     * views, `graphql_public`, `auth`: so setting `pg_schema` alone does the sensible thing.
+     *
+     * It used to be a hardcoded literal, which meant choosing a non-`public` `pg_schema` gave you
+     * a correct push and an API that answered `PGRST106` for everything: the engine had moved and
+     * PostgREST had not been told. State this explicitly when you need a different set, an extra
+     * schema of your own, or to stop exposing one.
+     */
+    api_schemas?: readonly string[]
+  }
+  /**
+   * Drafts and preview links, for the models that declare `versions`.
+   *
+   * Project-wide rather than per model: a draft is a draft whichever model it belongs to, and a
+   * reviewer granted sight of one is not granted it a table at a time.
+   */
+  publishing?: {
+    /**
+     * Studio roles that see every unpublished draft and its history, beyond the record's own
+     * creator. Defaults to all three, `["admin", "developer", "editor"]`.
+     *
+     * The record's creator always sees their own drafts and is not listed here. Narrowing this is
+     * the interesting case, and it has a trap: whoever may **update** a record may draft and publish
+     * it, so a role that can edit but cannot see drafts will build its save on the live row and
+     * discard a colleague's pending work. Take a role off this list only where it also cannot edit.
+     *
+     * An empty list narrows visibility to creators alone.
+     *
+     * `anon` is never on this list and cannot be put on it. A draft schema readable without
+     * credentials would make publishing mean nothing.
+     *
+     * Studio can override this at runtime for a project that needs to change it without a push.
+     * This is the reviewable default that lives in git.
+     */
+    draft_visibility?: readonly ("admin" | "developer" | "editor")[]
+    /** Signed, expiring links that let someone without an account read a draft. */
+    preview?: {
+      /** Lifetime of a minted link when the request does not ask for one, in seconds. Default 900. */
+      default_ttl?: number
+      /** Ceiling for a link covering one record, in seconds. Default 604800, seven days. */
+      max_record_ttl?: number
+      /**
+       * Ceiling for a link covering every draft in the project, in seconds. Default 86400, one day.
+       *
+       * Shorter than a record link on purpose: the blast radius is every unpublished draft there is,
+       * so the window in which a leaked link is still worth anything should be smaller.
+       */
+      max_project_ttl?: number
+      /**
+       * Whether project-scoped links may be minted at all. Default true.
+       *
+       * Set false for a project where nothing should ever be shareable in bulk; record links keep
+       * working. Minting one is already restricted to `admin` and `developer`, since nobody can
+       * grant sight of drafts they cannot see themselves.
+       */
+      allow_project_scope?: boolean
+    }
   }
   functions?: {
     /** Path to edge functions directory, relative to `supatype.root` when not absolute. */
     path?: string
+    /**
+     * **Public functions** allowed to see the service-role key, which reads and writes past every
+     * access rule.
+     *
+     * Empty by default, and that default is the point: a function is a public endpoint anyone holding
+     * the anon key can invoke, so an ambient admin credential made every one of them able to read the
+     * whole database. Naming one here is a reviewable line in a diff; ambient privilege is not.
+     *
+     * **Model hooks are not listed here and do not need to be.** A hook is procedural: only the API
+     * server calls it, around a write the caller was already permitted to make, and the gateway
+     * refuses its route from outside, so there is no attacker to withhold it from, and the trust is
+     * the same a trigger already has.
+     */
+    serviceRole?: readonly string[]
   }
   output?: {
     /** Path for generated TypeScript types. */
@@ -218,6 +372,37 @@ export interface SupatypeProjectConfig {
   admin?: {
     /** JWT `app_metadata.role` values allowed to use Studio. Default: admin, supatype_admin */
     roles?: string[]
+    /**
+     * Where each model renders in your own front end, keyed by model name.
+     *
+     * Studio needs this for two things that look alike and are not: the live preview pane, which
+     * streams unsaved keystrokes into an iframe, and a shared preview link, which points somebody
+     * with no account at a saved draft. Both need the same answer to "what is the address of this
+     * record", and neither can guess it.
+     *
+     * Without it there is no share link to give out. Studio says so rather than handing over the
+     * bare code, because a credential with nowhere to open it reads as a bug.
+     *
+     * `urlPattern` names fields in braces and they are filled from the record in hand, so a post
+     * previews at the address its current slug implies.
+     *
+     * **A path is enough when this deployment serves the app.** With `app.mode` set to `static` or
+     * `proxy`, the app is served at `/` on the same origin as the API, and Studio resolves a path
+     * against the origin it is loaded from. Writing the origin out again only risks it going stale:
+     *
+     * ```ts
+     * admin: { livePreview: { Post: { urlPattern: "/preview/{slug}" } } }
+     * ```
+     *
+     * With `app.mode: "none"` the app is somewhere else and no deployment fact can say where, so
+     * give an absolute URL. `supatype push` refuses a path-only pattern in that mode rather than
+     * letting it become a link that resolves to nothing.
+     *
+     * ```ts
+     * admin: { livePreview: { Post: { urlPattern: "https://example.com/preview/{slug}" } } }
+     * ```
+     */
+    livePreview?: Record<string, { url?: string; urlPattern?: string }>
   }
 }
 
@@ -298,6 +483,23 @@ export function mergeProjectConfig(
     ...(base.admin !== undefined || override.admin !== undefined
       ? { admin: { ...base.admin, ...override.admin } as NonNullable<SupatypeProjectConfig["admin"]> }
       : {}),
+    ...(base.environments !== undefined || override.environments !== undefined
+      ? (() => {
+          const b = base.environments
+          const o = override.environments
+          const mergedBranchDefaults =
+            b?.branchDefaults !== undefined || o?.branchDefaults !== undefined
+              ? { ...(b?.branchDefaults ?? {}), ...(o?.branchDefaults ?? {}) }
+              : undefined
+          return {
+            environments: {
+              ...b,
+              ...o,
+              ...(mergedBranchDefaults !== undefined ? { branchDefaults: mergedBranchDefaults } : {}),
+            } as NonNullable<SupatypeProjectConfig["environments"]>,
+          }
+        })()
+      : {}),
   }
 }
 
@@ -321,7 +523,117 @@ export function validateProjectConfig(raw: unknown, filename: string): SupatypeP
     throw new Error(`${filename}: app section is required`)
   }
 
+  validateExternalDatabase(cfg, filename)
+  validateCache(cfg, filename)
+
   return raw as SupatypeProjectConfig
+}
+
+/**
+ * `cache.provider = "pg_keyspace"` describes how the Postgres this stack
+ * starts is configured, so it cannot be honoured against a database Supatype
+ * does not manage. Rejected rather than silently falling back to Valkey: a
+ * stack that quietly runs the thing you switched away from is worse than one
+ * that will not start.
+ */
+function validateCache(cfg: Record<string, unknown>, filename: string): void {
+  const cache = cfg["cache"] as Record<string, unknown> | undefined
+  if (!cache) return
+  const provider = cache["provider"]
+  if (provider !== undefined && provider !== "valkey" && provider !== "pg_keyspace") {
+    throw new Error(
+      `${filename}: cache.provider must be "valkey" or "pg_keyspace" (got ${JSON.stringify(provider)})`,
+    )
+  }
+  const database = cfg["database"] as Record<string, unknown> | undefined
+  if (provider === "pg_keyspace" && database?.["external"]) {
+    throw new Error(
+      `${filename}: cache.provider = "pg_keyspace" needs the Postgres this stack starts — ` +
+        `it is loaded with shared_preload_libraries, which is not something Supatype can set on ` +
+        `a database.external one. Use cache.provider = "valkey", or drop database.external.`,
+    )
+  }
+  const prefixes = cache["durablePrefixes"]
+  if (prefixes !== undefined) {
+    if (!Array.isArray(prefixes) || prefixes.some((p) => typeof p !== "string" || p.length === 0)) {
+      throw new Error(`${filename}: cache.durablePrefixes must be an array of non-empty strings`)
+    }
+    // `,` separates entries and `=` separates a prefix from its tier in
+    // pg_keyspace.durability_overrides, so a prefix containing either would be
+    // read as two settings. Refused here rather than mangled into the command
+    // line, where it would surface as a Postgres that will not start.
+    const bad = (prefixes as string[]).find((p) => p.includes(",") || p.includes("="))
+    if (bad) {
+      throw new Error(
+        `${filename}: cache.durablePrefixes entry ${JSON.stringify(bad)} cannot contain "," or "=" — ` +
+          `both are separators in pg_keyspace.durability_overrides`,
+      )
+    }
+  }
+}
+
+/**
+ * Rules for `database.external`, all of them errors rather than precedence.
+ *
+ * Every one of these is a case where two settings describe the same fact and the stack would have to
+ * pick. A silent winner is how you end up with a push that went somewhere other than where the
+ * services are reading, which looks like data loss and is not.
+ */
+function validateExternalDatabase(cfg: Record<string, unknown>, filename: string): void {
+  const database = cfg["database"] as Record<string, unknown>
+  const external = database["external"]
+  if (external === undefined) return
+
+  if (typeof external !== "object" || external === null || Array.isArray(external)) {
+    throw new Error(`${filename}: database.external must be an object with a url`)
+  }
+
+  const url = (external as Record<string, unknown>)["url"]
+  if (typeof url !== "string" || url.trim().length === 0) {
+    throw new Error(
+      `${filename}: database.external.url is required, the Postgres URL every service connects to.\n` +
+        "Reading it from the environment keeps the password out of version control:\n" +
+        "  database: { external: { url: process.env.DATABASE_URL! } }\n" +
+        "The project's .env is loaded before the config module, so DATABASE_URL there is enough.",
+    )
+  }
+  if (!/^postgres(ql)?:\/\//.test(url.trim())) {
+    throw new Error(
+      `${filename}: database.external.url must be a postgres:// or postgresql:// URL (got "${url.trim()}")`,
+    )
+  }
+
+  const realtime = (external as Record<string, unknown>)["realtime"]
+  if (realtime !== undefined && typeof realtime !== "boolean") {
+    throw new Error(`${filename}: database.external.realtime must be true or false`)
+  }
+
+  if (database["provider"] !== undefined) {
+    throw new Error(
+      `${filename}: database.provider ("${String(database["provider"])}") and database.external ` +
+        "cannot both be set, provider chooses a Postgres for Supatype to run, external says one " +
+        "already exists.\n" +
+        "Remove database.provider. The runtime stack is still chosen by the top-level `provider`.",
+    )
+  }
+
+  const server = cfg["server"] as Record<string, unknown> | undefined
+  if (server?.["mode"] === "managed") {
+    throw new Error(
+      `${filename}: database.external is not supported with server.mode "managed", on the cloud ` +
+        "path the database is part of what is being provided.\n" +
+        "Use an external database with a self-hosted stack (server.mode \"dev\" or \"standalone\").",
+    )
+  }
+
+  const connection = cfg["connection"]
+  if (typeof connection === "string" && connection.trim() !== url.trim()) {
+    throw new Error(
+      `${filename}: connection and database.external.url are both set and disagree.\n` +
+        "database.external.url is what the whole stack uses, CLI commands included, remove " +
+        "`connection`.",
+    )
+  }
 }
 
 /** Schema entry path (with fallback). */
@@ -342,6 +654,19 @@ export function functionsPathCandidatesFromProject(cfg: SupatypeProjectConfig, c
   }
   // Prefer modern default, but keep legacy fallback for compatibility.
   return [resolve(root, "functions"), resolve(root, "supatype/functions")]
+}
+
+/**
+ * Directory holding **model hooks**, procedural handlers the API calls around a write.
+ *
+ * Separate from `functions/` because the two have different trust models: a function is a public
+ * endpoint anyone with the anon key may invoke, while a hook is only ever called by the server. One
+ * worker serves both, and the gateway refuses the hook namespace from outside, so keeping them in
+ * separate directories is what makes that boundary structural rather than a list to maintain.
+ */
+export function hooksPathFromProject(cfg: SupatypeProjectConfig, cwd: string): string {
+  const root = projectRootFromConfig(cfg, cwd)
+  return resolve(root, "hooks")
 }
 
 /** Preferred default functions path (used when creating new functions). */
@@ -373,9 +698,43 @@ export function serverBaseUrl(cfg: SupatypeProjectConfig): string | undefined {
   }
 }
 
+/**
+ * True when `supatype self-host compose` should render Kong ACME TLS (Let's Encrypt).
+ * Gated on a real self-host render (not `supatype dev`), standalone mode, a non-empty
+ * domain, an ACME contact email, and `tls.provider !== "none"`.
+ */
+export function selfHostTlsEnabled(
+  cfg: SupatypeProjectConfig,
+  devLocal = false,
+): boolean {
+  if (devLocal) return false
+  if (cfg.server.mode !== "standalone") return false
+  const domain = cfg.server.domain?.trim()
+  if (!domain) return false
+  const tls = cfg.server.tls
+  if (!tls || tls.provider === "none") return false
+  return Boolean(tls.email?.trim())
+}
+
 /** Resolved runtime provider (`config.provider` ?? `database.provider` ?? native). */
 export function resolveRuntimeProvider(cfg: SupatypeProjectConfig): "native" | "docker" {
   return cfg.provider ?? cfg.database.provider ?? "native"
+}
+
+/**
+ * Routes entitled to the service-role key, as the worker's env expects them.
+ *
+ * Resolved here rather than in the compose template so there is one definition of the format.
+ *
+ * This does **not** check that the names exist, it cannot, since it has only the config. An earlier
+ * version of this comment claimed a typo was "visible in one place rather than silently granting
+ * nothing", which was false: nothing read the list except the two callers that turn it into an env var.
+ * `checkServiceRoleRoutes` in `service-role-check.ts` is what actually resolves the names, and `push`
+ * refuses on it.
+ */
+export function serviceRoleRoutes(cfg: SupatypeProjectConfig): string[] {
+  const declared = cfg.functions?.serviceRole ?? []
+  return [...declared].map((entry) => entry.trim()).filter((entry) => entry.length > 0).sort()
 }
 
 /** Kong gateway port when `provider: docker` (self-host compose dev). */
@@ -392,5 +751,189 @@ export function localDSN(cfg: SupatypeProjectConfig): string {
  * Prefers optional `connection` in config, then `DATABASE_URL` env, then a local default DSN.
  */
 export function connectionString(cfg: SupatypeProjectConfig): string {
-  return cfg.connection ?? process.env["DATABASE_URL"] ?? localDSN(cfg)
+  return externalDatabaseUrl(cfg) ?? cfg.connection ?? process.env["DATABASE_URL"] ?? localDSN(cfg)
+}
+
+/** True when the project points at a Postgres it does not manage. */
+export function usesExternalDatabase(cfg: SupatypeProjectConfig): boolean {
+  return externalDatabaseUrl(cfg) !== undefined
+}
+
+/**
+ * The external Postgres URL, or undefined for a managed one.
+ *
+ * Ahead of `connection` and `DATABASE_URL` in [`connectionString`] on purpose: a stated external
+ * database is the whole stack's database, and a CLI command that pushed somewhere else while the
+ * services read from here would look exactly like data loss.
+ */
+export function externalDatabaseUrl(cfg: SupatypeProjectConfig): string | undefined {
+  const url = cfg.database.external?.url?.trim()
+  return url && url.length > 0 ? url : undefined
+}
+
+/**
+ * Whether realtime should run.
+ *
+ * `false` only when stated. An external database that cannot support logical replication is detected
+ * rather than declared: the capability record is what Studio and `doctor` read, so an operator who
+ * has not thought about it gets a truthful answer instead of a silent default.
+ */
+export function realtimeEnabled(cfg: SupatypeProjectConfig): boolean {
+  return cfg.database.external?.realtime ?? true
+}
+
+/** The Postgres schema Supatype manages. */
+export function pgSchema(cfg: SupatypeProjectConfig): string {
+  const declared = cfg.schema?.pg_schema?.trim()
+  return declared && declared.length > 0 ? declared : "public"
+}
+
+/**
+ * Schemas the stack exposes for its own sake, beyond the one Supatype manages.
+ *
+ * Dev used to omit `auth` while self-host exposed it, so the same request could work against a
+ * self-hosted stack and 404 locally. One list for both.
+ */
+export const STACK_API_SCHEMAS = ["supatype", "graphql_public", "auth"] as const
+
+/**
+ * The schema holding generated draft views, one per versioned model.
+ *
+ * Its own schema rather than a suffix on the table name, so a draft has the same table name and the
+ * same row type as what it is a draft of, and a client reaches it by switching profile.
+ */
+export const DRAFT_SCHEMA = "draft"
+
+/** What shapes the exposed-schema list, beyond the config itself. */
+export type ApiSchemaOptions = {
+  /** How field rules will be enforced here. `views` moves the managed schema off the list. */
+  tier?: "none" | "extension" | "views" | undefined
+  /** True when any model declares `versions`, which is what puts the `draft` schema on the list. */
+  drafts?: boolean | undefined
+}
+
+/**
+ * Schemas to expose over REST, as `PGRST_DB_SCHEMA` wants them.
+ *
+ * The managed schema first, then what the stack needs for itself. Derived rather than hardcoded
+ * because the literal version silently ignored `pg_schema`: the engine would migrate into `app`
+ * while PostgREST kept serving `public`, so every request answered `PGRST106` and nothing in the
+ * output mentioned the setting that caused it.
+ *
+ * `api_schemas` replaces the whole list when stated, including the stack schemas, so dropping
+ * `supatype` from it is a supported way to stop exposing Studio's views. That holds for `draft` too:
+ * an explicit list has to name it, and `db check` reports a project whose models declare `versions`
+ * against a list that does not. Order is preserved and duplicates removed: PostgREST serves the first
+ * entry as the default profile, so the managed schema has to lead.
+ */
+export function apiSchemas(cfg: SupatypeProjectConfig, options?: ApiSchemaOptions): string[] {
+  const explicit = cfg.schema?.api_schemas
+  // Tier-2 field masking serves from `api`, and the managed schema must come **off** the list: a
+  // client picks its schema per request with `Accept-Profile`, so leaving it exposed would let any
+  // caller read the unmasked table and make the mask opt-out. The API roles hold no privileges there
+  // under tier 2 either, so exposing it would only produce denials.
+  const managed = options?.tier === "views" ? "api" : pgSchema(cfg)
+  // `draft` sits behind the managed schema and never in front of it: the first entry is the default
+  // profile, and a client that named no profile reading drafts by default would invert the feature.
+  const derived = options?.drafts === true
+    ? [managed, DRAFT_SCHEMA, ...STACK_API_SCHEMAS]
+    : [managed, ...STACK_API_SCHEMAS]
+  const list = explicit && explicit.length > 0 ? explicit : derived
+
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const raw of list) {
+    const name = raw.trim()
+    if (name.length === 0 || seen.has(name)) continue
+    seen.add(name)
+    out.push(name)
+  }
+  return out
+}
+
+/** `PGRST_DB_SCHEMA` value: comma-separated, in order. */
+export function apiSchemaList(cfg: SupatypeProjectConfig, options?: ApiSchemaOptions): string {
+  return apiSchemas(cfg, options).join(", ")
+}
+
+/**
+ * Studio roles that see every draft, beyond each record's own creator.
+ *
+ * All three of them, which is to say anyone with Studio write access. It was narrower, `admin` and
+ * `developer` only, and that put two decisions in conflict: whoever may **update** a record may
+ * draft and publish it, so an `editor` could edit a record whose pending draft they could not see,
+ * and their save would be built on the live row and silently discard a colleague's work. Two editors
+ * on one post is the ordinary editorial case, not an exotic one. Seeing and acting line up instead.
+ *
+ * The creator is not in this list and cannot be removed from it: they wrote the draft, and a system
+ * where you cannot read back what you just saved is broken rather than secure. An empty configured
+ * list is honoured and means creators only, which is why this cannot fall back on emptiness.
+ *
+ * `anon` is not a Studio role and can never be here. A draft readable without credentials would make
+ * publishing mean nothing.
+ */
+export const DEFAULT_DRAFT_VISIBILITY = ["admin", "developer", "editor"] as const
+
+/** Studio roles a Supatype project understands, most privileged first. */
+export const STUDIO_ROLES = ["admin", "developer", "editor"] as const
+
+/**
+ * The configured draft-visibility roles, or the default when the project states none.
+ *
+ * An unknown role name is dropped rather than passed through to a policy, where it would be a role
+ * nothing can ever hold: a typo would then read as a working setting that silently grants nobody.
+ */
+export function draftVisibilityRoles(cfg: SupatypeProjectConfig): string[] {
+  const declared = cfg.publishing?.draft_visibility
+  if (declared === undefined) return [...DEFAULT_DRAFT_VISIBILITY]
+  const known = new Set<string>(STUDIO_ROLES)
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const raw of declared) {
+    const role = raw.trim().toLowerCase()
+    if (!known.has(role) || seen.has(role)) continue
+    seen.add(role)
+    out.push(role)
+  }
+  return out
+}
+
+/** Bounds on a minted preview link, in seconds. */
+export type PreviewLimits = {
+  defaultTtl: number
+  maxRecordTtl: number
+  maxProjectTtl: number
+  allowProjectScope: boolean
+}
+
+export const PREVIEW_DEFAULTS: PreviewLimits = {
+  defaultTtl: 900,
+  maxRecordTtl: 604800,
+  maxProjectTtl: 86400,
+  allowProjectScope: true,
+}
+
+/**
+ * The project's preview-link bounds, defaults filled in.
+ *
+ * A stated value is clamped to at least a second and, for the default lifetime, to no more than the
+ * ceiling it would be issued against: a `default_ttl` above `max_record_ttl` would otherwise mint
+ * links that the same config refuses to honour.
+ */
+export function previewLimits(cfg: SupatypeProjectConfig): PreviewLimits {
+  const declared = cfg.publishing?.preview
+  const positive = (value: number | undefined, fallback: number): number =>
+    typeof value === "number" && Number.isFinite(value) && value >= 1 ? Math.floor(value) : fallback
+
+  const maxRecordTtl = positive(declared?.max_record_ttl, PREVIEW_DEFAULTS.maxRecordTtl)
+  const maxProjectTtl = positive(declared?.max_project_ttl, PREVIEW_DEFAULTS.maxProjectTtl)
+  return {
+    defaultTtl: Math.min(
+      positive(declared?.default_ttl, PREVIEW_DEFAULTS.defaultTtl),
+      Math.max(maxRecordTtl, maxProjectTtl),
+    ),
+    maxRecordTtl,
+    maxProjectTtl,
+    allowProjectScope: declared?.allow_project_scope ?? PREVIEW_DEFAULTS.allowProjectScope,
+  }
 }

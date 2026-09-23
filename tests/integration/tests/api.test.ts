@@ -1,5 +1,5 @@
 /**
- * Integration tests — run against a live supatype dev stack.
+ * Integration tests: run against a live supatype dev stack.
  *
  * Requires SUPATYPE_URL and SUPATYPE_ANON_KEY environment variables.
  * Run via: scripts/integration-test.sh
@@ -37,11 +37,12 @@ describe("health", () => {
 
 describe("posts REST CRUD", () => {
   let createdId: string | undefined
+  const slug = `hello-integration-${Date.now()}`
 
   test("insert a post", async () => {
     const { data, error } = await client
       .from("post")
-      .insert({ title: "Hello Integration", slug: "hello-integration" })
+      .insert({ title: "Hello Integration", slug })
 
     assert.ifError(error)
     assert.ok(Array.isArray(data) && data.length > 0, "No rows returned")
@@ -54,7 +55,7 @@ describe("posts REST CRUD", () => {
     const { data, error } = await client
       .from("post")
       .select()
-      .eq("slug", "hello-integration")
+      .eq("slug", slug)
 
     assert.ifError(error)
     assert.ok(Array.isArray(data) && data.length >= 1)
@@ -233,6 +234,10 @@ describe("edge functions", () => {
     assert.equal(body.ok, true)
     assert.equal(body.hasSupatypeUrl, true)
     assert.equal(body.hasAnonKey, true)
-    assert.equal(body.hasServiceRoleKey, true)
+    // False by design, and the point of the least-privilege work: the worker withholds the
+    // service role key and hands it back only to a route that declared it needs one, or to a
+    // model hook. env-check declares nothing, so it must not see an ambient admin credential.
+    // This assertion said true, from before that change, and had been failing CI since.
+    assert.equal(body.hasServiceRoleKey, false)
   })
 })

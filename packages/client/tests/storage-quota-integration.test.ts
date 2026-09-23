@@ -1,5 +1,5 @@
 /**
- * Integration test — Task 93: Storage quota exceeded
+ * Integration test: Task 93: Storage quota exceeded
  *
  * Tests: quota exceeded -> 507 with clear message.
  */
@@ -13,7 +13,8 @@ const STORAGE_URL = "http://localhost:18473/storage/v1"
 const HEADERS = { apikey: "test-anon-key", Authorization: "Bearer test-token" }
 
 function freshClient(): StorageClient {
-  return new StorageClient(STORAGE_URL, HEADERS)
+  // Headers are asked for per request now, so a session arriving after construction is used.
+  return new StorageClient(STORAGE_URL, () => Promise.resolve(HEADERS))
 }
 
 function createMockBlob(sizeBytes: number): Blob {
@@ -35,7 +36,7 @@ function mockFetchResponse(
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
-describe("Task 93 — Storage quota integration", () => {
+describe("Task 93: Storage quota integration", () => {
   beforeEach(() => vi.restoreAllMocks())
 
   describe("Quota exceeded on upload", () => {

@@ -6,7 +6,18 @@ import { cn } from "../lib/utils.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type NavItem = { label: string; href: string; activeWhen?: (path: string) => boolean }
+type NavItem = {
+  label: string
+  href: string
+  activeWhen?: (path: string) => boolean
+  /**
+   * Why this tab cannot be opened here, when it cannot.
+   *
+   * The tab stays and says so. Removing it leaves somebody concluding the product has no Postgres
+   * logs, rather than that this build does not.
+   */
+  unavailable?: { note: string }
+}
 type NavGroup = { label?: string; items: NavItem[] }
 
 // ─── Tertiary tab groups per route ────────────────────────────────────────────
@@ -18,16 +29,16 @@ function edgeFunctionsBaseFromPath(path: string): string | null {
 }
 
 function getTertiaryGroups(path: string): NavGroup[] | null {
-  // Observability — Logs
+  // Observability: Logs
   if (path === "/observability/logs" || path.startsWith("/observability/logs/")) {
     return [{
       items: [
-        { label: "API",            href: "/observability/logs/api",       activeWhen: (p) => p === "/observability/logs/api" },
-        { label: "Auth",           href: "/observability/logs/auth",      activeWhen: (p) => p === "/observability/logs/auth" },
-        { label: "Storage",        href: "/observability/logs/storage",   activeWhen: (p) => p === "/observability/logs/storage" },
+        { label: "API",            href: "/observability/logs/api",       activeWhen: (p) => p === "/observability/logs/api", unavailable: { note: "Request logging is not built yet" } },
+        { label: "Auth",           href: "/observability/logs/auth",      activeWhen: (p) => p === "/observability/logs/auth" , unavailable: { note: "Auth event logging is not built yet" } },
+        { label: "Storage",        href: "/observability/logs/storage",   activeWhen: (p) => p === "/observability/logs/storage" , unavailable: { note: "Storage access logging is not built yet" } },
         { label: "Edge Functions", href: "/observability/logs/functions", activeWhen: (p) => p === "/observability/logs/functions" },
-        { label: "Realtime",       href: "/observability/logs/realtime",  activeWhen: (p) => p === "/observability/logs/realtime" },
-        { label: "Postgres",       href: "/observability/logs/postgres",  activeWhen: (p) => p === "/observability/logs/postgres" },
+        { label: "Realtime",       href: "/observability/logs/realtime",  activeWhen: (p) => p === "/observability/logs/realtime" , unavailable: { note: "Realtime connection logging is not built yet" } },
+        { label: "Postgres",       href: "/observability/logs/postgres",  activeWhen: (p) => p === "/observability/logs/postgres" , unavailable: { note: "Database server logs are not built yet" } },
       ],
     }]
   }
@@ -38,6 +49,7 @@ function getTertiaryGroups(path: string): NavGroup[] | null {
       items: [
         { label: "Docs",     href: "/api/rest" },
         { label: "Settings", href: "/api/rest/settings" },
+        { label: "Cache",    href: "/api/rest/cache", activeWhen: (p) => p === "/api/rest/cache" },
       ],
     }]
   }
@@ -82,7 +94,7 @@ function getTertiaryGroups(path: string): NavGroup[] | null {
     }]
   }
 
-  // Intelligence — Agents sub-tabs
+  // Intelligence: Agents sub-tabs
   if (path.startsWith("/ai/agents")) {
     return [{
       items: [
@@ -106,9 +118,11 @@ function getTertiaryGroups(path: string): NavGroup[] | null {
             p === base ||
             (p.startsWith(base + "/") &&
               !p.startsWith(base + "/schema") &&
+              !p.startsWith(base + "/rules") &&
               !p.startsWith(base + "/data") &&
               !p.startsWith(base + "/api") &&
-              !p.startsWith(base + "/graphql")),
+              !p.startsWith(base + "/graphql") &&
+              !p.startsWith(base + "/cache")),
         },
         {
           label: "Schema",
@@ -129,6 +143,11 @@ function getTertiaryGroups(path: string): NavGroup[] | null {
           label: "GraphQL",
           href: `${base}/graphql`,
           activeWhen: (p) => p === `${base}/graphql`,
+        },
+        {
+          label: "Cache",
+          href: `${base}/cache`,
+          activeWhen: (p) => p === `${base}/cache`,
         },
       ],
     }]
@@ -147,14 +166,21 @@ function getTertiaryGroups(path: string): NavGroup[] | null {
             p === base ||
             (p.startsWith(base + "/") &&
               !p.startsWith(base + "/schema") &&
+              !p.startsWith(base + "/rules") &&
               !p.startsWith(base + "/data") &&
               !p.startsWith(base + "/api") &&
-              !p.startsWith(base + "/graphql")),
+              !p.startsWith(base + "/graphql") &&
+              !p.startsWith(base + "/cache")),
         },
         {
           label: "Schema",
           href: `${base}/schema`,
           activeWhen: (p) => p === `${base}/schema`,
+        },
+        {
+          label: "Rules",
+          href: `${base}/rules`,
+          activeWhen: (p) => p === `${base}/rules`,
         },
         {
           label: "Data",
@@ -170,6 +196,11 @@ function getTertiaryGroups(path: string): NavGroup[] | null {
           label: "GraphQL",
           href: `${base}/graphql`,
           activeWhen: (p) => p === `${base}/graphql`,
+        },
+        {
+          label: "Cache",
+          href: `${base}/cache`,
+          activeWhen: (p) => p === `${base}/cache`,
         },
       ],
     }]
@@ -205,6 +236,23 @@ export function TertiaryNav(): React.ReactElement | null {
             )}
             {group.items.map((item) => {
               const active = item.activeWhen ? item.activeWhen(path) : path === item.href
+              if (item.unavailable !== undefined) {
+                // Disabled rather than absent. A tab that vanishes teaches nothing: somebody looking
+                // for Postgres logs concludes there are none, rather than that they are not built.
+                return (
+                  <span
+                    key={item.href}
+                    title={item.unavailable.note}
+                    aria-disabled="true"
+                    className={cn(
+                      "relative h-10 px-3 text-[13px] whitespace-nowrap flex items-center",
+                      "text-muted-foreground/50 cursor-not-allowed select-none",
+                    )}
+                  >
+                    {item.label}
+                  </span>
+                )
+              }
               return (
                 <button
                   key={item.href}

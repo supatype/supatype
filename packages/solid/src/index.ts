@@ -1,4 +1,4 @@
-// @supatype/solid — Solid.js primitives for Supatype
+// @supatype/solid: Solid.js primitives for Supatype
 
 export { SupatypeContext, useSupatype } from "./context.js"
 

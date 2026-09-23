@@ -1,0 +1,22 @@
+{
+  "name": "@supatype/example-validation",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Field validation end to end: type bounds, model constraints, and a per-field validator function",
+  "scripts": {
+    "dev": "supatype dev",
+    "push": "supatype push --yes",
+    "keys": "supatype keys",
+    "doctor": "supatype doctor",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p hooks/tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@supatype/cli": "workspace:*",
+    "@supatype/client": "workspace:*",
+    "@supatype/types": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5"
+  }
+}

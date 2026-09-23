@@ -12,6 +12,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Parses every shell `run:` block in .github/workflows with `bash -n`.
+      #
+      # Workflow shell is not executed until the workflow runs, and release workflows run on a
+      # tag, so a syntax error there is found by a release rather than by CI. That has happened:
+      # a stray backslash before a closing quote made a step unparseable, and it was only seen
+      # when `brew install` ran for the first time during v0.1.10.
+      - name: Workflow shell steps parse
+        run: python3 scripts/lint-workflow-shell.py
+
       - uses: pnpm/action-setup@v4
 
       - uses: actions/setup-node@v4
@@ -42,6 +51,30 @@ jobs:
       - name: Test
         run: pnpm turbo run test
 
+      # What the examples import, against what the packages export. Report-only by design: whether
+      # an exotic primitive deserves an example is a judgement, and forcing one would produce the
+      # forty-field model the kitchen sink argues against. What is gated is that the ledger stays
+      # current — add an export and the committed numbers go stale, so the gap arrives in a diff
+      # where a person decides.
+      - name: Example coverage ledger is up to date
+        run: |
+          node scripts/check-example-coverage.mjs --write
+          git diff --exit-code -- examples/COVERAGE.md \
+            || { echo "::error::examples/COVERAGE.md is stale. Run 'node scripts/check-example-coverage.mjs --write' and commit it."; exit 1; }
+
+      # The two examples that ship a front end and never proved it compiles.
+      #
+      # `blog` is typechecked and was never built, which cannot see a Server Component importing a
+      # client-only API or a broken "use client" boundary. `supabucks` has no typecheck script, so
+      # root turbo skips it entirely, and its `dist/` is what `app.mode = "static"` serves: a build
+      # that emits nothing leaves the example's headline feature broken and silent. A build is not a
+      # typecheck — Vite does not typecheck — but it is the difference between an example that
+      # compiles and one nobody has run since it was written.
+      - name: Example front ends build
+        run: |
+          pnpm --filter @supatype/example-supabucks build
+          pnpm --filter @supatype/example-blog build
+
   docker:
     runs-on: ubuntu-latest
     steps:
@@ -60,20 +93,20 @@ jobs:
       - name: Build storage package
         run: pnpm --filter @supatype/storage build
 
-      - name: Build docker image — storage
+      - name: Build docker image, storage
         uses: docker/build-push-action@v5
         with:
           context: packages/storage
           push: false
 
-      - name: Build docker image — realtime
+      - name: Build docker image, realtime
         uses: docker/build-push-action@v5
         with:
           context: .
           file: packages/realtime/Dockerfile
           push: false
 
-      - name: Build docker image — studio
+      - name: Build docker image, studio
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -83,7 +116,7 @@ jobs:
       - name: Build self-host-control package
         run: pnpm --filter @supatype/self-host-control build
 
-      - name: Build docker image — control-plane
+      - name: Build docker image, control-plane
         uses: docker/build-push-action@v5
         with:
           context: packages/self-host-control

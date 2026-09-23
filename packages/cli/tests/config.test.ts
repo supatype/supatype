@@ -176,8 +176,27 @@ describe("loadConfig()", () => {
       })}`,
     )
     const cfg = loadConfig(tmpDir)
-    expect(cfg.versions.engine).toBe("0.4.2")
+    expect(cfg.versions!.engine).toBe("0.4.2")
     expect(cfg.schema?.path).toBe("./a.ts")
+  })
+
+  it("loads defineConfig import before @supatype/cli is installed (init scaffold)", () => {
+    writeFileSync(
+      join(tmpDir, "supatype.config.ts"),
+      `import { defineConfig } from "@supatype/cli"
+
+export default defineConfig({
+  project: { name: "fresh" },
+  database: { provider: "docker" },
+  server: { mode: "dev" },
+  app: { mode: "none" },
+  schema: { path: "./schema/index.ts" },
+})
+`,
+    )
+    const cfg = loadConfig(tmpDir)
+    expect(cfg.project?.name).toBe("fresh")
+    expect(cfg.schema?.path).toBe("./schema/index.ts")
   })
 })
 
@@ -207,7 +226,9 @@ describe("mergeProjectConfig()", () => {
       ...minimalProject("p"),
       email: { provider: "smtp", smtp: { host: "h1", port: 587, user: "u0" } },
     })
-    const merged = mergeProjectConfig(base, { email: { smtp: { host: "h2", pass: "x" } } })
+    const merged = mergeProjectConfig(base, {
+      email: { smtp: { host: "h2", pass: "x" } },
+    } as Partial<typeof base>)
     expect(merged.email?.provider).toBe("smtp")
     expect(merged.email?.smtp?.host).toBe("h2")
     expect(merged.email?.smtp?.port).toBe(587)
@@ -222,7 +243,7 @@ describe("mergeProjectConfig()", () => {
     })
     const merged = mergeProjectConfig(base, {
       email: { send_email_hook_secrets: "v1,whsec_customsecret0000000000000000" },
-    })
+    } as Partial<typeof base>)
     expect(merged.email?.send_email_hook).toBe(true)
     expect(merged.email?.send_email_hook_uri).toBe("http://old/hook")
     expect(merged.email?.send_email_hook_secrets).toBe("v1,whsec_customsecret0000000000000000")
@@ -233,7 +254,9 @@ describe("mergeProjectConfig()", () => {
       ...minimalProject("p"),
       app: { mode: "static", static_dir: "./dist", vite_dev_url: "http://127.0.0.1:1111" },
     })
-    const merged = mergeProjectConfig(base, { app: { vite_dev_url: "http://127.0.0.1:5173" } })
+    const merged = mergeProjectConfig(base, {
+      app: { vite_dev_url: "http://127.0.0.1:5173" },
+    } as Partial<typeof base>)
     expect(merged.app?.vite_dev_url).toBe("http://127.0.0.1:5173")
   })
 
@@ -248,5 +271,31 @@ describe("mergeProjectConfig()", () => {
     expect(merged.app.mode).toBe("proxy")
     expect(merged.app.start).toBe("dev:site")
     expect(merged.app.static_dir).toBe("./dist")
+  })
+
+  it("preserves base environments when a local override sets only server.mode", () => {
+    const base = defineConfig({
+      ...minimalProject("p"),
+      server: { mode: "standalone", domain: "api.example.com" },
+      environments: { default: "production" },
+    })
+    const merged = mergeProjectConfig(base, { server: { mode: "dev" } })
+    expect(merged.server.mode).toBe("dev")
+    expect(merged.environments?.default).toBe("production")
+  })
+
+  it("deep-merges environments.branchDefaults across base and override", () => {
+    const base = defineConfig({
+      ...minimalProject("p"),
+      environments: { default: "production", branchDefaults: { main: "production" } },
+    })
+    const merged = mergeProjectConfig(base, {
+      environments: { branchDefaults: { staging: "preview" } },
+    })
+    expect(merged.environments?.default).toBe("production")
+    expect(merged.environments?.branchDefaults).toEqual({
+      main: "production",
+      staging: "preview",
+    })
   })
 })

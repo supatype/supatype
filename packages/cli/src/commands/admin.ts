@@ -1,17 +1,103 @@
 // ─── Admin panel CLI commands (Gap Appendices task 48) ──────────────────────
 //
-// `npx supatype admin create-user` — create an admin user in the project's
-// {ref}_auth.users table. Used for initial setup and ongoing admin management.
+// `npx supatype admin create-user`, create an admin user in the project's
+// auth.users table. First admin is ensured on `supatype dev` or `supatype push`.
 
 import type { Command } from "commander"
-import { createInterface } from "node:readline"
-import { randomBytes, scrypt } from "node:crypto"
-import { promisify } from "node:util"
+import { spawnSync } from "node:child_process"
+import { existsSync } from "node:fs"
+import { dirname, join, resolve } from "node:path"
+import bcrypt from "bcryptjs"
+import type { Pool, QueryResult } from "pg"
 import { loadConfig } from "../config.js"
-import { connectionString } from "../project-config.js"
-import { signJwt } from "../jwt.js"
+import {
+  connectionString,
+  resolveRuntimeProvider,
+  type SupatypeProjectConfig,
+} from "../project-config.js"
+import { readEnvValue, upsertEnvFile } from "../env-file.js"
+import { hasEngineOverride } from "../binary-cache.js"
+import { readDevSessionLock } from "../dev-session-lock.js"
+import { composeProjectName } from "../self-host-compose.js"
+import { confirm as uiConfirm } from "../ui/confirm.js"
+import { error, info, plain } from "../ui/messages.js"
+import { promptPassword, promptText } from "../ui/prompts.js"
+import { isInteractive } from "../ui/interactive.js"
+import {
+  getActiveDevSession,
+} from "../dev-session.js"
 
-const scryptAsync = promisify(scrypt)
+export const ADMIN_EMAIL_ENV = "SUPATYPE_ADMIN_EMAIL"
+export const ADMIN_PASSWORD_ENV = "SUPATYPE_ADMIN_PASSWORD"
+
+const BCRYPT_ROUNDS = 10
+
+/**
+ * Studio roles a membership row may hold, most privileged first.
+ *
+ * Must match `studioRolePermissions` in supatype-server and
+ * `STUDIO_ROLE_PERMISSIONS` in the control plane: capability checks refuse a role
+ * they do not recognise, so an unvalidated `--role` here would create a user who
+ * is locked out of the very panel they were made for.
+ */
+export const STUDIO_ROLES = ["admin", "developer", "editor"] as const
+
+function assertStudioRole(role: string): void {
+  if ((STUDIO_ROLES as readonly string[]).includes(role)) return
+  error(
+    `Unknown Studio role "${role}". Choose one of: ${STUDIO_ROLES.join(", ")}.\n` +
+      "  Studio roles are Supatype's own; your application's roles are separate " +
+      "and belong in your access rules.",
+  )
+  process.exit(1)
+}
+
+/** The auth service scopes users to the nil instance id in single-tenant/self-host mode. */
+export const SUPATYPE_NIL_INSTANCE_ID = "00000000-0000-0000-0000-000000000000"
+
+/** Audience claim used when looking up users (matches SUPATYPE_JWT_AUD in compose). */
+export function authJwtAud(cwd: string): string {
+  return readEnvValue(cwd, "SUPATYPE_JWT_AUD", "authenticated")
+}
+
+type DbQuery = (sql: string, params?: unknown[]) => Promise<QueryResult>
+type AuthConfirmedColumn = "email_confirmed_at" | "confirmed_at"
+
+/** Prefer the migrated column when present; fall back to postgres init `confirmed_at`. */
+export async function resolveAuthConfirmedAtColumn(query: DbQuery): Promise<AuthConfirmedColumn> {
+  const result = await query(
+    `SELECT column_name
+     FROM information_schema.columns
+     WHERE table_schema = 'auth'
+       AND table_name = 'users'
+       AND column_name IN ('email_confirmed_at', 'confirmed_at')
+     ORDER BY CASE column_name WHEN 'email_confirmed_at' THEN 0 ELSE 1 END
+     LIMIT 1`,
+  )
+  const row = result.rows[0] as { column_name?: string; value?: string } | undefined
+  const name = row?.column_name ?? row?.value
+  if (name === "email_confirmed_at" || name === "confirmed_at") return name
+  return "confirmed_at"
+}
+
+export interface EnsureFirstAdminOptions {
+  email?: string
+  password?: string
+  cwd?: string
+  role?: string
+  connection?: string
+  compose?: { project: string; composePath: string }
+}
+
+function resolveAdminConnection(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  override?: string,
+): string {
+  if (override !== undefined) return override
+  if (hasEngineOverride(config)) return hostComposeDbUrlFromEnv(cwd)
+  return readEnvValue(cwd, "DATABASE_URL", connectionString(config))
+}
 
 export function registerAdmin(program: Command): void {
   const adminCmd = program
@@ -23,7 +109,7 @@ export function registerAdmin(program: Command): void {
     .description("Create an admin user for the admin panel")
     .option("--email <email>", "Admin user email address")
     .option("--password <password>", "Admin user password (prompted if not provided)")
-    .option("--role <role>", "Admin role to assign", "admin")
+    .option("--role <role>", `Studio role to assign (${STUDIO_ROLES.join(" | ")})`, "admin")
     .option("--connection <url>", "Database connection URL (overrides config)")
     .action(
       async (opts: {
@@ -34,105 +120,53 @@ export function registerAdmin(program: Command): void {
       }) => {
         const cwd = process.cwd()
         const config = loadConfig(cwd)
-        const connection = opts.connection ?? connectionString(config)
+        const connection = resolveAdminConnection(cwd, config, opts.connection)
 
-        const email = opts.email ?? (await prompt("Admin email: "))
+        const email = opts.email ?? (await promptText("Admin email"))
         if (!email || !email.includes("@")) {
-          console.error("A valid email address is required.")
+          error("A valid email address is required.")
           process.exit(1)
         }
 
         const password =
-          opts.password ?? (await prompt("Admin password (min 8 chars): "))
+          opts.password ?? (await promptText("Admin password (min 8 chars)"))
         if (!password || password.length < 8) {
-          console.error("Password must be at least 8 characters.")
+          error("Password must be at least 8 characters.")
           process.exit(1)
         }
 
         const role = opts.role
+        assertStudioRole(role)
 
-        console.log(`\nCreating admin user: ${email} (role: ${role})...`)
+        info(`Creating admin user: ${email} (role: ${role})...`)
 
-        // We use pg directly to insert into the auth.users table
-        const pg = await importPg()
-        const pool = new pg.Pool({ connectionString: connection, max: 2 })
+        const compose =
+          opts.connection === undefined ? resolveDockerComposeContext(cwd, config) : null
 
         try {
-          // Ensure the auth schema and users table exist
-          await pool.query(`
-            CREATE SCHEMA IF NOT EXISTS auth;
-
-            CREATE TABLE IF NOT EXISTS auth.users (
-              id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-              instance_id   UUID,
-              aud           TEXT DEFAULT 'authenticated',
-              role          TEXT DEFAULT 'authenticated',
-              email         TEXT UNIQUE,
-              encrypted_password TEXT,
-              email_confirmed_at TIMESTAMPTZ DEFAULT now(),
-              raw_app_meta_data  JSONB DEFAULT '{}',
-              raw_user_meta_data JSONB DEFAULT '{}',
-              created_at    TIMESTAMPTZ DEFAULT now(),
-              updated_at    TIMESTAMPTZ DEFAULT now(),
-              confirmation_token TEXT DEFAULT '',
-              recovery_token TEXT DEFAULT '',
-              email_change_token_new TEXT DEFAULT '',
-              email_change  TEXT DEFAULT ''
-            );
-          `)
-
-          // Check if user already exists
-          const existing = await pool.query(
-            `SELECT id FROM auth.users WHERE email = $1`,
-            [email.toLowerCase()],
-          )
-
-          if (existing.rows.length > 0) {
-            console.error(
-              `\nUser with email "${email}" already exists.`,
+          if (compose) {
+            await createAdminUser(
+              (sql, params) => composeExecQuery(cwd, compose, sql, params),
+              email,
+              password,
+              role,
+              { cwd },
             )
-            console.log(
-              `To update their role, use: supatype admin set-role --email ${email} --role ${role}`,
-            )
-            process.exit(1)
+          } else {
+            const pg = await importPg()
+            const pool = new pg.Pool({ connectionString: connection, max: 2 })
+            try {
+              await ensureAuthUsersTable(pool)
+              await createAdminUser(pool, email, password, role, { cwd })
+            } finally {
+              await pool.end()
+            }
           }
-
-          // Hash the password (bcrypt-style for GoTrue compatibility)
-          const passwordHash = await hashPassword(password)
-
-          // Insert the admin user with the admin role in app_metadata
-          const appMetadata = JSON.stringify({ role, provider: "email", providers: ["email"] })
-          const userMetadata = JSON.stringify({})
-
-          const result = await pool.query(
-            `INSERT INTO auth.users (
-              email, encrypted_password, role, aud,
-              raw_app_meta_data, raw_user_meta_data,
-              email_confirmed_at, created_at, updated_at
-            ) VALUES (
-              $1, $2, 'authenticated', 'authenticated',
-              $3::jsonb, $4::jsonb,
-              now(), now(), now()
-            ) RETURNING id, email`,
-            [email.toLowerCase(), passwordHash, appMetadata, userMetadata],
-          )
-
-          const user = result.rows[0] as { id: string; email: string }
-
-          console.log(`\nAdmin user created successfully.`)
-          console.log(`  ID:    ${user.id}`)
-          console.log(`  Email: ${user.email}`)
-          console.log(`  Role:  ${role}`)
-          console.log(
-            `\nThis user can now log in to the admin panel at /admin\n`,
-          )
+          info("This user can now log in to the admin panel at /admin")
         } catch (err) {
-          const message =
-            err instanceof Error ? err.message : "Unknown error"
-          console.error(`\nFailed to create admin user: ${message}`)
+          const message = err instanceof Error ? err.message : "Unknown error"
+          error(`Failed to create admin user: ${message}`)
           process.exit(1)
-        } finally {
-          await pool.end()
         }
       },
     )
@@ -141,46 +175,53 @@ export function registerAdmin(program: Command): void {
     .command("set-role")
     .description("Change an existing user's admin role")
     .requiredOption("--email <email>", "User email address")
-    .requiredOption("--role <role>", "New role to assign")
+    .requiredOption("--role <role>", `New Studio role (${STUDIO_ROLES.join(" | ")})`)
     .option("--connection <url>", "Database connection URL (overrides config)")
     .action(
       async (opts: { email: string; role: string; connection?: string }) => {
+        assertStudioRole(opts.role)
         const cwd = process.cwd()
         const config = loadConfig(cwd)
-        const connection = opts.connection ?? connectionString(config)
+        const connection = resolveAdminConnection(cwd, config, opts.connection)
 
         const pg = await importPg()
         const pool = new pg.Pool({ connectionString: connection, max: 2 })
 
         try {
+          // Studio roles live in `_supatype.studio_members`, not in
+          // `app_metadata`: that key is the developer's namespace for their own
+          // app roles, and writing Studio access there means assigning an app
+          // role could hand out admin UI access by accident.
+          await ensureStudioMembersTable((sql, params) => pool.query(sql, params))
           const result = await pool.query(
-            `UPDATE auth.users
-             SET raw_app_meta_data = raw_app_meta_data || $1::jsonb,
-                 updated_at = now()
-             WHERE email = $2
-             RETURNING id, email, raw_app_meta_data`,
-            [JSON.stringify({ role: opts.role }), opts.email.toLowerCase()],
+            `WITH target AS (
+               SELECT id, email FROM auth.users WHERE email = $2
+             ), upsert AS (
+               INSERT INTO _supatype.studio_members (user_id, role)
+               SELECT id, $1 FROM target
+               ON CONFLICT (user_id) DO UPDATE
+                 SET role = EXCLUDED.role, updated_at = now()
+               RETURNING user_id
+             )
+             SELECT id, email FROM target`,
+            [opts.role, opts.email.toLowerCase()],
           )
 
           if (result.rows.length === 0) {
-            console.error(`\nNo user found with email "${opts.email}".`)
+            error(`No user found with email "${opts.email}".`)
             process.exit(1)
           }
 
-          const user = result.rows[0] as {
-            id: string
-            email: string
-            raw_app_meta_data: Record<string, unknown>
-          }
+          const user = result.rows[0] as { id: string; email: string }
 
-          console.log(`\nRole updated successfully.`)
-          console.log(`  ID:    ${user.id}`)
-          console.log(`  Email: ${user.email}`)
-          console.log(`  Role:  ${opts.role}\n`)
+          info("Role updated successfully.")
+          plain(`  ID:    ${user.id}`)
+          plain(`  Email: ${user.email}`)
+          plain(`  Role:  ${opts.role}`)
         } catch (err) {
           const message =
             err instanceof Error ? err.message : "Unknown error"
-          console.error(`\nFailed to update role: ${message}`)
+          error(`Failed to update role: ${message}`)
           process.exit(1)
         } finally {
           await pool.end()
@@ -190,37 +231,40 @@ export function registerAdmin(program: Command): void {
 
   adminCmd
     .command("list-users")
-    .description("List users with admin roles")
+    .description("List users with Studio access")
     .option("--connection <url>", "Database connection URL (overrides config)")
     .action(async (opts: { connection?: string }) => {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
-      const connection = opts.connection ?? connectionString(config)
+      const connection = resolveAdminConnection(cwd, config, opts.connection)
 
       const pg = await importPg()
       const pool = new pg.Pool({ connectionString: connection, max: 2 })
 
       try {
+        // Studio access is membership, not a claim, list the grant that
+        // actually decides admission. LEFT JOIN, because a membership held by a
+        // Supatype Cloud account has no row in this project's `auth.users`;
+        // hiding those would make `list-users` disagree with who can log in.
         const result = await pool.query(
-          `SELECT id, email, raw_app_meta_data->>'role' as role, created_at
-           FROM auth.users
-           WHERE raw_app_meta_data->>'role' IS NOT NULL
-             AND raw_app_meta_data->>'role' != 'authenticated'
-           ORDER BY created_at ASC`,
+          `SELECT COALESCE(m.user_id, m.platform_user_id) AS id,
+                  COALESCE(u.email, '(cloud account)') AS email,
+                  m.role, m.created_at
+             FROM _supatype.studio_members m
+             LEFT JOIN auth.users u ON u.id = m.user_id
+            ORDER BY m.created_at ASC`,
         )
 
         if (result.rows.length === 0) {
-          console.log("\nNo admin users found.")
-          console.log(
-            "Create one with: supatype admin create-user --email admin@example.com --role admin\n",
-          )
+          info("No admin users found.")
+          info("Create one with: supatype admin create-user --email admin@example.com --role admin")
           return
         }
 
-        console.log(
+        plain(
           "\n  ID                                     Email                          Role         Created",
         )
-        console.log("  " + "-".repeat(100))
+        plain("  " + "-".repeat(100))
         for (const row of result.rows) {
           const r = row as {
             id: string
@@ -229,15 +273,15 @@ export function registerAdmin(program: Command): void {
             created_at: string
           }
           const date = new Date(r.created_at).toISOString().slice(0, 10)
-          console.log(
+          plain(
             `  ${r.id}  ${r.email.padEnd(30)} ${r.role.padEnd(12)} ${date}`,
           )
         }
-        console.log()
+        plain()
       } catch (err) {
         const message =
           err instanceof Error ? err.message : "Unknown error"
-        console.error(`\nFailed to list admin users: ${message}`)
+        error(`Failed to list admin users: ${message}`)
         process.exit(1)
       } finally {
         await pool.end()
@@ -245,128 +289,527 @@ export function registerAdmin(program: Command): void {
     })
 }
 
-// ─── First admin user prompt (task 48) ──────────────────────────────────────
-// Called by `supatype push` on initial setup if no admin users exist.
+/** @deprecated Use ensureFirstAdminUser */
+export const promptFirstAdminUser = ensureFirstAdminUser
 
-export async function promptFirstAdminUser(
+/**
+ * Ensure a first admin user exists (idempotent). Called from `dev` and `push`
+ * when auth.users is ready and no admin users exist yet.
+ */
+export async function ensureFirstAdminUser(
   connection: string,
+  options: EnsureFirstAdminOptions = {},
 ): Promise<void> {
   const pg = await importPg()
   const pool = new pg.Pool({ connectionString: connection, max: 2 })
-
   try {
-    // Check if auth.users table exists
-    const tableExists = await pool.query(
-      `SELECT EXISTS (
-        SELECT FROM information_schema.tables
-        WHERE table_schema = 'auth' AND table_name = 'users'
-      ) as exists`,
+    await ensureFirstAdminWithQuery(
+      (sql, params) => pool.query(sql, params),
+      options,
     )
-    if (!tableExists.rows[0]?.exists) return
-
-    // Check if any admin users exist
-    const adminCount = await pool.query(
-      `SELECT COUNT(*) as count FROM auth.users
-       WHERE raw_app_meta_data->>'role' IS NOT NULL
-         AND raw_app_meta_data->>'role' != 'authenticated'`,
-    )
-
-    const count = parseInt(
-      (adminCount.rows[0] as { count: string }).count,
-      10,
-    )
-    if (count > 0) return
-
-    // No admin users — prompt to create one
-    console.log("\n  No admin users found for the admin panel.")
-    const createAdmin = await confirm(
-      "  Create an admin user now? [y/N] ",
-    )
-    if (!createAdmin) {
-      console.log(
-        "  Skipped. You can create one later with: supatype admin create-user\n",
-      )
-      return
-    }
-
-    const email = await prompt("  Admin email: ")
-    if (!email || !email.includes("@")) {
-      console.log("  Invalid email. Skipping admin user creation.\n")
-      return
-    }
-
-    const password = await prompt(
-      "  Admin password (min 8 chars): ",
-    )
-    if (!password || password.length < 8) {
-      console.log(
-        "  Password too short. Skipping admin user creation.\n",
-      )
-      return
-    }
-
-    const passwordHash = await hashPassword(password)
-    const appMetadata = JSON.stringify({
-      role: "admin",
-      provider: "email",
-      providers: ["email"],
-    })
-
-    await pool.query(
-      `INSERT INTO auth.users (
-        email, encrypted_password, role, aud,
-        raw_app_meta_data, raw_user_meta_data,
-        email_confirmed_at, created_at, updated_at
-      ) VALUES (
-        $1, $2, 'authenticated', 'authenticated',
-        $3::jsonb, '{}'::jsonb,
-        now(), now(), now()
-      )`,
-      [email.toLowerCase(), passwordHash, appMetadata],
-    )
-
-    console.log(`\n  Admin user "${email}" created (role: admin).`)
-    console.log(`  Log in at /admin after starting the dev server.\n`)
   } catch {
-    // Non-fatal — if auth schema doesn't exist yet, skip silently
+    // Non-fatal: skip when DB is unreachable or auth schema is not ready
   } finally {
     await pool.end()
   }
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────────
+/**
+ * Resolve DB access for the current project (host URL or compose exec when DB
+ * is not published to the host).
+ */
+export async function ensureFirstAdminUserForProject(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  options: EnsureFirstAdminOptions = {},
+): Promise<void> {
+  const root = resolve(cwd)
+  const merged: EnsureFirstAdminOptions = { cwd: root, ...options }
+
+  if (
+    resolveRuntimeProvider(config) === "docker" &&
+    merged.compose &&
+    !hasEngineOverride(config)
+  ) {
+    try {
+      await ensureFirstAdminWithQuery(
+        (sql, params) => composeExecQuery(root, merged.compose!, sql, params),
+        merged,
+      )
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      error(`Could not ensure first admin user: ${message}`)
+    }
+    return
+  }
+
+  const connection =
+    merged.compose && hasEngineOverride(config)
+      ? hostComposeDbUrlFromEnv(root)
+      : options.connection ?? readEnvValue(root, "DATABASE_URL", connectionString(config))
+
+  await ensureFirstAdminUser(connection, merged)
+}
+
+/** Exported for tests: the DB seam both the pool and compose paths share. */
+export async function ensureFirstAdminWithQuery(
+  query: DbQuery,
+  options: EnsureFirstAdminOptions,
+): Promise<void> {
+  const cwd = options.cwd ? resolve(options.cwd) : process.cwd()
+
+  if (!(await authUsersTableExists(query))) return
+  if (await hasAdminUsers(query)) return
+
+  const credentials = await resolveAdminCredentials(options, cwd)
+  if (!credentials) {
+    if (!isInteractive()) {
+      info(
+        "No admin users found. Set SUPATYPE_ADMIN_EMAIL / SUPATYPE_ADMIN_PASSWORD in .env, " +
+          "or run: supatype admin create-user",
+      )
+    }
+    return
+  }
+
+  const role = options.role ?? "admin"
+  try {
+    await createAdminUser(query, credentials.email, credentials.password, role, {
+      quiet: true,
+      cwd,
+    })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    error(`Failed to create admin user: ${message}`)
+    return
+  }
+  clearAdminSeedPassword(cwd)
+  logFirstAdminCreated(credentials.email, role)
+}
+
+function logFirstAdminCreated(email: string, role: string): void {
+  if (getActiveDevSession()?.isTui()) {
+    console.log(`Admin user "${email}" created (role: ${role}).`)
+    console.log("Log in at /admin after starting the dev server.")
+    return
+  }
+  info(`Admin user "${email}" created (role: ${role}).`)
+  info("Log in at /admin after starting the dev server.")
+}
+
+async function resolveAdminCredentials(
+  options: EnsureFirstAdminOptions,
+  cwd: string,
+): Promise<{ email: string; password: string } | null> {
+  const envEmail = options.email ?? readEnvValue(cwd, ADMIN_EMAIL_ENV, "").trim()
+  const envPassword =
+    options.password ?? readEnvValue(cwd, ADMIN_PASSWORD_ENV, "").trim()
+
+  if (envEmail && envPassword) {
+    if (!envEmail.includes("@")) {
+      info("Invalid admin email in .env. Skipping admin user creation.")
+      return null
+    }
+    if (envPassword.length < 8) {
+      info("Admin password in .env is too short (min 8 chars). Skipping.")
+      return null
+    }
+    return { email: envEmail, password: envPassword }
+  }
+
+  if (!isInteractive()) return null
+
+  info("No admin users found for the admin panel.")
+  const createAdmin = await uiConfirm("Create an admin user now?")
+  if (!createAdmin) {
+    info("Skipped. You can create one later with: supatype admin create-user")
+    return null
+  }
+
+  const email = await promptText("Admin email")
+  if (!email || !email.includes("@")) {
+    info("Invalid email. Skipping admin user creation.")
+    return null
+  }
+
+  const password = await promptPassword("Admin password (min 8 chars)")
+  if (!password || password.length < 8) {
+    info("Password too short. Skipping admin user creation.")
+    return null
+  }
+
+  return { email, password }
+}
+
+export function clearAdminSeedPassword(cwd: string): void {
+  // Unconditional: this is a one-time seed password being retired, and whoever wrote it wanted it
+  // gone once used.
+  upsertEnvFile(cwd, {}, { remove: [ADMIN_PASSWORD_ENV] })
+}
+
+export async function hashPasswordForAuth(password: string): Promise<string> {
+  return bcrypt.hash(password, BCRYPT_ROUNDS)
+}
+
+async function createAdminUser(
+  db: Pool | DbQuery,
+  email: string,
+  password: string,
+  role: string,
+  opts: { quiet?: boolean; aud?: string; cwd?: string } = {},
+): Promise<{ id: string; email: string }> {
+  const query: DbQuery =
+    typeof (db as Pool).query === "function"
+      ? (sql, params) => (db as Pool).query(sql, params)
+      : (db as DbQuery)
+
+  const normalized = email.toLowerCase()
+  const aud = opts.aud ?? (opts.cwd ? authJwtAud(opts.cwd) : "authenticated")
+  const existing = await query(
+    `SELECT id FROM auth.users
+     WHERE instance_id = $1::uuid
+       AND LOWER(email) = $2
+       AND aud = $3
+       AND is_sso_user = false`,
+    [SUPATYPE_NIL_INSTANCE_ID, normalized, aud],
+  )
+  if (existing.rows.length > 0) {
+    throw new Error(`User with email "${email}" already exists.`)
+  }
+
+  const passwordHash = await hashPasswordForAuth(password)
+  // No `role` here: `app_metadata` is the developer's namespace for their own
+  // application roles, and Studio access is granted through
+  // `_supatype.studio_members` instead. Writing it in both places means an app
+  // role assignment can silently confer admin UI access.
+  const appMetadata = JSON.stringify({
+    provider: "email",
+    providers: ["email"],
+  })
+  const userMetadata = JSON.stringify({})
+  const confirmedCol = await resolveAuthConfirmedAtColumn(query)
+
+  const result = await query(
+    `INSERT INTO auth.users (
+      instance_id, id, aud, role, email, encrypted_password,
+      raw_app_meta_data, raw_user_meta_data,
+      ${confirmedCol},
+      confirmation_token, recovery_token,
+      email_change_token_new, email_change, email_change_token_current,
+      phone_change, phone_change_token, reauthentication_token,
+      is_sso_user, is_anonymous,
+      created_at, updated_at
+    ) VALUES (
+      $1::uuid, gen_random_uuid(), $2, 'authenticated', $3, $4,
+      $5::jsonb, $6::jsonb,
+      now(),
+      '', '', '', '', '', '', '', '',
+      false, false,
+      now(), now()
+    ) RETURNING id, email`,
+    [SUPATYPE_NIL_INSTANCE_ID, aud, normalized, passwordHash, appMetadata, userMetadata],
+  )
+
+  const user = result.rows[0] as { id: string; email: string }
+  await recordStudioMembership(query, user.id, role)
+  if (!opts.quiet) {
+    info("Admin user created successfully.")
+    plain(`  ID:    ${user.id}`)
+    plain(`  Email: ${user.email}`)
+    plain(`  Role:  ${role}`)
+  }
+  return user
+}
+
+/**
+ * Record Studio access in `_supatype.studio_members`.
+ *
+ * Studio capability is deliberately not a JWT claim: `app_metadata` belongs to
+ * the developer's own app roles, and letting it grant Studio access means a
+ * developer assigning an app role could hand out admin UI access by accident.
+ *
+ * This is now the *only* grant, so a failure here is fatal to the command, a
+ * user created without a membership row cannot reach Studio at all, and
+ * reporting success would leave no clue why.
+ */
+async function recordStudioMembership(
+  query: DbQuery,
+  userId: string,
+  role: string,
+): Promise<void> {
+  await ensureStudioMembersTable(query)
+  await query(
+    `INSERT INTO _supatype.studio_members (user_id, role)
+     VALUES ($1, $2)
+     ON CONFLICT (user_id) DO UPDATE SET role = EXCLUDED.role, updated_at = now()`,
+    [userId, role],
+  )
+}
+
+async function ensureAuthUsersTable(pool: Pool): Promise<void> {
+  await pool.query(`
+    CREATE SCHEMA IF NOT EXISTS auth;
+
+    CREATE TABLE IF NOT EXISTS auth.users (
+      id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      instance_id   UUID DEFAULT '00000000-0000-0000-0000-000000000000'::uuid,
+      aud           TEXT DEFAULT 'authenticated',
+      role          TEXT DEFAULT 'authenticated',
+      email         TEXT UNIQUE,
+      encrypted_password TEXT,
+      email_confirmed_at TIMESTAMPTZ DEFAULT now(),
+      raw_app_meta_data  JSONB DEFAULT '{}',
+      raw_user_meta_data JSONB DEFAULT '{}',
+      created_at    TIMESTAMPTZ DEFAULT now(),
+      updated_at    TIMESTAMPTZ DEFAULT now(),
+      confirmation_token TEXT DEFAULT '',
+      recovery_token TEXT DEFAULT '',
+      email_change_token_new TEXT DEFAULT '',
+      email_change_token_current TEXT DEFAULT '',
+      email_change  TEXT DEFAULT '',
+      phone_change  TEXT DEFAULT '',
+      phone_change_token TEXT DEFAULT '',
+      reauthentication_token TEXT DEFAULT '',
+      is_sso_user   BOOLEAN NOT NULL DEFAULT false,
+      is_anonymous  BOOLEAN NOT NULL DEFAULT false
+    );
+  `)
+}
+
+async function authUsersTableExists(query: DbQuery): Promise<boolean> {
+  const result = await query(
+    `SELECT EXISTS (
+      SELECT FROM information_schema.tables
+      WHERE table_schema = 'auth' AND table_name = 'users'
+    ) as exists`,
+  )
+  return Boolean(result.rows[0]?.exists)
+}
+
+/**
+ * Whether anyone can already reach Studio.
+ *
+ * Counts membership rows, not `app_metadata` claims: the claim no longer grants
+ * anything, so counting it would report an admin exists while nobody can log in.
+ * A missing table means the project has never been pushed, no admins.
+ */
+async function hasAdminUsers(query: DbQuery): Promise<boolean> {
+  // Postgres resolves relations at parse time, so the table has to be checked
+  // separately rather than guarded inside the count query. Absent means the
+  // project has never been pushed, no admins, and `createAdminUser` will
+  // create the table itself.
+  if (!(await studioMembersTableExists(query))) return false
+
+  // Inner JOIN on purpose, unlike `list-users`: a membership held by a cloud
+  // account cannot log in to a self-hosted auth service, so a project exported from
+  // cloud with only those grants genuinely still needs a first admin.
+  const adminCount = await query(
+    `SELECT COUNT(*)::int as count
+       FROM _supatype.studio_members m
+       JOIN auth.users u ON u.id = m.user_id
+      WHERE m.role <> 'authenticated'`,
+  )
+  const count = (adminCount.rows[0] as { count: number } | undefined)?.count ?? 0
+  return count > 0
+}
+
+/**
+ * A project whose engine predates the membership table, or one that has never
+ * been pushed, still needs working `admin create-user` / `admin set-role`.
+ * Mirrors the engine's own definition (`create_studio_members_table_sql`).
+ *
+ * A row is held by exactly one identity: `user_id` for a project user (what the
+ * CLI grants), or `platform_user_id` for a Supatype Cloud account. The engine
+ * migrates older single-identity tables; this only has to create the current
+ * shape when there is nothing there at all.
+ */
+async function ensureStudioMembersTable(query: DbQuery): Promise<void> {
+  await query(`CREATE SCHEMA IF NOT EXISTS _supatype`)
+  await query(
+    `CREATE TABLE IF NOT EXISTS _supatype.studio_members (
+       id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+       user_id           UUID UNIQUE,
+       platform_user_id  UUID UNIQUE,
+       role              TEXT NOT NULL,
+       created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+       updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+       CONSTRAINT studio_members_one_identity
+         CHECK (num_nonnulls(user_id, platform_user_id) = 1)
+     )`,
+  )
+}
+
+async function studioMembersTableExists(query: DbQuery): Promise<boolean> {
+  const result = await query(
+    `SELECT to_regclass('_supatype.studio_members') IS NOT NULL as exists`,
+  )
+  return Boolean(result.rows[0]?.exists)
+}
+
+/** Postgres password for compose `exec psql` (db is not published to the host). */
+export function composePostgresPassword(cwd: string): string {
+  return readEnvValue(cwd, "POSTGRES_PASSWORD", "postgres")
+}
+
+function resolveDockerComposeContext(
+  cwd: string,
+  config: SupatypeProjectConfig,
+): { project: string; composePath: string } | null {
+  if (resolveRuntimeProvider(config) !== "docker" || hasEngineOverride(config)) {
+    return null
+  }
+
+  const session = readDevSessionLock(cwd)
+  if (session?.composeProject && session.composePath && existsSync(session.composePath)) {
+    return { project: session.composeProject, composePath: session.composePath }
+  }
+
+  const composePath = resolve(cwd, ".supatype/self-host/docker-compose.yml")
+  if (!existsSync(composePath)) return null
+
+  return {
+    project: composeProjectName(config.project?.name ?? "project"),
+    composePath,
+  }
+}
+
+function composeExecQuery(
+  cwd: string,
+  compose: { project: string; composePath: string },
+  sql: string,
+  params: unknown[] = [],
+): Promise<QueryResult> {
+  const db = readEnvValue(cwd, "POSTGRES_DB", "supatype")
+  const user = readEnvValue(cwd, "POSTGRES_USER", "supatype_admin")
+  const pgPassword = composePostgresPassword(cwd)
+  const envFile = join(cwd, ".env")
+  const composeDir = dirname(compose.composePath)
+  const args = [
+    "compose",
+    "-p",
+    compose.project,
+    "--project-directory",
+    cwd,
+    "-f",
+    compose.composePath,
+  ]
+  if (existsSync(envFile)) args.push("--env-file", envFile)
+
+  if (params.length === 0) {
+    args.push(
+      "exec",
+      "-T",
+      "-e",
+      `PGPASSWORD=${pgPassword}`,
+      "db",
+      "psql",
+      "-U",
+      user,
+      "-d",
+      db,
+      "-tAc",
+      sql,
+    )
+    const result = spawnSync("docker", args, { cwd: composeDir, encoding: "utf8" })
+    if (result.status !== 0) {
+      throw new Error((result.stderr ?? result.stdout ?? "compose psql failed").trim())
+    }
+    const text = (result.stdout ?? "").trim()
+    if (sql.trim().toUpperCase().startsWith("SELECT")) {
+      return Promise.resolve({
+        rows: parsePsqlScalarRows(sql, text),
+        rowCount: 1,
+        command: "SELECT",
+        oid: 0,
+        fields: [],
+      })
+    }
+    return Promise.resolve({
+      rows: [],
+      rowCount: 0,
+      command: "INSERT",
+      oid: 0,
+      fields: [],
+    })
+  }
+
+  args.push(
+    "exec",
+    "-T",
+    "-e",
+    `PGPASSWORD=${pgPassword}`,
+    "db",
+    "psql",
+    "-U",
+    user,
+    "-d",
+    db,
+    "-v",
+    "ON_ERROR_STOP=1",
+    "-c",
+    interpolateSql(sql, params),
+  )
+  const result = spawnSync("docker", args, { cwd: composeDir, encoding: "utf8" })
+  if (result.status !== 0) {
+    throw new Error((result.stderr ?? result.stdout ?? "compose psql failed").trim())
+  }
+  const stdout = (result.stdout ?? "").trim()
+  const idMatch = stdout.match(
+    /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\s+\|\s+(.+)/i,
+  )
+  if (idMatch) {
+    return Promise.resolve({
+      rows: [{ id: idMatch[1], email: idMatch[2]?.trim() }],
+      rowCount: 1,
+      command: "INSERT",
+      oid: 0,
+      fields: [],
+    })
+  }
+  return Promise.resolve({
+    rows: [],
+    rowCount: 0,
+    command: "INSERT",
+    oid: 0,
+    fields: [],
+  })
+}
+
+function parsePsqlScalarRows(sql: string, text: string): Record<string, unknown>[] {
+  const upper = sql.toUpperCase()
+  if (upper.includes(" AS EXISTS")) {
+    return [{ exists: text === "t" }]
+  }
+  if (upper.includes(" AS COUNT")) {
+    return [{ count: Number.parseInt(text, 10) || 0 }]
+  }
+  if (text === "") return []
+  return [{ value: text }]
+}
+
+function interpolateSql(sql: string, params: unknown[]): string {
+  return sql.replace(/\$(\d+)/g, (_match, index: string) => {
+    const value = params[Number(index) - 1]
+    if (value === null || value === undefined) return "NULL"
+    if (typeof value === "number" || typeof value === "bigint") return String(value)
+    if (typeof value === "boolean") return value ? "TRUE" : "FALSE"
+    return `'${String(value).replace(/'/g, "''")}'`
+  })
+}
+
+function hostComposeDbUrlFromEnv(cwd: string): string {
+  const port = readEnvValue(cwd, "SUPATYPE_DEV_DB_PORT", "54329")
+  const user = readEnvValue(cwd, "POSTGRES_USER", "supatype_admin")
+  const pass = readEnvValue(cwd, "POSTGRES_PASSWORD", "postgres")
+  const db = readEnvValue(cwd, "POSTGRES_DB", "supatype")
+  return `postgresql://${user}:${pass}@127.0.0.1:${port}/${db}?sslmode=disable`
+}
 
 async function importPg(): Promise<typeof import("pg")> {
   try {
     return await import("pg")
   } catch {
-    console.error(
-      "pg package is required for admin commands. Install it with: pnpm add pg",
-    )
+    error("pg package is required for admin commands. Install it with: pnpm add pg")
     process.exit(1)
   }
-}
-
-async function hashPassword(password: string): Promise<string> {
-  const salt = randomBytes(16).toString("hex")
-  const derived = (await scryptAsync(password, salt, 64)) as Buffer
-  return `${salt}:${derived.toString("hex")}`
-}
-
-function prompt(question: string): Promise<string> {
-  const rl = createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  })
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => {
-      rl.close()
-      resolve(answer.trim())
-    })
-  })
-}
-
-async function confirm(question: string): Promise<boolean> {
-  const answer = await prompt(question)
-  return answer.toLowerCase() === "y"
 }

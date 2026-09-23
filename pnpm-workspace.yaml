@@ -1,4 +1,8 @@
 packages:
   - "packages/*"
   - "examples/*"
+  # The kitchen sink is one project with two front ends under apps/, so its package.json files
+  # sit a level deeper than every other example's.
+  - "examples/*/apps/*"
   - "tests/integration"
+  - "tests/e2e"

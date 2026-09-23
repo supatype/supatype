@@ -8,10 +8,15 @@ import type { DashboardBlock, ModelConfig } from "../config.js"
 import { DASHBOARD_VIEW_LIMITS } from "../config.js"
 import { JumpToSearch } from "../components/JumpToSearch.js"
 import { studioRestHeaders } from "../lib/studio-auth-headers.js"
+import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
 export function Dashboard(): React.ReactElement {
+  // Rows here are read with the service role, so the elevated-access notice applies
+  // to this view. See `useShowsProjectRows`.
+  useShowsProjectRows()
+
   const config = useAdminConfig()
   const client = useAdminClient()
   const tier = config.tier ?? "free"
@@ -148,7 +153,7 @@ export function Dashboard(): React.ReactElement {
                   </button>
                   {!canSaveMore && !activeView && (
                     <span className="text-xs text-muted-foreground">
-                      {limitLabel} view limit reached — upgrade to save more
+                      {limitLabel} view limit reached, upgrade to save more
                     </span>
                   )}
                   <button
@@ -497,7 +502,7 @@ function SignupsChartBlock(): React.ReactElement {
   return (
     <div className="p-5">
       <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">
-        New Signups — last 30 days
+        New Signups: last 30 days
       </h3>
       {data.length === 0 ? (
         <p className="text-sm text-muted-foreground">No signup data yet</p>

@@ -2,9 +2,9 @@
  * ANSI colours for `supatype dev` TUI task list and log panes.
  */
 
-export const RESET = "\x1b[0m"
-export const DIM = "\x1b[2m"
-export const BOLD = "\x1b[1m"
+import { BOLD, DIM, RESET } from "./ui/brand.js"
+
+export { RESET, DIM, BOLD }
 
 /** Purple for orchestrator logs, green for Vite/app, etc. */
 export function taskColor(taskId: string): string {
@@ -30,7 +30,7 @@ export function levelColor(line: string): string | null {
   return null
 }
 
-/** Drop redundant prefix — task pane is already labelled supatype. */
+/** Drop redundant prefix: task pane is already labelled supatype. */
 export function normalizeStackLogLine(line: string): string {
   return line.replace(/^\[supatype\]\s*/, "")
 }
@@ -41,7 +41,26 @@ export function colorizeLogLine(taskId: string, line: string): string {
   return `${base}${line}${RESET}`
 }
 
-export function colorizeTaskLabel(taskId: string, label: string, focused: boolean): string {
-  const style = focused ? BOLD + taskColor(taskId) : taskColor(taskId)
-  return `${style}${label}${RESET}`
+/** Ink colour names for React components (parallel to ANSI taskColor). */
+export function taskInkColor(taskId: string): string {
+  switch (taskId) {
+    case "stack":
+      return "magenta"
+    case "app":
+      return "green"
+    case "studio":
+      return "cyan"
+    case "server":
+      return "green"
+    case "postgrest":
+      return "blue"
+    default:
+      return "white"
+  }
+}
+
+export function logInkColor(taskId: string, line: string): string {
+  if (line.startsWith("✗ ")) return "red"
+  if (line.startsWith("⚠ ")) return "yellow"
+  return taskInkColor(taskId)
 }

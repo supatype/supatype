@@ -1,7 +1,24 @@
 import React, { useState, useEffect, useCallback } from "react"
 import { Header } from "../components/Header.js"
 import { useAdminClient } from "../hooks/useAdminClient.js"
+import { useLocale } from "../hooks/useLocale.js"
+import { getLocalizedFieldValue } from "../lib/localized-field.js"
 import type { ModelConfig, FieldConfig } from "../config.js"
+import {
+  cellAccess,
+  isOperationOffered,
+  useStudioFieldAccess,
+  type CellAccess,
+} from "../hooks/useStudioFieldAccess.js"
+import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
+import { Badge } from "../components/ui.js"
+import {
+  fetchRecordStates,
+  publishableLocales,
+  WHOLE_RECORD,
+  type RecordState,
+} from "../lib/publishing.js"
+import { stateLabels } from "../components/PublishBar.js"
 
 interface ListViewProps {
   model: ModelConfig
@@ -14,7 +31,13 @@ interface SortState {
 }
 
 export function ListView({ model, onNavigate }: ListViewProps): React.ReactElement {
+  // Rows here are read with the service role, so the elevated-access notice applies
+  // to this view. See `useShowsProjectRows`.
+  useShowsProjectRows()
+
   const client = useAdminClient()
+  const { currentLocale, defaultLocale, locales: projectLocales } = useLocale()
+  const fieldAccess = useStudioFieldAccess()
   const [rows, setRows] = useState<Record<string, unknown>[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -70,6 +93,31 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
     })
   }
 
+  // What each row on this page currently is. One query for the page, and a failure just means no
+  // badges: the record's own editor is authoritative about its state.
+  //
+  // The state, not a boolean. This said "Draft" for any record with an unpublished edit, which is
+  // wrong for the ordinary case of a published post being revised, and used the same word the
+  // editor uses for a language that has never been published at all.
+  const [recordStates, setRecordStates] = useState<Map<string, RecordState>>(new Map())
+  const localeCodes = projectLocales.map((l) => l.code).join(",")
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const ids = rows.map((r) => String(r[model.primaryKey]))
+      const codes = localeCodes === "" ? [] : localeCodes.split(",")
+      const publishable =
+        model.versions === null ? [WHOLE_RECORD] : publishableLocales(model.versions, codes)
+      const states = await fetchRecordStates(client, model, ids, publishable)
+      if (!cancelled) setRecordStates(states)
+    })()
+    return () => {
+      cancelled = true
+    }
+    // `localeCodes` is a joined string rather than the array, so a stable locale list does not
+    // re-fire this on every render.
+  }, [client, model, rows, localeCodes])
+
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
       const next = new Set(prev)
@@ -101,13 +149,17 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
       <Header
         title={model.labelPlural}
         actions={
-          <button
-            type="button"
-            className="st-btn st-btn-primary"
-            onClick={() => { onNavigate(`/models/${model.name}/create`) }}
-          >
-            Create {model.label}
-          </button>
+          // Withdrawn only on a settled deny: `row` means some records allow it, and the
+          // server is what refuses either way.
+          isOperationOffered(fieldAccess, model.tableName, "create") ? (
+            <button
+              type="button"
+              className="st-btn st-btn-primary"
+              onClick={() => { onNavigate(`/models/${model.name}/create`) }}
+            >
+              Create {model.label}
+            </button>
+          ) : null
         }
       />
 
@@ -125,9 +177,11 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
         {selected.size > 0 && (
           <div className="st-bulk-actions">
             <span>{selected.size} selected</span>
-            <button type="button" className="st-btn st-btn-danger" onClick={() => { void handleBulkDelete() }}>
-              Delete selected
-            </button>
+            {isOperationOffered(fieldAccess, model.tableName, "delete") && (
+              <button type="button" className="st-btn st-btn-danger" onClick={() => { void handleBulkDelete() }}>
+                Delete selected
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -193,9 +247,38 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
                         aria-label={`Select row ${id}`}
                       />
                     </td>
-                    {columns.map((col) => (
+                    {columns.map((col, index) => (
                       <td key={col.name} className="st-table-cell">
-                        <CellRenderer value={row[col.name]} field={col} />
+                        <AccessAwareCell
+                          access={cellAccess(fieldAccess, model.tableName, col.name, row[col.name])}
+                        >
+                          <CellRenderer
+                            value={row[col.name]}
+                            field={col}
+                            currentLocale={currentLocale}
+                            defaultLocale={defaultLocale}
+                          />
+                        </AccessAwareCell>
+                        {/* On the first column, so it reads as a property of the record rather than
+                            of a field. An editor scanning a list needs to see that something is
+                            waiting without opening every row to find out. */}
+                        {index === 0 &&
+                          (() => {
+                            const state = recordStates.get(id)
+                            // Live needs no badge: it is the state a reader would assume, and a
+                            // badge on every row is a badge nobody reads.
+                            if (state === undefined || state === "live") return null
+                            const label = stateLabels[state]
+                            return (
+                              <Badge
+                                variant={label.variant}
+                                className="ml-2"
+                                title={label.title}
+                              >
+                                {label.long}
+                              </Badge>
+                            )
+                          })()}
                       </td>
                     ))}
                   </tr>
@@ -229,29 +312,122 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
   )
 }
 
-function CellRenderer({ value, field }: { value: unknown; field: FieldConfig }): React.ReactElement {
-  if (value === null || value === undefined) {
-    return <span className="st-cell-null">—</span>
+function CellRenderer({
+  value,
+  field,
+  currentLocale,
+  defaultLocale,
+}: {
+  value: unknown
+  field: FieldConfig
+  currentLocale: string
+  defaultLocale: string
+}): React.ReactElement {
+  const resolved = getLocalizedFieldValue(value, field.localized === true, currentLocale, defaultLocale)
+
+  if (resolved === null || resolved === undefined) {
+    return <span className="st-cell-null">-</span>
   }
 
   switch (field.widget) {
     case "boolean":
-      return <span className={`st-cell-bool st-cell-bool--${value ? "true" : "false"}`}>{value ? "Yes" : "No"}</span>
+      return <span className={`st-cell-bool st-cell-bool--${resolved ? "true" : "false"}`}>{resolved ? "Yes" : "No"}</span>
     case "image":
-      if (typeof value === "object" && value !== null && "path" in (value as Record<string, unknown>)) {
+    case "file":
+      if (typeof resolved === "object" && resolved !== null && "path" in (resolved as Record<string, unknown>)) {
         return <span className="st-cell-image">[Image]</span>
       }
-      return <span>{String(value)}</span>
+      return <span>{formatCellText(resolved)}</span>
     case "publish":
-      return <span className={`st-cell-status st-cell-status--${String(value)}`}>{String(value)}</span>
+      return <span className={`st-cell-status st-cell-status--${String(resolved)}`}>{String(resolved)}</span>
     case "date":
     case "datetime":
-      return <span className="st-cell-date">{new Date(String(value)).toLocaleDateString()}</span>
+      return <span className="st-cell-date">{new Date(String(resolved)).toLocaleDateString()}</span>
+    case "json":
+      return <span className="st-cell-text">{truncate(formatCellText(resolved), 100)}</span>
     default:
-      return <span className="st-cell-text">{truncate(String(value), 100)}</span>
+      return <span className="st-cell-text">{truncate(formatCellText(resolved), 100)}</span>
   }
+}
+
+function formatCellText(value: unknown): string {
+  if (typeof value === "string") return value
+  if (typeof value === "number" || typeof value === "boolean") return String(value)
+  if (typeof value === "object" && value !== null) {
+    try {
+      return JSON.stringify(value)
+    } catch {
+      return String(value)
+    }
+  }
+  return String(value)
 }
 
 function truncate(text: string, maxLength: number): string {
   return text.length > maxLength ? text.slice(0, maxLength) + "..." : text
+}
+
+/**
+ * Renders a cell with its access state, and **never hides a value that came back**.
+ *
+ * A withheld column arrives as null, which as an empty cell is indistinguishable from a record
+ * that simply has no value, so `hidden` shows a lock instead of nothing. But that only holds
+ * where masking is actually being applied and the verdict is settled: an empty cell for an
+ * elevated caller, or under a per-row rule, is not evidence of anything, and claiming otherwise
+ * would tell the reader a record is hiding a value it does not have.
+ *
+ * `revealed` is the case that matters for an administrator, who acts elevated by default. The
+ * masking extension exempts the service role, so restricted columns reach them in full. Blanking
+ * those would hide data they are entitled to and make the restriction look like it applies to
+ * them.
+ */
+function AccessAwareCell({
+  access,
+  children,
+}: {
+  access: CellAccess
+  children: React.ReactNode
+}): React.ReactElement {
+  if (access === "hidden") {
+    return (
+      <span
+        className="st-cell-masked"
+        title="Hidden by a field access rule"
+        aria-label="Hidden by a field access rule"
+      >
+        &#128274;
+      </span>
+    )
+  }
+
+  if (access === "unknown") {
+    // Restricted, empty, and per-row: this record either withholds the value or has none, and
+    // nothing available here can tell which. Say that rather than pick one.
+    return (
+      <span
+        className="st-cell-masked st-cell-masked-unknown"
+        title="Hidden by a field access rule, or empty, this column is restricted per record"
+        aria-label="Hidden by a field access rule, or empty"
+      >
+        &#128274;?
+      </span>
+    )
+  }
+
+  if (access === "revealed") {
+    return (
+      <span className="st-cell-restricted">
+        {children}
+        <span
+          className="st-cell-restricted-marker"
+          title="Access-controlled field: other callers may not see this value"
+          aria-label="Access-controlled field"
+        >
+          &#128274;
+        </span>
+      </span>
+    )
+  }
+
+  return <>{children}</>
 }

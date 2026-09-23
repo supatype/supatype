@@ -14,7 +14,7 @@ import type {
 } from "@supatype/types"
 
 /**
- * Customer — the loyalty profile, one row per signed-in user.
+ * Customer: the loyalty profile, one row per signed-in user.
  *
  * `id` is the Supatype auth user id, so each person owns exactly their own
  * profile (RLS Owner). `stars` is the spendable balance; `lifetimeStars` only
@@ -38,7 +38,7 @@ export type Customer = Model<{
 }>
 
 /**
- * Activity — one row per star event (earning a coffee or redeeming a reward).
+ * Activity: one row per star event (earning a coffee or redeeming a reward).
  *
  * `kind` distinguishes earn vs redeem; `stars` is the signed delta (positive
  * when earning, negative when redeeming). Drives the activity feed on the

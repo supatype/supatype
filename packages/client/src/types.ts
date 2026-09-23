@@ -52,6 +52,16 @@ export type AuthChangeEvent =
   | "PASSWORD_RECOVERY"
   | "MFA_CHALLENGE_VERIFIED"
 
+/**
+ * OAuth / magic-link redirect flow.
+ * - `pkce`: authorize with code_challenge; app exchanges `?code=` via `exchangeCodeForSession`.
+ * - `implicit`: tokens returned in the URL hash (`#access_token=…`).
+ *
+ * Web `signInWithOAuth` defaults to `implicit` for backward compatibility.
+ * React Native helpers should pass `pkce` (recommended default for mobile).
+ */
+export type AuthFlowType = "pkce" | "implicit"
+
 // ─── MFA types ──────────────────────────────────────────────────────────────
 
 export interface AuthMFAEnrollResponse {
@@ -118,17 +128,71 @@ export interface SupatypeError {
   message: string
   status?: number | undefined
   code?: string | undefined
+  /**
+   * The column a field validator refused, when the refusal came from one.
+   *
+   * Carried separately from `message` so a client does not parse prose to know which input to mark.
+   * A validator's whole reason for existing over a `beforeChange` hook is that its refusal names a
+   * field; losing that here would leave the message in a banner, which is what a hook already gives
+   * you.
+   */
+  field?: string | undefined
 }
 
 // ─── Query result ─────────────────────────────────────────────────────────────
+
+/**
+ * A column in the response that carries a read restriction.
+ *
+ * Postgres cannot omit a column, the result-set shape is fixed and identical for every row
+ *- so a column you may not read comes back as `null`, indistinguishable on the wire from a
+ * value that is genuinely null. This says which nulls are explicable by masking.
+ *
+ * Advisory. It describes the schema's restrictions, not a decision: what you can actually
+ * read is enforced in the database, and ignoring or tampering with this changes nothing.
+ */
+export interface MaskedField {
+  column: string
+  /**
+   * `identity`: the verdict is the same for every row in this response, so a `null` in the
+   * column is explicable by masking for the whole result set.
+   *
+   * `row`: the rule reads the row, so only *some* nulls are masked values and the rest are
+   * genuinely null. Deliberately not narrowed further: the header is computed before the
+   * query runs, so claiming more would be a guess.
+   */
+  scope: "identity" | "row"
+}
 
 export interface QueryResult<TData> {
   data: TData | null
   error: SupatypeError | null
   count: number | null
+  meta?: {
+    cacheStatus?: "HIT" | "MISS" | "BYPASS" | undefined
+    /** Present only when the response named restricted columns. Absent means "not stated". */
+    maskedFields?: MaskedField[] | undefined
+  } | undefined
 }
 
 // ─── RPC result ──────────────────────────────────────────────────────────────
+
+/**
+ * Options for {@link SupatypeClient.rpc}.
+ *
+ * `schema` is not decoration. PostgREST resolves `/rpc/<name>` against the
+ * **default profile**, which is the first schema on the exposed list, so a
+ * function living anywhere else is unreachable without naming its schema. The
+ * generated publishing functions live in `supatype` for exactly the reason they
+ * are generated at all: they are the stack's, not the project's, and putting them
+ * in the managed schema would collide with a model called `publish`.
+ */
+export interface RpcOptions {
+  head?: boolean | undefined
+  count?: "exact" | "planned" | "estimated" | undefined
+  /** Postgres schema holding the function, sent as `Content-Profile`. */
+  schema?: string | undefined
+}
 
 export interface RpcResult<TData> {
   data: TData | null
@@ -222,13 +286,43 @@ export interface AnyDatabase {
 
 // ─── Client config ────────────────────────────────────────────────────────────
 
+/** Sync or async key-value store for auth session persistence (e.g. AsyncStorage in React Native). */
+export interface AuthStorage {
+  getItem(key: string): string | null | Promise<string | null>
+  setItem(key: string, value: string): void | Promise<void>
+  removeItem(key: string): void | Promise<void>
+}
+
+/**
+ * The schema holding one draft view per versioned model, selected by `Accept-Profile`.
+ *
+ * Stated here as well as in the CLI (`project-config.ts`, which puts it on `PGRST_DB_SCHEMA`) and
+ * the engine (which creates the views), because the SDK ships standalone and depending on a
+ * workspace package for one identifier would be a worse trade than three call sites naming it.
+ * Changing it means changing all three, the same as `api` for the field-masking views.
+ */
+export const DRAFT_SCHEMA = "draft"
+
+export interface SelectQueryOptions {
+  count?: "exact" | "planned" | "estimated" | undefined
+  head?: boolean | undefined
+  /**
+   * PostgREST schema to read from, sent as `Accept-Profile`.
+   *
+   * Set by `.draft()` rather than by hand: the point of a profile here is that a draft has the same
+   * table name and the same row type as what it is a draft of, so the only thing that changes
+   * between reading live content and reading the pending edit is which schema answers.
+   */
+  profile?: string | undefined
+}
+
 export interface SupatypeClientConfig {
   /** Base URL of the Supatype gateway (e.g. http://localhost:18473) */
   url: string
   /** Anon JWT key */
   anonKey: string
   /**
-   * Service role key — bypasses row-level security.
+   * Service role key: bypasses row-level security.
    * Only set this in trusted server-side or developer-tool contexts.
    * Never expose to end-user clients.
    */
@@ -244,6 +338,11 @@ export interface SupatypeClientConfig {
      * Default: `"st"`.
      */
     cookiePrefix?: string | undefined
+    /**
+     * Custom session store. When set, replaces browser localStorage/cookie persistence.
+     * React Native: pass an AsyncStorage or expo-secure-store adapter.
+     */
+    storage?: AuthStorage | undefined
   } | undefined
   /**
    * Disable automatic retry for transient errors.
@@ -256,9 +355,34 @@ export interface SupatypeClientConfig {
    */
   timeout?: number | undefined
   /**
+   * In-memory GET query cache. When omitted, a shared default cache is used.
+   */
+  queryCache?: import("./query-cache.js").QueryCache | undefined
+  /**
    * Pre-load a session at construction time (SSR use case).
    * Used by `@supatype/ssr` to inject a cookie-parsed session into the client
    * before any requests are made.
    */
   initialSession?: Session | undefined
+  /**
+   * A preview link's code, used as this client's whole credential.
+   *
+   * Set it on a client built to serve one preview request. The code names a link the project can
+   * revoke, and the client exchanges it for a token that lives about a minute. That token carries
+   * no subject, so the bearer is nobody in particular: the database's own policy decides what they
+   * may read, and there is no admin key anywhere on the path.
+   *
+   * **It wins over a signed-in session, deliberately.** A preview route is opened by whoever was
+   * sent the link, and some of them will already be logged in as someone with no access to the
+   * draft. Falling back to that session would show them "not found" and send them to ask why the
+   * post had been deleted.
+   *
+   * Refused alongside `serviceRoleKey`: a route that has both is a route sending admin credentials
+   * down a path meant for strangers, which is the mistake this feature exists to remove.
+   */
+  previewCode?: string | undefined
+  /**
+   * Extra headers merged into every request (e.g. Studio `X-Supatype-Environment`).
+   */
+  headers?: Record<string, string> | undefined
 }

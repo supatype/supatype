@@ -1,6 +1,6 @@
 # Type Resolution in the Schema Extractor
 
-`type-extractor.ts` converts TypeScript type definitions into `ExtractedSchemaAst` —
+`type-extractor.ts` converts TypeScript type definitions into `ExtractedSchemaAst`,
 the JSON handed to the engine binary for SQL generation and client type output.
 
 This document explains how type names are resolved, what patterns are supported,
@@ -12,24 +12,24 @@ and how the three-tier fallback chain works.
 
 The extractor uses the TypeScript **parser only** (`ts.createSourceFile`), not the
 full type checker. This is fast and requires no `tsconfig.json`, but it means the
-extractor only sees raw source text — it cannot evaluate what a type alias resolves to.
+extractor only sees raw source text, it cannot evaluate what a type alias resolves to.
 
 The consequence is that any indirection breaks resolution:
 
 ```typescript
-// Works — extractor sees "Optional" literally
+// Works: extractor sees "Optional" literally
 type Post = Model<{ email: Optional<Email> }>
 
-// Previously broken — extractor sees "Nullable", not "Optional"
+// Previously broken: extractor sees "Nullable", not "Optional"
 type Nullable<T> = Optional<T>
 type Post = Model<{ email: Nullable<Email> }>
 
-// Previously broken — import rename
+// Previously broken: import rename
 import { Optional as Maybe } from "@supatype/types"
 type Post = Model<{ email: Maybe<Email> }>
 ```
 
-Failures were silent — unknown types fell through to `{ kind: "text", pgType: "TEXT" }`
+Failures were silent: unknown types fell through to `{ kind: "text", pgType: "TEXT" }`
 instead of throwing an error.
 
 ---
@@ -40,18 +40,18 @@ Every type name encountered in a field definition is resolved through three tier
 in order. The first tier to succeed wins. If all three fail, an error is thrown.
 
 ```
-Tier 1 — syntactic switch      instant    inline primitives and modifiers by name
-Tier 2 — alias registry        instant    user-defined type aliases, import renames
-Tier 3 — TypeScript checker    ~300ms†    conditional types, mapped types
+Tier 1: syntactic switch      instant    inline primitives and modifiers by name
+Tier 2: alias registry        instant    user-defined type aliases, import renames
+Tier 3: TypeScript checker    ~300ms†    conditional types, mapped types
 ```
 
-† Tier 3 is **lazy** — the `ts.Program` and `TypeChecker` are only created the first
+† Tier 3 is **lazy**, the `ts.Program` and `TypeChecker` are only created the first
 time a conditional or mapped type is encountered. Schemas that use only tiers 1 and 2
 pay no cost.
 
 ---
 
-## Tier 1 — Syntactic Switch
+## Tier 1: Syntactic Switch
 
 The existing behaviour. The extractor walks the type reference chain and matches
 names exactly against a hardcoded switch:
@@ -71,12 +71,12 @@ This covers all types used inline with their canonical names.
 
 ---
 
-## Tier 2 — Alias Registry
+## Tier 2: Alias Registry
 
 Built once at startup from all source files loaded by `loadSchemaSourceFiles`.
 Covers two sub-cases:
 
-### 2a — Type alias declarations
+### 2a: Type alias declarations
 
 Any `type X = ...` that is not a `Model<>` declaration is indexed by name:
 
@@ -103,7 +103,7 @@ type B = Optional<Email>
 Cycle detection via a `resolving: Set<string>` guard prevents infinite loops and
 throws a descriptive error instead.
 
-### 2b — Import renames
+### 2b: Import renames
 
 Explicit `as` renames in import statements are indexed per file:
 
@@ -123,17 +123,17 @@ the current file. `Maybe` becomes `Optional`, `MaybeNull` becomes `Nullable`
 into the source file set and their aliases are available in the registry.
 
 Only relative specifiers (`.`-prefixed) are followed. Bare specifiers and scoped
-packages (`@supatype/types`, `node_modules/*`) are not loaded — their exported
+packages (`@supatype/types`, `node_modules/*`) are not loaded, their exported
 names are already covered by the tier 1 switch.
 
 ---
 
-## Tier 3 — TypeScript Checker
+## Tier 3: TypeScript Checker
 
 Required for types that cannot be evaluated syntactically:
 
-- **Conditional types**: `T extends U ? A : B` — requires evaluating the constraint
-- **Mapped types**: `{ [K in keyof T]: F<T[K]> }` — requires enumerating `keyof T`
+- **Conditional types**: `T extends U ? A : B`, requires evaluating the constraint
+- **Mapped types**: `{ [K in keyof T]: F<T[K]> }`, requires enumerating `keyof T`
 
 ### How it works
 
@@ -147,7 +147,7 @@ Required for types that cannot be evaluated syntactically:
 3. `checker.getTypeAtLocation(programNode)` resolves the type fully.
 
 4. `checker.typeToString(type, ..., TypeFormatFlags.UseAliasDefinedOutsideCurrentScope)`
-   converts it back to a string with **alias names preserved** — so `Optional<Email>`
+   converts it back to a string with **alias names preserved**, so `Optional<Email>`
    stays as `Optional<Email>` rather than expanding to the underlying branded
    intersection type.
 
@@ -160,7 +160,7 @@ Required for types that cannot be evaluated syntactically:
 
 - A field type is directly a conditional or mapped expression
 - A tier 2 alias body contains a conditional or mapped type (detected by
-  `needsChecker()` before text substitution is attempted — the original node,
+  `needsChecker()` before text substitution is attempted, the original node,
   which has valid source positions, is passed to the checker instead)
 - The `Model<>` fields argument is a mapped type alias:
   ```typescript
@@ -175,40 +175,40 @@ Required for types that cannot be evaluated syntactically:
 ## What Is Supported
 
 ```typescript
-// Tier 1 — inline, canonical names
+// Tier 1: inline, canonical names
 email:  Optional<Email>
 slug:   Unique<Slug<"title">>
 id:     PrimaryKey<UUID>
 
-// Tier 2a — simple alias
+// Tier 2a: simple alias
 type Nullable<T>  = Optional<T>
 type UniqueSlug   = Unique<Slug<"title">>
 email: Nullable<Email>
 slug:  UniqueSlug
 
-// Tier 2a — multi-hop
+// Tier 2a: multi-hop
 type A = B
 type B = Nullable<Email>
 email: A
 
-// Tier 2b — import rename of primitive
+// Tier 2b: import rename of primitive
 import { Optional as Maybe } from "@supatype/types"
 email: Maybe<Email>
 
-// Tier 2b — import rename of local alias
+// Tier 2b: import rename of local alias
 import { Nullable as MaybeNull } from "./field-types"
 email: MaybeNull<Email>
 
-// Tier 2b — cross-file alias (no rename)
+// Tier 2b: cross-file alias (no rename)
 // helpers.ts: export type Nullable<T> = Optional<T>
 import { Nullable } from "./helpers"
 email: Nullable<Email>
 
-// Tier 3 — conditional type
+// Tier 3: conditional type
 type NullableStr<T> = T extends string ? Optional<T> : T
 email: NullableStr<Email>
 
-// Tier 3 — mapped type as fields object
+// Tier 3: mapped type as fields object
 type AllOptional<T> = { [K in keyof T]: Optional<T[K]> }
 type Post = Model<AllOptional<{ email: Email; name: Text }>>
 ```
@@ -225,10 +225,10 @@ import { SomeHelper } from "some-library"
 // symbols only available in node_modules (other than @supatype/types)
 
 // TypeScript utility types used as field types
-email: NonNullable<string>    // error — not a @supatype/types primitive
+email: NonNullable<string>    // error, not a @supatype/types primitive
 
 // Namespace-qualified names
-email: Types.Optional<Email>  // error — only identifier references are resolved
+email: Types.Optional<Email>  // error, only identifier references are resolved
 ```
 
 ---
@@ -290,5 +290,5 @@ type CheckerContext = {
 ## Adding a New Tier 1 Primitive
 
 When a new type is added to `@supatype/types`, add a `case` to the `switch` in
-`parseScalarType`. No other changes are needed — tier 2 and tier 3 handle
+`parseScalarType`. No other changes are needed, tier 2 and tier 3 handle
 aliases and compositions of it automatically.

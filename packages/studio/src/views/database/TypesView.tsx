@@ -1,5 +1,6 @@
 import React, { useState } from "react"
 import { useProjectProxy } from "../../hooks/useProjectProxy.js"
+import { useSchemaPicker } from "../../hooks/useSchemaPicker.js"
 import { useApiQuery } from "../../hooks/useApiQuery.js"
 import { Badge, Button, Card } from "../../components/ui.js"
 import { EmptyState } from "../../components/EmptyState.js"
@@ -20,7 +21,7 @@ const LIST_QUERY = (schema: string) => `
 
 export function TypesView(): React.ReactElement {
   const proxy = useProjectProxy()
-  const [schema, setSchema] = useState("public")
+  const { schemas, schema, setSchema } = useSchemaPicker()
   const [newEnumName, setNewEnumName] = useState("")
   const [newEnumValues, setNewEnumValues] = useState("")
   const [showCreate, setShowCreate] = useState(false)
@@ -28,7 +29,6 @@ export function TypesView(): React.ReactElement {
   const [runBusy, setRunBusy] = useState(false)
   const [dropModal, setDropModal] = useState<string | null>(null)
 
-  const { data: schemas } = useApiQuery(() => proxy.schemas(), [proxy])
   const { data: types, loading, error, refetch } = useApiQuery(
     () => proxy.sql(LIST_QUERY(schema)).then((r) => r.rows),
     [proxy, schema],
@@ -72,7 +72,7 @@ export function TypesView(): React.ReactElement {
         <div className="flex items-center gap-3">
           <h1 className="text-xl font-semibold text-foreground">Types</h1>
           <select value={schema} onChange={(e) => setSchema(e.target.value)} className="px-2 py-1 text-sm rounded-md border border-border bg-background text-foreground focus:outline-none">
-            {(schemas ?? ["public"]).map((s) => <option key={s} value={s}>{s}</option>)}
+            {(schemas.length > 0 ? schemas : [schema]).map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
         <Button variant="primary" onClick={() => setShowCreate(true)}>Create enum</Button>
@@ -123,7 +123,7 @@ export function TypesView(): React.ReactElement {
                   <td className="px-4 py-3">
                     <Badge variant={row["typtype"] === "e" ? "indigo" : "blue"}>{row["typtype"] === "e" ? "enum" : "composite"}</Badge>
                   </td>
-                  <td className="px-4 py-3 text-xs text-muted-foreground">{((row["enum_values"] as string[] | null) ?? []).join(", ") || "—"}</td>
+                  <td className="px-4 py-3 text-xs text-muted-foreground">{((row["enum_values"] as string[] | null) ?? []).join(", ") || "-"}</td>
                   <td className="px-4 py-3 text-right">
                     <button type="button" className="text-xs text-destructive hover:underline" onClick={() => setDropModal(row["typname"] as string)}>Drop</button>
                   </td>

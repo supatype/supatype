@@ -29,11 +29,25 @@ export interface StorageBucketMeta {
   updated_at: string
 }
 
+/** Resolved fresh per request, so a session that arrives later is used. */
+export type AuthHeaders = () => Promise<Record<string, string>>
+
 export class StorageClient {
   private readonly url: string
-  private readonly headers: Record<string, string>
+  private readonly headers: AuthHeaders
 
-  constructor(url: string, headers: Record<string, string>) {
+  /**
+   * Headers are asked for per request, not captured here.
+   *
+   * They used to be a plain object built when the client was constructed, which is before anybody
+   * has signed in. Every storage request therefore carried the anon key for the life of the page,
+   * whatever session the caller later had: an app's per-user storage policies saw `anon`, and
+   * Studio's proxy refused the request outright because an anon key carries no subject.
+   *
+   * Every other client on this object already took the same function. Storage was the one that did
+   * not.
+   */
+  constructor(url: string, headers: AuthHeaders) {
     this.url = url
     this.headers = headers
   }
@@ -44,7 +58,7 @@ export class StorageClient {
 
   async listBuckets(): Promise<{ data: StorageBucketMeta[] | null; error: SupatypeError | null }> {
     try {
-      const res = await fetch(`${this.url}/bucket`, { headers: this.headers })
+      const res = await fetch(`${this.url}/bucket`, { headers: await this.headers() })
       if (!res.ok) {
         const err = await res.json().catch(() => ({ message: "Error" })) as { message?: string }
         return { data: null, error: { message: err.message ?? "Failed to list buckets" } }
@@ -70,7 +84,7 @@ export class StorageClient {
       }
       const res = await fetch(`${this.url}/bucket`, {
         method: "POST",
-        headers: { ...this.headers, "Content-Type": "application/json" },
+        headers: { ...(await this.headers()), "Content-Type": "application/json" },
         body: JSON.stringify(body),
       })
       if (!res.ok) {
@@ -87,9 +101,9 @@ export class StorageClient {
 export class BucketClient {
   private readonly url: string
   private readonly bucket: string
-  private readonly headers: Record<string, string>
+  private readonly headers: AuthHeaders
 
-  constructor(url: string, bucket: string, headers: Record<string, string>) {
+  constructor(url: string, bucket: string, headers: AuthHeaders) {
     this.url = url
     this.bucket = bucket
     this.headers = headers
@@ -102,7 +116,7 @@ export class BucketClient {
   ): Promise<{ data: { path: string } | null; error: SupatypeError | null }> {
     const inferredType = file instanceof File && file.type ? file.type : "application/octet-stream"
     const headers: Record<string, string> = {
-      ...this.headers,
+      ...(await this.headers()),
       "Content-Type": options?.contentType ?? inferredType,
     }
     if (options?.upsert === true) {
@@ -125,7 +139,7 @@ export class BucketClient {
     options?: { transform?: TransformOptions | undefined } | undefined,
   ): Promise<{ data: Blob | null; error: SupatypeError | null }> {
     const url = this.buildObjectUrl("authenticated", path, options?.transform)
-    const res = await fetch(url, { headers: this.headers })
+    const res = await fetch(url, { headers: await this.headers() })
     if (!res.ok) {
       const err = await res.json().catch(() => ({ message: "Download failed" })) as Record<string, unknown>
       return { data: null, error: { message: String(err["message"] ?? err["error"] ?? "Download failed"), status: res.status } }
@@ -148,7 +162,7 @@ export class BucketClient {
   ): Promise<{ data: { signedUrl: string } | null; error: SupatypeError | null }> {
     const res = await fetch(`${this.url}/object/sign/${this.bucket}/${path}`, {
       method: "POST",
-      headers: { ...this.headers, "Content-Type": "application/json" },
+      headers: { ...(await this.headers()), "Content-Type": "application/json" },
       body: JSON.stringify({ expiresIn }),
     })
     if (!res.ok) {
@@ -178,7 +192,7 @@ export class BucketClient {
   async remove(paths: string[]): Promise<{ data: StorageObject[] | null; error: SupatypeError | null }> {
     const res = await fetch(`${this.url}/object/${this.bucket}`, {
       method: "DELETE",
-      headers: { ...this.headers, "Content-Type": "application/json" },
+      headers: { ...(await this.headers()), "Content-Type": "application/json" },
       body: JSON.stringify({ prefixes: paths }),
     })
     if (!res.ok) {
@@ -200,7 +214,7 @@ export class BucketClient {
     }
     const res = await fetch(`${this.url}/object/list/${this.bucket}`, {
       method: "POST",
-      headers: { ...this.headers, "Content-Type": "application/json" },
+      headers: { ...(await this.headers()), "Content-Type": "application/json" },
       body: JSON.stringify(body),
     })
     if (!res.ok) {

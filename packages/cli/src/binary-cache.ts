@@ -1,7 +1,7 @@
 /**
- * Binary cache — manages supatype component binaries.
+ * Binary cache: manages supatype component binaries.
  *
- * Components: engine, server, postgres, deno.
+ * Components: engine, server, postgres, deno, realtime.
  * Cache root: ~/.supatype/cache/{component}/{version}/
  * Override path: config.overrides?.{component} (local build path).
  *
@@ -37,6 +37,12 @@ import { basename, join, resolve, isAbsolute } from "node:path"
 import type { SupatypeProjectConfig } from "./project-config.js"
 import { loadProjectLink, migrateLegacyLinkFiles } from "./link.js"
 import { releasePublicKey } from "./release-public-key.js"
+import {
+  isDownloadInProgress,
+  releaseDownloadLock,
+  tryAcquireDownloadLock,
+  waitForComponentDownload,
+} from "./binary-download-lock.js"
 
 /**
  * Set `versions.{engine|server|postgres|deno}: VERSION_PIN_LOCAL` to mean “use `overrides.*` only”
@@ -65,7 +71,7 @@ export function hasMeaningfulOverrides(config: SupatypeProjectConfig): boolean {
   return false
 }
 
-/** Lines for a startup banner — non-empty override paths only. */
+/** Lines for a startup banner, non-empty override paths only. */
 export function describeActiveOverrides(config: SupatypeProjectConfig): string[] {
   const o = config.overrides
   if (!o) return []
@@ -79,6 +85,7 @@ export function describeActiveOverrides(config: SupatypeProjectConfig): string[]
   add("server", o.server)
   add("postgres_dir", o.postgres_dir)
   add("deno", o.deno)
+  add("realtime", o.realtime)
   add("studio", o.studio)
   add("postgrest", o.postgrest)
   return lines
@@ -145,6 +152,7 @@ const CDN_PATHS: Record<Component, (version: string, platform: PlatformId) => st
   server:   (v, p) => `/server/v${v}/supatype-server-${p.os}-${p.arch}${p.os === "windows" ? ".exe" : ""}`,
   postgres: (v, p) => `/postgres/v${v}/supatype-pg-${postgresArchiveTag(v)}-${p.os}-${p.arch}${p.os === "windows" ? ".zip" : ".tar.gz"}`,
   deno:     (v, p) => `/deno/v${v}/deno-${p.os}-${p.arch}${p.os === "windows" ? ".exe" : ""}`,
+  realtime: (v, p) => `/realtime/v${v}/supatype-realtime-${p.os}-${p.arch}${p.os === "windows" ? ".exe" : ""}`,
 }
 
 // Checksums file path (one per version directory, covers all platform binaries).
@@ -167,6 +175,16 @@ export function cachedBinaryPath(component: Component, version: string, platform
   return join(cachePath(component, version), binaryName(component, version, platform))
 }
 
+/** True when the platform binary for `version` is present and passes format checks. */
+export function isCachedBinaryReady(
+  component: Component,
+  version: string,
+  platform: PlatformId = currentPlatform(),
+): boolean {
+  const destPath = cachedBinaryPath(component, version, platform)
+  return existsSync(destPath) && cachedArtifactLooksValid(component, destPath)
+}
+
 function binaryName(component: Component, version: string, platform: PlatformId): string {
   const win = platform.os === "windows"
   switch (component) {
@@ -174,7 +192,28 @@ function binaryName(component: Component, version: string, platform: PlatformId)
     case "server":   return `supatype-server-${platform.os}-${platform.arch}${win ? ".exe" : ""}`
     case "postgres": return `supatype-pg-${postgresArchiveTag(version)}-${platform.os}-${platform.arch}${win ? ".zip" : ".tar.gz"}`
     case "deno":     return `deno-${platform.os}-${platform.arch}${win ? ".exe" : ""}`
+    case "realtime": return `supatype-realtime-${platform.os}-${platform.arch}${win ? ".exe" : ""}`
   }
+}
+
+/**
+ * Names a published archive may carry, most-canonical first.
+ *
+ * `supatype-postgres` published the Intel macOS archive as `darwin-x86_64` while every other platform
+ * used `amd64`, the spelling the CLI derives from `process.arch === "x64"`. Releases already on the CDN
+ * carry the old name, so both are accepted and the *signed* checksums manifest decides which exists.
+ * Nothing is guessed: the URL and the hash always come from the same manifest entry.
+ */
+export function archiveNameCandidates(
+  component: Component,
+  version: string,
+  platform: PlatformId,
+): string[] {
+  const canonical = binaryName(component, version, platform)
+  if (component === "postgres" && platform.os === "darwin" && platform.arch === "amd64") {
+    return [canonical, canonical.replace("darwin-amd64", "darwin-x86_64")]
+  }
+  return [canonical]
 }
 
 // ---------------------------------------------------------------------------
@@ -203,9 +242,9 @@ export function currentPlatform(): PlatformId {
  * Resolve the binary path for a component.
  *
  * Resolution order:
- * 1. config.overrides?.[component] — local build path (must exist)
+ * 1. config.overrides?.[component]: local build path (must exist)
  * 2. Cached binary at ~/.supatype/cache/{component}/{version}/
- * 3. Throws — caller should call download() first.
+ * 3. Throws, so the caller should call download() first.
  *
  * Hard error if any meaningful `overrides` entry is set while the project is linked to cloud
  * (`project.ref`, `.supatype/cloud.json`, or `.supatype/linked.json`).
@@ -299,6 +338,45 @@ export async function ensureCachedBinary(
   return download(component, version, platform)
 }
 
+async function acquireDownloadSlot(
+  component: Component,
+  version: string,
+  platform: PlatformId,
+): Promise<void> {
+  const isReady = () => isCachedBinaryReady(component, version, platform)
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (isReady()) return
+
+    if (tryAcquireDownloadLock(component, version)) return
+
+    if (isDownloadInProgress(component, version)) {
+      console.log(
+        `[supatype] ${component} v${version} is downloading in another process, waiting...`,
+      )
+      const outcome = await waitForComponentDownload(component, version, isReady, (c) => {
+        console.log(`[supatype] Still waiting for ${c} download...`)
+      })
+      if (outcome === "ready") return
+      if (outcome === "timeout") {
+        throw new Error(
+          `Timed out waiting for ${component} v${version} download. Run: supatype update`,
+        )
+      }
+      console.warn(
+        `[supatype] ${component} v${version} download did not finish in the other process, retrying.`,
+      )
+      continue
+    }
+
+    if (tryAcquireDownloadLock(component, version)) return
+  }
+
+  throw new Error(
+    `Could not acquire download lock for ${component} v${version}. Run: supatype update`,
+  )
+}
+
 export async function download(
   component: Component,
   version: string,
@@ -306,7 +384,7 @@ export async function download(
 ): Promise<string> {
   if (version === VERSION_PIN_LOCAL) {
     throw new Error(
-      `cannot download CDN binary when version is "${VERSION_PIN_LOCAL}" — set overrides.${component === "postgres" ? "postgres_dir" : component} or pin a semver`,
+      `cannot download CDN binary when version is "${VERSION_PIN_LOCAL}": set overrides.${component === "postgres" ? "postgres_dir" : component} or pin a semver`,
     )
   }
 
@@ -322,12 +400,16 @@ export async function download(
       return destPath
     }
     console.warn(
-      `[supatype] ${component} v${version} cache invalid — re-downloading (${destPath}).`,
+      `[supatype] ${component} v${version} cache invalid, re-downloading (${destPath}).`,
     )
     unlinkSync(destPath)
   }
 
-  const binaryUrl = `${CDN_BASE}${CDN_PATHS[component](version, platform)}`
+  await acquireDownloadSlot(component, version, platform)
+  if (isCachedBinaryReady(component, version, platform)) {
+    return destPath
+  }
+
   const checksumsUrl = `${CDN_BASE}${checksumsDirPath(component, version)}`
   const minisigUrl = `${checksumsUrl}.minisig`
 
@@ -336,15 +418,20 @@ export async function download(
   const tmpPath = destPath + ".tmp"
   try {
     // ── Fetch checksums + optional minisig (retried on transient failures) ───
-    const expectedChecksum = await withRetry(() =>
-      fetchChecksums(checksumsUrl, minisigUrl, name),
+    const match = await withRetry(() =>
+      fetchChecksums(checksumsUrl, minisigUrl, archiveNameCandidates(component, version, platform)),
     )
+
+    // The directory from the path template, the filename from the manifest: a release published under
+    // a legacy name is fetched under that name rather than one the CLI assumed.
+    const cdnDir = CDN_PATHS[component](version, platform).replace(/\/[^/]+$/, "")
+    const binaryUrl = `${CDN_BASE}${cdnDir}/${match.filename}`
 
     // ── Stream-download binary with progress (retried on transient failures) ─
     await withRetry(() => streamToFileWithProgress(binaryUrl, tmpPath))
 
     // ── Verify SHA256 ────────────────────────────────────────────────────────
-    await verifyChecksum(tmpPath, expectedChecksum, component)
+    await verifyChecksum(tmpPath, match.checksum, component)
 
     writeFileSync(destPath, readFileSync(tmpPath))
 
@@ -361,6 +448,7 @@ export async function download(
       `Failed to download ${component} v${version} from ${CDN_BASE}: ${(err as Error).message}`,
     )
   } finally {
+    releaseDownloadLock(component, version)
     if (existsSync(tmpPath)) {
       try { unlinkSync(tmpPath) } catch { /* ignore */ }
     }
@@ -373,11 +461,19 @@ export async function download(
  * Fetch checksums.sha256, optionally verify its minisign signature, and
  * return the expected SHA256 for `binaryFilename`.
  */
-async function fetchChecksums(
+/**
+ * Fetch a checksums manifest and verify its minisign signature, returning the entry for one of
+ * `binaryFilenames`.
+ *
+ * Exported so the standalone CLI download path enforces the same rule as component downloads.
+ * It previously verified nothing at all, which made the CLI stricter about a postgres archive
+ * than about overwriting its own executable.
+ */
+export async function fetchChecksums(
   checksumsUrl: string,
   minisigUrl: string,
-  binaryFilename: string,
-): Promise<string> {
+  binaryFilenames: string | string[],
+): Promise<ChecksumMatch> {
   const csResp = await fetch(checksumsUrl)
   if (!csResp.ok) {
     throw new Error(`Failed to fetch checksums from ${checksumsUrl}: HTTP ${csResp.status}`)
@@ -388,16 +484,16 @@ async function fetchChecksums(
   if (!pubKey) {
     // Fail closed: a missing public key means we cannot verify authenticity, only
     // integrity (SHA256). Published builds always embed the key, so this only
-    // happens in source/contributor builds — never silently downgrade.
+    // happens in source/contributor builds. Never silently downgrade.
     if (process.env["SUPATYPE_ALLOW_UNVERIFIED_DOWNLOADS"] === "1") {
       console.warn(
-        "[supatype] \u26a0  SUPATYPE_ALLOW_UNVERIFIED_DOWNLOADS=1 — no minisign public " +
+        "[supatype] \u26a0  SUPATYPE_ALLOW_UNVERIFIED_DOWNLOADS=1: no minisign public " +
           "key configured; verifying SHA256 only (authenticity NOT checked).",
       )
-      return extractChecksum(checksumsText, binaryFilename)
+      return extractChecksum(checksumsText, binaryFilenames)
     }
     throw new Error(
-      "No minisign public key configured — cannot verify release authenticity.\n" +
+      "No minisign public key configured, so cannot verify release authenticity.\n" +
         "Published @supatype/cli builds embed the key automatically; if you are building " +
         "from source, set SUPATYPE_RELEASE_PUBLIC_KEY to the release public key, or set " +
         "SUPATYPE_ALLOW_UNVERIFIED_DOWNLOADS=1 to download with SHA256-only verification (unsafe).",
@@ -415,7 +511,7 @@ async function fetchChecksums(
   const sigText = await sigResp.text()
   verifyMinisign(Buffer.from(checksumsText, "utf8"), sigText, pubKey)
 
-  return extractChecksum(checksumsText, binaryFilename)
+  return extractChecksum(checksumsText, binaryFilenames)
 }
 
 // ---------------------------------------------------------------------------
@@ -423,7 +519,7 @@ async function fetchChecksums(
 // ---------------------------------------------------------------------------
 
 /**
- * Ed25519 SPKI DER prefix — wraps a raw 32-byte public key into the
+ * Ed25519 SPKI DER prefix, wraps a raw 32-byte public key into the
  * SubjectPublicKeyInfo structure that Node.js crypto.createPublicKey expects.
  *
  * Breakdown:
@@ -451,7 +547,7 @@ export function verifyMinisign(fileBytes: Buffer, sigFileContent: string, pubKey
 
   // Parse signature file:
   //   line 0: untrusted comment
-  //   line 1: base64 sig bytes — [2 algo][8 keyId][64 Ed25519 sig]
+  //   line 1: base64 sig bytes: [2 algo][8 keyId][64 Ed25519 sig]
   //   line 2: trusted comment
   //   line 3: base64 global sig (over sig bytes + trusted comment)
   const sigLines = sigFileContent.trim().split("\n")
@@ -464,12 +560,12 @@ export function verifyMinisign(fileBytes: Buffer, sigFileContent: string, pubKey
   const signature = sigBytes.subarray(10, 74)
 
   // Both Ed25519 modes are supported:
-  //   "Ed" (0x45, 0x64) — legacy: signature is over the raw file bytes.
-  //   "ED" (0x45, 0x44) — prehashed: signature is over BLAKE2b-512(file).
+  //   "Ed" (0x45, 0x64) legacy: signature is over the raw file bytes.
+  //   "ED" (0x45, 0x44) prehashed: signature is over BLAKE2b-512(file).
   // Modern minisign (and our release pipeline) default to prehashed mode.
   if (algo[0] !== 0x45 || (algo[1] !== 0x64 && algo[1] !== 0x44)) {
     throw new Error(
-      "Unsupported minisign algorithm — expected Ed25519 ('Ed' legacy or 'ED' prehashed).\n" +
+      "Unsupported minisign algorithm, expected Ed25519 ('Ed' legacy or 'ED' prehashed).\n" +
         `Got: 0x${algo[0]?.toString(16)}${algo[1]?.toString(16)}`,
     )
   }
@@ -477,7 +573,7 @@ export function verifyMinisign(fileBytes: Buffer, sigFileContent: string, pubKey
 
   if (!sigKeyId.equals(pkKeyId)) {
     throw new Error(
-      "Minisign key ID mismatch — signature was produced with a different key.\n" +
+      "Minisign key ID mismatch: the signature was produced with a different key.\n" +
         "This could indicate a compromised release. Do not proceed.",
     )
   }
@@ -494,7 +590,7 @@ export function verifyMinisign(fileBytes: Buffer, sigFileContent: string, pubKey
   const valid = cryptoVerify(null, signedData, keyObject, signature)
   if (!valid) {
     throw new Error(
-      "Minisign signature verification FAILED — the checksum file may have been tampered with.\n" +
+      "Minisign signature verification FAILED: the checksum file may have been tampered with.\n" +
         "This could indicate a supply chain attack. Aborting download.",
     )
   }
@@ -502,20 +598,35 @@ export function verifyMinisign(fileBytes: Buffer, sigFileContent: string, pubKey
 
 /**
  * Extract the SHA256 hash for `filename` from a checksums.sha256 file.
- * Format: `<hash>  <filename>` (sha256sum output, two spaces).
+ * Format: `<hash>  <filename>` (sha256sum output, two spaces), or `<hash> *<filename>` when
+ * the publisher used binary mode.
+ *
+ * Exported so the standalone CLI download path parses the manifest the same way rather than
+ * carrying a second implementation.
  */
-function extractChecksum(checksumsText: string, filename: string): string {
-  const target = basename(filename)
-  for (const line of checksumsText.split("\n")) {
-    const parts = line.trim().split(/\s+/)
-    if (parts.length >= 2 && parts[1] === target) {
-      return parts[0]!
+export function extractChecksum(
+  checksumsText: string,
+  filenames: string | string[],
+): ChecksumMatch {
+  const targets = (Array.isArray(filenames) ? filenames : [filenames]).map((f) => basename(f))
+  for (const target of targets) {
+    for (const line of checksumsText.split("\n")) {
+      const parts = line.trim().split(/\s+/)
+      if (parts.length >= 2 && parts[1]?.replace(/^\*/, "") === target) {
+        return { filename: target, checksum: parts[0]! }
+      }
     }
   }
   throw new Error(
-    `Checksum not found for "${target}" in checksums.sha256.\n` +
+    `Checksum not found for ${targets.map((t) => `"${t}"`).join(" or ")} in checksums.sha256.\n` +
       "The checksums file may be from a different release.",
   )
+}
+
+/** Which published name matched, and its hash, both from the same signed manifest entry. */
+export interface ChecksumMatch {
+  filename: string
+  checksum: string
 }
 
 // ---------------------------------------------------------------------------
@@ -569,7 +680,7 @@ async function streamToFileWithProgress(url: string, destPath: string): Promise<
 // SHA256 verification
 // ---------------------------------------------------------------------------
 
-const EXECUTABLE_COMPONENTS = new Set<Component>(["engine", "server", "deno"])
+const EXECUTABLE_COMPONENTS = new Set<Component>(["engine", "server", "deno", "realtime"])
 
 /** True when a cached file matches expected format for the current platform. */
 function cachedArtifactLooksValid(component: Component, filePath: string): boolean {
@@ -594,9 +705,9 @@ export function validateArtifactFormat(
 
 /**
  * Per-component CDN artifact shapes:
- *   engine, server, deno — native executable (ELF / Mach-O / PE)
- *   postgres (unix)      — .tar.gz (gzip)
- *   postgres (windows)   — .zip
+ *   engine, server, deno, realtime: native executable (ELF / Mach-O / PE)
+ *   postgres (unix)      .tar.gz (gzip)
+ *   postgres (windows)   .zip
  */
 function assertArtifactFormat(
   component: Component,
@@ -623,7 +734,7 @@ function assertGzipArchive(filePath: string): void {
     if (magic[0] !== 0x1f || magic[1] !== 0x8b) {
       throw new Error(
         "Downloaded postgres file is not a gzip archive (bad magic bytes). " +
-          "The CDN object may be corrupt or cached HTML — delete ~/.supatype/cache and retry.",
+          "The CDN object may be corrupt or cached HTML, so delete ~/.supatype/cache and retry.",
       )
     }
   } finally {
@@ -640,7 +751,7 @@ function assertZipArchive(filePath: string): void {
     if (magic[0] !== 0x50 || magic[1] !== 0x4b) {
       throw new Error(
         "Downloaded postgres file is not a zip archive (bad magic bytes). " +
-          "The CDN object may be corrupt or cached HTML — delete ~/.supatype/cache and retry.",
+          "The CDN object may be corrupt or cached HTML, so delete ~/.supatype/cache and retry.",
       )
     }
   } finally {
@@ -663,14 +774,14 @@ function assertNativeExecutable(
     if (goCArchive) {
       throw new Error(
         `Downloaded ${component} file is a Go static archive (c-archive), not an executable. ` +
-          "The CDN object may be from a bad release build — delete ~/.supatype/cache and retry.",
+          "The CDN object may be from a bad release build, so delete ~/.supatype/cache and retry.",
       )
     }
     if (platform.os === "windows") {
       if (magic[0] !== 0x4d || magic[1] !== 0x5a) {
         throw new Error(
           `Downloaded ${component} file is not a Windows PE executable (bad magic bytes). ` +
-            "The CDN object may be corrupt or cached HTML — delete ~/.supatype/cache and retry.",
+            "The CDN object may be corrupt or cached HTML, so delete ~/.supatype/cache and retry.",
         )
       }
       return
@@ -681,7 +792,7 @@ function assertNativeExecutable(
       if (!elf) {
         throw new Error(
           `Downloaded ${component} file is not an ELF executable (bad magic bytes). ` +
-            "The CDN object may be corrupt or cached HTML — delete ~/.supatype/cache and retry.",
+            "The CDN object may be corrupt or cached HTML, so delete ~/.supatype/cache and retry.",
         )
       }
       return
@@ -695,7 +806,7 @@ function assertNativeExecutable(
     if (!macho) {
       throw new Error(
         `Downloaded ${component} file is not a Mach-O executable (bad magic bytes). ` +
-          "The CDN object may be corrupt or cached HTML — delete ~/.supatype/cache and retry.",
+          "The CDN object may be corrupt or cached HTML, so delete ~/.supatype/cache and retry.",
       )
     }
   } finally {
@@ -741,7 +852,7 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
 // ---------------------------------------------------------------------------
 
 /**
- * On Windows, Git Bash represents paths as /c/Users/... — convert to C:\Users\...
+ * On Windows, Git Bash represents paths as /c/Users/..., convert to C:\Users\...
  */
 export function normalisePlatformPath(p: string): string {
   let result = p
@@ -806,12 +917,22 @@ export async function fetchLatestVersion(component: Component): Promise<string> 
   return data.version.trim()
 }
 
-/** Fetch the latest version for all components concurrently. */
-export async function fetchAllLatestVersions(): Promise<Record<Component, string>> {
+/** Fetch the latest version for all components concurrently. Missing CDN entries are omitted. */
+export async function fetchAllLatestVersions(): Promise<Partial<Record<Component, string>>> {
   const results = await Promise.all(
-    BINARY_COMPONENTS.map(async (c) => [c, await fetchLatestVersion(c)] as const),
+    BINARY_COMPONENTS.map(async (c) => {
+      try {
+        return [c, await fetchLatestVersion(c)] as const
+      } catch {
+        return [c, undefined] as const
+      }
+    }),
   )
-  return Object.fromEntries(results) as Record<Component, string>
+  const out: Partial<Record<Component, string>> = {}
+  for (const [c, v] of results) {
+    if (v) out[c] = v
+  }
+  return out
 }
 
 // ---------------------------------------------------------------------------
@@ -824,8 +945,10 @@ export async function fetchAllLatestVersions(): Promise<Record<Component, string
  * Fails gracefully when graceful=true (suitable for postinstall).
  */
 /**
- * Verify all cached binaries for the current platform (used by integration CI).
- * Throws if any cached component is missing or fails format checks.
+ * Verify cached binaries for the current platform (used by integration CI).
+ * Only checks components present in `versions`; unpublished CDN components
+ * (no latest.json yet) are skipped with a log so CI can land before first release.
+ * Throws if a pinned component is missing from cache or fails format checks.
  */
 export function verifyCachedBinaries(versions: Partial<ComponentVersions> | undefined): void {
   if (!versions) {
@@ -835,7 +958,10 @@ export function verifyCachedBinaries(versions: Partial<ComponentVersions> | unde
   for (const component of BINARY_COMPONENTS) {
     const version = versions[component]
     if (typeof version !== "string" || version.trim() === "") {
-      throw new Error(`[supatype] versions.${component} must be set`)
+      console.log(
+        `[supatype] skipping verify for ${component} (no version, CDN latest.json not published yet)`,
+      )
+      continue
     }
     const destPath = join(cachePath(component, version), binaryName(component, version, platform))
     if (!cachedArtifactLooksValid(component, destPath)) {
@@ -857,7 +983,7 @@ export async function downloadAll(
 
   for (const component of components) {
     const version = versions?.[component] ?? latest[component]
-    if (version === VERSION_PIN_LOCAL) continue
+    if (!version || version === VERSION_PIN_LOCAL) continue
     try {
       await download(component, version, platform)
     } catch (err) {

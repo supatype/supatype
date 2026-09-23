@@ -1,6 +1,6 @@
 # Self-Host Example (maintainer fixture)
 
-> **End users:** follow [supatype.github.io/supatype/#self-host](https://supatype.github.io/supatype/#self-host) in your own project — this directory is a maintainer fixture only.
+> **End users:** follow [supatype.github.io/supatype/#self-host](https://supatype.github.io/supatype/#self-host) in your own project, this directory is a maintainer fixture only.
 
 This example shows the compose-first self-host flow for Supatype.
 
@@ -19,14 +19,20 @@ This example shows the compose-first self-host flow for Supatype.
 cp .env.example .env
 ```
 
+Set `POSTGRES_PASSWORD`, `AUTHENTICATOR_PASSWORD` and `JWT_SECRET` to values of
+your own. Leave `ANON_KEY` and `SERVICE_ROLE_KEY` blank: they are JWTs signed
+with `JWT_SECRET`, so `selfhost:up` mints them on first start and leaves any
+value you set alone.
+
 Supatype image overrides in `.env` let you pin beta tags:
 
 - `SUPATYPE_POSTGRES_IMAGE`
 - `SUPATYPE_SERVER_IMAGE`
 - `SUPATYPE_STORAGE_IMAGE`
-- `SUPATYPE_REALTIME_IMAGE`
+- `SUPATYPE_FUNCTIONS_WORKER_IMAGE`
+- `SUPATYPE_CONTROL_PLANE_IMAGE`
 - `SUPATYPE_STUDIO_IMAGE`
-- `SUPATYPE_SCHEMA_ENGINE_IMAGE`
+- `SUPATYPE_ENGINE_IMAGE` (schema-engine; compose `tools` profile)
 
 If unset, compose defaults are used.
 
@@ -81,7 +87,7 @@ supatype admin create-user --email admin@example.com --password 'your-secure-pas
 
 Configure allowed roles in `supatype.config.ts` via `admin.roles` (default: `admin`, `supatype_admin`). Do not expose `/studio/` on the public internet without TLS and authentication.
 
-Local docker dev (`supatype dev` with compose) sets `STUDIO_OPEN_DEV=1` on the server for frictionless iteration only — production compose does not.
+Local docker dev (`supatype dev` with compose) sets `STUDIO_OPEN_DEV=1` on the server for frictionless iteration only, production compose does not.
 
 If Studio is not loading:
 
@@ -106,6 +112,17 @@ pnpm run selfhost:logs -- --service studio
 - Auth: `http://localhost:18473/auth/v1/`
 - Storage: `http://localhost:18473/storage/v1/`
 - Realtime: `ws://localhost:18473/realtime/v1/`
+
+## Going live with a custom domain (HTTPS)
+
+To serve this stack on a real domain with automatic Let's Encrypt TLS:
+
+```bash
+supatype add domain demo.example.com --email you@example.com
+supatype self-host compose up -d
+```
+
+This sets `server.mode = "standalone"` + `server.domain` + `server.tls` in `supatype.config.ts`, then re-renders compose so Kong publishes `:80`/`:443`, a Valkey service stores the certs, and the `acme` plugin issues a certificate on the first HTTPS request. Point the domain's DNS A record at the host and open ports 80 and 443 first.
 
 ## App routing
 

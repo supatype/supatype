@@ -87,7 +87,7 @@ export function ProvidersView(): React.ReactElement {
                   </div>
                   <div>
                     <label className="block text-xs text-muted-foreground mb-1">
-                      Client Secret {p.clientSecretSet ? "(already set — leave blank to keep)" : ""}
+                      Client Secret {p.clientSecretSet ? "(already set, leave blank to keep)" : ""}
                     </label>
                     <Input type="password" value={editSecret} onChange={(e) => setEditSecret(e.target.value)} />
                   </div>

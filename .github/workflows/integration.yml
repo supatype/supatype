@@ -2,35 +2,35 @@ name: Integration Tests
 
 on:
   pull_request:
-    paths:
-      - "packages/cli/**"
-      - "packages/client/**"
-      - "packages/self-host-control/**"
-      - "tests/integration/**"
-      - ".github/workflows/integration.yml"
+    branches: [main]
   push:
     branches: [main]
-    paths:
-      - "packages/cli/**"
-      - "packages/client/**"
-      - "packages/self-host-control/**"
-      - "tests/integration/**"
-      - ".github/workflows/integration.yml"
+  schedule:
+    # CDN soak: weekly (install.sh path; linux only)
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
 
 concurrency:
   group: integration-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # Exercises `supatype dev` (Docker compose) + @supatype/client against CDN binaries.
+  # Exercises `supatype dev` (Docker compose) + @supatype/client.
+  # Sibling images (postgres/engine/server) come from Docker Hub; realtime +
+  # control-plane are built from this monorepo.
   # macOS native is disabled until native Postgres ships contrib extensions (pgcrypto).
   dev-integration:
     name: supatype dev (docker)
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-22.04
-    # Disabled temporarily: `dev` integration behavior is currently flaky in CI.
-    # Keep `compose-smoke` so we still validate published docker images.
-    if: ${{ false }}
-    timeout-minutes: 15
+    timeout-minutes: 30
+    env:
+      SUPATYPE_PROVIDER: docker
+      SUPATYPE_POSTGRES_IMAGE: supatype/postgres:latest
+      SUPATYPE_ENGINE_IMAGE: supatype/schema-engine:latest
+      SUPATYPE_SERVER_IMAGE: supatype/server:latest
+      SUPATYPE_REALTIME_IMAGE: supatype/realtime:ci-dev
+      SUPATYPE_CONTROL_PLANE_IMAGE: supatype/control-plane:ci-dev
 
     steps:
       - uses: actions/checkout@v4
@@ -57,21 +57,49 @@ jobs:
 
       - name: Prefetch engine/server/postgres/deno binaries
         run: node tests/integration/scripts/ci-prefetch-binaries.mjs
+        env:
+          # From-source CLI builds have no embedded key; map the release secret.
+          SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
+
+      # Generated types drifting from the schema is a real class of rot: a schema change lands, the
+      # committed types keep the old shape, and every example compiles against a lie. It lives here
+      # rather than in the cheap CI job because `generate` needs the engine binary, which the step
+      # above has just fetched. Files an example gitignores never show in the diff, so this runs over
+      # all of them without needing to know which commits what.
+      - name: Generated types are up to date
+        run: |
+          for dir in examples/*/; do
+            [ -f "$dir/supatype.config.ts" ] || continue
+            echo "==> $dir"
+            (cd "$dir" && node ../../packages/cli/bin/supatype.js generate)
+          done
+          git diff --exit-code -- examples/ \
+            || { echo "::error::Generated types are stale. Run 'supatype generate' in the example above and commit the result."; exit 1; }
+        env:
+          SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
 
       - name: Run supatype dev integration tests
         run: bash tests/integration/scripts/integration-test.sh --skip-build
+        env:
+          SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
 
       - name: Upload logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: dev-integration-logs-ubuntu
-          path: ~/.supatype/projects/supatype-integration/logs/
+          path: |
+            ~/.supatype/projects/supatype-integration/logs/
+            tests/integration/.supatype/
+            tests/integration/.supatype/ci-logs/
+            tests/integration/.env
           retention-days: 3
+          if-no-files-found: warn
 
   # Exercises published Docker images via `supatype self-host compose` (Linux only).
   compose-smoke:
     name: self-host compose (images)
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-22.04
     timeout-minutes: 20
 
@@ -99,10 +127,25 @@ jobs:
             -f packages/self-host-control/Dockerfile \
             packages/self-host-control
 
+      # The caching and header-buffer assertions below test packages/studio/nginx.conf, so the
+      # image under test has to be built from this checkout. Pulling supatype/studio:latest tested
+      # whatever was last published instead: the config in that image is fourteen lines with no
+      # Cache-Control at all, so the assertions could not pass however correct the repo was, and a
+      # future change to nginx.conf would pass or fail for reasons unconnected to the change.
+      # Root context, not the package directory: the Dockerfile copies the lockfile and
+      # packages/client alongside packages/studio.
+      - name: Build Studio image for compose smoke
+        run: |
+          docker build \
+            -t supatype/studio:ci \
+            -f packages/studio/Dockerfile \
+            .
+
       - name: Run compose image smoke test
         run: bash tests/integration/scripts/compose-smoke.sh
         env:
           SUPATYPE_CONTROL_PLANE_IMAGE: supatype/control-plane:ci
+          SUPATYPE_STUDIO_IMAGE: supatype/studio:ci
 
       - name: Upload compose logs on failure
         if: failure()
@@ -111,3 +154,494 @@ jobs:
           name: compose-smoke-logs
           path: tests/integration/.supatype/self-host/
           retention-days: 3
+
+
+  # Every validation mechanism, against a running stack, asserted by what it refuses.
+  #
+  # The unit suites cover generation and parsing; this covers the seams between them, which is where
+  # every defect in this feature has actually been. A validator map the CLI built and nothing wrote,
+  # a manifest key the compose path never set, a Studio normalizer that dropped the rules: all had
+  # green tests and none survived a request.
+  # Realtime is on by default, so every job above already starts the service, and
+  # none of them ever subscribed. What they proved is that the gateway upgrades a
+  # WebSocket, which a broken realtime does too: the socket opens and no row
+  # arrives. This subscribes, writes, and waits with a deadline.
+  #
+  # Dispatch and schedule only, for the same reason as the validation job below,
+  # and only until the same release ships. Realtime itself needs nothing
+  # unpublished: it decodes WAL from a replication slot, so there is no
+  # per-table opt-in. The server in front of it does. This branch's CLI writes
+  # SUPATYPE_* and the published `supatype/server:latest` still reads GOTRUE_*,
+  # so the stack does not come up at all and the failure says nothing about
+  # realtime.
+  #
+  # **Add `pull_request` here once a `supatype/server` release carrying the
+  # SUPATYPE_ prefix is on Docker Hub.** Nothing else blocks it; verified green
+  # against a locally built server image.
+  # Studio in a browser. Everything else tests its server surface, which stays
+  # green through a bundle that loads and then throws, an asset referenced at the
+  # wrong base path, or a sign-in form wired to nothing.
+  #
+  # Gated for the same reason and until the same release as the two jobs below:
+  # the stack in front of Studio is supatype/server:latest, which still reads the
+  # old prefix while this branch's CLI writes the new one.
+  #
+  # **Add `pull_request` here once a `supatype/server` release carrying the
+  # SUPATYPE_ prefix is on Docker Hub.**
+  studio-ui-e2e:
+    name: studio UI (browser)
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    env:
+      # Studio reads its model and database views from the admin config the
+      # engine writes on push, so this job pushes, and pushing downloads the
+      # host engine. Without the key the download refuses to verify the
+      # release and the push writes no config, which then presents as every
+      # Studio view being empty rather than as a missing secret.
+      SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript packages
+        run: pnpm build
+
+      # Chromium only: a second engine doubles the download and the minutes, and
+      # nothing here tests browser differences.
+      - name: Install Chromium
+        run: pnpm --filter supatype-e2e exec playwright install --with-deps chromium
+
+      - name: Run the Studio UI e2e
+        run: bash tests/integration/scripts/studio-ui-e2e.sh
+
+      - name: Upload the Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-ui-playwright-report
+          path: |
+            tests/e2e/playwright-report/**
+            tests/e2e/test-results/**
+          if-no-files-found: ignore
+
+  storage-backend:
+    name: storage backend (S3 compatibility)
+    # Runs on pull requests, unlike the live-stack jobs below: it starts one container rather than
+    # a stack, and it is the only coverage packages/storage has.
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript packages
+        run: pnpm build
+
+      - name: Drive packages/storage against SeaweedFS
+        run: bash tests/integration/scripts/storage-backend-e2e.sh
+
+  realtime-e2e:
+    name: realtime (live stack)
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript packages
+        run: pnpm build
+
+      - name: Run the realtime e2e
+        run: bash tests/integration/scripts/realtime-e2e.sh
+
+      - name: Upload stack logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: realtime-e2e-logs
+          path: |
+            examples/realtime/.supatype/**/*.log
+          if-no-files-found: ignore
+
+  validation-e2e:
+    name: field validation (live stack)
+    # Dispatch and schedule only, for now. The stack it needs is not published yet: this asserts a
+    # validator refusal, which needs a `supatype/server` carrying per-field validators, and bounds
+    # backed by CHECKs, which needs a `supatype/schema-engine` release carrying the constraint
+    # generator. Until both ship, running this on every pull request would fail work that has
+    # nothing to do with it.
+    #
+    # **Add `pull_request` here once schema-engine >= the constraint release and server >= the
+    # validator release are on Docker Hub.** That is the whole condition; nothing else blocks it.
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript packages
+        run: pnpm build
+
+      # Built here, not pulled: the published worker predates the `hooks/` route prefix, so it
+      # serves no hook at all and would resolve `hooks/<name>` to a function literally called
+      # "hooks". The worker is in this repository, so this half needs no release to be testable.
+      - name: Build functions-worker from source
+        run: |
+          docker build             -t supatype/functions-worker:ci             -f packages/functions-worker/Dockerfile             packages/functions-worker
+
+      - name: Run the validation e2e
+        run: bash tests/integration/scripts/validation-e2e.sh
+        env:
+          SUPATYPE_FUNCTIONS_WORKER_IMAGE: supatype/functions-worker:ci
+
+      - name: Upload stack logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-e2e-logs
+          path: |
+            examples/validation/.supatype/
+            examples/validation/*.log
+          retention-days: 3
+
+  kitchen-sink-e2e:
+    name: kitchen sink (live stack)
+    # Dispatch and schedule only, for now, like the other live-stack jobs: this asserts a served
+    # SPA with fallback routing, realtime delivery, a storage round trip with a real transform and
+    # an edge function, so it needs published images carrying all four. Promote to `pull_request`
+    # once they are on Docker Hub.
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript packages
+        run: pnpm build
+
+      # Built here, not pulled: the example declares a per-field validator, and the published worker
+      # predates the `hooks/` route prefix, so it would serve no hook at all. Same reason the
+      # validation job builds it.
+      - name: Build functions-worker from source
+        run: |
+          docker build -t supatype/functions-worker:ci -f packages/functions-worker/Dockerfile packages/functions-worker
+
+      - name: Run the kitchen sink e2e
+        run: bash tests/integration/scripts/kitchen-sink-e2e.sh
+        env:
+          SUPATYPE_FUNCTIONS_WORKER_IMAGE: supatype/functions-worker:ci
+
+      - name: Upload stack logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kitchen-sink-e2e-logs
+          path: |
+            examples/kitchen-sink/.supatype/**/*.log
+            examples/kitchen-sink/*.log
+          if-no-files-found: ignore
+          retention-days: 3
+
+  supabucks-e2e:
+    name: static app (live stack)
+    # Dispatch and schedule only, for now, on the same condition the validation job documents: this
+    # asserts a served SPA, which needs a published `supatype/server` carrying static mode and its
+    # fallback route. Promote to `pull_request` once that is on Docker Hub.
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript packages
+        run: pnpm build
+
+      - name: Run the supabucks e2e
+        run: bash tests/integration/scripts/supabucks-e2e.sh
+
+      - name: Upload stack logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: supabucks-e2e-logs
+          path: |
+            examples/supabucks/.supatype/**/*.log
+            examples/supabucks/*.log
+          if-no-files-found: ignore
+          retention-days: 3
+
+  blog-e2e:
+    name: server-rendered app (live stack)
+    # Dispatch and schedule only, for now. Two reasons, both outside this script: the stack must
+    # carry the functions worker that serves `greet`, and `app.mode = "proxy"` points at
+    # host.docker.internal, which a Linux runner only resolves when the rendered compose maps it to
+    # the host gateway. Promote to `pull_request` once both hold on a scheduled run.
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript packages
+        run: pnpm build
+
+      - name: Run the blog e2e
+        run: bash tests/integration/scripts/blog-e2e.sh
+
+      - name: Upload stack logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blog-e2e-logs
+          path: |
+            examples/blog/.supatype/**/*.log
+            examples/blog/*.log
+          if-no-files-found: ignore
+          retention-days: 3
+
+  # Zero to running, from the workspace build: init (docker) → dev → an API that answers.
+  # Phase-10.6 row C21, kept here as provenance, the job is named for what it does.
+  # macOS runners have no Docker Desktop; Colima provides the daemon.
+  zero-to-running:
+    name: "zero to running: workspace CLI (${{ matrix.os }})"
+    if: github.event_name != 'schedule'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # x86_64, not arm64: the arm64 macOS runners have no nested virtualisation, so Colima's `vz`
+        # driver dies at "creating and starting" and no Docker daemon can come up there at all.
+        #
+        # `macos-15-intel`, not `macos-13`: that label was retired on 2025-12-04 and a job requesting
+        # it queues forever rather than failing, see the same note in supatype-postgres's
+        # native-archives workflow, which is where the current Intel label is recorded.
+        os: [ubuntu-22.04, macos-15-intel]
+    env:
+      SUPATYPE_ZTR_INSTALL: workspace
+      SUPATYPE_ZTR_KEEP_ON_FAILURE: "1"
+      # Docker on the macOS runner is a Colima VM: it takes about two minutes to boot before
+      # compose starts, and the gateway has been observed still coming up five minutes after
+      # that, with `supatype dev` itself healthy and still waiting. 300s is a Linux budget, so
+      # on macOS it fails the job on the hardware rather than on the product. `matrix` is
+      # available in a job-level `env:`, unlike `runner`.
+      SUPATYPE_ZTR_MAX_WAIT: ${{ matrix.os == 'macos-15-intel' && '900' || '300' }}
+      SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
+
+    steps:
+      # $RUNNER_TEMP, not ${{ runner.temp }}: the `runner` context does not exist in a
+      # job-level `env:`, and referencing it there makes GitHub reject the whole file.
+      - name: Choose a work root outside the checkout
+        run: echo "SUPATYPE_ZTR_WORK_ROOT=$RUNNER_TEMP/zero-to-running" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v4
+
+      - name: Start Docker (Colima on macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install docker docker-compose colima
+          colima start --cpu 3 --memory 8 --disk 40
+          docker info
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Cache component binaries
+        uses: actions/cache@v4
+        with:
+          path: ~/.supatype/cache
+          key: supatype-binaries-v2-${{ matrix.os }}-${{ hashFiles('packages/cli/src/binary-cache.ts') }}
+          restore-keys: |
+            supatype-binaries-v2-${{ matrix.os }}-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript packages
+        run: pnpm build
+
+      - name: Prefetch engine binary for init
+        run: node tests/integration/scripts/ci-prefetch-binaries.mjs
+        env:
+          SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
+
+      - name: Run the zero-to-running soak
+        run: bash tests/integration/scripts/zero-to-running.sh
+
+      - name: Upload the run's logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zero-to-running-workspace-${{ matrix.os }}
+          path: ${{ runner.temp }}/zero-to-running/ztr-smoke/
+          retention-days: 3
+          if-no-files-found: warn
+
+  # The same journey through the published installer, `curl | sh` from the CDN rather than the
+  # workspace build, so it exercises what a new user actually runs. Linux only; not Windows.
+  # Phase-10.6 row C21.
+  # Back on main pushes: a v* release now publishes a CLI, so this exercises the installer
+  # against a real release rather than failing for want of one. It stays off pull requests,
+  # because a CDN or network problem would otherwise block reviews for an unrelated reason.
+  zero-to-running-cdn:
+    name: "zero to running: curl | sh install (linux)"
+    if: >
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    env:
+      SUPATYPE_ZTR_INSTALL: cdn
+      SUPATYPE_ZTR_KEEP_ON_FAILURE: "1"
+      # Deliberately no SUPATYPE_RELEASE_PUBLIC_KEY. The published binary embeds the key at
+      # release time; supplying it here would test a configuration no user has, and would
+      # hide a release that forgot to embed it, which every release so far would have.
+
+    steps:
+      # $RUNNER_TEMP, not ${{ runner.temp }}: the `runner` context does not exist in a
+      # job-level `env:`, and referencing it there makes GitHub reject the whole file.
+      - name: Choose a work root outside the checkout
+        run: echo "SUPATYPE_ZTR_WORK_ROOT=$RUNNER_TEMP/zero-to-running-cdn" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v4
+
+      - name: Run the zero-to-running soak through the published installer
+        run: bash tests/integration/scripts/zero-to-running.sh
+
+      - name: Upload the run's logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zero-to-running-cdn-ubuntu
+          path: ${{ runner.temp }}/zero-to-running-cdn/ztr-smoke/
+          retention-days: 3
+          if-no-files-found: warn
+
+  # The publish-and-install contract, on every change rather than on demand.
+  #
+  # This path has produced eight defects that only a real tag exercised: a bundle that could not
+  # build, an entry point that exited 0 in silence, a binary reporting 0.0.0, self-update
+  # replacing a path inside the embedded filesystem, a publisher able to advertise a version the
+  # binary did not carry, a formula generator fed the wrong input, hashes read from the wrong
+  # source, and a bash replacement that behaved differently on macOS. Each was found by running
+  # the real thing, and none would have been found by reading it.
+  #
+  # Builds one target for the host, serves it as the CDN layout, installs with the real
+  # install.sh, asserts the installed binary reports the published version, then that a tampered
+  # archive and a manifest signed by another key are both refused.
+  cli-artifact-roundtrip:
+    name: publish and install round trip
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      # Without minisign the test skips its signature checks, which are half the point.
+      - name: Install minisign
+        run: sudo apt-get install -y -qq minisign
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the CLI
+        # `@supatype/cli...`, not the package alone: the CLI imports @supatype/types, so on a
+        # fresh checkout building it by itself fails with TS2307 before it starts.
+        run: pnpm --filter "@supatype/cli..." build
+
+      - name: Round trip
+        run: bash tests/integration/scripts/cli-artifact-roundtrip.sh
+

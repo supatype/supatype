@@ -14,6 +14,8 @@ import { BlocksWidget } from "./BlocksWidget.js"
 import { PublishWidget } from "./PublishWidget.js"
 import { ColorWidget } from "./ColorWidget.js"
 import { XmlWidget } from "./XmlWidget.js"
+import { CodeWidget } from "./CodeWidget.js"
+import { CurrencyWidget } from "./CurrencyWidget.js"
 import { SlugWidget } from "./SlugWidget.js"
 import { DerivedTextWidget } from "./DerivedTextWidget.js"
 import { ButtonWidget } from "./ButtonWidget.js"
@@ -36,11 +38,21 @@ export interface WidgetProps {
   slugFollowSource?: boolean
   /** Compact read-only styling for the metadata sidebar. */
   variant?: "default" | "meta"
+  /**
+   * Why this field was refused, shown beneath the input.
+   *
+   * A validator's refusal names the column it refused, and putting it here rather than in the form's
+   * banner is the entire reason a validator is worth declaring over a `beforeChange` hook: a hook
+   * speaks for the write, so its message has nowhere better to go.
+   */
+  error?: string
+  /** Default-locale text shown when the active locale has no translation yet. */
+  localePlaceholder?: string | undefined
 }
 
 /**
  * Engine admin JSON declares `derivedText`; older bundles may still expose `sources`/`template`
- * on `widget: "text"` — route those to DerivedTextWidget so previews track like slug.
+ * on `widget: "text"`: route those to DerivedTextWidget so previews track like slug.
  */
 export function normalizeDerivedPreviewFieldConfig(config: FieldConfig): FieldConfig {
   if (config.widget === "derivedText") return config
@@ -64,6 +76,31 @@ export function normalizeDerivedPreviewFieldConfig(config: FieldConfig): FieldCo
   }
 }
 
+function TranslationIcon(): React.ReactElement {
+  return (
+    <svg
+      className="st-field-localized-icon"
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="m5 8 6 6" />
+      <path d="m4 14 6-6 2-3" />
+      <path d="M2 5h12" />
+      <path d="M7 2v3" />
+      <path d="m22 22-5-10-5 10" />
+      <path d="M14 18h6" />
+    </svg>
+  )
+}
+
 export function FieldWidget(props: WidgetProps): React.ReactElement {
   const config = normalizeDerivedPreviewFieldConfig(props.config)
   const next = { ...props, config }
@@ -71,16 +108,25 @@ export function FieldWidget(props: WidgetProps): React.ReactElement {
 
   return (
     <div
-      className={`st-field st-field--${config.widget}${config.required ? " st-field--required" : ""}${variant === "meta" ? " st-field--meta" : ""}`}
+      className={`st-field st-field--${config.widget}${config.required ? " st-field--required" : ""}${variant === "meta" ? " st-field--meta" : ""}${props.error !== undefined ? " st-field--invalid" : ""}`}
     >
       <label className="st-field-label" htmlFor={`field-${config.name}`}>
         {config.label}
         {config.required && <span className="st-field-required" aria-label="required"> *</span>}
-        {config.localized && <span className="st-field-localized" title="This field is translated"> L</span>}
+        {config.localized && (
+          <span className="st-field-localized" title="This field is translated" aria-label="Translated field">
+            <TranslationIcon />
+          </span>
+        )}
       </label>
       <div className="st-field-input">
         <WidgetRenderer {...next} />
       </div>
+      {props.error !== undefined && (
+        <p className="st-field-error" role="alert" id={`field-${config.name}-error`}>
+          {props.error}
+        </p>
+      )}
     </div>
   )
 }
@@ -126,6 +172,10 @@ function WidgetRenderer(props: WidgetProps): React.ReactElement {
       return <ColorWidget {...props} />
     case "xml":
       return <XmlWidget {...props} />
+    case "code":
+      return <CodeWidget {...props} />
+    case "currency":
+      return <CurrencyWidget {...props} />
     case "button":
       return <ButtonWidget {...props} />
     default:

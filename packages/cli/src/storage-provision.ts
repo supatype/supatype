@@ -1,7 +1,7 @@
 /**
  * Provision storage buckets declared in a schema AST via the storage server API.
  *
- * The storage server is the authority on bucket existence — going through the API
+ * The storage server is the authority on bucket existence, going through the API
  * ensures it creates any backing resources (directories, S3 buckets, etc.).
  * Buckets already registered return 409 Conflict, which is treated as success.
  */
@@ -76,10 +76,10 @@ export async function provisionBuckets(
       .catch(() => null)
 
     if (res === null) {
-      console.warn(`[storage] Storage API unreachable — skipped bucket "${bucket.id}"`)
+      console.warn(`[storage] Storage API unreachable, skipped bucket "${bucket.id}"`)
       continue
     }
-    if (res.status === 409) continue // already exists — fine
+    if (res.status === 409) continue // already exists, fine
     if (!res.ok) {
       const msg = await res.text().catch(() => res.statusText)
       console.warn(`[storage] Failed to provision bucket "${bucket.id}": ${msg}`)

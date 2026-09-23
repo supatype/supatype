@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { resolve, relative } from "node:path"
 import ts from "typescript"
 import { loadConfig } from "../config.js"
+import { error, plain } from "../ui/messages.js"
 
 export function registerTypes(program: Command): void {
   const types = program.command("types").description("Type generation and validation utilities")
@@ -63,11 +64,11 @@ export function registerTypes(program: Command): void {
       }
 
       if (errors.length > 0) {
-        for (const err of errors) console.error(`- ${err}`)
+        for (const err of errors) error(err)
         process.exit(1)
       }
 
-      console.log("types check passed")
+      plain("types check passed")
     })
 }
 

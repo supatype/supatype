@@ -10,7 +10,7 @@
 
 // ─── Plugin Metadata ─────────────────────────────────────────────────────────
 
-/** Plugin API version — used for compatibility checking. */
+/** Plugin API version: used for compatibility checking. */
 export const PLUGIN_API_VERSION = 1
 
 export type PluginType = "field" | "composite" | "provider" | "widget"
@@ -39,7 +39,7 @@ export interface FieldTypeDefinition<TValue = unknown> {
   tsType: string
   /** Optional default value expression */
   defaultExpression?: string | undefined
-  /** Validate a value — return null if valid, error message if invalid */
+  /** Validate a value: return null if valid, error message if invalid */
   validate?(value: unknown): string | null
   /** Serialise a TypeScript value to a Postgres-compatible value */
   serialise?(value: TValue): unknown
@@ -77,7 +77,7 @@ export interface CompositeDefinition {
   label: string
   /** Fields this composite adds to a model */
   fields: CompositeFieldDef[]
-  /** Admin panel grouping — how fields should be displayed */
+  /** Admin panel grouping: how fields should be displayed */
   adminGroup?: {
     /** Collapsible group? Default: true */
     collapsible?: boolean | undefined
@@ -112,7 +112,7 @@ export interface ProviderDefinition<TConfig = Record<string, unknown>> {
   category: ProviderCategory
   /** Human-readable label */
   label: string
-  /** Configuration schema — used for validation and Studio settings UI */
+  /** Configuration schema: used for validation and Studio settings UI */
   configSchema: Record<string, {
     type: "string" | "number" | "boolean" | "select"
     label: string
@@ -161,7 +161,7 @@ export interface CommerceProvider {
   /** Create a customer portal URL */
   getPortalUrl?(customerId: string, returnUrl: string): Promise<string>
 
-  /** Handle a webhook payload — returns the parsed event */
+  /** Handle a webhook payload, returns the parsed event */
   handleWebhook(payload: string, signature: string): Promise<{ type: string; data: unknown }>
 }
 

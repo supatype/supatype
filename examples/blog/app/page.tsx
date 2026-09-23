@@ -6,10 +6,12 @@ type Post = AugmentedDatabase["public"]["Tables"]["post"]["Row"]
 
 export default async function HomePage(): Promise<React.ReactElement> {
   const supatype = await createClient()
+  // No `.eq("status", "published")`. The read rule is `published_at <= now()`, so an unpublished
+  // post is unreadable rather than merely unselected — a filter every query had to remember has
+  // become a property of the model.
   const { data: posts, error } = await supatype
     .from("post")
     .select()
-    .eq("status", "published")
     .order("published_at", { ascending: false })
     .limit(20)
 

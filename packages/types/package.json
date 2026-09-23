@@ -1,6 +1,7 @@
 {
   "name": "@supatype/types",
-  "version": "0.1.0-alpha.4",
+  "version": "0.1.5",
+  "license": "MIT",
   "description": "Pure type primitives for Supatype RFC v2",
   "type": "module",
   "main": "./dist/index.js",
@@ -21,7 +22,7 @@
   "scripts": {
     "build": "tsc --project tsconfig.json",
     "dev": "tsc --project tsconfig.json --watch",
-    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "typecheck": "tsc --project tsconfig.json --noEmit && tsc --project tsconfig.test.json",
     "test": "vitest run",
     "clean": "rm -rf dist *.tsbuildinfo"
   },

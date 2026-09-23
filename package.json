@@ -14,12 +14,19 @@
     "build:engine": "cargo build --workspace",
     "build:engine:release": "cargo build --workspace --release",
     "test:engine": "cargo test --workspace",
-    "clean": "turbo run clean && cargo clean"
+    "clean": "turbo run clean && cargo clean",
+    "skills:install": "bash scripts/skills-install.sh",
+    "coverage:examples": "node scripts/check-example-coverage.mjs --write"
   },
   "devDependencies": {
     "turbo": "^2",
     "typescript": "^5",
     "vitest": "^4.0.18"
   },
-  "packageManager": "pnpm@10.6.0"
+  "packageManager": "pnpm@10.6.0",
+  "pnpm": {
+    "overrides": {
+      "react-native": "0.81.5"
+    }
+  }
 }

@@ -1,4 +1,4 @@
-// @supatype/vue — Vue composables for Supatype
+// @supatype/vue: Vue composables for Supatype
 
 export { supatypePlugin, useSupatype, SUPATYPE_KEY } from "./context.js"
 

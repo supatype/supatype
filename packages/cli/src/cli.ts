@@ -15,8 +15,10 @@ import { registerMigrate } from "./commands/migrate.js"
 import { registerSeed } from "./commands/seed.js"
 import { registerKeys } from "./commands/keys.js"
 import { registerApp } from "./commands/app.js"
+import { registerAdd } from "./commands/add.js"
 import { registerSelfHost } from "./commands/self-host.js"
 import { registerCloud } from "./commands/cloud.js"
+import { registerLogin } from "./commands/login.js"
 import { registerEngine } from "./commands/engine.js"
 import { registerDb } from "./commands/db.js"
 import { registerDeploy } from "./commands/deploy.js"
@@ -24,21 +26,27 @@ import { registerStatus } from "./commands/status.js"
 import { registerLogs } from "./commands/logs.js"
 import { registerAdmin } from "./commands/admin.js"
 import { registerFunctions } from "./commands/functions.js"
+import { registerHooks } from "./commands/hooks.js"
 import { registerPlugins } from "./commands/plugins.js"
 import { registerTypes } from "./commands/types.js"
 import { registerMigrateFromV1 } from "./commands/migrate-from-v1.js"
 import { registerSelfUpdate } from "./commands/self-update.js"
+import { registerInternalCommands } from "./commands/internal.js"
+import { cliPackageVersion } from "./cli-package-version.js"
+import { reportCliFatal } from "./ui/fatal.js"
+import { wrapProgramActionsWithChrome } from "./ui/runtime/command-chrome.js"
 
-export function run(): void {
+export async function run(): Promise<void> {
   const program = new Command()
     .name("supatype")
-    .description("Supatype — schema-first Postgres API")
-    .version("0.1.0")
+    .description("Supatype: type-first platform for PostgreSQL")
+    .version(cliPackageVersion())
 
   registerInit(program)
   registerDev(program)
   registerCache(program)
   registerSelfUpdate(program)
+  registerInternalCommands(program)
   registerUpdate(program)
   registerPg(program)
   registerPush(program)
@@ -52,7 +60,9 @@ export function run(): void {
   registerSeed(program)
   registerKeys(program)
   registerApp(program)
+  registerAdd(program)
   registerSelfHost(program)
+  registerLogin(program)
   registerCloud(program)
   registerEngine(program)
   registerDb(program)
@@ -61,9 +71,17 @@ export function run(): void {
   registerLogs(program)
   registerAdmin(program)
   registerFunctions(program)
+  registerHooks(program)
   registerPlugins(program)
   registerTypes(program)
   registerMigrateFromV1(program)
 
-  program.parse()
+  wrapProgramActionsWithChrome(program)
+
+  try {
+    await program.parseAsync(process.argv)
+  } catch (err) {
+    reportCliFatal(err)
+    process.exit(1)
+  }
 }

@@ -581,6 +581,159 @@ export type Post = Model<WithTimestamps<{
     expect(post?.options.singleton).toBeUndefined()
   })
 
+  it("extracts models that use intersection `} & Timestamps` with relational fields", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-intersection-timestamps-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type {
+  Model, LoggedIn, Owner, Public, RelatedTo, Unique, Optional, MaxLength, Timestamps, UUID,
+} from "@supatype/types"
+
+export type Profile = Model<{
+  id: UUID
+  display_name: string
+}, {
+  access: { read: LoggedIn; create: Owner<"id">; update: Owner<"id">; delete: Owner<"id"> }
+}>
+
+export type Room = Model<{
+  id: UUID
+  name: Unique<string>
+  topic: Optional<string>
+  created_by: RelatedTo<Profile, { required: true }>
+} & Timestamps, {
+  access: { read: Public; create: LoggedIn; update: Owner<"created_by_id">; delete: Owner<"created_by_id"> }
+}>
+
+export type Message = Model<{
+  id: UUID
+  room: RelatedTo<Room, { required: true, onDelete: "cascade" }>
+  author: RelatedTo<Profile, { required: true }>
+  body: MaxLength<string, 2000>
+} & Timestamps, {
+  access: { read: Public; create: LoggedIn; update: Owner<"author_id">; delete: Owner<"author_id"> }
+  indexes: [{ fields: ["room_id", "created_at"] }]
+}>
+`,
+      "utf8",
+    )
+
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    expect(ast).not.toBeNull()
+    expect(ast?.models).toHaveLength(3)
+
+    const room = ast?.models.find((m) => m.name === "Room")
+    const message = ast?.models.find((m) => m.name === "Message")
+
+    expect(room).toBeDefined()
+    expect(tableName(room)).toBe("room")
+    expect(room?.options.timestamps).toBe(true)
+    expect(room?.fields["created_by"]).toMatchObject({
+      kind: "relation",
+      cardinality: "belongsTo",
+      target: "Profile",
+      required: true,
+      annotations: { db: { foreignKey: "created_by_id" } },
+    })
+    expect(room?.fields["created_at"]).toMatchObject({ kind: "datetime" })
+    expect(room?.fields["updated_at"]).toMatchObject({ kind: "datetime" })
+
+    expect(message).toBeDefined()
+    expect(tableName(message)).toBe("message")
+    expect(message?.options.timestamps).toBe(true)
+    expect(message?.fields["room"]).toMatchObject({
+      kind: "relation",
+      cardinality: "belongsTo",
+      target: "Room",
+      required: true,
+      onDelete: "cascade",
+      annotations: { db: { foreignKey: "room_id" } },
+    })
+    expect(message?.fields["author"]).toMatchObject({
+      kind: "relation",
+      cardinality: "belongsTo",
+      target: "Profile",
+      required: true,
+    })
+    expect(message?.fields["body"]).toMatchObject({
+      kind: "text",
+      check: 'char_length("{name}") <= 2000',
+    })
+    const messageIndexes = message?.annotations.db.indexes as Array<Record<string, unknown>>
+    expect(messageIndexes).toHaveLength(1)
+    expect(messageIndexes?.[0]).toMatchObject({
+      using: "btree",
+      unique: false,
+      fields: ["room_id", "created_at"],
+    })
+  })
+
+  it("extracts ManyToMany relations with through table option", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-many-to-many-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, UUID, ManyToMany, Public, LoggedIn } from "@supatype/types"
+
+export type Course = Model<{
+  id: UUID
+  title: string
+}, {
+  access: { read: Public; create: LoggedIn }
+}>
+
+export type Student = Model<{
+  id: UUID
+  name: string
+  courses: ManyToMany<Course, { through: "enrollments" }>
+}, {
+  access: { read: Public; create: LoggedIn }
+}>
+`,
+      "utf8",
+    )
+
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const student = ast?.models.find((m) => m.name === "Student")
+    expect(student?.fields["courses"]).toMatchObject({
+      kind: "relation",
+      cardinality: "manyToMany",
+      target: "Course",
+      through: "enrollments",
+    })
+  })
+
+  it("extracts models with `} & SoftDelete` intersection", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-intersection-softdelete-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, UUID, SoftDelete, Public, LoggedIn } from "@supatype/types"
+
+export type Post = Model<{
+  id: UUID
+  title: string
+} & SoftDelete, {
+  access: { read: Public; create: LoggedIn }
+}>
+`,
+      "utf8",
+    )
+
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const post = ast?.models.find((m) => m.name === "Post")
+    expect(post).toBeDefined()
+    expect(post?.fields["deleted_at"]).toMatchObject({ kind: "datetime", required: false })
+    expect(post?.options.softDelete).toBe(true)
+  })
+
   it("extracts LocaleConfig into schema AST locales", () => {
     const dir = mkdtempSync(join(tmpdir(), "supatype-types-locale-config-"))
     dirs.push(dir)
@@ -981,5 +1134,354 @@ export type User = Model<{ id: UUID; email: NonNullable<string> }>
     )
 
     expect(() => extractSchemaAstFromTypes(schemaPath, dir)).toThrow(/Unknown Supatype type "NonNullable"/)
+  })
+  // Regression: access factored into a shared type alias silently produced NO
+  // rules, so every model using the pattern was published without RLS.
+  it("resolves model access from a shared type alias in another file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-access-alias-"))
+    dirs.push(dir)
+    writeFileSync(
+      join(dir, "shared.ts"),
+      `
+import type { Public, Role } from "@supatype/types"
+
+export type CmsPublicReadAdminWrite = {
+  read: Public
+  create: Role<"admin">
+  update: Role<"admin">
+  delete: Role<"admin">
+}
+`,
+      "utf8",
+    )
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, UUID } from "@supatype/types"
+import type { CmsPublicReadAdminWrite } from "./shared.js"
+
+export type Article = Model<{ id: UUID; title: string }, {
+  tableName: "articles"
+  access: CmsPublicReadAdminWrite
+}>
+`,
+      "utf8",
+    )
+
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const access = modelAccess(ast?.models.find((m) => m.name === "Article"))
+    expect(access).toEqual({
+      read: { type: "public" },
+      create: { type: "role", roles: ["admin"] },
+      update: { type: "role", roles: ["admin"] },
+      delete: { type: "role", roles: ["admin"] },
+    })
+  })
+
+  it("resolves model access from an intersection of aliases", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-access-intersection-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, UUID, Public, Role } from "@supatype/types"
+
+type PublicRead = { read: Public }
+type AdminWrite = { create: Role<"admin">; delete: Role<"admin"> }
+
+export type Article = Model<{ id: UUID; title: string }, {
+  access: PublicRead & AdminWrite
+}>
+`,
+      "utf8",
+    )
+
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const access = modelAccess(ast?.models.find((m) => m.name === "Article"))
+    expect(Object.keys(access).sort()).toEqual(["create", "delete", "read"])
+  })
+
+  // The dangerous case: `const … as const` cannot express access (the rule names
+  // are types), and silently ignoring it published an unprotected table.
+  it("throws when model access cannot be resolved instead of dropping the rules", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-access-unresolvable-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, UUID } from "@supatype/types"
+
+export type Article = Model<{ id: UUID; title: string }, {
+  access: typeof someRuntimeValue
+}>
+`,
+      "utf8",
+    )
+
+    expect(() => extractSchemaAstFromTypes(schemaPath, dir)).toThrow(
+      /Model "Article": could not resolve its `access` rules/,
+    )
+  })
+
+  it("carries Decimal precision and scale through to the AST", () => {
+    // `Decimal<10, 2>` used to extract as an unbounded NUMERIC: the engine renders `NUMERIC(p, s)`
+    // from these two facts, and nothing read the type arguments. A money column silently lost its
+    // constraint, which no error surfaced and no test caught.
+    const dir = mkdtempSync(join(tmpdir(), "supatype-decimal-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Decimal, Model, UUID } from "@supatype/types"
+
+export type Invoice = Model<{
+  id: UUID
+  total: Decimal<10, 2>
+  rate: Decimal<5, 4>
+}>
+`,
+      "utf8",
+    )
+
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const invoice = ast?.models.find((m) => m.name === "Invoice")
+    expect(invoice?.fields["total"]).toMatchObject({ kind: "decimal", precision: 10, scale: 2 })
+    expect(invoice?.fields["rate"]).toMatchObject({ kind: "decimal", precision: 5, scale: 4 })
+  })
+
+  it("extracts Code and Currency as JSONB carrying their declared shape", () => {
+    // Both were exported from `@supatype/types` and rejected by the extractor, so a schema using
+    // either failed the push with "unknown type". Each carries two values, a language with its
+    // source, an amount with its currency, so JSONB is the column that does not drop one.
+    const dir = mkdtempSync(join(tmpdir(), "supatype-code-currency-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Code, Currency, Model, UUID } from "@supatype/types"
+
+export type Snippet = Model<{
+  id: UUID
+  body: Code<"sql">
+  anyLang: Code
+  price: Currency<"USD">
+  anyCurrency: Currency
+}>
+`,
+      "utf8",
+    )
+
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const snippet = ast?.models.find((m) => m.name === "Snippet")
+
+    expect(snippet?.fields["body"]).toMatchObject({
+      kind: "json",
+      annotations: { db: { pgType: "JSONB" } },
+      tsType: '{ lang: "sql"; source: string }',
+    })
+    expect(snippet?.fields["price"]).toMatchObject({
+      kind: "json",
+      annotations: { db: { pgType: "JSONB" } },
+      tsType: '{ amount: string; code: "USD" }',
+    })
+
+    // Without a literal argument the currency is not known statically, so the row carries it.
+    expect(snippet?.fields["anyLang"]).toMatchObject({ tsType: "{ lang: string; source: string }" })
+    expect(snippet?.fields["anyCurrency"]).toMatchObject({ tsType: "{ amount: string; code: string }" })
+
+    // Both are JSONB, so the column kind cannot tell Studio which editor to show. The `editor`
+    // annotation is what separates a code snippet from a money amount from a raw JSON blob.
+    expect(snippet?.fields["body"]).toMatchObject({ annotations: { platform: { editor: "code" } } })
+    expect(snippet?.fields["price"]).toMatchObject({
+      annotations: { platform: { editor: "currency" } },
+    })
+  })
+
+  it("throws when bucket access cannot be resolved", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-bucket-access-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Bucket } from "@supatype/types"
+
+export type Media = Bucket<"media", {
+  access: typeof someRuntimeValue
+}>
+`,
+      "utf8",
+    )
+
+    expect(() => extractSchemaAstFromTypes(schemaPath, dir)).toThrow(
+      /Bucket "media": could not resolve its `access` rules/,
+    )
+  })
+
+  it("emits structured validation bounds alongside the compiled check constraint", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-validation-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type {
+  Model, Public, UUID, Int, Optional, MaxLength, MinLength, Between,
+} from "@supatype/types"
+
+export type Review = Model<{
+  id: UUID
+  headline: MaxLength<string, 120>
+  body: MinLength<MaxLength<string, 4000>, 20>
+  rating: Between<Int, 1, 5>
+  note: Optional<string>
+}, {
+  access: { read: Public }
+}>
+`,
+      "utf8",
+    )
+
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const review = ast?.models.find((m) => m.name === "Review")
+    expect(review).toBeDefined()
+
+    expect(review?.fields["headline"]).toMatchObject({
+      check: 'char_length("{name}") <= 120',
+      validation: { maxLength: 120 },
+    })
+
+    // Stacked modifiers merge into one check and one validation object.
+    expect(review?.fields["body"]).toMatchObject({
+      validation: { maxLength: 4000, minLength: 20 },
+    })
+    expect(review?.fields["body"]?.["check"]).toContain('char_length("{name}") <= 4000')
+    expect(review?.fields["body"]?.["check"]).toContain('char_length("{name}") >= 20')
+
+    expect(review?.fields["rating"]).toMatchObject({
+      kind: "integer",
+      validation: { min: 1, max: 5 },
+    })
+
+    // A field with no constraint modifier carries no validation key at all.
+    expect(review?.fields["note"]?.["validation"]).toBeUndefined()
+  })
+
+  it("carries Searchable through to the model's searchFields", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-types-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, UUID, Optional, Searchable, Public } from "@supatype/types"
+
+export type Article = Model<{
+  id: UUID
+  title: Searchable<string>
+  subtitle: Optional<Searchable<string>>
+  views: number
+}, {
+  access: { read: Public }
+}>
+`,
+      "utf8",
+    )
+
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const article = ast?.models.find((m) => m.name === "Article")
+
+    // The flag reaches the field, and the model gains the list Studio reads to decide whether to
+    // render its search box at all. This used to be dropped on the floor by the extractor.
+    expect(article?.fields["title"]?.annotations?.platform?.searchable).toBe(true)
+    expect(article?.annotations.platform.searchFields).toEqual(["title", "subtitle"])
+    expect(article?.fields["views"]?.annotations?.platform?.searchable).toBeUndefined()
+
+    // Unwrapping still happens: Searchable<string> is a text column, not a wrapper type.
+    expect(article?.fields["title"]).toMatchObject({ kind: "text" })
+    expect(article?.fields["subtitle"]).toMatchObject({ kind: "text", required: false })
+  })
+
+  it("lets a model order its search fields explicitly", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-types-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, UUID, Searchable, Public } from "@supatype/types"
+
+export type Person = Model<{
+  id: UUID
+  email: Searchable<string>
+  name: string
+}, {
+  searchable: ["name"]
+  access: { read: Public }
+}>
+`,
+      "utf8",
+    )
+
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const person = ast?.models.find((m) => m.name === "Person")
+
+    // The declared order wins, because the list view filters on the first entry, and a field
+    // flagged but unlisted still follows rather than being lost.
+    expect(person?.annotations.platform.searchFields).toEqual(["name", "email"])
+  })
+
+  it("refuses a searchable column that is not a field", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-types-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, UUID, Public } from "@supatype/types"
+
+export type Widget = Model<{
+  id: UUID
+  label: string
+}, {
+  searchable: ["lable"]
+  access: { read: Public }
+}>
+`,
+      "utf8",
+    )
+
+    // A typo here used to compile and produce a model with no search at all. Naming the column
+    // and the alternatives is the whole point: the failure is otherwise invisible.
+    expect(() => extractSchemaAstFromTypes(schemaPath, dir)).toThrow(/"lable"/)
+  })
+
+  it("omits searchFields entirely when nothing is searchable", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-types-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, UUID, Public } from "@supatype/types"
+
+export type Event = Model<{
+  id: UUID
+  name: string
+}, {
+  access: { read: Public }
+}>
+`,
+      "utf8",
+    )
+
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const event = ast?.models.find((m) => m.name === "Event")
+    expect(event?.annotations.platform.searchFields).toBeUndefined()
   })
 })

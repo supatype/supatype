@@ -34,11 +34,12 @@ export function NewPostForm({ userId }: NewPostFormProps): React.ReactElement {
       setBodyError("Please add some body text.")
       return
     }
+    // No `status`. A new post is unpublished because `published_at` is null, and the read rule is
+    // what hides it — nothing has to remember to say so.
     const payload = {
       title,
       body,
       authUser: { id: userId },
-      status: "draft" as const,
     } satisfies TableInsert<"post">
     const result = await mutate(payload)
     if (result.error === null && result.data !== null && result.data.length > 0) {

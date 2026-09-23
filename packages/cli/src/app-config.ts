@@ -55,6 +55,86 @@ function updateAppConfigAst(configPath: string, input: UpdateAppConfigInput): st
   return sourceFile.getFullText()
 }
 
+export interface UpdateServerConfigInput {
+  domain: string
+  tlsEmail: string
+  provider?: "kong" | "none"
+}
+
+/**
+ * Set `server.mode = "standalone"` plus `domain` and `tls` in supatype.config.ts,
+ * enabling self-host HTTPS. Preserves other `server` keys (port, etc).
+ */
+export function updateServerConfigInProject(cwd: string, input: UpdateServerConfigInput): string {
+  const configPath = resolve(cwd, "supatype.config.ts")
+  if (!existsSync(configPath)) {
+    throw new Error("supatype.config.ts not found. Run: supatype init")
+  }
+  const next = updateServerConfigAst(configPath, input)
+  writeFileSync(configPath, next, "utf8")
+  return configPath
+}
+
+function updateServerConfigAst(configPath: string, input: UpdateServerConfigInput): string {
+  const project = new Project({
+    useInMemoryFileSystem: false,
+    skipAddingFilesFromTsConfig: true,
+    manipulationSettings: {
+      quoteKind: QuoteKind.Double,
+    },
+  })
+  const srcText = readFileSync(configPath, "utf8")
+  const sourceFile = project.createSourceFile(configPath, srcText, { overwrite: true })
+  const rootObject = getRootConfigObject(sourceFile)
+
+  const serverProperty = rootObject.getProperty("server")
+
+  if (serverProperty === undefined) {
+    rootObject.addPropertyAssignment({
+      name: "server",
+      initializer: renderServerInitializer(input),
+    })
+  } else if (Node.isPropertyAssignment(serverProperty)) {
+    const init = serverProperty.getInitializer()
+    if (init && Node.isObjectLiteralExpression(init)) {
+      patchServerObject(init, input)
+    } else {
+      serverProperty.setInitializer(renderServerInitializer(input))
+    }
+  } else {
+    serverProperty.remove()
+    rootObject.addPropertyAssignment({
+      name: "server",
+      initializer: renderServerInitializer(input),
+    })
+  }
+
+  return sourceFile.getFullText()
+}
+
+function renderServerInitializer(input: UpdateServerConfigInput): string {
+  const provider = input.provider ?? "kong"
+  return `{
+    mode: "standalone",
+    domain: "${input.domain}",
+    tls: { email: "${input.tlsEmail}", provider: "${provider}" },
+  }`
+}
+
+function patchServerObject(serverObj: ObjectLiteralExpression, input: UpdateServerConfigInput): void {
+  upsertStringProperty(serverObj, "mode", "standalone")
+  upsertStringProperty(serverObj, "domain", input.domain)
+  const provider = input.provider ?? "kong"
+  const tlsInitializer = `{ email: "${input.tlsEmail}", provider: "${provider}" }`
+  const existing = serverObj.getProperty("tls")
+  if (existing && Node.isPropertyAssignment(existing)) {
+    existing.setInitializer(tlsInitializer)
+  } else {
+    if (existing) existing.remove()
+    serverObj.addPropertyAssignment({ name: "tls", initializer: tlsInitializer })
+  }
+}
+
 function getRootConfigObject(sourceFile: SourceFile): ObjectLiteralExpression {
   const exportAssignment = sourceFile.getFirstDescendantByKind(SyntaxKind.ExportAssignment)
   if (!exportAssignment) {

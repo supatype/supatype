@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest"
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { runtimeRouteSpec } from "../src/runtime-routes.js"
 import { buildKongDeclarative } from "../src/kong-config.js"
 import { composeDockerImageEnv, composePullNeedsIgnoreFailures, hasLocalVersionPins, isRegistryPullableImageRef, renderSelfHostCompose, writeSelfHostCompose } from "../src/self-host-compose.js"
-import { updateAppConfigInProject } from "../src/app-config.js"
+import { updateAppConfigInProject, updateServerConfigInProject } from "../src/app-config.js"
 import type { SupatypeProjectConfig } from "../src/project-config.js"
 import { DENO_RELEASE_PIN } from "../src/release-pins.js"
 
@@ -20,6 +20,19 @@ const baseConfig: SupatypeProjectConfig = {
     postgres: "17.2",
     deno: DENO_RELEASE_PIN,
   },
+}
+
+/**
+ * The same project with no `versions.postgres` pin.
+ *
+ * The keyspace is served by the image, and an image pinned to a release older than the toggle
+ * ignores `SUPATYPE_KEYSPACE_ENABLED` and comes up with no RESP listener — which is not an error
+ * anywhere. So a pin resolves the default to Valkey, and the tests about the default have to say
+ * which world they are in rather than inheriting one by accident.
+ */
+const unpinnedPostgres = (config: SupatypeProjectConfig): SupatypeProjectConfig => {
+  const { postgres: _dropped, ...rest } = config.versions ?? {}
+  return { ...config, versions: rest }
 }
 
 describe("runtime contract", () => {
@@ -89,6 +102,25 @@ describe("runtime contract", () => {
     expect(first).toBe(second)
   })
 
+  it("self-host compose exposes the managed schema over REST, not a hardcoded public", () => {
+    // The literal here was the reason a non-default pg_schema pushed correctly and then answered
+    // PGRST106 on every request: the engine had moved and PostgREST was never told.
+    const compose = renderSelfHostCompose({
+      ...baseConfig,
+      schema: { pg_schema: "app" },
+    })
+    expect(compose).toContain('PGRST_DB_SCHEMA: "app, supatype, graphql_public, auth"')
+    expect(compose).not.toContain('PGRST_DB_SCHEMA: "public,')
+  })
+
+  it("self-host compose honours an explicit api_schemas list verbatim", () => {
+    const compose = renderSelfHostCompose({
+      ...baseConfig,
+      schema: { pg_schema: "app", api_schemas: ["app", "reporting"] },
+    })
+    expect(compose).toContain('PGRST_DB_SCHEMA: "app, reporting"')
+  })
+
   it("self-host compose does not inject a synthetic app-proxy service", () => {
     const compose = renderSelfHostCompose({ ...baseConfig, app: { mode: "proxy", upstream: "http://app:3000" } })
     expect(compose).not.toContain("ghcr.io/supatype/app-proxy")
@@ -109,13 +141,58 @@ describe("runtime contract", () => {
     expect(compose).toContain("supatype/schema-engine:latest")
   })
 
+  // PostgREST must connect as `authenticator`, never as POSTGRES_USER. POSTGRES_USER is
+  // `supatype_admin`, a superuser, and a superuser session may SET ROLE to any role in the
+  // cluster: so a request whose JWT named one got it. Verified against a live stack: a
+  // token with `role: "supatype_admin"` returned every row of an RLS-protected table.
+  it("self-host compose connects PostgREST as authenticator, not the superuser", () => {
+    const compose = renderSelfHostCompose(baseConfig)
+    expect(compose).toContain("PGRST_DB_URI: postgresql://authenticator:")
+    expect(compose).not.toMatch(/PGRST_DB_URI:.*POSTGRES_USER/)
+    expect(compose).not.toMatch(/PGRST_DB_URI:.*supatype_admin/)
+  })
+
+  // A separate credential, so rotating the operator's POSTGRES_PASSWORD cannot take the REST
+  // API down with it. Unset is a hard compose error rather than an empty password.
+  it("gives PostgREST its own credential, not POSTGRES_PASSWORD", () => {
+    const compose = renderSelfHostCompose(baseConfig)
+    expect(compose).toMatch(/PGRST_DB_URI:.*\$\{AUTHENTICATOR_PASSWORD:\?/)
+    expect(compose).not.toMatch(/PGRST_DB_URI:.*POSTGRES_PASSWORD/)
+    expect(compose).toMatch(/AUTHENTICATOR_PASSWORD: \$\{AUTHENTICATOR_PASSWORD:\?/)
+  })
+
+  // `supatype dev --provider docker` renders *this* file, so a `${VAR:?}` with no default
+  // takes local dev down before anything starts, `docker compose` refuses to interpolate and
+  // exits 1. Adding one therefore means wiring it into `upsertDevComposeEnv` as well. This
+  // list is the reminder; if it fails, do that rather than just updating the list.
+  it("requires only variables the dev path also sets", () => {
+    const compose = renderSelfHostCompose(baseConfig)
+    const required = [...compose.matchAll(/\$\{([A-Z0-9_]+):\?/g)].map((m) => m[1])
+    expect([...new Set(required)].sort()).toEqual([
+      "AUTHENTICATOR_PASSWORD",
+      "JWT_SECRET",
+      "POSTGRES_PASSWORD",
+    ])
+  })
+
+  // The whole point of requiring them: a service must never fall back to a secret published in
+  // this repository. That default used to reach PostgREST, storage and auth.
+  it("never defaults a secret to a published constant", () => {
+    const compose = renderSelfHostCompose(baseConfig)
+    expect(compose).not.toContain("super-secret-jwt-token")
+    expect(compose).not.toMatch(/\$\{JWT_SECRET:-/)
+    expect(compose).not.toMatch(/\$\{POSTGRES_PASSWORD:-/)
+  })
+
   it("composeDockerImageEnv maps pinned versions to SUPATYPE_*_IMAGE", () => {
     expect(composeDockerImageEnv(baseConfig)).toEqual({
       SUPATYPE_ENGINE_IMAGE: "supatype/schema-engine:v0.4.2",
       SUPATYPE_SERVER_IMAGE: "supatype/server:v0.1.0",
       SUPATYPE_POSTGRES_IMAGE: "supatype/postgres:17-latest",
     })
-    expect(composeDockerImageEnv({ ...baseConfig, versions: undefined })).toEqual({})
+    const withoutVersions = { ...baseConfig }
+    delete withoutVersions.versions
+    expect(composeDockerImageEnv(withoutVersions)).toEqual({})
     expect(
       composeDockerImageEnv({
         ...baseConfig,
@@ -210,6 +287,18 @@ describe("runtime contract", () => {
     expect(compose).toContain("SUPATYPE_APP_UPSTREAM: http://host.docker.internal:4321")
   })
 
+  it("devLocal compose injects SUPATYPE_VITE_DEV_URL when app.vite_dev_url is set", () => {
+    const compose = renderSelfHostCompose(
+      {
+        ...baseConfig,
+        app: { mode: "static", static_dir: "./dist", vite_dev_url: "http://127.0.0.1:5173" },
+      },
+      process.cwd(),
+      { devLocal: true },
+    )
+    expect(compose).toContain("SUPATYPE_VITE_DEV_URL: http://host.docker.internal:5173")
+  })
+
   it("devLocal compose omits studio container when overrides.studio is set", () => {
     const compose = renderSelfHostCompose(
       { ...baseConfig, overrides: { studio: "../supatype/packages/studio" } },
@@ -232,6 +321,55 @@ describe("runtime contract", () => {
       expect(kong).toContain("http://host.docker.internal:3002")
       expect(kong).not.toContain("http://studio:3002")
       expect(kong).toContain("strip_path: false")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("manifest switches functions on, because the compose file always runs a worker", () => {
+    // The generated compose file starts a `functions-worker` and hands the server
+    // SUPATYPE_FUNCTIONS_WORKER_URL, while the manifest beside it said functions were disabled. The
+    // server reads the manifest, so every function 404'd in a stack that was running a worker for
+    // them. Docker `supatype dev` renders this same file, so one flag broke both paths.
+    const dir = mkdtempSync(join(tmpdir(), "supatype-fn-manifest-"))
+    try {
+      writeSelfHostCompose(dir, baseConfig)
+      const compose = readFileSync(join(dir, ".supatype", "self-host", "docker-compose.yml"), "utf8")
+      expect(compose).toContain("  functions-worker:")
+      expect(compose).toContain("SUPATYPE_FUNCTIONS_WORKER_URL: http://functions-worker:8001")
+
+      const manifest = JSON.parse(
+        readFileSync(join(dir, ".supatype", "manifest.json"), "utf8"),
+      ) as Record<string, unknown>
+      expect(manifest["functions_enabled"]).toBe(true)
+      expect(manifest["functions_worker_url"]).toBe("http://functions-worker:8001")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("repairs a manifest written by an older CLI without touching its other keys", () => {
+    // Regenerating the compose file is the obvious fix to try, so it has to work: without the
+    // repair, only brand-new projects get functions and an existing stack stays broken.
+    const dir = mkdtempSync(join(tmpdir(), "supatype-fn-repair-"))
+    try {
+      mkdirSync(join(dir, ".supatype"), { recursive: true })
+      writeFileSync(
+        join(dir, ".supatype", "manifest.json"),
+        JSON.stringify({ schema: "tenant_7", postgrest_url: "http://pg:3000", functions_enabled: false }),
+        "utf8",
+      )
+
+      writeSelfHostCompose(dir, baseConfig)
+
+      const manifest = JSON.parse(
+        readFileSync(join(dir, ".supatype", "manifest.json"), "utf8"),
+      ) as Record<string, unknown>
+      expect(manifest["functions_enabled"]).toBe(true)
+      expect(manifest["functions_worker_url"]).toBe("http://functions-worker:8001")
+      // Values `push` put there survive: the schema is not "public" and must stay as found.
+      expect(manifest["schema"]).toBe("tenant_7")
+      expect(manifest["postgrest_url"]).toBe("http://pg:3000")
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
@@ -262,6 +400,7 @@ describe("runtime contract", () => {
     expect(compose).toContain("\n  functions-worker:\n")
     expect(compose).toContain("SUPATYPE_FUNCTIONS_WORKER_URL: http://functions-worker:8001")
     expect(compose).toContain("SUPATYPE_FUNCTIONS_ROOT: /project/functions")
+    expect(compose).toContain("SUPATYPE_URL: http://kong:8000")
     expect(compose).not.toContain("deploy/functions")
     expect(compose).not.toContain("supatype-functions")
   })
@@ -376,6 +515,60 @@ export default defineConfig({
     }
   })
 
+  it("server config updater sets standalone mode, domain, and tls (preserving other keys)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-server-config-"))
+    try {
+      const configPath = join(dir, "supatype.config.ts")
+      writeFileSync(
+        configPath,
+        `import { defineConfig } from "@supatype/cli"
+
+export default defineConfig({
+  project: { name: "x" },
+  database: { provider: "docker" },
+  server: { mode: "dev", port: 54321 },
+  app: { mode: "none" },
+})
+`,
+        "utf8",
+      )
+      updateServerConfigInProject(dir, { domain: "demo.supatype.com", tlsEmail: "hello@supatype.com" })
+      const next = readFileSync(configPath, "utf8")
+      expect(next).toContain(`mode: "standalone"`)
+      expect(next).toContain(`domain: "demo.supatype.com"`)
+      expect(next).toContain(`tls: { email: "hello@supatype.com", provider: "kong" }`)
+      expect(next).toContain(`port: 54321`)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("server config updater is idempotent and overwrites a prior domain/email", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-server-config-"))
+    try {
+      const configPath = join(dir, "supatype.config.ts")
+      writeFileSync(
+        configPath,
+        `export default {
+  project: { name: "x" },
+  database: { provider: "docker" },
+  server: { mode: "standalone", domain: "old.example.com", tls: { email: "old@example.com", provider: "kong" } },
+  app: { mode: "none" },
+}
+`,
+        "utf8",
+      )
+      updateServerConfigInProject(dir, { domain: "new.supatype.com", tlsEmail: "new@supatype.com" })
+      const next = readFileSync(configPath, "utf8")
+      expect(next).toContain(`domain: "new.supatype.com"`)
+      expect(next).toContain(`email: "new@supatype.com"`)
+      expect(next).not.toContain("old.example.com")
+      expect(next).not.toContain("old@example.com")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it("writes self-host compose artifacts under .supatype/self-host", () => {
     const dir = mkdtempSync(join(tmpdir(), "supatype-compose-"))
     try {
@@ -388,6 +581,11 @@ export default defineConfig({
       expect(compose).toContain("${SUPATYPE_SERVER_IMAGE:-${SUPATYPE_AUTH_IMAGE:-supatype/server:latest}}")
       expect(compose).toContain("${SUPATYPE_STORAGE_IMAGE:-supatype/storage:latest}")
       expect(compose).toContain("${SUPATYPE_STUDIO_IMAGE:-supatype/studio:latest}")
+      // SeaweedFS is the object store, and the only one: MinIO's community edition is archived and
+      // its image was withdrawn, so a stack that still named it could not start at all.
+      expect(compose).toContain("  seaweedfs:")
+      expect(compose).toContain("S3_ENDPOINT: http://seaweedfs:8333")
+      expect(compose).not.toContain("minio")
       expect(compose).toContain("SUPATYPE_POSTGREST_URL: http://postgrest:3000")
       expect(compose).toContain("unified gateway")
       const kong = readFileSync(out.kongPath, "utf8")
@@ -397,6 +595,205 @@ export default defineConfig({
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+
+  it("renders SeaweedFS with its identities and its own volume", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-seaweed-"))
+    try {
+      const out = writeSelfHostCompose(dir, { ...baseConfig, app: { mode: "none" } })
+      const compose = readFileSync(out.composePath, "utf8")
+
+      expect(compose).toContain("  seaweedfs:")
+      // The storage service has to be pointed at the server that is actually running. Getting this
+      // wrong renders a stack that starts cleanly and fails on the first upload.
+      expect(compose).toContain("S3_ENDPOINT: http://seaweedfs:8333")
+      expect(compose).toContain("-s3.config=/etc/seaweedfs/s3.json")
+      expect(compose).toContain(".supatype/self-host/s3.json:/etc/seaweedfs/s3.json:ro")
+      expect(compose).toContain("  storage-data:")
+
+      // Same credentials in both halves, checked rather than assumed: a mismatch here does not
+      // fail at start, it fails at the first upload, which is a much worse place to find it.
+      const identities = JSON.parse(readFileSync(out.s3ConfigPath, "utf8")) as {
+        identities: { name: string; credentials: { accessKey: string; secretKey: string }[] }[]
+      }
+      const credential = identities.identities[0]?.credentials[0]
+      expect(compose).toContain(`S3_ACCESS_KEY: ${credential?.accessKey}`)
+      expect(compose).toContain(`S3_SECRET_KEY: ${credential?.secretKey}`)
+
+      // No anonymous identity: a bucket is public because of its policy, not because the server is.
+      expect(identities.identities.map((i) => i.name)).not.toContain("anonymous")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  const tlsConfig: SupatypeProjectConfig = {
+    ...baseConfig,
+    server: { mode: "standalone", domain: "api.example.com", tls: { email: "ops@example.com" } },
+  }
+
+  it("self-host compose renders Kong TLS with the certificate store in Postgres", () => {
+    const compose = renderSelfHostCompose(unpinnedPostgres(tlsConfig))
+    expect(compose).toContain('- "80:8000"')
+    expect(compose).toContain('- "443:8443"')
+    expect(compose).toContain("KONG_PROXY_LISTEN")
+    expect(compose).toContain("https://api.example.com")
+    expect(compose).not.toContain("HTTPS is off")
+    // The cert store is the db container, which Kong now depends on instead of a sidecar.
+    expect(compose).toContain("SUPATYPE_VALKEY_ADDR: db:6379")
+    expect(compose).not.toContain("\n  valkey:\n")
+  })
+
+  it("self-host compose renders Kong TLS + Valkey where the project keeps the sidecar", () => {
+    const compose = renderSelfHostCompose({ ...tlsConfig, cache: { provider: "valkey" } })
+    expect(compose).toContain("\n  valkey:\n")
+    expect(compose).toContain("valkey/valkey:8-alpine")
+    expect(compose).toContain("- valkey")
+    expect(compose).toMatch(/^\s{2}valkey-data:/m)
+    expect(compose).toContain('- "443:8443"')
+  })
+
+  it("self-host compose includes Valkey and SUPATYPE_VALKEY_ADDR when it is the chosen provider", () => {
+    const compose = renderSelfHostCompose({ ...baseConfig, cache: { provider: "valkey" } })
+    expect(compose).toContain("\n  valkey:\n")
+    expect(compose).toContain("valkey/valkey:8-alpine")
+    expect(compose).toContain("SUPATYPE_VALKEY_ADDR: valkey:6379")
+    expect(compose).toMatch(/^\s{2}valkey-data:/m)
+  })
+
+  it("self-host compose serves the keyspace from Postgres, which is what it does by default", () => {
+    // Asserted without a `cache` section at all: the default is the behaviour, and a test that
+    // only ever passed `provider: "pg_keyspace"` would go on passing after the default moved back.
+    const compose = renderSelfHostCompose(unpinnedPostgres(baseConfig))
+    // No second stateful service, and nothing left pointing at one.
+    expect(compose).not.toContain("\n  valkey:\n")
+    expect(compose).not.toContain("valkey/valkey:8-alpine")
+    expect(compose).not.toMatch(/^\s{2}valkey-data:/m)
+    expect(compose).not.toContain("      valkey:\n        condition: service_started")
+    expect(compose).toContain("SUPATYPE_VALKEY_ADDR: db:6379")
+    // Turned on from the environment, so the image owns its own preload list.
+    // A copy of that list here would go stale the first time it gains a library.
+    expect(compose).toContain('SUPATYPE_KEYSPACE_ENABLED: "1"')
+    expect(compose).not.toContain("shared_preload_libraries")
+    // Durable keys are rows in a database, and it has to be this one.
+    expect(compose).toContain("SUPATYPE_KEYSPACE_DATABASE: ${POSTGRES_DB:-supatype}")
+    // A cache by default, with certificates the one thing kept.
+    expect(compose).toContain("SUPATYPE_KEYSPACE_DURABILITY: ephemeral")
+    expect(compose).toContain('SUPATYPE_KEYSPACE_DURABILITY_OVERRIDES: "kong_acme:=durable"')
+    // Shared memory is reserved at postmaster start whether or not it is used,
+    // so an unsized keyspace is memory a small host does not have.
+    expect(compose).toContain('SUPATYPE_KEYSPACE_KEYS: "200000"')
+    expect(compose).toContain('SUPATYPE_KEYSPACE_RING_MB: "16"')
+    expect(compose).toContain('SUPATYPE_KEYSPACE_ROWCACHE_MB: "64"')
+    // Reachable to the compose network, not published: RESP on a public
+    // interface is an unauthenticated read of every cached response.
+    expect(compose).toMatch(/expose:\n\s+- "6379"/)
+    expect(compose).not.toMatch(/- "\d+:6379"/)
+  })
+
+  it("self-host compose keeps the certificates durable whether or not TLS is on today", () => {
+    // The override costs nothing while no key matches it, and turning TLS on
+    // later should not need a database restart to make certificates safe.
+    for (const tls of [false, true]) {
+      const compose = renderSelfHostCompose({
+        ...baseConfig,
+        ...(tls
+          ? { server: { ...baseConfig.server, mode: "standalone" as const, domain: "example.test", tls: { email: "ops@example.test" } } }
+          : {}),
+        cache: { provider: "pg_keyspace" },
+      })
+      expect(compose).toContain('SUPATYPE_KEYSPACE_DURABILITY_OVERRIDES: "kong_acme:=durable"')
+    }
+  })
+
+  it("self-host compose keeps Valkey where the project asks for it", () => {
+    // Selectable, not deprecated: a project that wrote this down keeps the sidecar, and the
+    // Postgres it runs beside is left without a keyspace rather than quietly serving one too.
+    const compose = renderSelfHostCompose({ ...baseConfig, cache: { provider: "valkey" } })
+    expect(compose).toContain("\n  valkey:\n")
+    expect(compose).not.toContain("SUPATYPE_KEYSPACE_ENABLED")
+  })
+
+  it("self-host compose keeps Valkey for a project that pins its Postgres image", () => {
+    // The toggle is honoured by the image, from the release that introduced it. An older pinned
+    // image ignores it and starts with no RESP listener — a stack that comes up, and a cache that
+    // never hits. A pin says the image is fixed, and a default must not assume something about a
+    // fixed image it cannot check; `cache: { provider: "pg_keyspace" }` is how a project on a
+    // capable pin says so.
+    const compose = renderSelfHostCompose(baseConfig)
+    expect(compose).toContain("\n  valkey:\n")
+    expect(compose).not.toContain("SUPATYPE_KEYSPACE_ENABLED")
+
+    const asked = renderSelfHostCompose({ ...baseConfig, cache: { provider: "pg_keyspace" } })
+    expect(asked).toContain('SUPATYPE_KEYSPACE_ENABLED: "1"')
+  })
+
+  it("self-host compose gives an external database Valkey, because nothing else can run", () => {
+    // pg_keyspace is loaded through shared_preload_libraries, which is a property of a Postgres
+    // this stack starts. The default has to resolve by itself here: an absent `cache.provider`
+    // cannot mean the same thing beside a managed database and an unmanaged one.
+    const compose = renderSelfHostCompose({
+      ...unpinnedPostgres(baseConfig),
+      database: { external: { url: "postgres://u:p@h:5432/d" } },
+    })
+    expect(compose).toContain("\n  valkey:\n")
+    expect(compose).not.toContain("SUPATYPE_KEYSPACE_ENABLED")
+  })
+
+  it("self-host compose persists the named prefixes alongside the certificates", () => {
+    const compose = renderSelfHostCompose({
+      ...baseConfig,
+      cache: { provider: "pg_keyspace", durablePrefixes: ["session:", "flag:"] },
+    })
+    expect(compose).toContain("SUPATYPE_KEYSPACE_DURABILITY: ephemeral")
+    // ACME first: a project cannot displace it by naming prefixes of its own.
+    expect(compose).toContain(
+      'SUPATYPE_KEYSPACE_DURABILITY_OVERRIDES: "kong_acme:=durable, session:=durable, flag:=durable"',
+    )
+  })
+
+  it("self-host compose stays plain HTTP with a discoverable hint when TLS is off", () => {
+    const compose = renderSelfHostCompose(baseConfig)
+    expect(compose).not.toContain('- "443:8443"')
+    expect(compose).toContain("${SUPATYPE_KONG_PORT:-18473}:8000")
+    expect(compose).toContain("HTTPS is off")
+  })
+
+  it("self-host compose does not enable TLS for a domain without an ACME email", () => {
+    const compose = renderSelfHostCompose({
+      ...baseConfig,
+      server: { mode: "standalone", domain: "api.example.com" },
+    })
+    expect(compose).not.toContain('- "443:8443"')
+  })
+
+  it("writeSelfHostCompose emits a Kong acme plugin pointed at whichever RESP server runs", () => {
+    // The certificates are the one thing in the keyspace that must survive a restart, so the host
+    // Kong is told about has to be the one the stack actually started. Both directions asserted:
+    // a mismatch here is a Kong that cannot store its certificate, found on the first renewal.
+    for (const { cache, host } of [
+      { cache: undefined, host: "db" },
+      { cache: { provider: "valkey" as const }, host: "valkey" },
+    ]) {
+      const dir = mkdtempSync(join(tmpdir(), "supatype-tls-"))
+      try {
+        const out = writeSelfHostCompose(dir, { ...unpinnedPostgres(tlsConfig), ...(cache ? { cache } : {}) })
+        const kong = readFileSync(out.kongPath, "utf8")
+        expect(kong).toContain("name: acme")
+        expect(kong).toContain('account_email: "ops@example.com"')
+        expect(kong).toContain("tos_accepted: true")
+        expect(kong).toContain('- "api.example.com"')
+        expect(kong).toContain("storage: redis")
+        expect(kong).toContain(`host: "${host}"`)
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    }
+  })
+
+  it("kong declarative omits the acme plugin when no acme options are provided", () => {
+    const kong = buildKongDeclarative({ unifiedGateway: true })
+    expect(kong).not.toContain("name: acme")
   })
 
   it("writes default manifest when missing for compose", () => {

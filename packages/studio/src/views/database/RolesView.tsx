@@ -65,7 +65,7 @@ export function RolesView(): React.ReactElement {
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-1">
                         {caps.map((c) => <Badge key={c} variant="blue">{c}</Badge>)}
-                        {caps.length === 0 && <span className="text-xs text-muted-foreground">—</span>}
+                        {caps.length === 0 && <span className="text-xs text-muted-foreground">-</span>}
                       </div>
                     </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">{(row["rolconnlimit"] as number) === -1 ? "unlimited" : String(row["rolconnlimit"])}</td>

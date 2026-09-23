@@ -148,13 +148,13 @@ export const StorageErrorCodes = {
 export const PostgrestErrorCodes = {
   /** JWT expired or missing */
   JWT_EXPIRED: "PGRST301",
-  /** No permission — RLS policy denied access */
+  /** No permission: RLS policy denied access */
   PERMISSION_DENIED: "PGRST302",
   /** Requested resource not found */
   NOT_FOUND: "PGRST116",
   /** Multiple rows returned when single expected */
   MULTIPLE_ROWS: "PGRST116",
-  /** Schema cache miss — PostgREST needs reload */
+  /** Schema cache miss: PostgREST needs reload */
   SCHEMA_CACHE_MISS: "PGRST204",
   /** Foreign key violation */
   FK_VIOLATION: "PGRST23503",
@@ -181,7 +181,7 @@ export const RealtimeErrorCodes = {
   CHANNEL_ERROR: "REALTIME_CHANNEL_ERROR",
   /** Connection limit exceeded (429-equivalent for WS) */
   CONNECTION_LIMIT: "REALTIME_CONNECTION_LIMIT",
-  /** Heartbeat timeout — server unresponsive */
+  /** Heartbeat timeout: server unresponsive */
   HEARTBEAT_TIMEOUT: "REALTIME_HEARTBEAT_TIMEOUT",
 } as const
 

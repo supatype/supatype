@@ -6,7 +6,7 @@
 import { existsSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { BOLD, RESET, taskColor } from "./dev-task-colors.js"
+import { BOLD, BRAND_COLOR, RESET } from "./ui/brand.js"
 
 const EMBEDDED_LOGO_WORDMARK = [
   "                           __                 ",
@@ -57,6 +57,5 @@ export function layoutLogoBlock(lines: readonly string[]): string[] {
 }
 
 export function colorLogoLines(lines: readonly string[]): string[] {
-  const purple = taskColor("stack")
-  return lines.map((line) => `${purple}${BOLD}${line}${RESET}`)
+  return lines.map((line) => `${BRAND_COLOR}${BOLD}${line}${RESET}`)
 }

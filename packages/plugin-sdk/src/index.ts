@@ -1,4 +1,4 @@
-// @supatype/plugin-sdk — Plugin development kit for Supatype extensions
+// @supatype/plugin-sdk: Plugin development kit for Supatype extensions
 
 // Core types
 export {

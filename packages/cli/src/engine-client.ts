@@ -1,5 +1,5 @@
 /**
- * engine-client.ts — subprocess-based engine invocation.
+ * engine-client.ts: subprocess-based engine invocation.
  *
  * Replaces the former HTTP-based engine client (Docker container API).
  * All callers use the same interface; only the transport changed.
@@ -99,7 +99,7 @@ async function getEngineBin(): Promise<string> {
     // Otherwise (no valid project config) fall through to default cache scan.
   }
 
-  // No config found — scan the cache for any available engine binary.
+  // No config found: scan the cache for any available engine binary.
   const platform = currentPlatform()
   const engineCacheDir = join(homedir(), ".supatype", "cache", "engine")
   try {
@@ -208,7 +208,7 @@ export async function engineRequest<T = unknown>(
   try {
     return JSON.parse(result.stdout) as T
   } catch {
-    // Non-JSON stdout — return as message.
+    // Non-JSON stdout: return as message.
     return { message: result.stdout.trim() } as T
   }
 }

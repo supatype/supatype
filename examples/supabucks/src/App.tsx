@@ -15,7 +15,7 @@ function richTextHasContent(doc: RichTextDoc | null): boolean {
   return JSON.stringify(root?.children ?? []).includes('"text":"')
 }
 
-/** Stable fingerprint of a doc — used as a remount key so the read-only editor
+/** Stable fingerprint of a doc, used as a remount key so the read-only editor
  *  reloads when the bio changes (it otherwise only reads `value` once on mount). */
 function docRevision(doc: RichTextDoc | null): string {
   const s = JSON.stringify(doc ?? null)
@@ -58,7 +58,7 @@ export default function App() {
         {view === "profile" && user && <Profile />}
       </main>
       <footer className="footer">
-        <span>Supabucks is a demo built on Supatype — one TypeScript schema, full backend.</span>
+        <span>Supabucks is a demo built on Supatype, one TypeScript schema, full backend.</span>
       </footer>
     </div>
   )
@@ -111,7 +111,7 @@ function Home({ setView, onFlash }: { setView: (v: View) => void; onFlash: (m: s
           </p>
           {!user && (
             <button className="btn btn-primary btn-lg" onClick={() => setView("profile")}>
-              Join Supabucks — it's free
+              Join Supabucks: it's free
             </button>
           )}
         </div>

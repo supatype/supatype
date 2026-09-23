@@ -1,8 +1,9 @@
 {
   "name": "@supatype/studio",
-  "version": "0.1.0-alpha.4",
+  "version": "0.1.5",
+  "license": "Apache-2.0",
   "private": true,
-  "description": "Supatype Studio — unified admin panel and developer dashboard",
+  "description": "Supatype Studio: unified admin panel and developer dashboard",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
@@ -19,6 +20,7 @@
     "./tailwind": "./tailwind.preset.ts"
   },
   "scripts": {
+    "test": "vitest run tests/",
     "dev": "vite",
     "build": "vite build",
     "build:lib": "BUILD_MODE=lib vite build",
@@ -57,10 +59,12 @@
     "tailwind-merge": "^2.5.0"
   },
   "devDependencies": {
+    "@supatype/types": "workspace:*",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^4",
     "autoprefixer": "^10.4.20",
+    "jsdom": "^30.1.1",
     "postcss": "^8.4.47",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

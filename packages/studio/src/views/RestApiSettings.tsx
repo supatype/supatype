@@ -1,28 +1,34 @@
 import React, { useState, useEffect } from "react"
 import { useAdminConfig } from "../hooks/useAdminConfig.js"
+import { useServerRestCacheOffered } from "../hooks/useServerRestCacheOffered.js"
 import { useStudioClient } from "../StudioCore.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { Button, Card, CodeBlock, Input } from "../components/ui.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { cn } from "../lib/utils.js"
+import { declaredTables, projectTtlCeiling } from "../lib/cache-declaration.js"
+import type { DeclaredCache } from "../lib/cache-declaration.js"
 
 const HTTP_METHODS = ["GET", "POST", "PATCH", "DELETE"] as const
 
 export function RestApiSettings(): React.ReactElement {
   const config = useAdminConfig()
   const client = useStudioClient()
+  const serverCacheOffered = useServerRestCacheOffered()
 
   const apiBase = `${client.url.replace(/\/+$/, "")}/rest/v1`
 
   const [schema, setSchema] = useState("public")
   const [maxRows, setMaxRows] = useState("1000")
-  const [committed, setCommitted] = useState({ schema: "public", maxRows: "1000" })
+  const [cacheMaxTTL, setCacheMaxTTL] = useState("0")
+  const [committed, setCommitted] = useState({ schema: "public", maxRows: "1000", cacheMaxTTL: "0" })
   const [isSaving, setIsSaving] = useState(false)
   const [savedOk, setSavedOk] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [retryCount, setRetryCount] = useState(0)
+  const [declared, setDeclared] = useState<DeclaredCache | undefined>(undefined)
 
   useEffect(() => {
     let cancelled = false
@@ -33,18 +39,30 @@ export function RestApiSettings(): React.ReactElement {
       credentials: "include",
     })
       .then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.json() })
-      .then((d: { schema: string; max_rows: number }) => {
+      .then((d: { schema: string; max_rows: number; cache_max_ttl?: number; declared?: DeclaredCache }) => {
         if (cancelled) return
+        setDeclared(d.declared ?? {})
         setSchema(d.schema ?? "public")
         setMaxRows(String(d.max_rows ?? 1000))
-        setCommitted({ schema: d.schema ?? "public", maxRows: String(d.max_rows ?? 1000) })
+        setCacheMaxTTL(String(d.cache_max_ttl ?? 0))
+        setCommitted({
+          schema: d.schema ?? "public",
+          maxRows: String(d.max_rows ?? 1000),
+          cacheMaxTTL: String(d.cache_max_ttl ?? 0),
+        })
       })
       .catch((e: Error) => { if (!cancelled) setLoadError(e.message ?? "Failed to load") })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [client, retryCount])
 
-  const isDirty = schema !== committed.schema || maxRows !== committed.maxRows
+  const ttlCeiling = projectTtlCeiling(declared)
+  const cacheDeclaring = declaredTables(declared)
+
+  const isDirty =
+    schema !== committed.schema ||
+    maxRows !== committed.maxRows ||
+    (serverCacheOffered && cacheMaxTTL !== committed.cacheMaxTTL)
 
   const handleSave = async () => {
     setIsSaving(true)
@@ -58,13 +76,17 @@ export function RestApiSettings(): React.ReactElement {
           ...studioAuthHeaders(client),
         },
         credentials: "include",
-        body: JSON.stringify({ schema, max_rows: parseInt(maxRows, 10) }),
+        body: JSON.stringify({
+          schema,
+          max_rows: parseInt(maxRows, 10),
+          ...(serverCacheOffered && { cache_max_ttl: parseInt(cacheMaxTTL, 10) || 0 }),
+        }),
       })
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
         throw new Error((body as { message?: string }).message ?? `${res.status} ${res.statusText}`)
       }
-      setCommitted({ schema, maxRows })
+      setCommitted({ schema, maxRows, cacheMaxTTL })
       setSavedOk(true)
       setTimeout(() => setSavedOk(false), 2000)
     } catch (err) {
@@ -135,8 +157,88 @@ export function RestApiSettings(): React.ReactElement {
               <span className="text-xs text-muted-foreground">per request</span>
             </div>
           </Row>
+          {serverCacheOffered ? (
+            <Row label="Cache max TTL">
+              <div className="flex flex-col items-end gap-1">
+                <div className="flex items-center gap-2">
+                  <Input
+                    className="w-24 text-sm font-mono"
+                    type="number"
+                    min={0}
+                    {...(ttlCeiling !== null && { max: ttlCeiling })}
+                    value={cacheMaxTTL}
+                    onChange={(e) => { setCacheMaxTTL(e.target.value); setSaveError(null) }}
+                  />
+                  <span className="text-xs text-muted-foreground">seconds (0 = off)</span>
+                </div>
+                {/*
+                  The project-wide number is capped at the *highest* per-table cap the schema
+                  declares, because the lowest would let one model with a five-second cap drag
+                  every other table down with it. Each table is held to its own cap on the read
+                  path, where the table being served is known — so this ceiling is the loosest of
+                  them and not the effective TTL of anything in particular.
+                */}
+                {ttlCeiling !== null && (
+                  <span className="text-xs text-muted-foreground">
+                    Capped at {ttlCeiling}s by the highest <code className="font-mono">cache.maxTtl</code>{" "}
+                    your schema declares.
+                  </span>
+                )}
+              </div>
+            </Row>
+          ) : null}
         </div>
       </Card>
+
+      {serverCacheOffered ? (
+      <Card>
+        <div className="px-4 py-3 border-b border-border">
+          <h2 className="text-sm font-semibold">Response cache</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            A table is cacheable only where its model declares{" "}
+            <code className="font-mono">cache</code>. Within that, enable it per table under each
+            model&apos;s Cache tab, or manage entries under{" "}
+            <a href="/api/rest/cache" className="text-primary hover:underline">API → REST → Cache</a>.
+          </p>
+          {/*
+            Named, not counted. "3 tables declare a cache" leaves someone opening models one at a
+            time to find which three, and the list is the whole answer.
+          */}
+          <p className="text-xs text-muted-foreground mt-1">
+            {cacheDeclaring.length === 0 ? (
+              <>
+                No model declares a cache yet, so nothing may be cached. Add{" "}
+                <code className="font-mono">cache: &#123; enabled: true &#125;</code> to a model and
+                run <code className="font-mono">supatype push</code>.
+              </>
+            ) : (
+              <>
+                Declared in your schema:{" "}
+                {cacheDeclaring.map((t, i) => (
+                  <React.Fragment key={t}>
+                    {i > 0 ? ", " : ""}
+                    <code className="font-mono">{t}</code>
+                  </React.Fragment>
+                ))}
+                .
+              </>
+            )}
+          </p>
+        </div>
+      </Card>
+      ) : (
+      <Card className="border-amber-500/30 bg-amber-500/5">
+        <div className="px-4 py-3 space-y-2">
+          <h2 className="text-sm font-semibold">Server-side cache not on Free</h2>
+          <p className="text-xs text-muted-foreground">
+            On the Cloud free tier every request reaches PostgREST: responses are not cached on the
+            server, so <code className="font-mono">.cache(&#123; server: true &#125;)</code> is ignored.
+            Client-only <code className="font-mono">.cache(&#123; ttl &#125;)</code> still works in your app.
+            Pro serves those reads from memory instead.
+          </p>
+        </div>
+      </Card>
+      )}
 
       {/* Tables */}
       <Card>

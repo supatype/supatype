@@ -1,5 +1,5 @@
 /**
- * systemd.ts — generate systemd unit files for self-hosted deployments.
+ * systemd.ts: generate systemd unit files for self-hosted deployments.
  *
  * Usage:
  *   generateUnits(config, outputDir)

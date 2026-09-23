@@ -1,7 +1,10 @@
 import { AuthClient } from "./auth.js"
-import { QueryBuilder, MutationBuilder } from "./query.js"
+import { PreviewCredential } from "./preview.js"
+import { QueryBuilder, MutationBuilder, type HeadersProvider } from "./query.js"
+import { defaultQueryCache, type QueryCache } from "./query-cache.js"
 import { StorageClient } from "./storage.js"
 import { RealtimeClient } from "./realtime.js"
+import type { RealtimeEvent, RealtimePayload } from "./realtime.js"
 import { PostgrestError } from "./errors.js"
 import { createRetryFetch } from "./retry.js"
 import { warnIfServerlessDirectConnection } from "./fetch-with-retry.js"
@@ -13,18 +16,26 @@ import type {
   SupatypeFunctions,
   SupatypeClientConfig,
   SupatypeError,
+  RpcOptions,
+  SelectQueryOptions,
 } from "./types.js"
+import { DRAFT_SCHEMA } from "./types.js"
 
 export type {
   User,
   Session,
   AuthChangeEvent,
+  AuthFlowType,
   SupatypeError,
   QueryResult,
+  MaskedField,
   RpcResult,
   AnyDatabase,
   SupatypeClientConfig,
   FunctionDef,
+  AuthStorage,
+  RpcOptions,
+  SelectQueryOptions,
   TableDef,
   TableInsert,
   SupatypeModels,
@@ -32,8 +43,16 @@ export type {
   SupatypeFunctions,
   AugmentedDatabase,
 } from "./types.js"
+export {
+  generateCodeVerifier,
+  createCodeChallengeS256,
+  PKCE_METHOD_S256,
+} from "./pkce.js"
+export { DRAFT_SCHEMA } from "./types.js"
+export type { QueryCacheOptions, CacheStatus } from "./query-cache.js"
 export { AuthClient } from "./auth.js"
-export { QueryBuilder, MutationBuilder } from "./query.js"
+export { QueryBuilder, MutationBuilder, type HeadersProvider } from "./query.js"
+export { QueryCache, defaultQueryCache } from "./query-cache.js"
 export { StorageClient, BucketClient } from "./storage.js"
 export type { StorageObject, TransformOptions } from "./storage.js"
 export { RealtimeClient } from "./realtime.js"
@@ -47,6 +66,7 @@ export { ERROR_CODES_DOCUMENTATION, getErrorDocumentation, getErrorCodesByCatego
 export type { ErrorCodeEntry } from "./error-codes-doc.js"
 export { CONNECTION_MODES, SERVERLESS_CONNECTION_WARNING, CONNECTION_FAQ } from "./serverless-docs.js"
 export type { ConnectionModeDoc } from "./serverless-docs.js"
+export { PreviewLinkError } from "./preview.js"
 
 // ─── Table client ─────────────────────────────────────────────────────────────
 
@@ -58,26 +78,75 @@ interface TableDef {
 
 class TableClient<TDef extends TableDef> {
   private readonly baseUrl: string
+  private readonly table: string
   private readonly path: string
-  private readonly headers: Record<string, string>
+  private readonly getHeaders: HeadersProvider
+  private readonly onUnauthorized: (() => Promise<void>) | undefined
+  private readonly queryCache: QueryCache
+  private readonly realtime: RealtimeClient
+  /**
+   * The schema this table's reads come from, set by `draft()`.
+   *
+   * Mutable, and safe to be: `from()` builds a fresh client per call, so nothing is shared between
+   * two queries. Reads only; a draft view is not writable and a write is an ordinary update that
+   * records a new version.
+   */
+  private profile: string | undefined
 
-  constructor(baseUrl: string, table: string, headers: Record<string, string>) {
+  constructor(
+    baseUrl: string,
+    table: string,
+    getHeaders: HeadersProvider,
+    realtime: RealtimeClient,
+    queryCache: QueryCache = defaultQueryCache,
+    onUnauthorized?: (() => Promise<void>) | undefined,
+  ) {
     this.baseUrl = baseUrl
+    this.table = table
     this.path = `/rest/v1/${table}`
-    this.headers = headers
+    this.getHeaders = getHeaders
+    this.realtime = realtime
+    this.onUnauthorized = onUnauthorized
+    this.queryCache = queryCache
   }
 
   /**
-   * Start a SELECT query.
+   * Read the pending draft instead of what is published.
    *
-   * Pass a type parameter to narrow the result when embedding relations:
-   * ```ts
-   * client.from('posts').select<Post & { comments: Comment[] }>('*, comments(*)')
+   * ```typescript
+   * const { data } = await supatype.from("posts").draft().select("id, title, body")
    * ```
-   * Without a type parameter the full Row type is returned.
+   *
+   * Selects the generated `draft` schema, whose views carry the same row type as the table, so the
+   * only thing that changes is which schema answers. Available on models that declare `versions`;
+   * anything else has no draft view and answers `PGRST106`.
+   *
+   * **Read-only, and permission is not the read rule.** A draft is visible to the record's creator
+   * and to the project's elevated Studio roles, or to a caller holding a signed preview link. A
+   * caller who may read published content is not thereby entitled to read what has not been
+   * published. Write with the ordinary `update`, which records a new draft version; publish with
+   * `supatype.publish`.
    */
-  select<TResult = TDef["Row"]>(columns?: string | undefined): QueryBuilder<TResult> {
-    return new QueryBuilder<TResult>(this.baseUrl, this.path, this.headers, columns)
+  draft(): this {
+    this.profile = DRAFT_SCHEMA
+    return this
+  }
+
+  select<TResult = TDef["Row"]>(
+    columns?: string | undefined,
+    options?: SelectQueryOptions | undefined,
+  ): QueryBuilder<TResult> {
+    return new QueryBuilder<TResult>(
+      this.baseUrl,
+      this.path,
+      this.getHeaders,
+      columns,
+      this.queryCache,
+      this.onUnauthorized,
+      // The profile joins the select options rather than riding a longer constructor: it is a
+      // property of the request being described, like `count` and `head` beside it.
+      { ...options, ...(this.profile !== undefined && { profile: this.profile }) },
+    )
   }
 
   insert(
@@ -86,9 +155,11 @@ class TableClient<TDef extends TableDef> {
     return new MutationBuilder<TDef["Row"]>(
       this.baseUrl,
       this.path,
-      this.headers,
+      this.getHeaders,
       "POST",
       data,
+      undefined,
+      this.onUnauthorized,
     )
   }
 
@@ -98,10 +169,11 @@ class TableClient<TDef extends TableDef> {
     return new MutationBuilder<TDef["Row"]>(
       this.baseUrl,
       this.path,
-      this.headers,
+      this.getHeaders,
       "POST",
       data,
       { upsert: true },
+      this.onUnauthorized,
     )
   }
 
@@ -109,9 +181,11 @@ class TableClient<TDef extends TableDef> {
     return new MutationBuilder<TDef["Row"]>(
       this.baseUrl,
       this.path,
-      this.headers,
+      this.getHeaders,
       "PATCH",
       data,
+      undefined,
+      this.onUnauthorized,
     )
   }
 
@@ -119,9 +193,49 @@ class TableClient<TDef extends TableDef> {
     return new MutationBuilder<TDef["Row"]>(
       this.baseUrl,
       this.path,
-      this.headers,
+      this.getHeaders,
       "DELETE",
+      undefined,
+      undefined,
+      this.onUnauthorized,
     )
+  }
+
+  /**
+   * Subscribe to postgres_changes for this table (typed to Row).
+   * Phase 10.6 F11: preferred over raw `client.realtime.channel(...)`.
+   */
+  subscribe(
+    callback: (payload: RealtimePayload<TDef["Row"]>) => void,
+    opts?: {
+      event?: RealtimeEvent | undefined
+      filter?: string | undefined
+      schema?: string | undefined
+    } | undefined,
+  ): {
+    unsubscribe: () => void
+    channel: ReturnType<RealtimeClient["channel"]>
+  } {
+    const event = opts?.event ?? "*"
+    const schema = opts?.schema ?? "public"
+    const channel = this.realtime
+      .channel(`${schema}:${this.table}`)
+      .on(
+        "postgres_changes",
+        {
+          event,
+          schema,
+          table: this.table,
+          ...(opts?.filter !== undefined && { filter: opts.filter }),
+        },
+        callback,
+      )
+    return {
+      channel,
+      unsubscribe: () => {
+        channel.unsubscribe()
+      },
+    }
   }
 }
 
@@ -220,13 +334,20 @@ export interface FunctionInvokeOptions {
 
 class FunctionsClient {
   private readonly baseUrl: string
-  private readonly headers: Record<string, string>
+  private readonly getHeaders: HeadersProvider
+  private readonly onUnauthorized: (() => Promise<void>) | undefined
   private readonly doFetch: (url: string, init?: RequestInit) => Promise<Response>
 
-  constructor(baseUrl: string, headers: Record<string, string>, doFetch: (url: string, init?: RequestInit) => Promise<Response>) {
+  constructor(
+    baseUrl: string,
+    getHeaders: HeadersProvider,
+    doFetch: (url: string, init?: RequestInit) => Promise<Response>,
+    onUnauthorized?: (() => Promise<void>) | undefined,
+  ) {
     this.baseUrl = baseUrl
-    this.headers = headers
+    this.getHeaders = getHeaders
     this.doFetch = doFetch
+    this.onUnauthorized = onUnauthorized
   }
 
   /**
@@ -245,14 +366,13 @@ class FunctionsClient {
     options?: (Omit<FunctionInvokeOptions, "body"> & { body?: EdgeFunctionArgs<TFn> | undefined }) | undefined,
   ): Promise<{ data: EdgeFunctionReturns<TFn> | null; error: SupatypeError | null }> {
     const method = options?.method ?? "POST"
-    const mergedHeaders: Record<string, string> = {
-      ...this.headers,
+    const resolveHeaders = async (): Promise<Record<string, string>> => ({
+      ...(await this.getHeaders()),
       ...options?.headers,
-    }
+    })
 
     const fetchOpts: RequestInit = {
       method,
-      headers: mergedHeaders,
     }
 
     if (options?.body !== undefined && method !== "GET") {
@@ -260,10 +380,19 @@ class FunctionsClient {
     }
 
     try {
-      const res = await this.doFetch(
+      let headers = await resolveHeaders()
+      let res = await this.doFetch(
         `${this.baseUrl}/functions/v1/${functionName}`,
-        fetchOpts,
+        { ...fetchOpts, headers },
       )
+      if (res.status === 401 && this.onUnauthorized !== undefined) {
+        await this.onUnauthorized()
+        headers = await resolveHeaders()
+        res = await this.doFetch(
+          `${this.baseUrl}/functions/v1/${functionName}`,
+          { ...fetchOpts, headers },
+        )
+      }
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({})) as Record<string, unknown>
@@ -327,7 +456,7 @@ export interface SupatypeClient<TDatabase extends AnyDatabase = AugmentedDatabas
   rpc<TFn extends FunctionNames<TDatabase>>(
     fn: TFn,
     params?: FunctionArgs<TDatabase, TFn> | undefined,
-    options?: { head?: boolean | undefined; count?: "exact" | "planned" | "estimated" | undefined } | undefined,
+    options?: RpcOptions | undefined,
   ): Promise<RpcResult<FunctionReturns<TDatabase, TFn>>>
 }
 
@@ -337,10 +466,29 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
   // Warn early if a direct Postgres URL is used in a serverless environment
   warnIfServerlessDirectConnection(config.url)
 
+  // A client with both is a route sending admin credentials down a path meant for strangers, which
+  // is precisely what the preview link exists to remove. Thrown rather than warned: the two are
+  // never both correct, and a warning in a server log is not read by whoever wrote the route.
+  if (config.previewCode !== undefined && config.serviceRoleKey !== undefined) {
+    throw new Error(
+      "A Supatype client cannot carry both `previewCode` and `serviceRoleKey`. A preview link is " +
+        "the bearer's whole credential and needs no admin key; sending one anyway would let " +
+        "anybody who reached that route read everything.",
+    )
+  }
+
+  // Built once and shared by every request this client makes, so a page rendering several queries
+  // exchanges the code once rather than once per table.
+  const previewCredential =
+    config.previewCode === undefined || config.previewCode === ""
+      ? null
+      : new PreviewCredential(config.url, config.previewCode)
+
   const baseHeaders: Record<string, string> = {
     apikey: config.anonKey,
     Authorization: `Bearer ${config.anonKey}`,
     "Content-Type": "application/json",
+    ...config.headers,
   }
 
   // Create a retry-aware fetch bound to client-level config
@@ -354,31 +502,31 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
     persistSession: config.auth?.persistSession,
     storageKey: config.auth?.storageKey,
     cookiePrefix: config.auth?.cookiePrefix,
+    storage: config.auth?.storage,
   })
-  // Storage admin operations (listBuckets, createBucket, etc.) require service_role.
-  // When a service role key is provided (developer tools like Studio), use it for
-  // storage so admin calls are authorised; otherwise fall back to the anon headers.
-  const storageHeaders: Record<string, string> = config.serviceRoleKey
-    ? {
-        apikey: config.serviceRoleKey,
-        Authorization: `Bearer ${config.serviceRoleKey}`,
-        "Content-Type": "application/json",
-      }
-    : baseHeaders
-  const storage = new StorageClient(`${config.url}/storage/v1`, storageHeaders)
   const realtime = new RealtimeClient(`${config.url}/realtime/v1`, baseHeaders)
-  const functions = new FunctionsClient(config.url, baseHeaders, doFetch)
+  const queryCache = config.queryCache ?? defaultQueryCache
 
-  const getAuthHeaders = (): Record<string, string> => {
-    // Studio and other admin tools pass serviceRoleKey — use it for table/RPC/GraphQL
+  const getAuthHeaders = async (): Promise<Record<string, string>> => {
+    // Studio and other admin tools pass serviceRoleKey, use it for table/RPC/GraphQL
     // so supatype_admin RLS policies and bypass rules apply (anon would fail).
     if (config.serviceRoleKey) {
       return {
         apikey: config.serviceRoleKey,
         Authorization: `Bearer ${config.serviceRoleKey}`,
         "Content-Type": "application/json",
+        ...config.headers,
       }
     }
+    // A preview link is the whole credential, and it comes before any session on purpose: whoever
+    // opened the link may well be signed in as someone with no access to the draft, and quietly
+    // using that identity would show them "not found".
+    if (previewCredential !== null) {
+      // Throws when the link will not resolve. The query layer turns that into an ordinary
+      // `{ data: null, error }`, so a revoked link reads as a message rather than as a crash.
+      return { ...baseHeaders, Authorization: `Bearer ${await previewCredential.token()}` }
+    }
+    await auth.ensureValidSession()
     const token = auth.currentAccessToken
     if (token !== null) {
       const role = jwtRole(token)
@@ -391,6 +539,20 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
     return baseHeaders
   }
 
+  // Storage asks for headers per request, like every other client here.
+  //
+  // It used to be handed a plain object built above, before anybody had signed in, so every storage
+  // request carried the anon key for the life of the page. An app's per-user storage policies saw
+  // `anon` rather than the caller, and through Studio's proxy the request was refused outright,
+  // because an anon key carries no `sub` and the proxy requires one.
+  const storage = new StorageClient(`${config.url}/storage/v1`, getAuthHeaders)
+
+  const onUnauthorized = config.serviceRoleKey
+    ? undefined
+    : (): Promise<void> => auth.ensureValidSession()
+
+  const functions = new FunctionsClient(config.url, getAuthHeaders, doFetch, onUnauthorized)
+
   return {
     url: config.url,
     serviceRoleKey: config.serviceRoleKey,
@@ -399,7 +561,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
       table: TTable,
     ): TableClient<TDatabase["public"]["Tables"][TTable]> {
       type TDef = TDatabase["public"]["Tables"][TTable]
-      return new TableClient<TDef>(config.url, table, getAuthHeaders())
+      return new TableClient<TDef>(config.url, table, getAuthHeaders, realtime, queryCache, onUnauthorized)
     },
 
     global<TRow extends Record<string, unknown> = Record<string, unknown>>(name: string): GlobalClient<TRow> {
@@ -407,12 +569,12 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
       type TDef = { Row: TRow; Insert: TRow; Update: Partial<TRow> }
       return {
         async get(): Promise<{ data: TRow | null; error: SupatypeError | null }> {
-          const tc = new TableClient<TDef>(config.url, tableName, getAuthHeaders())
+          const tc = new TableClient<TDef>(config.url, tableName, getAuthHeaders, realtime, queryCache, onUnauthorized)
           const result = await tc.select().limit(1).maybeSingle()
           return { data: result.data ?? null, error: result.error }
         },
         async update(data: Partial<TRow>): Promise<{ data: TRow | null; error: SupatypeError | null }> {
-          const tc = new TableClient<TDef>(config.url, tableName, getAuthHeaders())
+          const tc = new TableClient<TDef>(config.url, tableName, getAuthHeaders, realtime, queryCache, onUnauthorized)
           const result = await tc.upsert(data as TRow)
           const row = Array.isArray(result.data) ? (result.data[0] as TRow | undefined) ?? null : null
           return { data: row, error: result.error }
@@ -437,9 +599,17 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
       try {
         res = await doFetch(`${config.url}/graphql/v1`, {
           method: "POST",
-          headers: getAuthHeaders(),
+          headers: await getAuthHeaders(),
           body: JSON.stringify(body),
         })
+        if (res.status === 401 && onUnauthorized !== undefined) {
+          await onUnauthorized()
+          res = await doFetch(`${config.url}/graphql/v1`, {
+            method: "POST",
+            headers: await getAuthHeaders(),
+            body: JSON.stringify(body),
+          })
+        }
       } catch (e) {
         return { data: null, error: { message: e instanceof Error ? e.message : "Network error" } }
       }
@@ -466,13 +636,19 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
     async rpc<TFn extends FunctionNames<TDatabase>>(
       fn: TFn,
       params?: FunctionArgs<TDatabase, TFn> | undefined,
-      options?: { head?: boolean | undefined; count?: "exact" | "planned" | "estimated" | undefined } | undefined,
+      options?: RpcOptions | undefined,
     ): Promise<RpcResult<FunctionReturns<TDatabase, TFn>>> {
-      const headers: Record<string, string> = { ...getAuthHeaders() }
+      const headers: Record<string, string> = { ...(await getAuthHeaders()) }
       const method = options?.head === true ? "HEAD" : "POST"
 
       if (options?.count !== undefined) {
         headers["Prefer"] = `count=${options.count}`
+      }
+      // PostgREST resolves `/rpc/<name>` against the default profile, so a function in any other
+      // schema is unreachable without this. `Content-Profile` rather than `Accept-Profile`, because
+      // an RPC call is a POST and PostgREST reads the write-side header for it.
+      if (options?.schema !== undefined) {
+        headers["Content-Profile"] = options.schema
       }
 
       let res: Response
@@ -482,6 +658,18 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
           headers,
           ...(params !== undefined && method !== "HEAD" && { body: JSON.stringify(params) }),
         })
+        if (res.status === 401 && onUnauthorized !== undefined) {
+          await onUnauthorized()
+          const retryHeaders: Record<string, string> = { ...(await getAuthHeaders()) }
+          if (options?.count !== undefined) {
+            retryHeaders["Prefer"] = `count=${options.count}`
+          }
+          res = await doFetch(`${config.url}/rest/v1/rpc/${fn}`, {
+            method,
+            headers: retryHeaders,
+            ...(params !== undefined && method !== "HEAD" && { body: JSON.stringify(params) }),
+          })
+        }
       } catch (e) {
         return { data: null, error: { message: e instanceof Error ? e.message : "Network error" } }
       }

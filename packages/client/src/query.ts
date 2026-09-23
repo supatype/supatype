@@ -1,4 +1,6 @@
-import type { QueryResult, SupatypeError } from "./types.js"
+import type { QueryCache, QueryCacheOptions, CacheStatus } from "./query-cache.js"
+import { buildCacheKey, defaultQueryCache } from "./query-cache.js"
+import type { MaskedField, QueryResult, SelectQueryOptions, SupatypeError } from "./types.js"
 
 const DEBUG_AUTH =
   (typeof process !== "undefined" && process.env["NEXT_PUBLIC_SUPATYPE_DEBUG_AUTH"] === "1") ||
@@ -22,27 +24,119 @@ function decodeJwtRoleFromAuthHeader(headers: Record<string, string>): string | 
   }
 }
 
+/**
+ * Parse `X-Supatype-Masked-Fields: salary=row, ssn=identity`.
+ *
+ * Unrecognised entries are dropped rather than guessed at: this is advisory decoration, so
+ * a header from a newer server saying something this client does not understand should
+ * degrade to silence, never to a wrong claim about which columns are masked.
+ */
+export function parseMaskedFields(header: string | null): MaskedField[] | undefined {
+  if (header === null || header.trim() === "") return undefined
+
+  const fields: MaskedField[] = []
+  for (const entry of header.split(",")) {
+    const [column, scope] = entry.split("=", 2).map((part) => part.trim())
+    if (column === undefined || column === "") continue
+    if (scope !== "identity" && scope !== "row") continue
+    fields.push({ column, scope })
+  }
+
+  return fields.length > 0 ? fields : undefined
+}
+
+function withMeta<T>(
+  result: QueryResult<T>,
+  meta: { cacheStatus?: CacheStatus; maskedFields?: MaskedField[] | undefined },
+): QueryResult<T> {
+  const { cacheStatus, maskedFields } = meta
+  if (cacheStatus === undefined && maskedFields === undefined) return result
+  return {
+    ...result,
+    meta: {
+      ...(result.meta ?? {}),
+      ...(cacheStatus !== undefined && { cacheStatus }),
+      ...(maskedFields !== undefined && { maskedFields }),
+    },
+  }
+}
+
+/** Resolves auth (and other) headers at request time so token refresh can run first. */
+export type HeadersProvider = () => Promise<Record<string, string>>
+
+function asHeadersProvider(
+  headers: Record<string, string> | HeadersProvider,
+): HeadersProvider {
+  if (typeof headers === "function") return headers
+  return () => Promise.resolve(headers)
+}
+
+async function fetchWithOptional401Retry(
+  url: string,
+  init: RequestInit,
+  resolveHeaders: () => Promise<Record<string, string>>,
+  onUnauthorized?: (() => Promise<void>) | undefined,
+): Promise<Response> {
+  let headers = await resolveHeaders()
+  let res = await fetch(url, { ...init, headers })
+  if (res.status === 401 && onUnauthorized !== undefined) {
+    await onUnauthorized()
+    headers = await resolveHeaders()
+    res = await fetch(url, { ...init, headers })
+  }
+  return res
+}
+
 // ─── QueryBuilder ─────────────────────────────────────────────────────────────
 
 export class QueryBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
   private readonly baseUrl: string
   private readonly path: string
-  private readonly headers: Record<string, string>
+  private readonly getHeaders: HeadersProvider
+  private readonly onUnauthorized: (() => Promise<void>) | undefined
+  private readonly extraHeaders: Record<string, string>
   private readonly params: URLSearchParams
+  private readonly queryCache: QueryCache
+  private cacheOptions: QueryCacheOptions | undefined
+  private readonly countMode: SelectQueryOptions["count"]
+  private readonly head: boolean
 
   constructor(
     baseUrl: string,
     path: string,
-    headers: Record<string, string>,
+    headers: Record<string, string> | HeadersProvider,
     columns?: string | undefined,
+    queryCache: QueryCache = defaultQueryCache,
+    onUnauthorized?: (() => Promise<void>) | undefined,
+    selectOptions?: SelectQueryOptions | undefined,
   ) {
     this.baseUrl = baseUrl
     this.path = path
-    this.headers = { ...headers }
+    this.getHeaders = asHeadersProvider(headers)
+    this.onUnauthorized = onUnauthorized
+    this.extraHeaders = {}
     this.params = new URLSearchParams()
+    this.queryCache = queryCache
+    this.countMode = selectOptions?.count
+    this.head = selectOptions?.head === true
     if (columns !== undefined) {
       this.params.set("select", columns)
     }
+    if (this.countMode !== undefined) {
+      this.extraHeaders["Prefer"] = `count=${this.countMode}`
+    }
+    // A profile picks the schema that answers, which is how a draft is read: same table name, same
+    // row type, one header. Set at construction rather than as a chainable step, so it cannot be
+    // added to a request that has already been described.
+    if (selectOptions?.profile !== undefined) {
+      this.extraHeaders["Accept-Profile"] = selectOptions.profile
+    }
+  }
+
+  /** Enable GET caching. Use `{ server: true }` to cache the response on the server too. */
+  cache(options: QueryCacheOptions): this {
+    this.cacheOptions = options
+    return this
   }
 
   select(columns: string): this {
@@ -115,6 +209,12 @@ export class QueryBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
     return this
   }
 
+  /** PostgREST OR filter: pass conditions in PostgREST syntax, e.g. `"status.eq.active,owner_id.eq.123"`. */
+  or(filters: string): this {
+    this.params.append("or", `(${filters})`)
+    return this
+  }
+
   order(
     column: string,
     opts?: { ascending?: boolean | undefined; nullsFirst?: boolean | undefined } | undefined,
@@ -132,49 +232,110 @@ export class QueryBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
 
   /** Set the locale for resolving localized fields. */
   locale(code: string): this {
-    this.headers["Accept-Language"] = code
+    this.extraHeaders["Accept-Language"] = code
     return this
   }
 
   range(from: number, to: number): this {
-    this.headers["Range"] = `${from}-${to}`
-    this.headers["Range-Unit"] = "items"
+    this.extraHeaders["Range"] = `${from}-${to}`
+    this.extraHeaders["Range-Unit"] = "items"
     return this
   }
 
   /** Return a single row (errors if none or many found). */
   async single(): Promise<QueryResult<TRow>> {
-    const headers = {
-      ...this.headers,
+    const { data, error, meta } = await this._fetch({
       Accept: "application/vnd.pgrst.object+json",
+    })
+    if (error !== null) return { data: null, error, count: null, ...(meta && { meta }) }
+    // Some proxies drop Accept and return a one-element array, unwrap.
+    const row = (Array.isArray(data) ? data[0] : data) as TRow | undefined
+    if (row === undefined) {
+      return {
+        data: null,
+        error: { message: "JSON object requested, multiple (or no) rows returned", code: "PGRST116" },
+        count: null,
+        ...(meta && { meta }),
+      }
     }
-    const { data, error } = await this._fetch(headers)
-    if (error !== null) return { data: null, error, count: null }
-    return { data: data as unknown as TRow, error: null, count: 1 }
+    return { data: row, error: null, count: 1, ...(meta && { meta }) }
   }
 
   /** Return a single row or null (errors if many found). */
   async maybeSingle(): Promise<QueryResult<TRow | null>> {
-    const { data, error, count } = await this._fetch(this.headers)
-    if (error !== null) return { data: null, error, count: null }
+    const { data, error, count, meta } = await this._fetch({})
+    if (error !== null) return { data: null, error, count: null, ...(meta && { meta }) }
     const rows = data as TRow[]
     const row = rows.length > 0 ? (rows[0] ?? null) : null
-    return { data: row, error: null, count }
+    return { data: row, error: null, count, ...(meta && { meta }) }
   }
 
   then<R1 = QueryResult<TRow[]>, R2 = never>(
     onfulfilled?: ((value: QueryResult<TRow[]>) => R1 | PromiseLike<R1>) | null | undefined,
     onrejected?: ((reason: unknown) => R2 | PromiseLike<R2>) | null | undefined,
   ): PromiseLike<R1 | R2> {
-    return this._fetch(this.headers).then(onfulfilled, onrejected)
+    return this._fetch({}).then(onfulfilled, onrejected)
   }
 
-  private async _fetch(headers: Record<string, string>): Promise<QueryResult<TRow[]>> {
+  private buildRequestUrl(): string {
     const qs = this.params.toString()
-    const url = `${this.baseUrl}${this.path}${qs ? `?${qs}` : ""}`
+    return `${this.baseUrl}${this.path}${qs ? `?${qs}` : ""}`
+  }
+
+  private applyServerCacheHeader(headers: Record<string, string>): Record<string, string> {
+    if (!this.cacheOptions?.server) return headers
+    const seconds = Math.max(1, Math.floor(this.cacheOptions.ttl / 1000))
+    const cacheDirective =
+      this.cacheOptions.public === true
+        ? `max-age=${seconds}, public`
+        : `max-age=${seconds}`
+    return {
+      ...headers,
+      "X-Supatype-Cache": cacheDirective,
+    }
+  }
+
+  private mergePreferHeader(
+    headers: Record<string, string>,
+    extra: Record<string, string>,
+  ): Record<string, string> {
+    const merged = { ...headers, ...extra }
+    const preferParts = [headers["Prefer"], extra["Prefer"]].filter(Boolean)
+    if (preferParts.length > 0) {
+      merged["Prefer"] = preferParts.join(",")
+    }
+    return merged
+  }
+
+  private async _fetch(fetchHeaders: Record<string, string>): Promise<QueryResult<TRow[]>> {
+    const mergedExtra = this.mergePreferHeader(this.extraHeaders, fetchHeaders)
+    const url = this.buildRequestUrl()
+    const method = this.head ? "HEAD" : "GET"
+    const resolveRequestHeaders = async (): Promise<Record<string, string>> => {
+      const authHeaders = await this.getHeaders()
+      return this.applyServerCacheHeader({ ...authHeaders, ...mergedExtra })
+    }
+
+    if (this.cacheOptions && !this.head) {
+      const requestHeaders = await resolveRequestHeaders()
+      const cacheKey = buildCacheKey("GET", url, requestHeaders, {
+        partition: this.cacheOptions.key,
+        public: this.cacheOptions.public,
+      })
+      const cached = this.queryCache.get<TRow[]>(cacheKey)
+      if (cached) {
+        return withMeta(cached, { cacheStatus: "HIT" })
+      }
+    }
+
     let res: Response
     try {
-      res = await fetch(url, { headers })
+      res = await fetchWithOptional401Retry(
+        url,
+        { method },
+        resolveRequestHeaders,
+        this.onUnauthorized,
+      )
     } catch (e) {
       return {
         data: null,
@@ -189,30 +350,63 @@ export class QueryBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
         ? parseInt(contentRange.split("/")[1] ?? "0", 10)
         : null
 
+    const maskedFields = parseMaskedFields(res.headers.get("X-Supatype-Masked-Fields"))
+    const serverCacheStatus = res.headers.get("X-Supatype-Cache-Status") as CacheStatus | null
+    const cacheStatus: CacheStatus =
+      serverCacheStatus === "HIT" || serverCacheStatus === "MISS" || serverCacheStatus === "BYPASS"
+        ? serverCacheStatus
+        : this.cacheOptions
+          ? "MISS"
+          : undefined
+
     if (!res.ok) {
       const err = await res.json().catch(() => ({ message: "Error" })) as Record<string, unknown>
+      const debugHeaders = await resolveRequestHeaders()
       if (DEBUG_AUTH) {
         console.log("[supatype:query] request failed", {
           url,
           status: res.status,
-          role: decodeJwtRoleFromAuthHeader(headers),
+          role: decodeJwtRoleFromAuthHeader(debugHeaders),
           message: String(err["message"] ?? err["hint"] ?? "Request failed"),
           code: typeof err["code"] === "string" ? err["code"] : null,
         })
       }
-      return {
-        data: null,
-        error: {
-          message: String(err["message"] ?? err["hint"] ?? "Request failed"),
-          status: res.status,
-          ...(err["code"] !== undefined && { code: String(err["code"]) }),
+      return withMeta<TRow[]>(
+        {
+          data: null,
+          error: {
+            message: String(err["message"] ?? err["hint"] ?? "Request failed"),
+            status: res.status,
+            ...(err["code"] !== undefined && { code: String(err["code"]) }),
+            // A field validator's refusal names the column it refused. Kept whole rather than
+            // folded into the message, so a form can mark the input.
+            ...(typeof err["field"] === "string" && { field: err["field"] }),
+          },
+          count: null,
         },
-        count: null,
-      }
+        { cacheStatus, maskedFields },
+      )
+    }
+
+    if (method === "HEAD" || res.status === 204) {
+      return withMeta<TRow[]>(
+        { data: null, error: null, count },
+        { cacheStatus, maskedFields },
+      )
     }
 
     const json = await res.json() as TRow[]
-    return { data: json, error: null, count }
+    const result: QueryResult<TRow[]> = { data: json, error: null, count }
+
+    if (this.cacheOptions) {
+      const cacheKey = buildCacheKey("GET", url, await resolveRequestHeaders(), {
+        partition: this.cacheOptions.key,
+        public: this.cacheOptions.public,
+      })
+      this.queryCache.set(cacheKey, result, this.cacheOptions.ttl)
+    }
+
+    return withMeta(result, { cacheStatus, maskedFields })
   }
 }
 
@@ -223,7 +417,9 @@ type HttpMethod = "POST" | "PATCH" | "DELETE"
 export class MutationBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
   private readonly baseUrl: string
   private readonly path: string
-  private readonly headers: Record<string, string>
+  private readonly getHeaders: HeadersProvider
+  private readonly onUnauthorized: (() => Promise<void>) | undefined
+  private readonly extraHeaders: Record<string, string>
   private readonly method: HttpMethod
   private readonly body: unknown
   private readonly params: URLSearchParams
@@ -231,25 +427,28 @@ export class MutationBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
   constructor(
     baseUrl: string,
     path: string,
-    headers: Record<string, string>,
+    headers: Record<string, string> | HeadersProvider,
     method: HttpMethod,
     body?: unknown,
     opts?: { upsert?: boolean | undefined } | undefined,
+    onUnauthorized?: (() => Promise<void>) | undefined,
   ) {
     this.baseUrl = baseUrl
     this.path = path
-    this.headers = { ...headers }
+    this.getHeaders = asHeadersProvider(headers)
+    this.onUnauthorized = onUnauthorized
+    this.extraHeaders = {}
     this.method = method
     this.body = body
     this.params = new URLSearchParams()
 
     if (opts?.upsert === true) {
-      this.headers["Prefer"] = "resolution=merge-duplicates"
+      this.extraHeaders["Prefer"] = "resolution=merge-duplicates"
     }
 
     // Return inserted/updated rows
     if (method !== "DELETE") {
-      this.headers["Prefer"] = (this.headers["Prefer"] ?? "") + ",return=representation"
+      this.extraHeaders["Prefer"] = (this.extraHeaders["Prefer"] ?? "") + ",return=representation"
     }
   }
 
@@ -268,6 +467,36 @@ export class MutationBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
     return this
   }
 
+  /** Limit returned columns on the mutation response (requires `return=representation`). */
+  select(columns?: string): this {
+    this.params.set("select", columns ?? "*")
+    return this
+  }
+
+  async single(): Promise<QueryResult<TRow>> {
+    const { data, error, count, meta } = await this._execute({
+      Accept: "application/vnd.pgrst.object+json",
+    })
+    if (error !== null) return { data: null, error, count: null, ...(meta && { meta }) }
+    const row = data !== null && data.length > 0 ? (data[0] as TRow) : null
+    if (row === null) {
+      return {
+        data: null,
+        error: { message: "JSON object requested, multiple (or no) rows returned" },
+        count: null,
+        ...(meta && { meta }),
+      }
+    }
+    return { data: row, error: null, count: 1, ...(meta && { meta }) }
+  }
+
+  async maybeSingle(): Promise<QueryResult<TRow | null>> {
+    const { data, error, count, meta } = await this._execute({})
+    if (error !== null) return { data: null, error, count: null, ...(meta && { meta }) }
+    const row = data !== null && data.length > 0 ? (data[0] ?? null) : null
+    return { data: row, error: null, count, ...(meta && { meta }) }
+  }
+
   then<R1 = QueryResult<TRow[]>, R2 = never>(
     onfulfilled?: ((value: QueryResult<TRow[]>) => R1 | PromiseLike<R1>) | null | undefined,
     onrejected?: ((reason: unknown) => R2 | PromiseLike<R2>) | null | undefined,
@@ -275,16 +504,26 @@ export class MutationBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
     return this._execute().then(onfulfilled, onrejected)
   }
 
-  private async _execute(): Promise<QueryResult<TRow[]>> {
+  private async _execute(fetchHeaders: Record<string, string> = {}): Promise<QueryResult<TRow[]>> {
     const qs = this.params.toString()
     const url = `${this.baseUrl}${this.path}${qs ? `?${qs}` : ""}`
+    const resolveRequestHeaders = async (): Promise<Record<string, string>> => ({
+      ...(await this.getHeaders()),
+      ...this.extraHeaders,
+      ...fetchHeaders,
+    })
+    const init: RequestInit = {
+      method: this.method,
+      ...(this.body !== undefined && { body: JSON.stringify(this.body) }),
+    }
     let res: Response
     try {
-      res = await fetch(url, {
-        method: this.method,
-        headers: this.headers,
-        ...(this.body !== undefined && { body: JSON.stringify(this.body) }),
-      })
+      res = await fetchWithOptional401Retry(
+        url,
+        init,
+        resolveRequestHeaders,
+        this.onUnauthorized,
+      )
     } catch (e) {
       return {
         data: null,
@@ -300,7 +539,7 @@ export class MutationBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
           url,
           method: this.method,
           status: res.status,
-          role: decodeJwtRoleFromAuthHeader(this.headers),
+          role: decodeJwtRoleFromAuthHeader(await resolveRequestHeaders()),
           message: String(err["message"] ?? err["hint"] ?? "Request failed"),
           code: typeof err["code"] === "string" ? err["code"] : null,
         })
@@ -329,3 +568,5 @@ export class MutationBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
 // ─── StorageError ─────────────────────────────────────────────────────────────
 
 export type { SupatypeError }
+export type { QueryCacheOptions, CacheStatus } from "./query-cache.js"
+export { QueryCache, defaultQueryCache } from "./query-cache.js"

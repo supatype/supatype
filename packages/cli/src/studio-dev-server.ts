@@ -2,24 +2,32 @@ import { existsSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { ProcessManager } from "./process-manager.js"
 
-const STUDIO_PORT = 3002
+/** Vite dev server port when `overrides.studio` is set. */
+export const STUDIO_DEV_PORT = 3002
 
 export interface StudioDevServerOptions {
   cwd: string
   studioOverride: string
   pidDir: string
-  serviceRoleKey: string
+  /**
+   * The anon key, and only the anon key. Studio in the browser is an untrusted
+   * client: privileged calls go through /studio/proxy, which holds the service
+   * role key server-side and applies membership, role permissions and the audit
+   * trail. Studio refuses a service role key handed to the browser and says so
+   * loudly, which is what this used to trigger on every dev start.
+   */
+  anonKey: string
   /**
    * Where Vite proxies API requests (Kong gateway port for compose dev, or
    * supatype-server port for native `supatype dev`).
    */
   proxyTarget: string
   /**
-   * Public Supatype URL the browser uses. Compose dev: Kong on the host.
-   * Native dev: Vite dev server (same origin as Studio).
+   * Browser API base URL. Must match the Vite dev origin (`http://localhost:3002`)
+   * so fetches hit the Vite proxy (SUPATYPE_PROXY_TARGET) and avoid CORS.
    */
   viteSupatypeUrl: string
-  /** Vite `base` — `/studio/` when behind Kong at `/studio/`; `/` for native dev on :3002. */
+  /** Vite `base`: `/studio/` when behind Kong at `/studio/`; `/` for native dev on :3002. */
   basePath?: string
 }
 
@@ -35,7 +43,7 @@ export function startStudioViteDevServer(opts: StudioDevServerOptions): ProcessM
   const basePath = opts.basePath ?? "/"
   return new ProcessManager(
     process.execPath,
-    [viteJs, "--port", String(STUDIO_PORT), "--strictPort", "--host"],
+    [viteJs, "--port", String(STUDIO_DEV_PORT), "--strictPort", "--host"],
     {
       label: "studio",
       pidDir: opts.pidDir,
@@ -44,8 +52,7 @@ export function startStudioViteDevServer(opts: StudioDevServerOptions): ProcessM
       env: {
         VITE_SUPATYPE_URL: opts.viteSupatypeUrl,
         SUPATYPE_PROXY_TARGET: opts.proxyTarget,
-        VITE_SUPATYPE_ANON_KEY: opts.serviceRoleKey,
-        VITE_SUPATYPE_SERVICE_ROLE_KEY: opts.serviceRoleKey,
+        VITE_SUPATYPE_ANON_KEY: opts.anonKey,
         VITE_BASE_PATH: basePath,
       },
     },

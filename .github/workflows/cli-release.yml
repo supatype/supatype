@@ -1,0 +1,253 @@
+# Publish standalone supatype CLI binaries to releases.supatype.com/cli/
+#
+# Bun compiles the binaries, not esbuild + pkg. The CLI's TUI stack (ink, @clack/prompts,
+# yoga-layout) uses top-level await, which esbuild cannot emit as CJS, and in ESM it either
+# miscompiles or deadlocks on an unsettled await. Bun compiles the same graph without
+# complaint and cross compiles every target from one Linux runner.
+name: CLI release
+
+# Called by release.yml on a v* tag, so the standalone binaries carry the same version as the
+# npm packages and there is one "latest" per release. There is no cli-v* tag any more: a second
+# tag namespace meant two versions of one product, and self-update compares the running binary
+# against cli/latest.json, so the two could disagree about what the latest release was.
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Version to publish, without a leading v (e.g. 0.1.8)
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to publish, without a leading v (e.g. 0.1.8)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: compile and sign
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Resolved once, and exported as a job output so downstream jobs consume it rather than
+      # deriving it again. Four copies of this snippet used to derive the version
+      # independently, and the one in the build job was missing entirely, so the binary
+      # carried whatever version happened to be committed. $GITHUB_ENV does not cross jobs,
+      # which is what let two more copies survive in the Homebrew job.
+      - name: Resolve the release version
+        id: version
+        run: |
+          set -euo pipefail
+          # Always from the caller. release.yml derives it from the tag, so the tag is the single
+          # source of the version for npm packages, Docker images and these binaries alike.
+          VERSION="${{ inputs.version }}"
+          VERSION="${VERSION#v}"
+          case "$VERSION" in
+            "" | *[!0-9A-Za-z.-]*)
+              echo "refusing to publish version '$VERSION'" >&2
+              exit 1
+              ;;
+          esac
+          echo "CLI_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "publishing v$VERSION"
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # .bun-version, not a literal here: integration.yml compiles the same artefacts for its
+      # round-trip check, and a release that compiles with a different Bun than the check
+      # exercised is a difference nothing would report.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      # The standalone binary has no package.json to read at runtime, so the version has to
+      # be a value in the source before it is compiled. Without this `--version` answers
+      # 0.0.0 and `self-update`, which compares that against cli/latest.json, re-downloads on
+      # every run.
+      - name: Stamp the release version across the workspace
+        run: node scripts/set-version.mjs "$CLI_VERSION"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Without this the binary ships EMBEDDED_RELEASE_PUBLIC_KEY = "", and binary-cache
+      # fails closed: a new user's first `supatype dev` cannot verify the components it
+      # downloads and stops with "No minisign public key configured".
+      - name: Embed release public key (required)
+        run: node scripts/embed-release-pubkey.mjs
+        env:
+          MINISIGN_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
+
+      # One command: @supatype/cli declares no workspace dependencies, so a `^...` filter
+      # selects nothing (`turbo --dry=json` reports no packages and no tasks) and only costs a
+      # pnpm and turbo startup.
+      - name: Build the CLI
+        # `@supatype/cli...`, not the package alone: the CLI imports @supatype/types, so on a
+        # fresh checkout building it by itself fails with TS2307 before it starts.
+        run: pnpm --filter "@supatype/cli..." build
+
+      - name: Compile and package every target
+        run: bash packages/cli/scripts/build-release-artifacts.sh "$CLI_VERSION" "$PWD/artifacts"
+
+      # Signed, because `supatype self-update` replaces the executable on the user's PATH and a
+      # checksum served from the same bucket as the archive proves only that the download was
+      # intact. Component manifests have always been signed; this closes the gap where the CLI
+      # was stricter about a postgres archive than about overwriting itself. The signature
+      # covers checksums.sha256, which in turn covers every archive.
+      #
+      # It must ship with the first release: published paths are immutable, so a version that
+      # goes out unsigned stays unsigned, and adding the .minisig later would mean writing into
+      # an already-published prefix, which is what produced the postgres checksum skew.
+      - name: Sign the checksums manifest
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y -qq minisign
+          cd artifacts
+          printf '%s' "${{ secrets.MINISIGN_PRIVATE_KEY }}" > /tmp/minisign.key
+          echo "${{ secrets.MINISIGN_PASSWORD }}" | minisign \
+            -S -s /tmp/minisign.key \
+            -m checksums.sha256 \
+            -t "supatype cli v$CLI_VERSION"
+          rm -f /tmp/minisign.key
+          test -s checksums.sha256.minisig
+
+      - name: Upload artefacts for inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ env.CLI_VERSION }}
+          path: artifacts/
+          if-no-files-found: error
+          # The input is already-compressed archives, about 320 MB of them. The default
+          # compression-level 6 spends a full single-threaded deflate pass saving nothing, and
+          # the CDN copy two steps later is the one that matters, so these are a short-lived
+          # debugging convenience rather than storage.
+          compression-level: 0
+          retention-days: 7
+
+
+  # Run every artefact on the hardware it targets, before anything is published.
+  #
+  # The darwin binaries are cross compiled on Linux and had never been executed anywhere; given
+  # this project has already shipped an Intel macOS archive no client could use, "it compiled"
+  # is not evidence. A published path is immutable, so a broken artefact cannot be replaced,
+  # only superseded by a new version.
+  smoke:
+    name: run the artefact (${{ matrix.name }})
+    needs: build
+    runs-on: ${{ matrix.runner }}
+    # Five of the seven published artefacts are executed here. linux-arm64 and
+    # linux-arm64-musl are not: no arm64 Linux runner is available to this repository, so they
+    # ship cross compiled and unrun. Do not read a green smoke job as covering every artefact.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-amd64
+            runner: ubuntu-24.04
+            archive: supatype-cli-linux-amd64.tar.gz
+          - name: linux-amd64-musl
+            runner: ubuntu-24.04
+            archive: supatype-cli-linux-amd64-musl.tar.gz
+            # Alpine plus the C++ runtime Bun's musl build links against. Without libstdc++ the
+            # binary dies with twenty "Error relocating" lines, which is what install.sh now
+            # detects and explains.
+            container: alpine:3.20
+            container_deps: libstdc++ libgcc tar coreutils
+          # macos-15 is arm64 (Apple Silicon); macos-15-intel is the x86_64 label. macos-13 was
+          # retired on 2025-12-04 and requesting it queues forever rather than failing.
+          - name: darwin-arm64
+            runner: macos-15
+            archive: supatype-cli-darwin-arm64.tar.gz
+          - name: darwin-amd64
+            runner: macos-15-intel
+            archive: supatype-cli-darwin-amd64.tar.gz
+          - name: windows-amd64
+            runner: windows-latest
+            archive: supatype-cli-windows-amd64.zip
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: cli-${{ needs.build.outputs.version }}
+          path: artifacts
+
+      # One script for every target, host or container, so the check cannot drift between them.
+      # It is committed rather than inlined here so it can be run against a local build.
+      - name: Run the artefact and check the version it reports
+        if: matrix.container == ''
+        shell: bash
+        run: |
+          bash tests/integration/scripts/smoke-cli-artifact.sh             "artifacts/${{ matrix.archive }}" "${{ needs.build.outputs.version }}"
+
+      # Alpine needs the C++ runtime Bun's musl build links against. Without it the binary dies
+      # with twenty "Error relocating" lines, which reads as a missing file rather than a missing
+      # libc, and is what install.sh now detects and explains.
+      - name: Run the artefact in ${{ matrix.container }}
+        if: matrix.container != ''
+        shell: bash
+        run: |
+          docker run --rm -v "$PWD:/w" -w /w "${{ matrix.container }}" sh -c             "apk add --no-cache bash ${{ matrix.container_deps }} >/dev/null 2>&1 &&              bash tests/integration/scripts/smoke-cli-artifact.sh                'artifacts/${{ matrix.archive }}' '${{ needs.build.outputs.version }}'"
+
+  publish:
+    name: publish to the CDN
+    needs: [build, smoke]
+    runs-on: ubuntu-24.04
+    env:
+      CLI_VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: cli-${{ needs.build.outputs.version }}
+          path: artifacts
+
+      # Ordering matters. Archives and their checksums go up first, install.sh next, and
+      # latest.json last: it is the only mutable object here, so nothing advertises a version
+      # until every file that version needs is already readable.
+      - name: Publish to the CDN
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.CDN_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CDN_AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.CDN_AWS_REGION }}
+          # Hetzner needs path addressing and s3v4, and refuses instance metadata lookups.
+          # Copied from deno-releases.yml, which is the workflow that actually works against
+          # this bucket. Omitting them is how an upload fails on a real tag.
+          AWS_EC2_METADATA_DISABLED: "true"
+          AWS_RETRY_MODE: standard
+          AWS_MAX_ATTEMPTS: "10"
+        run: |
+          set -euo pipefail
+          aws configure set default.s3.addressing_style path >/dev/null
+          aws configure set default.s3.signature_version s3v4 >/dev/null
+
+          EP="${{ secrets.CDN_ENDPOINT }}"
+          EP="${EP%/}"
+          BUCKET="${{ secrets.CDN_BUCKET }}"
+          PREFIX="s3://${BUCKET}/cli/v${CLI_VERSION}"
+
+          # Versioned objects are immutable, matching the component archives. Nothing rewrites
+          # this prefix, so a client may cache an archive and its checksum for a year without
+          # them ever disagreeing.
+          aws s3 cp artifacts/ "${PREFIX}/" --recursive \
+            --endpoint-url "${EP}" --no-progress \
+            --cache-control "public, max-age=31536000, immutable"
+
+          printf '{"version":"%s","date":"%s"}\n' "${CLI_VERSION}" "$(date -u +%Y-%m-%d)" > latest.json
+          aws s3 cp latest.json "s3://${BUCKET}/cli/latest.json" \
+            --endpoint-url "${EP}" --cache-control "no-cache" --no-progress

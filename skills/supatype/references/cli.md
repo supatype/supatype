@@ -46,7 +46,7 @@ Auth flag: `--token` (cloud = platform PAT; self-host = `SERVICE_ROLE_KEY`). `--
 | `supatype db connection-string` | Show DB URL (cloud linked projects) |
 | `supatype db reset-password` | Reset cloud project DB password |
 | `supatype pg` | Postgres helpers |
-| `supatype pull` | **Removed**: type-first mode uses `schema/index.ts` as source of truth |
+| `supatype pull` | Draft `schema/index.ts` from live DB introspection (review before push). Flags: `--connection`, `--out`, `--dry-run` |
 
 ## App and deploy
 
@@ -54,6 +54,7 @@ Auth flag: `--token` (cloud = platform PAT; self-host = `SERVICE_ROLE_KEY`). `--
 |---------|---------|
 | `supatype app add` | Add static or proxy app to compose (e.g. `--static ./public`) |
 | `supatype app remove` | Remove app from compose |
+| `supatype add domain [domain]` | Add a custom domain with automatic HTTPS (self-host). Interactive, or pass `--email <addr>`. Sets `server.mode=standalone` + `domain` + `tls`; apply with `compose up -d` |
 | `supatype self-host compose render` | Write docker-compose.yml |
 | `supatype self-host compose up -d` | Start production stack |
 | `supatype self-host compose down` | Stop stack |
@@ -66,10 +67,14 @@ Auth flag: `--token` (cloud = platform PAT; self-host = `SERVICE_ROLE_KEY`). `--
 
 | Command | Purpose |
 |---------|---------|
+| `supatype functions new <name>` | Scaffold `functions/<name>/index.ts` plus Deno IDE types (`functions/deno.d.ts`, `functions/tsconfig.json`) |
+| `supatype functions serve` | Local Deno server for all functions |
 | `supatype functions deploy` | Deploy edge functions via control plane when linked |
 | `supatype functions list` | List deployed functions |
 | `supatype plugins` | Plugin scaffolding |
 | `supatype types` | Type utilities |
+
+Kitchen-sink example (monorepo): `examples/edge-kit` — Vite UI that invokes sample functions.
 
 ## Ops and maintenance
 
@@ -80,7 +85,24 @@ Auth flag: `--token` (cloud = platform PAT; self-host = `SERVICE_ROLE_KEY`). `--
 | `supatype admin` | Admin user provisioning |
 | `supatype update` | Update pinned component versions |
 | `supatype cache` | Binary/image cache management |
+| REST GET cache | See [caching.md](caching.md) — `.cache({ ttl, server })` on queries |
 | `supatype engine` | Schema engine utilities |
+
+## Local Docker dev — ports, multiple projects, shutdown
+
+**Kong port (`SUPATYPE_KONG_PORT`):**
+- `supatype init` (Docker) prompts for a gateway port; default is `18473` or the next free port.
+- Each project should have a **unique** `SUPATYPE_KONG_PORT` in `.env` so multiple stacks can run concurrently.
+- `supatype dev` re-checks the configured port; if it is taken, you can pick another interactively.
+- Open the URL printed by `supatype dev`, not always `:18473`.
+
+**Stopping the stack:**
+- `supatype dev` runs `docker compose down` on Ctrl+C, terminal close, and as a sync fallback on process exit.
+- `.supatype/dev-session.json` tracks the active dev session; the next `supatype dev` offers to clean up a stack left running after an unclean exit.
+- `supatype push` may start **Postgres only** and leave it running (intentional for prod/self-host workflows). Stop with `supatype self-host compose down`.
+
+**Renaming `project.name`:**
+- Docker compose project slug changes (`supatype-{name}`). On the next `supatype dev`, the CLI detects the rename via `.supatype/environment.json` and offers to stop the old stack (volumes preserved).
 
 ## Typical sequences
 
@@ -117,9 +139,9 @@ supatype rollback --no-sync-schema  # database only
 **Self-host production:**
 ```bash
 npm run build
-supatype self-host compose render
-supatype self-host compose up -d
-supatype link --url https://your-domain --token $SERVICE_ROLE_KEY
+supatype add domain demo.example.com --email you@example.com  # automatic HTTPS (Kong ACME)
+supatype self-host compose up -d                              # publishes :80/:443, issues cert on first hit
+supatype link --url https://demo.example.com --token $SERVICE_ROLE_KEY
 supatype deploy
 ```
 

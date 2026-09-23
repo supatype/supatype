@@ -15,6 +15,14 @@ export const DASHBOARD_VIEW_LIMITS: Record<Tier, number> = {
   enterprise: -1,
 }
 
+import type { FieldValidation } from "@supatype/types"
+import type { ModelConstraint } from "./lib/evaluate-constraint.js"
+
+// Declared once, in `@supatype/types`, beside the modifiers that compile into it. Re-exported
+// because widgets import it from here alongside `FieldConfig`.
+export type { FieldValidation }
+export type { ModelConstraint }
+
 export type WidgetType =
   | "text"
   | "textarea"
@@ -38,6 +46,10 @@ export type WidgetType =
   | "uuid"
   | "color"
   | "xml"
+  /** `Code<Lang>`: `{ lang, source }` in JSONB, edited as source text. */
+  | "code"
+  /** `Currency<Code>`: `{ amount, code }` in JSONB, amount in minor units. */
+  | "currency"
   | "button"
 
 export interface FieldConfig {
@@ -48,8 +60,8 @@ export interface FieldConfig {
   localized: boolean
   /** Field-specific options (e.g. enum values, relation target, block types). */
   options?: Record<string, unknown>
-  /** Validation rules (min, max, maxLength, pattern, etc.). */
-  validation?: Record<string, unknown>
+  /** Bounds declared on the field's type; the same rule Postgres enforces as a CHECK. */
+  validation?: FieldValidation
   /** Whether this field appears in the list view column. */
   listColumn?: boolean
   /** Column width hint for list view. */
@@ -96,14 +108,43 @@ export interface ModelConfig {
   searchFields: string[]
   /** Whether this model has publishable workflow. */
   publishable: boolean
-  /** Whether this model has versioning enabled. */
-  versioning: boolean
+  /**
+   * Drafts and version history, when the model declares `versions`.
+   *
+   * `null` for a model that does not. Replaces a `versioning: boolean` that read a key the engine
+   * never emitted, so it was false everywhere and the version UI was unreachable by construction.
+   */
+  versions: ModelVersionsConfig | null
   /** Whether this model has soft delete. */
   softDelete: boolean
   /** Whether this model has timestamps. */
   timestamps: boolean
   /** Whether this model has hooks configured. */
   hasHooks: boolean
+  /**
+   * Model-level rules the database enforces, carried as the nodes the CLI parsed.
+   *
+   * Nodes rather than SQL: Studio evaluates them against the form so it can say which rule failed
+   * and, when one names a single column, on which field. A rendered `CHECK` could only be sent to
+   * Postgres and waited on.
+   */
+  constraints?: ModelConstraint[]
+  /**
+   * Indexes the schema declares, as the engine resolved them.
+   *
+   * Only declared ones. An index the engine creates for a relation or a blocks field follows from
+   * another declaration, and listing it beside the chosen ones would read as a choice.
+   */
+  indexes?: ModelIndex[]
+}
+
+/** One declared index. */
+export interface ModelIndex {
+  name: string
+  fields: string[]
+  unique: boolean
+  /** `btree`, `gin`, and so on, as Postgres names them. */
+  using: string
 }
 
 export interface GlobalConfig {
@@ -140,8 +181,18 @@ export interface BrandingConfig {
 }
 
 export interface LivePreviewConfig {
-  url: string
-  /** URL pattern with {field} placeholders, e.g. "/blog/{slug}" */
+  /**
+   * Where the project's app lives, when it is not this deployment.
+   *
+   * Optional: with `app.mode` set to `static` or `proxy` the app is served at `/` on the same
+   * origin as the API, which Studio already knows, so stating it again only risks it going stale.
+   */
+  url?: string
+  /**
+   * Path or URL with {field} placeholders, e.g. "/blog/{slug}".
+   *
+   * A path is resolved against the origin Studio is served from; an absolute URL is used as given.
+   */
   urlPattern?: string
 }
 
@@ -153,7 +204,7 @@ export interface AdminConfig {
   branding?: BrandingConfig
   livePreview?: Record<string, LivePreviewConfig>
   dashboard?: DashboardConfig
-  /** Current org tier — used to enforce dashboard view limits. */
+  /** Current org tier: used to enforce dashboard view limits. */
   tier?: Tier
   /** Roles allowed to access Studio (from supatype.config.ts admin.roles). */
   adminRoles?: string[]
@@ -179,7 +230,30 @@ export interface DashboardView {
   updated_at: string
 }
 
-/** Legacy single-widget list — still accepted for static config overrides. */
+/** Legacy single-widget list: still accepted for static config overrides. */
 export interface DashboardConfig {
   widgets?: DashboardBlock[]
+}
+
+/**
+ * What a versioned model's editor needs to know.
+ *
+ * Mirrors the `versions` object the engine puts in the admin config. `drafts: false` is the
+ * audit-trail case: history is recorded and nothing is withheld, so the editor writes the table
+ * directly and offers no publish control.
+ */
+export interface ModelVersionsConfig {
+  /** Editing writes a draft version rather than the live row. */
+  drafts: boolean
+  /** Versions kept per record. */
+  keep: number
+  /** The companion table holding the snapshots. */
+  versionsTable: string
+  /**
+   * Columns holding one value per locale.
+   *
+   * Publishing is per locale, so a control that says "publish English" has to know which columns
+   * English is a key of. Empty for a model with no localized field, which publishes as a whole.
+   */
+  localizedColumns: string[]
 }

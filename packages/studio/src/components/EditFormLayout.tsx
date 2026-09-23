@@ -18,7 +18,12 @@ export interface EditFormLayoutProps {
   isCreate?: boolean
   onDuplicate?: () => void
   onDelete?: () => void
-  preview?: React.ReactNode
+  /** Opens the preview slide-over. Rendered in the sidebar, beside the record's other actions. */
+  previewAction?: React.ReactNode
+  /** Publishing controls, rendered at the top of the sidebar. */
+  publishing?: React.ReactNode
+  /** Per-field messages from the last refused save, keyed by column. */
+  fieldErrors?: Record<string, string>
   className?: string
 }
 
@@ -37,7 +42,9 @@ export function EditFormLayout({
   isCreate,
   onDuplicate,
   onDelete,
-  preview,
+  previewAction,
+  publishing,
+  fieldErrors,
   className,
 }: EditFormLayoutProps): React.ReactElement {
   const showSidebar = true
@@ -61,12 +68,14 @@ export function EditFormLayout({
             defaultLocale={defaultLocale}
             recordSyncKey={recordSyncKey}
             slugFollowSource={slugFollowSource}
+            {...(fieldErrors !== undefined && { fieldErrors })}
           />
         </form>
-        {preview}
       </div>
       {showSidebar && (
         <EditFormSidebar
+          publishing={publishing}
+          previewAction={previewAction}
           metaFields={metaFields}
           values={values}
           onChange={onChange}

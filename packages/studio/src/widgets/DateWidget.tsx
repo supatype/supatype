@@ -15,10 +15,19 @@ export function DateWidget({ config, value, onChange, readOnly }: WidgetProps): 
     }
   }
 
+  // A temporal `Between` bounds the picker itself, so an out-of-range date is harder to pick than
+  // to have rejected. The database enforces the same bound either way.
+  const bound = (raw: number | string | undefined): string | undefined => {
+    if (typeof raw !== "string") return undefined
+    return isDatetime ? raw.slice(0, 16) : raw.slice(0, 10)
+  }
+
   return (
     <input
       id={`field-${config.name}`}
       type={inputType}
+      min={bound(config.validation?.min)}
+      max={bound(config.validation?.max)}
       className="st-input"
       value={inputValue}
       onChange={(e) => {

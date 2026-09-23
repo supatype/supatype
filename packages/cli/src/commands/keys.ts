@@ -1,7 +1,8 @@
 import type { Command } from "commander"
-import { readFileSync, existsSync } from "node:fs"
+import { readFileSync, existsSync, writeFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { signJwt } from "../jwt.js"
+import { error, plain } from "../ui/messages.js"
 
 export function registerKeys(program: Command): void {
   program
@@ -12,15 +13,13 @@ export function registerKeys(program: Command): void {
     .action((opts: { secret?: string; expYears: string }) => {
       const secret = opts.secret ?? resolveSecret()
       if (!secret) {
-        console.error(
-          "Error: JWT_SECRET not found. Set it in .env or pass --secret <value>",
-        )
+        error("JWT_SECRET not found. Set it in .env or pass --secret <value>")
         process.exit(1)
       }
 
       const expYears = parseInt(opts.expYears, 10)
       if (isNaN(expYears) || expYears < 1) {
-        console.error("Error: --exp-years must be a positive integer")
+        error("--exp-years must be a positive integer")
         process.exit(1)
       }
 
@@ -30,24 +29,83 @@ export function registerKeys(program: Command): void {
       const anonKey = signJwt({ iss: "supatype", role: "anon", iat: now, exp }, secret)
       const serviceKey = signJwt({ iss: "supatype", role: "service_role", iat: now, exp }, secret)
 
-      console.log("\nGenerated keys (valid for", expYears, "years):\n")
-      console.log("ANON_KEY=" + anonKey)
-      console.log("SERVICE_ROLE_KEY=" + serviceKey)
-      console.log(
-        "\nAdd these to your .env file. Do not commit .env to source control.",
-      )
+      plain(`\nGenerated keys (valid for ${expYears} years):\n`)
+      plain("ANON_KEY=" + anonKey)
+      plain("SERVICE_ROLE_KEY=" + serviceKey)
+      plain("\nAdd these to your .env file. Do not commit .env to source control.")
     })
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-export function resolveSecret(): string | undefined {
+/** Mint a long-lived anon + service_role JWT pair from a secret. */
+export function signKeyPair(
+  secret: string,
+  expYears = 10,
+): { anonKey: string; serviceKey: string } {
+  const now = Math.floor(Date.now() / 1000)
+  const exp = now + expYears * 365 * 24 * 60 * 60
+  return {
+    anonKey: signJwt({ iss: "supatype", role: "anon", iat: now, exp }, secret),
+    serviceKey: signJwt({ iss: "supatype", role: "service_role", iat: now, exp }, secret),
+  }
+}
+
+/**
+ * Generate keys from the JWT_SECRET found in `dir`'s .env (or env var) and
+ * rewrite the ANON_KEY / SERVICE_ROLE_KEY lines in that .env file in place.
+ * Returns the minted pair, or null if no secret could be resolved.
+ */
+export function generateAndWriteKeys(
+  dir: string,
+  expYears = 10,
+): { anonKey: string; serviceKey: string } | null {
+  const secret = resolveSecret(dir)
+  if (!secret) return null
+
+  const { anonKey, serviceKey } = signKeyPair(secret, expYears)
+
+  const envPath = resolve(dir, ".env")
+  if (existsSync(envPath)) {
+    let content = readFileSync(envPath, "utf8")
+    content = upsertEnvVar(content, "ANON_KEY", anonKey)
+    content = upsertEnvVar(content, "SERVICE_ROLE_KEY", serviceKey)
+    content = upsertEnvVar(content, "VITE_SUPATYPE_ANON_KEY", anonKey)
+    content = upsertEnvVar(content, "PUBLIC_SUPATYPE_ANON_KEY", anonKey)
+    content = upsertEnvVar(content, "EXPO_PUBLIC_SUPATYPE_ANON_KEY", anonKey)
+    const apiUrl = readEnvVar(content, "PUBLIC_SUPATYPE_URL") ?? readEnvVar(content, "API_EXTERNAL_URL")
+    if (apiUrl) {
+      content = upsertEnvVar(content, "VITE_SUPATYPE_URL", apiUrl)
+      content = upsertEnvVar(content, "EXPO_PUBLIC_SUPATYPE_URL", apiUrl)
+    }
+    writeFileSync(envPath, content, "utf8")
+  }
+
+  return { anonKey, serviceKey }
+}
+
+function upsertEnvVar(content: string, key: string, value: string): string {
+  const re = new RegExp(`^${key}=.*$`, "m")
+  if (re.test(content)) return content.replace(re, `${key}=${value}`)
+  const sep = content.endsWith("\n") || content.length === 0 ? "" : "\n"
+  return `${content}${sep}${key}=${value}\n`
+}
+
+function readEnvVar(content: string, key: string): string | undefined {
+  const re = new RegExp(`^${key}=(.*)$`, "m")
+  const match = re.exec(content)
+  if (!match?.[1]) return undefined
+  const value = match[1].trim()
+  return value.length > 0 ? value : undefined
+}
+
+export function resolveSecret(dir: string = process.cwd()): string | undefined {
   // 1. Check environment variable
   const fromEnv = process.env["JWT_SECRET"]
   if (fromEnv) return fromEnv
 
-  // 2. Parse .env file in cwd
-  const envPath = resolve(process.cwd(), ".env")
+  // 2. Parse .env file in the target directory
+  const envPath = resolve(dir, ".env")
   if (!existsSync(envPath)) return undefined
 
   try {
@@ -63,4 +121,44 @@ export function resolveSecret(): string | undefined {
     // ignore read errors
   }
   return undefined
+}
+
+/**
+ * Mint ANON_KEY / SERVICE_ROLE_KEY into `dir`'s .env only where they are
+ * missing or blank, and report which ones were filled.
+ *
+ * Deliberately not `generateAndWriteKeys`, which rewrites them unconditionally.
+ * That is right for `init`, where the project is new, and wrong for anything
+ * that runs on an existing deployment: reissuing the anon key on every start
+ * would lock out every client already holding one.
+ *
+ * A self-host `.env` copied from the template arrives with both keys empty, and
+ * the server refuses to serve without a service role key outside dev mode. That
+ * left the documented quick start unable to start at all.
+ */
+export function fillMissingKeys(dir: string, expYears = 10): string[] {
+  const envPath = resolve(dir, ".env")
+  if (!existsSync(envPath)) return []
+
+  const content = readFileSync(envPath, "utf8")
+  const blank = (name: string): boolean => {
+    const current = readEnvVar(content, name)
+    return current === undefined || current.trim() === ""
+  }
+
+  const needed = ["ANON_KEY", "SERVICE_ROLE_KEY"].filter(blank)
+  if (needed.length === 0) return []
+
+  const secret = resolveSecret(dir)
+  if (!secret) return []
+
+  const { anonKey, serviceKey } = signKeyPair(secret, expYears)
+  const minted: Record<string, string> = { ANON_KEY: anonKey, SERVICE_ROLE_KEY: serviceKey }
+
+  let next = content
+  for (const name of needed) {
+    next = upsertEnvVar(next, name, minted[name] as string)
+  }
+  writeFileSync(envPath, next, "utf8")
+  return needed
 }

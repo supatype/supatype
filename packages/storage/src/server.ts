@@ -1,6 +1,7 @@
 import { createServer as httpCreateServer, type IncomingMessage, type ServerResponse } from "node:http"
 import { authenticate, isServiceRole, type JwtPayload } from "./auth.js"
 import { ensureSchema } from "./db.js"
+import { withDatabaseRetry } from "./db-retry.js"
 import * as bucketRoutes from "./routes/buckets.js"
 import * as objectRoutes from "./routes/objects.js"
 import { getDefaultCorsHeaders } from "./middleware/cors.js"
@@ -82,7 +83,7 @@ route("PUT", "/bucket/:id", bucketRoutes.update, { requireServiceRole: true })
 route("DELETE", "/bucket/:id", bucketRoutes.remove, { requireServiceRole: true })
 route("POST", "/bucket/:id/empty", bucketRoutes.empty, { requireServiceRole: true })
 
-// Object routes — specific patterns must be registered before the wildcard upload route
+// Object routes: specific patterns must be registered before the wildcard upload route
 route("POST", "/object/list/:bucket", objectRoutes.listObjects, { requireAuth: true })
 route("POST", "/object/sign/:bucket/**", objectRoutes.createSignedUrl, { requireAuth: true })
 route("POST", "/object/:bucket/**", objectRoutes.upload, { requireAuth: true })
@@ -96,7 +97,11 @@ route("DELETE", "/object/:bucket", objectRoutes.removeObjects, { requireAuth: tr
 export function createServer() {
   let schemaReady = false
 
-  ensureSchema()
+  // Retried rather than fatal: a database that is not reachable *yet* is the normal case on a cold
+  // start, and the only thing that used to hide it was the Compose healthcheck on a `db` container.
+  // An external database has no such container, and any database can restart under a running stack.
+  // A non-connection failure still exits, see db-retry.ts for where that line is drawn.
+  withDatabaseRetry(() => ensureSchema(), { label: "storage schema" })
     .then(() => {
       schemaReady = true
       console.log("storage schema ready")
@@ -122,7 +127,7 @@ export function createServer() {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`)
     const method = req.method?.toUpperCase() ?? "GET"
 
-    // CORS preflight — use default (permissive) headers since we don't
+    // CORS preflight: use default (permissive) headers since we don't
     // know the bucket yet during OPTIONS. Per-bucket CORS is applied by
     // each route handler after resolving the bucket.
     if (method === "OPTIONS") {
@@ -150,7 +155,7 @@ export function createServer() {
     }
 
     try {
-      // Default CORS headers — route handlers may override with
+      // Default CORS headers: route handlers may override with
       // bucket-specific headers via applyCorsHeaders()
       for (const [k, v] of Object.entries(getDefaultCorsHeaders())) {
         res.setHeader(k, v)

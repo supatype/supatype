@@ -1,13 +1,16 @@
+import { withPublishing } from "../model-versioning.js"
 import type { Command } from "commander"
 import { readFileSync, writeFileSync, existsSync } from "node:fs"
 import { resolve } from "node:path"
-import { createInterface } from "node:readline"
+import { loadCloudCredentials, persistCloudSession } from "../cloud-credentials.js"
 import { loadProjectLink, migrateLegacyLinkFiles } from "../link.js"
 import { targetFetch } from "../target-client.js"
 import { registerEnvs, registerLinkOptions, runLinkAction } from "./link-helpers.js"
 import { resolveTarget, targetSchemaPush, schemaPgSchema } from "../resolve-target.js"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { schemaPathFromProject } from "../project-config.js"
+import { error, info, plain } from "../ui/messages.js"
+import { nextSteps } from "../ui/next-steps.js"
 
 interface CloudConfig {
   apiUrl: string
@@ -27,7 +30,7 @@ export function loadCloudConfig(cwd: string): CloudConfig | null {
   }
   return {
     apiUrl: link.cloudApiUrl ?? "https://api.supatype.com",
-    token: link.token ?? "",
+    token: link.token ?? loadCloudCredentials()?.accessToken ?? "",
     projectSlug: link.projectRef,
     ...(link.orgId !== undefined ? { orgId: link.orgId } : {}),
   }
@@ -43,19 +46,39 @@ function saveCloudConfig(cwd: string, config: CloudConfig): void {
 }
 
 async function cloudFetch<T>(config: CloudConfig, method: string, path: string, body?: unknown): Promise<T> {
+  const cwd = process.cwd()
+  const creds = loadCloudCredentials()
+  const refreshToken = creds?.refreshToken ?? loadProjectLink(cwd)?.refreshToken
   return targetFetch<T>(config.apiUrl, "/api/v1", {
     method,
     path,
-    body,
+    ...(body !== undefined ? { body } : {}),
     token: config.token,
-    orgId: config.orgId,
+    ...(config.orgId !== undefined ? { orgId: config.orgId } : {}),
+    ...(refreshToken
+      ? {
+          authRefresh: {
+            cloudApiUrl: config.apiUrl,
+            refreshToken,
+            onRefreshed: ({ accessToken, refreshToken: nextRefresh }) => {
+              persistCloudSession(cwd, {
+                apiUrl: config.apiUrl,
+                accessToken,
+                ...(nextRefresh !== undefined ? { refreshToken: nextRefresh } : {}),
+              })
+              config.token = accessToken
+            },
+          },
+        }
+      : {}),
   })
 }
 
 export function isCloudLinked(cwd: string): boolean {
   migrateLegacyLinkFiles(cwd)
   const link = loadProjectLink(cwd)
-  return Boolean(link?.kind === "cloud" && link.projectRef && link.token)
+  if (!(link?.kind === "cloud" && link.projectRef)) return false
+  return Boolean(link.token || loadCloudCredentials()?.accessToken)
 }
 
 export async function pushSchemaToLinkedProject(
@@ -65,33 +88,23 @@ export async function pushSchemaToLinkedProject(
   const config = loadConfig(cwd)
   const target = resolveTarget(cwd, { env: opts?.env })
   if (target.mode !== "cloud") {
-    console.error("Not linked to a cloud project. Run: supatype link --project <slug>")
+    error("Not linked to a cloud project. Run: supatype link --project <slug>")
     process.exit(1)
   }
 
-  const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
-  console.log(`Pushing schema to ${target.mode} project ${target.projectRef} (${target.environment})...`)
+  const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
+  info(`Pushing schema to ${target.mode} project ${target.projectRef} (${target.environment})...`)
 
   const result = await targetSchemaPush(target, ast, {
     force: opts?.force ?? true,
     schema: schemaPgSchema(cwd),
   })
 
-  console.log((result as { message?: string }).message ?? "Schema push completed.")
+  info((result as { message?: string }).message ?? "Schema push completed.")
 }
 
 export async function deploySchemaToLinkedProject(cwd: string, environment: string): Promise<void> {
   await pushSchemaToLinkedProject(cwd, { force: true, env: environment })
-}
-
-function prompt(question: string): Promise<string> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout })
-  return new Promise((resolvePrompt) => {
-    rl.question(question, (answer) => {
-      rl.close()
-      resolvePrompt(answer.trim())
-    })
-  })
 }
 
 export function registerCloud(program: Command): void {
@@ -128,18 +141,18 @@ export function registerCloud(program: Command): void {
       }>>(config, "GET", "/projects")
 
       if (projects.length === 0) {
-        console.log("No projects. Create one with: supatype projects create <name>")
+        info("No projects. Create one with: supatype projects create <name>")
         return
       }
 
-      console.log("\n  Name                    Slug                     Tier    Region    Status")
-      console.log("  " + "─".repeat(80))
+      plain("\n  Name                    Slug                     Tier    Region    Status")
+      plain("  " + "─".repeat(80))
       for (const p of projects) {
-        console.log(
+        plain(
           `  ${p.name.padEnd(24)}${p.slug.padEnd(25)}${p.tier.padEnd(8)}${p.region.padEnd(10)}${p.status}`,
         )
       }
-      console.log()
+      plain()
     })
 
   projectsCmd
@@ -150,16 +163,16 @@ export function registerCloud(program: Command): void {
     .action(async (name: string, opts: { tier: string; region: string }) => {
       const config = getCloudConfigOrExit()
 
-      console.log(`Creating project "${name}" (${opts.tier}, ${opts.region})...`)
+      info(`Creating project "${name}" (${opts.tier}, ${opts.region})...`)
 
       const project = await cloudFetch<{ slug: string; name: string; status: string }>(
         config, "POST", "/projects",
         { name, tier: opts.tier, region: opts.region },
       )
 
-      console.log(`\nProject created: ${project.name} (${project.slug})`)
-      console.log(`Status: ${project.status}`)
-      console.log(`\nTo link this project: supatype link --project ${project.slug}\n`)
+      info(`Project created: ${project.name} (${project.slug})`)
+      info(`Status: ${project.status}`)
+      nextSteps("To link this project:", [`supatype link --project ${project.slug}`])
     })
 
   projectsCmd
@@ -168,7 +181,7 @@ export function registerCloud(program: Command): void {
     .action(async (slug: string) => {
       const config = getCloudConfigOrExit()
       await cloudFetch(config, "POST", `/projects/${slug}/pause`)
-      console.log(`Project ${slug} paused.`)
+      info(`Project ${slug} paused.`)
     })
 
   projectsCmd
@@ -177,7 +190,7 @@ export function registerCloud(program: Command): void {
     .action(async (slug: string) => {
       const config = getCloudConfigOrExit()
       await cloudFetch(config, "POST", `/projects/${slug}/resume`)
-      console.log(`Project ${slug} resumed.`)
+      info(`Project ${slug} resumed.`)
     })
 
   const domainsCmd = program
@@ -190,7 +203,7 @@ export function registerCloud(program: Command): void {
     .action(async () => {
       const config = getCloudConfigOrExit()
       if (!config.projectSlug) {
-        console.error("Not linked to a project. Run: supatype link")
+        error("Not linked to a project. Run: supatype link")
         process.exit(1)
       }
 
@@ -199,18 +212,18 @@ export function registerCloud(program: Command): void {
       }>>(config, "GET", `/projects/${config.projectSlug}/domains`)
 
       if (domains.length === 0) {
-        console.log("No custom domains configured.")
+        info("No custom domains configured.")
         return
       }
 
-      console.log("\n  Domain                          Status               CNAME Target")
-      console.log("  " + "─".repeat(80))
+      plain("\n  Domain                          Status               CNAME Target")
+      plain("  " + "─".repeat(80))
       for (const d of domains) {
-        console.log(
+        plain(
           `  ${d.domain.padEnd(34)}${d.status.padEnd(21)}${d.cnameTarget}`,
         )
       }
-      console.log()
+      plain()
     })
 
   domainsCmd
@@ -219,7 +232,7 @@ export function registerCloud(program: Command): void {
     .action(async (domain: string) => {
       const config = getCloudConfigOrExit()
       if (!config.projectSlug) {
-        console.error("Not linked to a project. Run: supatype link")
+        error("Not linked to a project. Run: supatype link")
         process.exit(1)
       }
 
@@ -228,9 +241,9 @@ export function registerCloud(program: Command): void {
         { domain },
       )
 
-      console.log(`\nDomain added: ${result.domain}`)
-      console.log(`\n${result.instructions}`)
-      console.log(`\nAfter adding the CNAME record, verify with: supatype domains verify ${domain}\n`)
+      info(`Domain added: ${result.domain}`)
+      plain(`\n${result.instructions}`)
+      info(`After adding the CNAME record, verify with: supatype domains verify ${domain}`)
     })
 
   domainsCmd
@@ -239,12 +252,12 @@ export function registerCloud(program: Command): void {
     .action(async (domainId: string) => {
       const config = getCloudConfigOrExit()
       if (!config.projectSlug) {
-        console.error("Not linked to a project. Run: supatype link")
+        error("Not linked to a project. Run: supatype link")
         process.exit(1)
       }
 
       await cloudFetch(config, "DELETE", `/projects/${config.projectSlug}/domains/${domainId}`)
-      console.log("Domain removed.")
+      info("Domain removed.")
     })
 
   domainsCmd
@@ -253,7 +266,7 @@ export function registerCloud(program: Command): void {
     .action(async (domainId: string) => {
       const config = getCloudConfigOrExit()
       if (!config.projectSlug) {
-        console.error("Not linked to a project. Run: supatype link")
+        error("Not linked to a project. Run: supatype link")
         process.exit(1)
       }
 
@@ -261,7 +274,7 @@ export function registerCloud(program: Command): void {
         config, "POST", `/projects/${config.projectSlug}/domains/${domainId}/verify`,
       )
 
-      console.log(`Domain ${result.domain}: ${result.status}`)
+      info(`Domain ${result.domain}: ${result.status}`)
     })
 }
 
@@ -269,15 +282,18 @@ function getCloudConfigOrExit(): CloudConfig {
   const cwd = process.cwd()
   let config = loadCloudConfig(cwd)
   if (!config) {
+    const creds = loadCloudCredentials()
     const token =
       process.env["SUPATYPE_ACCESS_TOKEN"] ??
-      process.env["SUPATYPE_TOKEN"]
-    const apiUrl = process.env["SUPATYPE_API_URL"] ?? "https://api.supatype.com"
+      process.env["SUPATYPE_TOKEN"] ??
+      creds?.accessToken
+    const apiUrl =
+      process.env["SUPATYPE_API_URL"] ?? creds?.apiUrl ?? "https://api.supatype.com"
     if (!token) {
-      console.error("Not connected to Supatype Cloud. Run: supatype link, or set SUPATYPE_ACCESS_TOKEN.")
+      error("Not connected to Supatype Cloud. Run: supatype login (then supatype link), or set SUPATYPE_ACCESS_TOKEN.")
       process.exit(1)
     }
-    config = { apiUrl, token }
+    config = { apiUrl: apiUrl.replace(/\/$/, ""), token }
   }
   return config
 }

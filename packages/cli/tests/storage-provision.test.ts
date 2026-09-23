@@ -80,7 +80,7 @@ describe("provisionBuckets", () => {
 
     await provisionBuckets("http://localhost:54321/storage/v1", "key", [{ id: "photos", public: false }])
 
-    expect(warn).toHaveBeenCalledWith('[storage] Storage API unreachable — skipped bucket "photos"')
+    expect(warn).toHaveBeenCalledWith('[storage] Storage API unreachable, skipped bucket "photos"')
   })
 })
 

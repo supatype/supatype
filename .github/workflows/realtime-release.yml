@@ -1,0 +1,97 @@
+# Publish supatype-realtime standalone binaries to releases.supatype.com/realtime/
+name: Realtime release
+
+on:
+  push:
+    tags:
+      - "realtime-v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version string (e.g. 0.1.0)
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-amd64
+            runner: ubuntu-24.04
+            pkg_target: node22-linux-x64
+            output: supatype-realtime-linux-amd64
+          - platform: linux-arm64
+            runner: ubuntu-24.04
+            pkg_target: node22-linux-arm64
+            output: supatype-realtime-linux-arm64
+          - platform: darwin-amd64
+            runner: macos-14
+            pkg_target: node22-macos-x64
+            output: supatype-realtime-darwin-amd64
+          - platform: darwin-arm64
+            runner: macos-14
+            pkg_target: node22-macos-arm64
+            output: supatype-realtime-darwin-arm64
+          - platform: windows-amd64
+            runner: windows-latest
+            pkg_target: node22-win-x64
+            output: supatype-realtime-windows-amd64.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install and bundle realtime
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter @supatype/realtime build
+          node packages/realtime/scripts/build-release-bundle.mjs
+
+      - name: Package standalone binary
+        run: |
+          npx --yes @yao-pkg/pkg@6.6.0 packages/realtime/release-bundle/supatype-realtime-bundle.cjs --targets ${{ matrix.pkg_target }} --output ${{ matrix.output }}
+
+      - name: Upload to CDN
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.CDN_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CDN_AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.CDN_AWS_REGION }}
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#realtime-v}"
+          if [ -n "${{ inputs.version }}" ]; then VERSION="${{ inputs.version }}"; fi
+          EP="${{ secrets.CDN_ENDPOINT }}"
+          EP="${EP%/}"
+          BUCKET="${{ secrets.CDN_BUCKET }}"
+          BASE="s3://${BUCKET}/realtime/v${VERSION}"
+          aws s3 cp "${{ matrix.output }}" "${BASE}/${{ matrix.output }}" --endpoint-url "${EP}" --no-progress
+
+  publish-manifest:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Write realtime/latest.json
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.CDN_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CDN_AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.CDN_AWS_REGION }}
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#realtime-v}"
+          if [ -n "${{ inputs.version }}" ]; then VERSION="${{ inputs.version }}"; fi
+          EP="${{ secrets.CDN_ENDPOINT }}"
+          BUCKET="${{ secrets.CDN_BUCKET }}"
+          printf '{"version":"%s","date":"%s"}\n' "${VERSION}" "$(date -u +%Y-%m-%d)" > latest.json
+          aws s3 cp latest.json "s3://${BUCKET}/realtime/latest.json" --endpoint-url "${EP%/}" --cache-control "no-cache" --no-progress

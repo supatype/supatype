@@ -1,7 +1,8 @@
 {
   "name": "@supatype/plugin-sdk",
-  "version": "0.1.0",
-  "description": "Plugin SDK for building Supatype extensions — field types, composites, providers, and widgets",
+  "version": "0.1.5",
+  "license": "MIT",
+  "description": "Plugin SDK for building Supatype extensions, field types, composites, providers, and widgets",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -16,7 +17,11 @@
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
-  "keywords": ["supatype", "plugin", "sdk"],
+  "keywords": [
+    "supatype",
+    "plugin",
+    "sdk"
+  ],
   "devDependencies": {
     "@types/node": "^22",
     "typescript": "^5"
