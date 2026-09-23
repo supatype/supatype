@@ -2,7 +2,7 @@
 FROM denoland/deno:debian-2.2.0
 
 WORKDIR /app
-COPY deno.json main.ts ./
+COPY deno.json main.ts invocation.ts logging.ts ./
 
 ENV PORT=8001
 EXPOSE 8001
