@@ -157,6 +157,14 @@ export type Page = Model<{
   updated_at: Timestamp
 }, {
   versions: { drafts: true, keep: 20 }
+  /**
+   * Shared across every reader, because the read rule does not mention one.
+   *
+   * `Lte<"published_at", Now>` varies by row and by the clock, never by who is asking, so a single
+   * cached entry is correct for everybody. That is the case `public` exists to serve, and the one a
+   * classifier that only asks "does this depend on identity?" refuses by mistake.
+   */
+  cache: { enabled: true, maxTtl: 300, public: true, rows: true }
   access: {
     read: Lte<"published_at", Now>
     create: Role<"editor">
@@ -181,6 +189,7 @@ export type Speaker = Model<{
   updated_at: Timestamp
 }, {
   versions: true
+  cache: { enabled: true, maxTtl: 300, public: true, rows: true }
   access: {
     read: Lte<"published_at", Now>
     create: Role<"editor">
@@ -198,6 +207,8 @@ export type Room = Model<{
   created_at: Timestamp
   updated_at: Timestamp
 }, {
+  /** Unconditionally readable and almost never edited: the easy end of the same argument. */
+  cache: { enabled: true, maxTtl: 600, public: true, rows: true }
   access: {
     read: Public
     create: Role<"editor">
@@ -242,6 +253,14 @@ export type Talk = Model<{
    */
   validate: { title: "validate-talk-title" }
   indexes: [{ fields: ["day", "starts_at"] }]
+  /**
+   * The shortest ceiling here, because this is the model both front ends hammer.
+   *
+   * A ceiling, not a setting: Studio and the admin API may lower it or switch the table off, and
+   * may never raise it past this line or cache a model that declared nothing. The schema stays an
+   * honest description of what the system may do and an operator keeps a lever for an incident.
+   */
+  cache: { enabled: true, maxTtl: 120, public: true, rows: true }
   constraints: [
     Lte<"starts_at", "ends_at">,
   ]
@@ -255,7 +274,13 @@ export type Talk = Model<{
 
 export type Sponsor = Model<{
   id: UUID
-  name: string
+  /**
+   * Unique, because two sponsors with one name at one conference is a data error rather than a
+   * possibility. It is also what lets the seed converge: without a unique key there is nothing for
+   * `ON CONFLICT` to match, so every re-seed inserted another copy and the app rendered the same
+   * sponsor three times at three different tiers.
+   */
+  name: Unique<string>
   tier: "platinum" | "gold" | "community"
   /** Brand colour, so the plugin colour picker has somewhere honest to live. */
   brandColor: Optional<Color>
@@ -268,6 +293,7 @@ export type Sponsor = Model<{
   created_at: Timestamp
   updated_at: Timestamp
 }, {
+  cache: { enabled: true, maxTtl: 600, public: true, rows: true }
   access: {
     read: Lte<"published_at", Now>
     create: Role<"editor">
@@ -312,6 +338,15 @@ export type Ticket = Model<{
   created_at: Timestamp
   updated_at: Timestamp
 }, {
+  /**
+   * Cached per caller, and the one model here where `public` would be a data leak.
+   *
+   * `OwnerFrom<"authUser">` answers differently for every caller, so one shared entry would serve
+   * one attendee's ticket to the next. `enabled` without `public` is the common case and the safe
+   * one; asking for `public` here is refused at push, by name, because `access.read` is in this
+   * same object and can be read at the same time as the declaration.
+   */
+  cache: { enabled: true, maxTtl: 30, public: false }
   access: {
     read: OwnerFrom<"authUser">
     create: LoggedIn
@@ -349,6 +384,18 @@ export type ChatMessage = Model<{
    * only one direct SQL bypasses. Here for a rule a `CHECK` cannot state.
    */
   validate: { body: "validate-chat-body" }
+  /**
+   * No `cache` block, on purpose, and the only model here that says so.
+   *
+   * This is the table the lobby subscribes to. A response cache in front of a feed whose whole
+   * value is that it is current would serve a message list that is seconds stale while the socket
+   * delivers the row that contradicts it, and the two would disagree on screen. The absence is the
+   * declaration: a model with no `cache` block may not be cached by Studio, by the admin API or by
+   * anyone, which is what makes leaving it out a decision rather than an oversight.
+   *
+   * `read: LoggedIn` would also rule out `public` on its own. A public entry is shared with every
+   * caller including anonymous ones, and this table is not anon-readable.
+   */
   access: {
     read: LoggedIn
     create: LoggedIn
@@ -368,6 +415,7 @@ export type SiteSettings = Model<{
   updated_at: Timestamp
 }, {
   singleton: true
+  cache: { enabled: true, maxTtl: 3600, public: true, rows: true }
   access: {
     read: Public
     create: Role<"editor">

@@ -85,6 +85,23 @@ echo "==> What a browser cannot assert"
 (cd "$EXAMPLE_DIR" && SUPATYPE_URL="$BASE_URL" ANON_KEY="$ANON_KEY" npx tsx verify.ts)
 
 echo ""
+echo "==> What a browser can assert"
+# The half `verify.ts` cannot reach. It drives the API and says nothing about whether any of it
+# arrives on a screen: the app was rewritten from a five-tab demo harness into a conference app and
+# the whole change was visible only in a screenshot, which is not a test.
+#
+# Skipped rather than failed when Playwright's browser is not installed, because this script is
+# also run by hand on machines that have never downloaded one, and a missing browser is not a
+# regression in the example.
+if (cd "$ROOT_DIR/tests/e2e" && npx playwright install --dry-run chromium >/dev/null 2>&1); then
+  (cd "$ROOT_DIR/tests/e2e" && E2E_BASE_URL="$BASE_URL" npx playwright test specs/kitchen-sink-app.spec.ts) \
+    || fail "the attendee app's browser tests did not pass"
+  echo "  ok   the attendee app renders what the schema says it should"
+else
+  echo "  skip Playwright's chromium is not installed; run 'npx playwright install chromium'"
+fi
+
+echo ""
 echo "==> app.mode walk: static"
 status="$(http_status "$BASE_URL/")"
 [[ "$status" == "200" ]] || fail "GET / returned $status in static mode, expected the SPA"

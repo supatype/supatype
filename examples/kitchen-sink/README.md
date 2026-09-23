@@ -22,17 +22,33 @@ jobs, so it has never executed; every claim here is backed by code that typechec
 by assertions written to fail loudly, but not yet by a green run. The first dispatch or scheduled
 run is where that changes.
 
-`apps/app` (Vite SPA, `app.mode = "static"`) is the session-shaped half: auth through
-`@supatype/react-auth`'s prebuilt forms, `useQuery` against the published schedule, and in the
-lobby all three realtime paths — `postgres_changes` for what was written down, presence for who is
-here now, broadcast for a "typing…" that is deliberately not a row. The ticket screen covers
-per-row access (`OwnerFrom` with no client-side filter), `useFunction` for work this client cannot
-do (issuing gates on your token then writes with the service role), and a signed URL into a
-private bucket, which a public URL cannot reach. The media screen covers storage: upload, then the
-same object read back both as uploaded and transformed on read. The rules screen meets all three
-ways of refusing a value — a bound, a model constraint and a validator — on a model a signed-in
-caller may actually write, because a refusal nobody can trigger teaches nothing about how they
-differ.
+`apps/app` (Vite SPA, `app.mode = "static"`) is the session-shaped half, and it is organised by
+what an attendee does rather than by which API each screen exercises. **Programme** groups the
+published talks by day with their speaker, room and abstract; **Speakers** is the grid of who is
+talking; **Lobby** is the chat; **My ticket** is a ticket; **Sponsors** is who paid for the coffee;
+**Account** is where you change your picture.
+
+That reorganisation is the point rather than decoration. The screens used to be named after the
+surfaces they covered, including a **Media** tab that was a file input and a **Rules** tab that was
+three API descriptions with a *Try it* button beside each, under a `Proves: useQuery, relations,
+ordering` caption wedged into the navigation. It covered the same API and read as a test fixture,
+which is a poor advertisement for building anything with this. The explanation is still here,
+behind a **What this demonstrates** control on each screen, because reading the example is the
+point; it is simply no longer the chrome.
+
+The same surfaces are all still exercised, in the places an attendee would meet them. `useQuery`
+and relations build the programme. All three realtime paths are in the lobby: `postgres_changes`
+for what was written down, presence for who is here now, broadcast for a "typing…" that is
+deliberately not a row. Per-row access is the ticket (`OwnerFrom` with no client-side filter),
+alongside `useFunction` for work this client cannot do and a signed URL into a private bucket that
+a public URL cannot reach. Storage upload and transform-on-read are the profile picture. And the
+three ways of refusing a value are met by writing a message the schema will not accept, where the
+difference between them is visible: a bound and a constraint come back as database errors, while
+the validator names the field and says what to change.
+
+Every screen is built from `src/components/ui.tsx`, and no screen writes CSS of its own. The
+previous version hand-rolled markup against a stylesheet that had grown a class per view, so five
+screens had five type scales and no shared idea of a card.
 
 The storage and signed-URL paths close a gap nothing in this repository covered: `blog` declares
 buckets and never uploads, so before this the runtime path was typechecked and never run.
@@ -92,7 +108,24 @@ the stack and a `host.docker.internal` that resolves on a Linux runner, the same
 | Access | `Public`, `LoggedIn`, `Owner`, `OwnerFrom`, `Role`, and `Lte<"published_at", Now>` as the read rule |
 | Constraints | `Lte<"starts_at","ends_at">` on `Talk` and `Gte<Length<"body">, Literal<2>>` on `ChatMessage`, plus a composite index |
 | Publishing | `versions: { drafts, keep }` on `Page`, `Speaker` and `Talk` |
+| Caching | `cache: { enabled, maxTtl, public, rows }` on seven models, and deliberately absent on the eighth |
 | Singleton | `SiteSettings`, one row, edited in Studio |
+
+The cache declaration is on the model because that is the only place both halves of the decision
+are visible at once. `public` shares one entry with every caller, so it is correct for `Talk`,
+`Page`, `Speaker`, `Sponsor` and `Room`, whose read rules depend on a column and the clock but
+never on who is asking, and it is a data leak on `Ticket`, whose `OwnerFrom` rule answers
+differently per caller. `supatype push` refuses that pairing by name rather than leaving it to be
+noticed in production, and the admin API refuses it again at runtime.
+
+**`ChatMessage` declares no cache, and that is the entry worth reading.** It is the table the lobby
+subscribes to: a response cache in front of a feed whose whole value is being current would serve a
+stale list while the socket delivers the row contradicting it. A model with no `cache` block cannot
+be cached by Studio, the admin API or anyone, so leaving it out is a decision the schema records
+rather than something nobody got round to.
+
+Declarations are ceilings, never settings. `Talk` caps at 120 seconds; Studio can lower that or
+switch the table off mid-incident, and can never raise it or cache a model that declared nothing.
 
 `functions/` holds two edge functions: `ping`, which cannot fail for its own reasons and so tells
 you the worker itself is wrong, and `issue-ticket`, which gates on the caller's own token and then
@@ -121,10 +154,16 @@ separately, so a search box in Studio needs an engine carrying it.
 
 ```bash
 pnpm install
+cp .env.example .env # `supatype keys` needs a JWT_SECRET; it does not invent one
 pnpm keys            # mints ANON_KEY / SERVICE_ROLE_KEY into .env
 pnpm build:app       # app.mode is "static", so the SPA must exist before the stack serves it
 pnpm dev             # Postgres, the schema, the whole stack
 ```
+
+The `.env` copy is not optional and the order is not arbitrary. `supatype keys` reads
+`JWT_SECRET` and fails without one, and the SPA reads `VITE_SUPATYPE_ANON_KEY` at **build**
+time, so a build that runs before the keys exist ships `anonKey: undefined` and every request
+it makes is rejected by the gateway. Rebuild after re-minting keys.
 
 Then, in another terminal:
 
@@ -136,9 +175,15 @@ pnpm verify          # the assertions a browser cannot make
 The marketing site runs beside the stack rather than inside it:
 
 ```bash
+cp apps/marketing/.env.local.example apps/marketing/.env.local
+# paste ANON_KEY from .env into NEXT_PUBLIC_SUPATYPE_ANON_KEY
 pnpm mode:marketing && pnpm build:marketing
 pnpm --filter @supatype/example-kitchen-sink-marketing dev
 ```
+
+Next.js reads `apps/marketing/.env.local`, not the project root, and the CLI only writes
+`VITE_`, `PUBLIC_` and `EXPO_PUBLIC_` names, so that paste is manual. Skipping it leaves
+`anonKey` as the empty string, which reads as an anonymous caller with no key at all.
 
 `pnpm typecheck` covers all three TypeScript projects here — the schema and scripts, `functions/`,
 and `hooks/` — because the Deno-typed directories need their own configs and a config nobody runs

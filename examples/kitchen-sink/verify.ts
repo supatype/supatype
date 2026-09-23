@@ -14,6 +14,12 @@ import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { createClient } from "@supatype/client"
 
+/**
+ * From `.env`, which `pnpm verify` loads. 18473 is the first port `supatype dev` tries, not this
+ * project's: several examples share the range and each writes the one it got back to its own
+ * `.env`. Defaulting to 18473 without reading that file points these assertions at whichever other
+ * example is running, which passes or fails for reasons that have nothing to do with this one.
+ */
 const KONG_PORT = process.env["SUPATYPE_KONG_PORT"] ?? "18473"
 const URL = process.env["SUPATYPE_URL"] ?? `http://127.0.0.1:${KONG_PORT}`
 const DEADLINE_MS = Number(process.env["KITCHEN_SINK_DEADLINE_MS"] ?? 30_000)
@@ -56,6 +62,54 @@ async function main(): Promise<void> {
     !titles.includes("Unfinished thoughts on indexes"),
     "anon cannot read the unpublished talk",
     `saw ${JSON.stringify(titles)}`,
+  )
+
+  // The seed publishes seven talks across two days. A count rather than a spot-check, because the
+  // programme groups by day and a fixture that collapsed to one day would still pass the two
+  // assertions above while making the screen meaningless.
+  check(
+    (publicTalks ?? []).length >= 5,
+    "the programme has enough published talks to group",
+    `saw ${(publicTalks ?? []).length}`,
+  )
+
+  console.log("\n==> the surfaces the app renders, which nothing asserted before")
+  const { data: speakers, error: speakerError } = await anon.from("speaker").select()
+  if (speakerError) throw new Error(`reading speakers as anon: ${speakerError.message}`)
+  check((speakers ?? []).length >= 3, "speakers are readable and seeded", `saw ${(speakers ?? []).length}`)
+
+  // Localization asserted where it is decided rather than where it is displayed. The API hands back
+  // every language at once; a speaker seeded with only English must not acquire a French bio.
+  const ada = (speakers ?? []).find((s) => (s as { name: string }).name === "Ada Buckley") as
+    | { bio?: Record<string, string> | null }
+    | undefined
+  const rune = (speakers ?? []).find((s) => (s as { name: string }).name === "Rune Oyelaran") as
+    | { bio?: Record<string, string> | null }
+    | undefined
+  check(typeof ada?.bio?.["en"] === "string", "a seeded bio survives a re-seed", JSON.stringify(ada?.bio))
+  check(
+    rune?.bio?.["fr"] === undefined,
+    "an untranslated bio stays untranslated",
+    `saw ${JSON.stringify(rune?.bio)}`,
+  )
+
+  const { data: sponsors, error: sponsorError } = await anon.from("sponsor").select()
+  if (sponsorError) throw new Error(`reading sponsors as anon: ${sponsorError.message}`)
+  const sponsorNames = (sponsors ?? []).map((s) => (s as { name: string }).name)
+  // `Sponsor.name` is Unique, so a re-seed cannot duplicate a row. Without it the seed had no key
+  // to conflict on and every run inserted another copy, which the app then rendered three times.
+  check(
+    new Set(sponsorNames).size === sponsorNames.length,
+    "re-seeding does not duplicate sponsors",
+    `saw ${JSON.stringify(sponsorNames)}`,
+  )
+
+  const { data: settings, error: settingsError } = await anon.from("_global_site_settings").select()
+  if (settingsError) throw new Error(`reading site settings as anon: ${settingsError.message}`)
+  check(
+    (settings ?? []).length === 1,
+    "the singleton holds exactly one row",
+    `saw ${(settings ?? []).length}`,
   )
 
   console.log("\n==> a signed-in caller")
@@ -110,6 +164,11 @@ async function main(): Promise<void> {
   // through the socket, and a stack with healthy replication can still fail them.
   const room = `lobby:verify-${Date.now()}`
   const rx = anon.realtime.channel(room)
+  // A second client, because broadcast is delivery to *other* subscribers: the server does not
+  // echo to the sender, and there is no `self` option to ask it to, which matches every other
+  // implementation of this. Asserting it with one client asserted a loopback that is not offered,
+  // and failed for that reason rather than because broadcast was broken.
+  const tx = createClient({ url: URL, anonKey: key }).realtime.channel(room)
   const gotBroadcast = new Promise<boolean>((res) => {
     rx.onBroadcast("typing", () => res(true))
     setTimeout(() => res(false), DEADLINE_MS)
@@ -122,11 +181,16 @@ async function main(): Promise<void> {
     rx.subscribe((s) => { if (s === "SUBSCRIBED") res() })
     setTimeout(res, 15_000)
   })
+  await new Promise<void>((res) => {
+    tx.subscribe((s) => { if (s === "SUBSCRIBED") res() })
+    setTimeout(res, 15_000)
+  })
   rx.track({ who: "verify" })
-  rx.broadcast("typing", { who: "verify" })
+  tx.broadcast("typing", { who: "verify-sender" })
   check(await gotPresence, "a presence join is delivered", `within ${DEADLINE_MS}ms`)
-  check(await gotBroadcast, "a broadcast is delivered", `within ${DEADLINE_MS}ms`)
+  check(await gotBroadcast, "a broadcast reaches another subscriber", `within ${DEADLINE_MS}ms`)
   rx.unsubscribe()
+  tx.unsubscribe()
 
   console.log("\n==> storage: upload, transform, remove")
   const bucket = anon.storage.from("speaker-headshots")
