@@ -56,9 +56,13 @@ import { registerDevShutdown } from "../dev-shutdown.js"
 import { patchRouteManifest } from "../route-manifest.js"
 import { resolveRealtimeLaunch } from "../realtime-launch.js"
 import { writeAppViteEnv } from "../app-vite-env.js"
-import { ensureValkeySidecar, stopValkeySidecar } from "../valkey-sidecar.js"
+import { ensureValkeySidecar, probeTcp, stopValkeySidecar } from "../valkey-sidecar.js"
 import {
+  firstFreePort,
   initdb,
+  KEYSPACE_PORT_BASE,
+  KEYSPACE_PORT_SPAN,
+  nativeKeyspaceLibraryPresent,
   nativeMaskLibraryPresent,
   start as pgStart,
   stop as pgStop,
@@ -194,13 +198,39 @@ export function registerDev(program: Command): void {
       // pgBinDir is set on the native path and used to add DLL search path for
       // PostgREST on Windows (PostgREST links against libpq + SSL from MinGW).
       let pgBinDir: string | null = null
+      // The port the native Postgres serves RESP on, or null when this archive
+      // has no pg_keyspace and the Valkey sidecar is what the cache talks to.
+      let keyspacePort: number | null = null
 
       {
         // native: resolve pg bin dir and manage with pg_ctl
         pgBinDir = await resolvePgBinDir(config)
         const dataDir = config.database.data_dir ?? join(stateRoot, "data")
         mkdirSync(dataDir, { recursive: true })
-        const pgOpts = { pgBinDir, dataDir, port: pgPort, logPath: join(logsDir, "postgres.log") }
+        // The RESP keyspace, when this archive carries it: one process instead
+        // of a Postgres and a Valkey container. The port is chosen rather than
+        // fixed because 6379 is the first thing a developer's own Redis or a
+        // leftover sidecar takes, and a keyspace that cannot bind its port
+        // fails inside the postmaster log where nobody is looking.
+        keyspacePort = nativeKeyspaceLibraryPresent(pgBinDir)
+          ? await firstFreePort(KEYSPACE_PORT_BASE, KEYSPACE_PORT_SPAN)
+          : null
+        if (nativeKeyspaceLibraryPresent(pgBinDir) && keyspacePort === null) {
+          console.warn(
+            `[supatype] ⚠  No free port in ${KEYSPACE_PORT_BASE}-${KEYSPACE_PORT_BASE + KEYSPACE_PORT_SPAN - 1} ` +
+              "for the Postgres keyspace — starting without it.",
+          )
+        }
+
+        const pgOpts = {
+          pgBinDir,
+          dataDir,
+          port: pgPort,
+          logPath: join(logsDir, "postgres.log"),
+          ...(keyspacePort !== null
+            ? { keyspacePort, keyspaceDatabase: projectName }
+            : {}),
+        }
 
         console.log("[supatype] Initialising Postgres data directory...")
         initdb(pgOpts)
@@ -400,7 +430,27 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
               ? "ses"
               : "smtp"
 
-      const valkeySidecar = ensureValkeySidecar(projectName)
+      // Postgres serves RESP itself when the archive had pg_keyspace and the
+      // port came up. The probe is not ceremony: shared memory limits, a
+      // preload ordering mistake or a port taken between the check and the
+      // start all leave a Postgres that is running and a keyspace that is not,
+      // and the difference is a cache that silently never hits.
+      const nativeKeyspaceAddr =
+        keyspacePort !== null && (await probeTcp("127.0.0.1", keyspacePort))
+          ? `127.0.0.1:${keyspacePort}`
+          : null
+      if (keyspacePort !== null && nativeKeyspaceAddr === null) {
+        console.warn(
+          `[supatype] ⚠  Postgres has pg_keyspace but is not serving RESP on :${keyspacePort} — ` +
+            "see logs/postgres.log. Falling back to the Valkey sidecar.",
+        )
+      }
+      if (nativeKeyspaceAddr) {
+        console.log(`[supatype] Keyspace served by Postgres (${nativeKeyspaceAddr}).`)
+      }
+      const valkeySidecar = nativeKeyspaceAddr
+        ? { addr: nativeKeyspaceAddr, containerName: null, started: false }
+        : ensureValkeySidecar(projectName)
 
       const serverEnv: Record<string, string> = {
         // supatype-server outer layer
