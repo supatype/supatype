@@ -55,7 +55,7 @@ Pin all `@supatype/*` packages to the **same version** to avoid client/type skew
 
 Omit `versions` in `supatype.config.ts` so Docker pulls `:latest` images.
 
-**Scaffold reference:** `supatype init --mode standalone` (static + `vite_dev_url`). Maintainer fixture: `examples/self-host/` in the Supatype monorepo. See [references/frontend.md](references/frontend.md).
+**Scaffold reference:** `supatype init --mode standalone` (static + `vite_dev_url`). Reference fixture: [`examples/self-host/`](https://github.com/supatype/supatype/tree/main/examples/self-host) in the Supatype repository. See [references/frontend.md](references/frontend.md).
 
 ## Daily workflow
 
