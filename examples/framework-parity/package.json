@@ -1,0 +1,45 @@
+{
+  "name": "@supatype/example-framework-parity",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The same screen in Vue, Svelte and Solid, against one schema — so the diff between them is the parity documentation",
+  "scripts": {
+    "dev": "supatype dev",
+    "dev:vue": "vite --config vite.vue.config.ts",
+    "dev:svelte": "vite --config vite.svelte.config.ts",
+    "dev:solid": "vite --config vite.solid.config.ts",
+    "build": "pnpm build:vue && pnpm build:svelte && pnpm build:solid",
+    "build:vue": "vite build --config vite.vue.config.ts",
+    "build:svelte": "vite build --config vite.svelte.config.ts",
+    "build:solid": "vite build --config vite.solid.config.ts",
+    "mode:vue": "supatype app add --static ./dist/vue",
+    "mode:svelte": "supatype app add --static ./dist/svelte",
+    "mode:solid": "supatype app add --static ./dist/solid",
+    "push": "supatype push --yes",
+    "keys": "supatype keys",
+    "generate": "supatype generate",
+    "typecheck": "tsc -p tsconfig.json --noEmit && vue-tsc -p tsconfig.vue.json --noEmit && svelte-check --tsconfig tsconfig.svelte.json && tsc -p tsconfig.solid.json --noEmit && tsc -p functions/tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@supatype/cli": "workspace:*",
+    "@supatype/client": "workspace:*",
+    "@supatype/solid": "workspace:*",
+    "@supatype/svelte": "workspace:*",
+    "@supatype/types": "workspace:*",
+    "@supatype/vue": "workspace:*",
+    "solid-js": "^1.9.0",
+    "svelte": "^5.0.0",
+    "vue": "^3.5.0"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.0.0",
+    "@types/node": "^22",
+    "@vitejs/plugin-vue": "^5.2.0",
+    "svelte-check": "^4.0.0",
+    "typescript": "^5",
+    "vite": "^6.0.0",
+    "vite-plugin-solid": "^2.11.0",
+    "vue-tsc": "^2.2.0"
+  }
+}

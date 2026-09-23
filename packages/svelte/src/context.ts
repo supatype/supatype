@@ -3,7 +3,17 @@ import type { SupatypeClient, AnyDatabase } from "@supatype/client"
 
 const SUPATYPE_KEY = Symbol("supatype")
 
-export function setSupatypeClient(client: SupatypeClient): void {
+/**
+ * Generic in the database, like its getter.
+ *
+ * It used to take a bare `SupatypeClient`, which defaults to `AugmentedDatabase`, so passing the
+ * typed client a project actually has — `createClient<Database>(…)` — was a type error at the one
+ * call every Svelte app makes. The only way through was a cast in user code, which then threw away
+ * the row types the client was carrying.
+ */
+export function setSupatypeClient<TDatabase extends AnyDatabase = AnyDatabase>(
+  client: SupatypeClient<TDatabase>,
+): void {
   setContext(SUPATYPE_KEY, client)
 }
 
