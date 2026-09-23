@@ -31,6 +31,12 @@ jobs:
       SUPATYPE_SERVER_IMAGE: supatype/server:latest
       SUPATYPE_REALTIME_IMAGE: supatype/realtime:ci-dev
       SUPATYPE_CONTROL_PLANE_IMAGE: supatype/control-plane:ci-dev
+      # Built from this checkout, below, rather than pulled. The published tag broke on a
+      # `COPY deno.json main.ts ./` that left out the modules main.ts imports, and this job pulling
+      # it meant five edge-function tests started failing here on a change that touched none of
+      # them, while the Dockerfile fix sitting in the same tree went unused. The `edge-functions`
+      # jobs already build it; a job that invokes functions should test the worker it ships.
+      SUPATYPE_FUNCTIONS_WORKER_IMAGE: supatype/functions-worker:ci
 
     steps:
       - uses: actions/checkout@v4
@@ -77,6 +83,10 @@ jobs:
             || { echo "::error::Generated types are stale. Run 'supatype generate' in the example above and commit the result."; exit 1; }
         env:
           SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
+
+      - name: Build functions-worker from source
+        run: |
+          docker build -t supatype/functions-worker:ci -f packages/functions-worker/Dockerfile packages/functions-worker
 
       - name: Run supatype dev integration tests
         run: bash tests/integration/scripts/integration-test.sh --skip-build
