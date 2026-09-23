@@ -156,6 +156,22 @@ export class BucketClient {
     return { data: { publicUrl } }
   }
 
+  /**
+   * Resolve what the storage API returned against this client's base URL.
+   *
+   * `getPublicUrl` hands back something fetchable; this used to hand back the server's response
+   * verbatim, and the server answers with a path (`/object/sign/...`). So one of the two URL
+   * methods returned a URL and the other returned half of one, which fails at the caller as
+   * `TypeError: Failed to parse URL` rather than anywhere near here.
+   *
+   * Absolute answers are passed through untouched, so a deployment whose storage API returns a
+   * full URL (a CDN, a signed S3 link) is not mangled by being prefixed a second time.
+   */
+  private absoluteObjectUrl(value: string): string {
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) return value
+    return `${this.url.replace(/\/$/, "")}/${value.replace(/^\//, "")}`
+  }
+
   async createSignedUrl(
     path: string,
     expiresIn: number,
@@ -170,7 +186,7 @@ export class BucketClient {
       return { data: null, error: { message: String(err["message"] ?? err["error"] ?? "Failed to create signed URL"), status: res.status } }
     }
     const json = await res.json() as { signedURL: string }
-    return { data: { signedUrl: json.signedURL }, error: null }
+    return { data: { signedUrl: this.absoluteObjectUrl(json.signedURL) }, error: null }
   }
 
   async createSignedUrls(
