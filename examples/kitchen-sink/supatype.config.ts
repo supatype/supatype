@@ -3,13 +3,14 @@ import { defineConfig } from "@supatype/cli"
 /**
  * One project, two front ends.
  *
- * `app.mode` is a single value — the server serves one thing at `/` — so the two apps take turns
+ * `app.mode` is a single value, the server serves one thing at `/`, so the two apps take turns
  * rather than running side by side. That is not a limitation to work around: the mode switch is
- * itself a feature, and `pnpm verify:modes` asserts all three.
+ * itself a feature, and `tests/integration/scripts/kitchen-sink-e2e.sh` asserts all three.
  *
- * Day to day, `pnpm dev:app` and `pnpm dev:marketing` write `supatype.local.config.ts`
- * (gitignored, deep-merged) to pick which one you are working on. The committed default is the
- * SPA, because it is the deployment most projects ship.
+ * Day to day, `pnpm mode:app`, `pnpm mode:marketing` and `pnpm mode:none` pick which one you are
+ * working on. Each is a real `supatype app` invocation, so they rewrite this file in place rather
+ * than layering a local override; expect a dirty config after switching. The committed default is
+ * the SPA, because it is the deployment most projects ship.
  */
 export default defineConfig({
   project: { name: "kitchen-sink" },
