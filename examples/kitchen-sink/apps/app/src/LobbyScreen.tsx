@@ -155,7 +155,7 @@ export function LobbyScreen({ userId, email }: { userId: string; email: string }
               </p>
             )}
             {live.map((message) => {
-              const mine = message.authUser_id === userId
+              const mine = message.auth_user_id === userId
               const who = message.authorName ?? (mine ? me : "attendee")
               return (
                 <div
