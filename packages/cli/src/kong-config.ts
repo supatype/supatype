@@ -19,7 +19,7 @@ export interface KongDeclarativeOptions {
   /** See {@link RuntimeRouteOptions.studioStripPath}. */
   studioStripPath?: boolean | undefined
   /**
-   * When set, append a global Kong `acme` plugin (Let's Encrypt) with Redis/Valkey
+   * When set, append a global Kong `acme` plugin (Let's Encrypt) with RESP
    * storage so the self-host gateway provisions and renews TLS automatically.
    */
   acme?: { email: string; domain: string; redisHost: string } | undefined

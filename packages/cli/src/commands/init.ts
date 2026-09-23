@@ -1511,7 +1511,7 @@ function printNextSteps(args: {
       selfHostSteps.push("supatype self-host compose up -d   # Kong provisions HTTPS automatically")
       selfHostSteps.push(`Your Supatype platform goes live at https://${domain}`)
       selfHostSteps.push(
-        "Your app, REST, Auth, Storage, Realtime, Functions, and Studio, all behind one HTTPS domain (certs persist in valkey-data)",
+        "Your app, REST, Auth, Storage, Realtime, Functions, and Studio, all behind one HTTPS domain (certificates outlive restarts)",
       )
     } else {
       selfHostSteps.push(

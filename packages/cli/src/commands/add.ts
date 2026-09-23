@@ -101,5 +101,5 @@ function printDomainNextSteps(cwd: string, domain: string): void {
     `Platform URL: https://${domain}`,
   ])
   plain("  App, REST, Auth, Storage, Realtime, Functions, and Studio, one HTTPS domain.")
-  plain("  Certificates persist in the valkey-data volume.\n")
+  plain("  Certificates outlive restarts — in the keyspace's durable store, or the valkey-data volume.\n")
 }

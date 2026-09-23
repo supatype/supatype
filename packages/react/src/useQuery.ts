@@ -19,7 +19,7 @@ export interface UseQueryOptions {
   enabled?: boolean | undefined
   /** Re-fetch interval in milliseconds */
   refetchInterval?: number | undefined
-  /** In-memory GET cache; pass `{ server: true }` for Valkey-backed server cache */
+  /** In-memory GET cache; pass `{ server: true }` to cache the response on the server too */
   cache?: QueryCacheOptions | undefined
   /**
    * Read the pending draft instead of what is published.

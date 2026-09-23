@@ -133,7 +133,7 @@ export class QueryBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
     }
   }
 
-  /** Enable GET caching. Use `{ server: true }` for Valkey-backed server cache. */
+  /** Enable GET caching. Use `{ server: true }` to cache the response on the server too. */
   cache(options: QueryCacheOptions): this {
     this.cacheOptions = options
     return this
