@@ -22,6 +22,7 @@ import {
 } from "./project-config.js"
 import { syncManifestHooks, writeHooksModule } from "./model-hooks.js"
 import { syncRowCacheEnv } from "./model-cache.js"
+import { anonKeyEnvUpdates } from "./commands/keys.js"
 import { signJwt } from "./jwt.js"
 import { ensureDevDbPort, ensureKongPort } from "./dev-ports.js"
 import { handleComposeProjectRename } from "./compose-rename.js"
@@ -290,13 +291,13 @@ export function upsertDevComposeEnv(
     ...seedMissingLocalSecrets(cwd),
     // Project configuration, seeded not overwritten, see seedMissingDatabaseIdentity.
     ...seedMissingDatabaseIdentity(cwd),
-    ANON_KEY: anonKey,
-    SERVICE_ROLE_KEY: serviceRoleKey,
-    PUBLIC_SUPATYPE_ANON_KEY: anonKey,
-    VITE_SUPATYPE_ANON_KEY: anonKey,
-    EXPO_PUBLIC_SUPATYPE_ANON_KEY: anonKey,
-    PUBLIC_SUPATYPE_URL: apiUrl,
-    EXPO_PUBLIC_SUPATYPE_URL: apiUrl,
+    // Shared with `supatype keys --write`, so a front end's prefix cannot be written by one and
+    // forgotten by the other. See `anonKeyEnvUpdates`.
+    //
+    // This list used to live here as well, and the two had already drifted: `dev` wrote
+    // PUBLIC_ and EXPO_PUBLIC_ URLs and no VITE_SUPATYPE_URL, so a Vite app whose `.env` had only
+    // ever been touched by `supatype dev` built against an empty string.
+    ...anonKeyEnvUpdates(anonKey, serviceRoleKey, apiUrl),
     SUPATYPE_KONG_PORT: String(kongPort),
     API_EXTERNAL_URL: apiUrl,
     SITE_URL: apiUrl,
