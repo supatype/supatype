@@ -43,6 +43,17 @@ const SEAWEEDFS_IMAGE =
   "chrislusf/seaweedfs:4.46@sha256:08d516132314207d10c8e37cbffc1f32b147d870169688734cc61c6231625b62"
 
 /** Credentials the object store is configured with and the storage service is handed. */
+/**
+ * The prefix Kong's ACME plugin stores its certificates under.
+ *
+ * Not a guess and not configurable: the plugin prefixes every key it writes
+ * with this and enforces it in its own `reserved_words.lua`, so it is the one
+ * durable thing in a keyspace that is otherwise a cache. Verified on a live
+ * instance — both ACME keys survived `kill -9` with only this prefix named
+ * durable, and a response-cache key beside them did not.
+ */
+const ACME_KEY_PREFIX = "kong_acme:"
+
 const OBJECT_STORE_ACCESS_KEY = "supatype"
 const OBJECT_STORE_SECRET_KEY = "supatype-secret"
 
@@ -425,7 +436,16 @@ ${seaweedPorts}`
     ? `      - "80:8000"
       - "443:8443"`
     : `      - "\${SUPATYPE_KONG_PORT:-18473}:8000"`
-  const valkeyBlock = `
+  // The RESP server the response cache and Kong's ACME certificates use.
+  // Either a Valkey sidecar, or pg_keyspace inside the Postgres container --
+  // one stateful service instead of two.
+  const keyspaceInPg = config.cache?.provider === "pg_keyspace"
+  const respHost = keyspaceInPg ? "db" : "valkey"
+  const valkeyBlock = keyspaceInPg
+    ? `  # No \`valkey\` service: cache.provider is "pg_keyspace", so the RESP keyspace is
+  # served by the \`db\` container on :6379. See extensions/pg_keyspace in supatype/postgres.
+`
+    : `
   valkey:
     image: \${SUPATYPE_VALKEY_IMAGE:-valkey/valkey:8-alpine}
     command: ["valkey-server", "--appendonly", "yes"]
@@ -434,7 +454,9 @@ ${seaweedPorts}`
     volumes:
       - valkey-data:/data
 `
-  const kongValkeyDepends = "\n      - valkey"
+  // With the keyspace inside Postgres, waiting on `db` is already what every
+  // other service does, so Kong needs no extra dependency of its own.
+  const kongValkeyDepends = keyspaceInPg ? "" : "\n      - valkey"
   const tlsHintComment = tlsEnabled
     ? ""
     : `  # HTTPS is off. To enable automatic TLS (Let's Encrypt) for production, set in supatype.config.ts:
@@ -444,8 +466,7 @@ ${seaweedPorts}`
   // An external database is not ours to declare a volume for.
   const volumesBlock = `volumes:
 ${external ? "" : "  db-data:\n"}  storage-data:
-  valkey-data:
-`
+${keyspaceInPg ? "" : "  valkey-data:\n"}`
 
   // `depends_on` for the services that talk to Postgres. With an external database there is no
   // container to wait on, so the clause disappears entirely and each service retries on connect
@@ -490,6 +511,66 @@ ${dbDependency}`
     : ""
   const realtimeServerEnv = realtime ? "      SUPATYPE_REALTIME_URL: http://realtime:4000" : ""
 
+  // pg_keyspace registers background workers and requests shared memory at
+  // postmaster start, so it has to be in `shared_preload_libraries` -- there is
+  // no runtime toggle. The image turns it on from the environment
+  // (SUPATYPE_KEYSPACE_ENABLED) and writes the configuration itself, which is
+  // why this does not restate the preload list: the entrypoint appends
+  // pg_keyspace to the image's own list, in the right place (before
+  // supatype_mask, so the mask stays outermost and the image's
+  // pg_keyspace.require_mask = on is satisfied rather than refusing to serve).
+  // Restating it here would be a copy that goes stale the first time the image
+  // adds a library.
+  //
+  // Durability is `ephemeral` for everything, with ACME the one exception.
+  // A response cache that went through the WAL would put this stack's busiest
+  // write on disk to keep a copy of something that expires in seconds; a
+  // certificate that did not survive `docker compose restart db` would be
+  // re-issued against Let's Encrypt's rate limits, or fail. So the default is
+  // the cheap one and the certificates are named.
+  //
+  // `kong_acme:` is not a guess. Kong's ACME plugin prefixes every key it
+  // stores with it and enforces that prefix in its own reserved_words.lua;
+  // proven on a live instance, where both ACME keys survived `kill -9` under
+  // this exact configuration and the response-cache key did not.
+  //
+  // It is set whether or not TLS is on today. The override costs nothing when
+  // no key matches it, and a stack that turns TLS on later should not need a
+  // database restart before its certificates are safe to store.
+  const durablePrefixes = config.cache?.durablePrefixes ?? []
+  const durabilityOverrides = [ACME_KEY_PREFIX, ...durablePrefixes]
+    .map((prefix) => `${prefix}=durable`)
+    .join(", ")
+
+  // Sizing is shared memory, reserved at postmaster start whether or not the
+  // cache is used, so the defaults are a self-hosted stack's floor rather than
+  // the extension's own (1M keys x 512 B reserves ~689 MiB per worker before
+  // rings and row cache). These are measured on a live PG16 build, not derived:
+  // this profile reserves ~235 MiB, of which ~16 MiB is a fixed row-cache
+  // directory that rowcache_mb does not describe and cannot be declined.
+  const keyspaceDbEnv = keyspaceInPg
+    ? `      # The RESP keyspace, in place of a Valkey sidecar. The image writes
+      # /etc/postgresql-custom/pg_keyspace.conf from these before any server starts.
+      SUPATYPE_KEYSPACE_ENABLED: "1"
+      # Durable keys are rows in this database; without it they land in \`postgres\`.
+      SUPATYPE_KEYSPACE_DATABASE: \${POSTGRES_DB:-supatype}
+      SUPATYPE_KEYSPACE_DURABILITY: ephemeral
+      SUPATYPE_KEYSPACE_DURABILITY_OVERRIDES: "${durabilityOverrides}"
+      SUPATYPE_KEYSPACE_KEYS: "200000"
+      SUPATYPE_KEYSPACE_RING_MB: "16"
+      SUPATYPE_KEYSPACE_ROWCACHE_MB: "64"
+`
+    : ""
+
+  // Not published to the host: the keyspace is reachable to the compose network
+  // (server, Kong) and nothing else. A RESP port on a public interface is an
+  // unauthenticated read of every cached response.
+  const keyspaceExpose = keyspaceInPg
+    ? `    expose:
+      - "6379"
+`
+    : ""
+
   const dbServiceBlock = external
     ? `  # No \`db\` service: database.external points this stack at a Postgres it does not manage.
   # Every service reads \${DATABASE_URL} from .env, and \`supatype db check\` reports what that
@@ -503,7 +584,7 @@ ${dbDependency}`
       POSTGRES_DB: \${POSTGRES_DB:-supatype}
       # Read by the image's init to password the \`authenticator\` role PostgREST connects as.
       AUTHENTICATOR_PASSWORD: \${AUTHENTICATOR_PASSWORD:?AUTHENTICATOR_PASSWORD is missing from .env}
-${dbPorts}    volumes:
+${keyspaceDbEnv}${dbPorts}${keyspaceExpose}    volumes:
       - db-data:/var/lib/postgresql/data
     healthcheck:
       # -h 127.0.0.1 forces TCP. Without it \`pg_isready\` uses the Unix socket, which the
@@ -641,7 +722,7 @@ ${serverPorts}    volumes:
       SUPATYPE_FUNCTIONS_WORKER_URL: http://functions-worker:8001
 ${realtimeServerEnv}
       SUPATYPE_CONTROL_PLANE_URL: http://control-plane:8080
-      SUPATYPE_VALKEY_ADDR: valkey:6379
+      SUPATYPE_VALKEY_ADDR: ${respHost}:6379
 ${appEnv}
       SUPATYPE_API_HOST: 0.0.0.0
       SUPATYPE_API_PORT: 9999
@@ -674,9 +755,7 @@ ${appEnv}
       SUPATYPE_DISABLE_SIGNUP: \${DISABLE_SIGNUP:-false}
 ${devLocal ? "      STUDIO_OPEN_DEV: \"1\"\n" : ""}
     depends_on:
-${dbDependencyClause}      valkey:
-        condition: service_started
-      postgrest:
+${dbDependencyClause}${keyspaceInPg ? "" : "      valkey:\n        condition: service_started\n"}      postgrest:
         condition: service_started
       storage:
         condition: service_started
@@ -937,8 +1016,18 @@ export function writeSelfHostCompose(
         studioServiceUrl: COMPOSE_STUDIO_HOST_URL,
         studioStripPath: false,
       }),
+      // Kong stores its certificates wherever the RESP server is. With
+      // pg_keyspace that is the database container, and they are durable
+      // there because the keyspace defaults to durable and nothing names
+      // Kong's keys as an exception.
       ...(tlsEnabled && domain && acmeEmail
-        ? { acme: { email: acmeEmail, domain, redisHost: "valkey" } }
+        ? {
+            acme: {
+              email: acmeEmail,
+              domain,
+              redisHost: config.cache?.provider === "pg_keyspace" ? "db" : "valkey",
+            },
+          }
         : {}),
     }),
     "utf8",

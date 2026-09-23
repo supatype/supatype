@@ -100,6 +100,39 @@ export interface SupatypeProjectConfig {
       provider?: "kong" | "none"
     }
   }
+  /**
+   * Where the REST response cache and Kong's ACME certificates live.
+   *
+   * Both speak RESP, so this is a choice of server rather than of feature.
+   */
+  cache?: {
+    /**
+     * "valkey" (default) = a Valkey sidecar container.
+     * "pg_keyspace"      = the RESP keyspace inside the Postgres container, so
+     *                      the stack runs one stateful service instead of two.
+     *
+     * pg_keyspace needs `shared_preload_libraries`, which is a property of the
+     * Postgres this stack starts — so it is only available when Supatype
+     * provisions the database. With `database.external` there is no container
+     * to configure and the setting is rejected rather than ignored.
+     */
+    provider?: "valkey" | "pg_keyspace"
+    /**
+     * Extra key prefixes to persist when `provider` is "pg_keyspace".
+     *
+     * The keyspace is a cache: everything is ephemeral, living in shared
+     * memory and not surviving a restart of the database. The exception is
+     * Kong's ACME certificates, which are always kept — you do not have to
+     * name them, and re-issuing them on every restart would meet Let's
+     * Encrypt's rate limits.
+     *
+     * List a prefix here only for something you are storing yourself that
+     * must outlive a restart. Each durable write goes through the WAL, which
+     * is the cost being avoided everywhere else. Each entry is a prefix of the
+     * key as stored — see `pg_keyspace.durability_overrides`.
+     */
+    durablePrefixes?: string[]
+  }
   app: {
     /**
      * How the root path "/" is handled by supatype-server.
@@ -486,8 +519,52 @@ export function validateProjectConfig(raw: unknown, filename: string): SupatypeP
   }
 
   validateExternalDatabase(cfg, filename)
+  validateCache(cfg, filename)
 
   return raw as SupatypeProjectConfig
+}
+
+/**
+ * `cache.provider = "pg_keyspace"` describes how the Postgres this stack
+ * starts is configured, so it cannot be honoured against a database Supatype
+ * does not manage. Rejected rather than silently falling back to Valkey: a
+ * stack that quietly runs the thing you switched away from is worse than one
+ * that will not start.
+ */
+function validateCache(cfg: Record<string, unknown>, filename: string): void {
+  const cache = cfg["cache"] as Record<string, unknown> | undefined
+  if (!cache) return
+  const provider = cache["provider"]
+  if (provider !== undefined && provider !== "valkey" && provider !== "pg_keyspace") {
+    throw new Error(
+      `${filename}: cache.provider must be "valkey" or "pg_keyspace" (got ${JSON.stringify(provider)})`,
+    )
+  }
+  const database = cfg["database"] as Record<string, unknown> | undefined
+  if (provider === "pg_keyspace" && database?.["external"]) {
+    throw new Error(
+      `${filename}: cache.provider = "pg_keyspace" needs the Postgres this stack starts — ` +
+        `it is loaded with shared_preload_libraries, which is not something Supatype can set on ` +
+        `a database.external one. Use cache.provider = "valkey", or drop database.external.`,
+    )
+  }
+  const prefixes = cache["durablePrefixes"]
+  if (prefixes !== undefined) {
+    if (!Array.isArray(prefixes) || prefixes.some((p) => typeof p !== "string" || p.length === 0)) {
+      throw new Error(`${filename}: cache.durablePrefixes must be an array of non-empty strings`)
+    }
+    // `,` separates entries and `=` separates a prefix from its tier in
+    // pg_keyspace.durability_overrides, so a prefix containing either would be
+    // read as two settings. Refused here rather than mangled into the command
+    // line, where it would surface as a Postgres that will not start.
+    const bad = (prefixes as string[]).find((p) => p.includes(",") || p.includes("="))
+    if (bad) {
+      throw new Error(
+        `${filename}: cache.durablePrefixes entry ${JSON.stringify(bad)} cannot contain "," or "=" — ` +
+          `both are separators in pg_keyspace.durability_overrides`,
+      )
+    }
+  }
 }
 
 /**
