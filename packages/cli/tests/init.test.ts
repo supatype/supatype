@@ -333,7 +333,37 @@ describe("scaffold()", () => {
     expect(config).toContain('provider: "local"')
     expect(config).toContain("Production storage: external S3")
     const env = readFileSync(join(tmpRoot, ".env"), "utf8")
-    expect(env).toContain("local development, MinIO")
+    expect(env).toContain("local development, SeaweedFS")
     expect(env).toContain("production, external bucket")
+  })
+
+  // The compose generator has had this guard since SeaweedFS replaced MinIO; the .env generator
+  // did not, which is the whole reason it kept naming a withdrawn image and a port nothing serves.
+  // A scaffolded .env is the first thing a new project reads, so it gets the same guard.
+  it("a scaffolded .env never names MinIO or its port", () => {
+    for (const storage of ["local", "s3"] as const) {
+      scaffold(tmpRoot, {
+        ...defaultScaffoldOptions("my-app"),
+        storageLocal: storage,
+        storageProduction: storage,
+      })
+      const env = readFileSync(join(tmpRoot, ".env"), "utf8")
+      expect(env.toLowerCase()).not.toContain("minio")
+      expect(env).not.toContain("9000")
+      rmSync(tmpRoot, { recursive: true, force: true })
+      mkdirSync(tmpRoot, { recursive: true })
+    }
+  })
+
+  // The object store publishes 8333, and the storage service reads S3_ENDPOINT from this file.
+  // A local .env pointing anywhere else is a stack that starts and then fails on first upload.
+  it("local storage points at the port the object store actually publishes", () => {
+    scaffold(tmpRoot, {
+      ...defaultScaffoldOptions("my-app"),
+      storageLocal: "local",
+      storageProduction: "local",
+    })
+    const env = readFileSync(join(tmpRoot, ".env"), "utf8")
+    expect(env).toContain("S3_ENDPOINT=http://localhost:8333")
   })
 })

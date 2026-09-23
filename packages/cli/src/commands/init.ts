@@ -70,7 +70,7 @@ const STORAGE_PROVIDER_OPTIONS: {
   label: string
   hint: string
 }[] = [
-  { value: "local", label: "Local", hint: "storage you host yourself (MinIO)" },
+  { value: "local", label: "Local", hint: "storage you host yourself (SeaweedFS)" },
   { value: "s3", label: "S3", hint: "external bucket (AWS S3 or compatible)" },
 ]
 
@@ -1164,7 +1164,7 @@ function storageConfigLines(
   if (storageProduction === "s3" && storageLocal !== "s3") {
     lines.push(`  // Production storage: external S3 bucket, set production S3_* in .env`)
   } else if (storageProduction === "local" && storageLocal === "s3") {
-    lines.push(`  // Production storage: MinIO on your server (included in self-host compose)`)
+    lines.push(`  // Production storage: SeaweedFS on your server (included in self-host compose)`)
   }
   return lines
 }
@@ -1305,7 +1305,7 @@ S3_SECRET_KEY=`
     }
     return `${localStorageEnvSection("local")}
 
-# Production storage (MinIO on your server)
+# Production storage (SeaweedFS on your server)
 # Included in the self-host compose stack, no extra configuration needed.`
   }
 
@@ -1323,8 +1323,8 @@ S3_BUCKET=
 S3_ACCESS_KEY=
 S3_SECRET_KEY=`
   }
-  return `# Storage (local development, MinIO)
-S3_ENDPOINT=http://localhost:9000
+  return `# Storage (local development, SeaweedFS)
+S3_ENDPOINT=http://localhost:8333
 S3_ACCESS_KEY=supatype
 S3_SECRET_KEY=supatype-secret`
 }
@@ -1338,7 +1338,7 @@ S3_BUCKET=
 S3_ACCESS_KEY=
 S3_SECRET_KEY=`
   }
-  return `# Storage (production, MinIO on your server)
+  return `# Storage (production, SeaweedFS on your server)
 # Included in the self-host compose stack, no extra configuration needed.`
 }
 

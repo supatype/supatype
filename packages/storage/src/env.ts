@@ -23,8 +23,8 @@ export const config = {
    */
   jwtSecret: env("JWT_SECRET"),
 
-  /** S3-compatible endpoint (MinIO for local dev). */
-  s3Endpoint: env("S3_ENDPOINT", "http://localhost:9000"),
+  /** S3-compatible endpoint (SeaweedFS for local dev). */
+  s3Endpoint: env("S3_ENDPOINT", "http://localhost:8333"),
 
   /** S3 region. */
   s3Region: env("S3_REGION", "us-east-1"),
@@ -35,16 +35,16 @@ export const config = {
   /** S3 secret key. */
   s3SecretKey: env("S3_SECRET_KEY", "supatype-secret"),
 
-  /** Whether to force path-style access (required for MinIO). */
+  /** Whether to force path-style access (required for SeaweedFS). */
   s3ForcePathStyle: env("S3_FORCE_PATH_STYLE", "true") === "true",
 
   /**
    * Publicly reachable base URL for S3 objects in public buckets.
-   * For MinIO in local dev this is the same as S3_ENDPOINT (e.g. http://localhost:9000).
+   * For SeaweedFS in local dev this is the same as S3_ENDPOINT (e.g. http://localhost:8333).
    * For AWS set this to your CloudFront domain or the bucket's public S3 URL.
    * Defaults to S3_ENDPOINT.
    */
-  s3PublicUrl: env("S3_PUBLIC_URL", env("S3_ENDPOINT", "http://localhost:9000")),
+  s3PublicUrl: env("S3_PUBLIC_URL", env("S3_ENDPOINT", "http://localhost:8333")),
 
   /** Maximum upload size in bytes (default 50 MB). */
   maxUploadSize: parseInt(env("MAX_UPLOAD_SIZE", String(50 * 1024 * 1024)), 10),
