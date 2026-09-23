@@ -265,7 +265,17 @@ export async function targetSchemaPush(
   target: DeployTarget,
   ast: unknown,
   opts?: { force?: boolean; schema?: string; schemaSources?: SchemaSourcesPayload | null },
-): Promise<{ message?: string; status?: string; name?: string }> {
+): Promise<{
+  message?: string
+  status?: string
+  name?: string
+  /**
+   * What the control plane made of this schema's cache declaration. Absent from an engine push and
+   * from a control plane too old to send it, which is why every reader of it has to treat absence
+   * as "nothing to say" rather than as an empty declaration.
+   */
+  cache?: { tables?: string[]; honoured?: boolean }
+}> {
   if (target.mode === "direct" || (target.mode === "local" && !target.token)) {
     await ensureEngine()
     const body: Record<string, unknown> = {

@@ -197,3 +197,33 @@ export type Reading = Model<{ sensor: Slug; value: Slug }, {
     expect(cacheOf(ast)).toEqual({ enabled: true })
   })
 })
+
+describe("the TTL bound, enforced where the number was written", () => {
+  const withTtl = (ttl: string) => () =>
+    extract(`
+export type Post = Model<{
+  id: UUID
+  title: Slug
+}, {
+  access: { read: Public }
+  cache: { enabled: true; maxTtl: ${ttl} }
+}>`)
+
+  it("refuses a cap the admin API would refuse", () => {
+    // 86400 is the bound `PATCH /admin/v1/config/rest` enforces on the project-wide TTL, and a
+    // declared cap is the same quantity. Left to the server it arrives inside a manifest rather
+    // than a request, and nothing refuses a manifest.
+    expect(withTtl("90000")).toThrow(/between 0 and 86400 seconds/)
+    expect(withTtl("-1")).toThrow(/between 0 and 86400 seconds/)
+  })
+
+  it("refuses a fractional cap rather than rounding one", () => {
+    expect(withTtl("1.5")).toThrow(/whole number of seconds/)
+  })
+
+  it("accepts the bounds themselves", () => {
+    expect(withTtl("86400")).not.toThrow()
+    // Zero is the absence of a declared cap, not a cap of zero — both ends read it that way.
+    expect(withTtl("0")).not.toThrow()
+  })
+})
