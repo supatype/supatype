@@ -11,8 +11,10 @@
  *     rather than a struct of zeroes, and `rowCacheHeadline` keeps "off" and "healthy and idle"
  *     apart.
  *  3. `stale_after_ms` is a promise to a user, not an ops metric. Mode B is eventual with a
- *     bound, so it is said in words next to the control that turns it on — and read live, because
- *     it grows with the number of participating databases.
+ *     bound, so it is said in words wherever the row cache is reported — and read live, because it
+ *     grows with the number of participating databases. There is no control to put it next to:
+ *     Mode B is declared in the schema and not switched on in Studio (§13.3), so the sentence
+ *     rides the row-cache line in `cache-declaration.ts`.
  *  4. `hit_pct` is null, not 0, before the first lookup. "No traffic yet" and "0% hit rate" are
  *     different states, and a fresh cache rendering 0% looks broken.
  */
@@ -258,24 +260,3 @@ export function reconcileNoteFor(table: string, r: RowCacheReconcile | undefined
   return null
 }
 
-/**
- * Whether to show the staleness promise beside the enable toggle.
- *
- * Only when the row cache is actually the thing serving reads. With it off, or
- * unavailable, or incoherent, the response cache is the whole feature and it
- * has no staleness window of its own beyond its TTL — promising one would
- * invent a caveat, and §12.2's rule is that this sentence is a promise rather
- * than a readout.
- *
- * `idle` counts: the cache is running and this table is about to be registered,
- * so the window applies to what the user is in the middle of turning on. That
- * is the state every project sits in before its first table is enabled, and it
- * is the moment the sentence is most worth reading.
- *
- * A rule rather than an inline condition because it is the third of the four,
- * and the other three are here with tests on them.
- */
-export function showsStalenessPromise(status: RowCacheStatus | null): boolean {
-  if (!status) return false
-  return status.state === "participating" || status.state === "idle"
-}
