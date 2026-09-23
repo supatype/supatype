@@ -143,12 +143,15 @@ dump_failure_logs() {
     echo "  (no compose file at $compose_file)"
     return 0
   fi
+  # The CLI names the compose project `supatype-<name>`; without -p, compose derives it from the
+  # directory and finds no containers, so the dump comes out empty.
+  local compose=(docker compose -p "supatype-${PROJECT_NAME}" -f "$compose_file" --project-directory "$project_dir")
   echo "==> Compose ps"
-  docker compose -f "$compose_file" --project-directory "$project_dir" ps -a || true
+  "${compose[@]}" ps -a || true
   echo "==> Recent server logs"
-  docker compose -f "$compose_file" --project-directory "$project_dir" logs --tail 40 server 2>&1 || true
+  "${compose[@]}" logs --tail 80 server 2>&1 || true
   echo "==> Recent db logs"
-  docker compose -f "$compose_file" --project-directory "$project_dir" logs --tail 40 db 2>&1 || true
+  "${compose[@]}" logs --tail 40 db 2>&1 || true
 }
 
 main() {
