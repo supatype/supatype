@@ -9,6 +9,7 @@ import {
   validateModelValidators,
   writeHooksModule,
 } from "../model-hooks.js"
+import { syncRowCacheEnv } from "../model-cache.js"
 import { adapterEntry, readHookUpload } from "../hook-upload.js"
 import { checkServiceRoleRoutes, serviceRoleProblemLines } from "../service-role-check.js"
 import { fatalError } from "../ui/fatal.js"
@@ -295,6 +296,16 @@ async function generateTypesLocal(ast: unknown, config: SupatypeProjectConfig): 
   if (hooksPath !== null) info(`Hook handler types written to ${hooksPath}`)
   // The server watches this file, so a changed hook takes effect without a restart.
   if (syncManifestHooks(cwd, ast)) info("Hook map written to .supatype/manifest.json")
+  // The row cache is configured at postmaster start, so this is the one cache setting a push
+  // cannot make take effect on its own.
+  const rowCache = syncRowCacheEnv(cwd, ast)
+  if (rowCache !== null) {
+    info(
+      `Row cache switched ${rowCache} in .env. Recreate the database container for it to take ` +
+        "effect: the image writes pg_keyspace.conf at start, so a running Postgres keeps the " +
+        "setting it booted with.",
+    )
+  }
 
   if (!config.output?.types && !config.output?.client) return
   // The CLI writes these, it does not ask the engine to. Passing types_path and client_path and

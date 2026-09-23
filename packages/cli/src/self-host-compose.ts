@@ -402,18 +402,29 @@ ${studioService}
       - "127.0.0.1:\${SUPATYPE_DEV_DB_PORT:-54329}:5432"
 `
       : `    ports:
-      - "5432:5432"
+      - "\${SUPATYPE_DB_PORT:-5432}:5432"
 `
     : ""
+  // Host ports, every one of them overridable.
+  //
+  // Kong's has been `${SUPATYPE_KONG_PORT:-18473}` for as long as `supatype dev` has picked a free
+  // one per project and written it back to .env. These three were fixed literals, so the second
+  // project on a machine could not start: Docker refuses the bind and compose reports only that
+  // the stack would not come up, naming no port. Two projects side by side is the normal case
+  // here (this repository ships eight examples), so a literal is the wrong default.
+  //
+  // Defaults are the previous literals, so a project with none of these set behaves exactly as
+  // before. Allocating them per project the way the Kong port is allocated is the follow-up; this
+  // makes a second stack possible rather than automatic.
   const serverPorts = devLocal
     ? ""
     : `    ports:
-      - "9999:9999"
+      - "\${SUPATYPE_SERVER_PORT:-9999}:9999"
 `
   const seaweedPorts = devLocal
     ? ""
     : `    ports:
-      - "8333:8333"
+      - "\${SUPATYPE_SEAWEEDFS_PORT:-8333}:8333"
 `
   // One source for the credentials: the server is configured with them and the storage service is
   // handed them, and a mismatch does not fail at start, it fails at the first upload.
@@ -560,6 +571,17 @@ ${dbDependency}`
       SUPATYPE_KEYSPACE_KEYS: "200000"
       SUPATYPE_KEYSPACE_RING_MB: "16"
       SUPATYPE_KEYSPACE_ROWCACHE_MB: "64"
+      # Mode B, the row cache itself. The segment above is reserved either way; these two decide
+      # whether anything decodes into it or serves from it, and the image refuses readthrough
+      # without decode because that pair serves stale rows forever rather than merely wasting
+      # memory.
+      #
+      # From .env rather than a literal, because only a push can answer this: the switches follow
+      # whether any model declares \`cache: { rows: true }\`, and \`self-host compose render\` runs
+      # with no schema in hand. Default off, so a project that declares no row cache does not pin
+      # WAL behind a replication slot it never reads.
+      SUPATYPE_KEYSPACE_ROWCACHE_DECODE: "\${SUPATYPE_KEYSPACE_ROWCACHE_DECODE:-0}"
+      SUPATYPE_KEYSPACE_ROWCACHE_READTHROUGH: "\${SUPATYPE_KEYSPACE_ROWCACHE_READTHROUGH:-0}"
 `
     : ""
 
@@ -705,7 +727,17 @@ ${dbDependency}
     # stays visible instead of hiding in a crash loop.
     restart: on-failure:5
 ${serverPorts}    volumes:
+      # The project is read-only: the server reads the schema, the manifest and the functions, and
+      # has no business editing any of them.
       - ${projectMount}:/project:ro
+      # .supatype is the exception, and only because one file in it is not project source.
+      # api-config.json is the operator's runtime state: which tables have caching switched on,
+      # the project TTL, max_rows. PATCH /admin/v1/config/rest writes it, which is what Studio's
+      # cache panel and the CLI's cache commands call. Under the read-only mount alone that PATCH
+      # fails with "read-only file system", so a cache a model declares can be read back as
+      # declared and never actually switched on. A narrower bind than making the whole project
+      # writable, because the rest of the tree keeps the guarantee.
+      - ${projectMount}/.supatype:/project/.supatype
     working_dir: /project
     environment:
       SUPATYPE_MODE: ${devLocal ? "dev" : "standalone"}

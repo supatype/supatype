@@ -21,6 +21,7 @@ import {
   type SupatypeProjectConfig,
 } from "./project-config.js"
 import { syncManifestHooks, writeHooksModule } from "./model-hooks.js"
+import { syncRowCacheEnv } from "./model-cache.js"
 import { signJwt } from "./jwt.js"
 import { ensureDevDbPort, ensureKongPort } from "./dev-ports.js"
 import { handleComposeProjectRename } from "./compose-rename.js"
@@ -35,6 +36,7 @@ import {
   runDockerCompose,
   schemaEngineImageForPush,
   writeSelfHostCompose,
+  selfHostComposePaths,
   type SelfHostComposePaths,
 } from "./self-host-compose.js"
 import type { DockerBrandOptions } from "./docker-runtime.js"
@@ -594,12 +596,42 @@ async function refreshSchemaArtifacts(
   if (syncManifestHooks(cwd, ast)) {
     console.log("[supatype] Hook and validator maps written to .supatype/manifest.json")
   }
+  // Written before the stack comes up, so a first run with a row cache declared starts with it on
+  // rather than needing a second `supatype dev`.
+  const rowCache = syncRowCacheEnv(cwd, ast)
+  if (rowCache !== null) {
+    console.log(`[supatype] Row cache switched ${rowCache} in .env (pg_keyspace Mode B).`)
+  }
 
   try {
     await ensureEngine()
   } catch (err) {
+    // The host engine is a CDN download and this machine could not complete it. The schema is
+    // already applied, so fall back to the engine in compose rather than giving up: without
+    // admin-config.json Studio reports "No schema has been pushed yet" on a stack whose schema is
+    // entirely live, which reads as a failed push rather than a missing binary.
+    const paths = selfHostComposePaths(cwd)
+    const composeProject = composeProjectName(config.project.name)
+    const wrote = await generateViaComposeEngine(
+      paths,
+      cwd,
+      composeProject,
+      config,
+      ast,
+      adminConfigPath,
+    ).catch(() => false)
+    if (wrote) {
+      console.warn(
+        `[supatype] Host engine unavailable (${(err as Error).message}); used the in-compose ` +
+          "engine instead.",
+      )
+      return
+    }
     console.warn(
-      `[supatype] Host engine unavailable, admin/types not refreshed: ${(err as Error).message}`,
+      `[supatype] Host engine unavailable, admin/types not refreshed: ${(err as Error).message}
+` +
+        "[supatype] Studio will report no schema until this succeeds, even though the schema is " +
+        "applied. Retry with the stack up, or run `supatype push`.",
     )
     return
   }
@@ -1332,4 +1364,96 @@ function grantAuthSchemaAccess(
   if (result.status !== 0) {
     console.warn("[supatype] Could not grant service_role access to auth.users, Studio relation preview may fail.")
   }
+}
+
+/**
+ * Run one read-only generator in the in-compose schema-engine and return its stdout.
+ *
+ * The same image and the same bind mount the push just used, so if the schema could be applied
+ * this can run. It exists because the host engine is a separate binary fetched from a CDN, and a
+ * machine that cannot fetch it is not a machine that cannot generate: the schema is already
+ * applied, the AST is already on disk, and the container that did it is one `docker compose run`
+ * away.
+ */
+async function runComposeEngineGenerator(
+  paths: SelfHostComposePaths,
+  cwd: string,
+  composeProject: string,
+  config: SupatypeProjectConfig,
+  args: readonly string[],
+): Promise<string | null> {
+  const envFile = resolve(cwd, ".env")
+  const composeArgs = ["compose", "--progress", "quiet"]
+  if (composeProject) composeArgs.push("-p", composeProject)
+  composeArgs.push("--project-directory", cwd)
+  composeArgs.push("-f", paths.composePath)
+  if (existsSync(envFile)) composeArgs.push("--env-file", envFile)
+  composeArgs.push(
+    "--profile",
+    "tools",
+    "run",
+    "--rm",
+    "-T",
+    "schema-engine",
+    ...args,
+    "-i",
+    "/project/.supatype/schema.ast.json",
+  )
+
+  const env: NodeJS.ProcessEnv = { ...process.env, COMPOSE_PROGRESS: "quiet" }
+  const engineImage = await schemaEngineImageForPush(config)
+  if (engineImage) env.SUPATYPE_ENGINE_IMAGE = engineImage
+
+  const result = spawnSync("docker", composeArgs, {
+    cwd,
+    encoding: "utf8",
+    maxBuffer: 20 * 1024 * 1024,
+    env,
+  })
+  if ((result.status ?? 1) !== 0) return null
+  return String(result.stdout ?? "")
+}
+
+/**
+ * Write `admin-config.json` and the generated types using the in-compose engine.
+ *
+ * The fallback for a host engine that could not be fetched. Without it, a `supatype dev` that
+ * applied the schema perfectly well still left no `admin-config.json`, and Studio reads that file
+ * to decide whether a schema exists: the stack came up, every table was live, the API served them,
+ * and Studio said **"No schema has been pushed yet."** The warning that preceded it named the
+ * download, not the consequence, so nothing connected the two.
+ *
+ * Returns true when the admin config was written, which is the file Studio actually needs.
+ */
+export async function generateViaComposeEngine(
+  paths: SelfHostComposePaths,
+  cwd: string,
+  composeProject: string,
+  config: SupatypeProjectConfig,
+  ast: unknown,
+  adminConfigPath: string,
+): Promise<boolean> {
+  const typesPath = config.output?.types
+  if (typeof typesPath === "string" && typesPath.trim().length > 0) {
+    const out = await runComposeEngineGenerator(paths, cwd, composeProject, config, ["generate"])
+    const marker = out?.indexOf("// Generated by supatype-engine") ?? -1
+    if (out && out.includes("export type")) {
+      const ts = (marker >= 0 ? out.slice(marker) : out).trimStart()
+      const hostPath = join(cwd, typesPath)
+      mkdirSync(dirname(hostPath), { recursive: true })
+      writeFileSync(hostPath, ts)
+      console.log(`[supatype] Types written to ${typesPath} (in-compose engine).`)
+    }
+  }
+
+  const adminOut = await runComposeEngineGenerator(paths, cwd, composeProject, config, ["admin"])
+  if (!adminOut) return false
+  const parsed = parseEngineJsonOutput<unknown>(adminOut)
+  if (parsed === null) return false
+
+  const admin = withAdminRoles(parsed, config)
+  restoreSystemRelationTargets(admin, ast)
+  writeFileSync(adminConfigPath, `${JSON.stringify(admin, null, 2)}\n`)
+  console.log("[supatype] Admin config written to .supatype/admin-config.json (in-compose engine).")
+  return true
 }
