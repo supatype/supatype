@@ -256,6 +256,23 @@ async function main(): Promise<void> {
   })
   check(ping.ok, "ping invoked", String(ping.status))
 
+  // Whether the deployment handed the worker a database URL, which `ping` reports as a boolean
+  // rather than returning the credential.
+  //
+  // Asserted in both directions from one expectation, because the interesting failure is not "no
+  // database URL": it is a project that set SUPATYPE_FUNCTIONS_DB_URL and got nothing, which is
+  // what happened for as long as the compose generator omitted the variable entirely. A check that
+  // only accepted `false` would have passed throughout.
+  const wantDbUrl = process.env["EXPECT_FUNCTION_DB_URL"] === "1"
+  const pingBody = (await ping.json().catch(() => ({}))) as { hasDbUrl?: boolean }
+  check(
+    pingBody.hasDbUrl === wantDbUrl,
+    wantDbUrl
+      ? "the function was handed the database URL the project opted into"
+      : "the function has no database URL, which is the default",
+    `hasDbUrl=${String(pingBody.hasDbUrl)}, expected ${String(wantDbUrl)}`,
+  )
+
   // The gate, not the happy path: issue-ticket refuses an anon Bearer with a 401 rather than
   // writing a ticket owned by nobody. A function that wrote first and checked later would pass a
   // test that only looked for a 2xx.

@@ -319,6 +319,15 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: ubuntu-22.04
     timeout-minutes: 25
+    env:
+      # The CLI is built from this checkout, where EMBEDDED_RELEASE_PUBLIC_KEY is empty: it is
+      # filled at publish, not in the tree. So the host engine download has nothing to verify
+      # against, refuses, and the push writes no config, which surfaces as an assertion about
+      # validators rather than as a missing key. Diagnosed once for studio-ui-e2e; it applies to
+      # every job here that pushes.
+      SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
+      # A fallback taken here is a path this job did not test. Fail instead of limping.
+      SUPATYPE_STRICT: "1"
 
     steps:
       - uses: actions/checkout@v4
@@ -367,6 +376,13 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: ubuntu-22.04
     timeout-minutes: 30
+    env:
+      # See validation-e2e: built from source, so the embedded key is empty and the host engine
+      # download refuses without this. This job is the one that would have caught the row cache,
+      # so it failing for a missing env var costs more here than anywhere else.
+      SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
+      # A fallback taken here is a path this job did not test. Fail instead of limping.
+      SUPATYPE_STRICT: "1"
 
     steps:
       - uses: actions/checkout@v4
@@ -415,6 +431,12 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: ubuntu-22.04
     timeout-minutes: 20
+    env:
+      # See validation-e2e: built from source, so the embedded key is empty and the host engine
+      # download refuses without this.
+      SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
+      # A fallback taken here is a path this job did not test. Fail instead of limping.
+      SUPATYPE_STRICT: "1"
 
     steps:
       - uses: actions/checkout@v4
@@ -455,6 +477,12 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: ubuntu-22.04
     timeout-minutes: 25
+    env:
+      # See validation-e2e: built from source, so the embedded key is empty and the host engine
+      # download refuses without this.
+      SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
+      # A fallback taken here is a path this job did not test. Fail instead of limping.
+      SUPATYPE_STRICT: "1"
 
     steps:
       - uses: actions/checkout@v4

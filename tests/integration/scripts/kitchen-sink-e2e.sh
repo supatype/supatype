@@ -74,6 +74,14 @@ echo "==> Building the SPA"
 
 echo ""
 echo "==> Bringing the stack up (static mode: the SPA is what / serves)"
+# Opt the functions worker into a database URL, so the path that was broken is the one exercised.
+# Set before the stack starts, because compose reads it when the container is created. The in-
+# network address, not a published host port: the worker resolves `db`, not `localhost`.
+#
+# The owner DSN is deliberate here and only here. This is a disposable CI stack asserting the wiring
+# works; a real project should point this at a role it restricted, since a function holding this
+# bypasses access rules, field masking and model hooks.
+export SUPATYPE_FUNCTIONS_DB_URL="postgresql://supatype_admin:$(grep -m1 '^POSTGRES_PASSWORD=' "$EXAMPLE_DIR/.env" | cut -d= -f2-)@db:5432/kitchen-sink"
 start_stack
 
 echo ""
@@ -82,7 +90,8 @@ echo "==> Seeding"
 
 echo ""
 echo "==> What a browser cannot assert"
-(cd "$EXAMPLE_DIR" && SUPATYPE_URL="$BASE_URL" ANON_KEY="$ANON_KEY" npx tsx verify.ts)
+(cd "$EXAMPLE_DIR" && SUPATYPE_URL="$BASE_URL" ANON_KEY="$ANON_KEY" \
+  EXPECT_FUNCTION_DB_URL=1 npx tsx verify.ts)
 
 echo ""
 echo "==> What a browser can assert"

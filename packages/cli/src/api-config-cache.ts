@@ -100,6 +100,36 @@ export function seedApiConfigCache(cwd: string, ast: unknown): CacheSeedResult |
  * refused it where the read rule varies by caller. Defaulting it off would make the declaration
  * mean nothing until someone ticked a box that the schema had already justified.
  */
+/**
+ * What a push or a dev boot should say about cache seeding, as lines to print.
+ *
+ * Returns the text rather than printing it, because the two callers write to the console
+ * differently and the thing worth sharing is the decision about what to say, not the formatting.
+ * Extracted from `push` when `dev` grew the same need: `seedApiConfigCache` had exactly one caller
+ * for a long time, which is why a stack brought up with `supatype dev` alone had no cache
+ * allowlist at all and nothing anywhere said so.
+ *
+ * Never an error, and never a rewrite of an entry that already exists. See `seedApiConfigCache`.
+ */
+export function cacheSeedingNotes(cwd: string, ast: unknown): string[] {
+  const result = seedApiConfigCache(cwd, ast)
+  if (result === null) return []
+
+  const notes: string[] = []
+  if (result.seeded.length > 0) {
+    notes.push(`Server cache enabled for ${result.seeded.join(", ")} in .supatype/api-config.json`)
+  }
+  if (result.ttlIsOff) {
+    // A note rather than a fix. Zero is an off switch someone may have chosen, and a push that
+    // turned caching on project-wide would be overriding a decision rather than filling in a blank.
+    notes.push(
+      `${result.declared.length} table(s) declare a cache, but cache_max_ttl is 0, so nothing ` +
+        `is cached until it is set, under API > REST > Settings or in .supatype/api-config.json.`,
+    )
+  }
+  return notes
+}
+
 function seedEntry(entry: ManifestCacheEntry): TableCacheConfig {
   return { enabled: true, allow_public: entry.public === true }
 }
