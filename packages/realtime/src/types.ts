@@ -19,6 +19,16 @@ export interface SubscribeMessage {
   type: "subscribe"
   channel: string
   event?: ChangeEvent | "*" | undefined
+  /**
+   * The table to watch, when the subscriber names one.
+   *
+   * Optional because it was not always sent, and a client that omits it still has its channel
+   * name read as `schema:table`. Present, it wins: the channel is a name for a subscription, not
+   * a statement about which table it concerns, and treating it as both meant a channel called
+   * anything other than its table silently matched nothing.
+   */
+  table?: string | undefined
+  schema?: string | undefined
   filter?: Record<string, string> | undefined
 }
 

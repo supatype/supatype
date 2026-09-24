@@ -1,10 +1,11 @@
 import type { QueryResult } from "./types.js"
 import { sha256Hex } from "./sha256-hex.js"
+import { bearerToken } from "./query.js"
 
 export interface QueryCacheOptions {
   /** Client-side TTL in milliseconds. */
   ttl: number
-  /** When true, send `X-Supatype-Cache: max-age=N` so the server caches the response too. */
+  /** When true, send `X-Supatype-Cache: max-age=N` for server-side Valkey caching. */
   server?: boolean | undefined
   /** When true (with server), request shared public cache scope when allowed for the table. */
   public?: boolean | undefined
@@ -26,14 +27,6 @@ interface JwtPayload {
   role?: string
 }
 
-function bearerOrApikey(headers: Record<string, string>): string {
-  const auth = headers["Authorization"] ?? headers["authorization"] ?? ""
-  if (auth.startsWith("Bearer ")) {
-    return auth.slice("Bearer ".length)
-  }
-  return headers["apikey"] ?? headers["Apikey"] ?? ""
-}
-
 function parseJwtPayload(token: string): JwtPayload | null {
   const parts = token.split(".")
   if (parts.length !== 3) return null
@@ -51,7 +44,7 @@ export function identityFingerprint(
   scope: "public" | "user",
 ): string {
   if (scope === "public") return "global"
-  const token = bearerOrApikey(headers)
+  const token = bearerToken(headers)
   if (!token) return "anon"
   const claims = parseJwtPayload(token)
   const role = claims?.role?.trim() || "authenticated"

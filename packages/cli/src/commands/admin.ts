@@ -363,12 +363,7 @@ export async function ensureFirstAdminWithQuery(
 
   const credentials = await resolveAdminCredentials(options, cwd)
   if (!credentials) {
-    if (!isInteractive()) {
-      info(
-        "No admin users found. Set SUPATYPE_ADMIN_EMAIL / SUPATYPE_ADMIN_PASSWORD in .env, " +
-          "or run: supatype admin create-user",
-      )
-    }
+    if (!isInteractive()) info(missingAdminCredentialsHint(cwd, options))
     return
   }
 
@@ -395,6 +390,28 @@ function logFirstAdminCreated(email: string, role: string): void {
   }
   info(`Admin user "${email}" created (role: ${role}).`)
   info("Log in at /admin after starting the dev server.")
+}
+
+/**
+ * What to say when there is no admin and no credentials to make one with.
+ *
+ * Naming both variables is wrong in the common case. `clearAdminSeedPassword` retires the seed
+ * password once it has been used, so a project that has ever created an admin keeps the email and
+ * has no password, and a later run against a reset database then reports both as missing. That
+ * reads as "you never set these" when in fact this tool consumed one of them, which is a dead end
+ * for anyone who knows they set it.
+ */
+function missingAdminCredentialsHint(cwd: string, options: EnsureFirstAdminOptions): string {
+  const email = options.email ?? readEnvValue(cwd, ADMIN_EMAIL_ENV, "").trim()
+  const create = "or run: supatype admin create-user"
+  if (!email) {
+    return `No admin users found. Set ${ADMIN_EMAIL_ENV} / ${ADMIN_PASSWORD_ENV} in .env, ${create}`
+  }
+  return (
+    `No admin users found. .env has ${ADMIN_EMAIL_ENV}="${email}" but no ${ADMIN_PASSWORD_ENV}: ` +
+    `it is a one-time seed and is removed once an admin has been created. ` +
+    `Set ${ADMIN_PASSWORD_ENV} again to seed one, ${create}`
+  )
 }
 
 async function resolveAdminCredentials(

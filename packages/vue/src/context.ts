@@ -14,15 +14,20 @@
  */
 
 import { inject, type InjectionKey, type Plugin } from "vue"
-import type { SupatypeClient, AnyDatabase } from "@supatype/client"
+import type { AnyClient, SupatypeClient, AnyDatabase } from "@supatype/client"
 
-export const SUPATYPE_KEY: InjectionKey<SupatypeClient> = Symbol("supatype")
+/** Typed at `AnyClient`, narrowed on read. See `AnyClient` for why it is neither generic nor `any`. */
+export const SUPATYPE_KEY: InjectionKey<AnyClient> = Symbol("supatype")
 
 /**
  * Vue plugin that provides the Supatype client to all components.
+ *
+ * Declared with its options tuple rather than a bare `Plugin`, whose options default to `any[]`:
+ * with that default `app.use(supatypePlugin, somethingElse)` was accepted at compile time and threw
+ * on the first `useSupatype()` instead.
  */
-export const supatypePlugin: Plugin = {
-  install(app, client: SupatypeClient) {
+export const supatypePlugin: Plugin<[AnyClient]> = {
+  install(app, client) {
     app.provide(SUPATYPE_KEY, client)
   },
 }

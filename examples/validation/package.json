@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "supatype dev",
     "push": "supatype push --yes",
-    "keys": "supatype keys",
+    "keys": "supatype keys --write",
     "doctor": "supatype doctor",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p hooks/tsconfig.json --noEmit"
   },

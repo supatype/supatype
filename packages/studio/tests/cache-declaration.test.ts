@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { emptyCacheDescription } from "../src/views/RestCacheBrowser.js"
 import {
   controlsFor,
   declaredTables,
@@ -130,6 +131,32 @@ describe("the row cache, which is shown and never offered", () => {
     expect(rowCacheLine({ posts: { rows: true } }, "posts", null, staleness).tone).toBe("warn")
   })
 
+  it("does not call a failed status read a disabled cache", () => {
+    // These were the same line, and that cost a real diagnosis. `/admin/v1/cache/rowcache`
+    // answered 502 on every database where the row cache was actually on, because the handler
+    // scanned the view's boolean `registrations_loaded` into an int64. The view is EMPTY while
+    // decoding is off, so there was no row, no scan and no error — turning the feature on is what
+    // started the failure. The panel then reported the one working database as "not running",
+    // which reads as "you have not configured this" and sends you to the schema.
+    const line = rowCacheLine(
+      { posts: { rows: true } },
+      "posts",
+      null,
+      staleness,
+      "cache/rowcache: 502",
+    )
+    expect(line.tone).toBe("warn")
+    expect(line.text).toContain("could not read")
+    expect(line.text).toContain("cache/rowcache: 502")
+    expect(line.text).not.toContain("from the heap")
+  })
+
+  it("still says off when the cache really is off, error or not", () => {
+    const off = { state: "off" as const, stale_after_ms: 200 }
+    const line = rowCacheLine({ posts: { rows: true } }, "posts", off, staleness, "ignored")
+    expect(line.text).toContain("from the heap")
+  })
+
   it("keeps running-but-unregistered apart from both serving and off", () => {
     // Registration follows an affirmative write to the allowlist rather than a reconcile at
     // startup, so a push that adds `rows: true` leaves the table declared and not yet registered.
@@ -165,5 +192,38 @@ describe("the wire shape, against the side that writes it", () => {
     const emitted = [...block![1]!.matchAll(/^\s*(\w+)\??:/gm)].map((m) => m[1]).sort()
 
     expect(emitted).toEqual(["enabled", "maxTtl", "public", "rows"])
+  })
+})
+
+describe("an empty cache listing", () => {
+  it("does not tell someone to enable what is already enabled", () => {
+    // The single sentence this replaced opened with "Enable caching in settings above", which is
+    // wrong for the person most likely to be reading it: the one who just switched it on and is
+    // wondering why nothing is listed.
+    const text = emptyCacheDescription("job_post", true)
+    expect(text).not.toContain("Switch it on")
+    expect(text).toContain("Caching is on")
+  })
+
+  it("names the opt-in, which is the usual reason nothing is cached", () => {
+    // Browsing the app never populates this: the TTL is min(client, project, schema), and a
+    // request naming no max-age asks for zero.
+    const text = emptyCacheDescription("job_post", true)
+    expect(text).toContain("cache({ server: true })")
+    expect(text).toContain("a plain GET is not cached")
+  })
+
+  it("says an empty list is normal rather than a fault", () => {
+    expect(emptyCacheDescription("job_post", true)).toContain("normal rather than a fault")
+  })
+
+  it("still gives the switch-it-on instruction when it is genuinely off", () => {
+    const text = emptyCacheDescription("job_post", false)
+    expect(text).toContain("Caching is off")
+    expect(text).toContain("settings above")
+  })
+
+  it("keeps the unfiltered listing's own wording", () => {
+    expect(emptyCacheDescription(null, false)).toBe("No cached REST responses yet.")
   })
 })

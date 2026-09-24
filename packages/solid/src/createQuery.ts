@@ -1,6 +1,7 @@
-import { createSignal, onMount } from "solid-js"
+import { createSignal, onCleanup, onMount } from "solid-js"
 import type { Accessor } from "solid-js"
 import type { AnyDatabase, SupatypeError } from "@supatype/client"
+import { onIdentityChange } from "@supatype/client"
 import { useSupatype } from "./context.js"
 
 export interface QueryOptions {
@@ -77,6 +78,10 @@ export function createQuery<
   onMount(() => {
     fetchData()
   })
+
+  // Re-run when the signed-in identity changes. See `onIdentityChange` for which changes count,
+  // and why the fetch above is not enough on its own.
+  onCleanup(onIdentityChange(client.auth, () => void fetchData()))
 
   return { data, error, loading, refetch: fetchData }
 }

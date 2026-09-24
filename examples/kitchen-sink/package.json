@@ -12,10 +12,10 @@
     "mode:marketing": "supatype app add --upstream http://host.docker.internal:3006",
     "mode:none": "supatype app remove",
     "push": "supatype push --yes",
-    "keys": "supatype keys",
+    "keys": "supatype keys --write",
     "generate": "supatype generate",
-    "seed": "tsx seed.ts",
-    "verify": "tsx verify.ts",
+    "seed": "tsx --env-file-if-exists=.env seed.ts",
+    "verify": "tsx --env-file-if-exists=.env verify.ts",
     "doctor": "supatype doctor",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p functions/tsconfig.json --noEmit && tsc -p hooks/tsconfig.json --noEmit"
   },

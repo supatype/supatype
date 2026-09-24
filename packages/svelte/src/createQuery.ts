@@ -1,5 +1,7 @@
+import { onDestroy } from "svelte"
 import { writable, type Readable } from "svelte/store"
 import type { AnyDatabase, SupatypeError } from "@supatype/client"
+import { onIdentityChange } from "@supatype/client"
 import { getSupatypeClient } from "./context.js"
 
 export interface QueryOptions {
@@ -75,6 +77,13 @@ export function createQuery<
 
   // Auto-fetch on creation
   fetchData()
+
+  // Re-run when the signed-in identity changes. See `onIdentityChange` for which changes count,
+  // and why the fetch above is not enough on its own.
+  //
+  // `onDestroy` is safe here for the same reason `getSupatypeClient()` above is: both need a
+  // component's init, and this store is read out of context, so it already had one.
+  onDestroy(onIdentityChange(client.auth, () => void fetchData()))
 
   return {
     data: { subscribe: data.subscribe },

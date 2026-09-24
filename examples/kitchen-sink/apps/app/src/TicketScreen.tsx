@@ -2,13 +2,14 @@ import React, { useState } from "react"
 import { useFunction, useQuery } from "@supatype/react"
 import { supatype } from "./client.js"
 import type { Database } from "../../../supatype/generated/database"
+import { Badge, Button, EmptyState, Note, PageHeader, ProvesNote, Row, Skeleton, Stack } from "./components/ui.js"
 
 type Ticket = Database["public"]["Tables"]["ticket"]["Row"]
 
 /**
- * My ticket — and only mine.
+ * My ticket, and only mine.
  *
- * There is no `.eq("auth_user_id", user.id)` here on purpose. `Ticket`'s read rule is
+ * There is no `.eq("authUser_id", user.id)` here on purpose. `Ticket`'s read rule is
  * `OwnerFrom<"authUser">`, so this unfiltered select returns exactly one row for its owner and
  * nothing for anyone else. The filter is not a convenience the client remembered; it is enforced
  * where a crafted request cannot get around it.
@@ -25,43 +26,106 @@ export function TicketScreen({ userId }: { userId: string }): React.ReactElement
     await refetch()
   }
 
-  if (loading) return <p className="ks-muted">Looking up your ticket…</p>
-  if (error) return <p className="ks-error">{error.message}</p>
+  const note = (
+    <ProvesNote>
+      <p>
+        The query is unfiltered. <code>OwnerFrom&lt;&quot;authUser&quot;&gt;</code> returns one row
+        to its owner and an empty list to everyone else, so somebody else running exactly this
+        query gets nothing rather than a 403.
+      </p>
+      <p>
+        Claiming calls an edge function. This client cannot write the row itself:{" "}
+        <code>reference</code> is unique and the price is not the buyer's to choose, so the
+        function gates on your token and then writes with the service role.
+      </p>
+      <p>
+        The PDF lives in a private bucket (<code>read: BucketOwner</code>), which a public URL
+        cannot reach at all. A signed URL is minted for you, valid for a minute, and useless to
+        anyone it is forwarded to once it expires.
+      </p>
+    </ProvesNote>
+  )
+
+  if (loading) {
+    return (
+      <>
+        <PageHeader title="My ticket" />
+        {note}
+        <Skeleton rows={1} height={180} />
+      </>
+    )
+  }
+  if (error) {
+    return (
+      <>
+        <PageHeader title="My ticket" />
+        {note}
+        <Note tone="error">{error.message}</Note>
+      </>
+    )
+  }
 
   const ticket = data?.[0]
+
   if (!ticket) {
     return (
-      <section>
-        <p className="ks-muted">
-          No ticket for this account yet. Claiming one calls an edge function, because this client
-          cannot write the row: <code>reference</code> is unique and the price is not the buyer's
-          to choose, so the function gates on your token and then writes with the service role.
-        </p>
-        <button className="ks-ghost" disabled={issue.loading} onClick={() => void claim()}>
-          {issue.loading ? "Claiming…" : "Claim a ticket"}
-        </button>
-        {issue.error !== null && <p className="ks-error">{issue.error.message}</p>}
-        <p className="ks-muted">
-          Signed in as <code>{userId}</code>. The same query as somebody else returns an empty list
-          rather than a 403, because the row is not theirs to see.
-        </p>
-      </section>
+      <>
+        <PageHeader title="My ticket" />
+        {note}
+        <EmptyState
+          title="No ticket on this account"
+          action={
+            <Button variant="primary" disabled={issue.loading} onClick={() => void claim()}>
+              {issue.loading ? "Claiming…" : "Claim a ticket"}
+            </Button>
+          }
+        >
+          Claiming runs the <code>issue-ticket</code> function, which checks your token and then
+          writes the row with the service role.
+        </EmptyState>
+        {issue.error !== null && (
+          <div style={{ marginTop: 12 }}>
+            <Note tone="error">{issue.error.message}</Note>
+          </div>
+        )}
+      </>
     )
   }
 
   return (
-    <article className="ks-card">
-      <h3>{ticket.reference}</h3>
-      <dl className="ks-facts">
-        <dt>Price</dt>
-        <dd>{JSON.stringify(ticket.price)}</dd>
-        <dt>VAT rate</dt>
-        <dd>{ticket.vatRate}</dd>
-        <dt>PDF</dt>
-        <dd>{ticket.pdf ? ticket.pdf.path : "not issued yet"}</dd>
-      </dl>
-      <TicketPdf pdf={ticket.pdf} />
-    </article>
+    <>
+      <PageHeader title="My ticket" subtitle="Show this at the door." />
+      {note}
+
+      <div className="ks-ticket">
+        <div className="ks-ticket__body">
+          <Row gap={8} wrap>
+            <Badge tone="accent">Admits one</Badge>
+            <Badge>Full conference</Badge>
+          </Row>
+
+          <dl className="ks-facts">
+            <dt>Reference</dt>
+            <dd className="ks-mono">{ticket.reference}</dd>
+            <dt>Price</dt>
+            <dd>{formatMoney(ticket.price)}</dd>
+            <dt>VAT</dt>
+            <dd>{ticket.vatRate != null ? `${ticket.vatRate}%` : "—"}</dd>
+            <dt>Holder</dt>
+            <dd className="ks-mono ks-truncate" title={userId}>{userId.slice(0, 8)}…</dd>
+          </dl>
+
+          <div style={{ marginTop: 18 }}>
+            <TicketPdf pdf={ticket.pdf} />
+          </div>
+        </div>
+
+        <div className="ks-ticket__stub">
+          <div className="ks-ticket__code" aria-hidden="true" />
+          <div className="ks-ticket__ref">{ticket.reference}</div>
+        </div>
+      </div>
+    </>
   )
 }
 
@@ -69,42 +133,63 @@ export function TicketScreen({ userId }: { userId: string }): React.ReactElement
  * Reaching a private object, which a URL alone cannot do.
  *
  * `ticket-files` is `BucketPrivate` with `read: BucketOwner`, so there is no public URL to link:
- * pasting one gets a 403 for everybody, its owner included. A signed URL is the way in — minted for
- * this caller, valid for a minute, and useless to anyone it is forwarded to once it expires.
+ * pasting one gets a 403 for everybody, its owner included.
  */
 function TicketPdf({ pdf }: { pdf: unknown }): React.ReactElement {
   const [link, setLink] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
   const path = (pdf as { path?: string } | null)?.path ?? null
 
   if (path === null) {
     return (
-      <p className="ks-muted">
-        No PDF issued yet. When there is one it lives in a private bucket whose rule is{" "}
-        <code>BucketOwner</code>, so the object is no more reachable than the row naming it.
+      <p className="ks-faint ks-small" style={{ margin: 0 }}>
+        No PDF issued yet. When there is one it lives in a private bucket, so the object is no more
+        reachable than the row naming it.
       </p>
     )
   }
 
   async function sign(): Promise<void> {
+    setBusy(true)
     setError(null)
     const { data, error: signError } = await supatype.storage
       .from("ticket-files")
       .createSignedUrl(path!, 60)
     if (signError) setError(signError.message)
     else setLink(data?.signedUrl ?? null)
+    setBusy(false)
   }
 
   return (
-    <div>
-      <button className="ks-ghost" onClick={() => void sign()}>Get a download link</button>
-      {error !== null && <p className="ks-error">{error}</p>}
-      {link !== null && (
-        <p className="ks-muted">
-          <a href={link}>Signed link</a> — good for 60 seconds, and minted for you rather than
-          shared with the world.
-        </p>
-      )}
-    </div>
+    <Stack gap={8}>
+      <Row gap={10} wrap>
+        <Button size="sm" disabled={busy} onClick={() => void sign()}>
+          {busy ? "Signing…" : "Download PDF"}
+        </Button>
+        {link !== null && (
+          <a className="ks-small" href={link}>
+            Signed link, good for 60 seconds
+          </a>
+        )}
+      </Row>
+      {error !== null && <Note tone="error">{error}</Note>}
+    </Stack>
   )
+}
+
+/** `Currency<"GBP">` crosses the wire as `{ currency, amount }`, with amount a string. */
+function formatMoney(value: unknown): string {
+  const money = value as { currency?: string; amount?: string | number } | null
+  if (money == null || money.amount == null) return "—"
+  const amount = Number(money.amount)
+  if (!Number.isFinite(amount)) return String(money.amount)
+  try {
+    return new Intl.NumberFormat("en-GB", {
+      style: "currency",
+      currency: money.currency ?? "GBP",
+    }).format(amount / 100)
+  } catch {
+    return `${money.currency ?? ""} ${amount}`.trim()
+  }
 }

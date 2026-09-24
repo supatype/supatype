@@ -17,7 +17,7 @@ import {
   PKCE_METHOD_S256,
 } from "./pkce.js"
 
-type AuthListener = (event: AuthChangeEvent, session: Session | null) => void
+export type AuthListener = (event: AuthChangeEvent, session: Session | null) => void
 
 interface AuthClientOptions {
   initialSession?: Session | undefined

@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react"
+import React, { useCallback, useEffect, useState } from "react"
 import { useStudioClient } from "../StudioCore.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
@@ -67,6 +67,35 @@ export interface RestCacheBrowserProps {
   showTableSettings?: boolean | undefined
 }
 
+/** Matches the cache health panels beside this list, so the whole screen ages together. */
+const LIST_POLL_MS = 10_000
+
+/**
+ * What an empty listing means, which depends on whether caching is on.
+ *
+ * One sentence used to cover both, and it opened with "Enable caching in settings above" — advice
+ * that is wrong for anyone who already has. Two things make this list empty on a table that is
+ * correctly configured, and neither is a setting: nothing has asked for a cached response yet, and
+ * entries leave when their TTL expires. An empty list is the normal resting state of a working
+ * cache on a quiet table.
+ *
+ * The opt-in matters most. The server caches a GET only when the client asks it to, so browsing
+ * the app never populates this: the TTL is min(client, project, schema), and a request that names
+ * no max-age asks for zero.
+ */
+export function emptyCacheDescription(table: string | null | undefined, enabled: boolean): string {
+  if (!table) return "No cached REST responses yet."
+  if (!enabled) {
+    return `Caching is off for ${table}. Switch it on in settings above, then issue a cached GET.`
+  }
+  return (
+    `Caching is on for ${table}, and nothing is cached right now. The server caches a response ` +
+    `only when the client asks it to, with \`.cache({ server: true })\` — a plain GET is not ` +
+    `cached. Entries also disappear when their TTL expires, so an empty list on a quiet table is ` +
+    `normal rather than a fault.`
+  )
+}
+
 export function RestCacheBrowser({
   tableFilter,
   title = "REST Cache",
@@ -110,6 +139,22 @@ export function RestCacheBrowser({
       }),
     [client, listUrl],
   )
+
+  // Cache entries expire on their own, so this list goes stale by sitting still.
+  //
+  // It was fetched once on mount and then left alone, next to health panels that poll every ten
+  // seconds — so half the screen was live and the half saying "nothing is cached" was frozen at
+  // whatever was true when the tab was opened. Opening the page before anything had been cached
+  // left it reading "No cache entries" indefinitely, which is indistinguishable from a cache that
+  // does not work, and the Refresh button is only obvious once you already suspect the list.
+  //
+  // Paused while a row is selected: refetching under an open detail pane is how a selection
+  // changes out from under someone mid-read.
+  useEffect(() => {
+    if (selectedKey !== null) return
+    const id = setInterval(() => refetch(), LIST_POLL_MS)
+    return () => clearInterval(id)
+  }, [refetch, selectedKey])
 
   const loadSettings = useCallback(async () => {
     if (!showTableSettings || !tableFilter) return
@@ -238,7 +283,13 @@ export function RestCacheBrowser({
   // Computed rather than stored: both are a pure function of what the last read and the last save
   // returned, and a copy in state is a copy that can go stale against them.
   const controls = controlsFor(declared, tableFilter ?? "")
-  const rowCache = rowCacheLine(declared, tableFilter ?? "", tableHealth.rowCache, describeStaleness)
+  const rowCache = rowCacheLine(
+    declared,
+    tableFilter ?? "",
+    tableHealth.rowCache,
+    describeStaleness,
+    tableHealth.error,
+  )
 
   if (!serverCacheOffered) {
     return (
@@ -423,11 +474,7 @@ export function RestCacheBrowser({
       ) : entries.length === 0 ? (
         <EmptyState
           title="No cache entries"
-          description={
-            tableFilter
-              ? `No cached responses for ${tableFilter}. Enable caching in settings above and issue a cached GET.`
-              : "No cached REST responses yet."
-          }
+          description={emptyCacheDescription(tableFilter, tableCfg.enabled)}
         />
       ) : (
         <Card>

@@ -9,7 +9,7 @@ never called still counts here: proving an example *runs* is what the live-stack
 | Package | Exports | Imported by an example | Note |
 |---|---:|---:|---|
 | `@supatype/types` | 118 | 57 | 61 not imported |
-| `@supatype/client` | 9 | 3 | 6 not imported |
+| `@supatype/client` | 10 | 3 | 7 not imported |
 | `@supatype/react` | 11 | 9 | 2 not imported |
 | `@supatype/react-auth` | 3 | 3 | complete |
 | `@supatype/react-native` | 2 | 2 | covered by examples/expo-auth, which imports a subset |
@@ -27,7 +27,7 @@ either deserves an example or deserves saying why not.
 
 **`@supatype/types`** — `AccessRuleFor`, `Ago`, `All`, `Asset`, `AuthRole`, `AuthUid`, `AutoIncrement`, `BigInt`, `BucketAccessMode`, `BucketStorageAccess`, `ButtonTarget`, `ButtonValue`, `Bytea`, `Claim`, `Code`, `Computed`, `DateTime`, `Default`, `EditorReadOnly`, `Exists`, `FieldValidation`, `Float`, `FromNow`, `Geo`, `Gt`, `HasMany`, `HasOne`, `IPAddress`, `In`, `IsNull`, `Like`, `LocalizedModel`, `Lt`, `MacAddress`, `ManyToMany`, `ModelHook`, `ModelIndex`, `Money`, `Neq`, `Not`, `OnDelete`, `OnUpdate`, `OwnerKey`, `OwnerOf`, `PrimaryKey`, `Private`, `Publishable`, `RelationTarget`, `Rows`, `ServerDefault`, `SmallInt`, `SoftDelete`, `StartOf`, `TSQuery`, `TSVector`, `TimeUnit`, `Timestamps`, `TruncUnit`, `Values`, `WithPublishable`, `WithSoftDelete`
 
-**`@supatype/client`** — `Session`, `StorageObject`, `SupatypeBuckets`, `SupatypeFunctions`, `SupatypeModels`, `User`
+**`@supatype/client`** — `Session`, `StorageObject`, `SupatypeBuckets`, `SupatypeFunctions`, `SupatypeModels`, `User`, `onIdentityChange`
 
 **`@supatype/react`** — `MutationOperation`, `SupatypeContext`
 

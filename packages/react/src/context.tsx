@@ -1,14 +1,13 @@
 "use client"
 
 import React from "react"
-import type { SupatypeClient, AnyDatabase, AugmentedDatabase } from "@supatype/client"
+import type { AnyClient, SupatypeClient, AnyDatabase, AugmentedDatabase } from "@supatype/client"
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const SupatypeContext = React.createContext<SupatypeClient<any> | null>(null)
+/** Typed at `AnyClient`, narrowed on read. See `AnyClient` for why it is neither generic nor `any`. */
+export const SupatypeContext = React.createContext<AnyClient | null>(null)
 
 export interface SupatypeProviderProps {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  client: SupatypeClient<any>
+  client: AnyClient
   children: React.ReactNode
 }
 

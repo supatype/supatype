@@ -9,7 +9,7 @@
     "vite": "vite",
     "build": "vite build",
     "push": "supatype push --yes",
-    "keys": "supatype keys",
+    "keys": "supatype keys --write",
     "functions": "supatype functions serve",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p functions/tsconfig.json --noEmit"
   },

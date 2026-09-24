@@ -64,11 +64,27 @@ function withMeta<T>(
 /** Resolves auth (and other) headers at request time so token refresh can run first. */
 export type HeadersProvider = () => Promise<Record<string, string>>
 
-function asHeadersProvider(
+export function asHeadersProvider(
   headers: Record<string, string> | HeadersProvider,
 ): HeadersProvider {
   if (typeof headers === "function") return headers
   return () => Promise.resolve(headers)
+}
+
+/**
+ * The caller's own token out of a header set: the session's bearer, else the apikey.
+ *
+ * One home for a rule three places had implemented separately. The realtime socket had the
+ * precedence the other way round, which is how it came to authenticate as anon on every
+ * connection: `apikey` is always set, so it never reached the Authorization header.
+ *
+ * Header names are matched in both casings because `config.headers` is caller-supplied and
+ * lowercase is just as valid over the wire.
+ */
+export function bearerToken(headers: Record<string, string>): string {
+  const authorization = headers["Authorization"] ?? headers["authorization"] ?? ""
+  if (authorization.startsWith("Bearer ")) return authorization.slice("Bearer ".length)
+  return headers["apikey"] ?? headers["Apikey"] ?? ""
 }
 
 async function fetchWithOptional401Retry(
@@ -133,7 +149,7 @@ export class QueryBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
     }
   }
 
-  /** Enable GET caching. Use `{ server: true }` to cache the response on the server too. */
+  /** Enable GET caching. Use `{ server: true }` for Valkey-backed server cache. */
   cache(options: QueryCacheOptions): this {
     this.cacheOptions = options
     return this

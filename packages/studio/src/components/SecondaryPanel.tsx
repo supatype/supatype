@@ -10,7 +10,7 @@ import { Badge } from "./ui.js"
 import type { AdminConfig } from "../config.js"
 import { cn } from "../lib/utils.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
-import { Button } from "./ui.js"
+import { Button, NAV_RAIL } from "./ui.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -231,7 +231,22 @@ function buildModelsSection(config: AdminConfig | null): SectionDef {
 
 // ─── SecondaryPanel ───────────────────────────────────────────────────────────
 
-export function SecondaryPanel(): React.ReactElement | null {
+/**
+ * Tier 2, the section's own list of items.
+ *
+ * Docked beside the content from `md` up. Below that the viewport cannot afford 200px of
+ * permanent chrome next to a content column, so the panel becomes an overlay the caller opens:
+ * at 390px the docked panel left the content roughly 190px wide, which is narrower than the
+ * headings inside it and wrapped "Job Post: Cache" onto three lines.
+ */
+export function SecondaryPanel({
+  open = false,
+  onClose,
+}: {
+  /** Mobile only: show the panel as an overlay. Ignored from `md` up, where it is always docked. */
+  open?: boolean
+  onClose?: () => void
+} = {}): React.ReactElement | null {
   const location = useLocation()
   const navigate = useNavigate()
   // Cloud sets both; outside cloud there is no platform to ask, which is the signal.
@@ -346,8 +361,25 @@ export function SecondaryPanel(): React.ReactElement | null {
   }
 
   return (
-    <div className="w-[200px] shrink-0 border-r border-border/80 bg-background flex flex-col h-full overflow-hidden">
-      <div className="px-4 pt-4 pb-2.5 border-b border-border/50 flex items-center justify-between gap-2">
+    <>
+      {/* Mobile: dismiss by tapping away, the same gesture the tier-1 sidebar already uses. */}
+      {open && (
+        <div
+          className="fixed inset-0 bg-black/40 z-40 md:hidden"
+          onClick={onClose}
+          aria-hidden="true"
+        />
+      )}
+      <div
+        className={cn(
+          "w-[200px] shrink-0 border-r border-border/80 bg-background flex-col h-full overflow-hidden",
+          "md:flex",
+          open
+            ? "flex fixed top-14 left-0 h-[calc(100vh-56px)] z-50 md:static md:h-full"
+            : "hidden",
+        )}
+      >
+      <div className={cn(NAV_RAIL, "px-4 flex items-center justify-between gap-2")}>
         <h2 className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground/80">
           {section.title}
         </h2>
@@ -426,6 +458,7 @@ export function SecondaryPanel(): React.ReactElement | null {
           </div>
         ))}
       </nav>
-    </div>
+      </div>
+    </>
   )
 }

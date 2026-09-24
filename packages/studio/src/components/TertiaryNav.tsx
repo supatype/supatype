@@ -3,6 +3,7 @@
 import React from "react"
 import { useNavigate, useLocation } from "react-router-dom"
 import { cn } from "../lib/utils.js"
+import { NAV_RAIL } from "./ui.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -211,21 +212,40 @@ function getTertiaryGroups(path: string): NavGroup[] | null {
 
 // ─── TertiaryNav ──────────────────────────────────────────────────────────────
 
-export function TertiaryNav(): React.ReactElement | null {
+/**
+ * Tier 3, the sub-tabs within a section item.
+ *
+ * `leading` is how the section-panel toggle reaches this rail on small screens. It is rendered
+ * even on routes with no tabs, because the rail is the only place that toggle lives: returning
+ * null there would leave a phone with the panel closed and no way to reopen it.
+ */
+export function TertiaryNav({
+  leading,
+}: {
+  leading?: React.ReactNode
+} = {}): React.ReactElement | null {
   const location = useLocation()
   const navigate = useNavigate()
   const path = location.pathname
 
   const groups = getTertiaryGroups(path)
-  if (!groups) return null
+  if (!groups) {
+    if (!leading) return null
+    return (
+      <nav className={cn(NAV_RAIL, "bg-background md:hidden")} aria-label="Section navigation">
+        <div className="flex items-center h-full px-2">{leading}</div>
+      </nav>
+    )
+  }
 
   return (
     <nav
-      className="shrink-0 border-b border-border/80 bg-background overflow-x-auto"
+      className={cn(NAV_RAIL, "bg-background overflow-x-auto")}
       style={{ scrollbarWidth: "none" }}
       aria-label="Sub-section navigation"
     >
-      <div className="flex items-center h-10 px-4 gap-0.5 min-w-max">
+      <div className="flex items-center h-full px-2 md:px-4 gap-0.5 min-w-max">
+        {leading}
         {groups.map((group, gi) => (
           <React.Fragment key={gi}>
             {gi > 0 && <div className="mx-3 h-4 w-px bg-border shrink-0" />}

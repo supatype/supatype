@@ -1,6 +1,22 @@
 import React from "react"
 import { cn } from "../lib/utils.js"
 
+/* ─── Nav rail ─── */
+
+/**
+ * The horizontal rail the secondary panel's header and the tertiary nav each occupy.
+ *
+ * They start at the same y and sit side by side, so their bottom borders read as one line running
+ * the width of the app. They were built separately and did not match: the nav was exactly 40px
+ * (`h-10`) while the panel header was padding-derived (`pt-4 pb-2.5`, about 42px), and the two
+ * borders were drawn at different opacities. The line stepped down and changed colour at the panel
+ * edge.
+ *
+ * One constant rather than the same classes written twice, because the bug is drift: either height
+ * can be adjusted alone and look correct in isolation.
+ */
+export const NAV_RAIL = "h-10 shrink-0 border-b border-border/80"
+
 /* ─── Badge / Pill ─── */
 
 export type BadgeVariant = "green" | "red" | "yellow" | "indigo" | "blue" | "outline"

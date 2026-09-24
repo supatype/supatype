@@ -16,6 +16,7 @@
  * `hooks` has always taken this route for the same reason. Plan §13.1 said otherwise and said to
  * verify before relying on it; this is the verified path.
  */
+import { readEnvValue, upsertEnvFile } from "./env-file.js"
 import type { ModelCacheAst } from "./schema-ast-v2.js"
 
 /** One table's cache declaration, as the manifest carries it. */
@@ -71,4 +72,51 @@ export function manifestCache(ast: unknown): Record<string, ManifestCacheEntry> 
     if (Object.keys(entry).length > 0) out[table] = entry
   }
   return out
+}
+
+// ─── Row cache enablement ────────────────────────────────────────────────────
+
+/** The two env names the Postgres image reads to turn Mode B on. */
+export const ROWCACHE_DECODE_ENV = "SUPATYPE_KEYSPACE_ROWCACHE_DECODE"
+export const ROWCACHE_READTHROUGH_ENV = "SUPATYPE_KEYSPACE_ROWCACHE_READTHROUGH"
+
+/** Whether any model declares `cache: { rows: true }`. */
+export function declaresRowCache(ast: unknown): boolean {
+  return Object.values(manifestCache(ast)).some((entry) => entry.rows === true)
+}
+
+/**
+ * Keep the row cache's two switches in `.env` matching what the schema declares.
+ *
+ * `cache: { rows: true }` registers a table with the row cache, and registration alone serves
+ * nothing: Mode B needs `pg_keyspace.rowcache_decode` for the invalidation worker and
+ * `rowcache_readthrough` to fill on a primary-key miss. Both are written by the image's entrypoint
+ * from these variables, before any server starts, so they cannot be switched at runtime and cannot
+ * be decided by the compose file alone: only a push knows whether any model declares `rows`.
+ *
+ * Without this the stack came up with the row-cache segment reserved, the tables registered, both
+ * switches off and nothing anywhere saying so. Studio's panel was the only thing that reported it,
+ * and it reported it as an operator's missing configuration rather than as a push that had not
+ * finished the job.
+ *
+ * Written to `.env` rather than baked into the compose file for the same reason `SUPATYPE_KONG_PORT`
+ * is: `self-host compose render` runs with no AST in hand, so a value the compose file hardcoded
+ * would be whatever the last render guessed.
+ *
+ * Returns the new state when it changed, and null when it did not. A change needs the database
+ * container recreated, which the caller is the one that can say.
+ */
+export function syncRowCacheEnv(cwd: string, ast: unknown): "on" | "off" | null {
+  const want = declaresRowCache(ast)
+  const value = want ? "1" : "0"
+
+  const current = readEnvValue(cwd, ROWCACHE_DECODE_ENV, "")
+  const currentThrough = readEnvValue(cwd, ROWCACHE_READTHROUGH_ENV, "")
+  if (current === value && currentThrough === value) return null
+
+  upsertEnvFile(cwd, {
+    [ROWCACHE_DECODE_ENV]: value,
+    [ROWCACHE_READTHROUGH_ENV]: value,
+  })
+  return want ? "on" : "off"
 }

@@ -1,5 +1,6 @@
-import { ref, onMounted, watch, type Ref } from "vue"
+import { ref, onMounted, onUnmounted, watch, type Ref } from "vue"
 import type { AnyDatabase, SupatypeError } from "@supatype/client"
+import { onIdentityChange } from "@supatype/client"
 import { useSupatype } from "./context.js"
 
 export interface UseQueryOptions {
@@ -94,6 +95,10 @@ export function useQuery<
   }
 
   onMounted(fetchData)
+
+  // Re-run when the signed-in identity changes. See `onIdentityChange` for which changes count,
+  // and why the fetch above is not enough on its own.
+  onUnmounted(onIdentityChange(client.auth, () => void fetchData()))
 
   // Re-fetch when enabled changes
   if (options?.enabled && typeof options.enabled !== "boolean") {

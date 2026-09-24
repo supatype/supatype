@@ -1,6 +1,7 @@
 import type { Command } from "commander"
-import { readFileSync, existsSync, writeFileSync } from "node:fs"
+import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { resolve } from "node:path"
+import { readEnvFile, upsertEnvFile } from "../env-file.js"
 import { signJwt } from "../jwt.js"
 import { error, plain } from "../ui/messages.js"
 
@@ -10,7 +11,9 @@ export function registerKeys(program: Command): void {
     .description("Generate ANON_KEY and SERVICE_ROLE_KEY JWTs from your JWT_SECRET")
     .option("--secret <secret>", "JWT secret (defaults to JWT_SECRET env var or value in .env)")
     .option("--exp-years <years>", "Token expiry in years (default: 10)", "10")
-    .action((opts: { secret?: string; expYears: string }) => {
+    .option("--write", "Write the keys into .env in the current directory instead of printing them")
+    .option("--force", "With --write, replace every key already in .env rather than filling blanks")
+    .action((opts: { secret?: string; expYears: string; write?: boolean; force?: boolean }) => {
       const secret = opts.secret ?? resolveSecret()
       if (!secret) {
         error("JWT_SECRET not found. Set it in .env or pass --secret <value>")
@@ -23,17 +26,114 @@ export function registerKeys(program: Command): void {
         process.exit(1)
       }
 
-      const now = Math.floor(Date.now() / 1000)
-      const exp = now + expYears * 365 * 24 * 60 * 60
+      const { anonKey, serviceKey } = signKeyPair(secret, expYears)
 
-      const anonKey = signJwt({ iss: "supatype", role: "anon", iat: now, exp }, secret)
-      const serviceKey = signJwt({ iss: "supatype", role: "service_role", iat: now, exp }, secret)
+      if (opts.write) {
+        const written = writeKeysToEnv(
+          process.cwd(),
+          { anonKey, serviceKey },
+          opts.force === true,
+        )
+        if (written.path === null) {
+          error("No .env here to write to. Create one, or drop --write to print the keys.")
+          process.exit(1)
+        }
+        plain(`\nKeys valid for ${expYears} years, written to ${written.path}:\n`)
+        // The names come back from the writer rather than being restated here, which is the whole
+        // point of there being one list.
+        for (const key of written.written) plain(`  ${key}`)
+        if (written.kept.length > 0) {
+          plain(`\nLeft alone, because they already hold a value:\n`)
+          for (const key of written.kept) plain(`  ${key}`)
+          plain("\nRe-run with --force to replace them.")
+        }
+        plain("\nDo not commit .env to source control.")
+        return
+      }
 
       plain(`\nGenerated keys (valid for ${expYears} years):\n`)
       plain("ANON_KEY=" + anonKey)
       plain("SERVICE_ROLE_KEY=" + serviceKey)
-      plain("\nAdd these to your .env file. Do not commit .env to source control.")
+      plain("\nAdd these to your .env file, or re-run with --write. Do not commit .env to source control.")
     })
+}
+
+/**
+ * Every env name a minted key pair is written to, in one place.
+ *
+ * Shared with `supatype dev`, which writes the same pair when it starts a stack. They used to hold
+ * separate lists, so a front end's prefix could be written by one and forgotten by the other, and
+ * which names your `.env` ended up with depended on whichever command you happened to run last.
+ *
+ * The URL names are only included when there is a URL to write, because an empty
+ * `VITE_SUPATYPE_URL` is worse than an absent one: the client reads it, finds a blank string, and
+ * requests against the page origin without saying why.
+ */
+export function anonKeyEnvUpdates(
+  anonKey: string,
+  serviceKey: string,
+  apiUrl?: string | undefined,
+): Record<string, string> {
+  return {
+    ANON_KEY: anonKey,
+    SERVICE_ROLE_KEY: serviceKey,
+    VITE_SUPATYPE_ANON_KEY: anonKey,
+    PUBLIC_SUPATYPE_ANON_KEY: anonKey,
+    EXPO_PUBLIC_SUPATYPE_ANON_KEY: anonKey,
+    ...(apiUrl !== undefined && {
+      VITE_SUPATYPE_URL: apiUrl,
+      PUBLIC_SUPATYPE_URL: apiUrl,
+      EXPO_PUBLIC_SUPATYPE_URL: apiUrl,
+    }),
+  }
+}
+
+export interface WriteKeysResult {
+  /** The .env written, or null when there is none here. */
+  path: string | null
+  written: string[]
+  kept: string[]
+}
+
+/**
+ * Write a minted pair into `dir`'s .env.
+ *
+ * Blanks only by default. An anon key already in `.env` is held by clients this command cannot
+ * reach, and reissuing it locks them out, so filling what is empty is the useful half and
+ * replacing what is not is a decision someone has to make out loud. `--force` is how they make it,
+ * and it rewrites every name this owns rather than only the empty ones.
+ *
+ * `--force` does not rewrite the file. `.env` also holds `JWT_SECRET`, which these keys are
+ * derived from, along with the database password and whatever else the project keeps there;
+ * replacing the file would leave a project whose keys cannot be regenerated and whose stack cannot
+ * start. Every line this command does not own is left exactly as it was, comments included.
+ */
+export function writeKeysToEnv(
+  dir: string,
+  keys: { anonKey: string; serviceKey: string },
+  force: boolean,
+): WriteKeysResult {
+  const envPath = resolve(dir, ".env")
+  if (!existsSync(envPath)) return { path: null, written: [], kept: [] }
+
+  const existing = readEnvFile(dir)
+  const apiUrl = existing["PUBLIC_SUPATYPE_URL"] || existing["API_EXTERNAL_URL"] || undefined
+  const candidates = anonKeyEnvUpdates(keys.anonKey, keys.serviceKey, apiUrl)
+
+  const updates: Record<string, string> = {}
+  const kept: string[] = []
+  for (const [name, value] of Object.entries(candidates)) {
+    // Blank counts as absent: a template ships `ANON_KEY=` and that is exactly the line to fill.
+    const current = existing[name]?.trim() ?? ""
+    if (!force && current !== "") {
+      kept.push(name)
+      continue
+    }
+    updates[name] = value
+  }
+
+  if (Object.keys(updates).length > 0) upsertEnvFile(dir, updates)
+  return { path: envPath, written: Object.keys(updates), kept }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -89,6 +189,11 @@ function upsertEnvVar(content: string, key: string, value: string): string {
   if (re.test(content)) return content.replace(re, `${key}=${value}`)
   const sep = content.endsWith("\n") || content.length === 0 ? "" : "\n"
   return `${content}${sep}${key}=${value}\n`
+}
+
+/** Whether `.env` declares `key` at all, with or without a value. */
+function hasEnvLine(content: string, key: string): boolean {
+  return new RegExp(`^${key}=`, "m").test(content)
 }
 
 function readEnvVar(content: string, key: string): string | undefined {

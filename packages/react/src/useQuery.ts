@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react"
 import type { AnyDatabase, AugmentedDatabase, SupatypeError, QueryCacheOptions } from "@supatype/client"
+import { onIdentityChange } from "@supatype/client"
 import { useSupatype } from "./context.js"
 
 export interface UseQueryOptions {
@@ -19,7 +20,7 @@ export interface UseQueryOptions {
   enabled?: boolean | undefined
   /** Re-fetch interval in milliseconds */
   refetchInterval?: number | undefined
-  /** In-memory GET cache; pass `{ server: true }` to cache the response on the server too */
+  /** In-memory GET cache; pass `{ server: true }` for Valkey-backed server cache */
   cache?: QueryCacheOptions | undefined
   /**
    * Read the pending draft instead of what is published.
@@ -134,6 +135,16 @@ export function useQuery<
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [execute])
+
+  // Re-run when the signed-in identity changes. See `onIdentityChange` for which changes count.
+  //
+  // Through a ref, and keyed on the client alone: keying on `execute` would re-subscribe every time
+  // `optionsJson` changed, and each re-subscribe takes a fresh baseline from the emission
+  // `onAuthStateChange` makes at registration. A sign-in landing in that window would be read as
+  // the baseline rather than as a change, and the query would never re-run.
+  const executeRef = useRef(execute)
+  executeRef.current = execute
+  useEffect(() => onIdentityChange(client.auth, () => void executeRef.current()), [client])
 
   return { data, error, count, loading, refetch: () => void execute() }
 }

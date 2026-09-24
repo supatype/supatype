@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "supatype dev",
     "push": "supatype push --yes",
-    "keys": "supatype keys",
+    "keys": "supatype keys --write",
     "verify": "tsx verify.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "verify:channels": "tsx verify-channels.ts",

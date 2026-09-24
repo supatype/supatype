@@ -7,58 +7,13 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { RealtimeClient, type RealtimePayload } from "../src/realtime.js"
+import {
+  createMockWebSocketClass,
+  simulateServerMessage,
+  type MockWebSocketInstance,
+} from "./helpers/mock-websocket.js"
 
-// ─── Mock WebSocket ──────────────────────────────────────────────────────────
 
-interface MockWebSocketInstance {
-  url: string
-  readyState: number
-  onopen: ((event: Event) => void) | null
-  onclose: ((event: CloseEvent) => void) | null
-  onmessage: ((event: MessageEvent) => void) | null
-  onerror: ((event: Event) => void) | null
-  send: ReturnType<typeof vi.fn>
-  close: ReturnType<typeof vi.fn>
-}
-
-function createMockWebSocketClass() {
-  const instances: MockWebSocketInstance[] = []
-
-  class MockWebSocket {
-    static OPEN = 1
-    static CONNECTING = 0
-    static CLOSED = 3
-
-    url: string
-    readyState = 0
-    onopen: ((event: Event) => void) | null = null
-    onclose: ((event: CloseEvent) => void) | null = null
-    onmessage: ((event: MessageEvent) => void) | null = null
-    onerror: ((event: Event) => void) | null = null
-    send = vi.fn()
-    close = vi.fn()
-
-    constructor(url: string) {
-      this.url = url
-      instances.push(this as unknown as MockWebSocketInstance)
-
-      // Auto-open after a microtask
-      queueMicrotask(() => {
-        this.readyState = 1 // OPEN
-        this.onopen?.({} as Event)
-      })
-    }
-  }
-
-  return { MockWebSocket, instances }
-}
-
-/** Simulate a server message arriving on a WebSocket instance. */
-function simulateServerMessage(ws: MockWebSocketInstance, msg: Record<string, unknown>): void {
-  ws.onmessage?.({ data: JSON.stringify(msg) } as MessageEvent)
-}
-
-// ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe("Task 94: Realtime multi-tenant isolation", () => {
   let MockWS: ReturnType<typeof createMockWebSocketClass>
