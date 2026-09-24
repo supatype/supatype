@@ -177,30 +177,21 @@ jobs:
   # WebSocket, which a broken realtime does too: the socket opens and no row
   # arrives. This subscribes, writes, and waits with a deadline.
   #
-  # Dispatch and schedule only, for the same reason as the validation job below,
-  # and only until the same release ships. Realtime itself needs nothing
-  # unpublished: it decodes WAL from a replication slot, so there is no
-  # per-table opt-in. The server in front of it does. This branch's CLI writes
-  # SUPATYPE_* and the published `supatype/server:latest` still reads GOTRUE_*,
-  # so the stack does not come up at all and the failure says nothing about
-  # realtime.
+  # The server release these waited for shipped, so they run on every trigger now.
   #
-  # **Add `pull_request` here once a `supatype/server` release carrying the
-  # SUPATYPE_ prefix is on Docker Hub.** Nothing else blocks it; verified green
-  # against a locally built server image.
+  # They were excluded from pull requests until a `supatype/server` carrying the SUPATYPE_ prefix
+  # reached Docker Hub. That happened, and nothing brought them back, so for weeks the only thing
+  # running them was a weekly cron that had been red since 2026-09-14. In that window two fixes
+  # landed and were never verified, one spec was added that had never once passed, and a release
+  # went out over the top of it.
+  #
+  # A temporary exclusion with no owner and no expiry is a permanent one.
+
   # Studio in a browser. Everything else tests its server surface, which stays
   # green through a bundle that loads and then throws, an asset referenced at the
   # wrong base path, or a sign-in form wired to nothing.
-  #
-  # Gated for the same reason and until the same release as the two jobs below:
-  # the stack in front of Studio is supatype/server:latest, which still reads the
-  # old prefix while this branch's CLI writes the new one.
-  #
-  # **Add `pull_request` here once a `supatype/server` release carrying the
-  # SUPATYPE_ prefix is on Docker Hub.**
   studio-ui-e2e:
     name: studio UI (browser)
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: ubuntu-22.04
     timeout-minutes: 25
     env:
@@ -274,7 +265,6 @@ jobs:
 
   realtime-e2e:
     name: realtime (live stack)
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: ubuntu-22.04
     timeout-minutes: 20
 
@@ -308,15 +298,8 @@ jobs:
 
   validation-e2e:
     name: field validation (live stack)
-    # Dispatch and schedule only, for now. The stack it needs is not published yet: this asserts a
-    # validator refusal, which needs a `supatype/server` carrying per-field validators, and bounds
-    # backed by CHECKs, which needs a `supatype/schema-engine` release carrying the constraint
-    # generator. Until both ship, running this on every pull request would fail work that has
-    # nothing to do with it.
-    #
-    # **Add `pull_request` here once schema-engine >= the constraint release and server >= the
-    # validator release are on Docker Hub.** That is the whole condition; nothing else blocks it.
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    # Both releases it waited for have shipped: the server carries per-field validators and the
+    # engine carries the constraint generator. Verified green against published images.
     runs-on: ubuntu-22.04
     timeout-minutes: 25
     env:
@@ -369,11 +352,8 @@ jobs:
 
   kitchen-sink-e2e:
     name: kitchen sink (live stack)
-    # Dispatch and schedule only, for now, like the other live-stack jobs: this asserts a served
-    # SPA with fallback routing, realtime delivery, a storage round trip with a real transform and
-    # an edge function, so it needs published images carrying all four. Promote to `pull_request`
-    # once they are on Docker Hub.
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    # All four images it waited for are published. Verified green against them: 10/10 browser
+    # tests and the whole of verify.ts, from destroyed volumes.
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     env:
@@ -425,10 +405,8 @@ jobs:
 
   supabucks-e2e:
     name: static app (live stack)
-    # Dispatch and schedule only, for now, on the same condition the validation job documents: this
-    # asserts a served SPA, which needs a published `supatype/server` carrying static mode and its
-    # fallback route. Promote to `pull_request` once that is on Docker Hub.
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    # The server carrying static mode and its fallback route is published, so this runs everywhere
+    # now. Verified green against it.
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     env:
@@ -470,11 +448,8 @@ jobs:
 
   blog-e2e:
     name: server-rendered app (live stack)
-    # Dispatch and schedule only, for now. Two reasons, both outside this script: the stack must
-    # carry the functions worker that serves `greet`, and `app.mode = "proxy"` points at
-    # host.docker.internal, which a Linux runner only resolves when the rendered compose maps it to
-    # the host gateway. Promote to `pull_request` once both hold on a scheduled run.
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    # Both conditions hold now: the published worker serves `greet`, and the rendered compose maps
+    # host.docker.internal to the host gateway so `app.mode = "proxy"` resolves on a Linux runner.
     runs-on: ubuntu-22.04
     timeout-minutes: 25
     env:
