@@ -33,7 +33,7 @@ import type { ExtractedSchemaAstV2 } from "../schema-ast-v2.js"
 import { ensureFirstAdminUser } from "./admin.js"
 import { withAdminRoles } from "../studio-admin-roles.js"
 import { restoreSystemRelationTargets } from "../restore-system-relation-targets.js"
-import { freeTierCacheNote, seedApiConfigCache } from "../api-config-cache.js"
+import { cacheSeedingNotes, freeTierCacheNote } from "../api-config-cache.js"
 import type { SupatypeProjectConfig } from "../project-config.js"
 import {
   resolveTarget,
@@ -265,20 +265,7 @@ async function deployHooksToTarget(
  * Never an error, and never a rewrite of an entry that already exists. See `seedApiConfigCache`.
  */
 function reportCacheSeeding(cwd: string, ast: unknown): void {
-  const result = seedApiConfigCache(cwd, ast)
-  if (result === null) return
-
-  if (result.seeded.length > 0) {
-    info(`Server cache enabled for ${result.seeded.join(", ")} in .supatype/api-config.json`)
-  }
-  if (result.ttlIsOff) {
-    // A note rather than a fix. Zero is an off switch someone may have chosen, and a push that
-    // turned caching on project-wide would be overriding a decision rather than filling in a blank.
-    info(
-      `${result.declared.length} table(s) declare a cache, but cache_max_ttl is 0 — nothing is ` +
-        `cached until it is set, under API → REST → Settings or in .supatype/api-config.json.`,
-    )
-  }
+  for (const note of cacheSeedingNotes(cwd, ast)) info(note)
 }
 
 /** The generated adapter, flattened to the name handlers were rewritten to import. */

@@ -17,6 +17,7 @@ import {
 import { hasEngineOverride, hasStudioOverride, pinnedVersion, fetchLatestVersion, VERSION_PIN_LOCAL } from "./binary-cache.js"
 import { buildKongDeclarative } from "./kong-config.js"
 import { keyspaceInPostgres } from "./cache-provider.js"
+import { STUDIO_DEV_PORT } from "./studio-dev-server.js"
 import { readEnvFile } from "./env-file.js"
 import { fieldMaskingTierFromProject, type FieldMaskingTier } from "./field-masking-tier.js"
 import { projectHasVersionedModels } from "./model-versioning.js"
@@ -285,8 +286,16 @@ function postgrestDatabaseUrl(config: SupatypeProjectConfig): string {
   return `postgresql://authenticator:${password}@${parsed.hostname}${port}${parsed.pathname}${parsed.search}`
 }
 
-/** Host Vite dev server as seen from Kong inside Docker Compose. */
-export const COMPOSE_STUDIO_HOST_URL = "http://host.docker.internal:3002"
+/**
+ * Host Vite dev server as seen from Kong inside Docker Compose.
+ *
+ * Derived from STUDIO_DEV_PORT rather than repeating the number, because the two are one decision.
+ * Held separately they drift, and the drift is invisible: Vite binds the new port, Kong keeps
+ * proxying to the old one, and `/studio/` serves whatever else happens to be listening there. On
+ * the machine this was found, that was an unrelated Next.js app, and every Studio view failed with
+ * a missing sign-in form rather than anything naming a port.
+ */
+export const COMPOSE_STUDIO_HOST_URL = `http://host.docker.internal:${STUDIO_DEV_PORT}`
 
 /** Studio container: always Docker Hub unless SUPATYPE_STUDIO_IMAGE is set in .env. */
 function studioServiceBlock(): string {
@@ -437,6 +446,15 @@ ${studioService}
     volumes:
       - storage-data:/data
       - ${SEAWEED_CONFIG_MOUNT}:/etc/seaweedfs/s3.json:ro
+    healthcheck:
+      # Any HTTP status line means the S3 endpoint is listening, which is the whole question.
+      # Success cannot be "HTTP 200": an unauthenticated GET on the root answers 403 by design,
+      # because the anonymous identity is deliberately absent from s3.json.
+      test: ["CMD-SHELL", "wget -q -S -O /dev/null http://127.0.0.1:8333 2>&1 | grep -q 'HTTP/'"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
 ${seaweedPorts}`
   const kongTlsEnv = tlsEnabled
     ? `      KONG_PROXY_LISTEN: "0.0.0.0:8000, 0.0.0.0:8443 ssl"
@@ -490,6 +508,21 @@ ${keyspaceInPg ? "" : "  valkey-data:\n"}`
         condition: service_healthy
 `
   const dbDependency = external ? "" : `    depends_on:\n${dbDependencyClause}`
+
+  // Storage waits for the object store, not only the database.
+  //
+  // seaweedfs had no healthcheck and nothing depended on it, so compose started it alongside
+  // storage rather than before it. Storage would then accept a bucket creation before seaweedfs
+  // was listening, and every bucket in the schema failed with `connect ECONNREFUSED <ip>:8333`
+  // while the metadata row was written anyway. Measured on a live stack: seaweedfs started twelve
+  // minutes after storage with RestartCount 0, so it was ordered late rather than crashing.
+  //
+  // A later push succeeds, which is exactly what made it read as an intermittent mystery. It
+  // lands on the first push after a stack comes up, which is the first push a new user ever runs.
+  const storageDependency = `    depends_on:
+${dbDependencyClause}      seaweedfs:
+        condition: service_healthy
+`
 
   // Realtime, omitted entirely when the project has turned it off.
   //
@@ -676,7 +709,7 @@ ${dbDependency}
       S3_ACCESS_KEY: ${OBJECT_STORE_ACCESS_KEY}
       S3_SECRET_KEY: ${OBJECT_STORE_SECRET_KEY}
       S3_FORCE_PATH_STYLE: "true"
-${dbDependency}
+${storageDependency}
   functions-worker:
     image: \${SUPATYPE_FUNCTIONS_WORKER_IMAGE:-supatype/functions-worker:latest}
     expose:
@@ -705,6 +738,18 @@ ${dbDependency}
       # each one able to read past every access rule in the schema.
       SUPATYPE_SERVICE_ROLE_KEY: \${SERVICE_ROLE_KEY:-}
       SUPATYPE_SERVICE_ROLE_ROUTES: "${serviceRoleRoutes(config).join(",")}"
+      # A direct database connection for functions, off unless asked for.
+      #
+      # The worker reads SUPATYPE_DB_URL and exposes it as \`ctx.dbUrl\`, and nothing here ever set
+      # it, so the field was permanently undefined on self-host and a function reaching for it got
+      # no value and no explanation.
+      #
+      # Deliberately its own variable rather than the project's DATABASE_URL. That one is the owner
+      # DSN every service already uses, and wiring it through by default would hand every function
+      # a connection that bypasses access rules, field masking and model hooks, none of which live
+      # in the database. Naming a separate variable makes it a decision: set it to the owner URL
+      # and accept that, or to a role you restricted yourself.
+      SUPATYPE_DB_URL: \${SUPATYPE_FUNCTIONS_DB_URL:-}
       STRIPE_SECRET_KEY: \${STRIPE_SECRET_KEY:-}
       STRIPE_WEBHOOK_SECRET: \${STRIPE_WEBHOOK_SECRET:-}
       SITE_URL: \${SITE_URL:-\${API_EXTERNAL_URL:-${externalUrlFallback}}}

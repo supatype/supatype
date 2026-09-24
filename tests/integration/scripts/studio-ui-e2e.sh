@@ -98,4 +98,17 @@ export SUPATYPE_ANON_KEY
 
 echo "==> Driving the browser"
 cd "$E2E_DIR"
-E2E_BASE_URL="$BROWSER_URL" npx playwright test
+# Named rather than "everything in specs/", because that directory is shared. `kitchen-sink-e2e.sh`
+# drives its own stack with its own schema and seed, and an unfiltered run pointed its spec at this
+# one: ten failures about a conference app, from the job that tests Studio. The kitchen-sink spec
+# landed after the last scheduled run, so the first anyone would have seen of it is the whole
+# Studio job going red for a reason that has nothing to do with Studio.
+#
+# A new spec here has to be added to a script deliberately. That is the point: it forces the
+# question of which stack it needs.
+E2E_BASE_URL="$BROWSER_URL" npx playwright test \
+  specs/studio.spec.ts \
+  specs/studio-views.spec.ts \
+  specs/studio-create-draft.spec.ts \
+  specs/function-logs.spec.ts \
+  specs/storage.spec.ts

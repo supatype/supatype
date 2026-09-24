@@ -29,6 +29,9 @@ import { handleComposeProjectRename } from "./compose-rename.js"
 import { recoverStaleDevSession, writeDevSessionLock } from "./dev-session-lock.js"
 import { endDevSession, startDevSession } from "./dev-session.js"
 import { ensureDevApiConfig } from "./ensure-dev-api-config.js"
+import { cacheSeedingNotes } from "./api-config-cache.js"
+import { DB_PORT_ENV, syncDatabaseUrlPort } from "./db-port.js"
+import { degraded } from "./strict.js"
 import {
   COMPOSE_PINNED_IMAGE_ENV_KEYS,
   composeDockerImageEnv,
@@ -604,6 +607,24 @@ async function refreshSchemaArtifacts(
     console.log(`[supatype] Row cache switched ${rowCache} in .env (pg_keyspace Mode B).`)
   }
 
+  // SUPATYPE_DB_PORT moves what compose binds; DATABASE_URL is what seeds and psql use. Nothing
+  // reconciled them, so a project moved off 5432 to avoid a clash came up perfectly and then
+  // failed on `npm run seed` with ECONNREFUSED against a port nothing was listening on.
+  const dbPort = syncDatabaseUrlPort(cwd)
+  if (dbPort !== null) {
+    console.log(
+      `[supatype] DATABASE_URL port ${dbPort.from} -> ${dbPort.to} in .env, ` +
+        `to match ${DB_PORT_ENV}.`,
+    )
+  }
+
+  // The declaration is a ceiling and the allowlist is what is actually on, and only `push` ever
+  // seeded the allowlist. So a stack brought up with `supatype dev` alone had every model's
+  // `cache` block declared and nothing switched on: `.cache({ server: true })` answered BYPASS,
+  // and the only way to find out why was to open Studio and tick a box the schema had already
+  // justified.
+  for (const note of cacheSeedingNotes(cwd, ast)) console.log(`[supatype] ${note}`)
+
   try {
     await ensureEngine()
   } catch (err) {
@@ -622,15 +643,19 @@ async function refreshSchemaArtifacts(
       adminConfigPath,
     ).catch(() => false)
     if (wrote) {
-      console.warn(
-        `[supatype] Host engine unavailable (${(err as Error).message}); used the in-compose ` +
-          "engine instead.",
+      // Reported through `degraded` rather than warned: the in-compose engine writes the admin
+      // config but never reaches the type generation below, so a run that takes this path has
+      // stale generated types and says so only in a line that scrolls past. In CI that is the
+      // difference between testing the host engine path and never touching it.
+      degraded(
+        "Host engine unavailable, used the in-compose engine instead",
+        (err as Error).message,
       )
       return
     }
-    console.warn(
-      `[supatype] Host engine unavailable, admin/types not refreshed: ${(err as Error).message}
-` +
+    degraded(
+      "Host engine unavailable, admin config and types not refreshed",
+      `${(err as Error).message}\n` +
         "[supatype] Studio will report no schema until this succeeds, even though the schema is " +
         "applied. Retry with the stack up, or run `supatype push`.",
     )
@@ -1339,8 +1364,17 @@ function reconcileAuthenticatorPassword(
     },
   )
   if (result.status !== 0) {
+    // The cause, not just the consequence. This warned that REST "may answer 502" and said nothing
+    // about why, so when the supabucks e2e then failed its only API assertion with a 502, the
+    // warning twenty lines earlier read as unrelated noise. A message that predicts a failure and
+    // withholds its reason costs more than one that says nothing.
+    const detail = [result.stderr, result.error?.message]
+      .map((s) => (s ?? "").trim())
+      .filter((s) => s.length > 0)
+      .join("\n")
     console.warn(
-      "[supatype] Could not set the authenticator password; the REST API may answer 502.",
+      `[supatype] Could not set the authenticator password, so the REST API will answer 502.\n` +
+        (detail === "" ? "[supatype] docker gave no output." : detail),
     )
   }
 }

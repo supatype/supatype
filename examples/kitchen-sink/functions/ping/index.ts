@@ -9,7 +9,16 @@ import type { FunctionContext } from "../_shared/context.ts"
  */
 export default async function handler(_req: Request, ctx: FunctionContext): Promise<Response> {
   return new Response(
-    JSON.stringify({ ok: true, executionId: ctx.executionId, region: ctx.region }),
+    JSON.stringify({
+      ok: true,
+      executionId: ctx.executionId,
+      region: ctx.region,
+      // Reported, never returned. `ctx.dbUrl` is a credential, and the point here is only whether
+      // the deployment handed the worker one: the compose generator never passed it through, so
+      // this was permanently undefined on self-host with nothing to say why. Opt in by setting
+      // SUPATYPE_FUNCTIONS_DB_URL in .env.
+      hasDbUrl: Boolean(ctx.dbUrl),
+    }),
     { status: 200, headers: { "Content-Type": "application/json" } },
   )
 }
