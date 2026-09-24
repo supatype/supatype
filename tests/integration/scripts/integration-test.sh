@@ -269,6 +269,11 @@ if [[ "$SUPATYPE_PROVIDER" == "docker" ]]; then
   docker_build_image "realtime" "${SUPATYPE_REALTIME_IMAGE:-supatype/realtime:ci-dev}" \
     -f "$ROOT_DIR/packages/realtime/Dockerfile" "$ROOT_DIR"
   export SUPATYPE_REALTIME_IMAGE="${SUPATYPE_REALTIME_IMAGE:-supatype/realtime:ci-dev}"
+  # Built, not pulled: the worker lives in this repo, so the stack should run this commit's copy
+  # rather than whatever `:latest` on Docker Hub happens to be.
+  docker_build_image "functions-worker" "${SUPATYPE_FUNCTIONS_WORKER_IMAGE:-supatype/functions-worker:ci-dev}" \
+    -f "$ROOT_DIR/packages/functions-worker/Dockerfile" "$ROOT_DIR/packages/functions-worker"
+  export SUPATYPE_FUNCTIONS_WORKER_IMAGE="${SUPATYPE_FUNCTIONS_WORKER_IMAGE:-supatype/functions-worker:ci-dev}"
   if [[ -d "$ROOT_DIR/../supatype-auth" ]]; then
     docker_build_image "server" "${SUPATYPE_SERVER_IMAGE:-supatype/server:ci-dev}" "$ROOT_DIR/../supatype-auth"
     export SUPATYPE_SERVER_IMAGE="${SUPATYPE_SERVER_IMAGE:-supatype/server:ci-dev}"

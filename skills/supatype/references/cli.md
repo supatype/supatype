@@ -74,7 +74,7 @@ Auth flag: `--token` (cloud = platform PAT; self-host = `SERVICE_ROLE_KEY`). `--
 | `supatype plugins` | Plugin scaffolding |
 | `supatype types` | Type utilities |
 
-Kitchen-sink example (monorepo): `examples/edge-kit` — Vite UI that invokes sample functions.
+Example: [`examples/edge-kit`](https://github.com/supatype/supatype/tree/main/examples/edge-kit) in the Supatype repository — Vite UI that invokes sample functions.
 
 ## Ops and maintenance
 
