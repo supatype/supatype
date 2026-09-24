@@ -509,10 +509,21 @@ export class RealtimeClient {
       }
     }
 
+    // `table` and `schema` travel with the subscription, rather than being inferred from the
+    // channel name at the other end.
+    //
+    // They were resolved here and then dropped, and the server falls back to reading the channel
+    // name as `schema:table`. So a subscription worked only when the channel happened to be named
+    // after its table, which is what `from(table).subscribe()` does. Anything else -- a channel
+    // called `lobby-chat` carrying `table: "chat_message"`, which is what `useSubscription` exists
+    // to let you write -- registered against a table no change can match. The socket reported
+    // SUBSCRIBED and delivered nothing, which is indistinguishable from a quiet table.
     this.sendMessage({
       type: "subscribe",
       channel: state.name,
       event: firstListener?.event ?? "*",
+      ...(firstListener?.table !== undefined && { table: firstListener.table }),
+      ...(firstListener?.schema !== undefined && { schema: firstListener.schema }),
       filter: Object.keys(filter).length > 0 ? filter : undefined,
     })
   }

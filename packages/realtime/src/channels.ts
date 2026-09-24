@@ -74,6 +74,28 @@ export class ChannelManager {
   }
 
   /**
+   * Which schema and table a subscribe message concerns.
+   *
+   * What the subscriber said wins; the channel name is the fallback for clients that predate
+   * sending it. The channel is a *name* for a subscription, and reading it as a statement about
+   * the table is a guess that is right only when the two happen to coincide -- which they do for
+   * `from(table).subscribe()` and do not for a channel named after its purpose. A subscription
+   * registered under the wrong table matches no change, and the only symptom is silence on a
+   * socket that has already reported SUBSCRIBED.
+   *
+   * Exported so the rule has one home. A test that restates it passes against a server that does
+   * something else, which is how this survived in the first place.
+   */
+  static resolveTarget(msg: {
+    channel: string
+    table?: string | undefined
+    schema?: string | undefined
+  }): { schema: string; table: string } {
+    const parsed = ChannelManager.parseChannel(msg.channel)
+    return { schema: msg.schema ?? parsed.schema, table: msg.table ?? parsed.table }
+  }
+
+  /**
    * Get all clients subscribed to a given schema.table,
    * optionally filtered by event type.
    */

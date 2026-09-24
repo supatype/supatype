@@ -285,18 +285,31 @@ export class RealtimeServer {
   private handleSubscribe(
     clientId: string,
     client: ConnectedClient,
-    msg: { channel: string; event?: ChangeEvent | "*" | undefined; filter?: Record<string, string> | undefined },
+    msg: {
+      channel: string
+      event?: ChangeEvent | "*" | undefined
+      table?: string | undefined
+      schema?: string | undefined
+      filter?: Record<string, string> | undefined
+    },
   ): void {
     if (this.env.secureChannels && !client.claims) {
       this.send(client.ws, { type: "system", status: "error", message: "authenticate before subscribing" })
       return
     }
 
-    const { schema, table } = ChannelManager.parseChannel(msg.channel)
+    // What the subscriber said, and the channel name only when they said nothing.
+    //
+    // Reading the table out of the channel name is a guess that happens to be right when the
+    // channel is named after its table, which is what `from(table).subscribe()` produces. A client
+    // naming its channel anything else got a subscription against a table no change can match, and
+    // the only symptom was silence on a socket that had reported SUBSCRIBED.
+    //
+    // The fallback stays for clients that predate `table` being sent at all: an old client and a
+    // new server behave exactly as they did.
     const subscription: Subscription = {
       channel: msg.channel,
-      schema,
-      table,
+      ...ChannelManager.resolveTarget(msg),
       event: msg.event ?? "*",
       filter: msg.filter ?? {},
     }
