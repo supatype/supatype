@@ -227,6 +227,15 @@ export interface ExtractedSchemaAstV2 {
   }
 }
 
+/**
+ * The Postgres type each field kind maps to, as published in the AST.
+ *
+ * A contract, not a hint: consumers generate parsers and casts from it. `money` and `decimal` said
+ * `TEXT` here while the engine creates `NUMERIC(19,4)` and `NUMERIC`, so anyone reading this wrote
+ * code that rejected every value the column returns. The engine's own `default_pg_type` agreed
+ * with the mistake for `money`, and was already right for `decimal`, which is what made it look
+ * considered.
+ */
 const DEFAULT_DB_BY_KIND: Partial<Record<FieldKind, Partial<DbFieldAnnotations>>> = {
   text: { pgType: "TEXT" },
   richText: { pgType: "JSONB" },
@@ -244,17 +253,17 @@ const DEFAULT_DB_BY_KIND: Partial<Record<FieldKind, Partial<DbFieldAnnotations>>
   slug: { pgType: "TEXT" },
   enum: { pgType: "TEXT" },
   json: { pgType: "JSONB" },
-  decimal: { pgType: "TEXT" },
+  decimal: { pgType: "NUMERIC" },
   bytes: { pgType: "BYTEA" },
   serial: { pgType: "SERIAL" },
   bigSerial: { pgType: "BIGSERIAL" },
-  money: { pgType: "TEXT" },
-  ip: { pgType: "TEXT" },
-  cidr: { pgType: "TEXT" },
-  macaddr: { pgType: "TEXT" },
-  xml: { pgType: "TEXT" },
-  tsQuery: { pgType: "TEXT" },
-  tsVector: { pgType: "TEXT" },
+  money: { pgType: "NUMERIC(19,4)" },
+  ip: { pgType: "INET" },
+  cidr: { pgType: "CIDR" },
+  macaddr: { pgType: "MACADDR" },
+  xml: { pgType: "XML" },
+  tsQuery: { pgType: "TSQUERY" },
+  tsVector: { pgType: "TSVECTOR" },
   color: { pgType: "TEXT" },
   array: { pgType: "ARRAY" },
   image: { pgType: "JSONB" },

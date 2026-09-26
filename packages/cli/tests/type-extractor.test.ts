@@ -1485,3 +1485,37 @@ export type Event = Model<{
     expect(event?.annotations.platform.searchFields).toBeUndefined()
   })
 })
+
+describe("the pg type an asset column claims", () => {
+  it("says JSONB, like the engine and the live column", () => {
+    // The extractor annotated image and file as TEXT, while this package's own DEFAULT_DB_BY_KIND,
+    // the engine's default, and the actual column in every pushed project all say JSONB. The
+    // engine honours an explicit annotation, so this was one code path away from creating a text
+    // column and then writing a JSON object into it.
+    const dir = mkdtempSync(join(tmpdir(), "supatype-asset-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, UUID, ImageAsset, FileAsset, Optional, Public } from "@supatype/types"
+
+export type Speaker = Model<{
+  id: UUID
+  headshot: Optional<ImageAsset>
+  handout: Optional<FileAsset>
+}, {
+  access: { read: Public }
+}>
+`,
+      "utf8",
+    )
+
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const speaker = ast?.models.find((m) => m.name === "Speaker")
+    const fields = speaker?.fields as Record<string, { annotations?: { db?: { pgType?: string } } }>
+
+    expect(fields["headshot"]?.annotations?.db?.pgType).toBe("JSONB")
+    expect(fields["handout"]?.annotations?.db?.pgType).toBe("JSONB")
+  })
+})

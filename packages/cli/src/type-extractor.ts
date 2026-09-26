@@ -1055,7 +1055,10 @@ function parseScalarType(
         const assetOpts = parseAssetFieldOptions(typeNode.typeArguments?.[1], sourceFile)
         return attachStorageFieldMeta(
           scalar("file", {
-            db: { pgType: "TEXT" },
+            // JSONB, not TEXT. The column holds { bucket, path }, this package's own
+            // DEFAULT_DB_BY_KIND says JSONB, and the engine honours an explicit annotation, so
+            // TEXT here was one code path from a text column with a JSON object written into it.
+            db: { pgType: "JSONB" },
             kernel: { bucket, ...(assetOpts.localized && { localized: true }) },
           }),
           bucket,
@@ -1067,7 +1070,10 @@ function parseScalarType(
         const assetOpts = parseAssetFieldOptions(typeNode.typeArguments?.[1], sourceFile)
         return attachStorageFieldMeta(
           scalar("image", {
-            db: { pgType: "TEXT" },
+            // JSONB, not TEXT. The column holds { bucket, path }, this package's own
+            // DEFAULT_DB_BY_KIND says JSONB, and the engine honours an explicit annotation, so
+            // TEXT here was one code path from a text column with a JSON object written into it.
+            db: { pgType: "JSONB" },
             kernel: { bucket, ...(assetOpts.localized && { localized: true }) },
           }),
           bucket,

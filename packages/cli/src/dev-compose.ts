@@ -2,6 +2,7 @@
  * `supatype dev` when `provider: docker`, full self-host Compose stack (Kong gateway).
  */
 
+import { writeAstDerivedOutputs } from "./type-generation.js"
 import { withPublishing } from "./model-versioning.js"
 import { existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
@@ -30,6 +31,7 @@ import { recoverStaleDevSession, writeDevSessionLock } from "./dev-session-lock.
 import { endDevSession, startDevSession } from "./dev-session.js"
 import { ensureDevApiConfig } from "./ensure-dev-api-config.js"
 import { cacheSeedingNotes } from "./api-config-cache.js"
+import { refreshFunctionsContext } from "./functions-context-refresh.js"
 import { DB_PORT_ENV, syncDatabaseUrlPort } from "./db-port.js"
 import { degraded } from "./strict.js"
 import {
@@ -377,7 +379,16 @@ async function waitComposeHealthy(paths: SelfHostComposePaths, cwd: string, maxM
   while (Date.now() < deadline) {
     const ready = spawnSync(
       "docker",
-      [...baseArgs, "exec", "-T", "db", "pg_isready", "-U", "supatype_admin"],
+      // Over TCP, deliberately, not the Unix socket.
+      //
+      // On a first run the Postgres entrypoint starts a temporary server with `listen_addresses=''`
+      // to run the init scripts, then shuts it down and starts the real one. That temporary server
+      // answers on the socket, so a socket `pg_isready` reports ready during init and the very next
+      // thing to connect meets "the database system is shutting down". It is why the initial push
+      // failed three times in a row on a clean machine while a warm one was fine.
+      //
+      // TCP is the distinction the entrypoint itself draws: the init server does not listen on it.
+      [...baseArgs, "exec", "-T", "db", "pg_isready", "-h", "127.0.0.1", "-U", "supatype_admin"],
       { cwd: composeDir, encoding: "utf8" },
     )
     if (ready.status === 0) return
@@ -597,6 +608,12 @@ async function refreshSchemaArtifacts(
   // validator silently not firing means a write the schema says is checked is accepted with a 201.
   const hooksModule = writeHooksModule(cwd, hooksPathFromProject(config, cwd), ast)
   if (hooksModule !== null) console.log(`[supatype] Hook handler types written to ${hooksModule}`)
+  // And the context module, on the same terms. `init` and `functions new` wrote it and nothing
+  // else did, so a project that already had functions when the two-argument contract landed never
+  // received one: its handlers had no `FunctionContext` to import.
+  if (refreshFunctionsContext(cwd, config)) {
+    console.log("[supatype] Function context type written to functions/_shared/context.ts")
+  }
   if (syncManifestHooks(cwd, ast)) {
     console.log("[supatype] Hook and validator maps written to .supatype/manifest.json")
   }
@@ -683,6 +700,23 @@ async function refreshSchemaArtifacts(
     } catch (err) {
       console.warn(`[supatype] Type generation failed: ${(err as Error).message}`)
     }
+  }
+
+  // Needs no engine, so it is written whether or not the types step above ran or succeeded. This
+  // is what `dev` never did: a project developed entirely through `supatype dev` received neither
+  // `index.d.ts`, which is what makes `createClient` typed without a generic, nor the field kinds
+  // the client reads to keep bigInt, decimal and money columns exact.
+  try {
+    for (const message of writeAstDerivedOutputs({
+      cwd,
+      ast,
+      ...(config.output?.types !== undefined && { typesPath: config.output.types }),
+      ...(config.output?.client !== undefined && { clientPath: config.output.client }),
+    })) {
+      console.log(`[supatype] ${message}`)
+    }
+  } catch (err) {
+    console.warn(`[supatype] Generated output failed: ${(err as Error).message}`)
   }
 
   try {
@@ -977,7 +1011,16 @@ export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfi
     throw new Error(detail || `Engine schema diff failed (exit ${result.status})`)
   }
   if (!result.diff) {
-    throw new Error("Engine diff returned no result")
+    // The engine exited 0 and produced nothing this could parse, which is a different failure from
+    // the engine exiting non-zero and is the harder one to act on. "Engine diff returned no result"
+    // named only the symptom, and running the same compose command by hand gave a clear error in
+    // one go, so the message was the only thing standing between the reader and the answer.
+    const output = (filterComposeNoise(result.output) || result.output || "").trim()
+    throw new Error(
+      output === ""
+        ? "The schema engine exited 0 and printed nothing. Run `supatype self-host compose run --rm schema-engine diff` to see what it does."
+        : `The schema engine exited 0 but its output could not be parsed as a diff:\n${output}`,
+    )
   }
   return result.diff
 }
@@ -1479,6 +1522,22 @@ export async function generateViaComposeEngine(
       writeFileSync(hostPath, ts)
       console.log(`[supatype] Types written to ${typesPath} (in-compose engine).`)
     }
+  }
+
+  // The same AST-derived files as the host path. This is the fallback used when the host engine
+  // could not be fetched, and these need no engine at all, so there is no reason for a project on
+  // this path to end up with fewer generated files than one on the other.
+  try {
+    for (const message of writeAstDerivedOutputs({
+      cwd,
+      ast,
+      ...(config.output?.types !== undefined && { typesPath: config.output.types }),
+      ...(config.output?.client !== undefined && { clientPath: config.output.client }),
+    })) {
+      console.log(`[supatype] ${message} (in-compose engine).`)
+    }
+  } catch (err) {
+    console.warn(`[supatype] Generated output failed: ${(err as Error).message}`)
   }
 
   const adminOut = await runComposeEngineGenerator(paths, cwd, composeProject, config, ["admin"])
