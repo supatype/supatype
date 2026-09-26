@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from "react"
 import { cn } from "../lib/utils.js"
 import { SlidePanel } from "./SlidePanel.js"
-import { Select } from "./ui.js"
+import { Badge, Select } from "./ui.js"
 
 type Tab = "sdk" | "direct" | "mcp"
 type Framework = "nextjs" | "react" | "vue" | "svelte" | "solid" | "vanilla"
@@ -95,12 +95,37 @@ function Step({ n, title, children, last }: { n: number; title: string; children
 
 // ── Tab definitions ───────────────────────────────────────────────────────────
 
-const TABS: Array<{ id: Tab; label: string; subtitle: string; icon: React.ReactElement; recommended?: boolean }> = [
+/**
+ * A tab carries at most one badge, because they share the one slot above the label.
+ *
+ * Everything that differs between the two kinds lives here rather than in the render, so adding a
+ * third is an entry in this table and not another branch in a ternary.
+ *
+ * `onlyWhenActive` is the difference that matters: "Recommended" is reassurance, so it is shown to
+ * someone already on that tab and faded out otherwise. "Soon" has to be legible from the
+ * unselected state, since its whole job is to say the tab holds nothing to follow yet.
+ */
+const TAB_BADGES = {
+  recommended: {
+    label: "Recommended",
+    className: "text-primary bg-primary/15 border-primary/30 transition-opacity",
+    onlyWhenActive: true,
+  },
+  soon: {
+    label: "Soon",
+    className: "bg-secondary text-muted-foreground",
+    onlyWhenActive: false,
+  },
+} as const
+
+type TabBadge = keyof typeof TAB_BADGES
+
+const TABS: Array<{ id: Tab; label: string; subtitle: string; icon: React.ReactElement; badge?: TabBadge }> = [
   {
     id: "sdk",
     label: "SDK",
     subtitle: "Client library",
-    recommended: true,
+    badge: "recommended",
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
         <polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" />
@@ -121,6 +146,7 @@ const TABS: Array<{ id: Tab; label: string; subtitle: string; icon: React.ReactE
     id: "mcp",
     label: "MCP",
     subtitle: "Connect your agent",
+    badge: "soon",
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
         <path d="M12 2L2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5" /><path d="M2 12l10 5 10-5" />
@@ -579,32 +605,36 @@ function DirectContent() {
 }
 
 
+/**
+ * The MCP tab, which today describes something that does not exist yet.
+ *
+ * It previously printed a working-looking config block telling people to run `npx @supatype/mcp`
+ * with a service role key in the env. No such package has ever been published, so the command
+ * fails, and the shape was wrong besides: the design is a remote endpoint the agent reaches over
+ * OAuth as the signed-in user, not a local process holding a key that bypasses RLS.
+ *
+ * The tab stays because MCP is on the roadmap and the panel is where people will look for it. It
+ * carries no snippet, because a copyable snippet is a promise that it works.
+ *
+ * It also stays clickable, where an unavailable nav item in SecondaryPanel is disabled with its
+ * note in a `title`. The difference is how much there is to say: three sentences about OAuth and
+ * RLS scoping do not fit in a tooltip, and this is one of three tabs rather than one of a dozen
+ * nav rows, so the cost of opening it and finding an explanation is a click.
+ */
 function McpContent() {
-  const config = `{
-  "mcpServers": {
-    "supatype": {
-      "command": "npx",
-      "args": ["@supatype/mcp"],
-      "env": {
-        "SUPATYPE_URL": "YOUR_SUPATYPE_URL",
-        "SUPATYPE_SERVICE_KEY": "YOUR_SERVICE_ROLE_KEY"
-      }
-    }
-  }
-}`
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        Connect your AI agent directly to your project via MCP. Works with Claude Desktop, Cursor, Windsurf, and any MCP-compatible tool.
+        Connect your AI agent directly to your project via MCP, with tools generated from your schema:
+        a model becomes CRUD, a function becomes a callable action. The agent connects over OAuth and
+        acts as the signed-in user, so it can reach exactly what that user&apos;s RLS policies allow and
+        nothing else.
       </p>
-      <Step n={1} title="Add to your agent config">
-        <CodeBlock code={config} filename="claude_desktop_config.json / .cursor/mcp.json" />
-      </Step>
-      <Step n={2} title="Environment variables" last>
-        <CodeBlock code={`SUPATYPE_URL=your-project-url\nSUPATYPE_SERVICE_KEY=your-service-role-key`} filename=".env" />
-      </Step>
       <div className="rounded-lg border border-border bg-secondary/20 px-3 py-2.5 text-xs text-muted-foreground">
-        The service role key bypasses RLS, use it only in trusted environments. Find it in <span className="text-foreground font-medium">Settings → API</span>.
+        <span className="text-foreground font-medium">Not available yet.</span> There is nothing to
+        configure here until it ships. In the meantime the <span className="text-primary font-medium">SDK</span>{" "}
+        tab is the type-safe way into your data, and <span className="text-primary font-medium">Direct</span>{" "}
+        gives you a connection string for anything that speaks Postgres.
       </div>
     </div>
   )
@@ -639,15 +669,17 @@ export function ConnectModal({ open, onClose }: ConnectModalProps): React.ReactE
                 : "border-border bg-secondary/20 text-muted-foreground hover:bg-secondary/40 hover:text-foreground",
             )}
           >
-            {t.recommended && (
-              <span className={cn(
-                "absolute -top-2 left-1/2 -translate-x-1/2 text-[9px] font-semibold rounded-full px-1.5 py-px whitespace-nowrap border transition-opacity",
-                tab === t.id
-                  ? "text-primary bg-primary/15 border-primary/30 opacity-100"
-                  : "opacity-0",
-              )}>
-                Recommended
-              </span>
+            {t.badge && (
+              <Badge
+                variant="outline"
+                className={cn(
+                  "absolute -top-2 left-1/2 -translate-x-1/2 text-[9px] font-semibold px-1.5 py-px whitespace-nowrap",
+                  TAB_BADGES[t.badge].className,
+                  TAB_BADGES[t.badge].onlyWhenActive && tab !== t.id && "opacity-0",
+                )}
+              >
+                {TAB_BADGES[t.badge].label}
+              </Badge>
             )}
             <span className={cn("transition-colors", tab === t.id ? "text-primary" : "")}>
               {t.icon}

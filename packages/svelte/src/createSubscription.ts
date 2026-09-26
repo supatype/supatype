@@ -1,6 +1,6 @@
 import { writable, type Readable } from "svelte/store"
 import { onDestroy } from "svelte"
-import type { AnyDatabase, SupatypeError, RealtimePayload, RealtimeEvent, ChannelStatus } from "@supatype/client"
+import type { AugmentedDatabase, AnyDatabase, SupatypeError, RealtimePayload, RealtimeEvent, ChannelStatus } from "@supatype/client"
 import { getSupatypeClient } from "./context.js"
 
 export interface SubscriptionOptions {
@@ -15,7 +15,7 @@ export interface SubscriptionStore<TRow> {
 }
 
 export function createSubscription<
-  TDatabase extends AnyDatabase = AnyDatabase,
+  TDatabase extends AnyDatabase = AugmentedDatabase,
   TTable extends keyof TDatabase["public"]["Tables"] & string = keyof TDatabase["public"]["Tables"] & string,
   TRow = TDatabase["public"]["Tables"][TTable]["Row"],
 >(

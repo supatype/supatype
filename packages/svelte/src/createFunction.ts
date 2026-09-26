@@ -1,5 +1,5 @@
 import { writable, type Readable } from "svelte/store"
-import type { AnyDatabase, SupatypeError } from "@supatype/client"
+import type { AugmentedDatabase, AnyDatabase, SupatypeError } from "@supatype/client"
 import { getSupatypeClient } from "./context.js"
 
 export interface FunctionStore<TResponse> {
@@ -11,7 +11,7 @@ export interface FunctionStore<TResponse> {
 
 export function createFunction<
   TResponse = unknown,
-  TDatabase extends AnyDatabase = AnyDatabase,
+  TDatabase extends AnyDatabase = AugmentedDatabase,
 >(
   functionName: string,
 ): FunctionStore<TResponse> {

@@ -1,6 +1,6 @@
 import { writable, type Readable } from "svelte/store"
 import { onDestroy } from "svelte"
-import type { AnyDatabase, SupatypeError, User, Session, AuthChangeEvent } from "@supatype/client"
+import type { AugmentedDatabase, AnyDatabase, SupatypeError, User, Session, AuthChangeEvent } from "@supatype/client"
 import { getSupatypeClient } from "./context.js"
 
 export interface AuthStore {
@@ -14,7 +14,7 @@ export interface AuthStore {
   resetPassword: (email: string) => Promise<{ error: SupatypeError | null }>
 }
 
-export function createAuth<TDatabase extends AnyDatabase = AnyDatabase>(): AuthStore {
+export function createAuth<TDatabase extends AnyDatabase = AugmentedDatabase>(): AuthStore {
   const client = getSupatypeClient<TDatabase>()
   const user = writable<User | null>(null)
   const session = writable<Session | null>(null)

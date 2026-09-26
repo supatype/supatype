@@ -1,6 +1,6 @@
 import { createSignal, onMount, onCleanup } from "solid-js"
 import type { Accessor } from "solid-js"
-import type { AnyDatabase, SupatypeError, User, Session, AuthChangeEvent } from "@supatype/client"
+import type { AugmentedDatabase, AnyDatabase, SupatypeError, User, Session, AuthChangeEvent } from "@supatype/client"
 import { useSupatype } from "./context.js"
 
 export interface AuthResult {
@@ -14,7 +14,7 @@ export interface AuthResult {
   resetPassword: (email: string) => Promise<{ error: SupatypeError | null }>
 }
 
-export function createAuth<TDatabase extends AnyDatabase = AnyDatabase>(): AuthResult {
+export function createAuth<TDatabase extends AnyDatabase = AugmentedDatabase>(): AuthResult {
   const client = useSupatype<TDatabase>()
   const [user, setUser] = createSignal<User | null>(null)
   const [session, setSession] = createSignal<Session | null>(null)

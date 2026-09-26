@@ -14,7 +14,7 @@
  */
 
 import { inject, type InjectionKey, type Plugin } from "vue"
-import type { AnyClient, SupatypeClient, AnyDatabase } from "@supatype/client"
+import type { AugmentedDatabase, AnyClient, SupatypeClient, AnyDatabase } from "@supatype/client"
 
 /** Typed at `AnyClient`, narrowed on read. See `AnyClient` for why it is neither generic nor `any`. */
 export const SUPATYPE_KEY: InjectionKey<AnyClient> = Symbol("supatype")
@@ -36,7 +36,7 @@ export const supatypePlugin: Plugin<[AnyClient]> = {
  * Get the Supatype client from the injection context.
  * Must be called inside setup() of a component that has the supatypePlugin installed.
  */
-export function useSupatype<TDatabase extends AnyDatabase = AnyDatabase>(): SupatypeClient<TDatabase> {
+export function useSupatype<TDatabase extends AnyDatabase = AugmentedDatabase>(): SupatypeClient<TDatabase> {
   const client = inject(SUPATYPE_KEY)
   if (!client) {
     throw new Error("useSupatype() requires the supatypePlugin to be installed on the Vue app.")

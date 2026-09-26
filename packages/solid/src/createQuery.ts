@@ -1,6 +1,6 @@
 import { createSignal, onCleanup, onMount } from "solid-js"
 import type { Accessor } from "solid-js"
-import type { AnyDatabase, SupatypeError } from "@supatype/client"
+import type { AugmentedDatabase, AnyDatabase, SupatypeError } from "@supatype/client"
 import { onIdentityChange } from "@supatype/client"
 import { useSupatype } from "./context.js"
 
@@ -21,7 +21,7 @@ export interface QueryResult<TRow> {
 }
 
 export function createQuery<
-  TDatabase extends AnyDatabase = AnyDatabase,
+  TDatabase extends AnyDatabase = AugmentedDatabase,
   TTable extends keyof TDatabase["public"]["Tables"] & string = keyof TDatabase["public"]["Tables"] & string,
   TRow = TDatabase["public"]["Tables"][TTable]["Row"],
 >(
