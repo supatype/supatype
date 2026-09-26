@@ -1,6 +1,5 @@
 import React, { useState } from "react"
 import { useAuth, useQuery } from "@supatype/react"
-import type { Database } from "../../../supatype/generated/database"
 import { AuthScreen } from "./AuthScreen.js"
 import { ProgrammeScreen } from "./ProgrammeScreen.js"
 import { SpeakersScreen } from "./SpeakersScreen.js"
@@ -10,8 +9,9 @@ import { SponsorsScreen } from "./SponsorsScreen.js"
 import { AccountScreen } from "./AccountScreen.js"
 import { Button } from "./components/ui.js"
 import { localizedOr } from "./lib/localized.js"
+import type { TableRow } from "@supatype/client"
 
-type SiteSettings = Database["public"]["Tables"]["_global_site_settings"]["Row"]
+type SiteSettings = TableRow<"_global_site_settings">
 
 /**
  * The attendee app: the session-shaped half of the kitchen sink.
@@ -119,7 +119,7 @@ function ConferenceBar({
   email: string
   onSignOut: () => void
 }): React.ReactElement {
-  const { data } = useQuery<Database, "_global_site_settings", SiteSettings>(
+  const { data } = useQuery(
     "_global_site_settings",
     { limit: 1 },
   )

@@ -1,14 +1,27 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022", "DOM"],
+    "lib": [
+      "ES2022",
+      "DOM"
+    ],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "strict": true,
     "exactOptionalPropertyTypes": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
-  "include": ["schema", "supatype.config.ts", "supatype/generated", "vite.*.config.ts"]
+  "include": [
+    "schema",
+    "supatype.config.ts",
+    "supatype/generated",
+    "vite.*.config.ts"
+  ],
+  "exclude": [
+    "functions"
+  ]
 }

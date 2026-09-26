@@ -10,17 +10,15 @@ import {
   TextInput,
   View,
 } from "react-native"
-import type { AugmentedDatabase, ChannelStatus } from "@supatype/client"
+import type { ChannelStatus, TableInsert, TableRow } from "@supatype/client"
 import { RealtimeClient } from "@supatype/client"
 import { useAuth, useQuery, useSupatype } from "@supatype/react"
 
 export const LOBBY_ROOM = "lobby"
 
-type ChatRow = AugmentedDatabase["public"]["Tables"]["chat_message"]["Row"] & {
-  auth_user_id?: string | null
-}
+type ChatRow = TableRow<"chat_message">
 
-type ProfileRow = AugmentedDatabase["public"]["Tables"]["profile"]["Row"]
+type ProfileRow = TableRow<"profile">
 
 function realtimeWsBase(httpUrl: string): string {
   return `${httpUrl.replace(/\/$/, "")}/realtime/v1`
@@ -33,7 +31,7 @@ export function ChatScreen({
   authorName: string
   currentUserId: string | undefined
 }): React.ReactElement {
-  const client = useSupatype<AugmentedDatabase>()
+  const client = useSupatype()
   const { user, session } = useAuth()
   const [draft, setDraft] = useState("")
   const [sending, setSending] = useState(false)
@@ -42,22 +40,14 @@ export function ChatScreen({
   const [subStatus, setSubStatus] = useState<ChannelStatus>("SUBSCRIBING")
   const seenIds = useRef(new Set<string>())
 
-  const { data: initialRows, loading, error: loadError, refetch } = useQuery<
-    AugmentedDatabase,
-    "chat_message",
-    ChatRow
-  >("chat_message", {
+  const { data: initialRows, loading, error: loadError, refetch } = useQuery("chat_message", {
     filter: { room: LOBBY_ROOM },
     order: { column: "created_at", ascending: true },
     limit: 100,
     enabled: user !== null,
   })
 
-  const { data: profileRows, refetch: refetchProfiles } = useQuery<
-    AugmentedDatabase,
-    "profile",
-    ProfileRow
-  >("profile", {
+  const { data: profileRows, refetch: refetchProfiles } = useQuery("profile", {
     limit: 200,
     enabled: user !== null,
   })
@@ -128,7 +118,7 @@ export function ChatScreen({
         body,
         auth_user_id: user.id,
         authorName: authorNameForMessage,
-      } as AugmentedDatabase["public"]["Tables"]["chat_message"]["Insert"])
+      } as TableInsert<"chat_message">)
       .select("id,room,body,auth_user_id,authorName,created_at")
       .single()
     setSending(false)

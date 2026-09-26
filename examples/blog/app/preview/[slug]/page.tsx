@@ -1,9 +1,9 @@
 import React from "react"
-import { createClient } from "@supatype/client"
-import type { AugmentedDatabase } from "@supatype/client"
+import { createClient } from "../../../supatype/generated/client"
+import type { TableRow } from "@supatype/client"
 import { RichText } from "@supatype/react"
 
-type Post = AugmentedDatabase["public"]["Tables"]["post"]["Row"]
+type Post = TableRow<"post">
 
 const url = process.env["NEXT_PUBLIC_SUPATYPE_URL"] ?? "http://localhost:18473"
 const anonKey = process.env["NEXT_PUBLIC_SUPATYPE_ANON_KEY"] ?? ""
@@ -48,7 +48,7 @@ export default async function PreviewPage({
   // A fresh client per request, carrying the link as its whole credential rather than the visitor's
   // session. `previewCode` beats a session on purpose: whoever opened this link may be signed in as
   // someone with no access to the draft, and using that identity would show them "not found".
-  const supatype = createClient<AugmentedDatabase>({ url, anonKey, previewCode: code })
+  const supatype = createClient({ url, anonKey, previewCode: code })
 
   const { data: posts, error } = await supatype
     .from("post")

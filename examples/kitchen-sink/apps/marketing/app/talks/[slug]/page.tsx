@@ -4,10 +4,9 @@ import { headers } from "next/headers"
 import { RichText } from "@supatype/react"
 import { createClient } from "@/lib/supatype-server"
 import { localized, publicImageUrl } from "@/lib/localized"
-import type { Database } from "../../../../../supatype/generated/database"
-
-type Talk = Database["public"]["Tables"]["talk"]["Row"]
-type Speaker = Database["public"]["Tables"]["speaker"]["Row"]
+import type { TableRow } from "@supatype/client"
+type Talk = TableRow<"talk">
+type Speaker = TableRow<"speaker">
 
 async function talkBySlug(slug: string): Promise<Talk | null> {
   const supatype = await createClient()

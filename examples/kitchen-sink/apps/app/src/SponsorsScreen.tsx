@@ -1,10 +1,10 @@
 import React from "react"
 import { useQuery } from "@supatype/react"
-import type { Database } from "../../../supatype/generated/database"
 import { Badge, Card, EmptyState, Grid, Note, PageHeader, ProvesNote, Row, Skeleton, Stack } from "./components/ui.js"
 import { localized } from "./lib/localized.js"
+import type { TableRow } from "@supatype/client"
 
-type Sponsor = Database["public"]["Tables"]["sponsor"]["Row"]
+type Sponsor = TableRow<"sponsor">
 
 const TIER_ORDER: Record<string, number> = { platinum: 0, gold: 1, community: 2 }
 
@@ -16,7 +16,7 @@ const TIER_ORDER: Record<string, number> = { platinum: 0, gold: 1, community: 2 
  * rather than the conference's, so it is used as an accent on their own card and nowhere else.
  */
 export function SponsorsScreen(): React.ReactElement {
-  const { data, error, loading } = useQuery<Database, "sponsor", Sponsor>("sponsor", { limit: 100 })
+  const { data, error, loading } = useQuery("sponsor", { limit: 100 })
 
   const note = (
     <ProvesNote>

@@ -1,12 +1,12 @@
 import React from "react"
 import { useQuery } from "@supatype/react"
-import type { Database } from "../../../supatype/generated/database"
 import { Avatar, Badge, EmptyState, PageHeader, ProvesNote, Row, Skeleton, Note } from "./components/ui.js"
 import { localized } from "./lib/localized.js"
+import type { TableRow } from "@supatype/client"
 
-type Talk = Database["public"]["Tables"]["talk"]["Row"]
-type Speaker = Database["public"]["Tables"]["speaker"]["Row"]
-type Room = Database["public"]["Tables"]["room"]["Row"]
+type Talk = TableRow<"talk">
+type Speaker = TableRow<"speaker">
+type Room = TableRow<"room">
 
 /**
  * The published programme, grouped by day.
@@ -22,12 +22,12 @@ type Room = Database["public"]["Tables"]["room"]["Row"]
  * server while the talk list does not.
  */
 export function ProgrammeScreen(): React.ReactElement {
-  const talks = useQuery<Database, "talk", Talk>("talk", {
+  const talks = useQuery("talk", {
     order: { column: "starts_at", ascending: true },
     limit: 100,
   })
-  const speakers = useQuery<Database, "speaker", Speaker>("speaker", { limit: 100 })
-  const rooms = useQuery<Database, "room", Room>("room", { limit: 50 })
+  const speakers = useQuery("speaker", { limit: 100 })
+  const rooms = useQuery("room", { limit: 50 })
 
   const speakerById = new Map((speakers.data ?? []).map((s) => [s.id, s]))
   const roomById = new Map((rooms.data ?? []).map((r) => [r.id, r]))

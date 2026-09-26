@@ -1,8 +1,7 @@
 import React from "react"
 import { createClient } from "@/lib/supatype-server"
-import type { Database } from "../../../../supatype/generated/database"
-
-type Talk = Database["public"]["Tables"]["talk"]["Row"]
+import type { TableRow } from "@supatype/client"
+type Talk = TableRow<"talk">
 
 export default async function TalksPage(): Promise<React.ReactElement> {
   const supatype = await createClient()

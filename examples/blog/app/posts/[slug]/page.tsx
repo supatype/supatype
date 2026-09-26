@@ -2,9 +2,8 @@ import React from "react"
 import { createClient } from "@/lib/supatype-server"
 import { RichText } from "@supatype/react"
 import { CommentsSection } from "./comments"
-import type { AugmentedDatabase } from "@supatype/client"
-
-type Post = AugmentedDatabase["public"]["Tables"]["post"]["Row"]
+import type { TableRow } from "@supatype/client"
+type Post = TableRow<"post">
 
 type Props = {
   params: Promise<{ slug: string }>

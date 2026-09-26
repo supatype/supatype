@@ -7,14 +7,13 @@ import {
   TextInput,
   View,
 } from "react-native"
-import type { AugmentedDatabase } from "@supatype/client"
 import { useAuth, useSupatype } from "@supatype/react"
 import { defaultDisplayName, type useProfileDisplayName } from "./useProfileDisplayName"
 
 type ProfileState = ReturnType<typeof useProfileDisplayName>
 
 export function HomeScreen({ profileState }: { profileState: ProfileState }): React.ReactElement {
-  const client = useSupatype<AugmentedDatabase>()
+  const client = useSupatype()
   const { user, signOut } = useAuth()
   const { profile, initialLoading, error: loadError, refetch } = profileState
 

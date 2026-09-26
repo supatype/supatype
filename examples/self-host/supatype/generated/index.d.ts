@@ -2,33 +2,27 @@
 
 declare module "@supatype/client" {
   interface SupatypeModels {
-    task: {
+    todo: {
       Row: {
-  auth_user_id: string | null
   created_at: string
   done: boolean
   id: string
-  note: string | null
+  owner_id: string
   title: string
-  updated_at: string
 }
       Insert: {
-  auth_user_id?: string | null
   created_at?: string
   done: boolean
   id?: string
-  note?: string | null
+  owner_id: string
   title: string
-  updated_at?: string
 }
       Update: {
-  auth_user_id?: string | null
   created_at?: string
   done?: boolean
   id?: string
-  note?: string | null
+  owner_id?: string
   title?: string
-  updated_at?: string
 }
     }
   }

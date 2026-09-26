@@ -1,7 +1,7 @@
-import type { AugmentedDatabase } from "@supatype/client"
+import type { TableRow } from "@supatype/client"
 import { useAuth, useQuery } from "@supatype/react"
 
-type ProfileRow = AugmentedDatabase["public"]["Tables"]["profile"]["Row"]
+type ProfileRow = TableRow<"profile">
 
 export function defaultDisplayName(email: string | undefined): string {
   return email?.split("@")[0] ?? "Expo user"
@@ -20,11 +20,7 @@ export function useProfileDisplayName(): {
   const { user } = useAuth()
   const userId = user?.id
 
-  const { data: rows, loading, error, refetch } = useQuery<
-    AugmentedDatabase,
-    "profile",
-    ProfileRow
-  >("profile", {
+  const { data: rows, loading, error, refetch } = useQuery("profile", {
     filter: userId !== undefined ? { id: userId } : undefined,
     limit: 1,
     enabled: userId !== undefined,

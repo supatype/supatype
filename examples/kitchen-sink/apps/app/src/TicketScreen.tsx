@@ -1,10 +1,10 @@
 import React, { useState } from "react"
 import { useFunction, useQuery } from "@supatype/react"
 import { supatype } from "./client.js"
-import type { Database } from "../../../supatype/generated/database"
 import { Badge, Button, EmptyState, Note, PageHeader, ProvesNote, Row, Skeleton, Stack } from "./components/ui.js"
+import type { TableRow } from "@supatype/client"
 
-type Ticket = Database["public"]["Tables"]["ticket"]["Row"]
+type Ticket = TableRow<"ticket">
 
 /**
  * My ticket, and only mine.
@@ -15,7 +15,7 @@ type Ticket = Database["public"]["Tables"]["ticket"]["Row"]
  * where a crafted request cannot get around it.
  */
 export function TicketScreen({ userId }: { userId: string }): React.ReactElement {
-  const { data, error, loading, refetch } = useQuery<Database, "ticket", Ticket>("ticket")
+  const { data, error, loading, refetch } = useQuery("ticket")
 
   // Issuing is server work: the reference is unique and the price is not the buyer's to choose, so
   // the row is written by a function holding the service role rather than by this client.

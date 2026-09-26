@@ -1,4 +1,4 @@
-import { createClient, type AugmentedDatabase } from "@supatype/client"
+import { createClient } from "../supatype/generated/client"
 
 const DEFAULT_GATEWAY = "http://localhost:18473"
 
@@ -36,7 +36,7 @@ function resolveAnonKey(): string {
 export const gatewayUrl = resolveUrl()
 export const anonKeyValue = resolveAnonKey()
 
-export const client = createClient<AugmentedDatabase>({
+export const client = createClient({
   url: gatewayUrl,
   anonKey: anonKeyValue,
 })

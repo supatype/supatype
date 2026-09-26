@@ -12,7 +12,7 @@
  */
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { createClient } from "@supatype/client"
+import { createClient } from "./supatype/generated/client"
 
 /**
  * From `.env`, which `pnpm verify` loads. 18473 is the first port `supatype dev` tries, not this

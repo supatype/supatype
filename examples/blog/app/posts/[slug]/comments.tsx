@@ -2,20 +2,19 @@
 
 import React, { useState } from "react"
 import { useAuth, useQuery, useMutation } from "@supatype/react"
-import type { AugmentedDatabase } from "@supatype/client"
-
-type Comment = AugmentedDatabase["public"]["Tables"]["comment"]["Row"]
+import type { TableRow } from "@supatype/client"
+type Comment = TableRow<"comment">
 
 export function CommentsSection({ postId }: { postId: string }): React.ReactElement {
   const { user } = useAuth()
   const [commentBody, setCommentBody] = useState("")
 
-  const { data: comments, loading, refetch } = useQuery<AugmentedDatabase, "comment">("comment", {
+  const { data: comments, loading, refetch } = useQuery("comment", {
     filter: { postId },
     order: { column: "created_at", ascending: true },
   })
 
-  const { mutate: addComment, loading: commenting } = useMutation<AugmentedDatabase, "comment">("comment", "insert")
+  const { mutate: addComment, loading: commenting } = useMutation("comment", "insert")
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>): Promise<void> {
     e.preventDefault()

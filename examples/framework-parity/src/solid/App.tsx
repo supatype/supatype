@@ -1,15 +1,16 @@
 import { createEffect, createSignal, For, Show } from "solid-js"
 import { createAuth, createFunction, createMutation, createQuery, createSubscription } from "@supatype/solid"
 import type { Database } from "../../supatype/generated/database"
+import type { TableRow } from "@supatype/client"
 
-type Task = Database["public"]["Tables"]["task"]["Row"]
+type Task = TableRow<"task">
 
 export function App() {
   const { user, loading: authLoading, signIn, signUp, signOut } = createAuth()
-  const { data: tasks, refetch } = createQuery<Database, "task", Task>("task", {
+  const { data: tasks, refetch } = createQuery("task", {
     order: { column: "created_at", ascending: false },
   })
-  const { mutate, loading: saving } = createMutation<Database, "task", Task>("task", "insert")
+  const { mutate, loading: saving } = createMutation("task", "insert")
   const ping = createFunction<{ ok: boolean }>("ping")
 
   // These bindings take the table and accumulate rows into `data` themselves, where
