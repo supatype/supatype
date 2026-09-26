@@ -1,3 +1,5 @@
+import type { ExactColumns } from "./exact-columns.js"
+
 /** Event types for database change notifications. */
 export type ChangeEvent = "INSERT" | "UPDATE" | "DELETE"
 
@@ -10,6 +12,12 @@ export interface WalChange {
   newRecord: Record<string, unknown> | null
   /** The old row data (null for INSERT). */
   oldRecord: Record<string, unknown> | null
+  /**
+   * Columns whose values are carried as exact strings, and what the subscriber turns them into.
+   *
+   * Empty for a table with no bigint, numeric or money column, which is most of them.
+   */
+  exactColumns: ExactColumns
   commitTimestamp: string
 }
 
@@ -78,6 +86,16 @@ export interface ChangeEventMessage {
     old: Record<string, unknown> | null
     new: Record<string, unknown> | null
   }
+  /**
+   * Columns in this payload carried as exact strings, and the kind each one is.
+   *
+   * Sent with the change rather than looked up by the subscriber, because the database declared
+   * these types and the frame is the only place that knowledge is certain. A client with no
+   * generated types still reads the value correctly, and one with them gets a native bigint.
+   *
+   * Omitted when there are none, which keeps an ordinary frame the size it was.
+   */
+  exactColumns?: ExactColumns
   timestamp: string
 }
 

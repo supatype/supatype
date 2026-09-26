@@ -2,6 +2,7 @@ import pg from "pg"
 import type { WalChange, ChangeEvent } from "./types.js"
 import { isSchemaPushLockHeld } from "./schema-push-lock.js"
 import { isTransientConnectionError, withDatabaseRetry } from "./db-retry.js"
+import { exactColumnsOf, valueForColumn } from "./exact-columns.js"
 import {
   RealtimeUnsupportedError,
   unsupportedRealtimeReason,
@@ -9,6 +10,18 @@ import {
 } from "./capability.js"
 
 const { Client } = pg
+
+/**
+ * How the slot is read, as a constant so the options are a contract rather than a detail.
+ *
+ * `numeric-data-types-as-string` is the one that matters: without it wal2json emits numerics as
+ * JSON numbers, and `JSON.parse` rounds a bigint past 2^53 to its even neighbour and flattens a
+ * numeric's scale before any code here can see the value. With it every numeric arrives as a
+ * string and `valueForColumn` hands the ordinary ones back as numbers.
+ */
+export const SLOT_READ_QUERY =
+  "SELECT data FROM pg_logical_slot_get_changes($1, NULL, NULL, " +
+  "'include-timestamp', 'on', 'include-pk', 'on', 'numeric-data-types-as-string', '1')"
 
 export interface ReplicationConfig {
   databaseUrl: string
@@ -229,13 +242,10 @@ export class ReplicationListener {
         this.onSchemaChangeCallback?.()
       }
 
-      const result = await this.client.query(
-        `SELECT data FROM pg_logical_slot_get_changes($1, NULL, NULL, 'include-timestamp', 'on', 'include-pk', 'on')`,
-        [this.config.slotName],
-      )
+      const result = await this.client.query(SLOT_READ_QUERY, [this.config.slotName])
 
       for (const row of result.rows as Array<{ data: string }>) {
-        const changes = this.parseWal2json(row.data)
+        const changes = parseWal2json(row.data)
         const onChange = this.onChangeCallback
         if (!onChange) return
         for (const change of changes) {
@@ -252,35 +262,51 @@ export class ReplicationListener {
       this.pollInFlight = false
     }
   }
+}
 
-  /**
-   * Parse a wal2json output row into WalChange objects.
-   * wal2json emits JSON with a `change` array, each entry having
-   * kind, schema, table, columnnames, columnvalues, oldkeys, etc.
-   */
-  private parseWal2json(data: string): WalChange[] {
-    try {
-      const parsed = JSON.parse(data) as Wal2JsonOutput
-      if (!parsed.change) return []
+/**
+ * Parse a wal2json output row into WalChange objects.
+ *
+ * wal2json emits JSON with a `change` array, each entry having kind, schema, table, columnnames,
+ * columnvalues, columntypes, oldkeys, etc.
+ *
+ * Exported because the interesting behaviour is in here rather than in the polling around it:
+ * which columns survive as exact strings, and which are handed back as numbers.
+ */
+export function parseWal2json(data: string): WalChange[] {
+  try {
+    const parsed = JSON.parse(data) as Wal2JsonOutput
+    if (!parsed.change) return []
+    const timestamp = parsed.timestamp ?? new Date().toISOString()
+    return parsed.change.map((entry) => changeFromEntry(entry, timestamp))
+  } catch {
+    console.error("[realtime] failed to parse wal2json data:", data)
+    return []
+  }
+}
 
-      return parsed.change.map((entry): WalChange => {
-        const event = mapKind(entry.kind)
-        const newRecord = event !== "DELETE" ? buildRecord(entry.columnnames, entry.columnvalues) : null
-        const oldRecord = event !== "INSERT" ? buildRecord(entry.oldkeys?.keynames, entry.oldkeys?.keyvalues) : null
-
-        return {
-          schema: entry.schema,
-          table: entry.table,
-          event,
-          newRecord,
-          oldRecord,
-          commitTimestamp: parsed.timestamp ?? new Date().toISOString(),
-        }
-      })
-    } catch {
-      console.error("[realtime] failed to parse wal2json data:", data)
-      return []
-    }
+/** One wal2json entry as a change, with its values and their exactness resolved from the types. */
+function changeFromEntry(entry: Wal2JsonChange, commitTimestamp: string): WalChange {
+  const event = mapKind(entry.kind)
+  return {
+    schema: entry.schema,
+    table: entry.table,
+    event,
+    newRecord:
+      event !== "DELETE"
+        ? buildRecord(entry.columnnames, entry.columnvalues, entry.columntypes)
+        : null,
+    oldRecord:
+      event !== "INSERT"
+        ? buildRecord(entry.oldkeys?.keynames, entry.oldkeys?.keyvalues, entry.oldkeys?.keytypes)
+        : null,
+    // Declared by the database rather than inferred from the value, so a bigint that happens to be
+    // small is still described as one and reaches the subscriber as a bigint.
+    exactColumns: {
+      ...exactColumnsOf(entry.oldkeys?.keynames, entry.oldkeys?.keytypes),
+      ...exactColumnsOf(entry.columnnames, entry.columntypes),
+    },
+    commitTimestamp,
   }
 }
 
@@ -297,9 +323,12 @@ interface Wal2JsonChange {
   table: string
   columnnames?: string[] | undefined
   columnvalues?: unknown[] | undefined
+  /** Declared types, which wal2json has always sent and this service used to discard. */
+  columntypes?: string[] | undefined
   oldkeys?: {
     keynames?: string[] | undefined
     keyvalues?: unknown[] | undefined
+    keytypes?: string[] | undefined
   } | undefined
 }
 
@@ -312,11 +341,15 @@ function mapKind(kind: string): ChangeEvent {
   }
 }
 
-function buildRecord(names?: string[], values?: unknown[]): Record<string, unknown> | null {
+function buildRecord(
+  names?: string[],
+  values?: unknown[],
+  types?: string[],
+): Record<string, unknown> | null {
   if (!names || !values) return null
   const record: Record<string, unknown> = {}
   for (let i = 0; i < names.length; i++) {
-    record[names[i]!] = values[i]
+    record[names[i]!] = valueForColumn(values[i], types?.[i])
   }
   return record
 }
