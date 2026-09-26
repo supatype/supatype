@@ -492,6 +492,58 @@ jobs:
   # Zero to running, from the workspace build: init (docker) → dev → an API that answers.
   # Phase-10.6 row C21, kept here as provenance, the job is named for what it does.
   # macOS runners have no Docker Desktop; Colima provides the daemon.
+  # Every field kind, against a real database.
+  #
+  # Coverage of which kinds exist was 32 of 41 when this landed, and every engine defect found that
+  # week was in a *property* of a kind already covered: the column `money` creates, the type the AST
+  # publishes for it, the TypeScript a required relation generates, whether an enum's default
+  # reaches Insert, whether a second push is a no-op, whether a field can be removed at all.
+  #
+  # On push to main rather than on every pull request: it brings up a full stack and takes minutes.
+  # `release.yml` gates a tag on this workflow being green for that commit, so a release cannot go
+  # out over a red run here.
+  #
+  # The same script runs locally:
+  #   bash tests/integration/scripts/field-conformance.sh
+  field-conformance:
+    name: field conformance (live stack)
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    env:
+      # Built from this checkout, so the embedded release key is empty and the host engine download
+      # has nothing to verify against. See validation-e2e.
+      SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
+      SUPATYPE_STRICT: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript packages
+        run: pnpm build
+
+      - name: Every field kind, against a real database
+        run: bash tests/integration/scripts/field-conformance.sh
+
+      - name: Upload the stack logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: field-conformance-logs
+          path: /tmp/supatype-conformance-*/
+          retention-days: 3
+          if-no-files-found: ignore
+
   zero-to-running:
     name: "zero to running: workspace CLI (${{ matrix.os }})"
     if: github.event_name != 'schedule'
