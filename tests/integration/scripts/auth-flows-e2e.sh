@@ -60,6 +60,20 @@ cp "$INTEGRATION_DIR/supatype.config.ts" "$INTEGRATION_DIR/supatype.config.ts.au
 node "$SCRIPT_DIR/point-email-at-smtp.mjs" "$INTEGRATION_DIR/supatype.config.ts" "$MAILPIT_SMTP"
 
 echo "==> Bringing the stack up"
+# Pin the gateway port into the project's .env before starting, so the stack and this script
+# cannot disagree about it.
+#
+# `.env` is not tracked, so it carries whatever a previous run on this machine left behind. It
+# said 18477 here while the script waited on 18473, and the only symptom was five minutes of
+# "Still waiting" followed by a timeout that named neither port. CI never saw it, because CI has
+# no leftover file. The conformance script pins it for the same reason.
+if [[ -f "$INTEGRATION_DIR/.env" ]]; then
+  if grep -q "^SUPATYPE_KONG_PORT=" "$INTEGRATION_DIR/.env"; then
+    sed -i "s/^SUPATYPE_KONG_PORT=.*/SUPATYPE_KONG_PORT=${KONG_PORT}/" "$INTEGRATION_DIR/.env"
+  else
+    printf '\nSUPATYPE_KONG_PORT=%s\n' "$KONG_PORT" >> "$INTEGRATION_DIR/.env"
+  fi
+fi
 (cd "$INTEGRATION_DIR" && node "$CLI_BIN" dev) &
 DEV_PID=$!
 
@@ -70,6 +84,9 @@ if ! wait_until "$MAX_WAIT" "$BASE_URL/auth/v1/health" ready; then
 fi
 
 ANON_KEY="$(sed -n 's/^ANON_KEY=//p' "$INTEGRATION_DIR/.env" | tr -d '"\r' | head -1)"
+# Needed to seed the rows the owner check is made against. Asking whether one user can read
+# another user's row is worthless unless the other user's row demonstrably exists.
+SERVICE_ROLE_KEY="$(sed -n 's/^SERVICE_ROLE_KEY=//p' "$INTEGRATION_DIR/.env" | tr -d '"\r' | head -1)"
 if [[ -z "$ANON_KEY" ]]; then
   echo "ERROR: no ANON_KEY in $INTEGRATION_DIR/.env"
   exit 1
@@ -80,4 +97,5 @@ cd "$INTEGRATION_DIR"
 SUPATYPE_URL="$BASE_URL" \
   MAILPIT_URL="http://127.0.0.1:${MAILPIT_HTTP}" \
   ANON_KEY="$ANON_KEY" \
+  SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY" \
   npx tsx scripts/auth-flows.ts

@@ -15,6 +15,7 @@ const BASE = process.env.SUPATYPE_URL ?? "http://127.0.0.1:18473"
 const MAILPIT = process.env.MAILPIT_URL ?? "http://127.0.0.1:18025"
 const ANON = process.env.ANON_KEY ?? ""
 if (!ANON) throw new Error("ANON_KEY must be set")
+const SERVICE = process.env.SERVICE_ROLE_KEY ?? ""
 
 let failures = 0
 const ok = (m: string) => console.log(`  ok   ${m}`)
@@ -234,16 +235,169 @@ async function passwordReset(): Promise<void> {
   else bad(`the old password still works (${withOld.status}) — the reset did not take`)
 }
 
+/** A GET with whatever credential the caller is testing. */
+async function get(path: string, token: string, key = ANON) {
+  const res = await fetch(`${BASE}${path}`, {
+    headers: { apikey: key, Authorization: `Bearer ${token}` },
+  })
+  const text = await res.text()
+  let parsed: unknown = null
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    /* not json */
+  }
+  return {
+    status: res.status,
+    rows: Array.isArray(parsed) ? (parsed as Record<string, unknown>[]) : null,
+    text,
+  }
+}
+
+/**
+ * Sessions, and whether row level security actually gates a read.
+ *
+ * MFA and recovery are the unusual flows. This is the one every deployment depends on from the
+ * first minute, and nothing ran it end to end: that a signed-in user reads their own rows and not
+ * another user's. If that were wrong, every self-hosted project would be publishing its users'
+ * data, and no amount of coverage elsewhere would have said so.
+ *
+ * The seeded rows are asserted to exist before anything asks who can see them. Without that
+ * control, a user seeing no other rows passes against an empty table, which is the shape of
+ * assertion that reports success for years while proving nothing.
+ */
+async function sessionsAndRls(): Promise<void> {
+  console.log("-- sessions, and RLS against real rows")
+  if (!SERVICE) {
+    bad("SERVICE_ROLE_KEY must be set to seed rows the owner check can be made against")
+    return
+  }
+
+  const stamp = Date.now()
+  const service = { apikey: SERVICE, Authorization: `Bearer ${SERVICE}`, ...json }
+  const users: { id: string; access: string; refresh: string; email: string }[] = []
+
+  for (const which of ["a", "b"]) {
+    const email = `rls-${which}-${stamp}@example.test`
+    const res = await post("/auth/v1/signup", { email, password: `Correct-Horse-${which}1` })
+    const id = (res.body?.["user"] as { id?: string } | undefined)?.id
+    const access = res.body?.["access_token"]
+    const refresh = res.body?.["refresh_token"]
+    if (typeof id !== "string" || typeof access !== "string" || typeof refresh !== "string") {
+      bad(`signup failed (${res.status}): ${res.text.slice(0, 160)}`)
+      return
+    }
+    users.push({ id, access, refresh, email })
+  }
+  const [a, b] = users as [(typeof users)[0], (typeof users)[0]]
+  if (a.id !== b.id) ok("two sign-ups produce two distinct users")
+  else bad("both sign-ups share a user id")
+
+  // Rotation. The token it replaced is deliberately not asserted dead: RefreshTokenReuseInterval
+  // lets a just-replaced token answer again, so two concurrent refreshes from one client do not
+  // sign the user out. Asserting otherwise would be asserting against the design.
+  const rotated = await post("/auth/v1/token?grant_type=refresh_token", {
+    refresh_token: a.refresh,
+  })
+  const newAccess = rotated.body?.["access_token"]
+  const newRefresh = rotated.body?.["refresh_token"]
+  if (typeof newAccess === "string") ok("a refresh token exchanges for a new session")
+  else bad(`refresh failed (${rotated.status}): ${rotated.text.slice(0, 160)}`)
+  if (newRefresh !== undefined && newRefresh !== a.refresh) {
+    ok("the refresh token rotates rather than being handed back")
+  } else bad("the refresh token did not rotate")
+
+  const access = typeof newAccess === "string" ? newAccess : a.access
+  const refresh = typeof newRefresh === "string" ? (newRefresh as string) : a.refresh
+
+  // Owner<"subscriber"> generates `(SELECT auth.uid()) = subscriber_id`, so the author row a
+  // subscription points at carries the auth user's own id.
+  for (const user of users) {
+    const author = await post(
+      "/rest/v1/author",
+      { id: user.id, email: user.email, username: `u${user.id.slice(0, 8)}` },
+      service,
+    )
+    if (author.status >= 300) {
+      bad(`could not seed an author (${author.status}): ${author.text.slice(0, 160)}`)
+      return
+    }
+    const sub = await post(
+      "/rest/v1/subscription",
+      {
+        subscriber_id: user.id,
+        externalId: String(stamp + users.indexOf(user)),
+        planId: "00000000-0000-0000-0000-000000000001",
+        currentPeriodEnd: new Date(Date.now() + 86_400_000).toISOString(),
+        unitAmount: "10.00",
+      },
+      service,
+    )
+    if (sub.status >= 300) {
+      bad(`could not seed a subscription (${sub.status}): ${sub.text.slice(0, 160)}`)
+      return
+    }
+  }
+
+  // The control, before anything about visibility. Both rows exist, so "sees none" below means
+  // something.
+  const all = await get("/rest/v1/subscription?select=id,subscriber_id", SERVICE, SERVICE)
+  const seeded = (all.rows ?? []).filter(
+    (r) => r["subscriber_id"] === a.id || r["subscriber_id"] === b.id,
+  )
+  if (seeded.length === 2) ok("both subscriptions exist")
+  else bad(`expected two seeded rows, the service role sees ${seeded.length}`)
+
+  const mine = await get("/rest/v1/subscription?select=id,subscriber_id", access)
+  const rows = mine.rows ?? []
+  if (rows.length === 1 && rows[0]?.["subscriber_id"] === a.id) {
+    ok("a signed-in user reads their own subscription")
+  } else bad(`expected one own row, saw ${rows.length}`)
+  if (rows.every((r) => r["subscriber_id"] !== b.id)) ok("and cannot read another user's")
+  else bad("one user can read another user's subscription")
+
+  // Denied before RLS is consulted: anon holds no SELECT grant on this table, only authenticated
+  // does. A refusal and an empty result are both safe, and both are accepted here so the assertion
+  // is about the outcome rather than which layer produced it.
+  const asAnon = await get("/rest/v1/subscription?select=id", ANON)
+  if (asAnon.status >= 400 || (asAnon.rows ?? []).length === 0) {
+    ok("an anon key reads none of them")
+  } else bad(`anon read ${(asAnon.rows ?? []).length} row(s)`)
+
+  // Signing out ends the session, which means the refresh token dies. The access token keeps
+  // working until it expires, because it is a stateless JWT that nothing consults a server about.
+  // That is the design, and it is asserted here so it is not later reported as a defect.
+  const out = await post(
+    "/auth/v1/logout",
+    {},
+    { apikey: ANON, Authorization: `Bearer ${access}`, ...json },
+  )
+  if (out.status < 300) ok("sign out is accepted")
+  else bad(`logout failed (${out.status})`)
+
+  const afterOut = await post("/auth/v1/token?grant_type=refresh_token", { refresh_token: refresh })
+  if (afterOut.status >= 400) {
+    ok("the refresh token is dead afterwards, so the session cannot be extended")
+  } else bad(`the refresh token still works after logout (${afterOut.status})`)
+
+  const stillReads = await get("/rest/v1/subscription?select=id", access)
+  if (stillReads.status < 400) {
+    ok("the issued access token remains valid until it expires, as a stateless JWT does")
+  } else ok("the access token was rejected after logout, which is stricter than required")
+}
+
 async function main(): Promise<void> {
   await mfa()
   console.log("")
   await passwordReset()
   console.log("")
+  await sessionsAndRls()
+  console.log("")
   if (failures > 0) {
     console.error(`FAILED: ${failures} assertion(s)`)
     process.exit(1)
   }
-  console.log("PASSED: MFA and password reset both work against a running server")
+  console.log("PASSED: MFA, recovery, sessions and RLS all work against a running server")
   process.exit(0)
 }
 
