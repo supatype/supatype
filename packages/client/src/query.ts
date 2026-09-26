@@ -1,6 +1,8 @@
 import type { QueryCache, QueryCacheOptions, CacheStatus } from "./query-cache.js"
 import { buildCacheKey, defaultQueryCache } from "./query-cache.js"
 import type { MaskedField, QueryResult, SelectQueryOptions, SupatypeError } from "./types.js"
+import { parseRowsExactly, tableFromPath } from "./exact-response.js"
+import { stringifyWithBigInts } from "./exact-values.js"
 
 const DEBUG_AUTH =
   (typeof process !== "undefined" && process.env["NEXT_PUBLIC_SUPATYPE_DEBUG_AUTH"] === "1") ||
@@ -411,8 +413,17 @@ export class QueryBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
       )
     }
 
-    const json = await res.json() as TRow[]
-    const result: QueryResult<TRow[]> = { data: json, error: null, count }
+    // Read from the text rather than `res.json()`: a bigInt, decimal or money column is already
+    // ruined by the time `JSON.parse` returns, and the digits are only recoverable from the body.
+    const parsed = parseRowsExactly(await res.text(), tableFromPath(this.path))
+    if (!parsed.ok) {
+      return withMeta<TRow[]>(
+        { data: null, error: { message: parsed.message, status: res.status }, count: null },
+        { cacheStatus, maskedFields },
+      )
+    }
+
+    const result: QueryResult<TRow[]> = { data: parsed.value as TRow[], error: null, count }
 
     if (this.cacheOptions) {
       const cacheKey = buildCacheKey("GET", url, await resolveRequestHeaders(), {
@@ -530,7 +541,9 @@ export class MutationBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
     })
     const init: RequestInit = {
       method: this.method,
-      ...(this.body !== undefined && { body: JSON.stringify(this.body) }),
+      // Not `JSON.stringify`: it throws on a bigint, so reading a row with a bigInt column and
+      // writing it back would fail now that the generated types declare one.
+      ...(this.body !== undefined && { body: stringifyWithBigInts(this.body) }),
     }
     let res: Response
     try {
@@ -575,8 +588,13 @@ export class MutationBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
       return { data: [], error: null, count: 0 }
     }
 
-    const json = await res.json() as TRow | TRow[]
-    const data = Array.isArray(json) ? json : [json]
+    // The returned representation of what was just written, so it needs the same care as a read.
+    const parsed = parseRowsExactly(await res.text(), tableFromPath(this.path))
+    if (!parsed.ok) {
+      return { data: null, error: { message: parsed.message, status: res.status }, count: null }
+    }
+
+    const data = Array.isArray(parsed.value) ? (parsed.value as TRow[]) : [parsed.value as TRow]
     return { data, error: null, count: data.length }
   }
 }

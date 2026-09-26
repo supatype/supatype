@@ -69,14 +69,20 @@ describe("QueryBuilder.cache", () => {
       cache,
     ).cache({ ttl: 60_000 })
 
-    const r1 = await qb
-    expect(r1.data).toEqual([{ id: 1 }])
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-
-    const r2 = await qb
-    expect(r2.data).toEqual([{ id: 1 }])
-    expect(r2.meta?.cacheStatus).toBe("HIT")
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    // Counted per table URL rather than across every request, because the client also fetches the
+    // project's column types once so it can keep bigInt, decimal and money columns exact. That
+    // request is cached per project and is not what this test is about.
+    const tableCalls = (): number =>
+      fetchMock.mock.calls.filter((call) => String(call[0]).includes("/rest/v1/posts")).length
+
+    const r1 = await qb
+    expect(r1.data).toEqual([{ id: 1 }])
+    expect(tableCalls()).toBe(1)
+
+    const r2 = await qb
+    expect(r2.data).toEqual([{ id: 1 }])
+    expect(r2.meta?.cacheStatus).toBe("HIT")
+    expect(tableCalls()).toBe(1)
   })
 
   it("sends X-Supatype-Cache when server: true", async () => {

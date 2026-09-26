@@ -18,6 +18,7 @@ function mockFetch(
     ok,
     status,
     json: vi.fn().mockResolvedValue(body),
+    text: vi.fn().mockResolvedValue(JSON.stringify(body)),
     headers: {
       get: (key: string) => (key === "content-range" ? (contentRange ?? null) : null),
     },
