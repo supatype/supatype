@@ -43,12 +43,12 @@ function sessionFor(userId: string, accessToken = "token"): Session {
       id: userId,
       email: `${userId}@example.com`,
       role: "authenticated",
-      app_metadata: {},
-      user_metadata: {},
-      created_at: "2024-01-01T00:00:00Z",
-      updated_at: "2024-01-01T00:00:00Z",
+      appMetadata: {},
+      userMetadata: {},
+      createdAt: "2024-01-01T00:00:00Z",
+      updatedAt: "2024-01-01T00:00:00Z",
     },
-  } as Session
+  }
 }
 
 describe("onIdentityChange", () => {

@@ -1,34 +1,24 @@
 /**
  * Type inference tests: verify that TypeScript generics produce the correct
  * types throughout the client API.  These assertions are checked at compile
- * time by tsc and at runtime via vitest's expectTypeOf.
+ * time by `tsc -p tsconfig.test.json`. They are NOT checked by `vitest run`: `expectTypeOf` is a
+ * no-op at runtime, so a false assertion here passes the test suite and is caught only by the
+ * typecheck. This file previously claimed both and was covered by neither.
  */
 import { describe, it, expectTypeOf } from "vitest"
 import { createClient, QueryBuilder, MutationBuilder } from "../src/index.js"
-import type { QueryResult, SupatypeError } from "../src/index.js"
+import type {
+  QueryResult,
+  SupatypeError,
+  TableRow,
+  TableInsert,
+  TableUpdate,
+} from "../src/index.js"
+// Brings the suite-wide `SupatypeModels` augmentation into this compilation as well as the types.
+import type { Post, PostInsert, Comment } from "./fixtures/models.js"
+import "./fixtures/models.js"
 
-// ─── Fixture database type ────────────────────────────────────────────────────
-
-interface Post {
-  id: string
-  title: string
-  status: "draft" | "published"
-  user_id: string
-}
-
-interface PostInsert {
-  title: string
-  status?: "draft" | "published" | undefined
-  user_id: string
-}
-
-interface Comment {
-  id: string
-  post_id: string
-  body: string
-}
-
-interface TestDB {
+type TestDB = {
   public: {
     Tables: {
       posts: { Row: Post; Insert: PostInsert; Update: Partial<PostInsert> }
@@ -38,13 +28,6 @@ interface TestDB {
 }
 
 const client = createClient<TestDB>({ url: "http://localhost:18473", anonKey: "test" })
-
-declare module "../src/types.js" {
-  interface SupatypeModels {
-    posts: { Row: Post; Insert: PostInsert; Update: Partial<PostInsert> }
-    comments: { Row: Comment; Insert: Omit<Comment, "id">; Update: Partial<Comment> }
-  }
-}
 
 const augmentedClient = createClient({ url: "http://localhost:18473", anonKey: "test" })
 
@@ -133,5 +116,30 @@ describe("Nested relation type override", () => {
     const q = client.from("posts").select<Embedded>("*, comments(*)")
     // The awaited data should be Embedded[] not Post[]
     expectTypeOf(q).resolves.toMatchTypeOf<QueryResult<Embedded[]>>()
+  })
+})
+
+// ─── Row and Update helpers ───────────────────────────────────────────────────
+
+describe("table type helpers", () => {
+  it("TableRow resolves a table name to its row type", () => {
+    // The absence of this is why every example reached into
+    // `Database["public"]["Tables"]["post"]["Row"]` by hand.
+    expectTypeOf<TableRow<"posts">>().toEqualTypeOf<Post>()
+  })
+
+  it("TableInsert resolves to the insert type", () => {
+    // Shipped already, and until now had no coverage at all.
+    expectTypeOf<TableInsert<"posts">>().toEqualTypeOf<PostInsert>()
+  })
+
+  it("TableUpdate resolves to the update type", () => {
+    expectTypeOf<TableUpdate<"posts">>().toEqualTypeOf<Partial<PostInsert>>()
+  })
+
+  it("distinguishes tables rather than collapsing them", () => {
+    // A helper that returned the same shape for every table would satisfy the assertions above.
+    expectTypeOf<TableRow<"comments">>().toEqualTypeOf<Comment>()
+    expectTypeOf<TableRow<"comments">>().not.toEqualTypeOf<Post>()
   })
 })
