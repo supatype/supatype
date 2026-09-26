@@ -1,4 +1,5 @@
 import { asHeadersProvider, bearerToken, type HeadersProvider } from "./query.js"
+import { coerceExactKinds, type ExactFields } from "./exact-values.js"
 
 export type RealtimeEvent = "INSERT" | "UPDATE" | "DELETE" | "*"
 
@@ -52,6 +53,21 @@ export interface PresenceEntry {
   [key: string]: unknown
 }
 
+/**
+ * Turn the exact columns of one record into the types the generated schema declares.
+ *
+ * Shared with the REST path rather than reimplemented: `coerceExactKinds` is what turns a bigint
+ * string into a native bigint and leaves a numeric as its exact string, so a row read over a
+ * subscription and the same row read over REST hold equal values.
+ */
+function coerceRecord(
+  record: Record<string, unknown> | null,
+  exact: ExactFields,
+): Record<string, unknown> | null {
+  if (record === null) return null
+  return coerceExactKinds(record, exact) as Record<string, unknown>
+}
+
 // ─── Server message types (subset matching @supatype/realtime) ───────────────
 
 interface ServerChangeMessage {
@@ -59,6 +75,13 @@ interface ServerChangeMessage {
   channel: string
   event: "INSERT" | "UPDATE" | "DELETE"
   payload: { old: Record<string, unknown> | null; new: Record<string, unknown> | null }
+  /**
+   * Columns the service carried as exact strings, and the kind each one is.
+   *
+   * The service reads them from the database's own declared types, so this is authoritative in a
+   * way the local registry is not: a project that never generated still gets the right value.
+   */
+  exactColumns?: ExactFields
   timestamp: string
 }
 
@@ -457,10 +480,14 @@ export class RealtimeClient {
     const schema = parts.length >= 2 ? parts[0]! : "public"
     const table = parts.length >= 2 ? parts[1]! : parts[0]!
 
+    // A bigint column arrives as a string and becomes a native bigint here, and a numeric stays
+    // the exact string `@supatype/types` declares for Decimal and Money. The same coercion the
+    // REST path uses, so a row read either way holds the same values.
+    const exact = msg.exactColumns ?? {}
     const payload: RealtimePayload<Record<string, unknown>> = {
       eventType: msg.event,
-      new: msg.payload.new,
-      old: msg.payload.old,
+      new: coerceRecord(msg.payload.new, exact),
+      old: coerceRecord(msg.payload.old, exact),
       schema,
       table,
       commitTimestamp: msg.timestamp,
