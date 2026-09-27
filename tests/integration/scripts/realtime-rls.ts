@@ -142,6 +142,10 @@ function subscriptionRow(subscriberId: string, externalId: string, mark: string)
     planId: "00000000-0000-0000-0000-000000000001",
     currentPeriodEnd: new Date(Date.now() + 86_400_000).toISOString(),
     unitAmount: "10.00",
+    status: "trialing",
+    billingPeriod: "monthly",
+    quantity: 1,
+    currency: "usd",
     metadata: { probe: mark },
   }
 }

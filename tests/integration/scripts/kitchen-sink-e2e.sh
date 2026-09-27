@@ -100,7 +100,7 @@ start_stack
 
 echo ""
 echo "==> Seeding"
-(cd "$EXAMPLE_DIR" && DATABASE_URL="postgresql://supatype_admin:$(grep -m1 '^POSTGRES_PASSWORD=' "$EXAMPLE_DIR/.env" | cut -d= -f2-)@127.0.0.1:${SUPATYPE_DEV_DB_PORT}/kitchen-sink?sslmode=disable" npx tsx seed.ts)
+(cd "$EXAMPLE_DIR" && DATABASE_URL="postgresql://supatype_admin:$(grep -m1 '^POSTGRES_PASSWORD=' "$EXAMPLE_DIR/.env" | cut -d= -f2-)@127.0.0.1:${SUPATYPE_DEV_DB_PORT}/$(grep -m1 '^POSTGRES_DB=' "$EXAMPLE_DIR/.env" | cut -d= -f2-)?sslmode=disable" npx tsx seed.ts)
 
 echo ""
 echo "==> What a browser cannot assert"
