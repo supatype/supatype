@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test"
+import { signInToStudio } from "../lib/studio-session.js"
 
 /**
  * The three groups of views Studio is for: models, the database, and auth.
@@ -28,18 +29,8 @@ function watchFailures(page: Page): string[] {
   return failures
 }
 
-async function signIn(page: Page): Promise<void> {
-  await page.goto("/studio/", { waitUntil: "networkidle" })
-  await page.getByLabel(/email/i).fill(EMAIL)
-  await page.getByLabel(/password/i).fill(PASSWORD)
-  await page.getByRole("button", { name: /sign in/i }).click()
-  // Wait for the session to be *stored*, not merely for the request to return.
-  // Navigating between those two moments loses it, and every later view then
-  // shows the sign-in page, which reads as "the view is broken".
-  await page.waitForFunction(() => localStorage.getItem("supatype.auth.session") !== null, null, {
-    timeout: 30_000,
-  })
-}
+const signIn = (page: Page): Promise<void> =>
+  signInToStudio(page, { email: EMAIL, password: PASSWORD })
 
 test.describe("Studio views", () => {
   test.beforeEach(async ({ page }) => {

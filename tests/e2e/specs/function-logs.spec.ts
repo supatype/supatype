@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test"
+import { signInToStudio } from "../lib/studio-session.js"
 
 /**
  * The Logs tab on a function, driven as a person drives it.
@@ -28,17 +29,8 @@ const PASSWORD = process.env.STUDIO_E2E_PASSWORD ?? "StudioE2E123!"
 /** A function the integration project defines, and which logs when invoked. */
 const FUNCTION = process.env.STUDIO_E2E_FUNCTION ?? "echo"
 
-async function signIn(page: Page): Promise<void> {
-  await page.goto("/studio/", { waitUntil: "networkidle" })
-  await page.getByLabel(/email/i).fill(EMAIL)
-  await page.getByLabel(/password/i).fill(PASSWORD)
-  await page.getByRole("button", { name: /sign in/i }).click()
-  // Wait for the session to be stored, not merely for the request to return: navigating between
-  // those two moments loses it and every later view shows the sign-in page.
-  await page.waitForFunction(() => localStorage.getItem("supatype.auth.session") !== null, null, {
-    timeout: 30_000,
-  })
-}
+const signIn = (page: Page): Promise<void> =>
+  signInToStudio(page, { email: EMAIL, password: PASSWORD })
 
 /**
  * Open the tab and report which route served it, taken from the response rather than assumed.

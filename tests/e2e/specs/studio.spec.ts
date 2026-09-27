@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test"
+import { signInToStudio } from "../lib/studio-session.js"
 
 /**
  * Studio, driven through a browser.
@@ -38,11 +39,8 @@ function collectFailures(page: Page): { errors: string[]; badResponses: string[]
   return { errors, badResponses }
 }
 
-async function signIn(page: Page): Promise<void> {
-  await page.getByLabel(/email/i).fill(EMAIL)
-  await page.getByLabel(/password/i).fill(PASSWORD)
-  await page.getByRole("button", { name: /sign in/i }).click()
-}
+const signIn = (page: Page): Promise<void> =>
+  signInToStudio(page, { email: EMAIL, password: PASSWORD, navigate: false })
 
 test.describe("Studio", () => {
   test("loads its bundle and renders, with nothing broken on the way", async ({ page }) => {
