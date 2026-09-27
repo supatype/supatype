@@ -1227,19 +1227,26 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
     }
   }
 
-  const pinnedRealtimeImage = readEnvValue(cwd, "SUPATYPE_REALTIME_IMAGE", "").trim()
-  if (pinnedRealtimeImage !== "") {
-    console.log("[supatype] Recreating realtime with pinned image...")
-    const rtStatus = runDockerCompose(
+  // A service whose image is pinned in `.env` is recreated once the stack is up, so a contributor
+  // can point at a build from this checkout rather than the published tag.
+  //
+  // Storage was missing from this list, which is why a storage bug survived: there was no way to
+  // run the suite against a local storage build, so every integration run tested the last release
+  // no matter what the working tree said.
+  for (const service of ["realtime", "storage"] as const) {
+    const variable = `SUPATYPE_${service.toUpperCase()}_IMAGE`
+    if (readEnvValue(cwd, variable, "").trim() === "") continue
+    console.log(`[supatype] Recreating ${service} with pinned image...`)
+    const status = runDockerCompose(
       paths.composePath,
-      ["up", "-d", "--force-recreate", "--no-deps", "realtime"],
+      ["up", "-d", "--force-recreate", "--no-deps", service],
       cwd,
       project,
       { quiet: true, brand: devBrand },
     )
-    if (rtStatus !== 0) {
+    if (status !== 0) {
       endDevSession()
-      exitComposeFailed(rtStatus, "Could not recreate the realtime container.", devBrand)
+      exitComposeFailed(status, `Could not recreate the ${service} container.`, devBrand)
     }
   }
 
