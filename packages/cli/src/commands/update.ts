@@ -52,7 +52,9 @@ export function registerUpdate(program: Command): void {
 
       if (provider === "docker") {
         if (opts.check) {
-          info("Docker provider: run without --check to pull compose images (supatype self-host compose pull).")
+          // There is no `self-host compose pull` subcommand; the earlier text named one and a reader
+          // following it got "unknown command". `update` is what pulls.
+          info("Docker provider: run `supatype update` without --check to pull the compose images.")
           return
         }
         const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
