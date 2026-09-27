@@ -426,6 +426,13 @@ jobs:
         run: |
           docker build -t supatype/functions-worker:ci -f packages/functions-worker/Dockerfile packages/functions-worker
 
+      # This suite drives a browser, and the runner ships none. Only the Studio job installed one,
+      # so every spec here failed on a missing executable rather than on anything it asserts.
+      # Chromium only, for the reason the Studio job gives: a second engine doubles the download
+      # and the minutes, and nothing here tests browser differences.
+      - name: Install Chromium
+        run: pnpm --filter supatype-e2e exec playwright install --with-deps chromium
+
       - name: Run the kitchen sink e2e
         run: bash tests/integration/scripts/kitchen-sink-e2e.sh
         env:
