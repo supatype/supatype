@@ -92,7 +92,10 @@ echo "==> Asking for generated types"
 node "$CONFORMANCE_DIR/enable-types.mjs" "$PROJECT_DIR/supatype.config.ts"
 
 echo "==> Generating a schema with every declarable kind"
-(cd "$ROOT_DIR" && npx tsx "$CONFORMANCE_DIR/generate-schema.ts" "$PROJECT_DIR")
+# `tsx` belongs to tests/integration, so it is run from there. At the workspace root it is on
+# PATH only when pnpm hoists it, which a strict install does not, and `npx tsx` then exits 127
+# before anything is checked.
+(cd "$ROOT_DIR" && pnpm --filter supatype-integration exec tsx "$CONFORMANCE_DIR/generate-schema.ts" "$PROJECT_DIR")
 
 echo "==> Bringing the stack up and pushing"
 sed -i "s/^SUPATYPE_KONG_PORT=.*/SUPATYPE_KONG_PORT=${KONG_PORT}/" "$PROJECT_DIR/.env" 2>/dev/null || true
@@ -160,7 +163,7 @@ echo "==> Asserting what each kind does"
   ANON_KEY="$ANON_KEY" \
   CONFORMANCE_COLUMNS="$COLUMNS_JSON" \
   SUPATYPE_CLI="$CLI_BIN" \
-  npx tsx "$CONFORMANCE_DIR/verify.ts")
+  pnpm --filter supatype-integration exec tsx "$CONFORMANCE_DIR/verify.ts")
 
 # ── 6. and every kind can be taken away again ────────────────────────────────
 #
