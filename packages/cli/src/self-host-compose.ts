@@ -18,7 +18,7 @@ import { hasEngineOverride, hasStudioOverride, pinnedVersion, fetchLatestVersion
 import { buildKongDeclarative } from "./kong-config.js"
 import { keyspaceInPostgres } from "./cache-provider.js"
 import { STUDIO_DEV_PORT } from "./studio-dev-server.js"
-import { readEnvFile } from "./env-file.js"
+import { hasEnvValue, readEnvFile } from "./env-file.js"
 import { fieldMaskingTierFromProject, type FieldMaskingTier } from "./field-masking-tier.js"
 import { projectHasVersionedModels } from "./model-versioning.js"
 
@@ -404,7 +404,12 @@ ${studioService}
     : `      - server
       - studio
       - control-plane`
-  const publishDbToHost = !devLocal || hasEngineOverride(config)
+  // In dev the database is published only when something on the host needs to reach it, which is
+  // normally a host engine build. A project that names a port is asking for one too: without this,
+  // `SUPATYPE_DEV_DB_PORT` was honoured for the number and ignored for whether the port existed,
+  // so a seed connecting over TCP got ECONNREFUSED and nothing said why.
+  const dbPortRequested = hasEnvValue(cwd, "SUPATYPE_DEV_DB_PORT")
+  const publishDbToHost = !devLocal || hasEngineOverride(config) || dbPortRequested
   const dbPorts = publishDbToHost
     ? devLocal
       ? `    ports:
@@ -775,6 +780,12 @@ ${realtimeBlock}
 ${dbDependency}
   server:
     image: \${SUPATYPE_SERVER_IMAGE:-\${SUPATYPE_AUTH_IMAGE:-supatype/server:latest}}
+    # host.docker.internal is a Docker Desktop name. On Linux it does not resolve unless it is
+    # mapped, so a project proxying the site or Studio to something on the host worked on macOS
+    # and Windows and failed on Linux with nothing reaching the app. host-gateway is Docker's own
+    # alias for the host, and needs 20.10, which this stack already requires.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     # The server runs its migrations at boot on a connection of their own,
     # and that path does not wait out a database that is still in recovery:
     # it exits. Waiting for db to report healthy is not enough, because
@@ -864,6 +875,12 @@ ${objectStoreBlock}
     working_dir: /project
 ${dbDependency}${studioBlock}${valkeyBlock}${tlsHintComment}  kong:
     image: kong:3.6
+    # host.docker.internal is a Docker Desktop name. On Linux it does not resolve unless it is
+    # mapped, so a project proxying the site or Studio to something on the host worked on macOS
+    # and Windows and failed on Linux with nothing reaching the app. host-gateway is Docker's own
+    # alias for the host, and needs 20.10, which this stack already requires.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml

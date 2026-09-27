@@ -391,6 +391,46 @@ describe("runtime contract", () => {
     }
   })
 
+  it("maps host.docker.internal, so a host proxy works on Linux too", () => {
+    // Docker Desktop resolves this name; Linux does not unless it is mapped. A project proxying
+    // the site or Studio to something on the host therefore worked on macOS and Windows and
+    // failed on Linux, with the gateway reaching nothing and no error naming the cause.
+    const compose = renderSelfHostCompose(baseConfig, process.cwd(), { devLocal: true })
+    for (const service of ["server", "kong"]) {
+      expect(serviceBlock(compose, service), service).toContain(
+        '- "host.docker.internal:host-gateway"',
+      )
+    }
+  })
+
+  it("publishes the database when a port is asked for", () => {
+    // In dev the port is published only when something on the host needs it, which is normally a
+    // host engine build. Naming a port is the same request: without this the number was honoured
+    // and the port never existed, so anything connecting over TCP got ECONNREFUSED.
+    const dir = mkdtempSync(join(tmpdir(), "supatype-dbport-"))
+    try {
+      writeFileSync(join(dir, ".env"), "SUPATYPE_DEV_DB_PORT=54329\n")
+      const compose = renderSelfHostCompose(baseConfig, dir, { devLocal: true })
+      // The number stays a compose variable so Docker resolves it; what changes is that the
+      // ports block exists at all.
+      expect(serviceBlock(compose, "db")).toContain("ports:")
+      expect(serviceBlock(compose, "db")).toContain("SUPATYPE_DEV_DB_PORT")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("leaves the database unpublished when nothing asked for it", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-dbport-"))
+    try {
+      writeFileSync(join(dir, ".env"), "ANON_KEY=x\n")
+      expect(serviceBlock(renderSelfHostCompose(baseConfig, dir, { devLocal: true }), "db"))
+        .not.toContain("5432:5432")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it("devLocal compose enables STUDIO_OPEN_DEV on supatype-server, and lets it be turned off", () => {
     const compose = renderSelfHostCompose(baseConfig, process.cwd(), { devLocal: true })
     // Defaulted rather than hardcoded. `supatype dev` still opens Studio without a sign-in, and

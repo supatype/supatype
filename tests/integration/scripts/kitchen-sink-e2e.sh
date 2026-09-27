@@ -73,6 +73,20 @@ echo "==> Building the SPA"
 [[ -f "$EXAMPLE_DIR/apps/app/dist/index.html" ]] || fail "the SPA build produced no dist/index.html"
 
 echo ""
+# Ask for a published database port, and seed over it.
+#
+# `seed.ts` connects to Postgres over TCP. In dev the port is published only when something on the
+# host needs it, which is normally a host engine build, so on a machine without one there was
+# nothing listening and the seed failed with ECONNREFUSED. Naming the port is the request; the
+# compose generator publishes it because it was named.
+SUPATYPE_DEV_DB_PORT="${SUPATYPE_DEV_DB_PORT:-54329}"
+if grep -q "^SUPATYPE_DEV_DB_PORT=" "$EXAMPLE_DIR/.env" 2>/dev/null; then
+  sed -i "s/^SUPATYPE_DEV_DB_PORT=.*/SUPATYPE_DEV_DB_PORT=${SUPATYPE_DEV_DB_PORT}/" "$EXAMPLE_DIR/.env"
+else
+  { echo ""; echo "SUPATYPE_DEV_DB_PORT=${SUPATYPE_DEV_DB_PORT}"; } >> "$EXAMPLE_DIR/.env"
+fi
+export SUPATYPE_DEV_DB_PORT
+
 echo "==> Bringing the stack up (static mode: the SPA is what / serves)"
 # Opt the functions worker into a database URL, so the path that was broken is the one exercised.
 # Set before the stack starts, because compose reads it when the container is created. The in-
@@ -86,7 +100,7 @@ start_stack
 
 echo ""
 echo "==> Seeding"
-(cd "$EXAMPLE_DIR" && npx tsx seed.ts)
+(cd "$EXAMPLE_DIR" && DATABASE_URL="postgresql://supatype_admin:$(grep -m1 '^POSTGRES_PASSWORD=' "$EXAMPLE_DIR/.env" | cut -d= -f2-)@127.0.0.1:${SUPATYPE_DEV_DB_PORT}/kitchen-sink?sslmode=disable" npx tsx seed.ts)
 
 echo ""
 echo "==> What a browser cannot assert"
