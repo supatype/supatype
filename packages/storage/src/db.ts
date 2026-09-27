@@ -1,5 +1,6 @@
 import pg from "pg"
 import { config } from "./env.js"
+import { isMissingGrant } from "./pg-errors.js"
 
 const pool = new pg.Pool({ connectionString: config.databaseUrl })
 
@@ -217,6 +218,7 @@ export async function getObject(bucketId: string, name: string): Promise<ObjectR
  */
 const CALLER_ROLES = new Set(["anon", "authenticated", "service_role"])
 
+
 /**
  * Can this caller see this object, according to the database?
  *
@@ -254,6 +256,21 @@ export async function objectVisibleTo(
       [bucketId, name],
     )
     return (res.rowCount ?? 0) > 0
+  } catch (err) {
+    // A deployment whose database predates the grants this check needs. Grants are checked before
+    // policies, so the caller is refused before any policy is consulted, and a read that used to
+    // be decided in the middleware now reaches Postgres and is rejected outright.
+    //
+    // Refused rather than rethrown: a missing grant must never read as "allowed", and a 500 naming
+    // a Postgres table tells an operator nothing about what to do. The log says what to run.
+    if (isMissingGrant(err)) {
+      console.error(
+        `[storage] permission denied reading storage.objects as ${jwt.role}. This deployment's ` +
+          "database is missing the grants the bucket rules need. Run `supatype push` to apply them.",
+      )
+      return false
+    }
+    throw err
   } finally {
     await client.query("ROLLBACK").catch(() => undefined)
     client.release()
