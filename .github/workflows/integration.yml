@@ -545,15 +545,23 @@ jobs:
   # publishes for it, the TypeScript a required relation generates, whether an enum's default
   # reaches Insert, whether a second push is a no-op, whether a field can be removed at all.
   #
-  # On push to main rather than on every pull request: it brings up a full stack and takes minutes.
-  # `release.yml` gates a tag on this workflow being green for that commit, so a release cannot go
-  # out over a red run here.
+  # It runs on pull requests as well as on push. It was push-only at first, on the grounds that it
+  # brings up a full stack and takes minutes, which is true and does not distinguish it from the
+  # seven live-stack jobs beside it that run on every pull request in parallel. What it did buy was
+  # a job whose first run is always a merge, and the first one broke main: the suite exited 127 on
+  # `tsx: not found` before checking a single kind, which a pull request would have caught.
+  #
+  # `release.yml` still gates a tag on this workflow being green for that commit, so a release
+  # cannot go out over a red run here. That needs the push run, not the absence of a pull request
+  # one.
+  #
+  # It reads `secrets.MINISIGN_PUBLIC_KEY`, which does not resolve for a pull request from a fork.
+  # `validation-e2e` has the same dependency, so a fork policy has to cover both or neither.
   #
   # The same script runs locally:
   #   bash tests/integration/scripts/field-conformance.sh
   field-conformance:
     name: field conformance (live stack)
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     env:
