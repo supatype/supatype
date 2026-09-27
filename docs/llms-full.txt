@@ -1,4 +1,4 @@
-# Supatype — full context for language models
+# Supatype: full context for language models
 
 > Type-first backend platform for PostgreSQL. One TypeScript schema generates the database, migrations, RLS, API, auth, storage, realtime, and Studio CMS. Self-hostable by default. Open-source MIT SDK.
 
@@ -23,7 +23,7 @@ Positioning shorthand used on the site: Supabase-style infrastructure + Payload-
 
 - Not a proprietary cloud-only database (Convex/Firebase-style lock-in). Data lives in Postgres.
 - Not “SQL-first then generate types.” Types are upstream; SQL is generated.
-- Not only a CMS and not only an auth product — those are pieces of one schema-driven stack.
+- Not only a CMS and not only an auth product; those are pieces of one schema-driven stack.
 
 ## How developers use it
 

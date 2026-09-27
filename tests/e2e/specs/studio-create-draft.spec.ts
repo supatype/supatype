@@ -27,10 +27,15 @@ test("creating a post leaves a first draft", async ({ page }) => {
   })
 
   const title = `draft-on-create-${Date.now()}`
-  await page.goto("/studio/models/Post/create", { waitUntil: "networkidle" })
+  await page.goto("/studio/models/post/create", { waitUntil: "networkidle" })
   await page.getByLabel(/^title/i).fill(title)
 
-  // `body` is a required localized rich text field, so a title alone cannot be saved.
+  // The model routes by the name its schema declares, `post`, not a title-cased display name.
+  // This spec asked for `Post` and every navigation landed on a page with no form on it, so the
+  // failure read as "the title field is missing" rather than "there is no such model".
+  //
+  // `body` is rich text. The schema has it optional, so this is filling a realistic record rather
+  // than satisfying a requirement.
   const body = page.locator('[contenteditable="true"]').first()
   await body.click()
   await body.fill("Body written by the create-draft check.")
@@ -39,12 +44,12 @@ test("creating a post leaves a first draft", async ({ page }) => {
 
   // The form navigates to the record once the row exists, which is the signal that the save
   // finished rather than that the button was pressed.
-  await page.waitForURL(/\/studio\/models\/Post\/[0-9a-f-]{36}$/, { timeout: 30_000 })
+  await page.waitForURL(/\/studio\/models\/post\/[0-9a-f-]{36}$/, { timeout: 30_000 })
   const recordId = page.url().split("/").pop() ?? ""
   expect(recordId).toMatch(/^[0-9a-f-]{36}$/)
 
   // The record's own history is where the draft has to show up. Asserting on the publish bar alone
   // would pass on a record with no versions at all, since it reports "Not published" either way.
-  await page.goto(`/studio/models/Post/${recordId}/versions`, { waitUntil: "networkidle" })
+  await page.goto(`/studio/models/post/${recordId}/versions`, { waitUntil: "networkidle" })
   await expect(page.getByText(/draft/i).first()).toBeVisible({ timeout: 15_000 })
 })

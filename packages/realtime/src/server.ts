@@ -496,6 +496,9 @@ export class RealtimeServer {
       channel: subscription.channel,
       event: change.event,
       payload: { old: visible.oldRecord, new: visible.newRecord },
+      ...(Object.keys(visible.exactColumns).length > 0
+        ? { exactColumns: visible.exactColumns }
+        : {}),
       timestamp: change.commitTimestamp,
     })
   }

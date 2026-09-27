@@ -2,8 +2,18 @@ import { existsSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { ProcessManager } from "./process-manager.js"
 
-/** Vite dev server port when `overrides.studio` is set. */
-export const STUDIO_DEV_PORT = 3002
+/**
+ * Vite dev server port when `overrides.studio` is set.
+ *
+ * Overridable because it is bound with `--strictPort`, so anything else already on 3002 does not
+ * make Vite pick another port, it makes Studio fail to start and be restarted every thirty seconds
+ * for the life of the session. 3002 is an ordinary port for a local app to be sitting on, and the
+ * only signal is a Vite stack trace in among the compose output.
+ *
+ * Only the `overrides.studio` path is affected, so this is a contributor's papercut rather than a
+ * user's: an ordinary `supatype dev` serves Studio from its container.
+ */
+export const STUDIO_DEV_PORT = Number(process.env["SUPATYPE_STUDIO_DEV_PORT"]) || 3002
 
 export interface StudioDevServerOptions {
   cwd: string

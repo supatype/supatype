@@ -1,5 +1,5 @@
 import { writable, type Readable } from "svelte/store"
-import type { AnyDatabase, SupatypeError } from "@supatype/client"
+import type { AugmentedDatabase, AnyDatabase, SupatypeError } from "@supatype/client"
 import { getSupatypeClient } from "./context.js"
 
 export type MutationOperation = "insert" | "update" | "delete" | "upsert"
@@ -18,7 +18,7 @@ export interface MutationStore<TRow> {
 }
 
 export function createMutation<
-  TDatabase extends AnyDatabase = AnyDatabase,
+  TDatabase extends AnyDatabase = AugmentedDatabase,
   TTable extends keyof TDatabase["public"]["Tables"] & string = keyof TDatabase["public"]["Tables"] & string,
   TRow = TDatabase["public"]["Tables"][TTable]["Row"],
 >(

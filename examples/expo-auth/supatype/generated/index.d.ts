@@ -4,24 +4,24 @@ declare module "@supatype/client" {
   interface SupatypeModels {
     chat_message: {
       Row: {
+  auth_user_id: string | null
   authorName: string | null
-  authUser: Record<string, unknown> | null
   body: string
   created_at: string
   id: string
   room: string
 }
       Insert: {
+  auth_user_id?: string | null
   authorName?: string | null
-  authUser?: Record<string, unknown> | null
   body: string
   created_at?: string
   id?: string
   room: string
 }
       Update: {
+  auth_user_id?: string | null
   authorName?: string | null
-  authUser?: Record<string, unknown> | null
   body?: string
   created_at?: string
   id?: string

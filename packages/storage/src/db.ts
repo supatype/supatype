@@ -1,5 +1,6 @@
 import pg from "pg"
 import { config } from "./env.js"
+import { isMissingGrant } from "./pg-errors.js"
 
 const pool = new pg.Pool({ connectionString: config.databaseUrl })
 
@@ -207,6 +208,73 @@ export async function getObject(bucketId: string, name: string): Promise<ObjectR
     [bucketId, name],
   )
   return res.rows[0] ?? null
+}
+
+/**
+ * Roles a caller may be switched to before a visibility check.
+ *
+ * An allowlist because `SET LOCAL ROLE` takes an identifier, not a parameter, and the value comes
+ * from a JWT claim. These are the three the gateway issues.
+ */
+const CALLER_ROLES = new Set(["anon", "authenticated", "service_role"])
+
+
+/**
+ * Can this caller see this object, according to the database?
+ *
+ * The bucket's declared read rule already exists as an RLS policy on `storage.objects`: a bucket
+ * saying `read: BucketLoggedIn` produced `auth.uid() IS NOT NULL`, and one saying
+ * `read: BucketOwner` produced `auth.uid() = owner`. Asking Postgres is therefore asking the rule
+ * itself, rather than a second implementation of it.
+ *
+ * The middleware used to decide this on its own, from `access_mode` alone, and hardcoded
+ * owner-only for every private bucket. So a bucket declaring `BucketLoggedIn` refused every user
+ * but the uploader, the generated policy was never reached, and the declared rule meant nothing.
+ * It failed safe, which is why it went unnoticed.
+ *
+ * Runs in a transaction that is always rolled back: `SET LOCAL` is scoped to it, so a pooled
+ * connection cannot be handed on still wearing a caller's role.
+ */
+export async function objectVisibleTo(
+  bucketId: string,
+  name: string,
+  // Typed by what is read rather than by an index signature: `JwtPayload` is an interface, and an
+  // interface does not satisfy `Record<string, unknown>`. Whatever is passed is serialised whole.
+  jwt: { sub: string; role: string },
+): Promise<boolean> {
+  if (!CALLER_ROLES.has(jwt.role)) return false
+
+  const client = await pool.connect()
+  try {
+    await client.query("BEGIN")
+    // `auth.uid()` and `auth.role()` read these, which is what the generated policies call.
+    await client.query("SELECT set_config('request.jwt.claims', $1, true)", [JSON.stringify(jwt)])
+    await client.query("SELECT set_config('request.jwt.claim.sub', $1, true)", [jwt.sub])
+    await client.query(`SET LOCAL ROLE ${jwt.role}`)
+    const res = await client.query(
+      `SELECT 1 FROM storage.objects WHERE bucket_id = $1 AND name = $2 LIMIT 1`,
+      [bucketId, name],
+    )
+    return (res.rowCount ?? 0) > 0
+  } catch (err) {
+    // A deployment whose database predates the grants this check needs. Grants are checked before
+    // policies, so the caller is refused before any policy is consulted, and a read that used to
+    // be decided in the middleware now reaches Postgres and is rejected outright.
+    //
+    // Refused rather than rethrown: a missing grant must never read as "allowed", and a 500 naming
+    // a Postgres table tells an operator nothing about what to do. The log says what to run.
+    if (isMissingGrant(err)) {
+      console.error(
+        `[storage] permission denied reading storage.objects as ${jwt.role}. This deployment's ` +
+          "database is missing the grants the bucket rules need. Run `supatype push` to apply them.",
+      )
+      return false
+    }
+    throw err
+  } finally {
+    await client.query("ROLLBACK").catch(() => undefined)
+    client.release()
+  }
 }
 
 export async function listObjectRows(

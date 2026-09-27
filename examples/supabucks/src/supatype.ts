@@ -1,4 +1,4 @@
-import { createClient } from "@supatype/client"
+import { createClient } from "../supatype/generated/client"
 import type { Database } from "../supatype/generated/database"
 
 /**
@@ -9,7 +9,7 @@ import type { Database } from "../supatype/generated/database"
  * Typed with the generated `Database` (supatype/generated/database.ts), so
  * `supatype.from("customer")` knows its columns.
  */
-export const supatype = createClient<Database>({
+export const supatype = createClient({
   url: typeof window !== "undefined" ? window.location.origin : "http://localhost:18473",
   anonKey: import.meta.env.VITE_SUPATYPE_ANON_KEY as string,
 })

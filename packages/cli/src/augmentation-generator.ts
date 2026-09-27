@@ -65,12 +65,58 @@ export function generateClientAugmentation(ast: unknown): string {
   return lines.join("\n")
 }
 
+function toSnakeCase(name: string): string {
+  return name.replace(/([A-Z])/g, "_$1").replace(/^_/, "").toLowerCase()
+}
+
+/**
+ * The column a declared field actually occupies, which is not always the name it was declared under.
+ *
+ * Only `belongsTo` puts a column on this table, and that column is the foreign key: `speaker_id`
+ * holding text, not `speaker` holding the target row. This used to group `relation` with the JSONB
+ * kinds, so the augmentation described a column that does not exist while the engine described the
+ * one that does, and the two generated files disagreed about the same field. `hasMany`, `hasOne` and
+ * `manyToMany` keep their key on the other table, so there is nothing here to describe.
+ */
+function resolveColumn(
+  name: string,
+  meta: Record<string, unknown>,
+): { column: string; ts: string } | null {
+  if (meta["kind"] !== "relation") return { column: name, ts: toTsType(meta) }
+  if (meta["cardinality"] !== "belongsTo") return null
+
+  const annotations = meta["annotations"]
+  const declared =
+    typeof annotations === "object" && annotations !== null
+      ? (annotations as { db?: { foreignKey?: unknown } }).db?.foreignKey
+      : undefined
+  const column =
+    typeof declared === "string" && declared.length > 0 ? declared : `${toSnakeCase(name)}_id`
+
+  // Nullable unless the relation asked for `NOT NULL`, which is the engine's rule. A fix that made
+  // every foreign key non-nullable would be wrong in the other direction just as often.
+  return { column, ts: meta["required"] === true ? "string" : "string | null" }
+}
+
+/** Declared fields as the columns they become, dropping the ones that are not columns here. */
+function columnsOf(
+  fields: Record<string, Record<string, unknown>>,
+): Array<{ column: string; ts: string; meta: Record<string, unknown> }> {
+  return Object.entries(fields)
+    .map(([name, meta]) => {
+      const resolved = resolveColumn(name, meta)
+      return resolved === null ? null : { ...resolved, meta }
+    })
+    .filter((entry): entry is { column: string; ts: string; meta: Record<string, unknown> } =>
+      entry !== null,
+    )
+    .sort((a, b) => a.column.localeCompare(b.column))
+}
+
 export function generateRowType(fields: Record<string, Record<string, unknown>>): string {
-  const entries = Object.entries(fields).sort(([a], [b]) => a.localeCompare(b))
-  if (entries.length === 0) return "Record<string, unknown>"
-  const body = entries
-    .map(([name, meta]) => `  ${quoteKey(name)}: ${toTsType(meta)}`)
-    .join("\n")
+  const columns = columnsOf(fields)
+  if (columns.length === 0) return "Record<string, unknown>"
+  const body = columns.map(({ column, ts }) => `  ${quoteKey(column)}: ${ts}`).join("\n")
   return `{\n${body}\n}`
 }
 
@@ -79,23 +125,21 @@ function insertColumnOptionalOnInsert(meta: Record<string, unknown>): boolean {
 }
 
 export function generateInsertType(fields: Record<string, Record<string, unknown>>): string {
-  const entries = Object.entries(fields).sort(([a], [b]) => a.localeCompare(b))
-  if (entries.length === 0) return "Record<string, unknown>"
-  const body = entries
-    .map(([name, meta]) => {
+  const columns = columnsOf(fields)
+  if (columns.length === 0) return "Record<string, unknown>"
+  const body = columns
+    .map(({ column, ts, meta }) => {
       const required = meta["required"] === true && !insertColumnOptionalOnInsert(meta)
-      return `  ${quoteKey(name)}${required ? "" : "?"}: ${toTsType(meta)}`
+      return `  ${quoteKey(column)}${required ? "" : "?"}: ${ts}`
     })
     .join("\n")
   return `{\n${body}\n}`
 }
 
 export function generateUpdateType(fields: Record<string, Record<string, unknown>>): string {
-  const entries = Object.entries(fields).sort(([a], [b]) => a.localeCompare(b))
-  if (entries.length === 0) return "Record<string, unknown>"
-  const body = entries
-    .map(([name, meta]) => `  ${quoteKey(name)}?: ${toTsType(meta)}`)
-    .join("\n")
+  const columns = columnsOf(fields)
+  if (columns.length === 0) return "Record<string, unknown>"
+  const body = columns.map(({ column, ts }) => `  ${quoteKey(column)}?: ${ts}`).join("\n")
   return `{\n${body}\n}`
 }
 
@@ -119,6 +163,11 @@ function toTsType(meta: Record<string, unknown>): string {
       case "timestamp":
       case "datetime":
       case "money":
+      // NUMERIC, and the exact value is the point. A `number` here is the same defect as parsing
+      // the wire with `JSON.parse`: `12345678901234567890.1234` has no float representation, so a
+      // column declared to hold it would arrive rounded and typed as though it had not been.
+      // `@supatype/types` already says so: `Decimal<P, S>` carries `string`.
+      case "decimal":
       case "xml":
       case "interval":
         return "string"
@@ -126,7 +175,6 @@ function toTsType(meta: Record<string, unknown>): string {
       case "smallInt":
       case "serial":
       case "float":
-      case "decimal":
         return "number"
       case "bigSerial":
       case "bigInt":
@@ -139,9 +187,14 @@ function toTsType(meta: Record<string, unknown>): string {
       case "vector":
       case "relation":
       case "array":
+        return "Record<string, unknown>"
+      // What `storage.upload()` actually produces, plus the bucket it went to. Emitting
+      // `Record<string, unknown>` here is why two example screens cast on the good path. A `url`
+      // is deliberately absent: a stored one goes stale and hard-codes the storage host, so it is
+      // derived at read time instead.
       case "image":
       case "file":
-        return "Record<string, unknown>"
+        return "{ bucket: string; path: string }"
       case "richText":
         return "(import(\"@supatype/types/lexical\").SerializedEditorState | string)"
       case "enum": {
@@ -155,7 +208,11 @@ function toTsType(meta: Record<string, unknown>): string {
         return "unknown"
     }
   })()
-  return required ? base : `${base} | null`
+  // A localized column is JSONB holding a locale map, `{"en": ..., "fr": ...}`, not the bare
+  // value. `page.title` is exactly this and was typed `string`, so calling a string method on it
+  // compiled and then failed against real data.
+  const shaped = meta["localized"] === true ? `{ [locale: string]: ${base} }` : base
+  return required ? shaped : `${shaped} | null`
 }
 
 function quoteKey(key: string): string {

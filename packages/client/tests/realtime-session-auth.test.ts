@@ -51,12 +51,12 @@ function session(accessToken: string): Session {
       id: "user-1",
       email: "a@b.com",
       role: "authenticated",
-      app_metadata: {},
-      user_metadata: {},
-      created_at: "2024-01-01T00:00:00Z",
-      updated_at: "2024-01-01T00:00:00Z",
+      appMetadata: {},
+      userMetadata: {},
+      createdAt: "2024-01-01T00:00:00Z",
+      updatedAt: "2024-01-01T00:00:00Z",
     },
-  } as Session
+  }
 }
 
 describe("realtime authenticates as the session, not as anon", () => {
@@ -93,7 +93,7 @@ describe("realtime authenticates as the session, not as anon", () => {
 
   it("opens the socket with the token the provider returns at connect time", async () => {
     let token = "first"
-    const client = new RealtimeClient("ws://localhost:4000/realtime", () => bearerHeaders(token))
+    const client = new RealtimeClient("ws://localhost:4000/realtime", async () => bearerHeaders(token))
     client.channel("public:task").subscribe()
     await settle()
     expect(tokenOf(MockWS.instances[0]!)).toBe("first")
@@ -107,7 +107,7 @@ describe("realtime authenticates as the session, not as anon", () => {
   })
 
   it("does not reconnect when the token has not changed", async () => {
-    const client = new RealtimeClient("ws://localhost:4000/realtime", () => bearerHeaders("same"))
+    const client = new RealtimeClient("ws://localhost:4000/realtime", async () => bearerHeaders("same"))
     client.channel("public:task").subscribe()
     await settle()
 
@@ -119,7 +119,7 @@ describe("realtime authenticates as the session, not as anon", () => {
 
   it("re-subscribes every channel on the replacement socket", async () => {
     let token = "before"
-    const client = new RealtimeClient("ws://localhost:4000/realtime", () => bearerHeaders(token))
+    const client = new RealtimeClient("ws://localhost:4000/realtime", async () => bearerHeaders(token))
     client.channel("public:task").subscribe()
     await settle()
 

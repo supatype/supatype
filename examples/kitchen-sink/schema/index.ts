@@ -38,6 +38,7 @@ import type {
   Literal,
   JSON,
   LocaleConfig,
+  HasMany,
   Localized,
   LoggedIn,
   Lte,
@@ -181,6 +182,12 @@ export type Speaker = Model<{
   /** Localized, so a French reader gets a French bio or none — never an English one in its place. */
   bio: Optional<Localized<RichText>>
   headshot: Optional<ImageAsset<speakerHeadshots>>
+  /**
+   * The inverse of `Talk.speaker`. A collection relation keeps its key on the other table, so this
+   * declares no column here and appears in no generated row type. It is here because the rule that
+   * omits it had unit coverage and no schema exercising it.
+   */
+  talks: HasMany<Talk>
   /** Shape travels with the value; a link list is not worth a table. */
   links: Optional<JSON<{ label: string; href: string }[]>>
   email: Optional<Email>

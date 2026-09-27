@@ -9,8 +9,55 @@ permissions:
   contents: write
 
 jobs:
+  # ── Release gate ────────────────────────────────────────────────────────────
+  #
+  # A tag used to publish npm packages and five Docker images with nothing
+  # checked, not even `ci.yml`. On 2026-09-24 that shipped a feature that had
+  # never once worked, while the integration suite had been red for ten days.
+  #
+  # Every other job roots at `prepare`, so gating `prepare` gates the release.
+  #
+  # Tags are not covered by branch protection, so a required-status-check rule
+  # cannot do this. It has to be a job.
+  #
+  # To release over a red suite, set the repository variable
+  # RELEASE_SKIP_GATE to the exact tag. Scoping it to one tag is deliberate:
+  # a boolean would get switched on during an incident and stay on.
+  gate:
+    name: required checks are green for this commit
+    runs-on: ubuntu-latest
+    steps:
+      - name: CI and Integration must have succeeded for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          TAG: ${{ github.ref_name }}
+          SKIP_FOR: ${{ vars.RELEASE_SKIP_GATE }}
+        run: |
+          set -euo pipefail
+          if [ "${SKIP_FOR:-}" = "$TAG" ]; then
+            echo "::warning::Gate skipped: RELEASE_SKIP_GATE is set to $TAG."
+            exit 0
+          fi
+          fail=0
+          for wf in ci.yml integration.yml; do
+            conclusion=$(gh api \
+              "repos/$REPO/actions/workflows/$wf/runs?head_sha=$SHA&per_page=1" \
+              --jq '.workflow_runs[0].conclusion // "missing"')
+            echo "$wf -> $conclusion"
+            # "missing" covers a tag on a commit that never ran the suite;
+            # a null conclusion covers one that is still running. Neither may publish.
+            if [ "$conclusion" != "success" ]; then
+              echo "::error::$wf is '$conclusion' for $SHA. A tag may not publish over it."
+              fail=1
+            fi
+          done
+          exit "$fail"
+
   # ── Extract version from tag ────────────────────────────────────────────────
   prepare:
+    needs: gate
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}

@@ -1,6 +1,6 @@
 import { createSignal } from "solid-js"
 import type { Accessor } from "solid-js"
-import type { AnyDatabase, SupatypeError } from "@supatype/client"
+import type { AugmentedDatabase, AnyDatabase, SupatypeError } from "@supatype/client"
 import { useSupatype } from "./context.js"
 
 export interface FunctionResult<TResponse> {
@@ -12,7 +12,7 @@ export interface FunctionResult<TResponse> {
 
 export function createFunction<
   TResponse = unknown,
-  TDatabase extends AnyDatabase = AnyDatabase,
+  TDatabase extends AnyDatabase = AugmentedDatabase,
 >(
   functionName: string,
 ): FunctionResult<TResponse> {

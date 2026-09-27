@@ -9,6 +9,22 @@ import { updateAppConfigInProject, updateServerConfigInProject } from "../src/ap
 import type { SupatypeProjectConfig } from "../src/project-config.js"
 import { DENO_RELEASE_PIN } from "../src/release-pins.js"
 
+/**
+ * One service's block from a rendered compose file.
+ *
+ * Compose is asserted as text here rather than parsed, because the CLI ships no YAML parser and a
+ * test is not worth a dependency. Slicing to a single service is what keeps that honest: service
+ * names and `condition: service_healthy` both recur, so a whole-document substring match would
+ * pass on another service's dependency.
+ */
+function serviceBlock(compose: string, name: string): string {
+  const lines = compose.split("\n")
+  const start = lines.indexOf(`  ${name}:`)
+  if (start === -1) return ""
+  const after = lines.slice(start + 1).findIndex((l) => /^ {2}[a-z][a-z0-9-]*:$/.test(l))
+  return lines.slice(start, after === -1 ? lines.length : start + 1 + after).join("\n")
+}
+
 const baseConfig: SupatypeProjectConfig = {
   project: { name: "acme" },
   database: { provider: "docker" },
@@ -375,9 +391,52 @@ describe("runtime contract", () => {
     }
   })
 
-  it("devLocal compose enables STUDIO_OPEN_DEV on supatype-server", () => {
+  it("maps host.docker.internal, so a host proxy works on Linux too", () => {
+    // Docker Desktop resolves this name; Linux does not unless it is mapped. A project proxying
+    // the site or Studio to something on the host therefore worked on macOS and Windows and
+    // failed on Linux, with the gateway reaching nothing and no error naming the cause.
     const compose = renderSelfHostCompose(baseConfig, process.cwd(), { devLocal: true })
-    expect(compose).toContain('STUDIO_OPEN_DEV: "1"')
+    for (const service of ["server", "kong"]) {
+      expect(serviceBlock(compose, service), service).toContain(
+        '- "host.docker.internal:host-gateway"',
+      )
+    }
+  })
+
+  it("publishes the database when a port is asked for", () => {
+    // In dev the port is published only when something on the host needs it, which is normally a
+    // host engine build. Naming a port is the same request: without this the number was honoured
+    // and the port never existed, so anything connecting over TCP got ECONNREFUSED.
+    const dir = mkdtempSync(join(tmpdir(), "supatype-dbport-"))
+    try {
+      writeFileSync(join(dir, ".env"), "SUPATYPE_DEV_DB_PORT=54329\n")
+      const compose = renderSelfHostCompose(baseConfig, dir, { devLocal: true })
+      // The number stays a compose variable so Docker resolves it; what changes is that the
+      // ports block exists at all.
+      expect(serviceBlock(compose, "db")).toContain("ports:")
+      expect(serviceBlock(compose, "db")).toContain("SUPATYPE_DEV_DB_PORT")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("leaves the database unpublished when nothing asked for it", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-dbport-"))
+    try {
+      writeFileSync(join(dir, ".env"), "ANON_KEY=x\n")
+      expect(serviceBlock(renderSelfHostCompose(baseConfig, dir, { devLocal: true }), "db"))
+        .not.toContain("5432:5432")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("devLocal compose enables STUDIO_OPEN_DEV on supatype-server, and lets it be turned off", () => {
+    const compose = renderSelfHostCompose(baseConfig, process.cwd(), { devLocal: true })
+    // Defaulted rather than hardcoded. `supatype dev` still opens Studio without a sign-in, and
+    // the browser suite can set STUDIO_OPEN_DEV=0 to drive the gate a deployment actually has.
+    // Held as a literal "1" there was no way to test Studio with its authorization on at all.
+    expect(compose).toContain('STUDIO_OPEN_DEV: "${STUDIO_OPEN_DEV:-1}"')
   })
 
   it("production self-host compose does not enable STUDIO_OPEN_DEV", () => {
@@ -592,6 +651,60 @@ export default defineConfig({
       expect(kong).toContain("http://server:9999")
       expect(kong).toContain("http://postgrest:3000/rpc/graphql")
       expect(kong).toContain("Content-Profile:graphql_public")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("offers functions a database URL, off unless the operator sets one", () => {
+    // `ctx.dbUrl` is read from SUPATYPE_DB_URL by the worker, and the generated compose never set
+    // it, so the field was permanently undefined on self-host: a function reaching for it got no
+    // value and nothing to explain why.
+    const dir = mkdtempSync(join(tmpdir(), "supatype-compose-"))
+    try {
+      const compose = readFileSync(
+        writeSelfHostCompose(dir, { ...baseConfig, app: { mode: "none" } }).composePath,
+        "utf8",
+      )
+      const worker = serviceBlock(compose, "functions-worker")
+
+      // Passed through, so the capability is reachable at all.
+      expect(worker).toContain("SUPATYPE_DB_URL:")
+      // Empty by default. The worker treats an empty value as absent, so `ctx.dbUrl` stays
+      // undefined until somebody opts in.
+      expect(worker).toContain("SUPATYPE_DB_URL: ${SUPATYPE_FUNCTIONS_DB_URL:-}")
+      // And its own variable, not the project's owner DSN. Interpolating DATABASE_URL here would
+      // give every function a connection that bypasses access rules, masking and hooks.
+      expect(worker).not.toContain("SUPATYPE_DB_URL: ${DATABASE_URL")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("starts storage only once the object store is answering", () => {
+    // seaweedfs had no healthcheck and nothing depended on it, so compose started it alongside
+    // storage. Storage then accepted a bucket creation before seaweedfs was listening, every
+    // bucket in the schema failed with `connect ECONNREFUSED <ip>:8333`, and the metadata row was
+    // written anyway so a later push looked fine. Measured on a live stack: seaweedfs started
+    // twelve minutes after storage with RestartCount 0.
+    //
+    // It lands on the first push after a stack comes up, which is the first push anyone runs.
+    const dir = mkdtempSync(join(tmpdir(), "supatype-compose-"))
+    try {
+      const out = writeSelfHostCompose(dir, { ...baseConfig, app: { mode: "none" } })
+      const compose = readFileSync(out.composePath, "utf8")
+
+      // Sliced to one service, because `seaweedfs` and `service_healthy` both appear elsewhere in
+      // this file and a whole-document substring match would pass on either.
+      const storage = serviceBlock(compose, "storage")
+      expect(storage).toContain("depends_on:")
+      expect(storage).toMatch(/seaweedfs:\s*\n\s*condition: service_healthy/)
+      // Still waits for the database. The fix must not swap one dependency for another.
+      expect(storage).toMatch(/db:\s*\n\s*condition: service_healthy/)
+
+      // `service_healthy` is only meaningful if the service defines health. Without it compose
+      // refuses to start the stack at all, which is a worse failure than the race.
+      expect(serviceBlock(compose, "seaweedfs")).toContain("healthcheck:")
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test"
+import { signInToStudio } from "../lib/studio-session.js"
 
 /**
  * Studio, driven through a browser.
@@ -38,11 +39,8 @@ function collectFailures(page: Page): { errors: string[]; badResponses: string[]
   return { errors, badResponses }
 }
 
-async function signIn(page: Page): Promise<void> {
-  await page.getByLabel(/email/i).fill(EMAIL)
-  await page.getByLabel(/password/i).fill(PASSWORD)
-  await page.getByRole("button", { name: /sign in/i }).click()
-}
+const signIn = (page: Page): Promise<void> =>
+  signInToStudio(page, { email: EMAIL, password: PASSWORD, navigate: false })
 
 test.describe("Studio", () => {
   test("loads its bundle and renders, with nothing broken on the way", async ({ page }) => {
@@ -105,8 +103,16 @@ test.describe("Studio", () => {
     // Studio shows is read through /studio/schema, so a rendered table name
     // proves the whole path: session, proxy, and the server behind it.
     await expect(page.locator("#root")).not.toBeEmpty()
-    const body = await page.locator("body").innerText()
-    expect(body.length, "signed in but the page is empty").toBeGreaterThan(40)
+    // Polled rather than read once. `#root` stops being empty as soon as the shell mounts, and the
+    // body was then sampled at that instant: a run that caught a loading state measured fifteen
+    // characters and failed, while the next run on the same code passed. A flaky assertion costs
+    // more than the one it guards, because it teaches everyone to re-run rather than read.
+    await expect
+      .poll(async () => (await page.locator("body").innerText()).length, {
+        message: "signed in but the page is empty",
+        timeout: 15_000,
+      })
+      .toBeGreaterThan(40)
 
     expect(badResponses, "requests Studio could not load after signing in").toEqual([])
   })

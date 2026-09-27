@@ -7,7 +7,7 @@ declare module "@supatype/client" {
   availableFrom: string | null
   availableUntil: string | null
   description: (import("@supatype/types/lexical").SerializedEditorState | string) | null
-  headline: string | null
+  headline: { [locale: string]: string } | null
   id: string
   name: string
   notes: Record<string, unknown> | null
@@ -22,7 +22,7 @@ declare module "@supatype/client" {
   availableFrom?: string | null
   availableUntil?: string | null
   description?: (import("@supatype/types/lexical").SerializedEditorState | string) | null
-  headline?: string | null
+  headline?: { [locale: string]: string } | null
   id?: string
   name: string
   notes?: Record<string, unknown> | null
@@ -37,7 +37,7 @@ declare module "@supatype/client" {
   availableFrom?: string | null
   availableUntil?: string | null
   description?: (import("@supatype/types/lexical").SerializedEditorState | string) | null
-  headline?: string | null
+  headline?: { [locale: string]: string } | null
   id?: string
   name?: string
   notes?: Record<string, unknown> | null

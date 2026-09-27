@@ -30,6 +30,14 @@ ENV_EXISTED="no"
 
 cleanup() {
   echo ""
+  # `down -v` on the way out means a failing assertion takes its evidence with it. The API answered
+  # 401 and by the time anyone could ask it why, the database was gone. Set this to keep the stack
+  # up and query it, the way `zero-to-running` already allows.
+  if [[ "${SUPATYPE_E2E_KEEP:-}" == "1" ]]; then
+    echo "==> teardown skipped (SUPATYPE_E2E_KEEP=1); stack left running at $BASE_URL"
+    if [[ -n "$DEV_PID" ]]; then kill "$DEV_PID" 2>/dev/null || true; fi
+    return
+  fi
   echo "==> teardown"
   if [[ -n "$DEV_PID" ]]; then kill "$DEV_PID" 2>/dev/null || true; fi
   (cd "$EXAMPLE_DIR" && docker compose -p supatype-supabucks down -v --remove-orphans) >/dev/null 2>&1 || true
@@ -106,12 +114,26 @@ echo "  ok   a signed key is baked into the bundle"
 
 echo ""
 echo "==> That key is accepted by the API this build is served from"
-# Both tables are owner-read, so anon sees an empty array. 200 with [] is the assertion: the key
-# verifies and RLS filtered the rows. A bad key is a 401, which is what this catches.
-status="$(http_status -H "apikey: $ANON_KEY" -H "Authorization: Bearer $ANON_KEY" \
+# Asserted on the error code, not the status, because both outcomes here are 401.
+#
+# This used to expect 200 with an empty array, on the assumption that anon holds SELECT and RLS
+# filters the rows away. Supatype does not work that way: `read: Owner<"id">` grants SELECT to
+# `authenticated` and withholds it from `anon`, since anon can never own a row, and withholding the
+# grant is a stronger guarantee than granting it and relying on a policy. So a 200 was never
+# reachable and this check could not pass.
+#
+# The distinction that matters is still available, and is what this section is named for:
+#   valid key   -> 42501, Postgres refused the table after the role was applied
+#   invalid key -> PGRST301, PostgREST could not decode the JWT at all
+# A key that never verifies cannot produce 42501, so this proves the same thing the old assertion
+# meant to.
+body="$(curl -sS -H "apikey: $ANON_KEY" -H "Authorization: Bearer $ANON_KEY" \
   "$BASE_URL/rest/v1/customer?select=id&limit=1")"
-[[ "$status" == "200" ]] || fail "anon REST read returned $status, expected 200"
-echo "  ok   anon REST read accepted"
+case "$body" in
+  *PGRST301*|*JWSError*) fail "the built key was rejected by the API: $body" ;;
+  *42501*|"[]"|"[]"*)    echo "  ok   anon REST read accepted (key verified, table correctly denied)" ;;
+  *)                     fail "unexpected anon REST response: $body" ;;
+esac
 
 echo ""
 echo "PASS: the SPA is built, served, falls back, and talks to its own API"

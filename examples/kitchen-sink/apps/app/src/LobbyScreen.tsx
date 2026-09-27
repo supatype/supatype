@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react"
 import { useMutation, useQuery, useSubscription } from "@supatype/react"
 import { supatype } from "./client.js"
-import type { Database } from "../../../supatype/generated/database"
 import { Avatar, Badge, Button, Card, Input, Note, PageHeader, ProvesNote, Row } from "./components/ui.js"
+import type { TableRow } from "@supatype/client"
 
-type ChatMessage = Database["public"]["Tables"]["chat_message"]["Row"]
+type ChatMessage = TableRow<"chat_message">
 
 const ROOM = "lobby"
 
@@ -33,7 +33,7 @@ export function LobbyScreen({ userId, email }: { userId: string; email: string }
   const me = useMemo(() => email.split("@")[0] ?? "you", [email])
 
   // The backlog, once. Everything after it arrives on the socket.
-  const { data: history } = useQuery<Database, "chat_message", ChatMessage>("chat_message", {
+  const { data: history } = useQuery("chat_message", {
     filter: { room: ROOM },
     order: { column: "created_at", ascending: true },
     limit: 50,
@@ -91,7 +91,7 @@ export function LobbyScreen({ userId, email }: { userId: string; email: string }
     supatype.realtime.channel(`lobby:${ROOM}`).broadcast("typing", { who: me })
   }
 
-  const { mutate, loading } = useMutation<Database, "chat_message", ChatMessage>(
+  const { mutate, loading } = useMutation(
     "chat_message",
     "insert",
   )

@@ -3,9 +3,8 @@
 import React from "react"
 import { useLivePreview } from "@supatype/react"
 import { Blocks } from "../../blocks"
-import type { Database } from "../../../../../supatype/generated/database"
-
-type Page = Database["public"]["Tables"]["page"]["Row"]
+import type { TableRow } from "@supatype/client"
+type Page = TableRow<"page">
 
 /**
  * The saved draft, replaced live while somebody types in Studio.

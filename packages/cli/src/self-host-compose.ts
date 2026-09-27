@@ -17,7 +17,8 @@ import {
 import { hasEngineOverride, hasStudioOverride, pinnedVersion, fetchLatestVersion, VERSION_PIN_LOCAL } from "./binary-cache.js"
 import { buildKongDeclarative } from "./kong-config.js"
 import { keyspaceInPostgres } from "./cache-provider.js"
-import { readEnvFile } from "./env-file.js"
+import { STUDIO_DEV_PORT } from "./studio-dev-server.js"
+import { hasEnvValue, readEnvFile } from "./env-file.js"
 import { fieldMaskingTierFromProject, type FieldMaskingTier } from "./field-masking-tier.js"
 import { projectHasVersionedModels } from "./model-versioning.js"
 
@@ -285,8 +286,16 @@ function postgrestDatabaseUrl(config: SupatypeProjectConfig): string {
   return `postgresql://authenticator:${password}@${parsed.hostname}${port}${parsed.pathname}${parsed.search}`
 }
 
-/** Host Vite dev server as seen from Kong inside Docker Compose. */
-export const COMPOSE_STUDIO_HOST_URL = "http://host.docker.internal:3002"
+/**
+ * Host Vite dev server as seen from Kong inside Docker Compose.
+ *
+ * Derived from STUDIO_DEV_PORT rather than repeating the number, because the two are one decision.
+ * Held separately they drift, and the drift is invisible: Vite binds the new port, Kong keeps
+ * proxying to the old one, and `/studio/` serves whatever else happens to be listening there. On
+ * the machine this was found, that was an unrelated Next.js app, and every Studio view failed with
+ * a missing sign-in form rather than anything naming a port.
+ */
+export const COMPOSE_STUDIO_HOST_URL = `http://host.docker.internal:${STUDIO_DEV_PORT}`
 
 /** Studio container: always Docker Hub unless SUPATYPE_STUDIO_IMAGE is set in .env. */
 function studioServiceBlock(): string {
@@ -395,7 +404,12 @@ ${studioService}
     : `      - server
       - studio
       - control-plane`
-  const publishDbToHost = !devLocal || hasEngineOverride(config)
+  // In dev the database is published only when something on the host needs to reach it, which is
+  // normally a host engine build. A project that names a port is asking for one too: without this,
+  // `SUPATYPE_DEV_DB_PORT` was honoured for the number and ignored for whether the port existed,
+  // so a seed connecting over TCP got ECONNREFUSED and nothing said why.
+  const dbPortRequested = hasEnvValue(cwd, "SUPATYPE_DEV_DB_PORT")
+  const publishDbToHost = !devLocal || hasEngineOverride(config) || dbPortRequested
   const dbPorts = publishDbToHost
     ? devLocal
       ? `    ports:
@@ -437,6 +451,15 @@ ${studioService}
     volumes:
       - storage-data:/data
       - ${SEAWEED_CONFIG_MOUNT}:/etc/seaweedfs/s3.json:ro
+    healthcheck:
+      # Any HTTP status line means the S3 endpoint is listening, which is the whole question.
+      # Success cannot be "HTTP 200": an unauthenticated GET on the root answers 403 by design,
+      # because the anonymous identity is deliberately absent from s3.json.
+      test: ["CMD-SHELL", "wget -q -S -O /dev/null http://127.0.0.1:8333 2>&1 | grep -q 'HTTP/'"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
 ${seaweedPorts}`
   const kongTlsEnv = tlsEnabled
     ? `      KONG_PROXY_LISTEN: "0.0.0.0:8000, 0.0.0.0:8443 ssl"
@@ -490,6 +513,21 @@ ${keyspaceInPg ? "" : "  valkey-data:\n"}`
         condition: service_healthy
 `
   const dbDependency = external ? "" : `    depends_on:\n${dbDependencyClause}`
+
+  // Storage waits for the object store, not only the database.
+  //
+  // seaweedfs had no healthcheck and nothing depended on it, so compose started it alongside
+  // storage rather than before it. Storage would then accept a bucket creation before seaweedfs
+  // was listening, and every bucket in the schema failed with `connect ECONNREFUSED <ip>:8333`
+  // while the metadata row was written anyway. Measured on a live stack: seaweedfs started twelve
+  // minutes after storage with RestartCount 0, so it was ordered late rather than crashing.
+  //
+  // A later push succeeds, which is exactly what made it read as an intermittent mystery. It
+  // lands on the first push after a stack comes up, which is the first push a new user ever runs.
+  const storageDependency = `    depends_on:
+${dbDependencyClause}      seaweedfs:
+        condition: service_healthy
+`
 
   // Realtime, omitted entirely when the project has turned it off.
   //
@@ -676,7 +714,7 @@ ${dbDependency}
       S3_ACCESS_KEY: ${OBJECT_STORE_ACCESS_KEY}
       S3_SECRET_KEY: ${OBJECT_STORE_SECRET_KEY}
       S3_FORCE_PATH_STYLE: "true"
-${dbDependency}
+${storageDependency}
   functions-worker:
     image: \${SUPATYPE_FUNCTIONS_WORKER_IMAGE:-supatype/functions-worker:latest}
     expose:
@@ -705,6 +743,18 @@ ${dbDependency}
       # each one able to read past every access rule in the schema.
       SUPATYPE_SERVICE_ROLE_KEY: \${SERVICE_ROLE_KEY:-}
       SUPATYPE_SERVICE_ROLE_ROUTES: "${serviceRoleRoutes(config).join(",")}"
+      # A direct database connection for functions, off unless asked for.
+      #
+      # The worker reads SUPATYPE_DB_URL and exposes it as \`ctx.dbUrl\`, and nothing here ever set
+      # it, so the field was permanently undefined on self-host and a function reaching for it got
+      # no value and no explanation.
+      #
+      # Deliberately its own variable rather than the project's DATABASE_URL. That one is the owner
+      # DSN every service already uses, and wiring it through by default would hand every function
+      # a connection that bypasses access rules, field masking and model hooks, none of which live
+      # in the database. Naming a separate variable makes it a decision: set it to the owner URL
+      # and accept that, or to a role you restricted yourself.
+      SUPATYPE_DB_URL: \${SUPATYPE_FUNCTIONS_DB_URL:-}
       STRIPE_SECRET_KEY: \${STRIPE_SECRET_KEY:-}
       STRIPE_WEBHOOK_SECRET: \${STRIPE_WEBHOOK_SECRET:-}
       SITE_URL: \${SITE_URL:-\${API_EXTERNAL_URL:-${externalUrlFallback}}}
@@ -730,6 +780,12 @@ ${realtimeBlock}
 ${dbDependency}
   server:
     image: \${SUPATYPE_SERVER_IMAGE:-\${SUPATYPE_AUTH_IMAGE:-supatype/server:latest}}
+    # host.docker.internal is a Docker Desktop name. On Linux it does not resolve unless it is
+    # mapped, so a project proxying the site or Studio to something on the host worked on macOS
+    # and Windows and failed on Linux with nothing reaching the app. host-gateway is Docker's own
+    # alias for the host, and needs 20.10, which this stack already requires.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     # The server runs its migrations at boot on a connection of their own,
     # and that path does not wait out a database that is still in recovery:
     # it exits. Waiting for db to report healthy is not enough, because
@@ -798,7 +854,7 @@ ${appEnv}
       SUPATYPE_SMTP_ADMIN_EMAIL: \${SUPATYPE_SMTP_ADMIN_EMAIL:-}
       SUPATYPE_SMTP_SENDER_NAME: \${SUPATYPE_SMTP_SENDER_NAME:-}
       SUPATYPE_DISABLE_SIGNUP: \${DISABLE_SIGNUP:-false}
-${devLocal ? "      STUDIO_OPEN_DEV: \"1\"\n" : ""}
+${devLocal ? "      STUDIO_OPEN_DEV: \"${STUDIO_OPEN_DEV:-1}\"\n" : ""}
     depends_on:
 ${dbDependencyClause}${keyspaceInPg ? "" : "      valkey:\n        condition: service_started\n"}      postgrest:
         condition: service_started
@@ -819,6 +875,12 @@ ${objectStoreBlock}
     working_dir: /project
 ${dbDependency}${studioBlock}${valkeyBlock}${tlsHintComment}  kong:
     image: kong:3.6
+    # host.docker.internal is a Docker Desktop name. On Linux it does not resolve unless it is
+    # mapped, so a project proxying the site or Studio to something on the host worked on macOS
+    # and Windows and failed on Linux with nothing reaching the app. host-gateway is Docker's own
+    # alias for the host, and needs 20.10, which this stack already requires.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml

@@ -74,7 +74,10 @@ function walk(dir, out = []) {
     if (statSync(path).isDirectory()) walk(path, out)
     // `.vue` and `.svelte` count: their `<script>` blocks are where those bindings are imported,
     // so skipping them would report the parity example as covering neither framework it covers.
-    else if (/\.(ts|tsx|mts|vue|svelte)$/.test(entry) && !path.includes("/generated/")) out.push(path)
+    // Separators are normalised before the test: `join` gives backslashes on Windows, so the
+    // literal "/generated/" never matched there. Generated files were scanned on one platform and
+    // skipped on the other, and the ledger a Windows contributor committed could not match CI.
+    else if (/\.(ts|tsx|mts|vue|svelte)$/.test(entry) && !path.replace(/\\/g, "/").includes("/generated/")) out.push(path)
   }
   return out
 }

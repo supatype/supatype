@@ -33,7 +33,7 @@ export interface HookTables {
       availableFrom: string | null
       availableUntil: string | null
       description: (RichTextValue | string) | null
-      headline: string | null
+      headline: { [locale: string]: string } | null
       id: string
       name: string
       notes: Record<string, unknown> | null
@@ -48,7 +48,7 @@ export interface HookTables {
       availableFrom?: string | null
       availableUntil?: string | null
       description?: (RichTextValue | string) | null
-      headline?: string | null
+      headline?: { [locale: string]: string } | null
       id?: string
       name: string
       notes?: Record<string, unknown> | null
@@ -63,7 +63,7 @@ export interface HookTables {
       availableFrom?: string | null
       availableUntil?: string | null
       description?: (RichTextValue | string) | null
-      headline?: string | null
+      headline?: { [locale: string]: string } | null
       id?: string
       name?: string
       notes?: Record<string, unknown> | null

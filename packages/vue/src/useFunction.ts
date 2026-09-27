@@ -1,5 +1,5 @@
 import { ref, type Ref } from "vue"
-import type { AnyDatabase, SupatypeError } from "@supatype/client"
+import type { AugmentedDatabase, AnyDatabase, SupatypeError } from "@supatype/client"
 import { useSupatype } from "./context.js"
 
 export interface UseFunctionReturn<TResponse> {
@@ -27,7 +27,7 @@ export interface UseFunctionReturn<TResponse> {
  */
 export function useFunction<
   TResponse = unknown,
-  TDatabase extends AnyDatabase = AnyDatabase,
+  TDatabase extends AnyDatabase = AugmentedDatabase,
 >(
   functionName: string,
 ): UseFunctionReturn<TResponse> {

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" type="image/svg+xml" href="supatype-icon.svg" />
   <link rel="apple-touch-icon" href="supatype-icon.svg" />
-  <title>Deploy to a VM with GitHub Actions — Supatype</title>
+  <title>Deploy to a VM with GitHub Actions | Supatype</title>
   <meta name="description" content="End-to-end example: scaffold a Supatype project locally, self-host on a VM with Docker Compose, and deploy updates via GitHub Actions over SSH." />
   <meta name="robots" content="index, follow" />
   <link rel="canonical" href="https://www.supatype.com/deploy-vm-github-actions.html" />
@@ -148,7 +148,7 @@ supatype keys</pre>
 # Add a build step to package.json, e.g. Vite → public/
 npm install -D vite
 # "build": "vite build"  (outputDir: public)</pre>
-    <p>Commit <code>supatype.config.ts</code> — do <strong>not</strong> run <code>app add</code> again on the server.</p>
+    <p>Commit <code>supatype.config.ts</code>, and do <strong>not</strong> run <code>app add</code> again on the server.</p>
 
     <h3>Develop locally</h3>
     <pre class="guide-pre">supatype dev
@@ -166,7 +166,7 @@ git push -u origin main</pre>
   <section class="guide-step">
     <h2>2 · Prepare the VM (one-time)</h2>
     <p>Ubuntu 22.04+ (or similar) with SSH access. Install Docker, Compose v2, Node 22, and the CLI:</p>
-    <pre class="guide-pre"># Docker — see https://docs.docker.com/engine/install/ubuntu/
+    <pre class="guide-pre"># Docker: see https://docs.docker.com/engine/install/ubuntu/
 sudo apt update &amp;&amp; sudo apt install -y git nodejs npm
 sudo npm install -g @supatype/cli
 
@@ -203,10 +203,10 @@ supatype self-host compose up -d</pre>
     <h2>3 · GitHub repository secrets</h2>
     <p>In your repo: <strong>Settings → Secrets and variables → Actions</strong>. Add:</p>
     <ul>
-      <li><code>VM_HOST</code> — public IP or hostname of the VM</li>
-      <li><code>VM_USER</code> — SSH user (e.g. <code>ubuntu</code>)</li>
-      <li><code>VM_SSH_KEY</code> — private key (PEM) that can log in as <code>VM_USER</code></li>
-      <li><code>DEPLOY_PATH</code> — <code>/opt/my-blog</code> (project directory on the VM)</li>
+      <li><code>VM_HOST</code>: public IP or hostname of the VM</li>
+      <li><code>VM_USER</code>: SSH user (e.g. <code>ubuntu</code>)</li>
+      <li><code>VM_SSH_KEY</code>: private key (PEM) that can log in as <code>VM_USER</code></li>
+      <li><code>DEPLOY_PATH</code>: <code>/opt/my-blog</code> (project directory on the VM)</li>
     </ul>
     <p class="guide-note">The workflow does not upload <code>.env</code>; production secrets stay only on the VM.</p>
   </section>
@@ -258,9 +258,9 @@ git push origin main</pre>
     <p>Watch the Action in GitHub → <strong>Actions</strong>. On success, hit your gateway URL and confirm schema + static files updated.</p>
     <h3>Troubleshooting</h3>
     <ul>
-      <li><strong>SSH fails</strong> — check security group / firewall allows port 22; verify <code>VM_SSH_KEY</code> matches the VM’s <code>authorized_keys</code>.</li>
-      <li><strong><code>supatype push</code> fails</strong> — ensure Compose is up and <code>DATABASE_URL</code> points at <code>localhost:5432</code>.</li>
-      <li><strong>Site unchanged</strong> — confirm <code>npm run build</code> writes into the directory set by <code>app.static_dir</code> (e.g. <code>./public</code>), then re-run <code>compose render</code> + <code>up -d</code>.</li>
+      <li><strong>SSH fails</strong>: check the security group / firewall allows port 22; verify <code>VM_SSH_KEY</code> matches the VM’s <code>authorized_keys</code>.</li>
+      <li><strong><code>supatype push</code> fails</strong>: ensure Compose is up and <code>DATABASE_URL</code> points at <code>localhost:5432</code>.</li>
+      <li><strong>Site unchanged</strong>: confirm <code>npm run build</code> writes into the directory set by <code>app.static_dir</code> (e.g. <code>./public</code>), then re-run <code>compose render</code> + <code>up -d</code>.</li>
     </ul>
   </section>
 

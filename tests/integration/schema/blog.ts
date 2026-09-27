@@ -118,6 +118,16 @@ export type post = Model<WithPublishable<WithTimestamps<{
   embedding: Optional<Vector<1536>>
   metadata: Optional<JSON<{ seo?: { metaTitle?: string; metaDesc?: string }; ogImage?: string }>>
 }>>, {
+  /**
+   * Versioned so `studio-create-draft.spec.ts` has something to assert against.
+   *
+   * That spec checks a versioned model's first save leaves a draft behind, and no model in this
+   * fixture had `versions` at all, so it could never have passed. It was added on 2026-09-17 to a
+   * job that does not run on pull requests, and the first scheduled run after it landed is the one
+   * that failed. `WithPublishable` above supplies `published_at`; it does not supply versions, and
+   * the two read similarly enough to be mistaken for each other.
+   */
+  versions: { drafts: true, keep: 5 }
   access: {
     read: Public
     create: LoggedIn

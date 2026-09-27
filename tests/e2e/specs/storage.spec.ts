@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test"
+import { signInToStudio } from "../lib/studio-session.js"
 
 /**
  * The Media & Storage section, which nothing covered.
@@ -17,15 +18,8 @@ import { expect, test, type Page } from "@playwright/test"
 const EMAIL = process.env.STUDIO_E2E_EMAIL ?? "studio-e2e@example.com"
 const PASSWORD = process.env.STUDIO_E2E_PASSWORD ?? "StudioE2E123!"
 
-async function signIn(page: Page): Promise<void> {
-  await page.goto("/studio/", { waitUntil: "networkidle" })
-  await page.getByLabel(/email/i).fill(EMAIL)
-  await page.getByLabel(/password/i).fill(PASSWORD)
-  await page.getByRole("button", { name: /sign in/i }).click()
-  await page.waitForFunction(() => localStorage.getItem("supatype.auth.session") !== null, null, {
-    timeout: 30_000,
-  })
-}
+const signIn = (page: Page): Promise<void> =>
+  signInToStudio(page, { email: EMAIL, password: PASSWORD })
 
 test.describe("media and storage", () => {
   test.beforeEach(async ({ page }) => {

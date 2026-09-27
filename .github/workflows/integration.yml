@@ -177,30 +177,21 @@ jobs:
   # WebSocket, which a broken realtime does too: the socket opens and no row
   # arrives. This subscribes, writes, and waits with a deadline.
   #
-  # Dispatch and schedule only, for the same reason as the validation job below,
-  # and only until the same release ships. Realtime itself needs nothing
-  # unpublished: it decodes WAL from a replication slot, so there is no
-  # per-table opt-in. The server in front of it does. This branch's CLI writes
-  # SUPATYPE_* and the published `supatype/server:latest` still reads GOTRUE_*,
-  # so the stack does not come up at all and the failure says nothing about
-  # realtime.
+  # The server release these waited for shipped, so they run on every trigger now.
   #
-  # **Add `pull_request` here once a `supatype/server` release carrying the
-  # SUPATYPE_ prefix is on Docker Hub.** Nothing else blocks it; verified green
-  # against a locally built server image.
+  # They were excluded from pull requests until a `supatype/server` carrying the SUPATYPE_ prefix
+  # reached Docker Hub. That happened, and nothing brought them back, so for weeks the only thing
+  # running them was a weekly cron that had been red since 2026-09-14. In that window two fixes
+  # landed and were never verified, one spec was added that had never once passed, and a release
+  # went out over the top of it.
+  #
+  # A temporary exclusion with no owner and no expiry is a permanent one.
+
   # Studio in a browser. Everything else tests its server surface, which stays
   # green through a bundle that loads and then throws, an asset referenced at the
   # wrong base path, or a sign-in form wired to nothing.
-  #
-  # Gated for the same reason and until the same release as the two jobs below:
-  # the stack in front of Studio is supatype/server:latest, which still reads the
-  # old prefix while this branch's CLI writes the new one.
-  #
-  # **Add `pull_request` here once a `supatype/server` release carrying the
-  # SUPATYPE_ prefix is on Docker Hub.**
   studio-ui-e2e:
     name: studio UI (browser)
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: ubuntu-22.04
     timeout-minutes: 25
     env:
@@ -274,7 +265,6 @@ jobs:
 
   realtime-e2e:
     name: realtime (live stack)
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: ubuntu-22.04
     timeout-minutes: 20
 
@@ -306,19 +296,60 @@ jobs:
             examples/realtime/.supatype/**/*.log
           if-no-files-found: ignore
 
+  # Auth, storage and realtime against one stack. Each of these suites existed and ran nowhere:
+  # the auth runner was invoked by no workflow, and the storage and realtime harnesses by nothing
+  # at all. Two of the bugs they cover reached a release through that gap.
+  #
+  # The storage and realtime images are built from the checkout by the script, because both
+  # suites assert behaviour that does not exist in the published tag until a release goes out.
+  data-plane-e2e:
+    name: auth, storage and realtime (live stack)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript packages
+        run: pnpm build
+
+      - name: Run the data plane e2e
+        run: bash tests/integration/scripts/data-plane-e2e.sh
+
+      - name: Upload stack logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: data-plane-e2e-logs
+          path: |
+            tests/integration/.supatype/**/*.log
+          if-no-files-found: ignore
+
   validation-e2e:
     name: field validation (live stack)
-    # Dispatch and schedule only, for now. The stack it needs is not published yet: this asserts a
-    # validator refusal, which needs a `supatype/server` carrying per-field validators, and bounds
-    # backed by CHECKs, which needs a `supatype/schema-engine` release carrying the constraint
-    # generator. Until both ship, running this on every pull request would fail work that has
-    # nothing to do with it.
-    #
-    # **Add `pull_request` here once schema-engine >= the constraint release and server >= the
-    # validator release are on Docker Hub.** That is the whole condition; nothing else blocks it.
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    # Both releases it waited for have shipped: the server carries per-field validators and the
+    # engine carries the constraint generator. Verified green against published images.
     runs-on: ubuntu-22.04
     timeout-minutes: 25
+    env:
+      # The CLI is built from this checkout, where EMBEDDED_RELEASE_PUBLIC_KEY is empty: it is
+      # filled at publish, not in the tree. So the host engine download has nothing to verify
+      # against, refuses, and the push writes no config, which surfaces as an assertion about
+      # validators rather than as a missing key. Diagnosed once for studio-ui-e2e; it applies to
+      # every job here that pushes.
+      SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
+      # A fallback taken here is a path this job did not test. Fail instead of limping.
+      SUPATYPE_STRICT: "1"
 
     steps:
       - uses: actions/checkout@v4
@@ -360,13 +391,17 @@ jobs:
 
   kitchen-sink-e2e:
     name: kitchen sink (live stack)
-    # Dispatch and schedule only, for now, like the other live-stack jobs: this asserts a served
-    # SPA with fallback routing, realtime delivery, a storage round trip with a real transform and
-    # an edge function, so it needs published images carrying all four. Promote to `pull_request`
-    # once they are on Docker Hub.
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    # All four images it waited for are published. Verified green against them: 10/10 browser
+    # tests and the whole of verify.ts, from destroyed volumes.
     runs-on: ubuntu-22.04
     timeout-minutes: 30
+    env:
+      # See validation-e2e: built from source, so the embedded key is empty and the host engine
+      # download refuses without this. This job is the one that would have caught the row cache,
+      # so it failing for a missing env var costs more here than anywhere else.
+      SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
+      # A fallback taken here is a path this job did not test. Fail instead of limping.
+      SUPATYPE_STRICT: "1"
 
     steps:
       - uses: actions/checkout@v4
@@ -391,6 +426,13 @@ jobs:
         run: |
           docker build -t supatype/functions-worker:ci -f packages/functions-worker/Dockerfile packages/functions-worker
 
+      # This suite drives a browser, and the runner ships none. Only the Studio job installed one,
+      # so every spec here failed on a missing executable rather than on anything it asserts.
+      # Chromium only, for the reason the Studio job gives: a second engine doubles the download
+      # and the minutes, and nothing here tests browser differences.
+      - name: Install Chromium
+        run: pnpm --filter supatype-e2e exec playwright install --with-deps chromium
+
       - name: Run the kitchen sink e2e
         run: bash tests/integration/scripts/kitchen-sink-e2e.sh
         env:
@@ -409,12 +451,16 @@ jobs:
 
   supabucks-e2e:
     name: static app (live stack)
-    # Dispatch and schedule only, for now, on the same condition the validation job documents: this
-    # asserts a served SPA, which needs a published `supatype/server` carrying static mode and its
-    # fallback route. Promote to `pull_request` once that is on Docker Hub.
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    # The server carrying static mode and its fallback route is published, so this runs everywhere
+    # now. Verified green against it.
     runs-on: ubuntu-22.04
     timeout-minutes: 20
+    env:
+      # See validation-e2e: built from source, so the embedded key is empty and the host engine
+      # download refuses without this.
+      SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
+      # A fallback taken here is a path this job did not test. Fail instead of limping.
+      SUPATYPE_STRICT: "1"
 
     steps:
       - uses: actions/checkout@v4
@@ -448,13 +494,16 @@ jobs:
 
   blog-e2e:
     name: server-rendered app (live stack)
-    # Dispatch and schedule only, for now. Two reasons, both outside this script: the stack must
-    # carry the functions worker that serves `greet`, and `app.mode = "proxy"` points at
-    # host.docker.internal, which a Linux runner only resolves when the rendered compose maps it to
-    # the host gateway. Promote to `pull_request` once both hold on a scheduled run.
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    # Both conditions hold now: the published worker serves `greet`, and the rendered compose maps
+    # host.docker.internal to the host gateway so `app.mode = "proxy"` resolves on a Linux runner.
     runs-on: ubuntu-22.04
     timeout-minutes: 25
+    env:
+      # See validation-e2e: built from source, so the embedded key is empty and the host engine
+      # download refuses without this.
+      SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
+      # A fallback taken here is a path this job did not test. Fail instead of limping.
+      SUPATYPE_STRICT: "1"
 
     steps:
       - uses: actions/checkout@v4
@@ -489,6 +538,58 @@ jobs:
   # Zero to running, from the workspace build: init (docker) → dev → an API that answers.
   # Phase-10.6 row C21, kept here as provenance, the job is named for what it does.
   # macOS runners have no Docker Desktop; Colima provides the daemon.
+  # Every field kind, against a real database.
+  #
+  # Coverage of which kinds exist was 32 of 41 when this landed, and every engine defect found that
+  # week was in a *property* of a kind already covered: the column `money` creates, the type the AST
+  # publishes for it, the TypeScript a required relation generates, whether an enum's default
+  # reaches Insert, whether a second push is a no-op, whether a field can be removed at all.
+  #
+  # On push to main rather than on every pull request: it brings up a full stack and takes minutes.
+  # `release.yml` gates a tag on this workflow being green for that commit, so a release cannot go
+  # out over a red run here.
+  #
+  # The same script runs locally:
+  #   bash tests/integration/scripts/field-conformance.sh
+  field-conformance:
+    name: field conformance (live stack)
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    env:
+      # Built from this checkout, so the embedded release key is empty and the host engine download
+      # has nothing to verify against. See validation-e2e.
+      SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
+      SUPATYPE_STRICT: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript packages
+        run: pnpm build
+
+      - name: Every field kind, against a real database
+        run: bash tests/integration/scripts/field-conformance.sh
+
+      - name: Upload the stack logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: field-conformance-logs
+          path: /tmp/supatype-conformance-*/
+          retention-days: 3
+          if-no-files-found: ignore
+
   zero-to-running:
     name: "zero to running: workspace CLI (${{ matrix.os }})"
     if: github.event_name != 'schedule'

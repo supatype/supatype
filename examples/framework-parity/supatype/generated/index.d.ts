@@ -4,7 +4,7 @@ declare module "@supatype/client" {
   interface SupatypeModels {
     task: {
       Row: {
-  authUser: Record<string, unknown> | null
+  auth_user_id: string | null
   created_at: string
   done: boolean
   id: string
@@ -13,7 +13,7 @@ declare module "@supatype/client" {
   updated_at: string
 }
       Insert: {
-  authUser?: Record<string, unknown> | null
+  auth_user_id?: string | null
   created_at?: string
   done: boolean
   id?: string
@@ -22,7 +22,7 @@ declare module "@supatype/client" {
   updated_at?: string
 }
       Update: {
-  authUser?: Record<string, unknown> | null
+  auth_user_id?: string | null
   created_at?: string
   done?: boolean
   id?: string

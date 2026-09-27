@@ -52,7 +52,23 @@ if [[ ! -f "$CLI_BIN" ]]; then
   exit 1
 fi
 
-echo "==> Bringing the stack up"
+# Run Studio the way a deployment runs it, with authorization on.
+#
+# `supatype dev` sets STUDIO_OPEN_DEV=1, which makes the Studio proxy answer unauthenticated
+# requests *and* inject the service role key. Every spec below used to run against that, so a
+# Studio that sent no Authorization header at all passed the whole suite. That is not a
+# hypothetical: it shipped once, and the note on `proxyClientOptions` in StudioAccessGate.tsx is
+# the post-mortem. The suite could not have caught it.
+#
+# Turning it off here costs nothing and means these specs exercise the gate every self-hosted
+# deployment has. Verified: the same thirteen pass either way, and unauthenticated calls get 401
+# rather than rows.
+echo "==> Bringing the stack up, with the Studio dev bypass off"
+if grep -q "^STUDIO_OPEN_DEV=" "$INTEGRATION_DIR/.env" 2>/dev/null; then
+  sed -i "s/^STUDIO_OPEN_DEV=.*/STUDIO_OPEN_DEV=0/" "$INTEGRATION_DIR/.env"
+else
+  { echo ""; echo "STUDIO_OPEN_DEV=0"; } >> "$INTEGRATION_DIR/.env"
+fi
 (cd "$INTEGRATION_DIR" && node "$CLI_BIN" dev) &
 DEV_PID=$!
 
@@ -98,4 +114,17 @@ export SUPATYPE_ANON_KEY
 
 echo "==> Driving the browser"
 cd "$E2E_DIR"
-E2E_BASE_URL="$BROWSER_URL" npx playwright test
+# Named rather than "everything in specs/", because that directory is shared. `kitchen-sink-e2e.sh`
+# drives its own stack with its own schema and seed, and an unfiltered run pointed its spec at this
+# one: ten failures about a conference app, from the job that tests Studio. The kitchen-sink spec
+# landed after the last scheduled run, so the first anyone would have seen of it is the whole
+# Studio job going red for a reason that has nothing to do with Studio.
+#
+# A new spec here has to be added to a script deliberately. That is the point: it forces the
+# question of which stack it needs.
+E2E_BASE_URL="$BROWSER_URL" npx playwright test \
+  specs/studio.spec.ts \
+  specs/studio-views.spec.ts \
+  specs/studio-create-draft.spec.ts \
+  specs/function-logs.spec.ts \
+  specs/storage.spec.ts

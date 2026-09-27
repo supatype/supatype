@@ -239,6 +239,34 @@ export type TableInsert<TTable extends keyof SupatypeModels & string> =
         : Record<string, unknown>
       : Record<string, unknown>
 
+/**
+ * Row type for an augmented table name (from generated `supatype` output).
+ *
+ * Reach for this rather than indexing the generated database type by hand. Only `TableInsert`
+ * existed, so every consumer that wanted a row type wrote
+ * `Database["public"]["Tables"]["post"]["Row"]` instead, including our own examples in 23 places.
+ * That spelling names four internal structures to say one thing, and it breaks the moment any of
+ * them is renamed.
+ */
+export type TableRow<TTable extends keyof SupatypeModels & string> =
+  [keyof SupatypeModels] extends [never]
+    ? Record<string, unknown>
+    : TTable extends keyof SupatypeModels
+      ? SupatypeModels[TTable] extends { Row: infer R }
+        ? R
+        : Record<string, unknown>
+      : Record<string, unknown>
+
+/** Update payload for an augmented table name (from generated `supatype` output). */
+export type TableUpdate<TTable extends keyof SupatypeModels & string> =
+  [keyof SupatypeModels] extends [never]
+    ? Record<string, unknown>
+    : TTable extends keyof SupatypeModels
+      ? SupatypeModels[TTable] extends { Update: infer U }
+        ? U
+        : Record<string, unknown>
+      : Record<string, unknown>
+
 type ModelDefFromAugmented<T> =
   T extends TableDef
     ? T

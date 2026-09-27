@@ -1,9 +1,9 @@
 import React from "react"
-import { createClient } from "@supatype/client"
+import { createClient } from "../../../../../supatype/generated/client"
 import { LivePage } from "./live-page"
-import type { Database } from "../../../../../supatype/generated/database"
+import type { TableRow } from "@supatype/client"
 
-type Page = Database["public"]["Tables"]["page"]["Row"]
+type Page = TableRow<"page">
 
 const url = process.env["NEXT_PUBLIC_SUPATYPE_URL"] ?? "http://localhost:18473"
 const anonKey = process.env["NEXT_PUBLIC_SUPATYPE_ANON_KEY"] ?? ""
@@ -46,7 +46,7 @@ export default async function PreviewPage({
     )
   }
 
-  const supatype = createClient<Database>({ url, anonKey, previewCode: code })
+  const supatype = createClient({ url, anonKey, previewCode: code })
   const { data, error } = await supatype.from("page").draft().select().eq("slug", slug).limit(1)
 
   if (error !== null) {

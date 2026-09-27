@@ -30,24 +30,24 @@ export type RichTextValue = { readonly root: { readonly children: readonly unkno
 export interface HookTables {
   "chat_message": {
     Row: {
+      auth_user_id: string | null
       authorName: string | null
-      authUser: Record<string, unknown> | null
       body: string
       created_at: string
       id: string
       room: string
     }
     Insert: {
+      auth_user_id?: string | null
       authorName?: string | null
-      authUser?: Record<string, unknown> | null
       body: string
       created_at?: string
       id?: string
       room: string
     }
     Update: {
+      auth_user_id?: string | null
       authorName?: string | null
-      authUser?: Record<string, unknown> | null
       body?: string
       created_at?: string
       id?: string
@@ -56,7 +56,7 @@ export interface HookTables {
   }
   "talk": {
     Row: {
-      abstract: (RichTextValue | string) | null
+      abstract: { [locale: string]: (RichTextValue | string) } | null
       created_at: string
       day: string
       embedding: Record<string, unknown> | null
@@ -64,15 +64,15 @@ export interface HookTables {
       id: string
       length: { ms: number }
       published_at: string | null
-      room: Record<string, unknown> | null
+      room_id: string | null
       slug: string
-      speaker: Record<string, unknown> | null
+      speaker_id: string | null
       starts_at: string
       title: string
       updated_at: string
     }
     Insert: {
-      abstract?: (RichTextValue | string) | null
+      abstract?: { [locale: string]: (RichTextValue | string) } | null
       created_at?: string
       day: string
       embedding?: Record<string, unknown> | null
@@ -80,15 +80,15 @@ export interface HookTables {
       id?: string
       length: { ms: number }
       published_at?: string | null
-      room?: Record<string, unknown> | null
+      room_id?: string | null
       slug: string
-      speaker?: Record<string, unknown> | null
+      speaker_id?: string | null
       starts_at: string
       title: string
       updated_at?: string
     }
     Update: {
-      abstract?: (RichTextValue | string) | null
+      abstract?: { [locale: string]: (RichTextValue | string) } | null
       created_at?: string
       day?: string
       embedding?: Record<string, unknown> | null
@@ -96,9 +96,9 @@ export interface HookTables {
       id?: string
       length?: { ms: number }
       published_at?: string | null
-      room?: Record<string, unknown> | null
+      room_id?: string | null
       slug?: string
-      speaker?: Record<string, unknown> | null
+      speaker_id?: string | null
       starts_at?: string
       title?: string
       updated_at?: string

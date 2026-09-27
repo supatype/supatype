@@ -11,7 +11,7 @@
  */
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { createClient } from "@supatype/client"
+import { createClient } from "./supatype/generated/client"
 
 const KONG_PORT = process.env.SUPATYPE_KONG_PORT ?? "18473"
 const URL = process.env.SUPATYPE_URL ?? `http://127.0.0.1:${KONG_PORT}`

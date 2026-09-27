@@ -39,6 +39,8 @@ export type {
   SelectQueryOptions,
   TableDef,
   TableInsert,
+  TableRow,
+  TableUpdate,
   SupatypeModels,
   SupatypeBuckets,
   SupatypeFunctions,
@@ -75,6 +77,16 @@ export type { StorageObject, TransformOptions } from "./storage.js"
 export { RealtimeClient } from "./realtime.js"
 export type { RealtimeEvent, RealtimePayload, ChannelStatus, PresenceEntry } from "./realtime.js"
 export * from "./errors.js"
+
+// Called by the generated `supatype/client.ts`, which is how a project tells the client which
+// columns hold values a JSON parser would destroy. Exported because generated code imports it;
+// applications do not call it.
+export {
+  registerFieldKinds,
+  fieldKindsAreRegistered,
+  forgetRegisteredFieldKinds,
+  type FieldKindsDocument,
+} from "./field-kinds-registry.js"
 export { fetchWithRetry, detectServerlessEnvironment, warnIfServerlessDirectConnection } from "./fetch-with-retry.js"
 export type { FetchOptions, ServerlessDetectionResult } from "./fetch-with-retry.js"
 export { createRetryFetch } from "./retry.js"

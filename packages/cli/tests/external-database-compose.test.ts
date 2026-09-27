@@ -42,13 +42,20 @@ describe("external database: compose", () => {
     const compose = renderSelfHostCompose(managed())
     expect(compose).toMatch(/^ {2}db:$/m)
     expect(compose).toContain("pg_isready")
+    // The positive half of "leaves no reference to the db host anywhere" below. Without this, that
+    // test's negative assertion could pass against a pattern that matches nothing at all.
+    expect(compose).toMatch(/^\s+db:\s*\n\s+condition:/m)
   })
 
   it("leaves no reference to the db host anywhere", () => {
     const compose = renderSelfHostCompose(external())
     expect(compose).not.toContain("@db:5432")
     expect(compose).not.toContain("db-data")
-    expect(compose).not.toContain("condition: service_healthy")
+    // Nothing may wait on a `db` service that is not there. Asserted as a dependency on `db`
+    // rather than as the absence of any health condition, which is what this used to say: storage
+    // waits for the object store to be healthy in every deployment, because that race is about
+    // seaweedfs and has nothing to do with where Postgres lives.
+    expect(compose).not.toMatch(/^\s+db:\s*\n\s+condition:/m)
   })
 
   it("points every database consumer at the one URL", () => {

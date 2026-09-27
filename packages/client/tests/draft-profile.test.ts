@@ -18,6 +18,7 @@ function captureHeaders(): {
     ok: true,
     status: 200,
     json: vi.fn().mockResolvedValue([]),
+    text: vi.fn().mockResolvedValue("[]"),
     headers: { get: () => null },
   })
   vi.stubGlobal("fetch", fetch)
@@ -140,6 +141,7 @@ describe("a preview link as the client's credential", () => {
         ok: true,
         status: 200,
         json: () => Promise.resolve([]),
+        text: () => Promise.resolve("[]"),
         headers: { get: () => null },
       })
     })
@@ -252,6 +254,7 @@ describe("what storage sends as its credential", () => {
       ok: true,
       status: 200,
       json: vi.fn().mockResolvedValue([]),
+      text: vi.fn().mockResolvedValue("[]"),
       headers: { get: () => null },
     })
     vi.stubGlobal("fetch", fetchMock)

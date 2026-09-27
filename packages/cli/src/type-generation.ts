@@ -13,9 +13,13 @@
  */
 
 import { mkdirSync, writeFileSync } from "node:fs"
-import { dirname, resolve } from "node:path"
+import { dirname, join, resolve, sep } from "node:path"
 import { generateClientAugmentation } from "./augmentation-generator.js"
 import { ensureEngine, engineRequest } from "./engine-client.js"
+import { generateProjectClient } from "./client-generator.js"
+
+/** The client a project imports, beside the generated types. */
+const PROJECT_CLIENT_FILENAME = "client.ts"
 
 export interface GenerateTypesRequest {
   cwd: string
@@ -48,7 +52,27 @@ export async function writeGeneratedTypes(req: GenerateTypesRequest): Promise<st
     written.push(`Types written to ${req.typesPath}`)
   }
 
-  // Generated locally from the AST, so it needs no engine round trip.
+  written.push(...writeAstDerivedOutputs(req))
+
+  return written
+}
+
+/**
+ * The generated files that come from the AST alone, with no engine round trip.
+ *
+ * Shared because three commands need them and only one was writing them. `push` and `generate`
+ * call {@link writeGeneratedTypes}; `dev` has its own type generation, for good reasons it should
+ * keep, and so never wrote these at all. The result was a project developed entirely through
+ * `supatype dev` that never received `index.d.ts`, so the module augmentation that makes
+ * `createClient` typed without a generic never happened, and never received the generated client,
+ * so every exact-value column fell back to asking the API.
+ *
+ * Kept separate from the types branch above rather than folding `dev` into it: that branch slices
+ * the engine's output from a marker and treats a failure as fatal, and `dev` must do neither.
+ */
+export function writeAstDerivedOutputs(req: GenerateTypesRequest): string[] {
+  const written: string[] = []
+
   if (req.clientPath !== undefined && req.clientPath !== "") {
     const outPath = resolve(req.cwd, req.clientPath)
     mkdirSync(dirname(outPath), { recursive: true })
@@ -56,5 +80,26 @@ export async function writeGeneratedTypes(req: GenerateTypesRequest): Promise<st
     written.push(`Client augmentation written to ${req.clientPath}`)
   }
 
+  // The client the project imports. One file carrying the augmentation, the exact-value columns
+  // and a re-export of `createClient`, so an app writes a single import and tsconfig cannot lose
+  // any of it. See `client-generator.ts` for what each part replaced.
+  // Beside `output.client` when set, otherwise beside `output.types`. A project that configured
+  // only types still gets a usable client: this one file carries the augmentation and the exact
+  // columns as well as `createClient`, so without it the project has types and no way to use them
+  // that knows anything about its schema.
+  const clientDir = req.clientPath ?? req.typesPath
+  if (clientDir !== undefined && clientDir !== "") {
+    const relative = join(dirname(clientDir), PROJECT_CLIENT_FILENAME)
+    const outPath = resolve(req.cwd, relative)
+    mkdirSync(dirname(outPath), { recursive: true })
+    writeFileSync(outPath, generateProjectClient(req.ast), "utf8")
+    written.push(`Client written to ${toPosix(relative)}`)
+  }
+
   return written
+}
+
+/** Reported with forward slashes, so the message reads the same on every platform. */
+function toPosix(path: string): string {
+  return path.split(sep).join("/")
 }

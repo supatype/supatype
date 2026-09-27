@@ -3,7 +3,7 @@
 import React, { useCallback, useState, type FormEvent } from "react"
 import { useRouter } from "next/navigation"
 import { useMutation } from "@supatype/react"
-import type { AugmentedDatabase, TableInsert } from "@supatype/client"
+import type { TableInsert } from "@supatype/client"
 import {
   RichTextEditor,
   emptyRichTextDocument,
@@ -17,7 +17,7 @@ type NewPostFormProps = {
 
 export function NewPostForm({ userId }: NewPostFormProps): React.ReactElement {
   const router = useRouter()
-  const { mutate, loading, error } = useMutation<AugmentedDatabase, "post">("post", "insert")
+  const { mutate, loading, error } = useMutation("post", "insert")
 
   const [title, setTitle] = useState("")
   const [body, setBody] = useState<SerializedEditorState>(() => emptyRichTextDocument())
@@ -38,8 +38,16 @@ export function NewPostForm({ userId }: NewPostFormProps): React.ReactElement {
     // what hides it — nothing has to remember to say so.
     const payload = {
       title,
-      body,
-      authUser: { id: userId },
+      // `body` is a localized column: it holds every language at once, so a bare value is the
+      // wrong shape and the API would have stored it as one. The editor writes English here, and
+      // the generated type only started saying so once localized columns were typed as the locale
+      // map they actually are.
+      body: { en: body },
+      // The column, not the relation. `RelatedTo<SupatypeAuthUser>` is declared as `authUser` and
+      // occupies `auth_user_id`, which is what the API accepts. This said `authUser: { id }` until
+      // the generated augmentation started describing relations correctly, because the old type
+      // was `Record<string, unknown>` and satisfied anything.
+      auth_user_id: userId,
     } satisfies TableInsert<"post">
     const result = await mutate(payload)
     if (result.error === null && result.data !== null && result.data.length > 0) {

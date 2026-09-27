@@ -1,5 +1,5 @@
 import { ref, onMounted, onUnmounted, type Ref } from "vue"
-import type { AnyDatabase, SupatypeError, RealtimePayload, RealtimeEvent, ChannelStatus } from "@supatype/client"
+import type { AugmentedDatabase, AnyDatabase, SupatypeError, RealtimePayload, RealtimeEvent, ChannelStatus } from "@supatype/client"
 import { useSupatype } from "./context.js"
 
 export type SubscriptionEvent = RealtimeEvent
@@ -31,7 +31,7 @@ export interface UseSubscriptionReturn<TRow> {
  * ```
  */
 export function useSubscription<
-  TDatabase extends AnyDatabase = AnyDatabase,
+  TDatabase extends AnyDatabase = AugmentedDatabase,
   TTable extends keyof TDatabase["public"]["Tables"] & string = keyof TDatabase["public"]["Tables"] & string,
   TRow = TDatabase["public"]["Tables"][TTable]["Row"],
 >(

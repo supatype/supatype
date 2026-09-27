@@ -8,7 +8,7 @@ declare module "@supatype/client" {
   created_at: string
   id: string
   supportEmail: string
-  tagline: string | null
+  tagline: { [locale: string]: string } | null
   updated_at: string
   venue: Record<string, unknown> | null
 }
@@ -17,7 +17,7 @@ declare module "@supatype/client" {
   created_at?: string
   id?: string
   supportEmail: string
-  tagline?: string | null
+  tagline?: { [locale: string]: string } | null
   updated_at?: string
   venue?: Record<string, unknown> | null
 }
@@ -26,28 +26,28 @@ declare module "@supatype/client" {
   created_at?: string
   id?: string
   supportEmail?: string
-  tagline?: string | null
+  tagline?: { [locale: string]: string } | null
   updated_at?: string
   venue?: Record<string, unknown> | null
 }
     }
     attendee: {
       Row: {
-  avatar: Record<string, unknown> | null
+  avatar: { bucket: string; path: string } | null
   created_at: string
   displayName: string
   id: string
   updated_at: string
 }
       Insert: {
-  avatar?: Record<string, unknown> | null
+  avatar?: { bucket: string; path: string } | null
   created_at?: string
   displayName: string
   id?: string
   updated_at?: string
 }
       Update: {
-  avatar?: Record<string, unknown> | null
+  avatar?: { bucket: string; path: string } | null
   created_at?: string
   displayName?: string
   id?: string
@@ -56,24 +56,24 @@ declare module "@supatype/client" {
     }
     chat_message: {
       Row: {
+  auth_user_id: string | null
   authorName: string | null
-  authUser: Record<string, unknown> | null
   body: string
   created_at: string
   id: string
   room: string
 }
       Insert: {
+  auth_user_id?: string | null
   authorName?: string | null
-  authUser?: Record<string, unknown> | null
   body: string
   created_at?: string
   id?: string
   room: string
 }
       Update: {
+  auth_user_id?: string | null
   authorName?: string | null
-  authUser?: Record<string, unknown> | null
   body?: string
   created_at?: string
   id?: string
@@ -88,7 +88,7 @@ declare module "@supatype/client" {
   published_at: string | null
   slug: string
   summary: string | null
-  title: string
+  title: { [locale: string]: string }
   updated_at: string
 }
       Insert: {
@@ -98,7 +98,7 @@ declare module "@supatype/client" {
   published_at?: string | null
   slug: string
   summary?: string | null
-  title: string
+  title: { [locale: string]: string }
   updated_at?: string
 }
       Update: {
@@ -108,7 +108,7 @@ declare module "@supatype/client" {
   published_at?: string | null
   slug?: string
   summary?: string | null
-  title?: string
+  title?: { [locale: string]: string }
   updated_at?: string
 }
     }
@@ -140,10 +140,10 @@ declare module "@supatype/client" {
     }
     speaker: {
       Row: {
-  bio: (import("@supatype/types/lexical").SerializedEditorState | string) | null
+  bio: { [locale: string]: (import("@supatype/types/lexical").SerializedEditorState | string) } | null
   created_at: string
   email: string | null
-  headshot: Record<string, unknown> | null
+  headshot: { bucket: string; path: string } | null
   id: string
   links: Record<string, unknown> | null
   name: string
@@ -152,10 +152,10 @@ declare module "@supatype/client" {
   updated_at: string
 }
       Insert: {
-  bio?: (import("@supatype/types/lexical").SerializedEditorState | string) | null
+  bio?: { [locale: string]: (import("@supatype/types/lexical").SerializedEditorState | string) } | null
   created_at?: string
   email?: string | null
-  headshot?: Record<string, unknown> | null
+  headshot?: { bucket: string; path: string } | null
   id?: string
   links?: Record<string, unknown> | null
   name: string
@@ -164,10 +164,10 @@ declare module "@supatype/client" {
   updated_at?: string
 }
       Update: {
-  bio?: (import("@supatype/types/lexical").SerializedEditorState | string) | null
+  bio?: { [locale: string]: (import("@supatype/types/lexical").SerializedEditorState | string) } | null
   created_at?: string
   email?: string | null
-  headshot?: Record<string, unknown> | null
+  headshot?: { bucket: string; path: string } | null
   id?: string
   links?: Record<string, unknown> | null
   name?: string
@@ -178,12 +178,12 @@ declare module "@supatype/client" {
     }
     sponsor: {
       Row: {
-  blurb: string | null
+  blurb: { [locale: string]: string } | null
   brandColor: unknown | null
   contactPhone: string | null
   created_at: string
   id: string
-  logo: Record<string, unknown> | null
+  logo: { bucket: string; path: string } | null
   name: string
   published_at: string | null
   tier: "platinum" | "gold" | "community"
@@ -191,12 +191,12 @@ declare module "@supatype/client" {
   website: string | null
 }
       Insert: {
-  blurb?: string | null
+  blurb?: { [locale: string]: string } | null
   brandColor?: unknown | null
   contactPhone?: string | null
   created_at?: string
   id?: string
-  logo?: Record<string, unknown> | null
+  logo?: { bucket: string; path: string } | null
   name: string
   published_at?: string | null
   tier: "platinum" | "gold" | "community"
@@ -204,12 +204,12 @@ declare module "@supatype/client" {
   website?: string | null
 }
       Update: {
-  blurb?: string | null
+  blurb?: { [locale: string]: string } | null
   brandColor?: unknown | null
   contactPhone?: string | null
   created_at?: string
   id?: string
-  logo?: Record<string, unknown> | null
+  logo?: { bucket: string; path: string } | null
   name?: string
   published_at?: string | null
   tier?: "platinum" | "gold" | "community"
@@ -219,7 +219,7 @@ declare module "@supatype/client" {
     }
     talk: {
       Row: {
-  abstract: (import("@supatype/types/lexical").SerializedEditorState | string) | null
+  abstract: { [locale: string]: (import("@supatype/types/lexical").SerializedEditorState | string) } | null
   created_at: string
   day: string
   embedding: Record<string, unknown> | null
@@ -227,15 +227,15 @@ declare module "@supatype/client" {
   id: string
   length: { ms: number }
   published_at: string | null
-  room: Record<string, unknown> | null
+  room_id: string | null
   slug: string
-  speaker: Record<string, unknown> | null
+  speaker_id: string | null
   starts_at: string
   title: string
   updated_at: string
 }
       Insert: {
-  abstract?: (import("@supatype/types/lexical").SerializedEditorState | string) | null
+  abstract?: { [locale: string]: (import("@supatype/types/lexical").SerializedEditorState | string) } | null
   created_at?: string
   day: string
   embedding?: Record<string, unknown> | null
@@ -243,15 +243,15 @@ declare module "@supatype/client" {
   id?: string
   length: { ms: number }
   published_at?: string | null
-  room?: Record<string, unknown> | null
+  room_id?: string | null
   slug: string
-  speaker?: Record<string, unknown> | null
+  speaker_id?: string | null
   starts_at: string
   title: string
   updated_at?: string
 }
       Update: {
-  abstract?: (import("@supatype/types/lexical").SerializedEditorState | string) | null
+  abstract?: { [locale: string]: (import("@supatype/types/lexical").SerializedEditorState | string) } | null
   created_at?: string
   day?: string
   embedding?: Record<string, unknown> | null
@@ -259,9 +259,9 @@ declare module "@supatype/client" {
   id?: string
   length?: { ms: number }
   published_at?: string | null
-  room?: Record<string, unknown> | null
+  room_id?: string | null
   slug?: string
-  speaker?: Record<string, unknown> | null
+  speaker_id?: string | null
   starts_at?: string
   title?: string
   updated_at?: string
@@ -269,37 +269,37 @@ declare module "@supatype/client" {
     }
     ticket: {
       Row: {
-  attendee: Record<string, unknown> | null
-  authUser: Record<string, unknown> | null
+  attendee_id: string | null
+  auth_user_id: string | null
   created_at: string
   id: string
-  pdf: Record<string, unknown> | null
+  pdf: { bucket: string; path: string } | null
   price: { amount: string; code: "GBP" }
   reference: string
   updated_at: string
-  vatRate: number
+  vatRate: string
 }
       Insert: {
-  attendee?: Record<string, unknown> | null
-  authUser?: Record<string, unknown> | null
+  attendee_id?: string | null
+  auth_user_id?: string | null
   created_at?: string
   id?: string
-  pdf?: Record<string, unknown> | null
+  pdf?: { bucket: string; path: string } | null
   price: { amount: string; code: "GBP" }
   reference: string
   updated_at?: string
-  vatRate: number
+  vatRate: string
 }
       Update: {
-  attendee?: Record<string, unknown> | null
-  authUser?: Record<string, unknown> | null
+  attendee_id?: string | null
+  auth_user_id?: string | null
   created_at?: string
   id?: string
-  pdf?: Record<string, unknown> | null
+  pdf?: { bucket: string; path: string } | null
   price?: { amount: string; code: "GBP" }
   reference?: string
   updated_at?: string
-  vatRate?: number
+  vatRate?: string
 }
     }
   }

@@ -1,10 +1,10 @@
 import React from "react"
 import { useQuery } from "@supatype/react"
-import type { Database } from "../../../supatype/generated/database"
 import { Avatar, Card, EmptyState, Grid, Note, PageHeader, ProvesNote, Row, Skeleton, Stack } from "./components/ui.js"
 import { localized } from "./lib/localized.js"
+import type { TableRow } from "@supatype/client"
 
-type Speaker = Database["public"]["Tables"]["speaker"]["Row"]
+type Speaker = TableRow<"speaker">
 
 /**
  * Everyone speaking, with their headshots and bios.
@@ -14,7 +14,7 @@ type Speaker = Database["public"]["Tables"]["speaker"]["Row"]
  * Studio a search box on the list view.
  */
 export function SpeakersScreen(): React.ReactElement {
-  const { data, error, loading } = useQuery<Database, "speaker", Speaker>("speaker", {
+  const { data, error, loading } = useQuery("speaker", {
     order: { column: "name", ascending: true },
     limit: 100,
   })

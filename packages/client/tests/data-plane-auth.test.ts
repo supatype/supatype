@@ -80,14 +80,15 @@ describe("createClient data plane auth", () => {
             expires_at: Math.floor(Date.now() / 1000) + 3600,
             user: RAW_USER,
           }),
-          headers: { get: () => null },
+          headers: { get: (): string | null => null },
         }
       }
       return {
         ok: true,
         status: 200,
         json: async () => [{ id: "1", title: "Hello" }],
-        headers: { get: () => null },
+        text: async () => JSON.stringify([{ id: "1", title: "Hello" }]),
+        headers: { get: (): string | null => null },
       }
     })
     vi.stubGlobal("fetch", fetchSpy)
@@ -130,14 +131,15 @@ describe("createClient data plane auth", () => {
           ok: false,
           status: 400,
           json: async () => ({ error_description: "Invalid Refresh Token" }),
-          headers: { get: () => null },
+          headers: { get: (): string | null => null },
         }
       }
       return {
         ok: true,
         status: 200,
         json: async () => [{ id: "1", title: "Anon ok" }],
-        headers: { get: () => null },
+        text: async () => JSON.stringify([{ id: "1", title: "Anon ok" }]),
+        headers: { get: (): string | null => null },
       }
     })
     vi.stubGlobal("fetch", fetchSpy)

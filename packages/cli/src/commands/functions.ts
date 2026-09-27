@@ -25,7 +25,10 @@ import {
 import { loadProjectLink } from "../link.js"
 import { resolveTarget } from "../resolve-target.js"
 import { targetFetch } from "../target-client.js"
-import { ensureFunctionsDenoTypes } from "../functions-deno-types.js"
+import {
+  ensureFunctionsDenoTypes,
+  sharedFunctionsReadmeSource,
+} from "../functions-deno-types.js"
 import { error, info, plain } from "../ui/messages.js"
 import { nextSteps } from "../ui/next-steps.js"
 
@@ -173,7 +176,7 @@ export default async function handler(req: Request, ctx: FunctionContext): Promi
     mkdirSync(sharedDir, { recursive: true })
     writeFileSync(
       join(sharedDir, "README.md"),
-      "# Shared Code\n\nFiles in `_shared/` are available to all functions via relative imports.\nThis directory is not deployed as a function.\n\nExample: `import { sendEmail } from '../_shared/email.ts'`\n",
+      sharedFunctionsReadmeSource(),
       "utf8",
     )
   }

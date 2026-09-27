@@ -4,40 +4,40 @@ declare module "@supatype/client" {
   interface SupatypeModels {
     comment: {
       Row: {
-  authorProfile: Record<string, unknown> | null
-  authUser: Record<string, unknown> | null
+  auth_user_id: string | null
+  author_profile_id: string | null
   body: string
   created_at: string
   id: string
-  post: Record<string, unknown> | null
+  post_id: string | null
   updated_at: string
 }
       Insert: {
-  authorProfile?: Record<string, unknown> | null
-  authUser?: Record<string, unknown> | null
+  auth_user_id?: string | null
+  author_profile_id?: string | null
   body: string
   created_at?: string
   id?: string
-  post?: Record<string, unknown> | null
+  post_id?: string | null
   updated_at?: string
 }
       Update: {
-  authorProfile?: Record<string, unknown> | null
-  authUser?: Record<string, unknown> | null
+  auth_user_id?: string | null
+  author_profile_id?: string | null
   body?: string
   created_at?: string
   id?: string
-  post?: Record<string, unknown> | null
+  post_id?: string | null
   updated_at?: string
 }
     }
     post: {
       Row: {
-  attachment: Record<string, unknown> | null
-  authorProfile: Record<string, unknown> | null
-  authUser: Record<string, unknown> | null
-  body: (import("@supatype/types/lexical").SerializedEditorState | string)
-  coverImage: Record<string, unknown> | null
+  attachment: { bucket: string; path: string } | null
+  auth_user_id: string | null
+  author_profile_id: string | null
+  body: { [locale: string]: (import("@supatype/types/lexical").SerializedEditorState | string) }
+  coverImage: { bucket: string; path: string } | null
   created_at: string
   excerpt: string | null
   feedCaption: string | null
@@ -49,11 +49,11 @@ declare module "@supatype/client" {
   updated_at: string
 }
       Insert: {
-  attachment?: Record<string, unknown> | null
-  authorProfile?: Record<string, unknown> | null
-  authUser?: Record<string, unknown> | null
-  body: (import("@supatype/types/lexical").SerializedEditorState | string)
-  coverImage?: Record<string, unknown> | null
+  attachment?: { bucket: string; path: string } | null
+  auth_user_id?: string | null
+  author_profile_id?: string | null
+  body: { [locale: string]: (import("@supatype/types/lexical").SerializedEditorState | string) }
+  coverImage?: { bucket: string; path: string } | null
   created_at?: string
   excerpt?: string | null
   feedCaption?: string | null
@@ -65,11 +65,11 @@ declare module "@supatype/client" {
   updated_at?: string
 }
       Update: {
-  attachment?: Record<string, unknown> | null
-  authorProfile?: Record<string, unknown> | null
-  authUser?: Record<string, unknown> | null
-  body?: (import("@supatype/types/lexical").SerializedEditorState | string)
-  coverImage?: Record<string, unknown> | null
+  attachment?: { bucket: string; path: string } | null
+  auth_user_id?: string | null
+  author_profile_id?: string | null
+  body?: { [locale: string]: (import("@supatype/types/lexical").SerializedEditorState | string) }
+  coverImage?: { bucket: string; path: string } | null
   created_at?: string
   excerpt?: string | null
   feedCaption?: string | null
@@ -83,21 +83,21 @@ declare module "@supatype/client" {
     }
     user: {
       Row: {
-  avatarUrl: Record<string, unknown> | null
+  avatarUrl: { bucket: string; path: string } | null
   created_at: string
   id: string
   name: string
   updated_at: string
 }
       Insert: {
-  avatarUrl?: Record<string, unknown> | null
+  avatarUrl?: { bucket: string; path: string } | null
   created_at?: string
   id?: string
   name: string
   updated_at?: string
 }
       Update: {
-  avatarUrl?: Record<string, unknown> | null
+  avatarUrl?: { bucket: string; path: string } | null
   created_at?: string
   id?: string
   name?: string

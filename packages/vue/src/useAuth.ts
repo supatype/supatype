@@ -1,5 +1,5 @@
 import { ref, onMounted, onUnmounted, type Ref } from "vue"
-import type { AnyDatabase, SupatypeError, User, Session, AuthChangeEvent } from "@supatype/client"
+import type { AugmentedDatabase, AnyDatabase, SupatypeError, User, Session, AuthChangeEvent } from "@supatype/client"
 import { useSupatype } from "./context.js"
 
 export interface UseAuthReturn {
@@ -34,7 +34,7 @@ export interface UseAuthReturn {
  * </template>
  * ```
  */
-export function useAuth<TDatabase extends AnyDatabase = AnyDatabase>(): UseAuthReturn {
+export function useAuth<TDatabase extends AnyDatabase = AugmentedDatabase>(): UseAuthReturn {
   const client = useSupatype<TDatabase>()
   const user = ref<User | null>(null) as Ref<User | null>
   const session = ref<Session | null>(null) as Ref<Session | null>

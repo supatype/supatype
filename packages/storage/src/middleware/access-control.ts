@@ -43,13 +43,17 @@ export async function checkReadAccess(
       if (!jwt) {
         return { allowed: false, status: 401, error: "Authentication required to access this file" }
       }
-      // Owner check: the object must be owned by the requesting user
+      // Existence first, with the service's own connection, so a missing object still produces a
+      // 404 from the route below rather than a 403 that would confirm nothing is there.
       const obj = await db.getObject(bucket.id, objectPath)
       if (!obj) {
         // Let the caller return 404 naturally
         return { allowed: true }
       }
-      if (obj.owner !== jwt.sub) {
+      // Then the decision itself, made by Postgres against the policy the bucket's declared read
+      // rule generated. This used to be an owner comparison written here, which ignored the rule:
+      // a bucket declaring `read: BucketLoggedIn` refused every user but the uploader.
+      if (!(await db.objectVisibleTo(bucket.id, objectPath, jwt))) {
         return {
           allowed: false,
           status: 403,

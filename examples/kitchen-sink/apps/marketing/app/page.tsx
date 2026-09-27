@@ -1,9 +1,10 @@
 import React from "react"
 import { createClient } from "@/lib/supatype-server"
+import { headers } from "next/headers"
 import { Blocks } from "./blocks"
-import type { Database } from "../../../supatype/generated/database"
-
-type Page = Database["public"]["Tables"]["page"]["Row"]
+import { localized } from "@/lib/localized"
+import type { TableRow } from "@supatype/client"
+type Page = TableRow<"page">
 
 /**
  * The home page, assembled from blocks an editor arranged.
@@ -23,6 +24,10 @@ export default async function HomePage(): Promise<React.ReactElement> {
   if (error !== null) return <p className="ks-error">Error: {error.message}</p>
 
   const page = (data as Page[] | null)?.[0]
+  // The locale middleware chose this on the edge, the same as the talk page does. `title` is a
+  // localized column, so it arrives as the whole record and rendering it directly printed
+  // [object Object] until the generated type started saying so.
+  const locale = (await headers()).get("x-locale") ?? "en"
   if (!page) {
     return (
       <section>
@@ -37,7 +42,7 @@ export default async function HomePage(): Promise<React.ReactElement> {
 
   return (
     <article>
-      <h1>{page.title}</h1>
+      <h1>{localized(page.title, locale) ?? ""}</h1>
       {page.summary !== null && <p className="ks-lede">{page.summary}</p>}
       <Blocks blocks={page.body} />
     </article>
