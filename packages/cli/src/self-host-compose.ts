@@ -843,7 +843,7 @@ ${appEnv}
       SUPATYPE_SMTP_ADMIN_EMAIL: \${SUPATYPE_SMTP_ADMIN_EMAIL:-}
       SUPATYPE_SMTP_SENDER_NAME: \${SUPATYPE_SMTP_SENDER_NAME:-}
       SUPATYPE_DISABLE_SIGNUP: \${DISABLE_SIGNUP:-false}
-${devLocal ? "      STUDIO_OPEN_DEV: \"1\"\n" : ""}
+${devLocal ? "      STUDIO_OPEN_DEV: \"${STUDIO_OPEN_DEV:-1}\"\n" : ""}
     depends_on:
 ${dbDependencyClause}${keyspaceInPg ? "" : "      valkey:\n        condition: service_started\n"}      postgrest:
         condition: service_started
