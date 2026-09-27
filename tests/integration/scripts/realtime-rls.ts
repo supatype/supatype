@@ -157,6 +157,7 @@ async function main(): Promise<void> {
       id: user.id,
       email: `rt-${user.id.slice(0, 8)}@example.test`,
       username: `r${user.id.slice(0, 8)}`,
+      role: "user",
     })
     if (author.status >= 300) {
       bad("could not seed an author", `HTTP ${author.status}: ${author.text.slice(0, 160)}`)

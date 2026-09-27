@@ -315,7 +315,7 @@ async function sessionsAndRls(): Promise<void> {
   for (const user of users) {
     const author = await post(
       "/rest/v1/author",
-      { id: user.id, email: user.email, username: `u${user.id.slice(0, 8)}` },
+      { id: user.id, email: user.email, username: `u${user.id.slice(0, 8)}`, role: "user" },
       service,
     )
     if (author.status >= 300) {

@@ -190,6 +190,7 @@ async function assetColumn(): Promise<void> {
       id: user.id,
       email: `asset-${user.id.slice(0, 8)}@example.test`,
       username: `a${user.id.slice(0, 8)}`,
+      role: "user",
       avatarUrl: reference,
     }),
   })
