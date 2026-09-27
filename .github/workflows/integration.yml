@@ -296,6 +296,45 @@ jobs:
             examples/realtime/.supatype/**/*.log
           if-no-files-found: ignore
 
+  # Auth, storage and realtime against one stack. Each of these suites existed and ran nowhere:
+  # the auth runner was invoked by no workflow, and the storage and realtime harnesses by nothing
+  # at all. Two of the bugs they cover reached a release through that gap.
+  #
+  # The storage and realtime images are built from the checkout by the script, because both
+  # suites assert behaviour that does not exist in the published tag until a release goes out.
+  data-plane-e2e:
+    name: auth, storage and realtime (live stack)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript packages
+        run: pnpm build
+
+      - name: Run the data plane e2e
+        run: bash tests/integration/scripts/data-plane-e2e.sh
+
+      - name: Upload stack logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: data-plane-e2e-logs
+          path: |
+            tests/integration/.supatype/**/*.log
+          if-no-files-found: ignore
+
   validation-e2e:
     name: field validation (live stack)
     # Both releases it waited for have shipped: the server carries per-field validators and the
