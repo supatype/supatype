@@ -2905,6 +2905,104 @@ const TIME_UNITS = [
 const TRUNC_UNITS = ["day", "week", "month", "year"] as const
 
 /**
+ * `After<Base, { days: 30, hours: 9 }>` / `Before<...>`: a point in time plus or minus a
+ * multi-unit duration.
+ *
+ * The interval is re-assembled from parsed integers and matched keywords, exactly as
+ * `parseDurationOperand` does, so no author-supplied text reaches Postgres. A permissive
+ * `"30 days 9 hours"` string would be raw SQL by another name.
+ *
+ * Direction is in the operand name rather than the sign of a component, which is the rule
+ * `Ago`/`FromNow` already follow: a negative amount is refused with a message naming the
+ * opposite operand, because relying on a double negative reads wrongly.
+ */
+function parseOffsetOperand(
+  ref: "After" | "Before",
+  args: readonly ts.TypeNode[],
+  sourceFile: ts.SourceFile,
+): Record<string, unknown> {
+  if (args.length !== 2) {
+    throw new Error(
+      `\`${ref}<>\` takes a base and an interval, as in ` +
+        `\`${ref}<StartOf<"day">, { days: 30, hours: 9 }>\`.`,
+    )
+  }
+
+  const base = parseAccessOperand(args[0]!, sourceFile)
+  const baseKind = typeof base["kind"] === "string" ? base["kind"] : ""
+  if (baseKind !== "now" && baseKind !== "startOf") {
+    throw new Error(
+      `\`${ref}<>\` measures from a point in time, so its base must be \`Now\` or ` +
+        `\`StartOf<unit>\`. A column or a claim depends on the row or the caller and ` +
+        `cannot be offset.`,
+    )
+  }
+
+  const intervalNode = args[1]!
+  if (!ts.isTypeLiteralNode(intervalNode)) {
+    throw new Error(
+      `\`${ref}<>\` takes the interval as an object, as in \`{ days: 30, hours: 9 }\`.`,
+    )
+  }
+
+  const opposite = ref === "After" ? "Before" : "After"
+  const interval: Record<string, number> = {}
+
+  for (const member of intervalNode.members) {
+    if (!ts.isPropertySignature(member) || !member.name || !member.type) {
+      throw new Error(`\`${ref}<>\` interval members must be \`unit: amount\` pairs.`)
+    }
+    const unit = member.name.getText(sourceFile).replace(/["']/g, "")
+    if (!TIME_UNITS.includes(unit as (typeof TIME_UNITS)[number])) {
+      throw new Error(
+        `\`${unit}\` is not a unit of time. Use one of: ${TIME_UNITS.join(", ")} (plural).`,
+      )
+    }
+
+    const amountNode = member.type
+    // A negative literal is a prefix-unary expression, not a numeric literal, so it has
+    // to be recognised separately or it is refused for the wrong reason and the message
+    // misses the real advice.
+    if (
+      ts.isLiteralTypeNode(amountNode) &&
+      ts.isPrefixUnaryExpression(amountNode.literal) &&
+      amountNode.literal.operator === ts.SyntaxKind.MinusToken
+    ) {
+      throw new Error(
+        `\`${ref}<>\` does not take a negative amount. For the other direction use ` +
+          `\`${opposite}<>\`, which reads correctly instead of relying on a double negative.`,
+      )
+    }
+    if (!ts.isLiteralTypeNode(amountNode) || !ts.isNumericLiteral(amountNode.literal)) {
+      throw new Error(`\`${unit}\` needs a number literal amount, as in \`{ ${unit}: 30 }\`.`)
+    }
+    const amount = Number(amountNode.literal.text)
+    if (!Number.isInteger(amount)) {
+      throw new Error(
+        `\`{ ${unit}: ${amount} }\` must be a whole number of units: Postgres intervals ` +
+          `take integers, so a fraction would be silently truncated or rejected.`,
+      )
+    }
+    if (unit in interval) {
+      throw new Error(`\`${ref}<>\` names \`${unit}\` twice; give each unit once.`)
+    }
+    interval[unit] = amount
+  }
+
+  // An all-zero interval means the base unchanged, which is never what an author wrote.
+  // The engine refuses it too, but saying so here names the operand at the point it was
+  // written rather than at push.
+  if (Object.values(interval).every((amount) => amount === 0)) {
+    throw new Error(
+      `\`${ref}<>\` was given an empty interval, which means the base unchanged. ` +
+        `Give at least one non-zero unit, as in \`{ days: 30 }\`.`,
+    )
+  }
+
+  return { kind: ref === "After" ? "after" : "before", base, interval }
+}
+
+/**
  * `Ago<30, "days">` / `FromNow<7, "days">`.
  *
  * The amount and unit are validated here and the interval is re-assembled from the
@@ -3062,6 +3160,9 @@ function parseAccessOperand(
       case "Ago":
       case "FromNow":
         return parseDurationOperand(ref, operandArgs, sourceFile)
+      case "After":
+      case "Before":
+        return parseOffsetOperand(ref, operandArgs, sourceFile)
       case "Claim": {
         const pathArg = typeNode.typeArguments?.[0]
         if (!pathArg || !ts.isLiteralTypeNode(pathArg) || !ts.isStringLiteral(pathArg.literal)) {

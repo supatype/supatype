@@ -580,6 +580,129 @@ export type Post = Model<{
     })
   })
 
+
+  // `After` / `Before`: a point in time plus or minus a multi-unit duration. The
+  // composition `Ago` and `FromNow` could not express, because they carry one amount
+  // and one unit.
+  it("extracts a composed offset from a truncation base", () => {
+    const post = extract(
+      `
+import type { Model, UUID, All, Gte, Lte, After, Before, Now, StartOf } from "@supatype/types"
+
+export type Post = Model<{
+  id: UUID
+}, {
+  access: {
+    read: All<[
+      Gte<"starts_at", After<StartOf<"day">, { days: 30, hours: 9 }>>,
+      Lte<"created_at", Before<Now, { weeks: 2 }>>
+    ]>
+  }
+}>
+`,
+      "offsets",
+    )
+
+    expect(access(post)["read"]).toEqual({
+      type: "all",
+      rules: [
+        {
+          type: "compare",
+          op: "gte",
+          left: { kind: "column", name: "starts_at" },
+          right: {
+            kind: "after",
+            base: { kind: "startOf", unit: "day" },
+            interval: { days: 30, hours: 9 },
+          },
+        },
+        {
+          type: "compare",
+          op: "lte",
+          left: { kind: "column", name: "created_at" },
+          right: {
+            kind: "before",
+            base: { kind: "now" },
+            interval: { weeks: 2 },
+          },
+        },
+      ],
+    })
+  })
+
+  // The base is what makes an offset meaningful. A column depends on the row, so it is
+  // not a point in time an offset can be measured from, and the engine refuses one too.
+  it("rejects a base that is not a point in time", () => {
+    expect(() =>
+      extract(
+        `
+import type { Model, UUID, Gte, After, Ago } from "@supatype/types"
+export type Post = Model<{ id: UUID }, {
+  access: { read: Gte<"a", After<Ago<1, "days">, { days: 1 }>> }
+}>
+`,
+        "offset-base",
+      ),
+    ).toThrow(/must be `Now` or `StartOf/)
+  })
+
+  it("rejects an unknown unit inside the interval", () => {
+    expect(() =>
+      extract(
+        `
+import type { Model, UUID, Gte, After, Now } from "@supatype/types"
+export type Post = Model<{ id: UUID }, {
+  access: { read: Gte<"a", After<Now, { dayz: 30 }>> }
+}>
+`,
+        "offset-unit",
+      ),
+    ).toThrow(/is not a unit of time/)
+  })
+
+  // Same rule as Ago/FromNow: direction lives in the operand name, not in a sign, so a
+  // negative amount is refused with the opposite operand named.
+  it("rejects a negative or fractional amount and names the opposite operand", () => {
+    const bad = (n: string) => `
+import type { Model, UUID, Gte, After, Now } from "@supatype/types"
+export type Post = Model<{ id: UUID }, {
+  access: { read: Gte<"a", After<Now, { days: ${n} }>> }
+}>
+`
+    expect(() => extract(bad("-5"), "offset-neg")).toThrow(/does not take a negative amount/)
+    expect(() => extract(bad("-5"), "offset-neg2")).toThrow(/`Before<>`/)
+    expect(() => extract(bad("0.5"), "offset-frac")).toThrow(/whole number/)
+  })
+
+  // An all-zero interval means the base unchanged, which is never what an author wrote.
+  it("rejects an interval that sums to nothing", () => {
+    expect(() =>
+      extract(
+        `
+import type { Model, UUID, Gte, After, Now } from "@supatype/types"
+export type Post = Model<{ id: UUID }, {
+  access: { read: Gte<"a", After<Now, { days: 0 }>> }
+}>
+`,
+        "offset-zero",
+      ),
+    ).toThrow(/empty interval/)
+  })
+
+  it("rejects a unit given twice", () => {
+    expect(() =>
+      extract(
+        `
+import type { Model, UUID, Gte, After, Now } from "@supatype/types"
+export type Post = Model<{ id: UUID }, {
+  access: { read: Gte<"a", After<Now, { days: 1, days: 2 }>> }
+}>
+`,
+        "offset-dup",
+      ),
+    ).toThrow(/twice/)
+  })
+
   // A permissive `"30 days"` string would be raw SQL by another name, so the amount
   // and unit are validated separately and the interval is reassembled from them.
   it("rejects a fractional or negative amount", () => {
