@@ -8,15 +8,30 @@ import { signInToStudio } from "../lib/studio-session.js"
  * that would hold it. A view rendering its chrome and an empty body is the
  * failure worth catching, and it looks identical to a working one to any test
  * that only checks the heading is there or that some string appears anywhere on
- * the page — the sidebar alone contains "Users", "Email" and every model name.
+ * the page: the sidebar alone contains "Users", "Email" and every model name.
  */
 const EMAIL = process.env.STUDIO_E2E_EMAIL ?? "studio-e2e@example.com"
 const PASSWORD = process.env.STUDIO_E2E_PASSWORD ?? "StudioE2E123!"
 
+/**
+ * A request the browser cancelled, rather than one that failed.
+ *
+ * Playwright reports both through `requestfailed`, and they are not the same event. A view that
+ * fires a count and then re-renders leaves that count in flight, and the browser aborts it. Nothing
+ * failed: no server saw it, and the page had already decided it did not want the answer. Counting
+ * it made every assertion below depend on whether a render landed before or after a HEAD request,
+ * which is a race, and it failed as one.
+ */
+const CANCELLED = "net::ERR_ABORTED"
+
 /** Requests the page could not make at all, or that failed on the server. */
 function watchFailures(page: Page): string[] {
   const failures: string[] = []
-  page.on("requestfailed", (r) => failures.push(`${r.method()} ${r.url()} :: ${r.failure()?.errorText}`))
+  page.on("requestfailed", (r) => {
+    const reason = r.failure()?.errorText
+    if (reason === CANCELLED) return
+    failures.push(`${r.method()} ${r.url()} :: ${reason}`)
+  })
   page.on("response", (r) => {
     const status = r.status()
     const url = r.url()
