@@ -8,7 +8,7 @@ import { signInToStudio } from "../lib/studio-session.js"
  * that would hold it. A view rendering its chrome and an empty body is the
  * failure worth catching, and it looks identical to a working one to any test
  * that only checks the heading is there or that some string appears anywhere on
- * the page — the sidebar alone contains "Users", "Email" and every model name.
+ * the page: the sidebar alone contains "Users", "Email" and every model name.
  */
 const EMAIL = process.env.STUDIO_E2E_EMAIL ?? "studio-e2e@example.com"
 const PASSWORD = process.env.STUDIO_E2E_PASSWORD ?? "StudioE2E123!"
