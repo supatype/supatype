@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { generateClientAugmentation, generateRowType } from "../src/augmentation-generator.js"
 
 describe("generateClientAugmentation", () => {
-  it("emits deterministic output independent of model order", () => {
+  it("emits models in the order the schema declares them", () => {
     const astA = {
       models: [
         {
@@ -32,9 +32,13 @@ describe("generateClientAugmentation", () => {
       ],
     }
 
-    expect(generateClientAugmentation(astA)).toEqual(generateClientAugmentation(astB))
-    expect(generateClientAugmentation(astA)).toContain("post:")
-    expect(generateClientAugmentation(astA)).toContain("comment:")
+    // The AST keeps the order `schema/index.ts` was written in, so the generated file does
+    // too: alphabetising threw away an order the author chose and the source of truth kept.
+    const a = generateClientAugmentation(astA)
+    const b = generateClientAugmentation(astB)
+    expect(a.indexOf("post:")).toBeLessThan(a.indexOf("comment:"))
+    expect(b.indexOf("comment:")).toBeLessThan(b.indexOf("post:"))
+    expect(a).not.toEqual(b)
   })
 
   it("resolves tableName from AST v2 annotations.db.tableName", () => {
@@ -80,7 +84,7 @@ describe("generateClientAugmentation", () => {
     expect(insertOnly).not.toContain("name?:")
   })
 
-  it("types richText fields as SerializedEditorState", () => {
+  it("types richText fields as the Lexical document they hold", () => {
     const ast = {
       models: [
         {
@@ -93,7 +97,9 @@ describe("generateClientAugmentation", () => {
       ],
     }
     const out = generateClientAugmentation(ast)
-    expect(out).toContain('import("@supatype/types/lexical").SerializedEditorState')
+    expect(out).toContain('import type { SerializedEditorState } from "@supatype/types/lexical"')
+    expect(out).toContain("export type RichText = SerializedEditorState")
+    expect(out).toContain("body: RichText")
     expect(out).not.toMatch(/body: Record<string, unknown>/)
   })
 
@@ -234,20 +240,112 @@ describe("column shapes that disagreed with the database", () => {
   })
 
   it("types an image as what storage.upload actually produces", () => {
-    // Was `Record<string, unknown>`, which is why the examples cast on the good path.
+    // Was `Record<string, unknown>`, which is why the examples cast on the good path. Named
+    // rather than written out, so this file and `types/database.ts` say it the same way.
     const row = generateRowType({
       headshot: { kind: "image", required: false, bucket: "speaker-headshots" },
     })
-    expect(row).toContain("headshot: { bucket: string; path: string } | null")
+    expect(row).toContain("headshot: StorageReference | null")
   })
 
   it("types a file the same way", () => {
     const row = generateRowType({ attachment: { kind: "file", required: true } })
-    expect(row).toContain("attachment: { bucket: string; path: string }")
+    expect(row).toContain("attachment: StorageReference")
   })
 
   it("does not store a url, because a stored one goes stale", () => {
     const row = generateRowType({ headshot: { kind: "image", required: true } })
     expect(row).not.toContain("url")
+  })
+})
+
+/**
+ * What this file has to agree with.
+ *
+ * `types/database.ts` and `supatype/generated/index.d.ts` describe the same columns of the
+ * same tables, and are written by two different generators: the engine's and this one. When
+ * they were compared column by column for a real schema, three of them disagreed, and in
+ * every case this side was the one that was wrong. Each is pinned below.
+ *
+ * The comparison itself is not automated here, because it needs an engine binary. What is
+ * automated is the property each disagreement came down to.
+ */
+describe("agreement with the engine's generator", () => {
+  const ast = {
+    models: [
+      {
+        name: "Event",
+        fields: {
+          id: { kind: "uuid", required: true, primaryKey: true },
+          title: { kind: "text", required: true },
+          slug: { kind: "slug", required: true },
+          description: { kind: "richText", required: false },
+          cover_image: { kind: "image", required: false },
+        },
+        annotations: { db: { tableName: "event", indexes: [] } },
+      },
+    ],
+  }
+
+  /**
+   * A slug is filled by a trigger the engine emits, so an insert need not supply one. This
+   * side demanded it, which asked for a value the database was about to overwrite.
+   */
+  it("does not demand a slug on insert", () => {
+    const out = generateClientAugmentation(ast)
+    const insert = out.split("Insert: {")[1]?.split("}")[0] ?? ""
+    expect(insert).toContain("slug?:")
+    expect(insert).not.toContain("slug: ")
+  })
+
+  /**
+   * A rich-text column holds a Lexical document. `| string` said it might hold a bare string
+   * too, so this file and `types/database.ts` disagreed about the same column.
+   */
+  it("types rich text as the document it holds, and nothing looser", () => {
+    const out = generateClientAugmentation(ast)
+    expect(out).toContain("description: RichText | null")
+    expect(out).not.toContain("SerializedEditorState | string")
+  })
+
+  /** Named aliases, the same ones, so a reader moving between the two files is not
+   * comparing spellings. */
+  it("names the shared types rather than writing them out", () => {
+    const out = generateClientAugmentation(ast)
+    expect(out).toContain("export type RichText = SerializedEditorState")
+    expect(out).toContain("export type StorageReference = {")
+    expect(out).toContain("cover_image: StorageReference | null")
+    expect(out).not.toContain("{ bucket: string; path: string }")
+  })
+
+  /** Emitted only when the schema uses them. */
+  it("declares no alias the schema does not use", () => {
+    const plain = generateClientAugmentation({
+      models: [
+        {
+          name: "Note",
+          fields: { body: { kind: "text", required: true } },
+          annotations: { db: { tableName: "note", indexes: [] } },
+        },
+      ],
+    })
+    expect(plain).not.toContain("RichText")
+    expect(plain).not.toContain("StorageReference")
+  })
+
+  /** The columns sit inside the block that holds them. */
+  it("indents each column into its own block", () => {
+    const out = generateClientAugmentation(ast)
+    expect(out).toContain("        title: string")
+    expect(out).not.toMatch(/^ {2}title: string$/m)
+  })
+
+  /** In the order the schema declares them, because the AST keeps that order. */
+  it("keeps the schema's column order", () => {
+    const out = generateClientAugmentation(ast)
+    const row = out.split("Row: {")[1]?.split("}")[0] ?? ""
+    const order = ["id", "title", "slug", "description", "cover_image"]
+    const positions = order.map((column) => row.indexOf(`${column}:`))
+    expect(positions).toEqual([...positions].sort((a, b) => a - b))
   })
 })
