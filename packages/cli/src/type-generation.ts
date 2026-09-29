@@ -21,6 +21,19 @@ import { generateProjectClient } from "./client-generator.js"
 /** The client a project imports, beside the generated types. */
 const PROJECT_CLIENT_FILENAME = "client.ts"
 
+/**
+ * Where generated output goes when a project has not said otherwise.
+ *
+ * Exported because two commands need the same answer: `generate` writes these files and
+ * `seed` reads one of them, and when they disagreed the builder was written to a path the
+ * seed run then reported as missing.
+ */
+export const DEFAULT_TYPES_PATH = "types/database.ts"
+export const DEFAULT_CLIENT_PATH = "supatype/generated/index.d.ts"
+
+/** The seed builder, beside the client, because both are generated from the same schema. */
+const SEED_BUILDER_FILENAME = "seed.ts"
+
 export interface GenerateTypesRequest {
   cwd: string
   ast: unknown
@@ -28,6 +41,39 @@ export interface GenerateTypesRequest {
   typesPath?: string | undefined
   /** Relative path for the client augmentation, from `output.client`. */
   clientPath?: string | undefined
+}
+
+/**
+ * Where the generated seed builder lives for this project.
+ *
+ * One rule, exported, because two things need the answer and a seed run that looked
+ * somewhere else would report a missing builder for a file that had just been written.
+ */
+export function seedBuilderPath(req: {
+  typesPath?: string | undefined
+  clientPath?: string | undefined
+}): string | undefined {
+  const directory = req.clientPath ?? req.typesPath
+  if (directory === undefined || directory === "") return undefined
+  return join(dirname(directory), SEED_BUILDER_FILENAME)
+}
+
+/**
+ * The same answer for a project that has configured nothing.
+ *
+ * `generate` writes with the defaults applied, so a reader must resolve them the same way or
+ * it looks for a file beside a path the project never set.
+ */
+export function seedBuilderPathWithDefaults(output?: {
+  types?: string | undefined
+  client?: string | undefined
+}): string {
+  return (
+    seedBuilderPath({
+      typesPath: output?.types ?? DEFAULT_TYPES_PATH,
+      clientPath: output?.client ?? DEFAULT_CLIENT_PATH,
+    }) ?? join(dirname(DEFAULT_CLIENT_PATH), SEED_BUILDER_FILENAME)
+  )
 }
 
 /** Writes what was asked for and returns one message per file, for the caller to report. */
@@ -50,6 +96,24 @@ export async function writeGeneratedTypes(req: GenerateTypesRequest): Promise<st
     mkdirSync(dirname(outPath), { recursive: true })
     writeFileSync(outPath, code, "utf8")
     written.push(`Types written to ${req.typesPath}`)
+  }
+
+  const seedPath = seedBuilderPath(req)
+  if (seedPath !== undefined) {
+    await ensureEngine()
+    const result = await engineRequest<{ code?: string; message?: string }>("/generate", {
+      ast: req.ast,
+      lang: "typescript",
+      artifact: "seed",
+    })
+    const code = result.code ?? result.message
+    if (code === undefined) {
+      throw new Error("Engine returned no output for the seed builder.")
+    }
+    const outPath = resolve(req.cwd, seedPath)
+    mkdirSync(dirname(outPath), { recursive: true })
+    writeFileSync(outPath, code, "utf8")
+    written.push(`Seed builder written to ${toPosix(seedPath)}`)
   }
 
   written.push(...writeAstDerivedOutputs(req))
