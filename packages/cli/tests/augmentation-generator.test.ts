@@ -308,6 +308,20 @@ describe("agreement with the engine's generator", () => {
     expect(out).not.toContain("SerializedEditorState | string")
   })
 
+  /**
+   * The three shapes differ by more than optionality here, which they do nowhere else. The
+   * engine emits a trigger that turns a plain string into a document on the way in, so a read
+   * is always a document and a write may be prose.
+   */
+  it("types rich text as a document to read and prose to write", () => {
+    const out = generateClientAugmentation(ast)
+    const block = (name: string): string =>
+      out.split(`${name}: {`)[1]?.split("      }")[0] ?? ""
+    expect(block("Row")).toContain("description: RichText | null")
+    expect(block("Insert")).toContain("description?: RichText | string | null")
+    expect(block("Update")).toContain("description?: RichText | string | null")
+  })
+
   /** Named aliases, the same ones, so a reader moving between the two files is not
    * comparing spellings. */
   it("names the shared types rather than writing them out", () => {

@@ -151,6 +151,26 @@ export function generateRowType(fields: Record<string, Record<string, unknown>>)
   return `{\n${body}\n}`
 }
 
+/**
+ * What a column accepts on the way in, where that is wider than what it returns.
+ *
+ * A rich text column holds a Lexical document, and the engine emits a trigger that normalises a
+ * plain string into one on insert and update. So writing prose is a string and reading it is
+ * always a document, and this is the only place the three shapes differ by more than
+ * optionality. Flattening them back would either demand hand-built Lexical JSON from every
+ * caller, or claim a read might return a string, which after the trigger it cannot.
+ */
+function widenForWrites(ts: string, meta: Record<string, unknown>): string {
+  if (meta["kind"] !== "richText") return ts
+  // Before the trailing `| null` rather than after it, so this reads the same as the engine's
+  // output for the same column. They describe the same table, and a reader comparing them
+  // should not have to work out that two orderings are one type.
+  const NULLABLE = " | null"
+  return ts.endsWith(NULLABLE)
+    ? `${ts.slice(0, -NULLABLE.length)} | string${NULLABLE}`
+    : `${ts} | string`
+}
+
 function insertColumnOptionalOnInsert(meta: Record<string, unknown>): boolean {
   // `slug` has neither a declared default nor a `serverGenerated` flag, but the engine emits
   // a trigger that fills it, which is the same thing from an insert's point of view.
@@ -165,7 +185,7 @@ export function generateInsertType(fields: Record<string, Record<string, unknown
   const body = columns
     .map(({ column, ts, meta }) => {
       const required = meta["required"] === true && !insertColumnOptionalOnInsert(meta)
-      return `  ${quoteKey(column)}${required ? "" : "?"}: ${ts}`
+      return `  ${quoteKey(column)}${required ? "" : "?"}: ${widenForWrites(ts, meta)}`
     })
     .join("\n")
   return `{\n${body}\n}`
@@ -174,7 +194,9 @@ export function generateInsertType(fields: Record<string, Record<string, unknown
 export function generateUpdateType(fields: Record<string, Record<string, unknown>>): string {
   const columns = columnsOf(fields)
   if (columns.length === 0) return "Record<string, unknown>"
-  const body = columns.map(({ column, ts }) => `  ${quoteKey(column)}?: ${ts}`).join("\n")
+  const body = columns
+    .map(({ column, ts, meta }) => `  ${quoteKey(column)}?: ${widenForWrites(ts, meta)}`)
+    .join("\n")
   return `{\n${body}\n}`
 }
 

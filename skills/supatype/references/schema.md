@@ -138,6 +138,11 @@ What each bound compiles to, by storage:
 |---|---|---|
 | `string`, `Email`, `URL`, `Slug`, `Color`, `XML`, `IPAddress`, `CIDR`, `MacAddress` | length | `char_length(col)` |
 | `RichText` | length | `char_length(_supatype.richtext_text(col))`, the plain text a reader sees |
+
+**`RichText` holds a Lexical document and accepts a plain string.** A trigger normalises a
+string into a single-paragraph document on insert and update, so the generated types read
+`RichText` and write `RichText | string`: prose can be written as prose, and a read always
+returns the document.
 | `Bytea` | length | `octet_length(col)` |
 | `string[]` and other arrays | items | `cardinality(col)` |
 | `JSON<T[]>`, `Blocks` | items | `jsonb_array_length(col)`, guarded by `jsonb_typeof` |
