@@ -24,6 +24,13 @@ const SUPATYPE_IGNORED_PATHS = [
   "supatype.local.config.ts",
   "supatype.local.config.js",
   "supatype.local.config.mjs",
+  // Generated from schema/index.ts by `supatype generate`, which needs no database and no
+  // running stack, so a clone can always rebuild it. Listed here rather than only in the
+  // `init` template so projects that already exist pick it up too.
+  //
+  // The default path. A project that moves `output.client` moves this with it, and would
+  // need its own line: there is no pattern that follows a value from the config file.
+  "supatype/generated/seed.ts",
 ] as const
 
 /** The paths above, for a scaffold that composes its own `.gitignore` around them. */

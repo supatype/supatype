@@ -812,7 +812,12 @@ function packageJsonTemplate(opts: ScaffoldOptions, deps: InitDependencyVersions
   const scripts: string[] = [
     `    "dev": "supatype dev"`,
     `    "push": "supatype push"`,
-    `    "seed": "tsx seed.ts"`,
+    `    "seed": "supatype seed"`,
+    // The generated seed builder is gitignored, so a fresh clone has to produce it before
+    // anything can import it. `generate` is fully offline, which is the condition that makes
+    // gitignoring generated code reasonable rather than a trap; without this hook it would be
+    // one, and the failure would be a missing module rather than anything naming the remedy.
+    `    "prepare": "supatype generate"`,
   ]
   if (opts.app.viteDevUrl) {
     scripts.push(`    "vite": "vite"`)
@@ -1347,28 +1352,33 @@ S3_SECRET_KEY=`
 }
 
 function seedTemplate(projectName: string): string {
-  return `import { sql } from "@supatype/cli/seed"
+  return `import type { SeedContext } from "@supatype/cli/seed"
 
-// Connect using DATABASE_URL from environment
-const db = sql(
-  process.env["DATABASE_URL"] ??
-    "postgresql://supatype_admin:postgres@localhost:5432/${projectName}",
-)
+/**
+ * Seed data for ${projectName}. Run it with \`supatype seed\`.
+ *
+ * The calls below are collected rather than executed. They are ordered by their foreign keys,
+ * batched into as few statements as they allow, and applied in one transaction: so there is no
+ * connection to open, no ordering to work out by hand, and a failure leaves nothing behind.
+ *
+ * Usually written as \`{ db, expr, log }\`; taken whole here so the example can stay commented.
+ */
+export default async function seed(ctx: SeedContext) {
+  ctx.log("seeding ${projectName}")
 
-async function seed() {
-  console.log("Seeding ${projectName}...")
+  // \`upsert\` is the one to reach for. Seeds get re-run, and naming the row by a key it already
+  // has is what makes that safe, without an id pasted in from somewhere.
+  //
+  // ctx.db.profile.upsert({
+  //   where: { id: "00000000-0000-4000-8000-000000000001" },
+  //   data: { display_name: "Admin" },
+  // })
 
-  // TODO: insert seed data
-  // await db\`INSERT INTO profile (id, display_name) VALUES ('...', 'Admin')\`
-
-  await db.end()
-  console.log("Done.")
+  // Times the database works out, so a fixture calendar is still ahead of whenever an
+  // environment is seeded rather than fixed to whenever this file was written:
+  //
+  //   starts_at: ctx.expr.startOf("day", { days: 30, hours: 9 })
 }
-
-seed().catch((e) => {
-  console.error(e)
-  process.exit(1)
-})
 `
 }
 
