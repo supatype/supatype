@@ -26,6 +26,7 @@ function buildRouteItems(models: ModelConfig[], globals: { name: string; label: 
     { label: "Database Overview",      href: "/database/overview",                 category: "Database",      kind: "route" },
     { label: "SQL Runner",             href: "/database/sql",                      category: "Database",      kind: "route" },
     { label: "Migrations",             href: "/database/migrations",               category: "Database",      kind: "route" },
+    { label: "Seeds",                  href: "/database/seeds",                    category: "Database",      kind: "route" },
     { label: "Tables",                 href: "/database/tables",                   category: "Database",      kind: "route" },
     { label: "Views",                  href: "/database/views",                    category: "Database",      kind: "route" },
     { label: "Functions",              href: "/database/functions",                category: "Database",      kind: "route" },

@@ -70,6 +70,7 @@ const STATIC_SECTIONS: Record<string, SectionDef> = {
         items: [
           { label: "SQL Runner",  href: "/database/sql" },
           { label: "Migrations",  href: "/database/migrations" },
+          { label: "Seeds",       href: "/database/seeds" },
         ],
       },
       {
