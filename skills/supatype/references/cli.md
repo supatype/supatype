@@ -14,7 +14,7 @@ Global flags (all commands): `--config`, `--env`, `--verbose`, `--json`, `--no-c
 | `supatype push` | Diff, migrate, generate types. Flags: `--yes`, `--connection`, `--env`, `--direct` |
 | `supatype diff` | Dry-run schema changes. Flags: `--connection`, `--env`, `--direct` |
 | `supatype generate` | Regenerate types without migration |
-| `supatype seed` | Run seed script |
+| `supatype seed [file]` | Apply seed data in one transaction. Flags: `--atomic`, `--status`, `--connection`, `--environment`, `--force`. See [references/seeding.md](references/seeding.md) |
 
 ## Linking (unified)
 
