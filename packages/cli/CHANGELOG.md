@@ -68,3 +68,10 @@
   and then a run that reported it missing.
 * **engine:** a failed seed is reported with its result document. The engine exits non-zero and
   prints what happened, and that was being discarded as a crash with no output.
+* **seed:** a project pinned to an engine with no `seed` subcommand is told so, by name, before
+  anything is resolved or downloaded. It got a usage error about an unrecognised argument, which
+  names nothing about the project and reads like a broken install.
+* **push:** a schema with a rich text column is refused on an engine that cannot normalise one.
+  The generated types accept a string on the way in and promise a document on the way out, and
+  the trigger is what makes the second half true; an older engine emits no trigger and rejects
+  nothing, so the push succeeded and a later read returned what the types call impossible.

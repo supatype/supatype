@@ -4,8 +4,12 @@ import {
   boundsRequiringHelpers,
   compareVersions,
   ENGINE_MIN_FOR_BOUNDS,
+  ENGINE_MIN_FOR_RICHTEXT_TRIGGER,
+  ENGINE_MIN_FOR_SEED,
   ENGINE_MIN_FOR_VERSIONS,
+  fieldsNeedingRichTextTrigger,
   modelsRequiringVersions,
+  seedUnsupportedByPinnedEngine,
 } from "../src/engine-floor.js"
 import type { ExtractedSchemaAstV2, FieldAstV2, ModelAstV2 } from "../src/schema-ast-v2.js"
 
@@ -35,6 +39,12 @@ function schema(models: ModelAstV2[]): ExtractedSchemaAstV2 {
 
 const WITH_BOUND = schema([model("Post", { title: field({ validation: { maxLength: 80 } }) })])
 const WITHOUT_BOUND = schema([model("Post", { title: field() })])
+
+const RICH_TEXT = field({ kind: "richText", annotations: { db: { pgType: "JSONB" }, platform: {} } })
+const WITH_RICH_TEXT = schema([model("Post", { title: field(), body: RICH_TEXT })])
+
+/** The engine released before either floor, so it is what a project pinned today would carry. */
+const BEFORE_BOTH = "0.3.3"
 
 describe("compareVersions", () => {
   it("orders by each numeric part, not lexically", () => {
@@ -141,5 +151,88 @@ describe("the versions floor", () => {
 
   it("still refuses bounds on an older pin, so the second rule did not shadow the first", () => {
     expect(() => { assertEngineSupportsSchema(WITH_BOUND, "0.1.9") }).toThrow(/bounds/)
+  })
+})
+
+describe("the rich text trigger floor", () => {
+  it("names the columns that need it", () => {
+    expect(fieldsNeedingRichTextTrigger(WITH_RICH_TEXT)).toEqual(["Post.body"])
+    expect(fieldsNeedingRichTextTrigger(WITHOUT_BOUND)).toEqual([])
+  })
+
+  it("refuses a rich text column on an engine that cannot normalise it", () => {
+    expect(() => { assertEngineSupportsSchema(WITH_RICH_TEXT, BEFORE_BOTH) }).toThrow(
+      new RegExp(`schema-engine ${ENGINE_MIN_FOR_RICHTEXT_TRIGGER.replace(/\./g, "\.")} or newer`),
+    )
+  })
+
+  it("points at the column, because the remedy is in the schema", () => {
+    try {
+      assertEngineSupportsSchema(WITH_RICH_TEXT, BEFORE_BOTH)
+      expect.unreachable("a rich text column on an older engine has to be refused")
+    } catch (err) {
+      const message = (err as Error).message
+      expect(message).toContain("Post.body")
+      expect(message).toContain("rich text columns")
+      // The whole point of the refusal: what goes wrong is a read, not the push.
+      expect(message).toContain("what the types say is impossible")
+      expect(message).toContain(`versions: { engine: "${ENGINE_MIN_FOR_RICHTEXT_TRIGGER}" }`)
+    }
+  })
+
+  it("allows the release itself and anything newer", () => {
+    expect(() => {
+      assertEngineSupportsSchema(WITH_RICH_TEXT, ENGINE_MIN_FOR_RICHTEXT_TRIGGER)
+    }).not.toThrow()
+    expect(() => { assertEngineSupportsSchema(WITH_RICH_TEXT, "1.0.0") }).not.toThrow()
+  })
+
+  it("says nothing about a schema with no rich text column", () => {
+    expect(() => { assertEngineSupportsSchema(WITHOUT_BOUND, BEFORE_BOTH) }).not.toThrow()
+  })
+
+  it("leaves an unpinned or local project alone", () => {
+    expect(() => { assertEngineSupportsSchema(WITH_RICH_TEXT, undefined) }).not.toThrow()
+    expect(() => { assertEngineSupportsSchema(WITH_RICH_TEXT, "local") }).not.toThrow()
+  })
+})
+
+describe("seedUnsupportedByPinnedEngine", () => {
+  it("refuses a pin with no seed subcommand, and says what to change", () => {
+    const message = seedUnsupportedByPinnedEngine(BEFORE_BOTH)
+    expect(message).toBeDefined()
+    expect(message).toContain(`schema-engine ${ENGINE_MIN_FOR_SEED} or newer`)
+    expect(message).toContain(BEFORE_BOTH)
+    expect(message).toContain(`versions: { engine: "${ENGINE_MIN_FOR_SEED}" }`)
+  })
+
+  it("allows the release itself and anything newer", () => {
+    expect(seedUnsupportedByPinnedEngine(ENGINE_MIN_FOR_SEED)).toBeUndefined()
+    expect(seedUnsupportedByPinnedEngine("1.0.0")).toBeUndefined()
+  })
+
+  it("leaves an unpinned or local project alone", () => {
+    // Unpinned resolves to latest, which is at or above the floor by definition.
+    expect(seedUnsupportedByPinnedEngine(undefined)).toBeUndefined()
+    expect(seedUnsupportedByPinnedEngine("local")).toBeUndefined()
+  })
+
+  it("is not conditional on the schema, because every seed needs the subcommand", () => {
+    // No argument but the pin: there is nothing a project could declare to opt out of this one,
+    // which is what makes it different from every other floor in this file.
+    expect(seedUnsupportedByPinnedEngine.length).toBe(1)
+  })
+})
+
+describe("the floors themselves", () => {
+  it("name the engine release that introduced them", () => {
+    // Hard-coded rather than read back from the constant. Every other assertion in this file
+    // builds its expectation from the value under test, so lowering a floor would move the tests
+    // with it and nothing would go red. A floor is a reviewed claim about a published engine, and
+    // this is the one place that says which one.
+    expect(ENGINE_MIN_FOR_BOUNDS).toBe("0.2.0")
+    expect(ENGINE_MIN_FOR_VERSIONS).toBe("0.3.0")
+    expect(ENGINE_MIN_FOR_RICHTEXT_TRIGGER).toBe("0.4.0")
+    expect(ENGINE_MIN_FOR_SEED).toBe("0.4.0")
   })
 })

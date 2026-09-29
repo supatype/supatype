@@ -37,6 +37,27 @@ export const ENGINE_MIN_FOR_BOUNDS = "0.2.0"
 export const ENGINE_MIN_FOR_VERSIONS = "0.3.0"
 
 /**
+ * First engine release that normalises a rich text column's contents (schema-engine v0.4.0).
+ *
+ * Silent in the same way `versions` is, and for a reason worth naming. The generated types accept
+ * a plain string on the way in and promise a Lexical document on the way out, and a trigger is
+ * what makes the second half true for every writer. An older engine emits no trigger and rejects
+ * nothing, so the string is stored exactly as it was written and every later read returns
+ * something the types say cannot happen.
+ */
+export const ENGINE_MIN_FOR_RICHTEXT_TRIGGER = "0.4.0"
+
+/**
+ * First engine release that has a `seed` subcommand (schema-engine v0.4.0).
+ *
+ * Unconditional, where everything else in this file is conditional on the schema. There is no way
+ * to write a seed that does not need the subcommand, so there is nothing to read the project for
+ * and nothing to point at. An older engine answers the request with a usage error about an
+ * unrecognised argument, which names no part of the project and reads like a broken install.
+ */
+export const ENGINE_MIN_FOR_SEED = "0.4.0"
+
+/**
  * Compare two dotted versions numerically. Returns <0, 0 or >0.
  *
  * Pre-release suffixes are dropped before comparing, so `0.2.0-rc.1` counts as `0.2.0`. That is
@@ -89,6 +110,17 @@ export function boundsRequiringHelpers(ast: ExtractedSchemaAstV2): string[] {
   return [...fieldsWithBounds(ast.models), ...modelsWithConstraints(ast.models)]
 }
 
+/** Rich text fields, which need a trigger only a new enough engine emits. */
+export function fieldsNeedingRichTextTrigger(ast: ExtractedSchemaAstV2): string[] {
+  const found: string[] = []
+  for (const model of ast.models) {
+    for (const [fieldName, field] of Object.entries(model.fields)) {
+      if (field.kind === "richText") found.push(`${model.name}.${fieldName}`)
+    }
+  }
+  return found
+}
+
 /** Models declaring `versions`, which needs a whole layer only a new enough engine emits. */
 export function modelsRequiringVersions(ast: ExtractedSchemaAstV2): string[] {
   return ast.models
@@ -134,6 +166,17 @@ const ENGINE_REQUIREMENTS: EngineRequirement[] = [
       `push reports success and you get a model with no history, no drafts and an editor that ` +
       `saves into nothing. That silence is the reason this refuses.`,
   },
+  {
+    since: ENGINE_MIN_FOR_RICHTEXT_TRIGGER,
+    declaredBy: fieldsNeedingRichTextTrigger,
+    feature: "rich text columns",
+    consequence:
+      `Only engine ${ENGINE_MIN_FOR_RICHTEXT_TRIGGER}+ emits the trigger that turns a plain ` +
+      `string written into one of these columns into a Lexical document. The generated types ` +
+      `accept a string on the way in and promise a document on the way out, and the trigger is ` +
+      `the only thing that makes the second half true. Without it the string is stored as it ` +
+      `was written and a later read returns what the types say is impossible.`,
+  },
 ]
 
 /**
@@ -142,13 +185,37 @@ const ENGINE_REQUIREMENTS: EngineRequirement[] = [
  * Takes the pin from `versions.engine`, or undefined when unpinned. See the note above on why
  * that is the right source rather than the binary's own `--version`.
  */
+/**
+ * Whether a pin can be compared at all.
+ *
+ * Unpinned resolves to latest, and `local` points at a build whose version the config does not
+ * know. Neither can be compared, and neither is the case that breaks.
+ */
+function comparable(pin: string | undefined): pin is string {
+  return pin !== undefined && pin !== "local"
+}
+
+/**
+ * The parts every refusal here shares: what is needed, and what to do about it.
+ *
+ * One builder rather than one per check, because the remedy is the only part of this message
+ * anyone acts on, and a second copy is a second place for it to go stale.
+ */
+function refusal(parts: { needs: string; since: string; pinned: string; body: string }): string {
+  return (
+    `${parts.needs}, which needs schema-engine ${parts.since} or newer, and this project ` +
+    `pins ${parts.pinned}.\n\n` +
+    `${parts.body}\n\n` +
+    `Raise or remove the pin in supatype.config.ts:\n` +
+    `  versions: { engine: "${parts.since}" }   // or omit it to track latest`
+  )
+}
+
 export function assertEngineSupportsSchema(
   ast: ExtractedSchemaAstV2,
   pinnedEngineVersion: string | undefined,
 ): void {
-  // Unpinned resolves to latest, and `local` points at a build whose version the config does not
-  // know. Neither can be compared, and neither is the case that breaks.
-  if (pinnedEngineVersion === undefined || pinnedEngineVersion === "local") return
+  if (!comparable(pinnedEngineVersion)) return
 
   for (const requirement of ENGINE_REQUIREMENTS) {
     if (compareVersions(pinnedEngineVersion, requirement.since) >= 0) continue
@@ -159,12 +226,36 @@ export function assertEngineSupportsSchema(
     const shown = needed.slice(0, 3).join(", ")
     const more = needed.length > 3 ? `, and ${needed.length - 3} more` : ""
     throw new Error(
-      `This schema declares ${requirement.feature}, which needs schema-engine ` +
-        `${requirement.since} or newer, and this project pins ${pinnedEngineVersion}.\n\n` +
-        `  Declared on: ${shown}${more}\n\n` +
-        `${requirement.consequence}\n\n` +
-        `Raise or remove the pin in supatype.config.ts:\n` +
-        `  versions: { engine: "${requirement.since}" }   // or omit it to track latest`,
+      refusal({
+        needs: `This schema declares ${requirement.feature}`,
+        since: requirement.since,
+        pinned: pinnedEngineVersion,
+        body: `  Declared on: ${shown}${more}\n\n${requirement.consequence}`,
+      }),
     )
   }
+}
+
+/**
+ * Why the pinned engine cannot run a seed, or undefined when it can.
+ *
+ * Returns rather than throws, because the seed command answers in exit codes and this is a `2`:
+ * the run could not start, alongside a missing builder or an unreachable database, rather than a
+ * `1` where the seed itself was wrong.
+ */
+export function seedUnsupportedByPinnedEngine(
+  pinnedEngineVersion: string | undefined,
+): string | undefined {
+  if (!comparable(pinnedEngineVersion)) return undefined
+  if (compareVersions(pinnedEngineVersion, ENGINE_MIN_FOR_SEED) >= 0) return undefined
+
+  return refusal({
+    needs: "Seeding is done by the engine",
+    since: ENGINE_MIN_FOR_SEED,
+    pinned: pinnedEngineVersion,
+    body:
+      `An engine older than ${ENGINE_MIN_FOR_SEED} has no \`seed\` subcommand. It would answer ` +
+      `this run with a usage error about an unrecognised argument, which names nothing about ` +
+      `your project and reads like a broken install.`,
+  })
 }
