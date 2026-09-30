@@ -14,11 +14,11 @@ import {
   usesExternalDatabase,
   type SupatypeProjectConfig,
 } from "./project-config.js"
-import { hasEngineOverride, hasStudioOverride, pinnedVersion, fetchLatestVersion, VERSION_PIN_LOCAL } from "./binary-cache.js"
+import { hasStudioOverride, pinnedVersion, fetchLatestVersion, VERSION_PIN_LOCAL } from "./binary-cache.js"
 import { buildKongDeclarative } from "./kong-config.js"
 import { keyspaceInPostgres } from "./cache-provider.js"
 import { STUDIO_DEV_PORT } from "./studio-dev-server.js"
-import { hasEnvValue, readEnvFile } from "./env-file.js"
+import { readEnvFile } from "./env-file.js"
 import { fieldMaskingTierFromProject, type FieldMaskingTier } from "./field-masking-tier.js"
 import { projectHasVersionedModels } from "./model-versioning.js"
 
@@ -404,12 +404,18 @@ ${studioService}
     : `      - server
       - studio
       - control-plane`
-  // In dev the database is published only when something on the host needs to reach it, which is
-  // normally a host engine build. A project that names a port is asking for one too: without this,
-  // `SUPATYPE_DEV_DB_PORT` was honoured for the number and ignored for whether the port existed,
-  // so a seed connecting over TCP got ECONNREFUSED and nothing said why.
-  const dbPortRequested = hasEnvValue(cwd, "SUPATYPE_DEV_DB_PORT")
-  const publishDbToHost = !devLocal || hasEngineOverride(config) || dbPortRequested
+  // The database is always reachable from the host.
+  //
+  // It used to be published in dev only when something was known to need it, which was a host
+  // engine build or a project that had named `SUPATYPE_DEV_DB_PORT`. Seeding is now a host
+  // process: the CLI resolves a connection string and the engine connects over TCP. Under the old
+  // rule a fresh `supatype init` produced a stack whose database nothing on the host could reach,
+  // so the first `supatype seed` got ECONNREFUSED and the remedy was an environment variable
+  // nobody had reason to know about.
+  //
+  // This exposes nothing new: the dev port below is bound to `127.0.0.1`, so it is reachable from
+  // this machine and from nowhere else.
+  const publishDbToHost = true
   const dbPorts = publishDbToHost
     ? devLocal
       ? `    ports:

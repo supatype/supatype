@@ -276,22 +276,47 @@ describe("runtime contract", () => {
     expect(compose).not.toContain("- ./kong.yml:/etc/kong/kong.yml:ro")
   })
 
-  it("devLocal compose omits host-published db and server ports", () => {
+  it("devLocal compose omits the production ports", () => {
     const compose = renderSelfHostCompose(baseConfig, process.cwd(), { devLocal: true })
     expect(compose).not.toContain('"5432:5432"')
     expect(compose).not.toContain('"9999:9999"')
     expect(compose).toContain("${SUPATYPE_KONG_PORT:-18473}:8000")
-    expect(compose).not.toContain("SUPATYPE_DEV_DB_PORT")
   })
 
-  it("devLocal compose publishes db to host when overrides.engine is set", () => {
-    const compose = renderSelfHostCompose(
+  /**
+   * The database is reachable from this machine, always.
+   *
+   * It used to be published in dev only when something was known to need it, which meant a
+   * fresh project had a database nothing on the host could reach: `supatype seed` resolves a
+   * connection string and the engine connects over TCP, so the first seed got ECONNREFUSED
+   * and the remedy was an environment variable nobody had reason to know about.
+   */
+  it("devLocal compose publishes the database on loopback", () => {
+    const compose = renderSelfHostCompose(baseConfig, process.cwd(), { devLocal: true })
+    expect(compose).toContain("127.0.0.1:${SUPATYPE_DEV_DB_PORT:-54329}:5432")
+  })
+
+  /** Loopback, so it is reachable from here and from nowhere else. */
+  it("devLocal never publishes the database beyond this machine", () => {
+    const compose = renderSelfHostCompose(baseConfig, process.cwd(), { devLocal: true })
+    const dbPorts = compose
+      .split("\n")
+      .filter((line) => line.includes(":5432"))
+      .filter((line) => line.trim().startsWith("-"))
+    expect(dbPorts.length).toBeGreaterThan(0)
+    for (const line of dbPorts) expect(line).toContain("127.0.0.1:")
+  })
+
+  it("an engine override no longer decides whether the database is published", () => {
+    const withOverride = renderSelfHostCompose(
       { ...baseConfig, overrides: { engine: "/tmp/supatype-engine" } },
       process.cwd(),
       { devLocal: true },
     )
-    expect(compose).toContain("127.0.0.1:${SUPATYPE_DEV_DB_PORT:-54329}:5432")
-    expect(compose).not.toContain('"5432:5432"')
+    const without = renderSelfHostCompose(baseConfig, process.cwd(), { devLocal: true })
+    expect(withOverride).toContain("127.0.0.1:${SUPATYPE_DEV_DB_PORT:-54329}:5432")
+    expect(without).toContain("127.0.0.1:${SUPATYPE_DEV_DB_PORT:-54329}:5432")
+    expect(withOverride).not.toContain('"5432:5432"')
   })
 
   it("devLocal proxy upstream rewrites localhost to host.docker.internal", () => {
