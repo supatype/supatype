@@ -97,6 +97,10 @@ use `ago` or `startOfBefore` to go backwards. `expr.now({ days: -20 })` throws, 
 `expr.now()` is typed to date-like columns and `expr.default()` to columns that have a default,
 so assigning either to the wrong column does not compile.
 
+A rich text column takes a plain string as well as a Lexical document. A trigger normalises
+the string into a single-paragraph document on the way in, so fixture prose is written as
+prose and a read always returns the document.
+
 **There is no `expr.uuid()`.** Omit `id` and the column's own default fills it. A second way to
 say it would let a seed and its schema disagree about how ids are made.
 
@@ -178,7 +182,7 @@ supatype seed --status
 
 reports, per file: when it was applied, how long it took, what it wrote, and whether the file
 has **drifted**, meaning its latest run used a different document than the run before it. Studio
-shows the same thing under Database → Seeds.
+shows the same thing under Database > Seeds.
 
 **It is a record, not a gate.** Seeds are idempotent upserts by design, so a file is not skipped
 because it ran before. The one exception:

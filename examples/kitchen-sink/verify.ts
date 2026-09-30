@@ -80,13 +80,22 @@ async function main(): Promise<void> {
 
   // Localization asserted where it is decided rather than where it is displayed. The API hands back
   // every language at once; a speaker seeded with only English must not acquire a French bio.
+  // A locale holds a document, not the prose it was seeded with. `bio` is localized rich text, so
+  // the engine's normalising trigger wraps each locale's value into a Lexical document on the way
+  // in. Asserting a string here passed only while no trigger existed, and would now be asserting
+  // that the column still holds what the types say it cannot.
+  type LocaleDocuments = Record<string, { root?: unknown } | undefined>
   const ada = (speakers ?? []).find((s) => (s as { name: string }).name === "Ada Buckley") as
-    | { bio?: Record<string, string> | null }
+    | { bio?: LocaleDocuments | null }
     | undefined
   const rune = (speakers ?? []).find((s) => (s as { name: string }).name === "Rune Oyelaran") as
-    | { bio?: Record<string, string> | null }
+    | { bio?: LocaleDocuments | null }
     | undefined
-  check(typeof ada?.bio?.["en"] === "string", "a seeded bio survives a re-seed", JSON.stringify(ada?.bio))
+  check(
+    ada?.bio?.["en"]?.root !== undefined,
+    "a seeded bio survives a re-seed as a document",
+    JSON.stringify(ada?.bio),
+  )
   check(
     rune?.bio?.["fr"] === undefined,
     "an untranslated bio stays untranslated",

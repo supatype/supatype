@@ -151,6 +151,24 @@ export function generateRowType(fields: Record<string, Record<string, unknown>>)
   return `{\n${body}\n}`
 }
 
+/**
+ * What a column accepts on the way in, where that is wider than what it returns.
+ *
+ * A rich text column holds a Lexical document, and the engine emits a trigger that normalises a
+ * plain string into one on insert and update. So writing prose is a string and reading it is
+ * always a document, and this is the only place the three shapes differ by more than
+ * optionality. Flattening them back would either demand hand-built Lexical JSON from every
+ * caller, or claim a read might return a string, which after the trigger it cannot.
+ */
+function widenForWrites(ts: string, meta: Record<string, unknown>): string {
+  // Rebuilt rather than edited. The widening has to land on the value the trigger normalises,
+  // and for a localized column that is each locale's value, not the map holding them. Splicing
+  // ` | string` into the finished string put it outside the locale wrapper, which said a bare
+  // string was a valid write to the column; the trigger would then store it as a single document
+  // where a locale map belongs, and the Row type says that cannot happen.
+  return meta["kind"] === "richText" ? toTsType(meta, true) : ts
+}
+
 function insertColumnOptionalOnInsert(meta: Record<string, unknown>): boolean {
   // `slug` has neither a declared default nor a `serverGenerated` flag, but the engine emits
   // a trigger that fills it, which is the same thing from an insert's point of view.
@@ -165,7 +183,7 @@ export function generateInsertType(fields: Record<string, Record<string, unknown
   const body = columns
     .map(({ column, ts, meta }) => {
       const required = meta["required"] === true && !insertColumnOptionalOnInsert(meta)
-      return `  ${quoteKey(column)}${required ? "" : "?"}: ${ts}`
+      return `  ${quoteKey(column)}${required ? "" : "?"}: ${widenForWrites(ts, meta)}`
     })
     .join("\n")
   return `{\n${body}\n}`
@@ -174,11 +192,13 @@ export function generateInsertType(fields: Record<string, Record<string, unknown
 export function generateUpdateType(fields: Record<string, Record<string, unknown>>): string {
   const columns = columnsOf(fields)
   if (columns.length === 0) return "Record<string, unknown>"
-  const body = columns.map(({ column, ts }) => `  ${quoteKey(column)}?: ${ts}`).join("\n")
+  const body = columns
+    .map(({ column, ts, meta }) => `  ${quoteKey(column)}?: ${widenForWrites(ts, meta)}`)
+    .join("\n")
   return `{\n${body}\n}`
 }
 
-function toTsType(meta: Record<string, unknown>): string {
+function toTsType(meta: Record<string, unknown>, prose = false): string {
   const kind = typeof meta["kind"] === "string" ? meta["kind"] : "json"
   const required = meta["required"] === true
   const base = (() => {
@@ -246,7 +266,11 @@ function toTsType(meta: Record<string, unknown>): string {
   // A localized column is JSONB holding a locale map, `{"en": ..., "fr": ...}`, not the bare
   // value. `page.title` is exactly this and was typed `string`, so calling a string method on it
   // compiled and then failed against real data.
-  const shaped = meta["localized"] === true ? `{ [locale: string]: ${base} }` : base
+  // Prose, which a trigger normalises into a document on the way in. Applied to the element,
+  // before the locale wrapper goes on, so a localized column reads `{ [locale: string]: RichText
+  // | string }` rather than claiming the whole map could be a string.
+  const written = prose && meta["kind"] === "richText" ? `${base} | string` : base
+  const shaped = meta["localized"] === true ? `{ [locale: string]: ${written} }` : written
   return required ? shaped : `${shaped} | null`
 }
 

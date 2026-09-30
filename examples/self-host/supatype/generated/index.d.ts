@@ -4,26 +4,26 @@ declare module "@supatype/client" {
   interface SupatypeModels {
     todo: {
       Row: {
-  created_at: string
-  done: boolean
-  id: string
-  owner_id: string
-  title: string
-}
+        id: string
+        title: string
+        done: boolean
+        owner_id: string
+        created_at: string
+      }
       Insert: {
-  created_at?: string
-  done: boolean
-  id?: string
-  owner_id: string
-  title: string
-}
+        id?: string
+        title: string
+        done: boolean
+        owner_id: string
+        created_at?: string
+      }
       Update: {
-  created_at?: string
-  done?: boolean
-  id?: string
-  owner_id?: string
-  title?: string
-}
+        id?: string
+        title?: string
+        done?: boolean
+        owner_id?: string
+        created_at?: string
+      }
     }
   }
 }

@@ -87,6 +87,9 @@ export function generateHooksModule(ast: unknown): string | null {
  *
  * Structural rather than imported: the precise \`SerializedEditorState\` lives in
  * \`@supatype/types/lexical\`, which a Deno function has no way to resolve.
+ *
+ * A hook writing to a rich text column may hand back a plain string instead; a trigger
+ * normalises it into one of these, so what a later read returns is always the document.
  */
 export type RichTextValue = { readonly root: { readonly children: readonly unknown[] } }
 

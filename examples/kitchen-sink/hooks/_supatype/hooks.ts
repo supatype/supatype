@@ -20,87 +20,93 @@
 //   })
 
 /**
- * Lexical editor state as JSON, or the plain string accepted for seeds and defaults.
+ * Lexical editor state as JSON.
  *
  * Structural rather than imported: the precise `SerializedEditorState` lives in
  * `@supatype/types/lexical`, which a Deno function has no way to resolve.
+ *
+ * A hook writing to a rich text column may hand back a plain string instead; a trigger
+ * normalises it into one of these, so what a later read returns is always the document.
  */
-export type RichTextValue = { readonly root: { readonly children: readonly unknown[] } } | string
+export type RichTextValue = { readonly root: { readonly children: readonly unknown[] } }
+
+/** A stored file, and the bucket it went to. */
+export type StorageReference = { readonly bucket: string; readonly path: string }
 
 export interface HookTables {
   "chat_message": {
     Row: {
-      auth_user_id: string | null
-      authorName: string | null
-      body: string
-      created_at: string
       id: string
       room: string
+      body: string
+      auth_user_id: string | null
+      authorName: string | null
+      created_at: string
     }
     Insert: {
-      auth_user_id?: string | null
-      authorName?: string | null
-      body: string
-      created_at?: string
       id?: string
       room: string
-    }
-    Update: {
+      body: string
       auth_user_id?: string | null
       authorName?: string | null
-      body?: string
       created_at?: string
+    }
+    Update: {
       id?: string
       room?: string
+      body?: string
+      auth_user_id?: string | null
+      authorName?: string | null
+      created_at?: string
     }
   }
   "talk": {
     Row: {
-      abstract: { [locale: string]: (RichTextValue | string) } | null
-      created_at: string
-      day: string
-      embedding: Record<string, unknown> | null
-      ends_at: string
       id: string
-      length: { ms: number }
-      published_at: string | null
-      room_id: string | null
-      slug: string
-      speaker_id: string | null
-      starts_at: string
       title: string
+      slug: string
+      abstract: { [locale: string]: RichTextValue } | null
+      speaker_id: string | null
+      room_id: string | null
+      day: string
+      starts_at: string
+      ends_at: string
+      length: { ms: number }
+      embedding: Record<string, unknown> | null
+      published_at: string | null
+      created_at: string
       updated_at: string
     }
     Insert: {
-      abstract?: { [locale: string]: (RichTextValue | string) } | null
-      created_at?: string
-      day: string
-      embedding?: Record<string, unknown> | null
-      ends_at: string
       id?: string
-      length: { ms: number }
-      published_at?: string | null
-      room_id?: string | null
-      slug: string
-      speaker_id?: string | null
-      starts_at: string
       title: string
+      slug?: string
+      abstract?: { [locale: string]: RichTextValue | string } | null
+      speaker_id?: string | null
+      room_id?: string | null
+      day: string
+      starts_at: string
+      ends_at: string
+      length: { ms: number }
+      embedding?: Record<string, unknown> | null
+      published_at?: string | null
+      created_at?: string
       updated_at?: string
     }
     Update: {
-      abstract?: { [locale: string]: (RichTextValue | string) } | null
-      created_at?: string
-      day?: string
-      embedding?: Record<string, unknown> | null
-      ends_at?: string
       id?: string
-      length?: { ms: number }
-      published_at?: string | null
-      room_id?: string | null
-      slug?: string
-      speaker_id?: string | null
-      starts_at?: string
       title?: string
+      slug?: string
+      abstract?: { [locale: string]: RichTextValue | string } | null
+      speaker_id?: string | null
+      room_id?: string | null
+      day?: string
+      starts_at?: string
+      ends_at?: string
+      length?: { ms: number }
+      embedding?: Record<string, unknown> | null
+      published_at?: string | null
+      created_at?: string
       updated_at?: string
     }
   }

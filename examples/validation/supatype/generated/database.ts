@@ -39,7 +39,7 @@ export type Database = {
           id?: string
           name: string
           slug?: string | null
-          description?: RichText | null
+          description?: RichText | string | null
           tags?: string[] | null
           setupItems?: Json | null
           notes?: ({ type: "note"; data: { text: string } })[] | null
@@ -56,7 +56,7 @@ export type Database = {
           id?: string
           name?: string
           slug?: string | null
-          description?: RichText | null
+          description?: RichText | string | null
           tags?: string[] | null
           setupItems?: Json | null
           notes?: ({ type: "note"; data: { text: string } })[] | null

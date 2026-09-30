@@ -4,20 +4,20 @@ declare module "@supatype/client" {
   interface SupatypeModels {
     note: {
       Row: {
-  body: string
-  created_at: string
-  id: string
-}
+        id: string
+        body: string
+        created_at: string
+      }
       Insert: {
-  body: string
-  created_at?: string
-  id?: string
-}
+        id?: string
+        body: string
+        created_at?: string
+      }
       Update: {
-  body?: string
-  created_at?: string
-  id?: string
-}
+        id?: string
+        body?: string
+        created_at?: string
+      }
     }
   }
 }

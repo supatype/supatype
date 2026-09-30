@@ -42,6 +42,12 @@
   reach and a remedy nobody had reason to know about.
 * **schema:** `After<>` and `Before<>` are parsed from the schema into the AST.
 
+* **generate:** a rich text column is typed as the document it holds on the way out and as
+  `RichText | string` on the way in. The engine emits a trigger that normalises a plain string
+  into a Lexical document on insert and update, so prose can be written as prose while a read
+  always returns the document. The seed builder gets the same split, and a tightening with it:
+  the column was typed as any JSON at all, so a seed could write a bare number into one.
+
 ### Bug Fixes
 
 * **generate:** the client augmentation follows the order the schema declares its models and

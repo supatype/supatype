@@ -14,32 +14,32 @@ declare module "@supatype/client" {
   interface SupatypeModels {
     task: {
       Row: {
-  auth_user_id: string | null
-  created_at: string
-  done: boolean
-  id: string
-  note: string | null
-  title: string
-  updated_at: string
-}
+        id: string
+        title: string
+        done: boolean
+        auth_user_id: string | null
+        note: string | null
+        created_at: string
+        updated_at: string
+      }
       Insert: {
-  auth_user_id?: string | null
-  created_at?: string
-  done: boolean
-  id?: string
-  note?: string | null
-  title: string
-  updated_at?: string
-}
+        id?: string
+        title: string
+        done: boolean
+        auth_user_id?: string | null
+        note?: string | null
+        created_at?: string
+        updated_at?: string
+      }
       Update: {
-  auth_user_id?: string | null
-  created_at?: string
-  done?: boolean
-  id?: string
-  note?: string | null
-  title?: string
-  updated_at?: string
-}
+        id?: string
+        title?: string
+        done?: boolean
+        auth_user_id?: string | null
+        note?: string | null
+        created_at?: string
+        updated_at?: string
+      }
     }
   }
 }

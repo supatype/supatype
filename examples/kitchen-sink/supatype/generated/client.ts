@@ -10,307 +10,316 @@
 
 import { registerFieldKinds } from "@supatype/client"
 
+import type { SerializedEditorState } from "@supatype/types/lexical"
+
+export type RichText = SerializedEditorState
+
+export type StorageReference = {
+  bucket: string
+  path: string
+}
+
 declare module "@supatype/client" {
   interface SupatypeModels {
-    _global_site_settings: {
-      Row: {
-  conferenceName: string
-  created_at: string
-  id: string
-  supportEmail: string
-  tagline: { [locale: string]: string } | null
-  updated_at: string
-  venue: Record<string, unknown> | null
-}
-      Insert: {
-  conferenceName: string
-  created_at?: string
-  id?: string
-  supportEmail: string
-  tagline?: { [locale: string]: string } | null
-  updated_at?: string
-  venue?: Record<string, unknown> | null
-}
-      Update: {
-  conferenceName?: string
-  created_at?: string
-  id?: string
-  supportEmail?: string
-  tagline?: { [locale: string]: string } | null
-  updated_at?: string
-  venue?: Record<string, unknown> | null
-}
-    }
-    attendee: {
-      Row: {
-  avatar: { bucket: string; path: string } | null
-  created_at: string
-  displayName: string
-  id: string
-  updated_at: string
-}
-      Insert: {
-  avatar?: { bucket: string; path: string } | null
-  created_at?: string
-  displayName: string
-  id?: string
-  updated_at?: string
-}
-      Update: {
-  avatar?: { bucket: string; path: string } | null
-  created_at?: string
-  displayName?: string
-  id?: string
-  updated_at?: string
-}
-    }
-    chat_message: {
-      Row: {
-  auth_user_id: string | null
-  authorName: string | null
-  body: string
-  created_at: string
-  id: string
-  room: string
-}
-      Insert: {
-  auth_user_id?: string | null
-  authorName?: string | null
-  body: string
-  created_at?: string
-  id?: string
-  room: string
-}
-      Update: {
-  auth_user_id?: string | null
-  authorName?: string | null
-  body?: string
-  created_at?: string
-  id?: string
-  room?: string
-}
-    }
     page: {
       Row: {
-  body: Record<string, unknown>
-  created_at: string
-  id: string
-  published_at: string | null
-  slug: string
-  summary: string | null
-  title: { [locale: string]: string }
-  updated_at: string
-}
+        id: string
+        title: { [locale: string]: string }
+        slug: string
+        summary: string | null
+        body: Record<string, unknown>
+        published_at: string | null
+        created_at: string
+        updated_at: string
+      }
       Insert: {
-  body: Record<string, unknown>
-  created_at?: string
-  id?: string
-  published_at?: string | null
-  slug: string
-  summary?: string | null
-  title: { [locale: string]: string }
-  updated_at?: string
-}
+        id?: string
+        title: { [locale: string]: string }
+        slug?: string
+        summary?: string | null
+        body: Record<string, unknown>
+        published_at?: string | null
+        created_at?: string
+        updated_at?: string
+      }
       Update: {
-  body?: Record<string, unknown>
-  created_at?: string
-  id?: string
-  published_at?: string | null
-  slug?: string
-  summary?: string | null
-  title?: { [locale: string]: string }
-  updated_at?: string
-}
-    }
-    room: {
-      Row: {
-  capacity: number
-  created_at: string
-  id: string
-  location: Record<string, unknown> | null
-  name: string
-  updated_at: string
-}
-      Insert: {
-  capacity: number
-  created_at?: string
-  id?: string
-  location?: Record<string, unknown> | null
-  name: string
-  updated_at?: string
-}
-      Update: {
-  capacity?: number
-  created_at?: string
-  id?: string
-  location?: Record<string, unknown> | null
-  name?: string
-  updated_at?: string
-}
+        id?: string
+        title?: { [locale: string]: string }
+        slug?: string
+        summary?: string | null
+        body?: Record<string, unknown>
+        published_at?: string | null
+        created_at?: string
+        updated_at?: string
+      }
     }
     speaker: {
       Row: {
-  bio: { [locale: string]: (import("@supatype/types/lexical").SerializedEditorState | string) } | null
-  created_at: string
-  email: string | null
-  headshot: { bucket: string; path: string } | null
-  id: string
-  links: Record<string, unknown> | null
-  name: string
-  published_at: string | null
-  slug: string
-  updated_at: string
-}
+        id: string
+        name: string
+        slug: string
+        bio: { [locale: string]: RichText } | null
+        headshot: StorageReference | null
+        links: Record<string, unknown> | null
+        email: string | null
+        published_at: string | null
+        created_at: string
+        updated_at: string
+      }
       Insert: {
-  bio?: { [locale: string]: (import("@supatype/types/lexical").SerializedEditorState | string) } | null
-  created_at?: string
-  email?: string | null
-  headshot?: { bucket: string; path: string } | null
-  id?: string
-  links?: Record<string, unknown> | null
-  name: string
-  published_at?: string | null
-  slug: string
-  updated_at?: string
-}
+        id?: string
+        name: string
+        slug?: string
+        bio?: { [locale: string]: RichText | string } | null
+        headshot?: StorageReference | null
+        links?: Record<string, unknown> | null
+        email?: string | null
+        published_at?: string | null
+        created_at?: string
+        updated_at?: string
+      }
       Update: {
-  bio?: { [locale: string]: (import("@supatype/types/lexical").SerializedEditorState | string) } | null
-  created_at?: string
-  email?: string | null
-  headshot?: { bucket: string; path: string } | null
-  id?: string
-  links?: Record<string, unknown> | null
-  name?: string
-  published_at?: string | null
-  slug?: string
-  updated_at?: string
-}
+        id?: string
+        name?: string
+        slug?: string
+        bio?: { [locale: string]: RichText | string } | null
+        headshot?: StorageReference | null
+        links?: Record<string, unknown> | null
+        email?: string | null
+        published_at?: string | null
+        created_at?: string
+        updated_at?: string
+      }
     }
-    sponsor: {
+    room: {
       Row: {
-  blurb: { [locale: string]: string } | null
-  brandColor: unknown | null
-  contactPhone: string | null
-  created_at: string
-  id: string
-  logo: { bucket: string; path: string } | null
-  name: string
-  published_at: string | null
-  tier: "platinum" | "gold" | "community"
-  updated_at: string
-  website: string | null
-}
+        id: string
+        name: string
+        capacity: number
+        location: Record<string, unknown> | null
+        created_at: string
+        updated_at: string
+      }
       Insert: {
-  blurb?: { [locale: string]: string } | null
-  brandColor?: unknown | null
-  contactPhone?: string | null
-  created_at?: string
-  id?: string
-  logo?: { bucket: string; path: string } | null
-  name: string
-  published_at?: string | null
-  tier: "platinum" | "gold" | "community"
-  updated_at?: string
-  website?: string | null
-}
+        id?: string
+        name: string
+        capacity: number
+        location?: Record<string, unknown> | null
+        created_at?: string
+        updated_at?: string
+      }
       Update: {
-  blurb?: { [locale: string]: string } | null
-  brandColor?: unknown | null
-  contactPhone?: string | null
-  created_at?: string
-  id?: string
-  logo?: { bucket: string; path: string } | null
-  name?: string
-  published_at?: string | null
-  tier?: "platinum" | "gold" | "community"
-  updated_at?: string
-  website?: string | null
-}
+        id?: string
+        name?: string
+        capacity?: number
+        location?: Record<string, unknown> | null
+        created_at?: string
+        updated_at?: string
+      }
     }
     talk: {
       Row: {
-  abstract: { [locale: string]: (import("@supatype/types/lexical").SerializedEditorState | string) } | null
-  created_at: string
-  day: string
-  embedding: Record<string, unknown> | null
-  ends_at: string
-  id: string
-  length: { ms: number }
-  published_at: string | null
-  room_id: string | null
-  slug: string
-  speaker_id: string | null
-  starts_at: string
-  title: string
-  updated_at: string
-}
+        id: string
+        title: string
+        slug: string
+        abstract: { [locale: string]: RichText } | null
+        speaker_id: string | null
+        room_id: string | null
+        day: string
+        starts_at: string
+        ends_at: string
+        length: { ms: number }
+        embedding: Record<string, unknown> | null
+        published_at: string | null
+        created_at: string
+        updated_at: string
+      }
       Insert: {
-  abstract?: { [locale: string]: (import("@supatype/types/lexical").SerializedEditorState | string) } | null
-  created_at?: string
-  day: string
-  embedding?: Record<string, unknown> | null
-  ends_at: string
-  id?: string
-  length: { ms: number }
-  published_at?: string | null
-  room_id?: string | null
-  slug: string
-  speaker_id?: string | null
-  starts_at: string
-  title: string
-  updated_at?: string
-}
+        id?: string
+        title: string
+        slug?: string
+        abstract?: { [locale: string]: RichText | string } | null
+        speaker_id?: string | null
+        room_id?: string | null
+        day: string
+        starts_at: string
+        ends_at: string
+        length: { ms: number }
+        embedding?: Record<string, unknown> | null
+        published_at?: string | null
+        created_at?: string
+        updated_at?: string
+      }
       Update: {
-  abstract?: { [locale: string]: (import("@supatype/types/lexical").SerializedEditorState | string) } | null
-  created_at?: string
-  day?: string
-  embedding?: Record<string, unknown> | null
-  ends_at?: string
-  id?: string
-  length?: { ms: number }
-  published_at?: string | null
-  room_id?: string | null
-  slug?: string
-  speaker_id?: string | null
-  starts_at?: string
-  title?: string
-  updated_at?: string
-}
+        id?: string
+        title?: string
+        slug?: string
+        abstract?: { [locale: string]: RichText | string } | null
+        speaker_id?: string | null
+        room_id?: string | null
+        day?: string
+        starts_at?: string
+        ends_at?: string
+        length?: { ms: number }
+        embedding?: Record<string, unknown> | null
+        published_at?: string | null
+        created_at?: string
+        updated_at?: string
+      }
+    }
+    sponsor: {
+      Row: {
+        id: string
+        name: string
+        tier: "platinum" | "gold" | "community"
+        brandColor: unknown | null
+        logo: StorageReference | null
+        website: string | null
+        blurb: { [locale: string]: string } | null
+        contactPhone: string | null
+        published_at: string | null
+        created_at: string
+        updated_at: string
+      }
+      Insert: {
+        id?: string
+        name: string
+        tier: "platinum" | "gold" | "community"
+        brandColor?: unknown | null
+        logo?: StorageReference | null
+        website?: string | null
+        blurb?: { [locale: string]: string } | null
+        contactPhone?: string | null
+        published_at?: string | null
+        created_at?: string
+        updated_at?: string
+      }
+      Update: {
+        id?: string
+        name?: string
+        tier?: "platinum" | "gold" | "community"
+        brandColor?: unknown | null
+        logo?: StorageReference | null
+        website?: string | null
+        blurb?: { [locale: string]: string } | null
+        contactPhone?: string | null
+        published_at?: string | null
+        created_at?: string
+        updated_at?: string
+      }
+    }
+    attendee: {
+      Row: {
+        id: string
+        displayName: string
+        avatar: StorageReference | null
+        created_at: string
+        updated_at: string
+      }
+      Insert: {
+        id?: string
+        displayName: string
+        avatar?: StorageReference | null
+        created_at?: string
+        updated_at?: string
+      }
+      Update: {
+        id?: string
+        displayName?: string
+        avatar?: StorageReference | null
+        created_at?: string
+        updated_at?: string
+      }
     }
     ticket: {
       Row: {
-  attendee_id: string | null
-  auth_user_id: string | null
-  created_at: string
-  id: string
-  pdf: { bucket: string; path: string } | null
-  price: { amount: string; code: "GBP" }
-  reference: string
-  updated_at: string
-  vatRate: string
-}
+        id: string
+        auth_user_id: string | null
+        attendee_id: string | null
+        reference: string
+        price: { amount: string; code: "GBP" }
+        vatRate: string
+        pdf: StorageReference | null
+        created_at: string
+        updated_at: string
+      }
       Insert: {
-  attendee_id?: string | null
-  auth_user_id?: string | null
-  created_at?: string
-  id?: string
-  pdf?: { bucket: string; path: string } | null
-  price: { amount: string; code: "GBP" }
-  reference: string
-  updated_at?: string
-  vatRate: string
-}
+        id?: string
+        auth_user_id?: string | null
+        attendee_id?: string | null
+        reference: string
+        price: { amount: string; code: "GBP" }
+        vatRate: string
+        pdf?: StorageReference | null
+        created_at?: string
+        updated_at?: string
+      }
       Update: {
-  attendee_id?: string | null
-  auth_user_id?: string | null
-  created_at?: string
-  id?: string
-  pdf?: { bucket: string; path: string } | null
-  price?: { amount: string; code: "GBP" }
-  reference?: string
-  updated_at?: string
-  vatRate?: string
-}
+        id?: string
+        auth_user_id?: string | null
+        attendee_id?: string | null
+        reference?: string
+        price?: { amount: string; code: "GBP" }
+        vatRate?: string
+        pdf?: StorageReference | null
+        created_at?: string
+        updated_at?: string
+      }
+    }
+    chat_message: {
+      Row: {
+        id: string
+        room: string
+        body: string
+        auth_user_id: string | null
+        authorName: string | null
+        created_at: string
+      }
+      Insert: {
+        id?: string
+        room: string
+        body: string
+        auth_user_id?: string | null
+        authorName?: string | null
+        created_at?: string
+      }
+      Update: {
+        id?: string
+        room?: string
+        body?: string
+        auth_user_id?: string | null
+        authorName?: string | null
+        created_at?: string
+      }
+    }
+    _global_site_settings: {
+      Row: {
+        id: string
+        conferenceName: string
+        tagline: { [locale: string]: string } | null
+        venue: Record<string, unknown> | null
+        supportEmail: string
+        created_at: string
+        updated_at: string
+      }
+      Insert: {
+        id?: string
+        conferenceName: string
+        tagline?: { [locale: string]: string } | null
+        venue?: Record<string, unknown> | null
+        supportEmail: string
+        created_at?: string
+        updated_at?: string
+      }
+      Update: {
+        id?: string
+        conferenceName?: string
+        tagline?: { [locale: string]: string } | null
+        venue?: Record<string, unknown> | null
+        supportEmail?: string
+        created_at?: string
+        updated_at?: string
+      }
     }
   }
 }

@@ -72,7 +72,7 @@ export type Database = {
           id?: string
           name: string
           slug?: string
-          bio?: LocalizedValue<RichText> | null
+          bio?: LocalizedValue<RichText | string> | null
           headshot?: StorageReference | null
           links?: Json | null
           email?: string | null
@@ -84,7 +84,7 @@ export type Database = {
           id?: string
           name?: string
           slug?: string
-          bio?: LocalizedValue<RichText> | null
+          bio?: LocalizedValue<RichText | string> | null
           headshot?: StorageReference | null
           links?: Json | null
           email?: string | null
@@ -142,7 +142,7 @@ export type Database = {
           id?: string
           title: string
           slug?: string
-          abstract?: LocalizedValue<RichText> | null
+          abstract?: LocalizedValue<RichText | string> | null
           speaker_id?: string | null
           room_id?: string | null
           day: string
@@ -158,7 +158,7 @@ export type Database = {
           id?: string
           title?: string
           slug?: string
-          abstract?: LocalizedValue<RichText> | null
+          abstract?: LocalizedValue<RichText | string> | null
           speaker_id?: string | null
           room_id?: string | null
           day?: string

@@ -10,71 +10,75 @@
 
 import { registerFieldKinds } from "@supatype/client"
 
+import type { SerializedEditorState } from "@supatype/types/lexical"
+
+export type RichText = SerializedEditorState
+
 declare module "@supatype/client" {
   interface SupatypeModels {
-    activity: {
-      Row: {
-  amount: number | null
-  auth_user_id: string | null
-  created_at: string
-  customer_id: string | null
-  emoji: string
-  id: string
-  kind: "earn" | "redeem"
-  label: string
-  stars: number
-}
-      Insert: {
-  amount?: number | null
-  auth_user_id?: string | null
-  created_at?: string
-  customer_id?: string | null
-  emoji: string
-  id?: string
-  kind: "earn" | "redeem"
-  label: string
-  stars: number
-}
-      Update: {
-  amount?: number | null
-  auth_user_id?: string | null
-  created_at?: string
-  customer_id?: string | null
-  emoji?: string
-  id?: string
-  kind?: "earn" | "redeem"
-  label?: string
-  stars?: number
-}
-    }
     customer: {
       Row: {
-  bio: (import("@supatype/types/lexical").SerializedEditorState | string) | null
-  created_at: string
-  id: string
-  lifetimeStars: number
-  name: string
-  stars: number
-  updated_at: string
-}
+        id: string
+        name: string
+        bio: RichText | null
+        stars: number
+        lifetimeStars: number
+        created_at: string
+        updated_at: string
+      }
       Insert: {
-  bio?: (import("@supatype/types/lexical").SerializedEditorState | string) | null
-  created_at?: string
-  id?: string
-  lifetimeStars: number
-  name: string
-  stars: number
-  updated_at?: string
-}
+        id?: string
+        name: string
+        bio?: RichText | string | null
+        stars: number
+        lifetimeStars: number
+        created_at?: string
+        updated_at?: string
+      }
       Update: {
-  bio?: (import("@supatype/types/lexical").SerializedEditorState | string) | null
-  created_at?: string
-  id?: string
-  lifetimeStars?: number
-  name?: string
-  stars?: number
-  updated_at?: string
-}
+        id?: string
+        name?: string
+        bio?: RichText | string | null
+        stars?: number
+        lifetimeStars?: number
+        created_at?: string
+        updated_at?: string
+      }
+    }
+    activity: {
+      Row: {
+        id: string
+        auth_user_id: string | null
+        customer_id: string | null
+        kind: "earn" | "redeem"
+        label: string
+        emoji: string
+        stars: number
+        amount: number | null
+        created_at: string
+      }
+      Insert: {
+        id?: string
+        auth_user_id?: string | null
+        customer_id?: string | null
+        kind: "earn" | "redeem"
+        label: string
+        emoji: string
+        stars: number
+        amount?: number | null
+        created_at?: string
+      }
+      Update: {
+        id?: string
+        auth_user_id?: string | null
+        customer_id?: string | null
+        kind?: "earn" | "redeem"
+        label?: string
+        emoji?: string
+        stars?: number
+        amount?: number | null
+        created_at?: string
+      }
     }
   }
 }

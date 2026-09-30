@@ -14,23 +14,23 @@ declare module "@supatype/client" {
   interface SupatypeModels {
     message: {
       Row: {
-  author: string
-  body: string
-  created_at: string
-  id: string
-}
+        id: string
+        body: string
+        author: string
+        created_at: string
+      }
       Insert: {
-  author: string
-  body: string
-  created_at?: string
-  id?: string
-}
+        id?: string
+        body: string
+        author: string
+        created_at?: string
+      }
       Update: {
-  author?: string
-  body?: string
-  created_at?: string
-  id?: string
-}
+        id?: string
+        body?: string
+        author?: string
+        created_at?: string
+      }
     }
   }
 }

@@ -28,7 +28,7 @@ export type Database = {
         Insert: {
           id?: string
           name: string
-          bio?: RichText | null
+          bio?: RichText | string | null
           stars: number
           lifetimeStars: number
           created_at?: string
@@ -37,7 +37,7 @@ export type Database = {
         Update: {
           id?: string
           name?: string
-          bio?: RichText | null
+          bio?: RichText | string | null
           stars?: number
           lifetimeStars?: number
           created_at?: string

@@ -103,6 +103,34 @@ describe("generateClientAugmentation", () => {
     expect(out).not.toMatch(/body: Record<string, unknown>/)
   })
 
+  it("widens a localized richText column inside the locale map, not around it", () => {
+    // The column holds one document per locale and the trigger normalises each of them, so what
+    // accepts prose is the locale's value. `{ [locale: string]: RichText } | string` would say a
+    // bare string is a valid write, and the trigger would store it as a single document where a
+    // locale map belongs, which the Row type says cannot happen.
+    const ast = {
+      models: [
+        {
+          tableName: "page",
+          fields: {
+            id: { kind: "uuid", pgType: "UUID", required: true, primaryKey: true, default: { kind: "genRandomUuid" } },
+            title: { kind: "richText", pgType: "JSONB", required: false, localized: true },
+            body: { kind: "richText", pgType: "JSONB", required: false },
+          },
+        },
+      ],
+    }
+    const out = generateClientAugmentation(ast)
+
+    expect(out).toContain("title: { [locale: string]: RichText } | null")
+    expect(out).toContain("title?: { [locale: string]: RichText | string } | null")
+    expect(out).not.toContain("{ [locale: string]: RichText } | string")
+
+    // The plain column keeps the widening at the top, so one cannot be flattened into the other.
+    expect(out).toContain("body: RichText | null")
+    expect(out).toContain("body?: RichText | string | null")
+  })
+
   it("uses a field's declared tsType instead of collapsing JSONB to an opaque object", () => {
     // `Currency<"USD">` and `Code<"sql">` are stored as JSONB because each carries two values. If
     // the generated row typed them as `Record<string, unknown>`, a caller reading `price.amount`
@@ -306,6 +334,20 @@ describe("agreement with the engine's generator", () => {
     const out = generateClientAugmentation(ast)
     expect(out).toContain("description: RichText | null")
     expect(out).not.toContain("SerializedEditorState | string")
+  })
+
+  /**
+   * The three shapes differ by more than optionality here, which they do nowhere else. The
+   * engine emits a trigger that turns a plain string into a document on the way in, so a read
+   * is always a document and a write may be prose.
+   */
+  it("types rich text as a document to read and prose to write", () => {
+    const out = generateClientAugmentation(ast)
+    const block = (name: string): string =>
+      out.split(`${name}: {`)[1]?.split("      }")[0] ?? ""
+    expect(block("Row")).toContain("description: RichText | null")
+    expect(block("Insert")).toContain("description?: RichText | string | null")
+    expect(block("Update")).toContain("description?: RichText | string | null")
   })
 
   /** Named aliases, the same ones, so a reader moving between the two files is not

@@ -1,0 +1,186 @@
+{
+  "irVersion": 1,
+  "schemaFingerprint": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "operations": [
+    {
+      "op": "upsert",
+      "model": "Profile",
+      "id": "alex",
+      "where": {
+        "id": "a0000000-0000-4000-8000-000000000001"
+      },
+      "data": {
+        "display_name": "Alex Rivera",
+        "full_name": "Alex Rivera"
+      }
+    },
+    {
+      "op": "upsert",
+      "model": "Organiser",
+      "id": "northern",
+      "where": {
+        "slug": "northern-lights-events"
+      },
+      "data": {
+        "name": "Northern Lights Events",
+        "contact_email": "hello@northernlights.test",
+        "owner": {
+          "connect": {
+            "id": {
+              "$ref": "alex.id"
+            }
+          }
+        },
+        "events": {
+          "create": [
+            {
+              "title": "Southwest Dev Conference",
+              "status": "published",
+              "starts_at": {
+                "kind": "after",
+                "base": {
+                  "kind": "startOf",
+                  "unit": "day"
+                },
+                "interval": {
+                  "days": 30,
+                  "hours": 9
+                }
+              },
+              "ends_at": {
+                "kind": "after",
+                "base": {
+                  "kind": "startOf",
+                  "unit": "day"
+                },
+                "interval": {
+                  "days": 30,
+                  "hours": 18
+                }
+              },
+              "created_at": {
+                "kind": "now"
+              },
+              "ticket_types": {
+                "createMany": [
+                  {
+                    "name": "Early Bird",
+                    "price": {
+                      "$numeric": "75.0000"
+                    },
+                    "quantity": 100
+                  },
+                  {
+                    "name": "Standard",
+                    "price": {
+                      "$numeric": "125.0000"
+                    },
+                    "quantity": 250
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "op": "createMany",
+      "model": "Venue",
+      "rows": [
+        {
+          "name": "The Exchange",
+          "city": "Bristol",
+          "capacity": 450,
+          "country": {
+            "$default": true
+          },
+          "organiser": {
+            "connect": {
+              "slug": "northern-lights-events"
+            }
+          }
+        },
+        {
+          "name": "Archway Studios",
+          "city": "London",
+          "capacity": 180,
+          "country": {
+            "$default": true
+          },
+          "organiser": {
+            "connect": {
+              "slug": "northern-lights-events"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "op": "group",
+      "if": {
+        "kind": "notExists",
+        "model": "SiteSettings"
+      },
+      "operations": [
+        {
+          "op": "create",
+          "model": "SiteSettings",
+          "data": {
+            "site_name": "Launch Test Tickets",
+            "default_currency": "GBP"
+          }
+        }
+      ]
+    },
+    {
+      "op": "group",
+      "if": {
+        "kind": "exists",
+        "model": "Event",
+        "where": {
+          "type": "compare",
+          "op": "eq",
+          "left": {
+            "kind": "column",
+            "name": "status"
+          },
+          "right": {
+            "kind": "literal",
+            "value": "published"
+          }
+        }
+      },
+      "operations": [
+        {
+          "op": "create",
+          "model": "PromoCode",
+          "data": {
+            "code": "EARLY20",
+            "discount_kind": "percentage",
+            "discount_value": 20,
+            "valid_until": {
+              "kind": "after",
+              "base": {
+                "kind": "now"
+              },
+              "interval": {
+                "days": 25
+              }
+            },
+            "event": {
+              "connect": {
+                "slug": "southwest-dev-conference"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "op": "sql",
+      "text": "ANALYZE event",
+      "params": []
+    }
+  ]
+}
