@@ -598,6 +598,48 @@ jobs:
           retention-days: 3
           if-no-files-found: ignore
 
+  # `supatype push` while `supatype dev` is watching the same project, on a real stack. Both drive
+  # one Compose project; without `.supatype/compose.lock` they raced on the `db` container and the
+  # loser failed with "container name ... is already in use". Collides them on purpose, both ways.
+  #
+  #   bash tests/integration/scripts/push-during-dev.sh
+  push-during-dev:
+    name: push during dev (live stack)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    env:
+      # See field-conformance.
+      SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
+      SUPATYPE_STRICT: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript packages
+        run: pnpm build
+
+      - name: Push and the dev watcher, at the same time
+        run: bash tests/integration/scripts/push-during-dev.sh
+
+      - name: Upload the logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: push-during-dev-logs
+          path: /tmp/supatype-pushlock-*/*.log
+          retention-days: 3
+          if-no-files-found: ignore
+
   zero-to-running:
     name: "zero to running: workspace CLI (${{ matrix.os }})"
     if: github.event_name != 'schedule'

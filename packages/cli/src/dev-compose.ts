@@ -11,6 +11,7 @@ import { spawnSync } from "node:child_process"
 import { startProxyDevApp, resolveProxyDevScript } from "./app/proxy-dev-app.js"
 import { loadSchemaAst } from "./config.js"
 import { withComposeSchemaPushLock } from "./schema-push-lock.js"
+import { acquireComposeProjectLock, withComposeProjectLock } from "./compose-project-lock.js"
 import {
   COMPOSE_DEV_KONG_PORT,
   connectionString,
@@ -139,6 +140,16 @@ function hostComposeDbUrl(cwd: string): string {
  * on the host (SUPATYPE_DEV_DB_PORT) so the local engine binary can connect.
  */
 export async function ensureDockerDbPublishedForHostEngine(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  brand?: DockerBrandOptions,
+): Promise<void> {
+  await withComposeProjectLock(cwd, "supatype (publishing Postgres to the host)", () =>
+    ensureDockerDbPublishedForHostEngineUnlocked(cwd, config, brand),
+  )
+}
+
+async function ensureDockerDbPublishedForHostEngineUnlocked(
   cwd: string,
   config: SupatypeProjectConfig,
   brand?: DockerBrandOptions,
@@ -732,7 +743,23 @@ async function refreshSchemaArtifacts(
   }
 }
 
+/**
+ * Every schema push through compose, holding the project's Compose lock. Reentrant, so `push` and
+ * dev startup (which already hold it) pass straight through; the dev watcher's pushes take it here.
+ */
 async function runComposeSchemaPush(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  paths: SelfHostComposePaths,
+  schemaPath: string,
+  composeProject: string,
+): Promise<void> {
+  await withComposeProjectLock(cwd, "supatype dev (applying a schema change)", () =>
+    runComposeSchemaPushUnlocked(cwd, config, paths, schemaPath, composeProject),
+  )
+}
+
+async function runComposeSchemaPushUnlocked(
   cwd: string,
   config: SupatypeProjectConfig,
   paths: SelfHostComposePaths,
@@ -962,6 +989,10 @@ async function runComposeEngineDiff(
  * through the local engine binary.
  */
 export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfig): Promise<DiffResult> {
+  return withComposeProjectLock(cwd, "supatype diff", () => diffSchemaDockerUnlocked(cwd, config))
+}
+
+async function diffSchemaDockerUnlocked(cwd: string, config: SupatypeProjectConfig): Promise<DiffResult> {
   if (resolveRuntimeProvider(config) !== "docker") {
     throw new Error("diffSchemaDocker requires provider: docker")
   }
@@ -1032,6 +1063,12 @@ export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfi
  * through the local engine binary (AST v2, contributor builds).
  */
 export async function pushSchemaDocker(cwd: string, config: SupatypeProjectConfig): Promise<void> {
+  // The whole sequence, not only the engine run: rewriting `.env` and the compose file and the
+  // `up -d` calls are what raced a running `dev` watcher on the same `db` container.
+  await withComposeProjectLock(cwd, "supatype push", () => pushSchemaDockerUnlocked(cwd, config))
+}
+
+async function pushSchemaDockerUnlocked(cwd: string, config: SupatypeProjectConfig): Promise<void> {
   if (resolveRuntimeProvider(config) !== "docker") {
     throw new Error("pushSchemaDocker requires provider: docker")
   }
@@ -1103,6 +1140,11 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
 
   const devBrand = { intro: "Local development" }
   const localServerImage = await ensureLocalServerDockerImage(cwd, config, devBrand)
+
+  // Held from the first write to `.env` until the stack is up, then released so that `push` and
+  // `diff` in another terminal can run; the watcher takes it again for each push. A throw on the
+  // way ends the process (`cli.ts` exits 1), and the lock's exit hook releases it then.
+  const releaseStartupLock = await acquireComposeProjectLock(cwd, "supatype dev (starting the stack)")
 
   ensureDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, devDbPort)
 
@@ -1279,6 +1321,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
 
   const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
   await provisionDockerStorageBuckets(ast, kongPort, serviceRoleKey)
+  releaseStartupLock()
 
   const pidDir = join(homedir(), ".supatype", "projects", config.project.name, "pid")
   mkdirSync(pidDir, { recursive: true })
