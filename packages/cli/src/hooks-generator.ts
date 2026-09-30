@@ -83,12 +83,15 @@ export function generateHooksModule(ast: unknown): string | null {
 //   })
 
 /**
- * Lexical editor state as JSON, or the plain string accepted for seeds and defaults.
+ * Lexical editor state as JSON.
  *
  * Structural rather than imported: the precise \`SerializedEditorState\` lives in
  * \`@supatype/types/lexical\`, which a Deno function has no way to resolve.
  */
-export type RichTextValue = { readonly root: { readonly children: readonly unknown[] } } | string
+export type RichTextValue = { readonly root: { readonly children: readonly unknown[] } }
+
+/** A stored file, and the bucket it went to. */
+export type StorageReference = { readonly bucket: string; readonly path: string }
 
 export interface HookTables {
 ${tableEntries}
@@ -412,11 +415,20 @@ function json(body: unknown, status: number): Response {
  * column emitted a module that failed to compile in the user's editor. Caught by compiling the
  * generated file in a test rather than by a reader reporting it.
  */
+/**
+ * The shared type names, as a Deno module can spell them.
+ *
+ * `RichText` resolves through `@supatype/types/lexical`, which a Deno function has no way to
+ * reach, so the module declares a structural stand-in and the generated rows point at that.
+ * `StorageReference` needs no import and is declared here as itself.
+ */
 function denoSafe(source: string): string {
-  return source.replaceAll(
-    'import("@supatype/types/lexical").SerializedEditorState',
-    "RichTextValue",
-  )
+  return source
+    .replaceAll("RichText", "RichTextValue")
+    .replaceAll(
+      'import("@supatype/types/lexical").SerializedEditorState',
+      "RichTextValue",
+    )
 }
 
 /** Re-indent a generated type literal so the emitted file reads as if it were written by hand. */
