@@ -2,7 +2,11 @@ import type { Command } from "commander"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { hooksPathFromProject, schemaPathFromProject } from "../project-config.js"
 import { writeHooksModule } from "../model-hooks.js"
-import { writeGeneratedTypes } from "../type-generation.js"
+import {
+  DEFAULT_CLIENT_PATH,
+  DEFAULT_TYPES_PATH,
+  writeGeneratedTypes,
+} from "../type-generation.js"
 import { error, info } from "../ui/messages.js"
 
 export function registerGenerate(program: Command): void {
@@ -14,8 +18,8 @@ export function registerGenerate(program: Command): void {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
       const schemaPath = schemaPathFromProject(config, cwd)
-      const outputTypesPath = config.output?.types ?? "types/database.ts"
-      const outputClientPath = config.output?.client ?? "supatype/generated/index.d.ts"
+      const outputTypesPath = config.output?.types ?? DEFAULT_TYPES_PATH
+      const outputClientPath = config.output?.client ?? DEFAULT_CLIENT_PATH
 
       info("Loading schema...")
       const ast = loadSchemaAst(schemaPath, cwd)

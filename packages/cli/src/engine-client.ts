@@ -149,6 +149,7 @@ export async function engineHealth(): Promise<boolean> {
  *   /introspect  → engine introspect
  *   /validate    → engine validate
  *   /admin       → engine admin (admin-config JSON on stdout)
+ *   /seed        → engine seed (result document JSON on stdout)
  */
 export async function engineRequest<T = unknown>(
   endpoint: string,
@@ -171,6 +172,19 @@ export async function engineRequest<T = unknown>(
     writeFileSync(gzPath, Buffer.from(body["schema_sources_gz_base64"], "base64"))
     cleanup.push(gzPath)
   }
+  // One file per seed document. The engine takes `--ir` once per document rather than one
+  // combined blob, so a failure can name the file it was in.
+  const irPaths: string[] = []
+  const documents = body["ir_documents"]
+  if (Array.isArray(documents)) {
+    documents.forEach((document, index) => {
+      const irPath = join(tmpDir, `ir-${Date.now()}-${index}.json`)
+      writeFileSync(irPath, typeof document === "string" ? document : JSON.stringify(document))
+      cleanup.push(irPath)
+      irPaths.push(irPath)
+    })
+  }
+
   if (body["schema_sources_manifest"] !== undefined) {
     manifestPath = join(tmpDir, `manifest-${Date.now()}.json`)
     writeFileSync(manifestPath, JSON.stringify(body["schema_sources_manifest"]))
@@ -180,6 +194,7 @@ export async function engineRequest<T = unknown>(
   const args = endpointToArgs(endpoint, body, reqFile, {
     ...(gzPath !== undefined ? { gzPath } : {}),
     ...(manifestPath !== undefined ? { manifestPath } : {}),
+    ...(irPaths.length > 0 ? { irPaths } : {}),
   })
 
   const result = spawnSync(bin, args, {
@@ -191,7 +206,16 @@ export async function engineRequest<T = unknown>(
     try { unlinkSync(f) } catch { /* ignore */ }
   }
 
-  if (result.status !== 0) {
+  // A failed seed is an answer, not a crash.
+  //
+  // `engine seed` exits 1 when the seed itself failed and prints the result document on
+  // stdout: which file, what it wrote before it stopped, and the error in the schema's own
+  // terms. Treating a non-zero exit as "no output" threw all of that away and reported
+  // `Engine /seed failed (exit 1): (no output)`, which is worse than the raw Postgres error
+  // it replaced. Anything without a document to read still throws.
+  const reportsFailureAsData = endpoint === "/seed" && (result.stdout?.trim().length ?? 0) > 0
+
+  if (result.status !== 0 && !reportsFailureAsData) {
     const stderr = result.stderr?.trim() || "(no output)"
     throw new EngineError(
       `Engine ${endpoint} failed (exit ${result.status}): ${stderr}`,
@@ -221,7 +245,7 @@ function endpointToArgs(
   endpoint: string,
   body: Record<string, unknown>,
   reqFile: string,
-  sources?: { gzPath?: string; manifestPath?: string },
+  sources?: { gzPath?: string; manifestPath?: string; irPaths?: string[] },
 ): string[] {
   const dbUrl = (body["database_url"] as string | undefined) ?? ""
   const schema = (body["schema"] as string | undefined) ?? "public"
@@ -259,7 +283,32 @@ function endpointToArgs(
 
     case "/generate": {
       const lang = (body["lang"] as string | undefined) ?? "typescript"
-      return ["generate", "--input", reqFile, "--lang", lang]
+      const artifact = (body["artifact"] as string | undefined) ?? "types"
+      return ["generate", "--input", reqFile, "--lang", lang, "--artifact", artifact]
+    }
+
+    case "/seed": {
+      // `--status` reads the ledger and needs no schema, so it does not take `--input`:
+      // passing one would make the command fail on a project whose schema has moved on.
+      if (body["status"] === true) {
+        return ["seed", "--database-url", dbUrl, "--status"]
+      }
+      const documents = (sources?.irPaths ?? []).flatMap((path) => ["--ir", path])
+      const environment =
+        typeof body["environment"] === "string" ? ["--environment", body["environment"]] : []
+      return [
+        "seed",
+        "--input",
+        reqFile,
+        ...documents,
+        "--database-url",
+        dbUrl,
+        "--schema",
+        schema,
+        ...environment,
+        ...(body["atomic"] === true ? ["--atomic"] : []),
+        ...(body["run_once"] === true ? ["--run-once"] : []),
+      ]
     }
 
     case "/introspect":
