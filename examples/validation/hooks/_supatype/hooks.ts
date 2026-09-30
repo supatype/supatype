@@ -20,59 +20,65 @@
 //   })
 
 /**
- * Lexical editor state as JSON, or the plain string accepted for seeds and defaults.
+ * Lexical editor state as JSON.
  *
  * Structural rather than imported: the precise `SerializedEditorState` lives in
  * `@supatype/types/lexical`, which a Deno function has no way to resolve.
+ *
+ * A hook writing to a rich text column may hand back a plain string instead; a trigger
+ * normalises it into one of these, so what a later read returns is always the document.
  */
-export type RichTextValue = { readonly root: { readonly children: readonly unknown[] } } | string
+export type RichTextValue = { readonly root: { readonly children: readonly unknown[] } }
+
+/** A stored file, and the bucket it went to. */
+export type StorageReference = { readonly bucket: string; readonly path: string }
 
 export interface HookTables {
   "product": {
     Row: {
-      availableFrom: string | null
-      availableUntil: string | null
-      description: (RichTextValue | string) | null
-      headline: { [locale: string]: string } | null
       id: string
       name: string
+      slug: string | null
+      description: RichTextValue | null
+      tags: Record<string, unknown> | null
+      setupItems: Record<string, unknown> | null
       notes: Record<string, unknown> | null
       rating: number | null
-      setupItems: Record<string, unknown> | null
+      availableFrom: string | null
+      availableUntil: string | null
+      headline: { [locale: string]: string } | null
       sku: string | null
-      slug: string | null
       status: "draft" | "published"
-      tags: Record<string, unknown> | null
     }
     Insert: {
-      availableFrom?: string | null
-      availableUntil?: string | null
-      description?: (RichTextValue | string) | null
-      headline?: { [locale: string]: string } | null
       id?: string
       name: string
+      slug?: string | null
+      description?: RichTextValue | string | null
+      tags?: Record<string, unknown> | null
+      setupItems?: Record<string, unknown> | null
       notes?: Record<string, unknown> | null
       rating?: number | null
-      setupItems?: Record<string, unknown> | null
-      sku?: string | null
-      slug?: string | null
-      status: "draft" | "published"
-      tags?: Record<string, unknown> | null
-    }
-    Update: {
       availableFrom?: string | null
       availableUntil?: string | null
-      description?: (RichTextValue | string) | null
       headline?: { [locale: string]: string } | null
+      sku?: string | null
+      status: "draft" | "published"
+    }
+    Update: {
       id?: string
       name?: string
+      slug?: string | null
+      description?: RichTextValue | string | null
+      tags?: Record<string, unknown> | null
+      setupItems?: Record<string, unknown> | null
       notes?: Record<string, unknown> | null
       rating?: number | null
-      setupItems?: Record<string, unknown> | null
+      availableFrom?: string | null
+      availableUntil?: string | null
+      headline?: { [locale: string]: string } | null
       sku?: string | null
-      slug?: string | null
       status?: "draft" | "published"
-      tags?: Record<string, unknown> | null
     }
   }
 }

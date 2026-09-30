@@ -2,51 +2,51 @@
 
 declare module "@supatype/client" {
   interface SupatypeModels {
-    chat_message: {
-      Row: {
-  auth_user_id: string | null
-  authorName: string | null
-  body: string
-  created_at: string
-  id: string
-  room: string
-}
-      Insert: {
-  auth_user_id?: string | null
-  authorName?: string | null
-  body: string
-  created_at?: string
-  id?: string
-  room: string
-}
-      Update: {
-  auth_user_id?: string | null
-  authorName?: string | null
-  body?: string
-  created_at?: string
-  id?: string
-  room?: string
-}
-    }
     profile: {
       Row: {
-  created_at: string
-  displayName: string | null
-  id: string
-  updated_at: string
-}
+        id: string
+        displayName: string | null
+        created_at: string
+        updated_at: string
+      }
       Insert: {
-  created_at?: string
-  displayName?: string | null
-  id?: string
-  updated_at?: string
-}
+        id?: string
+        displayName?: string | null
+        created_at?: string
+        updated_at?: string
+      }
       Update: {
-  created_at?: string
-  displayName?: string | null
-  id?: string
-  updated_at?: string
-}
+        id?: string
+        displayName?: string | null
+        created_at?: string
+        updated_at?: string
+      }
+    }
+    chat_message: {
+      Row: {
+        id: string
+        room: string
+        body: string
+        auth_user_id: string | null
+        authorName: string | null
+        created_at: string
+      }
+      Insert: {
+        id?: string
+        room: string
+        body: string
+        auth_user_id?: string | null
+        authorName?: string | null
+        created_at?: string
+      }
+      Update: {
+        id?: string
+        room?: string
+        body?: string
+        auth_user_id?: string | null
+        authorName?: string | null
+        created_at?: string
+      }
     }
   }
 }

@@ -10,109 +10,118 @@
 
 import { registerFieldKinds } from "@supatype/client"
 
+import type { SerializedEditorState } from "@supatype/types/lexical"
+
+export type RichText = SerializedEditorState
+
+export type StorageReference = {
+  bucket: string
+  path: string
+}
+
 declare module "@supatype/client" {
   interface SupatypeModels {
-    comment: {
+    user: {
       Row: {
-  auth_user_id: string | null
-  author_profile_id: string | null
-  body: string
-  created_at: string
-  id: string
-  post_id: string | null
-  updated_at: string
-}
+        id: string
+        name: string
+        avatarUrl: StorageReference | null
+        created_at: string
+        updated_at: string
+      }
       Insert: {
-  auth_user_id?: string | null
-  author_profile_id?: string | null
-  body: string
-  created_at?: string
-  id?: string
-  post_id?: string | null
-  updated_at?: string
-}
+        id?: string
+        name: string
+        avatarUrl?: StorageReference | null
+        created_at?: string
+        updated_at?: string
+      }
       Update: {
-  auth_user_id?: string | null
-  author_profile_id?: string | null
-  body?: string
-  created_at?: string
-  id?: string
-  post_id?: string | null
-  updated_at?: string
-}
+        id?: string
+        name?: string
+        avatarUrl?: StorageReference | null
+        created_at?: string
+        updated_at?: string
+      }
     }
     post: {
       Row: {
-  attachment: { bucket: string; path: string } | null
-  auth_user_id: string | null
-  author_profile_id: string | null
-  body: { [locale: string]: (import("@supatype/types/lexical").SerializedEditorState | string) }
-  coverImage: { bucket: string; path: string } | null
-  created_at: string
-  excerpt: string | null
-  feedCaption: string | null
-  id: string
-  published_at: string | null
-  slug: string | null
-  teaser: string | null
-  title: string
-  updated_at: string
-}
+        id: string
+        title: string
+        slug: string | null
+        teaser: string | null
+        excerpt: string | null
+        feedCaption: string | null
+        body: { [locale: string]: RichText }
+        coverImage: StorageReference | null
+        attachment: StorageReference | null
+        auth_user_id: string | null
+        author_profile_id: string | null
+        published_at: string | null
+        created_at: string
+        updated_at: string
+      }
       Insert: {
-  attachment?: { bucket: string; path: string } | null
-  auth_user_id?: string | null
-  author_profile_id?: string | null
-  body: { [locale: string]: (import("@supatype/types/lexical").SerializedEditorState | string) }
-  coverImage?: { bucket: string; path: string } | null
-  created_at?: string
-  excerpt?: string | null
-  feedCaption?: string | null
-  id?: string
-  published_at?: string | null
-  slug?: string | null
-  teaser?: string | null
-  title: string
-  updated_at?: string
-}
+        id?: string
+        title: string
+        slug?: string | null
+        teaser?: string | null
+        excerpt?: string | null
+        feedCaption?: string | null
+        body: { [locale: string]: RichText | string }
+        coverImage?: StorageReference | null
+        attachment?: StorageReference | null
+        auth_user_id?: string | null
+        author_profile_id?: string | null
+        published_at?: string | null
+        created_at?: string
+        updated_at?: string
+      }
       Update: {
-  attachment?: { bucket: string; path: string } | null
-  auth_user_id?: string | null
-  author_profile_id?: string | null
-  body?: { [locale: string]: (import("@supatype/types/lexical").SerializedEditorState | string) }
-  coverImage?: { bucket: string; path: string } | null
-  created_at?: string
-  excerpt?: string | null
-  feedCaption?: string | null
-  id?: string
-  published_at?: string | null
-  slug?: string | null
-  teaser?: string | null
-  title?: string
-  updated_at?: string
-}
+        id?: string
+        title?: string
+        slug?: string | null
+        teaser?: string | null
+        excerpt?: string | null
+        feedCaption?: string | null
+        body?: { [locale: string]: RichText | string }
+        coverImage?: StorageReference | null
+        attachment?: StorageReference | null
+        auth_user_id?: string | null
+        author_profile_id?: string | null
+        published_at?: string | null
+        created_at?: string
+        updated_at?: string
+      }
     }
-    user: {
+    comment: {
       Row: {
-  avatarUrl: { bucket: string; path: string } | null
-  created_at: string
-  id: string
-  name: string
-  updated_at: string
-}
+        id: string
+        auth_user_id: string | null
+        author_profile_id: string | null
+        body: string
+        post_id: string | null
+        created_at: string
+        updated_at: string
+      }
       Insert: {
-  avatarUrl?: { bucket: string; path: string } | null
-  created_at?: string
-  id?: string
-  name: string
-  updated_at?: string
-}
+        id?: string
+        auth_user_id?: string | null
+        author_profile_id?: string | null
+        body: string
+        post_id?: string | null
+        created_at?: string
+        updated_at?: string
+      }
       Update: {
-  avatarUrl?: { bucket: string; path: string } | null
-  created_at?: string
-  id?: string
-  name?: string
-  updated_at?: string
-}
+        id?: string
+        auth_user_id?: string | null
+        author_profile_id?: string | null
+        body?: string
+        post_id?: string | null
+        created_at?: string
+        updated_at?: string
+      }
     }
   }
 }

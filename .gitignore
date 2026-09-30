@@ -50,3 +50,10 @@ src/lib/supatype.ts
 # dev runs Vite from source, so a committed copy is only ever stale: it shipped
 # an outdated client field name once already.
 packages/studio/dist-app/
+
+# The generated seed builder. `supatype generate` writes it, it needs no database and no
+# running stack, and the CLI puts this same line in every new project's .gitignore. An example
+# that committed it would be doing the opposite of what the scaffold tells people to do.
+# Anchored with `**/` because a pattern containing a slash is relative to the .gitignore that
+# holds it, and this one sits at the monorepo root rather than in each example.
+**/supatype/generated/seed.ts

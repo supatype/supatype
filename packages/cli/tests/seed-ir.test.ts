@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from "vitest"
 import { readFileSync } from "node:fs"
+import { createHash } from "node:crypto"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { SeedCollector, type Manifest } from "../src/seed-ir.js"
@@ -21,17 +22,23 @@ import { eq, expr, type SeedDb, type SeedOperation } from "../src/seed.js"
 
 const here = dirname(fileURLToPath(import.meta.url))
 
-const GOLDEN = resolve(
-  here,
-  "..",
-  "..",
-  "..",
-  "..",
-  "supatype-schema-engine",
-  "tests",
-  "fixtures",
-  "seed_golden_ir.json",
-)
+const GOLDEN = resolve(here, "fixtures", "seed_golden_ir.json")
+
+/**
+ * The engine's copy of the same file, and the reason a second copy is safe.
+ *
+ * This used to read the engine's fixture directly across a sibling checkout, which is the right
+ * instinct and does not survive CI: this repository is cloned on its own, so the path did not
+ * exist and the test had never once run there.
+ *
+ * So the file is vendored, and both repositories assert this hash. Editing either copy turns its
+ * own suite red until the hash is updated, and updating the hash turns the other repository red
+ * until its copy follows. Neither can drift quietly, which is the only property the shared path
+ * was buying.
+ *
+ * Engine side: `tests/seed_ir_tests.rs`, same constant.
+ */
+const GOLDEN_SHA256 = "6ec5e51820868e0e303abe3c5aa57e034ff27c53374998d760d425863e538ea6"
 
 const FINGERPRINT = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
 
@@ -418,7 +425,12 @@ describe("the expression helpers", () => {
 
 describe("where the fixture lives", () => {
   it("is the engine's copy, not a second one that can drift", () => {
-    expect(GOLDEN).toContain(join("supatype-schema-engine", "tests", "fixtures"))
+    expect(GOLDEN).toContain(join("tests", "fixtures"))
+    // Line endings normalised first. git hands this file out as CRLF on Windows and LF on
+    // Linux, so hashing the bytes as checked out pins the platform rather than the content.
+    const normalised = readFileSync(GOLDEN, "utf8").split("\r\n").join("\n")
+    const digest = createHash("sha256").update(normalised, "utf8").digest("hex")
+    expect(digest, "the vendored copy has drifted from the engine's").toBe(GOLDEN_SHA256)
     expect(() => readFileSync(GOLDEN, "utf8")).not.toThrow()
   })
 })
