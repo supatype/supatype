@@ -158,6 +158,24 @@ export function composePullNeedsIgnoreFailures(
  * Uses config pin when set; otherwise CDN engine semver (Docker Hub `:latest` can lag).
  * Does not touch `.env`, server/postgres still use compose `:latest` defaults.
  */
+/**
+ * Whether this project's database is published to the host, and so needs a `DATABASE_URL` that
+ * points at it.
+ *
+ * One function because the two halves came apart once. Publishing was made unconditional for a
+ * local stack, because seeding is a host process and a database nothing on the host can reach is
+ * a database no seed can use. The code that writes `DATABASE_URL` to match kept an older
+ * condition, `overrides.engine`, so a project without a local engine build got a database
+ * published on 54329 and a `DATABASE_URL` still pointing at 5432. `supatype seed` then timed out
+ * and advised checking that the stack was running, which it was.
+ *
+ * The exception is an external database. There is no `db` container to publish, and that URL
+ * belongs to the operator: writing it once clobbered a real external Postgres.
+ */
+export function publishesDbToHost(config: SupatypeProjectConfig): boolean {
+  return !usesExternalDatabase(config)
+}
+
 export async function schemaEngineImageForPush(
   config: SupatypeProjectConfig,
 ): Promise<string | undefined> {
@@ -415,7 +433,7 @@ ${studioService}
   //
   // This exposes nothing new: the dev port below is bound to `127.0.0.1`, so it is reachable from
   // this machine and from nowhere else.
-  const publishDbToHost = true
+  const publishDbToHost = publishesDbToHost(config)
   const dbPorts = publishDbToHost
     ? devLocal
       ? `    ports:

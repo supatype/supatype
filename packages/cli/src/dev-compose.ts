@@ -39,6 +39,7 @@ import {
   composeDockerImageEnv,
   composeProjectName,
   exitComposeFailed,
+  publishesDbToHost,
   runDockerCompose,
   schemaEngineImageForPush,
   writeSelfHostCompose,
@@ -145,10 +146,10 @@ export async function ensureDockerDbPublishedForHostEngine(
   if (resolveRuntimeProvider(config) !== "docker") {
     throw new Error("ensureDockerDbPublishedForHostEngine requires provider: docker")
   }
-  if (!hasEngineOverride(config)) {
+  if (!publishesDbToHost(config)) {
     throw new Error(
-      "Docker Postgres is not published to the host without overrides.engine. " +
-        "Set overrides.engine in supatype.local.config.ts or pass --connection.",
+      "This project uses an external database, so there is no Docker Postgres to publish. " +
+        "Point DATABASE_URL at it, or pass --connection.",
     )
   }
 
@@ -1039,10 +1040,10 @@ export async function pushSchemaDocker(cwd: string, config: SupatypeProjectConfi
   // No dev db port for an external database: `ensureDevDbPort` allocates a host port for the `db`
   // container *and persists a matching DATABASE_URL*, which overwrote the operator's own URL, the
   // one the whole stack and every CLI command reads.
-  const devDbPort =
-    hasEngineOverride(config) && !usesExternalDatabase(config)
-      ? await resolveDevDbPort(cwd)
-      : undefined
+  // Whatever compose publishes, `DATABASE_URL` has to point at. Gating this on
+  // `overrides.engine` while the compose file published unconditionally is what left a project
+  // with a database on 54329 and a URL still saying 5432.
+  const devDbPort = publishesDbToHost(config) ? await resolveDevDbPort(cwd) : undefined
 
   const now = Math.floor(Date.now() / 1000)
   const jwtBase = { iss: "supatype", iat: now, exp: now + 315_360_000 }
@@ -1090,10 +1091,10 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   // No dev db port for an external database: `ensureDevDbPort` allocates a host port for the `db`
   // container *and persists a matching DATABASE_URL*, which overwrote the operator's own URL, the
   // one the whole stack and every CLI command reads.
-  const devDbPort =
-    hasEngineOverride(config) && !usesExternalDatabase(config)
-      ? await resolveDevDbPort(cwd)
-      : undefined
+  // Whatever compose publishes, `DATABASE_URL` has to point at. Gating this on
+  // `overrides.engine` while the compose file published unconditionally is what left a project
+  // with a database on 54329 and a URL still saying 5432.
+  const devDbPort = publishesDbToHost(config) ? await resolveDevDbPort(cwd) : undefined
 
   const now = Math.floor(Date.now() / 1000)
   const jwtBase = { iss: "supatype", iat: now, exp: now + 315_360_000 }
