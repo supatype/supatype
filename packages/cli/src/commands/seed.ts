@@ -14,9 +14,10 @@
 import type { Command } from "commander"
 import { existsSync, readdirSync } from "node:fs"
 import { join, relative, resolve, sep } from "node:path"
-import { isLinkedToCloudProject } from "../binary-cache.js"
+import { isLinkedToCloudProject, pinnedVersion } from "../binary-cache.js"
 import { loadConfig, loadSchemaAst, type SupatypeConfig } from "../config.js"
-import { ensureEngine, engineRequest } from "../engine-client.js"
+import { engineRequest, ensureEngine } from "../engine-client.js"
+import { seedUnsupportedByPinnedEngine } from "../engine-floor.js"
 import { pgSchema, projectRootFromConfig, schemaPathFromProject } from "../project-config.js"
 import { DsnNotFound, redact, resolveSeedDsn } from "../seed-connection.js"
 import { collectSeed, SeedCollectionFailed } from "../seed-runner.js"
@@ -85,6 +86,14 @@ export async function runSeed(file: string | undefined, opts: SeedFlags): Promis
       "This project is linked to Supatype Cloud. Refusing to run seeds locally.\n" +
         "  Pass --force only if you intend to target this linked project (advanced).",
     )
+    return 2
+  }
+
+  // Before the connection is resolved and before a builder is looked for: an engine that cannot
+  // seed makes both of those pointless, and the pin is the cheapest thing here to read.
+  const tooOld = seedUnsupportedByPinnedEngine(pinnedVersion("engine", config))
+  if (tooOld !== undefined) {
+    error(tooOld)
     return 2
   }
 

@@ -154,7 +154,7 @@ file and the position in the document that caused it.
 |-----------|---------|
 | `0` | Applied |
 | `1` | A seed failed: the data is wrong |
-| `2` | The run could not start: config, connection, Cloud guard, or a missing builder |
+| `2` | The run could not start: config, connection, Cloud guard, a missing builder, or an engine pinned too old to seed |
 
 The split lets CI tell "fix the seed" from "fix the environment".
 
