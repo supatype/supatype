@@ -18,6 +18,7 @@ Guide for working with Supatype projects. If unsure about a command or flag, run
 | Config and `.env` | [references/config.md](references/config.md) |
 | Schema and access rules | [references/schema.md](references/schema.md) |
 | CLI commands | [references/cli.md](references/cli.md) |
+| Seeding | [references/seeding.md](references/seeding.md) |
 | Frontend, client, React hooks + auth components | [references/frontend.md](references/frontend.md) |
 | REST GET caching (client + server) | [references/caching.md](references/caching.md) |
 | Self-host production | [references/self-host.md](references/self-host.md) |
@@ -111,5 +112,6 @@ Add `@supatype/client` when wiring a frontend. Run `supatype push` after schema 
 
 - **Schema design, access, relations, buckets** → [references/schema.md](references/schema.md)
 - **Command flags and workflow** → [references/cli.md](references/cli.md)
+- **Seed data, the ledger, `runOnce`** → [references/seeding.md](references/seeding.md)
 - **Astro/Vite/Next wiring, React hooks, auth UI components** → [references/frontend.md](references/frontend.md)
 - **Production compose** → [references/self-host.md](references/self-host.md)
