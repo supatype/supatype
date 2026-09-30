@@ -595,6 +595,75 @@ export type FromNow<TAmount extends number, TUnit extends TimeUnit> = Access<"Fr
   readonly unit: TUnit
 }>
 
+/**
+ * A multi-unit duration for {@link After} and {@link Before}.
+ *
+ * Every unit is optional, and omitted units are zero, so `{ days: 30 }` says what it
+ * looks like. Components are non-negative: direction belongs to the operand name, not to
+ * the sign, which is the rule {@link Ago} and {@link FromNow} already follow.
+ */
+export type TimeInterval = {
+  readonly years?: number
+  readonly months?: number
+  readonly weeks?: number
+  readonly days?: number
+  readonly hours?: number
+  readonly minutes?: number
+  readonly seconds?: number
+}
+
+/**
+ * `TimeInterval`, but a key that is not a unit is an error rather than ignored.
+ *
+ * A plain `extends TimeInterval` would accept `{ dayz: 30 }`: every unit is optional, so
+ * an object with none of them and one typo satisfies the constraint, and excess-property
+ * checking does not apply to a type argument the way it applies to a literal. The engine
+ * then reads the typo as absent and the interval as empty, which it refuses, but the
+ * author hears about it at push rather than in the editor.
+ *
+ * Mapping the unknown keys to `never` is what moves that to compile time.
+ */
+export type ExactInterval<TInterval> = TimeInterval &
+  Record<Exclude<keyof TInterval, keyof TimeInterval>, never>
+
+/**
+ * The bases an offset can be measured from: the clock, or a truncation of it.
+ *
+ * Deliberately not any operand. A column or a claim would render as an expression whose
+ * value depends on the row or the caller, which is not an offsetable point in time, and
+ * the engine refuses one with a message naming this set.
+ */
+export type OffsetBase = Now | StartOf<TruncUnit>
+
+/**
+ * A duration after a point in time: `After<Now, { days: 30 }>` is
+ * `now() + INTERVAL '30 days'`, and `After<StartOf<"day">, { days: 30, hours: 9 }>` is
+ * `date_trunc('day', now()) + INTERVAL '30 days 9 hours'`.
+ *
+ * {@link Ago} and {@link FromNow} carry one amount and one unit, so "thirty days from now
+ * at 09:00" could not be said before this: it needs a truncation composed with a
+ * multi-unit duration. `After<Now, ...>` and `Before<Now, ...>` subsume both of them, which
+ * are kept as they are.
+ */
+export type After<TBase extends OffsetBase, TInterval extends ExactInterval<TInterval>> = Access<
+  "After",
+  {
+    readonly kind: "After"
+    readonly base: TBase
+    readonly interval: TInterval
+  }
+>
+
+/** A duration before a point in time. See {@link After}. */
+export type Before<TBase extends OffsetBase, TInterval extends ExactInterval<TInterval>> = Access<
+  "Before",
+  {
+    readonly kind: "Before"
+    readonly base: TBase
+    readonly interval: TInterval
+  }
+>
+
 // ─── Comparisons ─────────────────────────────────────────────────────────────
 
 type Comparison<TName extends string, TLeft, TRight> = Access<TName, {
