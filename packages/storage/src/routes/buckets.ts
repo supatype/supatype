@@ -129,10 +129,11 @@ export async function empty(ctx: RequestContext): Promise<void> {
     sendJson(ctx.res, 404, { error: "Bucket not found" })
     return
   }
-  const removed = await db.emptyBucket(id)
-  await deleteS3Objects(
-    id,
-    removed.map((o) => objectKey(o.name, o.version)),
+  await db.emptyBucket(id, (objects) =>
+    deleteS3Objects(
+      id,
+      objects.map((o) => objectKey(o.name, o.version)),
+    ),
   )
   sendJson(ctx.res, 200, { message: "Successfully emptied" })
 }
