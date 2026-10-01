@@ -190,16 +190,33 @@ export async function deleteBucketRow(id: string): Promise<boolean> {
 }
 
 /**
- * Delete every object row in a bucket, returning what was stored so the caller can delete the bytes.
+ * Delete every object in a bucket: its rows, and through `deleteBytes`, its stored bytes.
  *
- * It returned nothing, so emptying a bucket removed its rows and left every file in S3.
+ * In one transaction, with the bytes deleted before it commits. Emptying used to remove only the
+ * rows and leave every file in S3; deleting the rows first and the bytes after would leave the
+ * files stranded if the object store failed part way, with no rows left to retry from. Here a
+ * failure rolls the rows back, and running it again finishes the job: deleting a key twice is
+ * harmless.
  */
-export async function emptyBucket(id: string): Promise<StoredObject[]> {
-  const res = await pool.query<StoredObject>(
-    `DELETE FROM storage.objects WHERE bucket_id = $1 RETURNING name, version`,
-    [id],
-  )
-  return res.rows
+export async function emptyBucket(
+  id: string,
+  deleteBytes: (objects: StoredObject[]) => Promise<void>,
+): Promise<void> {
+  const client = await pool.connect()
+  try {
+    await client.query("BEGIN")
+    const res = await client.query<StoredObject>(
+      `DELETE FROM storage.objects WHERE bucket_id = $1 RETURNING name, version`,
+      [id],
+    )
+    await deleteBytes(res.rows)
+    await client.query("COMMIT")
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => undefined)
+    throw err
+  } finally {
+    client.release()
+  }
 }
 
 // ─── Object metadata ────────────────────────────────────────────────────────────

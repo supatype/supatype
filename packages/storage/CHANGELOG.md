@@ -4,6 +4,13 @@
 
 ### Bug Fixes
 
+* **signed URLs:** a signed URL must carry this service's own token. Any token without a `.` was
+  passed through for S3 to validate, and the object was then fetched with the service's own
+  credentials, so `GET /object/sign/<bucket>/<path>?token=x` read any private object with no
+  session. Every bucket now gets the service's token, resolved to the live version when used; a
+  public bucket's S3 presigned URL stopped working once its object was overwritten.
+* **buckets:** emptying a bucket deletes the bytes inside the transaction that deletes the rows,
+  so a failing object store rolls the rows back and the empty can be retried.
 * **objects:** uploads, overwrites, deletes and lists run as the caller, so the row level security
   policies generated from each bucket's rules decide them. They ran on the owner connection, which
   bypasses those policies, and the service decided access itself from `access_mode` alone:

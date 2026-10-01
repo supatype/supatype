@@ -276,17 +276,12 @@ export async function downloadSigned(ctx: RequestContext): Promise<void> {
   }
 
   // ── Pre-signed URL verification (task 45) ──────────────────────────────────
-  // Try application-level HMAC token first, fall back to S3 pre-signed URL proxy
-  const payload = verifySignedToken(token, bucketId, objectPath)
-  if (!payload) {
-    // The token might be an S3-level pre-signed URL token, check if it looks
-    // like a base64url.base64url pair (our format) vs. S3 query params
-    if (token.includes(".")) {
-      // It was our format but failed verification, reject
-      sendJson(ctx.res, 403, { error: "Invalid or expired signed URL" })
-      return
-    }
-    // Otherwise, treat as S3 pre-signed URL and let S3 validate it
+  // Only this service's own HMAC token. Anything else used to be passed through "for S3 to
+  // validate", but the object was then fetched with the service's own credentials, so nothing
+  // validated it and `?token=x` read any private object with no session at all.
+  if (!verifySignedToken(token, bucketId, objectPath)) {
+    sendJson(ctx.res, 403, { error: "Invalid or expired signed URL" })
+    return
   }
 
   // No CORS for private bucket signed URLs (task 46)
@@ -331,20 +326,12 @@ export async function createSignedUrl(ctx: RequestContext): Promise<void> {
     return
   }
 
-  // For private buckets, use our HMAC-signed tokens (task 45)
-  // For public buckets, use S3 pre-signed URLs
-  const isPrivate = bucket.access_mode === "private" || (!bucket.public && bucket.access_mode !== "public")
-
-  if (isPrivate) {
-    // Application-level HMAC-SHA256 signed token
-    const token = createSignedToken(bucketId, objectPath, expiresIn)
-    const signedUrl = `/object/sign/${bucketId}/${objectPath}?token=${token}`
-    sendJson(ctx.res, 200, { signedURL: signedUrl })
-  } else {
-    // S3-level pre-signed URL
-    const signedUrl = await s3.createSignedDownloadUrl(bucketId, s3.objectKey(obj.name, obj.version), expiresIn)
-    sendJson(ctx.res, 200, { signedURL: signedUrl })
-  }
+  // This service's HMAC token for every bucket (task 45), served through this service, which
+  // resolves the object's live version when the URL is used. A public bucket used to get an S3
+  // presigned URL to one version's key, which stopped working the moment the object was
+  // overwritten and its old version deleted.
+  const token = createSignedToken(bucketId, objectPath, expiresIn)
+  sendJson(ctx.res, 200, { signedURL: `/object/sign/${bucketId}/${objectPath}?token=${token}` })
 }
 
 // ─── Remove objects ─────────────────────────────────────────────────────────────

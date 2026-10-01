@@ -33,6 +33,8 @@ const stored = new Map<string, Buffer>()
 let failPutFor: string | null = null
 /** Runs after a put has stored its bytes, so a test can act mid-upload or fail it then. */
 let afterPut: ((bucket: string, key: string) => Promise<void>) | null = null
+/** When set, the next S3 batch delete fails, as an unreachable object store would. */
+let failNextDelete = false
 
 /** An object's S3 keys: `name` itself, and any `name/<version>`. */
 function keyIsFor(key: string, name: string): boolean {
@@ -54,6 +56,10 @@ vi.mock("../src/s3.js", async (importOriginal) => {
       return { body, contentType: "text/plain", contentLength: body.length }
     },
     deleteObjects: async (bucket: string, keys: string[]) => {
+      if (failNextDelete) {
+        failNextDelete = false
+        throw new Error("S3 is down")
+      }
       for (const key of keys) stored.delete(`${bucket}/${key}`)
     },
     deleteObject: async (bucket: string, key: string) => {
@@ -463,6 +469,49 @@ describe.skipIf(!dockerAvailable)("bucket rules, enforced by Postgres", () => {
     })
     expect(res.status).toBe(200)
     expect(keysOf("loose", name)).toEqual([])
+  })
+
+  // ─── Signed URLs and emptying, from review ──────────────────────────────────
+
+  it("refuses a signed URL that carries no valid token, rather than serving the object", async () => {
+    // Anything without a "." used to be passed through "for S3 to validate", and then fetched with
+    // the service's own credentials, so `?token=x` read any private object with no session.
+    const x = user()
+    const name = unique("private")
+    await upload(x.token, "vault", name, "secret")
+    const res = await fetch(`${base}/object/sign/vault/${name}?token=x`)
+    expect(res.status).toBe(403)
+  })
+
+  it("issues a signed URL that still serves the object after it is overwritten", async () => {
+    // A public bucket's signed URL was an S3 URL to one version's key, which an overwrite deletes.
+    const x = user()
+    const name = unique("signed")
+    await upload(x.token, "avatars", name, "first")
+    const signed = await fetch(`${base}/object/sign/avatars/${name}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${x.token}`, "content-type": "application/json" },
+      body: JSON.stringify({ expiresIn: 60 }),
+    })
+    const url = ((await signed.json()) as { signedURL: string }).signedURL
+    expect(url.startsWith("/object/sign/avatars/")).toBe(true)
+    await upload(x.token, "avatars", name, "second", true)
+    const served = await fetch(`${base}${url}`)
+    expect(served.status).toBe(200)
+    expect(await served.text()).toBe("second")
+  })
+
+  it("keeps a bucket's rows when emptying it fails to delete the bytes, so it can be retried", async () => {
+    const name = unique("retry-empty")
+    await upload(SERVICE, "loose", name, "x")
+    failNextDelete = true
+    const res = await fetch(`${base}/bucket/loose/empty`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${SERVICE}` },
+    })
+    expect(res.status).toBe(500)
+    expect(await row("loose", name)).toBeDefined()
+    expect(keysOf("loose", name)).toHaveLength(1)
   })
 
   it("drops a policy an earlier push created that the schema no longer names, and only that", async () => {
