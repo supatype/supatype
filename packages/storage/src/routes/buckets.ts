@@ -4,7 +4,9 @@ import * as db from "../db.js"
 import {
   ensureBucket as ensureS3Bucket,
   deleteBucket as deleteS3Bucket,
+  deleteObjects as deleteS3Objects,
   applyBucketPolicyFromConfig,
+  objectKey,
 } from "../s3.js"
 
 import type { BucketAccessMode } from "../db.js"
@@ -102,8 +104,7 @@ export async function update(ctx: RequestContext): Promise<void> {
 export async function remove(ctx: RequestContext): Promise<void> {
   const id = ctx.params["id"]!
   // Must be empty first
-  const objects = await db.listObjectRows(id, "", 1, 0)
-  if (objects.length > 0) {
+  if (await db.bucketHasObjects(id)) {
     sendJson(ctx.res, 400, { error: "Bucket not empty. Call /bucket/:id/empty first." })
     return
   }
@@ -128,6 +129,10 @@ export async function empty(ctx: RequestContext): Promise<void> {
     sendJson(ctx.res, 404, { error: "Bucket not found" })
     return
   }
-  await db.emptyBucket(id)
+  const removed = await db.emptyBucket(id)
+  await deleteS3Objects(
+    id,
+    removed.map((o) => objectKey(o.name, o.version)),
+  )
   sendJson(ctx.res, 200, { message: "Successfully emptied" })
 }
