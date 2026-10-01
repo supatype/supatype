@@ -105,7 +105,12 @@ sed -i "s/^SUPATYPE_KONG_PORT=.*/SUPATYPE_KONG_PORT=${KONG_PORT}/" "$PROJECT_DIR
 # which is a `compose down`. So the readiness checks below passed against a stack that was already
 # being torn down, and assertion 4 was the first step to touch the API, by which point there was
 # nothing listening. That is why assertions 4 through 6 had never once run.
-(cd "$PROJECT_DIR" && node "$CLI_BIN" dev) &
+#
+# Its output also goes to a file, which step 6 reads to know when the watcher has applied a schema
+# edit. Not hidden, so the upload-on-failure step picks it up.
+DEV_LOG="$PROJECT_DIR/conformance-dev.log"
+: > "$DEV_LOG"
+(cd "$PROJECT_DIR" && node "$CLI_BIN" dev) > >(tee -a "$DEV_LOG") 2>&1 &
 DEV_PID=$!
 
 echo "==> Waiting for the API (up to 300s)"
@@ -170,8 +175,20 @@ echo "==> Asserting what each kind does"
 # Its own step because it rewrites the schema and re-runs the CLI. This is the assertion that a
 # field can be *removed*: dropping one from a model carrying a draft view used to fail with
 # "cannot drop column ... because other objects depend on it", leaving the migration part-applied.
+#
+# The push is the `dev` watcher's, not one of our own. `dev` is still running and watching the
+# schema directory, so editing the file already starts a push; running `supatype push` on top of it
+# put two compose invocations on the same `db` container at once, and the loser failed with
+# "The container name .../supatype-conformance-db-1 is already in use". So: count the watcher's
+# push outcomes, edit, and wait for one more.
+PUSH_DONE_RE='\[supatype\] (Applied [0-9]+ operation\(s\)|Schema up to date|Schema applied)'
+PUSH_FAILED_RE='\[supatype\] (Schema push failed|docker compose failed)'
+count_matches() { grep -cE "$1" "$DEV_LOG" || true; }
+
 echo ""
 echo "==> Every kind can be dropped again"
+DONE_BEFORE="$(count_matches "$PUSH_DONE_RE")"
+FAILED_BEFORE="$(count_matches "$PUSH_FAILED_RE")"
 python3 - "$PROJECT_DIR/schema/index.ts" <<'PY'
 import io, re, sys
 p = sys.argv[1]
@@ -180,8 +197,17 @@ s = io.open(p, encoding="utf-8").read()
 kept = [l for l in s.split("\n") if not re.match(r"^  probe(?!Text\b)[A-Z]", l)]
 io.open(p, "w", encoding="utf-8", newline="\n").write("\n".join(kept))
 PY
-(cd "$PROJECT_DIR" && node "$CLI_BIN" push --yes >/dev/null)
-echo "  ok   every probe column dropped"
+PUSH_OUTCOME=""
+for _ in $(seq 1 90); do
+  if (( $(count_matches "$PUSH_FAILED_RE") > FAILED_BEFORE )); then PUSH_OUTCOME="failed"; break; fi
+  if (( $(count_matches "$PUSH_DONE_RE") > DONE_BEFORE )); then PUSH_OUTCOME="done"; break; fi
+  sleep 2
+done
+case "$PUSH_OUTCOME" in
+  done) echo "  ok   every probe column dropped" ;;
+  failed) echo "  FAIL the dev watcher could not push the drop (see $DEV_LOG)" >&2; exit 1 ;;
+  *) echo "  FAIL the dev watcher never pushed the drop within 180s" >&2; exit 1 ;;
+esac
 
 REMAINING="$(cd "$PROJECT_DIR" && node "$CLI_BIN" diff 2>&1 | tail -3)"
 case "$REMAINING" in
