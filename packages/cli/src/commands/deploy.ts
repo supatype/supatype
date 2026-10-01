@@ -27,6 +27,7 @@ import { TIER_LIMITS, type Tier } from "./deploy-types.js"
 import { spawnSync } from "node:child_process"
 import { error, info, plain, step, warn } from "../ui/messages.js"
 import { withSpinner } from "../ui/progress.js"
+import { printPushWarnings, type EnginePushResult } from "../engine-push-output.js"
 
 export function registerDeploy(program: Command): void {
   const deploy = program
@@ -91,13 +92,14 @@ export function registerDeploy(program: Command): void {
 
           if (ops.length > 0) {
             info(`${ops.length} schema change(s) to apply.`)
-            await engineRequest("/push", {
+            const result = await engineRequest<EnginePushResult>("/push", {
               ast,
               database_url: connectionString(config),
               schema: "public",
               force: true,
             })
             info("Schema changes applied.")
+            printPushWarnings(result)
           } else {
             info("Schema is up to date.")
           }

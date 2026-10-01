@@ -269,6 +269,8 @@ export async function targetSchemaPush(
   message?: string
   status?: string
   name?: string
+  /** The schema's warnings, then any found once applied. See `printPushWarnings`. */
+  warnings?: string[]
   /**
    * What the control plane made of this schema's cache declaration. Absent from an engine push and
    * from a control plane too old to send it, which is why every reader of it has to treat absence

@@ -126,14 +126,21 @@ export type BucketRole<R extends string = string> = Access<"BucketRole", {
   readonly role: R
 }>
 
+/** A rule one bucket operation can take. */
+export type BucketRule = BucketPublic | BucketPrivate | BucketLoggedIn | BucketOwner | BucketRole<string>
+
 /**
- * Storage RLS subset: same primitives as {@link ModelMeta.access} (`read`, `create`, …) but typically
- * only `read` / `create` / `delete` are used for `storage.objects` policies when set on the bucket.
+ * A bucket's rules on `storage.objects`: the same four operations as {@link ModelMeta.access}, each
+ * its own rule. `update` governs overwriting an existing object.
+ *
+ * An operation left out is refused for every caller but the service role, the same as on a model.
+ * `accessMode: "public"` still serves files on the public URL whatever `read` says.
  */
 export type BucketStorageAccess = {
-  read?: BucketPublic | BucketPrivate | BucketLoggedIn | BucketOwner | BucketRole<string>
-  create?: BucketPublic | BucketPrivate | BucketLoggedIn | BucketOwner | BucketRole<string>
-  delete?: BucketPublic | BucketPrivate | BucketLoggedIn | BucketOwner | BucketRole<string>
+  read?: BucketRule
+  create?: BucketRule
+  update?: BucketRule
+  delete?: BucketRule
 }
 
 /**
@@ -1127,7 +1134,7 @@ export type ModelMeta<TFields extends Record<string, unknown>> = {
    * ```
    *
    * **The declaration is a ceiling; runtime may only narrow it.** Studio and the admin API decide
-   * what is *active* and can lower `maxTtl` from 60 to 10, or switch a table off entirely — they
+   * what is *active* and can lower `maxTtl` from 60 to 10, or switch a table off entirely, but they
    * cannot raise a cap or cache a model that declared nothing. So the schema stays an honest
    * description of what the system may do, and an operator keeps a lever they can pull during an
    * incident without a schema push. Drift is bounded and always in the safe direction.
@@ -1158,13 +1165,13 @@ export type ModelCacheOptions = {
    * Share one cache entry across all callers, instead of keying it per user.
    *
    * **This is a data-leak switch, and the model is the only place it can be checked.** A public
-   * entry is global — one response served to everyone. On a table whose read rule varies by *who*
+   * entry is global: one response served to everyone. On a table whose read rule varies by *who*
    * is asking, that serves one user's rows to another. Because `access.read` is right here in the
    * same object, `supatype push` refuses the combination by name rather than leaving it to be
    * noticed in production.
    *
    * Row-dependence is not the same question and is not refused: `Lte<"published_at", Now>` varies
-   * by row and by time but not by caller, so a shared entry is exactly right for it — that is the
+   * by row and by time but not by caller, so a shared entry is exactly right for it. That is the
    * case public caching exists to serve.
    */
   public?: boolean
@@ -1177,7 +1184,7 @@ export type ModelCacheOptions = {
    * that is a design-time invariant its author knows and an operator flipping a toggle at 3am does
    * not. Studio shows the state and the health and points back at the schema to change it.
    *
-   * Push refuses what the row cache cannot serve — a table with no primary key — because its cache
+   * Push refuses what the row cache cannot serve (a table with no primary key) because its cache
    * key *is* the primary key.
    */
   rows?: boolean

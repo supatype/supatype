@@ -50,6 +50,11 @@
 
 ### Bug Fixes
 
+* **storage:** a bucket's `update` rule reaches the engine. Every key other than `read`, `create`
+  and `delete` was skipped without a word, so an overwrite rule the author wrote was never
+  enforced. Any other key in a bucket's `access` is now an error that names it.
+* **push:** a push through Docker Compose prints the engine's warnings, as `supatype diff` does. It
+  printed none, so a push said nothing about a bucket operation it had just made unreachable.
 * **generate:** the client augmentation follows the order the schema declares its models and
   columns in. It sorted alphabetically, which threw away an order the author chose and the AST
   preserved, and made it disagree with `types/database.ts` about the same table.

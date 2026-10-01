@@ -11,6 +11,7 @@
  */
 
 import { keyspaceInPostgres } from "../cache-provider.js"
+import { printPushWarnings, type EnginePushResult } from "../engine-push-output.js"
 import type { Command } from "commander"
 import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
@@ -226,7 +227,7 @@ export function registerDev(program: Command): void {
         if (wantsPgKeyspace && nativeKeyspaceLibraryPresent(pgBinDir) && keyspacePort === null) {
           console.warn(
             `[supatype] ⚠  No free port in ${KEYSPACE_PORT_BASE}-${KEYSPACE_PORT_BASE + KEYSPACE_PORT_SPAN - 1} ` +
-              "for the Postgres keyspace — starting without it.",
+              "for the Postgres keyspace, so starting without it.",
           )
         }
 
@@ -449,7 +450,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
           : null
       if (keyspacePort !== null && nativeKeyspaceAddr === null) {
         console.warn(
-          `[supatype] ⚠  Postgres has pg_keyspace but is not serving RESP on :${keyspacePort} — ` +
+          `[supatype] ⚠  Postgres has pg_keyspace but is not serving RESP on :${keyspacePort}; ` +
             "see logs/postgres.log. Falling back to the Valkey sidecar.",
         )
       }
@@ -757,7 +758,7 @@ async function runSchemaPush(
   const pgSchema = config?.schema?.pg_schema ?? "public"
   const sources = writeSchemaSourcePushArtifacts(cwd)
   try {
-    await engineRequest("/push", {
+    const result = await engineRequest<EnginePushResult>("/push", {
       ast,
       database_url: dbURL,
       schema: pgSchema,
@@ -769,6 +770,7 @@ async function runSchemaPush(
           }
         : {}),
     })
+    printPushWarnings(result)
   } catch (err) {
     _lastFailedAst = astJson
     throw err

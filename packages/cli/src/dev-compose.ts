@@ -71,6 +71,8 @@ import {
   formatEnginePushMessage,
   parseEngineJsonOutput,
   parseEnginePushOutput,
+  printPushWarnings,
+  type EnginePushResult,
 } from "./engine-push-output.js"
 import { withAdminRoles } from "./studio-admin-roles.js"
 import { restoreSystemRelationTargets } from "./restore-system-relation-targets.js"
@@ -763,7 +765,7 @@ async function runComposeSchemaPush(
     const pgSchema = config.schema?.pg_schema ?? "public"
     const sources = writeSchemaSourcePushArtifacts(cwd)
     try {
-      await engineRequest("/push", {
+      const result = await engineRequest<EnginePushResult>("/push", {
         ast,
         database_url: projectDatabaseUrl(cwd, config),
         schema: pgSchema,
@@ -775,6 +777,7 @@ async function runComposeSchemaPush(
             }
           : {}),
       })
+      printPushWarnings(result)
     } catch (err) {
       _lastFailedAst = astJson
       throw err
@@ -898,6 +901,7 @@ async function runComposeEnginePush(
   if (exitStatus === 0) {
     if (pushResult) {
       console.log(`[supatype] ${formatEnginePushMessage(pushResult)}`)
+      printPushWarnings(pushResult)
     } else {
       console.log("[supatype] Schema applied.")
     }
