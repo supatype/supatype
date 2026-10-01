@@ -10,472 +10,481 @@
 
 import { registerFieldKinds } from "@supatype/client"
 
+import type { SerializedEditorState } from "@supatype/types/lexical"
+
+export type RichText = SerializedEditorState
+
+export type StorageReference = {
+  bucket: string
+  path: string
+}
+
 declare module "@supatype/client" {
   interface SupatypeModels {
     author: {
       Row: {
-  avatarUrl: { bucket: string; path: string } | null
-  bio: (import("@supatype/types/lexical").SerializedEditorState | string) | null
-  email: string
-  id: string
-  role: "user" | "editor" | "admin"
-  username: string
-  websiteUrl: string | null
-}
+        id: string
+        email: string
+        username: string
+        bio: RichText | null
+        avatarUrl: StorageReference | null
+        websiteUrl: string | null
+        role: "user" | "editor" | "admin"
+      }
       Insert: {
-  avatarUrl?: { bucket: string; path: string } | null
-  bio?: (import("@supatype/types/lexical").SerializedEditorState | string) | null
-  email: string
-  id?: string
-  role?: "user" | "editor" | "admin"
-  username: string
-  websiteUrl?: string | null
-}
+        id?: string
+        email: string
+        username: string
+        bio?: RichText | string | null
+        avatarUrl?: StorageReference | null
+        websiteUrl?: string | null
+        role?: "user" | "editor" | "admin"
+      }
       Update: {
-  avatarUrl?: { bucket: string; path: string } | null
-  bio?: (import("@supatype/types/lexical").SerializedEditorState | string) | null
-  email?: string
-  id?: string
-  role?: "user" | "editor" | "admin"
-  username?: string
-  websiteUrl?: string | null
-}
-    }
-    bounds_probe: {
-      Row: {
-  body: (import("@supatype/types/lexical").SerializedEditorState | string) | null
-  headline: string | null
-  id: string
-  observedOn: string | null
-  rating: number | null
-  reference: string | null
-  refs: Record<string, unknown> | null
-  sections: Record<string, unknown> | null
-  tags: Record<string, unknown> | null
-  windowCloses: string | null
-  windowOpens: string | null
-}
-      Insert: {
-  body?: (import("@supatype/types/lexical").SerializedEditorState | string) | null
-  headline?: string | null
-  id?: string
-  observedOn?: string | null
-  rating?: number | null
-  reference?: string | null
-  refs?: Record<string, unknown> | null
-  sections?: Record<string, unknown> | null
-  tags?: Record<string, unknown> | null
-  windowCloses?: string | null
-  windowOpens?: string | null
-}
-      Update: {
-  body?: (import("@supatype/types/lexical").SerializedEditorState | string) | null
-  headline?: string | null
-  id?: string
-  observedOn?: string | null
-  rating?: number | null
-  reference?: string | null
-  refs?: Record<string, unknown> | null
-  sections?: Record<string, unknown> | null
-  tags?: Record<string, unknown> | null
-  windowCloses?: string | null
-  windowOpens?: string | null
-}
-    }
-    category: {
-      Row: {
-  color: unknown
-  description: string | null
-  externalId: string
-  id: string
-  isActive: boolean
-  name: string
-  slug: string
-}
-      Insert: {
-  color?: unknown
-  description?: string | null
-  externalId: string
-  id?: string
-  isActive?: boolean
-  name: string
-  slug: string
-}
-      Update: {
-  color?: unknown
-  description?: string | null
-  externalId?: string
-  id?: string
-  isActive?: boolean
-  name?: string
-  slug?: string
-}
-    }
-    comment: {
-      Row: {
-  author_id: string | null
-  body: string
-  id: string
-  post_id: string | null
-  upvotes: number
-  user_id: string | null
-}
-      Insert: {
-  author_id?: string | null
-  body: string
-  id?: string
-  post_id?: string | null
-  upvotes?: number
-  user_id?: string | null
-}
-      Update: {
-  author_id?: string | null
-  body?: string
-  id?: string
-  post_id?: string | null
-  upvotes?: number
-  user_id?: string | null
-}
-    }
-    event: {
-      Row: {
-  coverageArea: Record<string, unknown> | null
-  created_at: string
-  createdTs: string | null
-  description: (import("@supatype/types/lexical").SerializedEditorState | string) | null
-  duration: { ms: number } | null
-  endsAt: string | null
-  eventDate: string | null
-  id: string
-  isPublic: boolean
-  location: Record<string, unknown> | null
-  maxAttendees: number | null
-  organizer_id: string | null
-  route: Record<string, unknown> | null
-  startsAt: string
-  title: string
-  updated_at: string
-}
-      Insert: {
-  coverageArea?: Record<string, unknown> | null
-  created_at?: string
-  createdTs?: string | null
-  description?: (import("@supatype/types/lexical").SerializedEditorState | string) | null
-  duration?: { ms: number } | null
-  endsAt?: string | null
-  eventDate?: string | null
-  id?: string
-  isPublic?: boolean
-  location?: Record<string, unknown> | null
-  maxAttendees?: number | null
-  organizer_id?: string | null
-  route?: Record<string, unknown> | null
-  startsAt: string
-  title: string
-  updated_at?: string
-}
-      Update: {
-  coverageArea?: Record<string, unknown> | null
-  created_at?: string
-  createdTs?: string | null
-  description?: (import("@supatype/types/lexical").SerializedEditorState | string) | null
-  duration?: { ms: number } | null
-  endsAt?: string | null
-  eventDate?: string | null
-  id?: string
-  isPublic?: boolean
-  location?: Record<string, unknown> | null
-  maxAttendees?: number | null
-  organizer_id?: string | null
-  route?: Record<string, unknown> | null
-  startsAt?: string
-  title?: string
-  updated_at?: string
-}
-    }
-    network_log: {
-      Row: {
-  auditAttachment: { bucket: string; path: string } | null
-  created_at: string
-  deviceMac: unknown | null
-  id: string
-  payload: unknown | null
-  rawXml: string | null
-  recordedAt: string
-  searchQuery: unknown | null
-  searchVector: unknown | null
-  severity: number
-  sourceIp: unknown
-  subnet: unknown | null
-  updated_at: string
-}
-      Insert: {
-  auditAttachment?: { bucket: string; path: string } | null
-  created_at?: string
-  deviceMac?: unknown | null
-  id?: string
-  payload?: unknown | null
-  rawXml?: string | null
-  recordedAt?: string
-  searchQuery?: unknown | null
-  searchVector?: unknown | null
-  severity?: number
-  sourceIp: unknown
-  subnet?: unknown | null
-  updated_at?: string
-}
-      Update: {
-  auditAttachment?: { bucket: string; path: string } | null
-  created_at?: string
-  deviceMac?: unknown | null
-  id?: string
-  payload?: unknown | null
-  rawXml?: string | null
-  recordedAt?: string
-  searchQuery?: unknown | null
-  searchVector?: unknown | null
-  severity?: number
-  sourceIp?: unknown
-  subnet?: unknown | null
-  updated_at?: string
-}
-    }
-    page: {
-      Row: {
-  author_id: string | null
-  content: Record<string, unknown> | null
-  id: string
-  metadata: Record<string, unknown> | null
-  slug: string
-  title: string
-}
-      Insert: {
-  author_id?: string | null
-  content?: Record<string, unknown> | null
-  id?: string
-  metadata?: Record<string, unknown> | null
-  slug: string
-  title: string
-}
-      Update: {
-  author_id?: string | null
-  content?: Record<string, unknown> | null
-  id?: string
-  metadata?: Record<string, unknown> | null
-  slug?: string
-  title?: string
-}
-    }
-    post: {
-      Row: {
-  attachment: { bucket: string; path: string } | null
-  author_id: string | null
-  body: (import("@supatype/types/lexical").SerializedEditorState | string) | null
-  category_id: string | null
-  coverImage: { bucket: string; path: string } | null
-  embedding: Record<string, unknown> | null
-  excerpt: string | null
-  id: string
-  metadata: Record<string, unknown> | null
-  rating: number | null
-  searchVector: unknown | null
-  slug: string
-  title: string
-  viewCount: number
-}
-      Insert: {
-  attachment?: { bucket: string; path: string } | null
-  author_id?: string | null
-  body?: (import("@supatype/types/lexical").SerializedEditorState | string) | null
-  category_id?: string | null
-  coverImage?: { bucket: string; path: string } | null
-  embedding?: Record<string, unknown> | null
-  excerpt?: string | null
-  id?: string
-  metadata?: Record<string, unknown> | null
-  rating?: number | null
-  searchVector?: unknown | null
-  slug: string
-  title: string
-  viewCount?: number
-}
-      Update: {
-  attachment?: { bucket: string; path: string } | null
-  author_id?: string | null
-  body?: (import("@supatype/types/lexical").SerializedEditorState | string) | null
-  category_id?: string | null
-  coverImage?: { bucket: string; path: string } | null
-  embedding?: Record<string, unknown> | null
-  excerpt?: string | null
-  id?: string
-  metadata?: Record<string, unknown> | null
-  rating?: number | null
-  searchVector?: unknown | null
-  slug?: string
-  title?: string
-  viewCount?: number
-}
-    }
-    product: {
-      Row: {
-  content: Record<string, unknown> | null
-  embedding: Record<string, unknown> | null
-  featureTags: Record<string, unknown> | null
-  id: string
-  listPrice: string | null
-  manualFile: { bucket: string; path: string } | null
-  minOrder: number
-  name: string
-  price: string
-  primaryImage: { bucket: string; path: string }
-  sku: string
-  specs: Record<string, unknown> | null
-  status: "active" | "inactive" | "discontinued"
-  stock: number
-  totalSold: bigint
-  weight: number | null
-}
-      Insert: {
-  content?: Record<string, unknown> | null
-  embedding?: Record<string, unknown> | null
-  featureTags?: Record<string, unknown> | null
-  id?: string
-  listPrice?: string | null
-  manualFile?: { bucket: string; path: string } | null
-  minOrder?: number
-  name: string
-  price: string
-  primaryImage: { bucket: string; path: string }
-  sku: string
-  specs?: Record<string, unknown> | null
-  status?: "active" | "inactive" | "discontinued"
-  stock?: number
-  totalSold?: bigint
-  weight?: number | null
-}
-      Update: {
-  content?: Record<string, unknown> | null
-  embedding?: Record<string, unknown> | null
-  featureTags?: Record<string, unknown> | null
-  id?: string
-  listPrice?: string | null
-  manualFile?: { bucket: string; path: string } | null
-  minOrder?: number
-  name?: string
-  price?: string
-  primaryImage?: { bucket: string; path: string }
-  sku?: string
-  specs?: Record<string, unknown> | null
-  status?: "active" | "inactive" | "discontinued"
-  stock?: number
-  totalSold?: bigint
-  weight?: number | null
-}
-    }
-    subscription: {
-      Row: {
-  billingPeriod: "monthly" | "annual"
-  canceledAt: string | null
-  created_at: string
-  currency: string
-  currentPeriodEnd: string
-  externalId: bigint
-  id: string
-  metadata: Record<string, unknown> | null
-  planId: string
-  quantity: number
-  status: "trialing" | "active" | "past_due" | "canceled" | "unpaid"
-  subscriber_id: string
-  trialEndsAt: string | null
-  unitAmount: string
-  updated_at: string
-}
-      Insert: {
-  billingPeriod?: "monthly" | "annual"
-  canceledAt?: string | null
-  created_at?: string
-  currency?: string
-  currentPeriodEnd: string
-  externalId: bigint
-  id?: string
-  metadata?: Record<string, unknown> | null
-  planId: string
-  quantity?: number
-  status?: "trialing" | "active" | "past_due" | "canceled" | "unpaid"
-  subscriber_id: string
-  trialEndsAt?: string | null
-  unitAmount: string
-  updated_at?: string
-}
-      Update: {
-  billingPeriod?: "monthly" | "annual"
-  canceledAt?: string | null
-  created_at?: string
-  currency?: string
-  currentPeriodEnd?: string
-  externalId?: bigint
-  id?: string
-  metadata?: Record<string, unknown> | null
-  planId?: string
-  quantity?: number
-  status?: "trialing" | "active" | "past_due" | "canceled" | "unpaid"
-  subscriber_id?: string
-  trialEndsAt?: string | null
-  unitAmount?: string
-  updated_at?: string
-}
-    }
-    tag: {
-      Row: {
-  color: unknown | null
-  id: string
-  name: string
-}
-      Insert: {
-  color?: unknown | null
-  id?: string
-  name: string
-}
-      Update: {
-  color?: unknown | null
-  id?: string
-  name?: string
-}
+        id?: string
+        email?: string
+        username?: string
+        bio?: RichText | string | null
+        avatarUrl?: StorageReference | null
+        websiteUrl?: string | null
+        role?: "user" | "editor" | "admin"
+      }
     }
     user_profile: {
       Row: {
-  author_id: string
-  birthDate: string | null
-  displayName: string
-  followerCount: number
-  followingCount: number
-  id: string
-  lastSeenAt: string | null
-  rank: number | null
-  reputationScore: bigint
-}
+        id: string
+        author_id: string
+        displayName: string
+        followerCount: number
+        followingCount: number
+        reputationScore: bigint
+        rank: number | null
+        birthDate: string | null
+        lastSeenAt: string | null
+      }
       Insert: {
-  author_id: string
-  birthDate?: string | null
-  displayName: string
-  followerCount?: number
-  followingCount?: number
-  id?: string
-  lastSeenAt?: string | null
-  rank?: number | null
-  reputationScore?: bigint
-}
+        id?: string
+        author_id: string
+        displayName: string
+        followerCount?: number
+        followingCount?: number
+        reputationScore?: bigint
+        rank?: number | null
+        birthDate?: string | null
+        lastSeenAt?: string | null
+      }
       Update: {
-  author_id?: string
-  birthDate?: string | null
-  displayName?: string
-  followerCount?: number
-  followingCount?: number
-  id?: string
-  lastSeenAt?: string | null
-  rank?: number | null
-  reputationScore?: bigint
-}
+        id?: string
+        author_id?: string
+        displayName?: string
+        followerCount?: number
+        followingCount?: number
+        reputationScore?: bigint
+        rank?: number | null
+        birthDate?: string | null
+        lastSeenAt?: string | null
+      }
+    }
+    category: {
+      Row: {
+        id: string
+        name: string
+        slug: string
+        description: string | null
+        color: unknown
+        isActive: boolean
+        externalId: string
+      }
+      Insert: {
+        id?: string
+        name: string
+        slug?: string
+        description?: string | null
+        color?: unknown
+        isActive?: boolean
+        externalId: string
+      }
+      Update: {
+        id?: string
+        name?: string
+        slug?: string
+        description?: string | null
+        color?: unknown
+        isActive?: boolean
+        externalId?: string
+      }
+    }
+    tag: {
+      Row: {
+        id: string
+        name: string
+        color: unknown | null
+      }
+      Insert: {
+        id?: string
+        name: string
+        color?: unknown | null
+      }
+      Update: {
+        id?: string
+        name?: string
+        color?: unknown | null
+      }
+    }
+    post: {
+      Row: {
+        id: string
+        title: string
+        slug: string
+        excerpt: string | null
+        body: RichText | null
+        author_id: string | null
+        category_id: string | null
+        coverImage: StorageReference | null
+        attachment: StorageReference | null
+        viewCount: number
+        rating: number | null
+        searchVector: unknown | null
+        embedding: Record<string, unknown> | null
+        metadata: Record<string, unknown> | null
+      }
+      Insert: {
+        id?: string
+        title: string
+        slug?: string
+        excerpt?: string | null
+        body?: RichText | string | null
+        author_id?: string | null
+        category_id?: string | null
+        coverImage?: StorageReference | null
+        attachment?: StorageReference | null
+        viewCount?: number
+        rating?: number | null
+        searchVector?: unknown | null
+        embedding?: Record<string, unknown> | null
+        metadata?: Record<string, unknown> | null
+      }
+      Update: {
+        id?: string
+        title?: string
+        slug?: string
+        excerpt?: string | null
+        body?: RichText | string | null
+        author_id?: string | null
+        category_id?: string | null
+        coverImage?: StorageReference | null
+        attachment?: StorageReference | null
+        viewCount?: number
+        rating?: number | null
+        searchVector?: unknown | null
+        embedding?: Record<string, unknown> | null
+        metadata?: Record<string, unknown> | null
+      }
+    }
+    comment: {
+      Row: {
+        id: string
+        body: string
+        post_id: string | null
+        author_id: string | null
+        user_id: string | null
+        upvotes: number
+      }
+      Insert: {
+        id?: string
+        body: string
+        post_id?: string | null
+        author_id?: string | null
+        user_id?: string | null
+        upvotes?: number
+      }
+      Update: {
+        id?: string
+        body?: string
+        post_id?: string | null
+        author_id?: string | null
+        user_id?: string | null
+        upvotes?: number
+      }
+    }
+    bounds_probe: {
+      Row: {
+        id: string
+        headline: string | null
+        body: RichText | null
+        tags: Record<string, unknown> | null
+        refs: Record<string, unknown> | null
+        sections: Record<string, unknown> | null
+        rating: number | null
+        observedOn: string | null
+        windowOpens: string | null
+        windowCloses: string | null
+        reference: string | null
+      }
+      Insert: {
+        id?: string
+        headline?: string | null
+        body?: RichText | string | null
+        tags?: Record<string, unknown> | null
+        refs?: Record<string, unknown> | null
+        sections?: Record<string, unknown> | null
+        rating?: number | null
+        observedOn?: string | null
+        windowOpens?: string | null
+        windowCloses?: string | null
+        reference?: string | null
+      }
+      Update: {
+        id?: string
+        headline?: string | null
+        body?: RichText | string | null
+        tags?: Record<string, unknown> | null
+        refs?: Record<string, unknown> | null
+        sections?: Record<string, unknown> | null
+        rating?: number | null
+        observedOn?: string | null
+        windowOpens?: string | null
+        windowCloses?: string | null
+        reference?: string | null
+      }
+    }
+    event: {
+      Row: {
+        id: string
+        title: string
+        description: RichText | null
+        startsAt: string
+        endsAt: string | null
+        eventDate: string | null
+        createdTs: string | null
+        duration: { ms: number } | null
+        location: Record<string, unknown> | null
+        coverageArea: Record<string, unknown> | null
+        route: Record<string, unknown> | null
+        organizer_id: string | null
+        maxAttendees: number | null
+        isPublic: boolean
+        created_at: string
+        updated_at: string
+      }
+      Insert: {
+        id?: string
+        title: string
+        description?: RichText | string | null
+        startsAt: string
+        endsAt?: string | null
+        eventDate?: string | null
+        createdTs?: string | null
+        duration?: { ms: number } | null
+        location?: Record<string, unknown> | null
+        coverageArea?: Record<string, unknown> | null
+        route?: Record<string, unknown> | null
+        organizer_id?: string | null
+        maxAttendees?: number | null
+        isPublic?: boolean
+        created_at?: string
+        updated_at?: string
+      }
+      Update: {
+        id?: string
+        title?: string
+        description?: RichText | string | null
+        startsAt?: string
+        endsAt?: string | null
+        eventDate?: string | null
+        createdTs?: string | null
+        duration?: { ms: number } | null
+        location?: Record<string, unknown> | null
+        coverageArea?: Record<string, unknown> | null
+        route?: Record<string, unknown> | null
+        organizer_id?: string | null
+        maxAttendees?: number | null
+        isPublic?: boolean
+        created_at?: string
+        updated_at?: string
+      }
+    }
+    network_log: {
+      Row: {
+        id: string
+        sourceIp: unknown
+        subnet: unknown | null
+        deviceMac: unknown | null
+        auditAttachment: StorageReference | null
+        payload: unknown | null
+        rawXml: string | null
+        searchQuery: unknown | null
+        searchVector: unknown | null
+        severity: number
+        recordedAt: string
+        created_at: string
+        updated_at: string
+      }
+      Insert: {
+        id?: string
+        sourceIp: unknown
+        subnet?: unknown | null
+        deviceMac?: unknown | null
+        auditAttachment?: StorageReference | null
+        payload?: unknown | null
+        rawXml?: string | null
+        searchQuery?: unknown | null
+        searchVector?: unknown | null
+        severity?: number
+        recordedAt?: string
+        created_at?: string
+        updated_at?: string
+      }
+      Update: {
+        id?: string
+        sourceIp?: unknown
+        subnet?: unknown | null
+        deviceMac?: unknown | null
+        auditAttachment?: StorageReference | null
+        payload?: unknown | null
+        rawXml?: string | null
+        searchQuery?: unknown | null
+        searchVector?: unknown | null
+        severity?: number
+        recordedAt?: string
+        created_at?: string
+        updated_at?: string
+      }
+    }
+    product: {
+      Row: {
+        id: string
+        name: string
+        sku: string
+        price: string
+        listPrice: string | null
+        weight: number | null
+        stock: number
+        totalSold: bigint
+        minOrder: number
+        status: "active" | "inactive" | "discontinued"
+        featureTags: Record<string, unknown> | null
+        manualFile: StorageReference | null
+        primaryImage: StorageReference
+        embedding: Record<string, unknown> | null
+        specs: Record<string, unknown> | null
+        content: Record<string, unknown> | null
+      }
+      Insert: {
+        id?: string
+        name: string
+        sku: string
+        price: string
+        listPrice?: string | null
+        weight?: number | null
+        stock?: number
+        totalSold?: bigint
+        minOrder?: number
+        status?: "active" | "inactive" | "discontinued"
+        featureTags?: Record<string, unknown> | null
+        manualFile?: StorageReference | null
+        primaryImage: StorageReference
+        embedding?: Record<string, unknown> | null
+        specs?: Record<string, unknown> | null
+        content?: Record<string, unknown> | null
+      }
+      Update: {
+        id?: string
+        name?: string
+        sku?: string
+        price?: string
+        listPrice?: string | null
+        weight?: number | null
+        stock?: number
+        totalSold?: bigint
+        minOrder?: number
+        status?: "active" | "inactive" | "discontinued"
+        featureTags?: Record<string, unknown> | null
+        manualFile?: StorageReference | null
+        primaryImage?: StorageReference
+        embedding?: Record<string, unknown> | null
+        specs?: Record<string, unknown> | null
+        content?: Record<string, unknown> | null
+      }
+    }
+    subscription: {
+      Row: {
+        id: string
+        subscriber_id: string
+        externalId: bigint
+        planId: string
+        status: "trialing" | "active" | "past_due" | "canceled" | "unpaid"
+        billingPeriod: "monthly" | "annual"
+        currentPeriodEnd: string
+        trialEndsAt: string | null
+        canceledAt: string | null
+        quantity: number
+        unitAmount: string
+        currency: string
+        metadata: Record<string, unknown> | null
+        created_at: string
+        updated_at: string
+      }
+      Insert: {
+        id?: string
+        subscriber_id: string
+        externalId: bigint
+        planId: string
+        status?: "trialing" | "active" | "past_due" | "canceled" | "unpaid"
+        billingPeriod?: "monthly" | "annual"
+        currentPeriodEnd: string
+        trialEndsAt?: string | null
+        canceledAt?: string | null
+        quantity?: number
+        unitAmount: string
+        currency?: string
+        metadata?: Record<string, unknown> | null
+        created_at?: string
+        updated_at?: string
+      }
+      Update: {
+        id?: string
+        subscriber_id?: string
+        externalId?: bigint
+        planId?: string
+        status?: "trialing" | "active" | "past_due" | "canceled" | "unpaid"
+        billingPeriod?: "monthly" | "annual"
+        currentPeriodEnd?: string
+        trialEndsAt?: string | null
+        canceledAt?: string | null
+        quantity?: number
+        unitAmount?: string
+        currency?: string
+        metadata?: Record<string, unknown> | null
+        created_at?: string
+        updated_at?: string
+      }
+    }
+    page: {
+      Row: {
+        id: string
+        title: string
+        slug: string
+        content: Record<string, unknown> | null
+        author_id: string | null
+        metadata: Record<string, unknown> | null
+      }
+      Insert: {
+        id?: string
+        title: string
+        slug?: string
+        content?: Record<string, unknown> | null
+        author_id?: string | null
+        metadata?: Record<string, unknown> | null
+      }
+      Update: {
+        id?: string
+        title?: string
+        slug?: string
+        content?: Record<string, unknown> | null
+        author_id?: string | null
+        metadata?: Record<string, unknown> | null
+      }
     }
   }
 }
