@@ -94,6 +94,49 @@ describe("createNativeClient", () => {
       createNativeClient({ url: AUTH_URL, anonKey: ANON }),
     ).toThrow(/secureStore/)
   })
+
+  it("joins a table subscription on its own", async () => {
+    // The native client is `createClient` underneath, so it inherited a `from(table).subscribe()`
+    // that registered a listener and never opened a socket. One case here so a native app that
+    // subscribes to nothing else is covered by name.
+    const sent: string[] = []
+    class OpenSocket {
+      static OPEN = 1
+      static CONNECTING = 0
+      readyState = 0
+      onopen: (() => void) | null = null
+      onmessage: ((event: { data: string }) => void) | null = null
+      onclose: (() => void) | null = null
+      onerror: (() => void) | null = null
+      constructor(readonly url: string) {
+        queueMicrotask(() => {
+          this.readyState = 1
+          this.onopen?.()
+        })
+      }
+      send(frame: string): void {
+        sent.push(frame)
+      }
+      close(): void {}
+    }
+    vi.stubGlobal("WebSocket", OpenSocket)
+
+    try {
+      const client = createNativeClient({ url: AUTH_URL, anonKey: ANON, secureStore: memorySecureStore() })
+      await client.auth.whenReady()
+      const sub = client.from("post").subscribe(() => {}, { event: "INSERT" })
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      const joins = sent
+        .map((raw) => JSON.parse(raw) as Record<string, unknown>)
+        .filter((frame) => frame["type"] === "subscribe")
+      expect(joins).toHaveLength(1)
+      expect(joins[0]!["table"]).toBe("post")
+      sub.unsubscribe()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
 })
 
 describe("openOAuth", () => {

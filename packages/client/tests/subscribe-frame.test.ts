@@ -13,7 +13,11 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { RealtimeClient } from "../src/realtime.js"
-import { createMockWebSocketClass, type MockWebSocketInstance } from "./helpers/mock-websocket.js"
+import {
+  createMockWebSocketClass,
+  simulateServerMessage,
+  type MockWebSocketInstance,
+} from "./helpers/mock-websocket.js"
 
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 10))
 
@@ -98,5 +102,61 @@ describe("the subscribe frame", () => {
     await settle()
 
     expect(subscribeFrames()[0]!["table"]).toBe("orders")
+    // The schema falls back the same way. It defaulted to "public" instead, and because the frame
+    // always carries a schema, that default overrode the "app" the server would have read.
+    expect(subscribeFrames()[0]!["schema"]).toBe("app")
+  })
+})
+
+describe("joining again after disconnect()", () => {
+  it("sends a fresh subscribe frame on the new socket", async () => {
+    // disconnect() dropped the socket but left the channel marked subscribed, so the new socket's
+    // open handler skipped it and the channel sat on a live socket it had never joined.
+    const client = new RealtimeClient("http://localhost:9999", { apikey: "anon" })
+    const channel = client
+      .channel("public:task")
+      .on("postgres_changes", { event: "*" }, () => {})
+      .subscribe()
+    await settle()
+    simulateServerMessage(instances[0]!, {
+      type: "system",
+      status: "ok",
+      message: "subscribed to public:task",
+    })
+
+    client.disconnect()
+    channel.subscribe()
+    await settle()
+
+    expect(instances).toHaveLength(2)
+    const onNewSocket = instances[1]!.send.mock.calls
+      .map((c) => JSON.parse(c[0] as string) as Record<string, unknown>)
+      .filter((m) => m["type"] === "subscribe")
+    expect(onNewSocket).toHaveLength(1)
+  })
+})
+
+describe("the payload a listener is handed", () => {
+  it("names the listener's table, not the channel's name", async () => {
+    // A channel named for its purpose was split on ":" to fill in `table`, so a listener on
+    // `chat_message` was told its rows came from a table called "lobby-chat".
+    const client = new RealtimeClient("http://localhost:9999", { apikey: "anon" })
+    let table: string | undefined
+    client
+      .channel("lobby-chat")
+      .on("postgres_changes", { event: "*", table: "chat_message" }, (payload) => {
+        table = payload.table
+      })
+      .subscribe()
+    await settle()
+
+    simulateServerMessage(instances[0]!, {
+      type: "change",
+      channel: "lobby-chat",
+      event: "INSERT",
+      payload: { old: null, new: { id: 1 } },
+      timestamp: "2026-01-01T00:00:00Z",
+    })
+    expect(table).toBe("chat_message")
   })
 })

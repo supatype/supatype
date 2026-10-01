@@ -68,6 +68,18 @@ function coerceRecord(
   return coerceExactKinds(record, exact) as Record<string, unknown>
 }
 
+/**
+ * The schema and table a channel name implies, when a listener does not say.
+ *
+ * `schema:table`, or a bare `table` in `public`. The same reading as the server's `parseChannel`
+ * fallback, so the two agree on any name; anything after a second colon is not part of either.
+ */
+function parseChannelName(name: string): { schema: string; table: string } {
+  const parts = name.split(":")
+  if (parts.length >= 2) return { schema: parts[0]!, table: parts[1]! }
+  return { schema: "public", table: name }
+}
+
 // ─── Server message types (subset matching @supatype/realtime) ───────────────
 
 interface ServerChangeMessage {
@@ -176,9 +188,6 @@ export class RealtimeClient {
   /** Abandon the current socket and immediately open a replacement, keeping every channel. */
   private cycleConnection(token: string | undefined): void {
     this.abandonSocket("reauthenticating")
-    for (const state of this.channels.values()) {
-      state.subscribed = false
-    }
     this.ensureConnection(token)
   }
 
@@ -205,6 +214,17 @@ export class RealtimeClient {
       old.close(1000, reason)
     }
     this.reconnectAttempts = 0
+    // Here rather than at each caller. `disconnect()` left every channel marked subscribed, so a
+    // channel that subscribed again afterwards opened a fresh socket and was never re-joined on it.
+    this.forgetJoins()
+  }
+
+  /** Every join belonged to the socket that just went away; the next one has to make its own. */
+  private forgetJoins(): void {
+    for (const state of this.channels.values()) {
+      state.subscribed = false
+      state.joinSent = false
+    }
   }
 
   channel<TRow = Record<string, unknown>>(name: string): ChannelSubscription<TRow> {
@@ -212,10 +232,14 @@ export class RealtimeClient {
 
     const sub: ChannelSubscription<TRow> = {
       on(_event, opts, callback) {
+        // Defaults read the channel name the way the server's fallback does. The schema used to
+        // default to "public" regardless, and since the frame always carries a schema, a channel
+        // named `app:orders` was registered against `public.orders`.
+        const named = parseChannelName(name)
         state.pgListeners.push({
           event: opts.event,
-          schema: opts.schema ?? "public",
-          table: opts.table ?? name.split(":").pop() ?? name,
+          schema: opts.schema ?? named.schema,
+          table: opts.table ?? named.table,
           filter: opts.filter,
           callback: callback as RealtimeCallback<Record<string, unknown>>,
         })
@@ -237,6 +261,11 @@ export class RealtimeClient {
 
       subscribe: (callback) => {
         state.statusCallback = callback ?? null
+        // Joining twice is a no-op rather than a second frame, so `from(table).subscribe()` can
+        // join on its own and a caller can still call this afterwards just to watch the status.
+        // A join already acknowledged will not be acknowledged again, so say so here or the new
+        // callback waits for a SUBSCRIBED that is never coming.
+        if (state.subscribed) callback?.("SUBSCRIBED")
         this.ensureConnection()
         this.sendSubscribe(state)
         return sub
@@ -315,6 +344,7 @@ export class RealtimeClient {
         broadcastListeners: new Map(),
         statusCallback: null,
         subscribed: false,
+        joinSent: false,
       }
       this.channels.set(name, state)
     }
@@ -400,10 +430,7 @@ export class RealtimeClient {
 
     ws.onclose = () => {
       this.ws = null
-      // Mark all channels as unsubscribed
-      for (const state of this.channels.values()) {
-        state.subscribed = false
-      }
+      this.forgetJoins()
       // Attempt reconnection with exponential backoff
       if (this.channels.size > 0) {
         this.scheduleReconnect()
@@ -475,27 +502,26 @@ export class RealtimeClient {
     const state = this.channels.get(msg.channel)
     if (!state) return
 
-    // Parse channel to get schema/table
-    const parts = msg.channel.split(":")
-    const schema = parts.length >= 2 ? parts[0]! : "public"
-    const table = parts.length >= 2 ? parts[1]! : parts[0]!
-
     // A bigint column arrives as a string and becomes a native bigint here, and a numeric stays
     // the exact string `@supatype/types` declares for Decimal and Money. The same coercion the
     // REST path uses, so a row read either way holds the same values.
     const exact = msg.exactColumns ?? {}
-    const payload: RealtimePayload<Record<string, unknown>> = {
-      eventType: msg.event,
-      new: coerceRecord(msg.payload.new, exact),
-      old: coerceRecord(msg.payload.old, exact),
-      schema,
-      table,
-      commitTimestamp: msg.timestamp,
-    }
+    const newRecord = coerceRecord(msg.payload.new, exact)
+    const oldRecord = coerceRecord(msg.payload.old, exact)
 
+    // Schema and table come from the listener, which is what was subscribed, not from splitting
+    // the channel name: a channel named for its purpose told a `chat_message` listener its rows
+    // came from a table called `lobby-chat`.
     for (const listener of state.pgListeners) {
       if (listener.event !== "*" && listener.event !== msg.event) continue
-      listener.callback(payload)
+      listener.callback({
+        eventType: msg.event,
+        new: newRecord,
+        old: oldRecord,
+        schema: listener.schema,
+        table: listener.table,
+        commitTimestamp: msg.timestamp,
+      })
     }
   }
 
@@ -522,6 +548,8 @@ export class RealtimeClient {
 
   private sendSubscribe(state: ChannelState): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return
+    if (state.joinSent) return
+    state.joinSent = true
 
     // Build filter from the first pg listener (if any)
     const firstListener = state.pgListeners[0]
@@ -541,7 +569,7 @@ export class RealtimeClient {
     //
     // They were resolved here and then dropped, and the server falls back to reading the channel
     // name as `schema:table`. So a subscription worked only when the channel happened to be named
-    // after its table, which is what `from(table).subscribe()` does. Anything else -- a channel
+    // after its table, as `from(table).subscribe()` names its own. Anything else -- a channel
     // called `lobby-chat` carrying `table: "chat_message"`, which is what `useSubscription` exists
     // to let you write -- registered against a table no change can match. The socket reported
     // SUBSCRIBED and delivered nothing, which is indistinguishable from a quiet table.
@@ -582,5 +610,13 @@ interface ChannelState {
   presenceListeners: Array<(event: { joins: PresenceEntry[]; leaves: PresenceEntry[] }) => void>
   broadcastListeners: Map<string, Array<(payload: Record<string, unknown>) => void>>
   statusCallback: ((status: ChannelStatus) => void) | null
+  /** The server acknowledged the join on the current socket. */
   subscribed: boolean
+  /**
+   * A join frame went out on the current socket, acknowledged or not.
+   *
+   * Separate from `subscribed` because the gap between the two is where a second `subscribe()`
+   * used to send a second frame.
+   */
+  joinSent: boolean
 }
