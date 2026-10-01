@@ -924,13 +924,31 @@ async function runComposeEnginePush(
  * published to the host. That is what a host-side `supatype adopt` got wrong on a docker project
  * (supatype#85), and why the push walkthrough runs adopt this way instead.
  */
+/** One engine run: its exit, what it printed on stdout alone, and everything it printed. */
+export interface EngineRun {
+  status: number
+  stdout: string
+  output: string
+}
+
+/**
+ * The adopt result from one engine run, or null when there is none to read.
+ *
+ * From stdout alone. The engine prints the preview as multi-line JSON, which only parses as a
+ * whole, and with stderr joined on (a compose warning about an unset variable, an engine log line)
+ * it did not parse at all, so a preview that worked was reported as a failed adopt.
+ */
+export function adoptResultFrom(run: EngineRun): AdoptResult | null {
+  return run.status === 0 ? parseEngineJsonOutput<AdoptResult>(run.stdout) : null
+}
+
 async function runComposeEngineCommand(
   paths: SelfHostComposePaths,
   cwd: string,
   composeProject: string,
   config: SupatypeProjectConfig,
   command: readonly string[],
-): Promise<{ status: number; output: string }> {
+): Promise<EngineRun> {
   const envFile = resolve(cwd, ".env")
   const composeArgs = ["compose", "--progress", "quiet"]
   if (composeProject) composeArgs.push("-p", composeProject)
@@ -962,7 +980,11 @@ async function runComposeEngineCommand(
     maxBuffer: 10 * 1024 * 1024,
     env,
   })
-  return { status: result.status ?? 1, output: `${result.stdout ?? ""}${result.stderr ?? ""}`.trim() }
+  return {
+    status: result.status ?? 1,
+    stdout: result.stdout ?? "",
+    output: `${result.stdout ?? ""}${result.stderr ?? ""}`.trim(),
+  }
 }
 
 async function runComposeEngineDiff(
@@ -1015,8 +1037,8 @@ export async function adoptSchemaDocker(
   }
   const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
   const result = await runComposeEngineCommand(paths, cwd, project, config, yes ? ["adopt", "--yes"] : ["adopt"])
-  const parsed = parseEngineJsonOutput<AdoptResult>(result.output)
-  if (result.status !== 0 || parsed === null) {
+  const parsed = adoptResultFrom(result)
+  if (parsed === null) {
     throw new Error(filterComposeNoise(result.output) || `Engine adopt failed (exit ${result.status})`)
   }
   return parsed
