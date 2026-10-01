@@ -249,3 +249,42 @@ describe("two subscriptions to the same table on one client", () => {
     expect(ws.close).toHaveBeenCalled()
   })
 })
+
+describe("review fixes", () => {
+  it("sends the join again after the server rejected it, on the same socket", async () => {
+    // A rejected join registers nothing on the server, so the channel must be joinable again.
+    // It stayed marked as sent until the socket went away, and a retry after authenticating sent
+    // nothing at all.
+    const client = newClient()
+    const channel = client.realtime
+      .channel("lobby")
+      .on("postgres_changes", { event: "*", table: "chat_message" }, () => {})
+    channel.subscribe()
+    await settle()
+    const ws = onlySocket()
+    expect(framesOfType("subscribe")).toHaveLength(1)
+
+    simulateServerMessage(ws, { type: "system", status: "error", message: "authenticate before subscribing" })
+    channel.subscribe()
+    await settle()
+    expect(framesOfType("subscribe")).toHaveLength(2)
+  })
+
+  it("delivers a change only to listeners for the table the channel subscribed, labelled as that table", async () => {
+    // The server registers the first listener's table. A second listener for another table on the
+    // same channel was handed those rows labelled as its own table.
+    const client = newClient()
+    const posts: unknown[] = []
+    const comments: unknown[] = []
+    client.realtime
+      .channel("feed")
+      .on("postgres_changes", { event: "*", table: "posts" }, (p) => posts.push(p.table))
+      .on("postgres_changes", { event: "*", table: "comments" }, (p) => comments.push(p.table))
+      .subscribe()
+    await settle()
+
+    simulateServerMessage(onlySocket(), changeOn("feed", "INSERT", { id: 1 }))
+    expect(posts).toEqual(["posts"])
+    expect(comments).toEqual([])
+  })
+})

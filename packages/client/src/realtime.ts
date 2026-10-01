@@ -493,6 +493,9 @@ export class RealtimeClient {
     if (msg.status === "error") {
       // Find which channel this error relates to, broadcast to all as fallback
       for (const state of this.channels.values()) {
+        // A refused join registered nothing on the server, so a channel not yet confirmed may
+        // join again on this socket. Marked as sent, a retry after authenticating sent nothing.
+        if (!state.subscribed) state.joinSent = false
         state.statusCallback?.("CHANNEL_ERROR")
       }
     }
@@ -509,17 +512,23 @@ export class RealtimeClient {
     const newRecord = coerceRecord(msg.payload.new, exact)
     const oldRecord = coerceRecord(msg.payload.old, exact)
 
-    // Schema and table come from the listener, which is what was subscribed, not from splitting
-    // the channel name: a channel named for its purpose told a `chat_message` listener its rows
-    // came from a table called `lobby-chat`.
+    // The channel is subscribed to the first listener's table, which is what `sendSubscribe`
+    // registers, so a change is that table's and goes only to listeners for it. Schema and table
+    // come from there, not from splitting the channel name: a channel named for its purpose told
+    // a `chat_message` listener its rows came from a table called `lobby-chat`. A listener for a
+    // different table on the same channel is never served by it, rather than handed these rows
+    // under its own table's name.
+    const subscribed = state.pgListeners[0]
+    if (!subscribed) return
     for (const listener of state.pgListeners) {
+      if (listener.schema !== subscribed.schema || listener.table !== subscribed.table) continue
       if (listener.event !== "*" && listener.event !== msg.event) continue
       listener.callback({
         eventType: msg.event,
         new: newRecord,
         old: oldRecord,
-        schema: listener.schema,
-        table: listener.table,
+        schema: subscribed.schema,
+        table: subscribed.table,
         commitTimestamp: msg.timestamp,
       })
     }
