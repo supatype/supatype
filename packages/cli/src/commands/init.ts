@@ -1000,7 +1000,7 @@ function appConfigLines(app: ScaffoldAppOptions, productionTarget: ProductionTar
 const HOLDING_PAGE_LOGO_URL = "https://supatype.github.io/supatype/supatype.svg"
 const HOLDING_PAGE_DOCS_URL = "https://supatype.github.io/supatype/"
 const HOLDING_PAGE_GITHUB_URL = "https://github.com/supatype"
-const HOLDING_PAGE_DISCORD_URL = "https://discord.gg/yaQrjQD4"
+const HOLDING_PAGE_DISCORD_URL = "https://discord.gg/TzMtynufEH"
 
 function escapeHtml(text: string): string {
   return text
