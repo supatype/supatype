@@ -65,6 +65,14 @@
 
 ### Bug Fixes
 
+* **connection:** every command that runs the engine on the host finds the database the same way,
+  in seed's order: `--connection`, `database.external.url`, `connection` in the config,
+  `DATABASE_URL` in the environment, `DATABASE_URL` in the project's `.env`, then the project's own
+  database. `supatype adopt`, `introspect` and `migrate` on a docker project took the URL in
+  `.supatype/environment.json`, which describes the `db` container, and failed looking up the host
+  `db` (supatype#85). `doctor`, `pull` and `admin` read only the process environment, never `.env`.
+  The derived default for a docker project is now the published compose database rather than the
+  native layout (`postgres:postgres@127.0.0.1:5432/<name>`), which a docker stack does not have.
 * **storage:** a bucket's `update` rule reaches the engine. Every key other than `read`, `create`
   and `delete` was skipped without a word, so an overwrite rule the author wrote was never
   enforced. Any other key in a bucket's `access` is now an error that names it.

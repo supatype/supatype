@@ -16,7 +16,8 @@ import type { Command } from "commander"
 import { existsSync, readdirSync, statSync, createReadStream, mkdirSync, cpSync } from "node:fs"
 import { join, relative } from "node:path"
 import { loadConfig, loadSchemaAst } from "../config.js"
-import { connectionString, schemaPathFromProject } from "../project-config.js"
+import { schemaPathFromProject } from "../project-config.js"
+import { resolveHostDatabaseUrl } from "../host-database.js"
 import { deploySchemaToLinkedProject, loadCloudConfig, pushSchemaToLinkedProject } from "./cloud.js"
 import { loadProjectLink } from "../link.js"
 import { resolveTarget } from "../resolve-target.js"
@@ -84,7 +85,7 @@ export function registerDeploy(program: Command): void {
 
           const diff = await engineRequest<DiffResult>("/diff", {
             ast,
-            database_url: connectionString(config),
+            database_url: resolveHostDatabaseUrl(cwd, config, { allowDerived: true }).dsn,
             schema: "public",
           })
 
@@ -94,7 +95,7 @@ export function registerDeploy(program: Command): void {
             info(`${ops.length} schema change(s) to apply.`)
             const result = await engineRequest<EnginePushResult>("/push", {
               ast,
-              database_url: connectionString(config),
+              database_url: resolveHostDatabaseUrl(cwd, config, { allowDerived: true }).dsn,
               schema: "public",
               force: true,
             })

@@ -4,12 +4,13 @@ import { loadConfig } from "./config.js"
 import type { DiffResult } from "./engine-client.js"
 import { ensureEngine, engineRequest } from "./engine-client.js"
 import type { SchemaSourcesPayload } from "./schema-sources.js"
+import { resolveHostDatabaseUrl } from "./host-database.js"
 import {
-  connectionString,
   pgSchema,
   resolveRuntimeProvider,
   schemaPathFromProject,
   serverBaseUrl,
+  type SupatypeProjectConfig,
 } from "./project-config.js"
 import {
   getEnvironmentTarget,
@@ -86,6 +87,17 @@ function resolveBranchDefaults(cwd: string, configEnvDefault?: string): string |
   }
 }
 
+/**
+ * The project's database as a host process reaches it, for a target that runs the engine here.
+ *
+ * Never `.supatype/environment.json`'s URL: that one describes the docker `db` container, right
+ * for a container and unresolvable from the host, which is how `supatype adopt` on a docker
+ * project failed (supatype#85).
+ */
+function hostDatabaseUrl(cwd: string, config: SupatypeProjectConfig, connection: string | undefined): string {
+  return resolveHostDatabaseUrl(cwd, config, { connection, allowDerived: true }).dsn
+}
+
 export function resolveTarget(cwd: string, flags: ResolveTargetFlags = {}): DeployTarget {
   const config = loadConfig(cwd)
   const projectRef = config.project?.name ?? config.project?.ref ?? "project"
@@ -104,7 +116,6 @@ export function resolveTarget(cwd: string, flags: ResolveTargetFlags = {}): Depl
   }
 
   if (flags.direct || flags.local) {
-    const localEnv = loadLocalEnvironment(cwd)
     return {
       mode: "direct",
       environment: "local",
@@ -112,10 +123,7 @@ export function resolveTarget(cwd: string, flags: ResolveTargetFlags = {}): Depl
       apiBaseUrl: (serverBaseUrl(config) ?? "").replace(/\/$/, ""),
       apiPrefix: "/platform/v1",
       link: null,
-      databaseUrl:
-        flags.connection ??
-        localEnv?.databaseUrl ??
-        connectionString(config),
+      databaseUrl: hostDatabaseUrl(cwd, config, flags.connection),
     }
   }
 
@@ -132,7 +140,7 @@ export function resolveTarget(cwd: string, flags: ResolveTargetFlags = {}): Depl
         apiPrefix: "/platform/v1",
         token: resolveLocalToken(cwd),
         link: null,
-        databaseUrl: localEnv.databaseUrl,
+        databaseUrl: hostDatabaseUrl(cwd, config, flags.connection),
       }
     }
     return {
@@ -142,7 +150,7 @@ export function resolveTarget(cwd: string, flags: ResolveTargetFlags = {}): Depl
       apiBaseUrl: (serverBaseUrl(config) ?? "").replace(/\/$/, ""),
       apiPrefix: "/platform/v1",
       link: null,
-      databaseUrl: flags.connection ?? connectionString(config),
+      databaseUrl: hostDatabaseUrl(cwd, config, flags.connection),
     }
   }
 
