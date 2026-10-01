@@ -34,7 +34,7 @@ Contact: see GitHub org and Discord linked from the site.
 
 - [GitHub organization](https://github.com/supatype): Source repos (SDK monorepo, server, engine, Postgres images)
 - [supatype/supatype](https://github.com/supatype/supatype): Main monorepo: CLI, client, Studio, realtime package
-- [Discord](https://discord.gg/yaQrjQD4): Community and product discussion
+- [Discord](https://discord.gg/TzMtynufEH): Community and product discussion
 
 ## Optional
 

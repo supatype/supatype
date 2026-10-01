@@ -58,7 +58,7 @@ CLI ladder: try locally with `supatype dev`; deploy the same schema with `supaty
 - VM deploy guide: https://www.supatype.com/deploy-vm-github-actions.html
 - GitHub org: https://github.com/supatype
 - Main repo: https://github.com/supatype/supatype
-- Discord: https://discord.gg/yaQrjQD4
+- Discord: https://discord.gg/TzMtynufEH
 
 ## Licensing & status
 
