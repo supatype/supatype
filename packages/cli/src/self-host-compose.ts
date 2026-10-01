@@ -51,7 +51,7 @@ const SEAWEEDFS_IMAGE =
  * Not a guess and not configurable: the plugin prefixes every key it writes
  * with this and enforces it in its own `reserved_words.lua`, so it is the one
  * durable thing in a keyspace that is otherwise a cache. Verified on a live
- * instance — both ACME keys survived `kill -9` with only this prefix named
+ * instance: both ACME keys survived `kill -9` with only this prefix named
  * durable, and a response-cache key beside them did not.
  */
 const ACME_KEY_PREFIX = "kong_acme:"
@@ -61,6 +61,13 @@ const OBJECT_STORE_SECRET_KEY = "supatype-secret"
 
 /** Where the rendered SeaweedFS identity file sits, resolved from the project root like kong.yml. */
 const SEAWEED_CONFIG_MOUNT = ".supatype/self-host/s3.json"
+
+/**
+ * The compose volume key Postgres keeps its data in. Docker names the volume
+ * `<compose project>_<key>`, and `supatype dev --reset-db` removes it by that name, so the key is
+ * declared once rather than spelled out in the file and again in the code that deletes it.
+ */
+export const DB_VOLUME_KEY = "db-data"
 
 type DockerPinComponent = "engine" | "server" | "postgres"
 
@@ -524,7 +531,7 @@ ${seaweedPorts}`
 `
   // An external database is not ours to declare a volume for.
   const volumesBlock = `volumes:
-${external ? "" : "  db-data:\n"}  storage-data:
+${external ? "" : `  ${DB_VOLUME_KEY}:\n`}  storage-data:
 ${keyspaceInPg ? "" : "  valkey-data:\n"}`
 
   // `depends_on` for the services that talk to Postgres. With an external database there is no
@@ -682,7 +689,7 @@ ${dbDependency}`
       # Read by the image's init to password the \`authenticator\` role PostgREST connects as.
       AUTHENTICATOR_PASSWORD: \${AUTHENTICATOR_PASSWORD:?AUTHENTICATOR_PASSWORD is missing from .env}
 ${keyspaceDbEnv}${dbPorts}${keyspaceExpose}    volumes:
-      - db-data:/var/lib/postgresql/data
+      - ${DB_VOLUME_KEY}:/var/lib/postgresql/data
     healthcheck:
       # -h 127.0.0.1 forces TCP. Without it \`pg_isready\` uses the Unix socket, which the
       # entrypoint's temporary init server is already listening on while TCP is still refused,
