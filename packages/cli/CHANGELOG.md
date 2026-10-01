@@ -4,6 +4,18 @@
 
 ### Features
 
+* **push:** when the engine refuses tables Supatype does not manage, `supatype push` and
+  `supatype dev` say which tables and that their declared access rules are not in force, and in a
+  terminal offer to adopt them there and then: the SQL adoption would run is shown, nothing is
+  applied without a second yes, and the push runs again afterwards. Without a terminal, or with
+  `--yes`, nothing is adopted and the command to run is printed. On a docker project adoption runs
+  through the compose schema-engine, so it reaches the stack's database. The refusal is read from
+  the engine's JSON reason, with its wording only as the fallback for an older engine.
+* **adopt, doctor:** `--no-cache` is hidden and does nothing but say it is no longer needed: both
+  read the database live. It never worked from the CLI (Commander stores it as `cache: false` and
+  the commands read `noCache`), and `doctor` would have passed it to an engine subcommand that does
+  not accept it.
+
 * **seed:** a seed file now exports a default function and describes writes rather than
   performing them. The calls are collected into a document that the engine validates against
   the schema, orders by foreign key, batches, and applies in one transaction. There is no

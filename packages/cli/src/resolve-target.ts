@@ -383,7 +383,7 @@ export async function targetListMigrations(
 export async function targetSchemaDoctor(
   target: DeployTarget,
   ast: unknown,
-  opts?: { noCache?: boolean | undefined; schema?: string },
+  opts?: { schema?: string },
 ): Promise<unknown> {
   if (target.mode === "direct" || (target.mode === "local" && !target.token)) {
     await ensureEngine()
@@ -391,7 +391,6 @@ export async function targetSchemaDoctor(
       ast,
       database_url: target.databaseUrl!,
       schema: opts?.schema ?? "public",
-      no_cache: opts?.noCache ?? false,
     })
   }
 
@@ -400,7 +399,6 @@ export async function targetSchemaDoctor(
     target.apiPrefix,
     apiFetchOpts(target, "POST", projectPath(target, "/schema/doctor"), {
       ast,
-      no_cache: opts?.noCache ?? false,
       schema: opts?.schema ?? "public",
     }),
   )
@@ -430,7 +428,7 @@ export async function targetSchemaIntrospect(
 export async function targetSchemaAdopt(
   target: DeployTarget,
   ast: unknown,
-  opts?: { names?: string[]; schema?: string; yes?: boolean; noCache?: boolean },
+  opts?: { names?: string[]; schema?: string; yes?: boolean },
 ): Promise<unknown> {
   if (target.mode === "direct" || (target.mode === "local" && !target.token)) {
     await ensureEngine()
@@ -440,7 +438,6 @@ export async function targetSchemaAdopt(
       schema: opts?.schema ?? "public",
       names: opts?.names,
       yes: opts?.yes ?? false,
-      no_cache: opts?.noCache ?? false,
     })
   }
 
@@ -451,7 +448,6 @@ export async function targetSchemaAdopt(
       ast,
       schema: opts?.schema ?? "public",
       yes: opts?.yes ?? false,
-      no_cache: opts?.noCache ?? false,
       ...(opts?.names !== undefined ? { names: opts.names } : {}),
     }),
   )

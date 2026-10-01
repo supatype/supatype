@@ -13,6 +13,7 @@
  * stops with it. Resetting the database is `supatype dev --reset-db`, which is asked for, confirmed,
  * and removes only Postgres's volume.
  */
+import { unmanagedTables } from "./adopt-walkthrough.js"
 import { fatalError } from "./ui/fatal.js"
 import type { DockerBrandOptions } from "./docker-runtime.js"
 
@@ -59,13 +60,11 @@ const TRANSIENT_PATTERNS: readonly RegExp[] = [
   /timeout expired|timed out/i,
 ]
 
-/** The engine's refusal to push over tables that carry no Supatype ownership marker. */
-const UNMANAGED_TABLES = /declares model\(s\) for table\(s\) Supatype does not manage/i
-
 function classifyPushFailure(message: string): PushFailureKind {
   // Checked first: the refusal is long prose, and it must not be retried because a word in it
-  // happens to look like a connection error.
-  if (UNMANAGED_TABLES.test(message)) return "unmanaged-tables"
+  // happens to look like a connection error. Read from the engine's JSON reason, with its wording
+  // only as the fallback for an engine that predates the JSON.
+  if (unmanagedTables(message) !== null) return "unmanaged-tables"
   if (TRANSIENT_PATTERNS.some((pattern) => pattern.test(message))) return "transient"
   return "engine"
 }

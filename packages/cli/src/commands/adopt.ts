@@ -6,6 +6,7 @@ import { resolveTarget, targetSchemaAdopt, schemaPgSchema } from "../resolve-tar
 import { confirm } from "../ui/confirm.js"
 import { info, plain } from "../ui/messages.js"
 import { withSpinner } from "../ui/progress.js"
+import { addRetiredNoCacheOption, warnIfRetiredNoCache } from "../retired-no-cache.js"
 
 interface AdoptPreview {
   status: string
@@ -18,21 +19,21 @@ interface AdoptPreview {
 }
 
 export function registerAdopt(program: Command): void {
-  program
+  const command = program
     .command("adopt")
     .description("Stamp Supatype-managed comments on DB objects matching the schema (adoption ceremony)")
     .option("--connection <url>", "Database connection URL (overrides config)")
     .option("--env <name>", "Target environment when linked")
     .option("--direct", "Use local engine subprocess")
     .option("--yes", "Apply stamps without interactive confirmation")
-    .option("--no-cache", "Force full database introspection")
-    .action(async (opts: {
+  addRetiredNoCacheOption(command).action(async (opts: {
       connection?: string
       env?: string
       direct?: boolean
       yes?: boolean
-      noCache?: boolean
+      cache?: boolean
     }) => {
+      warnIfRetiredNoCache(opts)
       const cwd = process.cwd()
       const config = loadConfig(cwd)
       const pgSchema = schemaPgSchema(cwd)
@@ -48,7 +49,6 @@ export function registerAdopt(program: Command): void {
 
       const preview = (await targetSchemaAdopt(target, ast, {
         schema: pgSchema,
-        noCache: opts.noCache ?? false,
         yes: false,
       })) as AdoptPreview
 
@@ -73,7 +73,6 @@ export function registerAdopt(program: Command): void {
 
       const result = (await targetSchemaAdopt(target, ast, {
         schema: pgSchema,
-        noCache: opts.noCache ?? false,
         yes: true,
       })) as { status: string; stamped?: number; name?: string }
 
