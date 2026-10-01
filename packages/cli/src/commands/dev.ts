@@ -131,12 +131,22 @@ export function registerDev(program: Command): void {
     .option("--no-watch", "Start services but do not watch for schema changes")
     .option("--stream", "Print interleaved logs instead of the interactive TUI")
     .option("--port <port>", "Port for supatype-server (overrides config)", String)
-    .action(async (opts: { watch: boolean; stream?: boolean; port?: string }) => {
+    .option("--reset-db", "Remove the local Postgres data volume before starting (asks first; storage is kept)")
+    .option("--yes", "Skip the --reset-db confirmation")
+    .action(async (opts: { watch: boolean; stream?: boolean; port?: string; resetDb?: boolean; yes?: boolean }) => {
       const cwd = process.cwd()
 
       // ── 1. Load project config (before TUI, fatal errors must hit real stderr) ──
       const config = loadConfig(cwd)
       const provider = resolveRuntimeProvider(config)
+
+      // The native provider keeps Postgres in a data directory, not a compose volume, and has
+      // nothing for this flag to remove. Saying so beats silently starting on the old data.
+      if (opts.resetDb === true && provider !== "docker") {
+        fatalError("--reset-db applies to the Docker provider only.", [
+          "This project runs Postgres natively, so there is no compose volume to remove.",
+        ])
+      }
 
       if (provider === "docker") {
         const probe = probeDockerDaemon()
@@ -165,7 +175,11 @@ export function registerDev(program: Command): void {
 
       if (provider === "docker") {
         const { runDevCompose } = await import("../dev-compose.js")
-        await runDevCompose(cwd, config, { watch: opts.watch !== false })
+        await runDevCompose(cwd, config, {
+          watch: opts.watch !== false,
+          resetDb: opts.resetDb === true,
+          yes: opts.yes === true,
+        })
         return
       }
 

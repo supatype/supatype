@@ -10,7 +10,7 @@ Global flags (all commands): `--config`, `--env`, `--verbose`, `--json`, `--no-c
 |---------|---------|
 | `supatype init [name]` | Scaffold project. Flags: `--mode dev \| standalone` |
 | `supatype keys` | Generate `ANON_KEY` + `SERVICE_ROLE_KEY` from `JWT_SECRET` |
-| `supatype dev` | Start local stack + control-plane. Docker default (Kong :18473). Flags: `--no-watch`, `--port` |
+| `supatype dev` | Start local stack + control-plane. Docker default (Kong :18473). Flags: `--no-watch`, `--port`, `--reset-db` (remove only the Postgres data volume, after confirmation), `--yes` (skip that confirmation; required for `--reset-db` without a TTY) |
 | `supatype push` | Diff, migrate, generate types. Flags: `--yes`, `--connection`, `--env`, `--direct` |
 | `supatype diff` | Dry-run schema changes. Flags: `--connection`, `--env`, `--direct` |
 | `supatype generate` | Regenerate types without migration |
@@ -74,7 +74,7 @@ Auth flag: `--token` (cloud = platform PAT; self-host = `SERVICE_ROLE_KEY`). `--
 | `supatype plugins` | Plugin scaffolding |
 | `supatype types` | Type utilities |
 
-Example: [`examples/edge-kit`](https://github.com/supatype/supatype/tree/main/examples/edge-kit) in the Supatype repository — Vite UI that invokes sample functions.
+Example: [`examples/edge-kit`](https://github.com/supatype/supatype/tree/main/examples/edge-kit) in the Supatype repository: a Vite UI that invokes sample functions.
 
 ## Ops and maintenance
 
@@ -85,10 +85,10 @@ Example: [`examples/edge-kit`](https://github.com/supatype/supatype/tree/main/ex
 | `supatype admin` | Admin user provisioning |
 | `supatype update` | Update pinned component versions |
 | `supatype cache` | Binary/image cache management |
-| REST GET cache | See [caching.md](caching.md) — `.cache({ ttl, server })` on queries |
+| REST GET cache | See [caching.md](caching.md): `.cache({ ttl, server })` on queries |
 | `supatype engine` | Schema engine utilities |
 
-## Local Docker dev — ports, multiple projects, shutdown
+## Local Docker dev: ports, multiple projects, shutdown
 
 **Kong port (`SUPATYPE_KONG_PORT`):**
 - `supatype init` (Docker) prompts for a gateway port; default is `18473` or the next free port.
@@ -98,6 +98,7 @@ Example: [`examples/edge-kit`](https://github.com/supatype/supatype/tree/main/ex
 
 **Stopping the stack:**
 - `supatype dev` runs `docker compose down` on Ctrl+C, terminal close, and as a sync fallback on process exit.
+- A failed schema push never resets the database. `dev` retries only while Postgres is unreachable; an engine refusal (for example unmanaged tables, fixed with `supatype adopt`) stops `dev` with the engine's message. `supatype dev --reset-db` is the only way `dev` removes data, and it removes only the Postgres volume.
 - `.supatype/dev-session.json` tracks the active dev session; the next `supatype dev` offers to clean up a stack left running after an unclean exit.
 - `supatype push` may start **Postgres only** and leave it running (intentional for prod/self-host workflows). Stop with `supatype self-host compose down`.
 
@@ -134,7 +135,7 @@ supatype rollback --env staging   # DB revert + optional schema file restore fro
 supatype rollback --no-sync-schema  # database only
 ```
 
-**Rollback notes:** `supatype rollback` undoes exactly the last applied migration on the shared database. Schema source files can be restored from the gzip snapshot stored in `_supatype.migrations` (not from git). One-step undo only — older migrations require sequential rollbacks or a forward-fix migration.
+**Rollback notes:** `supatype rollback` undoes exactly the last applied migration on the shared database. Schema source files can be restored from the gzip snapshot stored in `_supatype.migrations` (not from git). One-step undo only: older migrations require sequential rollbacks or a forward-fix migration.
 
 **Self-host production:**
 ```bash
