@@ -28,11 +28,12 @@ type Sent = { status: number; text: string; json: unknown }
 
 async function send(
   path: string,
-  init: { method?: string; body?: BodyInit; token?: string; type?: string } = {},
+  init: { method?: string; body?: BodyInit; token?: string; type?: string; headers?: Record<string, string> } = {},
 ): Promise<Sent> {
   const headers: Record<string, string> = {
     apikey: ANON,
     Authorization: `Bearer ${init.token ?? ANON}`,
+    ...init.headers,
   }
   if (init.type !== undefined) headers["Content-Type"] = init.type
   const res = await fetch(`${BASE}${path}`, {
@@ -65,13 +66,34 @@ async function signUp(): Promise<{ token: string; id: string }> {
 }
 
 /** Upload through the storage API, the way an application does. */
-async function upload(bucket: string, path: string, body: string, token: string): Promise<Sent> {
+async function upload(
+  bucket: string,
+  path: string,
+  body: string,
+  token: string,
+  opts: { type?: string; upsert?: boolean } = {},
+): Promise<Sent> {
   return send(`/storage/v1/object/${bucket}/${path}`, {
     method: "POST",
     token,
-    type: "text/plain",
+    type: opts.type ?? "text/plain",
     body,
+    ...(opts.upsert === true && { headers: { "x-upsert": "true" } }),
   })
+}
+
+async function removeObjects(bucket: string, paths: string[], token: string): Promise<Sent> {
+  return send(`/storage/v1/object/${bucket}`, {
+    method: "DELETE",
+    token,
+    type: "application/json",
+    body: JSON.stringify({ prefixes: paths }),
+  })
+}
+
+/** The public URL's bytes, with no session at all. */
+async function publicBytes(bucket: string, path: string): Promise<string> {
+  return (await fetch(`${BASE}/storage/v1/object/public/${bucket}/${path}`)).text()
 }
 
 async function publicBucket(): Promise<void> {
@@ -90,6 +112,29 @@ async function publicBucket(): Promise<void> {
   const anonRead = await fetch(`${BASE}/storage/v1/object/public/avatars/${path}`)
   check(anonRead.status < 300, "the public URL is readable with no credentials", `HTTP ${anonRead.status}`)
   check((await anonRead.text()) === body, "and returns the same bytes")
+
+  // supatype#81: the anon key is a JWT, and any JWT used to be enough to upload.
+  const asAnon = await upload("avatars", `probe/anon-${Date.now()}.txt`, "anon", ANON)
+  check(asAnon.status === 401, "the anon key is refused where create is BucketLoggedIn", `HTTP ${asAnon.status}`)
+
+  // supatype#82, and its overwrite twin: another signed-in user may neither remove nor replace it.
+  const stranger = await signUp()
+  const theirDelete = await removeObjects("avatars", [path], stranger.token)
+  check(
+    theirDelete.status < 300 && Array.isArray(theirDelete.json) && theirDelete.json.length === 0,
+    "another user's delete removes nothing where delete is BucketOwner",
+    `HTTP ${theirDelete.status}: ${theirDelete.text.slice(0, 120)}`,
+  )
+  const theirOverwrite = await upload("avatars", path, "replaced", stranger.token, { upsert: true })
+  check(theirOverwrite.status === 403, "and their overwrite is refused where update is BucketOwner", `HTTP ${theirOverwrite.status}`)
+  check((await publicBytes("avatars", path)) === body, "so the object still holds the uploader's bytes")
+
+  const ownDelete = await removeObjects("avatars", [path], user.token)
+  check(
+    Array.isArray(ownDelete.json) && ownDelete.json.length === 1,
+    "the uploader deletes their own object",
+    `HTTP ${ownDelete.status}: ${ownDelete.text.slice(0, 120)}`,
+  )
 }
 
 async function privateBucket(): Promise<void> {
@@ -144,8 +189,10 @@ async function roleGatedBucket(): Promise<void> {
   const user = await signUp()
   const path = `probe/${Date.now()}.pdf`
 
-  const asUser = await upload("product-manuals", path, "%PDF-1.4", user.token)
-  check(asUser.status >= 400, "a signed-in user is refused", `HTTP ${asUser.status}`)
+  // With the type the bucket accepts, so the refusal is the rule's. Sent as text/plain, this was
+  // refused with 415 for the content type, and passed while any signed-in user could upload here.
+  const asUser = await upload("product-manuals", path, "%PDF-1.4", user.token, { type: "application/pdf" })
+  check(asUser.status === 403, "a signed-in user is refused by the role rule", `HTTP ${asUser.status}`)
 
   const wrongType = await upload("product-manuals", path, "not a pdf", SERVICE)
   check(

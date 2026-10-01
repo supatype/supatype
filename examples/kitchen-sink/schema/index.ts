@@ -1,8 +1,8 @@
 /**
  * The kitchen sink: one schema, two audiences.
  *
- * A conference. The marketing site sells it — pages, speakers, talks, sponsors, all published by an
- * editor and read by anyone. The app is what an attendee signed in to — their ticket, their
+ * A conference. The marketing site sells it: pages, speakers, talks, sponsors, all published by an
+ * editor and read by anyone. The app is what an attendee signed in to: their ticket, their
  * schedule, the lobby chat. The two halves want genuinely different features, which is why this
  * example has two front ends instead of one app rendered twice.
  *
@@ -88,6 +88,7 @@ export type speakerHeadshots = Bucket<"speaker-headshots", {
   access: {
     read: BucketPublic
     create: BucketLoggedIn
+    update: BucketOwner
     delete: BucketOwner
   }
 }>
@@ -99,6 +100,7 @@ export type ticketFiles = Bucket<"ticket-files", {
   access: {
     read: BucketOwner
     create: BucketLoggedIn
+    update: BucketOwner
     delete: BucketOwner
   }
 }>
@@ -109,6 +111,7 @@ export type sponsorAssets = Bucket<"sponsor-assets", {
   access: {
     read: BucketRole<"sponsor">
     create: BucketRole<"sponsor">
+    update: BucketPrivate
     delete: BucketPrivate
   }
 }>
@@ -142,7 +145,7 @@ export type PageBlock = HeroBlock | ProseBlock | SpeakerGridBlock
  *
  * `read` is the publishing rule itself rather than a `status` column every query has to remember:
  * an unpublished page is unreadable, not merely unselected. `versions` is what lets the live page
- * stay live while an editor works on the next one — a single row holds one copy of the content, so
+ * stay live while an editor works on the next one. A single row holds one copy of the content, so
  * without it, editing a published page either destroys what is live or withholds the edit.
  */
 export type Page = Model<{
@@ -179,7 +182,7 @@ export type Speaker = Model<{
   /** `Searchable` alone is enough: Studio searches every column that carries it. */
   name: Searchable<string>
   slug: Unique<Slug<"name">>
-  /** Localized, so a French reader gets a French bio or none — never an English one in its place. */
+  /** Localized, so a French reader gets a French bio or none, never an English one in its place. */
   bio: Optional<Localized<RichText>>
   headshot: Optional<ImageAsset<speakerHeadshots>>
   /**
@@ -256,7 +259,7 @@ export type Talk = Model<{
    * The third way to refuse a value, and the only one that can name the field back to the caller.
    *
    * Bounds and constraints hold for every writer including `psql`; this runs on the API write path
-   * only. It is here for a rule a `CHECK` genuinely cannot express — see the function itself.
+   * only. It is here for a rule a `CHECK` genuinely cannot express (see the function itself).
    */
   validate: { title: "validate-talk-title" }
   indexes: [{ fields: ["day", "starts_at"] }]
