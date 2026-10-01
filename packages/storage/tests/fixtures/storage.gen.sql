@@ -88,10 +88,13 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON storage.objects TO anon, authenticated;
 DO $retire_storage_policies$
 DECLARE p record;
 BEGIN
+  IF to_regclass('storage.objects') IS NULL THEN RETURN; END IF;
   FOR p IN
     SELECT polname FROM pg_policy
      WHERE polrelid = 'storage.objects'::regclass
-       AND obj_description(oid, 'pg_policy') LIKE 'supatype:managed;kind=storage_policy;%'
+       AND (obj_description(oid, 'pg_policy') LIKE 'supatype:managed;kind=storage_policy;%'
+         OR (obj_description(oid, 'pg_policy') IS NULL
+             AND polname ~ '^storage_[A-Za-z0-9_]+_(sel|ins|del)$'))
        AND polname <> ALL (ARRAY['storage_avatars_sel', 'storage_avatars_ins', 'storage_avatars_upd', 'storage_avatars_del', 'storage_dropbox_sel', 'storage_dropbox_ins', 'storage_vault_sel', 'storage_vault_ins']::text[])
   LOOP
     EXECUTE format('DROP POLICY %I ON storage.objects', p.polname);
