@@ -41,6 +41,9 @@
   process, so the previous rule left a fresh project with a database nothing on the host could
   reach and a remedy nobody had reason to know about.
 * **schema:** `After<>` and `Before<>` are parsed from the schema into the AST.
+* **dev:** `--reset-db` starts from an empty local database. It removes the Postgres data volume
+  and nothing else, after a prompt that names the volume. Without a TTY it is refused unless
+  `--yes` is passed as well. Nothing in `dev` removes data without it.
 
 * **generate:** a rich text column is typed as the document it holds on the way out and as
   `RichText | string` on the way in. The engine emits a trigger that normalises a plain string
@@ -50,6 +53,13 @@
 
 ### Bug Fixes
 
+* **dev:** a failed first schema push no longer wipes the local database. Every failure was
+  answered with `docker compose down -v`, which removes every volume in the stack, Postgres and
+  storage alike, so a push the engine refused on purpose (a table Supatype does not manage, a
+  destructive change) cost the developer their rows and uploaded files, and the second attempt
+  then succeeded against an empty database. Only a database that is not reachable yet is retried
+  now, and the retry only starts Postgres again. A refusal stops `dev` with the engine's message
+  and exits non-zero; for unmanaged tables it names `supatype adopt` as the remedy.
 * **generate:** the client augmentation follows the order the schema declares its models and
   columns in. It sorted alphabetically, which threw away an order the author chose and the AST
   preserved, and made it disagree with `types/database.ts` about the same table.
