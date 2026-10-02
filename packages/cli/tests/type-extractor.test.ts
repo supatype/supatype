@@ -600,6 +600,42 @@ export type Config = Model<{
     expect(config?.options.singleton).toBe(true)
   })
 
+  it("carries a model's label overrides to the engine as options", () => {
+    // Presentation only: the engine passes these to Studio, which otherwise inflects the type
+    // name and cannot know that "Places of Interest" has its noun first.
+    const dir = mkdtempSync(join(tmpdir(), "supatype-model-labels-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, UUID, Public } from "@supatype/types"
+
+export type PlacesOfInterest = Model<{
+  id: UUID
+}, {
+  label: "Place of Interest"
+  labelPlural: "Places of Interest"
+  access: { read: Public }
+}>
+
+export type Post = Model<{
+  id: UUID
+}, {
+  access: { read: Public }
+}>
+`,
+      "utf8",
+    )
+
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const places = ast?.models.find((m) => m.name === "PlacesOfInterest")
+    expect(places?.options).toMatchObject({ label: "Place of Interest", labelPlural: "Places of Interest" })
+    const post = ast?.models.find((m) => m.name === "Post")
+    expect(post?.options).not.toHaveProperty("label")
+    expect(post?.options).not.toHaveProperty("labelPlural")
+  })
+
   it("infers timestamps from WithTimestamps wrapper", () => {
     const dir = mkdtempSync(join(tmpdir(), "supatype-timestamps-"))
     dirs.push(dir)

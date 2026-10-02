@@ -1308,10 +1308,7 @@ function parseAccessModeLiteral(
 }
 
 function parseSizeStringLiteral(typeNode: ts.TypeNode, sourceFile: ts.SourceFile): string | undefined {
-  if (ts.isLiteralTypeNode(typeNode) && ts.isStringLiteral(typeNode.literal)) {
-    return typeNode.literal.text
-  }
-  return stripQuotes(typeNode.getText(sourceFile)) || undefined
+  return literalStringType(typeNode) ?? (stripQuotes(typeNode.getText(sourceFile)) || undefined)
 }
 
 function parseJsonStringLiteral(typeNode: ts.TypeNode, sourceFile: ts.SourceFile): string | undefined {
@@ -1603,10 +1600,7 @@ function resolveBucketName(
   if (ts.isTypeReferenceNode(typeArg) && ts.isIdentifier(typeArg.typeName)) {
     return bucketAliases.get(typeArg.typeName.text) ?? typeArg.typeName.text
   }
-  if (ts.isLiteralTypeNode(typeArg) && ts.isStringLiteral(typeArg.literal)) {
-    return typeArg.literal.text
-  }
-  return typeArg.getText(sourceFile).replace(/^['"]|['"]$/g, "") || fallback
+  return literalStringType(typeArg) ?? (typeArg.getText(sourceFile).replace(/^['"]|['"]$/g, "") || fallback)
 }
 
 function isBooleanLiteralType(typeNode: ts.TypeNode, value: boolean): boolean {
@@ -1680,27 +1674,23 @@ function parseVersions(typeNode: ts.TypeNode): ParsedVersions | undefined {
   return parsed
 }
 
-function parseMetaLiteral(
-  metaArg: ts.TypeNode | undefined,
-  sourceFile: ts.SourceFile,
-): {
+interface MetaLiteral {
   tableName?: string
+  label?: string
+  labelPlural?: string
   singleton?: boolean
   timestamps?: boolean
   softDelete?: boolean
   autoLocalize?: boolean
   versions?: ParsedVersions
   searchable?: string[]
-} {
-  const result: {
-    tableName?: string
-    singleton?: boolean
-    timestamps?: boolean
-    softDelete?: boolean
-    autoLocalize?: boolean
-    versions?: ParsedVersions
-    searchable?: string[]
-  } = {}
+}
+
+function parseMetaLiteral(
+  metaArg: ts.TypeNode | undefined,
+  sourceFile: ts.SourceFile,
+): MetaLiteral {
+  const result: MetaLiteral = {}
 
   if (!metaArg || !ts.isTypeLiteralNode(metaArg)) return result
 
@@ -1721,17 +1711,14 @@ function parseMetaLiteral(
       result.autoLocalize = true
     } else if (key === "searchable" && ts.isTupleTypeNode(member.type)) {
       result.searchable = member.type.elements
-        .map((el) => (ts.isLiteralTypeNode(el) && ts.isStringLiteral(el.literal) ? el.literal.text : null))
+        .map(literalStringType)
         .filter((name): name is string => name !== null)
     } else if (key === "versions") {
       const versions = parseVersions(member.type)
       if (versions !== undefined) result.versions = versions
-    } else if (
-      key === "tableName" &&
-      ts.isLiteralTypeNode(member.type) &&
-      ts.isStringLiteral(member.type.literal)
-    ) {
-      result.tableName = member.type.literal.text
+    } else if (key === "tableName" || key === "label" || key === "labelPlural") {
+      const text = literalStringType(member.type)
+      if (text !== null) result[key] = text
     }
   }
 
@@ -1790,6 +1777,8 @@ function parseModelMeta(
   if (softDelete) options.softDelete = true
   if (literal.autoLocalize === true) options.autoLocalize = true
   if (literal.versions !== undefined) options.versions = literal.versions
+  if (literal.label !== undefined) options.label = literal.label
+  if (literal.labelPlural !== undefined) options.labelPlural = literal.labelPlural
 
   const access = parseModelAccess(metaArg, sourceFile, modelName, fields, resolveCtx)
   if (literal.versions !== undefined) assertVersionsWithoutFieldRules(access, modelName)
@@ -2249,8 +2238,9 @@ function parseModelIndexes(
       if (!ts.isPropertySignature(member) || !member.type) continue
       const key = getPropertyName(member.name)
       if (!key) continue
-      if (key === "name" && ts.isLiteralTypeNode(member.type) && ts.isStringLiteral(member.type.literal)) {
-        indexDef.name = member.type.literal.text
+      if (key === "name") {
+        const name = literalStringType(member.type)
+        if (name !== null) indexDef.name = name
       } else if (key === "unique" && isBooleanLiteralType(member.type, true)) {
         indexDef.unique = true
       } else if (key === "fields" && ts.isTupleTypeNode(member.type)) {
@@ -3234,12 +3224,9 @@ function parseRelationOptions(
       continue
     }
 
-    if (
-      (key === "onDelete" || key === "onUpdate" || key === "through") &&
-      ts.isLiteralTypeNode(member.type) &&
-      ts.isStringLiteral(member.type.literal)
-    ) {
-      out[key] = member.type.literal.text
+    if (key === "onDelete" || key === "onUpdate" || key === "through") {
+      const text = literalStringType(member.type)
+      if (text !== null) out[key] = text
     }
   }
 

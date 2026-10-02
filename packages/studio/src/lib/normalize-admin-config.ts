@@ -16,6 +16,24 @@ function humanize(name: string): string {
     .replace(/^\w/, (c) => c.toUpperCase())
 }
 
+/** `value` when it is a non-empty string. Empty counts as absent: it names nothing. */
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value !== "" ? value : undefined
+}
+
+/**
+ * What Studio calls one record of a model, and many.
+ *
+ * The project's own words win where its model meta set them. Otherwise both come from the type
+ * name, and a type named in the plural (`Places`, `Children`) is still one record per row, so the
+ * singular reads "Create Place" and the plural does not become "Placeses". A plural is inflected
+ * from the singular override when only that was set, so `label` alone is enough for most names.
+ */
+function modelLabels(mo: Record<string, unknown>, name: string): { label: string; labelPlural: string } {
+  const label = nonEmptyString(mo["label"]) ?? singularize(humanize(name))
+  return { label, labelPlural: nonEmptyString(mo["labelPlural"]) ?? pluralize(label) }
+}
+
 function normalizeStudioWidget(widget: unknown): FieldConfig["widget"] {
   const raw = String(widget ?? "text")
   if (raw.toLowerCase() === "derivedtext") return "derivedText"
@@ -56,15 +74,11 @@ export function normalizeAdminConfig(raw: unknown): AdminConfig {
   const models = ((r["models"] as unknown[]) ?? []).map((m) => {
     const mo = m as Record<string, unknown>
     const name = String(mo["name"] ?? "")
-    // A type named in the plural (`Places`, `Children`) is still one record per row, so the
-    // singular label reads "Create Place" and the plural one does not become "Placeses".
-    const label = singularize(humanize(name))
     const tableName = String(mo["tableName"] ?? name)
     const fields = mapEngineFields(mo["fields"])
     return {
       name,
-      label,
-      labelPlural: pluralize(label),
+      ...modelLabels(mo, name),
       tableName,
       apiPath: `/rest/v1/${tableName}`,
       primaryKey: String(mo["primaryKey"] ?? "id"),
@@ -100,7 +114,8 @@ export function normalizeAdminConfig(raw: unknown): AdminConfig {
     const tableName = String(go["tableName"] ?? `_global_${toGlobalSuffix(name)}`)
     return {
       name,
-      label: String(go["label"] ?? humanize(name)),
+      // One record, so only the singular override applies.
+      label: nonEmptyString(go["label"]) ?? humanize(name),
       tableName,
       apiPath: `/rest/v1/${tableName}`,
       fields: mapEngineFields(go["fields"]),
@@ -188,10 +203,8 @@ export function normalizeAdminConfig(raw: unknown): AdminConfig {
               // Empty counts as absent, the same way the resolver treats it. A model whose only
               // address is "" names nowhere, and keeping it would put a share control on screen
               // that mints a credential no link can carry.
-              const text = (value: unknown): string | undefined =>
-                typeof value === "string" && value !== "" ? value : undefined
-              const url = text(entry["url"])
-              const urlPattern = text(entry["urlPattern"])
+              const url = nonEmptyString(entry["url"])
+              const urlPattern = nonEmptyString(entry["urlPattern"])
               return [model, { ...(url !== undefined && { url }), ...(urlPattern !== undefined && { urlPattern }) }] as const
             })
             .filter(([, entry]) => entry.url !== undefined || entry.urlPattern !== undefined),

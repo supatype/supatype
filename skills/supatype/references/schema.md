@@ -79,6 +79,26 @@ export type SiteSettings = Model<{
 }>
 ```
 
+## Studio labels
+
+Studio names a model from its type, split into words and inflected: `ChildEducationExperiences` is
+"Child Education Experience" for one record and "Child Education Experiences" for the list. A type
+named in either number works. Override it where the guess reads wrong:
+
+```typescript
+export type PlacesOfInterest = Model<{
+  id: UUID
+  name: string
+}, {
+  label: "Place of Interest"
+  labelPlural: "Places of Interest"
+  access: { read: Public }
+}>
+```
+
+`labelPlural` is inflected from `label` when omitted. Labels are presentation only and never cause a
+migration.
+
 ## Storage buckets
 
 ```typescript
