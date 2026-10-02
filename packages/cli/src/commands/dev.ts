@@ -241,7 +241,7 @@ export function registerDev(program: Command): void {
         if (wantsPgKeyspace && nativeKeyspaceLibraryPresent(pgBinDir) && keyspacePort === null) {
           console.warn(
             `[supatype] ⚠  No free port in ${KEYSPACE_PORT_BASE}-${KEYSPACE_PORT_BASE + KEYSPACE_PORT_SPAN - 1} ` +
-              "for the Postgres keyspace, so starting without it.",
+              "for the Postgres keyspace, starting without it.",
           )
         }
 
@@ -464,8 +464,8 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
           : null
       if (keyspacePort !== null && nativeKeyspaceAddr === null) {
         console.warn(
-          `[supatype] ⚠  Postgres has pg_keyspace but is not serving RESP on :${keyspacePort}; ` +
-            "see logs/postgres.log. Falling back to the Valkey sidecar.",
+          `[supatype] ⚠  Postgres has pg_keyspace but is not serving RESP on :${keyspacePort}. ` +
+            "See logs/postgres.log. Falling back to the Valkey sidecar.",
         )
       }
       if (nativeKeyspaceAddr) {
