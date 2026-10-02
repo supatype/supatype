@@ -26,7 +26,7 @@ function anonKey(): string {
   if (fromEnv) return fromEnv
   const env = readFileSync(resolve(import.meta.dirname, ".env"), "utf8")
   const match = env.match(/^ANON_KEY=(.*)$/m)
-  if (!match) throw new Error("no ANON_KEY in .env — run `supatype dev` first")
+  if (!match) throw new Error("no ANON_KEY in .env: run `supatype dev` first")
   return match[1].trim().replace(/^"|"$/g, "")
 }
 
@@ -55,8 +55,8 @@ const arrived = new Promise<void>((resolve) => {
     { event: "INSERT" },
   )
 
-  // `.on()` only registers a listener; the socket opens here. Without this the
-  // callback above is never called and the failure is a timeout with no clue.
+  // `from().subscribe()` has already joined; this only watches the status, so
+  // the write below can wait for SUBSCRIBED instead of racing the handshake.
   sub.channel.subscribe((s) => {
     status = s
   })

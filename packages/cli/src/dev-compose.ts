@@ -80,6 +80,8 @@ import { provisionBucketsFromAst } from "./storage-provision.js"
 import type { ExtractedSchemaAstV2 } from "./schema-ast-v2.js"
 import { ensureFirstAdminUserForProject } from "./commands/admin.js"
 import { publishDevReady } from "./dev-ready-panel.js"
+import { exitInitialPushFailed, pushInitialSchema } from "./dev-initial-push.js"
+import { resetDevDatabase } from "./dev-db-reset.js"
 
 /** Default host port for compose Postgres when `overrides.engine` is set (devLocal). */
 const COMPOSE_DEV_DB_PORT = 54329
@@ -98,6 +100,10 @@ export function syncComposeImagePins(cwd: string, config: SupatypeProjectConfig)
 
 export interface DevComposeOptions {
   watch: boolean
+  /** Remove the Postgres data volume before starting, after confirmation. Never implied. */
+  resetDb: boolean
+  /** The reset was already confirmed on the command line, so do not prompt for it. */
+  yes: boolean
 }
 
 /** In-compose Postgres URL (SCRAM; not published to the host). */
@@ -120,8 +126,8 @@ async function resolveDevDbPort(cwd: string): Promise<number> {
  *
  * The compose helpers below describe the `db` *container*, on the host at
  * `SUPATYPE_DEV_DB_PORT`, or in-network at `db:5432`. Neither exists for a project pointed at an
- * external database, and passing one produced "pool timed out while waiting for an open connection"
- *- a message with nothing in it about the URL being wrong.
+ * external database, and passing one produced "pool timed out while waiting for an open connection",
+ * a message with nothing in it about the URL being wrong.
  */
 function projectDatabaseUrl(cwd: string, config: SupatypeProjectConfig, inNetwork = false): string {
   if (usesExternalDatabase(config)) return connectionString(config)
@@ -1083,6 +1089,30 @@ export async function pushSchemaDocker(cwd: string, config: SupatypeProjectConfi
   console.log("[supatype] Schema pushed.")
 }
 
+/**
+ * The first push of a `dev` session. A retry only ever brings Postgres back up: it never removes
+ * a volume, so a refused push leaves the developer's database exactly as it found it.
+ */
+async function applyInitialSchema(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  paths: SelfHostComposePaths,
+  schemaPath: string,
+  project: string,
+  brand: DockerBrandOptions,
+): Promise<void> {
+  const outcome = await pushInitialSchema({
+    push: () => runComposeSchemaPush(cwd, config, paths, schemaPath, project),
+    recoverDatabase: () => startComposeDatabase(config, paths, cwd, project, brand, undefined, endDevSession),
+    dumpLogs: (reason) => dumpComposeDbLogs(paths, cwd, project, reason),
+    sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+  })
+  if (outcome.kind === "applied") return
+  // Before the message, so it reaches the real terminal rather than a TUI that is going away.
+  endDevSession()
+  exitInitialPushFailed(outcome, brand)
+}
+
 export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, opts: DevComposeOptions): Promise<void> {
   if (resolveRuntimeProvider(config) !== "docker") {
     throw new Error("runDevCompose requires provider: docker")
@@ -1154,6 +1184,21 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   await recoverStaleDevSession(cwd)
   await handleComposeProjectRename(cwd, config.project.name, paths)
 
+  // Only on request, and before Postgres starts, so it comes up on an empty volume.
+  if (opts.resetDb) {
+    await resetDevDatabase(
+      {
+        composePath: paths.composePath,
+        cwd,
+        project,
+        external: usesExternalDatabase(config),
+        brand: devBrand,
+        onFailure: endDevSession,
+      },
+      { yes: opts.yes },
+    )
+  }
+
   if (!usesExternalDatabase(config)) {
     console.log("[supatype] Bringing up Postgres (compose db)...")
   }
@@ -1167,45 +1212,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
 
   // A: apply schema before realtime (and the rest of the stack) starts decoding WAL.
   const schemaPath = schemaPathFromProject(config, cwd)
-  {
-    const maxAttempts = 3
-    let lastErr: unknown
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        await runComposeSchemaPush(cwd, config, paths, schemaPath, project)
-        lastErr = undefined
-        break
-      } catch (e: unknown) {
-        lastErr = e
-        console.error(
-          `[supatype] Initial schema push failed (attempt ${attempt}/${maxAttempts}):`,
-          (e as Error).message,
-        )
-        dumpComposeDbLogs(paths, cwd, project, `schema push attempt ${attempt}/${maxAttempts}`)
-        if (attempt < maxAttempts) {
-          // Only for a database Supatype created. Tearing down an external one is not ours to do,
-          // and `down -v` would destroy the stack's other volumes for a failure that was never
-          // about Postgres.
-          if (!usesExternalDatabase(config)) {
-            console.log("[supatype] Resetting Postgres after failed schema push...")
-            runDockerCompose(paths.composePath, ["down", "-v"], cwd, project, {
-              quiet: true,
-              brand: devBrand,
-            })
-            await startComposeDatabase(config, paths, cwd, project, devBrand)
-          }
-          await new Promise((r) => setTimeout(r, 3000 * attempt))
-        }
-      }
-    }
-    if (lastErr) {
-      dumpComposeDbLogs(paths, cwd, project, "initial schema push exhausted")
-      endDevSession()
-      throw new Error(
-        `Initial schema push failed after ${maxAttempts} attempts: ${(lastErr as Error).message}`,
-      )
-    }
-  }
+  await applyInitialSchema(cwd, config, paths, schemaPath, project, devBrand)
 
   console.log("[supatype] Bringing up Docker Compose services...")
   const upStatus = runDockerCompose(paths.composePath, ["up", "-d"], cwd, project, {
