@@ -111,8 +111,8 @@ function collectInserts(client: Client): { rows: Row[]; ready: Promise<boolean>;
     { event: "INSERT" },
   )
 
-  // `.subscribe()` above only registers the handler. This opens the socket, and without waiting
-  // for SUBSCRIBED the seeds below race the handshake and a miss would mean nothing.
+  // `.subscribe()` above has already joined. This only watches the status: without waiting for
+  // SUBSCRIBED the seeds below race the handshake and a miss would mean nothing.
   const ready = new Promise<boolean>((resolve) => {
     const deadline = setTimeout(() => resolve(false), SUBSCRIBE_TIMEOUT_MS)
     sub.channel.subscribe((status) => {

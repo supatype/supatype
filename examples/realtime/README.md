@@ -35,18 +35,18 @@ FAIL: the channel never subscribed (last status: never reported)
 
 ## The one thing worth copying
 
-`client.from("message").subscribe(cb)` registers the listener. It does **not**
-open the socket — `.subscribe()` on the returned channel does:
+`client.from("message").subscribe(cb)` registers the listener and joins the
+channel. Calling `.subscribe()` on the returned channel does not join again; it
+is how you watch the status:
 
 ```ts
 const sub = supatype.from("message").subscribe(onChange, { event: "INSERT" })
 sub.channel.subscribe((status) => { /* SUBSCRIBED, CHANNEL_ERROR, ... */ })
 ```
 
-Without that second line the callback is never called, and the failure is a
-timeout with nothing to say why. Wait for `SUBSCRIBED` before writing the row
-you expect to be told about, or the write races the subscription and the event
-is missed for a reason that has nothing to do with realtime.
+Wait for `SUBSCRIBED` before writing the row you expect to be told about, or
+the write races the subscription and the event is missed for a reason that has
+nothing to do with realtime.
 
 ## Broadcast and presence
 
