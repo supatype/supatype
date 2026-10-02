@@ -1,0 +1,40 @@
+{
+  "astVersion": 2,
+  "models": [],
+  "storageBuckets": [
+    {
+      "id": "avatars",
+      "public": true,
+      "accessMode": "public",
+      "access": {
+        "read": { "type": "public" },
+        "create": { "type": "authenticated" },
+        "update": { "type": "owner", "field": "owner_id" },
+        "delete": { "type": "owner", "field": "owner_id" }
+      }
+    },
+    {
+      "id": "dropbox",
+      "public": false,
+      "accessMode": "private",
+      "access": {
+        "read": { "type": "authenticated" },
+        "create": { "type": "authenticated" }
+      }
+    },
+    {
+      "id": "loose",
+      "public": false,
+      "accessMode": "private"
+    },
+    {
+      "id": "vault",
+      "public": false,
+      "accessMode": "custom",
+      "access": {
+        "read": { "type": "owner", "field": "owner_id" },
+        "create": { "type": "authenticated" }
+      }
+    }
+  ]
+}

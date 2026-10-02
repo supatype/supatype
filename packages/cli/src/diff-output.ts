@@ -40,8 +40,8 @@ export function formatOperation(op: Operation): string {
   return kind
 }
 
-/** Print engine diff warnings before the operation list. */
-export function printDiffWarnings(diff: DiffResult): void {
+/** Print engine warnings: a diff's before its operation list, or a push's once it has run. */
+export function printDiffWarnings(diff: Pick<DiffResult, "warnings">): void {
   const warnings = diff.warnings ?? []
   if (warnings.length === 0) return
   console.log(`\n${warnings.length} warning(s):\n`)

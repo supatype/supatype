@@ -36,7 +36,7 @@ export type Database = {
           id?: string
           email: string
           username: string
-          bio?: RichText | null
+          bio?: RichText | string | null
           avatarUrl?: StorageReference | null
           websiteUrl?: string | null
           role?: "user" | "editor" | "admin"
@@ -47,7 +47,7 @@ export type Database = {
           id?: string
           email?: string
           username?: string
-          bio?: RichText | null
+          bio?: RichText | string | null
           avatarUrl?: StorageReference | null
           websiteUrl?: string | null
           role?: "user" | "editor" | "admin"
@@ -179,7 +179,7 @@ export type Database = {
           title: string
           slug?: string
           excerpt?: string | null
-          body?: RichText | null
+          body?: RichText | string | null
           author_id?: string | null
           category_id?: string | null
           coverImage?: StorageReference | null
@@ -197,7 +197,7 @@ export type Database = {
           title?: string
           slug?: string
           excerpt?: string | null
-          body?: RichText | null
+          body?: RichText | string | null
           author_id?: string | null
           category_id?: string | null
           coverImage?: StorageReference | null
@@ -265,7 +265,7 @@ export type Database = {
         Insert: {
           id?: string
           headline?: string | null
-          body?: RichText | null
+          body?: RichText | string | null
           tags?: string[] | null
           refs?: Json | null
           sections?: ({ type: "note"; data: { text: string } })[] | null
@@ -278,7 +278,7 @@ export type Database = {
         Update: {
           id?: string
           headline?: string | null
-          body?: RichText | null
+          body?: RichText | string | null
           tags?: string[] | null
           refs?: Json | null
           sections?: ({ type: "note"; data: { text: string } })[] | null
@@ -312,7 +312,7 @@ export type Database = {
         Insert: {
           id?: string
           title: string
-          description?: RichText | null
+          description?: RichText | string | null
           startsAt: string
           endsAt?: string | null
           eventDate?: string | null
@@ -330,7 +330,7 @@ export type Database = {
         Update: {
           id?: string
           title?: string
-          description?: RichText | null
+          description?: RichText | string | null
           startsAt?: string
           endsAt?: string | null
           eventDate?: string | null

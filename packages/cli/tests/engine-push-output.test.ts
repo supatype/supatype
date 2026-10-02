@@ -1,9 +1,38 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   filterComposeNoise,
   formatEnginePushMessage,
   parseEnginePushOutput,
+  printPushWarnings,
 } from "../src/engine-push-output.js"
+
+describe("printPushWarnings()", () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  function printed(run: () => void): string {
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined)
+    run()
+    return log.mock.calls.map((call) => call.join(" ")).join("\n")
+  }
+
+  it("prints what a push warned about", () => {
+    const out = printed(() =>
+      printPushWarnings(parseEnginePushOutput('{"status":"up_to_date","warnings":["Bucket \\"a\\" declares no delete rule"]}')!),
+    )
+    expect(out).toContain('[!] Bucket "a" declares no delete rule')
+  })
+
+  it("leaves out what the diff before it already showed", () => {
+    const out = printed(() => printPushWarnings({ warnings: ["shown", "found after applying"] }, ["shown"]))
+    expect(out).toContain("found after applying")
+    expect(out).not.toContain("shown\n")
+    expect(out).toContain("1 warning(s)")
+  })
+
+  it("prints nothing when there is nothing new", () => {
+    expect(printed(() => printPushWarnings({ warnings: ["shown"] }, ["shown"]))).toBe("")
+  })
+})
 
 describe("parseEnginePushOutput()", () => {
   it("parses JSON on its own line amid docker progress", () => {

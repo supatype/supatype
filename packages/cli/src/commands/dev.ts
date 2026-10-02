@@ -11,6 +11,7 @@
  */
 
 import { keyspaceInPostgres } from "../cache-provider.js"
+import { printPushWarnings, type EnginePushResult } from "../engine-push-output.js"
 import type { Command } from "commander"
 import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
@@ -771,7 +772,7 @@ async function runSchemaPush(
   const pgSchema = config?.schema?.pg_schema ?? "public"
   const sources = writeSchemaSourcePushArtifacts(cwd)
   try {
-    await engineRequest("/push", {
+    const result = await engineRequest<EnginePushResult>("/push", {
       ast,
       database_url: dbURL,
       schema: pgSchema,
@@ -783,6 +784,7 @@ async function runSchemaPush(
           }
         : {}),
     })
+    printPushWarnings(result)
   } catch (err) {
     _lastFailedAst = astJson
     throw err

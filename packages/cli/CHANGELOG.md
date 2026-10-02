@@ -53,6 +53,12 @@
 
 ### Bug Fixes
 
+* **storage:** a bucket's `update` rule reaches the engine. Every key other than `read`, `create`
+  and `delete` was skipped without a word, so an overwrite rule the author wrote was never
+  enforced. Any other key in a bucket's `access` is now an error that names it.
+* **push:** every push prints the engine's warnings, as `supatype diff` does, without repeating
+  the ones the diff before it showed. None did, so a push said nothing about a bucket operation it
+  had just made unreachable, and the warnings found after applying were shown nowhere.
 * **dev:** a failed first schema push no longer wipes the local database. Every failure was
   answered with `docker compose down -v`, which removes every volume in the stack, Postgres and
   storage alike, so a push the engine refused on purpose (a table Supatype does not manage, a

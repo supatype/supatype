@@ -2,11 +2,30 @@
  * Parse and format schema-engine push output (compose subprocess or HTTP).
  */
 
+import { printDiffWarnings } from "./diff-output.js"
+
+/**
+ * Print what a push warned about, less anything the diff before it already showed.
+ *
+ * Every caller of `/push` reports through here. The warnings used to reach only `supatype diff`, so
+ * a push said nothing about a bucket operation it had just made unreachable, and the ones found
+ * after applying were not shown anywhere.
+ */
+export function printPushWarnings(
+  result: Pick<EnginePushResult, "warnings">,
+  alreadyShown: readonly string[] = [],
+): void {
+  const shown = new Set(alreadyShown)
+  printDiffWarnings({ warnings: (result.warnings ?? []).filter((w) => !shown.has(w)) })
+}
+
 export interface EnginePushResult {
   status?: string
   operations?: number
   admin_refreshed?: boolean
   message?: string
+  /** The schema's warnings (a bucket rule left out, say), then any found once applied. */
+  warnings?: string[]
 }
 
 /** Extract the engine JSON object from mixed docker compose stdout/stderr. */

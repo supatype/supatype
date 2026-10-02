@@ -137,6 +137,17 @@ export function publicObjectUrl(bucket: string, key: string): string {
 
 // ─── Object operations ─────────────────────────────────────────────────────────
 
+/**
+ * Where an object's bytes are stored: `name/<version>`, a fresh version per upload, or `name` for
+ * an object written before versions, whose row has none.
+ *
+ * Fresh per upload so an overwrite never replaces the bytes being served: the new ones go
+ * alongside, the row is switched to them when it commits, and the old ones are deleted after.
+ */
+export function objectKey(name: string, version: string | null): string {
+  return version === null ? name : `${name}/${version}`
+}
+
 export async function putObject(
   bucket: string,
   key: string,
@@ -186,14 +197,18 @@ export async function deleteObjects(
   bucket: string,
   keys: string[],
 ): Promise<void> {
-  if (keys.length === 0) return
-  await s3.send(
-    new DeleteObjectsCommand({
-      Bucket: bucket,
-      Delete: { Objects: keys.map((Key) => ({ Key })) },
-    }),
-  )
+  // S3 takes at most 1000 keys per request, and emptying a bucket can pass any number.
+  for (let at = 0; at < keys.length; at += DELETE_BATCH) {
+    await s3.send(
+      new DeleteObjectsCommand({
+        Bucket: bucket,
+        Delete: { Objects: keys.slice(at, at + DELETE_BATCH).map((Key) => ({ Key })) },
+      }),
+    )
+  }
 }
+
+const DELETE_BATCH = 1000
 
 export async function listObjects(
   bucket: string,

@@ -3,7 +3,8 @@ import type { IncomingMessage } from "node:http"
 import { config } from "./env.js"
 
 export interface JwtPayload {
-  sub: string
+  /** Absent on the anon key, which is a JWT with a role and no subject. */
+  sub?: string
   role: string
   aud?: string
   exp?: number

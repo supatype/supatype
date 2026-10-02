@@ -27,6 +27,7 @@ import {
 } from "../preview-config-check.js"
 import { pinnedVersion } from "../binary-cache.js"
 import { printDiffOperations, printDiffWarnings } from "../diff-output.js"
+import { printPushWarnings } from "../engine-push-output.js"
 import { signJwt } from "../jwt.js"
 import { provisionBucketsFromAst } from "../storage-provision.js"
 import type { ExtractedSchemaAstV2 } from "../schema-ast-v2.js"
@@ -172,6 +173,8 @@ async function pushViaTarget(
       cacheSchemaSourcesLocally(cwd, migrationName, schemaSources.gz)
     }
   }
+  // The diff's were printed before applying; what is left is what the push found once applied.
+  printPushWarnings(pushResult, diff.warnings ?? [])
 
   if (target.mode === "cloud" || target.mode === "self-host") {
     await deployHooksToTarget(cwd, config, target, ast)
@@ -260,7 +263,7 @@ async function deployHooksToTarget(
  *
  * Two things have to be true for a local `.cache({ server: true })` to be served: the schema
  * declares the table, and the runtime allowlist has it on. A push writes the first, so without
- * this the second is a trip to Studio that nothing in the output asks for — the symptom being a
+ * this the second is a trip to Studio that nothing in the output asks for, the symptom being a
  * BYPASS header and a declaration that appears to do nothing.
  *
  * Never an error, and never a rewrite of an entry that already exists. See `seedApiConfigCache`.

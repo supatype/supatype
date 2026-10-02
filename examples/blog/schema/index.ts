@@ -42,6 +42,7 @@ export type userAvatars = Bucket<"user-avatars", {
   access: {
     read: BucketPublic
     create: BucketLoggedIn
+    update: BucketOwner
     delete: BucketOwner
   }
 }>
@@ -53,6 +54,7 @@ export type postCovers = Bucket<"post-covers", {
   access: {
     read: BucketPublic
     create: BucketLoggedIn
+    update: BucketOwner
     delete: BucketOwner
   }
 }>
@@ -63,6 +65,7 @@ export type postAttachments = Bucket<"post-attachments", {
   access: {
     read: BucketLoggedIn
     create: BucketLoggedIn
+    update: BucketOwner
     delete: BucketOwner
   }
 }>

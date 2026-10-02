@@ -300,6 +300,50 @@ export type Post = Model<{
     expect(hero).toMatchObject({ kind: "image", bucket: "covers", accessMode: "public" })
   })
 
+  // A bucket has the same four operations a model has, each its own rule. `update` used to be
+  // skipped without a word, so an overwrite rule the author wrote was simply never enforced.
+  function bucketWithAccess(access: string): string {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-bucket-rules-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, UUID, Bucket, BucketPublic, BucketLoggedIn, BucketOwner, FileAsset } from "@supatype/types"
+
+export type avatars = Bucket<"avatars", { accessMode: "public"; access: ${access} }>
+
+export type Profile = Model<{
+  id: UUID
+  avatar: FileAsset<avatars>
+}>
+`,
+      "utf8",
+    )
+    return schemaPath
+  }
+
+  it("extracts all four bucket rules, update included", () => {
+    const schemaPath = bucketWithAccess(
+      "{ read: BucketPublic; create: BucketLoggedIn; update: BucketOwner; delete: BucketOwner }",
+    )
+    const ast = extractSchemaAstFromTypes(schemaPath, join(schemaPath, ".."))
+    const b = ast?.storageBuckets?.find((x) => x.id === "avatars")
+    expect(b?.access).toEqual({
+      read: { type: "public" },
+      create: { type: "authenticated" },
+      update: { type: "owner", field: "owner_id" },
+      delete: { type: "owner", field: "owner_id" },
+    })
+  })
+
+  it("refuses a bucket rule key that is not an operation, rather than dropping it", () => {
+    const schemaPath = bucketWithAccess("{ read: BucketPublic; remove: BucketOwner }")
+    expect(() => extractSchemaAstFromTypes(schemaPath, join(schemaPath, ".."))).toThrow(
+      /Bucket "avatars": `remove` is not a bucket rule\. Use read, create, update or delete\./,
+    )
+  })
+
   it("extracts accessMode custom and s3BucketPolicy string", () => {
     const dir = mkdtempSync(join(tmpdir(), "supatype-bucket-custom-"))
     dirs.push(dir)

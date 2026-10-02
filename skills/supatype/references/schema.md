@@ -12,7 +12,7 @@ import type {
   SupatypeAuthUserId, UUID,
 } from "@supatype/types"
 
-/** App profile — `id` matches the Supatype auth user id. */
+/** App profile: `id` matches the Supatype auth user id. */
 export type Profile = Model<{
   id: SupatypeAuthUserId
   display_name: string
@@ -91,10 +91,21 @@ export type marketingImages = Bucket<"marketing", {
   access: {
     read: BucketPublic
     create: BucketRole<"admin">
+    update: BucketRole<"admin">
     delete: BucketRole<"admin">
   }
 }>
 ```
+
+A bucket has the same four rules as a model: `read`, `create`, `update` (overwriting an existing
+file) and `delete`. **A rule left out is refused** for every caller except the service role, and
+`supatype push` warns about each one. A bucket with no `access` at all accepts no uploads.
+`accessMode: "public"` still serves files on the public URL whatever `read` says.
+
+Rules are enforced by Postgres: the storage service runs every upload, overwrite, delete and list as
+the caller, against the policies the engine generates. Available rules: `BucketPublic`,
+`BucketLoggedIn`, `BucketOwner` (the uploader), `BucketRole<"name">`, `BucketPrivate`. Any other key
+in `access` is an error.
 
 ## Common field types
 
@@ -259,8 +270,8 @@ supatype diff                # preview operations
 supatype push                # apply migration
 ```
 
-`supatype pull` produces a **starting point** — types still flow from schema → `supatype generate`, not from the DB directly.
+`supatype pull` produces a **starting point**: types still flow from schema → `supatype generate`, not from the DB directly.
 
 Removing a column `Unique<>` emits `DropUniqueConstraint` only when the constraint has a `supatype:managed` comment (or was created by Supatype). Pre-existing constraints without stamps are reported by `supatype doctor` as unmanaged drift.
 
-For greenfield tables, define models first then push — all created constraints and indexes are stamped automatically.
+For greenfield tables, define models first then push; all created constraints and indexes are stamped automatically.

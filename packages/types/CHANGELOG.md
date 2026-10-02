@@ -2,7 +2,18 @@
 
 ## Unreleased
 
+### Breaking Changes
+
+* **storage:** a bucket rule that is left out is refused, for every caller but the service role,
+  the same as on a model. It used to mean "any signed-in user", so a bucket declaring only `read`
+  and `create` let anyone signed in delete anyone's files. A bucket with no `access` at all now
+  accepts no uploads. Declare each operation the bucket should allow; `supatype push` warns about
+  each one left out.
+
 ### Features
+
+* **storage:** `update` is a bucket rule, alongside `read`, `create` and `delete`, and governs
+  overwriting an existing file (`x-upsert`). `BucketRule` names the union every operation takes.
 
 * **access:** `After<TBase, TInterval>` and `Before<TBase, TInterval>` compose a base of `Now` or
   `StartOf<unit>` with a multi-unit interval, so "thirty days from now at 09:00" is expressible:

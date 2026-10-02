@@ -1,6 +1,7 @@
 import { withPublishing } from "../model-versioning.js"
 import type { Command } from "commander"
 import { join } from "node:path"
+import { printPushWarnings, type EnginePushResult } from "../engine-push-output.js"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { connectionString, projectRootFromConfig, schemaPathFromProject } from "../project-config.js"
 import { ensureEngine, engineRequest } from "../engine-client.js"
@@ -151,13 +152,14 @@ export function registerMigrate(program: Command): void {
 
       await ensureEngine()
       const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
-      const result = await engineRequest<{ message?: string }>("/push", {
+      const result = await engineRequest<EnginePushResult>("/push", {
         ast,
         database_url: connection,
         schema: "public",
         force: true,
       })
       info(result.message ?? "Reset complete.")
+      printPushWarnings(result)
     })
 }
 

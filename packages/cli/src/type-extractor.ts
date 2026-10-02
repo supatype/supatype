@@ -1344,6 +1344,9 @@ function parseMimeAcceptList(typeNode: ts.TypeNode, sourceFile: ts.SourceFile): 
   return undefined
 }
 
+/** The operations a bucket's `access` may name, the same four a model's may. */
+const BUCKET_RULE_KEYS: ReadonlySet<string> = new Set(["read", "create", "update", "delete"])
+
 function parsePartialBucketAccess(
   typeNode: ts.TypeNode,
   sourceFile: ts.SourceFile,
@@ -1367,7 +1370,14 @@ function parsePartialBucketAccess(
   for (const member of literal.members) {
     if (!ts.isPropertySignature(member) || !member.type) continue
     const key = getPropertyName(member.name)
-    if (key !== "read" && key !== "create" && key !== "delete") continue
+    // Refused rather than skipped. Skipping is how `update` went unenforced: the author wrote an
+    // overwrite rule, the bucket got none, and nothing said so.
+    if (key === null || !BUCKET_RULE_KEYS.has(key)) {
+      const written = key ?? member.name.getText(sourceFile)
+      throw new Error(
+        `Bucket "${bucketId}": \`${written}\` is not a bucket rule. Use read, create, update or delete.`,
+      )
+    }
     const bucketRule = parseAccessRule(member.type, sourceFile, resolveCtx)
     assertAccessRuleIsRenderable(bucketRule, bucketId, key)
     access[key] = bucketRule
@@ -1826,7 +1836,7 @@ function assertCacheIsServable(
         `Model "${model}": \`cache.public\` cannot be used with an \`access.read\` rule that ` +
           `varies by caller. A public cache entry is shared by everyone, so one caller's rows ` +
           `would be served to another. Use \`cache: { enabled: true }\` for per-user entries, or ` +
-          `make the read rule row-independent — a rule like \`Lte<"published_at", Now>\` varies by ` +
+          `make the read rule row-independent: a rule like \`Lte<"published_at", Now>\` varies by ` +
           `row without varying by caller and is safe to share.`,
       )
     }
@@ -1837,7 +1847,7 @@ function assertCacheIsServable(
     if (keyed.length === 0) {
       throw new Error(
         `Model "${model}": \`cache.rows\` needs a primary key, because the row cache's key IS the ` +
-          `primary key — there is nothing to cache by. Declare one, or drop \`rows\` and keep the ` +
+          `primary key, so there is nothing to cache by. Declare one, or drop \`rows\` and keep the ` +
           `response cache, which has no such requirement.`,
       )
     }
@@ -1887,7 +1897,7 @@ function resolveSearchFields(
  *
  * `cache_max_ttl` is refused outside 0–86400 by `PATCH /admin/v1/config/rest`, and a declared cap
  * is the same quantity. Left to the server, an out-of-range `maxTtl` reaches it as part of a
- * manifest rather than a request — nothing refuses a manifest — and the ceiling it produces is
+ * manifest rather than a request (nothing refuses a manifest), and the ceiling it produces is
  * whatever the arithmetic makes of it: a negative cap reads as "no cap declared" and permits more
  * than the author asked for, which is the one direction a ceiling must never move in.
  */
@@ -3323,7 +3333,7 @@ export interface ParsedModelCache {
  * Shaped like `parseModelHooks`, and travelling the same way: onto the route manifest beside
  * `hooks`, not into `annotations.platform`. The schema engine re-serialises its own parsed AST
  * (`serde_json::to_value(&ast)`), and `PlatformModelAnnotations` carries only `access` and
- * `search_fields` with no catch-all — so a key placed there is silently dropped on the way to the
+ * `search_fields` with no catch-all, so a key placed there is silently dropped on the way to the
  * server rather than riding through. Verified rather than assumed; see plan §13.1.
  */
 function parseModelCache(
