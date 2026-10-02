@@ -105,6 +105,14 @@ interface TableDef {
   Update: Record<string, unknown>
 }
 
+/**
+ * Makes each `from(table).subscribe()` channel name unique.
+ *
+ * Module-wide rather than per client because it only has to be unique, and a name never seen by
+ * one client cannot collide on another.
+ */
+let tableSubscriptionCount = 0
+
 class TableClient<TDef extends TableDef> {
   private readonly baseUrl: string
   private readonly table: string
@@ -231,8 +239,16 @@ class TableClient<TDef extends TableDef> {
   }
 
   /**
-   * Subscribe to postgres_changes for this table (typed to Row).
-   * Phase 10.6 F11: preferred over raw `client.realtime.channel(...)`.
+   * Subscribe to postgres_changes for this table (typed to Row), and join.
+   *
+   * Phase 10.6 F11: preferred over raw `client.realtime.channel(...)`. The returned `channel` is
+   * already subscribed; call `channel.subscribe(cb)` only to watch its status.
+   *
+   * Each call gets a channel of its own, named `schema:table:n`. The server keys a subscription by
+   * channel, so two calls sharing `schema:table` shared one filter and one event, and the first to
+   * unsubscribe removed the channel out from under the second. The name still reads as
+   * `schema:table` to anything that splits it, which is what a server predating `table` in the
+   * subscribe frame falls back to.
    */
   subscribe(
     callback: (payload: RealtimePayload<TDef["Row"]>) => void,
@@ -247,8 +263,9 @@ class TableClient<TDef extends TableDef> {
   } {
     const event = opts?.event ?? "*"
     const schema = opts?.schema ?? "public"
+    tableSubscriptionCount += 1
     const channel = this.realtime
-      .channel(`${schema}:${this.table}`)
+      .channel(`${schema}:${this.table}:${tableSubscriptionCount}`)
       .on(
         "postgres_changes",
         {
@@ -259,6 +276,9 @@ class TableClient<TDef extends TableDef> {
         },
         callback,
       )
+      // `on()` only records the listener. Without this nothing opened a socket or sent the join,
+      // and the callback waited forever unless something else on the client had joined already.
+      .subscribe()
     return {
       channel,
       unsubscribe: () => {
