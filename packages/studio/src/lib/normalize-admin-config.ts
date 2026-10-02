@@ -6,6 +6,7 @@ import type {
   ModelVersionsConfig,
   NavGroup,
 } from "../config.js"
+import { pluralize, singularize } from "./inflect.js"
 
 function humanize(name: string): string {
   return name
@@ -13,12 +14,6 @@ function humanize(name: string): string {
     .replace(/([A-Z])/g, " $1")
     .trim()
     .replace(/^\w/, (c) => c.toUpperCase())
-}
-
-function pluralize(word: string): string {
-  if (/(?:s|x|z|ch|sh)$/i.test(word)) return word + "es"
-  if (/[^aeiou]y$/i.test(word)) return word.slice(0, -1) + "ies"
-  return word + "s"
 }
 
 function normalizeStudioWidget(widget: unknown): FieldConfig["widget"] {
@@ -61,7 +56,9 @@ export function normalizeAdminConfig(raw: unknown): AdminConfig {
   const models = ((r["models"] as unknown[]) ?? []).map((m) => {
     const mo = m as Record<string, unknown>
     const name = String(mo["name"] ?? "")
-    const label = humanize(name)
+    // A type named in the plural (`Places`, `Children`) is still one record per row, so the
+    // singular label reads "Create Place" and the plural one does not become "Placeses".
+    const label = singularize(humanize(name))
     const tableName = String(mo["tableName"] ?? name)
     const fields = mapEngineFields(mo["fields"])
     return {
@@ -74,9 +71,10 @@ export function normalizeAdminConfig(raw: unknown): AdminConfig {
       fields,
       listColumns: (mo["listColumns"] as string[]) ?? [],
       // A model may say which columns to search, or the columns may say it themselves with
-      // `Searchable<T>`. The explicit list wins where it exists — its order is meaningful, the
-      // list view filters on the first — and the field flags are the fallback, so a schema that
-      // only marks fields still gets a search box rather than silently getting none.
+      // `Searchable<T>`. The explicit list wins where it exists, because its order is
+      // meaningful (the list view filters on the first), and the field flags are the fallback,
+      // so a schema that only marks fields still gets a search box rather than silently getting
+      // none.
       searchFields: (mo["searchFields"] as string[])
         ?? fields.filter((f) => f.searchable === true).map((f) => f.name),
       publishable: Boolean(mo["publishable"] ?? mo["publishing"] ?? false),
@@ -124,7 +122,7 @@ export function normalizeAdminConfig(raw: unknown): AdminConfig {
               (gl) => gl.tableName === globalTable || gl.name === globalTable,
             )
             return {
-              label: String(i["label"] ?? found?.label ?? humanize(globalTable)),
+              label: found?.label ?? String(i["label"] ?? humanize(globalTable)),
               href: `/models/globals/${found?.name ?? globalTable}`,
               type: "global" as const,
             }
@@ -132,8 +130,11 @@ export function normalizeAdminConfig(raw: unknown): AdminConfig {
           const modelName = String(i["model"] ?? "")
           const found = models.find((mo) => mo.tableName === modelName || mo.name === modelName)
           const routeName = found?.name ?? modelName
+          // The model's own label wins over the item's. The engine names an item by its raw type
+          // name, so preferring that would bring back "PlacesOfInterest" where the model already
+          // carries a readable label.
           return {
-            label: String(i["label"] ?? found?.label ?? humanize(modelName)),
+            label: found?.labelPlural ?? String(i["label"] ?? humanize(modelName)),
             href: `/models/${routeName}`,
             type: "model" as const,
           }

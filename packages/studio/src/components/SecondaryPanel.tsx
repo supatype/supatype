@@ -21,9 +21,9 @@ import { Button, NAV_RAIL } from "./ui.js"
  * concludes Supatype has none, rather than that this deployment does not. So the item stays, cannot
  * be clicked, and says which of the two it is.
  *
- *   - `cloud` — the feature exists, on Supatype Cloud. Self-host is not going to grow read replicas
+ *   - `cloud`: the feature exists, on Supatype Cloud. Self-host is not going to grow read replicas
  *     or point-in-time backups, so "coming soon" would be a lie; this is where it is.
- *   - `planned` — not built yet, anywhere. The nav is the roadmap people actually read.
+ *   - `planned`: not built yet, anywhere. The nav is the roadmap people actually read.
  */
 type Availability = { kind: "cloud" } | { kind: "planned"; note: string }
 
@@ -428,7 +428,7 @@ export function SecondaryPanel({
                       "text-muted-foreground/50 cursor-not-allowed select-none",
                     )}
                   >
-                    {item.label}
+                    <span className="min-w-0 truncate">{item.label}</span>
                     {blocked.kind === "cloud" && (
                       <Badge variant="blue" className="ml-2 shrink-0">
                         Cloud
@@ -445,14 +445,15 @@ export function SecondaryPanel({
                   onClick={() => navigate(item.href)}
                   aria-current={active ? "page" : undefined}
                   className={cn(
-                    "flex items-center w-full px-4 py-1.5 text-[13px] transition-colors",
+                    "flex items-center w-full px-4 py-1.5 text-left text-[13px] transition-colors",
                     "hover:bg-accent hover:text-accent-foreground",
                     active
                       ? "text-foreground font-medium bg-accent/50"
                       : "text-muted-foreground",
                   )}
                 >
-                  {item.label}
+                  {/* One line per entry: a wrapped label reads as a nested item under the one above. */}
+                  <span className="min-w-0 truncate" title={item.label}>{item.label}</span>
                 </button>
               )
             })}
