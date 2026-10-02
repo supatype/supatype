@@ -7,7 +7,7 @@
 
 import type { Command } from "commander"
 import { loadConfig, rethrowIfConfigBroken } from "../config.js"
-import { connectionString } from "../project-config.js"
+import { resolveHostDatabaseUrl } from "../host-database.js"
 import { loadProjectLink } from "../link.js"
 import { resolveTarget } from "../resolve-target.js"
 import { targetFetch } from "../target-client.js"
@@ -36,7 +36,7 @@ export function registerDb(program: Command): void {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
       const link = loadProjectLink(cwd)
-      const localConn = connectionString(config)
+      const localConn = resolveHostDatabaseUrl(cwd, config, { allowDerived: true }).dsn
 
       if (!link || link.kind !== "cloud") {
         const connStr = opts.transaction ? localConn.replace(/:5432\//, ":6432/") : localConn
@@ -151,7 +151,7 @@ export function registerDb(program: Command): void {
       if (!url || !schema) {
         try {
           const config = loadConfig(cwd)
-          url = url ?? connectionString(config)
+          url = url ?? resolveHostDatabaseUrl(cwd, config, { allowDerived: true }).dsn
           schema = schema ?? config.schema?.pg_schema ?? "public"
         } catch (err) {
           rethrowIfConfigBroken(err)

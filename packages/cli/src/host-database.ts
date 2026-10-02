@@ -1,25 +1,55 @@
 /**
- * Which database a seed run targets, and how that was decided.
+ * Which database a command run on the host connects to, and how that was decided.
  *
- * Its own file so the failure is testable without spawning anything. The failure is the
- * point: the old seed template carried a hardcoded fallback DSN, so a project with no
- * `.env` did not fail, it silently tried `localhost:5432` with a guessed password and
- * reported a connection error that named none of the things it had looked at. Someone
- * reading that has no way to tell "I have not set DATABASE_URL" from "the stack is not
- * running".
+ * One resolver for every host-side command: seed, adopt, introspect, migrate, doctor, pull, and
+ * any target resolved in direct mode. They used to find the database three different ways, and
+ * the one most of them used took `.supatype/environment.json`'s URL, which describes the docker
+ * `db` *container*, so `supatype adopt` on a docker project failed looking up the host `db`
+ * (supatype#85). Another read `process.env` and never the project's `.env`, where `supatype dev`
+ * writes the host-published URL. Seed's order was the one that worked, so it is this one.
  *
- * So every source is recorded whether it was found or not, and the error prints the lot.
+ * Its own file so the failure is testable without spawning anything. The failure is the point: a
+ * hardcoded fallback DSN meant a project with no `.env` silently tried `localhost:5432` with a
+ * guessed password and reported a connection error that named none of the things it had looked
+ * at. So every source is recorded whether it was found or not, and the error prints the lot.
  */
 
 import { existsSync } from "node:fs"
 import { join } from "node:path"
-import { readEnvFile } from "./env-file.js"
+import { readEnvFile, readEnvValue } from "./env-file.js"
+import { devPostgresPassword } from "./local-secrets.js"
 import {
   externalDatabaseUrl,
   localDSN,
   projectRootFromConfig,
+  resolveRuntimeProvider,
   type SupatypeProjectConfig,
 } from "./project-config.js"
+
+/** Where `supatype dev` publishes a docker project's Postgres when `.env` does not say. */
+export const COMPOSE_DEV_DB_PORT = 54329
+
+/**
+ * A docker project's own Postgres, as reached from the host: the port `supatype dev` publishes it
+ * on, with the credentials and database the stack was created with, all read from `.env`.
+ */
+export function hostComposeDbUrl(cwd: string): string {
+  const port = readEnvValue(cwd, "SUPATYPE_DEV_DB_PORT", String(COMPOSE_DEV_DB_PORT))
+  const user = readEnvValue(cwd, "POSTGRES_USER", "supatype_admin")
+  const db = readEnvValue(cwd, "POSTGRES_DB", "supatype")
+  return `postgresql://${user}:${devPostgresPassword(cwd)}@127.0.0.1:${port}/${db}?sslmode=disable`
+}
+
+/**
+ * The database Supatype runs for this project, when nothing names one.
+ *
+ * For docker, the published compose database. It used to be `localDSN` for every provider,
+ * `postgres:postgres@127.0.0.1:5432/<project name>`, which is the native layout: a docker
+ * project with no `.env` got a user, database and port that do not exist.
+ */
+function derivedDsn(root: string, config: SupatypeProjectConfig): string {
+  return resolveRuntimeProvider(config) === "docker" ? hostComposeDbUrl(root) : localDSN(config)
+}
 
 /** One place a connection string could have come from. */
 export interface DsnSource {
@@ -42,7 +72,7 @@ export interface ResolvedDsn {
 export class DsnNotFound extends Error {
   constructor(readonly tried: readonly DsnSource[]) {
     super(
-      `No database connection string for this seed run.\n${tried
+      `No database connection string to connect with.\n${tried
         .map((source) => `  ${source.found ? "found" : "not set"}  ${source.name}: ${source.detail}`)
         .join("\n")}`,
     )
@@ -69,7 +99,7 @@ export interface ResolveOptions {
  * `.env` is loaded first but ranks below a real environment variable, which is how every
  * other dotenv reader behaves and how Compose resolves the same names.
  */
-export function resolveSeedDsn(
+export function resolveHostDatabaseUrl(
   cwd: string,
   config: SupatypeProjectConfig,
   options: ResolveOptions = {},
@@ -122,7 +152,7 @@ export function resolveSeedDsn(
   if (fileValue !== undefined) return { dsn: fileValue, source: fileLabel, tried }
 
   if (options.allowDerived === true) {
-    const derived = localDSN(config)
+    const derived = derivedDsn(root, config)
     tried.push({ name: "the project's own local database", detail: redact(derived), found: true })
     return { dsn: derived, source: "the project's own local database", tried }
   }

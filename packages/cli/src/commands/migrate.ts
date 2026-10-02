@@ -3,7 +3,8 @@ import type { Command } from "commander"
 import { join } from "node:path"
 import { printPushWarnings, type EnginePushResult } from "../engine-push-output.js"
 import { loadConfig, loadSchemaAst } from "../config.js"
-import { connectionString, projectRootFromConfig, schemaPathFromProject } from "../project-config.js"
+import { projectRootFromConfig, schemaPathFromProject } from "../project-config.js"
+import { resolveHostDatabaseUrl } from "../host-database.js"
 import { ensureEngine, engineRequest } from "../engine-client.js"
 import { loadProjectLink } from "../link.js"
 import {
@@ -76,7 +77,7 @@ export function registerMigrate(program: Command): void {
     .option("--connection <url>", "Database connection URL (overrides config)")
     .action(async (opts: { connection?: string }) => {
       const config = loadConfig()
-      const connection = opts.connection ?? connectionString(config)
+      const connection = resolveHostDatabaseUrl(process.cwd(), config, { connection: opts.connection, allowDerived: true }).dsn
 
       await ensureEngine()
       const result = await engineRequest<{ message?: string }>("/migrations", {
@@ -147,7 +148,7 @@ export function registerMigrate(program: Command): void {
       }
 
       const config = loadConfig()
-      const connection = opts.connection ?? connectionString(config)
+      const connection = resolveHostDatabaseUrl(process.cwd(), config, { connection: opts.connection, allowDerived: true }).dsn
       const cwd = process.cwd()
 
       await ensureEngine()

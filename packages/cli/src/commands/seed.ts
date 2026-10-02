@@ -19,7 +19,7 @@ import { loadConfig, loadSchemaAst, type SupatypeConfig } from "../config.js"
 import { engineRequest, ensureEngine } from "../engine-client.js"
 import { seedUnsupportedByPinnedEngine } from "../engine-floor.js"
 import { pgSchema, projectRootFromConfig, schemaPathFromProject } from "../project-config.js"
-import { DsnNotFound, redact, resolveSeedDsn } from "../seed-connection.js"
+import { DsnNotFound, redact, resolveHostDatabaseUrl } from "../host-database.js"
 import { collectSeed, SeedCollectionFailed } from "../seed-runner.js"
 import { seedBuilderPathWithDefaults } from "../type-generation.js"
 import type { SeedConfig, SeedIr } from "../seed.js"
@@ -99,7 +99,7 @@ export async function runSeed(file: string | undefined, opts: SeedFlags): Promis
 
   let dsn: string
   try {
-    dsn = resolveSeedDsn(cwd, config, {
+    dsn = resolveHostDatabaseUrl(cwd, config, {
       connection: opts.connection,
       allowDerived: true,
     }).dsn

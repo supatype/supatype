@@ -83,9 +83,7 @@ import { publishDevReady } from "./dev-ready-panel.js"
 import { exitInitialPushFailed, pushInitialSchema, type InitialPushSteps } from "./dev-initial-push.js"
 import { offerAdoption, unmanagedTables, type AdoptionSteps } from "./adopt-walkthrough.js"
 import { resetDevDatabase } from "./dev-db-reset.js"
-
-/** Default host port for compose Postgres when `overrides.engine` is set (devLocal). */
-const COMPOSE_DEV_DB_PORT = 54329
+import { hostComposeDbUrl, resolveHostDatabaseUrl } from "./host-database.js"
 
 /** Sync optional Docker image pins from config into `.env` (no JWT rotation). */
 export function syncComposeImagePins(cwd: string, config: SupatypeProjectConfig): void {
@@ -133,14 +131,6 @@ async function resolveDevDbPort(cwd: string): Promise<number> {
 function projectDatabaseUrl(cwd: string, config: SupatypeProjectConfig, inNetwork = false): string {
   if (usesExternalDatabase(config)) return connectionString(config)
   return inNetwork ? composeDbUrl(cwd) : hostComposeDbUrl(cwd)
-}
-
-function hostComposeDbUrl(cwd: string): string {
-  const port = readEnvValue(cwd, "SUPATYPE_DEV_DB_PORT", String(COMPOSE_DEV_DB_PORT))
-  const user = readEnvValue(cwd, "POSTGRES_USER", "supatype_admin")
-  const pass = devPostgresPassword(cwd)
-  const db = readEnvValue(cwd, "POSTGRES_DB", "supatype")
-  return `postgresql://${user}:${pass}@127.0.0.1:${port}/${db}?sslmode=disable`
 }
 
 /**
@@ -202,13 +192,12 @@ export async function resolveHostEngineDatabaseUrl(
   config: SupatypeProjectConfig,
   explicit?: string,
 ): Promise<string> {
-  if (explicit?.trim()) return explicit
-  if (config.connection?.trim()) return config.connection
-  if (usesLocalDockerEngineDb(config)) {
+  // Published first, when this project's Postgres is the local docker one, so the URL below
+  // reaches something. The URL itself comes from the one resolver every host-side command uses.
+  if (usesLocalDockerEngineDb(config, explicit)) {
     await ensureDockerDbPublishedForHostEngine(cwd, config)
-    return hostComposeDbUrl(cwd)
   }
-  return connectionString(config)
+  return resolveHostDatabaseUrl(cwd, config, { connection: explicit, allowDerived: true }).dsn
 }
 
 /**

@@ -10,11 +10,8 @@ import { dirname, join, resolve } from "node:path"
 import bcrypt from "bcryptjs"
 import type { Pool, QueryResult } from "pg"
 import { loadConfig } from "../config.js"
-import {
-  connectionString,
-  resolveRuntimeProvider,
-  type SupatypeProjectConfig,
-} from "../project-config.js"
+import { resolveRuntimeProvider, type SupatypeProjectConfig } from "../project-config.js"
+import { resolveHostDatabaseUrl } from "../host-database.js"
 import { readEnvValue, upsertEnvFile } from "../env-file.js"
 import { hasEngineOverride } from "../binary-cache.js"
 import { readDevSessionLock } from "../dev-session-lock.js"
@@ -94,9 +91,7 @@ function resolveAdminConnection(
   config: SupatypeProjectConfig,
   override?: string,
 ): string {
-  if (override !== undefined) return override
-  if (hasEngineOverride(config)) return hostComposeDbUrlFromEnv(cwd)
-  return readEnvValue(cwd, "DATABASE_URL", connectionString(config))
+  return resolveHostDatabaseUrl(cwd, config, { connection: override, allowDerived: true }).dsn
 }
 
 export function registerAdmin(program: Command): void {
@@ -343,10 +338,10 @@ export async function ensureFirstAdminUserForProject(
     return
   }
 
-  const connection =
-    merged.compose && hasEngineOverride(config)
-      ? hostComposeDbUrlFromEnv(root)
-      : options.connection ?? readEnvValue(root, "DATABASE_URL", connectionString(config))
+  const connection = resolveHostDatabaseUrl(root, config, {
+    connection: options.connection,
+    allowDerived: true,
+  }).dsn
 
   await ensureFirstAdminUser(connection, merged)
 }
@@ -812,14 +807,6 @@ function interpolateSql(sql: string, params: unknown[]): string {
     if (typeof value === "boolean") return value ? "TRUE" : "FALSE"
     return `'${String(value).replace(/'/g, "''")}'`
   })
-}
-
-function hostComposeDbUrlFromEnv(cwd: string): string {
-  const port = readEnvValue(cwd, "SUPATYPE_DEV_DB_PORT", "54329")
-  const user = readEnvValue(cwd, "POSTGRES_USER", "supatype_admin")
-  const pass = readEnvValue(cwd, "POSTGRES_PASSWORD", "postgres")
-  const db = readEnvValue(cwd, "POSTGRES_DB", "supatype")
-  return `postgresql://${user}:${pass}@127.0.0.1:${port}/${db}?sslmode=disable`
 }
 
 async function importPg(): Promise<typeof import("pg")> {
