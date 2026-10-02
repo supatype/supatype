@@ -55,11 +55,13 @@
     "clsx": "^2.1.1",
     "codemirror": "^6.0.2",
     "lexical": "^0.43.0",
+    "pluralize": "^8.0.0",
     "recharts": "^3.8.1",
     "tailwind-merge": "^2.5.0"
   },
   "devDependencies": {
     "@supatype/types": "workspace:*",
+    "@types/pluralize": "^0.0.33",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^4",
