@@ -80,7 +80,8 @@ import { provisionBucketsFromAst } from "./storage-provision.js"
 import type { ExtractedSchemaAstV2 } from "./schema-ast-v2.js"
 import { ensureFirstAdminUserForProject } from "./commands/admin.js"
 import { publishDevReady } from "./dev-ready-panel.js"
-import { exitInitialPushFailed, pushInitialSchema } from "./dev-initial-push.js"
+import { exitInitialPushFailed, pushInitialSchema, type InitialPushSteps } from "./dev-initial-push.js"
+import { offerAdoption, unmanagedTables, type AdoptionSteps } from "./adopt-walkthrough.js"
 import { resetDevDatabase } from "./dev-db-reset.js"
 
 /** Default host port for compose Postgres when `overrides.engine` is set (devLocal). */
@@ -916,13 +917,38 @@ async function runComposeEnginePush(
   return { status: exitStatus, output }
 }
 
-async function runComposeEngineDiff(
+/**
+ * One schema-engine subcommand in the compose `tools` profile, against the stack's own database.
+ *
+ * In a container, so it reaches Postgres at the compose-internal address and needs nothing
+ * published to the host. That is what a host-side `supatype adopt` got wrong on a docker project
+ * (supatype#85), and why the push walkthrough runs adopt this way instead.
+ */
+/** One engine run: its exit, what it printed on stdout alone, and everything it printed. */
+export interface EngineRun {
+  status: number
+  stdout: string
+  output: string
+}
+
+/**
+ * The adopt result from one engine run, or null when there is none to read.
+ *
+ * From stdout alone. The engine prints the preview as multi-line JSON, which only parses as a
+ * whole, and with stderr joined on (a compose warning about an unset variable, an engine log line)
+ * it did not parse at all, so a preview that worked was reported as a failed adopt.
+ */
+export function adoptResultFrom(run: EngineRun): AdoptResult | null {
+  return run.status === 0 ? parseEngineJsonOutput<AdoptResult>(run.stdout) : null
+}
+
+async function runComposeEngineCommand(
   paths: SelfHostComposePaths,
   cwd: string,
   composeProject: string,
   config: SupatypeProjectConfig,
-  pgSchema: string,
-): Promise<{ status: number; output: string; diff: DiffResult | null }> {
+  command: readonly string[],
+): Promise<EngineRun> {
   const envFile = resolve(cwd, ".env")
   const composeArgs = ["compose", "--progress", "quiet"]
   if (composeProject) composeArgs.push("-p", composeProject)
@@ -937,33 +963,85 @@ async function runComposeEngineDiff(
     "run",
     "--rm",
     "schema-engine",
-    "diff",
+    ...command,
     "-i",
     "/project/.supatype/schema.ast.json",
     "--database-url",
     projectDatabaseUrl(cwd, config, true),
     "--schema",
-    pgSchema,
+    config.schema?.pg_schema ?? "public",
   )
-  const diffEnv: NodeJS.ProcessEnv = {
-    ...process.env,
-    COMPOSE_PROGRESS: "quiet",
-  }
+  const env: NodeJS.ProcessEnv = { ...process.env, COMPOSE_PROGRESS: "quiet" }
   const engineImage = await schemaEngineImageForPush(config)
-  if (engineImage) {
-    diffEnv.SUPATYPE_ENGINE_IMAGE = engineImage
-  }
+  if (engineImage) env.SUPATYPE_ENGINE_IMAGE = engineImage
   const result = spawnSync("docker", composeArgs, {
     cwd,
     encoding: "utf8",
     maxBuffer: 10 * 1024 * 1024,
-    env: diffEnv,
+    env,
   })
-  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim()
-  const exitStatus = result.status ?? 1
-  const diff = parseEngineJsonOutput<DiffResult>(output)
+  return {
+    status: result.status ?? 1,
+    stdout: result.stdout ?? "",
+    output: `${result.stdout ?? ""}${result.stderr ?? ""}`.trim(),
+  }
+}
 
-  return { status: exitStatus, output, diff }
+async function runComposeEngineDiff(
+  paths: SelfHostComposePaths,
+  cwd: string,
+  composeProject: string,
+  config: SupatypeProjectConfig,
+): Promise<{ status: number; output: string; diff: DiffResult | null }> {
+  const result = await runComposeEngineCommand(paths, cwd, composeProject, config, ["diff"])
+  return { ...result, diff: parseEngineJsonOutput<DiffResult>(result.output) }
+}
+
+/** Adoption against a docker project's own database, for the push walkthrough. */
+export function dockerAdoptionSteps(cwd: string, config: SupatypeProjectConfig): AdoptionSteps {
+  return {
+    preview: async () => (await adoptSchemaDocker(cwd, config, false)).stampStatements ?? [],
+    apply: async () => (await adoptSchemaDocker(cwd, config, true)).stamped ?? 0,
+  }
+}
+
+/** What `adopt` reports, previewing or applying. */
+export interface AdoptResult {
+  status?: string
+  stampStatements?: string[]
+  stamped?: number
+}
+
+/**
+ * Adopt on a docker project's own database: the stamp preview, or with `yes`, the stamps applied.
+ *
+ * Through the compose schema-engine, or the local engine binary when `overrides.engine` is set,
+ * the same way `diffSchemaDocker` reaches the database. The stack's database must be running,
+ * which it is whenever a push has just been refused by it.
+ */
+export async function adoptSchemaDocker(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  yes: boolean,
+): Promise<AdoptResult> {
+  const project = composeProjectName(config.project.name)
+  if (hasEngineOverride(config)) {
+    await ensureDockerDbPublishedForHostEngine(cwd, config, { intro: "Adopt" })
+    await ensureEngine()
+    return engineRequest<AdoptResult>("/adopt", {
+      ast: withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config),
+      database_url: projectDatabaseUrl(cwd, config),
+      schema: config.schema?.pg_schema ?? "public",
+      yes,
+    })
+  }
+  const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
+  const result = await runComposeEngineCommand(paths, cwd, project, config, yes ? ["adopt", "--yes"] : ["adopt"])
+  const parsed = adoptResultFrom(result)
+  if (parsed === null) {
+    throw new Error(filterComposeNoise(result.output) || `Engine adopt failed (exit ${result.status})`)
+  }
+  return parsed
 }
 
 /**
@@ -1011,11 +1089,11 @@ export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfi
   const astPath = join(supatypeDir, "schema.ast.json")
   writeFileSync(astPath, JSON.stringify(ast))
 
-  let result = await runComposeEngineDiff(paths, cwd, project, config, pgSchema)
+  let result = await runComposeEngineDiff(paths, cwd, project, config)
   // Windows Docker bind mounts can lag briefly after the host write.
   if (result.status !== 0) {
     await new Promise((r) => setTimeout(r, 250))
-    result = await runComposeEngineDiff(paths, cwd, project, config, pgSchema)
+    result = await runComposeEngineDiff(paths, cwd, project, config)
   }
   if (result.status !== 0) {
     const detail = filterComposeNoise(result.output) || result.output
@@ -1101,12 +1179,23 @@ async function applyInitialSchema(
   project: string,
   brand: DockerBrandOptions,
 ): Promise<void> {
-  const outcome = await pushInitialSchema({
+  const steps: InitialPushSteps = {
     push: () => runComposeSchemaPush(cwd, config, paths, schemaPath, project),
     recoverDatabase: () => startComposeDatabase(config, paths, cwd, project, brand, undefined, endDevSession),
     dumpLogs: (reason) => dumpComposeDbLogs(paths, cwd, project, reason),
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
-  })
+  }
+  let outcome = await pushInitialSchema(steps)
+  if (outcome.kind === "refused" && outcome.reason === "unmanaged-tables") {
+    // Offered rather than only named: the stack's database is up, so adoption can run against it
+    // here, and a push straight after it is the one that was just refused.
+    const tables = unmanagedTables(outcome.message) ?? []
+    const adopted = await offerAdoption(tables, dockerAdoptionSteps(cwd, config), {
+      yes: false,
+      retry: "supatype dev",
+    })
+    if (adopted === "adopted") outcome = await pushInitialSchema(steps)
+  }
   if (outcome.kind === "applied") return
   // Before the message, so it reaches the real terminal rather than a TUI that is going away.
   endDevSession()

@@ -28,6 +28,7 @@ import {
 import { pinnedVersion } from "../binary-cache.js"
 import { printDiffOperations, printDiffWarnings } from "../diff-output.js"
 import { printPushWarnings } from "../engine-push-output.js"
+import { pushOfferingAdoption, targetAdoptionSteps } from "../adopt-walkthrough.js"
 import { signJwt } from "../jwt.js"
 import { provisionBucketsFromAst } from "../storage-provision.js"
 import type { ExtractedSchemaAstV2 } from "../schema-ast-v2.js"
@@ -39,6 +40,7 @@ import { refreshFunctionsContext } from "../functions-context-refresh.js"
 import type { SupatypeProjectConfig } from "../project-config.js"
 import {
   resolveTarget,
+  targetSchemaAdopt,
   targetSchemaDiff,
   targetSchemaPush,
   schemaPgSchema,
@@ -101,8 +103,12 @@ export function registerPush(program: Command): void {
           await pushViaTarget(cwd, config, localTarget, ast, pgSchema, opts.yes ?? false)
           return
         }
-        const { pushSchemaDocker } = await import("../dev-compose.js")
-        await withSpinner("Applying schema via Docker Compose", () => pushSchemaDocker(cwd, config))
+        const { dockerAdoptionSteps, pushSchemaDocker } = await import("../dev-compose.js")
+        await pushOfferingAdoption(
+          () => withSpinner("Applying schema via Docker Compose", () => pushSchemaDocker(cwd, config)),
+          dockerAdoptionSteps(cwd, config),
+          { yes: opts.yes ?? false, retry: "supatype push" },
+        )
         return
       }
 
@@ -153,14 +159,23 @@ async function pushViaTarget(
     }
   }
 
-  const pushResult = await withSpinner(
-    ops.length > 0 ? "Applying migration" : "Syncing with engine",
+  const pushResult = await pushOfferingAdoption(
     () =>
-      targetSchemaPush(target, ast, {
-        force: true,
-        schema: pgSchema,
-        schemaSources: buildSchemaSourcesPayload(cwd, resolvePushedBy()),
-      }),
+      withSpinner(ops.length > 0 ? "Applying migration" : "Syncing with engine", () =>
+        targetSchemaPush(target, ast, {
+          force: true,
+          schema: pgSchema,
+          schemaSources: buildSchemaSourcesPayload(cwd, resolvePushedBy()),
+        }),
+      ),
+    targetAdoptionSteps(
+      async (yes) =>
+        (await targetSchemaAdopt(target, ast, { schema: pgSchema, yes })) as {
+          stampStatements?: string[]
+          stamped?: number
+        },
+    ),
+    { yes: skipConfirm, retry: "supatype push" },
   )
 
   if ((pushResult as { status?: string }).status === "up_to_date") {

@@ -68,6 +68,8 @@ export class EngineError extends Error {
     message: string,
     public readonly endpoint: string,
     public readonly exitCode: number | null,
+    /** What the engine printed on stdout. A refused push puts its machine-readable reason there. */
+    public readonly stdout = "",
   ) {
     super(message)
     this.name = "EngineError"
@@ -221,6 +223,7 @@ export async function engineRequest<T = unknown>(
       `Engine ${endpoint} failed (exit ${result.status}): ${stderr}`,
       endpoint,
       result.status,
+      result.stdout ?? "",
     )
   }
 
@@ -316,14 +319,12 @@ function endpointToArgs(
 
     case "/doctor": {
       const strict = body["strict"] ? ["--strict"] : []
-      const noCache = body["no_cache"] ? ["--no-cache"] : []
-      return ["doctor", "--input", reqFile, "--database-url", dbUrl, "--schema", schema, ...strict, ...noCache]
+      return ["doctor", "--input", reqFile, "--database-url", dbUrl, "--schema", schema, ...strict]
     }
 
     case "/adopt": {
       const yes = body["yes"] ? ["--yes"] : []
-      const noCache = body["no_cache"] ? ["--no-cache"] : []
-      return ["adopt", "--input", reqFile, "--database-url", dbUrl, "--schema", schema, ...yes, ...noCache]
+      return ["adopt", "--input", reqFile, "--database-url", dbUrl, "--schema", schema, ...yes]
     }
 
     case "/validate":

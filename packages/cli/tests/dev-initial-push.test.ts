@@ -68,6 +68,17 @@ describe("an engine refusal on the first attempt", () => {
     expect(s.sleep).not.toHaveBeenCalled()
   })
 
+  it("is recognised by the engine's JSON reason, not only by its wording", async () => {
+    // The engine prints the refusal machine-readably on stdout. Matching the prose alone would
+    // turn any rewording of the message back into an "engine" refusal with no adopt offer.
+    const json = '{"status":"refused","reason":"unmanaged_model_tables","tables":["orders"]}'
+    const s = steps([json])
+
+    const outcome = await pushInitialSchema(s)
+
+    expect(outcome).toMatchObject({ kind: "refused", reason: "unmanaged-tables" })
+  })
+
   it("treats any other engine error as a refusal too", async () => {
     const s = steps([DESTRUCTIVE, DESTRUCTIVE, DESTRUCTIVE])
 

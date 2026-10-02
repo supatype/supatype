@@ -7,6 +7,7 @@ import { loadProjectLink } from "../link.js"
 import { resolveHostEngineDatabaseUrl } from "../dev-compose.js"
 import { hooksReport, type HooksReport } from "../model-hooks.js"
 import { checkServiceRoleRoutes, type ServiceRoleProblems } from "../service-role-check.js"
+import { addRetiredNoCacheOption, warnIfRetiredNoCache } from "../retired-no-cache.js"
 
 interface DoctorItem {
   kind: string
@@ -36,21 +37,21 @@ export function printSection(title: string, items: DoctorItem[]): void {
 }
 
 export function registerDoctor(program: Command): void {
-  program
+  const command = program
     .command("doctor")
     .description("Report schema drift between schema/index.ts and the live database")
     .option("--connection <url>", "Database connection URL (overrides config)")
     .option("--env <name>", "Target environment when linked")
     .option("--strict", "Exit non-zero when missing or stale managed drift exists")
-    .option("--no-cache", "Force full database introspection")
     .option("--direct", "Use local engine subprocess")
-    .action(async (opts: {
+  addRetiredNoCacheOption(command).action(async (opts: {
       connection?: string
       env?: string
       strict?: boolean
-      noCache?: boolean
+      cache?: boolean
       direct?: boolean
     }) => {
+      warnIfRetiredNoCache(opts)
       const cwd = process.cwd()
       const config = loadConfig(cwd)
       const pgSchema = schemaPgSchema(cwd)
@@ -64,14 +65,12 @@ export function registerDoctor(program: Command): void {
       if (linked && !opts.direct && !opts.connection) {
         const target = resolveTarget(cwd, { env: opts.env })
         report = (await targetSchemaDoctor(target, ast, {
-          noCache: opts.noCache,
           schema: pgSchema,
         })) as DoctorReport
       } else if (!opts.direct && !opts.connection) {
         const connection = await resolveHostEngineDatabaseUrl(cwd, config, opts.connection)
         const target = resolveTarget(cwd, { direct: true, connection })
         report = (await targetSchemaDoctor(target, ast, {
-          noCache: opts.noCache,
           schema: pgSchema,
         })) as DoctorReport
         void connection
@@ -82,7 +81,6 @@ export function registerDoctor(program: Command): void {
           connection: opts.connection,
         })
         report = (await targetSchemaDoctor(target, ast, {
-          noCache: opts.noCache,
           schema: pgSchema,
         })) as DoctorReport
       }

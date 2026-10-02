@@ -38,7 +38,7 @@ Auth flag: `--token` (cloud = platform PAT; self-host = `SERVICE_ROLE_KEY`). `--
 | Command | Purpose |
 |---------|---------|
 | `supatype doctor` | Schema drift report. Flags: `--env`, `--direct`, `--strict` |
-| `supatype adopt` | Stamp managed comments on existing DB objects. Flags: `--env`, `--yes` |
+| `supatype adopt` | Stamp managed comments on existing DB objects. Flags: `--env`, `--yes`. `push` and `dev` offer to run it when they find unmanaged tables |
 | `supatype introspect` | Introspect live Postgres. Flags: `--env`, `--json`, `--direct` |
 | `supatype migrate` | Migration utilities |
 | `supatype rollback` | Undo the last applied migration (linked or direct). Flags: `--env`, `--connection`, `--direct`, `--sync-schema`, `--no-sync-schema` |
