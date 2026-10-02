@@ -38,14 +38,17 @@ describe("inflect", () => {
   })
 })
 
-describe("normalizeAdminConfig model labels", () => {
-  function labelsFor(name: string): { label: string; labelPlural: string } {
-    const config = normalizeAdminConfig({ models: [{ name, tableName: "t", fields: [] }] })
-    const model = config.models[0]
-    if (model === undefined) throw new Error("no model normalized")
-    return { label: model.label, labelPlural: model.labelPlural }
-  }
+function labelsFor(
+  name: string,
+  overrides: Record<string, unknown> = {},
+): { label: string; labelPlural: string } {
+  const config = normalizeAdminConfig({ models: [{ name, tableName: "t", fields: [], ...overrides }] })
+  const model = config.models[0]
+  if (model === undefined) throw new Error("no model normalized")
+  return { label: model.label, labelPlural: model.labelPlural }
+}
 
+describe("normalizeAdminConfig model labels", () => {
   it.each([
     ["Children", "Child", "Children"],
     ["Institutions", "Institution", "Institutions"],
@@ -54,6 +57,34 @@ describe("normalizeAdminConfig model labels", () => {
     ["Post", "Post", "Posts"],
   ])("a type named %s is labelled %s / %s", (name, label, labelPlural) => {
     expect(labelsFor(name)).toEqual({ label, labelPlural })
+  })
+})
+
+describe("normalizeAdminConfig label overrides", () => {
+  const labelsWith = (overrides: Record<string, unknown>) => labelsFor("PlacesOfInterest", overrides)
+
+  it("uses the project's own words for both labels when it set them", () => {
+    expect(labelsWith({ label: "Place of Interest", labelPlural: "Places of Interest" })).toEqual({
+      label: "Place of Interest",
+      labelPlural: "Places of Interest",
+    })
+  })
+
+  it("inflects the plural from a singular override when only that was set", () => {
+    expect(labelsWith({ label: "Venue" })).toEqual({ label: "Venue", labelPlural: "Venues" })
+  })
+
+  it("derives both from the type name when the engine sends null or an empty string", () => {
+    const derived = { label: "Places Of Interest", labelPlural: "Places Of Interests" }
+    expect(labelsWith({ label: null, labelPlural: null })).toEqual(derived)
+    expect(labelsWith({ label: "", labelPlural: "" })).toEqual(derived)
+  })
+
+  it("applies a global's singular override, and ignores an empty one", () => {
+    const globalLabel = (label: unknown): string | undefined =>
+      normalizeAdminConfig({ globals: [{ name: "SiteSettings", fields: [], label }] }).globals[0]?.label
+    expect(globalLabel("Site Setup")).toBe("Site Setup")
+    expect(globalLabel("")).toBe("Site Settings")
   })
 })
 

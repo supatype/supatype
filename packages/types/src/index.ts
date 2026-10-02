@@ -1002,6 +1002,16 @@ export type ModelMeta<TFields extends Record<string, unknown>> = {
     }
   }
   tableName?: string
+  /**
+   * What Studio calls one record of this model, when the name derived from the type reads wrong.
+   *
+   * Studio humanizes the type name and inflects it, so `ChildEducationExperiences` is labelled
+   * "Child Education Experience" and listed as "Child Education Experiences". Set this where that
+   * guess is wrong, for example a phrase whose first word is the noun: `"Place of Interest"`.
+   */
+  label?: string
+  /** What Studio calls many records of this model. Inflected from {@link label} when omitted. */
+  labelPlural?: string
   searchable?: readonly string[]
   /** Composite or single-column indexes, emitted to Postgres via the schema engine. */
   indexes?: readonly ModelIndex[]
