@@ -17,7 +17,7 @@
 import { existsSync } from "node:fs"
 import { join } from "node:path"
 import { readEnvFile, readEnvValue } from "./env-file.js"
-import { devPostgresPassword } from "./local-secrets.js"
+import { devDatabaseUrl } from "./local-secrets.js"
 import {
   externalDatabaseUrl,
   localDSN,
@@ -32,12 +32,15 @@ export const COMPOSE_DEV_DB_PORT = 54329
 /**
  * A docker project's own Postgres, as reached from the host: the port `supatype dev` publishes it
  * on, with the credentials and database the stack was created with, all read from `.env`.
+ *
+ * `port` is for the moment `dev` has chosen one and not yet written it. IPv4 because compose
+ * publishes the port on `127.0.0.1` only, and `localhost` can resolve to `::1` first.
  */
-export function hostComposeDbUrl(cwd: string): string {
-  const port = readEnvValue(cwd, "SUPATYPE_DEV_DB_PORT", String(COMPOSE_DEV_DB_PORT))
-  const user = readEnvValue(cwd, "POSTGRES_USER", "supatype_admin")
-  const db = readEnvValue(cwd, "POSTGRES_DB", "supatype")
-  return `postgresql://${user}:${devPostgresPassword(cwd)}@127.0.0.1:${port}/${db}?sslmode=disable`
+export function hostComposeDbUrl(
+  cwd: string,
+  port: number | string = readEnvValue(cwd, "SUPATYPE_DEV_DB_PORT", String(COMPOSE_DEV_DB_PORT)),
+): string {
+  return devDatabaseUrl(cwd, `127.0.0.1:${port}`)
 }
 
 /**
