@@ -13,6 +13,7 @@ import { loadConfig } from "../config.js"
 import { resolveRuntimeProvider, type SupatypeProjectConfig } from "../project-config.js"
 import { resolveHostDatabaseUrl } from "../host-database.js"
 import { readEnvValue, upsertEnvFile } from "../env-file.js"
+import { devDatabaseIdentity } from "../local-secrets.js"
 import { hasEngineOverride } from "../binary-cache.js"
 import { readDevSessionLock } from "../dev-session-lock.js"
 import { composeProjectName } from "../self-host-compose.js"
@@ -660,7 +661,7 @@ async function studioMembersTableExists(query: DbQuery): Promise<boolean> {
 
 /** Postgres password for compose `exec psql` (db is not published to the host). */
 export function composePostgresPassword(cwd: string): string {
-  return readEnvValue(cwd, "POSTGRES_PASSWORD", "postgres")
+  return devDatabaseIdentity(cwd).password
 }
 
 function resolveDockerComposeContext(
@@ -691,9 +692,7 @@ function composeExecQuery(
   sql: string,
   params: unknown[] = [],
 ): Promise<QueryResult> {
-  const db = readEnvValue(cwd, "POSTGRES_DB", "supatype")
-  const user = readEnvValue(cwd, "POSTGRES_USER", "supatype_admin")
-  const pgPassword = composePostgresPassword(cwd)
+  const { user, password: pgPassword, database: db } = devDatabaseIdentity(cwd)
   const envFile = join(cwd, ".env")
   const composeDir = dirname(compose.composePath)
   const args = [

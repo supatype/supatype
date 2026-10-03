@@ -11,7 +11,7 @@ import { isPortInUse } from "./postgres-ctl.js"
 import { readEnvInt, upsertEnvFile } from "./env-file.js"
 import { isInteractive } from "./ui/interactive.js"
 import { fatalError } from "./ui/fatal.js"
-import { COMPOSE_DEV_DB_PORT } from "./host-database.js"
+import { COMPOSE_DEV_DB_PORT, hostComposeDbUrl } from "./host-database.js"
 
 const MIN_PORT = 1024
 const MAX_PORT = 65535
@@ -241,18 +241,13 @@ async function promptPortConflictWithoutPersist(
   return port
 }
 
-
-function devDbConnectionUrl(port: number): string {
-  return `postgresql://supatype_admin:postgres@localhost:${port}/supatype?sslmode=disable`
-}
-
 export async function ensureDevDbPort(cwd: string): Promise<number> {
   const persisted = readEnvInt(cwd, "SUPATYPE_DEV_DB_PORT")
 
   const persist = (port: number): number => {
     upsertEnvFile(cwd, {
       SUPATYPE_DEV_DB_PORT: String(port),
-      DATABASE_URL: devDbConnectionUrl(port),
+      DATABASE_URL: hostComposeDbUrl(cwd, port),
     })
     return port
   }

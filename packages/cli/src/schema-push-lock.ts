@@ -11,7 +11,7 @@ import { existsSync } from "node:fs"
 import { resolve } from "node:path"
 import { spawn, spawnSync, type ChildProcess } from "node:child_process"
 import type { SelfHostComposePaths } from "./self-host-compose.js"
-import { readEnvValue } from "./env-file.js"
+import { devDatabaseIdentity } from "./local-secrets.js"
 
 export const SCHEMA_PUSH_LOCK_CLASSID = 872014
 export const SCHEMA_PUSH_LOCK_OBJID = 1
@@ -33,21 +33,19 @@ function dbExecArgs(
   composeProject: string,
   psqlArgs: string[],
 ): string[] {
-  const pass = readEnvValue(cwd, "POSTGRES_PASSWORD", "postgres")
-  const user = readEnvValue(cwd, "POSTGRES_USER", "supatype_admin")
-  const db = readEnvValue(cwd, "POSTGRES_DB", "supatype")
+  const { user, password, database } = devDatabaseIdentity(cwd)
   return [
     ...composeBaseArgs(paths, cwd, composeProject),
     "exec",
     "-T",
     "-e",
-    `PGPASSWORD=${pass}`,
+    `PGPASSWORD=${password}`,
     "db",
     "psql",
     "-U",
     user,
     "-d",
-    db,
+    database,
     "-v",
     "ON_ERROR_STOP=1",
     ...psqlArgs,

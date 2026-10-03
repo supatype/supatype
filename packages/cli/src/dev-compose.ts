@@ -58,9 +58,9 @@ import { ensureEngine, engineRequest, type DiffResult } from "./engine-client.js
 import { writeSchemaSourcePushArtifacts, type SchemaSourcePushArtifacts } from "./schema-sources.js"
 import { readEnvValue, upsertEnvFile } from "./env-file.js"
 import {
-  devAuthenticatorPassword,
+  devDatabaseIdentity,
+  devDatabaseUrl,
   devJwtSecret,
-  devPostgresPassword,
   seedMissingDatabaseIdentity,
   seedMissingLocalSecrets,
 } from "./local-secrets.js"
@@ -84,6 +84,7 @@ import { exitInitialPushFailed, pushInitialSchema, type InitialPushSteps } from 
 import { offerAdoption, unmanagedTables, type AdoptionSteps } from "./adopt-walkthrough.js"
 import { resetDevDatabase } from "./dev-db-reset.js"
 import { hostComposeDbUrl, resolveHostDatabaseUrl } from "./host-database.js"
+import { grantAuthSchemaAccess, reconcileAuthenticatorPassword } from "./compose-db-roles.js"
 
 /** Sync optional Docker image pins from config into `.env` (no JWT rotation). */
 export function syncComposeImagePins(cwd: string, config: SupatypeProjectConfig): void {
@@ -107,9 +108,7 @@ export interface DevComposeOptions {
 
 /** In-compose Postgres URL (SCRAM; not published to the host). */
 export function composeDbUrl(cwd: string): string {
-  const user = readEnvValue(cwd, "POSTGRES_USER", "supatype_admin")
-  const db = readEnvValue(cwd, "POSTGRES_DB", "supatype")
-  return `postgresql://${user}:${devPostgresPassword(cwd)}@db:5432/${db}?sslmode=disable`
+  return devDatabaseUrl(cwd, "db:5432")
 }
 
 /**
@@ -319,10 +318,7 @@ export function upsertDevComposeEnv(
     // User and database from the project, not hardcoded, same reason as
     // `seedMissingDatabaseIdentity`: a project not named "supatype" had this URL pointing at a
     // database that does not exist.
-    const dbUser = readEnvValue(cwd, "POSTGRES_USER", "supatype_admin")
-    const dbName = readEnvValue(cwd, "POSTGRES_DB", "supatype")
-    updates.DATABASE_URL =
-      `postgresql://${dbUser}:${devPostgresPassword(cwd)}@localhost:${devDbPort}/${dbName}?sslmode=disable`
+    updates.DATABASE_URL = hostComposeDbUrl(cwd, devDbPort)
   }
   // `SUPATYPE_SERVER_IMAGE` is written here, not passed in, and it is deliberately *not* marked
   // managed. The managed marker means "this value came from `versions` in the config and is mine to
@@ -387,7 +383,10 @@ async function waitComposeHealthy(paths: SelfHostComposePaths, cwd: string, maxM
       // failed three times in a row on a clean machine while a warm one was fine.
       //
       // TCP is the distinction the entrypoint itself draws: the init server does not listen on it.
-      [...baseArgs, "exec", "-T", "db", "pg_isready", "-h", "127.0.0.1", "-U", "supatype_admin"],
+      [
+        ...baseArgs, "exec", "-T", "db",
+        "pg_isready", "-h", "127.0.0.1", "-U", devDatabaseIdentity(cwd).user,
+      ],
       { cwd: composeDir, encoding: "utf8" },
     )
     if (ready.status === 0) return
@@ -1458,87 +1457,6 @@ function astHasSystemAuthRelation(ast: unknown): boolean {
     }
   }
   return false
-}
-
-/**
- * Set `authenticator`'s password to the one `.env` holds, every time the stack starts.
- *
- * The Postgres image passwords that role from `AUTHENTICATOR_PASSWORD` in its init scripts, which
- * run once, on an empty data directory. So the value the role actually has is whatever `.env` said
- * the day the volume was created, and `.env` can move afterwards. When the two diverge PostgREST
- * cannot log in, exits, and every REST request answers 502 with the real reason visible only in a
- * container log the developer has no reason to read.
- *
- * Reconciling here makes `.env` the answer to what the password is, rather than the volume's
- * birthday. It is idempotent, and it runs before the schema push so the API is already reachable by
- * the time the stack reports ready.
- */
-function reconcileAuthenticatorPassword(
-  paths: SelfHostComposePaths,
-  cwd: string,
-  composeProject: string,
-): void {
-  const composeDir = dirname(paths.composePath)
-  const owner = readEnvValue(cwd, "POSTGRES_USER", "supatype_admin")
-  const database = readEnvValue(cwd, "POSTGRES_DB", "supatype")
-  const result = spawnSync(
-    "docker",
-    [
-      "compose", "-p", composeProject, "-f", paths.composePath,
-      "exec", "-T",
-      "-e", `PGPASSWORD=${devPostgresPassword(cwd)}`,
-      "-e", `SUPATYPE_AUTHENTICATOR_PASSWORD=${devAuthenticatorPassword(cwd)}`,
-      "db", "psql", "-v", "ON_ERROR_STOP=1", "-U", owner, "-d", database,
-    ],
-    {
-      cwd: composeDir,
-      encoding: "utf8",
-      timeout: 10_000,
-      // `\getenv` reads the value from the container's environment, so the password is never a
-      // `docker exec` argument, which any process listing on the machine would show.
-      input: [
-        "\\getenv pw SUPATYPE_AUTHENTICATOR_PASSWORD",
-        "ALTER ROLE authenticator WITH LOGIN PASSWORD :'pw';",
-        "",
-      ].join("\n"),
-    },
-  )
-  if (result.status !== 0) {
-    // The cause, not just the consequence. This warned that REST "may answer 502" and said nothing
-    // about why, so when the supabucks e2e then failed its only API assertion with a 502, the
-    // warning twenty lines earlier read as unrelated noise. A message that predicts a failure and
-    // withholds its reason costs more than one that says nothing.
-    const detail = [result.stderr, result.error?.message]
-      .map((s) => (s ?? "").trim())
-      .filter((s) => s.length > 0)
-      .join("\n")
-    console.warn(
-      `[supatype] Could not set the authenticator password, so the REST API will answer 502.\n` +
-        (detail === "" ? "[supatype] docker gave no output." : detail),
-    )
-  }
-}
-
-function grantAuthSchemaAccess(
-  paths: SelfHostComposePaths,
-  cwd: string,
-  composeProject: string,
-): void {
-  const composeDir = dirname(paths.composePath)
-  const baseArgs = [
-    "compose", "-p", composeProject,
-    "-f", paths.composePath,
-  ]
-  const sql = "GRANT USAGE ON SCHEMA auth TO service_role; GRANT SELECT ON auth.users TO service_role;"
-  const result = spawnSync(
-    "docker",
-    [...baseArgs, "exec", "-T", "-e", "PGPASSWORD=postgres", "db",
-     "psql", "-U", "supatype_admin", "-d", "supatype", "-c", sql],
-    { cwd: composeDir, encoding: "utf8", timeout: 10_000 },
-  )
-  if (result.status !== 0) {
-    console.warn("[supatype] Could not grant service_role access to auth.users, Studio relation preview may fail.")
-  }
 }
 
 /**
