@@ -17,6 +17,7 @@ import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import { useProjectProxy } from "../hooks/useProjectProxy.js"
+import { containing, sqlText } from "../lib/sql.js"
 import { formatTimestamp } from "../lib/utils.js"
 
 // --- Types ---
@@ -70,16 +71,6 @@ const statusVariant: Record<ObjectStatus, BadgeVariant> = {
 const STATUSES: readonly ObjectStatus[] = ["managed", "adopted", "released"]
 
 // --- Reading the ledger ---
-
-/** A Postgres string literal. `proxy.sql` takes no parameters, so what the user types is quoted. */
-function sqlText(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`
-}
-
-/** `value` matched anywhere, with LIKE's own wildcards taken literally. */
-function containing(value: string): string {
-  return sqlText(`%${value.replace(/[\\%_]/g, (c) => `\\${c}`)}%`)
-}
 
 /** The page of `_supatype.managed_objects` that `query` asks for, with the count of all matches. */
 export function objectsQuery({ filters, page }: ObjectQuery): string {
