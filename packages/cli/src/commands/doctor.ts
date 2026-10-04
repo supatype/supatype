@@ -2,7 +2,7 @@ import type { Command } from "commander"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { info, plain } from "../ui/messages.js"
 import { hooksPathFromProject, schemaPathFromProject, serviceRoleRoutes } from "../project-config.js"
-import { resolveTarget, targetSchemaDoctor, schemaPgSchema } from "../resolve-target.js"
+import { resolveTarget, targetSchemaDoctor, schemaPgSchema, type DeployTarget } from "../resolve-target.js"
 import { loadProjectLink } from "../link.js"
 import { resolveHostEngineDatabaseUrl } from "../dev-compose.js"
 import { hooksReport, type HooksReport } from "../model-hooks.js"
@@ -15,12 +15,44 @@ interface DoctorItem {
   name: string
   fields: string[]
   message: string
+  /** What Supatype recorded, for a drifted object. */
+  recorded?: string
+  /** What the database holds now, for a drifted or conflicting object. */
+  live?: string
 }
 
-interface DoctorReport {
+/**
+ * The engine's reconcile, sorted for an operator. The last three arrived with the managed-object
+ * ledger, so an older engine omits them.
+ */
+export interface DoctorReport {
   missing: DoctorItem[]
   staleManaged: DoctorItem[]
   unmanagedDrift: DoctorItem[]
+  drifted?: DoctorItem[]
+  conflicting?: DoctorItem[]
+  released?: DoctorItem[]
+}
+
+type Category = keyof DoctorReport
+
+/** Each category, its heading, and its word in the summary line, in the order they print. */
+const SECTIONS: ReadonlyArray<{ key: Category; title: string; summary: string }> = [
+  { key: "missing", title: "Missing (declared, not in the database)", summary: "missing" },
+  { key: "drifted", title: "Drifted (changed outside Supatype)", summary: "drifted" },
+  { key: "staleManaged", title: "Stale managed (Supatype's, no longer declared)", summary: "stale managed" },
+  { key: "conflicting", title: "Conflicting (a declared name held by someone else)", summary: "conflicting" },
+  { key: "unmanagedDrift", title: "Unmanaged (not Supatype's, left in place)", summary: "unmanaged" },
+  { key: "released", title: "Released (left alone after `adopt --release`)", summary: "released" },
+]
+
+/** What a push would change or refuse: what `--strict` fails on, the engine's own rule. */
+const STRICT: ReadonlySet<Category> = new Set(["missing", "staleManaged", "drifted", "conflicting"])
+
+const itemsOf = (report: DoctorReport, key: Category): DoctorItem[] => report[key] ?? []
+
+export function hasStrictIssues(report: DoctorReport): boolean {
+  return [...STRICT].some((key) => itemsOf(report, key).length > 0)
 }
 
 /** Exported for tests: the label form is easy to get subtly wrong per item kind. */
@@ -33,7 +65,21 @@ export function printSection(title: string, items: DoctorItem[]): void {
     const label = item.table === item.name ? item.name : `${item.table}.${item.name}`
     plain(`  • ${label}${fields}`)
     plain(`    ${item.message}`)
+    if (item.recorded !== undefined) plain(`    recorded: ${item.recorded}`)
+    if (item.live !== undefined) plain(`    live:     ${item.live}`)
   }
+}
+
+/** Every section, then one summary line. Exported for tests. */
+export function printReport(report: DoctorReport): void {
+  for (const { key, title } of SECTIONS) printSection(title, itemsOf(report, key))
+  const counts = SECTIONS.map(({ key, summary }) => ({ n: itemsOf(report, key).length, summary }))
+  if (counts.every(({ n }) => n === 0)) {
+    info("No drift detected.")
+    return
+  }
+  const parts = counts.filter(({ n }) => n > 0).map(({ n, summary }) => `${n} ${summary}`)
+  plain(`\nSummary: ${parts.join(", ")}`)
 }
 
 export function registerDoctor(program: Command): void {
@@ -42,7 +88,7 @@ export function registerDoctor(program: Command): void {
     .description("Report schema drift between schema/index.ts and the live database")
     .option("--connection <url>", "Database connection URL (overrides config)")
     .option("--env <name>", "Target environment when linked")
-    .option("--strict", "Exit non-zero when missing or stale managed drift exists")
+    .option("--strict", "Exit non-zero when a push would change or refuse something")
     .option("--direct", "Use local engine subprocess")
   addRetiredNoCacheOption(command).action(async (opts: {
       connection?: string
@@ -59,53 +105,34 @@ export function registerDoctor(program: Command): void {
       info("Loading schema...")
       const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
 
-      let report: DoctorReport
-
-      const linked = loadProjectLink(cwd)
-      if (linked && !opts.direct && !opts.connection) {
-        const target = resolveTarget(cwd, { env: opts.env })
-        report = (await targetSchemaDoctor(target, ast, {
-          schema: pgSchema,
-        })) as DoctorReport
-      } else if (!opts.direct && !opts.connection) {
-        const connection = await resolveHostEngineDatabaseUrl(cwd, config, opts.connection)
-        const target = resolveTarget(cwd, { direct: true, connection })
-        report = (await targetSchemaDoctor(target, ast, {
-          schema: pgSchema,
-        })) as DoctorReport
-        void connection
-      } else {
-        const target = resolveTarget(cwd, {
-          env: opts.env,
-          direct: true,
-          connection: opts.connection,
-        })
-        report = (await targetSchemaDoctor(target, ast, {
-          schema: pgSchema,
-        })) as DoctorReport
-      }
+      const target = await doctorTarget(cwd, config, opts)
+      const report = (await targetSchemaDoctor(target, ast, { schema: pgSchema })) as DoctorReport
 
       printHooks(hooksReport(cwd, hooksPathFromProject(config, cwd), ast))
       printServiceRoleGrants(checkServiceRoleRoutes(config, cwd), serviceRoleRoutes(config))
+      printReport(report)
 
-      printSection("Missing (in AST, not in DB)", report.missing ?? [])
-      printSection("Stale managed (stamped, not in AST)", report.staleManaged ?? [])
-      printSection("Unmanaged drift (manual decision)", report.unmanagedDrift ?? [])
-
-      const missing = report.missing?.length ?? 0
-      const stale = report.staleManaged?.length ?? 0
-      const unmanaged = report.unmanagedDrift?.length ?? 0
-
-      if (missing + stale + unmanaged === 0) {
-        info("No drift detected.")
-      } else {
-        plain(`\nSummary: ${missing} missing, ${stale} stale managed, ${unmanaged} unmanaged`)
-      }
-
-      if (opts.strict && (missing > 0 || stale > 0)) {
+      if (opts.strict && hasStrictIssues(report)) {
         process.exit(1)
       }
     })
+}
+
+/**
+ * Where doctor looks: the linked environment, else the local dev database, unless `--direct` or
+ * `--connection` asks for the engine subprocess.
+ */
+async function doctorTarget(
+  cwd: string,
+  config: ReturnType<typeof loadConfig>,
+  opts: { connection?: string; env?: string; direct?: boolean },
+): Promise<DeployTarget> {
+  if (opts.direct || opts.connection) {
+    return resolveTarget(cwd, { env: opts.env, direct: true, connection: opts.connection })
+  }
+  if (loadProjectLink(cwd)) return resolveTarget(cwd, { env: opts.env })
+  const connection = await resolveHostEngineDatabaseUrl(cwd, config, undefined)
+  return resolveTarget(cwd, { direct: true, connection })
 }
 
 /**
