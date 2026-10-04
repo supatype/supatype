@@ -272,7 +272,13 @@ export async function targetSchemaDiff(
 export async function targetSchemaPush(
   target: DeployTarget,
   ast: unknown,
-  opts?: { force?: boolean; schema?: string; schemaSources?: SchemaSourcesPayload | null },
+  opts?: {
+    force?: boolean
+    schema?: string
+    schemaSources?: SchemaSourcesPayload | null
+    /** Put back access changed outside Supatype (plan 3.5); only after consent. */
+    overwriteDrift?: boolean
+  },
 ): Promise<{
   message?: string
   status?: string
@@ -293,6 +299,7 @@ export async function targetSchemaPush(
       database_url: target.databaseUrl!,
       schema: opts?.schema ?? "public",
       force: opts?.force ?? true,
+      overwrite_drift: opts?.overwriteDrift === true,
     }
     if (opts?.schemaSources) {
       body["schema_sources_gz_base64"] = opts.schemaSources.dataBase64
@@ -305,6 +312,7 @@ export async function targetSchemaPush(
     ast,
     force: opts?.force ?? true,
     schema: opts?.schema ?? "public",
+    overwriteDrift: opts?.overwriteDrift === true,
   }
   if (opts?.schemaSources) {
     pushBody["schemaSources"] = {

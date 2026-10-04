@@ -53,11 +53,13 @@ export interface ReconcileAction {
   key: { kind: string; schema: string; parent: string; name: string }
   /** A `create` the parent statement already makes (a constraint inline in `CREATE TABLE`). */
   inline?: boolean
-  reason?: "stamped" | "structure_matches" | "deparses_equal" | "owned_schema"
+  reason?: "stamped" | "structure_matches" | "deparses_equal" | "owned_schema" | "declared"
   /** A `drift` on a policy, grant, label or RLS attribute: putting it back changes who sees what. */
   security_relevant?: boolean
   recorded_def?: string
   live_def?: string
+  /** The statement a `create`, `recreate` or `replace` runs. */
+  create_sql?: string
 }
 
 export interface DiffResult {
@@ -272,7 +274,8 @@ export async function engineRequest<T = unknown>(
 // Endpoint → CLI args mapping
 // ---------------------------------------------------------------------------
 
-function endpointToArgs(
+/** The engine binary's arguments for an endpoint and its request body. Exported for its tests. */
+export function endpointToArgs(
   endpoint: string,
   body: Record<string, unknown>,
   reqFile: string,
@@ -283,6 +286,9 @@ function endpointToArgs(
   const force = body["force"] ? ["--force"] : []
   const nonInteractive =
     body["non_interactive"] === true || body["force"] === true ? ["--non-interactive"] : []
+  // Plan 3.5: put back access changed outside Supatype. The CLI sets it only after a person said
+  // yes to the difference, or when `--overwrite-drift` was passed.
+  const overwriteDrift = body["overwrite_drift"] === true ? ["--overwrite-drift"] : []
 
   switch (endpoint) {
     case "/diff":
@@ -302,6 +308,7 @@ function endpointToArgs(
         schema,
         ...force,
         ...nonInteractive,
+        ...overwriteDrift,
         ...sourceArgs,
       ]
     }

@@ -164,3 +164,38 @@ export function printDiffOperations(diff: Pick<DiffResult, "operations" | "recon
   }
   console.log()
 }
+
+/** The kinds that decide who may read or write: drift on them needs a person's consent. */
+const ACCESS_KINDS = new Set(["policy", "table_grant", "security_label", "rls_attributes"])
+
+/**
+ * Plan 3.5: the policies, grants, labels and RLS attributes this push would put back because
+ * they were changed or removed outside Supatype. A pipeline must not revert a deliberate hand
+ * edit on the next deploy, and a rollback could not bring it back, so the engine refuses these
+ * unless the push says to overwrite them.
+ */
+export function securityDrift(diff: Pick<DiffResult, "reconcile">): ReconcileAction[] {
+  return (diff.reconcile ?? []).filter(
+    (action) =>
+      (action.action === "drift" && action.security_relevant === true) ||
+      (action.action === "recreate" && ACCESS_KINDS.has(action.key.kind)),
+  )
+}
+
+/** Each drifted object with what Supatype recorded beside what the database holds now. */
+export function formatSecurityDrift(actions: ReconcileAction[]): string[] {
+  const lines: string[] = []
+  for (const action of actions) {
+    lines.push(`  ${kindLabel(action)} ${where(action)}`)
+    const recorded = action.action === "drift" ? action.recorded_def : action.create_sql
+    lines.push("    Supatype's:")
+    for (const line of (recorded ?? "").split("\n")) lines.push(`      ${line}`)
+    if (action.action === "drift") {
+      lines.push("    Now:")
+      for (const line of (action.live_def ?? "").split("\n")) lines.push(`      ${line}`)
+    } else {
+      lines.push("    Now: removed")
+    }
+  }
+  return lines
+}
