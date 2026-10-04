@@ -1,13 +1,13 @@
 import type { Command } from "commander"
 import { loadConfig, loadSchemaAst } from "../config.js"
-import { schemaPathFromProject } from "../project-config.js"
-import { targetSchemaAdopt, schemaPgSchema } from "../resolve-target.js"
-import { adoptedCount, adoptionLines, type AdoptOutcome } from "../adopt-walkthrough.js"
+import { pgSchema, schemaPathFromProject } from "../project-config.js"
+import { schemaCommandTarget, targetSchemaAdopt } from "../resolve-target.js"
+import { adoptedCount, adoptionLines } from "../adopt-walkthrough.js"
+import type { AdoptOutcome } from "../engine-client.js"
 import { confirm } from "../ui/confirm.js"
 import { info, plain } from "../ui/messages.js"
 import { withSpinner } from "../ui/progress.js"
 import { addRetiredNoCacheOption, warnIfRetiredNoCache } from "../retired-no-cache.js"
-import { schemaCommandTarget } from "./doctor.js"
 
 interface AdoptOptions {
   connection?: string
@@ -50,22 +50,36 @@ async function adopt(opts: AdoptOptions): Promise<void> {
   const target = await schemaCommandTarget(cwd, config, opts)
   const run = (yes: boolean): Promise<AdoptOutcome> =>
     targetSchemaAdopt(target, ast, {
-      schema: schemaPgSchema(cwd),
+      schema: pgSchema(config),
       yes,
       ...(opts.release !== undefined && { release: opts.release }),
     })
-
-  const lines = previewLines(await run(false))
-  if (lines.length === 0) {
-    info("Nothing to adopt: every object the schema declares is Supatype's or absent.")
+  // `--yes` already agreed, so one engine call does it and its outcome says what it took.
+  if (opts.yes) {
+    const outcome = await run(true)
+    for (const line of previewLines(outcome)) plain(`  ${line}`)
+    report(outcome)
     return
   }
-  plain(`\nAdopt will:\n`)
-  for (const line of lines) plain(`  ${line}`)
-  if (!opts.yes && !(await confirm("Go ahead?", { default: false }))) {
+  if (!show(previewLines(await run(false)))) return
+  if (!(await confirm("Go ahead?", { default: false }))) {
     plain("Adoption cancelled.")
     return
   }
-  const outcome = await run(true)
+  report(await run(true))
+}
+
+/** Prints what adopt will do, or says there is nothing; whether there was anything. */
+function show(lines: readonly string[]): boolean {
+  if (lines.length === 0) {
+    info("Nothing to adopt: every object the schema declares is Supatype's or absent.")
+    return false
+  }
+  plain(`\nAdopt will:\n`)
+  for (const line of lines) plain(`  ${line}`)
+  return true
+}
+
+function report(outcome: AdoptOutcome): void {
   info(`Adopted ${adoptedCount(outcome)} object(s), released ${outcome.release?.length ?? 0}.`)
 }

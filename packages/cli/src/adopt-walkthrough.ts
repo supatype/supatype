@@ -11,7 +11,7 @@
  * adoption would take, and asks twice before taking it. Anywhere else it never adopts, because
  * agreeing to a push is not agreeing to take ownership of tables, and it prints the command instead.
  */
-import { EngineError } from "./engine-client.js"
+import { EngineError, type AdoptOutcome } from "./engine-client.js"
 import { confirm } from "./ui/confirm.js"
 import { isInteractive } from "./ui/interactive.js"
 import { plain, warn } from "./ui/messages.js"
@@ -49,27 +49,6 @@ export function unmanagedTables(output: string): string[] | null {
 export function engineOutputOf(err: unknown): string {
   if (err instanceof EngineError) return `${err.message}\n${err.stdout}`
   return err instanceof Error ? err.message : String(err)
-}
-
-/** One object `adopt` hands over or takes back, as the engine names it. */
-export interface AdoptionItem {
-  kind: string
-  table: string
-  name: string
-  message: string
-}
-
-/**
- * What the engine's `adopt` reports, previewing or applying. Since the ledger it lists the objects
- * it hands over (`adopt`) and takes back (`release`) and writes ledger rows; an engine from before
- * listed the comment stamps it would write (`stampStatements`) and counted them (`stamped`).
- */
-export interface AdoptOutcome {
-  status?: string
-  adopt?: AdoptionItem[]
-  release?: AdoptionItem[]
-  stampStatements?: string[]
-  stamped?: number
 }
 
 /** What adopting would take, one line per object, whichever engine answered. */

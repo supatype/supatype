@@ -16,6 +16,7 @@ import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import { useProjectProxy } from "../hooks/useProjectProxy.js"
+import { formatTimestamp } from "../lib/utils.js"
 
 // --- Types ---
 
@@ -160,7 +161,7 @@ function ObjectRow({ object }: { object: ManagedObject }): React.ReactElement {
           </Link>
         )}
       </Td>
-      <Td className="text-xs text-muted-foreground">{object.updated_at}</Td>
+      <Td className="text-xs text-muted-foreground">{formatTimestamp(object.updated_at)}</Td>
     </tr>
   )
 }

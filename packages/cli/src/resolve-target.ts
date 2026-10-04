@@ -1,8 +1,7 @@
 import { existsSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { loadConfig } from "./config.js"
-import type { AdoptOutcome } from "./adopt-walkthrough.js"
-import type { DiffResult } from "./engine-client.js"
+import type { AdoptOutcome, DiffResult } from "./engine-client.js"
 import { ensureEngine, engineRequest } from "./engine-client.js"
 import type { SchemaSourcesPayload } from "./schema-sources.js"
 import { resolveHostDatabaseUrl } from "./host-database.js"
@@ -395,6 +394,26 @@ export async function targetListMigrations(
     target.apiPrefix,
     apiFetchOpts(target, "GET", projectPath(target, "/schema/migrations")),
   )
+}
+
+/**
+ * Where `doctor` and `adopt` look: the linked environment, else the local dev database, unless
+ * `--direct` or `--connection` asks for the engine subprocess. One answer for both, so `adopt` takes
+ * exactly what `doctor` reported. `dev-compose` is loaded only when the local database is the
+ * answer, as `push` loads it.
+ */
+export async function schemaCommandTarget(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  opts: { connection?: string; env?: string; direct?: boolean },
+): Promise<DeployTarget> {
+  if (opts.direct || opts.connection) {
+    return resolveTarget(cwd, { env: opts.env, direct: true, connection: opts.connection })
+  }
+  if (loadProjectLink(cwd)) return resolveTarget(cwd, { env: opts.env })
+  const { resolveHostEngineDatabaseUrl } = await import("./dev-compose.js")
+  const connection = await resolveHostEngineDatabaseUrl(cwd, config)
+  return resolveTarget(cwd, { direct: true, connection })
 }
 
 /**

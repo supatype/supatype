@@ -54,7 +54,7 @@ import {
   usesLocalServerImage,
   LOCAL_SERVER_DOCKER_IMAGE,
 } from "./compose-local-server-image.js"
-import { ensureEngine, engineRequest, type DiffResult } from "./engine-client.js"
+import { ensureEngine, engineRequest, type AdoptOutcome, type DiffResult } from "./engine-client.js"
 import { writeSchemaSourcePushArtifacts, type SchemaSourcePushArtifacts } from "./schema-sources.js"
 import { readEnvValue, upsertEnvFile } from "./env-file.js"
 import {
@@ -86,7 +86,6 @@ import {
   targetAdoptionSteps,
   unmanagedTables,
   type AdoptionSteps,
-  type AdoptOutcome,
 } from "./adopt-walkthrough.js"
 import { resetDevDatabase } from "./dev-db-reset.js"
 import { hostComposeDbUrl, resolveHostDatabaseUrl } from "./host-database.js"

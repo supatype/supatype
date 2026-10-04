@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { adoptedCount, adoptionLines, targetAdoptionSteps, type AdoptOutcome } from "../src/adopt-walkthrough.js"
+import { adoptedCount, adoptionLines, targetAdoptionSteps } from "../src/adopt-walkthrough.js"
+import type { AdoptOutcome } from "../src/engine-client.js"
 import { previewLines } from "../src/commands/adopt.js"
 import { endpointToArgs } from "../src/engine-client.js"
 
@@ -8,7 +9,7 @@ import { endpointToArgs } from "../src/engine-client.js"
  * it hands over and takes back, and writes ledger rows instead of comment stamps. A pinned engine
  * image can still be one from before, so every reader takes both shapes.
  */
-const item = (kind: string, name: string, message: string) => ({ kind, table: name, name, message })
+const item = (kind: string, name: string, message: string) => ({ kind, table: name, name, fields: [], message })
 
 const LEDGER: AdoptOutcome = {
   status: "preview",
