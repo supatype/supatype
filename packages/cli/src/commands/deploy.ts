@@ -23,6 +23,7 @@ import { loadProjectLink } from "../link.js"
 import { resolveTarget } from "../resolve-target.js"
 import { targetFetch } from "../target-client.js"
 import { ensureEngine, engineRequest, type DiffResult } from "../engine-client.js"
+import { plannedChanges } from "../diff-output.js"
 import { resolveAppConfig, validateStaticMode, validateBuildOutput, detectPackageManager } from "../app/framework.js"
 import { TIER_LIMITS, type Tier } from "./deploy-types.js"
 import { spawnSync } from "node:child_process"
@@ -89,10 +90,10 @@ export function registerDeploy(program: Command): void {
             schema: "public",
           })
 
-          const ops = diff.operations ?? []
+          const changes = plannedChanges(diff)
 
-          if (ops.length > 0) {
-            info(`${ops.length} schema change(s) to apply.`)
+          if (changes.length > 0) {
+            info(`${changes.length} schema change(s) to apply.`)
             const result = await engineRequest<EnginePushResult>("/push", {
               ast,
               database_url: resolveHostDatabaseUrl(cwd, config, { allowDerived: true }).dsn,

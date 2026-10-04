@@ -1,4 +1,82 @@
-import type { DiffResult, Operation } from "./engine-client.js"
+import type { DiffResult, Operation, ReconcileAction } from "./engine-client.js"
+
+type Risk = NonNullable<Operation["risk"]>
+
+/** One thing a push will do, from either side of the engine's plan. */
+export interface PlannedChange {
+  label: string
+  risk: Risk
+}
+
+/** `foreign_key` as a person says it: `foreign key`. */
+function kindLabel(action: ReconcileAction): string {
+  return action.key.kind.replace(/_/g, " ")
+}
+
+function where(action: ReconcileAction): string {
+  const { parent, name } = action.key
+  return parent ? `${parent}.${name}` : name
+}
+
+/**
+ * What a reconcile action means for the database, or `null` when it changes nothing there: a
+ * `keep`, a `forget` (ledger only), a `released` object, or a `create` its parent statement makes.
+ */
+export function formatReconcileAction(action: ReconcileAction): PlannedChange | null {
+  const kind = kindLabel(action)
+  const at = where(action)
+  switch (action.action) {
+    case "create":
+      return action.inline ? null : { label: `create ${kind} ${at}`, risk: "safe" }
+    case "adopt":
+      return {
+        label: `adopt ${kind} ${at} (already in the database, now recorded as Supatype's)`,
+        risk: "safe",
+      }
+    case "conflict":
+      return {
+        label: `${kind} ${at} exists and was not created by Supatype; run \`supatype adopt\` or rename it`,
+        risk: "danger",
+      }
+    case "recreate":
+      return { label: `recreate ${kind} ${at} (dropped outside Supatype)`, risk: "cautious" }
+    case "replace":
+      return { label: `replace ${kind} ${at}`, risk: "safe" }
+    case "drift":
+      return {
+        label: `${kind} ${at} was changed outside Supatype; the push puts it back`,
+        risk: action.security_relevant ? "danger" : "cautious",
+      }
+    case "drop":
+      return { label: `drop ${kind} ${at}`, risk: "cautious" }
+    case "keep":
+    case "forget":
+    case "released":
+      return null
+  }
+}
+
+/**
+ * Everything a push of this plan will do: the differ's operations, then the reconcile's changes.
+ * The one list `diff`, `push`, `deploy` and `migrate` count and confirm against, so a change the
+ * reconcile plans (a check or a foreign key, say) is never a push that "matches the database".
+ */
+export function plannedChanges(diff: Pick<DiffResult, "operations" | "reconcile">): PlannedChange[] {
+  const changes: PlannedChange[] = (diff.operations ?? []).map((op) => ({
+    label: op.warning ?? formatOperation(op),
+    risk: op.risk ?? "safe",
+  }))
+  for (const action of diff.reconcile ?? []) {
+    const change = formatReconcileAction(action)
+    if (change) changes.push(change)
+  }
+  return changes
+}
+
+/** Whether a change needs a person to say yes before a push applies it. */
+export function isRisky(change: PlannedChange): boolean {
+  return change.risk !== "safe"
+}
 
 /** Human-readable label for a single schema operation. */
 export function formatOperation(op: Operation): string {
@@ -51,7 +129,7 @@ export function printDiffWarnings(diff: Pick<DiffResult, "warnings">): void {
   console.log()
 }
 
-const RISK_SYMBOL: Record<NonNullable<DiffResult["operations"][number]["risk"]>, string> = {
+const RISK_SYMBOL: Record<Risk, string> = {
   safe: "+",
   warn: "~",
   cautious: "~",
@@ -59,7 +137,7 @@ const RISK_SYMBOL: Record<NonNullable<DiffResult["operations"][number]["risk"]>,
   destructive: "!",
 }
 
-const RISK_LEGEND: Record<NonNullable<DiffResult["operations"][number]["risk"]>, string> = {
+const RISK_LEGEND: Record<Risk, string> = {
   safe: "safe",
   warn: "caution",
   cautious: "caution",
@@ -67,24 +145,22 @@ const RISK_LEGEND: Record<NonNullable<DiffResult["operations"][number]["risk"]>,
   destructive: "DANGER",
 }
 
-/** Print planned schema operations from a diff result. */
-export function printDiffOperations(diff: DiffResult): void {
-  const ops = diff.operations ?? []
-  if (ops.length === 0) {
+/** Print what a push of this plan will do: the operations and the reconcile's changes. */
+export function printDiffOperations(diff: Pick<DiffResult, "operations" | "reconcile">): void {
+  const changes = plannedChanges(diff)
+  if (changes.length === 0) {
     console.log("No changes.")
     return
   }
 
-  console.log(`\n${ops.length} change(s):\n`)
-  for (const op of ops) {
-    const r = op.risk ?? "safe"
-    const label = op.warning ?? formatOperation(op)
-    console.log(`  [${RISK_SYMBOL[r]}] ${label}  (${RISK_LEGEND[r]})`)
+  console.log(`\n${changes.length} change(s):\n`)
+  for (const change of changes) {
+    console.log(`  [${RISK_SYMBOL[change.risk]}] ${change.label}  (${RISK_LEGEND[change.risk]})`)
   }
 
-  const dangerous = ops.filter((o) => o.risk === "danger").length
+  const dangerous = changes.filter((c) => c.risk === "danger" || c.risk === "destructive").length
   if (dangerous > 0) {
-    console.log(`\n  ${dangerous} dangerous operation(s). Review before pushing.`)
+    console.log(`\n  ${dangerous} dangerous change(s). Review before pushing.`)
   }
   console.log()
 }
