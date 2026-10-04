@@ -196,3 +196,30 @@ export function CodeBlock({
     </div>
   )
 }
+
+/* ─── Pager ─── */
+
+/** Where a paged list is: the zero-based page, its size, and how many rows there are in all. */
+export interface PageAt {
+  page: number
+  pageSize: number
+  total: number
+}
+
+/** "Page 2 of 7 (163)" with Previous and Next, for any list fetched a page at a time. */
+export function Pager({ at, onPage }: { at: PageAt; onPage: (page: number) => void }): React.ReactElement {
+  const pages = Math.max(1, Math.ceil(at.total / at.pageSize))
+  return (
+    <div className="flex items-center justify-end gap-2 mt-2">
+      <span className="text-xs text-muted-foreground">
+        Page {at.page + 1} of {pages} ({at.total})
+      </span>
+      <Button size="sm" onClick={() => onPage(at.page - 1)} disabled={at.page === 0}>
+        Previous
+      </Button>
+      <Button size="sm" onClick={() => onPage(at.page + 1)} disabled={at.page >= pages - 1}>
+        Next
+      </Button>
+    </div>
+  )
+}

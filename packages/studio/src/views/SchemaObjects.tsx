@@ -5,13 +5,14 @@
  * section 8). Built like `SeedHistory.tsx`: the same primitives, the same `proxy.sql` read, and
  * no new engine endpoint. Each row links to the migration that last changed it.
  *
- * Released objects are shown, not hidden: an object every push now leaves alone is the one an
- * operator most needs to remember exists.
+ * The ledger holds a row per column and per grant, so it is read a page at a time, filtered in the
+ * query rather than in the browser. Released objects are shown, not hidden: an object every push
+ * now leaves alone is the one an operator most needs to remember exists.
  */
 
-import React, { useMemo, useState } from "react"
+import React, { useState } from "react"
 import { Link } from "react-router-dom"
-import { Badge, Card, Input, Select, Td, Th, type BadgeVariant } from "../components/ui.js"
+import { Badge, Card, Input, Pager, Select, Td, Th, type BadgeVariant } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
@@ -40,11 +41,24 @@ export interface ObjectFilters {
   status: "all" | ObjectStatus
 }
 
+/** What is being looked at: the filters and the zero-based page. */
+export interface ObjectQuery {
+  filters: ObjectFilters
+  page: number
+}
+
+/** One page of objects, how many match in all, and every kind the ledger holds (for the filter). */
+export interface ObjectPage {
+  objects: ManagedObject[]
+  total: number
+  kinds: string[]
+}
+
 export const NO_FILTERS: ObjectFilters = { kind: "all", table: "", status: "all" }
 
-export const MANAGED_OBJECTS_SQL = `SELECT kind, schema_name, parent, name, status, migration_id,
-       updated_at::TEXT
- FROM _supatype.managed_objects ORDER BY kind, schema_name, parent, name`
+export const PAGE_SIZE = 50
+
+export const KINDS_SQL = "SELECT DISTINCT kind FROM _supatype.managed_objects ORDER BY kind"
 
 const statusVariant: Record<ObjectStatus, BadgeVariant> = {
   managed: "green",
@@ -56,6 +70,35 @@ const statusVariant: Record<ObjectStatus, BadgeVariant> = {
 const STATUSES: readonly ObjectStatus[] = ["managed", "adopted", "released"]
 
 // --- Reading the ledger ---
+
+/** A Postgres string literal. `proxy.sql` takes no parameters, so what the user types is quoted. */
+function sqlText(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`
+}
+
+/** `value` matched anywhere, with LIKE's own wildcards taken literally. */
+function containing(value: string): string {
+  return sqlText(`%${value.replace(/[\\%_]/g, (c) => `\\${c}`)}%`)
+}
+
+/** The page of `_supatype.managed_objects` that `query` asks for, with the count of all matches. */
+export function objectsQuery({ filters, page }: ObjectQuery): string {
+  const where: string[] = []
+  if (filters.kind !== "all") where.push(`kind = ${sqlText(filters.kind)}`)
+  if (filters.status !== "all") where.push(`status = ${sqlText(filters.status)}`)
+  const table = filters.table.trim()
+  // A table's own row names it; anything else names it first in its parent (`table.column`).
+  if (table !== "") {
+    where.push(
+      `(CASE WHEN parent = '' THEN name ELSE split_part(parent, '.', 1) END) ILIKE ${containing(table)} ESCAPE '\\'`,
+    )
+  }
+  return `SELECT kind, schema_name, parent, name, status, migration_id, updated_at::TEXT,
+       count(*) OVER () AS total
+ FROM _supatype.managed_objects${where.length > 0 ? `\n WHERE ${where.join(" AND ")}` : ""}
+ ORDER BY kind, schema_name, parent, name
+ LIMIT ${PAGE_SIZE} OFFSET ${page * PAGE_SIZE}`
+}
 
 /** One row of `_supatype.managed_objects`, which arrives as whatever the proxy decoded. */
 export function mapObjectRow(row: Record<string, unknown>): ManagedObject {
@@ -71,28 +114,14 @@ export function mapObjectRow(row: Record<string, unknown>): ManagedObject {
   }
 }
 
+/** The page the rows of `objectsQuery` make, given the ledger's kinds. */
+export function toPage(rows: readonly Record<string, unknown>[], kinds: string[]): ObjectPage {
+  return { objects: rows.map(mapObjectRow), total: Number(rows[0]?.["total"] ?? 0), kinds }
+}
+
 /** `posts.posts_title_idx`, or `posts` for a table-level object. */
 export function objectLabel(object: ManagedObject): string {
   return object.parent === "" ? object.name : `${object.parent}.${object.name}`
-}
-
-/** The table an object belongs to: its parent, or itself for a table. */
-function tableOf(object: ManagedObject): string {
-  return object.parent === "" ? object.name : (object.parent.split(".")[0] ?? object.parent)
-}
-
-/** The objects `filters` lets through. The table filter matches part of a table's name. */
-export function filterObjects(
-  objects: readonly ManagedObject[],
-  filters: ObjectFilters,
-): ManagedObject[] {
-  const table = filters.table.trim().toLowerCase()
-  return objects.filter(
-    (o) =>
-      (filters.kind === "all" || o.kind === filters.kind) &&
-      (filters.status === "all" || o.status === filters.status) &&
-      (table === "" || tableOf(o).toLowerCase().includes(table)),
-  )
 }
 
 /** Where Migration History shows one migration on its own. */
@@ -101,13 +130,6 @@ export function migrationLink(id: number): string {
 }
 
 // --- The screen ---
-
-export interface SchemaObjectsViewProps {
-  objects: ManagedObject[] | null
-  loading: boolean
-  error: string | null
-  onRefresh: () => void
-}
 
 interface FilterBarProps {
   filters: ObjectFilters
@@ -197,69 +219,75 @@ function ObjectTable({ objects }: { objects: readonly ManagedObject[] }): React.
   )
 }
 
-function FilteredObjects({ objects }: { objects: readonly ManagedObject[] }): React.ReactElement {
-  const [filters, setFilters] = useState<ObjectFilters>(NO_FILTERS)
-  const kinds = useMemo(() => [...new Set(objects.map((o) => o.kind))].sort(), [objects])
-  const shown = useMemo(() => filterObjects(objects, filters), [objects, filters])
-  return (
-    <>
-      <FilterBar filters={filters} kinds={kinds} onChange={setFilters} />
-      <ObjectTable objects={shown} />
-      <div className="text-xs text-muted-foreground mt-2">
-        {shown.length} of {objects.length} object{objects.length === 1 ? "" : "s"} shown
-      </div>
-    </>
-  )
+/** Fetching state, from `useApiQuery`. Loading is a null result: the first page has not arrived. */
+export interface LoadState {
+  error: string | null
+  onRefresh: () => void
+}
+
+export interface SchemaObjectsViewProps {
+  result: ObjectPage | null
+  query: ObjectQuery
+  onQuery: (query: ObjectQuery) => void
+  load: LoadState
 }
 
 /**
  * Everything the screen shows, given what it shows it. Separated from the fetching so every state
- * it can be in is one a test can render.
+ * it can be in is one a test can render. A page already shown stays while the next one loads, so
+ * typing in the filter does not blank the screen.
  */
-export function SchemaObjectsView({
-  objects,
-  loading,
-  error,
-  onRefresh,
-}: SchemaObjectsViewProps): React.ReactElement {
-  if (loading) {
+export function SchemaObjectsView({ result, query, onQuery, load }: SchemaObjectsViewProps): React.ReactElement {
+  // The ledger is created by the first push of an engine that has it, so its absence means this
+  // database has not had one yet rather than anything being broken.
+  const missing = load.error !== null && load.error.includes("does not exist")
+  if (load.error !== null && !missing) {
+    return <ErrorBanner message={load.error} onRetry={load.onRefresh} />
+  }
+  if (result === null && !missing) {
     return (
       <div className="flex items-center justify-center py-12">
         <span className="text-sm text-muted-foreground">Loading schema objects...</span>
       </div>
     )
   }
-
-  // The ledger is created by the first push of an engine that has it, so its absence means this
-  // database has not had one yet rather than anything being broken.
-  if (error !== null && !error.includes("does not exist")) {
-    return <ErrorBanner message={error} onRetry={onRefresh} />
-  }
-
-  const rows = error !== null ? [] : (objects ?? [])
-  if (rows.length === 0) {
+  if (missing || result === null || result.kinds.length === 0) {
     return (
       <EmptyState
         title="No schema objects recorded yet"
         description="Run `supatype push` to apply your schema. Every object it creates or adopts is recorded here."
-        action={onRefresh}
+        action={load.onRefresh}
         actionLabel="Refresh"
       />
     )
   }
-
-  return <FilteredObjects objects={rows} />
+  return (
+    <>
+      <FilterBar filters={query.filters} kinds={result.kinds} onChange={(filters) => onQuery({ filters, page: 0 })} />
+      <ObjectTable objects={result.objects} />
+      <Pager
+        at={{ page: query.page, pageSize: PAGE_SIZE, total: result.total }}
+        onPage={(page) => onQuery({ ...query, page })}
+      />
+    </>
+  )
 }
 
 export function SchemaObjects(): React.ReactElement {
   const proxy = useProjectProxy()
+  const [query, setQuery] = useState<ObjectQuery>({ filters: NO_FILTERS, page: 0 })
 
-  const { data, loading, error, refetch } = useApiQuery(async () => {
-    const result = await proxy.sql(MANAGED_OBJECTS_SQL)
-    return result.rows.map(mapObjectRow)
-  }, [proxy])
+  const { data, error, refetch } = useApiQuery(async () => {
+    const [rows, kinds] = await Promise.all([proxy.sql(objectsQuery(query)), proxy.sql(KINDS_SQL)])
+    return toPage(rows.rows, kinds.rows.map((r) => String(r["kind"] ?? "")))
+  }, [proxy, query])
 
   return (
-    <SchemaObjectsView objects={data} loading={loading} error={error} onRefresh={refetch} />
+    <SchemaObjectsView
+      result={data}
+      query={query}
+      onQuery={setQuery}
+      load={{ error, onRefresh: refetch }}
+    />
   )
 }

@@ -21,9 +21,11 @@ export interface DoctorReport {
   conflicting?: DoctorItem[]
   released?: DoctorItem[]
   rebaselined?: DoctorItem[]
+  /** Whether a push would change or refuse something: the engine's own `--strict` rule. */
+  blocking?: boolean
 }
 
-type Category = keyof DoctorReport
+type Category = Exclude<keyof DoctorReport, "blocking">
 
 /** Each category, its heading, and its word in the summary line, in the order they print. */
 const SECTIONS: ReadonlyArray<{ key: Category; title: string; summary: string }> = [
@@ -36,13 +38,21 @@ const SECTIONS: ReadonlyArray<{ key: Category; title: string; summary: string }>
   { key: "rebaselined", title: "Rebaselined (recorded as they are now)", summary: "rebaselined" },
 ]
 
-/** What a push would change or refuse: what `--strict` fails on, the engine's own rule. */
-const STRICT: ReadonlySet<Category> = new Set(["missing", "staleManaged", "drifted", "conflicting"])
+/**
+ * What `--strict` fails on, for an engine from before it said so itself (`blocking`): what a push
+ * would change or refuse.
+ */
+const STRICT_BEFORE_BLOCKING: ReadonlySet<Category> = new Set([
+  "missing",
+  "staleManaged",
+  "drifted",
+  "conflicting",
+])
 
 const itemsOf = (report: DoctorReport, key: Category): DoctorItem[] => report[key] ?? []
 
 export function hasStrictIssues(report: DoctorReport): boolean {
-  return [...STRICT].some((key) => itemsOf(report, key).length > 0)
+  return report.blocking ?? [...STRICT_BEFORE_BLOCKING].some((key) => itemsOf(report, key).length > 0)
 }
 
 /** Exported for tests: the label form is easy to get subtly wrong per item kind. */
