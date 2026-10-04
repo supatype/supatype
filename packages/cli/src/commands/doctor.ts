@@ -22,8 +22,9 @@ interface DoctorItem {
 }
 
 /**
- * The engine's reconcile, sorted for an operator. The last three arrived with the managed-object
- * ledger, so an older engine omits them.
+ * The engine's reconcile, sorted for an operator. The optional categories arrived with the
+ * managed-object ledger, so an older engine omits them; `rebaselined` is only there after
+ * `--rebaseline`.
  */
 export interface DoctorReport {
   missing: DoctorItem[]
@@ -32,6 +33,7 @@ export interface DoctorReport {
   drifted?: DoctorItem[]
   conflicting?: DoctorItem[]
   released?: DoctorItem[]
+  rebaselined?: DoctorItem[]
 }
 
 type Category = keyof DoctorReport
@@ -44,6 +46,7 @@ const SECTIONS: ReadonlyArray<{ key: Category; title: string; summary: string }>
   { key: "conflicting", title: "Conflicting (a declared name held by someone else)", summary: "conflicting" },
   { key: "unmanagedDrift", title: "Unmanaged (not Supatype's, left in place)", summary: "unmanaged" },
   { key: "released", title: "Released (left alone after `adopt --release`)", summary: "released" },
+  { key: "rebaselined", title: "Rebaselined (recorded as they are now)", summary: "rebaselined" },
 ]
 
 /** What a push would change or refuse: what `--strict` fails on, the engine's own rule. */
@@ -89,11 +92,16 @@ export function registerDoctor(program: Command): void {
     .option("--connection <url>", "Database connection URL (overrides config)")
     .option("--env <name>", "Target environment when linked")
     .option("--strict", "Exit non-zero when a push would change or refuse something")
+    .option(
+      "--rebaseline",
+      "Record every drifted object as it is now, changing no object (after a Postgres upgrade, or to keep a hand edit until the schema changes it)",
+    )
     .option("--direct", "Use local engine subprocess")
   addRetiredNoCacheOption(command).action(async (opts: {
       connection?: string
       env?: string
       strict?: boolean
+      rebaseline?: boolean
       cache?: boolean
       direct?: boolean
     }) => {
@@ -106,7 +114,10 @@ export function registerDoctor(program: Command): void {
       const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
 
       const target = await schemaCommandTarget(cwd, config, opts)
-      const report = (await targetSchemaDoctor(target, ast, { schema: pgSchema })) as DoctorReport
+      const report = (await targetSchemaDoctor(target, ast, {
+        schema: pgSchema,
+        rebaseline: opts.rebaseline === true,
+      })) as DoctorReport
 
       printHooks(hooksReport(cwd, hooksPathFromProject(config, cwd), ast))
       printServiceRoleGrants(checkServiceRoleRoutes(config, cwd), serviceRoleRoutes(config))

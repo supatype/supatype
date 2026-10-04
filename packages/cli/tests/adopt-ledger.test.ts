@@ -70,3 +70,12 @@ describe("endpointToArgs() for /adopt", () => {
     expect(endpointToArgs("/adopt", { ...body, yes: true }, "req.json")).not.toContain("--release")
   })
 })
+
+describe("endpointToArgs() for /doctor", () => {
+  const body = { ast: {}, database_url: "postgres://x", schema: "public" }
+
+  it("passes --rebaseline only when asked", () => {
+    expect(endpointToArgs("/doctor", body, "req.json")).not.toContain("--rebaseline")
+    expect(endpointToArgs("/doctor", { ...body, rebaseline: true }, "req.json")).toContain("--rebaseline")
+  })
+})

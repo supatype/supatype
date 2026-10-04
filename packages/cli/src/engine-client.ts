@@ -354,7 +354,8 @@ export function endpointToArgs(
 
     case "/doctor": {
       const strict = body["strict"] ? ["--strict"] : []
-      return ["doctor", "--input", reqFile, "--database-url", dbUrl, "--schema", schema, ...strict]
+      const rebaseline = body["rebaseline"] ? ["--rebaseline"] : []
+      return ["doctor", "--input", reqFile, "--database-url", dbUrl, "--schema", schema, ...strict, ...rebaseline]
     }
 
     case "/adopt": {
