@@ -207,7 +207,6 @@ export async function engineHealth(): Promise<boolean> {
  *   /generate    → engine generate
  *   /migrations  → engine migrations
  *   /introspect  → engine introspect
- *   /validate    → engine validate
  *   /admin       → engine admin (admin-config JSON on stdout)
  *   /seed        → engine seed (result document JSON on stdout)
  */
@@ -397,9 +396,6 @@ export function endpointToArgs(
       const objects = [...repeated(body["release"], "--release"), ...repeated(body["reclaim"], "--reclaim")]
       return ["adopt", "--input", reqFile, "--database-url", dbUrl, "--schema", schema, ...yes, ...objects]
     }
-
-    case "/validate":
-      return ["validate", "--input", reqFile]
 
     case "/admin":
       return ["admin", "--input", reqFile]
