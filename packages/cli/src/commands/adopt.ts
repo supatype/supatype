@@ -16,18 +16,20 @@ interface AdoptOptions {
   yes?: boolean
   cache?: boolean
   release?: string[]
+  reclaim?: string[]
 }
 
-/** What a preview says adopt will do, one line per object: handed over, then taken back. */
+/** What a preview says adopt will do, one line per object: handed over, taken back, handed back. */
 export function previewLines(outcome: AdoptOutcome): string[] {
-  return [...adoptionLines(outcome), ...(outcome.release ?? []).map((item) => item.message)]
+  const named = [...(outcome.release ?? []), ...(outcome.reclaim ?? [])]
+  return [...adoptionLines(outcome), ...named.map((item) => item.message)]
 }
 
 export function registerAdopt(program: Command): void {
   const command = program
     .command("adopt")
     .description(
-      "Hand Supatype the objects a push refuses because their names are taken, or take objects back with --release",
+      "Hand Supatype the objects a push refuses because their names are taken; take objects back with --release, and hand them back with --reclaim",
     )
     .option("--connection <url>", "Database connection URL (overrides config)")
     .option("--env <name>", "Target environment when linked")
@@ -35,6 +37,10 @@ export function registerAdopt(program: Command): void {
     .option(
       "--release <object...>",
       "Leave an object alone on every push, named as doctor names it: kind:table.name, or kind:name for a table",
+    )
+    .option(
+      "--reclaim <object...>",
+      "Hand a released object back to Supatype, named the same way: the next push makes it match the schema",
     )
     .option("--yes", "Adopt without asking")
   addRetiredNoCacheOption(command).action(adopt)
@@ -53,6 +59,7 @@ async function adopt(opts: AdoptOptions): Promise<void> {
       schema: pgSchema(config),
       yes,
       ...(opts.release !== undefined && { release: opts.release }),
+      ...(opts.reclaim !== undefined && { reclaim: opts.reclaim }),
     })
   // `--yes` already agreed, so one engine call does it and its outcome says what it took.
   if (opts.yes) {
@@ -81,5 +88,8 @@ function show(lines: readonly string[]): boolean {
 }
 
 function report(outcome: AdoptOutcome): void {
-  info(`Adopted ${adoptedCount(outcome)} object(s), released ${outcome.release?.length ?? 0}.`)
+  info(
+    `Adopted ${adoptedCount(outcome)} object(s), released ${outcome.release?.length ?? 0}, ` +
+      `reclaimed ${outcome.reclaim?.length ?? 0}.`,
+  )
 }

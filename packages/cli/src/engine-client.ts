@@ -77,13 +77,15 @@ export interface DoctorItem {
 
 /**
  * What the engine's `adopt` reports, previewing or applying. Since the ledger it lists the objects
- * it hands over (`adopt`) and takes back (`release`) and writes ledger rows; an engine from before
+ * it hands over (`adopt`), takes back (`release`) and hands back again (`reclaim`), and writes
+ * ledger rows; an engine from before
  * listed the comment stamps it would write (`stampStatements`) and counted them (`stamped`).
  */
 export interface AdoptOutcome {
   status?: string
   adopt?: DoctorItem[]
   release?: DoctorItem[]
+  reclaim?: DoctorItem[]
   stampStatements?: string[]
   stamped?: number
 }
@@ -300,6 +302,12 @@ export async function engineRequest<T = unknown>(
 // Endpoint → CLI args mapping
 // ---------------------------------------------------------------------------
 
+/** `flag` once per string in `values`, which a request body carries as a list (or not at all). */
+function repeated(values: unknown, flag: string): string[] {
+  if (!Array.isArray(values)) return []
+  return values.filter((v): v is string => typeof v === "string").flatMap((v) => [flag, v])
+}
+
 /** The engine binary's arguments for an endpoint and its request body. Exported for its tests. */
 export function endpointToArgs(
   endpoint: string,
@@ -386,10 +394,8 @@ export function endpointToArgs(
 
     case "/adopt": {
       const yes = body["yes"] ? ["--yes"] : []
-      const release = Array.isArray(body["release"])
-        ? body["release"].filter((r): r is string => typeof r === "string").flatMap((r) => ["--release", r])
-        : []
-      return ["adopt", "--input", reqFile, "--database-url", dbUrl, "--schema", schema, ...yes, ...release]
+      const objects = [...repeated(body["release"], "--release"), ...repeated(body["reclaim"], "--reclaim")]
+      return ["adopt", "--input", reqFile, "--database-url", dbUrl, "--schema", schema, ...yes, ...objects]
     }
 
     case "/validate":

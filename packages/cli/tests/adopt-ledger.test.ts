@@ -80,3 +80,15 @@ describe("endpointToArgs() for /doctor", () => {
     expect(endpointToArgs("/doctor", { ...body, rebaseline: true }, "req.json")).toContain("--rebaseline")
   })
 })
+
+describe("--reclaim", () => {
+  it("lists what is handed back after what is taken back", () => {
+    const back = item("table", "widget", "Table widget will be Supatype's again")
+    expect(previewLines({ ...LEDGER, reclaim: [back] }).at(-1)).toBe(back.message)
+  })
+
+  it("passes each object to reclaim as its own --reclaim", () => {
+    const body = { ast: {}, database_url: "postgres://x", schema: "public", reclaim: ["table:widget"] }
+    expect(endpointToArgs("/adopt", body, "req.json").slice(-2)).toEqual(["--reclaim", "table:widget"])
+  })
+})

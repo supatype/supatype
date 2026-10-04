@@ -464,19 +464,21 @@ export async function targetSchemaIntrospect(
 }
 
 /**
- * `adopt` on a target: hand the objects a push refuses to Supatype, and take back the ones named in
- * `release` (`kind:table.name`, as doctor names them). A preview unless `yes`.
+ * `adopt` on a target: hand the objects a push refuses to Supatype, take back the ones named in
+ * `release`, and hand back the released ones named in `reclaim` (`kind:table.name`, as doctor names
+ * them). A preview unless `yes`.
  */
 export async function targetSchemaAdopt(
   target: DeployTarget,
   ast: unknown,
-  opts?: { release?: string[]; schema?: string; yes?: boolean },
+  opts?: { release?: string[]; reclaim?: string[]; schema?: string; yes?: boolean },
 ): Promise<AdoptOutcome> {
   const body = {
     ast,
     schema: opts?.schema ?? "public",
     yes: opts?.yes ?? false,
     ...(opts?.release !== undefined && opts.release.length > 0 && { release: opts.release }),
+    ...(opts?.reclaim !== undefined && opts.reclaim.length > 0 && { reclaim: opts.reclaim }),
   }
   if (target.mode === "direct" || (target.mode === "local" && !target.token)) {
     await ensureEngine()
