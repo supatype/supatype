@@ -23,12 +23,15 @@ MAX_WAIT=180
 EMAIL="e2e@example.com"
 PASSWORD="e2e-password-12345"
 
+COMPOSE_PROJECT="supatype-validation"
+source "$SCRIPT_DIR/lib/compose-reset.sh"
+
 failures=0
 
+# Volumes too, not only the containers: the assertions insert fixed rows with unique slugs, so a
+# database that outlived the last run answers them with 409 and the run fails for no reason.
 cleanup() {
-  if [[ -d "$EXAMPLE_DIR/.supatype/self-host" ]]; then
-    (cd "$EXAMPLE_DIR" && node "$CLI_BIN" self-host compose down) >/dev/null 2>&1 || true
-  fi
+  remove_compose_project "$COMPOSE_PROJECT"
 }
 trap cleanup EXIT INT TERM
 
@@ -44,6 +47,9 @@ cd "$EXAMPLE_DIR"
 # not AUTHENTICATOR_PASSWORD, and compose refuses to interpolate a variable it cannot resolve.
 node "$SCRIPT_DIR/ensure-compose-env.mjs" "$EXAMPLE_DIR"
 
+echo "==> Removing anything a previous run left in $COMPOSE_PROJECT"
+remove_compose_project "$COMPOSE_PROJECT"
+
 echo "==> Bringing the stack up"
 node "$CLI_BIN" self-host compose up -d
 node "$CLI_BIN" push --yes
@@ -56,7 +62,7 @@ for i in $(seq 1 "$MAX_WAIT"); do
   fi
   if [[ "$i" -eq "$MAX_WAIT" ]]; then
     echo "    ERROR: stack did not become ready within ${MAX_WAIT}s"
-    docker compose -p supatype-validation ps || true
+    docker compose -p "$COMPOSE_PROJECT" ps || true
     exit 1
   fi
   sleep 1
