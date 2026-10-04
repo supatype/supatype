@@ -81,7 +81,13 @@ import type { ExtractedSchemaAstV2 } from "./schema-ast-v2.js"
 import { ensureFirstAdminUserForProject } from "./commands/admin.js"
 import { publishDevReady } from "./dev-ready-panel.js"
 import { exitInitialPushFailed, pushInitialSchema, type InitialPushSteps } from "./dev-initial-push.js"
-import { offerAdoption, unmanagedTables, type AdoptionSteps } from "./adopt-walkthrough.js"
+import {
+  offerAdoption,
+  targetAdoptionSteps,
+  unmanagedTables,
+  type AdoptionSteps,
+  type AdoptOutcome,
+} from "./adopt-walkthrough.js"
 import { resetDevDatabase } from "./dev-db-reset.js"
 import { hostComposeDbUrl, resolveHostDatabaseUrl } from "./host-database.js"
 
@@ -927,8 +933,8 @@ export interface EngineRun {
  * whole, and with stderr joined on (a compose warning about an unset variable, an engine log line)
  * it did not parse at all, so a preview that worked was reported as a failed adopt.
  */
-export function adoptResultFrom(run: EngineRun): AdoptResult | null {
-  return run.status === 0 ? parseEngineJsonOutput<AdoptResult>(run.stdout) : null
+export function adoptResultFrom(run: EngineRun): AdoptOutcome | null {
+  return run.status === 0 ? parseEngineJsonOutput<AdoptOutcome>(run.stdout) : null
 }
 
 async function runComposeEngineCommand(
@@ -988,21 +994,11 @@ async function runComposeEngineDiff(
 
 /** Adoption against a docker project's own database, for the push walkthrough. */
 export function dockerAdoptionSteps(cwd: string, config: SupatypeProjectConfig): AdoptionSteps {
-  return {
-    preview: async () => (await adoptSchemaDocker(cwd, config, false)).stampStatements ?? [],
-    apply: async () => (await adoptSchemaDocker(cwd, config, true)).stamped ?? 0,
-  }
-}
-
-/** What `adopt` reports, previewing or applying. */
-export interface AdoptResult {
-  status?: string
-  stampStatements?: string[]
-  stamped?: number
+  return targetAdoptionSteps((yes) => adoptSchemaDocker(cwd, config, yes))
 }
 
 /**
- * Adopt on a docker project's own database: the stamp preview, or with `yes`, the stamps applied.
+ * Adopt on a docker project's own database: the preview, or with `yes`, the ledger rows written.
  *
  * Through the compose schema-engine, or the local engine binary when `overrides.engine` is set,
  * the same way `diffSchemaDocker` reaches the database. The stack's database must be running,
@@ -1012,12 +1008,12 @@ export async function adoptSchemaDocker(
   cwd: string,
   config: SupatypeProjectConfig,
   yes: boolean,
-): Promise<AdoptResult> {
+): Promise<AdoptOutcome> {
   const project = composeProjectName(config.project.name)
   if (hasEngineOverride(config)) {
     await ensureDockerDbPublishedForHostEngine(cwd, config, { intro: "Adopt" })
     await ensureEngine()
-    return engineRequest<AdoptResult>("/adopt", {
+    return engineRequest<AdoptOutcome>("/adopt", {
       ast: withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config),
       database_url: projectDatabaseUrl(cwd, config),
       schema: config.schema?.pg_schema ?? "public",

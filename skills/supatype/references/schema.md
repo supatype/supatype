@@ -262,20 +262,25 @@ After `push`, import updated types in app code. Never edit the generated output 
 
 ## Adopting an existing database
 
-For databases created before Supatype managed-object stamping:
+Supatype records every object it creates in its own ledger (`_supatype.managed_objects`, out of the API's reach). Comments stay yours. For a database Supatype did not create:
 
 1. **Scaffold** (optional): `supatype introspect` or `supatype pull --dry-run` to draft `schema/index.ts`
 2. **Align**: edit models until `supatype diff` shows only expected changes
-3. **Adopt**: `supatype adopt` stamps `supatype:managed` comments on matching constraints/indexes (no DDL)
-4. **Push**: `supatype push` can then create/drop stamped objects safely
+3. **Adopt**: `supatype adopt` hands Supatype the objects a push refuses because the schema needs their names (writes ledger records only, no DDL)
+4. **Push**: `supatype push` then brings adopted objects to the schema's definition and manages them from then on
 
-### Managed object tiers
+An object that already matches what the schema would create is taken over without asking. An undeclared object is never taken.
 
-| Tier | Meaning | Push behavior |
+### What doctor and push see
+
+| State | Meaning | Push behavior |
 |------|---------|---------------|
-| **Expected** | Declared in `schema/index.ts` | Create or drop (with validation) |
-| **Managed-stale** | Stamped, not in AST | Drop only after doctor review |
-| **Unmanaged** | In DB, no stamp, not in AST | Never auto-dropped |
+| **Missing** | Declared, or Supatype's and dropped by hand | Creates it |
+| **Drifted** | Supatype's, changed outside Supatype | Puts it back; asks first for access rules (policies, grants, labels, RLS), and refuses without a terminal unless `--overwrite-drift` |
+| **Stale** | Supatype's, no longer declared | Drops it (tables and columns need `--force`) |
+| **Conflicting** | Declared name held by an object Supatype did not create | Refuses until `supatype adopt`, or a rename |
+| **Unmanaged** | Not Supatype's (including columns you add to a model table) | Never touched |
+| **Released** | Taken back with `supatype adopt --release` | Never touched, whatever the schema says |
 | **Out of scope** | `auth.*`, `_supatype.*`, extension tables | Ignored |
 
 ### Commands
@@ -283,15 +288,16 @@ For databases created before Supatype managed-object stamping:
 ```bash
 supatype introspect          # JSON or table summary from live DB
 supatype pull --dry-run      # draft Model<> scaffold (stdout)
-supatype doctor              # missing / stale / unmanaged drift report
-supatype doctor --strict     # CI: fail on missing or stale managed
-supatype adopt               # preview stamps; adopt --yes to apply
+supatype doctor              # what a push would find, by state
+supatype doctor --strict     # CI: fail when a push would change or refuse something
+supatype adopt               # preview; adopt --yes to take them
+supatype adopt --release index:posts.posts_title_idx   # keep a hand-edited object as it is
 supatype diff                # preview operations
 supatype push                # apply migration
 ```
 
 `supatype pull` produces a **starting point**: types still flow from schema → `supatype generate`, not from the DB directly.
 
-Removing a column `Unique<>` emits `DropUniqueConstraint` only when the constraint has a `supatype:managed` comment (or was created by Supatype). Pre-existing constraints without stamps are reported by `supatype doctor` as unmanaged drift.
+Removing `Unique<>` from a field drops its constraint only when Supatype created or adopted it. A unique constraint you added yourself stays, and `supatype doctor` lists it as unmanaged.
 
-For greenfield tables, define models first then push; all created constraints and indexes are stamped automatically.
+For greenfield tables, define models first then push; everything a push creates is recorded as Supatype's automatically.

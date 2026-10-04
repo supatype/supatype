@@ -359,7 +359,10 @@ export function endpointToArgs(
 
     case "/adopt": {
       const yes = body["yes"] ? ["--yes"] : []
-      return ["adopt", "--input", reqFile, "--database-url", dbUrl, "--schema", schema, ...yes]
+      const release = Array.isArray(body["release"])
+        ? body["release"].filter((r): r is string => typeof r === "string").flatMap((r) => ["--release", r])
+        : []
+      return ["adopt", "--input", reqFile, "--database-url", dbUrl, "--schema", schema, ...yes, ...release]
     }
 
     case "/validate":

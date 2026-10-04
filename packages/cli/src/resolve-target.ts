@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { loadConfig } from "./config.js"
+import type { AdoptOutcome } from "./adopt-walkthrough.js"
 import type { DiffResult } from "./engine-client.js"
 import { ensureEngine, engineRequest } from "./engine-client.js"
 import type { SchemaSourcesPayload } from "./schema-sources.js"
@@ -441,32 +442,31 @@ export async function targetSchemaIntrospect(
   )
 }
 
+/**
+ * `adopt` on a target: hand the objects a push refuses to Supatype, and take back the ones named in
+ * `release` (`kind:table.name`, as doctor names them). A preview unless `yes`.
+ */
 export async function targetSchemaAdopt(
   target: DeployTarget,
   ast: unknown,
-  opts?: { names?: string[]; schema?: string; yes?: boolean },
-): Promise<unknown> {
+  opts?: { release?: string[]; schema?: string; yes?: boolean },
+): Promise<AdoptOutcome> {
+  const body = {
+    ast,
+    schema: opts?.schema ?? "public",
+    yes: opts?.yes ?? false,
+    ...(opts?.release !== undefined && opts.release.length > 0 && { release: opts.release }),
+  }
   if (target.mode === "direct" || (target.mode === "local" && !target.token)) {
     await ensureEngine()
-    return engineRequest("/adopt", {
-      ast,
-      database_url: target.databaseUrl!,
-      schema: opts?.schema ?? "public",
-      names: opts?.names,
-      yes: opts?.yes ?? false,
-    })
+    return engineRequest<AdoptOutcome>("/adopt", { ...body, database_url: target.databaseUrl! })
   }
 
-  return targetFetch(
+  return (await targetFetch(
     target.apiBaseUrl,
     target.apiPrefix,
-    apiFetchOpts(target, "POST", projectPath(target, "/schema/adopt"), {
-      ast,
-      schema: opts?.schema ?? "public",
-      yes: opts?.yes ?? false,
-      ...(opts?.names !== undefined ? { names: opts.names } : {}),
-    }),
-  )
+    apiFetchOpts(target, "POST", projectPath(target, "/schema/adopt"), body),
+  )) as AdoptOutcome
 }
 
 export async function targetStatus(target: DeployTarget): Promise<unknown> {

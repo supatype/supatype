@@ -1,14 +1,14 @@
 /**
  * What a push does when the engine refuses tables Supatype does not manage.
  *
- * Those tables exist without Supatype's ownership marker: made by hand, restored from a dump, or
- * created by a Supatype too old to stamp them. Push refuses them because their declared access
+ * Those tables exist and Supatype did not create them: made by hand, restored from a dump, or
+ * created by a Supatype too old to record them. Push refuses them because their declared access
  * rules are not in force, and `adopt` is the remedy. It used to end there, with a message naming a
  * command, and the command it named could not reach a docker database (supatype#85) and found
- * nothing to stamp when it did (supatype#86).
+ * nothing to adopt when it did (supatype#86).
  *
- * So in a terminal the push offers to adopt them there and then: it says which tables, shows the
- * SQL adoption would run, and asks twice before running it. Anywhere else it never adopts, because
+ * So in a terminal the push offers to adopt them there and then: it says which tables, shows what
+ * adoption would take, and asks twice before taking it. Anywhere else it never adopts, because
  * agreeing to a push is not agreeing to take ownership of tables, and it prints the command instead.
  */
 import { EngineError } from "./engine-client.js"
@@ -51,11 +51,42 @@ export function engineOutputOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
+/** One object `adopt` hands over or takes back, as the engine names it. */
+export interface AdoptionItem {
+  kind: string
+  table: string
+  name: string
+  message: string
+}
+
+/**
+ * What the engine's `adopt` reports, previewing or applying. Since the ledger it lists the objects
+ * it hands over (`adopt`) and takes back (`release`) and writes ledger rows; an engine from before
+ * listed the comment stamps it would write (`stampStatements`) and counted them (`stamped`).
+ */
+export interface AdoptOutcome {
+  status?: string
+  adopt?: AdoptionItem[]
+  release?: AdoptionItem[]
+  stampStatements?: string[]
+  stamped?: number
+}
+
+/** What adopting would take, one line per object, whichever engine answered. */
+export function adoptionLines(outcome: AdoptOutcome): string[] {
+  return outcome.adopt?.map((item) => item.message) ?? outcome.stampStatements ?? []
+}
+
+/** How many objects an applied adopt took, whichever engine answered. */
+export function adoptedCount(outcome: AdoptOutcome): number {
+  return outcome.adopt?.length ?? outcome.stamped ?? 0
+}
+
 /** How to adopt, wherever the database is. */
 export interface AdoptionSteps {
-  /** The stamp statements adoption would run, without running them. */
+  /** What adoption would take, one line per object, without taking it. */
   preview: () => Promise<string[]>
-  /** Run them, returning how many objects were stamped. */
+  /** Take it, returning how many objects were adopted. */
   apply: () => Promise<number>
 }
 
@@ -75,12 +106,12 @@ export async function offerAdoption(
   policy: AdoptionPolicy,
 ): Promise<AdoptionOutcome> {
   warn(
-    `${tables.length === 1 ? "This table exists" : "These tables exist"} without Supatype's ownership ` +
-      `marker, so the access rules your schema declares for ${tables.length === 1 ? "it are" : "them are"} ` +
-      `not in force: ${tables.join(", ")}.`,
+    `${tables.length === 1 ? "This table exists" : "These tables exist"} and Supatype did not create ` +
+      `${tables.length === 1 ? "it" : "them"}, so the access rules your schema declares for ` +
+      `${tables.length === 1 ? "it are" : "them are"} not in force: ${tables.join(", ")}.`,
   )
   const manual = `Run \`supatype adopt\` to bring ${tables.length === 1 ? "it" : "them"} under management ` +
-    `(it shows the SQL first), then \`${policy.retry}\` again.`
+    `(it shows what it takes first), then \`${policy.retry}\` again.`
   if (policy.yes || !isInteractive()) {
     plain(manual)
     return "declined"
@@ -93,20 +124,20 @@ export async function offerAdoption(
 }
 
 async function adoptAfterPreview(steps: AdoptionSteps, manual: string): Promise<AdoptionOutcome> {
-  const statements = await steps.preview()
-  if (statements.length === 0) {
-    warn("Adoption found nothing to stamp, so nothing was changed.")
+  const lines = await steps.preview()
+  if (lines.length === 0) {
+    warn("Adoption found nothing to adopt, so nothing was changed.")
     plain(manual)
     return "declined"
   }
-  plain(`\nAdoption will run:\n`)
-  for (const sql of statements) plain(`  ${sql}`)
-  if (!(await confirm("Apply these stamps?", { default: false }))) {
+  plain(`\nAdoption will take:\n`)
+  for (const line of lines) plain(`  ${line}`)
+  if (!(await confirm("Adopt these?", { default: false }))) {
     plain(manual)
     return "declined"
   }
-  const stamped = await steps.apply()
-  plain(`Adopted: ${stamped} object(s) stamped.`)
+  const adopted = await steps.apply()
+  plain(`Adopted ${adopted} object(s).`)
   return "adopted"
 }
 
@@ -132,11 +163,9 @@ export async function pushOfferingAdoption<T>(
 }
 
 /** Adoption through a deploy target, for the push walkthrough on a direct or local target. */
-export function targetAdoptionSteps(
-  adopt: (yes: boolean) => Promise<{ stampStatements?: string[]; stamped?: number }>,
-): AdoptionSteps {
+export function targetAdoptionSteps(adopt: (yes: boolean) => Promise<AdoptOutcome>): AdoptionSteps {
   return {
-    preview: async () => (await adopt(false)).stampStatements ?? [],
-    apply: async () => (await adopt(true)).stamped ?? 0,
+    preview: async () => adoptionLines(await adopt(false)),
+    apply: async () => adoptedCount(await adopt(true)),
   }
 }

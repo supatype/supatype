@@ -220,13 +220,7 @@ async function pushViaTarget(
           overwriteDrift,
         }),
       ),
-    targetAdoptionSteps(
-      async (yes) =>
-        (await targetSchemaAdopt(target, ast, { schema: pgSchema, yes })) as {
-          stampStatements?: string[]
-          stamped?: number
-        },
-    ),
+    targetAdoptionSteps((yes) => targetSchemaAdopt(target, ast, { schema: pgSchema, yes })),
     { yes: run.yes, retry: "supatype push" },
   )
 
