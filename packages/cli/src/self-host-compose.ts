@@ -183,9 +183,20 @@ export function publishesDbToHost(config: SupatypeProjectConfig): boolean {
   return !usesExternalDatabase(config)
 }
 
+/**
+ * The engine image a compose push runs. An image named explicitly wins: `SUPATYPE_ENGINE_IMAGE` in
+ * the environment (as CI and a local engine build set it) or in the project's `.env` (the documented
+ * way to run a local build; the CLI writes it there only from a version pin). Otherwise the pinned
+ * version, or the latest published one. This used to set the variable over whatever was named, so
+ * every push ran the latest published engine whatever image a caller asked for.
+ */
 export async function schemaEngineImageForPush(
   config: SupatypeProjectConfig,
+  cwd: string,
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<string | undefined> {
+  const named = env["SUPATYPE_ENGINE_IMAGE"]?.trim() || readEnvFile(cwd)["SUPATYPE_ENGINE_IMAGE"]?.trim()
+  if (named) return named
   const pinned = pinnedVersion("engine", config)
   if (pinned === VERSION_PIN_LOCAL) return undefined
   if (pinned) return dockerImageRef("engine", pinned)

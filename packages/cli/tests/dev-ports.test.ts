@@ -31,7 +31,15 @@ describe("dev-ports", () => {
   it("reads persisted Kong port from .env", () => {
     const dir = mkdtempSync(join(tmpdir(), "supatype-ports-"))
     writeFileSync(join(dir, ".env"), "SUPATYPE_KONG_PORT=18474\n", "utf8")
-    expect(readPersistedKongPort(dir)).toBe(18474)
+    expect(readPersistedKongPort(dir, {})).toBe(18474)
+  })
+
+  // Compose binds the environment's port over `.env`'s, so `dev` must wait on the same one.
+  it("takes the environment's port over .env's, as Docker Compose does", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-ports-"))
+    writeFileSync(join(dir, ".env"), "SUPATYPE_KONG_PORT=18474\n", "utf8")
+    expect(readPersistedKongPort(dir, { SUPATYPE_KONG_PORT: "18490" })).toBe(18490)
+    expect(readPersistedKongPort(dir, { SUPATYPE_KONG_PORT: "not a port" })).toBe(18474)
   })
 
   it("findNextFreePort skips taken ports", async () => {

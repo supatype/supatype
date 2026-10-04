@@ -880,7 +880,7 @@ async function runComposeEnginePush(
     ...process.env,
     COMPOSE_PROGRESS: "quiet",
   }
-  const engineImage = await schemaEngineImageForPush(config)
+  const engineImage = await schemaEngineImageForPush(config, cwd)
   if (engineImage) {
     pushEnv.SUPATYPE_ENGINE_IMAGE = engineImage
   }
@@ -961,7 +961,7 @@ async function runComposeEngineCommand(
     config.schema?.pg_schema ?? "public",
   )
   const env: NodeJS.ProcessEnv = { ...process.env, COMPOSE_PROGRESS: "quiet" }
-  const engineImage = await schemaEngineImageForPush(config)
+  const engineImage = await schemaEngineImageForPush(config, cwd)
   if (engineImage) env.SUPATYPE_ENGINE_IMAGE = engineImage
   const result = spawnSync("docker", composeArgs, {
     cwd,
@@ -1576,7 +1576,7 @@ async function runComposeEngineGenerator(
   )
 
   const env: NodeJS.ProcessEnv = { ...process.env, COMPOSE_PROGRESS: "quiet" }
-  const engineImage = await schemaEngineImageForPush(config)
+  const engineImage = await schemaEngineImageForPush(config, cwd)
   if (engineImage) env.SUPATYPE_ENGINE_IMAGE = engineImage
 
   const result = spawnSync("docker", composeArgs, {
