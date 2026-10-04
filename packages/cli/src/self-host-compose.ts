@@ -6,8 +6,6 @@ import { fatalError } from "./ui/fatal.js"
 import {
   apiSchemaList,
   externalDatabaseUrl,
-  hooksPathFromProject,
-  preferredFunctionsPathFromProject,
   realtimeEnabled,
   serviceRoleRoutes,
   selfHostTlsEnabled,
@@ -994,14 +992,6 @@ function repairComposeFunctionsFlag(manifestPath: string): void {
   writeFileSync(manifestPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8")
 }
 
-function ensureProjectFunctionsDir(cwd: string, config: SupatypeProjectConfig): void {
-  mkdirSync(preferredFunctionsPathFromProject(config, cwd), { recursive: true })
-  // Both roots must exist before compose mounts the project read-only: a missing directory becomes
-  // a bind mount of a file that is not there, and the worker fails to start rather than serving the
-  // half it does have.
-  mkdirSync(hooksPathFromProject(config, cwd), { recursive: true })
-}
-
 /**
  * The config's external URL and `.env`'s `DATABASE_URL` must be the same string.
  *
@@ -1138,7 +1128,9 @@ export function writeSelfHostCompose(
   assertExternalUrlReachableFromContainers(config)
   const paths = selfHostComposePaths(cwd)
   mkdirSync(paths.dir, { recursive: true })
-  ensureProjectFunctionsDir(cwd, config)
+  // No functions/ or hooks/ here: the worker mounts the whole project and treats a missing root as
+  // nothing to serve, while an empty functions/ made `dev` scaffold function types into projects
+  // that have no functions. `functions new` and `init` create it when there is one.
   ensureComposeManifest(cwd, config)
   writeFileSync(paths.composePath, renderSelfHostCompose(config, cwd, resolved), "utf8")
   writeFileSync(paths.s3ConfigPath, renderSeaweedIdentities(), "utf8")

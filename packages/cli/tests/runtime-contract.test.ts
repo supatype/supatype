@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { runtimeRouteSpec } from "../src/runtime-routes.js"
@@ -411,6 +411,21 @@ describe("runtime contract", () => {
       // Values `push` put there survive: the schema is not "public" and must stay as found.
       expect(manifest["schema"]).toBe("tenant_7")
       expect(manifest["postgrest_url"]).toBe("http://pg:3000")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("leaves a project with no functions or hooks without those directories", () => {
+    // Creating them on every `dev` made the context refresh, which runs when `functions/` exists,
+    // scaffold `_shared/`, Deno types and a root tsconfig exclude into projects that have no
+    // functions. The worker needs neither: it mounts the whole project and treats a missing root
+    // as nothing to serve. `functions new` and `init` create the directory when there is a function.
+    const dir = mkdtempSync(join(tmpdir(), "supatype-no-fn-"))
+    try {
+      writeSelfHostCompose(dir, baseConfig)
+      expect(existsSync(join(dir, "functions"))).toBe(false)
+      expect(existsSync(join(dir, "hooks"))).toBe(false)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
