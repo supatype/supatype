@@ -53,7 +53,7 @@ export interface ReconcileAction {
   key: { kind: string; schema: string; parent: string; name: string }
   /** A `create` the parent statement already makes (a constraint inline in `CREATE TABLE`). */
   inline?: boolean
-  reason?: "stamped" | "structure_matches" | "deparses_equal"
+  reason?: "stamped" | "structure_matches" | "deparses_equal" | "owned_schema"
   /** A `drift` on a policy, grant, label or RLS attribute: putting it back changes who sees what. */
   security_relevant?: boolean
   recorded_def?: string
