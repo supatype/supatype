@@ -263,6 +263,34 @@ jobs:
       - name: Drive packages/storage against SeaweedFS
         run: bash tests/integration/scripts/storage-backend-e2e.sh
 
+  ownership-e2e:
+    name: ownership commands (adopt, release, reclaim, rebaseline, rollback)
+    # One Postgres container and the CLI driving the engine directly, so it runs on pull requests
+    # like storage-backend. It uses the engine the CLI resolves, and skips with a message while
+    # that engine predates the ledger commands.
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript packages
+        run: pnpm build
+
+      - name: Drive the ownership commands against a real database
+        run: bash tests/integration/scripts/ownership-e2e.sh
+
   realtime-e2e:
     name: realtime (live stack)
     runs-on: ubuntu-22.04
