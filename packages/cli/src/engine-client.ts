@@ -15,6 +15,7 @@ import { join } from "node:path"
 import { loadConfig } from "./config.js"
 import { currentPlatform, cachePath } from "./binary-cache.js"
 import { ensureBinary } from "./ensure-binary.js"
+import { uniqueFileToken } from "./unique-file-token.js"
 
 // ---------------------------------------------------------------------------
 // Types (kept for backward compatibility with existing callers)
@@ -219,7 +220,10 @@ export async function engineRequest<T = unknown>(
   const tmpDir = join(tmpdir(), "supatype-engine")
   mkdirSync(tmpDir, { recursive: true })
   const cleanup: string[] = []
-  const reqFile = join(tmpDir, `req-${Date.now()}.json`)
+  // One token for this request's files. The directory is shared by every CLI process, and named
+  // by the millisecond alone, two requests at once wrote one file and each engine read the other's.
+  const token = uniqueFileToken()
+  const reqFile = join(tmpDir, `req-${token}.json`)
   const inputPayload = body["ast"] !== undefined ? body["ast"] : body
   writeFileSync(reqFile, JSON.stringify(inputPayload))
   cleanup.push(reqFile)
@@ -227,7 +231,7 @@ export async function engineRequest<T = unknown>(
   let gzPath: string | undefined
   let manifestPath: string | undefined
   if (typeof body["schema_sources_gz_base64"] === "string") {
-    gzPath = join(tmpDir, `sources-${Date.now()}.gz`)
+    gzPath = join(tmpDir, `sources-${token}.gz`)
     writeFileSync(gzPath, Buffer.from(body["schema_sources_gz_base64"], "base64"))
     cleanup.push(gzPath)
   }
@@ -237,7 +241,7 @@ export async function engineRequest<T = unknown>(
   const documents = body["ir_documents"]
   if (Array.isArray(documents)) {
     documents.forEach((document, index) => {
-      const irPath = join(tmpDir, `ir-${Date.now()}-${index}.json`)
+      const irPath = join(tmpDir, `ir-${token}-${index}.json`)
       writeFileSync(irPath, typeof document === "string" ? document : JSON.stringify(document))
       cleanup.push(irPath)
       irPaths.push(irPath)
@@ -245,7 +249,7 @@ export async function engineRequest<T = unknown>(
   }
 
   if (body["schema_sources_manifest"] !== undefined) {
-    manifestPath = join(tmpDir, `manifest-${Date.now()}.json`)
+    manifestPath = join(tmpDir, `manifest-${token}.json`)
     writeFileSync(manifestPath, JSON.stringify(body["schema_sources_manifest"]))
     cleanup.push(manifestPath)
   }

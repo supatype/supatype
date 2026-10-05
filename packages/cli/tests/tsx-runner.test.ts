@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest"
 import { existsSync } from "node:fs"
 import { evalTempFileName, evalTsSnippet, runTsFile } from "../src/tsx-runner.js"
+import { uniqueFileToken } from "../src/unique-file-token.js"
 import { writeFileSync, unlinkSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
@@ -74,6 +75,18 @@ describe("evalTempFileName()", () => {
     const now = vi.spyOn(Date, "now").mockReturnValue(1_791_183_700_152)
     try {
       expect(evalTempFileName()).not.toBe(evalTempFileName())
+    } finally {
+      now.mockRestore()
+    }
+  })
+})
+
+describe("uniqueFileToken()", () => {
+  // The engine's request files and the config fallback share this helper, and the temp directory.
+  it("never repeats, even within one millisecond", () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_791_183_700_152)
+    try {
+      expect(uniqueFileToken()).not.toBe(uniqueFileToken())
     } finally {
       now.mockRestore()
     }
