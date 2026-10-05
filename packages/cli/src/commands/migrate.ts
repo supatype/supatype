@@ -23,6 +23,18 @@ import {
 import { confirm } from "../ui/confirm.js"
 import { info, plain, warn } from "../ui/messages.js"
 
+/**
+ * What `rollback` does with the schema files, from its `--sync-schema` / `--no-sync-schema` pair.
+ *
+ * Commander reports the pair as one `syncSchema` value: true, false, or unset. The action used to
+ * read a `noSyncSchema` key Commander never sets, so `--no-sync-schema` fell through to the restore
+ * offer, which a non-interactive run accepts, and rewrote the files it was asked to keep.
+ */
+export function schemaRestoreMode(opts: { syncSchema?: boolean }): "skip" | "auto" | "ask" {
+  if (opts.syncSchema === false) return "skip"
+  return opts.syncSchema === true ? "auto" : "ask"
+}
+
 export function registerMigrate(program: Command): void {
   const migrations = program
     .command("migrations")
@@ -101,7 +113,6 @@ export function registerMigrate(program: Command): void {
       env?: string
       direct?: boolean
       syncSchema?: boolean
-      noSyncSchema?: boolean
     }) => {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
@@ -123,8 +134,9 @@ export function registerMigrate(program: Command): void {
       const result = await targetSchemaRollback(target, { schema: pgSchema })
       info(result.message ?? "Rolled back.")
 
-      if (!opts.noSyncSchema) {
-        await offerSchemaRestore(cwd, config, target, result, pgSchema, opts.syncSchema ?? false)
+      const restore = schemaRestoreMode(opts)
+      if (restore !== "skip") {
+        await offerSchemaRestore(cwd, config, target, result, pgSchema, restore === "auto")
       }
     })
 
