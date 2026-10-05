@@ -52,6 +52,33 @@ type QueryFn = <T extends pg.QueryResultRow = pg.QueryResultRow>(
 ) => Promise<T[]>
 
 /**
+ * Tables in `schema` Supatype did not create: not in its ledger (`_supatype.managed_objects`), and
+ * not stamped `supatype:managed` by an engine from before the ledger. Since the engine stopped
+ * stamping (managed-object ownership Phase 6) the ledger is what says a table is Supatype's; the
+ * ledger is only read where it exists, since SQL cannot name a table that is not there.
+ */
+export async function foreignTables(q: QueryFn, schema: string): Promise<string[]> {
+  const [ledger] = await q<{ present: boolean }>(
+    "SELECT to_regclass('_supatype.managed_objects') IS NOT NULL AS present",
+  )
+  const recorded = ledger?.present
+    ? `AND NOT EXISTS (SELECT 1 FROM _supatype.managed_objects m
+                          WHERE m.kind = 'table' AND m.schema_name = n.nspname
+                            AND m.name = c.relname AND m.status <> 'released')`
+    : ""
+  const rows = await q<{ relname: string }>(
+    `SELECT c.relname FROM pg_class c
+       JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = $1 AND c.relkind = 'r'
+        AND coalesce(obj_description(c.oid, 'pg_class'), '') NOT LIKE 'supatype:managed%'
+        ${recorded}
+      ORDER BY c.relname`,
+    [schema],
+  )
+  return rows.map((t) => t.relname)
+}
+
+/**
  * Ask the database to do the one thing realtime needs, then undo it.
  *
  * SQLSTATEs measured against `supatype/postgres` rather than recalled:
@@ -448,19 +475,8 @@ export async function runPreflight(
 
   // ── Existing tables in the target schema ───────────────────────────────────
   if (schemaExists) {
-    const tables = await q<{ relname: string }>(
-      // Anything not carrying Supatype's ownership marker. Today that is every table, since
-      // tables are not stamped yet (E4); once they are, this narrows to genuinely foreign ones
-      // without needing to change.
-      `SELECT c.relname FROM pg_class c
-         JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = $1 AND c.relkind = 'r'
-          AND coalesce(obj_description(c.oid, 'pg_class'), '') NOT LIKE 'supatype:managed%'
-        ORDER BY c.relname`,
-      [opts.schema],
-    )
-    if (tables.length > 0) {
-      const names = tables.map((t) => t.relname)
+    const names = await foreignTables(q, opts.schema)
+    if (names.length > 0) {
       results.push({
         id: "existing-tables",
         title: `Existing tables in "${opts.schema}"`,

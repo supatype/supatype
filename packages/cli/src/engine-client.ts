@@ -34,8 +34,66 @@ export interface Operation {
   index?: { fields?: string[]; name?: string; unique?: boolean }
 }
 
+/**
+ * What the engine's reconcile decided about one object it owns (schema-engine `ledger::reconcile`).
+ * A kind that has moved onto the ledger is planned here rather than as an operation.
+ */
+export interface ReconcileAction {
+  action:
+    | "create"
+    | "adopt"
+    | "conflict"
+    | "recreate"
+    | "replace"
+    | "drift"
+    | "keep"
+    | "drop"
+    | "forget"
+    | "released"
+  key: { kind: string; schema: string; parent: string; name: string }
+  /** A `create` the parent statement already makes (a constraint inline in `CREATE TABLE`). */
+  inline?: boolean
+  reason?: "stamped" | "structure_matches" | "deparses_equal" | "owned_schema" | "declared"
+  /** A `drift` on a policy, grant, label or RLS attribute: putting it back changes who sees what. */
+  security_relevant?: boolean
+  recorded_def?: string
+  live_def?: string
+  /** The statement a `create`, `recreate` or `replace` runs. */
+  create_sql?: string
+}
+
+/** One object in a doctor or adopt report, as the engine names it. */
+export interface DoctorItem {
+  kind: string
+  table: string
+  name: string
+  fields: string[]
+  message: string
+  /** What Supatype recorded, for a drifted object. */
+  recorded?: string
+  /** What the database holds now, for a drifted or conflicting object. */
+  live?: string
+}
+
+/**
+ * What the engine's `adopt` reports, previewing or applying. Since the ledger it lists the objects
+ * it hands over (`adopt`), takes back (`release`) and hands back again (`reclaim`), and writes
+ * ledger rows; an engine from before
+ * listed the comment stamps it would write (`stampStatements`) and counted them (`stamped`).
+ */
+export interface AdoptOutcome {
+  status?: string
+  adopt?: DoctorItem[]
+  release?: DoctorItem[]
+  reclaim?: DoctorItem[]
+  stampStatements?: string[]
+  stamped?: number
+}
+
 export interface DiffResult {
   operations: Operation[]
+  /** Absent from engines older than the ledger. */
+  reconcile?: ReconcileAction[]
   warnings?: string[]
   summary?: string
 }
@@ -149,7 +207,6 @@ export async function engineHealth(): Promise<boolean> {
  *   /generate    → engine generate
  *   /migrations  → engine migrations
  *   /introspect  → engine introspect
- *   /validate    → engine validate
  *   /admin       → engine admin (admin-config JSON on stdout)
  *   /seed        → engine seed (result document JSON on stdout)
  */
@@ -244,7 +301,14 @@ export async function engineRequest<T = unknown>(
 // Endpoint → CLI args mapping
 // ---------------------------------------------------------------------------
 
-function endpointToArgs(
+/** `flag` once per string in `values`, which a request body carries as a list (or not at all). */
+function repeated(values: unknown, flag: string): string[] {
+  if (!Array.isArray(values)) return []
+  return values.filter((v): v is string => typeof v === "string").flatMap((v) => [flag, v])
+}
+
+/** The engine binary's arguments for an endpoint and its request body. Exported for its tests. */
+export function endpointToArgs(
   endpoint: string,
   body: Record<string, unknown>,
   reqFile: string,
@@ -255,6 +319,9 @@ function endpointToArgs(
   const force = body["force"] ? ["--force"] : []
   const nonInteractive =
     body["non_interactive"] === true || body["force"] === true ? ["--non-interactive"] : []
+  // Plan 3.5: put back access changed outside Supatype. The CLI sets it only after a person said
+  // yes to the difference, or when `--overwrite-drift` was passed.
+  const overwriteDrift = body["overwrite_drift"] === true ? ["--overwrite-drift"] : []
 
   switch (endpoint) {
     case "/diff":
@@ -274,6 +341,7 @@ function endpointToArgs(
         schema,
         ...force,
         ...nonInteractive,
+        ...overwriteDrift,
         ...sourceArgs,
       ]
     }
@@ -319,16 +387,15 @@ function endpointToArgs(
 
     case "/doctor": {
       const strict = body["strict"] ? ["--strict"] : []
-      return ["doctor", "--input", reqFile, "--database-url", dbUrl, "--schema", schema, ...strict]
+      const rebaseline = body["rebaseline"] ? ["--rebaseline"] : []
+      return ["doctor", "--input", reqFile, "--database-url", dbUrl, "--schema", schema, ...strict, ...rebaseline]
     }
 
     case "/adopt": {
       const yes = body["yes"] ? ["--yes"] : []
-      return ["adopt", "--input", reqFile, "--database-url", dbUrl, "--schema", schema, ...yes]
+      const objects = [...repeated(body["release"], "--release"), ...repeated(body["reclaim"], "--reclaim")]
+      return ["adopt", "--input", reqFile, "--database-url", dbUrl, "--schema", schema, ...yes, ...objects]
     }
-
-    case "/validate":
-      return ["validate", "--input", reqFile]
 
     case "/admin":
       return ["admin", "--input", reqFile]

@@ -6,7 +6,8 @@ import { Badge, Card, CodeBlock, Td, Th } from "../../components/ui.js"
 import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 import { SlidePanel } from "../../components/SlidePanel.js"
-import { isManaged } from "../../lib/managed-comment.js"
+import { isOwned, useOwnedObjects } from "../../lib/owned-objects.js"
+import { sqlText } from "../../lib/sql.js"
 
 /**
  * Every index the database holds, whether or not Supatype declared it.
@@ -33,13 +34,14 @@ const LIST_QUERY = (schema: string): string => `
   JOIN pg_class t ON t.oid = ix.indrelid
   JOIN pg_namespace n ON n.oid = t.relnamespace
   JOIN pg_am am ON am.oid = i.relam
-  WHERE n.nspname = '${schema}'
+  WHERE n.nspname = ${sqlText(schema)}
   ORDER BY t.relname, i.relname
 `
 
 export function IndexesView(): React.ReactElement {
   const proxy = useProjectProxy()
   const { schemas, schema, setSchema } = useSchemaPicker()
+  const owned = useOwnedObjects(proxy, schema)
   const [selected, setSelected] = useState<Record<string, unknown> | null>(null)
 
   const { data: indexes, loading, error } = useApiQuery(
@@ -98,7 +100,7 @@ export function IndexesView(): React.ReactElement {
                       {row["index_name"] as string}
                       {/* Says who owns it. An index without this badge is one a push will not
                           maintain and will not drop, which is worth knowing before editing it. */}
-                      {isManaged(row["comment"]) && (
+                      {isOwned(owned, row["table_name"], row["index_name"], row["comment"]) && (
                         <Badge variant="indigo" className="ml-2">
                           supatype
                         </Badge>

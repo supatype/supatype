@@ -37,8 +37,8 @@ Auth flag: `--token` (cloud = platform PAT; self-host = `SERVICE_ROLE_KEY`). `--
 
 | Command | Purpose |
 |---------|---------|
-| `supatype doctor` | Schema drift report. Flags: `--env`, `--direct`, `--strict` |
-| `supatype adopt` | Stamp managed comments on existing DB objects. Flags: `--env`, `--yes`. `push` and `dev` offer to run it when they find unmanaged tables |
+| `supatype doctor` | What a push would find: missing, drifted, stale, conflicting, unmanaged and released objects. Flags: `--env`, `--direct`, `--strict` (fail when a push would change or refuse something), `--rebaseline` (record drifted objects as they are now, changing nothing; after a Postgres upgrade) |
+| `supatype adopt` | Hand Supatype the objects a push refuses because their names are taken; records ownership, never edits the object. `--release kind:table.name` makes every push leave an object alone, and `--reclaim kind:table.name` hands it back. Flags: `--env`, `--yes`, `--release`, `--reclaim`. `push` and `dev` offer to run it when they find unmanaged tables |
 | `supatype introspect` | Introspect live Postgres. Flags: `--env`, `--json`, `--direct` |
 | `supatype migrate` | Migration utilities |
 | `supatype rollback` | Undo the last applied migration (linked or direct). Flags: `--env`, `--connection`, `--direct`, `--sync-schema`, `--no-sync-schema` |
