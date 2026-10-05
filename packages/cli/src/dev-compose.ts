@@ -297,9 +297,9 @@ export function upsertDevComposeEnv(
     // with a published constant. This guarantees presence without overwriting: only keys
     // genuinely absent from `.env` are filled, and with the value the project has been running
     // with rather than a fresh one.
-    ...seedMissingLocalSecrets(cwd),
+    ...seedMissingLocalSecrets(cwd, config),
     // Project configuration, seeded not overwritten, see seedMissingDatabaseIdentity.
-    ...seedMissingDatabaseIdentity(cwd),
+    ...seedMissingDatabaseIdentity(cwd, config),
     // Shared with `supatype keys --write`, so a front end's prefix cannot be written by one and
     // forgotten by the other. See `anonKeyEnvUpdates`.
     //
