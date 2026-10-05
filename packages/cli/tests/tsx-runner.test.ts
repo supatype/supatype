@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import { existsSync } from "node:fs"
-import { evalTsSnippet, runTsFile } from "../src/tsx-runner.js"
+import { evalTempFileName, evalTsSnippet, runTsFile } from "../src/tsx-runner.js"
 import { writeFileSync, unlinkSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
@@ -62,5 +62,20 @@ describe("tsx-runner", () => {
         unlinkSync(tmp)
       }
     })
+  })
+})
+
+describe("evalTempFileName()", () => {
+  // Every CLI process writes its snippet into the same directory. Named by `Date.now()` alone, two
+  // processes in one millisecond wrote one file, and each ran whichever snippet landed last: a
+  // test loaded another test's config, whose directory had just been removed, and two CLI commands
+  // started together could load each other's project config.
+  it("never repeats, even within one millisecond", () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_791_183_700_152)
+    try {
+      expect(evalTempFileName()).not.toBe(evalTempFileName())
+    } finally {
+      now.mockRestore()
+    }
   })
 })
