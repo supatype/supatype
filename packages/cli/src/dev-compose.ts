@@ -1335,6 +1335,15 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
     }
   }
 
+  // `up -d` recreates `db` when its definition changed since Postgres was started above for the
+  // schema push (a new image on upgrade, a different host port). Postgres then restarts under the
+  // services just started, and the admin seed and bucket provisioning below met "the database
+  // system is starting up" while the panel said the stack was running. Wait for it again: on a db
+  // that was left alone this returns at once.
+  if (!usesExternalDatabase(config)) {
+    await waitComposeHealthy(paths, cwd, 180_000, project)
+  }
+
   console.log("[supatype] Waiting for API gateway...")
   await waitKongReady(kongPort, 120, { composePath: paths.composePath, cwd, project })
   console.log("[supatype] Waiting for storage API...")
