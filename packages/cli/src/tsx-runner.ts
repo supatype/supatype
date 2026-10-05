@@ -10,6 +10,7 @@ import { createRequire } from "node:module"
 import { fileURLToPath } from "node:url"
 import { writeFileSync, unlinkSync } from "node:fs"
 import { tmpdir } from "node:os"
+import { randomUUID } from "node:crypto"
 import { isCompiledBinary } from "./cli-install-method.js"
 
 const _require = createRequire(import.meta.url)
@@ -70,6 +71,17 @@ export function runTsFile(
  * Evaluate an ESM TypeScript snippet via tsx and return its stdout.
  * The snippet should write JSON to process.stdout.
  */
+/**
+ * The snippet file's name, unique to this call.
+ *
+ * Every CLI process writes into the same directory, so the millisecond alone was not enough: two
+ * processes started together wrote one file and each ran whichever snippet landed last, which is
+ * one project loading another's config. The pid and a UUID make the name this call's own.
+ */
+export function evalTempFileName(): string {
+  return `supatype-eval-${Date.now()}-${process.pid}-${randomUUID()}.mts`
+}
+
 export function evalTsSnippet(
   snippet: string,
   opts: SpawnSyncOptions = {},
@@ -78,7 +90,7 @@ export function evalTsSnippet(
   // resolution can find workspace packages from there.
   // The subprocess CWD is kept as opts.cwd (the user's project dir) so that
   // any relative paths in the snippet resolve correctly.
-  const tmpFile = resolve(CLI_SRC_DIR, `supatype-eval-${Date.now()}.mts`)
+  const tmpFile = resolve(CLI_SRC_DIR, evalTempFileName())
   writeFileSync(tmpFile, snippet, "utf8")
   try {
     return runTsFile(tmpFile, opts)
