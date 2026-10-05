@@ -95,11 +95,17 @@ sql "CREATE SCHEMA IF NOT EXISTS auth; CREATE TABLE IF NOT EXISTS auth.users (id
 sql "CREATE TABLE public.legacy (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name text NOT NULL)"
 sql "INSERT INTO public.legacy (name) VALUES ('kept')"
 
-# An engine from before the ledger commands answers --reclaim with a usage error. Say so and stop:
-# the rest of this script would only measure that the engine is old.
-if cli adopt --reclaim policy:legacy.nothing 2>&1 | grep -qE "unexpected argument|unrecognized|Unknown option"; then
-  echo "SKIP: this engine has no adopt --reclaim; set OWNERSHIP_ENGINE_BIN to an engine that does"
-  exit 0
+# The ledger commands ship in engine 0.7.0. Against an older engine the rest of this script would
+# only measure that it is old, so say so and stop. An engine named in OWNERSHIP_ENGINE_BIN is one
+# someone chose to test, so it always runs.
+if [[ -z "${OWNERSHIP_ENGINE_BIN:-}" ]]; then
+  cli doctor >/dev/null 2>&1 || true # resolves, and if need be downloads, the CLI's engine
+  engine_bin="$(ls -t "$HOME"/.supatype/cache/engine/*/supatype-engine-* 2>/dev/null | head -1)"
+  engine_version="$([[ -n "$engine_bin" ]] && "$engine_bin" --version 2>/dev/null | awk '{print $2}')"
+  if [[ -z "$engine_version" ]] || [[ "$(printf '%s\n0.7.0\n' "$engine_version" | sort -V | head -1)" != "0.7.0" ]]; then
+    echo "SKIP: engine ${engine_version:-unknown} predates the ledger commands (0.7.0); set OWNERSHIP_ENGINE_BIN to test one"
+    exit 0
+  fi
 fi
 
 echo "==> Adopt, on a database Supatype has never pushed to"
