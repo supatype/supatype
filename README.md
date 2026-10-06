@@ -104,4 +104,9 @@ supatype cache list
 
 ## License
 
-See [LICENSE](LICENSE) and each package's `license` field. The schema engine binary the CLI downloads is distributed separately under its own license.
+Licensing is per package, and each package directory has its own `LICENSE` file:
+
+- **MIT:** the libraries you install in your app: `client`, `types`, the framework bindings (`react`, `react-native`, `vue`, `svelte`, `solid`), `ssr`, the auth UI packages, the plugin packages, `ui` and `common`.
+- **Apache 2.0:** the CLI and services (`cli`, `studio`, `storage`, `realtime`) and the rest of this repository ([LICENSE](LICENSE)).
+
+The schema engine binary the CLI downloads is not in this repository and is distributed under its own proprietary license. See [NOTICE](NOTICE).
