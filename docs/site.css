@@ -506,3 +506,32 @@ tr:last-child td { border-bottom: 0; }
   .strip .sep { display: none; }
   .nav-end .hide-sm { display: none; }
 }
+
+/* ── Frameworks, compare, quick start ── */
+.chips { display: flex; flex-wrap: wrap; gap: 10px; }
+.chips code {
+  border: 1px solid var(--ink-border);
+  border-radius: 9px;
+  background: var(--ink-raised);
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--fog-soft);
+}
+.section .link-card { max-width: 700px; }
+.compare { list-style: none; padding: 0; margin: 0; max-width: 700px; border-top: 1px solid var(--ink-line); }
+.compare li {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 16px;
+  border-bottom: 1px solid var(--ink-line);
+  padding: 16px 0;
+  font-size: 16px;
+  color: var(--fog-muted);
+}
+.compare strong { color: var(--fog-soft); font-weight: 600; }
+.compare li.us strong { color: var(--brand-soft); }
+.compare li.us { color: var(--fog); }
+pre.code.quickstart { max-width: 700px; }
+@media (max-width: 600px) {
+  .compare li { grid-template-columns: 1fr; gap: 4px; }
+}
