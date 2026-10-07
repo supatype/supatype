@@ -4,11 +4,15 @@
 
 # Supatype
 
-**Type-first backend platform for PostgreSQL.** Define `Model<…>` types in TypeScript; migrations, RLS, a REST and GraphQL API, auth, storage, realtime, edge functions and the Studio CMS follow.
+**Zero drift.**
+
+Postgres, migrations, row-level security, API, realtime, storage, Studio and the typed client your components use, all from the TypeScript you already write. Change a field once. Nothing else to update.
+
+One set of types runs your whole stack, database to component. Rename a field and the build fails instead of production.
 
 **Website & docs:** [supatype.com](https://www.supatype.com/) · **Org overview:** [github.com/supatype](https://github.com/supatype) · **Discord:** [discord.gg/TzMtynufEH](https://discord.gg/TzMtynufEH)
 
-User guides: [local dev](https://www.supatype.com/#local-dev) · [self-host](https://www.supatype.com/#self-host) · [deploy to a VM with GitHub Actions](https://www.supatype.com/deploy-vm-github-actions.html)
+User guides: [docs](https://www.supatype.com/docs/) · [local dev](https://www.supatype.com/docs/#local-dev) · [self-host](https://www.supatype.com/docs/#self-host) · [deploy to a VM with GitHub Actions](https://www.supatype.com/deploy-vm-github-actions.html)
 
 ---
 
@@ -43,6 +47,8 @@ supatype generate   # regenerate types and clients only
 ---
 
 ## Packages
+
+Every package consumes the same generated types; nothing in your app introspects the database after the fact or keeps its own copy of the model.
 
 | Package | What it is |
 |---------|------------|
