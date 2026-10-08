@@ -11,7 +11,7 @@ Global flags (all commands): `--config`, `--env`, `--verbose`, `--json`, `--no-c
 | `supatype init [name]` | Scaffold project. Flags: `--mode dev \| standalone` |
 | `supatype keys` | Generate `ANON_KEY` + `SERVICE_ROLE_KEY` from `JWT_SECRET` |
 | `supatype dev` | Start local stack + control-plane. Docker default (Kong :18473). Flags: `--no-watch`, `--port`, `--reset-db` (remove only the Postgres data volume, after confirmation), `--yes` (skip that confirmation; required for `--reset-db` without a TTY) |
-| `supatype push` | Diff, migrate, generate types. Flags: `--yes`, `--connection`, `--env`, `--direct` |
+| `supatype push` | Diff, migrate, generate types. Flags: `--yes`, `--connection`, `--env`, `--direct`, `--overwrite-drift` (engine 0.7.0+) |
 | `supatype diff` | Dry-run schema changes. Flags: `--connection`, `--env`, `--direct` |
 | `supatype generate` | Regenerate types without migration |
 | `supatype seed [file]` | Apply seed data in one transaction. Flags: `--atomic`, `--status`, `--connection`, `--environment`, `--force`. See [references/seeding.md](references/seeding.md) |
@@ -38,7 +38,7 @@ Auth flag: `--token` (cloud = platform PAT; self-host = `SERVICE_ROLE_KEY`). `--
 | Command | Purpose |
 |---------|---------|
 | `supatype doctor` | What a push would find: missing, drifted, stale, conflicting, unmanaged and released objects. Flags: `--env`, `--direct`, `--strict` (fail when a push would change or refuse something), `--rebaseline` (record drifted objects as they are now, changing nothing; after a Postgres upgrade) |
-| `supatype adopt` | Hand Supatype the objects a push refuses because their names are taken; records ownership, never edits the object. `--release kind:table.name` makes every push leave an object alone. Flags: `--env`, `--yes`, `--release`. `push` and `dev` offer to run it when they find unmanaged tables |
+| `supatype adopt` | Hand Supatype the objects a push refuses because their names are taken; records ownership, never edits the object. `--release kind:table.name` makes every push leave an object alone. Flags: `--env`, `--yes` (required when not interactive), `--release` (engine 0.7.0+). `push` and `dev` offer to run it when they find unmanaged tables |
 | `supatype introspect` | Introspect live Postgres. Flags: `--env`, `--json`, `--direct` |
 | `supatype migrate` | Migration utilities |
 | `supatype rollback` | Undo the last applied migration (linked or direct). Flags: `--env`, `--connection`, `--direct`, `--sync-schema`, `--no-sync-schema` |
@@ -59,7 +59,7 @@ Auth flag: `--token` (cloud = platform PAT; self-host = `SERVICE_ROLE_KEY`). `--
 | `supatype self-host compose up -d` | Start production stack |
 | `supatype self-host compose down` | Stop stack |
 | `supatype self-host compose status` | Health check |
-| `supatype deploy` | Deploy schema + static app to linked target. Flags: `--local`, `--env`, `--schema-only` |
+| `supatype deploy` | Deploy schema + static app to linked target. Flags: `--local`, `--env`, `--schema-only`, `--overwrite-drift` (engine 0.7.0+; without it a deploy refuses on access changed outside Supatype) |
 | `supatype deploy status` | Current static deployment |
 | `supatype deploy rollback` | Roll back static deployment. Flags: `--env`, `--to <deployment-id>` |
 
