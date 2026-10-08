@@ -11,7 +11,7 @@
  * adoption would take, and asks twice before taking it. Anywhere else it never adopts, because
  * agreeing to a push is not agreeing to take ownership of tables, and it prints the command instead.
  */
-import { EngineError, type AdoptOutcome } from "./engine-client.js"
+import { EngineError, type AdoptOutcome, type DoctorItem } from "./engine-client.js"
 import { confirm } from "./ui/confirm.js"
 import { isInteractive } from "./ui/interactive.js"
 import { plain, warn } from "./ui/messages.js"
@@ -54,6 +54,33 @@ export function engineOutputOf(err: unknown): string {
 /** What adopting would take, one line per object, whichever engine answered. */
 export function adoptionLines(outcome: AdoptOutcome): string[] {
   return outcome.adopt?.map((item) => item.message) ?? outcome.stampStatements ?? []
+}
+
+/**
+ * The kinds the engine names without a table (`kind:name`), as `ObjectKind::table_level` lists
+ * them; every other kind is `kind:table.name`.
+ */
+const TABLE_LEVEL_KINDS = new Set(["schema", "table", "function", "view", "enum_type", "sequence", "cron_job"])
+
+/** An object as the engine's `adopt --key` (and the `keys` request field) names it. */
+export function adoptionKey(item: Pick<DoctorItem, "kind" | "table" | "name">): string {
+  return TABLE_LEVEL_KINDS.has(item.kind) ? `${item.kind}:${item.name}` : `${item.kind}:${item.table}.${item.name}`
+}
+
+/**
+ * The conflicts a preview showed, named for the engine, so applying adopts those and nothing the
+ * database grew since. Undefined for an engine from before the ledger, which names none.
+ */
+export function previewedKeys(outcome: AdoptOutcome): string[] | undefined {
+  return outcome.adopt?.map(adoptionKey)
+}
+
+/** What the CLI says when the engine refused previewed keys that are no longer conflicts. */
+export const STALE_PREVIEW_MESSAGE = "The database changed since the preview; run `supatype adopt` again."
+
+/** Whether `err` is the engine refusing to adopt what a preview showed because it has changed. */
+export function isStalePreview(err: unknown): boolean {
+  return /changed since the preview/i.test(engineOutputOf(err))
 }
 
 /** How many objects an applied adopt took, whichever engine answered. */
@@ -115,7 +142,16 @@ async function adoptAfterPreview(steps: AdoptionSteps, manual: string): Promise<
     plain(manual)
     return "declined"
   }
-  const adopted = await steps.apply()
+  let adopted: number
+  try {
+    adopted = await steps.apply()
+  } catch (err: unknown) {
+    if (!isStalePreview(err)) throw err
+    // Nothing was written, so the push is still refused for the reason it was.
+    warn(STALE_PREVIEW_MESSAGE)
+    plain(manual)
+    return "declined"
+  }
   plain(`Adopted ${adopted} object(s).`)
   return "adopted"
 }
@@ -141,10 +177,24 @@ export async function pushOfferingAdoption<T>(
   }
 }
 
-/** Adoption through a deploy target, for the push walkthrough on a direct or local target. */
-export function targetAdoptionSteps(adopt: (yes: boolean) => Promise<AdoptOutcome>): AdoptionSteps {
+/**
+ * Adoption through a deploy target, for the push walkthrough on a direct or local target.
+ *
+ * Applying adopts what the preview showed and nothing else: the engine is sent the previewed keys.
+ * `beforeKeys` (the engine version gate) runs once the preview names some, before anyone is asked.
+ */
+export function targetAdoptionSteps(
+  adopt: (yes: boolean, keys?: string[]) => Promise<AdoptOutcome>,
+  beforeKeys: () => Promise<void> = async () => undefined,
+): AdoptionSteps {
+  let keys: string[] | undefined
   return {
-    preview: async () => adoptionLines(await adopt(false)),
-    apply: async () => adoptedCount(await adopt(true)),
+    preview: async () => {
+      const outcome = await adopt(false)
+      keys = previewedKeys(outcome)
+      if (keys !== undefined) await beforeKeys()
+      return adoptionLines(outcome)
+    },
+    apply: async () => adoptedCount(await (keys === undefined ? adopt(true) : adopt(true, keys))),
   }
 }
