@@ -19,15 +19,18 @@ function where(action: ReconcileAction): string {
 }
 
 /**
- * What a reconcile action means for the database, or `null` when it changes nothing there: a
- * `keep`, a `forget` (ledger only), a `released` object, or a `create` its parent statement makes.
+ * What a reconcile action means for the database, or `null` when it is not a change of its own: a
+ * `keep`, a `forget` (ledger only), a `released` object, or any action the engine marks `inline`
+ * (a create, recreate, replace or drift fix its parent statement already makes, so it is neither
+ * listed twice nor confirmed on its own).
  */
 export function formatReconcileAction(action: ReconcileAction): PlannedChange | null {
+  if (action.inline === true && action.action !== "conflict") return null
   const kind = kindLabel(action)
   const at = where(action)
   switch (action.action) {
     case "create":
-      return action.inline ? null : { label: `create ${kind} ${at}`, risk: "safe" }
+      return { label: `create ${kind} ${at}`, risk: "safe" }
     case "adopt":
       return {
         label: `adopt ${kind} ${at} (already in the database, now recorded as Supatype's)`,

@@ -51,7 +51,10 @@ export interface ReconcileAction {
     | "forget"
     | "released"
   key: { kind: string; schema: string; parent: string; name: string }
-  /** A `create` the parent statement already makes (a constraint inline in `CREATE TABLE`). */
+  /**
+   * An action the parent statement already carries out (a constraint inline in `CREATE TABLE`, or
+   * recreated with its table). Sent on `create`, `recreate`, `replace` and `drift`.
+   */
   inline?: boolean
   reason?: "stamped" | "structure_matches" | "deparses_equal" | "owned_schema"
   /** A `drift` on a policy, grant, label or RLS attribute: putting it back changes who sees what. */
