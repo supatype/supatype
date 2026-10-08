@@ -183,3 +183,37 @@ describe("endpointToArgs() for /push", () => {
     )
   })
 })
+
+describe("--overwrite-drift on every push path", () => {
+  it("reaches the compose schema-engine only when asked", async () => {
+    const { composeEnginePushArgs } = await import("../src/dev-compose.js")
+    expect(composeEnginePushArgs("postgres://db", null)).not.toContain("--overwrite-drift")
+    expect(composeEnginePushArgs("postgres://db", null, { overwriteDrift: false })).not.toContain(
+      "--overwrite-drift",
+    )
+    const args = composeEnginePushArgs("postgres://db", null, { overwriteDrift: true })
+    expect(args.slice(0, 1)).toEqual(["push"])
+    expect(args).toContain("--overwrite-drift")
+  })
+
+  it("a deploy refuses security drift unless --overwrite-drift was passed", async () => {
+    const { deploySecurityDriftRefusal } = await import("../src/commands/deploy.js")
+    const diff: DiffResult = {
+      operations: [],
+      reconcile: [
+        {
+          action: "drift",
+          key: key("policy", "posts", "posts_select"),
+          security_relevant: true,
+          recorded_def: "USING (true)",
+          live_def: "USING (false)",
+        },
+      ],
+    }
+    const refusal = deploySecurityDriftRefusal(diff, false)
+    expect(refusal).toContain("policy posts.posts_select")
+    expect(refusal).toContain("pass --overwrite-drift")
+    expect(deploySecurityDriftRefusal(diff, true)).toBeUndefined()
+    expect(deploySecurityDriftRefusal({ reconcile: [] }, false)).toBeUndefined()
+  })
+})
