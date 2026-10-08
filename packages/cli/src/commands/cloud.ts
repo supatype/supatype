@@ -83,7 +83,7 @@ export function isCloudLinked(cwd: string): boolean {
 
 export async function pushSchemaToLinkedProject(
   cwd: string,
-  opts?: { force?: boolean; env?: string },
+  opts?: { force?: boolean; env?: string; overwriteDrift?: boolean },
 ): Promise<void> {
   const config = loadConfig(cwd)
   const target = resolveTarget(cwd, { env: opts?.env })
@@ -98,13 +98,22 @@ export async function pushSchemaToLinkedProject(
   const result = await targetSchemaPush(target, ast, {
     force: opts?.force ?? true,
     schema: schemaPgSchema(cwd),
+    ...(opts?.overwriteDrift !== undefined && { overwriteDrift: opts.overwriteDrift }),
   })
 
   info((result as { message?: string }).message ?? "Schema push completed.")
 }
 
-export async function deploySchemaToLinkedProject(cwd: string, environment: string): Promise<void> {
-  await pushSchemaToLinkedProject(cwd, { force: true, env: environment })
+export async function deploySchemaToLinkedProject(
+  cwd: string,
+  environment: string,
+  opts?: { overwriteDrift?: boolean },
+): Promise<void> {
+  await pushSchemaToLinkedProject(cwd, {
+    force: true,
+    env: environment,
+    ...(opts?.overwriteDrift !== undefined && { overwriteDrift: opts.overwriteDrift }),
+  })
 }
 
 export function registerCloud(program: Command): void {
