@@ -172,6 +172,8 @@ async function doctor(opts: DoctorOptions): Promise<void> {
     const plan = rebaselinePlan(report, overwriteDrift)
     if (plan.record.length === 0) {
       printReport(report)
+      // Access drift alone is still drift: say why it was not recorded and how it would be.
+      printRebaselinePlan(plan)
       info("Nothing to rebaseline.")
     } else {
       printRebaselinePlan(plan)
