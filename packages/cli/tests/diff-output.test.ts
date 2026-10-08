@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   formatSecurityDrift,
+  isRisky,
   plannedChanges,
   printDiffOperations,
   securityDrift,
@@ -68,6 +69,22 @@ describe("plannedChanges()", () => {
       ["drop foreign key posts.posts_editor_id_fkey", "cautious"],
       ["adopt foreign key posts.posts_owner_id_fkey (already in the database, now recorded as Supatype's)", "safe"],
     ])
+  })
+
+  it("leaves out every action its parent statement carries out, not only a create", () => {
+    const diff: DiffResult = {
+      operations: [{ type: "create_table", table: "posts", risk: "safe" }],
+      reconcile: [
+        { action: "recreate", key: key("check", "posts", "a"), inline: true },
+        { action: "replace", key: key("check", "posts", "b"), inline: true },
+        { action: "drift", key: key("check", "posts", "c"), inline: true, security_relevant: false },
+        { action: "create", key: key("foreign_key", "posts", "d"), inline: true },
+      ],
+    }
+    const changes = plannedChanges(diff)
+    expect(changes.map((c) => c.label)).toEqual(["create_table posts"])
+    // Nothing left to confirm: a CI push without --yes must not abort on an inline recreate.
+    expect(changes.filter(isRisky)).toEqual([])
   })
 
   it("names an object without a parent by its name alone", () => {
@@ -164,5 +181,39 @@ describe("endpointToArgs() for /push", () => {
     expect(endpointToArgs("/push", { ...body, overwrite_drift: true }, "req.json")).toContain(
       "--overwrite-drift",
     )
+  })
+})
+
+describe("--overwrite-drift on every push path", () => {
+  it("reaches the compose schema-engine only when asked", async () => {
+    const { composeEnginePushArgs } = await import("../src/dev-compose.js")
+    expect(composeEnginePushArgs("postgres://db", null)).not.toContain("--overwrite-drift")
+    expect(composeEnginePushArgs("postgres://db", null, { overwriteDrift: false })).not.toContain(
+      "--overwrite-drift",
+    )
+    const args = composeEnginePushArgs("postgres://db", null, { overwriteDrift: true })
+    expect(args.slice(0, 1)).toEqual(["push"])
+    expect(args).toContain("--overwrite-drift")
+  })
+
+  it("a deploy refuses security drift unless --overwrite-drift was passed", async () => {
+    const { deploySecurityDriftRefusal } = await import("../src/commands/deploy.js")
+    const diff: DiffResult = {
+      operations: [],
+      reconcile: [
+        {
+          action: "drift",
+          key: key("policy", "posts", "posts_select"),
+          security_relevant: true,
+          recorded_def: "USING (true)",
+          live_def: "USING (false)",
+        },
+      ],
+    }
+    const refusal = deploySecurityDriftRefusal(diff, false)
+    expect(refusal).toContain("policy posts.posts_select")
+    expect(refusal).toContain("pass --overwrite-drift")
+    expect(deploySecurityDriftRefusal(diff, true)).toBeUndefined()
+    expect(deploySecurityDriftRefusal({ reconcile: [] }, false)).toBeUndefined()
   })
 })
