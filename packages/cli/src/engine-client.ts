@@ -256,12 +256,15 @@ export async function engineRequest<T = unknown>(
  * The directory engine request files are written to, created private to this user.
  *
  * A request can hold `database_url`, credentials included, and the directory is in the shared
- * system temp directory. `mode` applies only when `mkdir` creates it, so a directory an older CLI
- * left world-readable is narrowed too, where this user owns it. On Windows the mode bits are
- * mostly ignored and the user's temp directory is already private.
+ * system temp directory. `mode` applies only when `mkdir` creates it, so an existing directory is
+ * narrowed too. On Windows the mode bits are mostly ignored and the user's temp directory is
+ * already private.
  */
 function engineTempDir(): string {
-  const dir = join(tmpdir(), "supatype-engine")
+  // One directory per user on POSIX: a shared one another user created first is not ours to make
+  // private, and writing into it can fail. Windows' temp directory is already per user.
+  const uid = process.getuid?.()
+  const dir = join(tmpdir(), uid === undefined ? "supatype-engine" : `supatype-engine-${uid}`)
   mkdirSync(dir, { recursive: true, mode: 0o700 })
   try { chmodSync(dir, 0o700) } catch { /* not ours to change; the files are still 0600 */ }
   return dir

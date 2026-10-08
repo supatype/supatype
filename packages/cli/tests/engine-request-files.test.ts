@@ -20,7 +20,8 @@ vi.mock("node:os", async (importOriginal) => ({
 const { tmpdir: realTmpdir } = await vi.importActual<typeof import("node:os")>("node:os")
 const root = mkdtempSync(join(realTmpdir(), "supatype-engine-files-"))
 temp.root = root
-const engineDir = join(root, "supatype-engine")
+const uid = process.getuid?.()
+const engineDir = join(root, uid === undefined ? "supatype-engine" : `supatype-engine-${uid}`)
 vi.mock("../src/config.js", () => ({ loadConfig: () => ({}) }))
 vi.mock("../src/ensure-binary.js", () => ({ ensureBinary: async () => "/fake/supatype-engine" }))
 
