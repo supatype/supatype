@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   formatSecurityDrift,
+  isRisky,
   plannedChanges,
   printDiffOperations,
   securityDrift,
@@ -68,6 +69,22 @@ describe("plannedChanges()", () => {
       ["drop foreign key posts.posts_editor_id_fkey", "cautious"],
       ["adopt foreign key posts.posts_owner_id_fkey (already in the database, now recorded as Supatype's)", "safe"],
     ])
+  })
+
+  it("leaves out every action its parent statement carries out, not only a create", () => {
+    const diff: DiffResult = {
+      operations: [{ type: "create_table", table: "posts", risk: "safe" }],
+      reconcile: [
+        { action: "recreate", key: key("check", "posts", "a"), inline: true },
+        { action: "replace", key: key("check", "posts", "b"), inline: true },
+        { action: "drift", key: key("check", "posts", "c"), inline: true, security_relevant: false },
+        { action: "create", key: key("foreign_key", "posts", "d"), inline: true },
+      ],
+    }
+    const changes = plannedChanges(diff)
+    expect(changes.map((c) => c.label)).toEqual(["create_table posts"])
+    // Nothing left to confirm: a CI push without --yes must not abort on an inline recreate.
+    expect(changes.filter(isRisky)).toEqual([])
   })
 
   it("names an object without a parent by its name alone", () => {

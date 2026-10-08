@@ -1,8 +1,8 @@
 name: Integration Tests
 
 on:
+  # Every PR, including one stacked on another PR's branch.
   pull_request:
-    branches: [main]
   push:
     branches: [main]
   schedule:
