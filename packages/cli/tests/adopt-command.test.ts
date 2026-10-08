@@ -72,8 +72,56 @@ describe("supatype adopt", () => {
 
   it("checks the engine version before sending --release, and only then", async () => {
     await adopt("--yes")
-    expect(requireEngine).not.toHaveBeenCalled()
+    expect(requireEngine).not.toHaveBeenCalledWith("--release", expect.anything())
     await adopt("--yes", "--release", "table:widget")
     expect(requireEngine).toHaveBeenCalledWith("--release", expect.anything())
+  })
+
+  it("adopts only the conflicts the preview showed, checking the engine version first", async () => {
+    await adopt("--yes")
+    expect(targetSchemaAdopt.mock.calls.map((call) => call[2].keys)).toEqual([undefined, ["table:widget"]])
+    expect(requireEngine).toHaveBeenCalledWith("adopt", expect.anything())
+  })
+
+  it("adopts the previewed keys after a person agrees at the prompt", async () => {
+    vi.mocked(isInteractive).mockReturnValue(true)
+    confirmMock.mockResolvedValue(true)
+    await adopt()
+    expect(targetSchemaAdopt.mock.calls.map((call) => [call[2].yes, call[2].keys])).toEqual([
+      [false, undefined],
+      [true, ["table:widget"]],
+    ])
+  })
+
+  it("sends no keys to an engine from before the ledger, and does not gate it", async () => {
+    targetSchemaAdopt.mockImplementation(async (_t, _a, opts: { yes: boolean }) =>
+      opts.yes ? { status: "adopted", stamped: 1 } : { status: "preview", stampStatements: ["COMMENT ON ..."] },
+    )
+    await adopt("--yes")
+    expect(targetSchemaAdopt.mock.calls.map((call) => call[2].keys)).toEqual([undefined, undefined])
+    expect(requireEngine).not.toHaveBeenCalled()
+  })
+
+  it("exits 1 and says to run it again when the database changed since the preview", async () => {
+    targetSchemaAdopt.mockImplementation(async (_t, _a, opts: { yes: boolean }) => {
+      if (!opts.yes) return PREVIEW
+      throw new Error(
+        "Engine /adopt failed (exit 1): Error: table:widget was to be adopted but is not a conflict now: " +
+          "the database changed since the preview. Nothing was written",
+      )
+    })
+    await adopt("--yes")
+    expect(process.exitCode).toBe(1)
+    expect(stderr.mock.calls.flat().join(" ")).toContain(
+      "The database changed since the preview; run `supatype adopt` again.",
+    )
+  })
+
+  it("lets any other failure to apply through", async () => {
+    targetSchemaAdopt.mockImplementation(async (_t, _a, opts: { yes: boolean }) => {
+      if (!opts.yes) return PREVIEW
+      throw new Error("connection refused")
+    })
+    await expect(adopt("--yes")).rejects.toThrow("connection refused")
   })
 })

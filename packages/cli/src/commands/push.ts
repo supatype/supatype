@@ -229,7 +229,10 @@ async function pushViaTarget(
           overwriteDrift,
         }),
       ),
-    targetAdoptionSteps((yes) => targetSchemaAdopt(target, ast, { schema: pgSchema, yes })),
+    targetAdoptionSteps(
+      (yes, keys) => targetSchemaAdopt(target, ast, { schema: pgSchema, yes, ...(keys !== undefined && { keys }) }),
+      () => requireEngineForOwnershipFlag("adopt", config),
+    ),
     { yes: run.yes, retry: "supatype push" },
   )
 

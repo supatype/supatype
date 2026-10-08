@@ -365,7 +365,10 @@ export function endpointToArgs(
       const release = Array.isArray(body["release"])
         ? body["release"].filter((r): r is string => typeof r === "string").flatMap((r) => ["--release", r])
         : []
-      return ["adopt", "--input", reqFile, "--database-url", dbUrl, "--schema", schema, ...yes, ...release]
+      const keys = Array.isArray(body["keys"])
+        ? body["keys"].filter((k): k is string => typeof k === "string").flatMap((k) => ["--key", k])
+        : []
+      return ["adopt", "--input", reqFile, "--database-url", dbUrl, "--schema", schema, ...yes, ...release, ...keys]
     }
 
     case "/validate":
