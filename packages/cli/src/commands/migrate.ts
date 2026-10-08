@@ -6,6 +6,7 @@ import { loadConfig, loadSchemaAst } from "../config.js"
 import { projectRootFromConfig, schemaPathFromProject } from "../project-config.js"
 import { resolveHostDatabaseUrl } from "../host-database.js"
 import { ensureEngine, engineRequest } from "../engine-client.js"
+import { plannedChanges } from "../diff-output.js"
 import { loadProjectLink } from "../link.js"
 import {
   resolveTarget,
@@ -22,6 +23,18 @@ import {
 } from "../schema-sources.js"
 import { confirm } from "../ui/confirm.js"
 import { info, plain, warn } from "../ui/messages.js"
+
+/**
+ * What `rollback` does with the schema files, from its `--sync-schema` / `--no-sync-schema` pair.
+ *
+ * Commander reports the pair as one `syncSchema` value: true, false, or unset. The action used to
+ * read a `noSyncSchema` key Commander never sets, so `--no-sync-schema` fell through to the restore
+ * offer, which a non-interactive run accepts, and rewrote the files it was asked to keep.
+ */
+export function schemaRestoreMode(opts: { syncSchema?: boolean }): "skip" | "auto" | "ask" {
+  if (opts.syncSchema === false) return "skip"
+  return opts.syncSchema === true ? "auto" : "ask"
+}
 
 export function registerMigrate(program: Command): void {
   const migrations = program
@@ -101,7 +114,6 @@ export function registerMigrate(program: Command): void {
       env?: string
       direct?: boolean
       syncSchema?: boolean
-      noSyncSchema?: boolean
     }) => {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
@@ -123,8 +135,9 @@ export function registerMigrate(program: Command): void {
       const result = await targetSchemaRollback(target, { schema: pgSchema })
       info(result.message ?? "Rolled back.")
 
-      if (!opts.noSyncSchema) {
-        await offerSchemaRestore(cwd, config, target, result, pgSchema, opts.syncSchema ?? false)
+      const restore = schemaRestoreMode(opts)
+      if (restore !== "skip") {
+        await offerSchemaRestore(cwd, config, target, result, pgSchema, restore === "auto")
       }
     })
 
@@ -184,7 +197,7 @@ async function offerSchemaRestore(
 
   const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
   const diff = await targetSchemaDiff(target, ast, { schema: pgSchema })
-  const drift = (diff.operations ?? []).length > 0
+  const drift = plannedChanges(diff).length > 0
 
   if (!drift && !autoSync) {
     info("Schema files match reverted database (no restore needed).")
@@ -223,7 +236,7 @@ async function offerSchemaRestore(
   info(`Backup saved to ${backupDir}`)
 
   const postDiff = await targetSchemaDiff(target, ast, { schema: pgSchema })
-  if ((postDiff.operations ?? []).length === 0) {
+  if (plannedChanges(postDiff).length === 0) {
     info("Schema matches database after restore.")
   } else {
     info("Run `supatype diff`: schema may still differ from database.")

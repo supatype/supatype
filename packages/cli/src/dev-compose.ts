@@ -54,7 +54,7 @@ import {
   usesLocalServerImage,
   LOCAL_SERVER_DOCKER_IMAGE,
 } from "./compose-local-server-image.js"
-import { ensureEngine, engineRequest, type DiffResult } from "./engine-client.js"
+import { ensureEngine, engineRequest, type AdoptOutcome, type DiffResult } from "./engine-client.js"
 import { writeSchemaSourcePushArtifacts, type SchemaSourcePushArtifacts } from "./schema-sources.js"
 import { readEnvValue, upsertEnvFile } from "./env-file.js"
 import {
@@ -81,7 +81,12 @@ import type { ExtractedSchemaAstV2 } from "./schema-ast-v2.js"
 import { ensureFirstAdminUserForProject } from "./commands/admin.js"
 import { publishDevReady } from "./dev-ready-panel.js"
 import { exitInitialPushFailed, pushInitialSchema, type InitialPushSteps } from "./dev-initial-push.js"
-import { offerAdoption, unmanagedTables, type AdoptionSteps } from "./adopt-walkthrough.js"
+import {
+  offerAdoption,
+  targetAdoptionSteps,
+  unmanagedTables,
+  type AdoptionSteps,
+} from "./adopt-walkthrough.js"
 import { resetDevDatabase } from "./dev-db-reset.js"
 import { hostComposeDbUrl, resolveHostDatabaseUrl } from "./host-database.js"
 
@@ -292,9 +297,9 @@ export function upsertDevComposeEnv(
     // with a published constant. This guarantees presence without overwriting: only keys
     // genuinely absent from `.env` are filled, and with the value the project has been running
     // with rather than a fresh one.
-    ...seedMissingLocalSecrets(cwd),
+    ...seedMissingLocalSecrets(cwd, config),
     // Project configuration, seeded not overwritten, see seedMissingDatabaseIdentity.
-    ...seedMissingDatabaseIdentity(cwd),
+    ...seedMissingDatabaseIdentity(cwd, config),
     // Shared with `supatype keys --write`, so a front end's prefix cannot be written by one and
     // forgotten by the other. See `anonKeyEnvUpdates`.
     //
@@ -880,7 +885,7 @@ async function runComposeEnginePush(
     ...process.env,
     COMPOSE_PROGRESS: "quiet",
   }
-  const engineImage = await schemaEngineImageForPush(config)
+  const engineImage = await schemaEngineImageForPush(config, cwd)
   if (engineImage) {
     pushEnv.SUPATYPE_ENGINE_IMAGE = engineImage
   }
@@ -927,8 +932,8 @@ export interface EngineRun {
  * whole, and with stderr joined on (a compose warning about an unset variable, an engine log line)
  * it did not parse at all, so a preview that worked was reported as a failed adopt.
  */
-export function adoptResultFrom(run: EngineRun): AdoptResult | null {
-  return run.status === 0 ? parseEngineJsonOutput<AdoptResult>(run.stdout) : null
+export function adoptResultFrom(run: EngineRun): AdoptOutcome | null {
+  return run.status === 0 ? parseEngineJsonOutput<AdoptOutcome>(run.stdout) : null
 }
 
 async function runComposeEngineCommand(
@@ -961,7 +966,7 @@ async function runComposeEngineCommand(
     config.schema?.pg_schema ?? "public",
   )
   const env: NodeJS.ProcessEnv = { ...process.env, COMPOSE_PROGRESS: "quiet" }
-  const engineImage = await schemaEngineImageForPush(config)
+  const engineImage = await schemaEngineImageForPush(config, cwd)
   if (engineImage) env.SUPATYPE_ENGINE_IMAGE = engineImage
   const result = spawnSync("docker", composeArgs, {
     cwd,
@@ -988,21 +993,11 @@ async function runComposeEngineDiff(
 
 /** Adoption against a docker project's own database, for the push walkthrough. */
 export function dockerAdoptionSteps(cwd: string, config: SupatypeProjectConfig): AdoptionSteps {
-  return {
-    preview: async () => (await adoptSchemaDocker(cwd, config, false)).stampStatements ?? [],
-    apply: async () => (await adoptSchemaDocker(cwd, config, true)).stamped ?? 0,
-  }
-}
-
-/** What `adopt` reports, previewing or applying. */
-export interface AdoptResult {
-  status?: string
-  stampStatements?: string[]
-  stamped?: number
+  return targetAdoptionSteps((yes) => adoptSchemaDocker(cwd, config, yes))
 }
 
 /**
- * Adopt on a docker project's own database: the stamp preview, or with `yes`, the stamps applied.
+ * Adopt on a docker project's own database: the preview, or with `yes`, the ledger rows written.
  *
  * Through the compose schema-engine, or the local engine binary when `overrides.engine` is set,
  * the same way `diffSchemaDocker` reaches the database. The stack's database must be running,
@@ -1012,12 +1007,12 @@ export async function adoptSchemaDocker(
   cwd: string,
   config: SupatypeProjectConfig,
   yes: boolean,
-): Promise<AdoptResult> {
+): Promise<AdoptOutcome> {
   const project = composeProjectName(config.project.name)
   if (hasEngineOverride(config)) {
     await ensureDockerDbPublishedForHostEngine(cwd, config, { intro: "Adopt" })
     await ensureEngine()
-    return engineRequest<AdoptResult>("/adopt", {
+    return engineRequest<AdoptOutcome>("/adopt", {
       ast: withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config),
       database_url: projectDatabaseUrl(cwd, config),
       schema: config.schema?.pg_schema ?? "public",
@@ -1340,6 +1335,15 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
     }
   }
 
+  // `up -d` recreates `db` when its definition changed since Postgres was started above for the
+  // schema push (a new image on upgrade, a different host port). Postgres then restarts under the
+  // services just started, and the admin seed and bucket provisioning below met "the database
+  // system is starting up" while the panel said the stack was running. Wait for it again: on a db
+  // that was left alone this returns at once.
+  if (!usesExternalDatabase(config)) {
+    await waitComposeHealthy(paths, cwd, 180_000, project)
+  }
+
   console.log("[supatype] Waiting for API gateway...")
   await waitKongReady(kongPort, 120, { composePath: paths.composePath, cwd, project })
   console.log("[supatype] Waiting for storage API...")
@@ -1576,7 +1580,7 @@ async function runComposeEngineGenerator(
   )
 
   const env: NodeJS.ProcessEnv = { ...process.env, COMPOSE_PROGRESS: "quiet" }
-  const engineImage = await schemaEngineImageForPush(config)
+  const engineImage = await schemaEngineImageForPush(config, cwd)
   if (engineImage) env.SUPATYPE_ENGINE_IMAGE = engineImage
 
   const result = spawnSync("docker", composeArgs, {

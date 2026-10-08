@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { printSection } from "../src/commands/doctor.js"
+import { hasStrictIssues, printReport, printSection, type DoctorReport } from "../src/commands/doctor.js"
 
 /**
  * How a drift item reads to the operator.
@@ -58,5 +58,83 @@ describe("printSection", () => {
     const captured = lines()
     printSection("Unmanaged drift", [])
     expect(captured).toEqual([])
+  })
+
+  it("shows what was recorded beside what is live, for a drifted object", () => {
+    const captured = lines()
+    printSection("Drifted", [
+      {
+        kind: "rls_attributes",
+        table: "posts",
+        name: "rls",
+        fields: [],
+        message: "Row-level security on posts was changed outside Supatype",
+        recorded: "enabled=t",
+        live: "enabled=f",
+      },
+    ])
+    const text = captured.join("\n")
+    expect(text).toContain("recorded: enabled=t")
+    expect(text).toContain("live:     enabled=f")
+  })
+})
+
+/** The ledger's categories, one item each, as an engine with the reconcile reports them. */
+const item = (name: string): DoctorReport["missing"][number] => ({
+  kind: "index",
+  table: "posts",
+  name,
+  fields: [],
+  message: `${name} message`,
+})
+
+const empty: DoctorReport = { missing: [], staleManaged: [], unmanagedDrift: [] }
+
+describe("printReport", () => {
+  it("prints the reconcile's categories and counts them in the summary", () => {
+    const captured = lines()
+    printReport({ ...empty, drifted: [item("a")], conflicting: [item("b")], released: [item("c")] })
+    const text = captured.join("\n")
+    expect(text).toContain("Drifted (changed outside Supatype) (1)")
+    expect(text).toContain("Conflicting (a declared name held by someone else) (1)")
+    expect(text).toContain("posts.c")
+    expect(text).toContain("Summary: 1 drifted, 1 conflicting, 1 released")
+  })
+
+  it("reads an older engine's report, which has no ledger categories", () => {
+    const captured = lines()
+    printReport(empty)
+    expect(captured.join("\n")).toContain("No drift detected.")
+  })
+})
+
+describe("hasStrictIssues", () => {
+  it("fails on what a push would change or refuse", () => {
+    expect(hasStrictIssues({ ...empty, drifted: [item("a")] })).toBe(true)
+    expect(hasStrictIssues({ ...empty, conflicting: [item("a")] })).toBe(true)
+    expect(hasStrictIssues({ ...empty, missing: [item("a")] })).toBe(true)
+  })
+
+  it("does not fail on someone else's objects or released ones", () => {
+    expect(hasStrictIssues({ ...empty, unmanagedDrift: [item("a")], released: [item("b")] })).toBe(false)
+  })
+})
+
+describe("rebaselined objects", () => {
+  it("print in their own section, counted in the summary, and never fail --strict", () => {
+    const captured = lines()
+    const report = { ...empty, rebaselined: [item("a")] }
+    printReport(report)
+    const text = captured.join("\n")
+    expect(text).toContain("Rebaselined (recorded as they are now) (1)")
+    expect(text).toContain("Summary: 1 rebaselined")
+    expect(hasStrictIssues(report)).toBe(false)
+  })
+})
+
+describe("hasStrictIssues() with the engine's own answer", () => {
+  it("takes `blocking` when the engine sends it, whatever the lists say", () => {
+    expect(hasStrictIssues({ ...empty, drifted: [item("a")], blocking: false })).toBe(false)
+    expect(hasStrictIssues({ ...empty, blocking: true })).toBe(true)
   })
 })

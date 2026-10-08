@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { loadConfig } from "./config.js"
-import type { DiffResult } from "./engine-client.js"
+import type { AdoptOutcome, DiffResult } from "./engine-client.js"
 import { ensureEngine, engineRequest } from "./engine-client.js"
 import type { SchemaSourcesPayload } from "./schema-sources.js"
 import { resolveHostDatabaseUrl } from "./host-database.js"
@@ -272,7 +272,13 @@ export async function targetSchemaDiff(
 export async function targetSchemaPush(
   target: DeployTarget,
   ast: unknown,
-  opts?: { force?: boolean; schema?: string; schemaSources?: SchemaSourcesPayload | null },
+  opts?: {
+    force?: boolean
+    schema?: string
+    schemaSources?: SchemaSourcesPayload | null
+    /** Put back access changed outside Supatype (plan 3.5); only after consent. */
+    overwriteDrift?: boolean
+  },
 ): Promise<{
   message?: string
   status?: string
@@ -293,6 +299,7 @@ export async function targetSchemaPush(
       database_url: target.databaseUrl!,
       schema: opts?.schema ?? "public",
       force: opts?.force ?? true,
+      overwrite_drift: opts?.overwriteDrift === true,
     }
     if (opts?.schemaSources) {
       body["schema_sources_gz_base64"] = opts.schemaSources.dataBase64
@@ -305,6 +312,7 @@ export async function targetSchemaPush(
     ast,
     force: opts?.force ?? true,
     schema: opts?.schema ?? "public",
+    overwriteDrift: opts?.overwriteDrift === true,
   }
   if (opts?.schemaSources) {
     pushBody["schemaSources"] = {
@@ -388,27 +396,49 @@ export async function targetListMigrations(
   )
 }
 
+/**
+ * Where `doctor` and `adopt` look: the linked environment, else the local dev database, unless
+ * `--direct` or `--connection` asks for the engine subprocess. One answer for both, so `adopt` takes
+ * exactly what `doctor` reported. `dev-compose` is loaded only when the local database is the
+ * answer, as `push` loads it.
+ */
+export async function schemaCommandTarget(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  opts: { connection?: string; env?: string; direct?: boolean },
+): Promise<DeployTarget> {
+  if (opts.direct || opts.connection) {
+    return resolveTarget(cwd, { env: opts.env, direct: true, connection: opts.connection })
+  }
+  if (loadProjectLink(cwd)) return resolveTarget(cwd, { env: opts.env })
+  const { resolveHostEngineDatabaseUrl } = await import("./dev-compose.js")
+  const connection = await resolveHostEngineDatabaseUrl(cwd, config)
+  return resolveTarget(cwd, { direct: true, connection })
+}
+
+/**
+ * `doctor` on a target. With `rebaseline`, the drift it finds is first recorded as the new baseline
+ * (no object changes) and listed as rebaselined.
+ */
 export async function targetSchemaDoctor(
   target: DeployTarget,
   ast: unknown,
-  opts?: { schema?: string },
+  opts?: { schema?: string; rebaseline?: boolean },
 ): Promise<unknown> {
+  const body = {
+    ast,
+    schema: opts?.schema ?? "public",
+    ...(opts?.rebaseline === true && { rebaseline: true }),
+  }
   if (target.mode === "direct" || (target.mode === "local" && !target.token)) {
     await ensureEngine()
-    return engineRequest("/doctor", {
-      ast,
-      database_url: target.databaseUrl!,
-      schema: opts?.schema ?? "public",
-    })
+    return engineRequest("/doctor", { ...body, database_url: target.databaseUrl! })
   }
 
   return targetFetch(
     target.apiBaseUrl,
     target.apiPrefix,
-    apiFetchOpts(target, "POST", projectPath(target, "/schema/doctor"), {
-      ast,
-      schema: opts?.schema ?? "public",
-    }),
+    apiFetchOpts(target, "POST", projectPath(target, "/schema/doctor"), body),
   )
 }
 
@@ -433,32 +463,33 @@ export async function targetSchemaIntrospect(
   )
 }
 
+/**
+ * `adopt` on a target: hand the objects a push refuses to Supatype, take back the ones named in
+ * `release`, and hand back the released ones named in `reclaim` (`kind:table.name`, as doctor names
+ * them). A preview unless `yes`.
+ */
 export async function targetSchemaAdopt(
   target: DeployTarget,
   ast: unknown,
-  opts?: { names?: string[]; schema?: string; yes?: boolean },
-): Promise<unknown> {
+  opts?: { release?: string[]; reclaim?: string[]; schema?: string; yes?: boolean },
+): Promise<AdoptOutcome> {
+  const body = {
+    ast,
+    schema: opts?.schema ?? "public",
+    yes: opts?.yes ?? false,
+    ...(opts?.release !== undefined && opts.release.length > 0 && { release: opts.release }),
+    ...(opts?.reclaim !== undefined && opts.reclaim.length > 0 && { reclaim: opts.reclaim }),
+  }
   if (target.mode === "direct" || (target.mode === "local" && !target.token)) {
     await ensureEngine()
-    return engineRequest("/adopt", {
-      ast,
-      database_url: target.databaseUrl!,
-      schema: opts?.schema ?? "public",
-      names: opts?.names,
-      yes: opts?.yes ?? false,
-    })
+    return engineRequest<AdoptOutcome>("/adopt", { ...body, database_url: target.databaseUrl! })
   }
 
-  return targetFetch(
+  return (await targetFetch(
     target.apiBaseUrl,
     target.apiPrefix,
-    apiFetchOpts(target, "POST", projectPath(target, "/schema/adopt"), {
-      ast,
-      schema: opts?.schema ?? "public",
-      yes: opts?.yes ?? false,
-      ...(opts?.names !== undefined ? { names: opts.names } : {}),
-    }),
-  )
+    apiFetchOpts(target, "POST", projectPath(target, "/schema/adopt"), body),
+  )) as AdoptOutcome
 }
 
 export async function targetStatus(target: DeployTarget): Promise<unknown> {

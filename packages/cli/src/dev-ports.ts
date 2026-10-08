@@ -70,7 +70,15 @@ export async function findNextFreePort(start: number): Promise<number> {
   return port
 }
 
-export function readPersistedKongPort(cwd: string): number | null {
+/**
+ * The Kong port this project is set to: `SUPATYPE_KONG_PORT` in the environment when it is set,
+ * otherwise in `.env`. Docker Compose reads the environment ahead of `.env` and binds that port
+ * whatever `.env` says, so reading `.env` alone had `dev` wait on one port while Kong listened on
+ * another.
+ */
+export function readPersistedKongPort(cwd: string, env: NodeJS.ProcessEnv = process.env): number | null {
+  const fromEnvironment = Number(env["SUPATYPE_KONG_PORT"]?.trim())
+  if (isValidHostPort(fromEnvironment)) return fromEnvironment
   return readEnvInt(cwd, "SUPATYPE_KONG_PORT")
 }
 
@@ -131,7 +139,7 @@ export async function ensureKongPort(
     }
 
     if (!interactive) {
-      fatalError(`Port ${persisted} is already in use (SUPATYPE_KONG_PORT in .env).`, [
+      fatalError(`Port ${persisted} is already in use (SUPATYPE_KONG_PORT).`, [
         "Stop the other service or set a different SUPATYPE_KONG_PORT.",
         "Run `supatype dev` in a terminal to pick a new port interactively.",
       ])

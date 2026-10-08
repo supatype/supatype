@@ -6,8 +6,6 @@ import { fatalError } from "./ui/fatal.js"
 import {
   apiSchemaList,
   externalDatabaseUrl,
-  hooksPathFromProject,
-  preferredFunctionsPathFromProject,
   realtimeEnabled,
   serviceRoleRoutes,
   selfHostTlsEnabled,
@@ -19,6 +17,7 @@ import { buildKongDeclarative } from "./kong-config.js"
 import { keyspaceInPostgres } from "./cache-provider.js"
 import { STUDIO_DEV_PORT } from "./studio-dev-server.js"
 import { readEnvFile } from "./env-file.js"
+import { BUNDLED_DB_USER } from "./local-secrets.js"
 import { fieldMaskingTierFromProject, type FieldMaskingTier } from "./field-masking-tier.js"
 import { projectHasVersionedModels } from "./model-versioning.js"
 
@@ -183,9 +182,20 @@ export function publishesDbToHost(config: SupatypeProjectConfig): boolean {
   return !usesExternalDatabase(config)
 }
 
+/**
+ * The engine image a compose push runs. An image named explicitly wins: `SUPATYPE_ENGINE_IMAGE` in
+ * the environment (as CI and a local engine build set it) or in the project's `.env` (the documented
+ * way to run a local build; the CLI writes it there only from a version pin). Otherwise the pinned
+ * version, or the latest published one. This used to set the variable over whatever was named, so
+ * every push ran the latest published engine whatever image a caller asked for.
+ */
 export async function schemaEngineImageForPush(
   config: SupatypeProjectConfig,
+  cwd: string,
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<string | undefined> {
+  const named = env["SUPATYPE_ENGINE_IMAGE"]?.trim() || readEnvFile(cwd)["SUPATYPE_ENGINE_IMAGE"]?.trim()
+  if (named) return named
   const pinned = pinnedVersion("engine", config)
   if (pinned === VERSION_PIN_LOCAL) return undefined
   if (pinned) return dockerImageRef("engine", pinned)
@@ -994,12 +1004,42 @@ function repairComposeFunctionsFlag(manifestPath: string): void {
   writeFileSync(manifestPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8")
 }
 
-function ensureProjectFunctionsDir(cwd: string, config: SupatypeProjectConfig): void {
-  mkdirSync(preferredFunctionsPathFromProject(config, cwd), { recursive: true })
-  // Both roots must exist before compose mounts the project read-only: a missing directory becomes
-  // a bind mount of a file that is not there, and the worker fails to start rather than serving the
-  // half it does have.
-  mkdirSync(hooksPathFromProject(config, cwd), { recursive: true })
+/**
+ * `POSTGRES_USER`, when the bundled database is in use and it names a role the image cannot run as.
+ *
+ * The image's first start checks the cluster as {@link BUNDLED_DB_USER}, so any other superuser
+ * leaves the db container exiting with "password authentication failed for user supatype_admin",
+ * and `dev` waiting ninety seconds to report only that the database never became healthy. The CLI
+ * writes this value itself, so a hand-written `.env` is how a project gets here (edge-kit's template
+ * did). An external database is the operator's, with whatever user its URL names.
+ *
+ * Read from the shell first, then `.env`, which is the order Compose resolves it in. An empty value
+ * is Compose's `${POSTGRES_USER:-supatype_admin}` default, not a different user.
+ */
+export function unsupportedBundledDbUser(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  if (usesExternalDatabase(config)) return undefined
+  const user = (env["POSTGRES_USER"] ?? readEnvFile(cwd)["POSTGRES_USER"])?.trim()
+  if (user === undefined || user === "" || user === BUNDLED_DB_USER) return undefined
+  return user
+}
+
+function assertBundledDbUser(cwd: string, config: SupatypeProjectConfig): void {
+  const user = unsupportedBundledDbUser(cwd, config)
+  if (user === undefined) return
+  fatalError(
+    `POSTGRES_USER is "${user}", and the bundled Postgres runs as ${BUNDLED_DB_USER}`,
+    [
+      `The database image checks the cluster as ${BUNDLED_DB_USER} on first start, so with any other`,
+      "user the db container exits before the stack can start.",
+      `Set POSTGRES_USER=${BUNDLED_DB_USER} in .env, and the same user in DATABASE_URL.`,
+      "To use a Postgres you run yourself, with its own user, set database.external.url instead.",
+    ],
+    { brand: { intro: "Self-host compose" } },
+  )
 }
 
 /**
@@ -1129,6 +1169,7 @@ export function writeSelfHostCompose(
   options?: SelfHostComposeOptions,
 ): SelfHostComposePaths {
   assertExternalUrlMatchesEnv(cwd, config)
+  assertBundledDbUser(cwd, config)
   const tier = resolveFieldMaskingTier(cwd, config, options)
   const resolved: SelfHostComposeOptions = {
     ...options,
@@ -1138,7 +1179,9 @@ export function writeSelfHostCompose(
   assertExternalUrlReachableFromContainers(config)
   const paths = selfHostComposePaths(cwd)
   mkdirSync(paths.dir, { recursive: true })
-  ensureProjectFunctionsDir(cwd, config)
+  // No functions/ or hooks/ here: the worker mounts the whole project and treats a missing root as
+  // nothing to serve, while an empty functions/ made `dev` scaffold function types into projects
+  // that have no functions. `functions new` and `init` create it when there is one.
   ensureComposeManifest(cwd, config)
   writeFileSync(paths.composePath, renderSelfHostCompose(config, cwd, resolved), "utf8")
   writeFileSync(paths.s3ConfigPath, renderSeaweedIdentities(), "utf8")
