@@ -83,6 +83,7 @@ import { publishDevReady } from "./dev-ready-panel.js"
 import { exitInitialPushFailed, pushInitialSchema, type InitialPushSteps } from "./dev-initial-push.js"
 import { offerAdoption, unmanagedTables, type AdoptionSteps } from "./adopt-walkthrough.js"
 import { resetDevDatabase } from "./dev-db-reset.js"
+import { waitForDatabaseAfterUp } from "./dev-db-ready.js"
 import { hostComposeDbUrl, resolveHostDatabaseUrl } from "./host-database.js"
 
 /** Sync optional Docker image pins from config into `.env` (no JWT rotation). */
@@ -1346,7 +1347,12 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   // system is starting up" while the panel said the stack was running. Wait for it again: on a db
   // that was left alone this returns at once.
   if (!usesExternalDatabase(config)) {
-    await waitComposeHealthy(paths, cwd, 180_000, project)
+    await waitForDatabaseAfterUp({
+      waitHealthy: () => waitComposeHealthy(paths, cwd, 180_000, project),
+      dumpLogs: (reason) => dumpComposeDbLogs(paths, cwd, project, reason),
+      onFailure: endDevSession,
+      brand: devBrand,
+    })
   }
 
   console.log("[supatype] Waiting for API gateway...")
