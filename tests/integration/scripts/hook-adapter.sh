@@ -131,23 +131,34 @@ createServer((req, res) => {
 STUB
 
 # Credential probes: identical handlers in three positions, a plain public function, a public
-# function named in `serviceRole`, and a hook that is named nowhere.
+# function named in `serviceRole`, and a hook that is named nowhere. Each reports the key its
+# context carries and what `Deno.env` holds: the worker hands the key to a granted route as the
+# handler's second argument and withholds it from the environment for every route.
 mkdir -p "$WORK/functions/peek-key" "$WORK/functions/granted-fn" "$WORK/hooks/privileged"
 cat > "$WORK/functions/granted-fn/index.ts" <<'TS'
-export default (): Response =>
-  new Response(JSON.stringify({ key: Deno.env.get("SUPATYPE_SERVICE_ROLE_KEY") ?? null }), {
+export default (_req: Request, ctx?: { serviceRoleKey?: string }): Response =>
+  new Response(JSON.stringify({
+    key: ctx?.serviceRoleKey ?? null,
+    env: Deno.env.get("SUPATYPE_SERVICE_ROLE_KEY") ?? null,
+  }), {
     headers: { "Content-Type": "application/json" },
   })
 TS
 cat > "$WORK/functions/peek-key/index.ts" <<'TS'
-export default (): Response =>
-  new Response(JSON.stringify({ key: Deno.env.get("SUPATYPE_SERVICE_ROLE_KEY") ?? null }), {
+export default (_req: Request, ctx?: { serviceRoleKey?: string }): Response =>
+  new Response(JSON.stringify({
+    key: ctx?.serviceRoleKey ?? null,
+    env: Deno.env.get("SUPATYPE_SERVICE_ROLE_KEY") ?? null,
+  }), {
     headers: { "Content-Type": "application/json" },
   })
 TS
 cat > "$WORK/hooks/privileged/index.ts" <<'TS'
-export default (): Response =>
-  new Response(JSON.stringify({ key: Deno.env.get("SUPATYPE_SERVICE_ROLE_KEY") ?? null }), {
+export default (_req: Request, ctx?: { serviceRoleKey?: string }): Response =>
+  new Response(JSON.stringify({
+    key: ctx?.serviceRoleKey ?? null,
+    env: Deno.env.get("SUPATYPE_SERVICE_ROLE_KEY") ?? null,
+  }), {
     headers: { "Content-Type": "application/json" },
   })
 TS
@@ -178,7 +189,11 @@ export default (): Response =>
   })
 TS
 
-cp "$REPO_ROOT/packages/functions-worker/main.ts" "$WORK/worker-main.ts"
+# Every module, not only main.ts: main.ts imports its siblings (`./invocation.ts`), and staging it
+# alone had the worker exit at once with "Module not found", which the script reported as a worker
+# that did not start. The image's Dockerfile copies `*.ts` for the same reason.
+cp "$REPO_ROOT"/packages/functions-worker/*.ts "$WORK/"
+mv "$WORK/main.ts" "$WORK/worker-main.ts"
 
 STUB_LOG="$WORK/stub.log"
 : > "$STUB_LOG"
@@ -298,23 +313,32 @@ echo "$IMPORT_PEEK" | grep -q '"stolenAtImport":null' \
   || fail "a handler captured the key at import time: $IMPORT_PEEK"
 echo "  ✓ a handler cannot capture it at import time"
 
+# Granted or not, no route finds the key in the process environment.
+not_in_env() {
+  echo "$1" | grep -q '"env":null' || fail "the service-role key was readable from Deno.env: $1"
+}
+
 PUBLIC_PEEK="$(peeked peek-key)"
 echo "$PUBLIC_PEEK" | grep -q '"key":null'   || fail "a public function could read the service-role key: $PUBLIC_PEEK"
+not_in_env "$PUBLIC_PEEK"
 echo "  ✓ a public function cannot see the service-role key"
 
 GRANTED_FN="$(peeked granted-fn)"
-echo "$GRANTED_FN" | grep -q "super-secret-admin-key"   || fail "a public function named in serviceRole did not receive the key: $GRANTED_FN"
-echo "  ✓ a public function named in serviceRole receives it"
+echo "$GRANTED_FN" | grep -q '"key":"super-secret-admin-key"'   || fail "a public function named in serviceRole did not receive the key: $GRANTED_FN"
+not_in_env "$GRANTED_FN"
+echo "  ✓ a public function named in serviceRole receives it, in its context only"
 
 # Named nowhere, and still granted: a hook is procedural and unreachable from outside, so listing
 # every one would be friction with no attacker to stop, the same trust a trigger already has.
 HOOK_PEEK="$(peeked hooks/privileged)"
-echo "$HOOK_PEEK" | grep -q "super-secret-admin-key"   || fail "a hook did not receive the key it gets by default: $HOOK_PEEK"
-echo "  ✓ a hook receives it without being listed"
+echo "$HOOK_PEEK" | grep -q '"key":"super-secret-admin-key"'   || fail "a hook did not receive the key it gets by default: $HOOK_PEEK"
+not_in_env "$HOOK_PEEK"
+echo "  ✓ a hook receives it without being listed, in its context only"
 
 # And it does not leak from that invocation into the next one.
 PUBLIC_AGAIN="$(peeked peek-key)"
 echo "$PUBLIC_AGAIN" | grep -q '"key":null'   || fail "the key leaked from a granted call into a later one: $PUBLIC_AGAIN"
+not_in_env "$PUBLIC_AGAIN"
 echo "  ✓ and it does not persist into the next call"
 
 # ── The chain depth survives a handler that knows nothing about it ────────────
@@ -421,7 +445,7 @@ logs3 | grep -qE "[0-9]+ handler\(s\)" \
 # And it answers on the namespaced route, which is the only one the API server calls.
 HOOK_ONLY="$(curl -s -X POST "http://localhost:${PORT3}/hooks/privileged" \
   -H "content-type: application/json" -d '{}')"
-echo "$HOOK_ONLY" | grep -q "super-secret-admin-key" \
+echo "$HOOK_ONLY" | grep -q '"key":"super-secret-admin-key"' \
   || fail "a per-hook worker did not serve its hook: $HOOK_ONLY"
 echo "  ✓ a worker pinned to one hook serves it with no functions root"
 
@@ -466,7 +490,7 @@ logs4 | grep -qE "[0-9]+ handler\(s\)" \
   || fail "a worker pinned to a hook refused to start beside a functions root: $(logs4 | tail -3)"
 BOTH_ROOTS="$(curl -s -X POST "http://localhost:${PORT4}/hooks/privileged" \
   -H "content-type: application/json" -d '{}')"
-echo "$BOTH_ROOTS" | grep -q "super-secret-admin-key" \
+echo "$BOTH_ROOTS" | grep -q '"key":"super-secret-admin-key"' \
   || fail "a pinned hook was not served beside a functions root: $BOTH_ROOTS"
 echo "  ✓ and the pin is honoured across both roots, not per root"
 
