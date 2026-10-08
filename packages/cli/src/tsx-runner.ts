@@ -88,7 +88,9 @@ export function evalTsSnippet(
   // The subprocess CWD is kept as opts.cwd (the user's project dir) so that
   // any relative paths in the snippet resolve correctly.
   const tmpFile = resolve(CLI_SRC_DIR, evalTempFileName())
-  writeFileSync(tmpFile, snippet, "utf8")
+  // This user's only, and never written through a name that already exists: a snippet can carry a
+  // project's config or connection string.
+  writeFileSync(tmpFile, snippet, { encoding: "utf8", mode: 0o600, flag: "wx" })
   try {
     return runTsFile(tmpFile, opts)
   } finally {

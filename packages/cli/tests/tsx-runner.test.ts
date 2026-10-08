@@ -42,6 +42,17 @@ describe("tsx-runner", () => {
       expect(result.exitCode).not.toBe(0)
     })
 
+    // The snippet file sits beside the CLI's source while it runs, and can carry a project's
+    // config or connection string.
+    it.skipIf(process.platform === "win32")("writes the snippet readable by this user only", () => {
+      const result = evalTsSnippet(
+        `import { statSync } from "node:fs"\n` +
+          `process.stdout.write((statSync(new URL(import.meta.url)).mode & 0o777).toString(8))`,
+      )
+      expect(result.exitCode).toBe(0)
+      expect(result.stdout).toBe("600")
+    })
+
     it("captures stderr separately from stdout", () => {
       const result = evalTsSnippet(
         `process.stderr.write("err")\nprocess.stdout.write("out")`,

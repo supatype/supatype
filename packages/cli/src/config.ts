@@ -241,7 +241,9 @@ function loadTsConfigWithoutCliImport(
 
   const tmpPath = join(tmpdir(), `supatype-config-fallback-${uniqueFileToken()}.mts`)
   const wrapper = `const defineConfig = (config) => config\n${patched}`
-  writeFileSync(tmpPath, wrapper, "utf8")
+  // The config can hold credentials, and the system temp directory is shared: this user's only,
+  // and never written through a name that already exists.
+  writeFileSync(tmpPath, wrapper, { encoding: "utf8", mode: 0o600, flag: "wx" })
   try {
     const urlPath = "file:///" + tmpPath.replace(/\\/g, "/")
     const result = importModuleAsJson(urlPath, { cwd, env: configLoadEnv(cwd) })
