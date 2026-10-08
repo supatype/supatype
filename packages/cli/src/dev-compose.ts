@@ -88,6 +88,7 @@ import {
   type AdoptionSteps,
 } from "./adopt-walkthrough.js"
 import { resetDevDatabase } from "./dev-db-reset.js"
+import { requireEngineForOwnershipFlag } from "./engine-ownership-gate.js"
 import { hostComposeDbUrl, resolveHostDatabaseUrl } from "./host-database.js"
 
 /** Sync optional Docker image pins from config into `.env` (no JWT rotation). */
@@ -1016,11 +1017,15 @@ async function runComposeEngineDiff(
 
 /** Adoption against a docker project's own database, for the push walkthrough. */
 export function dockerAdoptionSteps(cwd: string, config: SupatypeProjectConfig): AdoptionSteps {
-  return targetAdoptionSteps((yes) => adoptSchemaDocker(cwd, config, yes))
+  return targetAdoptionSteps(
+    (yes, keys) => adoptSchemaDocker(cwd, config, yes, keys),
+    () => requireEngineForOwnershipFlag("adopt", config),
+  )
 }
 
 /**
- * Adopt on a docker project's own database: the preview, or with `yes`, the ledger rows written.
+ * Adopt on a docker project's own database: the preview, or with `yes`, the ledger rows written,
+ * for only the conflicts `keys` names when it is given (as a preview listed them).
  *
  * Through the compose schema-engine, or the local engine binary when `overrides.engine` is set,
  * the same way `diffSchemaDocker` reaches the database. The stack's database must be running,
@@ -1030,6 +1035,7 @@ export async function adoptSchemaDocker(
   cwd: string,
   config: SupatypeProjectConfig,
   yes: boolean,
+  keys?: string[],
 ): Promise<AdoptOutcome> {
   const project = composeProjectName(config.project.name)
   if (hasEngineOverride(config)) {
@@ -1040,10 +1046,12 @@ export async function adoptSchemaDocker(
       database_url: projectDatabaseUrl(cwd, config),
       schema: config.schema?.pg_schema ?? "public",
       yes,
+      ...(keys !== undefined && { keys }),
     })
   }
   const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
-  const result = await runComposeEngineCommand(paths, cwd, project, config, yes ? ["adopt", "--yes"] : ["adopt"])
+  const command = yes ? ["adopt", "--yes", ...(keys ?? []).flatMap((k) => ["--key", k])] : ["adopt"]
+  const result = await runComposeEngineCommand(paths, cwd, project, config, command)
   const parsed = adoptResultFrom(result)
   if (parsed === null) {
     throw new Error(filterComposeNoise(result.output) || `Engine adopt failed (exit ${result.status})`)
