@@ -1,9 +1,9 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { mkdtempSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { seedMissingDatabaseIdentity, seedMissingLocalSecrets } from "../src/local-secrets.js"
-import { unsupportedBundledDbUser } from "../src/self-host-compose.js"
+import { unsupportedBundledDbUser, writeSelfHostCompose } from "../src/self-host-compose.js"
 import { validateProjectConfig, type SupatypeProjectConfig } from "../src/project-config.js"
 
 /**
@@ -55,6 +55,42 @@ describe("a POSTGRES_USER the bundled database cannot run as", () => {
 
   it("does not apply to an external database, whose URL names its own user", () => {
     expect(unsupportedBundledDbUser(project("POSTGRES_USER=owner\n"), external(), {})).toBeUndefined()
+  })
+})
+
+// Earlier CLIs did not check this, so a stack can already exist on another user. The refusal has
+// to say how to get from there to here, not only what the value should be.
+describe("refusing a POSTGRES_USER the bundled database cannot run as", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("stops before compose is written, and says how to migrate an existing stack", () => {
+    const printed: string[] = []
+    const capture = (...args: unknown[]) => {
+      printed.push(args.map(String).join(" "))
+    }
+    vi.spyOn(console, "log").mockImplementation(capture)
+    vi.spyOn(console, "error").mockImplementation(capture)
+    vi.spyOn(console, "warn").mockImplementation(capture)
+    vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`exit ${code}`)
+    }) as typeof process.exit)
+    const previous = process.env["POSTGRES_USER"]
+    delete process.env["POSTGRES_USER"]
+    try {
+      expect(() => writeSelfHostCompose(project("POSTGRES_USER=postgres\n"), bundled())).toThrow(
+        "exit 1",
+      )
+    } finally {
+      if (previous !== undefined) process.env["POSTGRES_USER"] = previous
+    }
+
+    const out = printed.join("\n")
+    expect(out).toContain('POSTGRES_USER is "postgres"')
+    expect(out).toContain("POSTGRES_USER=supatype_admin")
+    expect(out).toContain("CREATE ROLE supatype_admin")
+    expect(out).toContain("supatype dev --reset-db")
   })
 })
 
