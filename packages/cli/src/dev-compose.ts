@@ -730,12 +730,19 @@ async function refreshSchemaArtifacts(
   }
 }
 
+/** How one push treats what needs a person's say. */
+export interface ComposePushOptions {
+  /** `--overwrite-drift`: put back access changed outside Supatype (plan 3.5). */
+  overwriteDrift?: boolean
+}
+
 async function runComposeSchemaPush(
   cwd: string,
   config: SupatypeProjectConfig,
   paths: SelfHostComposePaths,
   schemaPath: string,
   composeProject: string,
+  opts: ComposePushOptions = {},
 ): Promise<void> {
   const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
   const astJson = JSON.stringify(ast)
@@ -766,6 +773,7 @@ async function runComposeSchemaPush(
         database_url: projectDatabaseUrl(cwd, config),
         schema: pgSchema,
         force: true,
+        ...(opts.overwriteDrift === true && { overwrite_drift: true }),
         ...(sources
           ? {
               schema_sources_gz_base64: sources.payload.dataBase64,
@@ -790,11 +798,11 @@ async function runComposeSchemaPush(
   console.log("[supatype] Applying schema via compose schema-engine...")
   const sources = writeSchemaSourcePushArtifacts(cwd)
   const runPush = async () => {
-    let result = await runComposeEnginePush(paths, cwd, composeProject, config, sources)
+    let result = await runComposeEnginePush(paths, cwd, composeProject, config, sources, opts)
     // Windows Docker bind mounts can lag briefly after the host write.
     if (result.status !== 0) {
       await new Promise((r) => setTimeout(r, 250))
-      result = await runComposeEnginePush(paths, cwd, composeProject, config, sources)
+      result = await runComposeEnginePush(paths, cwd, composeProject, config, sources, opts)
     }
     return result
   }
@@ -845,6 +853,7 @@ async function runComposeEnginePush(
   composeProject: string,
   config: SupatypeProjectConfig,
   sources?: SchemaSourcePushArtifacts | null,
+  opts: ComposePushOptions = {},
 ): Promise<{ status: number; output: string }> {
   const envFile = resolve(cwd, ".env")
   const composeArgs = ["compose", "--progress", "quiet"]
@@ -860,22 +869,8 @@ async function runComposeEnginePush(
     "run",
     "--rm",
     "schema-engine",
-    "push",
-    "-i",
-    "/project/.supatype/schema.ast.json",
-    "--database-url",
-    projectDatabaseUrl(cwd, config, true),
-    "--force",
-    "--non-interactive",
+    ...composeEnginePushArgs(projectDatabaseUrl(cwd, config, true), sources, opts),
   )
-  if (sources) {
-    composeArgs.push(
-      "--schema-sources-gz",
-      sources.dockerGzPath,
-      "--schema-sources-manifest",
-      sources.dockerManifestPath,
-    )
-  }
   const pushEnv: NodeJS.ProcessEnv = {
     ...process.env,
     COMPOSE_PROGRESS: "quiet",
@@ -904,6 +899,34 @@ async function runComposeEnginePush(
   }
 
   return { status: exitStatus, output }
+}
+
+/** The compose schema-engine's `push` arguments, after the service name. Exported for its tests. */
+export function composeEnginePushArgs(
+  databaseUrl: string,
+  sources: SchemaSourcePushArtifacts | null | undefined,
+  opts: ComposePushOptions = {},
+): string[] {
+  const args = [
+    "push",
+    "-i",
+    "/project/.supatype/schema.ast.json",
+    "--database-url",
+    databaseUrl,
+    "--force",
+    "--non-interactive",
+  ]
+  // Only when asked: an engine older than the ledger rejects the flag.
+  if (opts.overwriteDrift === true) args.push("--overwrite-drift")
+  if (sources) {
+    args.push(
+      "--schema-sources-gz",
+      sources.dockerGzPath,
+      "--schema-sources-manifest",
+      sources.dockerManifestPath,
+    )
+  }
+  return args
 }
 
 /**
@@ -1108,7 +1131,11 @@ export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfi
  * `overrides.engine` is set: then Postgres is published to the host and push runs
  * through the local engine binary (AST v2, contributor builds).
  */
-export async function pushSchemaDocker(cwd: string, config: SupatypeProjectConfig): Promise<void> {
+export async function pushSchemaDocker(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  opts: ComposePushOptions = {},
+): Promise<void> {
   if (resolveRuntimeProvider(config) !== "docker") {
     throw new Error("pushSchemaDocker requires provider: docker")
   }
@@ -1136,7 +1163,7 @@ export async function pushSchemaDocker(cwd: string, config: SupatypeProjectConfi
 
   const schemaPath = schemaPathFromProject(config, cwd)
   const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
-  await runComposeSchemaPush(cwd, config, paths, schemaPath, project)
+  await runComposeSchemaPush(cwd, config, paths, schemaPath, project, opts)
 
   const upGateway = runDockerCompose(paths.composePath, ["up", "-d"], cwd, project, {
     quiet: true,
