@@ -120,4 +120,11 @@ describe("supatype doctor --rebaseline", () => {
     expect(process.exitCode).toBeUndefined()
     expect(requests()).toEqual([{ rebaseline: false, overwriteDrift: false }])
   })
+  it("says why access drift alone was not recorded, and how it would be", async () => {
+    targetSchemaDoctor.mockResolvedValue({ missing: [], staleManaged: [], unmanagedDrift: [], drifted: [POLICY] })
+    const out = await doctor("--rebaseline", "--yes")
+    expect(out).toContain("pass --overwrite-drift to record these too")
+    expect(out).toContain("Nothing to rebaseline")
+    expect(requests()).toEqual([{ rebaseline: false, overwriteDrift: false }])
+  })
 })
