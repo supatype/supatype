@@ -27,11 +27,11 @@ export const FALLBACK_POSTGRES_PASSWORD = "postgres"
 /** Fallback password for the role PostgREST connects as. */
 export const FALLBACK_AUTHENTICATOR_PASSWORD = "authenticator-local"
 
-/** Fallback owner of the local database, matching the compose file's `${POSTGRES_USER:-…}`. */
-export const FALLBACK_POSTGRES_USER = "supatype_admin"
-
-/** Fallback name of the local database, matching the compose file's `${POSTGRES_DB:-…}`. */
-export const FALLBACK_POSTGRES_DB = "supatype"
+/**
+ * The superuser the bundled Postgres image runs as. Its first start checks the cluster as this
+ * role, so it is not a choice the project gets to make, and not a value read from `.env`.
+ */
+export const BUNDLED_DB_USER = "supatype_admin"
 
 /** The secret the local stack signs and validates tokens with. */
 export function devJwtSecret(cwd: string): string {
@@ -92,8 +92,8 @@ export function seedMissingLocalSecrets(cwd: string): Record<string, string> {
  */
 export function seedMissingDatabaseIdentity(cwd: string): Record<string, string> {
   const out: Record<string, string> = {}
-  if (!hasEnvValue(cwd, "POSTGRES_USER")) out.POSTGRES_USER = FALLBACK_POSTGRES_USER
-  if (!hasEnvValue(cwd, "POSTGRES_DB")) out.POSTGRES_DB = FALLBACK_POSTGRES_DB
+  if (!hasEnvValue(cwd, "POSTGRES_USER")) out.POSTGRES_USER = "supatype_admin"
+  if (!hasEnvValue(cwd, "POSTGRES_DB")) out.POSTGRES_DB = "supatype"
   return out
 }
 
@@ -105,16 +105,19 @@ export interface DevDatabaseIdentity {
 }
 
 /**
- * The local database's owner, password and name, read from `.env`.
+ * The local database's owner, password and name.
+ *
+ * The password and database name are the project's own, read from `.env`. The user is always
+ * {@link BUNDLED_DB_USER}: the bundled image runs as that role whatever `.env` says.
  *
  * Every `psql` the CLI runs in the `db` container and every connection string it writes comes
  * through here, so a project's own credentials cannot be read by one path and assumed by another.
  */
 export function devDatabaseIdentity(cwd: string): DevDatabaseIdentity {
   return {
-    user: readEnvValue(cwd, "POSTGRES_USER", FALLBACK_POSTGRES_USER),
+    user: BUNDLED_DB_USER,
     password: devPostgresPassword(cwd),
-    database: readEnvValue(cwd, "POSTGRES_DB", FALLBACK_POSTGRES_DB),
+    database: readEnvValue(cwd, "POSTGRES_DB", "supatype"),
   }
 }
 

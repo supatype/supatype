@@ -1,5 +1,5 @@
 /**
- * Role fixes applied inside the project's `db` container on every start, as the database owner.
+ * Role fixes applied inside the project's `db` container on every start, as the bundled superuser.
  */
 
 import { dirname } from "node:path"
@@ -23,7 +23,8 @@ const GRANT_AUTH_SCHEMA_SQL = [
 ].join("\n")
 
 /**
- * Run `sql` through `psql` in the `db` container, as the project's owner, against its database.
+ * Run `sql` through `psql` in the `db` container, as the bundled superuser, against the project's
+ * database.
  *
  * `env` is passed into the container rather than onto the command line, so a script can read a
  * secret with `\getenv` and it never appears in a process listing.

@@ -49,7 +49,7 @@ describe("dev-ports", () => {
     writeFileSync(
       join(dir, ".env"),
       [
-        "POSTGRES_USER=ks_owner",
+        "POSTGRES_USER=supatype_admin",
         "POSTGRES_PASSWORD=ks-own-password",
         "POSTGRES_DB=kitchen-sink",
         "SUPATYPE_DEV_DB_PORT=54329",
@@ -64,7 +64,7 @@ describe("dev-ports", () => {
     const env = readFileSync(join(dir, ".env"), "utf8")
     expect(env).toMatch(/^SUPATYPE_DEV_DB_PORT=54330$/m)
     expect(env).toMatch(
-      /^DATABASE_URL=postgresql:\/\/ks_owner:ks-own-password@127\.0\.0\.1:54330\/kitchen-sink\?sslmode=disable$/m,
+      /^DATABASE_URL=postgresql:\/\/supatype_admin:ks-own-password@127\.0\.0\.1:54330\/kitchen-sink\?sslmode=disable$/m,
     )
   })
 })

@@ -6,7 +6,7 @@ import type { SpawnSyncReturns } from "node:child_process"
 
 /**
  * Both role fixes run `psql` inside the project's `db` container, so both have to log in as the
- * project's own owner, to the project's own database.
+ * bundled superuser, with the project's own password, to the project's own database.
  *
  * The auth grant did not. It hardcoded `postgres` / `supatype`, which is only right for a project
  * that never set its own, so on the kitchen sink (`POSTGRES_DB=kitchen-sink` and its own password)
@@ -28,7 +28,7 @@ const { grantAuthSchemaAccess, reconcileAuthenticatorPassword } = await import(
 )
 
 const PROJECT_ENV = [
-  "POSTGRES_USER=ks_owner",
+  "POSTGRES_USER=supatype_admin",
   "POSTGRES_PASSWORD=ks-own-password",
   "POSTGRES_DB=kitchen-sink",
   "AUTHENTICATOR_PASSWORD=ks-authenticator",
@@ -78,11 +78,11 @@ describe.each([
   ["grantAuthSchemaAccess", grantAuthSchemaAccess],
   ["reconcileAuthenticatorPassword", reconcileAuthenticatorPassword],
 ] as const)("%s", (_name, run) => {
-  it("logs in as the project's owner, to the project's database, with its password", () => {
+  it("logs in as the bundled superuser, to the project's database, with its password", () => {
     run(paths(), cwd, "supatype-kitchen-sink")
     const { args } = psqlCall()
 
-    expect(after(args, "-U")).toBe("ks_owner")
+    expect(after(args, "-U")).toBe("supatype_admin")
     expect(after(args, "-d")).toBe("kitchen-sink")
     expect(args).toContain("PGPASSWORD=ks-own-password")
     expect(args).not.toContain("PGPASSWORD=postgres")

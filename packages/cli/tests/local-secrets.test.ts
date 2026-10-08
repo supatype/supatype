@@ -7,6 +7,8 @@ import {
   FALLBACK_JWT_SECRET,
   FALLBACK_POSTGRES_PASSWORD,
   devAuthenticatorPassword,
+  devDatabaseIdentity,
+  devDatabaseUrl,
   devJwtSecret,
   devPostgresPassword,
   secretFingerprint,
@@ -88,5 +90,29 @@ describe("secretFingerprint", () => {
   it("is stable and distinguishes secrets", () => {
     expect(secretFingerprint("a")).toBe(secretFingerprint("a"))
     expect(secretFingerprint("a")).not.toBe(secretFingerprint("b"))
+  })
+})
+
+describe("devDatabaseIdentity", () => {
+  it("is the project's password and database, as the bundled superuser", () => {
+    const dir = project("POSTGRES_PASSWORD=pg-mine\nPOSTGRES_DB=shop\n")
+    expect(devDatabaseIdentity(dir)).toEqual({
+      user: "supatype_admin",
+      password: "pg-mine",
+      database: "shop",
+    })
+    expect(devDatabaseUrl(dir, "db:5432")).toBe(
+      "postgresql://supatype_admin:pg-mine@db:5432/shop?sslmode=disable",
+    )
+  })
+
+  // The bundled image runs as supatype_admin whatever `.env` says, so a different POSTGRES_USER
+  // is not a login the CLI can use. Reading it would point every psql at a role that is not there.
+  it("does not take the user from .env", () => {
+    expect(devDatabaseIdentity(project("POSTGRES_USER=postgres\n")).user).toBe("supatype_admin")
+  })
+
+  it("falls back to the compose file's database name", () => {
+    expect(devDatabaseIdentity(project()).database).toBe("supatype")
   })
 })
