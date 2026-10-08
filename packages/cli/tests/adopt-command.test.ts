@@ -49,9 +49,11 @@ describe("supatype adopt", () => {
   })
 
   it("exits 1 without adopting when it cannot ask and was not given --yes", async () => {
+    const stdout = vi.mocked(console.log)
     await adopt()
     expect(process.exitCode).toBe(1)
-    expect(stderr.mock.calls.flat().join(" ")).toContain("adopt needs --yes when not interactive")
+    // In a terminal an error is printed with the rest of the flow, on stdout.
+    expect([...stdout.mock.calls, ...stderr.mock.calls].flat().join(" ")).toContain("adopt needs --yes when not interactive")
     expect(targetSchemaAdopt.mock.calls.map((call) => call[2].yes)).toEqual([false])
   })
 
@@ -115,9 +117,11 @@ describe("supatype adopt", () => {
           "the database changed since the preview. Nothing was written",
       )
     })
+    const stdout = vi.mocked(console.log)
     await adopt()
     expect(process.exitCode).toBe(1)
-    expect(stderr.mock.calls.flat().join(" ")).toContain(
+    // In a terminal an error is printed with the rest of the flow, on stdout.
+    expect([...stdout.mock.calls, ...stderr.mock.calls].flat().join(" ")).toContain(
       "The database changed since the preview; run `supatype adopt` again.",
     )
   })
