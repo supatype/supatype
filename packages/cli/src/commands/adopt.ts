@@ -4,6 +4,7 @@ import { pgSchema, schemaPathFromProject } from "../project-config.js"
 import { schemaCommandTarget, targetSchemaAdopt } from "../resolve-target.js"
 import {
   adoptedCount,
+  adoptionKey,
   adoptionLines,
   isStalePreview,
   previewedKeys,
@@ -23,6 +24,7 @@ interface AdoptOptions {
   yes?: boolean
   cache?: boolean
   release?: string[]
+  key?: string[]
 }
 
 /** What a preview says adopt will do, one line per object: handed over, then taken back. */
@@ -43,6 +45,11 @@ export function registerAdopt(program: Command): void {
       "--release <object...>",
       "Leave an object alone on every push, named as doctor names it: kind:table.name, or kind:name for a table",
     )
+    .option(
+      "--key <object...>",
+      "Adopt only these conflicts, named as doctor names them (kind:table.name, or kind:name for a table); " +
+        "if one is no longer a conflict nothing is written",
+    )
     .option("--yes", "Adopt without asking")
   addRetiredNoCacheOption(command).action(adopt)
 }
@@ -52,6 +59,7 @@ async function adopt(opts: AdoptOptions): Promise<void> {
   const cwd = process.cwd()
   const config = loadConfig(cwd)
   if (opts.release !== undefined) await requireEngineForOwnershipFlag("--release", config)
+  if (opts.key !== undefined) await requireEngineForOwnershipFlag("--key", config)
   const ast = await withSpinner("Loading schema", async () =>
     loadSchemaAst(schemaPathFromProject(config, cwd), cwd),
   )
@@ -63,20 +71,22 @@ async function adopt(opts: AdoptOptions): Promise<void> {
       ...(opts.release !== undefined && { release: opts.release }),
       ...(keys !== undefined && { keys }),
     })
-  // `--yes` already agreed, so one engine call does it and its outcome says what it took. No
-  // preview was shown, so it names no keys: it adopts the conflicts found as it runs.
+  // `--yes` already agreed, so one engine call does it and its outcome says what it took: with
+  // `--key` only those objects, and without, every conflict found as it runs.
   if (opts.yes) {
-    const outcome = await run(true)
+    const outcome = await applying(() => run(true, opts.key))
+    if (outcome === undefined) return
     for (const line of previewLines(outcome)) plain(`  ${line}`)
     report(outcome)
     return
   }
-  const preview = await run(false)
-  if (!show(previewLines(preview))) return
-  // What was just shown is what is agreed to: applying names those conflicts, and the engine writes
-  // nothing if the database has changed since. An engine from before the ledger names none.
-  const keys = previewedKeys(preview)
-  if (keys !== undefined) await requireEngineForOwnershipFlag("adopt", config)
+  const preview = keyedOnly(await run(false), opts.key)
+  if (!show(previewLines(preview), opts.key !== undefined)) return
+  // `--key` names what to adopt. Otherwise what was just shown is what is agreed to: applying names
+  // those conflicts, and the engine writes nothing if the database has changed since. An engine
+  // from before the ledger names none.
+  const keys = opts.key ?? previewedKeys(preview)
+  if (opts.key === undefined && keys !== undefined) await requireEngineForOwnershipFlag("adopt", config)
   const consent = await askConsent("Go ahead?", false)
   if (consent === "needs-yes") {
     // Not a decline: a pipeline that forgot --yes adopted nothing, and must not pass as if it had.
@@ -88,21 +98,31 @@ async function adopt(opts: AdoptOptions): Promise<void> {
     plain("Adoption cancelled.")
     return
   }
-  let outcome: AdoptOutcome
+  const outcome = await applying(() => run(true, keys))
+  if (outcome !== undefined) report(outcome)
+}
+
+/**
+ * The outcome of applying, or undefined, having said so and set exit 1, when the engine refused
+ * because an object it was to adopt is no longer a conflict.
+ */
+async function applying(apply: () => Promise<AdoptOutcome>): Promise<AdoptOutcome | undefined> {
   try {
-    outcome = await run(true, keys)
+    return await apply()
   } catch (err: unknown) {
     if (!isStalePreview(err)) throw err
     error(STALE_PREVIEW_MESSAGE)
     process.exitCode = 1
-    return
+    return undefined
   }
-  report(outcome)
 }
 
-/** Prints what adopt will do, or says there is nothing; whether there was anything. */
-function show(lines: readonly string[]): boolean {
-  if (lines.length === 0) {
+/**
+ * Prints what adopt will do, or says there is nothing; whether to go on. With `--key` it goes on
+ * regardless: the engine says if a named object is not a conflict.
+ */
+function show(lines: readonly string[], keyed: boolean): boolean {
+  if (lines.length === 0 && !keyed) {
     info("Nothing to adopt: every object the schema declares is Supatype's or absent.")
     return false
   }
@@ -113,4 +133,10 @@ function show(lines: readonly string[]): boolean {
 
 function report(outcome: AdoptOutcome): void {
   info(`Adopted ${adoptedCount(outcome)} object(s), released ${outcome.release?.length ?? 0}.`)
+}
+
+/** The preview with only the conflicts `keys` names, when it names any. */
+export function keyedOnly(outcome: AdoptOutcome, keys: readonly string[] | undefined): AdoptOutcome {
+  if (keys === undefined || outcome.adopt === undefined) return outcome
+  return { ...outcome, adopt: outcome.adopt.filter((item) => keys.includes(adoptionKey(item))) }
 }
