@@ -485,6 +485,10 @@ export function MigrationHistory(): React.ReactElement {
 
   // Inline expanded row id
   const [expandedId, setExpandedId] = useState<number | null>(linkedId)
+  // Following another link while this screen is open expands the migration it names.
+  useEffect(() => {
+    if (linkedId !== null) setExpandedId(linkedId)
+  }, [linkedId])
   // Slide-out panel migration
   const [slideOut, setSlideOut] = useState<Migration | null>(null)
 
@@ -548,7 +552,11 @@ export function MigrationHistory(): React.ReactElement {
     <>
       {linkedId !== null && (
         <div className="flex items-center gap-2 mb-2 text-xs text-muted-foreground">
-          <span>Showing migration #{linkedId} only.</span>
+          <span>
+            {filtered.length === 0
+              ? `Migration #${linkedId} not found.`
+              : `Showing migration #${linkedId} only.`}
+          </span>
           <Button size="xs" onClick={() => setParams({})}>Show all</Button>
         </div>
       )}
@@ -637,7 +645,9 @@ export function MigrationHistory(): React.ReactElement {
             {filtered.length === 0 && (
               <tr>
                 <td colSpan={8} className="text-center py-8 text-muted-foreground text-sm">
-                  No migrations match your filters
+                  {linkedId !== null
+                    ? `Migration #${linkedId} not found: no tracked schema migration has that id.`
+                    : "No migrations match your filters"}
                 </td>
               </tr>
             )}
