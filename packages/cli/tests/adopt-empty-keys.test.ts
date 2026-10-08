@@ -32,6 +32,15 @@ describe("targetSchemaAdopt() with an empty key list", () => {
     expect(engineRequest.mock.calls.map((call) => call[1].yes)).toEqual([false, true])
   })
 
+  it("reclaims after a fresh preview shows still nothing to adopt", async () => {
+    engineRequest.mockResolvedValueOnce(RELEASED).mockResolvedValueOnce({ ...RELEASED, status: "adopted" })
+    await targetSchemaAdopt(target, {}, { yes: true, keys: [], reclaim: ["table:w"] })
+    expect(engineRequest.mock.calls.map((call) => [call[1].yes, call[1].reclaim])).toEqual([
+      [false, ["table:w"]],
+      [true, ["table:w"]],
+    ])
+  })
+
   it("writes nothing, as a stale preview, when a conflict has appeared since", async () => {
     engineRequest.mockResolvedValueOnce({
       ...RELEASED,
