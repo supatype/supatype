@@ -3,8 +3,9 @@ import { loadConfig, loadSchemaAst } from "../config.js"
 import { schemaPathFromProject } from "../project-config.js"
 import { targetSchemaAdopt, schemaPgSchema } from "../resolve-target.js"
 import { adoptedCount, adoptionLines, type AdoptOutcome } from "../adopt-walkthrough.js"
-import { confirm } from "../ui/confirm.js"
-import { info, plain } from "../ui/messages.js"
+import { askConsent } from "../ui/confirm.js"
+import { error, info, plain } from "../ui/messages.js"
+import { requireEngineForOwnershipFlag } from "../engine-ownership-gate.js"
 import { withSpinner } from "../ui/progress.js"
 import { addRetiredNoCacheOption, warnIfRetiredNoCache } from "../retired-no-cache.js"
 import { schemaCommandTarget } from "./doctor.js"
@@ -44,6 +45,7 @@ async function adopt(opts: AdoptOptions): Promise<void> {
   warnIfRetiredNoCache(opts)
   const cwd = process.cwd()
   const config = loadConfig(cwd)
+  if (opts.release !== undefined) await requireEngineForOwnershipFlag("--release", config)
   const ast = await withSpinner("Loading schema", async () =>
     loadSchemaAst(schemaPathFromProject(config, cwd), cwd),
   )
@@ -62,7 +64,14 @@ async function adopt(opts: AdoptOptions): Promise<void> {
   }
   plain(`\nAdopt will:\n`)
   for (const line of lines) plain(`  ${line}`)
-  if (!opts.yes && !(await confirm("Go ahead?", { default: false }))) {
+  const consent = await askConsent("Go ahead?", opts.yes ?? false)
+  if (consent === "needs-yes") {
+    // Not a decline: a pipeline that forgot --yes adopted nothing, and must not pass as if it had.
+    error("adopt needs --yes when not interactive")
+    process.exitCode = 1
+    return
+  }
+  if (consent === "declined") {
     plain("Adoption cancelled.")
     return
   }
