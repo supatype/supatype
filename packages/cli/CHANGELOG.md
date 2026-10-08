@@ -11,6 +11,12 @@
   `--yes`, nothing is adopted and the command to run is printed. On a docker project adoption runs
   through the compose schema-engine, so it reaches the stack's database. The refusal is read from
   the engine's JSON reason, with its wording only as the fallback for an older engine.
+* **adopt:** adopts only what was agreed to. After a preview and a yes at the prompt, it adopts the
+  conflicts the preview listed and nothing the database grew since; `--key kind:table.name`
+  (repeatable, engine 0.7.0+) adopts only the objects named; `--yes` alone adopts every conflict
+  there is and lists what it took. If an object it was to adopt is no longer a conflict, nothing is
+  written and it exits 1: "The database changed since the preview; run `supatype adopt` again."
+  The adopt offered by `push` and `dev` likewise takes only what it showed.
 * **adopt, doctor:** `--no-cache` is hidden and does nothing but say it is no longer needed: both
   read the database live. It never worked from the CLI (Commander stores it as `cache: false` and
   the commands read `noCache`), and `doctor` would have passed it to an engine subcommand that does
