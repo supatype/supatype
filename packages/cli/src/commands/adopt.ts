@@ -52,6 +52,7 @@ async function adopt(opts: AdoptOptions): Promise<void> {
   const cwd = process.cwd()
   const config = loadConfig(cwd)
   if (opts.release !== undefined) await requireEngineForOwnershipFlag("--release", config)
+  if (opts.reclaim !== undefined) await requireEngineForOwnershipFlag("--reclaim", config)
   const ast = await withSpinner("Loading schema", async () =>
     loadSchemaAst(schemaPathFromProject(config, cwd), cwd),
   )

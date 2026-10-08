@@ -76,4 +76,9 @@ describe("supatype adopt", () => {
     await adopt("--yes", "--release", "table:widget")
     expect(requireEngine).toHaveBeenCalledWith("--release", expect.anything())
   })
+  it("checks the engine version before sending --reclaim", async () => {
+    await adopt("--yes", "--reclaim", "table:widget")
+    expect(requireEngine).toHaveBeenCalledWith("--reclaim", expect.anything())
+    expect(requireEngine).not.toHaveBeenCalledWith("--release", expect.anything())
+  })
 })
