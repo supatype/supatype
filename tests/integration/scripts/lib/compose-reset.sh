@@ -24,3 +24,14 @@ remove_compose_project() {
   ids="$(docker volume ls -q --filter "$label" 2>/dev/null || true)"
   if [[ -n "$ids" ]]; then docker volume rm -f $ids >/dev/null 2>&1 || true; fi
 }
+
+# The compose project `supatype dev` gives a project called "$1": the same normalisation as
+# `composeProjectName()` in packages/cli/src/self-host-compose.ts (lower case, anything outside
+# [a-z0-9_-] collapsed to "-", leading and trailing "-" trimmed, "project" when nothing is left).
+# Without it a name with upper case or spaces was cleared under a project name `dev` never uses.
+compose_project_name() {
+  local slug
+  slug="$(printf '%s' "$1" | LC_ALL=C tr '[:upper:]' '[:lower:]' \
+    | LC_ALL=C sed -E 's/[^a-z0-9_-]+/-/g; s/^-+//; s/-+$//')"
+  printf 'supatype-%s\n' "${slug:-project}"
+}

@@ -28,8 +28,8 @@ source "$SCRIPT_DIR/lib/http-wait.sh"
 source "$SCRIPT_DIR/lib/compose-reset.sh"
 
 PROJECT_NAME="${SUPATYPE_ZTR_PROJECT:-ztr-smoke}"
-# `dev` names the stack after the project.
-COMPOSE_PROJECT="supatype-$PROJECT_NAME"
+# `dev` names the stack after the project, normalised as the CLI does.
+COMPOSE_PROJECT="$(compose_project_name "$PROJECT_NAME")"
 MAX_WAIT="${SUPATYPE_ZTR_MAX_WAIT:-300}"
 INSTALL_MODE="${SUPATYPE_ZTR_INSTALL:-workspace}"
 WORK_PARENT="${SUPATYPE_ZTR_WORK_ROOT:-}"
@@ -149,7 +149,7 @@ dump_failure_logs() {
   fi
   # The CLI names the compose project `supatype-<name>`; without -p, compose derives it from the
   # directory and finds no containers, so the dump comes out empty.
-  local compose=(docker compose -p "supatype-${PROJECT_NAME}" -f "$compose_file" --project-directory "$project_dir")
+  local compose=(docker compose -p "$COMPOSE_PROJECT" -f "$compose_file" --project-directory "$project_dir")
   echo "==> Compose ps"
   "${compose[@]}" ps -a || true
   echo "==> Recent server logs"
