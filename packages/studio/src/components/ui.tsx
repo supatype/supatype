@@ -206,18 +206,29 @@ export interface PageAt {
   total: number
 }
 
-/** "Page 2 of 7 (163)" with Previous and Next, for any list fetched a page at a time. */
-export function Pager({ at, onPage }: { at: PageAt; onPage: (page: number) => void }): React.ReactElement {
+/**
+ * "Page 2 of 7 (163)" with Previous and Next, for any list fetched a page at a time. `busy` while the
+ * next page loads: the buttons wait for it rather than paging from rows about to be replaced.
+ */
+export function Pager({
+  at,
+  onPage,
+  busy = false,
+}: {
+  at: PageAt
+  onPage: (page: number) => void
+  busy?: boolean
+}): React.ReactElement {
   const pages = Math.max(1, Math.ceil(at.total / at.pageSize))
   return (
     <div className="flex items-center justify-end gap-2 mt-2">
       <span className="text-xs text-muted-foreground">
-        Page {at.page + 1} of {pages} ({at.total})
+        {busy ? "Loading… " : ""}Page {at.page + 1} of {pages} ({at.total})
       </span>
-      <Button size="sm" onClick={() => onPage(at.page - 1)} disabled={at.page === 0}>
+      <Button size="sm" onClick={() => onPage(at.page - 1)} disabled={busy || at.page === 0}>
         Previous
       </Button>
-      <Button size="sm" onClick={() => onPage(at.page + 1)} disabled={at.page >= pages - 1}>
+      <Button size="sm" onClick={() => onPage(at.page + 1)} disabled={busy || at.page >= pages - 1}>
         Next
       </Button>
     </div>
