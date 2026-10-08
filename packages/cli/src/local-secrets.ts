@@ -15,12 +15,6 @@ import { hasEnvValue, readEnvValue } from "./env-file.js"
 import { usesExternalDatabase, type SupatypeProjectConfig } from "./project-config.js"
 
 /**
- * The superuser the bundled Postgres image runs as. Its first start checks the cluster as this
- * role, so it is not a choice the project gets to make: see `unsupportedBundledDbUser`.
- */
-export const BUNDLED_DB_USER = "supatype_admin"
-
-/**
  * Fallback JWT signing secret for a project that has none.
  *
  * Published, therefore worthless as a secret, anyone can mint a token for a stack still using
@@ -33,6 +27,12 @@ export const FALLBACK_POSTGRES_PASSWORD = "postgres"
 
 /** Fallback password for the role PostgREST connects as. */
 export const FALLBACK_AUTHENTICATOR_PASSWORD = "authenticator-local"
+
+/**
+ * The superuser the bundled Postgres image runs as. Its first start checks the cluster as this
+ * role, so it is not a choice the project gets to make, and not a value read from `.env`.
+ */
+export const BUNDLED_DB_USER = "supatype_admin"
 
 /** The secret the local stack signs and validates tokens with. */
 export function devJwtSecret(cwd: string): string {
