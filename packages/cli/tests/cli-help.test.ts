@@ -153,6 +153,14 @@ describe("CLI binary (requires built dist/)", () => {
     expect(stdout).not.toContain("--output-dir")
   })
 
+  it("push and deploy --help show --overwrite-drift", () => {
+    for (const command of ["push", "deploy"]) {
+      const { stdout, exitCode } = runCli([command, "--help"])
+      expect(exitCode).toBe(0)
+      expect(stdout).toContain("--overwrite-drift")
+    }
+  })
+
   it("self-host compose --help shows compose subcommands", () => {
     const { stdout, exitCode } = runCli(["self-host", "compose", "--help"])
     expect(exitCode).toBe(0)
