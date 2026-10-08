@@ -11,7 +11,7 @@ Global flags (all commands): `--config`, `--env`, `--verbose`, `--json`, `--no-c
 | `supatype init [name]` | Scaffold project. Flags: `--mode dev \| standalone` |
 | `supatype keys` | Generate `ANON_KEY` + `SERVICE_ROLE_KEY` from `JWT_SECRET` |
 | `supatype dev` | Start local stack + control-plane. Docker default (Kong :18473). Flags: `--no-watch`, `--port`, `--reset-db` (remove only the Postgres data volume, after confirmation), `--yes` (skip that confirmation; required for `--reset-db` without a TTY) |
-| `supatype push` | Diff, migrate, generate types. Flags: `--yes`, `--connection`, `--env`, `--direct` |
+| `supatype push` | Diff, migrate, generate types. Flags: `--yes`, `--connection`, `--env`, `--direct`, `--overwrite-drift` (engine 0.7.0+) |
 | `supatype diff` | Dry-run schema changes. Flags: `--connection`, `--env`, `--direct` |
 | `supatype generate` | Regenerate types without migration |
 | `supatype seed [file]` | Apply seed data in one transaction. Flags: `--atomic`, `--status`, `--connection`, `--environment`, `--force`. See [references/seeding.md](references/seeding.md) |
@@ -59,7 +59,7 @@ Auth flag: `--token` (cloud = platform PAT; self-host = `SERVICE_ROLE_KEY`). `--
 | `supatype self-host compose up -d` | Start production stack |
 | `supatype self-host compose down` | Stop stack |
 | `supatype self-host compose status` | Health check |
-| `supatype deploy` | Deploy schema + static app to linked target. Flags: `--local`, `--env`, `--schema-only` |
+| `supatype deploy` | Deploy schema + static app to linked target. Flags: `--local`, `--env`, `--schema-only`, `--overwrite-drift` (engine 0.7.0+; without it a deploy refuses on access changed outside Supatype) |
 | `supatype deploy status` | Current static deployment |
 | `supatype deploy rollback` | Roll back static deployment. Flags: `--env`, `--to <deployment-id>` |
 
