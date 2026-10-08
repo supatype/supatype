@@ -2,7 +2,14 @@ import type { Command } from "commander"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { schemaPathFromProject } from "../project-config.js"
 import { targetSchemaAdopt, schemaPgSchema } from "../resolve-target.js"
-import { adoptedCount, adoptionLines, type AdoptOutcome } from "../adopt-walkthrough.js"
+import {
+  adoptedCount,
+  adoptionLines,
+  isStalePreview,
+  previewedKeys,
+  STALE_PREVIEW_MESSAGE,
+  type AdoptOutcome,
+} from "../adopt-walkthrough.js"
 import { askConsent } from "../ui/confirm.js"
 import { error, info, plain } from "../ui/messages.js"
 import { requireEngineForOwnershipFlag } from "../engine-ownership-gate.js"
@@ -50,20 +57,26 @@ async function adopt(opts: AdoptOptions): Promise<void> {
     loadSchemaAst(schemaPathFromProject(config, cwd), cwd),
   )
   const target = await schemaCommandTarget(cwd, config, opts)
-  const run = (yes: boolean): Promise<AdoptOutcome> =>
+  const run = (yes: boolean, keys?: string[]): Promise<AdoptOutcome> =>
     targetSchemaAdopt(target, ast, {
       schema: schemaPgSchema(cwd),
       yes,
       ...(opts.release !== undefined && { release: opts.release }),
+      ...(keys !== undefined && { keys }),
     })
 
-  const lines = previewLines(await run(false))
+  const preview = await run(false)
+  const lines = previewLines(preview)
   if (lines.length === 0) {
     info("Nothing to adopt: every object the schema declares is Supatype's or absent.")
     return
   }
   plain(`\nAdopt will:\n`)
   for (const line of lines) plain(`  ${line}`)
+  // What was just shown is what is agreed to: applying names those conflicts, and the engine writes
+  // nothing if the database has changed since. An engine from before the ledger names none.
+  const keys = previewedKeys(preview)
+  if (keys !== undefined) await requireEngineForOwnershipFlag("adopt", config)
   const consent = await askConsent("Go ahead?", opts.yes ?? false)
   if (consent === "needs-yes") {
     // Not a decline: a pipeline that forgot --yes adopted nothing, and must not pass as if it had.
@@ -75,6 +88,14 @@ async function adopt(opts: AdoptOptions): Promise<void> {
     plain("Adoption cancelled.")
     return
   }
-  const outcome = await run(true)
+  let outcome: AdoptOutcome
+  try {
+    outcome = await run(true, keys)
+  } catch (err: unknown) {
+    if (!isStalePreview(err)) throw err
+    error(STALE_PREVIEW_MESSAGE)
+    process.exitCode = 1
+    return
+  }
   info(`Adopted ${adoptedCount(outcome)} object(s), released ${outcome.release?.length ?? 0}.`)
 }
