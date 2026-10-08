@@ -358,7 +358,20 @@ export function endpointToArgs(
     case "/doctor": {
       const strict = body["strict"] ? ["--strict"] : []
       const rebaseline = body["rebaseline"] ? ["--rebaseline"] : []
-      return ["doctor", "--input", reqFile, "--database-url", dbUrl, "--schema", schema, ...strict, ...rebaseline]
+      // Rebaseline access drift too; only ever sent alongside --rebaseline.
+      const overwriteDrift = body["rebaseline"] && body["overwrite_drift"] === true ? ["--overwrite-drift"] : []
+      return [
+        "doctor",
+        "--input",
+        reqFile,
+        "--database-url",
+        dbUrl,
+        "--schema",
+        schema,
+        ...strict,
+        ...rebaseline,
+        ...overwriteDrift,
+      ]
     }
 
     case "/adopt": {
