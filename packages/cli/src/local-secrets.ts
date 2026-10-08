@@ -12,6 +12,7 @@
  */
 
 import { hasEnvValue, readEnvValue } from "./env-file.js"
+import { usesExternalDatabase, type SupatypeProjectConfig } from "./project-config.js"
 
 /**
  * Fallback JWT signing secret for a project that has none.
@@ -26,6 +27,12 @@ export const FALLBACK_POSTGRES_PASSWORD = "postgres"
 
 /** Fallback password for the role PostgREST connects as. */
 export const FALLBACK_AUTHENTICATOR_PASSWORD = "authenticator-local"
+
+/**
+ * The superuser the bundled Postgres image runs as. Its first start checks the cluster as this
+ * role, so it is not a choice the project gets to make, and not a value read from `.env`.
+ */
+export const BUNDLED_DB_USER = "supatype_admin"
 
 /** The secret the local stack signs and validates tokens with. */
 export function devJwtSecret(cwd: string): string {
@@ -60,11 +67,20 @@ export function devAuthenticatorPassword(cwd: string): string {
  * issued, and a new `POSTGRES_PASSWORD` would not match the password baked into an existing
  * Postgres volume, which `initdb` only sets once. New projects get generated values from
  * `init`; existing ones keep working and are no worse off than before.
+ *
+ * `POSTGRES_PASSWORD` only for the bundled database. An external one is reached through the
+ * operator's `DATABASE_URL`, and a fallback password beside it describes a credential that does
+ * not exist.
  */
-export function seedMissingLocalSecrets(cwd: string): Record<string, string> {
+export function seedMissingLocalSecrets(
+  cwd: string,
+  config: SupatypeProjectConfig,
+): Record<string, string> {
   const out: Record<string, string> = {}
   if (!hasEnvValue(cwd, "JWT_SECRET")) out.JWT_SECRET = FALLBACK_JWT_SECRET
-  if (!hasEnvValue(cwd, "POSTGRES_PASSWORD")) out.POSTGRES_PASSWORD = FALLBACK_POSTGRES_PASSWORD
+  if (!usesExternalDatabase(config) && !hasEnvValue(cwd, "POSTGRES_PASSWORD")) {
+    out.POSTGRES_PASSWORD = FALLBACK_POSTGRES_PASSWORD
+  }
   if (!hasEnvValue(cwd, "AUTHENTICATOR_PASSWORD")) {
     out.AUTHENTICATOR_PASSWORD = FALLBACK_AUTHENTICATOR_PASSWORD
   }
@@ -83,10 +99,17 @@ export function seedMissingLocalSecrets(cwd: string): Record<string, string> {
  *
  * Seeded values match the compose file's own `${VAR:-default}`, so an absent key behaves
  * exactly as it did before.
+ *
+ * Nothing for an external database: both keys describe the bundled `db` container, and the
+ * operator's `DATABASE_URL` already names the user and database the stack connects to.
  */
-export function seedMissingDatabaseIdentity(cwd: string): Record<string, string> {
+export function seedMissingDatabaseIdentity(
+  cwd: string,
+  config: SupatypeProjectConfig,
+): Record<string, string> {
   const out: Record<string, string> = {}
-  if (!hasEnvValue(cwd, "POSTGRES_USER")) out.POSTGRES_USER = "supatype_admin"
+  if (usesExternalDatabase(config)) return out
+  if (!hasEnvValue(cwd, "POSTGRES_USER")) out.POSTGRES_USER = BUNDLED_DB_USER
   if (!hasEnvValue(cwd, "POSTGRES_DB")) out.POSTGRES_DB = "supatype"
   return out
 }

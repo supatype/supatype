@@ -65,6 +65,16 @@
 
 ### Bug Fixes
 
+* **dev, self-host:** a project whose `POSTGRES_USER` (in the shell or `.env`) names any user
+  other than `supatype_admin`, for example `postgres`, is now refused before compose starts, on
+  the bundled database only. The bundled Postgres image runs as `supatype_admin`, and with any
+  other user the `db` container exited and `dev` waited ninety seconds to say only that the
+  database never became healthy. **Migrating:** set `POSTGRES_USER=supatype_admin` in `.env` and
+  the same user in `DATABASE_URL`. If the stack's data volume was created as the old user, either
+  create the role in it first (connected as the old user:
+  `CREATE ROLE supatype_admin WITH SUPERUSER LOGIN PASSWORD '<POSTGRES_PASSWORD>'`) or start again
+  from an empty database with `supatype dev --reset-db`. A Postgres you run yourself, as its own
+  user, belongs in `database.external.url`, which this check does not apply to.
 * **connection:** every command that runs the engine on the host finds the database the same way,
   in seed's order: `--connection`, `database.external.url`, `connection` in the config,
   `DATABASE_URL` in the environment, `DATABASE_URL` in the project's `.env`, then the project's own

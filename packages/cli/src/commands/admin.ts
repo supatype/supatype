@@ -10,7 +10,7 @@ import { dirname, join, resolve } from "node:path"
 import bcrypt from "bcryptjs"
 import type { Pool, QueryResult } from "pg"
 import { loadConfig } from "../config.js"
-import { resolveRuntimeProvider, type SupatypeProjectConfig } from "../project-config.js"
+import { resolveRuntimeProvider, usesExternalDatabase, type SupatypeProjectConfig } from "../project-config.js"
 import { resolveHostDatabaseUrl } from "../host-database.js"
 import { readEnvValue, upsertEnvFile } from "../env-file.js"
 import { hasEngineOverride } from "../binary-cache.js"
@@ -321,11 +321,7 @@ export async function ensureFirstAdminUserForProject(
   const root = resolve(cwd)
   const merged: EnsureFirstAdminOptions = { cwd: root, ...options }
 
-  if (
-    resolveRuntimeProvider(config) === "docker" &&
-    merged.compose &&
-    !hasEngineOverride(config)
-  ) {
+  if (writesAdminThroughCompose(config, merged) && merged.compose) {
     try {
       await ensureFirstAdminWithQuery(
         (sql, params) => composeExecQuery(root, merged.compose!, sql, params),
@@ -344,6 +340,24 @@ export async function ensureFirstAdminUserForProject(
   }).dsn
 
   await ensureFirstAdminUser(connection, merged)
+}
+
+/**
+ * Whether the first admin is written by exec'ing psql in the compose `db` container.
+ *
+ * Only when there is one. An external database has no `db` service, so the exec failed with
+ * "service \"db\" is not running" and a BYO project got no admin; its URL reaches the database.
+ */
+export function writesAdminThroughCompose(
+  config: SupatypeProjectConfig,
+  options: Pick<EnsureFirstAdminOptions, "compose">,
+): boolean {
+  return (
+    resolveRuntimeProvider(config) === "docker" &&
+    options.compose !== undefined &&
+    !hasEngineOverride(config) &&
+    !usesExternalDatabase(config)
+  )
 }
 
 /** Exported for tests: the DB seam both the pool and compose paths share. */
