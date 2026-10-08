@@ -468,12 +468,13 @@ export async function targetSchemaIntrospect(
 /**
  * `adopt` on a target: hand the objects a push refuses to Supatype, take back the ones named in
  * `release`, and hand back the released ones named in `reclaim` (`kind:table.name`, as doctor names
- * them). A preview unless `yes`.
+ * them). A preview unless `yes`; with `keys` (the conflicts a preview showed, named the same way)
+ * only those are adopted, and nothing is written if one of them is no longer a conflict.
  */
 export async function targetSchemaAdopt(
   target: DeployTarget,
   ast: unknown,
-  opts?: { release?: string[]; reclaim?: string[]; schema?: string; yes?: boolean },
+  opts?: { release?: string[]; reclaim?: string[]; keys?: string[]; schema?: string; yes?: boolean },
 ): Promise<AdoptOutcome> {
   const body = {
     ast,
@@ -481,6 +482,8 @@ export async function targetSchemaAdopt(
     yes: opts?.yes ?? false,
     ...(opts?.release !== undefined && opts.release.length > 0 && { release: opts.release }),
     ...(opts?.reclaim !== undefined && opts.reclaim.length > 0 && { reclaim: opts.reclaim }),
+    // Sent even when empty: a preview that showed no conflicts agreed to adopt none.
+    ...(opts?.keys !== undefined && { keys: opts.keys }),
   }
   if (target.mode === "direct" || (target.mode === "local" && !target.token)) {
     await ensureEngine()
