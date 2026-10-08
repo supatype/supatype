@@ -83,6 +83,7 @@ import { publishDevReady } from "./dev-ready-panel.js"
 import { exitInitialPushFailed, pushInitialSchema, type InitialPushSteps } from "./dev-initial-push.js"
 import { offerAdoption, unmanagedTables, type AdoptionSteps } from "./adopt-walkthrough.js"
 import { resetDevDatabase } from "./dev-db-reset.js"
+import { waitForDatabaseAfterUp } from "./dev-db-ready.js"
 import { hostComposeDbUrl, resolveHostDatabaseUrl } from "./host-database.js"
 
 /** Sync optional Docker image pins from config into `.env` (no JWT rotation). */
@@ -1338,6 +1339,20 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
       endDevSession()
       exitComposeFailed(status, `Could not recreate the ${service} container.`, devBrand)
     }
+  }
+
+  // `up -d` recreates `db` when its definition changed since Postgres was started above for the
+  // schema push (a new image on upgrade, a different host port). Postgres then restarts under the
+  // services just started, and the admin seed and bucket provisioning below met "the database
+  // system is starting up" while the panel said the stack was running. Wait for it again: on a db
+  // that was left alone this returns at once.
+  if (!usesExternalDatabase(config)) {
+    await waitForDatabaseAfterUp({
+      waitHealthy: () => waitComposeHealthy(paths, cwd, 180_000, project),
+      dumpLogs: (reason) => dumpComposeDbLogs(paths, cwd, project, reason),
+      onFailure: endDevSession,
+      brand: devBrand,
+    })
   }
 
   console.log("[supatype] Waiting for API gateway...")
