@@ -8,13 +8,14 @@
  * writes a response JSON to stdout.
  */
 
-import { spawnSync } from "node:child_process"
-import { mkdirSync, writeFileSync, unlinkSync, existsSync, readdirSync } from "node:fs"
+import { spawnSync, type SpawnSyncReturns } from "node:child_process"
+import { chmodSync, mkdirSync, writeFileSync, unlinkSync, existsSync, readdirSync } from "node:fs"
 import { tmpdir, homedir } from "node:os"
 import { join } from "node:path"
 import { loadConfig } from "./config.js"
 import { currentPlatform, cachePath } from "./binary-cache.js"
 import { ensureBinary } from "./ensure-binary.js"
+import { uniqueFileToken } from "./unique-file-token.js"
 
 // ---------------------------------------------------------------------------
 // Types (kept for backward compatibility with existing callers)
@@ -159,53 +160,60 @@ export async function engineRequest<T = unknown>(
 ): Promise<T> {
   const bin = await getEngineBin()
 
-  const tmpDir = join(tmpdir(), "supatype-engine")
-  mkdirSync(tmpDir, { recursive: true })
-  const cleanup: string[] = []
-  const reqFile = join(tmpDir, `req-${Date.now()}.json`)
-  const inputPayload = body["ast"] !== undefined ? body["ast"] : body
-  writeFileSync(reqFile, JSON.stringify(inputPayload))
-  cleanup.push(reqFile)
+  const tmpDir = engineTempDir()
+  // Every file this request has created, removed in `finally` whatever fails after it: a later
+  // write, building the arguments, or the spawn itself.
+  const written: string[] = []
+  let result: SpawnSyncReturns<string>
+  try {
+    // One token for this request's files. The directory is shared by every CLI process, and named
+    // by the millisecond alone, two requests at once wrote one file and each engine read the other's.
+    const token = uniqueFileToken()
+    const reqFile = join(tmpDir, `req-${token}.json`)
+    const inputPayload = body["ast"] !== undefined ? body["ast"] : body
+    writeRequestFile(reqFile, JSON.stringify(inputPayload), written)
 
-  let gzPath: string | undefined
-  let manifestPath: string | undefined
-  if (typeof body["schema_sources_gz_base64"] === "string") {
-    gzPath = join(tmpDir, `sources-${Date.now()}.gz`)
-    writeFileSync(gzPath, Buffer.from(body["schema_sources_gz_base64"], "base64"))
-    cleanup.push(gzPath)
-  }
-  // One file per seed document. The engine takes `--ir` once per document rather than one
-  // combined blob, so a failure can name the file it was in.
-  const irPaths: string[] = []
-  const documents = body["ir_documents"]
-  if (Array.isArray(documents)) {
-    documents.forEach((document, index) => {
-      const irPath = join(tmpDir, `ir-${Date.now()}-${index}.json`)
-      writeFileSync(irPath, typeof document === "string" ? document : JSON.stringify(document))
-      cleanup.push(irPath)
-      irPaths.push(irPath)
+    let gzPath: string | undefined
+    let manifestPath: string | undefined
+    if (typeof body["schema_sources_gz_base64"] === "string") {
+      gzPath = join(tmpDir, `sources-${token}.gz`)
+      writeRequestFile(gzPath, Buffer.from(body["schema_sources_gz_base64"], "base64"), written)
+    }
+    // One file per seed document. The engine takes `--ir` once per document rather than one
+    // combined blob, so a failure can name the file it was in.
+    const irPaths: string[] = []
+    const documents = body["ir_documents"]
+    if (Array.isArray(documents)) {
+      documents.forEach((document, index) => {
+        const irPath = join(tmpDir, `ir-${token}-${index}.json`)
+        writeRequestFile(
+          irPath,
+          typeof document === "string" ? document : JSON.stringify(document),
+          written,
+        )
+        irPaths.push(irPath)
+      })
+    }
+
+    if (body["schema_sources_manifest"] !== undefined) {
+      manifestPath = join(tmpDir, `manifest-${token}.json`)
+      writeRequestFile(manifestPath, JSON.stringify(body["schema_sources_manifest"]), written)
+    }
+
+    const args = endpointToArgs(endpoint, body, reqFile, {
+      ...(gzPath !== undefined ? { gzPath } : {}),
+      ...(manifestPath !== undefined ? { manifestPath } : {}),
+      ...(irPaths.length > 0 ? { irPaths } : {}),
     })
-  }
 
-  if (body["schema_sources_manifest"] !== undefined) {
-    manifestPath = join(tmpDir, `manifest-${Date.now()}.json`)
-    writeFileSync(manifestPath, JSON.stringify(body["schema_sources_manifest"]))
-    cleanup.push(manifestPath)
-  }
-
-  const args = endpointToArgs(endpoint, body, reqFile, {
-    ...(gzPath !== undefined ? { gzPath } : {}),
-    ...(manifestPath !== undefined ? { manifestPath } : {}),
-    ...(irPaths.length > 0 ? { irPaths } : {}),
-  })
-
-  const result = spawnSync(bin, args, {
-    encoding: "utf8",
-    cwd: process.cwd(),
-  })
-
-  for (const f of cleanup) {
-    try { unlinkSync(f) } catch { /* ignore */ }
+    result = spawnSync(bin, args, {
+      encoding: "utf8",
+      cwd: process.cwd(),
+    })
+  } finally {
+    for (const f of written) {
+      try { unlinkSync(f) } catch { /* ignore */ }
+    }
   }
 
   // A failed seed is an answer, not a crash.
@@ -238,6 +246,45 @@ export async function engineRequest<T = unknown>(
     // Non-JSON stdout: return as message.
     return { message: result.stdout.trim() } as T
   }
+}
+
+// ---------------------------------------------------------------------------
+// Request files
+// ---------------------------------------------------------------------------
+
+/**
+ * The directory engine request files are written to, created private to this user.
+ *
+ * A request can hold `database_url`, credentials included, and the directory is in the shared
+ * system temp directory. `mode` applies only when `mkdir` creates it, so an existing directory is
+ * narrowed too. On Windows the mode bits are mostly ignored and the user's temp directory is
+ * already private.
+ */
+function engineTempDir(): string {
+  // One directory per user on POSIX: a shared one another user created first is not ours to make
+  // private, and writing into it can fail. Windows' temp directory is already per user.
+  const uid = process.getuid?.()
+  const dir = join(tmpdir(), uid === undefined ? "supatype-engine" : `supatype-engine-${uid}`)
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  try { chmodSync(dir, 0o700) } catch { /* not ours to change; the files are still 0600 */ }
+  return dir
+}
+
+/**
+ * Write one request file, readable by this user only, and record it for removal.
+ *
+ * `wx` creates the file or fails: a name that already exists, a file or a link someone placed
+ * there, is never written through. Such a file is not recorded, since it is not this request's to
+ * remove; anything else that fails after the file was created leaves it recorded, so it is removed.
+ */
+function writeRequestFile(path: string, data: string | Buffer, written: string[]): void {
+  try {
+    writeFileSync(path, data, { mode: 0o600, flag: "wx" })
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "EEXIST") written.push(path)
+    throw err
+  }
+  written.push(path)
 }
 
 // ---------------------------------------------------------------------------
