@@ -25,8 +25,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 CLI_BIN="$ROOT_DIR/packages/cli/bin/supatype.js"
 source "$SCRIPT_DIR/lib/http-wait.sh"
+source "$SCRIPT_DIR/lib/compose-reset.sh"
 
 PROJECT_NAME="${SUPATYPE_ZTR_PROJECT:-ztr-smoke}"
+# `dev` names the stack after the project, normalised as the CLI does.
+COMPOSE_PROJECT="$(compose_project_name "$PROJECT_NAME")"
 MAX_WAIT="${SUPATYPE_ZTR_MAX_WAIT:-300}"
 INSTALL_MODE="${SUPATYPE_ZTR_INSTALL:-workspace}"
 WORK_PARENT="${SUPATYPE_ZTR_WORK_ROOT:-}"
@@ -52,12 +55,13 @@ cleanup() {
     fi
     wait "$SUPATYPE_PID" 2>/dev/null || true
   fi
-  if [[ -n "$CREATED_WORK_ROOT" && -d "$CREATED_WORK_ROOT" ]]; then
-    if [[ "$FAILED" == "1" && "${SUPATYPE_ZTR_KEEP_ON_FAILURE:-}" == "1" ]]; then
-      echo "  Keeping work dir for debugging: $CREATED_WORK_ROOT"
-    else
-      rm -rf "$CREATED_WORK_ROOT"
-    fi
+  if [[ "$FAILED" == "1" && "${SUPATYPE_ZTR_KEEP_ON_FAILURE:-}" == "1" ]]; then
+    echo "  Keeping work dir and stack for debugging: $CREATED_WORK_ROOT"
+  else
+    # Stopping `dev` leaves the stack and its volumes behind, and the next run's fresh password
+    # then fails against the old database.
+    remove_compose_project "$COMPOSE_PROJECT"
+    if [[ -n "$CREATED_WORK_ROOT" && -d "$CREATED_WORK_ROOT" ]]; then rm -rf "$CREATED_WORK_ROOT"; fi
   fi
   echo "  Done."
 }
@@ -145,7 +149,7 @@ dump_failure_logs() {
   fi
   # The CLI names the compose project `supatype-<name>`; without -p, compose derives it from the
   # directory and finds no containers, so the dump comes out empty.
-  local compose=(docker compose -p "supatype-${PROJECT_NAME}" -f "$compose_file" --project-directory "$project_dir")
+  local compose=(docker compose -p "$COMPOSE_PROJECT" -f "$compose_file" --project-directory "$project_dir")
   echo "==> Compose ps"
   "${compose[@]}" ps -a || true
   echo "==> Recent server logs"
@@ -170,6 +174,9 @@ main() {
     mkdir -p "$WORK_PARENT"
   fi
   CREATED_WORK_ROOT="$WORK_PARENT"
+
+  echo "==> Removing anything a previous run left in $COMPOSE_PROJECT"
+  remove_compose_project "$COMPOSE_PROJECT"
 
   echo "==> supatype init $PROJECT_NAME (docker default, non-interactive)"
   cd "$WORK_PARENT"
