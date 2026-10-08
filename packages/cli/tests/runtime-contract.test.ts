@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { runtimeRouteSpec } from "../src/runtime-routes.js"
@@ -42,8 +42,8 @@ const baseConfig: SupatypeProjectConfig = {
  * The same project with no `versions.postgres` pin.
  *
  * The keyspace is served by the image, and an image pinned to a release older than the toggle
- * ignores `SUPATYPE_KEYSPACE_ENABLED` and comes up with no RESP listener — which is not an error
- * anywhere. So a pin resolves the default to Valkey, and the tests about the default have to say
+ * ignores `SUPATYPE_KEYSPACE_ENABLED` and comes up with no RESP listener, and nothing reports
+ * that as an error. So a pin resolves the default to Valkey, and the tests about the default have to say
  * which world they are in rather than inheriting one by accident.
  */
 const unpinnedPostgres = (config: SupatypeProjectConfig): SupatypeProjectConfig => {
@@ -411,6 +411,21 @@ describe("runtime contract", () => {
       // Values `push` put there survive: the schema is not "public" and must stay as found.
       expect(manifest["schema"]).toBe("tenant_7")
       expect(manifest["postgrest_url"]).toBe("http://pg:3000")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("leaves a project with no functions or hooks without those directories", () => {
+    // Creating them on every `dev` made the context refresh, which runs when `functions/` exists,
+    // scaffold `_shared/`, Deno types and a root tsconfig exclude into projects that have no
+    // functions. The worker needs neither: it mounts the whole project and treats a missing root
+    // as nothing to serve. `functions new` and `init` create the directory when there is a function.
+    const dir = mkdtempSync(join(tmpdir(), "supatype-no-fn-"))
+    try {
+      writeSelfHostCompose(dir, baseConfig)
+      expect(existsSync(join(dir, "functions"))).toBe(false)
+      expect(existsSync(join(dir, "hooks"))).toBe(false)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
@@ -854,7 +869,7 @@ export default defineConfig({
 
   it("self-host compose keeps Valkey for a project that pins its Postgres image", () => {
     // The toggle is honoured by the image, from the release that introduced it. An older pinned
-    // image ignores it and starts with no RESP listener — a stack that comes up, and a cache that
+    // image ignores it and starts with no RESP listener: the stack comes up, and the cache
     // never hits. A pin says the image is fixed, and a default must not assume something about a
     // fixed image it cannot check; `cache: { provider: "pg_keyspace" }` is how a project on a
     // capable pin says so.
