@@ -41,6 +41,23 @@ sql() {
     psql -h 127.0.0.1 -U supatype_admin -d ownership -v ON_ERROR_STOP=1 -qtAc "$1"
 }
 cli() { (cd "$PROJECT_DIR" && node "$CLI_BIN" "$@" --direct --connection "$URL"); }
+# Passes only when the CLI exits with `code` and prints `pattern`: a refusal for the expected
+# reason. A bare `! cli ...` also passed on an unknown flag or a lost database connection.
+refuses() {
+  local code="$1" pattern="$2" out status=0
+  shift 2
+  out="$(cli "$@" 2>&1)" || status=$?
+  if [[ "$status" -ne "$code" ]]; then
+    echo "        expected exit $code, got $status:"
+    tail -5 <<<"$out" | sed 's/^/        /'
+    return 1
+  fi
+  if ! grep -qF -- "$pattern" <<<"$out"; then
+    echo "        exit $code, but the output does not say: $pattern"
+    tail -5 <<<"$out" | sed 's/^/        /'
+    return 1
+  fi
+}
 status_of() { sql "SELECT status FROM _supatype.managed_objects WHERE kind = '$1' AND parent = '$2' AND name = '$3'"; }
 
 if [[ ! -f "$CLI_BIN" ]]; then
@@ -100,16 +117,34 @@ sql "INSERT INTO public.legacy (name) VALUES ('kept')"
 # someone chose to test, so it always runs.
 if [[ -z "${OWNERSHIP_ENGINE_BIN:-}" ]]; then
   cli doctor >/dev/null 2>&1 || true # resolves, and if need be downloads, the CLI's engine
-  engine_bin="$(ls -t "$HOME"/.supatype/cache/engine/*/supatype-engine-* 2>/dev/null | head -1)"
-  engine_version="$([[ -n "$engine_bin" ]] && "$engine_bin" --version 2>/dev/null | awk '{print $2}')"
+  # `|| true` inside each: with no engine cached, `ls` fails, and under `set -euo pipefail` the
+  # assignment would end the script with exit 2 instead of reaching the skip below.
+  engine_bin="$(ls -t "$HOME"/.supatype/cache/engine/*/supatype-engine-* 2>/dev/null | head -1 || true)"
+  engine_version="$([[ -n "$engine_bin" ]] && "$engine_bin" --version 2>/dev/null | awk '{print $2}' || true)"
   if [[ -z "$engine_version" ]] || [[ "$(printf '%s\n0.7.0\n' "$engine_version" | sort -V | head -1)" != "0.7.0" ]]; then
-    echo "SKIP: engine ${engine_version:-unknown} predates the ledger commands (0.7.0); set OWNERSHIP_ENGINE_BIN to test one"
+    if [[ -z "$engine_version" ]]; then
+      reason="no cached engine whose version could be read, so none known to have the ledger commands (0.7.0)"
+    else
+      reason="engine $engine_version predates the ledger commands (0.7.0)"
+    fi
+    reason="$reason; set OWNERSHIP_ENGINE_BIN to test one"
+    # Loud on purpose: this job is green when it skips, and that must not read as a pass.
+    echo
+    echo "################################################################################"
+    echo "SKIPPED, NOT PASSED: no ownership check ran. $reason"
+    echo "################################################################################"
+    if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+      echo "::warning title=ownership-e2e skipped::No ownership check ran: $reason"
+      if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+        echo "### ownership-e2e SKIPPED: no check ran. $reason" >>"$GITHUB_STEP_SUMMARY"
+      fi
+    fi
     exit 0
   fi
 fi
 
 echo "==> Adopt, on a database Supatype has never pushed to"
-check "the first push refuses the existing table" '! cli push --yes >/dev/null 2>&1'
+check "the first push refuses the existing table" 'refuses 1 "Supatype did not create it" push --yes'
 check "adopt takes it" 'cli adopt --yes 2>&1 | grep -q "Adopted 1 object"'
 check "the push it unblocks applies" 'cli push --yes >/dev/null 2>&1'
 check "the table is recorded as adopted" '[[ "$(status_of table "" legacy)" == adopted ]]'
@@ -125,13 +160,18 @@ check "a push leaves the released policy alone" 'cli push --yes >/dev/null 2>&1 
 check "doctor lists it as released" 'cli doctor 2>&1 | grep -q "Released"'
 check "reclaim hands it back" 'cli adopt --reclaim policy:legacy.legacy_select --yes 2>&1 | grep -q "reclaimed 1"'
 # Putting back an access rule removed outside Supatype needs consent, reclaimed or not.
-check "the next push asks before restoring an access rule" '! cli push --yes >/dev/null 2>&1'
+check "the next push asks before restoring an access rule" 'refuses 1 "pass --overwrite-drift" push --yes'
 check "with consent it restores it" 'cli push --yes --overwrite-drift >/dev/null 2>&1 && [[ "$(policy_count)" == 1 ]]'
 
 echo "==> doctor --strict and --rebaseline"
 sql "ALTER POLICY legacy_select ON public.legacy USING (name <> 'hidden')"
-check "doctor --strict fails on a hand edit" '! cli doctor --strict >/dev/null 2>&1'
-check "--rebaseline records it" 'cli doctor --rebaseline 2>&1 | grep -q "1 rebaselined"'
+check "doctor --strict fails on a hand edit" 'refuses 1 "Drifted (changed outside Supatype)" doctor --strict'
+# A rebaseline takes the database's version as Supatype's, so it asks first; a hand edit to an
+# access rule is taken only with --overwrite-drift as well.
+check "--rebaseline will not run unasked" 'refuses 1 "doctor --rebaseline needs --yes when not interactive" doctor --rebaseline'
+check "--rebaseline --yes leaves a hand-edited policy alone" 'cli doctor --rebaseline --yes 2>&1 | grep -qF "pass --overwrite-drift to record these too"'
+check "so doctor --strict still fails on it" 'refuses 1 "Drifted (changed outside Supatype)" doctor --strict'
+check "--rebaseline --overwrite-drift records it" 'cli doctor --rebaseline --overwrite-drift --yes 2>&1 | grep -q "1 rebaselined"'
 check "doctor --strict is clean after" 'cli doctor --strict >/dev/null 2>&1'
 check "and a push keeps the hand edit" 'cli push --yes >/dev/null 2>&1 && sql "SELECT qual FROM pg_policies WHERE policyname = '"'"'legacy_select'"'"'" | grep -q hidden'
 
