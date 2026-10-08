@@ -33,7 +33,9 @@ if [[ "$ENV_EXISTED" == "no" ]]; then
 fi
 
 # The example pins its gateway port in .env so its URLs are true; follow it rather than assuming.
-KONG_PORT="${SUPATYPE_KONG_PORT:-$(grep -m1 '^SUPATYPE_KONG_PORT=' "$EXAMPLE_DIR/.env" | cut -d= -f2-)}"
+# `|| true`: without the key (or the file) grep exits 1, and under `set -euo pipefail` the script
+# would stop here without a word instead of falling back to the default port.
+KONG_PORT="${SUPATYPE_KONG_PORT:-$(grep -m1 '^SUPATYPE_KONG_PORT=' "$EXAMPLE_DIR/.env" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)}"
 KONG_PORT="${KONG_PORT:-18473}"
 # IPv4 explicitly: `localhost` resolves to ::1 first on some hosts, where Docker's IPv6 forwarder
 # may accept and then reset.
