@@ -70,8 +70,20 @@ export async function findNextFreePort(start: number): Promise<number> {
   return port
 }
 
-export function readPersistedKongPort(cwd: string): number | null {
-  return readEnvInt(cwd, "SUPATYPE_KONG_PORT")
+/**
+ * The Kong port this project is set to: `SUPATYPE_KONG_PORT` in the environment when it is set,
+ * otherwise in `.env`. Docker Compose reads the environment ahead of `.env` and binds that port
+ * whatever `.env` says, so reading `.env` alone had `dev` wait on one port while Kong listened on
+ * another.
+ */
+export function readPersistedKongPort(cwd: string, env: NodeJS.ProcessEnv = process.env): number | null {
+  return kongPortFromEnvironment(env) ?? readEnvInt(cwd, "SUPATYPE_KONG_PORT")
+}
+
+/** `SUPATYPE_KONG_PORT` from the shell environment, when it is set to a usable port. */
+function kongPortFromEnvironment(env: NodeJS.ProcessEnv): number | null {
+  const port = Number(env["SUPATYPE_KONG_PORT"]?.trim())
+  return isValidHostPort(port) ? port : null
 }
 
 function persistKongPort(cwd: string, port: number): void {
@@ -104,6 +116,8 @@ export interface EnsureKongPortOptions {
    * rather than refused: that is this project's own stack, not a stranger's.
    */
   composeProject?: string
+  /** The environment Docker Compose will read. Defaults to `process.env`. */
+  env?: NodeJS.ProcessEnv
 }
 
 /**
@@ -118,7 +132,8 @@ export async function ensureKongPort(
 ): Promise<number> {
   const interactive = opts.interactive ?? isInteractive()
   const context = opts.context ?? "dev"
-  const persisted = readPersistedKongPort(cwd)
+  const env = opts.env ?? process.env
+  const persisted = readPersistedKongPort(cwd, env)
 
   if (persisted !== null) {
     if (!(await isPortInUse(persisted))) return persisted
@@ -130,8 +145,23 @@ export async function ensureKongPort(
       return persisted
     }
 
+    // A port from the shell is not ours to move. Compose binds the shell's value ahead of `.env`,
+    // so a new port written to `.env` would be ignored and `dev` would wait on one port while Kong
+    // tried to bind the busy one. Say where the port came from instead of offering a choice.
+    if (kongPortFromEnvironment(env) === persisted) {
+      fatalError(
+        `Port ${persisted} is already in use, and SUPATYPE_KONG_PORT=${persisted} is set in your shell.`,
+        [
+          "Docker Compose uses the shell's SUPATYPE_KONG_PORT ahead of .env, so Supatype cannot move",
+          "the gateway to another port while it is set.",
+          "Unset it (`unset SUPATYPE_KONG_PORT`, or `Remove-Item Env:SUPATYPE_KONG_PORT` in PowerShell)",
+          "to use the port in .env, set it to a free port, or stop the service using this one.",
+        ],
+      )
+    }
+
     if (!interactive) {
-      fatalError(`Port ${persisted} is already in use (SUPATYPE_KONG_PORT in .env).`, [
+      fatalError(`Port ${persisted} is already in use (SUPATYPE_KONG_PORT).`, [
         "Stop the other service or set a different SUPATYPE_KONG_PORT.",
         "Run `supatype dev` in a terminal to pick a new port interactively.",
       ])
