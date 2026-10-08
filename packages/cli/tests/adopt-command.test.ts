@@ -22,6 +22,19 @@ const PREVIEW = {
   adopt: [{ kind: "table", table: "widget", name: "widget", message: "Table widget will be Supatype's" }],
 }
 
+const TWO_CONFLICTS = {
+  status: "preview",
+  adopt: [
+    ...PREVIEW.adopt,
+    { kind: "table", table: "gadget", name: "gadget", message: "Table gadget will be Supatype's" },
+  ],
+}
+
+const STALE =
+  "Engine /adopt failed (exit 1): Error: table:widget was to be adopted but is not a conflict now: " +
+  "the database changed since the preview. Nothing was written"
+const STALE_MESSAGE = "The database changed since the preview; run `supatype adopt` again."
+
 async function adopt(...args: string[]): Promise<void> {
   const program = new Command().exitOverride()
   registerAdopt(program)
@@ -77,13 +90,16 @@ describe("supatype adopt", () => {
     expect(requireEngine).toHaveBeenCalledWith("--release", expect.anything())
   })
 
-  it("adopts only the conflicts the preview showed, checking the engine version first", async () => {
+  it("names no keys on --yes alone: it adopts every conflict there is, and says what it took", async () => {
+    const stdout = vi.mocked(console.log)
     await adopt("--yes")
-    expect(targetSchemaAdopt.mock.calls.map((call) => call[2].keys)).toEqual([undefined, ["table:widget"]])
-    expect(requireEngine).toHaveBeenCalledWith("adopt", expect.anything())
+    expect(targetSchemaAdopt.mock.calls.every((call) => call[2].keys === undefined)).toBe(true)
+    expect(targetSchemaAdopt.mock.calls.at(-1)?.[2].yes).toBe(true)
+    expect(requireEngine).not.toHaveBeenCalledWith("adopt", expect.anything())
+    expect(stdout.mock.calls.flat().join("\n")).toContain("Table widget will be Supatype's")
   })
 
-  it("adopts the previewed keys after a person agrees at the prompt", async () => {
+  it("adopts only the conflicts the preview showed after a person agrees, checking the engine first", async () => {
     vi.mocked(isInteractive).mockReturnValue(true)
     confirmMock.mockResolvedValue(true)
     await adopt()
@@ -91,37 +107,88 @@ describe("supatype adopt", () => {
       [false, undefined],
       [true, ["table:widget"]],
     ])
+    expect(requireEngine).toHaveBeenCalledWith("adopt", expect.anything())
   })
 
   it("sends no keys to an engine from before the ledger, and does not gate it", async () => {
+    vi.mocked(isInteractive).mockReturnValue(true)
+    confirmMock.mockResolvedValue(true)
     targetSchemaAdopt.mockImplementation(async (_t, _a, opts: { yes: boolean }) =>
       opts.yes ? { status: "adopted", stamped: 1 } : { status: "preview", stampStatements: ["COMMENT ON ..."] },
     )
-    await adopt("--yes")
+    await adopt()
     expect(targetSchemaAdopt.mock.calls.map((call) => call[2].keys)).toEqual([undefined, undefined])
     expect(requireEngine).not.toHaveBeenCalled()
   })
 
   it("exits 1 and says to run it again when the database changed since the preview", async () => {
+    vi.mocked(isInteractive).mockReturnValue(true)
+    confirmMock.mockResolvedValue(true)
     targetSchemaAdopt.mockImplementation(async (_t, _a, opts: { yes: boolean }) => {
       if (!opts.yes) return PREVIEW
-      throw new Error(
-        "Engine /adopt failed (exit 1): Error: table:widget was to be adopted but is not a conflict now: " +
-          "the database changed since the preview. Nothing was written",
-      )
+      throw new Error(STALE)
     })
-    await adopt("--yes")
+    const stdout = vi.mocked(console.log)
+    await adopt()
     expect(process.exitCode).toBe(1)
-    expect(stderr.mock.calls.flat().join(" ")).toContain(
-      "The database changed since the preview; run `supatype adopt` again.",
-    )
+    // In a terminal an error is printed with the rest of the flow, on stdout.
+    expect([...stdout.mock.calls, ...stderr.mock.calls].flat().join(" ")).toContain(STALE_MESSAGE)
   })
 
   it("lets any other failure to apply through", async () => {
+    vi.mocked(isInteractive).mockReturnValue(true)
+    confirmMock.mockResolvedValue(true)
     targetSchemaAdopt.mockImplementation(async (_t, _a, opts: { yes: boolean }) => {
       if (!opts.yes) return PREVIEW
       throw new Error("connection refused")
     })
-    await expect(adopt("--yes")).rejects.toThrow("connection refused")
+    await expect(adopt()).rejects.toThrow("connection refused")
+  })
+
+  it("adopts only what --key names, after the engine version gate", async () => {
+    await adopt("--yes", "--key", "table:widget", "--key", "index:posts.posts_title_idx")
+    expect(requireEngine).toHaveBeenCalledWith("--key", expect.anything())
+    const applied = targetSchemaAdopt.mock.calls.at(-1)?.[2]
+    expect(applied?.yes).toBe(true)
+    expect(applied?.keys).toEqual(["table:widget", "index:posts.posts_title_idx"])
+  })
+
+  it("exits 1 with --key when one is no longer a conflict", async () => {
+    targetSchemaAdopt.mockImplementation(async (_t, _a, opts: { yes: boolean }) => {
+      if (!opts.yes) return PREVIEW
+      throw new Error(STALE)
+    })
+    await adopt("--yes", "--key", "table:widget")
+    expect(process.exitCode).toBe(1)
+    expect(stderr.mock.calls.flat().join(" ")).toContain(STALE_MESSAGE)
+  })
+
+  it("shows only the conflicts --key names before asking", async () => {
+    vi.mocked(isInteractive).mockReturnValue(true)
+    confirmMock.mockResolvedValue(true)
+    targetSchemaAdopt.mockImplementation(async (_t, _a, opts: { yes: boolean }) =>
+      opts.yes ? { status: "adopted", adopt: [PREVIEW.adopt[0]] } : TWO_CONFLICTS,
+    )
+    const stdout = vi.mocked(console.log)
+    await adopt("--key", "table:widget")
+    const printed = stdout.mock.calls.flat().join("\n")
+    expect(printed).toContain("Table widget will be Supatype's")
+    expect(printed).not.toContain("Table gadget")
+    expect(targetSchemaAdopt.mock.calls.at(-1)?.[2].keys).toEqual(["table:widget"])
+  })
+
+  it("agrees to adopt nothing when the preview listed only what to release", async () => {
+    vi.mocked(isInteractive).mockReturnValue(true)
+    confirmMock.mockResolvedValue(true)
+    targetSchemaAdopt.mockImplementation(async (_t, _a, opts: { yes: boolean }) => ({
+      status: opts.yes ? "adopted" : "preview",
+      adopt: [],
+      release: [{ kind: "table", table: "widget", name: "widget", message: "Table widget will be left alone" }],
+    }))
+    await adopt("--release", "table:widget")
+    expect(targetSchemaAdopt.mock.calls.map((call) => [call[2].yes, call[2].keys])).toEqual([
+      [false, undefined],
+      [true, []],
+    ])
   })
 })
