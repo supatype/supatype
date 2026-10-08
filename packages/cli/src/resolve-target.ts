@@ -470,31 +470,51 @@ export async function targetSchemaIntrospect(
  * `release`, and hand back the released ones named in `reclaim` (`kind:table.name`, as doctor names
  * them). A preview unless `yes`; with `keys` (the conflicts a preview showed, named the same way)
  * only those are adopted, and nothing is written if one of them is no longer a conflict.
+ *
+ * An empty `keys` adopts nothing, which the engine binary cannot be told: it reads no `--key` as
+ * "adopt every conflict". So an empty list is never sent to apply as it is. With nothing to release
+ * or reclaim there is no call at all; otherwise the database is previewed again first, and if it now
+ * holds a conflict nobody was shown, nothing is written and the preview is reported stale.
  */
 export async function targetSchemaAdopt(
   target: DeployTarget,
   ast: unknown,
   opts?: { release?: string[]; reclaim?: string[]; keys?: string[]; schema?: string; yes?: boolean },
 ): Promise<AdoptOutcome> {
+  const release = opts?.release ?? []
+  const reclaim = opts?.reclaim ?? []
   const body = {
     ast,
     schema: opts?.schema ?? "public",
     yes: opts?.yes ?? false,
-    ...(opts?.release !== undefined && opts.release.length > 0 && { release: opts.release }),
-    ...(opts?.reclaim !== undefined && opts.reclaim.length > 0 && { reclaim: opts.reclaim }),
-    // Sent even when empty: a preview that showed no conflicts agreed to adopt none.
+    ...(release.length > 0 && { release }),
+    ...(reclaim.length > 0 && { reclaim }),
     ...(opts?.keys !== undefined && { keys: opts.keys }),
   }
-  if (target.mode === "direct" || (target.mode === "local" && !target.token)) {
-    await ensureEngine()
-    return engineRequest<AdoptOutcome>("/adopt", { ...body, database_url: target.databaseUrl! })
+  const send = async (request: typeof body): Promise<AdoptOutcome> => {
+    if (target.mode === "direct" || (target.mode === "local" && !target.token)) {
+      await ensureEngine()
+      return engineRequest<AdoptOutcome>("/adopt", { ...request, database_url: target.databaseUrl! })
+    }
+    return (await targetFetch(
+      target.apiBaseUrl,
+      target.apiPrefix,
+      apiFetchOpts(target, "POST", projectPath(target, "/schema/adopt"), request),
+    )) as AdoptOutcome
   }
-
-  return (await targetFetch(
-    target.apiBaseUrl,
-    target.apiPrefix,
-    apiFetchOpts(target, "POST", projectPath(target, "/schema/adopt"), body),
-  )) as AdoptOutcome
+  if (body.yes && opts?.keys !== undefined && opts.keys.length === 0) {
+    if (release.length === 0 && reclaim.length === 0) {
+      return { status: "nothing_to_adopt", adopt: [], release: [], reclaim: [] }
+    }
+    const now = await send({ ...body, yes: false })
+    if ((now.adopt?.length ?? 0) > 0) {
+      throw new Error(
+        "Adopt was to take nothing, but there is a conflict now: the database changed since the preview. " +
+          "Nothing was written",
+      )
+    }
+  }
+  return send(body)
 }
 
 export async function targetStatus(target: DeployTarget): Promise<unknown> {
