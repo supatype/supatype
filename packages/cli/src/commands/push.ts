@@ -35,6 +35,7 @@ import {
   securityDrift,
 } from "../diff-output.js"
 import { printPushWarnings } from "../engine-push-output.js"
+import { requireEngineForOwnershipFlag } from "../engine-ownership-gate.js"
 import { pushOfferingAdoption, targetAdoptionSteps } from "../adopt-walkthrough.js"
 import { signJwt } from "../jwt.js"
 import { provisionBucketsFromAst } from "../storage-provision.js"
@@ -101,6 +102,7 @@ export function registerPush(program: Command): void {
       assertPreviewAddressesResolve(config)
 
       const run: PushRun = { yes: opts.yes ?? false, overwriteDrift: opts.overwriteDrift ?? false }
+      if (run.overwriteDrift) await requireEngineForOwnershipFlag("--overwrite-drift", config)
       const linked = loadProjectLink(cwd)
       const useDirect = opts.direct || opts.local || Boolean(opts.connection)
 
@@ -118,7 +120,10 @@ export function registerPush(program: Command): void {
         }
         const { dockerAdoptionSteps, pushSchemaDocker } = await import("../dev-compose.js")
         await pushOfferingAdoption(
-          () => withSpinner("Applying schema via Docker Compose", () => pushSchemaDocker(cwd, config)),
+          () =>
+            withSpinner("Applying schema via Docker Compose", () =>
+              pushSchemaDocker(cwd, config, { overwriteDrift: run.overwriteDrift }),
+            ),
           dockerAdoptionSteps(cwd, config),
           { yes: opts.yes ?? false, retry: "supatype push" },
         )
@@ -209,6 +214,10 @@ async function pushViaTarget(
 
   const overwriteDrift = await consentToSecurityDrift(diff, run)
   if (overwriteDrift === null) return
+  // Consent given at the prompt rather than by the flag still sends the flag.
+  if (overwriteDrift && !run.overwriteDrift) {
+    await requireEngineForOwnershipFlag("--overwrite-drift", config)
+  }
 
   const pushResult = await pushOfferingAdoption(
     () =>

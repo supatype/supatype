@@ -92,3 +92,16 @@ describe("--reclaim", () => {
     expect(endpointToArgs("/adopt", body, "req.json").slice(-2)).toEqual(["--reclaim", "table:widget"])
   })
 })
+
+describe("endpointToArgs() for /doctor --overwrite-drift", () => {
+  const body = { ast: {}, database_url: "postgres://x", schema: "public" }
+
+  it("passes --overwrite-drift only alongside --rebaseline", () => {
+    expect(endpointToArgs("/doctor", { ...body, overwrite_drift: true }, "req.json")).not.toContain(
+      "--overwrite-drift",
+    )
+    expect(
+      endpointToArgs("/doctor", { ...body, rebaseline: true, overwrite_drift: true }, "req.json").slice(-2),
+    ).toEqual(["--rebaseline", "--overwrite-drift"])
+  })
+})
