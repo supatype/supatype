@@ -410,7 +410,11 @@ export function endpointToArgs(
 
     case "/adopt": {
       const yes = body["yes"] ? ["--yes"] : []
-      const objects = [...repeated(body["release"], "--release"), ...repeated(body["reclaim"], "--reclaim")]
+      const objects = [
+        ...repeated(body["release"], "--release"),
+        ...repeated(body["reclaim"], "--reclaim"),
+        ...repeated(body["keys"], "--key"),
+      ]
       return ["adopt", "--input", reqFile, "--database-url", dbUrl, "--schema", schema, ...yes, ...objects]
     }
 
