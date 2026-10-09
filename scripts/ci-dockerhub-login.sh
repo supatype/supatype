@@ -17,19 +17,17 @@ set -uo pipefail
 : "${DOCKERHUB_USERNAME:?DOCKERHUB_USERNAME is not set}"
 : "${DOCKERHUB_TOKEN:?DOCKERHUB_TOKEN is not set}"
 
-# One line for the log: the daemon's registry mirrors, and the hourly pull budget Docker Hub gives
-# the CI account and how much of it is left. Every parallel job pulls from that one budget, and its
-# exhaustion is reported by Docker Hub as an "unauthenticated pull rate limit" even when the pull
-# was authenticated, so the number is worth having beside the failure. A HEAD of the rate-limit
-# preview manifest is free. Prints no credential or token, and never fails the step.
-summarize() {
+# The CI account's Docker Hub pull budget as "<left> of <limit>", from a HEAD of the rate-limit
+# preview manifest, which costs no pull. Every parallel job shares that one budget, and Docker Hub
+# reports its exhaustion as an "unauthenticated pull rate limit" even when the pull was
+# authenticated. The token goes through curl's stdin config, never its command line or the log.
+account_pulls_left() {
   local scope="repository:ratelimitpreview/test:pull" token headers limit remaining
   token=$(printf 'user = "%s:%s"\n' "$DOCKERHUB_USERNAME" "$DOCKERHUB_TOKEN" \
     | curl -sS -K - --max-time 20 \
       "https://auth.docker.io/token?service=registry.docker.io&scope=$scope" 2>/dev/null \
     | python3 -c 'import json, sys; print(json.load(sys.stdin).get("token", ""))' 2>/dev/null) || token=""
   if [ -n "$token" ]; then
-    # The token goes through curl's stdin config, not its command line.
     headers=$(printf 'header = "Authorization: Bearer %s"\n' "$token" \
       | curl -sS -I -K - --max-time 20 \
         https://registry-1.docker.io/v2/ratelimitpreview/test/manifests/latest 2>/dev/null \
@@ -37,8 +35,27 @@ summarize() {
     limit=$(printf '%s\n' "$headers" | sed -n 's/^ratelimit-limit: *\([0-9]*\).*/\1/p' | head -n 1)
     remaining=$(printf '%s\n' "$headers" | sed -n 's/^ratelimit-remaining: *\([0-9]*\).*/\1/p' | head -n 1)
   fi
+  echo "${remaining:-unknown} of ${limit:-unknown}"
+}
+
+# One line for the log: the daemon's mirrors and the account's budget. With
+# DOCKERHUB_VERIFY_MIRROR=1, also a real pull of a small image as the logged-in client, with the
+# budget read before and after: a pull the mirror served leaves it unchanged, and succeeds even
+# when it is spent. Never fails the step.
+summarize() {
+  local before after result image="busybox:1.36.1"
+  before=$(account_pulls_left)
   echo "Docker Hub: mirrors $(docker info --format '{{json .RegistryConfig.Mirrors}}' 2>/dev/null || echo unknown);" \
-    "account pulls left this hour ${remaining:-unknown} of ${limit:-unknown}."
+    "account pulls left this hour $before."
+  if [ "${DOCKERHUB_VERIFY_MIRROR:-}" = 1 ]; then
+    if result=$(docker pull -q "$image" 2>&1); then
+      result="pulled"
+    else
+      result="failed ($(printf '%s\n' "$result" | sed -n '/./{p;q;}'))"
+    fi
+    after=$(account_pulls_left)
+    echo "Docker Hub mirror check: $image $result; account pulls left $before before, $after after."
+  fi
   return 0
 }
 

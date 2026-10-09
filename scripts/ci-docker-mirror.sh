@@ -6,6 +6,12 @@
 # neither. An image the mirror does not hold (it caches popular Docker Hub images, not all of
 # them) is a miss the daemon answers by pulling from Docker Hub itself, with the job's login.
 #
+# The daemon also moves to the containerd image store. The classic store sends the Docker Hub
+# login to every docker.io endpoint, mirrors included; mirror.gcr.io rejects those credentials
+# ("unauthorized: authentication failed"), and the daemon then falls back to Docker Hub, so with a
+# login in place the classic store never pulled through the mirror at all. The containerd store
+# keeps the login for Docker Hub and asks the mirror anonymously.
+#
 # The mirror needs no secrets, so this runs in fork and Dependabot jobs too. It is an
 # optimisation: anything that goes wrong is a warning and the job pulls from Docker Hub as before.
 # It restarts the daemon, so it must run before a job starts any container.
@@ -26,10 +32,20 @@ mirrors() {
   docker info --format '{{json .RegistryConfig.Mirrors}}' 2>/dev/null
 }
 
+# "true" when the daemon keeps images in containerd, which is what makes the mirror usable with a login.
+containerd_store() {
+  case "$(docker info --format '{{json .DriverStatus}}' 2>/dev/null)" in
+    *io.containerd.snapshotter*) echo true ;;
+    *) echo false ;;
+  esac
+}
+
 case "$(mirrors)" in
   *"$mirror"*)
-    echo "Docker Hub mirror: $mirror already configured."
-    exit 0
+    if [ "$(containerd_store)" = true ]; then
+      echo "Docker Hub mirror: $mirror already configured, with the containerd image store."
+      exit 0
+    fi
     ;;
 esac
 
@@ -65,6 +81,9 @@ mirrors = cfg.get("registry-mirrors") or []
 if mirror not in mirrors:
     mirrors.append(mirror)
 cfg["registry-mirrors"] = mirrors
+features = cfg.get("features") or {}
+features["containerd-snapshotter"] = True
+cfg["features"] = features
 print(json.dumps(cfg, indent=2))
 PY
 ) || {
@@ -98,9 +117,14 @@ fi
 rm -f "$backup"
 
 active=$(mirrors)
+store=$(containerd_store)
 case "$active" in
   *"$mirror"*)
-    echo "Docker Hub mirror: $mirror active (daemon mirrors: $active)."
+    if [ "$store" = true ]; then
+      echo "Docker Hub mirror: $mirror active (daemon mirrors: $active; containerd image store)."
+    else
+      echo "::warning::Docker Hub mirror configured but the daemon kept the classic image store, which sends the Docker Hub login to the mirror; logged-in pulls will bypass it"
+    fi
     ;;
   *)
     echo "::warning::Docker Hub mirror not active after the restart (daemon mirrors: ${active:-unknown}); pulling from Docker Hub"
