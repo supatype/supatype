@@ -490,6 +490,63 @@ function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
+// ─── Before adopt ──────────────────────────────────────────────────────────────
+
+/** `column:<table>.<name>`, as `--key` names a column; undefined for any other key. */
+export function parseColumnKey(key: string): { table: string; column: string } | undefined {
+  if (!key.startsWith("column:")) return undefined
+  const rest = key.slice("column:".length)
+  const dot = rest.indexOf(".")
+  if (dot <= 0 || dot === rest.length - 1) return undefined
+  return { table: rest.slice(0, dot), column: rest.slice(dot + 1) }
+}
+
+/**
+ * What adopt will do with each column `--key` names that the engine's preview does not list (a
+ * column added outside Supatype is not a conflict, so the preview is silent about it): one line
+ * per column, saying the field that would be added and where, worked out by the same planning the
+ * edit after adopt uses, or that it has to be added by hand. Nothing is written.
+ */
+export async function previewKeyedColumns(
+  keys: readonly string[],
+  shown: readonly string[],
+  opts: { entryPath: string; cwd: string },
+  deps: { introspect: () => Promise<unknown> },
+): Promise<string[]> {
+  const columns = keys
+    .filter((key) => !shown.includes(key))
+    .map(parseColumnKey)
+    .filter((c): c is { table: string; column: string } => c !== undefined)
+  if (columns.length === 0) return []
+
+  let live: Map<string, LiveColumn> | undefined
+  let unread: string | undefined
+  try {
+    live = liveColumns(await deps.introspect())
+  } catch (err: unknown) {
+    unread = messageOf(err)
+  }
+
+  return columns.map(({ table, column }) => {
+    const head = `column ${table}.${column}: record as managed by Supatype`
+    if (live === undefined) {
+      return `${head}; its type could not be read from the database (${unread ?? "no answer"}), so declare it in your schema by hand`
+    }
+    const plan = planColumnDeclaration({ entryPath: opts.entryPath, cwd: opts.cwd, table, column, live: live.get(`${table}.${column}`) })
+    if (plan.status === "planned") {
+      const imports =
+        plan.addsImports.length > 0 ? `, importing ${plan.addsImports.join(", ")} from "${TYPES_MODULE}"` : ""
+      return `${head}, and add \`${plan.line}\` to ${displayPath(plan.file, opts.cwd)} (${plan.model})${imports}`
+    }
+    if (plan.line === undefined) return `${head}; declare it in your schema by hand (${plan.reason})`
+    const where =
+      plan.model !== undefined
+        ? ` in ${plan.file !== undefined ? `${displayPath(plan.file, opts.cwd)} (${plan.model})` : `model ${plan.model}`}`
+        : ""
+    return `${head}; add it to your schema by hand${where}: \`${plan.line}\` (${plan.reason})`
+  })
+}
+
 // ─── After adopt ───────────────────────────────────────────────────────────────
 
 /** An object adopt took, as the engine names it. */
