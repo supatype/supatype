@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { pushConsentingToDrift } from "../src/drift-consent.js"
+import { askToOverwrite, pushConsentingToDrift } from "../src/drift-consent.js"
 import { EngineError } from "../src/engine-client.js"
 
 /** What the engine binary does on a docker push it refuses: exit 1, the JSON reason on stdout. */
@@ -91,5 +91,20 @@ describe("pushConsentingToDrift()", () => {
         throw boom
       }, { overwriteDrift: false, yes: false }),
     ).rejects.toBe(boom)
+  })
+})
+
+describe("askToOverwrite()", () => {
+  it("is yes to put Supatype's definitions back", async () => {
+    output()
+    expect(await askToOverwrite({ ask: async () => true })).toBe(true)
+    expect(process.exitCode).toBeUndefined()
+  })
+
+  it("keeps the hand edits on no and exits 1", async () => {
+    const printed = output()
+    expect(await askToOverwrite({ ask: async () => false })).toBe(false)
+    expect(process.exitCode).toBe(1)
+    expect(printed()).toContain("The changes made outside Supatype were kept; nothing was applied.")
   })
 })
