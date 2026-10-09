@@ -3,9 +3,8 @@ import { loadConfig, loadSchemaAst } from "../config.js"
 import { error, info, plain } from "../ui/messages.js"
 import { askConsent } from "../ui/confirm.js"
 import { isAccessKind } from "../diff-output.js"
-import { requireEngineForOwnershipFlag } from "../engine-ownership-gate.js"
 import { hooksPathFromProject, schemaPathFromProject, serviceRoleRoutes } from "../project-config.js"
-import { resolveTarget, targetSchemaDoctor, schemaPgSchema, type DeployTarget } from "../resolve-target.js"
+import { requireTargetFeatures, resolveTarget, targetSchemaDoctor, schemaPgSchema, type DeployTarget } from "../resolve-target.js"
 import { loadProjectLink } from "../link.js"
 import { resolveHostEngineDatabaseUrl } from "../dev-compose.js"
 import { hooksReport, type HooksReport } from "../model-hooks.js"
@@ -157,13 +156,15 @@ async function doctor(opts: DoctorOptions): Promise<void> {
     error("doctor --overwrite-drift only applies with --rebaseline")
     process.exit(1)
   }
-  if (rebaseline) await requireEngineForOwnershipFlag("--rebaseline", config)
-  if (overwriteDrift) await requireEngineForOwnershipFlag("--overwrite-drift", config)
 
   info("Loading schema...")
   const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
 
   const target = await schemaCommandTarget(cwd, config, opts)
+  await requireTargetFeatures(target, [
+    ...(rebaseline ? [{ feature: "rebaseline", flag: "--rebaseline" } as const] : []),
+    ...(overwriteDrift ? [{ feature: "overwrite_drift", flag: "--overwrite-drift" } as const] : []),
+  ])
   let report = (await targetSchemaDoctor(target, ast, { schema: pgSchema })) as DoctorReport
 
   printHooks(hooksReport(cwd, hooksPathFromProject(config, cwd), ast))

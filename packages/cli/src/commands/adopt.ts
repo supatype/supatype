@@ -2,11 +2,13 @@ import { resolve } from "node:path"
 import type { Command } from "commander"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { schemaPathFromProject } from "../project-config.js"
-import { targetSchemaAdopt, targetSchemaIntrospect, schemaPgSchema } from "../resolve-target.js"
+import { requireTargetFeatures, targetSchemaAdopt, targetSchemaIntrospect, schemaPgSchema } from "../resolve-target.js"
 import {
   adoptedCount,
   adoptionKey,
   adoptionLines,
+  ENGINE_BUSY_MESSAGE,
+  isEngineBusy,
   isStalePreview,
   previewedKeys,
   STALE_PREVIEW_MESSAGE,
@@ -16,7 +18,7 @@ import { declareAdoptedColumns, previewKeyedColumns } from "../adopt-columns.js"
 import { askConsent, confirm } from "../ui/confirm.js"
 import { isInteractive } from "../ui/interactive.js"
 import { error, info, plain, warn } from "../ui/messages.js"
-import { requireEngineForOwnershipFlag } from "../engine-ownership-gate.js"
+import { adoptKeysNeed, adoptNeeds } from "../engine-ownership-gate.js"
 import { withSpinner } from "../ui/progress.js"
 import { addRetiredNoCacheOption, warnIfRetiredNoCache } from "../retired-no-cache.js"
 import { schemaCommandTarget } from "./doctor.js"
@@ -63,12 +65,12 @@ async function adopt(opts: AdoptOptions): Promise<void> {
   warnIfRetiredNoCache(opts)
   const cwd = process.cwd()
   const config = loadConfig(cwd)
-  if (opts.release !== undefined) await requireEngineForOwnershipFlag("--release", config)
-  if (opts.key !== undefined) await requireEngineForOwnershipFlag("--key", config)
   const ast = await withSpinner("Loading schema", async () =>
     loadSchemaAst(schemaPathFromProject(config, cwd), cwd),
   )
   const target = await schemaCommandTarget(cwd, config, opts)
+  // Before the preview: the server or engine that adopts must take every flag given.
+  await requireTargetFeatures(target, adoptNeeds({ release: opts.release, keys: opts.key }))
   const run = (yes: boolean, keys?: string[]): Promise<AdoptOutcome> =>
     targetSchemaAdopt(target, ast, {
       schema: schemaPgSchema(cwd),
@@ -99,7 +101,8 @@ async function adopt(opts: AdoptOptions): Promise<void> {
   // since. `--yes` alone was agreed before anything was shown, so it adopts every conflict there
   // is. An engine from before the ledger names none.
   const keys = opts.key ?? (opts.yes ? undefined : previewedKeys(preview))
-  if (opts.key === undefined && keys !== undefined) await requireEngineForOwnershipFlag("adopt", config)
+  // Before anyone is asked: applying sends what was shown, which the target must honour.
+  if (opts.key === undefined && keys !== undefined) await requireTargetFeatures(target, [adoptKeysNeed(keys)])
   const consent = await askConsent("Go ahead?", opts.yes ?? false)
   if (consent === "needs-yes") {
     // Not a decline: a pipeline that forgot --yes adopted nothing, and must not pass as if it had.
@@ -115,8 +118,9 @@ async function adopt(opts: AdoptOptions): Promise<void> {
   try {
     outcome = await run(true, keys)
   } catch (err: unknown) {
-    if (!isStalePreview(err)) throw err
-    error(STALE_PREVIEW_MESSAGE)
+    if (!isStalePreview(err) && !isEngineBusy(err)) throw err
+    // Nothing was written either way: the engine refused before it took anything.
+    error(isEngineBusy(err) ? ENGINE_BUSY_MESSAGE : STALE_PREVIEW_MESSAGE)
     process.exitCode = 1
     return
   }

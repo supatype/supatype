@@ -2,7 +2,9 @@ import { Command } from "commander"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const targetSchemaDoctor = vi.hoisted(() => vi.fn())
-const requireEngine = vi.hoisted(() => vi.fn(async () => undefined))
+const requireEngine = vi.hoisted(() => vi.fn(async (_target: unknown, _needs: Array<{ feature: string; flag: string }>) => undefined))
+/** Every feature the target was asked for. */
+const asked = (): string[] => requireEngine.mock.calls.flatMap((call) => call[1].map((need) => need.feature))
 const confirmMock = vi.hoisted(() => vi.fn())
 
 vi.mock("../src/config.js", () => ({ loadConfig: () => ({ project: { name: "app" } }), loadSchemaAst: () => ({ models: [] }) }))
@@ -13,6 +15,7 @@ vi.mock("../src/project-config.js", () => ({
 }))
 vi.mock("../src/resolve-target.js", () => ({
   targetSchemaDoctor,
+  requireTargetFeatures: requireEngine,
   schemaPgSchema: () => "public",
   resolveTarget: () => ({ mode: "direct", databaseUrl: "postgres://x" }),
 }))
@@ -24,7 +27,6 @@ vi.mock("../src/model-hooks.js", () => ({
 vi.mock("../src/service-role-check.js", () => ({ checkServiceRoleRoutes: () => ({ missing: [] }) }))
 vi.mock("../src/ui/interactive.js", () => ({ isInteractive: vi.fn(() => false) }))
 vi.mock("../src/ui/clack.js", () => ({ p: { confirm: confirmMock, cancel: vi.fn() }, isCancel: () => false, CLACK_CANCEL: Symbol() }))
-vi.mock("../src/engine-ownership-gate.js", () => ({ requireEngineForOwnershipFlag: requireEngine }))
 
 import { rebaselinePlan, registerDoctor, type DoctorItem, type DoctorReport } from "../src/commands/doctor.js"
 import { isInteractive } from "../src/ui/interactive.js"
@@ -101,7 +103,7 @@ describe("supatype doctor --rebaseline", () => {
       { rebaseline: false, overwriteDrift: false },
       { rebaseline: true, overwriteDrift: false },
     ])
-    expect(requireEngine).toHaveBeenCalledWith("--rebaseline", expect.anything())
+    expect(asked()).toContain("rebaseline")
   })
 
   it("sends --overwrite-drift alongside the rebaseline when passed", async () => {
@@ -110,7 +112,7 @@ describe("supatype doctor --rebaseline", () => {
       { rebaseline: false, overwriteDrift: false },
       { rebaseline: true, overwriteDrift: true },
     ])
-    expect(requireEngine).toHaveBeenCalledWith("--overwrite-drift", expect.anything())
+    expect(asked()).toContain("overwrite_drift")
   })
 
   it("does not ask when there is nothing to rebaseline", async () => {

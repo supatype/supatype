@@ -19,6 +19,7 @@ vi.mock("../src/project-config.js", () => ({ schemaPathFromProject: () => schema
 vi.mock("../src/resolve-target.js", () => ({
   targetSchemaAdopt,
   targetSchemaIntrospect,
+  requireTargetFeatures: vi.fn(async () => undefined),
   schemaPgSchema: () => "public",
 }))
 vi.mock("../src/commands/doctor.js", () => ({ schemaCommandTarget: async () => ({ mode: "direct" }) }))
@@ -26,7 +27,6 @@ vi.mock("../src/commands/generate.js", () => ({ regenerateTypes }))
 vi.mock("../src/ui/progress.js", () => ({ withSpinner: (_: string, run: () => unknown) => run() }))
 vi.mock("../src/ui/interactive.js", () => ({ isInteractive: vi.fn(() => false) }))
 vi.mock("../src/ui/clack.js", () => ({ p: { confirm: confirmMock, cancel: vi.fn() }, isCancel: () => false, CLACK_CANCEL: Symbol() }))
-vi.mock("../src/engine-ownership-gate.js", () => ({ requireEngineForOwnershipFlag: vi.fn(async () => undefined) }))
 
 import { registerAdopt } from "../src/commands/adopt.js"
 import { isInteractive } from "../src/ui/interactive.js"

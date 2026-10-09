@@ -28,7 +28,15 @@ import {
   resolveCloudAccessToken,
   resolveCloudRefreshToken,
 } from "./cloud-credentials.js"
-import { targetFetch, type TargetFetchOptions } from "./target-client.js"
+import { TargetApiError, targetFetch, type TargetFetchOptions } from "./target-client.js"
+import {
+  adoptNeeds,
+  assertSupported,
+  engineCapabilities,
+  parseCapabilities,
+  type Capabilities,
+  type FeatureNeed,
+} from "./engine-ownership-gate.js"
 
 export interface ResolveTargetFlags {
   env?: string | undefined
@@ -246,6 +254,50 @@ function projectPath(target: DeployTarget, subpath: string): string {
   return `/projects/${target.projectRef}${subpath}`
 }
 
+/** Whether `target` runs the engine binary here rather than asking a control plane. */
+function runsEngineHere(target: DeployTarget): boolean {
+  return target.mode === "direct" || (target.mode === "local" && !target.token)
+}
+
+const capabilitiesOf = new WeakMap<DeployTarget, Capabilities>()
+
+/**
+ * What `target` supports: the engine binary's own answer when it runs here, otherwise the control
+ * plane's `GET <schema base>/capabilities`. A control plane without the route (404) is from before
+ * it, and supports no ownership feature: it would drop the fields, not forward them.
+ */
+export async function targetCapabilities(target: DeployTarget): Promise<Capabilities> {
+  const known = capabilitiesOf.get(target)
+  if (known !== undefined) return known
+  let caps: Capabilities
+  if (runsEngineHere(target)) {
+    caps = await engineCapabilities()
+  } else {
+    let answer: unknown
+    try {
+      answer = await targetFetch<unknown>(
+        target.apiBaseUrl,
+        target.apiPrefix,
+        apiFetchOpts(target, "GET", projectPath(target, "/schema/capabilities")),
+      )
+    } catch (err: unknown) {
+      if (!(err instanceof TargetApiError && err.status === 404)) throw err
+    }
+    caps = { features: parseCapabilities(answer) ?? new Set(), source: "server" }
+  }
+  capabilitiesOf.set(target, caps)
+  return caps
+}
+
+/**
+ * Refuse, before anything is sent, an ownership feature `target` does not support: "this server
+ * does not support <flag>; update it". Never asks when nothing is needed.
+ */
+export async function requireTargetFeatures(target: DeployTarget, needs: readonly FeatureNeed[]): Promise<void> {
+  if (needs.length === 0) return
+  assertSupported(await targetCapabilities(target), needs)
+}
+
 export async function targetSchemaDiff(
   target: DeployTarget,
   ast: unknown,
@@ -293,14 +345,16 @@ export async function targetSchemaPush(
    */
   cache?: { tables?: string[]; honoured?: boolean }
 }> {
-  if (target.mode === "direct" || (target.mode === "local" && !target.token)) {
+  const overwriteDrift = opts?.overwriteDrift === true
+  await requireTargetFeatures(target, overwriteDrift ? [{ feature: "overwrite_drift", flag: "--overwrite-drift" }] : [])
+  if (runsEngineHere(target)) {
     await ensureEngine()
     const body: Record<string, unknown> = {
       ast,
       database_url: target.databaseUrl!,
       schema: opts?.schema ?? "public",
       force: opts?.force ?? true,
-      overwrite_drift: opts?.overwriteDrift === true,
+      ...(overwriteDrift && { overwrite_drift: true }),
     }
     if (opts?.schemaSources) {
       body["schema_sources_gz_base64"] = opts.schemaSources.dataBase64
@@ -313,7 +367,8 @@ export async function targetSchemaPush(
     ast,
     force: opts?.force ?? true,
     schema: opts?.schema ?? "public",
-    overwriteDrift: opts?.overwriteDrift === true,
+    // The engine's own name, which a control plane forwards as it is.
+    ...(overwriteDrift && { overwrite_drift: true }),
   }
   if (opts?.schemaSources) {
     pushBody["schemaSources"] = {
@@ -468,7 +523,10 @@ export async function targetSchemaAdopt(
     ...(release.length > 0 && { release }),
     ...(opts?.keys !== undefined && { keys: opts.keys }),
   }
-  if (target.mode === "direct" || (target.mode === "local" && !target.token)) {
+  // A server that dropped `keys` would adopt every conflict, and one that dropped `release` would
+  // adopt instead of release: refused before sending, never degraded.
+  await requireTargetFeatures(target, adoptNeeds({ keys: opts?.keys, release }))
+  if (runsEngineHere(target)) {
     await ensureEngine()
     return engineRequest<AdoptOutcome>("/adopt", { ...body, database_url: target.databaseUrl! })
   }
