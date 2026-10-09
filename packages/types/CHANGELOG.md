@@ -4,6 +4,10 @@
 
 ### Breaking Changes
 
+* **schema:** `AutoIncrement<T>` is now `Identity<T>`: a `GENERATED ALWAYS AS IDENTITY` column
+  rather than `SERIAL`. A column an earlier push made as a serial is left as one: the push warns and
+  prints the statements that convert it, to run on purpose.
+
 * **storage:** a bucket rule that is left out is refused, for every caller but the service role,
   the same as on a model. It used to mean "any signed-in user", so a bucket declaring only `read`
   and `create` let anyone signed in delete anyone's files. A bucket with no `access` at all now
@@ -11,6 +15,14 @@
   each one left out.
 
 ### Features
+
+* **schema:** identity and stored generated columns, as options on the field types:
+  `Int<{ identity: "always" }>`, `BigInt<{ identity: "by-default" }>`, `SmallInt<{ identity }>`, and
+  `generated: "<sql>"` on every scalar type (`Float<{ generated: "price * qty" }>`,
+  `TSVector<{ generated: "to_tsvector('english', title)" }>`). `Identity<number>`,
+  `Identity<bigint, "by-default">` and `Generated<string, "lower(name)">` resolve to exactly the
+  options form, for the types (`string`) that take no options. `IdentityMode`,
+  `ScalarFieldOptions` and `IntegerFieldOptions` name the options.
 
 * **storage:** `update` is a bucket rule, alongside `read`, `create` and `delete`, and governs
   overwriting an existing file (`x-upsert`). `BucketRule` names the union every operation takes.
