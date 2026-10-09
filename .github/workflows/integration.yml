@@ -50,6 +50,9 @@ jobs:
 
       - name: Log in to Docker Hub
         if: env.DOCKERHUB_USERNAME != ''
+        # A Docker Hub outage (it has answered this login with a 500) must not fail the job: the
+        # step is only there to lift the rate limit, and the job falls back to anonymous pulls.
+        continue-on-error: true
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -132,6 +135,9 @@ jobs:
 
       - name: Log in to Docker Hub
         if: env.DOCKERHUB_USERNAME != ''
+        # A Docker Hub outage (it has answered this login with a 500) must not fail the job: the
+        # step is only there to lift the rate limit, and the job falls back to anonymous pulls.
+        continue-on-error: true
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -228,6 +234,9 @@ jobs:
 
       - name: Log in to Docker Hub
         if: env.DOCKERHUB_USERNAME != ''
+        # A Docker Hub outage (it has answered this login with a 500) must not fail the job: the
+        # step is only there to lift the rate limit, and the job falls back to anonymous pulls.
+        continue-on-error: true
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -277,6 +286,9 @@ jobs:
 
       - name: Log in to Docker Hub
         if: env.DOCKERHUB_USERNAME != ''
+        # A Docker Hub outage (it has answered this login with a 500) must not fail the job: the
+        # step is only there to lift the rate limit, and the job falls back to anonymous pulls.
+        continue-on-error: true
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -343,6 +355,9 @@ jobs:
 
       - name: Log in to Docker Hub
         if: env.DOCKERHUB_USERNAME != ''
+        # A Docker Hub outage (it has answered this login with a 500) must not fail the job: the
+        # step is only there to lift the rate limit, and the job falls back to anonymous pulls.
+        continue-on-error: true
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -389,6 +404,9 @@ jobs:
 
       - name: Log in to Docker Hub
         if: env.DOCKERHUB_USERNAME != ''
+        # A Docker Hub outage (it has answered this login with a 500) must not fail the job: the
+        # step is only there to lift the rate limit, and the job falls back to anonymous pulls.
+        continue-on-error: true
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -440,6 +458,9 @@ jobs:
 
       - name: Log in to Docker Hub
         if: env.DOCKERHUB_USERNAME != ''
+        # A Docker Hub outage (it has answered this login with a 500) must not fail the job: the
+        # step is only there to lift the rate limit, and the job falls back to anonymous pulls.
+        continue-on-error: true
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -499,6 +520,9 @@ jobs:
 
       - name: Log in to Docker Hub
         if: env.DOCKERHUB_USERNAME != ''
+        # A Docker Hub outage (it has answered this login with a 500) must not fail the job: the
+        # step is only there to lift the rate limit, and the job falls back to anonymous pulls.
+        continue-on-error: true
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -565,6 +589,9 @@ jobs:
 
       - name: Log in to Docker Hub
         if: env.DOCKERHUB_USERNAME != ''
+        # A Docker Hub outage (it has answered this login with a 500) must not fail the job: the
+        # step is only there to lift the rate limit, and the job falls back to anonymous pulls.
+        continue-on-error: true
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -615,6 +642,9 @@ jobs:
 
       - name: Log in to Docker Hub
         if: env.DOCKERHUB_USERNAME != ''
+        # A Docker Hub outage (it has answered this login with a 500) must not fail the job: the
+        # step is only there to lift the rate limit, and the job falls back to anonymous pulls.
+        continue-on-error: true
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -687,6 +717,9 @@ jobs:
 
       - name: Log in to Docker Hub
         if: env.DOCKERHUB_USERNAME != ''
+        # A Docker Hub outage (it has answered this login with a 500) must not fail the job: the
+        # step is only there to lift the rate limit, and the job falls back to anonymous pulls.
+        continue-on-error: true
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -760,6 +793,9 @@ jobs:
 
       - name: Log in to Docker Hub
         if: env.DOCKERHUB_USERNAME != ''
+        # A Docker Hub outage (it has answered this login with a 500) must not fail the job: the
+        # step is only there to lift the rate limit, and the job falls back to anonymous pulls.
+        continue-on-error: true
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -834,6 +870,9 @@ jobs:
 
       - name: Log in to Docker Hub
         if: env.DOCKERHUB_USERNAME != ''
+        # A Docker Hub outage (it has answered this login with a 500) must not fail the job: the
+        # step is only there to lift the rate limit, and the job falls back to anonymous pulls.
+        continue-on-error: true
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
