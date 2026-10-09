@@ -3,6 +3,7 @@ import {
   assertSupported,
   capabilityRefusal,
   ENGINE_MIN_FOR_OWNERSHIP,
+  identityColumnsNeed,
   legacyFeatures,
   LEGACY_OWNERSHIP_FEATURES,
   OwnershipUnsupportedError,
@@ -100,6 +101,41 @@ describe("capabilityRefusal() / assertSupported()", () => {
   })
 })
 
+/** A schema with an identity column and a generated one. */
+const NUMBERED = {
+  models: [
+    {
+      name: "Post",
+      fields: {
+        id: { kind: "integer", identity: "always" },
+        title: { kind: "text" },
+        title_lower: { kind: "text", generated: { expression: "lower(title)", stored: true } },
+      },
+    },
+  ],
+}
+
+describe("identityColumnsNeed()", () => {
+  it("names the fields the database fills, and needs nothing for a schema without one", () => {
+    expect(identityColumnsNeed(NUMBERED)).toEqual([
+      { feature: "identity_columns", flag: "identity and generated columns (Post.id, Post.title_lower)" },
+    ])
+    expect(identityColumnsNeed({ models: [{ name: "Post", fields: { title: { kind: "text" } } }] })).toEqual([])
+    expect(identityColumnsNeed({})).toEqual([])
+  })
+
+  it("is refused by an engine or a server without identity_columns, saying to update it or do it by hand", () => {
+    const [need] = identityColumnsNeed(NUMBERED)
+    expect(capabilityRefusal(need!, { features: new Set(ALL), source: "server" })).toBe(
+      "this server does not support identity and generated columns (Post.id, Post.title_lower); update it, or declare those fields as plain columns and make the change in the database yourself",
+    )
+    expect(capabilityRefusal(need!, { features: new Set(), source: "engine" })).toContain(
+      "update it (`supatype update`, or pin versions.engine to a newer release), or declare those fields as plain columns",
+    )
+    expect(capabilityRefusal(need!, { features: new Set(["identity_columns"]), source: "server" })).toBeUndefined()
+  })
+})
+
 describe("targetSchemaPush() against a server", () => {
   afterEach(() => {
     vi.unstubAllGlobals()
@@ -158,6 +194,32 @@ describe("targetSchemaPush() against a server", () => {
     const body = JSON.parse(String(push[1]?.body)) as Record<string, unknown>
     expect(body["overwrite_drift"]).toBe(true)
     expect(body).not.toHaveProperty("overwriteDrift")
+  })
+
+  it("never sends identity or generated columns to a server whose engine does not read them", async () => {
+    const fetchMock = vi.fn(async (url: string) =>
+      url.endsWith("/schema/capabilities") ? reply(200, { data: { features: ALL } }) : reply(200, { data: {} }),
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    const { targetSchemaPush, targetSchemaDiff } = await import("../src/resolve-target.js")
+    await expect(targetSchemaPush(selfHost(), NUMBERED, {})).rejects.toThrow(
+      "this server does not support identity and generated columns (Post.id, Post.title_lower); update it",
+    )
+    await expect(targetSchemaDiff(selfHost(), NUMBERED)).rejects.toThrow("identity and generated columns")
+    expect(fetchMock.mock.calls.every((c) => String(c[0]).endsWith("/schema/capabilities"))).toBe(true)
+  })
+
+  it("sends them once the server lists identity_columns", async () => {
+    const fetchMock = vi.fn(async (url: string, _init?: { body?: string }) =>
+      url.endsWith("/schema/capabilities")
+        ? reply(200, { data: { features: [...ALL, "identity_columns"] } })
+        : reply(200, { data: { status: "applied" } }),
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    const { targetSchemaPush } = await import("../src/resolve-target.js")
+    await targetSchemaPush(selfHost(), NUMBERED, {})
+    const push = fetchMock.mock.calls.find((c) => String(c[0]).endsWith("/schema/push"))!
+    expect(JSON.parse(String(push[1]?.body)).ast).toEqual(NUMBERED)
   })
 
   it("does not ask for capabilities when no ownership flag is sent", async () => {

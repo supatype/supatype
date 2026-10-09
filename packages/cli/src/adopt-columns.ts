@@ -43,6 +43,8 @@ interface ExpectedField {
   scale?: number
   /** An identity column's mode, as the AST spells it. */
   identity?: "always" | "byDefault"
+  /** `AutoIncrement<>`, which a serial column satisfies. */
+  autoIncrement?: true
   /** A generated column's expression. */
   generated?: string
 }
@@ -52,8 +54,21 @@ export interface ColumnFieldType {
   expect: ExpectedField
 }
 
-/** The field type whose column is exactly `col`, or why there is none to be sure of. */
-export function fieldTypeForColumn(col: LiveColumn, opts: { localized?: boolean } = {}): ColumnFieldType | { reason: string } {
+/** Why a column the database fills cannot be declared as one where the engine cannot read it. */
+const NO_IDENTITY_COLUMNS =
+  "this engine does not support identity and generated columns; update it, or declare the column by hand"
+
+/**
+ * The field type whose column is exactly `col`, or why there is none to be sure of.
+ *
+ * `identityColumns`: whether the engine the schema is pushed to reads identity and generated
+ * columns (its `identity_columns` capability). Without it an identity or generated column is not
+ * declared as one, since the push would be refused, and a serial is declared as it always was.
+ */
+export function fieldTypeForColumn(
+  col: LiveColumn,
+  opts: { localized?: boolean; identityColumns?: boolean } = {},
+): ColumnFieldType | { reason: string } {
   const udt = (col.udtName || col.dataType).toLowerCase()
   const base = baseType(udt, col)
   if ("reason" in base) return base
@@ -63,8 +78,22 @@ export function fieldTypeForColumn(col: LiveColumn, opts: { localized?: boolean 
   const hasDefault = col.default != null && col.default !== ""
   // How the database fills it, which the introspection says: an identity column numbered from its
   // sequence, or a generated one computed from the row (identity-contract).
-  if (col.isIdentity === true) return identityFieldType(col, base)
-  if (col.isGenerated === true) return generatedFieldType(col, base, expr)
+  if (col.isIdentity === true || col.isGenerated === true) {
+    if (opts.identityColumns !== true) {
+      return { reason: `it is ${col.isIdentity === true ? "an identity" : "a generated"} column, and ${NO_IDENTITY_COLUMNS}` }
+    }
+    if (col.isIdentity === true) return identityFieldType(col, base)
+    return generatedFieldType(col, base, expr)
+  }
+  // A serial (numbered by its default, `nextval` of the sequence it owns) is `AutoIncrement`, which
+  // a push leaves exactly as it is.
+  if (opts.identityColumns === true && isSerial(col) && (base.kind === "integer" || base.kind === "bigInt")) {
+    const width = { name: base.kind === "bigInt" ? "bigint" : "number", keyword: true }
+    return {
+      expr: { name: "AutoIncrement", args: [width] },
+      expect: { kind: base.kind, required: true, identity: "byDefault", autoIncrement: true },
+    }
+  }
   // The database assigns it, so an insert may leave it out. Its default stays the database's own.
   if (hasDefault) expr = { name: "ServerDefault", args: [expr] }
   if (col.nullable) expr = { name: "Optional", args: [expr] }
@@ -77,6 +106,11 @@ export function fieldTypeForColumn(col: LiveColumn, opts: { localized?: boolean 
       ...(base.scale !== undefined && { scale: base.scale }),
     },
   }
+}
+
+/** A serial column: numbered by its default, `nextval` of a sequence. */
+function isSerial(col: LiveColumn): boolean {
+  return !col.nullable && typeof col.default === "string" && col.default.startsWith("nextval(")
 }
 
 /** The kinds an identity column can have. */
@@ -252,6 +286,8 @@ export interface PlanInput {
   column: string
   /** The live column; undefined when the database did not report it. */
   live: LiveColumn | undefined
+  /** Whether the engine reads identity and generated columns (`identity_columns`). */
+  identityColumns?: boolean
 }
 
 /** Work out how to declare an adopted column, without writing anything. */
@@ -269,7 +305,7 @@ export function planColumnDeclaration(input: PlanInput): ColumnDeclaration {
     ast = extractSchemaAstFromTypes(input.entryPath, input.cwd)
   } catch (err: unknown) {
     if (input.live === undefined) return manual(`the schema could not be read (${messageOf(err)})`)
-    return withCanonicalLine(manual(`the schema could not be read (${messageOf(err)})`), input.live)
+    return withCanonicalLine(manual(`the schema could not be read (${messageOf(err)})`), input.live, input.identityColumns)
   }
   // Declared already (adopting a table hands over its declared columns too): nothing to add.
   const declaring = (ast?.models ?? []).filter((m) => m.annotations.db.tableName === table && column in m.fields)
@@ -283,17 +319,22 @@ export function planColumnDeclaration(input: PlanInput): ColumnDeclaration {
       models.length === 0
         ? `no model in the schema has table ${table}`
         : `more than one model has table ${table} (${models.map((m) => m.name).join(", ")})`
-    return withCanonicalLine(manual(reason), input.live)
+    return withCanonicalLine(manual(reason), input.live, input.identityColumns)
   }
   const model = models[0]!
 
   const found = findModelDeclaration(input.entryPath, model.name)
-  if ("reason" in found) return withCanonicalLine(manual(found.reason, { model: model.name }), input.live)
+  if ("reason" in found) {
+    return withCanonicalLine(manual(found.reason, { model: model.name }), input.live, input.identityColumns)
+  }
   const { sourceFile, fields, localized } = found
   const file = sourceFile.getFilePath()
   const at = { model: model.name, file }
 
-  const type = fieldTypeForColumn(input.live, { localized })
+  const type = fieldTypeForColumn(input.live, {
+    localized,
+    ...(input.identityColumns !== undefined && { identityColumns: input.identityColumns }),
+  })
   if ("reason" in type) return manual(`column ${table}.${column} cannot be declared exactly: ${type.reason}`, at)
 
   const key = fieldKey(column)
@@ -327,9 +368,13 @@ export function planColumnDeclaration(input: PlanInput): ColumnDeclaration {
   }
 }
 
-function withCanonicalLine(manual: ColumnDeclarationManual, live: LiveColumn | undefined): ColumnDeclarationManual {
+function withCanonicalLine(
+  manual: ColumnDeclarationManual,
+  live: LiveColumn | undefined,
+  identityColumns: boolean | undefined,
+): ColumnDeclarationManual {
   if (live === undefined) return manual
-  const type = fieldTypeForColumn(live)
+  const type = fieldTypeForColumn(live, { ...(identityColumns !== undefined && { identityColumns }) })
   if ("reason" in type) return { ...manual, reason: `${manual.reason}; and ${type.reason}` }
   return {
     ...manual,
@@ -429,6 +474,7 @@ function fieldMismatch(field: ModelAstV2["fields"][string], expect: ExpectedFiel
   if (expect.precision !== undefined && field["precision"] !== expect.precision) return "its precision differs"
   if (expect.scale !== undefined && field["scale"] !== expect.scale) return "its scale differs"
   if (field["identity"] !== expect.identity) return "its identity differs"
+  if (field["autoIncrement"] !== expect.autoIncrement) return "it reads as another kind of identity"
   const generated = (field["generated"] as { expression?: unknown } | undefined)?.expression
   if (generated !== expect.generated) return "its generated expression differs"
   return undefined
@@ -669,7 +715,7 @@ export function parseColumnKey(key: string): { table: string; column: string } |
 export async function previewKeyedColumns(
   keys: readonly string[],
   shown: readonly string[],
-  opts: { entryPath: string; cwd: string },
+  opts: { entryPath: string; cwd: string; identityColumns?: boolean },
   deps: { introspect: () => Promise<unknown> },
 ): Promise<string[]> {
   const columns = keys
@@ -691,7 +737,14 @@ export async function previewKeyedColumns(
     if (live === undefined) {
       return `${head}; its type could not be read from the database (${unread ?? "no answer"}), so declare it in your schema by hand`
     }
-    const plan = planColumnDeclaration({ entryPath: opts.entryPath, cwd: opts.cwd, table, column, live: live.get(`${table}.${column}`) })
+    const plan = planColumnDeclaration({
+      entryPath: opts.entryPath,
+      cwd: opts.cwd,
+      table,
+      column,
+      live: live.get(`${table}.${column}`),
+      ...(opts.identityColumns !== undefined && { identityColumns: opts.identityColumns }),
+    })
     if (plan.status === "declared") return `${head}; the schema already declares it (${plan.model})`
     if (plan.status === "planned") {
       const imports =
@@ -723,6 +776,8 @@ export interface DeclareOptions {
   yes: boolean
   /** Whether a person can be asked. */
   interactive: boolean
+  /** Whether the engine reads identity and generated columns (`identity_columns`). */
+  identityColumns?: boolean
 }
 
 export interface DeclareDeps {
@@ -766,6 +821,7 @@ export async function declareAdoptedColumns(
       table: item.table,
       column: item.name,
       live: live?.get(`${item.table}.${item.name}`),
+      ...(opts.identityColumns !== undefined && { identityColumns: opts.identityColumns }),
     })
     if (planned.status !== "planned") {
       results.push(planned)
