@@ -68,6 +68,16 @@ describe("targetSchemaAdopt() with an empty key list", () => {
   })
 })
 
+describe("targetSchemaAdopt() with --reclaim", () => {
+  it("is refused, never sent, to an engine without reclaim", async () => {
+    features.value = new Set(["adopt_keys", "adopt_none", "release"])
+    await expect(targetSchemaAdopt({ ...target }, {}, { yes: true, reclaim: ["table:w"] })).rejects.toThrow(
+      "does not support --reclaim",
+    )
+    expect(engineRequest).not.toHaveBeenCalled()
+  })
+})
+
 describe("the docker provider's adopt", () => {
   it("passes --adopt-none for an empty key list, never falling back to adopt-all", async () => {
     const { adoptCommand } = await import("../src/dev-compose.js")
