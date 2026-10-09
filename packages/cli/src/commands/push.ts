@@ -35,7 +35,8 @@ import {
   securityDrift,
 } from "../diff-output.js"
 import { printPushWarnings } from "../engine-push-output.js"
-import { requireEngineForOwnershipFlag } from "../engine-ownership-gate.js"
+import { pushConsentingToDrift } from "../drift-consent.js"
+import type { FeatureNeed } from "../engine-ownership-gate.js"
 import { pushOfferingAdoption, targetAdoptionSteps } from "../adopt-walkthrough.js"
 import { signJwt } from "../jwt.js"
 import { provisionBucketsFromAst } from "../storage-provision.js"
@@ -47,6 +48,7 @@ import { cacheSeedingNotes, freeTierCacheNote } from "../api-config-cache.js"
 import { refreshFunctionsContext } from "../functions-context-refresh.js"
 import type { SupatypeProjectConfig } from "../project-config.js"
 import {
+  requireTargetFeatures,
   resolveTarget,
   targetSchemaAdopt,
   targetSchemaDiff,
@@ -102,7 +104,6 @@ export function registerPush(program: Command): void {
       assertPreviewAddressesResolve(config)
 
       const run: PushRun = { yes: opts.yes ?? false, overwriteDrift: opts.overwriteDrift ?? false }
-      if (run.overwriteDrift) await requireEngineForOwnershipFlag("--overwrite-drift", config)
       const linked = loadProjectLink(cwd)
       const useDirect = opts.direct || opts.local || Boolean(opts.connection)
 
@@ -118,11 +119,19 @@ export function registerPush(program: Command): void {
           await pushViaTarget(cwd, config, localTarget, ast, pgSchema, run)
           return
         }
-        const { dockerAdoptionSteps, pushSchemaDocker } = await import("../dev-compose.js")
+        const { dockerAdoptionSteps, pushSchemaDocker, requireDockerFeatures } = await import("../dev-compose.js")
+        const gate = () => requireDockerFeatures(cwd, config, [OVERWRITE_DRIFT])
+        if (run.overwriteDrift) await gate()
         await pushOfferingAdoption(
+          // No diff is read first on this path, so the engine's refusal is where drift shows up.
           () =>
-            withSpinner("Applying schema via Docker Compose", () =>
-              pushSchemaDocker(cwd, config, { overwriteDrift: run.overwriteDrift }),
+            pushConsentingToDrift(
+              (overwriteDrift) =>
+                withSpinner("Applying schema via Docker Compose", () =>
+                  pushSchemaDocker(cwd, config, { overwriteDrift }),
+                ),
+              run,
+              { beforeOverwrite: gate },
             ),
           dockerAdoptionSteps(cwd, config),
           { yes: opts.yes ?? false, retry: "supatype push" },
@@ -138,6 +147,8 @@ export function registerPush(program: Command): void {
       await pushViaTarget(cwd, config, target, ast, pgSchema, run)
     })
 }
+
+const OVERWRITE_DRIFT: FeatureNeed = { feature: "overwrite_drift", flag: "--overwrite-drift" }
 
 /** How this push was asked to treat what needs a person's say. */
 interface PushRun {
@@ -182,6 +193,8 @@ async function pushViaTarget(
   pgSchema: string,
   run: PushRun,
 ): Promise<void> {
+  // Before anything is read or asked: a server or engine that cannot honour the flag says so now.
+  if (run.overwriteDrift) await requireTargetFeatures(target, [OVERWRITE_DRIFT])
   const diff = await withSpinner("Diffing against database", () =>
     targetSchemaDiff(target, ast, { schema: pgSchema }),
   )
@@ -216,7 +229,7 @@ async function pushViaTarget(
   if (overwriteDrift === null) return
   // Consent given at the prompt rather than by the flag still sends the flag.
   if (overwriteDrift && !run.overwriteDrift) {
-    await requireEngineForOwnershipFlag("--overwrite-drift", config)
+    await requireTargetFeatures(target, [OVERWRITE_DRIFT])
   }
 
   const pushResult = await pushOfferingAdoption(
