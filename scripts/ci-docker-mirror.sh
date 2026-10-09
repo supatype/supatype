@@ -16,17 +16,36 @@
 # optimisation: anything that goes wrong is a warning and the job pulls from Docker Hub as before.
 # It restarts the daemon, so it must run before a job starts any container.
 #
-# Linux only. On macOS Docker is a Colima VM with its own daemon config; the step says so and
-# does nothing. Runs under bash 3.2 as well (no ${var,,}, no mapfile).
+# On Linux it edits the runner's own daemon. On macOS Docker runs inside a Colima VM, started by an
+# earlier step, and the same edit is made to the daemon in the VM through `colima ssh`. Anywhere
+# else, or on macOS without a running Colima, the step says so and does nothing. Runs under bash
+# 3.2 as well (no ${var,,}, no mapfile).
 set -uo pipefail
 
 mirror="https://mirror.gcr.io"
 daemon_json=/etc/docker/daemon.json
 
-if [ "$(uname -s)" != "Linux" ]; then
-  echo "Docker Hub mirror: skipped on $(uname -s) (Docker runs in a VM with its own daemon config)."
-  exit 0
-fi
+case "$(uname -s)" in
+  Linux)
+    as_root() { sudo "$@"; }
+    restart_docker() { sudo systemctl restart docker; }
+    wait_tries=30
+    ;;
+  Darwin)
+    if ! command -v colima >/dev/null 2>&1 || ! colima status >/dev/null 2>&1; then
+      echo "Docker Hub mirror: skipped on macOS, Colima is not running."
+      exit 0
+    fi
+    as_root() { colima ssh -- sudo "$@"; }
+    restart_docker() { colima ssh -- sudo sh -c 'systemctl restart docker || service docker restart'; }
+    # The VM's daemon, and the socket Colima forwards to it, take longer to come back.
+    wait_tries=60
+    ;;
+  *)
+    echo "Docker Hub mirror: skipped on $(uname -s)."
+    exit 0
+    ;;
+esac
 
 mirrors() {
   docker info --format '{{json .RegistryConfig.Mirrors}}' 2>/dev/null
@@ -51,7 +70,7 @@ esac
 
 wait_for_daemon() {
   local i
-  for i in $(seq 1 30); do
+  for i in $(seq 1 "$wait_tries"); do
     if docker info >/dev/null 2>&1; then
       return 0
     fi
@@ -62,9 +81,9 @@ wait_for_daemon() {
 
 backup=$(mktemp)
 had_config=0
-if sudo test -f "$daemon_json"; then
+if as_root test -f "$daemon_json"; then
   had_config=1
-  sudo cat "$daemon_json" >"$backup"
+  as_root cat "$daemon_json" >"$backup"
 fi
 
 # Merge into whatever the image already configures rather than replacing it.
@@ -94,16 +113,16 @@ PY
 
 restore() {
   if [ "$had_config" = 1 ]; then
-    sudo cp "$backup" "$daemon_json"
+    as_root tee "$daemon_json" <"$backup" >/dev/null
   else
-    sudo rm -f "$daemon_json"
+    as_root rm -f "$daemon_json"
   fi
-  sudo systemctl restart docker && wait_for_daemon
+  restart_docker && wait_for_daemon
 }
 
-if ! { sudo mkdir -p "$(dirname "$daemon_json")" \
-  && printf '%s\n' "$merged" | sudo tee "$daemon_json" >/dev/null \
-  && sudo systemctl restart docker \
+if ! { as_root mkdir -p "$(dirname "$daemon_json")" \
+  && printf '%s\n' "$merged" | as_root tee "$daemon_json" >/dev/null \
+  && restart_docker \
   && wait_for_daemon; }; then
   # A daemon that does not come back would fail every later step, which the mirror must never do.
   if restore; then
