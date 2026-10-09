@@ -1,7 +1,8 @@
+import { resolve } from "node:path"
 import type { Command } from "commander"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { schemaPathFromProject } from "../project-config.js"
-import { targetSchemaAdopt, schemaPgSchema } from "../resolve-target.js"
+import { targetSchemaAdopt, targetSchemaIntrospect, schemaPgSchema } from "../resolve-target.js"
 import {
   adoptedCount,
   adoptionKey,
@@ -11,12 +12,15 @@ import {
   STALE_PREVIEW_MESSAGE,
   type AdoptOutcome,
 } from "../adopt-walkthrough.js"
-import { askConsent } from "../ui/confirm.js"
-import { error, info, plain } from "../ui/messages.js"
+import { declareAdoptedColumns } from "../adopt-columns.js"
+import { askConsent, confirm } from "../ui/confirm.js"
+import { isInteractive } from "../ui/interactive.js"
+import { error, info, plain, warn } from "../ui/messages.js"
 import { requireEngineForOwnershipFlag } from "../engine-ownership-gate.js"
 import { withSpinner } from "../ui/progress.js"
 import { addRetiredNoCacheOption, warnIfRetiredNoCache } from "../retired-no-cache.js"
 import { schemaCommandTarget } from "./doctor.js"
+import { regenerateTypes } from "./generate.js"
 
 interface AdoptOptions {
   connection?: string
@@ -112,6 +116,22 @@ async function adopt(opts: AdoptOptions): Promise<void> {
     for (const line of adoptionLines(outcome)) plain(`  ${line}`)
   }
   info(`Adopted ${adoptedCount(outcome)} object(s), released ${outcome.release?.length ?? 0}.`)
+  // An adopted column is managed, so the schema declares it from now on (see adopt-columns.ts).
+  await declareAdoptedColumns(
+    outcome.adopt ?? [],
+    {
+      entryPath: resolve(cwd, schemaPathFromProject(config, cwd)),
+      cwd,
+      yes: opts.yes ?? false,
+      interactive: isInteractive(),
+    },
+    {
+      introspect: () => targetSchemaIntrospect(target, { schema: schemaPgSchema(cwd) }),
+      confirm: async (question) => (await confirm(question, { default: false })) === true,
+      regenerate: () => regenerateTypes(cwd),
+      say: { info, warn, plain },
+    },
+  )
 }
 
 /** The preview with only the conflicts `keys` names, when it names any. */
