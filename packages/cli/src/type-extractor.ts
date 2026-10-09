@@ -214,7 +214,8 @@ export function collectSchemaSourcePaths(entryAbsPath: string, projectRoot: stri
   return { entryPoint, files }
 }
 
-function walkSchemaSourceAbsPaths(entryPath: string): string[] {
+/** Every schema source file the entry reaches through relative imports, entry first. */
+export function walkSchemaSourceAbsPaths(entryPath: string): string[] {
   const visited = new Set<string>()
   const paths: string[] = []
   const queue: string[] = [entryPath]

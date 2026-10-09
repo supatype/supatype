@@ -1,7 +1,8 @@
+import { resolve } from "node:path"
 import type { Command } from "commander"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { pgSchema, schemaPathFromProject } from "../project-config.js"
-import { schemaCommandTarget, targetSchemaAdopt } from "../resolve-target.js"
+import { schemaCommandTarget, targetSchemaAdopt, targetSchemaIntrospect } from "../resolve-target.js"
 import {
   adoptedCount,
   adoptionKey,
@@ -11,11 +12,14 @@ import {
   STALE_PREVIEW_MESSAGE,
 } from "../adopt-walkthrough.js"
 import type { AdoptOutcome } from "../engine-client.js"
-import { askConsent } from "../ui/confirm.js"
-import { error, info, plain } from "../ui/messages.js"
+import { declareAdoptedColumns } from "../adopt-columns.js"
+import { askConsent, confirm } from "../ui/confirm.js"
+import { isInteractive } from "../ui/interactive.js"
+import { error, info, plain, warn } from "../ui/messages.js"
 import { requireEngineForOwnershipFlag } from "../engine-ownership-gate.js"
 import { withSpinner } from "../ui/progress.js"
 import { addRetiredNoCacheOption, warnIfRetiredNoCache } from "../retired-no-cache.js"
+import { regenerateTypes } from "./generate.js"
 
 interface AdoptOptions {
   connection?: string
@@ -71,6 +75,23 @@ async function adopt(opts: AdoptOptions): Promise<void> {
       ...(opts.release !== undefined && { release: opts.release }),
       ...(keys !== undefined && { keys }),
     })
+  // An adopted column is managed, so the schema declares it from now on (see adopt-columns.ts).
+  const declare = (outcome: AdoptOutcome) =>
+    declareAdoptedColumns(
+      outcome.adopt ?? [],
+      {
+        entryPath: resolve(cwd, schemaPathFromProject(config, cwd)),
+        cwd,
+        yes: opts.yes ?? false,
+        interactive: isInteractive(),
+      },
+      {
+        introspect: () => targetSchemaIntrospect(target, { schema: pgSchema(config) }),
+        confirm: async (question) => (await confirm(question, { default: false })) === true,
+        regenerate: () => regenerateTypes(cwd),
+        say: { info, warn, plain },
+      },
+    )
   // `--yes` already agreed, so one engine call does it and its outcome says what it took: with
   // `--key` only those objects, and without, every conflict found as it runs.
   if (opts.yes) {
@@ -78,6 +99,7 @@ async function adopt(opts: AdoptOptions): Promise<void> {
     if (outcome === undefined) return
     for (const line of previewLines(outcome)) plain(`  ${line}`)
     report(outcome)
+    await declare(outcome)
     return
   }
   const preview = keyedOnly(await run(false), opts.key)
@@ -99,7 +121,9 @@ async function adopt(opts: AdoptOptions): Promise<void> {
     return
   }
   const outcome = await applying(() => run(true, keys))
-  if (outcome !== undefined) report(outcome)
+  if (outcome === undefined) return
+  report(outcome)
+  await declare(outcome)
 }
 
 /**

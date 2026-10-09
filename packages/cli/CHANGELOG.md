@@ -17,6 +17,20 @@
   there is and lists what it took. If an object it was to adopt is no longer a conflict, nothing is
   written and it exits 1: "The database changed since the preview; run `supatype adopt` again."
   The adopt offered by `push` and `dev` likewise takes only what it showed.
+* **adopt:** adopting a column declares it. `supatype adopt --key column:<table>.<name>` hands
+  Supatype a column added outside the schema, and the CLI then adds the field to the model whose
+  table it is (found by its table name, `tableName` included, in any schema file) and runs what
+  `supatype generate` does, so the next `supatype push` treats it as an ordinary declared field.
+  The field key is the column name and its type is one whose column is exactly the live one
+  (`Optional<…>` when nullable, `ServerDefault<…>` when the column has a default), so the push
+  changes nothing; the edit keeps the file's formatting and comments and is checked by reading the
+  schema back, or undone. In a terminal it shows the file, model and field line and asks first;
+  `--yes` edits without asking. When the model cannot be found, the type cannot be declared
+  exactly, or the edit is declined, the file is left alone and the field line to add, with the file
+  and model, is printed; the adopt has still happened and it exits 0. Other adopted kinds are not
+  fields and are unchanged.
+* **adopt:** an empty key list (adopt nothing, only release) reaches the engine binary as
+  `--adopt-none`, in one call, instead of a second preview first.
 * **adopt, doctor:** `--no-cache` is hidden and does nothing but say it is no longer needed: both
   read the database live. It never worked from the CLI (Commander stores it as `cache: false` and
   the commands read `noCache`), and `doctor` would have passed it to an engine subcommand that does

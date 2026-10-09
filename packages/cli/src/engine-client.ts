@@ -408,6 +408,9 @@ export function endpointToArgs(
       const keys = Array.isArray(body["keys"])
         ? body["keys"].filter((k): k is string => typeof k === "string").flatMap((k) => ["--key", k])
         : []
+      // No `--key` at all is "adopt every conflict" to the binary, so an empty list, which over
+      // HTTP is "adopt none", is `--adopt-none` here.
+      if (Array.isArray(body["keys"]) && keys.length === 0) keys.push("--adopt-none")
       return ["adopt", "--input", reqFile, "--database-url", dbUrl, "--schema", schema, ...yes, ...release, ...keys]
     }
 
