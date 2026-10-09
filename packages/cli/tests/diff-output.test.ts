@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
+  formatDriftedObjects,
   formatSecurityDrift,
   isRisky,
   plannedChanges,
   printDiffOperations,
   securityDrift,
+  securityDriftRefusal,
 } from "../src/diff-output.js"
 import { endpointToArgs, type DiffResult, type ReconcileAction } from "../src/engine-client.js"
 
@@ -145,6 +147,70 @@ describe("securityDrift()", () => {
   it("is empty for an engine without a reconcile", () => {
     expect(securityDrift({})).toEqual([])
   })
+
+  it("counts access the schema changes too when it was also hand-edited (replace with drifted)", () => {
+    const reconcile: ReconcileAction[] = [
+      {
+        action: "replace",
+        key: key("policy", "posts", "posts_select"),
+        create_sql: "CREATE POLICY new",
+        drifted: { recorded_def: "using=true", live_def: "using=false", live_fp: "fp" },
+      },
+      // Replaced, but nobody touched it: an ordinary schema change.
+      { action: "replace", key: key("policy", "posts", "posts_insert"), create_sql: "CREATE POLICY x" },
+      // Hand-edited, but not access: put back without asking.
+      {
+        action: "replace",
+        key: key("check", "posts", "c"),
+        create_sql: "CHECK",
+        drifted: { recorded_def: "a", live_def: "b" },
+      },
+    ]
+    const drifted = securityDrift({ reconcile })
+    expect(drifted.map((a) => a.key.name)).toEqual(["posts_select"])
+    expect(formatSecurityDrift(drifted)).toEqual([
+      "  policy posts.posts_select",
+      "    Supatype's:",
+      "      using=true",
+      "    Now:",
+      "      using=false",
+    ])
+  })
+})
+
+describe("securityDriftRefusal()", () => {
+  it("reads the objects from the engine's JSON refusal line, among log lines", () => {
+    const output = [
+      "INFO supatype-engine starting",
+      JSON.stringify({
+        status: "refused",
+        reason: "security_drift",
+        objects: [
+          { key: { kind: "policy", schema: "public", parent: "posts", name: "read" }, recorded: "USING (true)", live: "USING (false)" },
+          { key: { kind: "table_grant", schema: "public", parent: "posts", name: "anon" }, recorded: "GRANT SELECT", live: null },
+        ],
+      }),
+      "Error: 2 object(s) that decide who may read or write were changed outside Supatype",
+    ].join("\n")
+    const objects = securityDriftRefusal(output)
+    expect(objects).toHaveLength(2)
+    expect(formatDriftedObjects(objects!)).toEqual([
+      "  policy posts.read",
+      "    Supatype's:",
+      "      USING (true)",
+      "    Now:",
+      "      USING (false)",
+      "  table grant posts.anon",
+      "    Supatype's:",
+      "      GRANT SELECT",
+      "    Now: removed",
+    ])
+  })
+
+  it("is null for any other failure", () => {
+    expect(securityDriftRefusal('{"status":"refused","reason":"unmanaged_model_tables","tables":["a"]}')).toBeNull()
+    expect(securityDriftRefusal("Error: boom")).toBeNull()
+  })
 })
 
 describe("formatSecurityDrift()", () => {
@@ -215,5 +281,24 @@ describe("--overwrite-drift on every push path", () => {
     expect(refusal).toContain("pass --overwrite-drift")
     expect(deploySecurityDriftRefusal(diff, true)).toBeUndefined()
     expect(deploySecurityDriftRefusal({ reconcile: [] }, false)).toBeUndefined()
+  })
+
+  it("a deploy refuses a hand-edited policy the schema also replaces", async () => {
+    const { deploySecurityDriftRefusal } = await import("../src/commands/deploy.js")
+    const refusal = deploySecurityDriftRefusal(
+      {
+        reconcile: [
+          {
+            action: "replace",
+            key: key("policy", "posts", "posts_select"),
+            create_sql: "CREATE POLICY new",
+            drifted: { recorded_def: "USING (true)", live_def: "USING (false)" },
+          },
+        ],
+      },
+      false,
+    )
+    expect(refusal).toContain("policy posts.posts_select")
+    expect(refusal).toContain("USING (false)")
   })
 })
