@@ -112,8 +112,9 @@ sql "CREATE SCHEMA IF NOT EXISTS auth; CREATE TABLE IF NOT EXISTS auth.users (id
 sql "CREATE TABLE public.legacy (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name text NOT NULL)"
 sql "INSERT INTO public.legacy (name) VALUES ('kept')"
 
-# The ledger commands ship in engine 0.7.0. Against an older engine the rest of this script would
-# only measure that it is old, so say so and stop. An engine named in OWNERSHIP_ENGINE_BIN is one
+# The ledger commands need an engine that lists them in `capabilities` (the rebaseline consent,
+# accept_access_drift, came with it). Against an older engine the rest of this script would only
+# measure that it is old, so say so and stop. An engine named in OWNERSHIP_ENGINE_BIN is one
 # someone chose to test, so it always runs.
 if [[ -z "${OWNERSHIP_ENGINE_BIN:-}" ]]; then
   cli doctor >/dev/null 2>&1 || true # resolves, and if need be downloads, the CLI's engine
@@ -121,11 +122,12 @@ if [[ -z "${OWNERSHIP_ENGINE_BIN:-}" ]]; then
   # assignment would end the script with exit 2 instead of reaching the skip below.
   engine_bin="$(ls -t "$HOME"/.supatype/cache/engine/*/supatype-engine-* 2>/dev/null | head -1 || true)"
   engine_version="$([[ -n "$engine_bin" ]] && "$engine_bin" --version 2>/dev/null | awk '{print $2}' || true)"
-  if [[ -z "$engine_version" ]] || [[ "$(printf '%s\n0.7.0\n' "$engine_version" | sort -V | head -1)" != "0.7.0" ]]; then
+  engine_features="$([[ -n "$engine_bin" ]] && "$engine_bin" capabilities 2>/dev/null || true)"
+  if ! grep -q '"accept_access_drift"' <<<"$engine_features"; then
     if [[ -z "$engine_version" ]]; then
-      reason="no cached engine whose version could be read, so none known to have the ledger commands (0.7.0)"
+      reason="no cached engine whose version could be read, so none known to have the ledger commands"
     else
-      reason="engine $engine_version predates the ledger commands (0.7.0)"
+      reason="engine $engine_version does not list the ledger commands in \`capabilities\`"
     fi
     reason="$reason; set OWNERSHIP_ENGINE_BIN to test one"
     # Loud on purpose: this job is green when it skips, and that must not read as a pass.
@@ -144,7 +146,9 @@ if [[ -z "${OWNERSHIP_ENGINE_BIN:-}" ]]; then
 fi
 
 echo "==> Adopt, on a database Supatype has never pushed to"
-check "the first push refuses the existing table" 'refuses 1 "Supatype did not create it" push --yes'
+# The engine's refusal says "Supatype did not create them"; the CLI's own line says "it" for one
+# table. Either is the refusal this checks for.
+check "the first push refuses the existing table" 'refuses 1 "Supatype did not create" push --yes'
 check "adopt takes it" 'cli adopt --yes 2>&1 | grep -q "Adopted 1 object"'
 check "the push it unblocks applies" 'cli push --yes >/dev/null 2>&1'
 check "the table is recorded as adopted" '[[ "$(status_of table "" legacy)" == adopted ]]'
@@ -167,11 +171,13 @@ echo "==> doctor --strict and --rebaseline"
 sql "ALTER POLICY legacy_select ON public.legacy USING (name <> 'hidden')"
 check "doctor --strict fails on a hand edit" 'refuses 1 "Drifted (changed outside Supatype)" doctor --strict'
 # A rebaseline takes the database's version as Supatype's, so it asks first; a hand edit to an
-# access rule is taken only with --overwrite-drift as well.
-check "--rebaseline will not run unasked" 'refuses 1 "doctor --rebaseline needs --yes when not interactive" doctor --rebaseline'
-check "--rebaseline --yes leaves a hand-edited policy alone" 'cli doctor --rebaseline --yes 2>&1 | grep -qF "pass --overwrite-drift to record these too"'
+# access rule is taken only with --accept-access-drift as well. The only drift here is that hand
+# edit, so it is with --accept-access-drift that there is something to record, and to ask about.
+check "--rebaseline will not run unasked" 'refuses 1 "doctor --rebaseline needs --yes when not interactive" doctor --rebaseline --accept-access-drift'
+check "--rebaseline --yes leaves a hand-edited policy alone" 'cli doctor --rebaseline --yes 2>&1 | grep -qF "pass --accept-access-drift to record these too"'
 check "so doctor --strict still fails on it" 'refuses 1 "Drifted (changed outside Supatype)" doctor --strict'
-check "--rebaseline --overwrite-drift records it" 'cli doctor --rebaseline --overwrite-drift --yes 2>&1 | grep -q "1 rebaselined"'
+check "doctor refuses --overwrite-drift, naming the flag that replaced it" 'refuses 1 "supatype doctor --rebaseline --accept-access-drift" doctor --rebaseline --overwrite-drift --yes'
+check "--rebaseline --accept-access-drift records it" 'cli doctor --rebaseline --accept-access-drift --yes 2>&1 | grep -q "1 rebaselined"'
 check "doctor --strict is clean after" 'cli doctor --strict >/dev/null 2>&1'
 check "and a push keeps the hand edit" 'cli push --yes >/dev/null 2>&1 && sql "SELECT qual FROM pg_policies WHERE policyname = '"'"'legacy_select'"'"'" | grep -q hidden'
 
