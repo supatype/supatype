@@ -291,7 +291,7 @@ supatype pull --dry-run      # draft Model<> scaffold (stdout)
 supatype doctor              # what a push would find, by state
 supatype doctor --strict     # CI: fail when a push would change or refuse something
 supatype doctor --rebaseline # accept drifted objects as they are now (e.g. after a Postgres upgrade)
-supatype doctor --rebaseline --overwrite-drift --yes   # also hand-edited policies/grants, without asking
+supatype doctor --rebaseline --accept-access-drift --yes   # also hand-edited policies/grants, without asking
 supatype adopt               # preview; adopt --yes to take them
 supatype adopt --release index:posts.posts_title_idx   # keep a hand-edited object as it is
 supatype adopt --reclaim index:posts.posts_title_idx   # hand it back: the next push makes it match the schema
