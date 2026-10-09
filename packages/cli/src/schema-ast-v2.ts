@@ -143,6 +143,19 @@ export interface KernelFieldFacts {
   fieldType?: string
   tsType?: string
   index?: boolean
+  /** `GENERATED {ALWAYS | BY DEFAULT} AS IDENTITY` on an integer column (identity-contract). */
+  identity?: IdentityAst
+  /** `GENERATED ALWAYS AS (expression) STORED` (identity-contract). */
+  generated?: GeneratedAst
+}
+
+/** An identity column's mode as the AST spells it (`Identity<T, "by-default">` is `byDefault`). */
+export type IdentityAst = "always" | "byDefault"
+
+/** A stored generated column: the expression, verbatim SQL over the row's columns. */
+export interface GeneratedAst {
+  expression: string
+  stored: true
 }
 
 /**
@@ -413,6 +426,8 @@ export function emitField(parsed: ParsedField): FieldAstV2 {
   if (kernel.fieldType !== undefined) wire.fieldType = kernel.fieldType
   if (kernel.tsType !== undefined) wire.tsType = kernel.tsType
   if (parsed.kind === "blocks" && kernel.index !== undefined) wire.index = kernel.index
+  if (kernel.identity !== undefined) wire.identity = kernel.identity
+  if (kernel.generated !== undefined) wire.generated = kernel.generated
 
   const annotations: FieldAnnotations = {}
   if (hasKeys(db as Record<string, unknown>)) annotations.db = db
