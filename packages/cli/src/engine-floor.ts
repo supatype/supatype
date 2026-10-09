@@ -58,6 +58,15 @@ export const ENGINE_MIN_FOR_RICHTEXT_TRIGGER = "0.4.0"
 export const ENGINE_MIN_FOR_SEED = "0.4.0"
 
 /**
+ * First engine release that reads identity and generated columns (schema-engine v0.7.0).
+ *
+ * Silent, like `versions`: an older engine does not reject `identity` or `generated`, it ignores
+ * them. An identity column would be a plain NOT NULL integer every insert then fails on, and a
+ * generated one a plain column nothing fills.
+ */
+export const ENGINE_MIN_FOR_GENERATED_COLUMNS = "0.7.0"
+
+/**
  * Compare two dotted versions numerically. Returns <0, 0 or >0.
  *
  * Pre-release suffixes are dropped before comparing, so `0.2.0-rc.1` counts as `0.2.0`. That is
@@ -121,6 +130,19 @@ export function fieldsNeedingRichTextTrigger(ast: ExtractedSchemaAstV2): string[
   return found
 }
 
+/** Identity and generated columns, which an older engine ignores. */
+export function fieldsGeneratedByTheDatabase(ast: ExtractedSchemaAstV2): string[] {
+  const found: string[] = []
+  for (const model of ast.models) {
+    for (const [fieldName, field] of Object.entries(model.fields)) {
+      if (field["identity"] !== undefined || field["generated"] !== undefined) {
+        found.push(`${model.name}.${fieldName}`)
+      }
+    }
+  }
+  return found
+}
+
 /** Models declaring `versions`, which needs a whole layer only a new enough engine emits. */
 export function modelsRequiringVersions(ast: ExtractedSchemaAstV2): string[] {
   return ast.models
@@ -176,6 +198,15 @@ const ENGINE_REQUIREMENTS: EngineRequirement[] = [
       `accept a string on the way in and promise a document on the way out, and the trigger is ` +
       `the only thing that makes the second half true. Without it the string is stored as it ` +
       `was written and a later read returns what the types say is impossible.`,
+  },
+  {
+    since: ENGINE_MIN_FOR_GENERATED_COLUMNS,
+    declaredBy: fieldsGeneratedByTheDatabase,
+    feature: "identity and generated columns",
+    consequence:
+      `Only engine ${ENGINE_MIN_FOR_GENERATED_COLUMNS}+ reads them. An older engine ignores ` +
+      `\`identity\` and \`generated\` and applies the rest, so an identity column becomes a plain ` +
+      `NOT NULL integer every insert fails on, and a generated one a plain column nothing fills.`,
   },
 ]
 

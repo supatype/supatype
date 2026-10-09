@@ -51,7 +51,8 @@
   "byDefault"`, `generated: { expression, stored: true }`), refusing an identity on a non-integer,
   both at once, or either with a default. The generated client types make a generated column and an
   identity `always` column `?: never` on insert and update; an identity `by-default` column is
-  optional on insert. Needs an engine that reads them.
+  optional on insert. A push refuses them on an engine pinned before 0.7.0, which would ignore
+  them and push plain columns.
 * **adopt, pull:** an identity or generated column is declared as one, from what the engine's
   introspection now says (`Identity<number>`, `Identity<bigint, "by-default">`,
   `SmallInt<{ identity: … }>`, `Generated<T, "<expression>">`). `adopt` used to leave every NOT NULL
