@@ -183,7 +183,7 @@ async function offerSchemaRestore(
     return
   }
 
-  const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
+  const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
   const diff = await targetSchemaDiff(target, ast, { schema: pgSchema })
   const drift = plannedChanges(diff).length > 0
 
