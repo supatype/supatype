@@ -11,7 +11,7 @@ Global flags (all commands): `--config`, `--env`, `--verbose`, `--json`, `--no-c
 | `supatype init [name]` | Scaffold project. Flags: `--mode dev \| standalone` |
 | `supatype keys` | Generate `ANON_KEY` + `SERVICE_ROLE_KEY` from `JWT_SECRET` |
 | `supatype dev` | Start local stack + control-plane. Docker default (Kong :18473). Flags: `--no-watch`, `--port`, `--reset-db` (remove only the Postgres data volume, after confirmation), `--yes` (skip that confirmation; required for `--reset-db` without a TTY), `--overwrite-drift` (every push of the session puts back access changed outside Supatype) |
-| `supatype push` | Diff, migrate, generate types. Flags: `--yes`, `--connection`, `--env`, `--direct`, `--overwrite-drift`. On the Docker provider a push the engine refuses over access changed outside Supatype shows each object and, in a terminal, asks before putting it back |
+| `supatype push` | Diff, migrate, generate types. Flags: `--yes`, `--connection`, `--env`, `--direct`, `--overwrite-drift`. On the Docker provider a push the engine refuses over access changed outside Supatype shows each object and, in a terminal, asks before putting it back. On every path, declining keeps the hand edits, applies nothing and exits 1 |
 | `supatype diff` | Dry-run schema changes. Flags: `--connection`, `--env`, `--direct` |
 | `supatype generate` | Regenerate types without migration |
 | `supatype seed [file]` | Apply seed data in one transaction. Flags: `--atomic`, `--status`, `--connection`, `--environment`, `--force`. See [references/seeding.md](references/seeding.md) |
