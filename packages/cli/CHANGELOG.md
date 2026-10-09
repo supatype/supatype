@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Breaking Changes
+
+* **schema:** `AutoIncrement<T>` compiles to an identity column (`GENERATED ALWAYS AS IDENTITY`)
+  rather than `SERIAL`. An existing serial column is not converted: `supatype push` leaves it, warns
+  and prints the statements that convert it.
+
 ### Fixes
 
 * **doctor:** the rebaseline consent is renamed: `supatype doctor --rebaseline --accept-access-drift`
@@ -38,6 +44,19 @@
   no longer prints "add this field by hand" for the columns its model already declares.
 
 ### Features
+
+* **schema:** identity and stored generated columns. The schema compiler reads the options form
+  (`Int<{ identity: "always" }>`, `Float<{ generated: "price * qty" }>`) and the aliases
+  (`Identity<>`, `Generated<>`, `AutoIncrement<>`) into one AST encoding (`identity: "always" |
+  "byDefault"`, `generated: { expression, stored: true }`), refusing an identity on a non-integer,
+  both at once, or either with a default. The generated client types make a generated column and an
+  identity `always` column `?: never` on insert and update; an identity `by-default` column is
+  optional on insert. Needs an engine that reads them.
+* **adopt, pull:** an identity or generated column is declared as one, from what the engine's
+  introspection now says (`Identity<number>`, `Identity<bigint, "by-default">`,
+  `SmallInt<{ identity: … }>`, `Generated<T, "<expression>">`). `adopt` used to leave every NOT NULL
+  integer with no default to be declared by hand, since it could not tell an identity column from an
+  ordinary one, and declared a generated column as a plain one.
 
 * **push:** when the engine refuses tables Supatype does not manage, `supatype push` and
   `supatype dev` say which tables and that their declared access rules are not in force, and in a
@@ -121,6 +140,10 @@
 
 ### Bug Fixes
 
+* **push:** declining the prompt to put back access changed outside Supatype exits 1 on every push
+  path. On a linked or self-hosted target the push said "Aborted" and exited 0, so a script could
+  not tell a kept hand edit from an applied push; the docker path already exited 1. Both now print
+  the same message and apply nothing.
 * **connection:** every command that runs the engine on the host finds the database the same way,
   in seed's order: `--connection`, `database.external.url`, `connection` in the config,
   `DATABASE_URL` in the environment, `DATABASE_URL` in the project's `.env`, then the project's own
