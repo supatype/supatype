@@ -91,6 +91,12 @@ describe("supatype adopt column:<table>.<name>", () => {
     vi.mocked(isInteractive).mockReturnValue(true)
     confirmMock.mockResolvedValue(true)
     await adopt("--key", "column:widget.colour")
+    // The preview names the column and the field before anything is asked.
+    expect(output()).toContain(
+      `column widget.colour: record as managed by Supatype, and add \`colour: Optional<string>\` to ${schemaPath.value} (Widget)`,
+    )
+    expect(output().indexOf("Adopt will:")).toBeLessThan(output().indexOf("column widget.colour: record"))
+    expect(confirmMock.mock.calls[0]?.[0]).toMatchObject({ message: expect.stringContaining("Go ahead?") })
     // Once for the adopt, once for the edit.
     expect(confirmMock).toHaveBeenCalledTimes(2)
     expect(readFileSync(schemaPath.value, "utf8")).toContain("colour: Optional<string>")
@@ -122,7 +128,20 @@ describe("supatype adopt column:<table>.<name>", () => {
     await adopt("--key", "column:widget.colour")
     expect(process.exitCode).toBe(1)
     expect(readFileSync(schemaPath.value, "utf8")).toBe(SCHEMA)
-    expect(targetSchemaIntrospect).not.toHaveBeenCalled()
+    expect(targetSchemaAdopt.mock.calls.every((call) => call[2].yes === false)).toBe(true)
+    expect(regenerateTypes).not.toHaveBeenCalled()
+  })
+
+  it("previews a column it cannot declare exactly as one to add by hand", async () => {
+    targetSchemaIntrospect.mockResolvedValue({
+      tables: [{ name: "widget", columns: [{ name: "colour", dataType: "character varying", udtName: "varchar", nullable: true }] }],
+    })
+    vi.mocked(isInteractive).mockReturnValue(true)
+    confirmMock.mockResolvedValue(false)
+    await adopt("--key", "column:widget.colour")
+    expect(output()).toContain("column widget.colour: record as managed by Supatype; declare it in your schema by hand (")
+    expect(output()).toContain("Adoption cancelled.")
+    expect(readFileSync(schemaPath.value, "utf8")).toBe(SCHEMA)
   })
 
   it("does not read the database for adopted objects that are not columns", async () => {

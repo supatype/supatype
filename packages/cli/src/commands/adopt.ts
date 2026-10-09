@@ -12,7 +12,7 @@ import {
   STALE_PREVIEW_MESSAGE,
 } from "../adopt-walkthrough.js"
 import type { AdoptOutcome } from "../engine-client.js"
-import { declareAdoptedColumns } from "../adopt-columns.js"
+import { declareAdoptedColumns, previewKeyedColumns } from "../adopt-columns.js"
 import { askConsent, confirm } from "../ui/confirm.js"
 import { isInteractive } from "../ui/interactive.js"
 import { error, info, plain, warn } from "../ui/messages.js"
@@ -83,18 +83,20 @@ async function adopt(opts: AdoptOptions): Promise<void> {
       ...(opts.reclaim !== undefined && { reclaim: opts.reclaim }),
       ...(keys !== undefined && { keys }),
     })
+  const entryPath = resolve(cwd, schemaPathFromProject(config, cwd))
+  const introspect = (): Promise<unknown> => targetSchemaIntrospect(target, { schema: pgSchema(config) })
   // An adopted column is managed, so the schema declares it from now on (see adopt-columns.ts).
   const declare = (outcome: AdoptOutcome) =>
     declareAdoptedColumns(
       outcome.adopt ?? [],
       {
-        entryPath: resolve(cwd, schemaPathFromProject(config, cwd)),
+        entryPath,
         cwd,
         yes: opts.yes ?? false,
         interactive: isInteractive(),
       },
       {
-        introspect: () => targetSchemaIntrospect(target, { schema: pgSchema(config) }),
+        introspect,
         confirm: async (question) => (await confirm(question, { default: false })) === true,
         regenerate: () => regenerateTypes(cwd),
         say: { info, warn, plain },
@@ -111,7 +113,13 @@ async function adopt(opts: AdoptOptions): Promise<void> {
     return
   }
   const preview = keyedOnly(await run(false), opts.key)
-  if (!show(previewLines(preview), opts.key !== undefined)) return
+  // A column added outside Supatype is not a conflict, so the engine's preview does not list it:
+  // say here what adopting each keyed one does, including the field the schema will gain.
+  const columnLines =
+    opts.key === undefined
+      ? []
+      : await previewKeyedColumns(opts.key, previewedKeys(preview) ?? [], { entryPath, cwd }, { introspect })
+  if (!show([...previewLines(preview), ...columnLines], opts.key !== undefined)) return
   // `--key` names what to adopt. Otherwise what was just shown is what is agreed to: applying names
   // those conflicts, and the engine writes nothing if the database has changed since. An engine
   // from before the ledger names none.
