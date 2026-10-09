@@ -493,6 +493,8 @@ function parseFieldType(
     /** `Identity<>` / `AutoIncrement<>`: the mode, and whether the integer came as `number` or `bigint`. */
     identity: undefined as IdentityAst | undefined,
     identityKeyword: undefined as "integer" | "bigInt" | undefined,
+    /** `AutoIncrement<>`: an identity by default that a live serial column satisfies. */
+    autoIncrement: false,
     /** `Generated<T, expr>`. */
     generated: undefined as string | undefined,
   }
@@ -520,12 +522,15 @@ function parseFieldType(
         continue
       case "Identity":
       case "AutoIncrement": {
-        // `AutoIncrement<T>` is `Identity<T>` (identity-contract). Either defaults to `number`.
-        const mode = typeName === "Identity" ? literalStringType(current.typeArguments?.[1]) : null
+        // `AutoIncrement<T>` is `Identity<T, "by-default">`, and says so to the engine, which then
+        // leaves a serial column made when it compiled to one (identity-contract). Either defaults
+        // to `number`.
+        const mode = typeName === "Identity" ? literalStringType(current.typeArguments?.[1]) : "by-default"
         if (typeName === "Identity" && current.typeArguments?.[1] !== undefined && mode === null) {
           throw new Error(`Field "${fieldName}": an identity is "always" or "by-default".`)
         }
         flags.identity = identityAst(mode ?? "always", fieldName)
+        flags.autoIncrement = typeName === "AutoIncrement"
         const inner = current.typeArguments?.[0]
         if (inner === undefined || inner.kind === ts.SyntaxKind.NumberKeyword) {
           flags.identityKeyword = "integer"
@@ -732,6 +737,7 @@ function parseFieldType(
   }
 
   parsed = withGeneration(fieldName, parsed, flags.identity, flags.generated)
+  if (flags.autoIncrement) parsed = { ...parsed, kernel: { ...parsed.kernel, autoIncrement: true } }
 
   if (fieldName === "id" && parsed.kind === "uuid" && flags.primaryKey === false) {
     parsed = {
