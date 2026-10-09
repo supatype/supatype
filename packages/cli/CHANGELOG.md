@@ -134,6 +134,10 @@
 
 ### Bug Fixes
 
+* **push:** declining the prompt to put back access changed outside Supatype exits 1 on every push
+  path. On a linked or self-hosted target the push said "Aborted" and exited 0, so a script could
+  not tell a kept hand edit from an applied push; the docker path already exited 1. Both now print
+  the same message and apply nothing.
 * **connection:** every command that runs the engine on the host finds the database the same way,
   in seed's order: `--connection`, `database.external.url`, `connection` in the config,
   `DATABASE_URL` in the environment, `DATABASE_URL` in the project's `.env`, then the project's own
