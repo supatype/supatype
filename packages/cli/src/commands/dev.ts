@@ -54,7 +54,7 @@ import { beginDevSession, endDevSession, resolveDevUiMode, startDevSession } fro
 import { publishDevReady } from "../dev-ready-panel.js"
 import { probeDockerDaemon, reportDockerUnavailable } from "../docker-runtime.js"
 import { fatalError } from "../ui/fatal.js"
-import { registerDevShutdown } from "../dev-shutdown.js"
+import { registerDevShutdown, waitForDevShutdown } from "../dev-shutdown.js"
 import { patchRouteManifest } from "../route-manifest.js"
 import { resolveRealtimeLaunch } from "../realtime-launch.js"
 import { writeAppViteEnv } from "../app-vite-env.js"
@@ -712,7 +712,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
       }
 
       // Block until killed.
-      await new Promise<never>(() => undefined)
+      await waitForDevShutdown()
     })
 }
 
