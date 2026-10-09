@@ -12,7 +12,7 @@ import {
   STALE_PREVIEW_MESSAGE,
   type AdoptOutcome,
 } from "../adopt-walkthrough.js"
-import { declareAdoptedColumns } from "../adopt-columns.js"
+import { declareAdoptedColumns, previewKeyedColumns } from "../adopt-columns.js"
 import { askConsent, confirm } from "../ui/confirm.js"
 import { isInteractive } from "../ui/interactive.js"
 import { error, info, plain, warn } from "../ui/messages.js"
@@ -77,8 +77,17 @@ async function adopt(opts: AdoptOptions): Promise<void> {
       ...(keys !== undefined && { keys }),
     })
 
+  const entryPath = resolve(cwd, schemaPathFromProject(config, cwd))
+  const introspect = (): Promise<unknown> => targetSchemaIntrospect(target, { schema: schemaPgSchema(cwd) })
+
   const preview = keyedOnly(await run(false), opts.key)
-  const lines = previewLines(preview)
+  // A column added outside Supatype is not a conflict, so the engine's preview does not list it:
+  // say here what adopting each keyed one does, including the field the schema will gain.
+  const columnLines =
+    opts.key === undefined
+      ? []
+      : await previewKeyedColumns(opts.key, previewedKeys(preview) ?? [], { entryPath, cwd }, { introspect })
+  const lines = [...previewLines(preview), ...columnLines]
   if (lines.length === 0 && opts.key === undefined) {
     info("Nothing to adopt: every object the schema declares is Supatype's or absent.")
     return
@@ -120,13 +129,13 @@ async function adopt(opts: AdoptOptions): Promise<void> {
   await declareAdoptedColumns(
     outcome.adopt ?? [],
     {
-      entryPath: resolve(cwd, schemaPathFromProject(config, cwd)),
+      entryPath,
       cwd,
       yes: opts.yes ?? false,
       interactive: isInteractive(),
     },
     {
-      introspect: () => targetSchemaIntrospect(target, { schema: schemaPgSchema(cwd) }),
+      introspect,
       confirm: async (question) => (await confirm(question, { default: false })) === true,
       regenerate: () => regenerateTypes(cwd),
       say: { info, warn, plain },
