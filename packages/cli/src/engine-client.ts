@@ -207,6 +207,13 @@ export async function engineRequest<T = unknown>(
   body: Record<string, unknown>,
 ): Promise<T> {
   const bin = await getEngineBin()
+  // A schema with identity or generated columns goes only to an engine that reads them: one that
+  // does not would push plain columns and say nothing. Imported here, as the gate imports this.
+  if (body["ast"] !== undefined) {
+    const { assertSupported, binaryCapabilities, identityColumnsNeed } = await import("./engine-ownership-gate.js")
+    const needs = identityColumnsNeed(body["ast"])
+    if (needs.length > 0) assertSupported(binaryCapabilities(bin), needs)
+  }
 
   const tmpDir = join(tmpdir(), "supatype-engine")
   mkdirSync(tmpDir, { recursive: true })

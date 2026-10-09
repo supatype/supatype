@@ -93,6 +93,7 @@ import {
   adoptKeysNeed,
   assertSupported,
   engineCapabilities,
+  identityColumnsNeed,
   probeCapabilities,
   type Capabilities,
   type FeatureNeed,
@@ -773,6 +774,9 @@ async function runComposeSchemaPush(
   if (!existsSync(astPath)) {
     throw new Error(`Failed to write schema AST at ${astPath}`)
   }
+  // Identity and generated columns only to an engine that reads them (the override's binary is
+  // asked by `engineRequest`).
+  if (!hasEngineOverride(config)) await requireDockerFeatures(cwd, config, identityColumnsNeed(ast))
 
   // Admin + types come from the AST only (no DB), refresh before push so Studio stays
   // in sync even when migration fails (e.g. bad engine image, lossy column change).
@@ -1113,6 +1117,11 @@ export async function adoptSchemaDocker(
       ...(keys !== undefined && { keys }),
     })
   }
+  await requireDockerFeatures(
+    cwd,
+    config,
+    identityColumnsNeed(withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)),
+  )
   const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
   const command = adoptCommand(yes, keys)
   const result = await runComposeEngineCommand(paths, cwd, project, config, command)
@@ -1162,6 +1171,7 @@ export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfi
 
   const schemaPath = schemaPathFromProject(config, cwd)
   const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
+  await requireDockerFeatures(cwd, config, identityColumnsNeed(ast))
 
   const supatypeDir = join(cwd, ".supatype")
   mkdirSync(supatypeDir, { recursive: true })

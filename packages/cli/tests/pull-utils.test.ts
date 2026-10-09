@@ -152,8 +152,8 @@ describe("toCamelCase()", () => {
 })
 
 describe("identity and generated columns in the scaffold", () => {
-  const field = (col: Parameters<typeof introspectColumnToColumnInfo>[0]) =>
-    pgTypeToModelField(introspectColumnToColumnInfo(col))
+  const field = (col: Parameters<typeof introspectColumnToColumnInfo>[0], identityColumns = true) =>
+    pgTypeToModelField(introspectColumnToColumnInfo(col, { identityColumns }))
 
   it("declares an identity column as one", () => {
     const base = { dataType: "integer", nullable: false, isIdentity: true }
@@ -181,5 +181,20 @@ describe("identity and generated columns in the scaffold", () => {
 
   it("leaves a plain column as it was", () => {
     expect(field({ name: "n", dataType: "integer", udtName: "int4", nullable: false })).toBe("n: Int")
+  })
+
+  it("declares a serial as AutoIncrement", () => {
+    const serial = { dataType: "integer", nullable: false, default: "nextval('t_id_seq'::regclass)" }
+    expect(field({ ...serial, name: "id", udtName: "int4" })).toBe("id: AutoIncrement<number>")
+    expect(field({ ...serial, name: "n", udtName: "int8" })).toBe("n: AutoIncrement<bigint>")
+  })
+
+  it("drafts plain fields, saying why, for an engine without identity_columns", () => {
+    const identity = { name: "id", dataType: "integer", udtName: "int4", nullable: false, isIdentity: true }
+    expect(field({ ...identity, identityGeneration: "ALWAYS" }, false)).toBe(
+      "id: Int // TODO: an identity column; this engine does not support identity and generated columns: update it, or declare it by hand",
+    )
+    const serial = { name: "n", dataType: "integer", udtName: "int4", nullable: false, default: "nextval('s'::regclass)" }
+    expect(field(serial, false)).toBe("n: Int")
   })
 })

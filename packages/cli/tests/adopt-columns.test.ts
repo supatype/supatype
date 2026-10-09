@@ -57,8 +57,9 @@ beforeEach(() => {
 
 afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
-function plan(table: string, live: LiveColumn | undefined) {
-  return planColumnDeclaration({ entryPath: entry, cwd: dir, table, column: live?.name ?? "missing", live })
+/** Planned for an engine that reads identity and generated columns, unless told otherwise. */
+function plan(table: string, live: LiveColumn | undefined, identityColumns = true) {
+  return planColumnDeclaration({ entryPath: entry, cwd: dir, table, column: live?.name ?? "missing", live, identityColumns })
 }
 
 function declare(table: string, live: LiveColumn) {
@@ -451,6 +452,7 @@ describe("identity and generated columns", () => {
   it("quotes an expression that holds quotes", () => {
     const t = fieldTypeForColumn(
       col("n", "float8", { isGenerated: true, generationExpression: "price * 1.2 /* 'vat' */" }),
+      { identityColumns: true },
     )
     if ("reason" in t) throw new Error(t.reason)
     expect(t.expect).toMatchObject({ kind: "float", required: true, generated: "price * 1.2 /* 'vat' */" })
@@ -459,8 +461,36 @@ describe("identity and generated columns", () => {
   it("says why when no field type declares the generated column", () => {
     const t = fieldTypeForColumn(
       col("doc", "jsonb", { isGenerated: true, generationExpression: "jsonb_build_object('a', 1)" }),
+      { identityColumns: true },
     )
     expect(t).toHaveProperty("reason")
     expect((t as { reason: string }).reason).toContain("generated column")
+  })
+
+  it("does not declare one for an engine without identity_columns, and says to update it", () => {
+    for (const live of [
+      identity("int4", "ALWAYS"),
+      col("title_lower", "text", { isGenerated: true, generationExpression: "lower(title)" }),
+    ]) {
+      const planned = plan("post", live, false)
+      expect(planned).toMatchObject({ status: "manual" })
+      expect((planned as { reason: string }).reason).toContain(
+        "this engine does not support identity and generated columns; update it, or declare the column by hand",
+      )
+    }
+  })
+
+  const serial = (udt: string) => col("seq", udt, { default: `nextval('post_seq_seq'::regclass)` })
+
+  it("declares a serial as AutoIncrement, which reads back as the identity a push leaves it", () => {
+    expect(plan("post", serial("int4"))).toMatchObject({ status: "planned", line: "seq: AutoIncrement<number>" })
+    expect(declare("post", serial("int8"))).toMatchObject({ status: "planned" })
+    expect(readFileSync(entry, "utf8")).toContain("seq: AutoIncrement<bigint>")
+    const field = extractSchemaAstFromTypes(entry, dir)?.models[0]?.fields["seq"]
+    expect(field).toMatchObject({ kind: "bigInt", identity: "byDefault", autoIncrement: true, required: true })
+  })
+
+  it("declares a serial as the server default it is for an engine without identity_columns", () => {
+    expect(plan("post", serial("int4"), false)).toMatchObject({ status: "planned", line: "seq: ServerDefault<Int>" })
   })
 })

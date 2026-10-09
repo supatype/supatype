@@ -2,7 +2,13 @@ import { resolve } from "node:path"
 import type { Command } from "commander"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { schemaPathFromProject } from "../project-config.js"
-import { requireTargetFeatures, targetSchemaAdopt, targetSchemaIntrospect, schemaPgSchema } from "../resolve-target.js"
+import {
+  requireTargetFeatures,
+  targetCapabilities,
+  targetSchemaAdopt,
+  targetSchemaIntrospect,
+  schemaPgSchema,
+} from "../resolve-target.js"
 import {
   adoptedCount,
   adoptionKey,
@@ -80,6 +86,8 @@ async function adopt(opts: AdoptOptions): Promise<void> {
     })
 
   const entryPath = resolve(cwd, schemaPathFromProject(config, cwd))
+  // A column the database fills is declared as one only for an engine that reads it.
+  const identityColumns = (await targetCapabilities(target)).features.has("identity_columns")
   const introspect = (): Promise<unknown> => targetSchemaIntrospect(target, { schema: schemaPgSchema(cwd) })
 
   const preview = keyedOnly(await run(false), opts.key)
@@ -88,7 +96,7 @@ async function adopt(opts: AdoptOptions): Promise<void> {
   const columnLines =
     opts.key === undefined
       ? []
-      : await previewKeyedColumns(opts.key, previewedKeys(preview) ?? [], { entryPath, cwd }, { introspect })
+      : await previewKeyedColumns(opts.key, previewedKeys(preview) ?? [], { entryPath, cwd, identityColumns }, { introspect })
   const lines = [...previewLines(preview), ...columnLines]
   if (lines.length === 0 && opts.key === undefined) {
     info("Nothing to adopt: every object the schema declares is Supatype's or absent.")
@@ -137,6 +145,7 @@ async function adopt(opts: AdoptOptions): Promise<void> {
       cwd,
       yes: opts.yes ?? false,
       interactive: isInteractive(),
+      identityColumns,
     },
     {
       introspect,
