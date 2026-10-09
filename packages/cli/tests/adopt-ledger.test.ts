@@ -59,7 +59,7 @@ describe("targetAdoptionSteps()", () => {
     expect(calls).toEqual([false, true])
   })
 
-  it("applies only the keys the preview showed, after the version gate", async () => {
+  it("applies only the keys the preview showed, after the capability gate", async () => {
     const calls: Array<[boolean, string[] | undefined]> = []
     const gate = vi.fn(async () => undefined)
     const steps = targetAdoptionSteps(async (yes, keys) => {
@@ -67,12 +67,28 @@ describe("targetAdoptionSteps()", () => {
       return yes ? { status: "adopted", adopt: LEDGER.adopt! } : LEDGER
     }, gate)
     await steps.preview()
-    expect(gate).toHaveBeenCalledTimes(1)
+    // The capability gate sees what applying will send, before anyone is asked.
+    expect(gate).toHaveBeenCalledWith(["table:widget"])
     await steps.apply()
     expect(calls).toEqual([
       [false, undefined],
       [true, ["table:widget"]],
     ])
+  })
+
+  it("never applies when the target cannot take the previewed keys: the refusal ends it", async () => {
+    const calls: boolean[] = []
+    const steps = targetAdoptionSteps(
+      async (yes) => {
+        calls.push(yes)
+        return LEDGER
+      },
+      async () => {
+        throw new Error("this server does not support --key; update it")
+      },
+    )
+    await expect(steps.preview()).rejects.toThrow("this server does not support --key; update it")
+    expect(calls).toEqual([false])
   })
 
   it("sends no keys, and needs no gate, for an engine from before the ledger", async () => {

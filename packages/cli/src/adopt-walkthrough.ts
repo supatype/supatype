@@ -11,7 +11,8 @@
  * adoption would take, and asks twice before taking it. Anywhere else it never adopts, because
  * agreeing to a push is not agreeing to take ownership of tables, and it prints the command instead.
  */
-import { EngineError } from "./engine-client.js"
+import { ENGINE_BUSY, EngineError } from "./engine-client.js"
+import { TargetApiError } from "./target-client.js"
 import { confirm } from "./ui/confirm.js"
 import { isInteractive } from "./ui/interactive.js"
 import { plain, warn } from "./ui/messages.js"
@@ -150,6 +151,22 @@ export async function offerAdoption(
   return adoptAfterPreview(steps, manual)
 }
 
+/**
+ * Whether `err` is the engine refusing because another push, adopt or rebaseline holds its lock:
+ * nothing was written, and trying again is the answer. From the binary, or a server's 409.
+ */
+export function isEngineBusy(err: unknown): boolean {
+  if (err instanceof EngineError) return err.reason === ENGINE_BUSY
+  if (err instanceof TargetApiError) {
+    return err.status === 409 && (err.code === ENGINE_BUSY || /another push, adopt or rebaseline is running/i.test(err.message))
+  }
+  return false
+}
+
+/** What the CLI says when adopt met a busy engine. */
+export const ENGINE_BUSY_MESSAGE =
+  "The database is busy: another push, adopt or rebaseline is running on it. Nothing was adopted; try again."
+
 async function adoptAfterPreview(steps: AdoptionSteps, manual: string): Promise<AdoptionOutcome> {
   const lines = await steps.preview()
   if (lines.length === 0) {
@@ -167,9 +184,9 @@ async function adoptAfterPreview(steps: AdoptionSteps, manual: string): Promise<
   try {
     adopted = await steps.apply()
   } catch (err: unknown) {
-    if (!isStalePreview(err)) throw err
+    if (!isStalePreview(err) && !isEngineBusy(err)) throw err
     // Nothing was written, so the push is still refused for the reason it was.
-    warn(STALE_PREVIEW_MESSAGE)
+    warn(isEngineBusy(err) ? ENGINE_BUSY_MESSAGE : STALE_PREVIEW_MESSAGE)
     plain(manual)
     return "declined"
   }
@@ -206,14 +223,14 @@ export async function pushOfferingAdoption<T>(
  */
 export function targetAdoptionSteps(
   adopt: (yes: boolean, keys?: string[]) => Promise<AdoptOutcome>,
-  beforeKeys: () => Promise<void> = async () => undefined,
+  beforeKeys: (keys: string[]) => Promise<void> = async () => undefined,
 ): AdoptionSteps {
   let keys: string[] | undefined
   return {
     preview: async () => {
       const outcome = await adopt(false)
       keys = previewedKeys(outcome)
-      if (keys !== undefined) await beforeKeys()
+      if (keys !== undefined) await beforeKeys(keys)
       return adoptionLines(outcome)
     },
     apply: async () => adoptedCount(await (keys === undefined ? adopt(true) : adopt(true, keys))),
