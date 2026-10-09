@@ -334,6 +334,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Pulls Docker Hub images through mirror.gcr.io, which no rate limit applies to. Needs no
+      # secrets, so it runs for forks too; restarts the daemon, so it comes before any container.
+      - name: Use the Docker Hub mirror
+        run: bash scripts/ci-docker-mirror.sh
+
       # Continues anonymously when Docker Hub is unavailable; fails on rejected credentials.
       - name: Log in to Docker Hub
         if: env.DOCKERHUB_USERNAME != ''
