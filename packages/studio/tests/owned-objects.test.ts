@@ -65,5 +65,7 @@ describe("isMissingLedger()", () => {
   it("is not any other failure", () => {
     expect(isMissingLedger("permission denied for table managed_objects")).toBe(false)
     expect(isMissingLedger('column "kind" does not exist')).toBe(false)
+    expect(isMissingLedger('column "kind" of relation "_supatype.managed_objects" does not exist')).toBe(false)
+    expect(isMissingLedger('function _supatype.managed_objects_fp() does not exist')).toBe(false)
   })
 })

@@ -59,7 +59,7 @@ describe("targetAdoptionSteps()", () => {
     expect(calls).toEqual([false, true])
   })
 
-  it("applies only the keys the preview showed, after the version gate", async () => {
+  it("applies only the keys the preview showed, after the capability gate", async () => {
     const calls: Array<[boolean, string[] | undefined]> = []
     const gate = vi.fn(async () => undefined)
     const steps = targetAdoptionSteps(async (yes, keys) => {
@@ -67,12 +67,28 @@ describe("targetAdoptionSteps()", () => {
       return yes ? { status: "adopted", adopt: LEDGER.adopt! } : LEDGER
     }, gate)
     await steps.preview()
-    expect(gate).toHaveBeenCalledTimes(1)
+    // The capability gate sees what applying will send, before anyone is asked.
+    expect(gate).toHaveBeenCalledWith(["table:widget"])
     await steps.apply()
     expect(calls).toEqual([
       [false, undefined],
       [true, ["table:widget"]],
     ])
+  })
+
+  it("never applies when the target cannot take the previewed keys: the refusal ends it", async () => {
+    const calls: boolean[] = []
+    const steps = targetAdoptionSteps(
+      async (yes) => {
+        calls.push(yes)
+        return LEDGER
+      },
+      async () => {
+        throw new Error("this server does not support --key; update it")
+      },
+    )
+    await expect(steps.preview()).rejects.toThrow("this server does not support --key; update it")
+    expect(calls).toEqual([false])
   })
 
   it("sends no keys, and needs no gate, for an engine from before the ledger", async () => {
@@ -183,15 +199,20 @@ describe("--reclaim", () => {
   })
 })
 
-describe("endpointToArgs() for /doctor --overwrite-drift", () => {
+describe("endpointToArgs() for /doctor --accept-access-drift", () => {
   const body = { ast: {}, database_url: "postgres://x", schema: "public" }
 
-  it("passes --overwrite-drift only alongside --rebaseline", () => {
-    expect(endpointToArgs("/doctor", { ...body, overwrite_drift: true }, "req.json")).not.toContain(
-      "--overwrite-drift",
+  it("passes --accept-access-drift only alongside --rebaseline", () => {
+    expect(endpointToArgs("/doctor", { ...body, accept_access_drift: true }, "req.json")).not.toContain(
+      "--accept-access-drift",
     )
     expect(
-      endpointToArgs("/doctor", { ...body, rebaseline: true, overwrite_drift: true }, "req.json").slice(-2),
-    ).toEqual(["--rebaseline", "--overwrite-drift"])
+      endpointToArgs("/doctor", { ...body, rebaseline: true, accept_access_drift: true }, "req.json").slice(-2),
+    ).toEqual(["--rebaseline", "--accept-access-drift"])
+  })
+
+  it("never sends --overwrite-drift to doctor, which the engine now rejects there", () => {
+    const args = endpointToArgs("/doctor", { ...body, rebaseline: true, overwrite_drift: true }, "req.json")
+    expect(args).not.toContain("--overwrite-drift")
   })
 })

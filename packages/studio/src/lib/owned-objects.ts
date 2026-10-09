@@ -51,7 +51,9 @@ export function ownedObjectsQuery(schema: string): string {
  * lacks) is an error the screen has to show.
  */
 export function isMissingLedger(message: string): boolean {
-  return /_supatype\.managed_objects"? does not exist|schema "_supatype" does not exist/.test(message)
+  // Postgres's missing-relation error for the ledger, or its schema: never "column … of relation
+  // … does not exist", which is a ledger that is there and lacks a column.
+  return /(?<!of )relation "_supatype\.managed_objects" does not exist|schema "_supatype" does not exist/.test(message)
 }
 
 /** The owned objects, keyed by `ownedKey`, and why they could not be read, if they could not. */
@@ -64,16 +66,21 @@ export interface OwnedObjects {
 export function useOwnedObjects(proxy: ProjectProxy, schema: string): OwnedObjects {
   const { data, error } = useApiQuery(
     () =>
-      proxy
-        .sql(ownedObjectsQuery(schema))
-        .then(
-          (r): ReadonlySet<string> =>
-            new Set(r.rows.map((row) => ownedKey(String(row["kind"]), String(row["parent"]), String(row["name"])))),
-        ),
+      proxy.sql(ownedObjectsQuery(schema)).then((r) => ({
+        proxy,
+        schema,
+        owned: new Set(
+          r.rows.map((row) => ownedKey(String(row["kind"]), String(row["parent"]), String(row["name"]))),
+        ) as ReadonlySet<string>,
+      })),
     [proxy, schema],
   )
   if (error !== null) return { owned: NONE, error: isMissingLedger(error) ? null : error }
-  return { owned: data ?? NONE, error: null }
+  // The query hook keeps its last answer while the next one loads, so after switching schema (or
+  // project) that answer is the previous one's: it must not badge this schema's objects. Until the
+  // answer for this one arrives, nothing is known to be owned.
+  const current = data !== null && data.proxy === proxy && data.schema === schema
+  return { owned: current ? data.owned : NONE, error: null }
 }
 
 /** Whether the object `name` on `table`, recorded as one of `kinds`, with comment `comment`, is Supatype's. */

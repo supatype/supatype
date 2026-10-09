@@ -18,6 +18,7 @@ import { ErrorBanner } from "../components/ErrorBanner.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import { useProjectProxy } from "../hooks/useProjectProxy.js"
 import { containing, sqlText } from "../lib/sql.js"
+import { isMissingLedger } from "../lib/owned-objects.js"
 import { formatTimestamp } from "../lib/utils.js"
 
 // --- Types ---
@@ -169,6 +170,15 @@ export function objectLabel(object: ManagedObject): string {
 }
 
 /** Where Migration History shows one migration on its own. */
+/**
+ * Whether a failed read is the ledger not being there yet: Postgres's missing-relation error for
+ * `_supatype.managed_objects`, and nothing else. Any other "does not exist" (a column an older
+ * ledger lacks, a function, a role) is a real failure the screen has to show.
+ */
+export function isMissingLedgerError(message: string): boolean {
+  return isMissingLedger(message)
+}
+
 export function migrationLink(id: number): string {
   return `/database/migrations?migration=${id}`
 }
@@ -288,7 +298,7 @@ export interface SchemaObjectsViewProps {
 export function SchemaObjectsView({ result, query, onQuery, load }: SchemaObjectsViewProps): React.ReactElement {
   // The ledger is created by the first push of an engine that has it, so its absence means this
   // database has not had one yet rather than anything being broken.
-  const missing = load.error !== null && load.error.includes("does not exist")
+  const missing = load.error !== null && isMissingLedgerError(load.error)
   if (load.error !== null && !missing) {
     return <ErrorBanner message={load.error} onRetry={load.onRefresh} />
   }

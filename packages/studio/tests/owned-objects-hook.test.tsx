@@ -11,8 +11,8 @@ let container: HTMLDivElement
 let root: Root
 let seen: OwnedObjects | null
 
-function Probe({ proxy }: { proxy: ProjectProxy }): null {
-  seen = useOwnedObjects(proxy, "public")
+function Probe({ proxy, schema = "public" }: { proxy: ProjectProxy; schema?: string }): null {
+  seen = useOwnedObjects(proxy, schema)
   return null
 }
 
@@ -63,5 +63,27 @@ describe("useOwnedObjects()", () => {
     )
     expect(result.owned.size).toBe(0)
     expect(result.error).toBe("permission denied for table managed_objects")
+  })
+
+  it("never shows the previous schema's objects while the next schema's are loading", async () => {
+    let release: (rows: { rows: Record<string, unknown>[] }) => void = () => {}
+    const proxy = proxyAnswering(async () => ({ rows: [] }))
+    proxy.sql = async (query: string) =>
+      query.includes("'public'")
+        ? { rows: [{ kind: "index", parent: "posts", name: "i" }] }
+        : new Promise((resolve) => {
+            release = resolve as typeof release
+          })
+    expect([...(await read(proxy)).owned]).toEqual([ownedKey("index", "posts", "i")])
+
+    await act(async () => root.render(<Probe proxy={proxy} schema="billing" />))
+    // Loading billing: public's badge must not show on billing's objects.
+    expect(seen!.owned.size).toBe(0)
+
+    await act(async () => {
+      release({ rows: [{ kind: "index", parent: "invoices", name: "j" }] })
+      await Promise.resolve()
+    })
+    expect([...seen!.owned]).toEqual([ownedKey("index", "invoices", "j")])
   })
 })

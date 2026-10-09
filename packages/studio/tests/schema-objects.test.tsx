@@ -75,6 +75,18 @@ describe("before any push has recorded anything", () => {
   it("shows any other failure as one", () => {
     expect(render({ load: { error: "permission denied", onRefresh: () => {} } })).toContain("permission denied")
   })
+
+  it("shows any other \"does not exist\" as the failure it is, not as an empty ledger", () => {
+    for (const error of [
+      'column "migration_id" does not exist',
+      'relation "public.posts" does not exist',
+      'role "anon" does not exist',
+    ]) {
+      const html = render({ load: { error, onRefresh: () => {} } })
+      expect(html).not.toContain("No schema objects recorded yet")
+      expect(html).toContain("does not exist")
+    }
+  })
 })
 
 describe("a page of the recorded objects", () => {

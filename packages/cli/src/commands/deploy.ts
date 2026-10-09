@@ -24,7 +24,7 @@ import { resolveTarget } from "../resolve-target.js"
 import { targetFetch } from "../target-client.js"
 import { ensureEngine, engineRequest, type DiffResult } from "../engine-client.js"
 import { formatSecurityDrift, plannedChanges, securityDrift } from "../diff-output.js"
-import { requireEngineForOwnershipFlag } from "../engine-ownership-gate.js"
+import { requireEngineFeatures } from "../engine-ownership-gate.js"
 import { resolveAppConfig, validateStaticMode, validateBuildOutput, detectPackageManager } from "../app/framework.js"
 import { TIER_LIMITS, type Tier } from "./deploy-types.js"
 import { spawnSync } from "node:child_process"
@@ -86,10 +86,9 @@ export function registerDeploy(program: Command): void {
       const link = loadProjectLink(cwd)
       const cloudCfg = loadCloudConfig(cwd)
       const envName = opts.env ?? opts.environment ?? "production"
+      // A linked deploy is checked against the server it pushes to (`targetSchemaPush`), a local one
+      // against the engine binary, before either sends the flag.
       const overwriteDrift = opts.overwriteDrift ?? false
-      if (overwriteDrift && !opts.appOnly && !opts.skipBuild) {
-        await requireEngineForOwnershipFlag("--overwrite-drift", config)
-      }
 
       let schemaDone = false
 
@@ -113,6 +112,7 @@ export function registerDeploy(program: Command): void {
         if (opts.local) {
           step("Schema Push (local)")
           await ensureEngine()
+          if (overwriteDrift) await requireEngineFeatures([{ feature: "overwrite_drift", flag: "--overwrite-drift" }])
 
           const diff = await engineRequest<DiffResult>("/diff", {
             ast,
