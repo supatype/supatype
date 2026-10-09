@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# Point the runner's Docker daemon at mirror.gcr.io, Google's public Docker Hub mirror.
+#
+# Docker Hub pulls are rate-limited: anonymously per runner IP, and logged in per account, where
+# every parallel CI job shares the one hourly budget. Pulls served by the mirror count against
+# neither. An image the mirror does not hold (it caches popular Docker Hub images, not all of
+# them) is a miss the daemon answers by pulling from Docker Hub itself, with the job's login.
+#
+# The mirror needs no secrets, so this runs in fork and Dependabot jobs too. It is an
+# optimisation: anything that goes wrong is a warning and the job pulls from Docker Hub as before.
+# It restarts the daemon, so it must run before a job starts any container.
+#
+# Linux only. On macOS Docker is a Colima VM with its own daemon config; the step says so and
+# does nothing. Runs under bash 3.2 as well (no ${var,,}, no mapfile).
+set -uo pipefail
+
+mirror="https://mirror.gcr.io"
+daemon_json=/etc/docker/daemon.json
+
+if [ "$(uname -s)" != "Linux" ]; then
+  echo "Docker Hub mirror: skipped on $(uname -s) (Docker runs in a VM with its own daemon config)."
+  exit 0
+fi
+
+mirrors() {
+  docker info --format '{{json .RegistryConfig.Mirrors}}' 2>/dev/null
+}
+
+case "$(mirrors)" in
+  *"$mirror"*)
+    echo "Docker Hub mirror: $mirror already configured."
+    exit 0
+    ;;
+esac
+
+wait_for_daemon() {
+  local i
+  for i in $(seq 1 30); do
+    if docker info >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
+backup=$(mktemp)
+had_config=0
+if sudo test -f "$daemon_json"; then
+  had_config=1
+  sudo cat "$daemon_json" >"$backup"
+fi
+
+# Merge into whatever the image already configures rather than replacing it.
+merged=$(python3 - "$backup" "$mirror" <<'PY'
+import json, sys
+path, mirror = sys.argv[1], sys.argv[2]
+try:
+    with open(path) as f:
+        text = f.read()
+    cfg = json.loads(text) if text.strip() else {}
+except FileNotFoundError:
+    cfg = {}
+mirrors = cfg.get("registry-mirrors") or []
+if mirror not in mirrors:
+    mirrors.append(mirror)
+cfg["registry-mirrors"] = mirrors
+print(json.dumps(cfg, indent=2))
+PY
+) || {
+  echo "::warning::Docker Hub mirror not configured: could not read $daemon_json; pulling from Docker Hub"
+  rm -f "$backup"
+  exit 0
+}
+
+restore() {
+  if [ "$had_config" = 1 ]; then
+    sudo cp "$backup" "$daemon_json"
+  else
+    sudo rm -f "$daemon_json"
+  fi
+  sudo systemctl restart docker && wait_for_daemon
+}
+
+if ! { sudo mkdir -p "$(dirname "$daemon_json")" \
+  && printf '%s\n' "$merged" | sudo tee "$daemon_json" >/dev/null \
+  && sudo systemctl restart docker \
+  && wait_for_daemon; }; then
+  # A daemon that does not come back would fail every later step, which the mirror must never do.
+  if restore; then
+    echo "::warning::Docker Hub mirror not configured: the daemon did not restart with it; restored the previous config and pulling from Docker Hub"
+  else
+    echo "::warning::Docker Hub mirror not configured, and the Docker daemon did not come back after restoring its config"
+  fi
+  rm -f "$backup"
+  exit 0
+fi
+rm -f "$backup"
+
+active=$(mirrors)
+case "$active" in
+  *"$mirror"*)
+    echo "Docker Hub mirror: $mirror active (daemon mirrors: $active)."
+    ;;
+  *)
+    echo "::warning::Docker Hub mirror not active after the restart (daemon mirrors: ${active:-unknown}); pulling from Docker Hub"
+    ;;
+esac
+exit 0

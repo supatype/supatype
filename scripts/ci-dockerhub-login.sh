@@ -3,7 +3,8 @@
 #
 # Reads DOCKERHUB_USERNAME and DOCKERHUB_TOKEN from the environment; workflows pass them through a
 # step `env:` and skip the step when the username is empty (fork and Dependabot PRs get no
-# secrets), so those runs pull anonymously.
+# secrets), so those runs pull anonymously. The mirror.gcr.io registry mirror, which serves most
+# pulls without touching either rate limit, is set up before this by scripts/ci-docker-mirror.sh.
 #
 # The login is only there to lift the rate limit, so Docker Hub being unavailable must not fail
 # the job: it has answered this login with a 500, and a job that then stops before any test has
@@ -16,81 +17,37 @@ set -uo pipefail
 : "${DOCKERHUB_USERNAME:?DOCKERHUB_USERNAME is not set}"
 : "${DOCKERHUB_TOKEN:?DOCKERHUB_TOKEN is not set}"
 
-# Which credentials the docker CLI will hand the daemon: the config file's credsStore, credHelpers
-# and auths keys. Key names only; the values are credentials.
-describe_docker_config() {
-  local config="${DOCKER_CONFIG:-$HOME/.docker}/config.json"
-  if [ ! -f "$config" ]; then
-    echo "  $config: absent"
-    return 0
-  fi
-  python3 - "$config" <<'PY' || echo "  $config: unreadable"
-import json, sys
-path = sys.argv[1]
-with open(path) as f:
-    cfg = json.load(f)
-print("  %s: credsStore=%s credHelpers=%s auths=%s" % (
-    path,
-    cfg.get("credsStore") or "-",
-    ",".join(sorted(cfg.get("credHelpers") or {})) or "-",
-    ",".join(sorted(cfg.get("auths") or {})) or "-",
-))
-PY
-}
-
-# Proves whether pulls on this runner will count as authenticated, without spending a pull: a HEAD
-# of Docker Hub's rate-limit preview manifest is free and answers with the limit that applies and
-# who it is charged to (`docker-ratelimit-source` is the account for an authenticated token and the
-# runner's IP for an anonymous one). Asked once with the CI credentials and once without, next to
-# the daemon's mirrors and the CLI's config. Prints no credential or token, and never fails the step.
-ratelimit_headers() {
-  # $1: a curl config line naming the Authorization header (keeps the token off the command line).
-  printf '%s' "$1" | curl -sS -I -K - --max-time 20 \
-    https://registry-1.docker.io/v2/ratelimitpreview/test/manifests/latest 2>&1 \
-    | tr -d '\r' | grep -Ei '^(HTTP/|ratelimit-limit|ratelimit-remaining|docker-ratelimit-source|curl:)' \
-    | sed 's/^/    /'
-}
-
-diagnose() {
-  echo "Docker Hub diagnostics:"
-  echo "  DOCKER_CONFIG=${DOCKER_CONFIG:-unset} HOME=$HOME"
-  describe_docker_config
-  echo "  daemon registry mirrors: $(docker info --format '{{json .RegistryConfig.Mirrors}}' 2>&1 | head -n 1)"
-  echo "  daemon image store: $(docker info --format '{{.Driver}} {{json .DriverStatus}}' 2>&1 | head -n 1)"
-
-  local scope="repository:ratelimitpreview/test:pull" body status token
-  body=$(printf 'user = "%s:%s"\n' "$DOCKERHUB_USERNAME" "$DOCKERHUB_TOKEN" \
-    | curl -sS -K - --max-time 20 -w '\n%{http_code}' \
-      "https://auth.docker.io/token?service=registry.docker.io&scope=$scope" 2>/dev/null) || body=""
-  status=$(printf '%s\n' "$body" | tail -n 1)
-  token=$(printf '%s\n' "$body" | sed '$d' \
-    | python3 -c 'import json, sys; print(json.load(sys.stdin).get("token", ""))' 2>/dev/null) || token=""
-  echo "  token request with the CI credentials: HTTP ${status:-none}"
-  if [ -n "$token" ]; then
-    echo "  rate limit with the CI credentials:"
-    ratelimit_headers "header = \"Authorization: Bearer $token\""
-  fi
-
-  body=$(curl -sS --max-time 20 \
-    "https://auth.docker.io/token?service=registry.docker.io&scope=$scope" 2>/dev/null) || body=""
-  token=$(printf '%s\n' "$body" \
+# One line for the log: the daemon's registry mirrors, and the hourly pull budget Docker Hub gives
+# the CI account and how much of it is left. Every parallel job pulls from that one budget, and its
+# exhaustion is reported by Docker Hub as an "unauthenticated pull rate limit" even when the pull
+# was authenticated, so the number is worth having beside the failure. A HEAD of the rate-limit
+# preview manifest is free. Prints no credential or token, and never fails the step.
+summarize() {
+  local scope="repository:ratelimitpreview/test:pull" token headers limit remaining
+  token=$(printf 'user = "%s:%s"\n' "$DOCKERHUB_USERNAME" "$DOCKERHUB_TOKEN" \
+    | curl -sS -K - --max-time 20 \
+      "https://auth.docker.io/token?service=registry.docker.io&scope=$scope" 2>/dev/null \
     | python3 -c 'import json, sys; print(json.load(sys.stdin).get("token", ""))' 2>/dev/null) || token=""
   if [ -n "$token" ]; then
-    echo "  rate limit anonymously (this runner's IP):"
-    ratelimit_headers "header = \"Authorization: Bearer $token\""
+    # The token goes through curl's stdin config, not its command line.
+    headers=$(printf 'header = "Authorization: Bearer %s"\n' "$token" \
+      | curl -sS -I -K - --max-time 20 \
+        https://registry-1.docker.io/v2/ratelimitpreview/test/manifests/latest 2>/dev/null \
+      | tr -d '\r') || headers=""
+    limit=$(printf '%s\n' "$headers" | sed -n 's/^ratelimit-limit: *\([0-9]*\).*/\1/p' | head -n 1)
+    remaining=$(printf '%s\n' "$headers" | sed -n 's/^ratelimit-remaining: *\([0-9]*\).*/\1/p' | head -n 1)
   fi
+  echo "Docker Hub: mirrors $(docker info --format '{{json .RegistryConfig.Mirrors}}' 2>/dev/null || echo unknown);" \
+    "account pulls left this hour ${remaining:-unknown} of ${limit:-unknown}."
   return 0
 }
-
-echo "Docker CLI config before login:"
-describe_docker_config
 
 attempts=3
 err=""
 for attempt in $(seq 1 "$attempts"); do
   if err=$(printf '%s' "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin 2>&1 >/dev/null); then
     echo "Docker Hub login succeeded (attempt $attempt of $attempts)."
-    diagnose || true
+    summarize || true
     exit 0
   fi
   echo "Docker Hub login attempt $attempt of $attempts failed: $err" >&2
