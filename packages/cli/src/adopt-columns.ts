@@ -41,6 +41,10 @@ interface ExpectedField {
   required: boolean
   precision?: number
   scale?: number
+  /** An identity column's mode, as the AST spells it. */
+  identity?: "always" | "byDefault"
+  /** A generated column's expression. */
+  generated?: string
 }
 
 export interface ColumnFieldType {
@@ -57,17 +61,10 @@ export function fieldTypeForColumn(col: LiveColumn, opts: { localized?: boolean 
   // In a localized model a bare `string` is stored as JSONB per locale, which this column is not.
   if (opts.localized === true && base.kind === "text") expr = { name: "NotLocalized", args: [expr] }
   const hasDefault = col.default != null && col.default !== ""
-  // An identity column reads as NOT NULL with no default too: the database assigns it, but the
-  // introspection does not say so, and `@supatype/types` has no field type for identity. Declaring
-  // it as a required field would be wrong for an identity column, so it is left to a person.
-  if (!col.nullable && !hasDefault && INTEGER_KINDS.has(base.kind)) {
-    return {
-      reason:
-        `it is NOT NULL with no default, which is also how an identity column reads, and the CLI cannot ` +
-        `tell which it is. If it is an ordinary column, declare it as \`${fieldKey(col.name)}: ${render(expr, (n) => n)}\`; ` +
-        "if it is an identity (or generated) column, no field type declares it yet",
-    }
-  }
+  // How the database fills it, which the introspection says: an identity column numbered from its
+  // sequence, or a generated one computed from the row (identity-contract).
+  if (col.isIdentity === true) return identityFieldType(col, base)
+  if (col.isGenerated === true) return generatedFieldType(col, base, expr)
   // The database assigns it, so an insert may leave it out. Its default stays the database's own.
   if (hasDefault) expr = { name: "ServerDefault", args: [expr] }
   if (col.nullable) expr = { name: "Optional", args: [expr] }
@@ -84,6 +81,56 @@ export function fieldTypeForColumn(col: LiveColumn, opts: { localized?: boolean 
 
 /** The kinds an identity column can have. */
 const INTEGER_KINDS = new Set(["smallInt", "integer", "bigInt"])
+
+/**
+ * An identity column, in the alias form where it is exact (`Identity<number>`, `Identity<bigint,
+ * "by-default">`) and the options form where the alias would read as another width
+ * (`SmallInt<{ identity: "always" }>`, since `Identity<SmallInt>` is an `Int` to the type checker).
+ */
+function identityFieldType(
+  col: LiveColumn,
+  base: { expr: TypeExpr; kind: string },
+): ColumnFieldType | { reason: string } {
+  if (!INTEGER_KINDS.has(base.kind)) {
+    return { reason: `it is an identity column of type ${col.udtName || col.dataType}, which no field type declares` }
+  }
+  const identity = col.identityGeneration === "BY DEFAULT" ? "byDefault" : "always"
+  const mode = identity === "byDefault" ? "by-default" : "always"
+  const modeArg = JSON.stringify(mode)
+  const expr: TypeExpr =
+    base.kind === "smallInt"
+      ? { name: "SmallInt", args: [`{ identity: ${modeArg} }`] }
+      : {
+          name: "Identity",
+          args: [
+            { name: base.kind === "bigInt" ? "bigint" : "number", keyword: true },
+            ...(mode === "always" ? [] : [modeArg]),
+          ],
+        }
+  return { expr, expect: { kind: base.kind, required: true, identity } }
+}
+
+/** The kinds the engine computes a stored generated column for (identity-contract). */
+const GENERATED_KINDS = new Set([
+  "text", "boolean", "uuid", "smallInt", "integer", "bigInt", "float", "datetime", "date", "bytes",
+])
+
+/** A generated column: `Generated<T, "expression">`, the expression as Postgres reports it. */
+function generatedFieldType(
+  col: LiveColumn,
+  base: { kind: string },
+  expr: TypeExpr,
+): ColumnFieldType | { reason: string } {
+  const expression = col.generationExpression ?? ""
+  if (!GENERATED_KINDS.has(base.kind) || expression === "") {
+    return {
+      reason: `it is a generated column of type ${col.udtName || col.dataType}, which no field type declares as one`,
+    }
+  }
+  let generated: TypeExpr = { name: "Generated", args: [expr, JSON.stringify(expression)] }
+  if (col.nullable) generated = { name: "Optional", args: [generated] }
+  return { expr: generated, expect: { kind: base.kind, required: !col.nullable, generated: expression } }
+}
 
 function baseType(
   udt: string,
@@ -381,6 +428,9 @@ function fieldMismatch(field: ModelAstV2["fields"][string], expect: ExpectedFiel
   if (field["localized"] === true) return "it reads as localized"
   if (expect.precision !== undefined && field["precision"] !== expect.precision) return "its precision differs"
   if (expect.scale !== undefined && field["scale"] !== expect.scale) return "its scale differs"
+  if (field["identity"] !== expect.identity) return "its identity differs"
+  const generated = (field["generated"] as { expression?: unknown } | undefined)?.expression
+  if (generated !== expect.generated) return "its generated expression differs"
   return undefined
 }
 

@@ -46,6 +46,11 @@
   both at once, or either with a default. The generated client types make a generated column and an
   identity `always` column `?: never` on insert and update; an identity `by-default` column is
   optional on insert. Needs an engine that reads them.
+* **adopt, pull:** an identity or generated column is declared as one, from what the engine's
+  introspection now says (`Identity<number>`, `Identity<bigint, "by-default">`,
+  `SmallInt<{ identity: … }>`, `Generated<T, "<expression>">`). `adopt` used to leave every NOT NULL
+  integer with no default to be declared by hand, since it could not tell an identity column from an
+  ordinary one, and declared a generated column as a plain one.
 
 * **push:** when the engine refuses tables Supatype does not manage, `supatype push` and
   `supatype dev` say which tables and that their declared access rules are not in force, and in a

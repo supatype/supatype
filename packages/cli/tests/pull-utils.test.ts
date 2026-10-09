@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import {
   introspectColumnToColumnInfo,
   pgTypeToField,
+  pgTypeToModelField,
   toCamelCase,
   type ColumnInfo,
 } from "../src/pull-utils.js"
@@ -147,5 +148,38 @@ describe("toCamelCase()", () => {
     ["api_key", "ApiKey"],
   ])("converts %s → %s", (input, expected) => {
     expect(toCamelCase(input)).toBe(expected)
+  })
+})
+
+describe("identity and generated columns in the scaffold", () => {
+  const field = (col: Parameters<typeof introspectColumnToColumnInfo>[0]) =>
+    pgTypeToModelField(introspectColumnToColumnInfo(col))
+
+  it("declares an identity column as one", () => {
+    const base = { dataType: "integer", nullable: false, isIdentity: true }
+    expect(field({ ...base, name: "id", udtName: "int4", identityGeneration: "ALWAYS" })).toBe("id: Identity<number>")
+    expect(field({ ...base, name: "n", udtName: "int8", identityGeneration: "BY DEFAULT" })).toBe(
+      'n: Identity<bigint, "by-default">',
+    )
+    expect(field({ ...base, name: "s", udtName: "int2", identityGeneration: "ALWAYS" })).toBe(
+      's: SmallInt<{ identity: "always" }>',
+    )
+  })
+
+  it("declares a generated column with its expression", () => {
+    expect(
+      field({
+        name: "title_lower",
+        dataType: "text",
+        udtName: "text",
+        nullable: true,
+        isGenerated: true,
+        generationExpression: "lower(title)",
+      }),
+    ).toBe('title_lower: Optional<Generated<string, "lower(title)">>')
+  })
+
+  it("leaves a plain column as it was", () => {
+    expect(field({ name: "n", dataType: "integer", udtName: "int4", nullable: false })).toBe("n: Int")
   })
 })

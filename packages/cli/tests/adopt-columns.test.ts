@@ -177,18 +177,10 @@ describe("declaring an adopted column", () => {
 })
 
 describe("what cannot be declared exactly", () => {
-  it("leaves a NOT NULL integer with no default to a person: it may be an identity column", () => {
+  it("declares a NOT NULL integer with no default as required: the introspection says it is no identity", () => {
     const t = fieldTypeForColumn(col("seq", "int8"))
-    expect(t).toHaveProperty("reason")
-    expect((t as { reason: string }).reason).toContain("identity")
-    expect((t as { reason: string }).reason).toContain("`seq: BigInt`")
-    const result = plan("post", col("seq", "int8"))
-    // Never a required field the schema would then insist on: printed for a person to choose.
-    expect(result).toMatchObject({ status: "manual", model: "Post" })
-    expect(result).not.toHaveProperty("line")
-    // With a default, or nullable, there is no doubt.
-    expect(fieldTypeForColumn(col("seq", "int8", { default: "nextval('s')" }))).not.toHaveProperty("reason")
-    expect(fieldTypeForColumn(col("seq", "int8", { nullable: true }))).not.toHaveProperty("reason")
+    expect(t).not.toHaveProperty("reason")
+    expect(plan("post", col("seq", "int8"))).toMatchObject({ status: "planned", line: "seq: BigInt" })
   })
 
   it("refuses an import that would bind a name the file already has, saying how to add it", () => {
@@ -409,5 +401,66 @@ describe("previewKeyedColumns()", () => {
     expect(parseColumnKey("column:post.a.b")).toEqual({ table: "post", column: "a.b" })
     expect(parseColumnKey("column:post")).toBeUndefined()
     expect(parseColumnKey("index:post.i")).toBeUndefined()
+  })
+})
+
+/** Identity and generated columns are declared as such, from what the introspection says (identity-contract). */
+describe("identity and generated columns", () => {
+  const identity = (udt: string, how: "ALWAYS" | "BY DEFAULT") =>
+    col("seq", udt, { isIdentity: true, identityGeneration: how })
+
+  it("declares an identity column in the alias form where it is exact", () => {
+    expect(plan("post", identity("int4", "ALWAYS"))).toMatchObject({ status: "planned", line: "seq: Identity<number>" })
+    expect(plan("post", identity("int8", "BY DEFAULT"))).toMatchObject({
+      status: "planned",
+      line: 'seq: Identity<bigint, "by-default">',
+    })
+  })
+
+  it("declares a smallint identity in the options form, which keeps its width", () => {
+    const planned = plan("post", identity("int2", "BY DEFAULT"))
+    expect(planned).toMatchObject({ status: "planned", line: 'seq: SmallInt<{ identity: "by-default" }>' })
+    const declared = declare("post", identity("int2", "BY DEFAULT"))
+    expect(declared).toMatchObject({ status: "planned" })
+    const field = extractSchemaAstFromTypes(entry, dir)?.models[0]?.fields["seq"]
+    expect(field).toMatchObject({ kind: "smallInt", identity: "byDefault", required: true })
+  })
+
+  it("writes an identity column the schema then reads back as one", () => {
+    expect(declare("post", identity("int8", "ALWAYS"))).toMatchObject({ status: "planned" })
+    expect(readFileSync(entry, "utf8")).toContain("seq: Identity<bigint>")
+    const field = extractSchemaAstFromTypes(entry, dir)?.models[0]?.fields["seq"]
+    expect(field).toMatchObject({ kind: "bigInt", identity: "always" })
+  })
+
+  it("declares a generated column with the expression Postgres reports", () => {
+    const lower = col("title_lower", "text", {
+      nullable: true,
+      isGenerated: true,
+      generationExpression: "lower(title)",
+    })
+    expect(plan("post", lower)).toMatchObject({
+      status: "planned",
+      line: 'title_lower: Optional<Generated<string, "lower(title)">>',
+    })
+    expect(declare("post", lower)).toMatchObject({ status: "planned" })
+    const field = extractSchemaAstFromTypes(entry, dir)?.models[0]?.fields["title_lower"]
+    expect(field).toMatchObject({ kind: "text", required: false, generated: { expression: "lower(title)" } })
+  })
+
+  it("quotes an expression that holds quotes", () => {
+    const t = fieldTypeForColumn(
+      col("n", "float8", { isGenerated: true, generationExpression: "price * 1.2 /* 'vat' */" }),
+    )
+    if ("reason" in t) throw new Error(t.reason)
+    expect(t.expect).toMatchObject({ kind: "float", required: true, generated: "price * 1.2 /* 'vat' */" })
+  })
+
+  it("says why when no field type declares the generated column", () => {
+    const t = fieldTypeForColumn(
+      col("doc", "jsonb", { isGenerated: true, generationExpression: "jsonb_build_object('a', 1)" }),
+    )
+    expect(t).toHaveProperty("reason")
+    expect((t as { reason: string }).reason).toContain("generated column")
   })
 })
