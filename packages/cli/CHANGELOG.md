@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Breaking Changes
+
+* **schema:** `AutoIncrement<T>` compiles to an identity column (`GENERATED ALWAYS AS IDENTITY`)
+  rather than `SERIAL`. An existing serial column is not converted: `supatype push` leaves it, warns
+  and prints the statements that convert it.
+
 ### Fixes
 
 * **push, adopt, doctor, deploy, dev:** ownership flags are checked against what will run them
@@ -32,6 +38,14 @@
   no longer prints "add this field by hand" for the columns its model already declares.
 
 ### Features
+
+* **schema:** identity and stored generated columns. The schema compiler reads the options form
+  (`Int<{ identity: "always" }>`, `Float<{ generated: "price * qty" }>`) and the aliases
+  (`Identity<>`, `Generated<>`, `AutoIncrement<>`) into one AST encoding (`identity: "always" |
+  "byDefault"`, `generated: { expression, stored: true }`), refusing an identity on a non-integer,
+  both at once, or either with a default. The generated client types make a generated column and an
+  identity `always` column `?: never` on insert and update; an identity `by-default` column is
+  optional on insert. Needs an engine that reads them.
 
 * **push:** when the engine refuses tables Supatype does not manage, `supatype push` and
   `supatype dev` say which tables and that their declared access rules are not in force, and in a
