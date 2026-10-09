@@ -50,13 +50,21 @@ export async function pushConsentingToDrift<T>(
       )
       throw err
     }
-    const ask = deps.ask ?? (async (q: string) => (await confirm(q, { default: false })) === true)
-    if (!(await ask("Put Supatype's definitions back?"))) {
-      plain("Aborted. The changes made outside Supatype were kept; nothing was applied.")
-      process.exitCode = 1
-      return undefined
-    }
+    if (!(await askToOverwrite(deps))) return undefined
     await deps.beforeOverwrite?.()
     return push(true)
   }
+}
+
+/**
+ * The question both push paths end on, once what drifted is shown: yes to put Supatype's
+ * definitions back. A no keeps the hand edits, applies nothing and exits 1, on the docker path and
+ * on a linked or self-hosted target alike, so a script sees the same refusal whichever ran it.
+ */
+export async function askToOverwrite(deps: Pick<DriftConsentDeps, "ask"> = {}): Promise<boolean> {
+  const ask = deps.ask ?? (async (q: string) => (await confirm(q, { default: false })) === true)
+  if (await ask("Put Supatype's definitions back?")) return true
+  plain("Aborted. The changes made outside Supatype were kept; nothing was applied.")
+  process.exitCode = 1
+  return false
 }
