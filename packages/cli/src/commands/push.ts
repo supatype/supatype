@@ -35,7 +35,7 @@ import {
   securityDrift,
 } from "../diff-output.js"
 import { printPushWarnings } from "../engine-push-output.js"
-import { pushConsentingToDrift } from "../drift-consent.js"
+import { askToOverwrite, pushConsentingToDrift } from "../drift-consent.js"
 import { adoptKeysNeed, type FeatureNeed } from "../engine-ownership-gate.js"
 import { pushOfferingAdoption, targetAdoptionSteps } from "../adopt-walkthrough.js"
 import { signJwt } from "../jwt.js"
@@ -151,7 +151,7 @@ export function registerPush(program: Command): void {
 const OVERWRITE_DRIFT: FeatureNeed = { feature: "overwrite_drift", flag: "--overwrite-drift" }
 
 /** How this push was asked to treat what needs a person's say. */
-interface PushRun {
+export interface PushRun {
   /** `--yes`: skip the prompts. */
   yes: boolean
   /** `--overwrite-drift`: put back access changed outside Supatype without asking (plan 3.5). */
@@ -164,7 +164,10 @@ interface PushRun {
  * revert a deliberate hand edit and a rollback could not bring it back. Returns whether to
  * overwrite, or `null` when the push should not go ahead.
  */
-async function consentToSecurityDrift(diff: DiffResult, run: PushRun): Promise<boolean | null> {
+export async function consentToSecurityDrift(
+  diff: Pick<DiffResult, "reconcile">,
+  run: PushRun,
+): Promise<boolean | null> {
   if (run.overwriteDrift) return true
   const drifted = securityDrift(diff)
   if (drifted.length === 0) return false
@@ -177,12 +180,7 @@ async function consentToSecurityDrift(diff: DiffResult, run: PushRun): Promise<b
     process.exitCode = 1
     return null
   }
-  const confirmed = await confirm("Put Supatype's definitions back?", { default: false })
-  if (!confirmed) {
-    plain("Aborted. The changes made outside Supatype were kept.")
-    return null
-  }
-  return true
+  return (await askToOverwrite()) ? true : null
 }
 
 async function pushViaTarget(
