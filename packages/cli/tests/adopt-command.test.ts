@@ -11,6 +11,7 @@ vi.mock("../src/resolve-target.js", () => ({
   targetSchemaAdopt,
   requireTargetFeatures: requireTarget,
   schemaCommandTarget: async () => ({ mode: "direct" }),
+  targetCapabilities: async () => ({ features: new Set(["identity_columns"]), source: "engine" }),
 }))
 vi.mock("../src/ui/progress.js", () => ({ withSpinner: (_: string, run: () => unknown) => run() }))
 vi.mock("../src/ui/interactive.js", () => ({ isInteractive: vi.fn(() => false) }))

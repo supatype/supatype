@@ -21,6 +21,7 @@ vi.mock("../src/resolve-target.js", () => ({
   targetSchemaIntrospect,
   schemaCommandTarget: async () => ({ mode: "direct" }),
   requireTargetFeatures: vi.fn(async () => undefined),
+  targetCapabilities: async () => ({ features: new Set(["identity_columns"]), source: "engine" }),
 }))
 vi.mock("../src/commands/generate.js", () => ({ regenerateTypes }))
 vi.mock("../src/ui/progress.js", () => ({ withSpinner: (_: string, run: () => unknown) => run() }))
