@@ -153,8 +153,8 @@ describe("CLI binary (requires built dist/)", () => {
     expect(stdout).not.toContain("--output-dir")
   })
 
-  it("push and deploy --help show --overwrite-drift", () => {
-    for (const command of ["push", "deploy"]) {
+  it("push, deploy and dev --help show --overwrite-drift", () => {
+    for (const command of ["push", "deploy", "dev"]) {
       const { stdout, exitCode } = runCli([command, "--help"])
       expect(exitCode).toBe(0)
       expect(stdout).toContain("--overwrite-drift")

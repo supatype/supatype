@@ -6,12 +6,14 @@
  * managed, and a managed column is one the schema declares, so the CLI then adds the field to the
  * model whose table it is, and regenerates types: from the next push it is an ordinary field.
  *
- * Rewriting someone's source is only done when it can be done exactly, and only when a person says
- * so at a prompt. The field key is the column name (a field's key is its column, verbatim: the
- * engine does not convert case), its type is one whose column is exactly the live one, so the next
- * push changes nothing, and the edit is checked by reading the schema back. Otherwise, or when the
- * person declines, cannot be asked, or passed `--yes` (which agrees to the adopt, not to edits of
- * their files), the file is untouched and the CLI prints the line to add and where.
+ * Rewriting someone's source is only done when it can be done exactly, and only when a person
+ * agreed: at a prompt, or up front with `--yes`, which agrees to the adopt and to the edit it implies
+ * (an adopted column the schema does not declare is a push that drops it). The field key is the
+ * column name (a field's key is its column, verbatim: the engine does not convert case), its type
+ * is one whose column is exactly the live one, so the next push changes nothing, and the edit is
+ * checked by reading the schema back. Otherwise, or when the person declines or cannot be asked
+ * without `--yes`, the file is untouched and the CLI prints the line to add and where. A file the
+ * CLI did not leave as it wrote it is never put back: an edit made meanwhile is the person's.
  */
 import { readFileSync, writeFileSync } from "node:fs"
 import { relative } from "node:path"
@@ -54,8 +56,20 @@ export function fieldTypeForColumn(col: LiveColumn, opts: { localized?: boolean 
   let expr = base.expr
   // In a localized model a bare `string` is stored as JSONB per locale, which this column is not.
   if (opts.localized === true && base.kind === "text") expr = { name: "NotLocalized", args: [expr] }
+  const hasDefault = col.default != null && col.default !== ""
+  // An identity column reads as NOT NULL with no default too: the database assigns it, but the
+  // introspection does not say so, and `@supatype/types` has no field type for identity. Declaring
+  // it as a required field would be wrong for an identity column, so it is left to a person.
+  if (!col.nullable && !hasDefault && INTEGER_KINDS.has(base.kind)) {
+    return {
+      reason:
+        `it is NOT NULL with no default, which is also how an identity column reads, and the CLI cannot ` +
+        `tell which it is. If it is an ordinary column, declare it as \`${fieldKey(col.name)}: ${render(expr, (n) => n)}\`; ` +
+        "if it is an identity (or generated) column, no field type declares it yet",
+    }
+  }
   // The database assigns it, so an insert may leave it out. Its default stays the database's own.
-  if (col.default != null && col.default !== "") expr = { name: "ServerDefault", args: [expr] }
+  if (hasDefault) expr = { name: "ServerDefault", args: [expr] }
   if (col.nullable) expr = { name: "Optional", args: [expr] }
   return {
     expr,
@@ -67,6 +81,9 @@ export function fieldTypeForColumn(col: LiveColumn, opts: { localized?: boolean 
     },
   }
 }
+
+/** The kinds an identity column can have. */
+const INTEGER_KINDS = new Set(["smallInt", "integer", "bigInt"])
 
 function baseType(
   udt: string,
@@ -169,7 +186,15 @@ export interface ColumnDeclarationManual {
   file?: string
 }
 
-export type ColumnDeclaration = ColumnDeclarationPlan | ColumnDeclarationManual
+/** The schema already declares the column: adopting it needs no edit. */
+export interface ColumnAlreadyDeclared {
+  status: "declared"
+  table: string
+  column: string
+  model: string
+}
+
+export type ColumnDeclaration = ColumnDeclarationPlan | ColumnDeclarationManual | ColumnAlreadyDeclared
 
 export interface PlanInput {
   /** Absolute path of the schema entry. */
@@ -192,15 +217,18 @@ export function planColumnDeclaration(input: PlanInput): ColumnDeclaration {
     reason,
     ...extra,
   })
-  if (input.live === undefined) {
-    return manual(`the database did not report column ${table}.${column}, so its type is not known`)
-  }
-
   let ast: ExtractedSchemaAstV2 | null
   try {
     ast = extractSchemaAstFromTypes(input.entryPath, input.cwd)
   } catch (err: unknown) {
+    if (input.live === undefined) return manual(`the schema could not be read (${messageOf(err)})`)
     return withCanonicalLine(manual(`the schema could not be read (${messageOf(err)})`), input.live)
+  }
+  // Declared already (adopting a table hands over its declared columns too): nothing to add.
+  const declaring = (ast?.models ?? []).filter((m) => m.annotations.db.tableName === table && column in m.fields)
+  if (declaring.length === 1) return { status: "declared", table, column, model: declaring[0]!.name }
+  if (input.live === undefined) {
+    return manual(`the database did not report column ${table}.${column}, so its type is not known`)
   }
   const models = (ast?.models ?? []).filter((m) => m.annotations.db.tableName === table)
   if (models.length !== 1) {
@@ -227,7 +255,7 @@ export function planColumnDeclaration(input: PlanInput): ColumnDeclaration {
   const asManual = (reason: string) => manual(reason, { ...at, line: canonical, imports: canonicalImports })
 
   if (column in model.fields || hasMember(fields, column)) {
-    return asManual(`model ${model.name} already has a field named ${column}`)
+    return { status: "declared", table, column, model: model.name }
   }
 
   const imports = importEdits(sourceFile, canonicalImports)
@@ -252,7 +280,8 @@ export function planColumnDeclaration(input: PlanInput): ColumnDeclaration {
   }
 }
 
-function withCanonicalLine(manual: ColumnDeclarationManual, live: LiveColumn): ColumnDeclarationManual {
+function withCanonicalLine(manual: ColumnDeclarationManual, live: LiveColumn | undefined): ColumnDeclarationManual {
+  if (live === undefined) return manual
   const type = fieldTypeForColumn(live)
   if ("reason" in type) return { ...manual, reason: `${manual.reason}; and ${type.reason}` }
   return {
@@ -267,38 +296,47 @@ function withCanonicalLine(manual: ColumnDeclarationManual, live: LiveColumn): C
  * file must still parse. If not, or the write fails, the file is put back as it was.
  */
 export function applyColumnDeclaration(plan: ColumnDeclarationPlan, entryPath: string, cwd: string): ColumnDeclaration {
+  const manual = (reason: string): ColumnDeclarationManual => ({
+    status: "manual",
+    table: plan.table,
+    column: plan.column,
+    reason,
+    line: plan.line,
+    ...(plan.addsImports.length > 0 && { imports: plan.addsImports }),
+    model: plan.model,
+    file: plan.file,
+  })
+  // Put back only what this wrote: a file that is no longer exactly `after` holds someone's edit.
   const undo = (reason: string): ColumnDeclarationManual => {
     try {
-      if (readFileSync(plan.file, "utf8") !== plan.before) writeFileSync(plan.file, plan.before, "utf8")
+      if (readFileSync(plan.file, "utf8") !== plan.after) {
+        return manual(`${reason}; the file has changed since it was edited, so it was left as it is`)
+      }
+      writeFileSync(plan.file, plan.before, "utf8")
     } catch {
-      /* the write itself failed, so the file is as it was */
+      return manual(`${reason}; the file could not be put back, so check it`)
     }
-    return {
-      status: "manual",
-      table: plan.table,
-      column: plan.column,
-      reason,
-      line: plan.line,
-      ...(plan.addsImports.length > 0 && { imports: plan.addsImports }),
-      model: plan.model,
-      file: plan.file,
-    }
+    return manual(`${reason}, so it was put back`)
   }
   try {
     if (readFileSync(plan.file, "utf8") !== plan.before) {
-      return undo("the file changed since the edit was worked out")
+      // Edited while the person was asked: theirs, and left exactly as it is.
+      return manual("the file changed since the edit was worked out, so it was left as it is")
     }
     writeFileSync(plan.file, plan.after, "utf8")
   } catch (err: unknown) {
-    return undo(`the file could not be written (${messageOf(err)})`)
+    // Nothing of ours is known to be in it: a failed write is not undone over whatever is there.
+    return manual(`the file could not be written (${messageOf(err)})`)
   }
   const problem = verify(plan, entryPath, cwd)
-  return problem === undefined ? plan : undo(`the edited schema did not read back as planned (${problem}), so it was put back`)
+  return problem === undefined ? plan : undo(`the edited schema did not read back as planned (${problem})`)
 }
 
 function verify(plan: ColumnDeclarationPlan, entryPath: string, cwd: string): string | undefined {
   const parsed = ts.transpileModule(plan.after, { reportDiagnostics: true, fileName: plan.file })
   if ((parsed.diagnostics ?? []).length > 0) return "the file no longer parses"
+  const duplicate = duplicateIdentifier(plan.file, plan.after)
+  if (duplicate !== undefined) return duplicate
   let ast: ExtractedSchemaAstV2 | null
   try {
     ast = extractSchemaAstFromTypes(entryPath, cwd)
@@ -310,6 +348,31 @@ function verify(plan: ColumnDeclarationPlan, entryPath: string, cwd: string): st
   const field = models[0]!.fields[plan.key]
   if (field === undefined) return `field ${plan.key} is not found`
   return fieldMismatch(field, plan.expect)
+}
+
+/** Errors that mean a name is bound twice (TS2300 and kin), which parsing alone does not report. */
+const DUPLICATE_CODES = new Set([2300, 2440, 2395])
+
+/** The first "duplicate identifier" kind of error in `text`, checked as one file on its own. */
+function duplicateIdentifier(fileName: string, text: string): string | undefined {
+  const options: ts.CompilerOptions = { noLib: true, noResolve: true, types: [], noEmit: true }
+  const host = ts.createCompilerHost(options)
+  const source = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true)
+  const getSourceFile = host.getSourceFile.bind(host)
+  host.getSourceFile = (name, ...rest) => (name === fileName ? source : getSourceFile(name, ...rest))
+  const program = ts.createProgram([fileName], options, host)
+  const found = program.getSemanticDiagnostics(source).find((d) => DUPLICATE_CODES.has(d.code))
+  if (found !== undefined) return ts.flattenDiagnosticMessageText(found.messageText, " ")
+  // With the module unresolved the checker cannot see an import clash with the file's own type, so
+  // that one is looked for directly.
+  const file = new Project({ useInMemoryFileSystem: true }).createSourceFile(fileName, text, { overwrite: true })
+  for (const decl of file.getImportDeclarations()) {
+    for (const spec of decl.getNamedImports()) {
+      const name = spec.getAliasNode()?.getText() ?? spec.getName()
+      if (declaredLocally(file, name)) return `Import declaration conflicts with local declaration of '${name}'.`
+    }
+  }
+  return undefined
 }
 
 function fieldMismatch(field: ModelAstV2["fields"][string], expect: ExpectedField): string | undefined {
@@ -403,6 +466,11 @@ interface TextEdit {
   text: string
 }
 
+/** The file's own line ending, so an inserted line matches the lines around it. */
+function lineEnding(text: string): string {
+  return text.includes("\r\n") ? "\r\n" : "\n"
+}
+
 function applyEdits(text: string, edits: TextEdit[]): string {
   let out = text
   for (const edit of [...edits].sort((a, b) => b.pos - a.pos)) {
@@ -430,10 +498,12 @@ function fieldInsertion(sourceFile: SourceFile, fields: TypeLiteralNode, line: s
     // `{ a: string }` on one line: keep it on one line.
     return { pos: end, text: sep === "" ? `; ${line}` : ` ${line}${sep}` }
   }
-  // After anything else on the last member's line (a trailing comment stays with its field).
+  // After anything else on the last member's line (a trailing comment stays with its field), and
+  // before its line ending, which the new line ends with too: a CRLF file stays CRLF.
   const lineStart = text.lastIndexOf("\n", last.getStart()) + 1
   const indent = /^[ \t]*/.exec(text.slice(lineStart))?.[0] ?? ""
-  return { pos: lineEnd, text: `\n${indent}${line}${sep}` }
+  const crlf = text[lineEnd - 1] === "\r"
+  return { pos: crlf ? lineEnd - 1 : lineEnd, text: `${crlf ? "\r\n" : "\n"}${indent}${line}${sep}` }
 }
 
 /**
@@ -455,6 +525,18 @@ function importEdits(
   const missing = names.filter((n) => !local.has(n))
   if (missing.length === 0) return { local, edits: [], added: [] }
 
+  // Importing a name the file already binds (another import, or its own type) would declare it
+  // twice: refused, for a person to alias, rather than written.
+  const taken = missing.filter((n) => boundLocally(sourceFile, n))
+  if (taken.length > 0) {
+    return {
+      reason:
+        `${relativeName(sourceFile)} already has ${taken.map((n) => `a ${n}`).join(" and ")} that is not ` +
+        `"${TYPES_MODULE}"'s, so importing ${taken.length === 1 ? "it" : "them"} would declare the name twice; ` +
+        `import ${taken.join(", ")} from "${TYPES_MODULE}" under another name and use that`,
+    }
+  }
+
   const target = decls.find((d) => d.getNamedImports().length > 0 && d.getNamespaceImport() === undefined)
   if (target === undefined) {
     return { reason: `${relativeName(sourceFile)} has no named import from "${TYPES_MODULE}" to add ${missing.join(", ")} to` }
@@ -475,11 +557,38 @@ function importEdits(
 
   const lineStart = text.lastIndexOf("\n", last.getStart()) + 1
   const indent = /^[ \t]*/.exec(text.slice(lineStart))?.[0] ?? ""
+  const eol = lineEnding(text)
   if (trailingComma) {
     const pos = end + between.indexOf(",") + 1
-    return { local, edits: [{ pos, text: spelled.map((n) => `\n${indent}${n},`).join("") }], added: missing }
+    return { local, edits: [{ pos, text: spelled.map((n) => `${eol}${indent}${n},`).join("") }], added: missing }
   }
-  return { local, edits: [{ pos: end, text: spelled.map((n) => `,\n${indent}${n}`).join("") }], added: missing }
+  return { local, edits: [{ pos: end, text: spelled.map((n) => `,${eol}${indent}${n}`).join("") }], added: missing }
+}
+
+/** Whether `name` is already bound at the top of the file: by an import, or a declaration. */
+function boundLocally(sourceFile: SourceFile, name: string): boolean {
+  for (const decl of sourceFile.getImportDeclarations()) {
+    if (decl.getDefaultImport()?.getText() === name) return true
+    if (decl.getNamespaceImport()?.getText() === name) return true
+    for (const spec of decl.getNamedImports()) {
+      if ((spec.getAliasNode()?.getText() ?? spec.getName()) === name) return true
+    }
+    // `import X = require(...)` and the like are rare enough to leave to the read-back.
+  }
+  return declaredLocally(sourceFile, name)
+}
+
+/** Whether the file declares `name` itself, at the top level. */
+function declaredLocally(sourceFile: SourceFile, name: string): boolean {
+  return (
+    sourceFile.getTypeAlias(name) !== undefined ||
+    sourceFile.getInterface(name) !== undefined ||
+    sourceFile.getClass(name) !== undefined ||
+    sourceFile.getEnum(name) !== undefined ||
+    sourceFile.getFunction(name) !== undefined ||
+    sourceFile.getVariableDeclaration(name) !== undefined ||
+    sourceFile.getModule(name) !== undefined
+  )
 }
 
 function relativeName(sourceFile: SourceFile): string {
@@ -533,6 +642,7 @@ export async function previewKeyedColumns(
       return `${head}; its type could not be read from the database (${unread ?? "no answer"}), so declare it in your schema by hand`
     }
     const plan = planColumnDeclaration({ entryPath: opts.entryPath, cwd: opts.cwd, table, column, live: live.get(`${table}.${column}`) })
+    if (plan.status === "declared") return `${head}; the schema already declares it (${plan.model})`
     if (plan.status === "planned") {
       const imports =
         plan.addsImports.length > 0 ? `, importing ${plan.addsImports.join(", ")} from "${TYPES_MODULE}"` : ""
@@ -584,7 +694,11 @@ export async function declareAdoptedColumns(
   opts: DeclareOptions,
   deps: DeclareDeps,
 ): Promise<ColumnDeclaration[]> {
-  const columns = adopted.filter((item) => item.kind === "column")
+  // A table adopted with its columns: the engine lists each declared column it took as well, and a
+  // column the schema does not declare is adopted only on a table Supatype already owns, so every
+  // one of these is declared already.
+  const tables = new Set(adopted.filter((item) => item.kind === "table").map((item) => item.name))
+  const columns = adopted.filter((item) => item.kind === "column" && !tables.has(item.table))
   if (columns.length === 0) return []
 
   let live: Map<string, LiveColumn> | undefined
@@ -603,7 +717,7 @@ export async function declareAdoptedColumns(
       column: item.name,
       live: live?.get(`${item.table}.${item.name}`),
     })
-    if (planned.status === "manual") {
+    if (planned.status !== "planned") {
       results.push(planned)
       continue
     }
