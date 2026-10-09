@@ -780,7 +780,10 @@ async function runSchemaPush(
 ): Promise<void> {
   // Build AST JSON from schema file.
   const { loadSchemaAst } = await import("../config.js")
-  let ast = loadSchemaAst(schemaPath, cwd)
+  const { withPublishing } = await import("../model-versioning.js")
+  const loaded = loadSchemaAst(schemaPath, cwd)
+  // As `supatype push` sends it: the engine refuses a versioned schema with no publishing config.
+  let ast = config ? withPublishing(loaded, config) : loaded
 
   // Strip fields whose kind requires an unavailable Postgres extension.
   if (skipFieldKinds && skipFieldKinds.size > 0) {
