@@ -2,16 +2,19 @@ import { Command } from "commander"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const targetSchemaAdopt = vi.hoisted(() => vi.fn())
-const requireEngine = vi.hoisted(() => vi.fn(async () => undefined))
+const requireTarget = vi.hoisted(() => vi.fn(async (_target: unknown, _needs: Array<{ feature: string; flag: string }>) => undefined))
 const confirmMock = vi.hoisted(() => vi.fn())
 
 vi.mock("../src/config.js", () => ({ loadConfig: () => ({ project: { name: "app" } }), loadSchemaAst: () => ({}) }))
 vi.mock("../src/project-config.js", () => ({ schemaPathFromProject: () => "schema", pgSchema: () => "public" }))
-vi.mock("../src/resolve-target.js", () => ({ targetSchemaAdopt, schemaCommandTarget: async () => ({ mode: "direct" }) }))
+vi.mock("../src/resolve-target.js", () => ({
+  targetSchemaAdopt,
+  requireTargetFeatures: requireTarget,
+  schemaCommandTarget: async () => ({ mode: "direct" }),
+}))
 vi.mock("../src/ui/progress.js", () => ({ withSpinner: (_: string, run: () => unknown) => run() }))
 vi.mock("../src/ui/interactive.js", () => ({ isInteractive: vi.fn(() => false) }))
 vi.mock("../src/ui/clack.js", () => ({ p: { confirm: confirmMock, cancel: vi.fn() }, isCancel: () => false, CLACK_CANCEL: Symbol() }))
-vi.mock("../src/engine-ownership-gate.js", () => ({ requireEngineForOwnershipFlag: requireEngine }))
 
 import { registerAdopt } from "../src/commands/adopt.js"
 import { isInteractive } from "../src/ui/interactive.js"
@@ -34,6 +37,9 @@ const STALE =
   "the database changed since the preview. Nothing was written"
 const STALE_MESSAGE = "The database changed since the preview; run `supatype adopt` again."
 
+/** Every feature the target was asked for, in order. */
+const asked = (): string[] => requireTarget.mock.calls.flatMap((call) => call[1].map((need) => need.feature))
+
 async function adopt(...args: string[]): Promise<void> {
   const program = new Command().exitOverride()
   registerAdopt(program)
@@ -48,7 +54,7 @@ describe("supatype adopt", () => {
     targetSchemaAdopt.mockImplementation(async (_t, _a, opts: { yes: boolean }) =>
       opts.yes ? { status: "adopted", adopt: PREVIEW.adopt } : PREVIEW,
     )
-    requireEngine.mockClear()
+    requireTarget.mockClear()
     confirmMock.mockReset()
     vi.mocked(isInteractive).mockReturnValue(false)
     vi.spyOn(console, "log").mockImplementation(() => undefined)
@@ -85,11 +91,31 @@ describe("supatype adopt", () => {
     expect(targetSchemaAdopt.mock.calls.map((call) => call[2].yes)).toEqual([false])
   })
 
-  it("checks the engine version before sending --release, and only then", async () => {
+  it("checks the target supports --release before sending it, and only then", async () => {
     await adopt("--yes")
-    expect(requireEngine).not.toHaveBeenCalledWith("--release", expect.anything())
+    expect(asked()).not.toContain("release")
     await adopt("--yes", "--release", "table:widget")
-    expect(requireEngine).toHaveBeenCalledWith("--release", expect.anything())
+    expect(asked()).toContain("release")
+  })
+
+  it("refuses a flag the target does not support before previewing anything", async () => {
+    requireTarget.mockRejectedValueOnce(new Error("this server does not support --release; update it"))
+    await expect(adopt("--yes", "--release", "table:widget")).rejects.toThrow(
+      "this server does not support --release; update it",
+    )
+    expect(targetSchemaAdopt).not.toHaveBeenCalled()
+  })
+
+  it("says busy, try again when another writer holds the engine's lock", async () => {
+    const { EngineError, ENGINE_BUSY } = await import("../src/engine-client.js")
+    targetSchemaAdopt.mockImplementation(async (_t, _a, opts: { yes: boolean }) => {
+      if (!opts.yes) return PREVIEW
+      throw new EngineError("Another push, adopt or rebaseline is running on this database; try again.", "/adopt", 1, "", ENGINE_BUSY)
+    })
+    await adopt("--yes")
+    expect(process.exitCode).toBe(1)
+    expect(stderr.mock.calls.flat().join(" ")).toContain("busy")
+    expect(stderr.mock.calls.flat().join(" ")).toContain("try again")
   })
 
   it("names no keys on --yes alone: it adopts every conflict there is, and says what it took", async () => {
@@ -97,11 +123,11 @@ describe("supatype adopt", () => {
     await adopt("--yes")
     expect(targetSchemaAdopt.mock.calls.every((call) => call[2].keys === undefined)).toBe(true)
     expect(targetSchemaAdopt.mock.calls.at(-1)?.[2].yes).toBe(true)
-    expect(requireEngine).not.toHaveBeenCalledWith("adopt", expect.anything())
+    expect(asked()).toEqual([])
     expect(stdout.mock.calls.flat().join("\n")).toContain("Table widget will be Supatype's")
   })
 
-  it("adopts only the conflicts the preview showed after a person agrees, checking the engine first", async () => {
+  it("adopts only the conflicts the preview showed after a person agrees, checking the target first", async () => {
     vi.mocked(isInteractive).mockReturnValue(true)
     confirmMock.mockResolvedValue(true)
     await adopt()
@@ -109,7 +135,7 @@ describe("supatype adopt", () => {
       [false, undefined],
       [true, ["table:widget"]],
     ])
-    expect(requireEngine).toHaveBeenCalledWith("adopt", expect.anything())
+    expect(asked()).toContain("adopt_keys")
   })
 
   it("sends no keys to an engine from before the ledger, and does not gate it", async () => {
@@ -120,7 +146,7 @@ describe("supatype adopt", () => {
     )
     await adopt()
     expect(targetSchemaAdopt.mock.calls.map((call) => call[2].keys)).toEqual([undefined, undefined])
-    expect(requireEngine).not.toHaveBeenCalled()
+    expect(asked()).toEqual([])
   })
 
   it("exits 1 and says to run it again when the database changed since the preview", async () => {
@@ -147,9 +173,9 @@ describe("supatype adopt", () => {
     await expect(adopt()).rejects.toThrow("connection refused")
   })
 
-  it("adopts only what --key names, after the engine version gate", async () => {
+  it("adopts only what --key names, after the capability gate", async () => {
     await adopt("--yes", "--key", "table:widget", "--key", "index:posts.posts_title_idx")
-    expect(requireEngine).toHaveBeenCalledWith("--key", expect.anything())
+    expect(asked()).toContain("adopt_keys")
     const applied = targetSchemaAdopt.mock.calls.at(-1)?.[2]
     expect(applied?.yes).toBe(true)
     expect(applied?.keys).toEqual(["table:widget", "index:posts.posts_title_idx"])
@@ -192,5 +218,7 @@ describe("supatype adopt", () => {
       [false, undefined],
       [true, []],
     ])
+    // Adopting none is a feature of its own: an engine without it would adopt every conflict.
+    expect(asked()).toEqual(["release", "adopt_none"])
   })
 })

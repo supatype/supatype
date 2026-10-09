@@ -186,6 +186,9 @@ export function securityDrift(diff: Pick<DiffResult, "reconcile">): ReconcileAct
   return (diff.reconcile ?? []).filter(
     (action) =>
       (action.action === "drift" && action.security_relevant === true) ||
+      // The schema changed it too, so it is replaced rather than put back: the hand edit is
+      // overwritten all the same, as the engine counts it.
+      (action.action === "replace" && action.drifted !== undefined && ACCESS_KINDS.has(action.key.kind)) ||
       (action.action === "recreate" && ACCESS_KINDS.has(action.key.kind)),
   )
 }
@@ -194,16 +197,64 @@ export function securityDrift(diff: Pick<DiffResult, "reconcile">): ReconcileAct
 export function formatSecurityDrift(actions: ReconcileAction[]): string[] {
   const lines: string[] = []
   for (const action of actions) {
-    lines.push(`  ${kindLabel(action)} ${where(action)}`)
-    const recorded = action.action === "drift" ? action.recorded_def : action.create_sql
-    lines.push("    Supatype's:")
-    for (const line of (recorded ?? "").split("\n")) lines.push(`      ${line}`)
-    if (action.action === "drift") {
-      lines.push("    Now:")
-      for (const line of (action.live_def ?? "").split("\n")) lines.push(`      ${line}`)
-    } else {
-      lines.push("    Now: removed")
-    }
+    const recorded =
+      action.action === "drift"
+        ? action.recorded_def
+        : action.action === "replace"
+          ? action.drifted?.recorded_def
+          : action.create_sql
+    const live =
+      action.action === "drift" ? action.live_def : action.action === "replace" ? action.drifted?.live_def : undefined
+    lines.push(...driftLines(`${kindLabel(action)} ${where(action)}`, recorded ?? "", action.action === "recreate" ? null : live ?? ""))
   }
   return lines
+}
+
+function driftLines(label: string, recorded: string, live: string | null): string[] {
+  const lines = [`  ${label}`, "    Supatype's:"]
+  for (const line of recorded.split("\n")) lines.push(`      ${line}`)
+  if (live === null) {
+    lines.push("    Now: removed")
+  } else {
+    lines.push("    Now:")
+    for (const line of live.split("\n")) lines.push(`      ${line}`)
+  }
+  return lines
+}
+
+/** The `reason` the engine gives a push it refused over access changed outside Supatype. */
+export const SECURITY_DRIFT = "security_drift"
+
+/** One object that refusal names (schema-engine `ledger::drift::DriftedObject`). */
+export interface DriftedObject {
+  key: { kind: string; schema?: string; parent: string; name: string }
+  /** What Supatype recorded, or for one removed by hand what it would make. */
+  recorded: string
+  /** What the database holds now; null when it was removed. */
+  live?: string | null
+}
+
+/**
+ * The objects a security-drift refusal names, or null when `output` is not one. Read from the JSON
+ * line the engine binary prints on stdout (or a server's JSON error body).
+ */
+export function securityDriftRefusal(output: string): DriftedObject[] | null {
+  for (const line of output.split(/\r?\n/)) {
+    const candidate = line.trim()
+    if (!candidate.startsWith("{")) continue
+    try {
+      const parsed = JSON.parse(candidate) as { reason?: unknown; objects?: unknown }
+      if (parsed.reason === SECURITY_DRIFT && Array.isArray(parsed.objects)) return parsed.objects as DriftedObject[]
+    } catch {
+      /* not this line */
+    }
+  }
+  return null
+}
+
+/** Each object a refusal names, with what Supatype recorded beside what the database holds now. */
+export function formatDriftedObjects(objects: readonly DriftedObject[]): string[] {
+  return objects.flatMap((o) =>
+    driftLines(`${o.key.kind.replace(/_/g, " ")} ${o.key.parent ? `${o.key.parent}.${o.key.name}` : o.key.name}`, o.recorded, o.live ?? null),
+  )
 }
