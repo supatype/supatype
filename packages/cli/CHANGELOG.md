@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+### Fixes
+
+* **doctor:** the rebaseline consent is renamed: `supatype doctor --rebaseline --accept-access-drift`
+  records policies, grants, labels and RLS changed outside Supatype as the baseline too (sent as
+  `accept_access_drift`, or `--accept-access-drift` to the engine binary). `--overwrite-drift` is
+  push's flag, which puts Supatype's definitions back, the opposite; on `doctor` it is now an error
+  that names the new flag. What the engine would not rebaseline without it is listed as "Not
+  rebaselined".
+* **push, adopt, doctor, deploy, dev:** ownership flags are checked against what will run them
+  before anything is sent. A linked cloud or self-host target is asked
+  `GET <schema base>/capabilities`; a server without the route (404) or whose engine does not list
+  the feature is refused with "this server does not support <flag>; update it" rather than sent a
+  field it would drop (an adopt of the previewed keys used to become an adopt of everything, and a
+  consent to overwrite drift was lost). The engine binary path asks the binary that will actually
+  run (`supatype-engine capabilities`, or its version for an older one), so `overrides.engine` and
+  an offline cached engine work without the CDN; offline with nothing cached says what to do.
+  `push` now sends `overwrite_drift`, the engine's own field name, to every target.
+* **push:** a policy, grant, label or RLS attribute the schema changes that was also edited outside
+  Supatype is shown and asked about like any other access drift (the engine's `replace` with
+  `drifted`), and `deploy` refuses it without `--overwrite-drift`.
+* **push (docker):** when the engine refuses to overwrite access changed outside Supatype, the push
+  shows each object and, in a terminal, asks; a yes pushes again with `--overwrite-drift`.
+  `supatype dev --overwrite-drift` applies it to every push of the session.
+* **adopt:** a busy engine (another push, adopt or rebaseline holds its lock) is reported in the
+  engine's own words, "busy, try again", instead of an exit code and log lines.
+* **adopt:** on a docker project an empty key list reaches the compose engine as `--adopt-none`; it
+  used to be sent as no keys, which adopts every conflict.
+* **adopt:** declaring an adopted column never puts back content the CLI did not write: a file
+  edited while the prompt was open is left as it is, with the field to add printed. A field whose
+  import would bind a name the file already has is printed for a person to alias instead of
+  written, and the read-back now catches a duplicate identifier. New lines use the file's own line
+  endings. A NOT NULL integer column with no default may be an identity column, which no field type
+  declares, so it is printed for a person rather than declared as a required field. Adopting a table
+  no longer prints "add this field by hand" for the columns its model already declares.
+
 ### Features
 
 * **push:** when the engine refuses tables Supatype does not manage, `supatype push` and
@@ -24,7 +59,8 @@
   The field key is the column name and its type is one whose column is exactly the live one
   (`Optional<…>` when nullable, `ServerDefault<…>` when the column has a default), so the push
   changes nothing; the edit keeps the file's formatting and comments and is checked by reading the
-  schema back, or undone. In a terminal it shows the file, model and field line and asks first;
+  schema back, or undone (only when the file is still exactly what was written). In a terminal it
+  shows the file, model and field line and asks first;
   `--yes` edits without asking. When the model cannot be found, the type cannot be declared
   exactly, or the edit is declined, the file is left alone and the field line to add, with the file
   and model, is printed; the adopt has still happened and it exits 0. Other adopted kinds are not

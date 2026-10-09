@@ -63,7 +63,7 @@ function plan(table: string, live: LiveColumn | undefined) {
 
 function declare(table: string, live: LiveColumn) {
   const planned = plan(table, live)
-  if (planned.status !== "planned") throw new Error(`not planned: ${planned.reason}`)
+  if (planned.status !== "planned") throw new Error(`not planned: ${JSON.stringify(planned)}`)
   return applyColumnDeclaration(planned, entry, dir)
 }
 
@@ -74,7 +74,7 @@ describe("fieldTypeForColumn()", () => {
       if ("reason" in t) return t.reason
       return JSON.stringify(t.expr)
     }
-    expect(text(col("a", "int4"))).toContain('"Int"')
+    expect(text(col("a", "int4", { nullable: true }))).toContain('"Int"')
     expect(text(col("a", "timestamptz"))).toContain('"Timestamp"')
     expect(text(col("a", "numeric", { numericPrecision: 10, numericScale: 2 }))).toContain('"Decimal"')
   })
@@ -124,9 +124,9 @@ describe("declaring an adopted column", () => {
       `import type { Model, Public, Int as Integer } from "@supatype/types"\n` +
         `export type Article = Model<{ title: string; words: Integer }, { tableName: "articles"; access: { read: Public } }>\n`,
     )
-    const result = declare("articles", col("rank", "int4"))
+    const result = declare("articles", col("rank", "int4", { default: "0" }))
     expect(result).toMatchObject({ status: "planned", model: "Article", file: blog })
-    expect(readFileSync(blog, "utf8")).toContain("{ title: string; words: Integer; rank: Integer }")
+    expect(readFileSync(blog, "utf8")).toContain("{ title: string; words: Integer; rank: ServerDefault<Integer> }")
   })
 
   it("writes NotLocalized<string> in a localized model, where a bare string would become JSONB", () => {
@@ -172,6 +172,128 @@ describe("declaring an adopted column", () => {
     const broken = { ...planned, after: planned.after.replace("note: string", "note: Int") }
     const result = applyColumnDeclaration(broken, entry, dir)
     expect(result).toMatchObject({ status: "manual", line: planned.line })
+    expect(readFileSync(entry, "utf8")).toBe(POST)
+  })
+})
+
+describe("what cannot be declared exactly", () => {
+  it("leaves a NOT NULL integer with no default to a person: it may be an identity column", () => {
+    const t = fieldTypeForColumn(col("seq", "int8"))
+    expect(t).toHaveProperty("reason")
+    expect((t as { reason: string }).reason).toContain("identity")
+    expect((t as { reason: string }).reason).toContain("`seq: BigInt`")
+    const result = plan("post", col("seq", "int8"))
+    // Never a required field the schema would then insist on: printed for a person to choose.
+    expect(result).toMatchObject({ status: "manual", model: "Post" })
+    expect(result).not.toHaveProperty("line")
+    // With a default, or nullable, there is no doubt.
+    expect(fieldTypeForColumn(col("seq", "int8", { default: "nextval('s')" }))).not.toHaveProperty("reason")
+    expect(fieldTypeForColumn(col("seq", "int8", { nullable: true }))).not.toHaveProperty("reason")
+  })
+
+  it("refuses an import that would bind a name the file already has, saying how to add it", () => {
+    write(
+      "schema/index.ts",
+      `import type { Model, Public } from "@supatype/types"\n` +
+        `import type { Optional } from "./my-optional"\n` +
+        `export type Post = Model<{ title: string }, { access: { read: Public } }>\n`,
+    )
+    const result = plan("post", col("note", "text", { nullable: true }))
+    expect(result).toMatchObject({ status: "manual", line: "note: Optional<string>", imports: ["Optional"] })
+    expect((result as { reason: string }).reason).toContain("already has a Optional")
+    expect(readFileSync(entry, "utf8")).not.toContain("note")
+
+    write(
+      "schema/index.ts",
+      `import type { Model, Public } from "@supatype/types"\n` +
+        `type Optional<T> = T | null\n` +
+        `export type Post = Model<{ title: string }, { access: { read: Public } }>\n`,
+    )
+    expect(plan("post", col("note", "text", { nullable: true }))).toMatchObject({ status: "manual" })
+  })
+
+  it("catches a duplicate identifier when the edit is read back", () => {
+    const planned = plan("post", col("note", "text", { nullable: true }))
+    if (planned.status !== "planned") throw new Error("not planned")
+    // An edit that, however it came about, binds Optional twice.
+    const twice = planned.after.replace(`import type {`, `import type { Optional } from "./elsewhere"\nimport type {`)
+    const result = applyColumnDeclaration({ ...planned, after: twice }, entry, dir)
+    expect(result.status).toBe("manual")
+    expect((result as { reason: string }).reason).toContain("Duplicate identifier 'Optional'")
+    expect(readFileSync(entry, "utf8")).toBe(POST)
+  })
+
+  it("inserts the field and the import with the file's own CRLF line endings", () => {
+    const crlf = POST.replace(/\n/g, "\r\n")
+    write("schema/index.ts", crlf)
+    const result = declare("post", col("subtitle", "text", { nullable: true }))
+    expect(result.status).toBe("planned")
+    const after = readFileSync(entry, "utf8")
+    expect(after.replace(/\r\n/g, "")).not.toContain("\n")
+    expect(after).toContain("  updated_at: Timestamp\r\n  subtitle: Optional<string>\r\n}, {")
+    expect(after).toContain("  UUID,\r\n  Optional,\r\n} from")
+  })
+})
+
+describe("never putting back what it did not write", () => {
+  it("leaves an edit the person made while being asked, and says what to add", async () => {
+    const say = { info: vi.fn(), warn: vi.fn(), plain: vi.fn() }
+    const userEdit = POST.replace("/** A post. */", "/** A post, edited while the prompt was open. */")
+    const results = await declareAdoptedColumns(
+      [{ kind: "column", table: "post", name: "note" }],
+      { entryPath: entry, cwd: dir, yes: false, interactive: true },
+      {
+        introspect: async () => ({ tables: [{ name: "post", columns: [col("note", "text", { nullable: true })] }] }),
+        // The person saves the file in their editor, then says yes.
+        confirm: async () => {
+          writeFileSync(entry, userEdit)
+          return true
+        },
+        regenerate: vi.fn(async () => []),
+        say,
+      },
+    )
+    expect(readFileSync(entry, "utf8")).toBe(userEdit)
+    expect(results[0]).toMatchObject({ status: "manual", line: "note: Optional<string>" })
+    const printed = [...say.warn.mock.calls, ...say.plain.mock.calls].flat().join("\n")
+    expect(printed).toContain("left as it is")
+    expect(printed).toContain("note: Optional<string>")
+  })
+})
+
+describe("adopting a table with the columns it declares", () => {
+  it("prints nothing to add for columns the model already declares", async () => {
+    const say = { info: vi.fn(), warn: vi.fn(), plain: vi.fn() }
+    const introspect = vi.fn(async () => ({ tables: [{ name: "post", columns: [col("title", "text"), col("id", "uuid")] }] }))
+    const results = await declareAdoptedColumns(
+      [
+        { kind: "table", table: "post", name: "post" },
+        { kind: "column", table: "post", name: "title" },
+        { kind: "column", table: "post", name: "id" },
+      ],
+      { entryPath: entry, cwd: dir, yes: true, interactive: false },
+      { introspect, confirm: vi.fn(), regenerate: vi.fn(async () => []), say },
+    )
+    expect(results).toEqual([])
+    expect(say.warn).not.toHaveBeenCalled()
+    expect(say.plain).not.toHaveBeenCalled()
+    expect(readFileSync(entry, "utf8")).toBe(POST)
+  })
+
+  it("says nothing for a declared column adopted on its own either", async () => {
+    const say = { info: vi.fn(), warn: vi.fn(), plain: vi.fn() }
+    const results = await declareAdoptedColumns(
+      [{ kind: "column", table: "post", name: "title" }],
+      { entryPath: entry, cwd: dir, yes: true, interactive: false },
+      {
+        introspect: async () => ({ tables: [{ name: "post", columns: [col("title", "text")] }] }),
+        confirm: vi.fn(),
+        regenerate: vi.fn(async () => []),
+        say,
+      },
+    )
+    expect(results).toMatchObject([{ status: "declared", model: "Post" }])
+    expect(say.warn).not.toHaveBeenCalled()
     expect(readFileSync(entry, "utf8")).toBe(POST)
   })
 })
@@ -260,15 +382,13 @@ describe("previewKeyedColumns()", () => {
     const [line] = await preview(["column:post.slug"], introspectWith([col("slug", "varchar")]))
     expect(line).toMatch(/^column post\.slug: record as managed by Supatype; declare it in your schema by hand \(/)
     const [taken] = await preview(["column:post.title"], introspectWith([col("title", "text")]))
-    expect(taken).toBe(
-      `column post.title: record as managed by Supatype; add it to your schema by hand in ${join("schema", "index.ts")} ` +
-        "(Post): `title: string` (model Post already has a field named title)",
-    )
+    // A field the model already has is not one to add by hand.
+    expect(taken).toBe("column post.title: record as managed by Supatype; the schema already declares it (Post)")
     const [noModel] = await preview(["column:other.x"], async () => ({
-      tables: [{ name: "other", columns: [col("x", "int4")] }],
+      tables: [{ name: "other", columns: [col("x", "int4", { nullable: true })] }],
     }))
     expect(noModel).toBe(
-      "column other.x: record as managed by Supatype; add it to your schema by hand: `x: Int` (no model in the schema has table other)",
+      "column other.x: record as managed by Supatype; add it to your schema by hand: `x: Optional<Int>` (no model in the schema has table other)",
     )
   })
 
