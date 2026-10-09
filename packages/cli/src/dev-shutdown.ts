@@ -89,6 +89,24 @@ export function registerDevShutdown(
   ensureDevShutdownHooks()
 }
 
+/**
+ * Keep `supatype dev` running until a signal (or the TUI) shuts it down. Never resolves.
+ *
+ * A pending promise is not something Node waits for. `dev` used to end on
+ * `await new Promise(() => undefined)`, which held the process only while something else did: a
+ * schema watcher, a child app, the TUI reading stdin. `dev --stream --no-watch` with stdin not a
+ * terminal has none of them, so the event loop drained the moment the ready banner printed, the
+ * process exited 0, and the `exit` hook above ran a silent `docker compose down`. The stack
+ * reported ready and was gone a second later, with nothing in the output saying why.
+ *
+ * The interval is the handle that keeps the loop alive. Shutdown leaves through `process.exit`,
+ * so it never needs clearing.
+ */
+export function waitForDevShutdown(): Promise<never> {
+  setInterval(() => undefined, 0x7fffffff)
+  return new Promise<never>(() => undefined)
+}
+
 /** TUI Ctrl+C: do not re-emit SIGINT (avoids double-fire on Windows raw mode). */
 export function requestDevShutdown(): void {
   ignoreSigintUntil = Date.now() + 400
