@@ -65,7 +65,7 @@ import {
   seedMissingLocalSecrets,
 } from "./local-secrets.js"
 import { writeLocalEnvironment } from "./link.js"
-import { registerDevShutdown } from "./dev-shutdown.js"
+import { registerDevShutdown, waitForDevShutdown } from "./dev-shutdown.js"
 import {
   filterComposeNoise,
   formatEnginePushMessage,
@@ -1475,7 +1475,8 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
     })
   }
 
-  await new Promise<never>(() => undefined)
+  // Until Ctrl+C or a signal: the shutdown hook takes the stack down and exits.
+  await waitForDevShutdown()
 }
 
 function astHasSystemAuthRelation(ast: unknown): boolean {
