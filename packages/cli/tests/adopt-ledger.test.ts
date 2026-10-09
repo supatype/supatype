@@ -148,4 +148,16 @@ describe("endpointToArgs() for /adopt", () => {
   it("passes no --key without keys", () => {
     expect(endpointToArgs("/adopt", { ...body, yes: true }, "req.json")).not.toContain("--key")
   })
+
+  it("passes --adopt-none, and no --key, for an empty key list", () => {
+    const args = endpointToArgs("/adopt", { ...body, yes: true, keys: [], release: ["table:w"] }, "req.json")
+    expect(args).toContain("--adopt-none")
+    expect(args).not.toContain("--key")
+    expect(args.slice(-3)).toEqual(["--release", "table:w", "--adopt-none"])
+  })
+
+  it("passes no --adopt-none without keys, or with some", () => {
+    expect(endpointToArgs("/adopt", { ...body, yes: true }, "req.json")).not.toContain("--adopt-none")
+    expect(endpointToArgs("/adopt", { ...body, yes: true, keys: ["table:w"] }, "req.json")).not.toContain("--adopt-none")
+  })
 })
