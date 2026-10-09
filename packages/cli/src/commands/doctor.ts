@@ -1,5 +1,6 @@
 import type { Command } from "commander"
 import { loadConfig, loadSchemaAst } from "../config.js"
+import { withPublishing } from "../model-versioning.js"
 import { info, plain } from "../ui/messages.js"
 import { hooksPathFromProject, schemaPathFromProject, serviceRoleRoutes } from "../project-config.js"
 import { resolveTarget, targetSchemaDoctor, schemaPgSchema } from "../resolve-target.js"
@@ -57,7 +58,8 @@ export function registerDoctor(program: Command): void {
       const pgSchema = schemaPgSchema(cwd)
 
       info("Loading schema...")
-      const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
+      // As push sends it: the engine refuses a versioned schema that carries no publishing config.
+      const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
 
       let report: DoctorReport
 
