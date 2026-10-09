@@ -10,6 +10,7 @@ vi.mock("../src/project-config.js", () => ({ schemaPathFromProject: () => "schem
 vi.mock("../src/resolve-target.js", () => ({
   targetSchemaAdopt,
   requireTargetFeatures: requireTarget,
+  targetCapabilities: async () => ({ features: new Set(["identity_columns"]), source: "engine" }),
   schemaPgSchema: () => "public",
 }))
 vi.mock("../src/commands/doctor.js", () => ({ schemaCommandTarget: async () => ({ mode: "direct" }) }))

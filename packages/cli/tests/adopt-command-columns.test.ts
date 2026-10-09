@@ -20,6 +20,7 @@ vi.mock("../src/resolve-target.js", () => ({
   targetSchemaAdopt,
   targetSchemaIntrospect,
   requireTargetFeatures: vi.fn(async () => undefined),
+  targetCapabilities: async () => ({ features: new Set(["identity_columns"]), source: "engine" }),
   schemaPgSchema: () => "public",
 }))
 vi.mock("../src/commands/doctor.js", () => ({ schemaCommandTarget: async () => ({ mode: "direct" }) }))

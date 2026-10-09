@@ -43,12 +43,29 @@ describe("identity columns", () => {
   a: Int<{ identity: "always" }>
   b: Identity<number>
   c: Identity
-  d: AutoIncrement<number>
   e: Identity<Int>
 `)
-    for (const key of ["a", "b", "c", "d", "e"]) expect(fields[key], key).toMatchObject(identityAlways)
-    // Not the old SERIAL.
-    expect(fields["d"]?.kind).toBe("integer")
+    for (const key of ["a", "b", "c", "e"]) {
+      expect(fields[key], key).toMatchObject(identityAlways)
+      expect(fields[key], key).not.toHaveProperty("autoIncrement")
+    }
+  })
+
+  it("compiles AutoIncrement to an identity by default that says it is one", () => {
+    const fields = fieldsOf(`
+  a: AutoIncrement<number>
+  b: AutoIncrement
+  c: AutoIncrement<bigint>
+  d: Identity<number, "by-default">
+`)
+    const auto = { identity: "byDefault", autoIncrement: true, required: true }
+    // Not the old SERIAL: an identity by default, which a serial made then satisfies.
+    expect(fields["a"]).toMatchObject({ kind: "integer", ...auto, annotations: { db: { serverGenerated: true } } })
+    expect(fields["b"]).toMatchObject({ kind: "integer", ...auto })
+    expect(fields["c"]).toMatchObject({ kind: "bigInt", ...auto })
+    // The explicit form is not AutoIncrement: on a serial column it converts it.
+    expect(fields["d"]).toMatchObject({ kind: "integer", identity: "byDefault" })
+    expect(fields["d"]).not.toHaveProperty("autoIncrement")
   })
 
   it("spells by-default as the AST does, and keeps the integer's width", () => {
