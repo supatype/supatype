@@ -6,6 +6,12 @@ on:
   # Every PR, including one stacked on another PR's branch.
   pull_request:
 
+# A new push to a PR cancels that PR's runs on older commits; they can only report on code that is
+# no longer the PR's head. Pushes to main each get a group of their own, so every main commit runs.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
+
 # The Docker Hub account the release workflows publish with, used here only to pull. Anonymous
 # pulls are rate-limited per runner IP and CI was failing on 429 toomanyrequests. Empty where
 # secrets are withheld (fork and Dependabot PRs): the login steps below then skip, and those
