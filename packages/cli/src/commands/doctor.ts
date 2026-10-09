@@ -1,5 +1,6 @@
 import { Option, type Command } from "commander"
 import { loadConfig, loadSchemaAst } from "../config.js"
+import { withPublishing } from "../model-versioning.js"
 import { error, info, plain } from "../ui/messages.js"
 import { askConsent } from "../ui/confirm.js"
 import { isAccessKind } from "../diff-output.js"
@@ -167,7 +168,8 @@ async function doctor(opts: DoctorOptions): Promise<void> {
   }
 
   info("Loading schema...")
-  const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
+  // As push sends it: the engine refuses a versioned schema that carries no publishing config.
+  const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
 
   const target = await schemaCommandTarget(cwd, config, opts)
   await requireTargetFeatures(target, [

@@ -1,6 +1,7 @@
 import { resolve } from "node:path"
 import type { Command } from "commander"
 import { loadConfig, loadSchemaAst } from "../config.js"
+import { withPublishing } from "../model-versioning.js"
 import { pgSchema, schemaPathFromProject } from "../project-config.js"
 import {
   requireTargetFeatures,
@@ -71,7 +72,8 @@ async function adopt(opts: AdoptOptions): Promise<void> {
   const cwd = process.cwd()
   const config = loadConfig(cwd)
   const ast = await withSpinner("Loading schema", async () =>
-    loadSchemaAst(schemaPathFromProject(config, cwd), cwd),
+    // As push sends it: the engine refuses a versioned schema that carries no publishing config.
+    withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config),
   )
   const target = await schemaCommandTarget(cwd, config, opts)
   // Before the preview: the server or engine that adopts must take every flag given.
