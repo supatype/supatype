@@ -4,6 +4,12 @@
 
 ### Fixes
 
+* **doctor:** the rebaseline consent is renamed: `supatype doctor --rebaseline --accept-access-drift`
+  records policies, grants, labels and RLS changed outside Supatype as the baseline too (sent as
+  `accept_access_drift`, or `--accept-access-drift` to the engine binary). `--overwrite-drift` is
+  push's flag, which puts Supatype's definitions back, the opposite; on `doctor` it is now an error
+  that names the new flag. What the engine would not rebaseline without it is listed as "Not
+  rebaselined".
 * **push, adopt, doctor, deploy, dev:** ownership flags are checked against what will run them
   before anything is sent. A linked cloud or self-host target is asked
   `GET <schema base>/capabilities`; a server without the route (404) or whose engine does not list

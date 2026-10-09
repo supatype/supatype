@@ -1,4 +1,4 @@
-import type { Command } from "commander"
+import { Option, type Command } from "commander"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { error, info, plain } from "../ui/messages.js"
 import { askConsent } from "../ui/confirm.js"
@@ -36,6 +36,11 @@ export interface DoctorReport {
   conflicting?: DoctorItem[]
   released?: DoctorItem[]
   rebaselined?: DoctorItem[]
+  /**
+   * Access drift `--rebaseline` did not record because `--accept-access-drift` was not given. Still
+   * listed under `drifted`.
+   */
+  rebaselineRefused?: DoctorItem[]
 }
 
 type Category = keyof DoctorReport
@@ -49,6 +54,11 @@ const SECTIONS: ReadonlyArray<{ key: Category; title: string; summary: string }>
   { key: "unmanagedDrift", title: "Unmanaged (not Supatype's, left in place)", summary: "unmanaged" },
   { key: "released", title: "Released (left alone after `adopt --release`)", summary: "released" },
   { key: "rebaselined", title: "Rebaselined (recorded as they are now)", summary: "rebaselined" },
+  {
+    key: "rebaselineRefused",
+    title: "Not rebaselined (access changed outside Supatype; pass --accept-access-drift to record it)",
+    summary: "not rebaselined",
+  },
 ]
 
 /** What a push would change or refuse: what `--strict` fails on, the engine's own rule. */
@@ -89,15 +99,15 @@ export function printReport(report: DoctorReport): void {
 
 /**
  * What `doctor --rebaseline` would record, from a report taken without it: every drifted object,
- * except access drift (policies, grants, labels, RLS) unless `--overwrite-drift` says to take a hand
+ * except access drift (policies, grants, labels, RLS) unless `--accept-access-drift` says to take a hand
  * edit to who may read or write as Supatype's too. Exported for tests.
  */
 export function rebaselinePlan(
   report: DoctorReport,
-  overwriteDrift: boolean,
+  acceptAccessDrift: boolean,
 ): { record: DoctorItem[]; kept: DoctorItem[] } {
   const drifted = report.drifted ?? []
-  if (overwriteDrift) return { record: drifted, kept: [] }
+  if (acceptAccessDrift) return { record: drifted, kept: [] }
   return {
     record: drifted.filter((item) => !isAccessKind(item.kind)),
     kept: drifted.filter((item) => isAccessKind(item.kind)),
@@ -108,7 +118,7 @@ export function rebaselinePlan(
 export function printRebaselinePlan(plan: { record: DoctorItem[]; kept: DoctorItem[] }): void {
   printSection("Rebaseline will record these as they are now, changing no object", plan.record)
   printSection(
-    "Left drifted: access changed outside Supatype (pass --overwrite-drift to record these too)",
+    "Left drifted: access changed outside Supatype (pass --accept-access-drift to record these too)",
     plan.kept,
   )
 }
@@ -118,6 +128,8 @@ interface DoctorOptions {
   env?: string
   strict?: boolean
   rebaseline?: boolean
+  acceptAccessDrift?: boolean
+  /** Retired on doctor: it is push's flag. Kept only to point at `--accept-access-drift`. */
   overwriteDrift?: boolean
   yes?: boolean
   cache?: boolean
@@ -136,9 +148,12 @@ export function registerDoctor(program: Command): void {
       "Record drifted objects as they are now, changing no object (after a Postgres upgrade, or to keep a hand edit until the schema changes it); shows them and asks first",
     )
     .option(
-      "--overwrite-drift",
+      "--accept-access-drift",
       "With --rebaseline, also record policies, grants, labels and RLS changed outside Supatype",
     )
+    // Renamed: `--overwrite-drift` puts Supatype's definitions back on push, the opposite of what a
+    // rebaseline does. Still parsed, so it can say so rather than "unknown option".
+    .addOption(new Option("--overwrite-drift").hideHelp())
     .option("--yes", "Rebaseline without asking")
     .option("--direct", "Use local engine subprocess")
   addRetiredNoCacheOption(command).action(doctor)
@@ -150,10 +165,17 @@ async function doctor(opts: DoctorOptions): Promise<void> {
   const config = loadConfig(cwd)
   const pgSchema = schemaPgSchema(cwd)
   const rebaseline = opts.rebaseline === true
-  const overwriteDrift = opts.overwriteDrift === true
+  const acceptAccessDrift = opts.acceptAccessDrift === true
 
-  if (overwriteDrift && !rebaseline) {
-    error("doctor --overwrite-drift only applies with --rebaseline")
+  if (opts.overwriteDrift === true) {
+    error(
+      "doctor no longer takes --overwrite-drift. To record access changed outside Supatype as the baseline, run: " +
+        "supatype doctor --rebaseline --accept-access-drift",
+    )
+    process.exit(1)
+  }
+  if (acceptAccessDrift && !rebaseline) {
+    error("doctor --accept-access-drift only applies with --rebaseline")
     process.exit(1)
   }
 
@@ -163,7 +185,7 @@ async function doctor(opts: DoctorOptions): Promise<void> {
   const target = await schemaCommandTarget(cwd, config, opts)
   await requireTargetFeatures(target, [
     ...(rebaseline ? [{ feature: "rebaseline", flag: "--rebaseline" } as const] : []),
-    ...(overwriteDrift ? [{ feature: "overwrite_drift", flag: "--overwrite-drift" } as const] : []),
+    ...(acceptAccessDrift ? [{ feature: "accept_access_drift", flag: "--accept-access-drift" } as const] : []),
   ])
   let report = (await targetSchemaDoctor(target, ast, { schema: pgSchema })) as DoctorReport
 
@@ -172,8 +194,8 @@ async function doctor(opts: DoctorOptions): Promise<void> {
 
   if (rebaseline) {
     // Plan 3.2: a rebaseline takes what the database holds as Supatype's from now on, so a person
-    // sees each object first, and a hand edit to access is taken only with --overwrite-drift too.
-    const plan = rebaselinePlan(report, overwriteDrift)
+    // sees each object first, and a hand edit to access is taken only with --accept-access-drift too.
+    const plan = rebaselinePlan(report, acceptAccessDrift)
     if (plan.record.length === 0) {
       printReport(report)
       // Access drift alone is still drift: say why it was not recorded and how it would be.
@@ -197,7 +219,7 @@ async function doctor(opts: DoctorOptions): Promise<void> {
         report = (await targetSchemaDoctor(target, ast, {
           schema: pgSchema,
           rebaseline: true,
-          overwriteDrift,
+          acceptAccessDrift,
         })) as DoctorReport
         printReport(report)
       }

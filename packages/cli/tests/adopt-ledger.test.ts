@@ -187,15 +187,20 @@ describe("endpointToArgs() for /doctor", () => {
   })
 })
 
-describe("endpointToArgs() for /doctor --overwrite-drift", () => {
+describe("endpointToArgs() for /doctor --accept-access-drift", () => {
   const body = { ast: {}, database_url: "postgres://x", schema: "public" }
 
-  it("passes --overwrite-drift only alongside --rebaseline", () => {
-    expect(endpointToArgs("/doctor", { ...body, overwrite_drift: true }, "req.json")).not.toContain(
-      "--overwrite-drift",
+  it("passes --accept-access-drift only alongside --rebaseline", () => {
+    expect(endpointToArgs("/doctor", { ...body, accept_access_drift: true }, "req.json")).not.toContain(
+      "--accept-access-drift",
     )
     expect(
-      endpointToArgs("/doctor", { ...body, rebaseline: true, overwrite_drift: true }, "req.json").slice(-2),
-    ).toEqual(["--rebaseline", "--overwrite-drift"])
+      endpointToArgs("/doctor", { ...body, rebaseline: true, accept_access_drift: true }, "req.json").slice(-2),
+    ).toEqual(["--rebaseline", "--accept-access-drift"])
+  })
+
+  it("never sends --overwrite-drift to doctor, which the engine now rejects there", () => {
+    const args = endpointToArgs("/doctor", { ...body, rebaseline: true, overwrite_drift: true }, "req.json")
+    expect(args).not.toContain("--overwrite-drift")
   })
 })

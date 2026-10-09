@@ -169,4 +169,30 @@ describe("targetSchemaPush() against a server", () => {
     const body = JSON.parse(String(fetchMock.mock.calls[0]![1]?.body)) as Record<string, unknown>
     expect(body).not.toHaveProperty("overwrite_drift")
   })
+
+  it("doctor --rebaseline --accept-access-drift sends accept_access_drift, and is refused where unsupported", async () => {
+    const fetchMock = vi.fn(async (url: string, _init?: { body?: string }) =>
+      url.endsWith("/schema/capabilities")
+        ? reply(200, { data: { features: ["rebaseline", "overwrite_drift"] } })
+        : reply(200, { data: { missing: [], staleManaged: [], unmanagedDrift: [] } }),
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    const { targetSchemaDoctor } = await import("../src/resolve-target.js")
+    // A server whose engine predates the rename: rebaseline yes, accepting access drift no.
+    await expect(targetSchemaDoctor(selfHost(), {}, { rebaseline: true, acceptAccessDrift: true })).rejects.toThrow(
+      "this server does not support --accept-access-drift; update it",
+    )
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).endsWith("/schema/doctor"))).toBe(false)
+
+    fetchMock.mockImplementation(async (url: string) =>
+      url.endsWith("/schema/capabilities")
+        ? reply(200, { data: { features: ALL } })
+        : reply(200, { data: { missing: [], staleManaged: [], unmanagedDrift: [] } }),
+    )
+    await targetSchemaDoctor(selfHost(), {}, { rebaseline: true, acceptAccessDrift: true })
+    const sent = fetchMock.mock.calls.find((c) => String(c[0]).endsWith("/schema/doctor"))!
+    const body = JSON.parse(String(sent[1]?.body)) as Record<string, unknown>
+    expect(body).toMatchObject({ rebaseline: true, accept_access_drift: true })
+    expect(body).not.toHaveProperty("overwrite_drift")
+  })
 })
