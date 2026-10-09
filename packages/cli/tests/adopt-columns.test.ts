@@ -6,7 +6,9 @@ import {
   applyColumnDeclaration,
   declareAdoptedColumns,
   fieldTypeForColumn,
+  parseColumnKey,
   planColumnDeclaration,
+  previewKeyedColumns,
   type DeclareDeps,
   type LiveColumn,
 } from "../src/adopt-columns.js"
@@ -234,5 +236,58 @@ describe("declareAdoptedColumns()", () => {
     await declareAdoptedColumns(NOTE, { entryPath: entry, cwd: dir, yes: true, interactive: false }, d)
     expect(readFileSync(entry, "utf8")).toBe(POST)
     expect(all(d)).toContain("Declare a field note")
+  })
+})
+
+describe("previewKeyedColumns()", () => {
+  const introspectWith = (columns: LiveColumn[]) => async () => ({ tables: [{ name: "post", columns }] })
+  const preview = (keys: string[], introspect: () => Promise<unknown>, shown: string[] = []) =>
+    previewKeyedColumns(keys, shown, { entryPath: entry, cwd: dir }, { introspect })
+
+  it("names the field, file and model the edit after adopt would write, and writes nothing", async () => {
+    const lines = await preview(["column:post.subtitle"], introspectWith([col("subtitle", "text", { nullable: true })]))
+    expect(lines).toEqual([
+      'column post.subtitle: record as managed by Supatype, and add `subtitle: Optional<string>` to ' +
+        `${join("schema", "index.ts")} (Post), importing Optional from "@supatype/types"`,
+    ])
+    // Exactly what the edit would add.
+    const planned = plan("post", col("subtitle", "text", { nullable: true }))
+    expect(planned.status === "planned" && planned.line).toBe("subtitle: Optional<string>")
+    expect(readFileSync(entry, "utf8")).toBe(POST)
+  })
+
+  it("says to add the field by hand when it cannot be written safely", async () => {
+    const [line] = await preview(["column:post.slug"], introspectWith([col("slug", "varchar")]))
+    expect(line).toMatch(/^column post\.slug: record as managed by Supatype; declare it in your schema by hand \(/)
+    const [taken] = await preview(["column:post.title"], introspectWith([col("title", "text")]))
+    expect(taken).toBe(
+      `column post.title: record as managed by Supatype; add it to your schema by hand in ${join("schema", "index.ts")} ` +
+        "(Post): `title: string` (model Post already has a field named title)",
+    )
+    const [noModel] = await preview(["column:other.x"], async () => ({
+      tables: [{ name: "other", columns: [col("x", "int4")] }],
+    }))
+    expect(noModel).toBe(
+      "column other.x: record as managed by Supatype; add it to your schema by hand: `x: Int` (no model in the schema has table other)",
+    )
+  })
+
+  it("says so when the database cannot be read", async () => {
+    const [line] = await preview(["column:post.subtitle"], async () => {
+      throw new Error("refused")
+    })
+    expect(line).toContain("its type could not be read from the database (refused)")
+  })
+
+  it("skips keys that are not columns, and columns the engine's preview already lists, without reading the database", async () => {
+    const introspect = vi.fn(introspectWith([]))
+    expect(await preview(["table:post", "column:post.title"], introspect, ["column:post.title"])).toEqual([])
+    expect(introspect).not.toHaveBeenCalled()
+  })
+
+  it("parses column keys", () => {
+    expect(parseColumnKey("column:post.a.b")).toEqual({ table: "post", column: "a.b" })
+    expect(parseColumnKey("column:post")).toBeUndefined()
+    expect(parseColumnKey("index:post.i")).toBeUndefined()
   })
 })
