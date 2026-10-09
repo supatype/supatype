@@ -20,8 +20,8 @@ describe("identity and generated columns", () => {
     expectTypeOf<Identity<number>>().toEqualTypeOf<Int<{ identity: "always" }>>()
     expectTypeOf<Identity<bigint, "by-default">>().toEqualTypeOf<BigInt<{ identity: "by-default" }>>()
     expectTypeOf<Identity>().toEqualTypeOf<Int<{ identity: "always" }>>()
-    expectTypeOf<AutoIncrement<number>>().toEqualTypeOf<Identity<number>>()
-    expectTypeOf<AutoIncrement<bigint>>().toEqualTypeOf<BigInt<{ identity: "always" }>>()
+    expectTypeOf<AutoIncrement<number>>().toEqualTypeOf<Identity<number, "by-default">>()
+    expectTypeOf<AutoIncrement<bigint>>().toEqualTypeOf<BigInt<{ identity: "by-default" }>>()
   })
 
   it("keeps the value type of the column", () => {
