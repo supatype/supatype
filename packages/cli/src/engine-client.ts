@@ -410,11 +410,11 @@ export function endpointToArgs(
 
     case "/adopt": {
       const yes = body["yes"] ? ["--yes"] : []
-      const objects = [
-        ...repeated(body["release"], "--release"),
-        ...repeated(body["reclaim"], "--reclaim"),
-        ...repeated(body["keys"], "--key"),
-      ]
+      const keys = repeated(body["keys"], "--key")
+      // No `--key` at all is "adopt every conflict" to the binary, so an empty list, which over
+      // HTTP is "adopt none", is `--adopt-none` here.
+      if (Array.isArray(body["keys"]) && keys.length === 0) keys.push("--adopt-none")
+      const objects = [...repeated(body["release"], "--release"), ...repeated(body["reclaim"], "--reclaim"), ...keys]
       return ["adopt", "--input", reqFile, "--database-url", dbUrl, "--schema", schema, ...yes, ...objects]
     }
 
