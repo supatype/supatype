@@ -96,6 +96,15 @@ export function filterObjects(
 }
 
 /** Where Migration History shows one migration on its own. */
+/**
+ * Whether a failed read is the ledger not being there yet: Postgres's missing-relation error for
+ * `_supatype.managed_objects`, and nothing else. Any other "does not exist" (a column an older
+ * ledger lacks, a function, a role) is a real failure the screen has to show.
+ */
+export function isMissingLedgerError(message: string): boolean {
+  return /relation "_supatype\.managed_objects" does not exist/.test(message)
+}
+
 export function migrationLink(id: number): string {
   return `/database/migrations?migration=${id}`
 }
@@ -232,7 +241,7 @@ export function SchemaObjectsView({
 
   // The ledger is created by the first push of an engine that has it, so its absence means this
   // database has not had one yet rather than anything being broken.
-  if (error !== null && !error.includes("does not exist")) {
+  if (error !== null && !isMissingLedgerError(error)) {
     return <ErrorBanner message={error} onRetry={onRefresh} />
   }
 
