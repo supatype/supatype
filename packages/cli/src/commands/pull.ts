@@ -4,6 +4,7 @@ import { loadConfig } from "../config.js"
 import { schemaPathFromProject } from "../project-config.js"
 import { ensureEngine, engineRequest } from "../engine-client.js"
 import { resolveHostEngineDatabaseUrl } from "../dev-compose.js"
+import { engineCapabilities } from "../engine-ownership-gate.js"
 import { databaseStateToSchemaScaffold, type DatabaseStateJson } from "../pull-utils.js"
 import { info, plain } from "../ui/messages.js"
 
@@ -28,7 +29,9 @@ export function registerPull(program: Command): void {
         schema: pgSchema,
       })
 
-      const scaffold = databaseStateToSchemaScaffold(state)
+      // Identity, generated and serial columns are drafted as such only for an engine that reads them.
+      const identityColumns = (await engineCapabilities()).features.has("identity_columns")
+      const scaffold = databaseStateToSchemaScaffold(state, { identityColumns })
       const defaultOut = schemaPathFromProject(config, cwd)
 
       if (opts.dryRun || !opts.out) {

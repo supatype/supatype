@@ -2,7 +2,13 @@ import { resolve } from "node:path"
 import type { Command } from "commander"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { pgSchema, schemaPathFromProject } from "../project-config.js"
-import { requireTargetFeatures, schemaCommandTarget, targetSchemaAdopt, targetSchemaIntrospect } from "../resolve-target.js"
+import {
+  requireTargetFeatures,
+  schemaCommandTarget,
+  targetCapabilities,
+  targetSchemaAdopt,
+  targetSchemaIntrospect,
+} from "../resolve-target.js"
 import {
   adoptedCount,
   adoptionKey,
@@ -78,6 +84,8 @@ async function adopt(opts: AdoptOptions): Promise<void> {
       ...(keys !== undefined && { keys }),
     })
   const entryPath = resolve(cwd, schemaPathFromProject(config, cwd))
+  // A column the database fills is declared as one only for an engine that reads it.
+  const identityColumns = (await targetCapabilities(target)).features.has("identity_columns")
   const introspect = (): Promise<unknown> => targetSchemaIntrospect(target, { schema: pgSchema(config) })
   // An adopted column is managed, so the schema declares it from now on (see adopt-columns.ts).
   const declare = (outcome: AdoptOutcome) =>
@@ -88,6 +96,7 @@ async function adopt(opts: AdoptOptions): Promise<void> {
         cwd,
         yes: opts.yes ?? false,
         interactive: isInteractive(),
+        identityColumns,
       },
       {
         introspect,
@@ -112,7 +121,7 @@ async function adopt(opts: AdoptOptions): Promise<void> {
   const columnLines =
     opts.key === undefined
       ? []
-      : await previewKeyedColumns(opts.key, previewedKeys(preview) ?? [], { entryPath, cwd }, { introspect })
+      : await previewKeyedColumns(opts.key, previewedKeys(preview) ?? [], { entryPath, cwd, identityColumns }, { introspect })
   if (!show([...previewLines(preview), ...columnLines], opts.key !== undefined)) return
   // `--key` names what to adopt. Otherwise what was just shown is what is agreed to: applying names
   // those conflicts, and the engine writes nothing if the database has changed since. An engine

@@ -32,6 +32,7 @@ import {
   adoptNeeds,
   assertSupported,
   engineCapabilities,
+  identityColumnsNeed,
   parseCapabilities,
   type Capabilities,
   type FeatureNeed,
@@ -302,6 +303,7 @@ export async function targetSchemaDiff(
   ast: unknown,
   opts?: { schema?: string },
 ): Promise<DiffResult> {
+  await requireTargetFeatures(target, identityColumnsNeed(ast))
   if (target.mode === "direct" || (target.mode === "local" && !target.token)) {
     await ensureEngine()
     return engineRequest<DiffResult>("/diff", {
@@ -345,7 +347,10 @@ export async function targetSchemaPush(
   cache?: { tables?: string[]; honoured?: boolean }
 }> {
   const overwriteDrift = opts?.overwriteDrift === true
-  await requireTargetFeatures(target, overwriteDrift ? [{ feature: "overwrite_drift", flag: "--overwrite-drift" }] : [])
+  await requireTargetFeatures(target, [
+    ...(overwriteDrift ? [{ feature: "overwrite_drift" as const, flag: "--overwrite-drift" }] : []),
+    ...identityColumnsNeed(ast),
+  ])
   if (runsEngineHere(target)) {
     await ensureEngine()
     const body: Record<string, unknown> = {
@@ -493,6 +498,7 @@ export async function targetSchemaDoctor(
   await requireTargetFeatures(target, [
     ...(rebaseline ? [{ feature: "rebaseline", flag: "--rebaseline" } as const] : []),
     ...(acceptAccessDrift ? [{ feature: "accept_access_drift", flag: "--accept-access-drift" } as const] : []),
+    ...identityColumnsNeed(ast),
   ])
   if (runsEngineHere(target)) {
     await ensureEngine()
@@ -551,7 +557,7 @@ export async function targetSchemaAdopt(
   }
   // A server that dropped `keys` would adopt every conflict, and one that dropped `release` would
   // adopt instead of release: refused before sending, never degraded.
-  await requireTargetFeatures(target, adoptNeeds({ keys: opts?.keys, release }))
+  await requireTargetFeatures(target, [...adoptNeeds({ keys: opts?.keys, release }), ...identityColumnsNeed(ast)])
   if (runsEngineHere(target)) {
     await ensureEngine()
     return engineRequest<AdoptOutcome>("/adopt", { ...body, database_url: target.databaseUrl! })

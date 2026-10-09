@@ -29,6 +29,9 @@ export const OWNERSHIP_FEATURES = [
   "accept_access_drift",
   "overwrite_drift",
   "engine_busy",
+  // Not an ownership flag: a field's `identity` / `generated` (identity-contract). An engine without
+  // it ignores both and makes a plain column, so a schema declaring either is refused instead.
+  "identity_columns",
 ] as const
 
 export type OwnershipFeature = (typeof OWNERSHIP_FEATURES)[number]
@@ -61,6 +64,23 @@ export function adoptNeeds(opts: { keys?: readonly string[] | undefined; release
   return needs
 }
 
+/**
+ * What sending `ast` needs for its identity and generated columns, which an engine or server
+ * without `identity_columns` would drop: none when it declares neither.
+ */
+export function identityColumnsNeed(ast: unknown): FeatureNeed[] {
+  const models = (ast as { models?: unknown } | null)?.models
+  if (!Array.isArray(models)) return []
+  const fields: string[] = []
+  for (const model of models as { name?: string; fields?: Record<string, Record<string, unknown>> }[]) {
+    for (const [name, field] of Object.entries(model.fields ?? {})) {
+      if (field["identity"] !== undefined || field["generated"] !== undefined) fields.push(`${model.name}.${name}`)
+    }
+  }
+  if (fields.length === 0) return []
+  return [{ feature: "identity_columns", flag: `identity and generated columns (${fields.join(", ")})` }]
+}
+
 /** First engine release with the ownership ledger's flags (schema-engine v0.7.0). */
 export const ENGINE_MIN_FOR_OWNERSHIP = "0.7.0"
 
@@ -90,9 +110,14 @@ export class OwnershipUnsupportedError extends Error {
 /** Why `need` cannot be sent to what answered `caps`, or undefined when it can. */
 export function capabilityRefusal(need: FeatureNeed, caps: Capabilities): string | undefined {
   if (caps.features.has(need.feature)) return undefined
+  // A schema, not a flag: what it asks for can also be done by hand.
+  const byHand =
+    need.feature === "identity_columns"
+      ? ", or declare those fields as plain columns and make the change in the database yourself"
+      : ""
   return caps.source === "server"
-    ? `this server does not support ${need.flag}; update it`
-    : `this Supatype engine does not support ${need.flag}; update it (\`supatype update\`, or pin versions.engine to a newer release)`
+    ? `this server does not support ${need.flag}; update it${byHand}`
+    : `this Supatype engine does not support ${need.flag}; update it (\`supatype update\`, or pin versions.engine to a newer release)${byHand}`
 }
 
 /** Throw `OwnershipUnsupportedError` for the first need `caps` does not cover. */
