@@ -17,6 +17,13 @@
   },
   "include": [
     "specs",
-    "playwright.config.ts"
+    "playwright.config.ts",
+    "masking/lib",
+    "masking/specs",
+    "masking/*.ts",
+    "masking/project/schema",
+    "masking/project/supatype.config.ts",
+    "positioning/specs",
+    "positioning/*.ts"
   ]
 }
