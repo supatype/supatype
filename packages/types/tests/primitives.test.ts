@@ -3,6 +3,7 @@ import type {
   Block,
   Blocks,
   Computed,
+  Email,
   EditorReadOnly,
   HasMany,
   JSON,
@@ -33,8 +34,7 @@ type Post = Model<{
   slug: Unique<Slug>
   body: RichText
   metadata: JSON<{ draft: boolean }>
-  // `RelatedTo`, not a bare field: `author_id` is owner-eligible only because a relation named `author`
-  // is declared here. A plain column of that name is not enough, which several tests below pin.
+  // `author_id` is owner-eligible twice over: it is a UUID column, and the key of the relation `author`.
   author: RelatedTo<SupatypeAuthUser>
   comments: HasMany<Comment>
 }, {
@@ -123,16 +123,43 @@ describe("@supatype/types primitives", () => {
     expectTypeOf<SelfOwned>().toHaveProperty("id")
   })
 
-  it("rejects Owner<\"id\"> when id is not explicitly auth user id", () => {
-    // @ts-expect-error - id must be SupatypeAuthUserId for Owner<"id">
-    type _BadSelfOwned = Model<{ id: UUID; name: string }, { access: { update: Owner<"id"> } }>
+  it("accepts Owner<\"id\"> when id is a UUID column", () => {
+    type SelfOwned = Model<{ id: UUID; name: string }, { access: { update: Owner<"id"> } }>
+    expectTypeOf<SelfOwned>().toHaveProperty("id")
   })
 
-  it("rejects orphan *_id owner keys that are not relation-backed", () => {
-    // The counterpart to the inline test above, and the reason it now declares a relation: a bare
-    // `author_id` column tells the type system nothing about whose id it holds.
-    // @ts-expect-error - author_id exists but has no RelatedTo<...> backing field
-    type _Orphan = Model<{ id: UUID; author_id: UUID; title: string }, { access: { update: Owner<"author_id"> } }>
+  it("accepts an owner column declared UUID or SupatypeAuthUserId, modifiers aside", () => {
+    // A7-N3: a row owned through a plain `owner_id` column, with no relation declared.
+    type Note = Model<{
+      id: UUID
+      owner_id: UUID
+      editor_id: Optional<SupatypeAuthUserId>
+      body: string
+    }, {
+      access: {
+        read: Owner<"owner_id">
+        update: Owner<"owner_id">
+        delete: Owner<"editor_id">
+      }
+    }>
+    expectTypeOf<Note>().toHaveProperty("owner_id")
+  })
+
+  it("rejects an owner field that does not hold a user id", () => {
+    // @ts-expect-error - a string column cannot own a row
+    type _Text = Model<{ id: UUID; title: string }, { access: { update: Owner<"title"> } }>
+    // @ts-expect-error - an Email column is tagged, but not as a user id
+    type _Email = Model<{ id: UUID; contact: Email }, { access: { update: Owner<"contact"> } }>
+  })
+
+  it("applies the same owner rule to field-level access", () => {
+    type Masked = Model<{ id: UUID; owner_id: UUID; salary: number }, {
+      access: { read: Public; fields: { salary: { read: Owner<"owner_id"> } } }
+    }>
+    expectTypeOf<Masked>().toHaveProperty("salary")
+
+    // @ts-expect-error - a number column cannot own a row
+    type _Bad = Model<{ id: UUID; owner_id: UUID; salary: number }, { access: { read: Public; fields: { salary: { read: Owner<"salary"> } } } }>
   })
 
   it("rejects Owner<Model,...> when model does not match current model", () => {
