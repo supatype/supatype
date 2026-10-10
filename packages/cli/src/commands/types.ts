@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { resolve, relative } from "node:path"
 import ts from "typescript"
 import { loadConfig } from "../config.js"
+import { projectOutputPaths } from "../type-generation.js"
 import { error, plain } from "../ui/messages.js"
 
 export function registerTypes(program: Command): void {
@@ -14,7 +15,7 @@ export function registerTypes(program: Command): void {
     .action(() => {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
-      const augmentationPath = resolve(cwd, config.output?.client ?? "supatype/generated/index.d.ts")
+      const augmentationPath = resolve(cwd, projectOutputPaths(config.output).clientPath)
 
       const errors: string[] = []
 

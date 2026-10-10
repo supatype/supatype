@@ -910,7 +910,28 @@ async function runSchemaPush(
     }
   }
 
+  await writeNativeTypes(cwd, ast, config)
   console.log("[supatype] Schema applied.")
+}
+
+/**
+ * The generated types and client, as `push` writes them, at the default paths when `output` is not
+ * set. Native dev never wrote them, so a renamed field left the app compiling against the old name.
+ * A failure is a warning: the schema is applied and dev keeps watching.
+ */
+async function writeNativeTypes(
+  cwd: string,
+  ast: unknown,
+  config?: import("../project-config.js").SupatypeProjectConfig,
+): Promise<void> {
+  const { projectOutputPaths, writeGeneratedTypes } = await import("../type-generation.js")
+  try {
+    for (const message of await writeGeneratedTypes({ cwd, ast, ...projectOutputPaths(config?.output) })) {
+      console.log(`[supatype] ${message}`)
+    }
+  } catch (err) {
+    console.warn(`[supatype] Type generation failed: ${(err as Error).message}`)
+  }
 }
 
 function provisionStorageBuckets(

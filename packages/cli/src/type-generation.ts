@@ -7,9 +7,10 @@
  * `supatype push` claims to generate types and produced none. `supatype generate` had it right
  * all along, and this is that logic, shared, so the two cannot disagree again.
  *
- * Each path is optional and an absent one is skipped, because the two callers differ on purpose:
- * `generate` falls back to defaults and always writes, while `push` writes only what the project
- * asked for and must not start creating files in projects that never configured any.
+ * Each path is optional and an absent one is skipped. `generate`, `push` and `dev` all pass
+ * {@link projectOutputPaths}, so a project that set no `output` still gets the defaults: `push` and
+ * `dev` used to write only what the project configured, and `init` configured nothing, so in a new
+ * project a renamed field left the typed client describing a column that no longer existed.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs"
@@ -64,16 +65,26 @@ export function seedBuilderPath(req: {
  * `generate` writes with the defaults applied, so a reader must resolve them the same way or
  * it looks for a file beside a path the project never set.
  */
-export function seedBuilderPathWithDefaults(output?: {
+export function seedBuilderPathWithDefaults(output?: ProjectOutput): string {
+  return seedBuilderPath(projectOutputPaths(output)) ?? join(dirname(DEFAULT_CLIENT_PATH), SEED_BUILDER_FILENAME)
+}
+
+/** A project's `output` section, as `supatype.config.ts` declares it. */
+export interface ProjectOutput {
   types?: string | undefined
   client?: string | undefined
-}): string {
-  return (
-    seedBuilderPath({
-      typesPath: output?.types ?? DEFAULT_TYPES_PATH,
-      clientPath: output?.client ?? DEFAULT_CLIENT_PATH,
-    }) ?? join(dirname(DEFAULT_CLIENT_PATH), SEED_BUILDER_FILENAME)
-  )
+}
+
+/**
+ * Where this project's generated types and client go: what `output` says, else the defaults. A
+ * blank path counts as unset, since writing to it would mean writing to the project root.
+ */
+export function projectOutputPaths(output?: ProjectOutput): { typesPath: string; clientPath: string } {
+  const set = (path: string | undefined) => (path !== undefined && path.trim() !== "" ? path : undefined)
+  return {
+    typesPath: set(output?.types) ?? DEFAULT_TYPES_PATH,
+    clientPath: set(output?.client) ?? DEFAULT_CLIENT_PATH,
+  }
 }
 
 /** Writes what was asked for and returns one message per file, for the caller to report. */

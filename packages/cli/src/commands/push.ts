@@ -67,7 +67,7 @@ import {
 import { confirm, logSkippedConfirm } from "../ui/confirm.js"
 import { info, plain } from "../ui/messages.js"
 import { withSpinner } from "../ui/progress.js"
-import { writeGeneratedTypes } from "../type-generation.js"
+import { projectOutputPaths, writeGeneratedTypes } from "../type-generation.js"
 import { isInteractive } from "../ui/interactive.js"
 
 const DEV_JWT_SECRET = "super-secret-jwt-token-with-at-least-32-characters-long"
@@ -406,19 +406,14 @@ async function generateTypesLocal(ast: unknown, config: SupatypeProjectConfig): 
     )
   }
 
-  if (!config.output?.types && !config.output?.client) return
   // The CLI writes these, it does not ask the engine to. Passing types_path and client_path and
   // reading only `message` meant the generated TypeScript was printed to the terminal and no file
-  // was ever created, so `push` reported success and produced nothing.
-  const written = await withSpinner("Generating types", async () => {
-    const messages = await writeGeneratedTypes({
-      cwd,
-      ast,
-      typesPath: config.output?.types,
-      clientPath: config.output?.client,
-    })
-    return messages
-  })
+  // was ever created, so `push` reported success and produced nothing. Written at the default
+  // paths when `output` is not set: a client left describing the old schema compiles against
+  // columns that no longer exist.
+  const written = await withSpinner("Generating types", () =>
+    writeGeneratedTypes({ cwd, ast, ...projectOutputPaths(config.output) }),
+  )
   for (const message of written) info(message)
 }
 
