@@ -27,6 +27,12 @@ export const FALLBACK_POSTGRES_PASSWORD = "postgres"
 /** Fallback password for the role PostgREST connects as. */
 export const FALLBACK_AUTHENTICATOR_PASSWORD = "authenticator-local"
 
+/**
+ * The superuser the bundled Postgres image runs as. Its first start checks the cluster as this
+ * role, so it is not a choice the project gets to make, and not a value read from `.env`.
+ */
+export const BUNDLED_DB_USER = "supatype_admin"
+
 /** The secret the local stack signs and validates tokens with. */
 export function devJwtSecret(cwd: string): string {
   return readEnvValue(cwd, "JWT_SECRET", FALLBACK_JWT_SECRET)
@@ -89,6 +95,36 @@ export function seedMissingDatabaseIdentity(cwd: string): Record<string, string>
   if (!hasEnvValue(cwd, "POSTGRES_USER")) out.POSTGRES_USER = "supatype_admin"
   if (!hasEnvValue(cwd, "POSTGRES_DB")) out.POSTGRES_DB = "supatype"
   return out
+}
+
+/** Who the local database belongs to and what it is called, as the stack was created with it. */
+export interface DevDatabaseIdentity {
+  user: string
+  password: string
+  database: string
+}
+
+/**
+ * The local database's owner, password and name.
+ *
+ * The password and database name are the project's own, read from `.env`. The user is always
+ * {@link BUNDLED_DB_USER}: the bundled image runs as that role whatever `.env` says.
+ *
+ * Every `psql` the CLI runs in the `db` container and every connection string it writes comes
+ * through here, so a project's own credentials cannot be read by one path and assumed by another.
+ */
+export function devDatabaseIdentity(cwd: string): DevDatabaseIdentity {
+  return {
+    user: BUNDLED_DB_USER,
+    password: devPostgresPassword(cwd),
+    database: readEnvValue(cwd, "POSTGRES_DB", "supatype"),
+  }
+}
+
+/** A connection string to the local database at `hostPort`, `db:5432` inside the network. */
+export function devDatabaseUrl(cwd: string, hostPort: string): string {
+  const { user, password, database } = devDatabaseIdentity(cwd)
+  return `postgresql://${user}:${password}@${hostPort}/${database}?sslmode=disable`
 }
 
 /**

@@ -148,33 +148,33 @@ describe("endpointToArgs() for /adopt", () => {
   const body = { ast: {}, database_url: "postgres://x", schema: "public" }
 
   it("passes each object to release as its own --release", () => {
-    const args = endpointToArgs("/adopt", { ...body, release: ["table:widget", "index:posts.a"] }, "req.json")
+    const args = endpointToArgs("/adopt", { ...body, release: ["table:widget", "index:posts.a"] }, { reqFile: "req.json" })
     expect(args.slice(-4)).toEqual(["--release", "table:widget", "--release", "index:posts.a"])
   })
 
   it("passes no --release when nothing is released", () => {
-    expect(endpointToArgs("/adopt", { ...body, yes: true }, "req.json")).not.toContain("--release")
+    expect(endpointToArgs("/adopt", { ...body, yes: true }, { reqFile: "req.json" })).not.toContain("--release")
   })
 
   it("passes each previewed key as its own --key", () => {
-    const args = endpointToArgs("/adopt", { ...body, yes: true, keys: ["table:widget", "index:posts.a"] }, "req.json")
+    const args = endpointToArgs("/adopt", { ...body, yes: true, keys: ["table:widget", "index:posts.a"] }, { reqFile: "req.json" })
     expect(args.slice(-5)).toEqual(["--yes", "--key", "table:widget", "--key", "index:posts.a"])
   })
 
   it("passes no --key without keys", () => {
-    expect(endpointToArgs("/adopt", { ...body, yes: true }, "req.json")).not.toContain("--key")
+    expect(endpointToArgs("/adopt", { ...body, yes: true }, { reqFile: "req.json" })).not.toContain("--key")
   })
 
   it("passes --adopt-none, and no --key, for an empty key list", () => {
-    const args = endpointToArgs("/adopt", { ...body, yes: true, keys: [], release: ["table:w"] }, "req.json")
+    const args = endpointToArgs("/adopt", { ...body, yes: true, keys: [], release: ["table:w"] }, { reqFile: "req.json" })
     expect(args).toContain("--adopt-none")
     expect(args).not.toContain("--key")
     expect(args.slice(-3)).toEqual(["--release", "table:w", "--adopt-none"])
   })
 
   it("passes no --adopt-none without keys, or with some", () => {
-    expect(endpointToArgs("/adopt", { ...body, yes: true }, "req.json")).not.toContain("--adopt-none")
-    expect(endpointToArgs("/adopt", { ...body, yes: true, keys: ["table:w"] }, "req.json")).not.toContain("--adopt-none")
+    expect(endpointToArgs("/adopt", { ...body, yes: true }, { reqFile: "req.json" })).not.toContain("--adopt-none")
+    expect(endpointToArgs("/adopt", { ...body, yes: true, keys: ["table:w"] }, { reqFile: "req.json" })).not.toContain("--adopt-none")
   })
 })
 
@@ -182,8 +182,8 @@ describe("endpointToArgs() for /doctor", () => {
   const body = { ast: {}, database_url: "postgres://x", schema: "public" }
 
   it("passes --rebaseline only when asked", () => {
-    expect(endpointToArgs("/doctor", body, "req.json")).not.toContain("--rebaseline")
-    expect(endpointToArgs("/doctor", { ...body, rebaseline: true }, "req.json")).toContain("--rebaseline")
+    expect(endpointToArgs("/doctor", body, { reqFile: "req.json" })).not.toContain("--rebaseline")
+    expect(endpointToArgs("/doctor", { ...body, rebaseline: true }, { reqFile: "req.json" })).toContain("--rebaseline")
   })
 })
 
@@ -195,7 +195,7 @@ describe("--reclaim", () => {
 
   it("passes each object to reclaim as its own --reclaim", () => {
     const body = { ast: {}, database_url: "postgres://x", schema: "public", reclaim: ["table:widget"] }
-    expect(endpointToArgs("/adopt", body, "req.json").slice(-2)).toEqual(["--reclaim", "table:widget"])
+    expect(endpointToArgs("/adopt", body, { reqFile: "req.json" }).slice(-2)).toEqual(["--reclaim", "table:widget"])
   })
 })
 
@@ -203,16 +203,16 @@ describe("endpointToArgs() for /doctor --accept-access-drift", () => {
   const body = { ast: {}, database_url: "postgres://x", schema: "public" }
 
   it("passes --accept-access-drift only alongside --rebaseline", () => {
-    expect(endpointToArgs("/doctor", { ...body, accept_access_drift: true }, "req.json")).not.toContain(
+    expect(endpointToArgs("/doctor", { ...body, accept_access_drift: true }, { reqFile: "req.json" })).not.toContain(
       "--accept-access-drift",
     )
     expect(
-      endpointToArgs("/doctor", { ...body, rebaseline: true, accept_access_drift: true }, "req.json").slice(-2),
+      endpointToArgs("/doctor", { ...body, rebaseline: true, accept_access_drift: true }, { reqFile: "req.json" }).slice(-2),
     ).toEqual(["--rebaseline", "--accept-access-drift"])
   })
 
   it("never sends --overwrite-drift to doctor, which the engine now rejects there", () => {
-    const args = endpointToArgs("/doctor", { ...body, rebaseline: true, overwrite_drift: true }, "req.json")
+    const args = endpointToArgs("/doctor", { ...body, rebaseline: true, overwrite_drift: true }, { reqFile: "req.json" })
     expect(args).not.toContain("--overwrite-drift")
   })
 })

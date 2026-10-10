@@ -60,6 +60,7 @@ import { registerDevShutdown, waitForDevShutdown } from "../dev-shutdown.js"
 import { patchRouteManifest } from "../route-manifest.js"
 import { resolveRealtimeLaunch } from "../realtime-launch.js"
 import { writeAppViteEnv } from "../app-vite-env.js"
+import { AUTHENTICATOR_PASSWORD_ENV, nativeRolesSql } from "../native-roles-sql.js"
 import { ensureValkeySidecar, probeTcp, stopValkeySidecar } from "../valkey-sidecar.js"
 import {
   firstFreePort,
@@ -344,37 +345,12 @@ export function registerDev(program: Command): void {
         //
         // Conditional on the library being bundled: an archive downloaded before it was would fail
         // the CREATE, and there is nothing the developer could do about it from here.
-        const maskSql = nativeMaskLibraryPresent(pgBinDir)
-          ? "CREATE EXTENSION IF NOT EXISTS supatype_mask;\n"
-          : ""
-        const rolesSql = `
-${maskSql}CREATE SCHEMA IF NOT EXISTS auth;
-DO $$ BEGIN
-  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'anon')
-    THEN CREATE ROLE anon NOLOGIN; END IF;
-  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticated')
-    THEN CREATE ROLE authenticated NOLOGIN; END IF;
-  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'service_role')
-    THEN CREATE ROLE service_role NOLOGIN BYPASSRLS; END IF;
-  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticator')
-    THEN CREATE ROLE authenticator LOGIN NOINHERIT PASSWORD '${authenticatorPassword}'; END IF;
-END $$;
-GRANT anon, authenticated, service_role TO postgres;
-GRANT anon, authenticated, service_role TO authenticator;
-GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
--- Table-level privileges (RLS restricts rows; roles still need table access)
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated;
-GRANT ALL ON ALL TABLES IN SCHEMA public TO service_role;
-GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO authenticated, service_role;
--- Default privileges so tables created by the engine push inherit these grants
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO anon;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO authenticated;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO service_role;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticated, service_role;
-`
-        spawnSync(psqlBin, [...pgConnArgs, "-d", projectName, "-c", rolesSql],
-          { stdio: "pipe", encoding: "utf8", env: pgEnv })
+        spawnSync(psqlBin, [...pgConnArgs, "-d", projectName, "-f", "-"], {
+          stdio: "pipe",
+          encoding: "utf8",
+          input: nativeRolesSql(nativeMaskLibraryPresent(pgBinDir)),
+          env: { ...pgEnv, [AUTHENTICATOR_PASSWORD_ENV]: authenticatorPassword },
+        })
       }
 
       const LOCAL_JWT_SECRET = devJwtSecret(cwd)

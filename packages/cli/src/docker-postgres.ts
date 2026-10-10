@@ -7,6 +7,7 @@
  */
 
 import { spawnSync } from "node:child_process"
+import { dockerEnv } from "./docker-env.js"
 
 export interface DockerPgOptions {
   /** Docker image to run. Defaults to supatype/postgres:latest. */
@@ -29,15 +30,16 @@ function dockerPgPsql(
   sql: string,
   password = DEFAULT_DEV_PASSWORD,
 ) {
+  const secrets = dockerEnv({ PGPASSWORD: password })
   return spawnSync(
     "docker",
     [
       "exec",
-      "-e", `PGPASSWORD=${password}`,
+      ...secrets.args,
       name,
       "psql", "--no-password", "-U", PG_USER, "-d", db, "-tAc", sql,
     ],
-    { encoding: "utf8", stdio: "pipe" },
+    { encoding: "utf8", stdio: "pipe", env: secrets.env },
   )
 }
 
@@ -59,19 +61,22 @@ export function dockerPgStart(opts: DockerPgOptions): void {
   // Remove any stopped container from a previous session.
   spawnSync("docker", ["rm", "-f", name], { encoding: "utf8" })
 
+  const secrets = dockerEnv({
+    POSTGRES_USER: PG_USER,
+    POSTGRES_PASSWORD: password,
+    POSTGRES_DB: projectName,
+  })
   const result = spawnSync(
     "docker",
     [
       "run", "-d",
       "--name", name,
-      "-e", `POSTGRES_USER=${PG_USER}`,
-      "-e", `POSTGRES_PASSWORD=${password}`,
-      "-e", `POSTGRES_DB=${projectName}`,
+      ...secrets.args,
       "-p", `${port}:5432`,
       "-v", `${volume}:/var/lib/postgresql/data`,
       image,
     ],
-    { encoding: "utf8", stdio: "pipe" },
+    { encoding: "utf8", stdio: "pipe", env: secrets.env },
   )
 
   if (result.status !== 0) {
@@ -261,17 +266,17 @@ export function runAuthMigrationsViaDocker(
   serverImage: string,
   migrateEnv: Record<string, string>,
 ): void {
-  const envArgs = Object.entries(migrateEnv).flatMap(([k, v]) => ["-e", `${k}=${v}`])
+  const secrets = dockerEnv(migrateEnv)
   const result = spawnSync(
     "docker",
     [
       "run", "--rm",
       "--network", `container:${pgContainerName}`,
-      ...envArgs,
+      ...secrets.args,
       serverImage,
       "migrate",
     ],
-    { encoding: "utf8", stdio: "pipe" },
+    { encoding: "utf8", stdio: "pipe", env: secrets.env },
   )
   if (result.status !== 0) {
     const detail = (result.stderr ?? result.stdout ?? "").trim()

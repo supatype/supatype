@@ -38,7 +38,7 @@ describe("targetSchemaAdopt() with an empty key list", () => {
     const body = engineRequest.mock.calls[0]?.[1] as Record<string, unknown>
     expect(body["yes"]).toBe(true)
     expect(body["keys"]).toEqual([])
-    expect(endpointToArgs("/adopt", body, "req.json")).toContain("--adopt-none")
+    expect(endpointToArgs("/adopt", body, { reqFile: "req.json" })).toContain("--adopt-none")
   })
 
   it("reclaims with --adopt-none in one apply", async () => {
@@ -47,7 +47,7 @@ describe("targetSchemaAdopt() with an empty key list", () => {
     expect(engineRequest).toHaveBeenCalledTimes(1)
     const body = engineRequest.mock.calls[0]?.[1] as Record<string, unknown>
     expect(body["reclaim"]).toEqual(["table:w"])
-    expect(endpointToArgs("/adopt", body, "req.json").slice(-3)).toEqual(["--reclaim", "table:w", "--adopt-none"])
+    expect(endpointToArgs("/adopt", body, { reqFile: "req.json" }).slice(-3)).toEqual(["--reclaim", "table:w", "--adopt-none"])
   })
 
   it("sends a non-empty key list straight to apply", async () => {
