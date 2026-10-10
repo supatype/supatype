@@ -9,13 +9,12 @@
  */
 
 import { spawnSync, type SpawnSyncReturns } from "node:child_process"
-import { chmodSync, mkdirSync, writeFileSync, unlinkSync, existsSync, readdirSync } from "node:fs"
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir, homedir } from "node:os"
 import { join } from "node:path"
 import { loadConfig } from "./config.js"
 import { currentPlatform, cachePath } from "./binary-cache.js"
 import { ensureBinary } from "./ensure-binary.js"
-import { uniqueFileToken } from "./unique-file-token.js"
 
 // ---------------------------------------------------------------------------
 // Types (kept for backward compatibility with existing callers)
@@ -160,62 +159,26 @@ export async function engineRequest<T = unknown>(
 ): Promise<T> {
   const bin = await getEngineBin()
 
+  // A directory of this request's own, removed with everything in it whatever fails: a write,
+  // building the arguments, or the spawn itself.
   const tmpDir = engineTempDir()
-  // Every file this request has created, removed in `finally` whatever fails after it: a later
-  // write, building the arguments, or the spawn itself.
-  const written: string[] = []
   let result: SpawnSyncReturns<string>
   try {
-    // One token for this request's files. The directory is shared by every CLI process, and named
-    // by the millisecond alone, two requests at once wrote one file and each engine read the other's.
-    const token = uniqueFileToken()
-    const reqFile = join(tmpDir, `req-${token}.json`)
-    const inputPayload = body["ast"] !== undefined ? body["ast"] : body
-    writeRequestFile(reqFile, JSON.stringify(inputPayload), written)
-
-    let gzPath: string | undefined
-    let manifestPath: string | undefined
-    if (typeof body["schema_sources_gz_base64"] === "string") {
-      gzPath = join(tmpDir, `sources-${token}.gz`)
-      writeRequestFile(gzPath, Buffer.from(body["schema_sources_gz_base64"], "base64"), written)
-    }
-    // One file per seed document. The engine takes `--ir` once per document rather than one
-    // combined blob, so a failure can name the file it was in.
-    const irPaths: string[] = []
-    const documents = body["ir_documents"]
-    if (Array.isArray(documents)) {
-      documents.forEach((document, index) => {
-        const irPath = join(tmpDir, `ir-${token}-${index}.json`)
-        writeRequestFile(
-          irPath,
-          typeof document === "string" ? document : JSON.stringify(document),
-          written,
-        )
-        irPaths.push(irPath)
-      })
-    }
-
-    if (body["schema_sources_manifest"] !== undefined) {
-      manifestPath = join(tmpDir, `manifest-${token}.json`)
-      writeRequestFile(manifestPath, JSON.stringify(body["schema_sources_manifest"]), written)
-    }
-
-    const args = endpointToArgs(endpoint, body, reqFile, {
-      ...(gzPath !== undefined ? { gzPath } : {}),
-      ...(manifestPath !== undefined ? { manifestPath } : {}),
-      ...(irPaths.length > 0 ? { irPaths } : {}),
-    })
-
+    const files = writeRequestFiles(tmpDir, body)
+    const args = endpointToArgs(endpoint, body, files)
     result = spawnSync(bin, args, {
       encoding: "utf8",
       cwd: process.cwd(),
     })
   } finally {
-    for (const f of written) {
-      try { unlinkSync(f) } catch { /* ignore */ }
-    }
+    try { rmSync(tmpDir, { recursive: true, force: true }) } catch { /* ignore */ }
   }
 
+  return readEngineResult<T>(endpoint, result)
+}
+
+/** Turn the engine's exit status and stdout into the request's answer, or throw its error. */
+function readEngineResult<T>(endpoint: string, result: SpawnSyncReturns<string>): T {
   // A failed seed is an answer, not a crash.
   //
   // `engine seed` exits 1 when the seed itself failed and prints the result document on
@@ -252,39 +215,68 @@ export async function engineRequest<T = unknown>(
 // Request files
 // ---------------------------------------------------------------------------
 
-/**
- * The directory engine request files are written to, created private to this user.
- *
- * A request can hold `database_url`, credentials included, and the directory is in the shared
- * system temp directory. `mode` applies only when `mkdir` creates it, so an existing directory is
- * narrowed too. On Windows the mode bits are mostly ignored and the user's temp directory is
- * already private.
- */
-function engineTempDir(): string {
-  // One directory per user on POSIX: a shared one another user created first is not ours to make
-  // private, and writing into it can fail. Windows' temp directory is already per user.
-  const uid = process.getuid?.()
-  const dir = join(tmpdir(), uid === undefined ? "supatype-engine" : `supatype-engine-${uid}`)
-  mkdirSync(dir, { recursive: true, mode: 0o700 })
-  try { chmodSync(dir, 0o700) } catch { /* not ours to change; the files are still 0600 */ }
-  return dir
+/** The files one request hands the engine, named on its command line. */
+interface RequestFiles {
+  reqFile: string
+  gzPath?: string
+  manifestPath?: string
+  irPaths?: string[]
 }
 
 /**
- * Write one request file, readable by this user only, and record it for removal.
+ * A new directory for one request's files, private to this user.
  *
- * `wx` creates the file or fails: a name that already exists, a file or a link someone placed
- * there, is never written through. Such a file is not recorded, since it is not this request's to
- * remove; anything else that fails after the file was created leaves it recorded, so it is removed.
+ * A request can hold `database_url`, credentials included, and the directory is in the shared
+ * system temp directory. A fixed name there can be created first by another user, world-writable
+ * or as a link to a directory they own, and `mkdir` with `recursive` accepts it as it is. So each
+ * request makes its own with `mkdtemp`, which picks an unused random name, never follows a link,
+ * and creates it 0700. On Windows the mode bits are mostly ignored and the user's temp directory
+ * is already private.
  */
-function writeRequestFile(path: string, data: string | Buffer, written: string[]): void {
-  try {
-    writeFileSync(path, data, { mode: 0o600, flag: "wx" })
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "EEXIST") written.push(path)
-    throw err
+function engineTempDir(): string {
+  return mkdtempSync(join(tmpdir(), "supatype-engine-"))
+}
+
+/** Write the request and every file it refers to into `dir`, and say where each went. */
+function writeRequestFiles(dir: string, body: Record<string, unknown>): RequestFiles {
+  const reqFile = join(dir, "request.json")
+  // Without an AST the body is the request, less the connection string: that goes to the engine
+  // on its own and has no reason to be on disk.
+  const inputPayload = body["ast"] !== undefined ? body["ast"] : withoutDatabaseUrl(body)
+  writeRequestFile(reqFile, JSON.stringify(inputPayload))
+
+  const files: RequestFiles = { reqFile }
+  if (typeof body["schema_sources_gz_base64"] === "string") {
+    files.gzPath = join(dir, "sources.gz")
+    writeRequestFile(files.gzPath, Buffer.from(body["schema_sources_gz_base64"], "base64"))
   }
-  written.push(path)
+  // One file per seed document. The engine takes `--ir` once per document rather than one
+  // combined blob, so a failure can name the file it was in.
+  const documents = body["ir_documents"]
+  if (Array.isArray(documents) && documents.length > 0) {
+    files.irPaths = documents.map((document: unknown, index) => {
+      const irPath = join(dir, `ir-${index}.json`)
+      writeRequestFile(irPath, typeof document === "string" ? document : JSON.stringify(document))
+      return irPath
+    })
+  }
+  if (body["schema_sources_manifest"] !== undefined) {
+    files.manifestPath = join(dir, "manifest.json")
+    writeRequestFile(files.manifestPath, JSON.stringify(body["schema_sources_manifest"]))
+  }
+  return files
+}
+
+function withoutDatabaseUrl(body: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(body).filter(([key]) => key !== "database_url"))
+}
+
+/**
+ * Write one request file, readable by this user only. `wx` creates the file or fails, so nothing
+ * already at the name is ever written through.
+ */
+function writeRequestFile(path: string, data: string | Buffer): void {
+  writeFileSync(path, data, { mode: 0o600, flag: "wx" })
 }
 
 // ---------------------------------------------------------------------------
@@ -294,9 +286,9 @@ function writeRequestFile(path: string, data: string | Buffer, written: string[]
 function endpointToArgs(
   endpoint: string,
   body: Record<string, unknown>,
-  reqFile: string,
-  sources?: { gzPath?: string; manifestPath?: string; irPaths?: string[] },
+  files: RequestFiles,
 ): string[] {
+  const { reqFile } = files
   const dbUrl = (body["database_url"] as string | undefined) ?? ""
   const schema = (body["schema"] as string | undefined) ?? "public"
   const force = body["force"] ? ["--force"] : []
@@ -309,8 +301,8 @@ function endpointToArgs(
 
     case "/push": {
       const sourceArgs: string[] = []
-      if (sources?.gzPath) sourceArgs.push("--schema-sources-gz", sources.gzPath)
-      if (sources?.manifestPath) sourceArgs.push("--schema-sources-manifest", sources.manifestPath)
+      if (files.gzPath) sourceArgs.push("--schema-sources-gz", files.gzPath)
+      if (files.manifestPath) sourceArgs.push("--schema-sources-manifest", files.manifestPath)
       return [
         "push",
         "--input",
@@ -343,7 +335,7 @@ function endpointToArgs(
       if (body["status"] === true) {
         return ["seed", "--database-url", dbUrl, "--status"]
       }
-      const documents = (sources?.irPaths ?? []).flatMap((path) => ["--ir", path])
+      const documents = (files.irPaths ?? []).flatMap((path) => ["--ir", path])
       const environment =
         typeof body["environment"] === "string" ? ["--environment", body["environment"]] : []
       return [
