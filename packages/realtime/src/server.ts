@@ -8,6 +8,7 @@ import { ReplicationListener } from "./replication.js"
 import { RealtimeUnsupportedError } from "./capability.js"
 import { RlsFilter } from "./rls.js"
 import { filterIsMaskSafe } from "./field-mask.js"
+import { matchesFilter } from "./filter-match.js"
 import type {
   ClientMessage,
   ServerMessage,
@@ -479,7 +480,7 @@ export class RealtimeServer {
     // "did I receive this event" would otherwise answer a question about a hidden value.
     if (
       filterIsMaskSafe(subscription.filter, masked) &&
-      !this.matchesFilter(change, subscription.filter)
+      !matchesFilter(change, subscription.filter)
     ) {
       return
     }
@@ -489,7 +490,7 @@ export class RealtimeServer {
     if (!visible) return
 
     // Authoritative filter pass, against what this subscriber is actually allowed to see.
-    if (!this.matchesFilter(visible, subscription.filter)) return
+    if (!matchesFilter(visible, subscription.filter)) return
 
     this.send(client.ws, {
       type: "change",
@@ -501,33 +502,6 @@ export class RealtimeServer {
         : {}),
       timestamp: change.commitTimestamp,
     })
-  }
-
-
-  /** Check if a change matches PostgREST-style column filters. */
-  private matchesFilter(change: WalChange, filter: Record<string, string>): boolean {
-    const record = change.newRecord ?? change.oldRecord
-    if (!record) return true
-    if (Object.keys(filter).length === 0) return true
-
-    for (const [key, condition] of Object.entries(filter)) {
-      const match = condition.match(/^(eq|neq|gt|gte|lt|lte)\.(.+)$/)
-      if (!match) continue
-
-      const [, op, value] = match
-      const actual = String(record[key] ?? "")
-
-      switch (op) {
-        case "eq": if (actual !== value) return false; break
-        case "neq": if (actual === value) return false; break
-        case "gt": if (!(actual > value!)) return false; break
-        case "gte": if (!(actual >= value!)) return false; break
-        case "lt": if (!(actual < value!)) return false; break
-        case "lte": if (!(actual <= value!)) return false; break
-      }
-    }
-
-    return true
   }
 
   private send(ws: WebSocket, msg: ServerMessage): void {
