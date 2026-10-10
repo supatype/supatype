@@ -15,7 +15,7 @@ vi.mock("../src/ui/interactive.js", () => ({
   isInteractive: vi.fn(() => true),
 }))
 
-import { confirm, logSkippedConfirm } from "../src/ui/confirm.js"
+import { askConsent, confirm, logSkippedConfirm } from "../src/ui/confirm.js"
 import { isInteractive } from "../src/ui/interactive.js"
 
 describe("ui confirm", () => {
@@ -41,5 +41,30 @@ describe("ui confirm", () => {
     logSkippedConfirm("3 risky operations")
     expect(log.mock.calls[0]?.[0]).toContain("--yes")
     log.mockRestore()
+  })
+})
+
+describe("askConsent()", () => {
+  beforeEach(() => {
+    confirmMock.mockReset()
+    vi.mocked(isInteractive).mockReturnValue(true)
+  })
+
+  it("takes --yes as consent without asking", async () => {
+    await expect(askConsent("Go ahead?", true)).resolves.toBe("given")
+    expect(confirmMock).not.toHaveBeenCalled()
+  })
+
+  it("asks a person, and a no is a decline", async () => {
+    confirmMock.mockResolvedValue(false)
+    await expect(askConsent("Go ahead?", false)).resolves.toBe("declined")
+    confirmMock.mockResolvedValue(true)
+    await expect(askConsent("Go ahead?", false)).resolves.toBe("given")
+  })
+
+  it("needs --yes when there is nobody to ask", async () => {
+    vi.mocked(isInteractive).mockReturnValue(false)
+    await expect(askConsent("Go ahead?", false)).resolves.toBe("needs-yes")
+    expect(confirmMock).not.toHaveBeenCalled()
   })
 })

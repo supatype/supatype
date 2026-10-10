@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { loadConfig } from "./config.js"
+import type { AdoptOutcome } from "./adopt-walkthrough.js"
 import type { DiffResult } from "./engine-client.js"
 import { ensureEngine, engineRequest } from "./engine-client.js"
 import type { SchemaSourcesPayload } from "./schema-sources.js"
@@ -29,8 +30,10 @@ import {
 } from "./cloud-credentials.js"
 import { TargetApiError, targetFetch, type TargetFetchOptions } from "./target-client.js"
 import {
+  adoptNeeds,
   assertSupported,
   engineCapabilities,
+  identityColumnsNeed,
   parseCapabilities,
   type Capabilities,
   type FeatureNeed,
@@ -301,6 +304,7 @@ export async function targetSchemaDiff(
   ast: unknown,
   opts?: { schema?: string },
 ): Promise<DiffResult> {
+  await requireTargetFeatures(target, identityColumnsNeed(ast))
   if (target.mode === "direct" || (target.mode === "local" && !target.token)) {
     await ensureEngine()
     return engineRequest<DiffResult>("/diff", {
@@ -344,7 +348,10 @@ export async function targetSchemaPush(
   cache?: { tables?: string[]; honoured?: boolean }
 }> {
   const overwriteDrift = opts?.overwriteDrift === true
-  await requireTargetFeatures(target, overwriteDrift ? [{ feature: "overwrite_drift", flag: "--overwrite-drift" }] : [])
+  await requireTargetFeatures(target, [
+    ...(overwriteDrift ? [{ feature: "overwrite_drift" as const, flag: "--overwrite-drift" }] : []),
+    ...identityColumnsNeed(ast),
+  ])
   if (runsEngineHere(target)) {
     await ensureEngine()
     const body: Record<string, unknown> = {
@@ -455,6 +462,7 @@ export async function targetSchemaDoctor(
   ast: unknown,
   opts?: { schema?: string },
 ): Promise<unknown> {
+  await requireTargetFeatures(target, identityColumnsNeed(ast))
   if (target.mode === "direct" || (target.mode === "local" && !target.token)) {
     await ensureEngine()
     return engineRequest("/doctor", {
@@ -495,32 +503,40 @@ export async function targetSchemaIntrospect(
   )
 }
 
+/**
+ * `adopt` on a target: hand the objects a push refuses to Supatype, and take back the ones named in
+ * `release` (`kind:table.name`, as doctor names them). A preview unless `yes`; with `keys` (the
+ * conflicts a preview showed, named the same way) only those are adopted, and nothing is written if
+ * one of them is no longer a conflict.
+ *
+ * An empty `keys` adopts nothing: the engine binary is told so with `--adopt-none` (see
+ * `endpointToArgs`), and its server reads `keys: []` the same way.
+ */
 export async function targetSchemaAdopt(
   target: DeployTarget,
   ast: unknown,
-  opts?: { names?: string[]; schema?: string; yes?: boolean },
-): Promise<unknown> {
-  if (target.mode === "direct" || (target.mode === "local" && !target.token)) {
-    await ensureEngine()
-    return engineRequest("/adopt", {
-      ast,
-      database_url: target.databaseUrl!,
-      schema: opts?.schema ?? "public",
-      names: opts?.names,
-      yes: opts?.yes ?? false,
-    })
+  opts?: { release?: string[]; keys?: string[]; schema?: string; yes?: boolean },
+): Promise<AdoptOutcome> {
+  const release = opts?.release ?? []
+  const body = {
+    ast,
+    schema: opts?.schema ?? "public",
+    yes: opts?.yes ?? false,
+    ...(release.length > 0 && { release }),
+    ...(opts?.keys !== undefined && { keys: opts.keys }),
   }
-
-  return targetFetch(
+  // A server that dropped `keys` would adopt every conflict, and one that dropped `release` would
+  // adopt instead of release: refused before sending, never degraded.
+  await requireTargetFeatures(target, [...adoptNeeds({ keys: opts?.keys, release }), ...identityColumnsNeed(ast)])
+  if (runsEngineHere(target)) {
+    await ensureEngine()
+    return engineRequest<AdoptOutcome>("/adopt", { ...body, database_url: target.databaseUrl! })
+  }
+  return (await targetFetch(
     target.apiBaseUrl,
     target.apiPrefix,
-    apiFetchOpts(target, "POST", projectPath(target, "/schema/adopt"), {
-      ast,
-      schema: opts?.schema ?? "public",
-      yes: opts?.yes ?? false,
-      ...(opts?.names !== undefined ? { names: opts.names } : {}),
-    }),
-  )
+    apiFetchOpts(target, "POST", projectPath(target, "/schema/adopt"), body),
+  )) as AdoptOutcome
 }
 
 export async function targetStatus(target: DeployTarget): Promise<unknown> {
