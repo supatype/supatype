@@ -57,3 +57,8 @@ packages/studio/dist-app/
 # Anchored with `**/` because a pattern containing a slash is relative to the .gitignore that
 # holds it, and this one sits at the monorepo root rather than in each example.
 **/supatype/generated/seed.ts
+
+# Eval snippets the CLI writes next to its own source while it runs (`supatype-eval-<id>.mts`) so
+# ESM resolution finds the workspace packages. Each is removed after use; one that survives a
+# crash is never source.
+supatype-eval-*.mts
