@@ -6,6 +6,7 @@ import { loadConfig, loadSchemaAst } from "../config.js"
 import { projectRootFromConfig, schemaPathFromProject } from "../project-config.js"
 import { resolveHostDatabaseUrl } from "../host-database.js"
 import { ensureEngine, engineRequest } from "../engine-client.js"
+import { plannedChanges } from "../diff-output.js"
 import { loadProjectLink } from "../link.js"
 import {
   resolveTarget,
@@ -182,9 +183,9 @@ async function offerSchemaRestore(
     return
   }
 
-  const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
+  const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
   const diff = await targetSchemaDiff(target, ast, { schema: pgSchema })
-  const drift = (diff.operations ?? []).length > 0
+  const drift = plannedChanges(diff).length > 0
 
   if (!drift && !autoSync) {
     info("Schema files match reverted database (no restore needed).")
@@ -223,7 +224,7 @@ async function offerSchemaRestore(
   info(`Backup saved to ${backupDir}`)
 
   const postDiff = await targetSchemaDiff(target, ast, { schema: pgSchema })
-  if ((postDiff.operations ?? []).length === 0) {
+  if (plannedChanges(postDiff).length === 0) {
     info("Schema matches database after restore.")
   } else {
     info("Run `supatype diff`: schema may still differ from database.")

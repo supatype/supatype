@@ -26,7 +26,7 @@ import {
   unresolvablePreviewMessage,
 } from "../preview-config-check.js"
 import { pinnedVersion } from "../binary-cache.js"
-import { printDiffOperations, printDiffWarnings } from "../diff-output.js"
+import { isRisky, plannedChanges, printDiffOperations, printDiffWarnings } from "../diff-output.js"
 import { printPushWarnings } from "../engine-push-output.js"
 import { pushOfferingAdoption, targetAdoptionSteps } from "../adopt-walkthrough.js"
 import { signJwt } from "../jwt.js"
@@ -132,24 +132,24 @@ async function pushViaTarget(
   const diff = await withSpinner("Diffing against database", () =>
     targetSchemaDiff(target, ast, { schema: pgSchema }),
   )
-  const ops = diff.operations ?? []
+  // The differ's operations and the reconcile's changes together: a push with only reconciled
+  // objects to change still applies a migration, and is confirmed like any other.
+  const changes = plannedChanges(diff)
   printDiffWarnings(diff)
 
-  if (ops.length === 0) {
+  if (changes.length === 0) {
     info("Schema matches the database (no DDL). Syncing Studio metadata...")
   } else {
-    printDiffOperations({ operations: ops })
-    const risky = ops.filter(
-      (o) => o.risk === "cautious" || o.risk === "destructive" || o.risk === "warn" || o.risk === "danger",
-    )
+    printDiffOperations(diff)
+    const risky = changes.filter(isRisky)
     if (risky.length > 0 && !skipConfirm) {
       if (!isInteractive()) {
-        logSkippedConfirm(`${risky.length} risky operation(s) require confirmation`)
+        logSkippedConfirm(`${risky.length} risky change(s) require confirmation`)
         plain("Aborted.")
         return
       }
       const confirmed = await confirm(
-        `${risky.length} risky operation(s) above. Proceed?`,
+        `${risky.length} risky change(s) above. Proceed?`,
         { default: false },
       )
       if (!confirmed) {
@@ -161,7 +161,7 @@ async function pushViaTarget(
 
   const pushResult = await pushOfferingAdoption(
     () =>
-      withSpinner(ops.length > 0 ? "Applying migration" : "Syncing with engine", () =>
+      withSpinner(changes.length > 0 ? "Applying migration" : "Syncing with engine", () =>
         targetSchemaPush(target, ast, {
           force: true,
           schema: pgSchema,

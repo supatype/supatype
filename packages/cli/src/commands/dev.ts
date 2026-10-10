@@ -54,7 +54,7 @@ import { beginDevSession, endDevSession, resolveDevUiMode, startDevSession } fro
 import { publishDevReady } from "../dev-ready-panel.js"
 import { probeDockerDaemon, reportDockerUnavailable } from "../docker-runtime.js"
 import { fatalError } from "../ui/fatal.js"
-import { registerDevShutdown } from "../dev-shutdown.js"
+import { registerDevShutdown, waitForDevShutdown } from "../dev-shutdown.js"
 import { patchRouteManifest } from "../route-manifest.js"
 import { resolveRealtimeLaunch } from "../realtime-launch.js"
 import { writeAppViteEnv } from "../app-vite-env.js"
@@ -712,7 +712,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticate
       }
 
       // Block until killed.
-      await new Promise<never>(() => undefined)
+      await waitForDevShutdown()
     })
 }
 
@@ -738,7 +738,10 @@ async function runSchemaPush(
 ): Promise<void> {
   // Build AST JSON from schema file.
   const { loadSchemaAst } = await import("../config.js")
-  let ast = loadSchemaAst(schemaPath, cwd)
+  const { withPublishing } = await import("../model-versioning.js")
+  const loaded = loadSchemaAst(schemaPath, cwd)
+  // As `supatype push` sends it: the engine refuses a versioned schema with no publishing config.
+  let ast = config ? withPublishing(loaded, config) : loaded
 
   // Strip fields whose kind requires an unavailable Postgres extension.
   if (skipFieldKinds && skipFieldKinds.size > 0) {
