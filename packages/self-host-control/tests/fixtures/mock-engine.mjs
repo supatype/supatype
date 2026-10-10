@@ -44,6 +44,26 @@ if (cmd === "migrations" && args.includes("--name")) {
     name: "20240101_test",
     message: "Rolled back migration 20240101_test.",
   }))
+} else if (cmd === "capabilities") {
+  if (process.env["MOCK_ENGINE_NO_CAPABILITIES"] === "1") {
+    console.error("error: unrecognized subcommand 'capabilities'")
+    process.exit(2)
+  }
+  console.log(JSON.stringify({ features: ["adopt_keys", "adopt_none", "release", "reclaim", "rebaseline", "accept_access_drift", "overwrite_drift", "engine_busy"] }))
+} else if (process.env["MOCK_ENGINE_REFUSE"] === "security_drift") {
+  console.log(JSON.stringify({
+    status: "refused",
+    reason: "security_drift",
+    objects: [{ key: { kind: "policy", schema: "public", parent: "posts", name: "read" }, recorded: "a", live: "b" }],
+  }))
+  console.error("2026-01-01T00:00:00Z  INFO supatype-engine starting")
+  console.error("Error: 1 object(s) that decide who may read or write were changed outside Supatype: policy:posts.read (changed).")
+  process.exit(1)
+} else if (process.env["MOCK_ENGINE_REFUSE"] === "engine_busy") {
+  console.error("2026-01-01T00:00:00Z  INFO supatype-engine starting")
+  console.error("Error: another push, adopt or rebaseline is running on this database; try again. Nothing was applied.")
+  process.exit(1)
 } else {
-  console.log("{}")
+  // What it was asked, so a test can see every flag the control plane forwarded.
+  console.log(JSON.stringify({ args }))
 }
