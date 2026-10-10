@@ -6,7 +6,8 @@ import { Badge, Card, CodeBlock, Td, Th } from "../../components/ui.js"
 import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 import { SlidePanel } from "../../components/SlidePanel.js"
-import { isManaged } from "../../lib/managed-comment.js"
+import { CONSTRAINT_KINDS, isOwned, useOwnedObjects } from "../../lib/owned-objects.js"
+import { sqlText } from "../../lib/sql.js"
 
 /**
  * Every constraint the database enforces, whether or not Supatype declared it.
@@ -29,7 +30,7 @@ const LIST_QUERY = (schema: string): string => `
   FROM pg_constraint c
   JOIN pg_class t ON t.oid = c.conrelid
   JOIN pg_namespace n ON n.oid = t.relnamespace
-  WHERE n.nspname = '${schema}' AND c.contype <> 'n'
+  WHERE n.nspname = ${sqlText(schema)} AND c.contype <> 'n'
   ORDER BY t.relname, c.conname
 `
 
@@ -43,6 +44,7 @@ const TYPE_VARIANT: Record<string, "indigo" | "blue" | "green" | "yellow"> = {
 export function ConstraintsView(): React.ReactElement {
   const proxy = useProjectProxy()
   const { schemas, schema, setSchema } = useSchemaPicker()
+  const { owned, error: ownedError } = useOwnedObjects(proxy, schema)
   const [selected, setSelected] = useState<Record<string, unknown> | null>(null)
 
   const { data: constraints, loading, error } = useApiQuery(
@@ -68,6 +70,8 @@ export function ConstraintsView(): React.ReactElement {
       </div>
 
       {error && <ErrorBanner message={error} />}
+      {/* Without the ledger read every badge would be missing, which reads as "nothing is Supatype's". */}
+      {ownedError && <ErrorBanner message={`Could not read which objects are Supatype's: ${ownedError}`} />}
 
       {loading ? (
         <div className="space-y-2">
@@ -103,7 +107,7 @@ export function ConstraintsView(): React.ReactElement {
                       {row["name"] as string}
                       {/* An unbadged constraint is one no push maintains: hand-written, or left
                           behind by a schema that no longer declares it. */}
-                      {isManaged(row["comment"]) && (
+                      {isOwned(owned, CONSTRAINT_KINDS[String(row["type"])] ?? [], row["table_name"], row["name"], row["comment"]) && (
                         <Badge variant="indigo" className="ml-2">
                           supatype
                         </Badge>
