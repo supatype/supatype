@@ -6,7 +6,7 @@
 import type { Command } from "commander"
 import { spawnSync } from "node:child_process"
 import { existsSync } from "node:fs"
-import { dirname, join, resolve } from "node:path"
+import { dirname, resolve } from "node:path"
 import bcrypt from "bcryptjs"
 import type { Pool, QueryResult } from "pg"
 import { loadConfig } from "../config.js"
@@ -14,6 +14,7 @@ import { resolveRuntimeProvider, type SupatypeProjectConfig } from "../project-c
 import { resolveHostDatabaseUrl } from "../host-database.js"
 import { readEnvValue, upsertEnvFile } from "../env-file.js"
 import { devDatabaseIdentity } from "../local-secrets.js"
+import { composeDbPsql, type ComposeStack } from "../compose-db-psql.js"
 import { hasEngineOverride } from "../binary-cache.js"
 import { readDevSessionLock } from "../dev-session-lock.js"
 import { composeProjectName } from "../self-host-compose.js"
@@ -84,7 +85,7 @@ export interface EnsureFirstAdminOptions {
   cwd?: string
   role?: string
   connection?: string
-  compose?: { project: string; composePath: string }
+  compose?: ComposeStack
 }
 
 function resolveAdminConnection(
@@ -667,7 +668,7 @@ export function composePostgresPassword(cwd: string): string {
 function resolveDockerComposeContext(
   cwd: string,
   config: SupatypeProjectConfig,
-): { project: string; composePath: string } | null {
+): ComposeStack | null {
   if (resolveRuntimeProvider(config) !== "docker" || hasEngineOverride(config)) {
     return null
   }
@@ -686,104 +687,58 @@ function resolveDockerComposeContext(
   }
 }
 
-function composeExecQuery(
+async function composeExecQuery(
   cwd: string,
-  compose: { project: string; composePath: string },
+  compose: ComposeStack,
   sql: string,
   params: unknown[] = [],
 ): Promise<QueryResult> {
-  const { user, password: pgPassword, database: db } = devDatabaseIdentity(cwd)
-  const envFile = join(cwd, ".env")
-  const composeDir = dirname(compose.composePath)
-  const args = [
-    "compose",
-    "-p",
-    compose.project,
-    "--project-directory",
-    cwd,
-    "-f",
-    compose.composePath,
-  ]
-  if (existsSync(envFile)) args.push("--env-file", envFile)
-
   if (params.length === 0) {
-    args.push(
-      "exec",
-      "-T",
-      "-e",
-      `PGPASSWORD=${pgPassword}`,
-      "db",
-      "psql",
-      "-U",
-      user,
-      "-d",
-      db,
-      "-tAc",
-      sql,
-    )
-    const result = spawnSync("docker", args, { cwd: composeDir, encoding: "utf8" })
-    if (result.status !== 0) {
-      throw new Error((result.stderr ?? result.stdout ?? "compose psql failed").trim())
-    }
-    const text = (result.stdout ?? "").trim()
+    const text = runComposePsql(cwd, compose, ["-tAc", sql])
     if (sql.trim().toUpperCase().startsWith("SELECT")) {
-      return Promise.resolve({
-        rows: parsePsqlScalarRows(sql, text),
-        rowCount: 1,
-        command: "SELECT",
-        oid: 0,
-        fields: [],
-      })
+      return queryResult("SELECT", parsePsqlScalarRows(sql, text), 1)
     }
-    return Promise.resolve({
-      rows: [],
-      rowCount: 0,
-      command: "INSERT",
-      oid: 0,
-      fields: [],
-    })
+    return queryResult("INSERT", [], 0)
   }
 
-  args.push(
-    "exec",
-    "-T",
-    "-e",
-    `PGPASSWORD=${pgPassword}`,
-    "db",
-    "psql",
-    "-U",
-    user,
-    "-d",
-    db,
+  const stdout = runComposePsql(cwd, compose, [
     "-v",
     "ON_ERROR_STOP=1",
     "-c",
     interpolateSql(sql, params),
-  )
-  const result = spawnSync("docker", args, { cwd: composeDir, encoding: "utf8" })
-  if (result.status !== 0) {
-    throw new Error((result.stderr ?? result.stdout ?? "compose psql failed").trim())
-  }
-  const stdout = (result.stdout ?? "").trim()
+  ])
   const idMatch = stdout.match(
     /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\s+\|\s+(.+)/i,
   )
   if (idMatch) {
-    return Promise.resolve({
-      rows: [{ id: idMatch[1], email: idMatch[2]?.trim() }],
-      rowCount: 1,
-      command: "INSERT",
-      oid: 0,
-      fields: [],
-    })
+    return queryResult("INSERT", [{ id: idMatch[1], email: idMatch[2]?.trim() }], 1)
   }
-  return Promise.resolve({
-    rows: [],
-    rowCount: 0,
-    command: "INSERT",
-    oid: 0,
-    fields: [],
+  return queryResult("INSERT", [], 0)
+}
+
+/**
+ * Run `psql` in the stack's `db` container as the project's database owner, and return its
+ * trimmed stdout.
+ */
+function runComposePsql(cwd: string, compose: ComposeStack, psqlArgs: string[]): string {
+  const { args, env } = composeDbPsql(cwd, compose, psqlArgs)
+  const result = spawnSync("docker", args, {
+    cwd: dirname(compose.composePath),
+    encoding: "utf8",
+    env,
   })
+  if (result.status !== 0) {
+    throw new Error((result.stderr ?? result.stdout ?? "compose psql failed").trim())
+  }
+  return (result.stdout ?? "").trim()
+}
+
+function queryResult(
+  command: "SELECT" | "INSERT",
+  rows: Record<string, unknown>[],
+  rowCount: number,
+): QueryResult {
+  return { rows, rowCount, command, oid: 0, fields: [] }
 }
 
 function parsePsqlScalarRows(sql: string, text: string): Record<string, unknown>[] {

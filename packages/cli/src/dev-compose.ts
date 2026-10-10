@@ -85,6 +85,7 @@ import { offerAdoption, unmanagedTables, type AdoptionSteps } from "./adopt-walk
 import { resetDevDatabase } from "./dev-db-reset.js"
 import { hostComposeDbUrl, resolveHostDatabaseUrl } from "./host-database.js"
 import { grantAuthSchemaAccess, reconcileAuthenticatorPassword } from "./compose-db-roles.js"
+import { dockerEnv } from "./docker-env.js"
 
 /** Sync optional Docker image pins from config into `.env` (no JWT rotation). */
 export function syncComposeImagePins(cwd: string, config: SupatypeProjectConfig): void {
@@ -838,6 +839,9 @@ async function runComposeSchemaPushQueued(
   }
 }
 
+/** The schema AST as the `schema-engine` container sees it, under the project mount. */
+const COMPOSE_SCHEMA_AST = "/project/.supatype/schema.ast.json"
+
 async function runComposeEnginePush(
   paths: SelfHostComposePaths,
   cwd: string,
@@ -845,52 +849,22 @@ async function runComposeEnginePush(
   config: SupatypeProjectConfig,
   sources?: SchemaSourcePushArtifacts | null,
 ): Promise<{ status: number; output: string }> {
-  const envFile = resolve(cwd, ".env")
-  const composeArgs = ["compose", "--progress", "quiet"]
-  if (composeProject) composeArgs.push("-p", composeProject)
-  composeArgs.push("--project-directory", cwd)
-  composeArgs.push("-f", paths.composePath)
-  if (existsSync(envFile)) {
-    composeArgs.push("--env-file", envFile)
-  }
-  composeArgs.push(
-    "--profile",
-    "tools",
-    "run",
-    "--rm",
-    "schema-engine",
-    "push",
-    "-i",
-    "/project/.supatype/schema.ast.json",
-    "--database-url",
-    projectDatabaseUrl(cwd, config, true),
-    "--force",
-    "--non-interactive",
-  )
+  const engineArgs = ["push", "-i", COMPOSE_SCHEMA_AST, "--force", "--non-interactive"]
   if (sources) {
-    composeArgs.push(
+    engineArgs.push(
       "--schema-sources-gz",
       sources.dockerGzPath,
       "--schema-sources-manifest",
       sources.dockerManifestPath,
     )
   }
-  const pushEnv: NodeJS.ProcessEnv = {
-    ...process.env,
-    COMPOSE_PROGRESS: "quiet",
-  }
-  const engineImage = await schemaEngineImageForPush(config)
-  if (engineImage) {
-    pushEnv.SUPATYPE_ENGINE_IMAGE = engineImage
-  }
-  const result = spawnSync("docker", composeArgs, {
+  const { output, status: exitStatus } = await runComposeEngine(
+    paths,
     cwd,
-    encoding: "utf8",
-    maxBuffer: 10 * 1024 * 1024,
-    env: pushEnv,
-  })
-  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim()
-  const exitStatus = result.status ?? 1
+    composeProject,
+    config,
+    engineArgs,
+  )
   const pushResult = parseEnginePushOutput(output)
 
   if (exitStatus === 0) {
@@ -905,13 +879,6 @@ async function runComposeEnginePush(
   return { status: exitStatus, output }
 }
 
-/**
- * One schema-engine subcommand in the compose `tools` profile, against the stack's own database.
- *
- * In a container, so it reaches Postgres at the compose-internal address and needs nothing
- * published to the host. That is what a host-side `supatype adopt` got wrong on a docker project
- * (supatype#85), and why the push walkthrough runs adopt this way instead.
- */
 /** One engine run: its exit, what it printed on stdout alone, and everything it printed. */
 export interface EngineRun {
   status: number
@@ -930,6 +897,13 @@ export function adoptResultFrom(run: EngineRun): AdoptResult | null {
   return run.status === 0 ? parseEngineJsonOutput<AdoptResult>(run.stdout) : null
 }
 
+/**
+ * One schema-engine subcommand in the compose `tools` profile, against the stack's own database.
+ *
+ * In a container, so it reaches Postgres at the compose-internal address and needs nothing
+ * published to the host. That is what a host-side `supatype adopt` got wrong on a docker project
+ * (supatype#85), and why the push walkthrough runs adopt this way instead.
+ */
 async function runComposeEngineCommand(
   paths: SelfHostComposePaths,
   cwd: string,
@@ -937,36 +911,41 @@ async function runComposeEngineCommand(
   config: SupatypeProjectConfig,
   command: readonly string[],
 ): Promise<EngineRun> {
+  const schema = config.schema?.pg_schema ?? "public"
+  const engineArgs = [...command, "-i", COMPOSE_SCHEMA_AST, "--schema", schema]
+  return runComposeEngine(paths, cwd, composeProject, config, engineArgs)
+}
+
+/**
+ * Run the engine with `engineArgs` in the compose `tools` profile, against the stack's database.
+ *
+ * The database URL carries the password, so it reaches the engine as `DATABASE_URL` through a
+ * bare `-e`, with the value in docker's environment rather than on its command line.
+ */
+async function runComposeEngine(
+  paths: SelfHostComposePaths,
+  cwd: string,
+  composeProject: string,
+  config: SupatypeProjectConfig,
+  engineArgs: readonly string[],
+): Promise<EngineRun> {
   const envFile = resolve(cwd, ".env")
   const composeArgs = ["compose", "--progress", "quiet"]
   if (composeProject) composeArgs.push("-p", composeProject)
-  composeArgs.push("--project-directory", cwd)
-  composeArgs.push("-f", paths.composePath)
-  if (existsSync(envFile)) {
-    composeArgs.push("--env-file", envFile)
-  }
-  composeArgs.push(
-    "--profile",
-    "tools",
-    "run",
-    "--rm",
-    "schema-engine",
-    ...command,
-    "-i",
-    "/project/.supatype/schema.ast.json",
-    "--database-url",
-    projectDatabaseUrl(cwd, config, true),
-    "--schema",
-    config.schema?.pg_schema ?? "public",
+  composeArgs.push("--project-directory", cwd, "-f", paths.composePath)
+  if (existsSync(envFile)) composeArgs.push("--env-file", envFile)
+  const secrets = dockerEnv(
+    { DATABASE_URL: projectDatabaseUrl(cwd, config, true) },
+    { ...process.env, COMPOSE_PROGRESS: "quiet" },
   )
-  const env: NodeJS.ProcessEnv = { ...process.env, COMPOSE_PROGRESS: "quiet" }
+  composeArgs.push("--profile", "tools", "run", "--rm", ...secrets.args, "schema-engine")
   const engineImage = await schemaEngineImageForPush(config)
-  if (engineImage) env.SUPATYPE_ENGINE_IMAGE = engineImage
-  const result = spawnSync("docker", composeArgs, {
+  if (engineImage) secrets.env.SUPATYPE_ENGINE_IMAGE = engineImage
+  const result = spawnSync("docker", [...composeArgs, ...engineArgs], {
     cwd,
     encoding: "utf8",
     maxBuffer: 10 * 1024 * 1024,
-    env,
+    env: secrets.env,
   })
   return {
     status: result.status ?? 1,
@@ -1490,7 +1469,7 @@ async function runComposeEngineGenerator(
     "schema-engine",
     ...args,
     "-i",
-    "/project/.supatype/schema.ast.json",
+    COMPOSE_SCHEMA_AST,
   )
 
   const env: NodeJS.ProcessEnv = { ...process.env, COMPOSE_PROGRESS: "quiet" }

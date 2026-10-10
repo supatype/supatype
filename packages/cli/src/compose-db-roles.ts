@@ -7,6 +7,7 @@ import { spawnSync, type SpawnSyncReturns } from "node:child_process"
 import { devAuthenticatorPassword, devDatabaseIdentity } from "./local-secrets.js"
 import type { SelfHostComposePaths } from "./self-host-compose.js"
 import { degraded } from "./strict.js"
+import { dockerEnv } from "./docker-env.js"
 
 type ComposeTarget = Pick<SelfHostComposePaths, "composePath">
 
@@ -26,8 +27,9 @@ const GRANT_AUTH_SCHEMA_SQL = [
  * Run `sql` through `psql` in the `db` container, as the bundled superuser, against the project's
  * database.
  *
- * `env` is passed into the container rather than onto the command line, so a script can read a
- * secret with `\getenv` and it never appears in a process listing.
+ * The password and `env` reach the container as bare `-e NAME` flags with the values in docker's
+ * own environment, so a script can read a secret with `\getenv` and neither it nor the password is
+ * on docker's command line, where any local user could read it from the process list.
  */
 function runOwnerPsql(
   paths: ComposeTarget,
@@ -37,16 +39,21 @@ function runOwnerPsql(
   env: Record<string, string> = {},
 ): SpawnSyncReturns<string> {
   const { user, password, database } = devDatabaseIdentity(cwd)
-  const envArgs = Object.entries({ PGPASSWORD: password, ...env })
-    .flatMap(([key, value]) => ["-e", `${key}=${value}`])
+  const secrets = dockerEnv({ PGPASSWORD: password, ...env })
   return spawnSync(
     "docker",
     [
       "compose", "-p", composeProject, "-f", paths.composePath,
-      "exec", "-T", ...envArgs,
+      "exec", "-T", ...secrets.args,
       "db", "psql", "-v", "ON_ERROR_STOP=1", "-U", user, "-d", database,
     ],
-    { cwd: dirname(paths.composePath), encoding: "utf8", timeout: 10_000, input: sql },
+    {
+      cwd: dirname(paths.composePath),
+      encoding: "utf8",
+      timeout: 10_000,
+      input: sql,
+      env: secrets.env,
+    },
   )
 }
 

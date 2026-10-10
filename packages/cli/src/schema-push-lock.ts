@@ -7,49 +7,23 @@
  *   - supatype-schema-engine (pg_advisory_xact_lock on the same keys)
  */
 
-import { existsSync } from "node:fs"
-import { resolve } from "node:path"
 import { spawn, spawnSync, type ChildProcess } from "node:child_process"
 import type { SelfHostComposePaths } from "./self-host-compose.js"
-import { devDatabaseIdentity } from "./local-secrets.js"
+import { composeDbPsql } from "./compose-db-psql.js"
+import type { DockerEnv } from "./docker-env.js"
 
 export const SCHEMA_PUSH_LOCK_CLASSID = 872014
 export const SCHEMA_PUSH_LOCK_OBJID = 1
 
-function composeBaseArgs(
-  paths: SelfHostComposePaths,
-  cwd: string,
-  composeProject: string,
-): string[] {
-  const envFile = resolve(cwd, ".env")
-  const args = ["compose", "-p", composeProject, "--project-directory", cwd, "-f", paths.composePath]
-  if (existsSync(envFile)) args.push("--env-file", envFile)
-  return args
-}
-
-function dbExecArgs(
+/** `psql` in the stack's `db` container, stopping at the first error. */
+function dbExec(
   paths: SelfHostComposePaths,
   cwd: string,
   composeProject: string,
   psqlArgs: string[],
-): string[] {
-  const { user, password, database } = devDatabaseIdentity(cwd)
-  return [
-    ...composeBaseArgs(paths, cwd, composeProject),
-    "exec",
-    "-T",
-    "-e",
-    `PGPASSWORD=${password}`,
-    "db",
-    "psql",
-    "-U",
-    user,
-    "-d",
-    database,
-    "-v",
-    "ON_ERROR_STOP=1",
-    ...psqlArgs,
-  ]
+): DockerEnv {
+  const stack = { project: composeProject, composePath: paths.composePath }
+  return composeDbPsql(cwd, stack, ["-v", "ON_ERROR_STOP=1", ...psqlArgs])
 }
 
 function schemaPushLockIsHeld(
@@ -57,7 +31,7 @@ function schemaPushLockIsHeld(
   cwd: string,
   composeProject: string,
 ): boolean {
-  const args = dbExecArgs(paths, cwd, composeProject, [
+  const { args, env } = dbExec(paths, cwd, composeProject, [
     "-tAc",
     `SELECT EXISTS (
        SELECT 1 FROM pg_locks
@@ -67,7 +41,7 @@ function schemaPushLockIsHeld(
          AND granted
      )`,
   ])
-  const result = spawnSync("docker", args, { cwd, encoding: "utf8" })
+  const result = spawnSync("docker", args, { cwd, encoding: "utf8", env })
   return result.status === 0 && result.stdout.trim() === "t"
 }
 
@@ -90,11 +64,12 @@ export async function withComposeSchemaPushLock<T>(
   //
   // Closing stdin *does* propagate: psql sees EOF, exits, and the session ends, which is what
   // releases an advisory lock. Deterministic, and it needs no signal to cross the boundary.
-  const args = dbExecArgs(paths, cwd, composeProject, ["-f", "-"])
+  const { args, env } = dbExec(paths, cwd, composeProject, ["-f", "-"])
 
   let stderrBuf = ""
   const holder: ChildProcess = spawn("docker", args, {
     cwd,
+    env,
     stdio: ["pipe", "pipe", "pipe"],
   })
   holder.stdin?.write(
@@ -155,14 +130,11 @@ async function releaseHolder(
   if (!schemaPushLockIsHeld(paths, cwd, composeProject)) return
 
   // Last resort: the session outlived its client. Ending it releases the lock.
-  spawnSync(
-    "docker",
-    dbExecArgs(paths, cwd, composeProject, [
-      "-tAc",
-      `SELECT pg_terminate_backend(pid) FROM pg_stat_activity
-         WHERE pid <> pg_backend_pid()
-           AND query LIKE '%pg_advisory_lock(${SCHEMA_PUSH_LOCK_CLASSID}, ${SCHEMA_PUSH_LOCK_OBJID})%'`,
-    ]),
-    { cwd, stdio: "ignore" },
-  )
+  const terminate = dbExec(paths, cwd, composeProject, [
+    "-tAc",
+    `SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+       WHERE pid <> pg_backend_pid()
+         AND query LIKE '%pg_advisory_lock(${SCHEMA_PUSH_LOCK_CLASSID}, ${SCHEMA_PUSH_LOCK_OBJID})%'`,
+  ])
+  spawnSync("docker", terminate.args, { cwd, stdio: "ignore", env: terminate.env })
 }

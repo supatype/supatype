@@ -16,10 +16,11 @@ import type { SpawnSyncReturns } from "node:child_process"
  */
 
 type Spawned = Partial<SpawnSyncReturns<string>>
-const spawnSync = vi.fn<(cmd: string, args: readonly string[], opts: { input?: string }) => Spawned>()
+interface SpawnOptions { input?: string; env?: NodeJS.ProcessEnv }
+const spawnSync = vi.fn<(cmd: string, args: readonly string[], opts: SpawnOptions) => Spawned>()
 vi.mock("node:child_process", async (importOriginal) => ({
   ...(await importOriginal<typeof import("node:child_process")>()),
-  spawnSync: (cmd: string, args: readonly string[], opts: { input?: string }) =>
+  spawnSync: (cmd: string, args: readonly string[], opts: SpawnOptions) =>
     spawnSync(cmd, args, opts),
 }))
 
@@ -46,10 +47,10 @@ let previousStrict: string | undefined
 const paths = () => ({ composePath: join(cwd, ".supatype", "self-host", "docker-compose.yml") })
 
 /** The `psql` invocation from the one `docker` call the function made. */
-function psqlCall(): { args: readonly string[]; input: string | undefined } {
+function psqlCall(): { args: readonly string[]; input: string | undefined; env: NodeJS.ProcessEnv } {
   expect(spawnSync).toHaveBeenCalledTimes(1)
   const [, args, opts] = spawnSync.mock.calls[0]!
-  return { args, input: opts.input }
+  return { args, input: opts.input, env: opts.env ?? {} }
 }
 
 /** The value after `flag` in an argument list. */
@@ -80,12 +81,13 @@ describe.each([
 ] as const)("%s", (_name, run) => {
   it("logs in as the bundled superuser, to the project's database, with its password", () => {
     run(paths(), cwd, "supatype-kitchen-sink")
-    const { args } = psqlCall()
+    const { args, env } = psqlCall()
 
     expect(after(args, "-U")).toBe("supatype_admin")
     expect(after(args, "-d")).toBe("kitchen-sink")
-    expect(args).toContain("PGPASSWORD=ks-own-password")
-    expect(args).not.toContain("PGPASSWORD=postgres")
+    expect(after(args, "-e")).toBe("PGPASSWORD")
+    expect(env["PGPASSWORD"]).toBe("ks-own-password")
+    expect(args.join(" ")).not.toContain("ks-own-password")
   })
 
   it("says why psql failed, not only what may break", () => {
@@ -120,9 +122,11 @@ describe("grantAuthSchemaAccess", () => {
 describe("reconcileAuthenticatorPassword", () => {
   it("hands the new password to psql through the environment, not the command line", () => {
     reconcileAuthenticatorPassword(paths(), cwd, "supatype-kitchen-sink")
-    const { args, input } = psqlCall()
+    const { args, input, env } = psqlCall()
 
-    expect(args).toContain("SUPATYPE_AUTHENTICATOR_PASSWORD=ks-authenticator")
+    expect(args).toContain("SUPATYPE_AUTHENTICATOR_PASSWORD")
+    expect(env["SUPATYPE_AUTHENTICATOR_PASSWORD"]).toBe("ks-authenticator")
+    expect(args.join(" ")).not.toContain("ks-authenticator")
     expect(input).toContain("\\getenv pw SUPATYPE_AUTHENTICATOR_PASSWORD")
     expect(args.join(" ")).not.toContain("ALTER ROLE")
   })

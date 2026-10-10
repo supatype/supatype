@@ -177,3 +177,14 @@ export function resolveHostDatabaseUrl(
 export function redact(dsn: string): string {
   return dsn.replace(/(:\/\/[^:/@]+:)[^@]*(@)/, "$1***$2")
 }
+
+/**
+ * A connection string without its password, and the password, for a child process: the
+ * password goes in its `PGPASSWORD`, where the process list does not show it, and the rest on
+ * its command line.
+ */
+export function splitPassword(dsn: string): { dsn: string; password: string | undefined } {
+  const match = /(:\/\/[^:/@]+):([^@]*)@/.exec(dsn)
+  if (!match) return { dsn, password: undefined }
+  return { dsn: dsn.replace(match[0], `${match[1]}@`), password: decodeURIComponent(match[2]!) }
+}

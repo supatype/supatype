@@ -199,9 +199,13 @@ export async function engineRequest<T = unknown>(
     ...(irPaths.length > 0 ? { irPaths } : {}),
   })
 
+  // The database URL carries the password, so it goes to the engine as `DATABASE_URL` (which every
+  // subcommand that connects reads) rather than `--database-url`, where any local user could read
+  // it from the process list.
   const result = spawnSync(bin, args, {
     encoding: "utf8",
     cwd: process.cwd(),
+    env: { ...process.env, DATABASE_URL: (body["database_url"] as string | undefined) ?? "" },
   })
 
   for (const f of cleanup) {
@@ -250,7 +254,6 @@ function endpointToArgs(
   reqFile: string,
   sources?: { gzPath?: string; manifestPath?: string; irPaths?: string[] },
 ): string[] {
-  const dbUrl = (body["database_url"] as string | undefined) ?? ""
   const schema = (body["schema"] as string | undefined) ?? "public"
   const force = body["force"] ? ["--force"] : []
   const nonInteractive =
@@ -258,7 +261,7 @@ function endpointToArgs(
 
   switch (endpoint) {
     case "/diff":
-      return ["diff", "--input", reqFile, "--database-url", dbUrl, "--schema", schema]
+      return ["diff", "--input", reqFile, "--schema", schema]
 
     case "/push": {
       const sourceArgs: string[] = []
@@ -268,8 +271,6 @@ function endpointToArgs(
         "push",
         "--input",
         reqFile,
-        "--database-url",
-        dbUrl,
         "--schema",
         schema,
         ...force,
@@ -279,7 +280,7 @@ function endpointToArgs(
     }
 
     case "/rollback":
-      return ["rollback", "--database-url", dbUrl, "--schema", schema]
+      return ["rollback", "--schema", schema]
 
     case "/parse":
       return ["parse", "--input", reqFile]
@@ -294,7 +295,7 @@ function endpointToArgs(
       // `--status` reads the ledger and needs no schema, so it does not take `--input`:
       // passing one would make the command fail on a project whose schema has moved on.
       if (body["status"] === true) {
-        return ["seed", "--database-url", dbUrl, "--status"]
+        return ["seed", "--status"]
       }
       const documents = (sources?.irPaths ?? []).flatMap((path) => ["--ir", path])
       const environment =
@@ -304,8 +305,6 @@ function endpointToArgs(
         "--input",
         reqFile,
         ...documents,
-        "--database-url",
-        dbUrl,
         "--schema",
         schema,
         ...environment,
@@ -315,16 +314,16 @@ function endpointToArgs(
     }
 
     case "/introspect":
-      return ["introspect", "--database-url", dbUrl, "--schema", schema]
+      return ["introspect", "--schema", schema]
 
     case "/doctor": {
       const strict = body["strict"] ? ["--strict"] : []
-      return ["doctor", "--input", reqFile, "--database-url", dbUrl, "--schema", schema, ...strict]
+      return ["doctor", "--input", reqFile, "--schema", schema, ...strict]
     }
 
     case "/adopt": {
       const yes = body["yes"] ? ["--yes"] : []
-      return ["adopt", "--input", reqFile, "--database-url", dbUrl, "--schema", schema, ...yes]
+      return ["adopt", "--input", reqFile, "--schema", schema, ...yes]
     }
 
     case "/validate":
@@ -337,13 +336,13 @@ function endpointToArgs(
       if (endpoint === "/migrations" || endpoint.startsWith("/migrations")) {
         const action = (body["action"] as string | undefined) ?? "list"
         if (action === "rollback") {
-          return ["rollback", "--database-url", dbUrl, "--schema", schema]
+          return ["rollback", "--schema", schema]
         }
         const name = body["name"] as string | undefined
         if (name) {
-          return ["migrations", "--database-url", dbUrl, "--name", name]
+          return ["migrations", "--name", name]
         }
-        return ["migrations", "--database-url", dbUrl]
+        return ["migrations"]
       }
       return [endpoint.replace(/^\//, ""), "--input", reqFile]
   }
