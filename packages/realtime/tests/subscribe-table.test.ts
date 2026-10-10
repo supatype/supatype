@@ -67,7 +67,7 @@ describe("the table a subscription watches", () => {
 describe("a subscriber registered under a name unlike its table", () => {
   it("receives changes for the table it named", () => {
     const channels = new ChannelManager()
-    const ws = { readyState: 1, send: () => {} } as unknown as WebSocket
+    const ws = { readyState: 1, send: () => {} } as unknown as Parameters<ChannelManager["addClient"]>[0]
     const clientId = channels.addClient(ws, null)
 
     const subscription: Subscription = {
