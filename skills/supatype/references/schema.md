@@ -331,7 +331,7 @@ An object that already matches what the schema would create is taken over withou
 | **Stale** | Supatype's, no longer declared | Drops it (tables and columns need `--force`) |
 | **Conflicting** | Declared name held by an object Supatype did not create | Refuses until `supatype adopt`, or a rename |
 | **Unmanaged** | Not Supatype's (including columns you add to a model table) | Never touched |
-| **Released** | Taken back with `supatype adopt --release` | Never touched, whatever the schema says |
+| **Released** | Taken back with `supatype adopt --release` | Never touched, whatever the schema says, until `supatype adopt --reclaim` hands it back |
 | **Out of scope** | `auth.*`, `_supatype.*`, extension tables | Ignored |
 
 ### Commands
@@ -345,6 +345,7 @@ supatype doctor --rebaseline # accept drifted objects as they are now (e.g. afte
 supatype doctor --rebaseline --accept-access-drift --yes   # also hand-edited policies/grants, without asking
 supatype adopt               # preview; adopt --yes to take them
 supatype adopt --release index:posts.posts_title_idx   # keep a hand-edited object as it is
+supatype adopt --reclaim index:posts.posts_title_idx   # hand it back: the next push makes it match the schema
 supatype diff                # preview operations
 supatype push                # apply migration
 ```

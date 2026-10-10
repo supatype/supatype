@@ -41,6 +41,15 @@ describe("targetSchemaAdopt() with an empty key list", () => {
     expect(endpointToArgs("/adopt", body, "req.json")).toContain("--adopt-none")
   })
 
+  it("reclaims with --adopt-none in one apply", async () => {
+    engineRequest.mockResolvedValueOnce(RELEASED)
+    await targetSchemaAdopt(target, {}, { yes: true, keys: [], reclaim: ["table:w"] })
+    expect(engineRequest).toHaveBeenCalledTimes(1)
+    const body = engineRequest.mock.calls[0]?.[1] as Record<string, unknown>
+    expect(body["reclaim"]).toEqual(["table:w"])
+    expect(endpointToArgs("/adopt", body, "req.json").slice(-3)).toEqual(["--reclaim", "table:w", "--adopt-none"])
+  })
+
   it("sends a non-empty key list straight to apply", async () => {
     engineRequest.mockResolvedValueOnce({ status: "adopted", adopt: [] })
     await targetSchemaAdopt(target, {}, { yes: true, keys: ["table:w"] })
@@ -54,6 +63,16 @@ describe("targetSchemaAdopt() with an empty key list", () => {
     const fresh = { ...target }
     await expect(targetSchemaAdopt(fresh, {}, { yes: true, keys: [], release: ["table:w"] })).rejects.toThrow(
       "does not support --adopt-none",
+    )
+    expect(engineRequest).not.toHaveBeenCalled()
+  })
+})
+
+describe("targetSchemaAdopt() with --reclaim", () => {
+  it("is refused, never sent, to an engine without reclaim", async () => {
+    features.value = new Set(["adopt_keys", "adopt_none", "release"])
+    await expect(targetSchemaAdopt({ ...target }, {}, { yes: true, reclaim: ["table:w"] })).rejects.toThrow(
+      "does not support --reclaim",
     )
     expect(engineRequest).not.toHaveBeenCalled()
   })

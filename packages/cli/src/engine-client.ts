@@ -85,13 +85,15 @@ export interface DoctorItem {
 
 /**
  * What the engine's `adopt` reports, previewing or applying. Since the ledger it lists the objects
- * it hands over (`adopt`) and takes back (`release`) and writes ledger rows; an engine from before
+ * it hands over (`adopt`), takes back (`release`) and hands back again (`reclaim`), and writes
+ * ledger rows; an engine from before
  * listed the comment stamps it would write (`stampStatements`) and counted them (`stamped`).
  */
 export interface AdoptOutcome {
   status?: string
   adopt?: DoctorItem[]
   release?: DoctorItem[]
+  reclaim?: DoctorItem[]
   stampStatements?: string[]
   stamped?: number
 }
@@ -364,6 +366,12 @@ function busySentence(stderr: string): string {
 // Endpoint → CLI args mapping
 // ---------------------------------------------------------------------------
 
+/** `flag` once per string in `values`, which a request body carries as a list (or not at all). */
+function repeated(values: unknown, flag: string): string[] {
+  if (!Array.isArray(values)) return []
+  return values.filter((v): v is string => typeof v === "string").flatMap((v) => [flag, v])
+}
+
 /** The engine binary's arguments for an endpoint and its request body. Exported for its tests. */
 export function endpointToArgs(
   endpoint: string,
@@ -465,16 +473,12 @@ export function endpointToArgs(
 
     case "/adopt": {
       const yes = body["yes"] ? ["--yes"] : []
-      const release = Array.isArray(body["release"])
-        ? body["release"].filter((r): r is string => typeof r === "string").flatMap((r) => ["--release", r])
-        : []
-      const keys = Array.isArray(body["keys"])
-        ? body["keys"].filter((k): k is string => typeof k === "string").flatMap((k) => ["--key", k])
-        : []
+      const keys = repeated(body["keys"], "--key")
       // No `--key` at all is "adopt every conflict" to the binary, so an empty list, which over
       // HTTP is "adopt none", is `--adopt-none` here.
       if (Array.isArray(body["keys"]) && keys.length === 0) keys.push("--adopt-none")
-      return ["adopt", "--input", reqFile, "--database-url", dbUrl, "--schema", schema, ...yes, ...release, ...keys]
+      const objects = [...repeated(body["release"], "--release"), ...repeated(body["reclaim"], "--reclaim"), ...keys]
+      return ["adopt", "--input", reqFile, "--database-url", dbUrl, "--schema", schema, ...yes, ...objects]
     }
 
     case "/validate":
