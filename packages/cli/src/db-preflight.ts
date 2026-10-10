@@ -143,8 +143,15 @@ const REQUIRED_ROLES = ["anon", "authenticated", "service_role", "authenticator"
 /** The three roles PostgREST switches to per request. `authenticator` only connects and switches. */
 const API_ROLES = ["anon", "authenticated", "service_role"] as const
 
+/**
+ * The schema holding the JWT readers every generated rule calls (`_supatype.jwt_claims()` and the
+ * rest). The engine moved them out of `auth` because the auth server's migrations replace the
+ * `auth.*` helpers, so this is the schema the API roles need USAGE on.
+ */
+const CLAIMS_SCHEMA = "_supatype"
+
 /** One row per API role that exists, for the schema named in the query. */
-export interface AuthSchemaUsageRow {
+export interface ClaimsSchemaUsageRow {
   rolname: string | null
   has_usage: boolean | null
   owner: string
@@ -359,18 +366,18 @@ export async function runPreflight(
     })
   }
 
-  // USAGE on the auth schema, asked by OID so a role that does not exist cannot raise
+  // USAGE on the claims schema, asked by OID so a role that does not exist cannot raise
   // `role "x" does not exist` the way the name-taking overload would.
-  const authUsage = await q<AuthSchemaUsageRow>(
+  const claimsUsage = await q<ClaimsSchemaUsageRow>(
     `SELECT r.rolname,
             has_schema_privilege(r.oid, n.oid, 'USAGE') AS has_usage,
             pg_get_userbyid(n.nspowner) AS owner
        FROM pg_namespace n
        LEFT JOIN pg_roles r ON r.rolname = ANY($1)
-      WHERE n.nspname = 'auth'`,
-    [API_ROLES as unknown as string[]],
+      WHERE n.nspname = $2`,
+    [API_ROLES as unknown as string[], CLAIMS_SCHEMA],
   )
-  results.push(authSchemaUsageCheck(authUsage, privs))
+  results.push(claimsSchemaUsageCheck(claimsUsage, privs))
 
   // ── Extensions ─────────────────────────────────────────────────────────────
   const installed = new Set(
@@ -496,30 +503,32 @@ export async function runPreflight(
 }
 
 /**
- * Can the API roles reach the auth helpers when a query calls them?
+ * Can the API roles reach the JWT readers when a query calls them?
  *
  * Postgres evaluates a policy's `USING` clause with the table owner's privileges, so row-level
  * security works without this grant and looks like proof the schema is fine. Field masking does
  * not: `supatype_mask` rewrites a masked column into `CASE WHEN can_read_t__c(t) …` in the target
- * list, which runs as the caller and reaches `auth.role()` directly. Studio's per-record
- * `can_<op>_<table>` calls have the same shape.
+ * list, which runs as the caller and reaches `_supatype.jwt_role()` and the other readers directly.
+ * Studio's per-record `can_<op>_<table>` calls have the same shape.
  *
- * `supatype/postgres` grants this at initdb, so a missing grant means a database Supatype did not
- * bootstrap. Kept a `degrade` rather than a `fail`: two named features stop working and the rest
- * of the stack is unaffected.
+ * The readers live in `_supatype` rather than `auth` because the auth server's migrations replace
+ * the `auth.*` helpers; checking `auth` here passed on databases where masking could not read the
+ * JWT at all. Every push grants this, so a missing grant means a database whose `_supatype` the
+ * pushing role cannot grant on. Kept a `degrade` rather than a `fail`: two named features stop
+ * working and the rest of the stack is unaffected.
  */
-export function authSchemaUsageCheck(
-  rows: AuthSchemaUsageRow[],
+export function claimsSchemaUsageCheck(
+  rows: ClaimsSchemaUsageRow[],
   privs: { current_user: string; is_super: boolean },
 ): CheckResult {
-  const base = { id: "auth-schema-usage", title: "USAGE on schema auth (API roles)" }
+  const base = { id: "claims-schema-usage", title: `USAGE on schema ${CLAIMS_SCHEMA} (API roles)` }
 
-  // No auth schema yet: the first push creates it and grants on it, so there is nothing to fix.
+  // No claims schema yet: the first push creates it and grants on it, so there is nothing to fix.
   if (rows.length === 0) {
     return {
       ...base,
       severity: "pass",
-      detail: "schema auth does not exist yet; the first push creates it and grants usage",
+      detail: `schema ${CLAIMS_SCHEMA} does not exist yet; the first push creates it and grants usage`,
     }
   }
 
@@ -555,7 +564,7 @@ export function authSchemaUsageCheck(
       "applying, and a masked column read by one of these roles fails with 42501 instead of " +
       "masking. Studio's per-record permission checks fail the same way. Row-level security is " +
       "unaffected, because Postgres evaluates policies with the table owner's privileges.",
-    remedy: `GRANT USAGE ON SCHEMA auth TO ${lacking.map(ident).join(", ")};`,
+    remedy: `GRANT USAGE ON SCHEMA ${CLAIMS_SCHEMA} TO ${lacking.map(ident).join(", ")};`,
     ...(!canGrant && { remedyNeedsOperator: true }),
   }
 }
