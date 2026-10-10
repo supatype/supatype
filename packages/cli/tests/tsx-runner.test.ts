@@ -1,6 +1,7 @@
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import { existsSync } from "node:fs"
-import { evalTsSnippet, runTsFile } from "../src/tsx-runner.js"
+import { evalTempFileName, evalTsSnippet, runTsFile } from "../src/tsx-runner.js"
+import { uniqueFileToken } from "../src/unique-file-token.js"
 import { writeFileSync, unlinkSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
@@ -41,6 +42,17 @@ describe("tsx-runner", () => {
       expect(result.exitCode).not.toBe(0)
     })
 
+    // The snippet file sits beside the CLI's source while it runs, and can carry a project's
+    // config or connection string.
+    it.skipIf(process.platform === "win32")("writes the snippet readable by this user only", () => {
+      const result = evalTsSnippet(
+        `import { statSync } from "node:fs"\n` +
+          `process.stdout.write((statSync(new URL(import.meta.url)).mode & 0o777).toString(8))`,
+      )
+      expect(result.exitCode).toBe(0)
+      expect(result.stdout).toBe("600")
+    })
+
     it("captures stderr separately from stdout", () => {
       const result = evalTsSnippet(
         `process.stderr.write("err")\nprocess.stdout.write("out")`,
@@ -62,5 +74,32 @@ describe("tsx-runner", () => {
         unlinkSync(tmp)
       }
     })
+  })
+})
+
+describe("evalTempFileName()", () => {
+  // Every CLI process writes its snippet into the same directory. Named by `Date.now()` alone, two
+  // processes in one millisecond wrote one file, and each ran whichever snippet landed last: a
+  // test loaded another test's config, whose directory had just been removed, and two CLI commands
+  // started together could load each other's project config.
+  it("never repeats, even within one millisecond", () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_791_183_700_152)
+    try {
+      expect(evalTempFileName()).not.toBe(evalTempFileName())
+    } finally {
+      now.mockRestore()
+    }
+  })
+})
+
+describe("uniqueFileToken()", () => {
+  // The engine's request files and the config fallback share this helper, and the temp directory.
+  it("never repeats, even within one millisecond", () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_791_183_700_152)
+    try {
+      expect(uniqueFileToken()).not.toBe(uniqueFileToken())
+    } finally {
+      now.mockRestore()
+    }
   })
 })

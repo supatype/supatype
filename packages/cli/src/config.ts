@@ -11,6 +11,7 @@ import {
 } from "./project-config.js"
 import { extractSchemaAstFromTypes } from "./type-extractor.js"
 import type { ExtractedSchemaAstV2 } from "./schema-ast-v2.js"
+import { uniqueFileToken } from "./unique-file-token.js"
 
 export type { SupatypeProjectConfig } from "./project-config.js"
 
@@ -238,9 +239,11 @@ function loadTsConfigWithoutCliImport(
   // If the file didn't import from @supatype/cli, this fallback won't help.
   if (patched === original) return null
 
-  const tmpPath = join(tmpdir(), `supatype-config-fallback-${Date.now()}.mts`)
+  const tmpPath = join(tmpdir(), `supatype-config-fallback-${uniqueFileToken()}.mts`)
   const wrapper = `const defineConfig = (config) => config\n${patched}`
-  writeFileSync(tmpPath, wrapper, "utf8")
+  // The config can hold credentials, and the system temp directory is shared: this user's only,
+  // and never written through a name that already exists.
+  writeFileSync(tmpPath, wrapper, { encoding: "utf8", mode: 0o600, flag: "wx" })
   try {
     const urlPath = "file:///" + tmpPath.replace(/\\/g, "/")
     const result = importModuleAsJson(urlPath, { cwd, env: configLoadEnv(cwd) })

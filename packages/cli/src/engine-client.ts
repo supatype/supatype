@@ -8,8 +8,8 @@
  * writes a response JSON to stdout.
  */
 
-import { spawnSync } from "node:child_process"
-import { mkdirSync, writeFileSync, unlinkSync, existsSync, readdirSync } from "node:fs"
+import { spawnSync, type SpawnSyncReturns } from "node:child_process"
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir, homedir } from "node:os"
 import { join } from "node:path"
 import { loadConfig } from "./config.js"
@@ -242,55 +242,26 @@ export async function engineRequest<T = unknown>(
     if (needs.length > 0) assertSupported(binaryCapabilities(bin), needs)
   }
 
-  const tmpDir = join(tmpdir(), "supatype-engine")
-  mkdirSync(tmpDir, { recursive: true })
-  const cleanup: string[] = []
-  const reqFile = join(tmpDir, `req-${Date.now()}.json`)
-  const inputPayload = body["ast"] !== undefined ? body["ast"] : body
-  writeFileSync(reqFile, JSON.stringify(inputPayload))
-  cleanup.push(reqFile)
-
-  let gzPath: string | undefined
-  let manifestPath: string | undefined
-  if (typeof body["schema_sources_gz_base64"] === "string") {
-    gzPath = join(tmpDir, `sources-${Date.now()}.gz`)
-    writeFileSync(gzPath, Buffer.from(body["schema_sources_gz_base64"], "base64"))
-    cleanup.push(gzPath)
-  }
-  // One file per seed document. The engine takes `--ir` once per document rather than one
-  // combined blob, so a failure can name the file it was in.
-  const irPaths: string[] = []
-  const documents = body["ir_documents"]
-  if (Array.isArray(documents)) {
-    documents.forEach((document, index) => {
-      const irPath = join(tmpDir, `ir-${Date.now()}-${index}.json`)
-      writeFileSync(irPath, typeof document === "string" ? document : JSON.stringify(document))
-      cleanup.push(irPath)
-      irPaths.push(irPath)
+  // A directory of this request's own, removed with everything in it whatever fails: a write,
+  // building the arguments, or the spawn itself.
+  const tmpDir = engineTempDir()
+  let result: SpawnSyncReturns<string>
+  try {
+    const files = writeRequestFiles(tmpDir, body)
+    const args = endpointToArgs(endpoint, body, files)
+    result = spawnSync(bin, args, {
+      encoding: "utf8",
+      cwd: process.cwd(),
     })
+  } finally {
+    try { rmSync(tmpDir, { recursive: true, force: true }) } catch { /* ignore */ }
   }
 
-  if (body["schema_sources_manifest"] !== undefined) {
-    manifestPath = join(tmpDir, `manifest-${Date.now()}.json`)
-    writeFileSync(manifestPath, JSON.stringify(body["schema_sources_manifest"]))
-    cleanup.push(manifestPath)
-  }
+  return readEngineResult<T>(endpoint, result)
+}
 
-  const args = endpointToArgs(endpoint, body, reqFile, {
-    ...(gzPath !== undefined ? { gzPath } : {}),
-    ...(manifestPath !== undefined ? { manifestPath } : {}),
-    ...(irPaths.length > 0 ? { irPaths } : {}),
-  })
-
-  const result = spawnSync(bin, args, {
-    encoding: "utf8",
-    cwd: process.cwd(),
-  })
-
-  for (const f of cleanup) {
-    try { unlinkSync(f) } catch { /* ignore */ }
-  }
-
+/** Turn the engine's exit status and stdout into the request's answer, or throw its error. */
+function readEngineResult<T>(endpoint: string, result: SpawnSyncReturns<string>): T {
   // A failed seed is an answer, not a crash.
   //
   // `engine seed` exits 1 when the seed itself failed and prints the result document on
@@ -362,6 +333,74 @@ function busySentence(stderr: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Request files
+// ---------------------------------------------------------------------------
+
+/** The files one request hands the engine, named on its command line. */
+interface RequestFiles {
+  reqFile: string
+  gzPath?: string
+  manifestPath?: string
+  irPaths?: string[]
+}
+
+/**
+ * A new directory for one request's files, private to this user.
+ *
+ * A request can hold `database_url`, credentials included, and the directory is in the shared
+ * system temp directory. A fixed name there can be created first by another user, world-writable
+ * or as a link to a directory they own, and `mkdir` with `recursive` accepts it as it is. So each
+ * request makes its own with `mkdtemp`, which picks an unused random name, never follows a link,
+ * and creates it 0700. On Windows the mode bits are mostly ignored and the user's temp directory
+ * is already private.
+ */
+function engineTempDir(): string {
+  return mkdtempSync(join(tmpdir(), "supatype-engine-"))
+}
+
+/** Write the request and every file it refers to into `dir`, and say where each went. */
+function writeRequestFiles(dir: string, body: Record<string, unknown>): RequestFiles {
+  const reqFile = join(dir, "request.json")
+  // Without an AST the body is the request, less the connection string: that goes to the engine
+  // on its own and has no reason to be on disk.
+  const inputPayload = body["ast"] !== undefined ? body["ast"] : withoutDatabaseUrl(body)
+  writeRequestFile(reqFile, JSON.stringify(inputPayload))
+
+  const files: RequestFiles = { reqFile }
+  if (typeof body["schema_sources_gz_base64"] === "string") {
+    files.gzPath = join(dir, "sources.gz")
+    writeRequestFile(files.gzPath, Buffer.from(body["schema_sources_gz_base64"], "base64"))
+  }
+  // One file per seed document. The engine takes `--ir` once per document rather than one
+  // combined blob, so a failure can name the file it was in.
+  const documents = body["ir_documents"]
+  if (Array.isArray(documents) && documents.length > 0) {
+    files.irPaths = documents.map((document: unknown, index) => {
+      const irPath = join(dir, `ir-${index}.json`)
+      writeRequestFile(irPath, typeof document === "string" ? document : JSON.stringify(document))
+      return irPath
+    })
+  }
+  if (body["schema_sources_manifest"] !== undefined) {
+    files.manifestPath = join(dir, "manifest.json")
+    writeRequestFile(files.manifestPath, JSON.stringify(body["schema_sources_manifest"]))
+  }
+  return files
+}
+
+function withoutDatabaseUrl(body: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(body).filter(([key]) => key !== "database_url"))
+}
+
+/**
+ * Write one request file, readable by this user only. `wx` creates the file or fails, so nothing
+ * already at the name is ever written through.
+ */
+function writeRequestFile(path: string, data: string | Buffer): void {
+  writeFileSync(path, data, { mode: 0o600, flag: "wx" })
+}
+
+// ---------------------------------------------------------------------------
 // Endpoint → CLI args mapping
 // ---------------------------------------------------------------------------
 
@@ -375,9 +414,9 @@ function repeated(values: unknown, flag: string): string[] {
 export function endpointToArgs(
   endpoint: string,
   body: Record<string, unknown>,
-  reqFile: string,
-  sources?: { gzPath?: string; manifestPath?: string; irPaths?: string[] },
+  files: RequestFiles,
 ): string[] {
+  const { reqFile } = files
   const dbUrl = (body["database_url"] as string | undefined) ?? ""
   const schema = (body["schema"] as string | undefined) ?? "public"
   const force = body["force"] ? ["--force"] : []
@@ -391,8 +430,8 @@ export function endpointToArgs(
 
     case "/push": {
       const sourceArgs: string[] = []
-      if (sources?.gzPath) sourceArgs.push("--schema-sources-gz", sources.gzPath)
-      if (sources?.manifestPath) sourceArgs.push("--schema-sources-manifest", sources.manifestPath)
+      if (files.gzPath) sourceArgs.push("--schema-sources-gz", files.gzPath)
+      if (files.manifestPath) sourceArgs.push("--schema-sources-manifest", files.manifestPath)
       return [
         "push",
         "--input",
@@ -428,7 +467,7 @@ export function endpointToArgs(
       if (body["status"] === true) {
         return ["seed", "--database-url", dbUrl, "--status"]
       }
-      const documents = (sources?.irPaths ?? []).flatMap((path) => ["--ir", path])
+      const documents = (files.irPaths ?? []).flatMap((path) => ["--ir", path])
       const environment =
         typeof body["environment"] === "string" ? ["--environment", body["environment"]] : []
       return [
