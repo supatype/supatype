@@ -82,7 +82,7 @@ jobs:
       # What the examples import, against what the packages export. Report-only by design: whether
       # an exotic primitive deserves an example is a judgement, and forcing one would produce the
       # forty-field model the kitchen sink argues against. What is gated is that the ledger stays
-      # current — add an export and the committed numbers go stale, so the gap arrives in a diff
+      # current: add an export and the committed numbers go stale, so the gap arrives in a diff
       # where a person decides.
       - name: Example coverage ledger is up to date
         run: |
@@ -96,12 +96,40 @@ jobs:
       # client-only API or a broken "use client" boundary. `supabucks` has no typecheck script, so
       # root turbo skips it entirely, and its `dist/` is what `app.mode = "static"` serves: a build
       # that emits nothing leaves the example's headline feature broken and silent. A build is not a
-      # typecheck — Vite does not typecheck — but it is the difference between an example that
+      # typecheck (Vite does not typecheck), but it is the difference between an example that
       # compiles and one nobody has run since it was written.
       - name: Example front ends build
         run: |
           pnpm --filter @supatype/example-supabucks build
           pnpm --filter @supatype/example-blog build
+
+  # The CLI's own suite on the other platforms it ships for. Path separators, `.exe` suffixes and
+  # temp directories differ there, and five Windows-only failures went unseen until a person ran
+  # the suite by hand on Windows (C09). Linux runs it in `check` above.
+  cli-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the CLI and what it depends on
+        run: pnpm turbo run build --filter=@supatype/cli...
+
+      - name: Test the CLI
+        run: pnpm --filter @supatype/cli test
 
   docker:
     runs-on: ubuntu-latest
