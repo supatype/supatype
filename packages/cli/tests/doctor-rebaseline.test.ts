@@ -17,10 +17,8 @@ vi.mock("../src/resolve-target.js", () => ({
   targetSchemaDoctor,
   requireTargetFeatures: requireEngine,
   schemaPgSchema: () => "public",
-  resolveTarget: () => ({ mode: "direct", databaseUrl: "postgres://x" }),
+  schemaCommandTarget: async () => ({ mode: "direct", databaseUrl: "postgres://x" }),
 }))
-vi.mock("../src/link.js", () => ({ loadProjectLink: () => null }))
-vi.mock("../src/dev-compose.js", () => ({ resolveHostEngineDatabaseUrl: async () => "postgres://x" }))
 vi.mock("../src/model-hooks.js", () => ({
   hooksReport: () => ({ declared: [], missing: [], validators: [], validatorsMissing: [], validatorMapMissing: false }),
 }))
@@ -28,7 +26,8 @@ vi.mock("../src/service-role-check.js", () => ({ checkServiceRoleRoutes: () => (
 vi.mock("../src/ui/interactive.js", () => ({ isInteractive: vi.fn(() => false) }))
 vi.mock("../src/ui/clack.js", () => ({ p: { confirm: confirmMock, cancel: vi.fn() }, isCancel: () => false, CLACK_CANCEL: Symbol() }))
 
-import { rebaselinePlan, registerDoctor, type DoctorItem, type DoctorReport } from "../src/commands/doctor.js"
+import { rebaselinePlan, registerDoctor, type DoctorReport } from "../src/commands/doctor.js"
+import type { DoctorItem } from "../src/engine-client.js"
 import { isInteractive } from "../src/ui/interactive.js"
 
 const item = (kind: string, name: string): DoctorItem => ({ kind, table: "posts", name, fields: [], message: `${kind} ${name} drifted` })

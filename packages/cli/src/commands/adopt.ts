@@ -2,13 +2,13 @@ import { resolve } from "node:path"
 import type { Command } from "commander"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { withPublishing } from "../model-versioning.js"
-import { schemaPathFromProject } from "../project-config.js"
+import { pgSchema, schemaPathFromProject } from "../project-config.js"
 import {
   requireTargetFeatures,
+  schemaCommandTarget,
   targetCapabilities,
   targetSchemaAdopt,
   targetSchemaIntrospect,
-  schemaPgSchema,
 } from "../resolve-target.js"
 import {
   adoptedCount,
@@ -19,8 +19,8 @@ import {
   isStalePreview,
   previewedKeys,
   STALE_PREVIEW_MESSAGE,
-  type AdoptOutcome,
 } from "../adopt-walkthrough.js"
+import type { AdoptOutcome } from "../engine-client.js"
 import { declareAdoptedColumns, previewKeyedColumns } from "../adopt-columns.js"
 import { askConsent, confirm } from "../ui/confirm.js"
 import { isInteractive } from "../ui/interactive.js"
@@ -28,7 +28,6 @@ import { error, info, plain, warn } from "../ui/messages.js"
 import { adoptKeysNeed, adoptNeeds } from "../engine-ownership-gate.js"
 import { withSpinner } from "../ui/progress.js"
 import { addRetiredNoCacheOption, warnIfRetiredNoCache } from "../retired-no-cache.js"
-import { schemaCommandTarget } from "./doctor.js"
 import { regenerateTypes } from "./generate.js"
 
 interface AdoptOptions {
@@ -81,17 +80,43 @@ async function adopt(opts: AdoptOptions): Promise<void> {
   await requireTargetFeatures(target, adoptNeeds({ release: opts.release, keys: opts.key }))
   const run = (yes: boolean, keys?: string[]): Promise<AdoptOutcome> =>
     targetSchemaAdopt(target, ast, {
-      schema: schemaPgSchema(cwd),
+      schema: pgSchema(config),
       yes,
       ...(opts.release !== undefined && { release: opts.release }),
       ...(keys !== undefined && { keys }),
     })
-
   const entryPath = resolve(cwd, schemaPathFromProject(config, cwd))
   // A column the database fills is declared as one only for an engine that reads it.
   const identityColumns = (await targetCapabilities(target)).features.has("identity_columns")
-  const introspect = (): Promise<unknown> => targetSchemaIntrospect(target, { schema: schemaPgSchema(cwd) })
-
+  const introspect = (): Promise<unknown> => targetSchemaIntrospect(target, { schema: pgSchema(config) })
+  // An adopted column is managed, so the schema declares it from now on (see adopt-columns.ts).
+  const declare = (outcome: AdoptOutcome) =>
+    declareAdoptedColumns(
+      outcome.adopt ?? [],
+      {
+        entryPath,
+        cwd,
+        yes: opts.yes ?? false,
+        interactive: isInteractive(),
+        identityColumns,
+      },
+      {
+        introspect,
+        confirm: async (question) => (await confirm(question, { default: false })) === true,
+        regenerate: () => regenerateTypes(cwd),
+        say: { info, warn, plain },
+      },
+    )
+  // `--yes` already agreed, so one engine call does it and its outcome says what it took: with
+  // `--key` only those objects, and without, every conflict found as it runs.
+  if (opts.yes) {
+    const outcome = await applying(() => run(true, opts.key))
+    if (outcome === undefined) return
+    for (const line of previewLines(outcome)) plain(`  ${line}`)
+    report(outcome)
+    await declare(outcome)
+    return
+  }
   const preview = keyedOnly(await run(false), opts.key)
   // A column added outside Supatype is not a conflict, so the engine's preview does not list it:
   // say here what adopting each keyed one does, including the field the schema will gain.
@@ -99,21 +124,14 @@ async function adopt(opts: AdoptOptions): Promise<void> {
     opts.key === undefined
       ? []
       : await previewKeyedColumns(opts.key, previewedKeys(preview) ?? [], { entryPath, cwd, identityColumns }, { introspect })
-  const lines = [...previewLines(preview), ...columnLines]
-  if (lines.length === 0 && opts.key === undefined) {
-    info("Nothing to adopt: every object the schema declares is Supatype's or absent.")
-    return
-  }
-  plain(`\nAdopt will:\n`)
-  for (const line of lines) plain(`  ${line}`)
-  // `--key` names what to adopt. Otherwise, agreeing at the prompt agrees to what was just shown:
-  // applying names those conflicts, and the engine writes nothing if the database has changed
-  // since. `--yes` alone was agreed before anything was shown, so it adopts every conflict there
-  // is. An engine from before the ledger names none.
-  const keys = opts.key ?? (opts.yes ? undefined : previewedKeys(preview))
+  if (!show([...previewLines(preview), ...columnLines], opts.key !== undefined)) return
+  // `--key` names what to adopt. Otherwise what was just shown is what is agreed to: applying names
+  // those conflicts, and the engine writes nothing if the database has changed since. An engine
+  // from before the ledger names none.
+  const keys = opts.key ?? previewedKeys(preview)
   // Before anyone is asked: applying sends what was shown, which the target must honour.
   if (opts.key === undefined && keys !== undefined) await requireTargetFeatures(target, [adoptKeysNeed(keys)])
-  const consent = await askConsent("Go ahead?", opts.yes ?? false)
+  const consent = await askConsent("Go ahead?", false)
   if (consent === "needs-yes") {
     // Not a decline: a pipeline that forgot --yes adopted nothing, and must not pass as if it had.
     error("adopt needs --yes when not interactive")
@@ -124,38 +142,44 @@ async function adopt(opts: AdoptOptions): Promise<void> {
     plain("Adoption cancelled.")
     return
   }
-  let outcome: AdoptOutcome
+  const outcome = await applying(() => run(true, keys))
+  if (outcome === undefined) return
+  report(outcome)
+  await declare(outcome)
+}
+
+/**
+ * The outcome of applying, or undefined, having said so and set exit 1, when the engine refused
+ * because an object it was to adopt is no longer a conflict.
+ */
+async function applying(apply: () => Promise<AdoptOutcome>): Promise<AdoptOutcome | undefined> {
   try {
-    outcome = await run(true, keys)
+    return await apply()
   } catch (err: unknown) {
     if (!isStalePreview(err) && !isEngineBusy(err)) throw err
     // Nothing was written either way: the engine refused before it took anything.
     error(isEngineBusy(err) ? ENGINE_BUSY_MESSAGE : STALE_PREVIEW_MESSAGE)
     process.exitCode = 1
-    return
+    return undefined
   }
-  if (keys === undefined) {
-    // Agreed before it ran, so what it found may not be what was shown: say what it took.
-    for (const line of adoptionLines(outcome)) plain(`  ${line}`)
+}
+
+/**
+ * Prints what adopt will do, or says there is nothing; whether to go on. With `--key` it goes on
+ * regardless: the engine says if a named object is not a conflict.
+ */
+function show(lines: readonly string[], keyed: boolean): boolean {
+  if (lines.length === 0 && !keyed) {
+    info("Nothing to adopt: every object the schema declares is Supatype's or absent.")
+    return false
   }
+  plain(`\nAdopt will:\n`)
+  for (const line of lines) plain(`  ${line}`)
+  return true
+}
+
+function report(outcome: AdoptOutcome): void {
   info(`Adopted ${adoptedCount(outcome)} object(s), released ${outcome.release?.length ?? 0}.`)
-  // An adopted column is managed, so the schema declares it from now on (see adopt-columns.ts).
-  await declareAdoptedColumns(
-    outcome.adopt ?? [],
-    {
-      entryPath,
-      cwd,
-      yes: opts.yes ?? false,
-      interactive: isInteractive(),
-      identityColumns,
-    },
-    {
-      introspect,
-      confirm: async (question) => (await confirm(question, { default: false })) === true,
-      regenerate: () => regenerateTypes(cwd),
-      say: { info, warn, plain },
-    },
-  )
 }
 
 /** The preview with only the conflicts `keys` names, when it names any. */

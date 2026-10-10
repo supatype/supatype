@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from "react"
+import { useSearchParams } from "react-router-dom"
 import { cn } from "../lib/utils.js"
 import { Badge, Button, Card, Input, Select, Th, Td } from "../components/ui.js"
 import { useProjectProxy, type ProjectProxy } from "../hooks/useProjectProxy.js"
@@ -438,6 +439,11 @@ function SlideOutPanel({ proxy, migration, changes, onClose }: {
   )
 }
 
+/** The migration a `?migration=<id>` link names, or null for anything that is not an id. */
+export function linkedMigrationId(param: string | null): number | null {
+  return param !== null && /^\d+$/.test(param) ? Number(param) : null
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export function MigrationHistory(): React.ReactElement {
@@ -473,8 +479,16 @@ export function MigrationHistory(): React.ReactElement {
     return map
   }, [visibleMigrations])
 
+  // A link to one migration (from Schema objects): shown on its own, already expanded.
+  const [params, setParams] = useSearchParams()
+  const linkedId = linkedMigrationId(params.get("migration"))
+
   // Inline expanded row id
-  const [expandedId, setExpandedId] = useState<number | null>(null)
+  const [expandedId, setExpandedId] = useState<number | null>(linkedId)
+  // Following another link while this screen is open expands the migration it names.
+  useEffect(() => {
+    if (linkedId !== null) setExpandedId(linkedId)
+  }, [linkedId])
   // Slide-out panel migration
   const [slideOut, setSlideOut] = useState<Migration | null>(null)
 
@@ -484,6 +498,9 @@ export function MigrationHistory(): React.ReactElement {
   const [dateTo, setDateTo] = useState("")
 
   const filtered = useMemo(() => {
+    // From every tracked migration, not only the visible ones: the one a link names may be a
+    // repeat sync this screen otherwise hides.
+    if (linkedId !== null) return trackedMigrations.filter((m) => m.id === linkedId)
     return displayMigrations.filter((m) => {
       const status: MigrationStatus = m.rolled_back ? "rolled_back" : "applied"
       if (search && !m.name.toLowerCase().includes(search.toLowerCase()) && !String(m.id).includes(search)) return false
@@ -492,7 +509,7 @@ export function MigrationHistory(): React.ReactElement {
       if (dateTo && new Date(m.applied_at) > new Date(dateTo + "T23:59:59Z")) return false
       return true
     })
-  }, [displayMigrations, search, filterStatus, dateFrom, dateTo])
+  }, [linkedId, trackedMigrations, displayMigrations, search, filterStatus, dateFrom, dateTo])
 
   if (loading) {
     return (
@@ -533,6 +550,17 @@ export function MigrationHistory(): React.ReactElement {
 
   return (
     <>
+      {linkedId !== null && (
+        <div className="flex items-center gap-2 mb-2 text-xs text-muted-foreground">
+          <span>
+            {filtered.length === 0
+              ? `Migration #${linkedId} not found.`
+              : `Showing migration #${linkedId} only.`}
+          </span>
+          <Button size="xs" onClick={() => setParams({})}>Show all</Button>
+        </div>
+      )}
+
       {/* Filters */}
       <div className="flex gap-2 mb-4 flex-wrap">
         <Input
@@ -617,7 +645,9 @@ export function MigrationHistory(): React.ReactElement {
             {filtered.length === 0 && (
               <tr>
                 <td colSpan={8} className="text-center py-8 text-muted-foreground text-sm">
-                  No migrations match your filters
+                  {linkedId !== null
+                    ? `Migration #${linkedId} not found: no tracked schema migration has that id.`
+                    : "No migrations match your filters"}
                 </td>
               </tr>
             )}

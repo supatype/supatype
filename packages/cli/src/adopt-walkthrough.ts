@@ -11,7 +11,7 @@
  * adoption would take, and asks twice before taking it. Anywhere else it never adopts, because
  * agreeing to a push is not agreeing to take ownership of tables, and it prints the command instead.
  */
-import { ENGINE_BUSY, EngineError } from "./engine-client.js"
+import { ENGINE_BUSY, EngineError, type AdoptOutcome, type DoctorItem } from "./engine-client.js"
 import { TargetApiError } from "./target-client.js"
 import { confirm } from "./ui/confirm.js"
 import { isInteractive } from "./ui/interactive.js"
@@ -52,27 +52,6 @@ export function engineOutputOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
-/** One object `adopt` hands over or takes back, as the engine names it. */
-export interface AdoptionItem {
-  kind: string
-  table: string
-  name: string
-  message: string
-}
-
-/**
- * What the engine's `adopt` reports, previewing or applying. Since the ledger it lists the objects
- * it hands over (`adopt`) and takes back (`release`) and writes ledger rows; an engine from before
- * listed the comment stamps it would write (`stampStatements`) and counted them (`stamped`).
- */
-export interface AdoptOutcome {
-  status?: string
-  adopt?: AdoptionItem[]
-  release?: AdoptionItem[]
-  stampStatements?: string[]
-  stamped?: number
-}
-
 /** What adopting would take, one line per object, whichever engine answered. */
 export function adoptionLines(outcome: AdoptOutcome): string[] {
   return outcome.adopt?.map((item) => item.message) ?? outcome.stampStatements ?? []
@@ -85,7 +64,7 @@ export function adoptionLines(outcome: AdoptOutcome): string[] {
 const TABLE_LEVEL_KINDS = new Set(["schema", "table", "function", "view", "enum_type", "sequence", "cron_job"])
 
 /** An object as the engine's `adopt --key` (and the `keys` request field) names it. */
-export function adoptionKey(item: Pick<AdoptionItem, "kind" | "table" | "name">): string {
+export function adoptionKey(item: Pick<DoctorItem, "kind" | "table" | "name">): string {
   return TABLE_LEVEL_KINDS.has(item.kind) ? `${item.kind}:${item.name}` : `${item.kind}:${item.table}.${item.name}`
 }
 

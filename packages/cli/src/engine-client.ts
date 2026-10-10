@@ -70,6 +70,32 @@ export interface ReconcileAction {
   drifted?: { recorded_def: string; live_def: string; live_fp?: string }
 }
 
+/** One object in a doctor or adopt report, as the engine names it. */
+export interface DoctorItem {
+  kind: string
+  table: string
+  name: string
+  fields: string[]
+  message: string
+  /** What Supatype recorded, for a drifted object. */
+  recorded?: string
+  /** What the database holds now, for a drifted or conflicting object. */
+  live?: string
+}
+
+/**
+ * What the engine's `adopt` reports, previewing or applying. Since the ledger it lists the objects
+ * it hands over (`adopt`) and takes back (`release`) and writes ledger rows; an engine from before
+ * listed the comment stamps it would write (`stampStatements`) and counted them (`stamped`).
+ */
+export interface AdoptOutcome {
+  status?: string
+  adopt?: DoctorItem[]
+  release?: DoctorItem[]
+  stampStatements?: string[]
+  stamped?: number
+}
+
 export interface DiffResult {
   operations: Operation[]
   /** Absent from engines older than the ledger. */
