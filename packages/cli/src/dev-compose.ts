@@ -54,7 +54,7 @@ import {
   usesLocalServerImage,
   LOCAL_SERVER_DOCKER_IMAGE,
 } from "./compose-local-server-image.js"
-import { ensureEngine, engineRequest, type DiffResult } from "./engine-client.js"
+import { ensureEngine, engineRequest, type AdoptOutcome, type DiffResult } from "./engine-client.js"
 import { writeSchemaSourcePushArtifacts, type SchemaSourcePushArtifacts } from "./schema-sources.js"
 import { readEnvValue, upsertEnvFile } from "./env-file.js"
 import {
@@ -65,7 +65,7 @@ import {
   seedMissingLocalSecrets,
 } from "./local-secrets.js"
 import { writeLocalEnvironment } from "./link.js"
-import { registerDevShutdown } from "./dev-shutdown.js"
+import { registerDevShutdown, waitForDevShutdown } from "./dev-shutdown.js"
 import {
   filterComposeNoise,
   formatEnginePushMessage,
@@ -81,8 +81,22 @@ import type { ExtractedSchemaAstV2 } from "./schema-ast-v2.js"
 import { ensureFirstAdminUserForProject } from "./commands/admin.js"
 import { publishDevReady } from "./dev-ready-panel.js"
 import { exitInitialPushFailed, pushInitialSchema, type InitialPushSteps } from "./dev-initial-push.js"
-import { offerAdoption, unmanagedTables, type AdoptionSteps } from "./adopt-walkthrough.js"
+import {
+  offerAdoption,
+  targetAdoptionSteps,
+  unmanagedTables,
+  type AdoptionSteps,
+} from "./adopt-walkthrough.js"
 import { resetDevDatabase } from "./dev-db-reset.js"
+import {
+  adoptKeysNeed,
+  assertSupported,
+  engineCapabilities,
+  identityColumnsNeed,
+  probeCapabilities,
+  type Capabilities,
+  type FeatureNeed,
+} from "./engine-ownership-gate.js"
 import { hostComposeDbUrl, resolveHostDatabaseUrl } from "./host-database.js"
 
 /** Sync optional Docker image pins from config into `.env` (no JWT rotation). */
@@ -103,6 +117,8 @@ export interface DevComposeOptions {
   resetDb: boolean
   /** The reset was already confirmed on the command line, so do not prompt for it. */
   yes: boolean
+  /** `--overwrite-drift`: every push of the session puts back access changed outside Supatype. */
+  overwriteDrift?: boolean
 }
 
 /** In-compose Postgres URL (SCRAM; not published to the host). */
@@ -730,12 +746,19 @@ async function refreshSchemaArtifacts(
   }
 }
 
+/** How one push treats what needs a person's say. */
+export interface ComposePushOptions {
+  /** `--overwrite-drift`: put back access changed outside Supatype (plan 3.5). */
+  overwriteDrift?: boolean
+}
+
 async function runComposeSchemaPush(
   cwd: string,
   config: SupatypeProjectConfig,
   paths: SelfHostComposePaths,
   schemaPath: string,
   composeProject: string,
+  opts: ComposePushOptions = {},
 ): Promise<void> {
   const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
   const astJson = JSON.stringify(ast)
@@ -750,6 +773,9 @@ async function runComposeSchemaPush(
   if (!existsSync(astPath)) {
     throw new Error(`Failed to write schema AST at ${astPath}`)
   }
+  // Identity and generated columns only to an engine that reads them (the override's binary is
+  // asked by `engineRequest`).
+  if (!hasEngineOverride(config)) await requireDockerFeatures(cwd, config, identityColumnsNeed(ast))
 
   // Admin + types come from the AST only (no DB), refresh before push so Studio stays
   // in sync even when migration fails (e.g. bad engine image, lossy column change).
@@ -766,6 +792,7 @@ async function runComposeSchemaPush(
         database_url: projectDatabaseUrl(cwd, config),
         schema: pgSchema,
         force: true,
+        ...(opts.overwriteDrift === true && { overwrite_drift: true }),
         ...(sources
           ? {
               schema_sources_gz_base64: sources.payload.dataBase64,
@@ -790,11 +817,11 @@ async function runComposeSchemaPush(
   console.log("[supatype] Applying schema via compose schema-engine...")
   const sources = writeSchemaSourcePushArtifacts(cwd)
   const runPush = async () => {
-    let result = await runComposeEnginePush(paths, cwd, composeProject, config, sources)
+    let result = await runComposeEnginePush(paths, cwd, composeProject, config, sources, opts)
     // Windows Docker bind mounts can lag briefly after the host write.
     if (result.status !== 0) {
       await new Promise((r) => setTimeout(r, 250))
-      result = await runComposeEnginePush(paths, cwd, composeProject, config, sources)
+      result = await runComposeEnginePush(paths, cwd, composeProject, config, sources, opts)
     }
     return result
   }
@@ -823,6 +850,7 @@ async function runComposeSchemaPushQueued(
   paths: SelfHostComposePaths,
   schemaPath: string,
   composeProject: string,
+  opts: ComposePushOptions = {},
 ): Promise<void> {
   if (_composePushInFlight) {
     _composePushQueued = true
@@ -832,7 +860,7 @@ async function runComposeSchemaPushQueued(
   try {
     do {
       _composePushQueued = false
-      await runComposeSchemaPush(cwd, config, paths, schemaPath, composeProject)
+      await runComposeSchemaPush(cwd, config, paths, schemaPath, composeProject, opts)
     } while (_composePushQueued)
   } finally {
     _composePushInFlight = false
@@ -845,6 +873,7 @@ async function runComposeEnginePush(
   composeProject: string,
   config: SupatypeProjectConfig,
   sources?: SchemaSourcePushArtifacts | null,
+  opts: ComposePushOptions = {},
 ): Promise<{ status: number; output: string }> {
   const envFile = resolve(cwd, ".env")
   const composeArgs = ["compose", "--progress", "quiet"]
@@ -860,22 +889,8 @@ async function runComposeEnginePush(
     "run",
     "--rm",
     "schema-engine",
-    "push",
-    "-i",
-    "/project/.supatype/schema.ast.json",
-    "--database-url",
-    projectDatabaseUrl(cwd, config, true),
-    "--force",
-    "--non-interactive",
+    ...composeEnginePushArgs(projectDatabaseUrl(cwd, config, true), sources, opts),
   )
-  if (sources) {
-    composeArgs.push(
-      "--schema-sources-gz",
-      sources.dockerGzPath,
-      "--schema-sources-manifest",
-      sources.dockerManifestPath,
-    )
-  }
   const pushEnv: NodeJS.ProcessEnv = {
     ...process.env,
     COMPOSE_PROGRESS: "quiet",
@@ -907,6 +922,73 @@ async function runComposeEnginePush(
 }
 
 /**
+ * What the engine a docker project runs supports: the local binary when `overrides.engine` is set,
+ * otherwise the compose schema-engine image, asked in a throwaway container.
+ */
+export async function dockerEngineCapabilities(cwd: string, config: SupatypeProjectConfig): Promise<Capabilities> {
+  if (hasEngineOverride(config)) return engineCapabilities()
+  const engineImage = await schemaEngineImageForPush(config)
+  const cacheKey = `${cwd}\0${engineImage ?? ""}`
+  const known = dockerCapabilities.get(cacheKey)
+  if (known !== undefined) return known
+  const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
+  const project = composeProjectName(config.project.name)
+  const caps = probeCapabilities((args) => {
+    const envFile = resolve(cwd, ".env")
+    const composeArgs = ["compose", "--progress", "quiet", "-p", project, "--project-directory", cwd, "-f", paths.composePath]
+    if (existsSync(envFile)) composeArgs.push("--env-file", envFile)
+    composeArgs.push("--profile", "tools", "run", "--rm", "--no-deps", "schema-engine", ...args)
+    const env: NodeJS.ProcessEnv = { ...process.env, COMPOSE_PROGRESS: "quiet" }
+    if (engineImage) env.SUPATYPE_ENGINE_IMAGE = engineImage
+    const run = spawnSync("docker", composeArgs, { cwd, encoding: "utf8", maxBuffer: 10 * 1024 * 1024, env })
+    return { status: run.status, stdout: run.stdout ?? "" }
+  })
+  dockerCapabilities.set(cacheKey, caps)
+  return caps
+}
+
+/** One answer per project and engine image for the life of the process: each costs a container. */
+const dockerCapabilities = new Map<string, Capabilities>()
+
+/** Refuse, before anything is sent, an ownership feature the docker project's engine lacks. */
+export async function requireDockerFeatures(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  needs: readonly FeatureNeed[],
+): Promise<void> {
+  if (needs.length === 0) return
+  assertSupported(await dockerEngineCapabilities(cwd, config), needs)
+}
+
+/** The compose schema-engine's `push` arguments, after the service name. Exported for its tests. */
+export function composeEnginePushArgs(
+  databaseUrl: string,
+  sources: SchemaSourcePushArtifacts | null | undefined,
+  opts: ComposePushOptions = {},
+): string[] {
+  const args = [
+    "push",
+    "-i",
+    "/project/.supatype/schema.ast.json",
+    "--database-url",
+    databaseUrl,
+    "--force",
+    "--non-interactive",
+  ]
+  // Only when asked: an engine older than the ledger rejects the flag.
+  if (opts.overwriteDrift === true) args.push("--overwrite-drift")
+  if (sources) {
+    args.push(
+      "--schema-sources-gz",
+      sources.dockerGzPath,
+      "--schema-sources-manifest",
+      sources.dockerManifestPath,
+    )
+  }
+  return args
+}
+
+/**
  * One schema-engine subcommand in the compose `tools` profile, against the stack's own database.
  *
  * In a container, so it reaches Postgres at the compose-internal address and needs nothing
@@ -927,8 +1009,8 @@ export interface EngineRun {
  * whole, and with stderr joined on (a compose warning about an unset variable, an engine log line)
  * it did not parse at all, so a preview that worked was reported as a failed adopt.
  */
-export function adoptResultFrom(run: EngineRun): AdoptResult | null {
-  return run.status === 0 ? parseEngineJsonOutput<AdoptResult>(run.stdout) : null
+export function adoptResultFrom(run: EngineRun): AdoptOutcome | null {
+  return run.status === 0 ? parseEngineJsonOutput<AdoptOutcome>(run.stdout) : null
 }
 
 async function runComposeEngineCommand(
@@ -986,23 +1068,28 @@ async function runComposeEngineDiff(
   return { ...result, diff: parseEngineJsonOutput<DiffResult>(result.output) }
 }
 
-/** Adoption against a docker project's own database, for the push walkthrough. */
-export function dockerAdoptionSteps(cwd: string, config: SupatypeProjectConfig): AdoptionSteps {
-  return {
-    preview: async () => (await adoptSchemaDocker(cwd, config, false)).stampStatements ?? [],
-    apply: async () => (await adoptSchemaDocker(cwd, config, true)).stamped ?? 0,
-  }
+/**
+ * The compose schema-engine's `adopt` arguments. `keys: []` is "adopt none", which the binary
+ * spells `--adopt-none`: no `--key` at all would adopt every conflict. Exported for its tests.
+ */
+export function adoptCommand(yes: boolean, keys?: readonly string[]): string[] {
+  if (!yes) return ["adopt"]
+  if (keys === undefined) return ["adopt", "--yes"]
+  if (keys.length === 0) return ["adopt", "--yes", "--adopt-none"]
+  return ["adopt", "--yes", ...keys.flatMap((k) => ["--key", k])]
 }
 
-/** What `adopt` reports, previewing or applying. */
-export interface AdoptResult {
-  status?: string
-  stampStatements?: string[]
-  stamped?: number
+/** Adoption against a docker project's own database, for the push walkthrough. */
+export function dockerAdoptionSteps(cwd: string, config: SupatypeProjectConfig): AdoptionSteps {
+  return targetAdoptionSteps(
+    (yes, keys) => adoptSchemaDocker(cwd, config, yes, keys),
+    (keys) => requireDockerFeatures(cwd, config, [adoptKeysNeed(keys)]),
+  )
 }
 
 /**
- * Adopt on a docker project's own database: the stamp preview, or with `yes`, the stamps applied.
+ * Adopt on a docker project's own database: the preview, or with `yes`, the ledger rows written,
+ * for only the conflicts `keys` names when it is given (as a preview listed them).
  *
  * Through the compose schema-engine, or the local engine binary when `overrides.engine` is set,
  * the same way `diffSchemaDocker` reaches the database. The stack's database must be running,
@@ -1012,20 +1099,31 @@ export async function adoptSchemaDocker(
   cwd: string,
   config: SupatypeProjectConfig,
   yes: boolean,
-): Promise<AdoptResult> {
+  keys?: string[],
+): Promise<AdoptOutcome> {
   const project = composeProjectName(config.project.name)
+  // Only these conflicts, or none for an empty list: never sent to an engine that would read
+  // either as "every conflict".
+  if (keys !== undefined) await requireDockerFeatures(cwd, config, [adoptKeysNeed(keys)])
   if (hasEngineOverride(config)) {
     await ensureDockerDbPublishedForHostEngine(cwd, config, { intro: "Adopt" })
     await ensureEngine()
-    return engineRequest<AdoptResult>("/adopt", {
+    return engineRequest<AdoptOutcome>("/adopt", {
       ast: withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config),
       database_url: projectDatabaseUrl(cwd, config),
       schema: config.schema?.pg_schema ?? "public",
       yes,
+      ...(keys !== undefined && { keys }),
     })
   }
+  await requireDockerFeatures(
+    cwd,
+    config,
+    identityColumnsNeed(withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)),
+  )
   const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
-  const result = await runComposeEngineCommand(paths, cwd, project, config, yes ? ["adopt", "--yes"] : ["adopt"])
+  const command = adoptCommand(yes, keys)
+  const result = await runComposeEngineCommand(paths, cwd, project, config, command)
   const parsed = adoptResultFrom(result)
   if (parsed === null) {
     throw new Error(filterComposeNoise(result.output) || `Engine adopt failed (exit ${result.status})`)
@@ -1072,6 +1170,7 @@ export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfi
 
   const schemaPath = schemaPathFromProject(config, cwd)
   const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
+  await requireDockerFeatures(cwd, config, identityColumnsNeed(ast))
 
   const supatypeDir = join(cwd, ".supatype")
   mkdirSync(supatypeDir, { recursive: true })
@@ -1108,7 +1207,11 @@ export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfi
  * `overrides.engine` is set: then Postgres is published to the host and push runs
  * through the local engine binary (AST v2, contributor builds).
  */
-export async function pushSchemaDocker(cwd: string, config: SupatypeProjectConfig): Promise<void> {
+export async function pushSchemaDocker(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  opts: ComposePushOptions = {},
+): Promise<void> {
   if (resolveRuntimeProvider(config) !== "docker") {
     throw new Error("pushSchemaDocker requires provider: docker")
   }
@@ -1136,7 +1239,7 @@ export async function pushSchemaDocker(cwd: string, config: SupatypeProjectConfi
 
   const schemaPath = schemaPathFromProject(config, cwd)
   const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
-  await runComposeSchemaPush(cwd, config, paths, schemaPath, project)
+  await runComposeSchemaPush(cwd, config, paths, schemaPath, project, opts)
 
   const upGateway = runDockerCompose(paths.composePath, ["up", "-d"], cwd, project, {
     quiet: true,
@@ -1167,9 +1270,10 @@ async function applyInitialSchema(
   schemaPath: string,
   project: string,
   brand: DockerBrandOptions,
+  opts: ComposePushOptions = {},
 ): Promise<void> {
   const steps: InitialPushSteps = {
-    push: () => runComposeSchemaPush(cwd, config, paths, schemaPath, project),
+    push: () => runComposeSchemaPush(cwd, config, paths, schemaPath, project, opts),
     recoverDatabase: () => startComposeDatabase(config, paths, cwd, project, brand, undefined, endDevSession),
     dumpLogs: (reason) => dumpComposeDbLogs(paths, cwd, project, reason),
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
@@ -1290,7 +1394,9 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
 
   // A: apply schema before realtime (and the rest of the stack) starts decoding WAL.
   const schemaPath = schemaPathFromProject(config, cwd)
-  await applyInitialSchema(cwd, config, paths, schemaPath, project, devBrand)
+  // `dev --overwrite-drift`, already checked against this engine before the session began.
+  const pushOptions: ComposePushOptions = { overwriteDrift: opts.overwriteDrift === true }
+  await applyInitialSchema(cwd, config, paths, schemaPath, project, devBrand, pushOptions)
 
   console.log("[supatype] Bringing up Docker Compose services...")
   const upStatus = runDockerCompose(paths.composePath, ["up", "-d"], cwd, project, {
@@ -1433,7 +1539,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
       shutdownState.debounceTimer = setTimeout(() => {
         shutdownState.debounceTimer = null
         console.log(`\n[supatype] Change detected in ${filename}, pushing schema...`)
-        runComposeSchemaPushQueued(cwd, config, paths, schemaPath, project)
+        runComposeSchemaPushQueued(cwd, config, paths, schemaPath, project, pushOptions)
           .then(async () => {
             const updatedAst = loadSchemaAst(schemaPath, cwd)
             await provisionDockerStorageBuckets(updatedAst, kongPort, serviceRoleKey)
@@ -1445,7 +1551,8 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
     })
   }
 
-  await new Promise<never>(() => undefined)
+  // Until Ctrl+C or a signal: the shutdown hook takes the stack down and exits.
+  await waitForDevShutdown()
 }
 
 function astHasSystemAuthRelation(ast: unknown): boolean {

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { loadConfig } from "./config.js"
-import type { DiffResult } from "./engine-client.js"
+import type { AdoptOutcome, DiffResult } from "./engine-client.js"
 import { ensureEngine, engineRequest } from "./engine-client.js"
 import type { SchemaSourcesPayload } from "./schema-sources.js"
 import { resolveHostDatabaseUrl } from "./host-database.js"
@@ -27,7 +27,16 @@ import {
   resolveCloudAccessToken,
   resolveCloudRefreshToken,
 } from "./cloud-credentials.js"
-import { targetFetch, type TargetFetchOptions } from "./target-client.js"
+import { TargetApiError, targetFetch, type TargetFetchOptions } from "./target-client.js"
+import {
+  adoptNeeds,
+  assertSupported,
+  engineCapabilities,
+  identityColumnsNeed,
+  parseCapabilities,
+  type Capabilities,
+  type FeatureNeed,
+} from "./engine-ownership-gate.js"
 
 export interface ResolveTargetFlags {
   env?: string | undefined
@@ -245,11 +254,56 @@ function projectPath(target: DeployTarget, subpath: string): string {
   return `/projects/${target.projectRef}${subpath}`
 }
 
+/** Whether `target` runs the engine binary here rather than asking a control plane. */
+function runsEngineHere(target: DeployTarget): boolean {
+  return target.mode === "direct" || (target.mode === "local" && !target.token)
+}
+
+const capabilitiesOf = new WeakMap<DeployTarget, Capabilities>()
+
+/**
+ * What `target` supports: the engine binary's own answer when it runs here, otherwise the control
+ * plane's `GET <schema base>/capabilities`. A control plane without the route (404) is from before
+ * it, and supports no ownership feature: it would drop the fields, not forward them.
+ */
+export async function targetCapabilities(target: DeployTarget): Promise<Capabilities> {
+  const known = capabilitiesOf.get(target)
+  if (known !== undefined) return known
+  let caps: Capabilities
+  if (runsEngineHere(target)) {
+    caps = await engineCapabilities()
+  } else {
+    let answer: unknown
+    try {
+      answer = await targetFetch<unknown>(
+        target.apiBaseUrl,
+        target.apiPrefix,
+        apiFetchOpts(target, "GET", projectPath(target, "/schema/capabilities")),
+      )
+    } catch (err: unknown) {
+      if (!(err instanceof TargetApiError && err.status === 404)) throw err
+    }
+    caps = { features: parseCapabilities(answer) ?? new Set(), source: "server" }
+  }
+  capabilitiesOf.set(target, caps)
+  return caps
+}
+
+/**
+ * Refuse, before anything is sent, an ownership feature `target` does not support: "this server
+ * does not support <flag>; update it". Never asks when nothing is needed.
+ */
+export async function requireTargetFeatures(target: DeployTarget, needs: readonly FeatureNeed[]): Promise<void> {
+  if (needs.length === 0) return
+  assertSupported(await targetCapabilities(target), needs)
+}
+
 export async function targetSchemaDiff(
   target: DeployTarget,
   ast: unknown,
   opts?: { schema?: string },
 ): Promise<DiffResult> {
+  await requireTargetFeatures(target, identityColumnsNeed(ast))
   if (target.mode === "direct" || (target.mode === "local" && !target.token)) {
     await ensureEngine()
     return engineRequest<DiffResult>("/diff", {
@@ -272,7 +326,13 @@ export async function targetSchemaDiff(
 export async function targetSchemaPush(
   target: DeployTarget,
   ast: unknown,
-  opts?: { force?: boolean; schema?: string; schemaSources?: SchemaSourcesPayload | null },
+  opts?: {
+    force?: boolean
+    schema?: string
+    schemaSources?: SchemaSourcesPayload | null
+    /** Put back access changed outside Supatype (plan 3.5); only after consent. */
+    overwriteDrift?: boolean
+  },
 ): Promise<{
   message?: string
   status?: string
@@ -286,13 +346,19 @@ export async function targetSchemaPush(
    */
   cache?: { tables?: string[]; honoured?: boolean }
 }> {
-  if (target.mode === "direct" || (target.mode === "local" && !target.token)) {
+  const overwriteDrift = opts?.overwriteDrift === true
+  await requireTargetFeatures(target, [
+    ...(overwriteDrift ? [{ feature: "overwrite_drift" as const, flag: "--overwrite-drift" }] : []),
+    ...identityColumnsNeed(ast),
+  ])
+  if (runsEngineHere(target)) {
     await ensureEngine()
     const body: Record<string, unknown> = {
       ast,
       database_url: target.databaseUrl!,
       schema: opts?.schema ?? "public",
       force: opts?.force ?? true,
+      ...(overwriteDrift && { overwrite_drift: true }),
     }
     if (opts?.schemaSources) {
       body["schema_sources_gz_base64"] = opts.schemaSources.dataBase64
@@ -305,6 +371,8 @@ export async function targetSchemaPush(
     ast,
     force: opts?.force ?? true,
     schema: opts?.schema ?? "public",
+    // The engine's own name, which a control plane forwards as it is.
+    ...(overwriteDrift && { overwrite_drift: true }),
   }
   if (opts?.schemaSources) {
     pushBody["schemaSources"] = {
@@ -388,27 +456,59 @@ export async function targetListMigrations(
   )
 }
 
+/**
+ * Where `doctor` and `adopt` look: the linked environment, else the local dev database, unless
+ * `--direct` or `--connection` asks for the engine subprocess. One answer for both, so `adopt` takes
+ * exactly what `doctor` reported. `dev-compose` is loaded only when the local database is the
+ * answer, as `push` loads it.
+ */
+export async function schemaCommandTarget(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  opts: { connection?: string; env?: string; direct?: boolean },
+): Promise<DeployTarget> {
+  if (opts.direct || opts.connection) {
+    return resolveTarget(cwd, { env: opts.env, direct: true, connection: opts.connection })
+  }
+  if (loadProjectLink(cwd)) return resolveTarget(cwd, { env: opts.env })
+  const { resolveHostEngineDatabaseUrl } = await import("./dev-compose.js")
+  const connection = await resolveHostEngineDatabaseUrl(cwd, config)
+  return resolveTarget(cwd, { direct: true, connection })
+}
+
+/**
+ * `doctor` on a target. With `rebaseline`, the drift it finds is first recorded as the new baseline
+ * (no object changes) and listed as rebaselined; access drift (policies, grants, labels, RLS) only
+ * with `acceptAccessDrift` as well (`accept_access_drift`; `overwrite_drift` is push's alone), else
+ * listed as `rebaselineRefused`.
+ */
 export async function targetSchemaDoctor(
   target: DeployTarget,
   ast: unknown,
-  opts?: { schema?: string },
+  opts?: { schema?: string; rebaseline?: boolean; acceptAccessDrift?: boolean },
 ): Promise<unknown> {
-  if (target.mode === "direct" || (target.mode === "local" && !target.token)) {
+  const rebaseline = opts?.rebaseline === true
+  const acceptAccessDrift = rebaseline && opts?.acceptAccessDrift === true
+  const body = {
+    ast,
+    schema: opts?.schema ?? "public",
+    ...(rebaseline && { rebaseline: true }),
+    ...(acceptAccessDrift && { accept_access_drift: true }),
+  }
+  await requireTargetFeatures(target, [
+    ...(rebaseline ? [{ feature: "rebaseline", flag: "--rebaseline" } as const] : []),
+    ...(acceptAccessDrift ? [{ feature: "accept_access_drift", flag: "--accept-access-drift" } as const] : []),
+    ...identityColumnsNeed(ast),
+  ])
+  if (runsEngineHere(target)) {
     await ensureEngine()
-    return engineRequest("/doctor", {
-      ast,
-      database_url: target.databaseUrl!,
-      schema: opts?.schema ?? "public",
-    })
+    return engineRequest("/doctor", { ...body, database_url: target.databaseUrl! })
   }
 
   return targetFetch(
     target.apiBaseUrl,
     target.apiPrefix,
-    apiFetchOpts(target, "POST", projectPath(target, "/schema/doctor"), {
-      ast,
-      schema: opts?.schema ?? "public",
-    }),
+    apiFetchOpts(target, "POST", projectPath(target, "/schema/doctor"), body),
   )
 }
 
@@ -433,32 +533,42 @@ export async function targetSchemaIntrospect(
   )
 }
 
+/**
+ * `adopt` on a target: hand the objects a push refuses to Supatype, take back the ones named in
+ * `release`, and hand back the released ones named in `reclaim` (`kind:table.name`, as doctor names
+ * them). A preview unless `yes`; with `keys` (the conflicts a preview showed, named the same way)
+ * only those are adopted, and nothing is written if one of them is no longer a conflict.
+ *
+ * An empty `keys` adopts nothing: the engine binary is told so with `--adopt-none` (see
+ * `endpointToArgs`), and its server reads `keys: []` the same way.
+ */
 export async function targetSchemaAdopt(
   target: DeployTarget,
   ast: unknown,
-  opts?: { names?: string[]; schema?: string; yes?: boolean },
-): Promise<unknown> {
-  if (target.mode === "direct" || (target.mode === "local" && !target.token)) {
-    await ensureEngine()
-    return engineRequest("/adopt", {
-      ast,
-      database_url: target.databaseUrl!,
-      schema: opts?.schema ?? "public",
-      names: opts?.names,
-      yes: opts?.yes ?? false,
-    })
+  opts?: { release?: string[]; reclaim?: string[]; keys?: string[]; schema?: string; yes?: boolean },
+): Promise<AdoptOutcome> {
+  const release = opts?.release ?? []
+  const reclaim = opts?.reclaim ?? []
+  const body = {
+    ast,
+    schema: opts?.schema ?? "public",
+    yes: opts?.yes ?? false,
+    ...(release.length > 0 && { release }),
+    ...(reclaim.length > 0 && { reclaim }),
+    ...(opts?.keys !== undefined && { keys: opts.keys }),
   }
-
-  return targetFetch(
+  // A server that dropped `keys` would adopt every conflict, and one that dropped `release` would
+  // adopt instead of release: refused before sending, never degraded.
+  await requireTargetFeatures(target, [...adoptNeeds({ keys: opts?.keys, release, reclaim }), ...identityColumnsNeed(ast)])
+  if (runsEngineHere(target)) {
+    await ensureEngine()
+    return engineRequest<AdoptOutcome>("/adopt", { ...body, database_url: target.databaseUrl! })
+  }
+  return (await targetFetch(
     target.apiBaseUrl,
     target.apiPrefix,
-    apiFetchOpts(target, "POST", projectPath(target, "/schema/adopt"), {
-      ast,
-      schema: opts?.schema ?? "public",
-      yes: opts?.yes ?? false,
-      ...(opts?.names !== undefined ? { names: opts.names } : {}),
-    }),
-  )
+    apiFetchOpts(target, "POST", projectPath(target, "/schema/adopt"), body),
+  )) as AdoptOutcome
 }
 
 export async function targetStatus(target: DeployTarget): Promise<unknown> {

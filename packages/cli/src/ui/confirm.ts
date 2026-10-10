@@ -31,6 +31,20 @@ export async function confirm(message: string, opts: ConfirmOptions = {}): Promi
   return value
 }
 
+/** What a person said to a change only they may approve. */
+export type Consent = "given" | "declined" | "needs-yes"
+
+/**
+ * Ask before a change only a person may approve. `--yes` is consent; without it a run that cannot
+ * ask has none, which the caller reports as an error (`needs-yes`) rather than reading silence as a
+ * no and exiting 0, so a pipeline that forgot `--yes` fails instead of passing having done nothing.
+ */
+export async function askConsent(question: string, yes: boolean): Promise<Consent> {
+  if (yes) return "given"
+  if (!isInteractive()) return "needs-yes"
+  return (await confirm(question, { default: false })) ? "given" : "declined"
+}
+
 /** Legacy-style y/N prompt text for non-TTY logs when skipping confirm. */
 export function logSkippedConfirm(reason: string): void {
   plain(`${reason} (use --yes to skip confirmation)`)

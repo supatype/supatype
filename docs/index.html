@@ -6,14 +6,14 @@
   <meta name="theme-color" content="#0A0A0C" />
   <link rel="icon" type="image/svg+xml" href="supatype-icon.svg" />
   <link rel="apple-touch-icon" href="supatype-icon.svg" />
-  <title>Supatype | Your types are the source of truth</title>
-  <meta name="description" content="Write your TypeScript types. Supatype derives the Postgres tables, migrations, row-level security, REST and GraphQL APIs, typed client, and Studio from one schema. Open source and in active development." />
+  <title>Supatype | Zero drift</title>
+  <meta name="description" content="Postgres, migrations, row-level security, API, realtime, storage, Studio and the typed client your components use, all from the TypeScript you already write. Change a field once. Nothing else to update." />
   <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
   <link rel="canonical" href="https://www.supatype.com/" />
   <link rel="alternate" type="text/plain" href="https://www.supatype.com/llms.txt" title="llms.txt" />
   <meta property="og:site_name" content="Supatype" />
-  <meta property="og:title" content="Supatype | Your types are the source of truth" />
-  <meta property="og:description" content="Postgres, APIs, row-level security, a typed client and Studio, derived from one TypeScript schema." />
+  <meta property="og:title" content="Supatype | Zero drift" />
+  <meta property="og:description" content="Postgres, migrations, row-level security, API, realtime, storage, Studio and the typed client your components use, all from the TypeScript you already write. Change a field once. Nothing else to update." />
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://www.supatype.com/" />
   <meta name="twitter:card" content="summary_large_image" />
@@ -24,17 +24,14 @@
 </head>
 <body>
 
-<div class="status">
-  <strong>Active development.</strong> Supatype is pre-1.0: it runs, but APIs and config may change between releases.
-</div>
-
 <header class="site-header">
   <nav>
     <a href="/" class="logo"><img src="supatype.svg" alt="Supatype" width="119" height="22" /></a>
     <div class="nav-links">
       <a href="#how-it-works">How it works</a>
-      <a href="#local-dev">Docs</a>
-      <a href="#self-host">Self-hosting</a>
+      <a href="#frameworks">Frameworks</a>
+      <a href="#agents">Agents</a>
+      <a href="/docs/">Docs</a>
       <a href="deploy-vm-github-actions.html">Guides</a>
     </div>
     <div class="nav-end">
@@ -50,12 +47,12 @@
   <section class="hero">
     <div class="wrap">
       <div class="hero-copy">
-        <div class="eyebrow">Open source · MIT</div>
-        <h1>Your types are the<br /><span class="gradient">source of truth.</span></h1>
+        <div class="eyebrow">MIT SDKs · Apache 2.0 CLI &amp; services · Schema engine binary under its own licence</div>
+        <h1>Zero <span class="gradient">drift.</span></h1>
         <p class="lede">
-          Write your TypeScript types. Supatype derives the Postgres tables, the migration, the
-          row-level security, the REST and GraphQL APIs, the typed client and an editing UI, and
-          keeps them in step every time the types change.
+          Postgres, migrations, row-level security, API, realtime, storage, Studio and the typed
+          client your components use, all from the TypeScript you already write. Change a field
+          once. Nothing else to update.
         </p>
         <div class="actions">
           <a href="#local-dev" class="btn btn-primary">Get started</a>
@@ -93,7 +90,7 @@
   }
 }&gt;</code></pre>
         <div class="panel-foot">
-          <div class="label">SUPATYPE PUSH DERIVES</div>
+          <div class="label">SUPATYPE PUSH GENERATES</div>
           <span>Table and migration</span>
           <span>Row-level security policies</span>
           <span>REST and GraphQL endpoints</span>
@@ -105,10 +102,18 @@
     </div>
   </section>
 
+  <!-- Demo video -->
+  <!-- TODO: add the demo video here (change a field once, watch the migration, policies, API and client follow). Leave hidden until a real recording exists. -->
+  <section class="demo" id="demo" hidden></section>
+
+  <div class="status">
+  <strong>Active development.</strong> Supatype is pre-1.0: it runs, but APIs and config may change between releases.
+  </div>
+
   <!-- Strip -->
   <section class="strip">
     <div class="wrap">
-      <span>MIT-licensed core</span><span class="sep">/</span>
+      <span>MIT SDKs, Apache 2.0 services</span><span class="sep">/</span>
       <span>Real Postgres 17</span><span class="sep">/</span>
       <span>Rust schema engine</span><span class="sep">/</span>
       <span>Self-host with Docker Compose</span>
@@ -120,10 +125,12 @@
     <div class="wrap">
       <div class="section-head">
         <div class="eyebrow">How it works</div>
-        <h2>One schema, and everything that usually drifts from it.</h2>
+        <h2>One set of types,<br />
+          <span class="gradient">and everything that usually drifts from it.</span></h2>
         <p>
-          A backend and a CMS normally describe the same data twice. Supatype reads your types once
-          and generates each layer from them, so a rename breaks the build instead of production.
+          Your stack describes the same data in six places, on both sides of the network. Supatype
+          has one. One set of types runs your whole stack, database to component. Rename a field and
+          the build fails instead of production.
         </p>
       </div>
 
@@ -162,272 +169,105 @@
     </div>
   </section>
 
-  <!-- Docs -->
-  <section class="section" id="docs">
-    <div class="wrap docs">
-
-      <aside class="docs-nav" aria-label="Documentation">
-        <p class="group">Get started</p>
-        <ul>
-          <li><a href="#local-dev">Local development</a></li>
-          <li><a href="#self-host">Self-hosting</a></li>
-        </ul>
-        <p class="group">Operate</p>
-        <ul>
-          <li><a href="#deploy-changes">Deploy changes</a></li>
-          <li><a href="#upgrading">Upgrading Supatype</a></li>
-        </ul>
-        <p class="group">Guides</p>
-        <ul>
-          <li><a href="deploy-vm-github-actions.html">VM + GitHub Actions</a></li>
-        </ul>
-      </aside>
-
-      <div>
-        <!-- Local development -->
-        <article class="doc" id="local-dev">
-          <div class="eyebrow">Get started</div>
-          <h2>Local development</h2>
-          <p>
-            Install the CLI, scaffold a project, and run the full stack on your machine. Supatype runs
-            it in <strong>Docker</strong> by default; choose <strong>Native</strong> during
-            <code>supatype init</code> if you would rather use host binaries and no Docker.
-          </p>
-
-          <div class="step">
-            <span class="num">1</span>
-            <div>
-              <h3>Install the CLI</h3>
-              <pre class="code"><span class="p">$</span> npm install -g @supatype/cli</pre>
-              <p>The first run downloads the binaries it needs into <code>~/.supatype/cache/</code>.</p>
-            </div>
-          </div>
-
-          <div class="step">
-            <span class="num">2</span>
-            <div>
-              <h3>Create a project</h3>
-              <pre class="code"><span class="p">$</span> mkdir my-app &amp;&amp; cd my-app
-<span class="p">$</span> supatype init
-<span class="p">$</span> npm install
-<span class="p">$</span> supatype keys</pre>
-              <p><code>supatype init</code> writes <code>package.json</code>, <code>supatype.config.ts</code>, a starter schema and <code>public/</code>. Add the keys it prints to <code>.env</code> if they are not there already.</p>
-            </div>
-          </div>
-
-          <div class="step">
-            <span class="num">3</span>
-            <div>
-              <h3>Start the stack and push your schema</h3>
-              <pre class="code"><span class="p">$</span> supatype dev
-<span class="p">$</span> supatype push</pre>
-              <p>
-                The gateway serves REST at <code>/rest/v1/</code>, auth at <code>/auth/v1/</code>,
-                storage and realtime. With Docker it listens on <code>http://localhost:18473</code>
-                (init picks a free port per project and writes it to <code>.env</code>); with Native
-                it listens on <code>http://localhost:54321</code>.
-              </p>
-            </div>
-          </div>
-
-          <div class="step">
-            <span class="num opt">+</span>
-            <div>
-              <h3>Serve your frontend dev server at <code>/</code></h3>
-              <p>
-                Keep the committed <code>supatype.config.ts</code> pointing at your production build,
-                and proxy to Vite or Next from a gitignored <code>supatype.local.config.ts</code>:
-              </p>
-              <pre class="code"><span class="c">// supatype.local.config.ts (your machine only)</span>
-<span class="k">export default</span> {
-  app: { mode: <span class="s">"proxy"</span>, upstream: <span class="s">"http://localhost:5173"</span> },
-}</pre>
-              <p>Restart <code>supatype dev</code> after changing config. The APIs stay on their own paths.</p>
-            </div>
-          </div>
-        </article>
-
-        <!-- Self-host -->
-        <article class="doc" id="self-host">
-          <div class="eyebrow">Get started</div>
-          <h2>Self-hosting</h2>
-          <p>
-            Run the whole platform on a server you own with Docker Compose. The project layout is the
-            same one you use locally, so the repository you develop in is the one you deploy.
-          </p>
-
-          <div class="step">
-            <span class="num">1</span>
-            <div>
-              <h3>Prepare the server</h3>
-              <p>Ubuntu 22.04 or similar, Docker with Compose v2, Node.js 22 or later, and the CLI:</p>
-              <pre class="code"><span class="p">$</span> npm install -g @supatype/cli</pre>
-            </div>
-          </div>
-
-          <div class="step">
-            <span class="num">2</span>
-            <div>
-              <h3>Scaffold and set secrets</h3>
-              <pre class="code"><span class="p">$</span> mkdir my-app &amp;&amp; cd my-app
-<span class="p">$</span> supatype init
-<span class="p">$</span> npm install
-<span class="p">$</span> supatype keys</pre>
-              <p>Set a strong <code>JWT_SECRET</code> and your public URLs in <code>.env</code>.</p>
-            </div>
-          </div>
-
-          <div class="step">
-            <span class="num">3</span>
-            <div>
-              <h3>Start Compose</h3>
-              <pre class="code"><span class="p">$</span> supatype self-host compose render
-<span class="p">$</span> supatype self-host compose up -d
-<span class="p">$</span> supatype push</pre>
-              <p>
-                The gateway listens on <code>http://&lt;your-host&gt;:18473</code> with Studio at
-                <code>/studio/</code>. Put a reverse proxy in front for HTTPS.
-              </p>
-              <p>
-                Images come from Docker Hub at <code>:latest</code>: <code>supatype/postgres:17-latest</code>,
-                <code>supatype/server</code> (which includes realtime), <code>supatype/storage</code>,
-                <code>supatype/studio</code>, <code>supatype/schema-engine</code>,
-                <code>supatype/functions-worker</code> and <code>supatype/control-plane</code>. Pin
-                versions with <code>SUPATYPE_*_IMAGE</code> in <code>.env</code> if you need to.
-              </p>
-            </div>
-          </div>
-
-          <div class="step">
-            <span class="num">4</span>
-            <div>
-              <h3>Serve a static app</h3>
-              <pre class="code"><span class="p">$</span> supatype app add --static ./public</pre>
-              <p>
-                This writes <code>app.mode: "static"</code> to <code>supatype.config.ts</code>. Commit
-                it; it is a one-time step, not something to repeat on the server.
-              </p>
-            </div>
-          </div>
-        </article>
-
-        <!-- Deploy changes -->
-        <article class="doc" id="deploy-changes">
-          <div class="eyebrow">Operate</div>
-          <h2>Deploy changes</h2>
-          <p>
-            Local and self-hosted environments read the same committed config. What differs between
-            machines lives in files you do not commit.
-          </p>
-
-          <div class="step plain">
-            <div>
-              <h3>Which file holds what</h3>
-              <div class="table-wrap">
-                <table>
-                  <thead><tr><th>File</th><th>Holds</th><th>Commit</th></tr></thead>
-                  <tbody>
-                    <tr><td><code>supatype.config.ts</code></td><td>Schema path, app routing, version pins</td><td>Yes</td></tr>
-                    <tr><td><code>supatype.local.config.ts</code></td><td>Overrides for your machine, such as the dev proxy</td><td>No</td></tr>
-                    <tr><td><code>.env</code></td><td><code>DATABASE_URL</code>, JWT keys, <code>API_EXTERNAL_URL</code></td><td>No</td></tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-
-          <div class="step plain">
-            <div>
-              <h3>What to run when something changes</h3>
-              <div class="table-wrap">
-                <table>
-                  <thead><tr><th>Change</th><th>Local</th><th>Self-hosted</th></tr></thead>
-                  <tbody>
-                    <tr>
-                      <td>Schema</td>
-                      <td><code>supatype push</code></td>
-                      <td><code>supatype push</code></td>
-                    </tr>
-                    <tr>
-                      <td>Frontend</td>
-                      <td>Nothing with the dev proxy; otherwise <code>npm run build</code></td>
-                      <td><code>npm run build</code>, then <code>compose render</code> and <code>compose up -d</code></td>
-                    </tr>
-                    <tr>
-                      <td><code>supatype.config.ts</code></td>
-                      <td>Restart <code>supatype dev</code></td>
-                      <td><code>compose render</code> and <code>compose up -d</code></td>
-                    </tr>
-                    <tr>
-                      <td><code>.env</code></td>
-                      <td>Restart <code>supatype dev</code></td>
-                      <td><code>compose up -d</code></td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-
-          <div class="step plain">
-            <div>
-              <h3>A typical server deploy</h3>
-              <pre class="code"><span class="p">$</span> cd my-app
-<span class="p">$</span> git pull
-<span class="p">$</span> npm install           <span class="c"># if package.json changed</span>
-<span class="p">$</span> supatype push         <span class="c"># schema migrations</span>
-<span class="p">$</span> npm run build         <span class="c"># static files into public/ or dist/</span>
-<span class="p">$</span> supatype self-host compose render
-<span class="p">$</span> supatype self-host compose up -d</pre>
-              <div class="note">
-                <span class="label">NOTE</span>
-                Point <code>DATABASE_URL</code> in the server's <code>.env</code> at the Compose Postgres on
-                <code>localhost:5432</code>, so <code>push</code> and Studio use the same database as the stack.
-              </div>
-            </div>
-          </div>
-        </article>
-
-        <!-- Upgrading -->
-        <article class="doc" id="upgrading">
-          <div class="eyebrow">Operate</div>
-          <h2>Upgrading Supatype</h2>
-          <p>
-            Moving to newer Supatype components is separate from deploying your own changes, and it
-            takes two commands, not one.
-          </p>
-
-          <div class="step plain">
-            <div>
-              <pre class="code"><span class="p">$</span> supatype update      <span class="c"># pull new images and binaries</span>
-<span class="p">$</span> supatype push        <span class="c"># apply the schema those components expect</span>
-<span class="p">$</span> supatype self-host compose up -d</pre>
-              <p>
-                The push is the step that is easy to miss. Grants, policies, functions and buckets are
-                generated from your schema and only reach the database through <code>push</code>, so
-                new images on an older database can refuse rules until it runs. The upgrade is finished
-                after the push, not before.
-              </p>
-              <div class="note">
-                <span class="label">403S AFTER AN UPGRADE</span>
-                This is the usual cause. The storage service logs the reason and names
-                <code>supatype push</code> as the fix.
-              </div>
-            </div>
-          </div>
-        </article>
-
-        <article class="doc">
-          <a href="deploy-vm-github-actions.html" class="link-card">
-            <div>
-              <div class="title">Deploy to a VM with GitHub Actions</div>
-              <div class="desc">Scaffold locally, bootstrap a VM, and deploy on every push to <code>main</code>.</div>
-            </div>
-            <span class="arrow">→</span>
-          </a>
-        </article>
+  <!-- Frameworks -->
+  <section class="section" id="frameworks">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="eyebrow">Frameworks</div>
+        <h2>The same types<br />
+          <span class="gradient">in every component.</span></h2>
+        <p>
+          React, React Native, Vue, Svelte and Solid, plus SSR for Next.js server components, route
+          handlers and middleware. Pre-built auth UI for React and React Native.
+        </p>
       </div>
+      <div class="chips">
+        <code>@supatype/react</code>
+        <code>@supatype/react-native</code>
+        <code>@supatype/vue</code>
+        <code>@supatype/svelte</code>
+        <code>@supatype/solid</code>
+        <code>@supatype/ssr</code>
+        <code>@supatype/react-auth</code>
+        <code>@supatype/react-native-auth</code>
+      </div>
+    </div>
+  </section>
 
+  <!-- Built for agents -->
+  <section class="section deep" id="agents">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="eyebrow">Built for agents</div>
+        <h2>One file for<br />
+          <span class="gradient">the agent to change.</span></h2>
+        <p>
+          Supatype ships an agent skill and plugins for Claude Code and Cursor. One file for the agent
+          to change, and the migration, policies, API and client follow.
+        </p>
+      </div>
+      <a href="https://github.com/supatype/supatype/blob/main/plugins/README.md" target="_blank" rel="noopener" class="link-card">
+        <div>
+          <div class="title">Install the Supatype skill</div>
+          <div class="desc">Plugins for Claude Code and Cursor, or copy the skill into your project.</div>
+        </div>
+        <span class="arrow">→</span>
+      </a>
+    </div>
+  </section>
+
+  <!-- How it compares -->
+  <section class="section" id="compare">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="eyebrow">How it compares</div>
+        <h2>Where the types<br />
+          <span class="gradient">stop.</span></h2>
+      </div>
+      <ul class="compare">
+        <li><strong>tRPC</strong> End-to-end types across the API. You still write the database and policies.</li>
+        <li><strong>Prisma</strong> Schema to types. Stops at the client.</li>
+        <li><strong>Supabase</strong> A backend. Types introspected after the fact.</li>
+        <li class="us"><strong>Supatype</strong> One set of types, database to component.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- Quick start -->
+  <section class="section deep" id="local-dev">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="eyebrow">Quick start</div>
+        <h2>Four commands<br />
+          <span class="gradient">to a running stack.</span></h2>
+        <p>Supatype runs the stack in Docker by default. <a href="/docs/#local-dev">Local development</a> covers native mode, ports and the frontend proxy.</p>
+      </div>
+      <pre class="code quickstart"><span class="p">$</span> npm install -g @supatype/cli
+<span class="p">$</span> supatype init
+<span class="p">$</span> supatype dev
+<span class="p">$</span> supatype push</pre>
+    </div>
+  </section>
+
+  <!-- Self-host -->
+  <section class="section" id="self-host">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="eyebrow">Self-hosting</div>
+        <h2>Run it on<br />
+          <span class="gradient">a server you own.</span></h2>
+        <p>
+          Docker Compose on any VM, with the same project layout you use locally. Images come from
+          Docker Hub; put a reverse proxy in front for HTTPS.
+        </p>
+      </div>
+      <a href="/docs/#self-host" class="link-card">
+        <div>
+          <div class="title">Self-hosting guide</div>
+          <div class="desc">Prepare the server, set secrets, start Compose, deploy changes and upgrade.</div>
+        </div>
+        <span class="arrow">→</span>
+      </a>
     </div>
   </section>
 
@@ -436,22 +276,26 @@
 <footer class="site-footer">
   <div class="wrap">
     <div class="footer-brand">
-      <img src="supatype.svg" alt="Supatype" width="108" height="20" />
-      <p>The type-first platform for PostgreSQL.</p>
-      <p class="mono">MIT licensed · Active development</p>
+      <img src="/supatype.svg" alt="Supatype" width="108" height="20" />
+      <p>Zero drift. One set of types, database to component.</p>
+      <p class="mono">SDKs MIT · CLI &amp; services Apache 2.0 · Schema engine binary under its own licence</p>
+      <p class="mono">Active development</p>
     </div>
     <div class="footer-links">
       <div class="footer-col">
         <span class="head">Docs</span>
-        <a href="#local-dev">Local development</a>
-        <a href="#self-host">Self-hosting</a>
-        <a href="#deploy-changes">Deploy changes</a>
-        <a href="deploy-vm-github-actions.html">VM + GitHub Actions</a>
+        <a href="/#local-dev">Quick start</a>
+        <a href="/docs/#local-dev">Local development</a>
+        <a href="/docs/#self-host">Self-hosting</a>
+        <a href="/docs/#deploy-changes">Deploy changes</a>
+        <a href="/docs/#upgrading">Upgrading</a>
+        <a href="/deploy-vm-github-actions.html">VM + GitHub Actions</a>
       </div>
       <div class="footer-col">
         <span class="head">Community</span>
         <a href="https://github.com/supatype" target="_blank" rel="noopener">GitHub</a>
         <a href="https://discord.gg/TzMtynufEH" target="_blank" rel="noopener">Discord</a>
+        <a href="https://github.com/supatype/supatype/blob/main/plugins/README.md" target="_blank" rel="noopener">Agent plugins</a>
         <a href="/llms.txt">llms.txt</a>
       </div>
     </div>

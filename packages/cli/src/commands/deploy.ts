@@ -23,12 +23,34 @@ import { loadProjectLink } from "../link.js"
 import { resolveTarget } from "../resolve-target.js"
 import { targetFetch } from "../target-client.js"
 import { ensureEngine, engineRequest, type DiffResult } from "../engine-client.js"
+import { formatSecurityDrift, plannedChanges, securityDrift } from "../diff-output.js"
+import { requireEngineFeatures } from "../engine-ownership-gate.js"
 import { resolveAppConfig, validateStaticMode, validateBuildOutput, detectPackageManager } from "../app/framework.js"
 import { TIER_LIMITS, type Tier } from "./deploy-types.js"
 import { spawnSync } from "node:child_process"
 import { error, info, plain, step, warn } from "../ui/messages.js"
 import { withSpinner } from "../ui/progress.js"
 import { printPushWarnings, type EnginePushResult } from "../engine-push-output.js"
+
+/**
+ * Plan 3.5: a deploy never asks, so access changed outside Supatype is put back only with
+ * `--overwrite-drift`. The refusal names each object, or undefined when the deploy may go ahead.
+ */
+export function deploySecurityDriftRefusal(
+  diff: Pick<DiffResult, "reconcile">,
+  overwriteDrift: boolean,
+): string | undefined {
+  if (overwriteDrift) return undefined
+  const drifted = securityDrift(diff)
+  if (drifted.length === 0) return undefined
+  return [
+    `${drifted.length} object(s) that decide who may read or write were changed outside Supatype:`,
+    "",
+    ...formatSecurityDrift(drifted),
+    "",
+    "Nothing was deployed. Review this with `supatype push`, or pass --overwrite-drift to put Supatype's definitions back.",
+  ].join("\n")
+}
 
 export function registerDeploy(program: Command): void {
   const deploy = program
@@ -44,6 +66,10 @@ export function registerDeploy(program: Command): void {
     .option("--skip-build", "Deploy existing build output without building")
     .option("--preview", "Deploy to a temporary preview URL")
     .option("--yes", "Skip confirmation prompts")
+    .option(
+      "--overwrite-drift",
+      "Put back policies, grants, labels and RLS changed outside Supatype; without it the deploy refuses",
+    )
     .action(async (opts: {
       local?: boolean
       environment?: string
@@ -53,12 +79,16 @@ export function registerDeploy(program: Command): void {
       skipBuild?: boolean
       preview?: boolean
       yes?: boolean
+      overwriteDrift?: boolean
     }) => {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
       const link = loadProjectLink(cwd)
       const cloudCfg = loadCloudConfig(cwd)
       const envName = opts.env ?? opts.environment ?? "production"
+      // A linked deploy is checked against the server it pushes to (`targetSchemaPush`), a local one
+      // against the engine binary, before either sends the flag.
+      const overwriteDrift = opts.overwriteDrift ?? false
 
       let schemaDone = false
 
@@ -68,7 +98,7 @@ export function registerDeploy(program: Command): void {
         !opts.appOnly &&
         !opts.skipBuild
       ) {
-        await deploySchemaToLinkedProject(cwd, envName)
+        await deploySchemaToLinkedProject(cwd, envName, { overwriteDrift })
         schemaDone = true
         if (opts.schemaOnly) {
           return
@@ -82,6 +112,7 @@ export function registerDeploy(program: Command): void {
         if (opts.local) {
           step("Schema Push (local)")
           await ensureEngine()
+          if (overwriteDrift) await requireEngineFeatures([{ feature: "overwrite_drift", flag: "--overwrite-drift" }])
 
           const diff = await engineRequest<DiffResult>("/diff", {
             ast,
@@ -89,15 +120,21 @@ export function registerDeploy(program: Command): void {
             schema: "public",
           })
 
-          const ops = diff.operations ?? []
+          const changes = plannedChanges(diff)
+          const refusal = deploySecurityDriftRefusal(diff, overwriteDrift)
+          if (refusal) {
+            error(refusal)
+            process.exit(1)
+          }
 
-          if (ops.length > 0) {
-            info(`${ops.length} schema change(s) to apply.`)
+          if (changes.length > 0) {
+            info(`${changes.length} schema change(s) to apply.`)
             const result = await engineRequest<EnginePushResult>("/push", {
               ast,
               database_url: resolveHostDatabaseUrl(cwd, config, { allowDerived: true }).dsn,
               schema: "public",
               force: true,
+              ...(overwriteDrift && { overwrite_drift: true }),
             })
             info("Schema changes applied.")
             printPushWarnings(result)
@@ -106,7 +143,7 @@ export function registerDeploy(program: Command): void {
           }
         } else if (link) {
           step("Schema Push (linked)")
-          await pushSchemaToLinkedProject(cwd, { force: opts.yes ?? true, env: envName })
+          await pushSchemaToLinkedProject(cwd, { force: opts.yes ?? true, env: envName, overwriteDrift })
         } else {
           error(
             "Not linked to Supatype Cloud. Run: supatype link\n" +

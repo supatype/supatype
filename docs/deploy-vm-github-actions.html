@@ -27,8 +27,8 @@
     <a href="/" class="logo"><img src="supatype.svg" alt="Supatype" width="119" height="22" /></a>
     <div class="nav-links">
       <a href="/#how-it-works">How it works</a>
-      <a href="/#local-dev">Docs</a>
-      <a href="/#self-host">Self-hosting</a>
+      <a href="/docs/">Docs</a>
+      <a href="/docs/#self-host">Self-hosting</a>
       <a href="deploy-vm-github-actions.html" aria-current="page">Guides</a>
     </div>
     <div class="nav-end">
@@ -42,7 +42,7 @@
 
   <section class="page-head">
     <div class="wrap">
-      <p class="crumbs"><a href="/#local-dev">Docs</a> / Guides</p>
+      <p class="crumbs"><a href="/docs/">Docs</a> / Guides</p>
       <h1>Deploy to a VM with GitHub Actions</h1>
       <p>
         Create a project on your laptop, push it to GitHub, run the stack on a VM with Docker
@@ -120,7 +120,7 @@
 <span class="p">$</span> supatype push</pre>
               <p>
                 Optionally proxy to Vite from a gitignored <code>supatype.local.config.ts</code> while
-                production stays <code>static</code>. See <a href="/#deploy-changes">Deploy changes</a>.
+                production stays <code>static</code>. See <a href="/docs/#deploy-changes">Deploy changes</a>.
               </p>
               <pre class="code"><span class="p">$</span> git init
 <span class="p">$</span> git add .
@@ -298,22 +298,26 @@ jobs:
 <footer class="site-footer">
   <div class="wrap">
     <div class="footer-brand">
-      <img src="supatype.svg" alt="Supatype" width="108" height="20" />
-      <p>The type-first platform for PostgreSQL.</p>
-      <p class="mono">MIT licensed · Active development</p>
+      <img src="/supatype.svg" alt="Supatype" width="108" height="20" />
+      <p>Zero drift. One set of types, database to component.</p>
+      <p class="mono">SDKs MIT · CLI &amp; services Apache 2.0 · Schema engine binary under its own licence</p>
+      <p class="mono">Active development</p>
     </div>
     <div class="footer-links">
       <div class="footer-col">
         <span class="head">Docs</span>
-        <a href="/#local-dev">Local development</a>
-        <a href="/#self-host">Self-hosting</a>
-        <a href="/#deploy-changes">Deploy changes</a>
-        <a href="deploy-vm-github-actions.html">VM + GitHub Actions</a>
+        <a href="/#local-dev">Quick start</a>
+        <a href="/docs/#local-dev">Local development</a>
+        <a href="/docs/#self-host">Self-hosting</a>
+        <a href="/docs/#deploy-changes">Deploy changes</a>
+        <a href="/docs/#upgrading">Upgrading</a>
+        <a href="/deploy-vm-github-actions.html">VM + GitHub Actions</a>
       </div>
       <div class="footer-col">
         <span class="head">Community</span>
         <a href="https://github.com/supatype" target="_blank" rel="noopener">GitHub</a>
         <a href="https://discord.gg/TzMtynufEH" target="_blank" rel="noopener">Discord</a>
+        <a href="https://github.com/supatype/supatype/blob/main/plugins/README.md" target="_blank" rel="noopener">Agent plugins</a>
         <a href="/llms.txt">llms.txt</a>
       </div>
     </div>

@@ -1,8 +1,8 @@
 name: Integration Tests
 
 on:
+  # Every PR, including one stacked on another PR's branch.
   pull_request:
-    branches: [main]
   push:
     branches: [main]
   schedule:
@@ -321,6 +321,47 @@ jobs:
 
       - name: Drive packages/storage against SeaweedFS
         run: bash tests/integration/scripts/storage-backend-e2e.sh
+
+  ownership-e2e:
+    name: ownership commands (adopt, release, reclaim, rebaseline, rollback)
+    # One Postgres container and the CLI driving the engine directly, so it runs on pull requests
+    # like storage-backend. It uses the engine the CLI resolves, and skips with a message while
+    # that engine predates the ledger commands.
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pulls Docker Hub images through mirror.gcr.io, which no rate limit applies to. Needs no
+      # secrets, so it runs for forks too; restarts the daemon, so it comes before any container.
+      - name: Use the Docker Hub mirror
+        run: bash scripts/ci-docker-mirror.sh
+
+      # Continues anonymously when Docker Hub is unavailable; fails on rejected credentials.
+      - name: Log in to Docker Hub
+        if: env.DOCKERHUB_USERNAME != ''
+        run: bash scripts/ci-dockerhub-login.sh
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript packages
+        run: pnpm build
+
+      - name: Drive the ownership commands against a real database
+        run: bash tests/integration/scripts/ownership-e2e.sh
 
   realtime-e2e:
     name: realtime (live stack)

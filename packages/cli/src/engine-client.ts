@@ -34,8 +34,74 @@ export interface Operation {
   index?: { fields?: string[]; name?: string; unique?: boolean }
 }
 
+/**
+ * What the engine's reconcile decided about one object it owns (schema-engine `ledger::reconcile`).
+ * A kind that has moved onto the ledger is planned here rather than as an operation.
+ */
+export interface ReconcileAction {
+  action:
+    | "create"
+    | "adopt"
+    | "conflict"
+    | "recreate"
+    | "replace"
+    | "drift"
+    | "keep"
+    | "drop"
+    | "forget"
+    | "released"
+  key: { kind: string; schema: string; parent: string; name: string }
+  /**
+   * An action the parent statement already carries out (a constraint inline in `CREATE TABLE`, or
+   * recreated with its table). Sent on `create`, `recreate`, `replace` and `drift`.
+   */
+  inline?: boolean
+  reason?: "stamped" | "structure_matches" | "deparses_equal" | "owned_schema" | "declared"
+  /** A `drift` on a policy, grant, label or RLS attribute: putting it back changes who sees what. */
+  security_relevant?: boolean
+  recorded_def?: string
+  live_def?: string
+  /** The statement a `create`, `recreate` or `replace` runs. */
+  create_sql?: string
+  /**
+   * On a `replace`: the object was also changed outside Supatype since the last apply, which the
+   * replacement overwrites. Where it decides access, a push asks first (plan 3.5).
+   */
+  drifted?: { recorded_def: string; live_def: string; live_fp?: string }
+}
+
+/** One object in a doctor or adopt report, as the engine names it. */
+export interface DoctorItem {
+  kind: string
+  table: string
+  name: string
+  fields: string[]
+  message: string
+  /** What Supatype recorded, for a drifted object. */
+  recorded?: string
+  /** What the database holds now, for a drifted or conflicting object. */
+  live?: string
+}
+
+/**
+ * What the engine's `adopt` reports, previewing or applying. Since the ledger it lists the objects
+ * it hands over (`adopt`), takes back (`release`) and hands back again (`reclaim`), and writes
+ * ledger rows; an engine from before
+ * listed the comment stamps it would write (`stampStatements`) and counted them (`stamped`).
+ */
+export interface AdoptOutcome {
+  status?: string
+  adopt?: DoctorItem[]
+  release?: DoctorItem[]
+  reclaim?: DoctorItem[]
+  stampStatements?: string[]
+  stamped?: number
+}
+
 export interface DiffResult {
   operations: Operation[]
+  /** Absent from engines older than the ledger. */
+  reconcile?: ReconcileAction[]
   warnings?: string[]
   summary?: string
 }
@@ -70,6 +136,8 @@ export class EngineError extends Error {
     public readonly exitCode: number | null,
     /** What the engine printed on stdout. A refused push puts its machine-readable reason there. */
     public readonly stdout = "",
+    /** A refusal the CLI acts on by name, such as `engine_busy`. */
+    public readonly reason?: string,
   ) {
     super(message)
     this.name = "EngineError"
@@ -87,6 +155,7 @@ async function getEngineBin(): Promise<string> {
 
   const cwd = process.cwd()
 
+  let unresolved: string | undefined
   try {
     const config = loadConfig(cwd)
     // Download-on-miss (with retry) so a fresh machine or a failed postinstall
@@ -98,6 +167,7 @@ async function getEngineBin(): Promise<string> {
     // possibly-stale cached binary from a different version.
     const message = err instanceof Error ? err.message : String(err)
     if (message.includes("Failed to download")) throw err
+    unresolved = message
     // Otherwise (no valid project config) fall through to default cache scan.
   }
 
@@ -116,8 +186,15 @@ async function getEngineBin(): Promise<string> {
   } catch { /* cache dir doesn't exist */ }
 
   throw new Error(
-    "Engine binary not found. Run: supatype update",
+    unresolved === undefined
+      ? "Engine binary not found. Run: supatype update"
+      : `Engine binary not found: ${unresolved}`,
   )
+}
+
+/** The engine binary this process runs, resolved (and downloaded if need be) once. */
+export async function engineBinPath(): Promise<string> {
+  return getEngineBin()
 }
 
 // ---------------------------------------------------------------------------
@@ -149,7 +226,6 @@ export async function engineHealth(): Promise<boolean> {
  *   /generate    → engine generate
  *   /migrations  → engine migrations
  *   /introspect  → engine introspect
- *   /validate    → engine validate
  *   /admin       → engine admin (admin-config JSON on stdout)
  *   /seed        → engine seed (result document JSON on stdout)
  */
@@ -158,6 +234,13 @@ export async function engineRequest<T = unknown>(
   body: Record<string, unknown>,
 ): Promise<T> {
   const bin = await getEngineBin()
+  // A schema with identity or generated columns goes only to an engine that reads them: one that
+  // does not would push plain columns and say nothing. Imported here, as the gate imports this.
+  if (body["ast"] !== undefined) {
+    const { assertSupported, binaryCapabilities, identityColumnsNeed } = await import("./engine-ownership-gate.js")
+    const needs = identityColumnsNeed(body["ast"])
+    if (needs.length > 0) assertSupported(binaryCapabilities(bin), needs)
+  }
 
   const tmpDir = join(tmpdir(), "supatype-engine")
   mkdirSync(tmpDir, { recursive: true })
@@ -218,6 +301,12 @@ export async function engineRequest<T = unknown>(
   const reportsFailureAsData = endpoint === "/seed" && (result.stdout?.trim().length ?? 0) > 0
 
   if (result.status !== 0 && !reportsFailureAsData) {
+    // Another writer holds the engine's lock: the engine's own sentence, without the exit code and
+    // the log lines around it, since nothing is wrong and the answer is to try again.
+    const busy = engineBusyMessage(result.stdout ?? "", result.stderr ?? "")
+    if (busy !== undefined) {
+      throw new EngineError(busy, endpoint, result.status, result.stdout ?? "", ENGINE_BUSY)
+    }
     const stderr = result.stderr?.trim() || "(no output)"
     throw new EngineError(
       `Engine ${endpoint} failed (exit ${result.status}): ${stderr}`,
@@ -240,11 +329,50 @@ export async function engineRequest<T = unknown>(
   }
 }
 
+/** The `reason` the engine gives a refusal over its lock (another push, adopt or rebaseline). */
+export const ENGINE_BUSY = "engine_busy"
+
+const ENGINE_BUSY_WORDING = /another push, adopt or rebaseline is running[^\n]*/i
+
+/**
+ * The engine's sentence when it refused because another push, adopt or rebaseline holds its lock,
+ * or undefined for any other failure. From a JSON refusal on stdout when the engine prints one,
+ * else its error line on stderr. Exported for its tests.
+ */
+export function engineBusyMessage(stdout: string, stderr: string): string | undefined {
+  for (const line of stdout.split(/\r?\n/)) {
+    const candidate = line.trim()
+    if (!candidate.startsWith("{")) continue
+    try {
+      const parsed = JSON.parse(candidate) as { reason?: unknown; message?: unknown; error?: unknown }
+      if (parsed.reason !== ENGINE_BUSY) continue
+      const said = typeof parsed.message === "string" ? parsed.message : parsed.error
+      return typeof said === "string" && said.trim() !== "" ? said.trim() : busySentence(stderr)
+    } catch {
+      /* not this line */
+    }
+  }
+  return ENGINE_BUSY_WORDING.test(stderr) ? busySentence(stderr) : undefined
+}
+
+function busySentence(stderr: string): string {
+  const found = ENGINE_BUSY_WORDING.exec(stderr)?.[0]?.trim()
+  const sentence = found ?? "another push, adopt or rebaseline is running on this database; try again. Nothing was applied."
+  return sentence.charAt(0).toUpperCase() + sentence.slice(1)
+}
+
 // ---------------------------------------------------------------------------
 // Endpoint → CLI args mapping
 // ---------------------------------------------------------------------------
 
-function endpointToArgs(
+/** `flag` once per string in `values`, which a request body carries as a list (or not at all). */
+function repeated(values: unknown, flag: string): string[] {
+  if (!Array.isArray(values)) return []
+  return values.filter((v): v is string => typeof v === "string").flatMap((v) => [flag, v])
+}
+
+/** The engine binary's arguments for an endpoint and its request body. Exported for its tests. */
+export function endpointToArgs(
   endpoint: string,
   body: Record<string, unknown>,
   reqFile: string,
@@ -255,6 +383,9 @@ function endpointToArgs(
   const force = body["force"] ? ["--force"] : []
   const nonInteractive =
     body["non_interactive"] === true || body["force"] === true ? ["--non-interactive"] : []
+  // Plan 3.5: put back access changed outside Supatype. The CLI sets it only after a person said
+  // yes to the difference, or when `--overwrite-drift` was passed.
+  const overwriteDrift = body["overwrite_drift"] === true ? ["--overwrite-drift"] : []
 
   switch (endpoint) {
     case "/diff":
@@ -274,6 +405,7 @@ function endpointToArgs(
         schema,
         ...force,
         ...nonInteractive,
+        ...overwriteDrift,
         ...sourceArgs,
       ]
     }
@@ -319,16 +451,34 @@ function endpointToArgs(
 
     case "/doctor": {
       const strict = body["strict"] ? ["--strict"] : []
-      return ["doctor", "--input", reqFile, "--database-url", dbUrl, "--schema", schema, ...strict]
+      const rebaseline = body["rebaseline"] ? ["--rebaseline"] : []
+      // Rebaseline access drift too; only ever sent alongside --rebaseline. Not --overwrite-drift,
+      // which the engine takes on push alone.
+      const acceptAccessDrift =
+        body["rebaseline"] && body["accept_access_drift"] === true ? ["--accept-access-drift"] : []
+      return [
+        "doctor",
+        "--input",
+        reqFile,
+        "--database-url",
+        dbUrl,
+        "--schema",
+        schema,
+        ...strict,
+        ...rebaseline,
+        ...acceptAccessDrift,
+      ]
     }
 
     case "/adopt": {
       const yes = body["yes"] ? ["--yes"] : []
-      return ["adopt", "--input", reqFile, "--database-url", dbUrl, "--schema", schema, ...yes]
+      const keys = repeated(body["keys"], "--key")
+      // No `--key` at all is "adopt every conflict" to the binary, so an empty list, which over
+      // HTTP is "adopt none", is `--adopt-none` here.
+      if (Array.isArray(body["keys"]) && keys.length === 0) keys.push("--adopt-none")
+      const objects = [...repeated(body["release"], "--release"), ...repeated(body["reclaim"], "--reclaim"), ...keys]
+      return ["adopt", "--input", reqFile, "--database-url", dbUrl, "--schema", schema, ...yes, ...objects]
     }
-
-    case "/validate":
-      return ["validate", "--input", reqFile]
 
     case "/admin":
       return ["admin", "--input", reqFile]

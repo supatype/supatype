@@ -1,26 +1,71 @@
-import type { Command } from "commander"
+import { Option, type Command } from "commander"
 import { loadConfig, loadSchemaAst } from "../config.js"
-import { info, plain } from "../ui/messages.js"
+import { withPublishing } from "../model-versioning.js"
+import { error, info, plain } from "../ui/messages.js"
+import { askConsent } from "../ui/confirm.js"
+import { isAccessKind } from "../diff-output.js"
 import { hooksPathFromProject, schemaPathFromProject, serviceRoleRoutes } from "../project-config.js"
-import { resolveTarget, targetSchemaDoctor, schemaPgSchema } from "../resolve-target.js"
-import { loadProjectLink } from "../link.js"
-import { resolveHostEngineDatabaseUrl } from "../dev-compose.js"
+import { requireTargetFeatures, schemaCommandTarget, targetSchemaDoctor, schemaPgSchema } from "../resolve-target.js"
+import type { DoctorItem } from "../engine-client.js"
 import { hooksReport, type HooksReport } from "../model-hooks.js"
 import { checkServiceRoleRoutes, type ServiceRoleProblems } from "../service-role-check.js"
 import { addRetiredNoCacheOption, warnIfRetiredNoCache } from "../retired-no-cache.js"
 
-interface DoctorItem {
-  kind: string
-  table: string
-  name: string
-  fields: string[]
-  message: string
-}
-
-interface DoctorReport {
+/**
+ * The engine's reconcile, sorted for an operator. The optional categories arrived with the
+ * managed-object ledger, so an older engine omits them; `rebaselined` is only there after
+ * `--rebaseline`.
+ */
+export interface DoctorReport {
   missing: DoctorItem[]
   staleManaged: DoctorItem[]
   unmanagedDrift: DoctorItem[]
+  drifted?: DoctorItem[]
+  conflicting?: DoctorItem[]
+  released?: DoctorItem[]
+  rebaselined?: DoctorItem[]
+  /**
+   * Access drift `--rebaseline` did not record because `--accept-access-drift` was not given. Still
+   * listed under `drifted`.
+   */
+  rebaselineRefused?: DoctorItem[]
+  /** Whether a push would change or refuse something: the engine's own `--strict` rule. */
+  blocking?: boolean
+}
+
+type Category = Exclude<keyof DoctorReport, "blocking">
+
+/** Each category, its heading, and its word in the summary line, in the order they print. */
+const SECTIONS: ReadonlyArray<{ key: Category; title: string; summary: string }> = [
+  { key: "missing", title: "Missing (declared, not in the database)", summary: "missing" },
+  { key: "drifted", title: "Drifted (changed outside Supatype)", summary: "drifted" },
+  { key: "staleManaged", title: "Stale managed (Supatype's, no longer declared)", summary: "stale managed" },
+  { key: "conflicting", title: "Conflicting (a declared name held by someone else)", summary: "conflicting" },
+  { key: "unmanagedDrift", title: "Unmanaged (not Supatype's, left in place)", summary: "unmanaged" },
+  { key: "released", title: "Released (left alone after `adopt --release`)", summary: "released" },
+  { key: "rebaselined", title: "Rebaselined (recorded as they are now)", summary: "rebaselined" },
+  {
+    key: "rebaselineRefused",
+    title: "Not rebaselined (access changed outside Supatype; pass --accept-access-drift to record it)",
+    summary: "not rebaselined",
+  },
+]
+
+/**
+ * What `--strict` fails on, for an engine from before it said so itself (`blocking`): what a push
+ * would change or refuse.
+ */
+const STRICT_BEFORE_BLOCKING: ReadonlySet<Category> = new Set([
+  "missing",
+  "staleManaged",
+  "drifted",
+  "conflicting",
+])
+
+const itemsOf = (report: DoctorReport, key: Category): DoctorItem[] => report[key] ?? []
+
+export function hasStrictIssues(report: DoctorReport): boolean {
+  return report.blocking ?? [...STRICT_BEFORE_BLOCKING].some((key) => itemsOf(report, key).length > 0)
 }
 
 /** Exported for tests: the label form is easy to get subtly wrong per item kind. */
@@ -33,7 +78,60 @@ export function printSection(title: string, items: DoctorItem[]): void {
     const label = item.table === item.name ? item.name : `${item.table}.${item.name}`
     plain(`  • ${label}${fields}`)
     plain(`    ${item.message}`)
+    if (item.recorded !== undefined) plain(`    recorded: ${item.recorded}`)
+    if (item.live !== undefined) plain(`    live:     ${item.live}`)
   }
+}
+
+/** Every section, then one summary line. Exported for tests. */
+export function printReport(report: DoctorReport): void {
+  for (const { key, title } of SECTIONS) printSection(title, itemsOf(report, key))
+  const counts = SECTIONS.map(({ key, summary }) => ({ n: itemsOf(report, key).length, summary }))
+  if (counts.every(({ n }) => n === 0)) {
+    info("No drift detected.")
+    return
+  }
+  const parts = counts.filter(({ n }) => n > 0).map(({ n, summary }) => `${n} ${summary}`)
+  plain(`\nSummary: ${parts.join(", ")}`)
+}
+
+/**
+ * What `doctor --rebaseline` would record, from a report taken without it: every drifted object,
+ * except access drift (policies, grants, labels, RLS) unless `--accept-access-drift` says to take a hand
+ * edit to who may read or write as Supatype's too. Exported for tests.
+ */
+export function rebaselinePlan(
+  report: DoctorReport,
+  acceptAccessDrift: boolean,
+): { record: DoctorItem[]; kept: DoctorItem[] } {
+  const drifted = report.drifted ?? []
+  if (acceptAccessDrift) return { record: drifted, kept: [] }
+  return {
+    record: drifted.filter((item) => !isAccessKind(item.kind)),
+    kept: drifted.filter((item) => isAccessKind(item.kind)),
+  }
+}
+
+/** The preview a person approves before a rebaseline. Exported for tests. */
+export function printRebaselinePlan(plan: { record: DoctorItem[]; kept: DoctorItem[] }): void {
+  printSection("Rebaseline will record these as they are now, changing no object", plan.record)
+  printSection(
+    "Left drifted: access changed outside Supatype (pass --accept-access-drift to record these too)",
+    plan.kept,
+  )
+}
+
+interface DoctorOptions {
+  connection?: string
+  env?: string
+  strict?: boolean
+  rebaseline?: boolean
+  acceptAccessDrift?: boolean
+  /** Retired on doctor: it is push's flag. Kept only to point at `--accept-access-drift`. */
+  overwriteDrift?: boolean
+  yes?: boolean
+  cache?: boolean
+  direct?: boolean
 }
 
 export function registerDoctor(program: Command): void {
@@ -42,70 +140,96 @@ export function registerDoctor(program: Command): void {
     .description("Report schema drift between schema/index.ts and the live database")
     .option("--connection <url>", "Database connection URL (overrides config)")
     .option("--env <name>", "Target environment when linked")
-    .option("--strict", "Exit non-zero when missing or stale managed drift exists")
+    .option("--strict", "Exit non-zero when a push would change or refuse something")
+    .option(
+      "--rebaseline",
+      "Record drifted objects as they are now, changing no object (after a Postgres upgrade, or to keep a hand edit until the schema changes it); shows them and asks first",
+    )
+    .option(
+      "--accept-access-drift",
+      "With --rebaseline, also record policies, grants, labels and RLS changed outside Supatype",
+    )
+    // Renamed: `--overwrite-drift` puts Supatype's definitions back on push, the opposite of what a
+    // rebaseline does. Still parsed, so it can say so rather than "unknown option".
+    .addOption(new Option("--overwrite-drift").hideHelp())
+    .option("--yes", "Rebaseline without asking")
     .option("--direct", "Use local engine subprocess")
-  addRetiredNoCacheOption(command).action(async (opts: {
-      connection?: string
-      env?: string
-      strict?: boolean
-      cache?: boolean
-      direct?: boolean
-    }) => {
-      warnIfRetiredNoCache(opts)
-      const cwd = process.cwd()
-      const config = loadConfig(cwd)
-      const pgSchema = schemaPgSchema(cwd)
+  addRetiredNoCacheOption(command).action(doctor)
+}
 
-      info("Loading schema...")
-      const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
+async function doctor(opts: DoctorOptions): Promise<void> {
+  warnIfRetiredNoCache(opts)
+  const cwd = process.cwd()
+  const config = loadConfig(cwd)
+  const pgSchema = schemaPgSchema(cwd)
+  const rebaseline = opts.rebaseline === true
+  const acceptAccessDrift = opts.acceptAccessDrift === true
 
-      let report: DoctorReport
+  if (opts.overwriteDrift === true) {
+    error(
+      "doctor no longer takes --overwrite-drift. To record access changed outside Supatype as the baseline, run: " +
+        "supatype doctor --rebaseline --accept-access-drift",
+    )
+    process.exit(1)
+  }
+  if (acceptAccessDrift && !rebaseline) {
+    error("doctor --accept-access-drift only applies with --rebaseline")
+    process.exit(1)
+  }
 
-      const linked = loadProjectLink(cwd)
-      if (linked && !opts.direct && !opts.connection) {
-        const target = resolveTarget(cwd, { env: opts.env })
-        report = (await targetSchemaDoctor(target, ast, {
-          schema: pgSchema,
-        })) as DoctorReport
-      } else if (!opts.direct && !opts.connection) {
-        const connection = await resolveHostEngineDatabaseUrl(cwd, config, opts.connection)
-        const target = resolveTarget(cwd, { direct: true, connection })
-        report = (await targetSchemaDoctor(target, ast, {
-          schema: pgSchema,
-        })) as DoctorReport
-        void connection
+  info("Loading schema...")
+  // As push sends it: the engine refuses a versioned schema that carries no publishing config.
+  const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
+
+  const target = await schemaCommandTarget(cwd, config, opts)
+  await requireTargetFeatures(target, [
+    ...(rebaseline ? [{ feature: "rebaseline", flag: "--rebaseline" } as const] : []),
+    ...(acceptAccessDrift ? [{ feature: "accept_access_drift", flag: "--accept-access-drift" } as const] : []),
+  ])
+  let report = (await targetSchemaDoctor(target, ast, { schema: pgSchema })) as DoctorReport
+
+  printHooks(hooksReport(cwd, hooksPathFromProject(config, cwd), ast))
+  printServiceRoleGrants(checkServiceRoleRoutes(config, cwd), serviceRoleRoutes(config))
+
+  if (rebaseline) {
+    // Plan 3.2: a rebaseline takes what the database holds as Supatype's from now on, so a person
+    // sees each object first, and a hand edit to access is taken only with --accept-access-drift too.
+    const plan = rebaselinePlan(report, acceptAccessDrift)
+    if (plan.record.length === 0) {
+      printReport(report)
+      // Access drift alone is still drift: say why it was not recorded and how it would be.
+      printRebaselinePlan(plan)
+      info("Nothing to rebaseline.")
+    } else {
+      printRebaselinePlan(plan)
+      const consent = await askConsent(
+        `Record ${plan.record.length} object(s) as Supatype's baseline?`,
+        opts.yes ?? false,
+      )
+      if (consent === "needs-yes") {
+        error("doctor --rebaseline needs --yes when not interactive")
+        process.exitCode = 1
+        return
+      }
+      if (consent === "declined") {
+        plain("Rebaseline cancelled. Nothing was recorded.")
+        printReport(report)
       } else {
-        const target = resolveTarget(cwd, {
-          env: opts.env,
-          direct: true,
-          connection: opts.connection,
-        })
         report = (await targetSchemaDoctor(target, ast, {
           schema: pgSchema,
+          rebaseline: true,
+          acceptAccessDrift,
         })) as DoctorReport
+        printReport(report)
       }
+    }
+  } else {
+    printReport(report)
+  }
 
-      printHooks(hooksReport(cwd, hooksPathFromProject(config, cwd), ast))
-      printServiceRoleGrants(checkServiceRoleRoutes(config, cwd), serviceRoleRoutes(config))
-
-      printSection("Missing (in AST, not in DB)", report.missing ?? [])
-      printSection("Stale managed (stamped, not in AST)", report.staleManaged ?? [])
-      printSection("Unmanaged drift (manual decision)", report.unmanagedDrift ?? [])
-
-      const missing = report.missing?.length ?? 0
-      const stale = report.staleManaged?.length ?? 0
-      const unmanaged = report.unmanagedDrift?.length ?? 0
-
-      if (missing + stale + unmanaged === 0) {
-        info("No drift detected.")
-      } else {
-        plain(`\nSummary: ${missing} missing, ${stale} stale managed, ${unmanaged} unmanaged`)
-      }
-
-      if (opts.strict && (missing > 0 || stale > 0)) {
-        process.exit(1)
-      }
-    })
+  if (opts.strict && hasStrictIssues(report)) {
+    process.exit(1)
+  }
 }
 
 /**
