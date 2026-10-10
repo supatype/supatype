@@ -8,6 +8,8 @@ import {
   type PredicateRef,
   type ReadMasks,
 } from "./field-mask.js"
+import { TableCatalog, type TableShape } from "./table-catalog.js"
+import { logDrop, sqlState, type DropSeverity } from "./drop-log.js"
 
 const { Pool } = pg
 
@@ -16,19 +18,38 @@ function quoteIdentifier(value: string): string {
   return `"${value.replace(/"/g, '""')}"`
 }
 
+function relationOf(change: WalChange): string {
+  return `${quoteIdentifier(change.schema)}.${quoteIdentifier(change.table)}`
+}
+
+/** Why a change was withheld from a subscriber. */
+interface Refusal {
+  severity: DropSeverity
+  reason: string
+}
+
+type Verdict = { send: WalChange } | Refusal
+
+const denied = (reason: string): Refusal => ({ severity: "denied", reason })
+const failed = (reason: string): Refusal => ({ severity: "failed", reason })
+
+/** What a table's changes are judged with, read before the subscriber's transaction opens. */
+interface TableRules {
+  masks: ReadMasks
+  shape: TableShape
+}
+
 /**
  * RLS-aware event filter.
  *
- * Before sending a change event to a subscriber, we verify they have
- * access to the record by running a SELECT with the subscriber's JWT
- * role set via `set_config('request.jwt.claims', ...)`.
- *
- * This ensures the realtime service respects the same RLS policies
- * that protect the REST API.
+ * Before sending a change event to a subscriber, we verify they have access to the record as the
+ * subscriber's role, with their JWT claims set via `set_config('request.jwt.claims', ...)`, so
+ * realtime respects the same rules that protect the REST API.
  */
 export class RlsFilter {
   private pool: pg.Pool
   private fieldMasks: FieldMaskCatalog
+  private tables: TableCatalog
 
   constructor(databaseUrl: string) {
     this.pool = new Pool({
@@ -39,11 +60,13 @@ export class RlsFilter {
       console.error("[realtime] rls pool error:", err)
     })
     this.fieldMasks = new FieldMaskCatalog(this.pool)
+    this.tables = new TableCatalog(this.pool)
   }
 
-  /** Drop the cached field rules, called when a schema push completes. */
-  invalidateFieldMasks(): void {
+  /** Drop the cached field rules and table shapes, called when a schema push completes. */
+  invalidateCatalogs(): void {
     this.fieldMasks.invalidate()
+    this.tables.invalidate()
   }
 
   /** Which columns of a table carry a read restriction, for filter safety checks. */
@@ -65,62 +88,167 @@ export class RlsFilter {
    * separate masking step: the only value a caller can obtain is the masked one, so a
    * dispatch path cannot forget to mask and send the real column instead.
    *
-   * Row visibility and field verdicts share one transaction, so a subscriber is judged
-   * once per change against one snapshot with one set of claims.
+   * Every drop is logged with its reason (see `drop-log.ts`), never with row data.
    */
   async visibleChange(
     claims: JwtClaims | null,
     change: WalChange,
   ): Promise<WalChange | null> {
+    const verdict = await this.judge(claims, change)
+    if ("send" in verdict) return verdict.send
+    logDrop(
+      {
+        schema: change.schema,
+        table: change.table,
+        event: change.event,
+        role: claims ? (claims.role ?? "authenticated") : "none",
+        reason: verdict.reason,
+      },
+      verdict.severity,
+    )
+    return null
+  }
+
+  private async judge(claims: JwtClaims | null, change: WalChange): Promise<Verdict> {
     // Unauthenticated clients can't see anything in secure mode
-    if (!claims) return null
+    if (!claims) return denied("unauthenticated subscriber")
 
     // Service role bypasses RLS, and is the role `supatype_mask` exempts too
-    if (claims.role === "service_role") return change
+    if (claims.role === "service_role") return { send: change }
 
-    let masks: ReadMasks
+    const rules = await this.rulesFor(change)
+    if ("reason" in rules) return rules
+    return this.judgeAsSubscriber(claims, change, rules)
+  }
+
+  /**
+   * The table's field rules and shape. Not knowing either means not being able to judge the
+   * change safely, so a failure here drops it.
+   */
+  private async rulesFor(change: WalChange): Promise<TableRules | Refusal> {
     try {
-      masks = await this.fieldMasks.readMasks(change.schema, change.table)
-    } catch {
-      // Not knowing which columns are restricted means not being able to send any of
-      // them safely.
-      return null
+      const masks = await this.fieldMasks.readMasks(change.schema, change.table)
+      const shape = await this.tables.shape(change.schema, change.table)
+      return { masks, shape }
+    } catch (err) {
+      return failed(`table catalog could not be read (SQLSTATE ${sqlState(err)})`)
     }
+  }
 
-    const client = await this.pool.connect()
+  /**
+   * Row visibility and field verdicts in one transaction, so a subscriber is judged once per
+   * change against one snapshot with one set of claims.
+   */
+  private async judgeAsSubscriber(
+    claims: JwtClaims,
+    change: WalChange,
+    rules: TableRules,
+  ): Promise<Verdict> {
+    let client: pg.PoolClient
     try {
-      await client.query("BEGIN")
-      await client.query(
-        `SELECT set_config('request.jwt.claims', $1, true)`,
-        [JSON.stringify(claims)],
-      )
-      await client.query(
-        `SELECT set_config('role', $1, true)`,
-        [claims.role ?? "authenticated"],
-      )
-
-      const visible =
+      client = await this.pool.connect()
+    } catch (err) {
+      return failed(`no database connection (SQLSTATE ${sqlState(err)})`)
+    }
+    try {
+      await this.beginAs(client, claims)
+      const refusal =
         change.event === "DELETE"
-          ? await this.deleteVisible(client, claims, change)
-          : await this.recordVisible(client, change)
-
-      if (!visible) {
-        await client.query("COMMIT")
-        return null
+          ? await this.deleteRefusal(client, change, rules.shape)
+          : await this.recordRefusal(client, change, rules.shape)
+      const verdict: Verdict = refusal ?? {
+        send: rules.masks.size === 0 ? change : await this.applyMasks(client, change, rules.masks),
       }
-
-      const masked = masks.size === 0 ? change : await this.applyMasks(client, change, masks)
       await client.query("COMMIT")
-      return masked
-    } catch {
+      return verdict
+    } catch (err) {
       await client.query("ROLLBACK").catch(() => {})
       // If anything fails (table gone, predicate missing, a value that will not round-trip
       // through jsonb), drop the event. A dropped event is recoverable; a leaked column is
       // not.
-      return null
+      return failed(`visibility check failed (SQLSTATE ${sqlState(err)})`)
     } finally {
       client.release()
     }
+  }
+
+  private async beginAs(client: pg.PoolClient, claims: JwtClaims): Promise<void> {
+    await client.query("BEGIN")
+    await client.query(`SELECT set_config('request.jwt.claims', $1, true)`, [JSON.stringify(claims)])
+    await client.query(`SELECT set_config('role', $1, true)`, [claims.role ?? "authenticated"])
+  }
+
+  /**
+   * Row visibility for INSERT and UPDATE: re-select the row by its primary key under the
+   * subscriber's role.
+   *
+   * Still a re-read rather than a generated `can_read_<table>` call, because the stored
+   * policies are authoritative and may include hand-written ones no generated function
+   * knows about.
+   *
+   * The key comes from the catalog, every column of it. It used to be guessed as `id` or else
+   * the first column, and on a table keyed by anything else the re-select matched any visible
+   * row sharing that first column's value, and the stranger's row went out whole.
+   */
+  private async recordRefusal(
+    client: pg.PoolClient,
+    change: WalChange,
+    shape: TableShape,
+  ): Promise<Refusal | null> {
+    const record = change.newRecord ?? change.oldRecord
+    if (!record) return failed("change carries no row")
+    const key = shape.primaryKey
+    if (key.length === 0) return failed("table has no primary key")
+    if (key.some((column) => !(column in record))) return failed("change lacks a primary key column")
+
+    const where = key.map((column, i) => `${quoteIdentifier(column)} = $${i + 1}`).join(" AND ")
+    const result = await client.query(
+      `SELECT 1 FROM ${relationOf(change)} WHERE ${where} LIMIT 1`,
+      key.map((column) => record[column]),
+    )
+    return result.rows.length > 0 ? null : denied("row not visible to subscriber")
+  }
+
+  /**
+   * DELETE visibility: could the subscriber have seen the row that was deleted?
+   *
+   * The row is gone, so it cannot be re-selected. It is judged instead by the engine-generated
+   * `can_read_<table>(row)` applied to the old tuple from the WAL, as the subscriber. That needs
+   * the whole old row, which the WAL carries only under `REPLICA IDENTITY FULL`; with the default
+   * identity it carries the key alone, and a key alone cannot be judged. Both that and a table
+   * with no generated predicate fail closed.
+   *
+   * This replaced "does the role hold SELECT on the table", which told every subscriber the key
+   * of every deleted row.
+   */
+  private async deleteRefusal(
+    client: pg.PoolClient,
+    change: WalChange,
+    shape: TableShape,
+  ): Promise<Refusal | null> {
+    const old = change.oldRecord
+    if (!old) return failed("delete carries no old row")
+    if (!shape.readPredicate) return failed(`no ${change.table} read predicate (can_read_${change.table})`)
+    if (shape.columns.some((column) => !(column in old))) {
+      return failed("old row incomplete: the table needs REPLICA IDENTITY FULL")
+    }
+    const visible = await this.predicateHolds(client, change, shape.readPredicate, old)
+    return visible ? null : denied("deleted row was not visible to subscriber")
+  }
+
+  private async predicateHolds(
+    client: pg.PoolClient,
+    change: WalChange,
+    predicate: PredicateRef,
+    record: Record<string, unknown>,
+  ): Promise<boolean> {
+    const result = await client.query(
+      `SELECT ${quotePredicateRef(predicate)}(r) AS visible ` +
+        `FROM jsonb_populate_record(null::${relationOf(change)}, $1::jsonb) AS r`,
+      [JSON.stringify(record)],
+    )
+    const row = result.rows[0] as { visible?: unknown } | undefined
+    return row?.visible === true
   }
 
   /**
@@ -140,44 +268,14 @@ export class RlsFilter {
     masks: ReadMasks,
   ): Promise<WalChange> {
     const columns = [...masks.keys()]
-    const sides: Array<{ key: "new" | "old"; alias: string; record: Record<string, unknown> }> = []
-    if (change.newRecord) sides.push({ key: "new", alias: "n", record: change.newRecord })
-    if (change.oldRecord) sides.push({ key: "old", alias: "o", record: change.oldRecord })
+    const sides = sidesOf(change)
     if (sides.length === 0) return change
 
     // Columns whose label could not be parsed are masked without asking.
     const askable = columns.filter((column) => masks.get(column) != null)
-
-    const verdicts = new Map<string, Map<string, boolean | null>>()
-    for (const side of sides) verdicts.set(side.key, new Map())
-
-    if (askable.length > 0) {
-      const relation = `${quoteIdentifier(change.schema)}.${quoteIdentifier(change.table)}`
-      const from = sides.map(
-        (side, index) =>
-          `jsonb_populate_record(null::${relation}, $${index + 1}::jsonb) AS ${side.alias}`,
-      )
-      const terms: string[] = []
-      askable.forEach((column, columnIndex) => {
-        const predicate = quotePredicateRef(masks.get(column) as PredicateRef)
-        for (const side of sides) {
-          terms.push(`${predicate}(${side.alias}) AS ${side.alias}_${columnIndex}`)
-        }
-      })
-
-      const result = await client.query(
-        `SELECT ${terms.join(", ")} FROM ${from.join(", ")}`,
-        sides.map((side) => JSON.stringify(side.record)),
-      )
-      const row = (result.rows[0] ?? {}) as Record<string, unknown>
-
-      askable.forEach((column, columnIndex) => {
-        for (const side of sides) {
-          const value = row[`${side.alias}_${columnIndex}`]
-          verdicts.get(side.key)!.set(column, value === true ? true : null)
-        }
-      })
-    }
+    const verdicts = askable.length > 0
+      ? await this.readVerdicts(client, change, sides, askable, masks)
+      : new Map<string, Map<string, boolean | null>>()
 
     return {
       ...change,
@@ -186,61 +284,54 @@ export class RlsFilter {
     }
   }
 
-  /**
-   * Row visibility for INSERT and UPDATE: re-select the row under the subscriber's role.
-   *
-   * Still a re-read rather than a generated `can_read_<table>` call, because the stored
-   * policies are authoritative and may include hand-written ones no generated function
-   * knows about. The field verdicts above are a different question, those have no
-   * policy to defer to.
-   */
-  private async recordVisible(client: pg.PoolClient, change: WalChange): Promise<boolean> {
-    const record = change.newRecord ?? change.oldRecord
-    if (!record) return false
-
-    const pkColumn = this.findPrimaryKeyColumn(record)
-    if (!pkColumn) return false
-
-    const result = await client.query(
-      `SELECT 1 FROM ${quoteIdentifier(change.schema)}.${quoteIdentifier(change.table)} ` +
-        `WHERE ${quoteIdentifier(pkColumn)} = $1 LIMIT 1`,
-      [record[pkColumn]],
-    )
-    return result.rows.length > 0
-  }
-
-  /**
-   * For DELETE the row is gone, so there is nothing to re-select. Falls back to "does this
-   * role hold SELECT on the table at all".
-   *
-   * Known coarseness, pre-existing and unchanged here: a subscriber who may read *some*
-   * rows sees *every* delete on the table. Field masking now applies to those payloads, so
-   * a restricted column is no longer disclosed by one, but which deletes a caller learns
-   * about is still broader than RLS would allow, and closing it needs last-known-visibility
-   * tracking rather than a query.
-   */
-  private async deleteVisible(
+  /** One query answering every restricted column for every side of the change. */
+  private async readVerdicts(
     client: pg.PoolClient,
-    claims: JwtClaims,
     change: WalChange,
-  ): Promise<boolean> {
-    const result = await client.query(
-      `SELECT has_table_privilege($1, $2, 'SELECT')`,
-      [claims.role ?? "authenticated", `"${change.schema}"."${change.table}"`],
+    sides: Side[],
+    askable: string[],
+    masks: ReadMasks,
+  ): Promise<Map<string, Map<string, boolean | null>>> {
+    const from = sides.map(
+      (side, index) =>
+        `jsonb_populate_record(null::${relationOf(change)}, $${index + 1}::jsonb) AS ${side.alias}`,
     )
-    const row = result.rows[0] as Record<string, unknown> | undefined
-    return row?.["has_table_privilege"] === true
+    const terms = askable.flatMap((column, columnIndex) => {
+      const predicate = quotePredicateRef(masks.get(column) as PredicateRef)
+      return sides.map((side) => `${predicate}(${side.alias}) AS ${side.alias}_${columnIndex}`)
+    })
+
+    const result = await client.query(
+      `SELECT ${terms.join(", ")} FROM ${from.join(", ")}`,
+      sides.map((side) => JSON.stringify(side.record)),
+    )
+    const row = (result.rows[0] ?? {}) as Record<string, unknown>
+
+    const verdicts = new Map<string, Map<string, boolean | null>>()
+    for (const side of sides) {
+      const perColumn = new Map<string, boolean | null>()
+      askable.forEach((column, columnIndex) => {
+        perColumn.set(column, row[`${side.alias}_${columnIndex}`] === true ? true : null)
+      })
+      verdicts.set(side.key, perColumn)
+    }
+    return verdicts
   }
 
   async shutdown(): Promise<void> {
     await this.pool.end()
   }
+}
 
-  /** Heuristic: look for 'id' column as primary key. */
-  private findPrimaryKeyColumn(record: Record<string, unknown>): string | null {
-    if ("id" in record) return "id"
-    // Fall back to the first column
-    const keys = Object.keys(record)
-    return keys[0] ?? null
-  }
+interface Side {
+  key: "new" | "old"
+  alias: string
+  record: Record<string, unknown>
+}
+
+function sidesOf(change: WalChange): Side[] {
+  const sides: Side[] = []
+  if (change.newRecord) sides.push({ key: "new", alias: "n", record: change.newRecord })
+  if (change.oldRecord) sides.push({ key: "old", alias: "o", record: change.oldRecord })
+  return sides
 }

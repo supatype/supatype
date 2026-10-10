@@ -1,4 +1,5 @@
 import type pg from "pg"
+import { TtlCache } from "./ttl-cache.js"
 
 /**
  * Per-column masking for realtime payloads.
@@ -113,11 +114,6 @@ export function parseMaskLabel(label: string): MaskLabel | null {
  */
 export type ReadMasks = Map<string, PredicateRef | null>
 
-interface CacheEntry {
-  masks: ReadMasks
-  readAt: number
-}
-
 /**
  * Which columns of which tables carry a read restriction, cached.
  *
@@ -129,22 +125,30 @@ interface CacheEntry {
  * The TTL bounds how long a newly-restricted column could still be broadcast.
  */
 export class FieldMaskCatalog {
-  private cache = new Map<string, CacheEntry>()
+  private cache: TtlCache<ReadMasks>
 
   constructor(
     private pool: pg.Pool,
-    private ttlMs = 30_000,
-  ) {}
+    ttlMs = 30_000,
+  ) {
+    this.cache = new TtlCache(ttlMs)
+  }
 
   invalidate(): void {
     this.cache.clear()
   }
 
-  async readMasks(schema: string, table: string): Promise<ReadMasks> {
-    const key = `${schema}.${table}`
-    const cached = this.cache.get(key)
-    if (cached && Date.now() - cached.readAt < this.ttlMs) return cached.masks
+  /**
+   * The read-restricted columns of a table and the predicate each is judged by.
+   *
+   * Sourced from security labels today. This is the one seam a different source (engine
+   * metadata, for a database without labels) plugs into: callers only see `ReadMasks`.
+   */
+  readMasks(schema: string, table: string): Promise<ReadMasks> {
+    return this.cache.get(`${schema}.${table}`, () => this.loadFromLabels(schema, table))
+  }
 
+  private async loadFromLabels(schema: string, table: string): Promise<ReadMasks> {
     const masks: ReadMasks = new Map()
     const result = await this.pool.query<{ column_name: string; label: string }>(
       `SELECT a.attname AS column_name, l.label
@@ -169,7 +173,6 @@ export class FieldMaskCatalog {
       if (parsed.read) masks.set(row.column_name, parsed.read)
     }
 
-    this.cache.set(key, { masks, readAt: Date.now() })
     return masks
   }
 }

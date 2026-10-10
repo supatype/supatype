@@ -103,10 +103,11 @@ export class RealtimeServer {
       void this.handleWalChange(change)
     })
     // A push can add, change or remove a field rule, and those are read from security
-    // labels and cached. Re-read them rather than wait out the TTL, so a newly restricted
-    // column stops being broadcast at the push rather than up to a TTL later.
+    // labels and cached, as are table shapes (keys, columns, predicates). Re-read them rather
+    // than wait out the TTL, so a newly restricted column stops being broadcast at the push
+    // rather than up to a TTL later.
     this.replication.onSchemaChange(() => {
-      this.rlsFilter.invalidateFieldMasks()
+      this.rlsFilter.invalidateCatalogs()
     })
 
     // Listen first, then connect. The old order awaited replication before binding the port, so a
