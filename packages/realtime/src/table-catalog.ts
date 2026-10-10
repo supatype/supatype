@@ -1,6 +1,7 @@
 import type pg from "pg"
 import type { PredicateRef } from "./field-mask.js"
 import { TtlCache } from "./ttl-cache.js"
+import { rowReadPredicateName } from "./predicate-names.js"
 
 /**
  * What realtime needs to know about a table's shape to judge a change, read from the catalog.
@@ -38,7 +39,7 @@ const READ_PREDICATE_SQL = `
   SELECT p.proname AS name
     FROM pg_proc p
    WHERE p.oid = to_regprocedure(
-           format('%I.%I(%I.%I)', $1::text, 'can_read_' || $2::text, $1::text, $2::text))
+           format('%I.%I(%I.%I)', $1::text, $3::text, $1::text, $2::text))
      AND p.prorettype = 'boolean'::regtype`
 
 /** The key columns in key order, from rows that carry each column's position in the key. */
@@ -74,11 +75,10 @@ export class TableCatalog {
   }
 
   private async load(schema: string, table: string): Promise<TableShape> {
-    const columns = await this.pool.query<{ name: string; pk_position: number | null }>(
-      COLUMNS_SQL,
-      [schema, table],
-    )
-    const predicate = await this.pool.query<{ name: string }>(READ_PREDICATE_SQL, [schema, table])
+    const [columns, predicate] = await Promise.all([
+      this.pool.query<{ name: string; pk_position: number | null }>(COLUMNS_SQL, [schema, table]),
+      this.pool.query<{ name: string }>(READ_PREDICATE_SQL, [schema, table, rowReadPredicateName(table)]),
+    ])
     const predicateName = predicate.rows[0]?.name
     return {
       columns: columns.rows.map((row) => row.name),
