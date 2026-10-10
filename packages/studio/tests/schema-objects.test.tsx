@@ -158,12 +158,17 @@ describe("fetchObjectPage()", () => {
   })
 
   it("counts with the same filters it pages with", () => {
-    expect(objectsCountQuery({ kind: "index", table: "", status: "all" })).toContain("WHERE kind = 'index'")
+    expect(objectsCountQuery({ ...NO_FILTERS, kind: "index" })).toContain("WHERE kind = 'index'")
     expect(lastPage(0)).toBe(0)
     expect(lastPage(PAGE_SIZE)).toBe(0)
     expect(lastPage(PAGE_SIZE + 1)).toBe(1)
   })
 })
+
+/** The `WHERE` clause of a query, on one line. */
+function whereOf(sql: string): string {
+  return (/WHERE([\s\S]*?)ORDER BY/.exec(sql)?.[1] ?? "").replace(/\s+/g, " ")
+}
 
 describe("objectsQuery()", () => {
   it("asks for one page, with the count of every match", () => {
@@ -174,7 +179,7 @@ describe("objectsQuery()", () => {
   })
 
   it("filters by kind and status in the query", () => {
-    const sql = objectsQuery({ filters: { kind: "index", table: "", status: "released" }, page: 0 })
+    const sql = objectsQuery({ filters: { ...NO_FILTERS, kind: "index", status: "released" }, page: 0 })
     expect(sql).toContain("kind = 'index'")
     expect(sql).toContain("status = 'released'")
   })
@@ -183,6 +188,20 @@ describe("objectsQuery()", () => {
     const sql = objectsQuery({ filters: { ...NO_FILTERS, table: "posts" }, page: 0 })
     expect(sql).toContain("split_part(parent, '.', 1)")
     expect(sql).toContain("ILIKE '%posts%'")
+  })
+
+  it("matches a table-less object (a function, a view) only when asked to, and then by its own name", () => {
+    const tablesOnly = whereOf(objectsQuery({ filters: { ...NO_FILTERS, table: "post" }, page: 0 }))
+    expect(tablesOnly).toContain("parent = '' AND kind = 'table' AND name ILIKE '%post%'")
+    expect(tablesOnly).not.toMatch(/WHEN parent = ''/)
+    expect(tablesOnly).not.toMatch(/parent = '' AND name ILIKE/)
+
+    const withTableless = whereOf(objectsQuery({ filters: { ...NO_FILTERS, table: "post", tableless: true }, page: 0 }))
+    expect(withTableless).toContain("parent = '' AND name ILIKE '%post%'")
+  })
+
+  it("leaves table-less objects in when there is no table filter, whatever the toggle says", () => {
+    expect(objectsQuery({ filters: { ...NO_FILTERS, tableless: true }, page: 0 })).not.toContain("WHERE")
   })
 
   it("quotes what was typed, and takes LIKE's wildcards literally", () => {
@@ -201,8 +220,34 @@ describe("toPage() and mapObjectRow()", () => {
     expect(page.objects[0]!.migration_id).toBeNull()
   })
 
-  it("reads an unknown status as managed rather than inventing one", () => {
-    expect(mapObjectRow({ kind: "table", name: "t", status: "weird" }).status).toBe("managed")
+  it("keeps an unknown status as the ledger has it, rather than reading it as managed", () => {
+    expect(mapObjectRow({ kind: "table", name: "t", status: "pending_release" }).status).toBe("pending_release")
+  })
+})
+
+describe("the table-less objects toggle", () => {
+  const toggle = (html: string) => /<input[^>]*type="checkbox"[^>]*>/.exec(html)?.[0] ?? ""
+
+  it("is offered, and waits for a table filter it would apply to", () => {
+    const html = render({ result: PAGE })
+    expect(html).toContain("Include table-less objects")
+    expect(toggle(html)).toContain("disabled")
+  })
+
+  it("can be turned on once a table is being filtered on", () => {
+    const html = render({ result: PAGE, query: { filters: { ...NO_FILTERS, table: "posts", tableless: true }, page: 0 } })
+    expect(toggle(html)).not.toContain("disabled")
+    expect(toggle(html)).toContain("checked")
+  })
+})
+
+describe("a status Studio does not know", () => {
+  it("shows as itself, never as managed", () => {
+    const html = render({
+      result: { ...PAGE, objects: [mapObjectRow({ kind: "table", schema_name: "public", parent: "", name: "probe", status: "pending_release" })] },
+    })
+    expect(html).toContain("unknown: pending_release")
+    expect(html).not.toMatch(/<span[^>]*>managed<\/span>/)
   })
 })
 

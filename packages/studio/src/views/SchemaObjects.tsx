@@ -10,9 +10,9 @@
  * now leaves alone is the one an operator most needs to remember exists.
  */
 
-import React, { useEffect, useMemo, useState } from "react"
+import React, { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
-import { Badge, Card, Input, Pager, Select, Td, Th, type BadgeVariant } from "../components/ui.js"
+import { Badge, Card, Checkbox, Input, Pager, Select, Td, Th, type BadgeVariant } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
@@ -31,7 +31,11 @@ export interface ManagedObject {
   /** The table for table-scoped kinds; empty for a table, a schema, a function and the like. */
   parent: string
   name: string
-  status: ObjectStatus
+  /**
+   * As the ledger has it: one of `ObjectStatus`, or a status this Studio does not know (a newer
+   * engine's), which is shown as itself rather than guessed at.
+   */
+  status: string
   /** The migration that last changed it, or null until a push has. */
   migration_id: number | null
   updated_at: string
@@ -41,6 +45,11 @@ export interface ObjectFilters {
   kind: string
   table: string
   status: "all" | ObjectStatus
+  /**
+   * Whether the table filter also matches the objects that belong to no table (a function, a view,
+   * an enum) by their own name. Off, it matches tables and what is on them, and nothing else.
+   */
+  tableless: boolean
 }
 
 /** What is being looked at: the filters and the zero-based page. */
@@ -60,7 +69,7 @@ export interface ObjectPage {
   kinds: string[]
 }
 
-export const NO_FILTERS: ObjectFilters = { kind: "all", table: "", status: "all" }
+export const NO_FILTERS: ObjectFilters = { kind: "all", table: "", status: "all", tableless: false }
 
 export const PAGE_SIZE = 50
 
@@ -78,7 +87,24 @@ const statusVariant: Record<ObjectStatus, BadgeVariant> = {
 
 const STATUSES: readonly ObjectStatus[] = ["managed", "adopted", "released"]
 
+function knownStatus(status: string): ObjectStatus | undefined {
+  return STATUSES.find((s) => s === status)
+}
+
 // --- Reading the ledger ---
+
+/**
+ * The rows the table filter `table` matches. A table matches by its own name, and an object on a
+ * table by its parent: the table, or `table.column` for a column's security label, of which only
+ * the table counts. The objects on no table (functions, views and the like) match by their own
+ * name, and only when `tableless` asks for them: otherwise "post" would bring in a function that
+ * merely mentions posts, or `slugify` for "slug".
+ */
+function tableMatch(table: string, tableless: boolean): string {
+  const like = `ILIKE ${containing(table)} ESCAPE '\\'`
+  const own = `parent = ''${tableless ? "" : " AND kind = 'table'"} AND name ${like}`
+  return `((${own}) OR (parent <> '' AND split_part(parent, '.', 1) ${like}))`
+}
 
 /** The `WHERE` clause the filters make, or an empty string for none. */
 function whereClause(filters: ObjectFilters): string {
@@ -86,12 +112,7 @@ function whereClause(filters: ObjectFilters): string {
   if (filters.kind !== "all") where.push(`kind = ${sqlText(filters.kind)}`)
   if (filters.status !== "all") where.push(`status = ${sqlText(filters.status)}`)
   const table = filters.table.trim()
-  // A table's own row names it; anything else names it first in its parent (`table.column`).
-  if (table !== "") {
-    where.push(
-      `(CASE WHEN parent = '' THEN name ELSE split_part(parent, '.', 1) END) ILIKE ${containing(table)} ESCAPE '\\'`,
-    )
-  }
+  if (table !== "") where.push(tableMatch(table, filters.tableless))
   return where.length > 0 ? `\n WHERE ${where.join(" AND ")}` : ""
 }
 
@@ -122,7 +143,7 @@ export function mapObjectRow(row: Record<string, unknown>): ManagedObject {
     schema: String(row["schema_name"] ?? ""),
     parent: String(row["parent"] ?? ""),
     name: String(row["name"] ?? ""),
-    status: STATUSES.find((s) => s === row["status"]) ?? "managed",
+    status: String(row["status"] ?? ""),
     migration_id: migration === null || migration === undefined ? null : Number(migration),
     updated_at: String(row["updated_at"] ?? ""),
   }
@@ -155,7 +176,7 @@ export async function fetchObjectPage(proxy: SqlRunner, query: ObjectQuery): Pro
 }
 
 /** `value`, once it has stopped changing for `ms`. */
-export function useDebouncedValue<T>(value: T, ms: number): T {
+function useDebouncedValue<T>(value: T, ms: number): T {
   const [settled, setSettled] = useState(value)
   useEffect(() => {
     const timer = setTimeout(() => setSettled(value), ms)
@@ -170,15 +191,6 @@ export function objectLabel(object: ManagedObject): string {
 }
 
 /** Where Migration History shows one migration on its own. */
-/**
- * Whether a failed read is the ledger not being there yet: Postgres's missing-relation error for
- * `_supatype.managed_objects`, and nothing else. Any other "does not exist" (a column an older
- * ledger lacks, a function, a role) is a real failure the screen has to show.
- */
-export function isMissingLedgerError(message: string): boolean {
-  return isMissingLedger(message)
-}
-
 export function migrationLink(id: number): string {
   return `/database/migrations?migration=${id}`
 }
@@ -191,15 +203,27 @@ interface FilterBarProps {
   onChange: (filters: ObjectFilters) => void
 }
 
+/**
+ * The table filter box. It shows every keystroke but hands the filter on only once typing pauses,
+ * so the new filter and its first page are asked for together. Resetting the page at once, while
+ * the filter waited, asked for the unfiltered first page and put it on screen before the filtered
+ * one arrived.
+ */
+function TableFilter({ table, onSettle }: { table: string; onSettle: (table: string) => void }): React.ReactElement {
+  const [draft, setDraft] = useState(table)
+  const settled = useDebouncedValue(draft, FILTER_DEBOUNCE_MS)
+  useEffect(() => {
+    if (settled !== table) onSettle(settled)
+  }, [settled, table, onSettle])
+  return (
+    <Input className="w-[240px]" placeholder="Filter by table..." value={draft} onChange={(e) => setDraft(e.target.value)} />
+  )
+}
+
 function FilterBar({ filters, kinds, onChange }: FilterBarProps): React.ReactElement {
   return (
     <div className="flex gap-2 mb-4 flex-wrap">
-      <Input
-        className="w-[240px]"
-        placeholder="Filter by table..."
-        value={filters.table}
-        onChange={(e) => onChange({ ...filters, table: e.target.value })}
-      />
+      <TableFilter table={filters.table} onSettle={(table) => onChange({ ...filters, table })} />
       <Select className="w-[180px]" value={filters.kind} onChange={(e) => onChange({ ...filters, kind: e.target.value })}>
         <option value="all">All kinds</option>
         {kinds.map((kind) => (
@@ -209,15 +233,31 @@ function FilterBar({ filters, kinds, onChange }: FilterBarProps): React.ReactEle
       <Select
         className="w-[140px]"
         value={filters.status}
-        onChange={(e) => onChange({ ...filters, status: STATUSES.find((s) => s === e.target.value) ?? "all" })}
+        onChange={(e) => onChange({ ...filters, status: knownStatus(e.target.value) ?? "all" })}
       >
         <option value="all">All status</option>
         {STATUSES.map((status) => (
           <option key={status} value={status}>{status}</option>
         ))}
       </Select>
+      <Checkbox
+        label="Include table-less objects"
+        title="Also match functions, views and other objects on no table, by their own name"
+        checked={filters.tableless}
+        // It changes what the table filter matches, so there is nothing for it to do without one.
+        disabled={filters.table.trim() === ""}
+        onChange={(e) => onChange({ ...filters, tableless: e.target.checked })}
+      />
     </div>
   )
+}
+
+function StatusBadge({ status }: { status: string }): React.ReactElement {
+  const known = knownStatus(status)
+  if (known !== undefined) return <Badge variant={statusVariant[known]}>{known}</Badge>
+  // Shown as itself, in red: the engine that wrote it is newer, or the row was edited by hand, and
+  // either way nothing here can say what Supatype will do with the object.
+  return <Badge variant="red">unknown: {status === "" ? "(none)" : status}</Badge>
 }
 
 function ObjectRow({ object }: { object: ManagedObject }): React.ReactElement {
@@ -226,7 +266,7 @@ function ObjectRow({ object }: { object: ManagedObject }): React.ReactElement {
       <Td className="text-xs text-muted-foreground">{object.kind.replace(/_/g, " ")}</Td>
       <Td className="font-mono text-xs">{objectLabel(object)}</Td>
       <Td className="text-xs text-muted-foreground">{object.schema}</Td>
-      <Td><Badge variant={statusVariant[object.status]}>{object.status}</Badge></Td>
+      <Td><StatusBadge status={object.status} /></Td>
       <Td className="text-xs">
         {object.migration_id === null ? (
           // Named rather than blank: an adopted object has no migration until a push changes it.
@@ -298,7 +338,7 @@ export interface SchemaObjectsViewProps {
 export function SchemaObjectsView({ result, query, onQuery, load }: SchemaObjectsViewProps): React.ReactElement {
   // The ledger is created by the first push of an engine that has it, so its absence means this
   // database has not had one yet rather than anything being broken.
-  const missing = load.error !== null && isMissingLedgerError(load.error)
+  const missing = load.error !== null && isMissingLedger(load.error)
   if (load.error !== null && !missing) {
     return <ErrorBanner message={load.error} onRetry={load.onRefresh} />
   }
@@ -339,15 +379,7 @@ export function SchemaObjectsView({ result, query, onQuery, load }: SchemaObject
 export function SchemaObjects(): React.ReactElement {
   const proxy = useProjectProxy()
   const [query, setQuery] = useState<ObjectQuery>({ filters: NO_FILTERS, page: 0 })
-  // The filter box shows every keystroke; the database is asked once typing pauses.
-  const table = useDebouncedValue(query.filters.table, FILTER_DEBOUNCE_MS)
-  const { page, filters: { kind, status } } = query
-  const asked = useMemo<ObjectQuery>(
-    () => ({ filters: { kind, status, table }, page }),
-    [kind, status, table, page],
-  )
-
-  const { data, loading, error, refetch } = useApiQuery(() => fetchObjectPage(proxy, asked), [proxy, asked])
+  const { data, loading, error, refetch } = useApiQuery(() => fetchObjectPage(proxy, query), [proxy, query])
 
   return (
     <SchemaObjectsView
