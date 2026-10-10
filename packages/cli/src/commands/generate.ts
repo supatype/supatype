@@ -2,11 +2,7 @@ import type { Command } from "commander"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { hooksPathFromProject, schemaPathFromProject } from "../project-config.js"
 import { writeHooksModule } from "../model-hooks.js"
-import {
-  DEFAULT_CLIENT_PATH,
-  DEFAULT_TYPES_PATH,
-  writeGeneratedTypes,
-} from "../type-generation.js"
+import { projectOutputPaths, writeGeneratedTypes } from "../type-generation.js"
 import { error, info } from "../ui/messages.js"
 
 export function registerGenerate(program: Command): void {
@@ -35,13 +31,7 @@ export async function regenerateTypes(cwd: string): Promise<string[]> {
   const schemaPath = schemaPathFromProject(config, cwd)
   const ast = loadSchemaAst(schemaPath, cwd)
   // Shared with push, which used to delegate the writing to the engine and produce no files.
-  // Unlike push, this command always writes: the defaults are the point of running it.
-  const written = await writeGeneratedTypes({
-    cwd,
-    ast,
-    typesPath: config.output?.types ?? DEFAULT_TYPES_PATH,
-    clientPath: config.output?.client ?? DEFAULT_CLIENT_PATH,
-  })
+  const written = await writeGeneratedTypes({ cwd, ast, ...projectOutputPaths(config.output) })
   const hooksPath = writeHooksModule(cwd, hooksPathFromProject(config, cwd), ast)
   return hooksPath === null ? written : [...written, `Hook handler types written to ${hooksPath}`]
 }

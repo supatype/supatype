@@ -45,6 +45,13 @@ describe("scaffold()", () => {
     expect(content).not.toMatch(/^\s*versions:\s*\{/m)
   })
 
+  it("supatype.config.ts names where the generated types and client go", () => {
+    // Without it, a project made by init had no `output`, and dev never regenerated the client.
+    scaffold(tmpRoot, defaultScaffoldOptions("out-app"))
+    const content = readFileSync(join(tmpRoot, "supatype.config.ts"), "utf8")
+    expect(content).toMatch(/^\s*output: \{ types: "types\/database\.ts", client: "supatype\/generated\/index\.d\.ts" \},$/m)
+  })
+
   it("package.json includes @supatype/cli and @supatype/types", () => {
     scaffold(tmpRoot, defaultScaffoldOptions("pkg-app"))
     const content = readFileSync(join(tmpRoot, "package.json"), "utf8")
