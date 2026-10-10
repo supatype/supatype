@@ -9,6 +9,15 @@
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "files": [
+    "bin/supatype.js",
+    "dist",
+    "!dist/**/supatype-eval-*",
+    "!dist/**/*.tsbuildinfo",
+    "releases",
+    "deno.d.ts",
+    "CHANGELOG.md"
+  ],
   "exports": {
     ".": {
       "import": "./dist/index.js",
