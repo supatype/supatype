@@ -2,7 +2,7 @@
 
 > Type-first backend platform for PostgreSQL: define `Model<>` types in TypeScript and generate schema, migrations, RLS, REST/GraphQL API, auth, storage, realtime, and Studio CMS, self-hostable by default.
 
-Supatype is an open-source (MIT) TypeScript SDK and platform. The TypeScript schema is the source of truth; SQL, APIs, policies, and admin UI are generated from it rather than maintained by hand. Local development uses `supatype dev` (native or Docker Compose). Production can self-host (`supatype/server` on Docker Hub) or use Supatype Cloud.
+Supatype is an open-source TypeScript SDK and platform: client SDKs are MIT, the CLI and services are Apache 2.0, and the schema engine is proprietary. The TypeScript schema is the source of truth; SQL, APIs, policies, and admin UI are generated from it rather than maintained by hand. Local development uses `supatype dev` (native or Docker Compose). Production can self-host (`supatype/server` on Docker Hub) or use Supatype Cloud.
 
 Primary audience: TypeScript developers and stack owners on Postgres who want end-to-end type safety without stitching Supabase-style infra, a separate CMS, and hand-written migrations.
 
