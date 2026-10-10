@@ -179,6 +179,11 @@
   then succeeded against an empty database. Only a database that is not reachable yet is retried
   now, and the retry only starts Postgres again. A refusal stops `dev` with the engine's message
   and exits non-zero; for unmanaged tables it names `supatype adopt` as the remedy.
+* **dev:** a first schema push that fails because Docker could not pull an image no longer says
+  "The engine refused the schema push" and asks for the schema to be fixed. The engine never ran,
+  so `dev` now says Docker could not pull the image, that nothing was applied, and what to do: for
+  Docker Hub's pull rate limit, `docker login` or wait; otherwise check the network and the image
+  tag. A registry that could not be reached is no longer retried as though Postgres were starting.
 * **generate:** the client augmentation follows the order the schema declares its models and
   columns in. It sorted alphabetically, which threw away an order the author chose and the AST
   preserved, and made it disagree with `types/database.ts` about the same table.
