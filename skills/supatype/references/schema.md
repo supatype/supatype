@@ -33,7 +33,7 @@ export type Profile = Model<{
 | `Public` | Anyone (including anon) |
 | `Private` | No direct API access |
 | `LoggedIn` | Authenticated users |
-| `Owner<"field">` | Row owner via field (often `"id"`) |
+| `Owner<"field">` | Row owner via `"id"`, a `UUID` or `SupatypeAuthUserId` field, or a relation's key (`"author_id"`) |
 | `OwnerFrom<"relation">` | Owner via related model |
 | `Role<"admin">` | Users with named role |
 

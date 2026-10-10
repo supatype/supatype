@@ -487,15 +487,31 @@ type RelationOwnerKeys<TFields extends Record<string, unknown>> = Extract<{
       : never
     : never
 }[keyof TFields], string>
-type SelfOwnerKey<TFields extends Record<string, unknown>> =
-  "id" extends keyof TFields
-    ? TFields["id"] extends SupatypeAuthUserId
-      ? "id"
-      : never
+/** The declared types a row can be owned through: a column that holds a user id. */
+type OwnerColumnTag = "primitive:UUID" | "primitive:SupatypeAuthUserId"
+/**
+ * True when a field is declared `UUID` or `SupatypeAuthUserId`.
+ *
+ * Read from the presence of the tag's key, not by assignability: the tag is optional, so a plain
+ * `string` is assignable to `UUID` and would otherwise count as an owner column.
+ */
+type IsOwnerColumn<V> = typeof SUPATYPE_TYPE extends keyof V
+  ? V extends { readonly [SUPATYPE_TYPE]?: { readonly tag: infer TTag } }
+    ? [TTag] extends [OwnerColumnTag]
+      ? true
+      : false
+    : false
+  : false
+/** Fields declared `UUID` or `SupatypeAuthUserId`, `id` included, with modifiers (`Optional<UUID>`) unwrapped. */
+type OwnerColumnKeys<TFields extends Record<string, unknown>> = Extract<{
+  [K in keyof TFields]-?: IsOwnerColumn<NonNullable<UnwrapModelFieldType<TFields[K]>>> extends true
+    ? K
     : never
+}[keyof TFields], string>
+/** What `Owner<"f">` may name: a UUID or auth-user-id column, or a relation's `<relation>_id` key. */
 type OwnerEligibleFieldKeys<TFields extends Record<string, unknown>> =
-  RelationOwnerKeys<TFields> | SelfOwnerKey<TFields>
-type ModelRelationFieldKeys<TModel> =
+  RelationOwnerKeys<TFields> | OwnerColumnKeys<TFields>
+type ModelOwnerFieldKeys<TModel> =
   TModel extends { readonly [SUPATYPE_MODEL]?: { readonly fields: infer TFields } }
     ? TFields extends Record<string, unknown>
       ? OwnerEligibleFieldKeys<TFields>
@@ -519,7 +535,7 @@ type AnySupatypeModel = {
  */
 export type Owner<
   TModelOrKey extends string | AnySupatypeModel,
-  TKey extends TModelOrKey extends string ? string : ModelRelationFieldKeys<TModelOrKey> = TModelOrKey extends string
+  TKey extends TModelOrKey extends string ? string : ModelOwnerFieldKeys<TModelOrKey> = TModelOrKey extends string
     ? TModelOrKey
     : never,
 > = Access<"Owner", {
@@ -528,7 +544,7 @@ export type Owner<
   readonly __ownerModel?: TModelOrKey extends string ? never : TModelOrKey
 }>
 export type OwnerKey<TModel extends AnySupatypeModel> =
-  ModelRelationFieldKeys<TModel>
+  ModelOwnerFieldKeys<TModel>
 export type OwnerOf<
   TModel extends AnySupatypeModel,
   TKey extends OwnerKey<TModel>,
