@@ -381,8 +381,6 @@ export function endpointToArgs(
   const dbUrl = (body["database_url"] as string | undefined) ?? ""
   const schema = (body["schema"] as string | undefined) ?? "public"
   const force = body["force"] ? ["--force"] : []
-  const nonInteractive =
-    body["non_interactive"] === true || body["force"] === true ? ["--non-interactive"] : []
   // Plan 3.5: put back access changed outside Supatype. The CLI sets it only after a person said
   // yes to the difference, or when `--overwrite-drift` was passed.
   const overwriteDrift = body["overwrite_drift"] === true ? ["--overwrite-drift"] : []
@@ -404,7 +402,9 @@ export function endpointToArgs(
         "--schema",
         schema,
         ...force,
-        ...nonInteractive,
+        // Always: the binary's stdin is a pipe nobody writes to, so a question it asked would read
+        // nothing and abort. The CLI asks the person, and sends `force` only after a yes.
+        "--non-interactive",
         ...overwriteDrift,
         ...sourceArgs,
       ]

@@ -10,16 +10,21 @@
  *
  * So a failure is classified before anything else happens. A database that is not reachable yet is
  * retried, and the retry never removes anything. An image Docker could not pull means the engine
- * never ran, and `dev` stops saying so. Everything else is the engine's answer, and `dev` stops
- * with it. Resetting the database is `supatype dev --reset-db`, which is asked for, confirmed,
+ * never ran, and `dev` stops saying so. A change that would drop data and was not agreed to leaves
+ * the database as it was, so `dev` says why and carries on watching. Everything else is the
+ * engine's answer, and `dev` stops with it. Resetting the database is `supatype dev --reset-db`, which is asked for, confirmed,
  * and removes only Postgres's volume.
  */
 import { unmanagedTables } from "./adopt-walkthrough.js"
+import { destructiveRefusal } from "./destructive-consent.js"
 import { fatalError } from "./ui/fatal.js"
 import type { DockerBrandOptions } from "./docker-runtime.js"
 
-/** What one failed push means for the next step. */
-export type PushFailureKind = "transient" | "unmanaged-tables" | "image-pull" | "engine"
+/**
+ * What one failed push means for the next step. `destructive` is a change that would drop data and
+ * was not agreed to: the database is untouched and still matches the last schema, so dev carries on.
+ */
+export type PushFailureKind = "transient" | "unmanaged-tables" | "destructive" | "image-pull" | "engine"
 
 /**
  * How the initial push ended.
@@ -97,6 +102,7 @@ function classifyPushFailure(message: string): PushFailureKind {
   // happens to look like a connection error. Read from the engine's JSON reason, with its wording
   // only as the fallback for an engine that predates the JSON.
   if (unmanagedTables(message) !== null) return "unmanaged-tables"
+  if (destructiveRefusal(message) !== null) return "destructive"
   // Before the transient check: a registry that refused a connection is not Postgres starting up,
   // and starting Postgres again would not pull the image.
   if (isImagePullFailure(message)) return "image-pull"
@@ -124,10 +130,12 @@ export async function pushInitialSchema(
     const failure = await attemptPush(steps.push)
     if (failure === null) return { kind: "applied" }
     message = failure
+    const kind = classifyPushFailure(failure)
+    // Not a failure to diagnose: the person was told what would be lost and the database is as it was.
+    if (kind === "destructive") return { kind: "refused", reason: kind, message }
     console.error(`[supatype] Initial schema push failed (attempt ${attempt}/${maxAttempts}):`, failure)
     steps.dumpLogs(`schema push attempt ${attempt}/${maxAttempts}`)
 
-    const kind = classifyPushFailure(failure)
     if (kind !== "transient") return { kind: "refused", reason: kind, message }
     if (attempt < maxAttempts) {
       await steps.recoverDatabase()

@@ -4,7 +4,7 @@
 
 import { writeAstDerivedOutputs } from "./type-generation.js"
 import { withPublishing } from "./model-versioning.js"
-import { existsSync, mkdirSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { spawnSync } from "node:child_process"
@@ -34,6 +34,12 @@ import { cacheSeedingNotes } from "./api-config-cache.js"
 import { refreshFunctionsContext } from "./functions-context-refresh.js"
 import { DB_PORT_ENV, syncDatabaseUrlPort } from "./db-port.js"
 import { degraded } from "./strict.js"
+import {
+  DEV_DESTRUCTIVE_POLICY,
+  destructiveLines,
+  destructiveRefusal,
+  pushConsentingToDestructive,
+} from "./destructive-consent.js"
 import {
   COMPOSE_PINNED_IMAGE_ENV_KEYS,
   composeDockerImageEnv,
@@ -80,7 +86,7 @@ import { provisionBucketsFromAst } from "./storage-provision.js"
 import type { ExtractedSchemaAstV2 } from "./schema-ast-v2.js"
 import { ensureFirstAdminUserForProject } from "./commands/admin.js"
 import { publishDevReady } from "./dev-ready-panel.js"
-import { exitInitialPushFailed, pushInitialSchema, type InitialPushSteps } from "./dev-initial-push.js"
+import { exitInitialPushFailed, pushInitialSchema, type InitialPushOutcome, type InitialPushSteps } from "./dev-initial-push.js"
 import {
   offerAdoption,
   targetAdoptionSteps,
@@ -750,6 +756,12 @@ async function refreshSchemaArtifacts(
 export interface ComposePushOptions {
   /** `--overwrite-drift`: put back access changed outside Supatype (plan 3.5). */
   overwriteDrift?: boolean
+  /**
+   * Apply a change that drops data. Only after a person agreed to it, through
+   * `pushConsentingToDestructive`: without it the engine refuses, which is what keeps a rename it
+   * did not recognise from emptying a column.
+   */
+  force?: boolean
 }
 
 async function runComposeSchemaPush(
@@ -791,7 +803,7 @@ async function runComposeSchemaPush(
         ast,
         database_url: projectDatabaseUrl(cwd, config),
         schema: pgSchema,
-        force: true,
+        force: opts.force === true,
         ...(opts.overwriteDrift === true && { overwrite_drift: true }),
         ...(sources
           ? {
@@ -818,8 +830,9 @@ async function runComposeSchemaPush(
   const sources = writeSchemaSourcePushArtifacts(cwd)
   const runPush = async () => {
     let result = await runComposeEnginePush(paths, cwd, composeProject, config, sources, opts)
-    // Windows Docker bind mounts can lag briefly after the host write.
-    if (result.status !== 0) {
+    // Windows Docker bind mounts can lag briefly after the host write. A destructive refusal is the
+    // engine's considered answer, not a lagging mount, and running it again only repeats it.
+    if (result.status !== 0 && destructiveRefusal(result.output) === null) {
       await new Promise((r) => setTimeout(r, 250))
       result = await runComposeEnginePush(paths, cwd, composeProject, config, sources, opts)
     }
@@ -860,11 +873,49 @@ async function runComposeSchemaPushQueued(
   try {
     do {
       _composePushQueued = false
-      await runComposeSchemaPush(cwd, config, paths, schemaPath, composeProject, opts)
+      await runDevSchemaPush(cwd, config, paths, schemaPath, composeProject, opts)
     } while (_composePushQueued)
   } finally {
     _composePushInFlight = false
   }
+}
+
+/**
+ * One push of a `dev` session, initial or on save. Never forced: a change that would drop data is
+ * asked about in a terminal and refused anywhere else, and the refusal leaves dev running.
+ */
+function runDevSchemaPush(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  paths: SelfHostComposePaths,
+  schemaPath: string,
+  composeProject: string,
+  opts: ComposePushOptions,
+): Promise<void> {
+  return pushConsentingToDestructive(
+    (force) => runComposeSchemaPush(cwd, config, paths, schemaPath, composeProject, { ...opts, force }),
+    DEV_DESTRUCTIVE_POLICY,
+    { describe: () => describeDockerDestruction(cwd, config) },
+  )
+}
+
+/**
+ * What a push of the current schema would destroy, from a diff against the stack's database. For
+ * the question a destructive push asks: the engine's refusal gives only a count.
+ */
+export async function describeDockerDestruction(cwd: string, config: SupatypeProjectConfig): Promise<string[]> {
+  if (hasEngineOverride(config)) {
+    const ast = JSON.parse(readFileSync(join(cwd, ".supatype", "schema.ast.json"), "utf8")) as unknown
+    const diff = await engineRequest<DiffResult>("/diff", {
+      ast,
+      database_url: projectDatabaseUrl(cwd, config),
+      schema: config.schema?.pg_schema ?? "public",
+    })
+    return destructiveLines(diff)
+  }
+  const project = composeProjectName(config.project.name)
+  const result = await runComposeEngineDiff(selfHostComposePaths(cwd), cwd, project, config)
+  return result.diff ? destructiveLines(result.diff) : []
 }
 
 async function runComposeEnginePush(
@@ -972,9 +1023,10 @@ export function composeEnginePushArgs(
     "/project/.supatype/schema.ast.json",
     "--database-url",
     databaseUrl,
-    "--force",
+    // The container has no terminal to ask on: the CLI asks, and forces only on a yes.
     "--non-interactive",
   ]
+  if (opts.force === true) args.push("--force")
   // Only when asked: an engine older than the ledger rejects the flag.
   if (opts.overwriteDrift === true) args.push("--overwrite-drift")
   if (sources) {
@@ -1273,26 +1325,43 @@ async function applyInitialSchema(
   opts: ComposePushOptions = {},
 ): Promise<void> {
   const steps: InitialPushSteps = {
-    push: () => runComposeSchemaPush(cwd, config, paths, schemaPath, project, opts),
+    push: () => runDevSchemaPush(cwd, config, paths, schemaPath, project, opts),
     recoverDatabase: () => startComposeDatabase(config, paths, cwd, project, brand, undefined, endDevSession),
     dumpLogs: (reason) => dumpComposeDbLogs(paths, cwd, project, reason),
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
   }
-  let outcome = await pushInitialSchema(steps)
-  if (outcome.kind === "refused" && outcome.reason === "unmanaged-tables") {
-    // Offered rather than only named: the stack's database is up, so adoption can run against it
-    // here, and a push straight after it is the one that was just refused.
-    const tables = unmanagedTables(outcome.message) ?? []
-    const adopted = await offerAdoption(tables, dockerAdoptionSteps(cwd, config), {
-      yes: false,
-      retry: "supatype dev",
-    })
-    if (adopted === "adopted") outcome = await pushInitialSchema(steps)
-  }
+  const outcome = await adoptingOnRefusal(await pushInitialSchema(steps), steps, cwd, config)
   if (outcome.kind === "applied") return
+  if (outcome.kind === "refused" && outcome.reason === "destructive") {
+    // Nothing was applied, so the database still matches the last schema it took. The stack can
+    // come up on it, and the next save is pushed (and refused or asked about) like any other.
+    console.warn(`[supatype] Initial schema push not applied:\n${outcome.message}`)
+    console.warn("[supatype] dev is running on the schema the database already has, and still watching.")
+    return
+  }
   // Before the message, so it reaches the real terminal rather than a TUI that is going away.
   endDevSession()
   exitInitialPushFailed(outcome, brand)
+}
+
+/**
+ * On an unmanaged-tables refusal, offer adoption and push once more. Offered rather than only
+ * named: the stack's database is up, so adoption can run against it here, and a push straight
+ * after it is the one that was just refused.
+ */
+async function adoptingOnRefusal(
+  outcome: InitialPushOutcome,
+  steps: InitialPushSteps,
+  cwd: string,
+  config: SupatypeProjectConfig,
+): Promise<InitialPushOutcome> {
+  if (outcome.kind !== "refused" || outcome.reason !== "unmanaged-tables") return outcome
+  const tables = unmanagedTables(outcome.message) ?? []
+  const adopted = await offerAdoption(tables, dockerAdoptionSteps(cwd, config), {
+    yes: false,
+    retry: "supatype dev",
+  })
+  return adopted === "adopted" ? pushInitialSchema(steps) : outcome
 }
 
 export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, opts: DevComposeOptions): Promise<void> {
