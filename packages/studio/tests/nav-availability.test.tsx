@@ -10,10 +10,9 @@ import { TertiaryNav } from "../src/components/TertiaryNav.js"
  * sub-nav entries led to one, and every log tab but one was a placeholder.
  *
  * A tab that cannot be opened is not removed, deliberately. Somebody hunting for Postgres logs
- * should learn that this build has none, not conclude the product has none — and for the features
- * that live on Cloud, the entry is how they find out where it lives.
+ * should learn that this build has none yet, not conclude the product will never have them.
  *
- * So the rule is: it is there, it cannot be clicked, and it says which of the two it is. These pin
+ * So the rule is: it is there, it cannot be clicked, and it says why. These pin
  * that, and pin that a tab which *does* work is not swept up with them.
  */
 function nav(path: string): string {
