@@ -10,6 +10,11 @@ export interface ApiQueryResult<T> {
 /**
  * Lightweight data-fetching hook that standardises loading/error/data state.
  * Automatically calls the fetcher when dependencies change.
+ *
+ * Only the latest request is applied. Each run takes a request id, and a response that arrives
+ * after a newer request started is dropped, so a slow answer to an old filter cannot overwrite the
+ * answer to the current one (a mounted flag alone did not do this: it was set back to true by the
+ * next run, before the old response landed).
  */
 export function useApiQuery<T>(
   fetcher: () => Promise<T>,
@@ -19,34 +24,40 @@ export function useApiQuery<T>(
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const mountedRef = useRef(true)
+  const latestRef = useRef(0)
   const fetcherRef = useRef(fetcher)
   fetcherRef.current = fetcher
 
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+
   const execute = useCallback(async () => {
+    const request = ++latestRef.current
+    const isLatest = (): boolean => mountedRef.current && latestRef.current === request
     setLoading(true)
     setError(null)
     try {
       const result = await fetcherRef.current()
-      if (mountedRef.current) {
+      if (isLatest()) {
         setData(result)
       }
     } catch (err) {
-      if (mountedRef.current) {
+      if (isLatest()) {
         setError(err instanceof Error ? err.message : "An unexpected error occurred")
       }
     } finally {
-      if (mountedRef.current) {
+      if (isLatest()) {
         setLoading(false)
       }
     }
   }, deps) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    mountedRef.current = true
     void execute()
-    return () => {
-      mountedRef.current = false
-    }
   }, [execute])
 
   return { data, loading, error, refetch: execute }
