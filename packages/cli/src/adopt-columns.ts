@@ -16,7 +16,7 @@
  * CLI did not leave as it wrote it is never put back: an edit made meanwhile is the person's.
  */
 import { readFileSync, writeFileSync } from "node:fs"
-import { normalize, relative, sep } from "node:path"
+import { isAbsolute, normalize, relative, sep } from "node:path"
 import { Node, Project, ts, type SourceFile, type TypeLiteralNode, type TypeNode } from "ts-morph"
 import { extractSchemaAstFromTypes, walkSchemaSourceAbsPaths } from "./type-extractor.js"
 import type { DbColumnState } from "./pull-utils.js"
@@ -927,9 +927,12 @@ function liveColumns(state: unknown): Map<string, LiveColumn> {
   return out
 }
 
-/** `file` relative to the project when it is inside it, with forward slashes on every platform. */
+/**
+ * `file` relative to the project when it is inside it, with forward slashes on every platform, as
+ * a schema import names it; otherwise the platform's own absolute path.
+ */
 function displayPath(file: string, cwd: string): string {
   const rel = relative(cwd, file)
-  const shown = rel === "" || rel.startsWith("..") ? file : rel
-  return shown.split(sep).join("/")
+  // On another drive `relative` answers the absolute path itself.
+  return rel === "" || rel.startsWith("..") || isAbsolute(rel) ? file : rel.split(sep).join("/")
 }
