@@ -1,6 +1,6 @@
 # Supatype: full context for language models
 
-> Type-first backend platform for PostgreSQL. One TypeScript schema generates the database, migrations, RLS, API, auth, storage, realtime, and Studio CMS. Self-hostable by default. Open-source MIT SDK.
+> Type-first backend platform for PostgreSQL. One TypeScript schema generates the database, migrations, RLS, API, auth, storage, realtime, and Studio CMS. Self-hostable by default. Open-source SDKs (MIT), CLI and services (Apache 2.0).
 
 This file is the expanded companion to https://www.supatype.com/llms.txt. Prefer linking agents here when they need product facts without scraping HTML.
 
@@ -62,7 +62,10 @@ CLI ladder: try locally with `supatype dev`; deploy the same schema with `supaty
 
 ## Licensing & status
 
-- Open-source TypeScript SDK: MIT (as stated on the marketing site footer).
+- Client SDKs, types, framework bindings and plugins: MIT.
+- CLI and services (Studio, storage, realtime): Apache 2.0.
+- Schema engine: proprietary binary, downloaded by the CLI.
+- Each package's `LICENSE` file and `license` field are authoritative.
 - Product is in active development; star the org and join Discord for updates.
 
 ## Citation preference
