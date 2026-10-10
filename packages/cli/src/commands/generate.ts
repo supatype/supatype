@@ -30,8 +30,11 @@ export async function regenerateTypes(cwd: string): Promise<string[]> {
   const config = loadConfig(cwd)
   const schemaPath = schemaPathFromProject(config, cwd)
   const ast = loadSchemaAst(schemaPath, cwd)
+  // A docker project's own engine image writes them, the engine that pushes its schema.
+  const { projectComposeEngine } = await import("../dev-compose.js")
+  const engine = await projectComposeEngine(cwd, config)
   // Shared with push, which used to delegate the writing to the engine and produce no files.
-  const written = await writeGeneratedTypes({ cwd, ast, ...projectOutputPaths(config.output) })
+  const written = await writeGeneratedTypes({ cwd, ast, ...projectOutputPaths(config.output), engine })
   const hooksPath = writeHooksModule(cwd, hooksPathFromProject(config, cwd), ast)
   return hooksPath === null ? written : [...written, `Hook handler types written to ${hooksPath}`]
 }

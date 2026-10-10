@@ -30,7 +30,7 @@ vi.mock("node:os", async (importOriginal) => ({
 const { tmpdir: realTmpdir } = await vi.importActual<typeof import("node:os")>("node:os")
 const root = mkdtempSync(join(realTmpdir(), "supatype-engine-files-"))
 temp.root = root
-vi.mock("../src/config.js", () => ({ loadConfig: () => ({}) }))
+vi.mock("../src/config.js", () => ({ hasProjectConfig: () => true, loadConfig: () => ({}) }))
 vi.mock("../src/ensure-binary.js", () => ({ ensureBinary: async () => "/fake/supatype-engine" }))
 
 /** What each file named on the engine's command line looked like when the engine ran. */

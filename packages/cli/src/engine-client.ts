@@ -9,11 +9,13 @@
  */
 
 import { spawnSync, type SpawnSyncReturns } from "node:child_process"
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
-import { tmpdir, homedir } from "node:os"
-import { join } from "node:path"
-import { loadConfig } from "./config.js"
-import { currentPlatform, cachePath } from "./binary-cache.js"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join, relative, sep } from "node:path"
+import { spawnComposeEngine, type ComposeEngineTarget } from "./compose-engine-run.js"
+import type { Capabilities } from "./engine-ownership-gate.js"
+import { hasProjectConfig, loadConfig } from "./config.js"
+import { cachedBinaryPath, currentPlatform, newestCachedVersion } from "./binary-cache.js"
 import { ensureBinary } from "./ensure-binary.js"
 
 // ---------------------------------------------------------------------------
@@ -154,42 +156,20 @@ async function getEngineBin(): Promise<string> {
   if (_engineBin) return _engineBin
 
   const cwd = process.cwd()
+  // In a project, the project decides: its pin, its `overrides.engine`, downloading on a miss so a
+  // fresh machine self-heals. Any failure there is the answer, never a reason to run some other
+  // engine. Falling back to the newest cached engine on every error is how a mistyped
+  // `overrides.engine` ran a cached 0.6.0, and `doctor` reported "No drift" from it (A2-N2).
+  _engineBin = hasProjectConfig(cwd) ? await ensureBinary("engine", loadConfig(cwd)) : newestCachedEngine()
+  return _engineBin
+}
 
-  let unresolved: string | undefined
-  try {
-    const config = loadConfig(cwd)
-    // Download-on-miss (with retry) so a fresh machine or a failed postinstall
-    // self-heals on first use instead of silently skipping type/admin refresh.
-    _engineBin = await ensureBinary("engine", config)
-    return _engineBin
-  } catch (err) {
-    // A real download/verification failure must surface, not fall back to a
-    // possibly-stale cached binary from a different version.
-    const message = err instanceof Error ? err.message : String(err)
-    if (message.includes("Failed to download")) throw err
-    unresolved = message
-    // Otherwise (no valid project config) fall through to default cache scan.
-  }
-
-  // No config found: scan the cache for any available engine binary.
+/** Outside a project there is nothing to choose by, so the newest engine in the cache. */
+function newestCachedEngine(): string {
   const platform = currentPlatform()
-  const engineCacheDir = join(homedir(), ".supatype", "cache", "engine")
-  try {
-    const cachedVersions = readdirSync(engineCacheDir).sort()
-    for (const version of cachedVersions.reverse()) {
-      const bin = join(cachePath("engine", version), `supatype-engine-${platform.os}-${platform.arch}`)
-      if (existsSync(bin)) {
-        _engineBin = bin
-        return _engineBin
-      }
-    }
-  } catch { /* cache dir doesn't exist */ }
-
-  throw new Error(
-    unresolved === undefined
-      ? "Engine binary not found. Run: supatype update"
-      : `Engine binary not found: ${unresolved}`,
-  )
+  const version = newestCachedVersion("engine", platform)
+  if (version === undefined) throw new Error("Engine binary not found. Run: supatype update")
+  return cachedBinaryPath("engine", version, platform)
 }
 
 /** The engine binary this process runs, resolved (and downloaded if need be) once. */
@@ -232,7 +212,9 @@ export async function engineHealth(): Promise<boolean> {
 export async function engineRequest<T = unknown>(
   endpoint: string,
   body: Record<string, unknown>,
+  compose?: ComposeEngine,
 ): Promise<T> {
+  if (compose !== undefined) return composeEngineRequest<T>(endpoint, body, compose)
   const bin = await getEngineBin()
   // A schema with identity or generated columns goes only to an engine that reads them: one that
   // does not would push plain columns and say nothing. Imported here, as the gate imports this.
@@ -259,6 +241,58 @@ export async function engineRequest<T = unknown>(
   }
 
   return readEngineResult<T>(endpoint, result)
+}
+
+/**
+ * The project's own engine image, run in its compose stack, for a docker project with no
+ * `overrides.engine`. Push has always run there; adopt, doctor, type generation and the admin config
+ * ran the host binary instead (the pin, else whatever was cached), so one project could be pushed by
+ * one engine and adopted by another that did not know the flags (A5-N2, A5-N3).
+ */
+export interface ComposeEngine {
+  target: ComposeEngineTarget
+  /** The database as the container reaches it, given to the engine as `DATABASE_URL`. */
+  databaseUrl: string
+  /** What the engine image supports, asked once. */
+  capabilities: () => Promise<Capabilities>
+}
+
+/** Subcommands that read only their input, so the run need not start the database. */
+const DATABASE_FREE_ENDPOINTS = new Set(["/generate", "/admin", "/parse"])
+
+/**
+ * `engineRequest` in the project's engine image. The request files go in a directory of their own
+ * under `.supatype`, which the engine service mounts at `/project`, and are removed afterwards; like
+ * the host path, they never hold the database URL.
+ */
+function composeEngineRequest<T>(endpoint: string, body: Record<string, unknown>, compose: ComposeEngine): T {
+  const { cwd } = compose.target
+  const supatypeDir = join(cwd, ".supatype")
+  mkdirSync(supatypeDir, { recursive: true })
+  const hostDir = mkdtempSync(join(supatypeDir, "engine-"))
+  let result: SpawnSyncReturns<string>
+  try {
+    const files = inContainer(writeRequestFiles(hostDir, body), cwd)
+    result = spawnComposeEngine(compose.target, endpointToArgs(endpoint, body, files), {
+      runFlags: DATABASE_FREE_ENDPOINTS.has(endpoint) ? ["-T", "--no-deps"] : ["-T"],
+      secrets: { DATABASE_URL: compose.databaseUrl },
+      maxBuffer: 50 * 1024 * 1024,
+    })
+  } finally {
+    rmSync(hostDir, { recursive: true, force: true })
+  }
+  return readEngineResult<T>(endpoint, result)
+}
+
+/** The request's files as the engine container sees them, under the project mount. */
+function inContainer(files: RequestFiles, cwd: string): RequestFiles {
+  const map = (path: string): string => `/project/${relative(cwd, path).split(sep).join("/")}`
+  return {
+    reqFile: map(files.reqFile),
+    ...(files.gzPath !== undefined && { gzPath: map(files.gzPath) }),
+    ...(files.manifestPath !== undefined && { manifestPath: map(files.manifestPath) }),
+    ...(files.irPaths !== undefined && { irPaths: files.irPaths.map(map) }),
+  }
 }
 
 /**

@@ -59,7 +59,7 @@ import {
   usesLocalServerImage,
   LOCAL_SERVER_DOCKER_IMAGE,
 } from "./compose-local-server-image.js"
-import { ensureEngine, engineRequest, type AdoptOutcome, type DiffResult } from "./engine-client.js"
+import { ensureEngine, engineRequest, type AdoptOutcome, type ComposeEngine, type DiffResult } from "./engine-client.js"
 import { writeSchemaSourcePushArtifacts, type SchemaSourcePushArtifacts } from "./schema-sources.js"
 import { readEnvValue, upsertEnvFile } from "./env-file.js"
 import {
@@ -219,6 +219,31 @@ export async function resolveHostEngineDatabaseUrl(
     await ensureDockerDbPublishedForHostEngine(cwd, config)
   }
   return resolveHostDatabaseUrl(cwd, config, { connection: explicit, allowDerived: true }).dsn
+}
+
+/**
+ * The project's own engine image in its compose stack, for a docker project with no
+ * `overrides.engine` and no `connection` of its own; otherwise undefined, and the host binary runs.
+ *
+ * The image push uses ({@link schemaEngineImageForPush}), reaching the database as push does. Doctor,
+ * adopt, type generation and the admin config ran the host binary instead, the pin or whatever was
+ * cached, so `adopt --key` was refused by an engine that did not know the flag (A5-N2) and dev's
+ * types failed on a feature the compose push had just applied (A5-N3).
+ */
+export async function projectComposeEngine(
+  cwd: string,
+  config: SupatypeProjectConfig,
+): Promise<ComposeEngine | undefined> {
+  if (resolveRuntimeProvider(config) !== "docker" || hasEngineOverride(config)) return undefined
+  if (config.connection?.trim()) return undefined
+  const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
+  const project = composeProjectName(config.project.name)
+  const engineImage = await schemaEngineImageForPush(config, cwd)
+  return {
+    target: { cwd, project, composePath: paths.composePath, engineImage },
+    databaseUrl: projectDatabaseUrl(cwd, config, true),
+    capabilities: () => dockerEngineCapabilities(cwd, config),
+  }
 }
 
 /**
@@ -607,18 +632,32 @@ let _composePushInFlight = false
 let _composePushQueued = false
 
 /**
- * Regenerate admin-config + TypeScript types from the AST using the **host** engine.
- * Only schema push/migrate runs in compose (Postgres is not on the host).
+ * Regenerate everything derived from the schema after a push: the AST-derived files, then the
+ * types and admin config from the engine. A docker project with no `overrides.engine` uses its own
+ * engine image, the one that pushed (A5-N3); otherwise the host binary, falling back to the image
+ * when the binary cannot be fetched.
  */
 async function refreshSchemaArtifacts(
   cwd: string,
   config: SupatypeProjectConfig,
   ast: unknown,
 ): Promise<void> {
-  const supatypeDir = join(cwd, ".supatype")
-  const adminConfigPath = join(supatypeDir, "admin-config.json")
+  writeAstDerivedArtifacts(cwd, config, ast)
+  const adminConfigPath = join(cwd, ".supatype", "admin-config.json")
+  let engine: ComposeEngine | undefined
+  try {
+    engine = await projectComposeEngine(cwd, config)
+  } catch (err) {
+    degraded("The project's engine image could not be resolved, admin config and types not refreshed", (err as Error).message)
+    return
+  }
+  if (engine === undefined && !(await hostEngineOrComposeFallback(cwd, config, ast, adminConfigPath))) return
+  await writeEngineArtifacts(cwd, config, ast, adminConfigPath, engine)
+}
 
-  // Before the engine gate below: these are read straight off the AST, so a push whose engine is
+/** The files read straight off the AST, written whatever happens with the engine afterwards. */
+function writeAstDerivedArtifacts(cwd: string, config: SupatypeProjectConfig, ast: unknown): void {
+  // Before the engine: these are read straight off the AST, so a push whose engine is
   // unavailable should still leave the server the right maps. The server watches this file, so a
   // hook or validator added to the schema takes effect without restarting the stack.
   //
@@ -661,52 +700,64 @@ async function refreshSchemaArtifacts(
   // and the only way to find out why was to open Studio and tick a box the schema had already
   // justified.
   for (const note of cacheSeedingNotes(cwd, ast)) console.log(`[supatype] ${note}`)
+}
 
+/**
+ * True when the host engine binary is ready. When it is not, the in-compose engine writes the
+ * admin config and types instead and this answers false, having said which happened.
+ */
+async function hostEngineOrComposeFallback(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  ast: unknown,
+  adminConfigPath: string,
+): Promise<boolean> {
   try {
     await ensureEngine()
+    return true
   } catch (err) {
+    // A project that named its engine gets that engine or an error, never a stand-in.
+    if (hasEngineOverride(config)) {
+      degraded("overrides.engine could not be used, admin config and types not refreshed", (err as Error).message)
+      return false
+    }
     // The host engine is a CDN download and this machine could not complete it. The schema is
     // already applied, so fall back to the engine in compose rather than giving up: without
     // admin-config.json Studio reports "No schema has been pushed yet" on a stack whose schema is
     // entirely live, which reads as a failed push rather than a missing binary.
     const paths = selfHostComposePaths(cwd)
     const composeProject = composeProjectName(config.project.name)
-    const wrote = await generateViaComposeEngine(
-      paths,
-      cwd,
-      composeProject,
-      config,
-      ast,
-      adminConfigPath,
-    ).catch(() => false)
+    const wrote = await generateViaComposeEngine(paths, cwd, composeProject, config, ast, adminConfigPath)
+      .catch(() => false)
+    // Reported through `degraded` rather than warned, so a run that takes this path says so where
+    // CI looks, rather than in a line that scrolls past.
+    const message = (err as Error).message
     if (wrote) {
-      // Reported through `degraded` rather than warned: the in-compose engine writes the admin
-      // config but never reaches the type generation below, so a run that takes this path has
-      // stale generated types and says so only in a line that scrolls past. In CI that is the
-      // difference between testing the host engine path and never touching it.
+      degraded("Host engine unavailable, used the in-compose engine instead", message)
+    } else {
       degraded(
-        "Host engine unavailable, used the in-compose engine instead",
-        (err as Error).message,
+        "Host engine unavailable, admin config and types not refreshed",
+        `${message}\n[supatype] Studio will report no schema until this succeeds, even though the ` +
+          "schema is applied. Retry with the stack up, or run `supatype push`.",
       )
-      return
     }
-    degraded(
-      "Host engine unavailable, admin config and types not refreshed",
-      `${(err as Error).message}\n` +
-        "[supatype] Studio will report no schema until this succeeds, even though the schema is " +
-        "applied. Retry with the stack up, or run `supatype push`.",
-    )
-    return
+    return false
   }
+}
 
+/** The types, the AST outputs and the admin config, from `engine` (the host binary when undefined). */
+async function writeEngineArtifacts(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  ast: unknown,
+  adminConfigPath: string,
+  engine: ComposeEngine | undefined,
+): Promise<void> {
   // At the default paths when `output` is not set, which is every project `init` made before it
   // wrote one: gated on `output.types`, a renamed field left the typed client on the old name.
   const { typesPath } = projectOutputPaths(config.output)
   try {
-    const result = await engineRequest<{ code?: string; message?: string }>("/generate", {
-      ast,
-      lang: "typescript",
-    })
+    const result = await engineRequest<{ code?: string; message?: string }>("/generate", { ast, lang: "typescript" }, engine)
     if (writeEngineTypes(cwd, typesPath, result.code ?? result.message)) {
       console.log(`[supatype] Types written to ${typesPath}`)
     } else {
@@ -719,7 +770,7 @@ async function refreshSchemaArtifacts(
   writeDevAstOutputs(cwd, ast, config, "")
 
   try {
-    const admin = withAdminRoles(await engineRequest<unknown>("/admin", { ast }), config)
+    const admin = withAdminRoles(await engineRequest<unknown>("/admin", { ast }, engine), config)
     restoreSystemRelationTargets(admin, ast)
     writeFileSync(adminConfigPath, `${JSON.stringify(admin, null, 2)}\n`)
     console.log("[supatype] Admin config written to .supatype/admin-config.json")

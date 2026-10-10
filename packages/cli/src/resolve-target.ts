@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { loadConfig } from "./config.js"
-import type { AdoptOutcome, DiffResult } from "./engine-client.js"
+import type { AdoptOutcome, ComposeEngine, DiffResult } from "./engine-client.js"
 import { ensureEngine, engineRequest } from "./engine-client.js"
 import type { SchemaSourcesPayload } from "./schema-sources.js"
 import { resolveHostDatabaseUrl } from "./host-database.js"
@@ -62,6 +62,11 @@ export interface DeployTarget {
   cwd?: string
   /** Engine subprocess path when mode is direct or local without control plane. */
   databaseUrl?: string
+  /**
+   * The project's engine image, for a docker project with no `overrides.engine`: the engine runs
+   * there rather than as the host binary, as push does.
+   */
+  compose?: ComposeEngine
 }
 
 export function loadLocalEnvironmentFile(cwd: string): LocalEnvironment | null {
@@ -254,6 +259,14 @@ function projectPath(target: DeployTarget, subpath: string): string {
   return `/projects/${target.projectRef}${subpath}`
 }
 
+/**
+ * Run the engine for `target`: in the project's engine image when it has one, else the host binary.
+ */
+async function engineHere<T = unknown>(target: DeployTarget, endpoint: string, body: Record<string, unknown>): Promise<T> {
+  if (target.compose === undefined) await ensureEngine()
+  return engineRequest<T>(endpoint, body, target.compose)
+}
+
 /** Whether `target` runs the engine binary here rather than asking a control plane. */
 function runsEngineHere(target: DeployTarget): boolean {
   return target.mode === "direct" || (target.mode === "local" && !target.token)
@@ -270,7 +283,9 @@ export async function targetCapabilities(target: DeployTarget): Promise<Capabili
   const known = capabilitiesOf.get(target)
   if (known !== undefined) return known
   let caps: Capabilities
-  if (runsEngineHere(target)) {
+  if (target.compose !== undefined) {
+    caps = await target.compose.capabilities()
+  } else if (runsEngineHere(target)) {
     caps = await engineCapabilities()
   } else {
     let answer: unknown
@@ -305,8 +320,7 @@ export async function targetSchemaDiff(
 ): Promise<DiffResult> {
   await requireTargetFeatures(target, identityColumnsNeed(ast))
   if (target.mode === "direct" || (target.mode === "local" && !target.token)) {
-    await ensureEngine()
-    return engineRequest<DiffResult>("/diff", {
+    return engineHere<DiffResult>(target, "/diff", {
       ast,
       database_url: target.databaseUrl!,
       schema: opts?.schema ?? "public",
@@ -352,7 +366,6 @@ export async function targetSchemaPush(
     ...identityColumnsNeed(ast),
   ])
   if (runsEngineHere(target)) {
-    await ensureEngine()
     const body: Record<string, unknown> = {
       ast,
       database_url: target.databaseUrl!,
@@ -364,7 +377,7 @@ export async function targetSchemaPush(
       body["schema_sources_gz_base64"] = opts.schemaSources.dataBase64
       body["schema_sources_manifest"] = opts.schemaSources.manifest
     }
-    return engineRequest("/push", body)
+    return engineHere(target, "/push", body)
   }
 
   const pushBody: Record<string, unknown> = {
@@ -421,8 +434,7 @@ export async function targetSchemaRollback(
   opts?: { schema?: string },
 ): Promise<SchemaRollbackResult> {
   if (target.mode === "direct" || (target.mode === "local" && !target.token)) {
-    await ensureEngine()
-    return engineRequest<SchemaRollbackResult>("/rollback", {
+    return engineHere<SchemaRollbackResult>(target, "/rollback", {
       database_url: target.databaseUrl!,
       schema: opts?.schema ?? "public",
     })
@@ -441,8 +453,8 @@ export async function targetListMigrations(
   target: DeployTarget,
 ): Promise<MigrationListEntry[]> {
   if (target.mode === "direct" || (target.mode === "local" && !target.token)) {
-    await ensureEngine()
-    const result = await engineRequest<{ migrations?: MigrationListEntry[] } | MigrationListEntry[]>(
+    const result = await engineHere<{ migrations?: MigrationListEntry[] } | MigrationListEntry[]>(
+      target,
       "/migrations",
       { database_url: target.databaseUrl!, action: "list" },
     )
@@ -461,6 +473,9 @@ export async function targetListMigrations(
  * `--direct` or `--connection` asks for the engine subprocess. One answer for both, so `adopt` takes
  * exactly what `doctor` reported. `dev-compose` is loaded only when the local database is the
  * answer, as `push` loads it.
+ *
+ * A docker project without `overrides.engine` runs the engine in its own image, as push does, so
+ * nothing is published to the host for it and the engine that adopts is the one that pushed.
  */
 export async function schemaCommandTarget(
   cwd: string,
@@ -471,7 +486,11 @@ export async function schemaCommandTarget(
     return resolveTarget(cwd, { env: opts.env, direct: true, connection: opts.connection })
   }
   if (loadProjectLink(cwd)) return resolveTarget(cwd, { env: opts.env })
-  const { resolveHostEngineDatabaseUrl } = await import("./dev-compose.js")
+  const { projectComposeEngine, resolveHostEngineDatabaseUrl } = await import("./dev-compose.js")
+  const compose = await projectComposeEngine(cwd, config)
+  if (compose !== undefined) {
+    return { ...resolveTarget(cwd, { direct: true, connection: compose.databaseUrl }), compose }
+  }
   const connection = await resolveHostEngineDatabaseUrl(cwd, config)
   return resolveTarget(cwd, { direct: true, connection })
 }
@@ -501,8 +520,7 @@ export async function targetSchemaDoctor(
     ...identityColumnsNeed(ast),
   ])
   if (runsEngineHere(target)) {
-    await ensureEngine()
-    return engineRequest("/doctor", { ...body, database_url: target.databaseUrl! })
+    return engineHere(target, "/doctor", { ...body, database_url: target.databaseUrl! })
   }
 
   return targetFetch(
@@ -517,8 +535,7 @@ export async function targetSchemaIntrospect(
   opts?: { schema?: string },
 ): Promise<unknown> {
   if (target.mode === "direct" || (target.mode === "local" && !target.token)) {
-    await ensureEngine()
-    return engineRequest("/introspect", {
+    return engineHere(target, "/introspect", {
       database_url: target.databaseUrl!,
       schema: opts?.schema ?? "public",
     })
@@ -561,8 +578,7 @@ export async function targetSchemaAdopt(
   // adopt instead of release: refused before sending, never degraded.
   await requireTargetFeatures(target, [...adoptNeeds({ keys: opts?.keys, release, reclaim }), ...identityColumnsNeed(ast)])
   if (runsEngineHere(target)) {
-    await ensureEngine()
-    return engineRequest<AdoptOutcome>("/adopt", { ...body, database_url: target.databaseUrl! })
+    return engineHere<AdoptOutcome>(target, "/adopt", { ...body, database_url: target.databaseUrl! })
   }
   return (await targetFetch(
     target.apiBaseUrl,
