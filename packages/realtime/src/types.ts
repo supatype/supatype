@@ -18,6 +18,13 @@ export interface WalChange {
    * Empty for a table with no bigint, numeric or money column, which is most of them.
    */
   exactColumns: ExactColumns
+  /**
+   * Each column's declared type, as wal2json reports it (`integer`, `numeric(12,2)`, ...).
+   *
+   * What a subscriber's column filter is compared by: `salary=gt.100000` is a numeric comparison
+   * on a numeric column, not a string one.
+   */
+  columnTypes: Record<string, string>
   commitTimestamp: string
 }
 

@@ -306,8 +306,23 @@ function changeFromEntry(entry: Wal2JsonChange, commitTimestamp: string): WalCha
       ...exactColumnsOf(entry.oldkeys?.keynames, entry.oldkeys?.keytypes),
       ...exactColumnsOf(entry.columnnames, entry.columntypes),
     },
+    columnTypes: {
+      ...columnTypesOf(entry.oldkeys?.keynames, entry.oldkeys?.keytypes),
+      ...columnTypesOf(entry.columnnames, entry.columntypes),
+    },
     commitTimestamp,
   }
+}
+
+/** Column name to declared type, for whichever names and types wal2json sent. */
+function columnTypesOf(names?: string[], types?: string[]): Record<string, string> {
+  const declared: Record<string, string> = {}
+  if (!names || !types) return declared
+  names.forEach((name, i) => {
+    const type = types[i]
+    if (type !== undefined) declared[name] = type
+  })
+  return declared
 }
 
 // ─── wal2json types ──────────────────────────────────────────────────────────
