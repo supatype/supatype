@@ -37,6 +37,7 @@ import {
   CAPABILITIES_TTL_MS,
   capabilitiesCache,
   rememberCapabilities,
+  REBASELINE_KEYS_NEED,
   type Capabilities,
   type FeatureNeed,
 } from "./engine-ownership-gate.js"
@@ -528,24 +529,30 @@ export async function schemaCommandTarget(
  * `doctor` on a target. With `rebaseline`, the drift it finds is first recorded as the new baseline
  * (no object changes) and listed as rebaselined; access drift (policies, grants, labels, RLS) only
  * with `acceptAccessDrift` as well (`accept_access_drift`; `overwrite_drift` is push's alone), else
- * listed as `rebaselineRefused`.
+ * listed as `rebaselineRefused`. With `keys` (the drifted objects its preview showed, named as
+ * doctor names them) it records only if the drift is still exactly those, and otherwise is refused
+ * with `drift_changed`, writing nothing.
  */
 export async function targetSchemaDoctor(
   target: DeployTarget,
   ast: unknown,
-  opts?: { schema?: string; rebaseline?: boolean; acceptAccessDrift?: boolean },
+  opts?: { schema?: string; rebaseline?: boolean; acceptAccessDrift?: boolean; keys?: string[] },
 ): Promise<unknown> {
   const rebaseline = opts?.rebaseline === true
   const acceptAccessDrift = rebaseline && opts?.acceptAccessDrift === true
+  const keys = rebaseline ? opts?.keys : undefined
   const body = {
     ast,
     schema: opts?.schema ?? "public",
     ...(rebaseline && { rebaseline: true }),
     ...(acceptAccessDrift && { accept_access_drift: true }),
+    ...(keys !== undefined && { keys }),
   }
+  // A server or engine that dropped `keys` would record drift nobody was shown: refused, never sent.
   await requireTargetFeatures(target, [
     ...(rebaseline ? [{ feature: "rebaseline", flag: "--rebaseline" } as const] : []),
     ...(acceptAccessDrift ? [{ feature: "accept_access_drift", flag: "--accept-access-drift" } as const] : []),
+    ...(keys !== undefined ? [REBASELINE_KEYS_NEED] : []),
     ...identityColumnsNeed(ast),
   ])
   if (runsEngineHere(target)) {

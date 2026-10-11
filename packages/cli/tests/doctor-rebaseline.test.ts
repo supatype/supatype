@@ -27,7 +27,8 @@ vi.mock("../src/ui/interactive.js", () => ({ isInteractive: vi.fn(() => false) }
 vi.mock("../src/ui/clack.js", () => ({ p: { confirm: confirmMock, cancel: vi.fn() }, isCancel: () => false, CLACK_CANCEL: Symbol() }))
 
 import { rebaselinePlan, registerDoctor, type DoctorReport } from "../src/commands/doctor.js"
-import type { DoctorItem } from "../src/engine-client.js"
+import { EngineError, type DoctorItem } from "../src/engine-client.js"
+import { TargetApiError } from "../src/target-client.js"
 import { isInteractive } from "../src/ui/interactive.js"
 
 const item = (kind: string, name: string): DoctorItem => ({ kind, table: "posts", name, fields: [], message: `${kind} ${name} drifted` })
@@ -111,7 +112,7 @@ describe("supatype doctor --rebaseline", () => {
       { rebaseline: false, acceptAccessDrift: false },
       { rebaseline: true, acceptAccessDrift: true },
     ])
-    expect(asked()).toEqual(["rebaseline", "accept_access_drift"])
+    expect(asked()).toEqual(["rebaseline", "rebaseline_keys", "accept_access_drift"])
   })
 
   it("refuses --overwrite-drift on doctor, pointing at --accept-access-drift, before anything is read", async () => {
@@ -157,5 +158,76 @@ describe("supatype doctor --rebaseline", () => {
     expect(out).toContain("pass --accept-access-drift to record these too")
     expect(out).toContain("Nothing to rebaseline")
     expect(requests()).toEqual([{ rebaseline: false, acceptAccessDrift: false }])
+  })
+})
+
+describe("doctor --rebaseline records only what the preview showed (C04, F29)", () => {
+  const DRIFT_CHANGED_LINE = JSON.stringify({
+    status: "refused",
+    reason: "drift_changed",
+    unseen: ["policy:tag.tag_select"],
+    gone: ["check:posts.posts_title_bounds"],
+    message: "The drift changed after the preview, so nothing was rebaselined.",
+  })
+
+  beforeEach(() => {
+    targetSchemaDoctor.mockReset()
+    targetSchemaDoctor.mockImplementation(async (_t, _a, opts: { rebaseline?: boolean }) =>
+      opts.rebaseline ? { ...PREVIEW, drifted: [POLICY], rebaselined: [CHECK] } : PREVIEW,
+    )
+    requireEngine.mockClear()
+    process.exitCode = undefined
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    process.exitCode = undefined
+  })
+
+  it("sends the key of every drifted object the preview showed, recorded or left drifted", async () => {
+    await doctor("--rebaseline", "--yes")
+    const applied = targetSchemaDoctor.mock.calls[1]![2] as { keys?: string[] }
+    expect(applied.keys).toEqual(["check:posts.posts_title_bounds", "policy:posts.posts_select"])
+    // Asked before the preview is shown, so an engine that would ignore the keys is refused first.
+    expect(asked()).toContain("rebaseline_keys")
+    const preview = targetSchemaDoctor.mock.calls[0]![2] as { keys?: string[] }
+    expect(preview.keys).toBeUndefined()
+  })
+
+  it("names what moved since the preview, says nothing was recorded, and exits 1 (binary)", async () => {
+    targetSchemaDoctor.mockImplementation(async (_t, _a, opts: { rebaseline?: boolean }) => {
+      if (!opts.rebaseline) return PREVIEW
+      throw new EngineError("Engine /doctor failed (exit 1): Error: The drift changed", "/doctor", 1, DRIFT_CHANGED_LINE)
+    })
+    vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`exit ${code}`)
+    }) as never)
+    await expect(doctor("--rebaseline", "--yes")).rejects.toThrow("exit 1")
+    const out = [...vi.mocked(console.error).mock.calls, ...vi.mocked(console.log).mock.calls].flat().join("\n")
+    expect(out).toContain("The drift changed after the preview, so nothing was recorded")
+    expect(out).toContain("New since the preview: policy:tag.tag_select")
+    expect(out).toContain("No longer drifted: check:posts.posts_title_bounds")
+    expect(out).toContain("supatype doctor --rebaseline")
+    expect(out).not.toContain("Rebaselined (recorded as they are now)")
+  })
+
+  it("reads the same refusal from a server's 409", async () => {
+    targetSchemaDoctor.mockImplementation(async (_t, _a, opts: { rebaseline?: boolean }) => {
+      if (!opts.rebaseline) return PREVIEW
+      throw new TargetApiError("The drift changed after the preview", 409, undefined, {
+        error: "The drift changed after the preview",
+        reason: "drift_changed",
+        unseen: ["policy:tag.tag_select"],
+        gone: [],
+      })
+    })
+    vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`exit ${code}`)
+    }) as never)
+    await expect(doctor("--rebaseline", "--accept-access-drift", "--yes")).rejects.toThrow("exit 1")
+    const out = [...vi.mocked(console.error).mock.calls, ...vi.mocked(console.log).mock.calls].flat().join("\n")
+    expect(out).toContain("New since the preview: policy:tag.tag_select")
+    expect(out).not.toContain("No longer drifted")
+    expect(out).toContain("supatype doctor --rebaseline --accept-access-drift")
   })
 })

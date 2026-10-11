@@ -23,7 +23,8 @@ function stringList(value: unknown): string[] | undefined {
 
 /**
  * Run `work`, answering a refusal the engine names (security drift, unmanaged tables, a busy
- * engine) as its own HTTP server does: 409 with the reason and what it is about.
+ * engine, a rebaseline whose drift moved after its preview) as its own HTTP server does: 409 with
+ * the reason and what it is about.
  */
 async function answering(res: ServerResponse, work: () => Promise<unknown>): Promise<void> {
   let data: unknown
@@ -118,6 +119,17 @@ export function registerSchemaRoutes(
       schema?: string
       rebaseline?: boolean
       accept_access_drift?: boolean
+      keys?: unknown
+    }
+    const keys = stringList(body.keys)
+    // Over HTTP `keys: []` means "the preview showed nothing", which the binary cannot be told: no
+    // `--key` at all is "record whatever drift there is". Refused rather than sent unkeyed.
+    if (body.rebaseline === true && keys !== undefined && keys.length === 0) {
+      sendJson(ctx.res, 400, {
+        error: "validation_error",
+        message: "'keys' names no object: send the drifted objects the preview showed, or no 'keys'",
+      })
+      return
     }
     const db = databaseUrlFromEnv()
     await answering(ctx.res, () =>
@@ -126,6 +138,7 @@ export function registerSchemaRoutes(
         schema: body.schema,
         rebaseline: body.rebaseline === true,
         acceptAccessDrift: body.accept_access_drift === true,
+        ...(keys !== undefined && { keys }),
       }),
     )
   })

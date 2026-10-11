@@ -149,6 +149,40 @@ describe("schema routes (mock engine)", () => {
     assert.ok(!argsOf(report.json).includes("--rebaseline"))
   })
 
+  test("POST /schema/doctor forwards a rebaseline's previewed keys, each as --key (F29)", async () => {
+    const keys = ["policy:note.note_select", "table:note"]
+    const res = await request(baseUrl, "POST", `/projects/${PROJECT}/schema/doctor`, { ast: {}, rebaseline: true, keys })
+    assert.equal(res.status, 200)
+    const args = argsOf(res.json)
+    assert.deepEqual(args.slice(args.indexOf("--rebaseline")), ["--rebaseline", "--key", keys[0], "--key", keys[1]])
+    // Keys mean nothing without a rebaseline, and the binary refuses them there.
+    const report = await request(baseUrl, "POST", `/projects/${PROJECT}/schema/doctor`, { ast: {}, keys })
+    assert.ok(!argsOf(report.json).includes("--key"))
+  })
+
+  test("POST /schema/doctor refuses an empty key list, which the binary would read as every drifted object", async () => {
+    const res = await request(baseUrl, "POST", `/projects/${PROJECT}/schema/doctor`, { ast: {}, rebaseline: true, keys: [] })
+    assert.equal(res.status, 400)
+  })
+
+  test("a drift_changed refusal is a 409 naming what is new and what is gone (F29)", async () => {
+    process.env["MOCK_ENGINE_REFUSE"] = "drift_changed"
+    try {
+      const res = await request(baseUrl, "POST", `/projects/${PROJECT}/schema/doctor`, {
+        ast: {},
+        rebaseline: true,
+        keys: ["policy:note.note_select"],
+      })
+      assert.equal(res.status, 409)
+      assert.equal(res.json["reason"], "drift_changed")
+      assert.deepEqual(res.json["unseen"], ["policy:tag.tag_select"])
+      assert.deepEqual(res.json["gone"], [])
+      assert.match(String(res.json["message"]), /drift changed after the preview/)
+    } finally {
+      delete process.env["MOCK_ENGINE_REFUSE"]
+    }
+  })
+
   test("a refusal the engine names is a 409 with its reason", async () => {
     process.env["MOCK_ENGINE_REFUSE"] = "security_drift"
     try {

@@ -70,7 +70,13 @@ export interface ReconcileAction {
    * On a `replace`: the object was also changed outside Supatype since the last apply, which the
    * replacement overwrites. Where it decides access, a push asks first (plan 3.5).
    */
-  drifted?: { recorded_def: string; live_def: string; live_fp?: string }
+  drifted?: {
+    recorded_def: string
+    live_def: string
+    live_fp?: string
+    /** Why it could not be compared with what Supatype made, when it could not: treated as changed (F16). */
+    unchecked?: string
+  }
 }
 
 /** One object in a doctor or adopt report, as the engine names it. */
@@ -470,6 +476,18 @@ function repeated(values: unknown, flag: string): string[] {
   return values.filter((v): v is string => typeof v === "string").flatMap((v) => [flag, v])
 }
 
+/**
+ * The drifted objects a rebaseline's preview showed, each as its own `--key`. The binary reads no
+ * `--key` at all as "record whatever drift there is", so an empty list, which over HTTP means
+ * "nothing was shown", cannot be sent and is refused here.
+ */
+function rebaselineKeys(keys: unknown): string[] {
+  if (Array.isArray(keys) && keys.length === 0) {
+    throw new Error("a rebaseline's keys names no object; the engine binary would record every drifted object")
+  }
+  return repeated(keys, "--key")
+}
+
 /** The engine binary's arguments for an endpoint and its request body. Exported for its tests. */
 export function endpointToArgs(
   endpoint: string,
@@ -559,6 +577,7 @@ export function endpointToArgs(
         ...strict,
         ...rebaseline,
         ...acceptAccessDrift,
+        ...(body["rebaseline"] ? rebaselineKeys(body["keys"]) : []),
       ]
     }
 

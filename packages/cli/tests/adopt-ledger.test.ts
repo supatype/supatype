@@ -216,3 +216,25 @@ describe("endpointToArgs() for /doctor --accept-access-drift", () => {
     expect(args).not.toContain("--overwrite-drift")
   })
 })
+
+describe("endpointToArgs() for /doctor with the previewed keys (F29)", () => {
+  const body = { ast: {}, database_url: "postgres://x", schema: "public" }
+
+  it("passes each previewed object as its own --key, only alongside --rebaseline", () => {
+    const keys = ["policy:note.note_select", "table:note"]
+    expect(endpointToArgs("/doctor", { ...body, rebaseline: true, keys }, { reqFile: "req.json" }).slice(-5)).toEqual([
+      "--rebaseline",
+      "--key",
+      "policy:note.note_select",
+      "--key",
+      "table:note",
+    ])
+    expect(endpointToArgs("/doctor", { ...body, keys }, { reqFile: "req.json" })).not.toContain("--key")
+  })
+
+  it("refuses an empty list, which the binary would read as every drifted object", () => {
+    expect(() => endpointToArgs("/doctor", { ...body, rebaseline: true, keys: [] }, { reqFile: "req.json" })).toThrow(
+      /names no object/,
+    )
+  })
+})

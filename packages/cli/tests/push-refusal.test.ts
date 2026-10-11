@@ -216,3 +216,40 @@ describe("explainingRefusal()", () => {
     expect(text).toContain("`supatype deploy --yes`")
   })
 })
+
+describe("drift_changed: a rebaseline refused because the drift moved after its preview (C04, F29)", () => {
+  const CHANGED = {
+    status: "refused",
+    reason: "drift_changed",
+    unseen: ["policy:tag.tag_select"],
+    gone: ["check:posts.posts_title_bounds"],
+    message: "The drift changed after the preview, so nothing was rebaselined.",
+  }
+
+  it("is read by code from the binary's line, a server's 409 body, and the docker path", async () => {
+    const { classifyPushRefusal } = await refusal()
+    const fromBinary = classifyPushRefusal(new EngineError("Engine /doctor failed (exit 1): x", "/doctor", 1, JSON.stringify(CHANGED)))
+    expect(fromBinary).toEqual({ kind: "drift-changed", unseen: ["policy:tag.tag_select"], gone: ["check:posts.posts_title_bounds"] })
+    const { status: _status, ...body } = CHANGED
+    const fromServer = classifyPushRefusal(new TargetApiError(CHANGED.message, 409, undefined, { error: CHANGED.message, ...body }))
+    expect(fromServer).toEqual(fromBinary)
+    expect(classifyPushRefusal(composeFailure(JSON.stringify(CHANGED), `Error: ${CHANGED.message}`))).toEqual(fromBinary)
+  })
+
+  it("is read by the engine's sentence from a server that passed on the reason alone", async () => {
+    const { classifyPushRefusal } = await refusal()
+    expect(classifyPushRefusal(new TargetApiError("The drift changed after the preview, so nothing was rebaselined.", 409))).toEqual({
+      kind: "drift-changed",
+      unseen: [],
+      gone: [],
+    })
+  })
+
+  it("says what is new, what is gone, that nothing was recorded, and to run doctor again", async () => {
+    const text = await explained(new EngineError("x", "/doctor", 1, JSON.stringify(CHANGED)), "supatype doctor --rebaseline")
+    expect(text).toContain("The drift changed after the preview, so nothing was recorded.")
+    expect(text).toContain("New since the preview: policy:tag.tag_select")
+    expect(text).toContain("No longer drifted: check:posts.posts_title_bounds")
+    expect(text).toContain("Run `supatype doctor --rebaseline` again to review the drift as it is now.")
+  })
+})

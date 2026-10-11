@@ -36,6 +36,8 @@ export const OWNERSHIP_FEATURES = [
   "reclaim",
   "rebaseline",
   "accept_access_drift",
+  // A rebaseline told which drifted objects its preview showed, refusing if the drift has moved.
+  "rebaseline_keys",
   "overwrite_drift",
   "engine_busy",
   // Not an ownership flag: a field's `identity` / `generated` (identity-contract). An engine without
@@ -76,6 +78,16 @@ export function adoptNeeds(opts: {
   if ((opts.reclaim ?? []).length > 0) needs.push({ feature: "reclaim", flag: "--reclaim" })
   if (opts.keys !== undefined) needs.push(adoptKeysNeed(opts.keys))
   return needs
+}
+
+/**
+ * What a rebaseline needs to record only the drift its preview showed. An engine or server without
+ * it records whatever drift there is when it runs, including drift that appeared after the person
+ * looked (C04), so the CLI refuses rather than send a rebaseline unkeyed.
+ */
+export const REBASELINE_KEYS_NEED: FeatureNeed = {
+  feature: "rebaseline_keys",
+  flag: "--rebaseline (recording only the drift the preview showed)",
 }
 
 /**

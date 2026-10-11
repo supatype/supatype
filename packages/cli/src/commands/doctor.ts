@@ -10,6 +10,9 @@ import type { DoctorItem } from "../engine-client.js"
 import { hooksReport, type HooksReport } from "../model-hooks.js"
 import { checkServiceRoleRoutes, type ServiceRoleProblems } from "../service-role-check.js"
 import { addRetiredNoCacheOption, warnIfRetiredNoCache } from "../retired-no-cache.js"
+import { adoptionKey } from "../adopt-walkthrough.js"
+import { REBASELINE_KEYS_NEED } from "../engine-ownership-gate.js"
+import { explainingRefusal } from "../push-refusal.js"
 
 /**
  * The engine's reconcile, sorted for an operator. The optional categories arrived with the
@@ -167,14 +170,8 @@ export function registerDoctor(program: Command): void {
   addRetiredNoCacheOption(command).action(doctor)
 }
 
-async function doctor(opts: DoctorOptions): Promise<void> {
-  warnIfRetiredNoCache(opts)
-  const cwd = process.cwd()
-  const config = loadConfig(cwd)
-  const pgSchema = schemaPgSchema(cwd)
-  const rebaseline = opts.rebaseline === true
-  const acceptAccessDrift = opts.acceptAccessDrift === true
-
+/** Exit 1 on a flag doctor no longer takes, or one that means nothing without `--rebaseline`. */
+function refuseMisusedFlags(opts: DoctorOptions): void {
   if (opts.overwriteDrift === true) {
     error(
       "doctor no longer takes --overwrite-drift. To record access changed outside Supatype as the baseline, run: " +
@@ -182,73 +179,98 @@ async function doctor(opts: DoctorOptions): Promise<void> {
     )
     process.exit(1)
   }
-  if (acceptAccessDrift && !rebaseline) {
+  if (opts.acceptAccessDrift === true && opts.rebaseline !== true) {
     error("doctor --accept-access-drift only applies with --rebaseline")
     process.exit(1)
   }
+}
+
+async function doctor(opts: DoctorOptions): Promise<void> {
+  warnIfRetiredNoCache(opts)
+  refuseMisusedFlags(opts)
+  const cwd = process.cwd()
+  const config = loadConfig(cwd)
+  const pgSchema = schemaPgSchema(cwd)
+  const rebaseline = opts.rebaseline === true
+  const acceptAccessDrift = opts.acceptAccessDrift === true
 
   info("Loading schema...")
   // As push sends it: the engine refuses a versioned schema that carries no publishing config.
   const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
 
   const target = await schemaCommandTarget(cwd, config, opts)
+  // Asked before the preview, so an engine that would record drift nobody was shown is refused
+  // before anyone is asked to agree to it.
   await requireTargetFeatures(target, [
-    ...(rebaseline ? [{ feature: "rebaseline", flag: "--rebaseline" } as const] : []),
+    ...(rebaseline ? [{ feature: "rebaseline", flag: "--rebaseline" } as const, REBASELINE_KEYS_NEED] : []),
     ...(acceptAccessDrift ? [{ feature: "accept_access_drift", flag: "--accept-access-drift" } as const] : []),
   ])
-  let report = (await targetSchemaDoctor(target, ast, { schema: pgSchema })) as DoctorReport
+  const preview = (await targetSchemaDoctor(target, ast, { schema: pgSchema })) as DoctorReport
 
   printHooks(hooksReport(cwd, hooksPathFromProject(config, cwd), ast))
   printServiceRoleGrants(checkServiceRoleRoutes(config, cwd), serviceRoleRoutes(config))
 
+  let report: DoctorReport | undefined = preview
   if (rebaseline) {
-    // Plan 3.2: a rebaseline takes what the database holds as Supatype's from now on, so a person
-    // sees each object first, and a hand edit to access is taken only with --accept-access-drift too.
-    const plan = rebaselinePlan(report, acceptAccessDrift)
-    if (plan.record.length === 0) {
-      printReport(report)
-      // Access drift alone is still drift: say why it was not recorded and how it would be.
-      printRebaselinePlan(plan)
-      info("Nothing to rebaseline.")
-    } else {
-      printRebaselinePlan(plan)
-      const consent = await askConsent(
-        `Record ${plan.record.length} object(s) as Supatype's baseline?`,
-        opts.yes ?? false,
-      )
-      if (consent === "needs-yes") {
-        error("doctor --rebaseline needs --yes when not interactive")
-        process.exitCode = 1
-        return
-      }
-      if (consent === "declined") {
-        plain("Rebaseline cancelled. Nothing was recorded.")
-        printReport(report)
-      } else {
-        report = (await targetSchemaDoctor(target, ast, {
-          schema: pgSchema,
-          rebaseline: true,
-          acceptAccessDrift,
-        })) as DoctorReport
-        printReport(report)
-      }
-    }
+    report = await runRebaseline(preview, {
+      acceptAccessDrift,
+      yes: opts.yes ?? false,
+      apply: async (keys) =>
+        (await targetSchemaDoctor(target, ast, { schema: pgSchema, rebaseline: true, acceptAccessDrift, keys })) as DoctorReport,
+    })
   } else {
-    printReport(report)
+    printReport(preview)
   }
+  if (report === undefined) return
 
   if (opts.strict && hasStrictIssues(report)) {
     process.exit(1)
   }
 }
 
+/** How a rebaseline is applied, and what the person agreed to up front. */
+interface RebaselineSteps {
+  acceptAccessDrift: boolean
+  yes: boolean
+  /** Record the drift, told the keys of every drifted object the preview showed. */
+  apply: (keys: string[]) => Promise<DoctorReport>
+}
+
 /**
- * Whether declared hooks can actually run.
- *
- * Worth its own section because every failure here is silent: a hook whose function is missing, or a
- * stack with functions switched off, produces no error anywhere, the write just succeeds
- * unvalidated. Drift you cannot see is the thing doctor exists for.
+ * Plan 3.2: a rebaseline takes what the database holds as Supatype's from now on, so a person sees
+ * each object first, and a hand edit to access is taken only with --accept-access-drift too. The
+ * engine is sent every drifted object the preview listed, recorded or left drifted, and records
+ * nothing if the drift is no longer those (C04). Prints the report it ends on and returns it, or
+ * undefined when it could not ask (exit 1 set).
  */
+async function runRebaseline(preview: DoctorReport, steps: RebaselineSteps): Promise<DoctorReport | undefined> {
+  const plan = rebaselinePlan(preview, steps.acceptAccessDrift)
+  if (plan.record.length === 0) {
+    printReport(preview)
+    // Access drift alone is still drift: say why it was not recorded and how it would be.
+    printRebaselinePlan(plan)
+    info("Nothing to rebaseline.")
+    return preview
+  }
+  printRebaselinePlan(plan)
+  const consent = await askConsent(`Record ${plan.record.length} object(s) as Supatype's baseline?`, steps.yes)
+  if (consent === "needs-yes") {
+    error("doctor --rebaseline needs --yes when not interactive")
+    process.exitCode = 1
+    return undefined
+  }
+  if (consent === "declined") {
+    plain("Rebaseline cancelled. Nothing was recorded.")
+    printReport(preview)
+    return preview
+  }
+  const keys = (preview.drifted ?? []).map(adoptionKey)
+  const command = `supatype doctor --rebaseline${steps.acceptAccessDrift ? " --accept-access-drift" : ""}`
+  const report = await explainingRefusal(command, () => steps.apply(keys))
+  printReport(report)
+  return report
+}
+
 /**
  * Field validators, reported separately from hooks because the consequence differs.
  *
@@ -278,6 +300,13 @@ function printFieldValidators(report: HooksReport): void {
   }
 }
 
+/**
+ * Whether declared hooks can actually run.
+ *
+ * Worth its own section because every failure here is silent: a hook whose function is missing, or a
+ * stack with functions switched off, produces no error anywhere, the write just succeeds
+ * unvalidated. Drift you cannot see is the thing doctor exists for.
+ */
 export function printHooks(report: HooksReport): void {
   printFieldValidators(report)
   if (report.declared.length === 0) return
