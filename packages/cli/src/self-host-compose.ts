@@ -940,6 +940,15 @@ ${dbDependency}${studioBlock}${valkeyBlock}${tlsHintComment}  kong:
       # one carries API calls, that one the page, and a request that clears one and fails the other
       # is worse to diagnose than one that fails outright.
       KONG_NGINX_HTTP_LARGE_CLIENT_HEADER_BUFFERS: "4 32k"
+      # Upstreams are service names, and a recreated container comes back on a new address. Docker's
+      # DNS answers with a 600 s TTL and Kong serves a stale record for up to an hour while it
+      # refreshes, so after the server was recreated sign-in answered 502 until Kong restarted.
+      # Looked up again every few seconds instead, with no stale answers and failures forgotten
+      # at once: Docker's DNS is local, so the lookups cost nothing worth saving.
+      KONG_DNS_VALID_TTL: "5"
+      KONG_DNS_STALE_TTL: "0"
+      KONG_DNS_NOT_FOUND_TTL: "1"
+      KONG_DNS_ERROR_TTL: "1"
 ${kongTlsEnv}    volumes:
       - ${kongMount}:/etc/kong/kong.yml:ro
     ports:
