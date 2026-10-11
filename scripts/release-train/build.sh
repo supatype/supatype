@@ -181,7 +181,10 @@ build_cloud_from_release() {
   engine="$(train_image engine)"
   arch="$(docker image inspect "$engine" --format '{{.Architecture}}')"
   [[ -f "$OUT/supatype-engine-linux-$arch" ]] || train_die "build engine before cloud: its binary is the release"
-  version="$(docker run --rm --entrypoint supatype-engine "$engine" --version | awk '{print $2}')-train"
+  # Build metadata dropped: since F24 a candidate reports 0.7.0-dev+<sha12>, and a `+` in the
+  # release path is a character the Dockerfile's URL and a static server need not agree on.
+  version="$(docker run --rm --entrypoint supatype-engine "$engine" --version | awk '{print $2}')"
+  version="${version%%+*}-train"
   cloud_engine_release "$version" "$arch"
   key="$(sed -n 2p "$OUT/engine-release/key.pub")"
   # A throwaway server image holding the release, so serving it needs no bind mount either.
