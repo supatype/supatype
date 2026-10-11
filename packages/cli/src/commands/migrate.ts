@@ -1,5 +1,6 @@
 import { withPublishing } from "../model-versioning.js"
 import type { Command } from "commander"
+import { writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { printPushWarnings, type EnginePushResult } from "../engine-push-output.js"
 import { loadConfig, loadSchemaAst } from "../config.js"
@@ -34,6 +35,46 @@ import { info, plain, warn } from "../ui/messages.js"
 export function schemaRestoreMode(opts: { syncSchema?: boolean }): "skip" | "auto" | "ask" {
   if (opts.syncSchema === false) return "skip"
   return opts.syncSchema === true ? "auto" : "ask"
+}
+
+/** `supatype migrate`'s options. */
+export interface MigrateOptions {
+  connection?: string
+  /** Rehearse the push so the file records it too (IN-A). Takes a push's locks while it runs. */
+  record?: boolean
+  force?: boolean
+  output?: string
+}
+
+/** The engine's answer: the binary prints the SQL, which arrives as `message`; a server sends `sql`. */
+export interface MigrateResult {
+  sql?: string
+  message?: string
+}
+
+/** The `/migrate` request for `opts`: `record` and `force` only when asked for. */
+export function migrateRequest(
+  ast: unknown,
+  databaseUrl: string,
+  schema: string,
+  opts: Pick<MigrateOptions, "record" | "force">,
+): Record<string, unknown> {
+  return {
+    ast,
+    database_url: databaseUrl,
+    schema,
+    force: opts.force === true,
+    record: opts.record === true,
+  }
+}
+
+/** The SQL from the engine's answer, or an error when it sent none. */
+export function migrationSql(result: MigrateResult): string {
+  const sql = result.sql ?? result.message
+  if (sql === undefined || sql.trim() === "") {
+    throw new Error("The engine returned no SQL for this migration.")
+  }
+  return sql.trimEnd()
 }
 
 export function registerMigrate(program: Command): void {
@@ -86,19 +127,37 @@ export function registerMigrate(program: Command): void {
 
   program
     .command("migrate")
-    .description("Apply pending migrations from the migration history")
+    .description(
+      "Write the SQL a push would apply, without applying it. Plain, it takes no lock your " +
+        "application waits on and the file records nothing: applied by hand, the next push finds " +
+        "the tables unmanaged. With --record the file also records the migration as a push does",
+    )
     .option("--connection <url>", "Database connection URL (overrides config)")
-    .action(async (opts: { connection?: string }) => {
-      const config = loadConfig()
-      const connection = resolveHostDatabaseUrl(process.cwd(), config, { connection: opts.connection, allowDerived: true }).dsn
+    .option(
+      "--record",
+      "Rehearse the push so the file records the migration history and which objects are Supatype's. " +
+        "Takes the table locks a push takes while it runs",
+    )
+    .option("--force", "Allow destructive changes, and rewrites of large tables")
+    .option("-o, --output <file>", "Write the SQL to this file instead of stdout")
+    .action(async (opts: MigrateOptions) => {
+      const cwd = process.cwd()
+      const config = loadConfig(cwd)
+      const connection = resolveHostDatabaseUrl(cwd, config, { connection: opts.connection, allowDerived: true }).dsn
+      const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
 
       await ensureEngine()
-      const result = await engineRequest<{ message?: string }>("/migrations", {
-        database_url: connection,
-        schema: "public",
-        action: "pending",
-      })
-      info(result.message ?? "Migrations applied.")
+      const result = await engineRequest<MigrateResult>(
+        "/migrate",
+        migrateRequest(ast, connection, schemaPgSchema(cwd), opts),
+      )
+      const sql = migrationSql(result)
+      if (opts.output === undefined) {
+        process.stdout.write(`${sql}\n`)
+        return
+      }
+      writeFileSync(opts.output, `${sql}\n`)
+      info(`Wrote ${opts.output}${opts.record ? "" : " (it records nothing: see its header)"}.`)
     })
 
   program
