@@ -9,6 +9,11 @@ on:
     # CDN soak: weekly (install.sh path; linux only)
     - cron: "17 6 * * 1"
   workflow_dispatch:
+    inputs:
+      schema_engine_sha:
+        description: supatype-schema-engine commit for the ownership job (the pin in .github/schema-engine-commit when empty)
+        required: false
+        type: string
 
 concurrency:
   group: integration-${{ github.ref }}
@@ -325,11 +330,14 @@ jobs:
   ownership-e2e:
     name: ownership commands (adopt, release, reclaim, rebaseline, rollback)
     # One Postgres container and the CLI driving the engine directly, so it runs on pull requests
-    # like storage-backend. It uses the engine the CLI resolves, and skips with a message while
-    # that engine predates the ledger commands.
+    # like storage-backend. The engine is not whatever the CLI resolves (the latest release, which
+    # can predate the commands): it is built from the engine commit pinned in
+    # .github/schema-engine-commit, the way the release train builds it, and the script fails when
+    # no check could run. The engine repository is private, so this needs PRIVATE_REPO_TOKEN, and
+    # fails without it (a fork's pull request) rather than passing having checked nothing.
     if: github.event_name != 'schedule'
     runs-on: ubuntu-22.04
-    timeout-minutes: 20
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4
@@ -346,6 +354,52 @@ jobs:
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Resolve the engine commit
+        id: engine
+        env:
+          IN_SHA: ${{ inputs.schema_engine_sha }}
+        run: |
+          set -euo pipefail
+          sha="${IN_SHA:-$(tr -d '[:space:]' < .github/schema-engine-commit)}"
+          if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::The engine commit must be a full 40-character SHA, got '$sha'."
+            exit 1
+          fi
+          echo "sha=$sha" >>"$GITHUB_OUTPUT"
+          echo "### ownership-e2e engine: supatype-schema-engine@$sha" >>"$GITHUB_STEP_SUMMARY"
+
+      # The release train's own checkout and build: the engine image built from that commit, and
+      # the binary extracted from it, so this job and the train test the same build of an engine.
+      - name: Build the engine at that commit
+        env:
+          OWNER: ${{ github.repository_owner }}
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          SHA_supatype_schema_engine: ${{ steps.engine.outputs.sha }}
+          SRC: ${{ runner.temp }}/engine-src
+        run: |
+          set -euo pipefail
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::PRIVATE_REPO_TOKEN is not available, so the private engine cannot be built and no ownership check can run."
+            exit 1
+          fi
+          bash scripts/release-train/checkout.sh "$SRC" supatype-schema-engine
+          bash scripts/release-train/build.sh --src "$SRC" engine
+          echo "OWNERSHIP_ENGINE_BIN=$SRC/.train-out/supatype-engine-linux-amd64" >>"$GITHUB_ENV"
+
+      # A candidate engine names its commit in its version (engine F24), so this proves the binary
+      # under test is the pinned build and not one resolved from anywhere else.
+      - name: The engine reports the pinned commit
+        env:
+          SHA: ${{ steps.engine.outputs.sha }}
+        run: |
+          set -euo pipefail
+          got="$("$OWNERSHIP_ENGINE_BIN" --version)"
+          echo "$got"
+          if [[ "$got" != *"-dev+${SHA:0:12}" ]]; then
+            echo "::error::The engine reports '$got', not a build of ${SHA:0:12}."
+            exit 1
+          fi
 
       - uses: pnpm/action-setup@v4
 
