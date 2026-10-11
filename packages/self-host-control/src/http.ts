@@ -8,6 +8,23 @@ export type RouteHandler = (ctx: {
   pathname: string
 }) => void | Promise<void>
 
+/** A refusal a handler throws, answered by the server with this status and error code. */
+export class HttpError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    message: string,
+  ) {
+    super(message)
+    this.name = "HttpError"
+  }
+}
+
+/** A 400 for a request whose input fails validation. */
+export function badRequest(message: string): HttpError {
+  return new HttpError(400, "validation_error", message)
+}
+
 export function sendJson(res: ServerResponse, status: number, payload: unknown): void {
   res.writeHead(status, { "Content-Type": "application/json" })
   res.end(JSON.stringify(payload))
