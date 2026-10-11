@@ -3,7 +3,13 @@ import type { IncomingMessage } from "node:http"
 import { createServer } from "node:http"
 import type { RealtimeEnv } from "./env.js"
 import { verifyToken, type JwtClaims } from "./auth.js"
-import { ChannelManager, type ConnectedClient } from "./channels.js"
+import {
+  ChannelManager,
+  admitChannelAction,
+  presenceKey,
+  type ChannelAction,
+  type ConnectedClient,
+} from "./channels.js"
 import { ReplicationListener } from "./replication.js"
 import { RealtimeUnsupportedError } from "./capability.js"
 import { RlsFilter } from "./rls.js"
@@ -16,6 +22,8 @@ import type {
   WalChange,
   ChangeEvent,
   PresenceEntry,
+  PresenceTrackMessage,
+  BroadcastMessage,
 } from "./types.js"
 
 /** Cached routing table entry for multi-tenant mode. */
@@ -35,6 +43,8 @@ export class RealtimeServer {
   private httpServer: ReturnType<typeof createServer> | null = null
   /** The in-flight initial replication connection, so shutdown and tests can await it. */
   private replicationStartup: Promise<void> = Promise.resolve()
+  /** Set by `stop()`, so a startup abandoned by the shutdown is not reported as a failure. */
+  private stopping = false
 
   /** Cached project routes for multi-tenant JWT verification + tier limits. */
   private projectRoutes = new Map<string, ProjectRoute>()
@@ -125,6 +135,9 @@ export class RealtimeServer {
       // A database that cannot do logical decoding is already reported by the listener, and the
       // service stays up serving presence and broadcast, only change-subscriptions are gone.
       if (err instanceof RealtimeUnsupportedError) return
+      // Stopped while still waiting for the database: the retry hands back its last error, and
+      // that is a shutdown, not a failure. Treating it as one marked a clean stop as exit code 1.
+      if (this.stopping) return
       // Anything else non-transient is a broken process, not a missing feature.
       console.error("[realtime] replication failed to start:", err)
       process.exitCode = 1
@@ -137,6 +150,7 @@ export class RealtimeServer {
   }
 
   async stop(): Promise<void> {
+    this.stopping = true
     if (this.routingCacheTimer) {
       clearInterval(this.routingCacheTimer)
       this.routingCacheTimer = null
@@ -194,9 +208,7 @@ export class RealtimeServer {
     }
 
     // Extract JWT: in multi-tenant mode, verify against per-project secret
-    const claims = this.env.multiTenant && projectRef
-      ? this.extractClaimsMultiTenant(req, projectRef)
-      : this.extractClaims(req)
+    const claims = this.extractClaims(req, this.jwtSecretFor(projectRef))
 
     if (this.env.secureChannels && !claims) {
       // Allow connection but require auth message before subscribing
@@ -228,18 +240,20 @@ export class RealtimeServer {
     })
   }
 
-  private extractClaims(req: IncomingMessage): JwtClaims | null {
+  /** The claims of the token the upgrade request carries, verified with `secret`. */
+  private extractClaims(req: IncomingMessage, secret: string | null): JwtClaims | null {
+    if (secret === null) return null
     // Try query parameter first
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`)
     const token = url.searchParams.get("token")
     if (token) {
-      return verifyToken(token, this.env.jwtSecret)
+      return verifyToken(token, secret)
     }
 
     // Try Authorization header
     const authHeader = req.headers.authorization
     if (authHeader?.startsWith("Bearer ")) {
-      return verifyToken(authHeader.slice(7), this.env.jwtSecret)
+      return verifyToken(authHeader.slice(7), secret)
     }
 
     return null
@@ -259,23 +273,54 @@ export class RealtimeServer {
         this.handleSubscribe(clientId, client, msg)
         break
       case "unsubscribe":
-        this.channels.unsubscribe(clientId, msg.channel)
-        this.send(client.ws, { type: "system", status: "ok", message: `unsubscribed from ${msg.channel}` })
+        this.handleUnsubscribe(clientId, client, msg.channel)
         break
       case "presence_track":
-        this.handlePresenceTrack(clientId, client, msg.channel, msg.payload)
+      case "presence_untrack":
+      case "broadcast":
+        this.handleChannelAction(clientId, client, msg)
+        break
+    }
+  }
+
+  /**
+   * Broadcast and presence, for a client allowed to send them.
+   *
+   * Refused with an error frame otherwise, the same shape subscribe refuses with, so a client
+   * learns why nothing happened rather than reading silence as an empty room.
+   */
+  private handleChannelAction(
+    clientId: string,
+    client: ConnectedClient,
+    msg: Extract<ClientMessage, { type: ChannelAction }>,
+  ): void {
+    const admitted = admitChannelAction(client, msg.channel, msg.type)
+    if (typeof admitted === "string") {
+      this.send(client.ws, { type: "system", status: "error", message: admitted })
+      return
+    }
+    switch (msg.type) {
+      case "presence_track":
+        this.handlePresenceTrack(clientId, client, admitted, msg)
         break
       case "presence_untrack":
         this.handlePresenceUntrack(clientId, client, msg.channel)
         break
       case "broadcast":
-        this.handleBroadcast(clientId, msg.channel, msg.event, msg.payload)
+        this.handleBroadcast(clientId, client, msg)
         break
     }
   }
 
+  private handleUnsubscribe(clientId: string, client: ConnectedClient, channel: string): void {
+    const entry = this.channels.unsubscribe(clientId, channel)
+    if (entry) this.announcePresence(client, channel, { joins: [], leaves: [entry] })
+    this.send(client.ws, { type: "system", status: "ok", message: `unsubscribed from ${channel}` })
+  }
+
   private handleAuth(clientId: string, client: ConnectedClient, token: string): void {
-    const claims = verifyToken(token, this.env.jwtSecret)
+    const secret = this.jwtSecretFor(client.projectRef)
+    const claims = secret === null ? null : verifyToken(token, secret)
     if (claims) {
       this.channels.setClientClaims(clientId, claims)
       this.send(client.ws, { type: "system", status: "ok", message: "authenticated" })
@@ -326,47 +371,36 @@ export class RealtimeServer {
 
     // Broadcast presence leaves for any channels this client was in
     for (const [channel, entry] of client.presence) {
-      const channelClients = this.channels.getChannelClients(channel)
-      if (channelClients.length > 0) {
-        const presenceMsg: ServerMessage = {
-          type: "presence",
-          channel,
-          joins: [],
-          leaves: [entry],
-        }
-        for (const { client: other } of channelClients) {
-          this.send(other.ws, presenceMsg)
-        }
-      }
+      this.announcePresence(client, channel, { joins: [], leaves: [entry] })
     }
   }
 
   // ─── Presence ────────────────────────────────────────────────────────────
 
+  /** Tell every member of `channel` in `client`'s project who joined and who left. */
+  private announcePresence(
+    client: ConnectedClient,
+    channel: string,
+    change: { joins: PresenceEntry[]; leaves: PresenceEntry[] },
+  ): void {
+    const presenceMsg: ServerMessage = { type: "presence", channel, ...change }
+    for (const { client: other } of this.channels.getChannelClients(channel, client.projectRef)) {
+      this.send(other.ws, presenceMsg)
+    }
+  }
+
   private handlePresenceTrack(
     clientId: string,
     client: ConnectedClient,
-    channel: string,
-    payload: Record<string, unknown>,
+    claims: JwtClaims,
+    msg: PresenceTrackMessage,
   ): void {
-    const entry: PresenceEntry = {
-      user_id: client.claims?.sub ?? "anonymous",
-      ...payload,
-    }
+    // The verified subject is written last, so a payload carrying its own `user_id` cannot
+    // replace it. Spread the other way round, any member could appear as any other.
+    const entry: PresenceEntry = { ...msg.payload, user_id: presenceKey(claims) }
 
-    this.channels.trackPresence(clientId, channel, entry)
-
-    // Broadcast the join to all channel subscribers
-    const channelClients = this.channels.getChannelClients(channel)
-    const presenceMsg: ServerMessage = {
-      type: "presence",
-      channel,
-      joins: [entry],
-      leaves: [],
-    }
-    for (const { client: other } of channelClients) {
-      this.send(other.ws, presenceMsg)
-    }
+    this.channels.trackPresence(clientId, msg.channel, entry)
+    this.announcePresence(client, msg.channel, { joins: [entry], leaves: [] })
   }
 
   private handlePresenceUntrack(
@@ -377,17 +411,7 @@ export class RealtimeServer {
     const entry = this.channels.untrackPresence(clientId, channel)
     if (!entry) return
 
-    const channelClients = this.channels.getChannelClients(channel)
-    const presenceMsg: ServerMessage = {
-      type: "presence",
-      channel,
-      joins: [],
-      leaves: [entry],
-    }
-    for (const { client: other } of channelClients) {
-      this.send(other.ws, presenceMsg)
-    }
-
+    this.announcePresence(client, channel, { joins: [], leaves: [entry] })
     this.send(client.ws, { type: "system", status: "ok", message: `presence untracked from ${channel}` })
   }
 
@@ -395,10 +419,10 @@ export class RealtimeServer {
 
   private handleBroadcast(
     senderClientId: string,
-    channel: string,
-    event: string,
-    payload: Record<string, unknown>,
+    sender: ConnectedClient,
+    msg: BroadcastMessage,
   ): void {
+    const { channel, event, payload } = msg
     const broadcastMsg: ServerMessage = {
       type: "broadcast",
       channel,
@@ -406,7 +430,7 @@ export class RealtimeServer {
       payload,
     }
 
-    const channelClients = this.channels.getChannelClients(channel)
+    const channelClients = this.channels.getChannelClients(channel, sender.projectRef)
     for (const { clientId, client } of channelClients) {
       // Don't echo back to sender
       if (clientId !== senderClientId) {
@@ -539,22 +563,14 @@ export class RealtimeServer {
   }
 
   /**
-   * Extract and verify JWT claims using the per-project secret (multi-tenant mode).
+   * The secret a client's tokens are verified with: its project's on a shared instance.
+   *
+   * The `auth` message used to verify against the instance-wide secret even in multi-tenant mode,
+   * so a client of one project could authenticate with a token that project never issued.
    */
-  private extractClaimsMultiTenant(req: IncomingMessage, projectRef: string): JwtClaims | null {
-    const route = this.projectRoutes.get(projectRef)
-    if (!route) return null
-
-    // Use the project's JWT secret
-    const secret = route.jwtSecret
-
-    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`)
-    const token = url.searchParams.get("token")
-    if (token) return verifyToken(token, secret)
-
-    const authHeader = req.headers.authorization
-    if (authHeader?.startsWith("Bearer ")) return verifyToken(authHeader.slice(7), secret)
-
-    return null
+  private jwtSecretFor(projectRef: string | null): string | null {
+    if (!this.env.multiTenant) return this.env.jwtSecret
+    if (projectRef === null) return null
+    return this.projectRoutes.get(projectRef)?.jwtSecret ?? null
   }
 }
