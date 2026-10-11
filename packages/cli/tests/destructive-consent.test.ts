@@ -123,3 +123,117 @@ describe("pushConsentingToDestructive()", () => {
     expect(result).toBe("forced")
   })
 })
+
+/**
+ * Renames are declared, never guessed (D1). When the engine names a drop and an add that may be a
+ * rename, a terminal is asked about that before "drop the data?", and a yes writes the declaration
+ * through the writer it was given and pushes again, unforced.
+ */
+describe("the rename offer", () => {
+  const candidate = { kind: "column" as const, table: "member", from: "name", to: "title" }
+
+  /** A push the engine refuses until the declaration is written, then applies. */
+  function declaringPush() {
+    let declared = false
+    const calls: boolean[] = []
+    const push = vi.fn(async (force: boolean) => {
+      calls.push(force)
+      if (!declared && !force) throw refusal()
+      return force ? "forced" : "renamed"
+    })
+    const writer = {
+      write: vi.fn(async () => {
+        declared = true
+      }),
+    }
+    return { push, writer, calls }
+  }
+
+  it("on yes writes the declaration and pushes again without force", async () => {
+    const { push, writer, calls } = declaringPush()
+    const questions: string[] = []
+    const result = await pushConsentingToDestructive(push, policy, {
+      ask: async (question) => {
+        questions.push(question)
+        return true
+      },
+      interactive: () => true,
+      renameCandidates: async () => [candidate],
+      renameWriter: writer,
+    })
+    expect(result).toBe("renamed")
+    expect(calls).toEqual([false, false])
+    expect(writer.write).toHaveBeenCalledWith(candidate)
+    expect(questions).toEqual(["Was this a rename: member.name -> title? (writes the declaration)"])
+  })
+
+  it("on no falls through to the drop question, and writes nothing", async () => {
+    const { push, writer, calls } = declaringPush()
+    const answers = [false, true]
+    const result = await pushConsentingToDestructive(push, policy, {
+      ask: async () => answers.shift() ?? false,
+      interactive: () => true,
+      renameCandidates: async () => [candidate],
+      renameWriter: writer,
+    })
+    expect(result).toBe("forced")
+    expect(calls).toEqual([false, true])
+    expect(writer.write).not.toHaveBeenCalled()
+  })
+
+  it("asks once per source: a second pairing of a column already declared is skipped", async () => {
+    const { push, writer } = declaringPush()
+    const ask = vi.fn(async () => true)
+    await pushConsentingToDestructive(push, policy, {
+      ask,
+      interactive: () => true,
+      renameCandidates: async () => [candidate, { ...candidate, to: "label" }],
+      renameWriter: writer,
+    })
+    expect(writer.write).toHaveBeenCalledOnce()
+    expect(ask).toHaveBeenCalledOnce()
+  })
+
+  it("offers nothing without a writer, and nothing without a terminal", async () => {
+    const { push } = declaringPush()
+    const ask = vi.fn(async () => false)
+    const renameCandidates = vi.fn(async () => [candidate])
+    await expect(
+      pushConsentingToDestructive(push, policy, { ask, interactive: () => true, renameCandidates }),
+    ).rejects.toBeInstanceOf(DestructiveChangeRefused)
+    expect(ask.mock.calls).toEqual([["Apply it and lose that data?"]])
+
+    const writer = { write: vi.fn(async () => undefined) }
+    await expect(
+      pushConsentingToDestructive(push, policy, {
+        ask,
+        interactive: () => false,
+        renameCandidates,
+        renameWriter: writer,
+      }),
+    ).rejects.toBeInstanceOf(DestructiveChangeRefused)
+    expect(writer.write).not.toHaveBeenCalled()
+  })
+
+  it("does not offer again when the push after a declaration is still refused", async () => {
+    const push = vi.fn(async (force: boolean) => {
+      if (!force) throw refusal()
+      return "forced"
+    })
+    const writer = { write: vi.fn(async () => undefined) }
+    const ask = vi.fn(async (_question: string) => true)
+    expect(
+      await pushConsentingToDestructive(push, policy, {
+        ask,
+        interactive: () => true,
+        renameCandidates: async () => [candidate],
+        renameWriter: writer,
+      }),
+    ).toBe("forced")
+    expect(writer.write).toHaveBeenCalledOnce()
+    expect(ask.mock.calls.map(([q]) => q)).toEqual([
+      "Was this a rename: member.name -> title? (writes the declaration)",
+      "Apply it and lose that data?",
+    ])
+  })
+})
