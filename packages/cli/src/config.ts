@@ -92,6 +92,11 @@ const LOCAL_CONFIG_CANDIDATES = [
   "supatype.local.config.mjs",
 ]
 
+/** True when `cwd` holds a project config, whether or not it then loads (a retired one included). */
+export function hasProjectConfig(cwd: string): boolean {
+  return [...MAIN_CONFIG_CANDIDATES, LEGACY_TOML].some((candidate) => existsSync(resolve(cwd, candidate)))
+}
+
 /**
  * Normalize a config object parsed from JSON (e.g. shorthand `schema: "./x"`).
  */

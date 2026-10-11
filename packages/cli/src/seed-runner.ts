@@ -16,7 +16,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
-import { evalTsSnippet } from "./tsx-runner.js"
+import { cliModuleUrl, evalTsSnippet } from "./tsx-runner.js"
 import type { SeedConfig, SeedIr } from "./seed.js"
 
 /** What a seed module turned out to be. */
@@ -79,8 +79,8 @@ function snippet(file: string, outPath: string, options: CollectOptions): string
   const url = (path: string): string => JSON.stringify(pathToFileURL(path).href)
   return `
 import { writeFileSync } from "node:fs"
-import { SeedCollector } from "./seed-ir.js"
-import { expr } from "./seed.js"
+import { SeedCollector } from ${JSON.stringify(cliModuleUrl("seed-ir.js"))}
+import { expr } from ${JSON.stringify(cliModuleUrl("seed.js"))}
 
 const builder = await import(${url(options.builderPath)})
 const module = await import(${url(file)})

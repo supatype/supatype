@@ -20,7 +20,7 @@ vi.mock("node:child_process", async (importOriginal) => ({
   ...(await importOriginal<typeof import("node:child_process")>()),
   spawnSync: (cmd: string, args: readonly string[], opts?: SpawnOptions) => spawnSync(cmd, args, opts),
 }))
-vi.mock("../src/config.js", () => ({ loadConfig: () => ({}) }))
+vi.mock("../src/config.js", () => ({ hasProjectConfig: () => true, loadConfig: () => ({}) }))
 vi.mock("../src/ensure-binary.js", () => ({ ensureBinary: async () => "/fake/supatype-engine" }))
 
 const { dockerEnv } = await import("../src/docker-env.js")

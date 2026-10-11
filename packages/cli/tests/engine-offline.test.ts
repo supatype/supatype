@@ -41,7 +41,10 @@ describe("resolveBinary() offline", () => {
   it("uses overrides.engine without looking anything up", async () => {
     const bin = join(cwd, "engine-build")
     writeFileSync(bin, "#!/bin/sh\n")
-    expect(await resolveBinary("engine", config({ overrides: { engine: bin } } as Partial<SupatypeProjectConfig>))).toBe(bin)
+    // Windows spawns an extensionless path as `<path>.exe`, so the override is copied there and that
+    // copy is what resolves.
+    const resolved = process.platform === "win32" ? `${bin}.exe` : bin
+    expect(await resolveBinary("engine", config({ overrides: { engine: bin } } as Partial<SupatypeProjectConfig>))).toBe(resolved)
     expect(fetch).not.toHaveBeenCalled()
   })
 

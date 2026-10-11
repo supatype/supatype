@@ -1636,3 +1636,55 @@ export type Speaker = Model<{
     expect(fields["handout"]?.annotations?.db?.pgType).toBe("JSONB")
   })
 })
+
+/**
+ * A role or owner argument is read as the string literal it is, never by stripping quote characters
+ * from its source text. Stripping turned `Role<"o'brien">` into the role `obrien`, a different role
+ * that the intended one is then denied as (E26).
+ */
+describe("access rule arguments", () => {
+  function accessOf(rule: string): Record<string, unknown> {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-rule-args-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Model, UUID, Public, Role, BucketRole, Owner, OwnerFrom } from "@supatype/types"
+
+export type Note = Model<{
+  id: UUID
+  author_id: UUID
+}, {
+  access: { read: Public; update: ${rule} }
+}>
+`,
+      "utf8",
+    )
+    return modelAccess(extractSchemaAstFromTypes(schemaPath, dir)?.models.find((m) => m.name === "Note"))
+  }
+
+  it("reads a role name from its literal", () => {
+    expect(accessOf(`Role<"editor">`)["update"]).toEqual({ type: "role", roles: ["editor"] })
+    expect(accessOf(`Role<'editor'>`)["update"]).toEqual({ type: "role", roles: ["editor"] })
+  })
+
+  it("refuses a role name containing a quote rather than changing it", () => {
+    expect(() => accessOf(`Role<"o'brien">`)).toThrow(/role name "o'brien".*quote/i)
+    expect(() => accessOf(`Role<'say "hi"'>`)).toThrow(/quote/i)
+  })
+
+  it("refuses a role argument that is not a string literal", () => {
+    expect(() => accessOf(`Role<string>`)).toThrow(/Role<>.*string literal/)
+  })
+
+  it("reads Owner and OwnerFrom fields from their literals", () => {
+    expect(accessOf(`Owner<"author_id">`)["update"]).toEqual({ type: "owner", field: "author_id" })
+    expect(accessOf(`OwnerFrom<"author_id">`)["update"]).toEqual({ type: "owner", field: "author_id" })
+  })
+
+  it("refuses an Owner or OwnerFrom argument that is not a string literal", () => {
+    expect(() => accessOf(`Owner<string>`)).toThrow(/Owner<>.*string literal/)
+    expect(() => accessOf(`OwnerFrom<string>`)).toThrow(/OwnerFrom<>.*string literal/)
+  })
+})

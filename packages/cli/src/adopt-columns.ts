@@ -16,7 +16,7 @@
  * CLI did not leave as it wrote it is never put back: an edit made meanwhile is the person's.
  */
 import { readFileSync, writeFileSync } from "node:fs"
-import { relative } from "node:path"
+import { isAbsolute, normalize, relative, sep } from "node:path"
 import { Node, Project, ts, type SourceFile, type TypeLiteralNode, type TypeNode } from "ts-morph"
 import { extractSchemaAstFromTypes, walkSchemaSourceAbsPaths } from "./type-extractor.js"
 import type { DbColumnState } from "./pull-utils.js"
@@ -328,7 +328,9 @@ export function planColumnDeclaration(input: PlanInput): ColumnDeclaration {
     return withCanonicalLine(manual(found.reason, { model: model.name }), input.live, input.identityColumns)
   }
   const { sourceFile, fields, localized } = found
-  const file = sourceFile.getFilePath()
+  // ts-morph names files with forward slashes on every platform; this is a path to write to, so
+  // it is the platform's own.
+  const file = normalize(sourceFile.getFilePath())
   const at = { model: model.name, file }
 
   const type = fieldTypeForColumn(input.live, {
@@ -446,7 +448,9 @@ function verify(plan: ColumnDeclarationPlan, entryPath: string, cwd: string): st
 const DUPLICATE_CODES = new Set([2300, 2440, 2395])
 
 /** The first "duplicate identifier" kind of error in `text`, checked as one file on its own. */
-function duplicateIdentifier(fileName: string, text: string): string | undefined {
+function duplicateIdentifier(path: string, text: string): string | undefined {
+  // The compiler host asks for files by forward-slash names on every platform.
+  const fileName = path.split(sep).join("/")
   const options: ts.CompilerOptions = { noLib: true, noResolve: true, types: [], noEmit: true }
   const host = ts.createCompilerHost(options)
   const source = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true)
@@ -827,32 +831,13 @@ export async function declareAdoptedColumns(
       results.push(planned)
       continue
     }
-    const where = `model ${planned.model} in ${displayPath(planned.file, opts.cwd)}`
-    if (!opts.yes) {
-      deps.say.plain(`\nColumn ${item.table}.${item.name} is now Supatype's, so the schema should declare it.`)
-      deps.say.plain(`Add to ${where}:\n`)
-      deps.say.plain(`  ${planned.line}`)
-      if (planned.addsImports.length > 0) {
-        deps.say.plain(`\n  (and import ${planned.addsImports.join(", ")} from "${TYPES_MODULE}")`)
-      }
-      const agreed = opts.interactive && (await deps.confirm(`Edit ${displayPath(planned.file, opts.cwd)}?`))
-      if (!agreed) {
-        results.push({
-          status: "manual",
-          table: item.table,
-          column: item.name,
-          reason: opts.interactive ? "you chose not to edit the file" : "there was no one to ask",
-          line: planned.line,
-          ...(planned.addsImports.length > 0 && { imports: planned.addsImports }),
-          model: planned.model,
-          file: planned.file,
-        })
-        continue
-      }
+    if (!opts.yes && !(opts.interactive && (await deps.confirm(declareQuestion(planned, opts.cwd))))) {
+      results.push(declinedDeclaration(planned, opts.interactive))
+      continue
     }
     const applied = applyColumnDeclaration(planned, opts.entryPath, opts.cwd)
     if (applied.status === "planned") {
-      deps.say.info(`Added \`${applied.line}\` to ${where}.`)
+      deps.say.info(`Added \`${applied.line}\` to model ${planned.model} in ${displayPath(planned.file, opts.cwd)}.`)
     }
     results.push(applied)
   }
@@ -872,6 +857,41 @@ export async function declareAdoptedColumns(
     deps.say.plain(`The next \`supatype push\` treats ${names} as declared field(s).`)
   }
   return results
+}
+
+/**
+ * The question asked before editing, carrying the field it would add.
+ *
+ * In the question rather than printed before it: the prompt clears the terminal when it mounts, so
+ * lines printed just before it never reached a person, who was asked to edit a file without seeing
+ * the edit (A5-N1). Without a prompt the same lines are printed once, by `printManual`.
+ */
+function declareQuestion(planned: ColumnDeclarationPlan, cwd: string): string {
+  const lines = [
+    `Column ${planned.table}.${planned.column} is now Supatype's, so the schema should declare it.`,
+    `Add to model ${planned.model} in ${displayPath(planned.file, cwd)}:`,
+    "",
+    `  ${planned.line}`,
+  ]
+  if (planned.addsImports.length > 0) {
+    lines.push("", `  (and import ${planned.addsImports.join(", ")} from "${TYPES_MODULE}")`)
+  }
+  lines.push("", `Edit ${displayPath(planned.file, cwd)}?`)
+  return lines.join("\n")
+}
+
+/** A planned edit nobody agreed to, as the field for a person to add by hand. */
+function declinedDeclaration(planned: ColumnDeclarationPlan, interactive: boolean): ColumnDeclarationManual {
+  return {
+    status: "manual",
+    table: planned.table,
+    column: planned.column,
+    reason: interactive ? "you chose not to edit the file" : "there was no one to ask",
+    line: planned.line,
+    ...(planned.addsImports.length > 0 && { imports: planned.addsImports }),
+    model: planned.model,
+    file: planned.file,
+  }
 }
 
 function printManual(result: ColumnDeclarationManual, cwd: string, say: DeclareDeps["say"]): void {
@@ -907,7 +927,12 @@ function liveColumns(state: unknown): Map<string, LiveColumn> {
   return out
 }
 
+/**
+ * `file` relative to the project when it is inside it, with forward slashes on every platform, as
+ * a schema import names it; otherwise the platform's own absolute path.
+ */
 function displayPath(file: string, cwd: string): string {
   const rel = relative(cwd, file)
-  return rel === "" || rel.startsWith("..") ? file : rel
+  // On another drive `relative` answers the absolute path itself.
+  return rel === "" || rel.startsWith("..") || isAbsolute(rel) ? file : rel.split(sep).join("/")
 }

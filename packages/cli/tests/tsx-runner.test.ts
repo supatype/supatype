@@ -1,10 +1,13 @@
 import { describe, it, expect, vi } from "vitest"
-import { existsSync } from "node:fs"
-import { evalTempFileName, evalTsSnippet, runTsFile } from "../src/tsx-runner.js"
+import { existsSync, realpathSync } from "node:fs"
+import { cliModuleUrl, evalTempFileName, evalTsSnippet, runTsFile } from "../src/tsx-runner.js"
 import { uniqueFileToken } from "../src/unique-file-token.js"
 import { writeFileSync, unlinkSync } from "node:fs"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { tmpdir } from "node:os"
+import { fileURLToPath } from "node:url"
+
+const CLI_SRC = join(dirname(fileURLToPath(import.meta.url)), "..", "src")
 
 describe("tsx-runner", () => {
   describe("evalTsSnippet()", () => {
@@ -42,7 +45,7 @@ describe("tsx-runner", () => {
       expect(result.exitCode).not.toBe(0)
     })
 
-    // The snippet file sits beside the CLI's source while it runs, and can carry a project's
+    // The snippet file sits in a shared temp directory while it runs, and can carry a project's
     // config or connection string.
     it.skipIf(process.platform === "win32")("writes the snippet readable by this user only", () => {
       const result = evalTsSnippet(
@@ -51,6 +54,29 @@ describe("tsx-runner", () => {
       )
       expect(result.exitCode).toBe(0)
       expect(result.stdout).toBe("600")
+    })
+
+    // A5-N4: a global install the user cannot write to failed every `diff` with EACCES, because the
+    // snippet was written beside the CLI's own source.
+    it("writes the snippet in the user's temp directory, not beside the CLI's source", () => {
+      const result = evalTsSnippet(
+        `import { fileURLToPath } from "node:url"\nprocess.stdout.write(fileURLToPath(import.meta.url))`,
+      )
+      expect(result.exitCode).toBe(0)
+      const where = dirname(result.stdout)
+      expect(where.startsWith(tmpdir())).toBe(true)
+      expect(where).not.toBe(realpathSync(CLI_SRC))
+      // Removed with the snippet.
+      expect(existsSync(where)).toBe(false)
+    })
+
+    it("lets a snippet import the CLI's own modules from the temp directory", () => {
+      const result = evalTsSnippet(
+        `import { evalTempFileName } from ${JSON.stringify(cliModuleUrl("tsx-runner.js"))}\n` +
+          `process.stdout.write(evalTempFileName().slice(0, 14))`,
+      )
+      expect(result.stderr).toBe("")
+      expect(result.stdout).toBe("supatype-eval-")
     })
 
     it("captures stderr separately from stdout", () => {

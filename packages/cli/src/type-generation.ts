@@ -16,7 +16,7 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve, sep } from "node:path"
 import { generateClientAugmentation } from "./augmentation-generator.js"
-import { ensureEngine, engineRequest } from "./engine-client.js"
+import { ensureEngine, engineRequest, type ComposeEngine } from "./engine-client.js"
 import { generateProjectClient } from "./client-generator.js"
 
 /** The client a project imports, beside the generated types. */
@@ -42,6 +42,11 @@ export interface GenerateTypesRequest {
   typesPath?: string | undefined
   /** Relative path for the client augmentation, from `output.client`. */
   clientPath?: string | undefined
+  /**
+   * The project's engine image, for a docker project with no `overrides.engine`: the types come from
+   * the engine that pushes, not from whichever host binary is cached.
+   */
+  engine?: ComposeEngine | undefined
 }
 
 /**
@@ -92,11 +97,7 @@ export async function writeGeneratedTypes(req: GenerateTypesRequest): Promise<st
   const written: string[] = []
 
   if (req.typesPath !== undefined && req.typesPath !== "") {
-    await ensureEngine()
-    const result = await engineRequest<{ code?: string; message?: string }>(
-      "/generate",
-      { ast: req.ast, lang: "typescript" },
-    )
+    const result = await generate(req, { ast: req.ast, lang: "typescript" })
     // `code` is the field the engine fills; `message` is the older shape. Reading only `message`
     // and printing it is how the generated file ended up in the terminal.
     const code = result.code ?? result.message
@@ -111,12 +112,7 @@ export async function writeGeneratedTypes(req: GenerateTypesRequest): Promise<st
 
   const seedPath = seedBuilderPath(req)
   if (seedPath !== undefined) {
-    await ensureEngine()
-    const result = await engineRequest<{ code?: string; message?: string }>("/generate", {
-      ast: req.ast,
-      lang: "typescript",
-      artifact: "seed",
-    })
+    const result = await generate(req, { ast: req.ast, lang: "typescript", artifact: "seed" })
     const code = result.code ?? result.message
     if (code === undefined) {
       throw new Error("Engine returned no output for the seed builder.")
@@ -130,6 +126,15 @@ export async function writeGeneratedTypes(req: GenerateTypesRequest): Promise<st
   written.push(...writeAstDerivedOutputs(req))
 
   return written
+}
+
+/** One `/generate` run, in the project's engine image when it has one, else the host binary. */
+async function generate(
+  req: GenerateTypesRequest,
+  body: Record<string, unknown>,
+): Promise<{ code?: string; message?: string }> {
+  if (req.engine === undefined) await ensureEngine()
+  return engineRequest<{ code?: string; message?: string }>("/generate", body, req.engine)
 }
 
 /**

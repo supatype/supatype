@@ -330,6 +330,24 @@ describe("declareAdoptedColumns()", () => {
     expect(all(d)).toContain("Add this field to model Post in schema/index.ts by hand")
   })
 
+  // A5-N1: the prompt clears the terminal when it mounts, so lines printed before it are lost. The
+  // field to add has to be part of the question itself.
+  it("puts the field to add into the question, since the prompt clears what was printed before it", async () => {
+    const d = deps({ confirm: vi.fn(async () => false) })
+    await declareAdoptedColumns(NOTE, { entryPath: entry, cwd: dir, yes: false, interactive: true }, d)
+    const question = String(vi.mocked(d.confirm).mock.calls[0]?.[0])
+    expect(question).toContain("Add to model Post in schema/index.ts")
+    expect(question).toContain("note: Optional<string>")
+    expect(question).toContain("Edit schema/index.ts?")
+  })
+
+  it("prints the field to add once when there is no one to ask", async () => {
+    const d = deps()
+    await declareAdoptedColumns(NOTE, { entryPath: entry, cwd: dir, yes: false, interactive: false }, d)
+    expect(d.confirm).not.toHaveBeenCalled()
+    expect(all(d).split("note: Optional<string>").length - 1).toBe(1)
+  })
+
   it("edits without asking under --yes", async () => {
     const d = deps()
     await declareAdoptedColumns(NOTE, { entryPath: entry, cwd: dir, yes: true, interactive: false }, d)
@@ -363,7 +381,7 @@ describe("previewKeyedColumns()", () => {
     const lines = await preview(["column:post.subtitle"], introspectWith([col("subtitle", "text", { nullable: true })]))
     expect(lines).toEqual([
       'column post.subtitle: record as managed by Supatype, and add `subtitle: Optional<string>` to ' +
-        `${join("schema", "index.ts")} (Post), importing Optional from "@supatype/types"`,
+        `schema/index.ts (Post), importing Optional from "@supatype/types"`,
     ])
     // Exactly what the edit would add.
     const planned = plan("post", col("subtitle", "text", { nullable: true }))
