@@ -20,6 +20,7 @@ import { keyspaceInPostgres } from "./cache-provider.js"
 import { STUDIO_DEV_PORT } from "./studio-dev-server.js"
 import { readEnvFile } from "./env-file.js"
 import { fieldMaskingTierFromProject, type FieldMaskingTier } from "./field-masking-tier.js"
+import { readRecordedTier } from "./recorded-field-masking-tier.js"
 import { projectHasVersionedModels } from "./model-versioning.js"
 
 /** Env keys written when `versions` pins exist in supatype.config.ts. */
@@ -1127,6 +1128,11 @@ function assertExternalUrlReachableFromContainers(config: SupatypeProjectConfig)
  * schema a moment later anyway. A schema that fails to load falls back to the default list: compose
  * generation is the wrong place to report a syntax error, and `push`/`dev` do it properly seconds
  * later with the file and line.
+ *
+ * One resolution for every render: the caller's explicit tier, else the tier the stack's own
+ * database recorded on its last push (see `recorded-field-masking-tier.ts`), else the prediction
+ * from the image. The record wins because it is what the database has, not what its image
+ * promised. An external database has no stack database to record one.
  */
 function resolveFieldMaskingTier(
   cwd: string,
@@ -1134,7 +1140,16 @@ function resolveFieldMaskingTier(
   options?: SelfHostComposeOptions,
 ): FieldMaskingTier | undefined {
   if (options?.fieldMaskingTier !== undefined) return options.fieldMaskingTier
-  return fieldMaskingTierFromProject(cwd, config)
+  const recorded = usesExternalDatabase(config) ? undefined : readRecordedTier(cwd)
+  return recorded ?? fieldMaskingTierFromProject(cwd, config)
+}
+
+/** The tier compose is written with when no caller names one, which is what PostgREST serves. */
+export function composeFieldMaskingTier(
+  cwd: string,
+  config: SupatypeProjectConfig,
+): FieldMaskingTier | undefined {
+  return resolveFieldMaskingTier(cwd, config)
 }
 
 /**

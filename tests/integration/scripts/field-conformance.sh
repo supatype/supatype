@@ -142,21 +142,29 @@ echo "  REST answering with HTTP ${REST_CODE:-000}"
 # "the gateway has finished", which `dev` does not currently expose.
 sleep 10
 
-ANON_KEY="$(grep -E '^ANON_KEY=' "$PROJECT_DIR/.env" | cut -d= -f2-)"
+# A value from the project's generated .env.
+env_value() { grep -E "^$1=" "$PROJECT_DIR/.env" | cut -d= -f2-; }
+
+ANON_KEY="$(env_value ANON_KEY)"
 [[ -n "$ANON_KEY" ]] || { echo "ERROR: no ANON_KEY in the generated .env" >&2; exit 1; }
 
-# The catalogue, read through the container rather than over a published port.
+# A query against the project's database, through the container rather than over a published port.
 #
 # Nothing guarantees Postgres is reachable from the host: the compose file publishes it only when a
 # port variable says so, and `docker port` failing inside a `$( )` under `set -o pipefail` killed
 # this script before its own error check could run. `docker exec` needs no published port and no
 # DATABASE_URL, so it cannot disagree with either.
+db_query() {
+  docker exec -e PGPASSWORD="$(env_value POSTGRES_PASSWORD)" "${COMPOSE_PROJECT}-db-1" \
+    psql -U "$(env_value POSTGRES_USER)" -d "$(env_value POSTGRES_DB)" -tAc "$1"
+}
+
 COLUMNS_JSON="$PROJECT_DIR/.conformance-columns.json"
-docker exec -e PGPASSWORD="$(grep -E '^POSTGRES_PASSWORD=' "$PROJECT_DIR/.env" | cut -d= -f2-)"   "${COMPOSE_PROJECT}-db-1"   psql -U "$(grep -E '^POSTGRES_USER=' "$PROJECT_DIR/.env" | cut -d= -f2-)"        -d "$(grep -E '^POSTGRES_DB=' "$PROJECT_DIR/.env" | cut -d= -f2-)"        -tAc "SELECT coalesce(json_agg(row_to_json(c)), '[]'::json) FROM (
-               SELECT column_name, data_type, udt_name, is_nullable
-                 FROM information_schema.columns
-                WHERE table_schema = 'public' AND table_name = 'probe_all'
-             ) c" > "$COLUMNS_JSON"
+db_query "SELECT coalesce(json_agg(row_to_json(c)), '[]'::json) FROM (
+            SELECT column_name, data_type, udt_name, is_nullable
+              FROM information_schema.columns
+             WHERE table_schema = 'public' AND table_name = 'probe_all'
+          ) c" > "$COLUMNS_JSON"
 [[ -s "$COLUMNS_JSON" ]] || { echo "ERROR: could not read the catalogue from the database" >&2; exit 1; }
 echo "  read $(node -e "console.log(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).length)" "$COLUMNS_JSON") columns from probe_all"
 
@@ -176,19 +184,48 @@ echo "==> Asserting what each kind does"
 # field can be *removed*: dropping one from a model carrying a draft view used to fail with
 # "cannot drop column ... because other objects depend on it", leaving the migration part-applied.
 #
-# The push is the `dev` watcher's, not one of our own. `dev` is still running and watching the
-# schema directory, so editing the file already starts a push; running `supatype push` on top of it
-# put two compose invocations on the same `db` container at once, and the loser failed with
-# "The container name .../supatype-conformance-db-1 is already in use". So: count the watcher's
-# push outcomes, edit, and wait for one more.
+# In two halves. `dev` refuses a change that would drop data, so its watcher must refuse this one
+# and keep every column and row. The drop is then applied the way a developer applies a deliberate
+# one, with `supatype push --yes`. That push runs only once the watcher has answered: two compose
+# invocations on the same `db` container at once fail with "The container name
+# .../supatype-conformance-db-1 is already in use".
 PUSH_DONE_RE='\[supatype\] (Applied [0-9]+ operation\(s\)|Schema up to date|Schema applied)'
 PUSH_FAILED_RE='\[supatype\] (Schema push failed|docker compose failed)'
+DESTRUCTIVE_RE='destructive operation\(s\) detected'
 count_matches() { grep -cE "$1" "$DEV_LOG" || true; }
+fail() { echo "  FAIL $1" >&2; exit 1; }
+
+# The watcher's next push outcome after an edit: "done", "failed", or nothing after 180s.
+wait_for_watcher() {
+  local done_before="$1" failed_before="$2"
+  for _ in $(seq 1 90); do
+    if (( $(count_matches "$PUSH_FAILED_RE") > failed_before )); then echo failed; return; fi
+    if (( $(count_matches "$PUSH_DONE_RE") > done_before )); then echo done; return; fi
+    sleep 2
+  done
+}
+
+# How many probe columns are left, besides the one the schema keeps.
+probe_columns() {
+  db_query "SELECT count(*) FROM information_schema.columns
+             WHERE table_schema = 'public' AND table_name = 'probe_all'
+               AND column_name LIKE 'probe%' AND column_name <> 'probeText'"
+}
+
+# The table's shape and content in one line: probe columns, rows, and a digest of every row.
+probe_snapshot() {
+  echo "$(probe_columns):$(db_query "SELECT count(*) || ':' ||
+    md5(coalesce(string_agg(t::text, ',' ORDER BY t::text), '')) FROM public.probe_all t")"
+}
 
 echo ""
-echo "==> Every kind can be dropped again"
+echo "==> dev refuses to drop every kind, and keeps the data"
+BEFORE_DROP="$(probe_snapshot)"
+IFS=: read -r COLUMNS_BEFORE ROWS_BEFORE _ <<< "$BEFORE_DROP"
+(( COLUMNS_BEFORE > 0 && ROWS_BEFORE > 0 )) || fail "nothing to drop: $BEFORE_DROP (columns:rows:digest)"
 DONE_BEFORE="$(count_matches "$PUSH_DONE_RE")"
 FAILED_BEFORE="$(count_matches "$PUSH_FAILED_RE")"
+DESTRUCTIVE_BEFORE="$(count_matches "$DESTRUCTIVE_RE")"
 python3 - "$PROJECT_DIR/schema/index.ts" <<'PY'
 import io, re, sys
 p = sys.argv[1]
@@ -197,17 +234,28 @@ s = io.open(p, encoding="utf-8").read()
 kept = [l for l in s.split("\n") if not re.match(r"^  probe(?!Text\b)[A-Z]", l)]
 io.open(p, "w", encoding="utf-8", newline="\n").write("\n".join(kept))
 PY
-PUSH_OUTCOME=""
-for _ in $(seq 1 90); do
-  if (( $(count_matches "$PUSH_FAILED_RE") > FAILED_BEFORE )); then PUSH_OUTCOME="failed"; break; fi
-  if (( $(count_matches "$PUSH_DONE_RE") > DONE_BEFORE )); then PUSH_OUTCOME="done"; break; fi
-  sleep 2
-done
-case "$PUSH_OUTCOME" in
-  done) echo "  ok   every probe column dropped" ;;
-  failed) echo "  FAIL the dev watcher could not push the drop (see $DEV_LOG)" >&2; exit 1 ;;
-  *) echo "  FAIL the dev watcher never pushed the drop within 180s" >&2; exit 1 ;;
+case "$(wait_for_watcher "$DONE_BEFORE" "$FAILED_BEFORE")" in
+  failed) ;;
+  done) fail "dev applied a change that drops $COLUMNS_BEFORE columns of data" ;;
+  *) fail "the dev watcher never answered the drop within 180s" ;;
 esac
+(( $(count_matches "$DESTRUCTIVE_RE") > DESTRUCTIVE_BEFORE )) ||
+  fail "dev's push failed, but not as a destructive change (see $DEV_LOG)"
+echo "  ok   dev refused the drop as destructive"
+kill -0 "$DEV_PID" 2>/dev/null || fail "dev exited after refusing the drop"
+echo "  ok   dev is still running"
+AFTER_REFUSAL="$(probe_snapshot)"
+[[ "$AFTER_REFUSAL" == "$BEFORE_DROP" ]] || fail "the refused drop changed the table: $BEFORE_DROP -> $AFTER_REFUSAL"
+echo "  ok   all $COLUMNS_BEFORE probe columns and $ROWS_BEFORE row(s) kept"
+
+echo ""
+echo "==> push --yes drops every kind"
+PUSH_LOG="$PROJECT_DIR/conformance-push.log"
+(cd "$PROJECT_DIR" && node "$CLI_BIN" push --yes) > "$PUSH_LOG" 2>&1 ||
+  { tail -20 "$PUSH_LOG" >&2; fail "push --yes could not apply the drop (see $PUSH_LOG)"; }
+LEFT="$(probe_columns)"
+[[ "$LEFT" == "0" ]] || fail "push --yes left $LEFT probe column(s) behind (see $PUSH_LOG)"
+echo "  ok   every probe column dropped"
 
 REMAINING="$(cd "$PROJECT_DIR" && node "$CLI_BIN" diff 2>&1 | tail -3)"
 case "$REMAINING" in

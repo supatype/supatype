@@ -20,6 +20,9 @@
 #   --runner <name>       runner container name (default supatype-train-runner)
 #   --keep                leave the runner container and its daemon volume for inspection
 #
+# Environment: TRAIN_TAG tags every image (default train), on this machine and in the runner;
+# TRAIN_RELEASE_PORT is the port the cloud build serves the engine release on (default 18899).
+#
 # Exit status is 0 only when every suite passed. Results: <dir>/summary.md, and per suite
 # <dir>/<suite>/{output.log,result.json,containers.log,ledgers.log}.
 set -euo pipefail
@@ -104,7 +107,7 @@ load_images() {
 
 run_in_runner() {
   runner bash -c "
-    export TRAIN_ISOLATED=1 TRAIN_SUPATYPE_DIR=/work/supatype TRAIN_ENGINE_DIR=/work/supatype-schema-engine
+    export TRAIN_ISOLATED=1 TRAIN_TAG=$TRAIN_TAG TRAIN_SUPATYPE_DIR=/work/supatype TRAIN_ENGINE_DIR=/work/supatype-schema-engine
     export TRAIN_ENGINE_BIN=/work/engine/supatype-engine-linux-amd64 TRAIN_HARNESS_DIR=/work/harness
     export SUPATYPE_RELEASE_PUBLIC_KEY=\"\$(grep -o 'RW[A-Za-z0-9+/=]\{40,\}' /work/supatype/scripts/install.sh | head -1)\"
     cd /work/harness

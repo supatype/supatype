@@ -131,26 +131,22 @@ createServer((req, res) => {
 STUB
 
 # Credential probes: identical handlers in three positions, a plain public function, a public
-# function named in `serviceRole`, and a hook that is named nowhere.
+# function named in `serviceRole`, and a hook that is named nowhere. Each reports the key its
+# invocation was handed (the second argument, the only way the worker delivers it) and whatever
+# `Deno.env` still holds, which must be nothing anywhere.
 mkdir -p "$WORK/functions/peek-key" "$WORK/functions/granted-fn" "$WORK/hooks/privileged"
-cat > "$WORK/functions/granted-fn/index.ts" <<'TS'
-export default (): Response =>
-  new Response(JSON.stringify({ key: Deno.env.get("SUPATYPE_SERVICE_ROLE_KEY") ?? null }), {
-    headers: { "Content-Type": "application/json" },
-  })
-TS
 cat > "$WORK/functions/peek-key/index.ts" <<'TS'
-export default (): Response =>
-  new Response(JSON.stringify({ key: Deno.env.get("SUPATYPE_SERVICE_ROLE_KEY") ?? null }), {
-    headers: { "Content-Type": "application/json" },
-  })
+export default (_req: Request, ctx?: { serviceRoleKey?: string }): Response =>
+  new Response(
+    JSON.stringify({
+      key: ctx?.serviceRoleKey ?? null,
+      envKey: Deno.env.get("SUPATYPE_SERVICE_ROLE_KEY") ?? null,
+    }),
+    { headers: { "Content-Type": "application/json" } },
+  )
 TS
-cat > "$WORK/hooks/privileged/index.ts" <<'TS'
-export default (): Response =>
-  new Response(JSON.stringify({ key: Deno.env.get("SUPATYPE_SERVICE_ROLE_KEY") ?? null }), {
-    headers: { "Content-Type": "application/json" },
-  })
-TS
+cp "$WORK/functions/peek-key/index.ts" "$WORK/functions/granted-fn/index.ts"
+cp "$WORK/functions/peek-key/index.ts" "$WORK/hooks/privileged/index.ts"
 
 mkdir -p "$WORK/hooks/writer"
 cat > "$WORK/hooks/writer/index.ts" <<'TS'
@@ -178,7 +174,11 @@ export default (): Response =>
   })
 TS
 
-cp "$REPO_ROOT/packages/functions-worker/main.ts" "$WORK/worker-main.ts"
+# The worker with every module beside main.ts, as its Dockerfile copies it. main.ts imports its
+# siblings, so copying main.ts alone made every worker exit at start with
+# `Module not found "file:///project/invocation.ts"`, before a single assertion ran.
+mkdir -p "$WORK/worker"
+cp "$REPO_ROOT"/packages/functions-worker/*.ts "$REPO_ROOT/packages/functions-worker/deno.json" "$WORK/worker/"
 
 STUB_LOG="$WORK/stub.log"
 : > "$STUB_LOG"
@@ -208,7 +208,7 @@ if ! docker info >/dev/null 2>&1; then
     SUPATYPE_INTERNAL_URL="http://localhost:8098" \
     SUPATYPE_EXTERNAL_URL="http://localhost:8097" \
     PORT="$PORT" \
-    deno run --allow-all "$WORK/worker-main.ts" > "$WORK/worker.log" 2>&1 &
+    deno run --allow-all "$WORK/worker/main.ts" > "$WORK/worker.log" 2>&1 &
     echo $! > "$WORK/worker.pid"
   )
   for _ in $(seq 1 30); do
@@ -221,8 +221,10 @@ fi
 
 if [ "$USE_DOCKER" = "1" ]; then
 echo "→ starting the real worker under $DENO_IMAGE"
+# Not --rm: a worker that exits at start must leave its logs behind for the check below, which
+# otherwise could only report "No such container".
 docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
-if ! MSYS_NO_PATHCONV=1 docker run --rm -d --name "$CONTAINER" \
+if ! MSYS_NO_PATHCONV=1 docker run -d --name "$CONTAINER" \
   -p "${PORT}:8001" \
   -e SUPATYPE_FUNCTIONS_ROOT=/project/functions \
   -e SUPATYPE_HOOKS_ROOT=/project/hooks \
@@ -233,7 +235,7 @@ if ! MSYS_NO_PATHCONV=1 docker run --rm -d --name "$CONTAINER" \
   -e PORT=8001 \
   --add-host host.docker.internal:host-gateway \
   -v "$(mount_path "$WORK"):/project:ro" \
-  "$DENO_IMAGE" run --allow-all /project/worker-main.ts > "$WORK/docker.out" 2>&1; then
+  "$DENO_IMAGE" run --allow-all /project/worker/main.ts > "$WORK/docker.out" 2>&1; then
   fail "docker run failed: $(cat "$WORK/docker.out")"
 fi
 
@@ -292,6 +294,8 @@ echo "  ✓ afterChange ran inside the worker"
 # environment then is a key a handler can copy and keep. Testing it in the real worker is the only way
 # to know the ordering held.
 peeked() { curl -s -X POST "http://localhost:${PORT}/$1" -H "content-type: application/json" -d '{}'; }
+# The key is handed to an invocation, never left in the environment for any handler to read.
+not_in_env() { echo "$2" | grep -q '"envKey":null' || fail "$1 found the service-role key in Deno.env: $2"; }
 
 IMPORT_PEEK="$(peeked import-peek)"
 echo "$IMPORT_PEEK" | grep -q '"stolenAtImport":null' \
@@ -300,16 +304,19 @@ echo "  ✓ a handler cannot capture it at import time"
 
 PUBLIC_PEEK="$(peeked peek-key)"
 echo "$PUBLIC_PEEK" | grep -q '"key":null'   || fail "a public function could read the service-role key: $PUBLIC_PEEK"
+not_in_env "a public function" "$PUBLIC_PEEK"
 echo "  ✓ a public function cannot see the service-role key"
 
 GRANTED_FN="$(peeked granted-fn)"
 echo "$GRANTED_FN" | grep -q "super-secret-admin-key"   || fail "a public function named in serviceRole did not receive the key: $GRANTED_FN"
+not_in_env "a granted function" "$GRANTED_FN"
 echo "  ✓ a public function named in serviceRole receives it"
 
 # Named nowhere, and still granted: a hook is procedural and unreachable from outside, so listing
 # every one would be friction with no attacker to stop, the same trust a trigger already has.
 HOOK_PEEK="$(peeked hooks/privileged)"
 echo "$HOOK_PEEK" | grep -q "super-secret-admin-key"   || fail "a hook did not receive the key it gets by default: $HOOK_PEEK"
+not_in_env "a hook" "$HOOK_PEEK"
 echo "  ✓ a hook receives it without being listed"
 
 # And it does not leak from that invocation into the next one.
@@ -349,7 +356,7 @@ if [ "$USE_DOCKER" = "1" ]; then
     -e SUPATYPE_SERVICE_ROLE_ROUTES=granted-fn \
     -e PORT=8001 \
     -v "$(mount_path "$WORK"):/project:ro" \
-    "$DENO_IMAGE" run --allow-all /project/worker-main.ts > "$WORK/docker2.out" 2>&1 \
+    "$DENO_IMAGE" run --allow-all /project/worker/main.ts > "$WORK/docker2.out" 2>&1 \
     || fail "docker run failed: $(cat "$WORK/docker2.out")"
   logs2() { docker logs "$CONTAINER2" 2>&1; }
 else
@@ -360,7 +367,7 @@ else
     SUPATYPE_SERVICE_ROLE_KEY=super-secret-admin-key \
     SUPATYPE_SERVICE_ROLE_ROUTES=granted-fn \
     PORT="$PORT2" \
-    deno run --allow-all "$WORK/worker-main.ts" > "$WORK/worker2.log" 2>&1 &
+    deno run --allow-all "$WORK/worker/main.ts" > "$WORK/worker2.log" 2>&1 &
     echo $! > "$WORK/worker2.pid"
   )
   logs2() { cat "$WORK/worker2.log"; }
@@ -395,7 +402,7 @@ if [ "$USE_DOCKER" = "1" ]; then
     -e SUPATYPE_SERVICE_ROLE_KEY=super-secret-admin-key \
     -e PORT=8001 \
     -v "$(mount_path "$WORK"):/project:ro" \
-    "$DENO_IMAGE" run --allow-all /project/worker-main.ts > "$WORK/docker3.out" 2>&1 \
+    "$DENO_IMAGE" run --allow-all /project/worker/main.ts > "$WORK/docker3.out" 2>&1 \
     || fail "docker run failed: $(cat "$WORK/docker3.out")"
   logs3() { docker logs "$CONTAINER3" 2>&1; }
 else
@@ -405,7 +412,7 @@ else
     SUPATYPE_FUNCTION_NAME=privileged \
     SUPATYPE_SERVICE_ROLE_KEY=super-secret-admin-key \
     PORT="$PORT3" \
-    deno run --allow-all "$WORK/worker-main.ts" > "$WORK/worker3.log" 2>&1 &
+    deno run --allow-all "$WORK/worker/main.ts" > "$WORK/worker3.log" 2>&1 &
     echo $! > "$WORK/worker3.pid"
   )
   logs3() { cat "$WORK/worker3.log"; }
@@ -441,7 +448,7 @@ if [ "$USE_DOCKER" = "1" ]; then
     -e SUPATYPE_SERVICE_ROLE_KEY=super-secret-admin-key \
     -e PORT=8001 \
     -v "$(mount_path "$WORK"):/project:ro" \
-    "$DENO_IMAGE" run --allow-all /project/worker-main.ts > "$WORK/docker4.out" 2>&1 \
+    "$DENO_IMAGE" run --allow-all /project/worker/main.ts > "$WORK/docker4.out" 2>&1 \
     || fail "docker run failed: $(cat "$WORK/docker4.out")"
   logs4() { docker logs "$CONTAINER4" 2>&1; }
 else
@@ -452,7 +459,7 @@ else
     SUPATYPE_FUNCTION_NAME=privileged \
     SUPATYPE_SERVICE_ROLE_KEY=super-secret-admin-key \
     PORT="$PORT4" \
-    deno run --allow-all "$WORK/worker-main.ts" > "$WORK/worker4.log" 2>&1 &
+    deno run --allow-all "$WORK/worker/main.ts" > "$WORK/worker4.log" 2>&1 &
     echo $! > "$WORK/worker4.pid"
   )
   logs4() { cat "$WORK/worker4.log"; }
