@@ -11,6 +11,7 @@ import { spawnSync } from "node:child_process"
 import { startProxyDevApp, resolveProxyDevScript } from "./app/proxy-dev-app.js"
 import { loadSchemaAst } from "./config.js"
 import { withComposeSchemaPushLock } from "./schema-push-lock.js"
+import { readRecordedTier, syncRecordedTier } from "./recorded-field-masking-tier.js"
 import {
   connectionString,
   projectRootFromConfig,
@@ -917,8 +918,36 @@ async function runComposeSchemaPushQueued(
       _composePushQueued = false
       await runDevSchemaPush(cwd, config, paths, schemaPath, composeProject, opts)
     } while (_composePushQueued)
+    followRecordedTier(cwd, config, { recreate: true })
   } finally {
     _composePushInFlight = false
+  }
+}
+
+/**
+ * Point PostgREST at the field-masking tier the database recorded on the push just made, when it
+ * differs from what compose was written with (T2-N6): `dev` and `push` predict the tier from the
+ * image, and a database without `supatype_mask` runs tier 2 whatever its image is. Compose is
+ * rendered again from the record. With `recreate`, PostgREST is recreated so a running stack serves
+ * the new search path now; a caller about to run `compose up -d` leaves that to it.
+ */
+export function followRecordedTier(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  opts: { recreate: boolean },
+): void {
+  if (usesExternalDatabase(config)) return
+  const project = composeProjectName(config.project.name)
+  const paths = selfHostComposePaths(cwd)
+  if (!syncRecordedTier(cwd, { project, composePath: paths.composePath })) return
+  writeSelfHostCompose(cwd, config, { devLocal: true })
+  console.log(`[supatype] The database runs field masking tier "${readRecordedTier(cwd)}"; PostgREST follows it.`)
+  if (!opts.recreate) return
+  const status = runDockerCompose(paths.composePath, ["up", "-d", "--no-deps", "postgrest"], cwd, project, {
+    quiet: true,
+  })
+  if (status !== 0) {
+    console.warn(`[supatype] Could not recreate PostgREST for the new tier (exit ${status}). Restart dev to apply it.`)
   }
 }
 
@@ -1301,6 +1330,8 @@ export async function pushSchemaDocker(
   const schemaPath = schemaPathFromProject(config, cwd)
   const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
   await runComposeSchemaPush(cwd, config, paths, schemaPath, project, opts)
+  // `up -d` below recreates PostgREST when the tier changed its environment.
+  followRecordedTier(cwd, config, { recreate: false })
 
   const upGateway = runDockerCompose(paths.composePath, ["up", "-d"], cwd, project, {
     quiet: true,
@@ -1474,6 +1505,8 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   // `dev --overwrite-drift`, already checked against this engine before the session began.
   const pushOptions: ComposePushOptions = { overwriteDrift: opts.overwriteDrift === true }
   await applyInitialSchema(cwd, config, paths, schemaPath, project, devBrand, pushOptions)
+  // Before the stack starts, so PostgREST comes up on the tier the push actually produced.
+  followRecordedTier(cwd, config, { recreate: false })
 
   console.log("[supatype] Bringing up Docker Compose services...")
   const upStatus = runDockerCompose(paths.composePath, ["up", "-d"], cwd, project, {

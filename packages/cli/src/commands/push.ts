@@ -342,6 +342,11 @@ async function finishLocalPush(cwd: string, config: SupatypeProjectConfig, targe
   }
   await generateTypesLocal(ast, config, isProjectDatabase(cwd, config, target.databaseUrl))
   const stackUrl = projectStackUrl(cwd, config, target.databaseUrl)
+  if (stackUrl !== undefined && resolveRuntimeProvider(config) === "docker") {
+    // A push to the running stack's database can change its tier (T2-N6), and PostgREST follows.
+    const { followRecordedTier } = await import("../dev-compose.js")
+    followRecordedTier(cwd, config, { recreate: true })
+  }
   if (stackUrl !== undefined) await provisionLocalStorage(ast, config, stackUrl)
   reportCacheSeeding(cwd, ast)
   if (stackUrl !== undefined) plain(`\nStudio: ${stackUrl}/studio/`)
