@@ -3,6 +3,7 @@ import {
   assertSupported,
   capabilityRefusal,
   ENGINE_MIN_FOR_OWNERSHIP,
+  EngineProbeFailed,
   identityColumnsNeed,
   legacyFeatures,
   LEGACY_OWNERSHIP_FEATURES,
@@ -47,9 +48,9 @@ describe("probeCapabilities()", () => {
     expect(older.features.size).toBe(0)
   })
 
-  it("supports nothing when the engine answers neither", () => {
-    expect(probeCapabilities(engine({ capabilities: null, version: null })).features.size).toBe(0)
-    expect(probeCapabilities(engine({ capabilities: "not json", version: null })).features.size).toBe(0)
+  it("throws when the engine answers neither: it never ran, which is not supporting nothing (C03)", () => {
+    expect(() => probeCapabilities(engine({ capabilities: null, version: null }))).toThrow(EngineProbeFailed)
+    expect(() => probeCapabilities(engine({ capabilities: "not json", version: null }))).toThrow(/did not run/)
   })
 })
 
@@ -137,9 +138,10 @@ describe("identityColumnsNeed()", () => {
 })
 
 describe("targetSchemaPush() against a server", () => {
-  afterEach(() => {
+  afterEach(async () => {
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
+    ;(await import("../src/resolve-target.js")).forgetServerCapabilities()
   })
 
   function selfHost() {
@@ -239,13 +241,15 @@ describe("targetSchemaPush() against a server", () => {
         : reply(200, { data: { missing: [], staleManaged: [], unmanagedDrift: [] } }),
     )
     vi.stubGlobal("fetch", fetchMock)
-    const { targetSchemaDoctor } = await import("../src/resolve-target.js")
+    const { forgetServerCapabilities, targetSchemaDoctor } = await import("../src/resolve-target.js")
     // A server whose engine predates the rename: rebaseline yes, accepting access drift no.
     await expect(targetSchemaDoctor(selfHost(), {}, { rebaseline: true, acceptAccessDrift: true })).rejects.toThrow(
       "this server does not support --accept-access-drift; update it",
     )
     expect(fetchMock.mock.calls.some((c) => String(c[0]).endsWith("/schema/doctor"))).toBe(false)
 
+    // The server is updated; its earlier answer is forgotten (as it is after CAPABILITIES_TTL_MS).
+    forgetServerCapabilities()
     fetchMock.mockImplementation(async (url: string) =>
       url.endsWith("/schema/capabilities")
         ? reply(200, { data: { features: ALL } })

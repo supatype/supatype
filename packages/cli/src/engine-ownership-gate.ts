@@ -8,14 +8,23 @@
  * everything. So the CLI asks first and refuses, naming the flag, rather than send it and degrade.
  *
  * - A linked (cloud or self-host) target answers `GET <schema base>/capabilities`. No route (404)
- *   means a server from before this check, which supports none of them.
+ *   means a server from before this check, which supports none of them. A project the server does
+ *   not know is said as that, never as a server to update.
  * - The engine binary answers `supatype-engine capabilities`. One from before the subcommand is
  *   judged by its version: the ledger's first release had the flags listed in
- *   `LEGACY_OWNERSHIP_FEATURES`, and nothing older had any.
+ *   `LEGACY_OWNERSHIP_FEATURES`, and nothing older had any. An engine that answers neither never
+ *   ran (an image Docker could not pull, a binary that is not there), which is an error, not an
+ *   engine that supports nothing.
+ *
+ * Only an answer is remembered: a failed probe is asked again. A binary's answer is keyed on the
+ * file (path, size, modified time) and a docker engine's on its image ID, so an engine swapped
+ * under a long `dev` session is noticed at once and nothing else is asked twice. A server's answer
+ * has nothing like that to key on, so it is trusted for `CAPABILITIES_TTL_MS`.
  *
  * Always the binary that will run (an override, a cached release offline), never the CDN's latest.
  */
 import { spawnSync } from "node:child_process"
+import { statSync } from "node:fs"
 import { engineBinPath } from "./engine-client.js"
 import { compareVersions } from "./engine-floor.js"
 
@@ -147,12 +156,17 @@ export function legacyFeatures(versionOutput: string): Set<string> {
   return new Set(LEGACY_OWNERSHIP_FEATURES)
 }
 
-/** Runs the engine with `args`; its exit and stdout. */
-export type EngineProbe = (args: readonly string[]) => { status: number | null; stdout: string }
+/** Runs the engine with `args`; its exit, stdout, and what else it printed. */
+export type EngineProbe = (args: readonly string[]) => { status: number | null; stdout: string; stderr?: string }
+
+/** The engine could not be asked: it never ran. Its output says why (an image pull, a missing binary). */
+export class EngineProbeFailed extends Error {
+  override readonly name = "EngineProbeFailed"
+}
 
 /**
  * What an engine supports, asking it with `probe`: `capabilities`, else `--version` for one from
- * before the subcommand. An engine that answers neither supports nothing.
+ * before the subcommand. Throws {@link EngineProbeFailed} when it answers neither.
  */
 export function probeCapabilities(probe: EngineProbe): Capabilities {
   const answered = probe(["capabilities"])
@@ -161,7 +175,54 @@ export function probeCapabilities(probe: EngineProbe): Capabilities {
     if (features !== undefined) return { features, source: "engine" }
   }
   const version = probe(["--version"])
-  return { features: version.status === 0 ? legacyFeatures(version.stdout) : new Set(), source: "engine" }
+  if (version.status === 0) return { features: legacyFeatures(version.stdout), source: "engine" }
+  const said = [version.stderr, answered.stderr].find((s) => s !== undefined && s.trim() !== "")?.trim()
+  throw new EngineProbeFailed(`Could not ask the Supatype engine what it supports: ${said ?? "it did not run"}`)
+}
+
+/** How long a server's answer is trusted before it is asked again. */
+export const CAPABILITIES_TTL_MS = 5 * 60_000
+
+/**
+ * Answers by key (a binary, a project and image, a server), each with when it was given. With
+ * `ttlMs`, an answer older than that is asked again; without, the key itself changes when the
+ * engine does.
+ */
+export interface CapabilitiesCache {
+  answers: Map<string, { caps: Capabilities; at: number }>
+  ttlMs?: number
+}
+
+/** A cache of answers, trusted for `ttlMs` when given. */
+export function capabilitiesCache(ttlMs?: number): CapabilitiesCache {
+  return { answers: new Map(), ...(ttlMs !== undefined && { ttlMs }) }
+}
+
+function recalled(cache: CapabilitiesCache, key: string): Capabilities | undefined {
+  const known = cache.answers.get(key)
+  if (known === undefined) return undefined
+  if (cache.ttlMs === undefined || Date.now() - known.at <= cache.ttlMs) return known.caps
+  cache.answers.delete(key)
+  return undefined
+}
+
+function remember(cache: CapabilitiesCache, key: string, caps: Capabilities): Capabilities {
+  cache.answers.set(key, { caps, at: Date.now() })
+  return caps
+}
+
+/** The answer for `key`, asked with `probe` unless one is known. A throw is not remembered. */
+export function rememberCapabilitiesSync(cache: CapabilitiesCache, key: string, probe: () => Capabilities): Capabilities {
+  return recalled(cache, key) ?? remember(cache, key, probe())
+}
+
+/** {@link rememberCapabilitiesSync} for a probe that has to wait, such as a request to a server. */
+export async function rememberCapabilities(
+  cache: CapabilitiesCache,
+  key: string,
+  probe: () => Promise<Capabilities>,
+): Promise<Capabilities> {
+  return recalled(cache, key) ?? remember(cache, key, await probe())
 }
 
 /** The first JSON value in `text`, which may follow log lines. */
@@ -175,18 +236,27 @@ function firstJson(text: string): unknown {
   }
 }
 
-const binaryCache = new Map<string, Capabilities>()
+const binaryCache = capabilitiesCache()
 
-/** What the engine binary at `bin` supports, asked once per process. */
+/** The binary as a cache key: a new file at the same path (an update, a rebuild) is a new key. */
+function binaryKey(bin: string): string {
+  try {
+    const { size, mtimeMs } = statSync(bin)
+    return `${bin}\0${size}\0${mtimeMs}`
+  } catch {
+    // Not there: the probe says so, and nothing is remembered.
+    return bin
+  }
+}
+
+/** What the engine binary at `bin` supports. */
 export function binaryCapabilities(bin: string): Capabilities {
-  const known = binaryCache.get(bin)
-  if (known !== undefined) return known
-  const caps = probeCapabilities((args) => {
-    const run = spawnSync(bin, [...args], { encoding: "utf8" })
-    return { status: run.status, stdout: run.stdout ?? "" }
-  })
-  binaryCache.set(bin, caps)
-  return caps
+  return rememberCapabilitiesSync(binaryCache, binaryKey(bin), () =>
+    probeCapabilities((args) => {
+      const run = spawnSync(bin, [...args], { encoding: "utf8" })
+      return { status: run.status, stdout: run.stdout ?? "", stderr: run.error?.message ?? run.stderr ?? "" }
+    }),
+  )
 }
 
 /** What the engine this project runs locally supports: the binary `engineRequest` will spawn. */
