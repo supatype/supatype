@@ -123,7 +123,7 @@ export class RlsFilter {
 
     const rules = await this.rulesFor(change)
     if ("reason" in rules) return rules
-    return this.judgeAsSubscriber(claims, change, rules)
+    return this.judgeAsSubscriber(claims, withWholeOldRow(change, rules.shape), rules)
   }
 
   /**
@@ -251,10 +251,11 @@ export class RlsFilter {
    * DELETE visibility: could the subscriber have seen the row that was deleted?
    *
    * The row is gone, so it cannot be re-selected. It is judged instead by the engine-generated
-   * `can_read_<table>(row)` applied to the old tuple from the WAL, as the subscriber. That needs
-   * the whole old row, which the WAL carries only under `REPLICA IDENTITY FULL`; with the default
-   * identity it carries the key alone, and a key alone cannot be judged. Both that and a table
-   * with no generated predicate fail closed.
+   * `can_read_<table>(row)` applied to the old tuple from the WAL, as the subscriber. Under
+   * `REPLICA IDENTITY FULL` that tuple has already been made whole by {@link withWholeOldRow}.
+   * Under any other identity a column it lacks is one the WAL never carried, and a row with a
+   * column missing cannot be judged; a table that is all key has every column anyway. Both that
+   * and a table with no generated predicate fail closed.
    *
    * This replaced "does the role hold SELECT on the table", which told every subscriber the key
    * of every deleted row.
@@ -370,6 +371,22 @@ export class RlsFilter {
   async shutdown(): Promise<void> {
     await this.pool.end()
   }
+}
+
+/**
+ * The change with its old row made whole when the table's replica identity says the WAL carried it.
+ *
+ * Under `REPLICA IDENTITY FULL` the WAL carries every column of the old row, but wal2json leaves a
+ * NULL column out of the old keys instead of sending it as null. So under FULL an absent column is
+ * NULL, and the old row is rebuilt with every catalog column. Reading absence as "the WAL carries
+ * only the key" withheld the DELETE of every row with a NULL column (TEST-1-N2). Under any other
+ * identity the record is left as it is, and {@link RlsFilter} judges what it lacks.
+ */
+function withWholeOldRow(change: WalChange, shape: TableShape): WalChange {
+  const old = change.oldRecord
+  if (!old || !shape.replicaIdentityFull) return change
+  const oldRecord = Object.fromEntries(shape.columns.map((column) => [column, old[column] ?? null]))
+  return { ...change, oldRecord }
 }
 
 interface Side {
