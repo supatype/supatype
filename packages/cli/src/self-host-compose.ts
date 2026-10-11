@@ -19,9 +19,19 @@ import { buildKongDeclarative } from "./kong-config.js"
 import { keyspaceInPostgres } from "./cache-provider.js"
 import { STUDIO_DEV_PORT } from "./studio-dev-server.js"
 import { readEnvFile } from "./env-file.js"
+import { CONTROL_PLANE_SECRET_ENV, ensureControlPlaneSecret } from "./local-secrets.js"
 import { fieldMaskingTierFromProject, type FieldMaskingTier } from "./field-masking-tier.js"
 import { readRecordedTier } from "./recorded-field-masking-tier.js"
 import { projectHasVersionedModels } from "./model-versioning.js"
+
+/**
+ * The control plane secret as the server and the control plane receive it, and nobody else.
+ *
+ * Required rather than defaulted: a control plane without it answers nobody, so compose should
+ * refuse to start the stack and say which variable is missing.
+ */
+const CONTROL_PLANE_SECRET_REQUIRED =
+  `${CONTROL_PLANE_SECRET_ENV}: \${${CONTROL_PLANE_SECRET_ENV}:?${CONTROL_PLANE_SECRET_ENV} is missing from .env}`
 
 /** Env keys written when `versions` pins exist in supatype.config.ts. */
 export const COMPOSE_PINNED_IMAGE_ENV_KEYS = [
@@ -829,6 +839,9 @@ ${realtimeBlock}
       SUPATYPE_DEPLOYMENTS_DIR: /project/.supatype/deployments
       COMPOSE_PROJECT_NAME: ${composeProject}
       SUPATYPE_ENGINE_BIN: supatype-engine
+      # Every request must present this, and only the server is given it: the functions worker
+      # shares this network and runs user code, which could otherwise call here directly.
+      ${CONTROL_PLANE_SECRET_REQUIRED}
 ${dbDependency}
   server:
     image: \${SUPATYPE_SERVER_IMAGE:-\${SUPATYPE_AUTH_IMAGE:-supatype/server:latest}}
@@ -875,6 +888,7 @@ ${serverPorts}    volumes:
       SUPATYPE_FUNCTIONS_WORKER_URL: http://functions-worker:8001
 ${realtimeServerEnv}
       SUPATYPE_CONTROL_PLANE_URL: http://control-plane:8080
+      ${CONTROL_PLANE_SECRET_REQUIRED}
       SUPATYPE_VALKEY_ADDR: ${respHost}:6379
 ${appEnv}
       SUPATYPE_API_HOST: 0.0.0.0
@@ -1182,6 +1196,8 @@ export function writeSelfHostCompose(
   assertExternalUrlReachableFromContainers(config)
   const paths = selfHostComposePaths(cwd)
   mkdirSync(paths.dir, { recursive: true })
+  // Before the file that requires it is written, so no stack is ever rendered without one.
+  ensureControlPlaneSecret(cwd)
   ensureProjectFunctionsDir(cwd, config)
   ensureComposeManifest(cwd, config)
   writeFileSync(paths.composePath, renderSelfHostCompose(config, cwd, resolved), "utf8")

@@ -11,7 +11,41 @@
  * behaviour of an existing project is unchanged.
  */
 
-import { hasEnvValue, readEnvValue } from "./env-file.js"
+import { randomBytes } from "node:crypto"
+import { hasEnvValue, readEnvValue, upsertEnvFile } from "./env-file.js"
+
+/**
+ * The secret the gateway presents to the control plane, and the only thing the control plane
+ * accepts as proof a request came through the gateway.
+ *
+ * The control plane listens on the compose network, which the functions worker shares, and the
+ * worker runs user code. So the compose file hands this to the server and the control plane and
+ * to nothing else.
+ */
+export const CONTROL_PLANE_SECRET_ENV = "SUPATYPE_CONTROL_PLANE_SECRET"
+
+/** A new control plane secret: 32 random bytes, base64url, so 43 characters. */
+export function generateControlPlaneSecret(): string {
+  return randomBytes(32).toString("base64url")
+}
+
+/**
+ * Generate the control plane secret into `.env` when the project has none.
+ *
+ * **Generated, unlike the fallbacks below.** Those keep the value an existing project has been
+ * running with, because changing it would break tokens or a database volume. Nothing holds a
+ * control plane secret before it is written, so there is nothing to preserve, and a published
+ * default would be readable by the very code it keeps out.
+ *
+ * Written once and then left alone: `.env` is compose's input, so a value that changed on every
+ * run would restart the server and the control plane every time. A project that predates the
+ * secret gets one on its next `dev` or `self-host` command, and compose recreates both services
+ * because their environment changed.
+ */
+export function ensureControlPlaneSecret(cwd: string): void {
+  if (hasEnvValue(cwd, CONTROL_PLANE_SECRET_ENV)) return
+  upsertEnvFile(cwd, { [CONTROL_PLANE_SECRET_ENV]: generateControlPlaneSecret() })
+}
 
 /**
  * Fallback JWT signing secret for a project that has none.

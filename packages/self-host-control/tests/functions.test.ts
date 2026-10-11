@@ -3,24 +3,9 @@ import { mkdtempSync, mkdirSync, readdirSync, rmSync, existsSync, writeFileSync 
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { test, describe, before, after } from "node:test"
-import { createControlPlaneServer } from "../src/server.js"
+import { request, startServer, type ControlPlaneServer } from "./helpers.js"
 
 const PROJECT = "test-project"
-
-async function request(
-  base: string,
-  method: string,
-  path: string,
-  body?: unknown,
-): Promise<{ status: number; json: Record<string, unknown> }> {
-  const res = await fetch(`${base}${path}`, {
-    method,
-    headers: { "Content-Type": "application/json" },
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-  })
-  const json = (await res.json()) as Record<string, unknown>
-  return { status: res.status, json }
-}
 
 /** Every entry under `dir`, relative to it, so a test can show nothing new appeared anywhere. */
 function tree(dir: string, prefix = ""): string[] {
@@ -32,7 +17,7 @@ function tree(dir: string, prefix = ""): string[] {
 
 describe("functions routes", () => {
   let baseUrl: string
-  let server: ReturnType<typeof createControlPlaneServer>
+  let server: ControlPlaneServer
   let tmp: string
   let projectDir: string
 
@@ -47,13 +32,7 @@ describe("functions routes", () => {
     // The worker restart shells out to docker compose; point it at a project that does not exist.
     process.env["COMPOSE_PROJECT_NAME"] = "supatype-self-host-control-test-none"
 
-    server = createControlPlaneServer()
-    await new Promise<void>((resolve) => {
-      server.listen(0, "127.0.0.1", () => resolve())
-    })
-    const addr = server.address()
-    const port = typeof addr === "object" && addr ? addr.port : 0
-    baseUrl = `http://127.0.0.1:${port}`
+    ;({ server, baseUrl } = await startServer())
   })
 
   after(() => {
