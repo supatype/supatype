@@ -36,7 +36,7 @@ import { refreshFunctionsContext } from "./functions-context-refresh.js"
 import { DB_PORT_ENV, syncDatabaseUrlPort } from "./db-port.js"
 import { degraded } from "./strict.js"
 import { DEV_DESTRUCTIVE_POLICY, destructiveLines, pushConsentingToDestructive } from "./destructive-consent.js"
-import { destructiveRefusal, reportDevPushFailure } from "./push-refusal.js"
+import { consentRefusal, reportDevPushFailure } from "./push-refusal.js"
 import {
   COMPOSE_PINNED_IMAGE_ENV_KEYS,
   composeDockerImageEnv,
@@ -874,9 +874,9 @@ async function runComposeSchemaPush(
   const sources = writeSchemaSourcePushArtifacts(cwd)
   const runPush = async () => {
     let result = await runComposeEnginePush(paths, cwd, composeProject, config, sources, opts)
-    // Windows Docker bind mounts can lag briefly after the host write. A destructive refusal is the
+    // Windows Docker bind mounts can lag briefly after the host write. A consent refusal is the
     // engine's considered answer, not a lagging mount, and running it again only repeats it.
-    if (result.status !== 0 && destructiveRefusal(result.output) === null) {
+    if (result.status !== 0 && consentRefusal(result.output) === null) {
       await new Promise((r) => setTimeout(r, 250))
       result = await runComposeEnginePush(paths, cwd, composeProject, config, sources, opts)
     }

@@ -31,6 +31,11 @@ export interface DoctorReport {
    * records them with the schema's definition. The engine counts them in `blocking` as it sees fit.
    */
   claimed?: DoctorItem[]
+  /**
+   * A foreign key or check of Supatype's added `NOT VALID` and not validated yet, or an index a
+   * concurrent build left INVALID (IN-C 2): the next push finishes it.
+   */
+  pending?: DoctorItem[]
   rebaselined?: DoctorItem[]
   /**
    * Access drift `--rebaseline` did not record because `--accept-access-drift` was not given. Still
@@ -55,6 +60,11 @@ const SECTIONS: ReadonlyArray<{ key: Category; title: string; summary: string }>
     key: "claimed",
     title: "Claimed (Supatype's own from an earlier engine; will be recorded on the next push)",
     summary: "claimed",
+  },
+  {
+    key: "pending",
+    title: "Pending (added online and not finished yet; the next push finishes it)",
+    summary: "pending",
   },
   { key: "rebaselined", title: "Rebaselined (recorded as they are now)", summary: "rebaselined" },
   {

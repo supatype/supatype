@@ -13,7 +13,7 @@
  */
 import type { DiffResult, RenameCandidate } from "./engine-client.js"
 import { plannedChanges } from "./diff-output.js"
-import { destructiveRefusal, engineOutputOf } from "./push-refusal.js"
+import { consentRefusal, engineOutputOf } from "./push-refusal.js"
 import { confirm } from "./ui/confirm.js"
 import { isInteractive } from "./ui/interactive.js"
 import { plain, warn } from "./ui/messages.js"
@@ -107,9 +107,10 @@ export const DEV_DESTRUCTIVE_POLICY: DestructiveConsentPolicy = {
 }
 
 /**
- * Push unforced; on the engine's destructive refusal, ask in a terminal and push again with
- * `force` on a yes. Throws {@link DestructiveChangeRefused} when nothing was applied, and rethrows
- * every other failure as it came.
+ * Push unforced; on the engine's refusal of a destructive change or of a rewrite of a large table
+ * (IN-C 3), ask in a terminal and push again with `force` on a yes. Throws
+ * {@link DestructiveChangeRefused} when nothing was applied, and rethrows every other failure as it
+ * came.
  */
 export async function pushConsentingToDestructive<T>(
   push: (force: boolean) => Promise<T>,
@@ -120,21 +121,24 @@ export async function pushConsentingToDestructive<T>(
     return await push(false)
   } catch (err: unknown) {
     const output = engineOutputOf(err)
-    const count = destructiveRefusal(output)
-    if (count === null) throw err
+    const refusal = consentRefusal(output)
+    if (refusal === null) throw err
     if (policy.yes) return push(true)
-    await showDestruction(count, deps.describe)
-    const refused = new DestructiveChangeRefused(refusalMessage(output, policy))
+    const rewrite = refusal.kind === "rewrite"
+    if (rewrite) showRewrite(refusal.count, output)
+    else await showDestruction(refusal.count, deps.describe)
+    const refused = new DestructiveChangeRefused(refusalMessage(output, policy, rewrite))
     if (!(deps.interactive ?? isInteractive)()) throw refused
     const ask = deps.ask ?? ((question: string) => confirm(question, { default: false }))
     // A declaration written is a different schema: push it again, asking about what is left, with
     // no second round of rename offers.
-    if ((await offerRenames(deps, ask)) > 0) {
+    if (!rewrite && (await offerRenames(deps, ask)) > 0) {
       const again: DestructiveConsentDeps = { ...deps }
       delete again.renameWriter
       return pushConsentingToDestructive(push, policy, again)
     }
-    if (!(await ask("Apply it and lose that data?"))) throw refused
+    const question = rewrite ? "Apply it and lock the table while it is rewritten?" : "Apply it and lose that data?"
+    if (!(await ask(question))) throw refused
     return push(true)
   }
 }
@@ -145,9 +149,26 @@ async function showDestruction(count: number, describe?: () => Promise<string[]>
   for (const line of lines) plain(`  [!] ${line}`)
 }
 
-function refusalMessage(output: string, policy: DestructiveConsentPolicy): string {
+/** Each rewrite the engine named, from its refusal: "items.qty ...: locks items while it ...". */
+function showRewrite(count: number, output: string): void {
+  warn(
+    `This schema change rewrites a large table, which stops every read and write on it until the push commits: ` +
+      `${count} operation(s).`,
+  )
+  const named = /rewrite a large table, which stops every read and write on it until the push commits: (.*?)\. Use --force/i
+  const list = named.exec(output)?.[1]
+  for (const line of list?.split("; ") ?? []) plain(`  [!] ${line}`)
+}
+
+function refusalMessage(output: string, policy: DestructiveConsentPolicy, rewrite: boolean): string {
   const engineLine =
-    output.split(/\r?\n/).find((line) => destructiveRefusal(line) !== null)?.trim() ?? output.trim()
+    output.split(/\r?\n/).find((line) => consentRefusal(line) !== null)?.trim() ?? output.trim()
+  if (rewrite) {
+    return [
+      `Nothing was applied. ${engineLine}`,
+      `To apply it on purpose, at a quiet time for that table, run \`${policy.apply}\`.`,
+    ].join("\n")
+  }
   return [
     `Nothing was applied. ${engineLine}`,
     DESTRUCTIVE_CHANGE_HINT,
