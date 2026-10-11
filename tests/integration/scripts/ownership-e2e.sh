@@ -11,9 +11,15 @@
 #
 # Environment:
 #   OWNERSHIP_PG_PORT     host port for the throwaway Postgres (default 55441)
+#   OWNERSHIP_PG_CONTAINER  its container name (default supatype-ownership-e2e-pg), so two runs on
+#                         one machine do not remove each other's database
 #   OWNERSHIP_ENGINE_BIN  a local engine binary to test, written into the project's overrides.engine;
-#                         without it the CLI uses the engine it resolves itself
+#                         without it the CLI uses the engine it resolves itself. CI sets it to the
+#                         engine built from the pinned engine commit (integration.yml).
 #   SUPATYPE_POSTGRES_IMAGE  Postgres image (default supatype/postgres:latest)
+#
+# An engine without the ledger commands means no check can run, and that exits 1: a run that
+# checked nothing has not passed (C17).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -21,7 +27,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 CLI_BIN="$ROOT_DIR/packages/cli/bin/supatype.js"
 PG_PORT="${OWNERSHIP_PG_PORT:-55441}"
 PG_IMAGE="${SUPATYPE_POSTGRES_IMAGE:-supatype/postgres:latest}"
-PG_CONTAINER="supatype-ownership-e2e-pg"
+PG_CONTAINER="${OWNERSHIP_PG_CONTAINER:-supatype-ownership-e2e-pg}"
 PG_PASSWORD="ownership-e2e"
 URL="postgresql://supatype_admin:${PG_PASSWORD}@127.0.0.1:${PG_PORT}/ownership?sslmode=disable"
 PROJECT_DIR="${TMPDIR:-/tmp}/supatype-ownership-$$"
@@ -112,44 +118,56 @@ sql "CREATE SCHEMA IF NOT EXISTS auth; CREATE TABLE IF NOT EXISTS auth.users (id
 sql "CREATE TABLE public.legacy (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name text NOT NULL)"
 sql "INSERT INTO public.legacy (name) VALUES ('kept')"
 
+# The engine under test: the one named in OWNERSHIP_ENGINE_BIN, else the one the CLI resolves.
+if [[ -n "${OWNERSHIP_ENGINE_BIN:-}" ]]; then
+  [[ -x "$OWNERSHIP_ENGINE_BIN" ]] || { echo "ERROR: OWNERSHIP_ENGINE_BIN ($OWNERSHIP_ENGINE_BIN) is not an executable file" >&2; exit 1; }
+  engine_bin="$OWNERSHIP_ENGINE_BIN"
+else
+  cli doctor >/dev/null 2>&1 || true # resolves, and if need be downloads, the CLI's engine
+  # `|| true`: with no engine cached, `ls` fails, and under `set -euo pipefail` the assignment
+  # would end the script with exit 2 instead of reaching the refusal below.
+  engine_bin="$(ls -t "$HOME"/.supatype/cache/engine/*/supatype-engine-* 2>/dev/null | head -1 || true)"
+fi
+engine_version="$([[ -n "$engine_bin" ]] && "$engine_bin" --version 2>/dev/null | awk '{print $2}' || true)"
+engine_features="$([[ -n "$engine_bin" ]] && "$engine_bin" capabilities 2>/dev/null || true)"
+
 # The ledger commands need an engine that lists them in `capabilities` (the rebaseline consent,
 # accept_access_drift, came with it). Against an older engine the rest of this script would only
-# measure that it is old, so say so and stop. An engine named in OWNERSHIP_ENGINE_BIN is one
-# someone chose to test, so it always runs.
-if [[ -z "${OWNERSHIP_ENGINE_BIN:-}" ]]; then
-  cli doctor >/dev/null 2>&1 || true # resolves, and if need be downloads, the CLI's engine
-  # `|| true` inside each: with no engine cached, `ls` fails, and under `set -euo pipefail` the
-  # assignment would end the script with exit 2 instead of reaching the skip below.
-  engine_bin="$(ls -t "$HOME"/.supatype/cache/engine/*/supatype-engine-* 2>/dev/null | head -1 || true)"
-  engine_version="$([[ -n "$engine_bin" ]] && "$engine_bin" --version 2>/dev/null | awk '{print $2}' || true)"
-  engine_features="$([[ -n "$engine_bin" ]] && "$engine_bin" capabilities 2>/dev/null || true)"
-  if ! grep -q '"accept_access_drift"' <<<"$engine_features"; then
-    if [[ -z "$engine_version" ]]; then
-      reason="no cached engine whose version could be read, so none known to have the ledger commands"
-    else
-      reason="engine $engine_version does not list the ledger commands in \`capabilities\`"
-    fi
-    reason="$reason; set OWNERSHIP_ENGINE_BIN to test one"
-    # Loud on purpose: this job is green when it skips, and that must not read as a pass.
-    echo
-    echo "################################################################################"
-    echo "SKIPPED, NOT PASSED: no ownership check ran. $reason"
-    echo "################################################################################"
-    if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
-      echo "::warning title=ownership-e2e skipped::No ownership check ran: $reason"
-      if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-        echo "### ownership-e2e SKIPPED: no check ran. $reason" >>"$GITHUB_STEP_SUMMARY"
-      fi
-    fi
-    exit 0
+# measure that it is old, so say so and fail: a run in which no check ran is not a pass.
+if ! grep -q '"accept_access_drift"' <<<"$engine_features"; then
+  if [[ -z "$engine_version" ]]; then
+    reason="no engine whose version could be read, so none known to have the ledger commands"
+  else
+    reason="engine $engine_version does not list the ledger commands in \`capabilities\`"
   fi
+  reason="$reason; set OWNERSHIP_ENGINE_BIN to an engine that has them"
+  echo
+  echo "################################################################################"
+  echo "SKIPPED, NOT PASSED: no ownership check ran. $reason"
+  echo "################################################################################"
+  if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+    echo "::error title=ownership-e2e did not run::No ownership check ran: $reason"
+    if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+      echo "### ownership-e2e FAILED: no check ran. $reason" >>"$GITHUB_STEP_SUMMARY"
+    fi
+  fi
+  exit 1
 fi
+echo "==> Engine under test: $engine_version ($engine_bin)"
 
 echo "==> Adopt, on a database Supatype has never pushed to"
 # The engine's refusal says "Supatype did not create them"; the CLI's own line says "it" for one
 # table. Either is the refusal this checks for.
 check "the first push refuses the existing table" 'refuses 1 "Supatype did not create" push --yes'
-check "adopt takes it" 'cli adopt --yes 2>&1 | grep -q "Adopted 1 object"'
+# The table, and with it whatever the image granted on it by default (anon and authenticated on
+# supatype/postgres): the engine adopts access objects alongside their table, so the count is not
+# fixed at one. The table is what this asserts; the ledger checks below confirm its status.
+adopts_legacy() {
+  local out
+  out="$(cli adopt --yes 2>&1)"
+  grep -q "Table legacy will be Supatype" <<<"$out" && grep -qE "Adopted [0-9]+ object" <<<"$out"
+}
+check "adopt takes it" 'adopts_legacy'
 check "the push it unblocks applies" 'cli push --yes >/dev/null 2>&1'
 check "the table is recorded as adopted" '[[ "$(status_of table "" legacy)" == adopted ]]'
 check "the row it held is still there" '[[ "$(sql "SELECT name FROM public.legacy")" == kept ]]'
@@ -198,6 +216,12 @@ check "rollback removes both" 'cli rollback --no-sync-schema >/dev/null 2>&1 && 
 check "--no-sync-schema leaves the schema files alone" 'cmp -s "$PROJECT_DIR/schema/index.ts" "$PROJECT_DIR/schema/index.ts.with-note"'
 mv "$PROJECT_DIR/schema/index.ts.before" "$PROJECT_DIR/schema/index.ts"
 check "doctor --strict is clean with the schema back as it was" 'cli doctor --strict >/dev/null 2>&1'
+
+echo "==> Every push was made by the engine under test"
+# Each push records its engine's version, and a candidate build reports `<next minor>-dev+<commit>`
+# (engine F24), so this tells the engine under test from a release or another candidate.
+pushed_by() { sql "SELECT string_agg(DISTINCT coalesce(engine_version, 'none'), ',') FROM _supatype.migrations"; }
+check "the migration history names $engine_version and no other engine" '[[ "$(pushed_by)" == "$engine_version" ]]'
 
 if [[ "$failures" -gt 0 ]]; then
   echo "FAILED: $failures check(s)"

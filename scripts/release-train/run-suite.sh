@@ -5,7 +5,8 @@
 #   - its command exits 0;
 #   - its output says nothing was skipped (C17: a skipped suite is a failed suite);
 #   - every Supatype container it started ran a train image (provenance.sh);
-#   - every database it pushed to was pushed by a ledger-era engine (the interim F24 marker);
+#   - every push it made was recorded by the train engine (`_supatype.migrations.engine_version`
+#     equals the train engine's `--version`, provenance.sh);
 #   - the host engine cache holds the train engine and nothing else.
 #
 # Usage: bash scripts/release-train/run-suite.sh <suite> <results-dir>

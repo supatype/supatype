@@ -59,9 +59,13 @@ build_image() {
   docker build --pull=false -t "$tag" "$@" "$context"
 }
 
+# The engine's build context has no .git, so it is told its commit: from F24 on, a non-release
+# build reports `<next minor>-dev+<commit>` and records that in `_supatype.migrations`, which is
+# how provenance.sh tells the train's engine from any other. An older engine ignores the argument.
 build_engine() {
   require_repo supatype-schema-engine
-  build_image engine "$SRC/supatype-schema-engine"
+  build_image engine "$SRC/supatype-schema-engine" \
+    --build-arg "SUPATYPE_ENGINE_BUILD_SHA=$(git -C "$SRC/supatype-schema-engine" rev-parse HEAD)"
   extract_engine_binary
 }
 
