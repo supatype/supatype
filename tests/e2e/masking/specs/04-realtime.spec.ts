@@ -1,5 +1,4 @@
 import { expect, test } from "@playwright/test"
-import { expectDefects } from "../lib/defects.js"
 import { rowOf, type Event } from "../lib/realtime.js"
 import { runScenario, type FeedName, type Scenario } from "../lib/realtime-scenario.js"
 import { realtimeLogs } from "../lib/stack.js"
@@ -85,10 +84,11 @@ test("a DELETE reaches a subscriber who could see the row, with nothing masked i
 })
 
 test("a DELETE of a row with NULL columns reaches a subscriber who could see it (TEST-1-N2)", () => {
-  expectDefects(["TEST-1-N2"])
   fenced("a:payslip")
   const del = events("a:payslip").find((e) => e.eventType === "DELETE" && rowOf(e)["ref"] === run.refs.nullPayslip)
   expect(del?.old?.["ref"], "the deleted payslip's key").toBe(run.refs.nullPayslip)
+  // The NULL columns wal2json left out come back as null, not as absent keys.
+  expect(del?.old, "the old row has every column").toHaveProperty("bank_account", null)
 })
 
 test("the payslip's owner receives their bank account", () => {
