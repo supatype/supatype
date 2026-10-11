@@ -23,6 +23,11 @@ export interface DoctorReport {
   drifted?: DoctorItem[]
   conflicting?: DoctorItem[]
   released?: DoctorItem[]
+  /**
+   * Supatype's own objects from an earlier engine that no ledger row records yet: the next push
+   * records them with the schema's definition. The engine counts them in `blocking` as it sees fit.
+   */
+  claimed?: DoctorItem[]
   rebaselined?: DoctorItem[]
   /**
    * Access drift `--rebaseline` did not record because `--accept-access-drift` was not given. Still
@@ -43,6 +48,11 @@ const SECTIONS: ReadonlyArray<{ key: Category; title: string; summary: string }>
   { key: "conflicting", title: "Conflicting (a declared name held by someone else)", summary: "conflicting" },
   { key: "unmanagedDrift", title: "Unmanaged (not Supatype's, left in place)", summary: "unmanaged" },
   { key: "released", title: "Released (left alone after `adopt --release`)", summary: "released" },
+  {
+    key: "claimed",
+    title: "Claimed (Supatype's own from an earlier engine; will be recorded on the next push)",
+    summary: "claimed",
+  },
   { key: "rebaselined", title: "Rebaselined (recorded as they are now)", summary: "rebaselined" },
   {
     key: "rebaselineRefused",

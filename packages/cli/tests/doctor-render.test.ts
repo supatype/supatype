@@ -138,3 +138,23 @@ describe("hasStrictIssues() with the engine's own answer", () => {
     expect(hasStrictIssues({ ...empty, blocking: true })).toBe(true)
   })
 })
+
+// C06: a 0.6.0 database reported `claimed=14` to the engine's doctor; the CLI said "No drift detected."
+describe("claimed objects (Supatype's own from an earlier engine, not recorded yet)", () => {
+  it("print in their own section saying the next push records them, counted in the summary", () => {
+    const captured = lines()
+    const report = { ...empty, claimed: [item("a"), item("b")], blocking: false } as DoctorReport
+    printReport(report)
+    const text = captured.join("\n")
+    expect(text).toMatch(/Claimed .*will be recorded on the next push.* \(2\)/)
+    expect(text).toContain("Summary: 2 claimed")
+    expect(text).not.toContain("No drift detected.")
+  })
+
+  it("count in --strict as the engine's `blocking` says, and not on an engine that does not say", () => {
+    const claimed = { ...empty, claimed: [item("a")] } as DoctorReport
+    expect(hasStrictIssues({ ...claimed, blocking: false })).toBe(false)
+    expect(hasStrictIssues({ ...claimed, blocking: true })).toBe(true)
+    expect(hasStrictIssues(claimed)).toBe(false)
+  })
+})
