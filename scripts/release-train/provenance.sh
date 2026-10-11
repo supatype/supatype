@@ -8,14 +8,11 @@
 #    second tag on a train image counts as the train image). A suite that pulled a published image
 #    in place of the build fails, whatever its own result.
 # 2. A poller looks into every running train Postgres container, in every database that holds a
-#    Supatype ledger, and records whether `_supatype.managed_objects_undo` exists. Only an engine
-#    with the rollback ledger creates it, so a database that has `_supatype.migrations` without it
-#    was pushed by an older engine.
-#
-# TODO(F24): once candidate builds carry a pre-release version (0.7.0-rc.<sha>), check
-# `_supatype.migrations.engine_version` against the train engine's `--version` instead. The undo
-# table is an interim marker: it tells a ledger-era engine from 0.6.0, not one candidate from
-# another.
+#    Supatype ledger, and records the engine versions in `_supatype.migrations.engine_version`.
+#    Each push records the version of the engine that made it, and since F24 a candidate build
+#    reports `<next minor>-dev+<commit>` (build.sh passes the commit), so every version recorded
+#    must be exactly what the train engine's `--version` prints. Anything else was pushed by
+#    another engine: a release, or a candidate from another commit.
 
 PROV_EVENTS_PID=""
 PROV_POLL_PID=""
@@ -43,10 +40,16 @@ poll_ledgers_once() {
     user="${user:-postgres}"
     for db in $(docker exec -e PGPASSWORD="$pw" "$c" psql -h 127.0.0.1 -U "$user" -d postgres -XAtqc \
       "select datname from pg_database where datallowconn and not datistemplate" 2>/dev/null); do
-      docker exec -e PGPASSWORD="$pw" "$c" psql -h 127.0.0.1 -U "$user" -d "$db" -XAtqc \
-        "select '$c $db ledger=' || (to_regclass('_supatype.migrations') is not null)::text
-                || ' undo=' || (to_regclass('_supatype.managed_objects_undo') is not null)::text" \
-        2>/dev/null >>"$out" || true
+      # One line per database with a ledger: `<container> <db> versions=<v1>,<v2>` (empty while no
+      # push has recorded a row). A database without `_supatype.migrations` prints nothing.
+      docker exec -i -e PGPASSWORD="$pw" "$c" psql -h 127.0.0.1 -U "$user" -d "$db" -XAtq \
+        2>/dev/null >>"$out" <<SQL || true
+select to_regclass('_supatype.migrations') is not null as has_ledger \gset
+\if :has_ledger
+select '$c $db versions=' || coalesce(string_agg(distinct coalesce(engine_version, 'none'), ','), '')
+  from _supatype.migrations;
+\endif
+SQL
     done
   done
 }
@@ -84,15 +87,22 @@ check_images() {
   done <"$dir/containers.log"
 }
 
-# Prints one line per database whose pushes were made by an engine without the ledger.
+# Prints one line per database that holds a push made by an engine other than the train's.
 check_ledgers() {
-  local dir="$1"
-  # The last observation of each database decides. The engine's bootstrap creates the migrations
-  # table and the undo table in separate transactions, so a poll can land between the two; what
-  # matters is the state the push left, not a moment inside it.
-  awk '{ state[$1 "/" $2] = $3 " " $4 }
-    END { for (db in state) if (state[db] == "ledger=true undo=false")
-      print "database " db " was pushed by an engine without the ledger (no _supatype.managed_objects_undo)" }' "$dir/ledgers.log"
+  local dir="$1" want
+  want="$("$TRAIN_ENGINE_BIN" --version 2>/dev/null | awk '{print $2}')"
+  if [[ -z "$want" ]]; then
+    echo "the train engine $TRAIN_ENGINE_BIN did not report a version"
+    return
+  fi
+  # Every observation counts, not only the last: rows are only ever added during a suite, and a
+  # database dropped before the final poll still had its pushes seen while it lived.
+  awk -v want="$want" '
+    { sub(/^versions=/, "", $3); n = split($3, vs, ",")
+      for (i = 1; i <= n; i++) if (vs[i] != want) bad[$1 "/" $2 " " vs[i]] = 1 }
+    END { for (k in bad) { split(k, p, " ")
+      print "database " p[1] " was pushed by engine " p[2] ", not the train engine " want } }' \
+    "$dir/ledgers.log"
 }
 
 # The host engine cache must hold the train engine and nothing else: anything else there was

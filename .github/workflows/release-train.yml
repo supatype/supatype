@@ -9,8 +9,8 @@
 #   cloud control-plane image, with its engine built from the same engine commit         supatype-cloud
 #
 # Nothing a suite runs may come from a registry in place of a build: run-suite.sh fails a suite
-# that started a published Supatype image, or whose pushes were made by an engine without the
-# rollback ledger (the interim engine marker until F24 gives candidates their own version).
+# that started a published Supatype image, or whose pushes were recorded by an engine other than
+# the train's (each push records its engine's version, `<next minor>-dev+<commit>` for a candidate).
 #
 # A skipped suite is a failed suite. Suites report skips in their output, and run-suite.sh fails
 # them; and the final `train` job fails unless every suite job succeeded, so a suite job skipped
