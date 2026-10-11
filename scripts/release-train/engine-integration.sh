@@ -10,12 +10,13 @@
 #
 # Environment:
 #   TRAIN_ENGINE_DIR   the candidate supatype-schema-engine checkout (required)
-#   TRAIN_POSTGRES_IMAGE  default supatype/postgres:train
+#   TRAIN_POSTGRES_IMAGE  default the train's postgres image (supatype/postgres:$TRAIN_TAG)
 #   TRAIN_ENGINE_PG_PORT  default 55442
 set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 ENGINE_DIR="${TRAIN_ENGINE_DIR:?TRAIN_ENGINE_DIR must name the engine checkout}"
-IMAGE="${TRAIN_POSTGRES_IMAGE:-supatype/postgres:train}"
+IMAGE="${TRAIN_POSTGRES_IMAGE:-$(train_image postgres)}"
 PORT="${TRAIN_ENGINE_PG_PORT:-55442}"
 CONTAINER="train-engine-integration-pg"
 
