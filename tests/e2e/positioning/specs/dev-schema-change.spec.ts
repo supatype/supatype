@@ -3,7 +3,6 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs"
 import { createRequire } from "node:module"
 import { join } from "node:path"
 import { expect, test } from "@playwright/test"
-import { expectDefects } from "../../masking/lib/defects.js"
 import { PROJECT_DIR, sql } from "../../masking/lib/stack.js"
 
 /**
@@ -61,7 +60,6 @@ test.describe.serial("supatype dev in a project made by init", () => {
   })
 
   test("a new field reaches the generated types (V-N2)", async () => {
-    expectDefects(["V-N2"])
     editSchema("  name: string\n", "  name: string\n  nickname: Optional<string>\n")
     expect(await until(() => hasColumn("nickname"), 120_000), "dev applied the new field").toBe(true)
     await until(() => readFileSync(TYPES, "utf8").includes("nickname"), 30_000)
@@ -70,7 +68,6 @@ test.describe.serial("supatype dev in a project made by init", () => {
   })
 
   test("a rename never empties the column (V-N1)", async () => {
-    expectDefects(["V-N1"])
     const logBefore = readFileSync(DEV_LOG, "utf8").length
     editSchema("  name: string\n", "  title: string\n")
     const reacted = (): boolean => hasColumn("title") || /destructive|refus|--force/i.test(readFileSync(DEV_LOG, "utf8").slice(logBefore))

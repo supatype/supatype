@@ -83,7 +83,7 @@ test("service_role writes a masked column (T2-N5)", async () => {
 })
 
 test("the admin writes a salary on their own row", async () => {
-  expectDefects(on({ 1: ["T1-N1"], 2: tier2UpdateDefects() }))
+  expectDefects(on({ 2: tier2UpdateDefects() }))
   const r = await rest(tokenOf("admin"), "PATCH", `employee?id=eq.${idOf("admin")}`, { salary: 310000 })
   expect(r.status, r.text).toBe(200)
   expect(storedEmployee("admin")?.salary).toBe("310000")

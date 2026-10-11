@@ -1,5 +1,4 @@
 import { expect, test } from "@playwright/test"
-import { expectDefects } from "../lib/defects.js"
 import { gql, nodes, rest, rows } from "../lib/http.js"
 import { currentTier, sql } from "../lib/stack.js"
 import { PEOPLE, personOf, seed, tokenOf } from "../lib/world.js"
@@ -36,8 +35,7 @@ if (currentTier() === 1) {
     expect(got).toEqual(wantForA)
   })
 
-  test("REST serves a computed column over the masked row (T1-N4)", async () => {
-    expectDefects(["T1-N4"])
+  test("REST serves a computed column over the masked row", async () => {
     const r = await rest(tokenOf("a"), "GET", "employee?select=id,salary_band")
     expect(r.status, r.text).toBe(200)
     const got = Object.fromEntries(rows(r).map((n) => [personOf(n["id"]) ?? "?", n["salary_band"]]))

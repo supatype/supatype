@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test"
-import { expectDefects, on } from "../lib/defects.js"
+import { expectDefects } from "../lib/defects.js"
 import { rowOf, type Event } from "../lib/realtime.js"
 import { runScenario, type FeedName, type Scenario } from "../lib/realtime-scenario.js"
 import { realtimeLogs } from "../lib/stack.js"
@@ -10,8 +10,9 @@ import { PEOPLE, world } from "../lib/world.js"
  * every payload, a filter on a masked column must not act as an oracle, and nobody may learn of a
  * row they cannot see, by INSERT, UPDATE or DELETE.
  *
- * Tier 2 delivers nothing at all today (A3-N3), so every assertion there waits on a fence that
- * never arrives.
+ * Fences are INSERTs and UPDATEs only. A DELETE reaches a subscriber only when the table carries
+ * its whole old row (REPLICA IDENTITY FULL), so DELETE delivery is asserted on its own
+ * (TEST-1-N1) rather than gating the other checks.
  */
 
 let run: Scenario
@@ -37,28 +38,24 @@ test("every feed joined", () => {
 })
 
 test("a user receives another's row with the masked columns null", () => {
-  expectDefects(on({ 2: ["A3-N3", "T2-N8"] }))
   fenced("a:employee")
   const [insert] = about("a:employee", idOf("b"), "INSERT")
   expect(insert?.new).toMatchObject({ name: PEOPLE.b.name, grade: PEOPLE.b.grade, salary: null, ssn: null })
 })
 
 test("a user receives their own ssn and not their salary", () => {
-  expectDefects(on({ 2: ["A3-N3", "T2-N8"] }))
   fenced("a:employee")
   const [insert] = about("a:employee", idOf("a"), "INSERT")
   expect(insert?.new).toMatchObject({ ssn: PEOPLE.a.ssn, salary: null })
 })
 
 test("the admin receives salaries", () => {
-  expectDefects(on({ 1: ["T1-N1"], 2: ["A3-N3"] }))
   fenced("admin:employee")
   const [insert] = about("admin:employee", idOf("b"), "INSERT")
   expect(insert?.new).toMatchObject({ salary: PEOPLE.b.salary, ssn: null })
 })
 
 test("a filter on a masked column delivers nothing", () => {
-  expectDefects(on({ 2: ["A3-N3"] }))
   fenced("a:employee")
   expect(run.feeds["a:employee[salary]"].ready).toBe(true)
   expect(run.feeds["a:employee[ssn]"].ready).toBe(true)
@@ -66,38 +63,41 @@ test("a filter on a masked column delivers nothing", () => {
   expect(events("a:employee[ssn]"), `ssn=eq.${PEOPLE.b.ssn}`).toEqual([])
 })
 
-test("a filter compares numbers as numbers (T1-N3)", () => {
-  expectDefects(on({ 1: ["T1-N3"], 2: ["A3-N3", "T1-N3"] }))
+test("a filter compares numbers as numbers", () => {
   fenced("a:employee[grade]")
   expect(about("a:employee[grade]", idOf("a")), "grade 9 is not > 10").toEqual([])
 })
 
-test("payslip events are masked and a DELETE carries only the key", () => {
-  expectDefects(on({ 2: ["A3-N3", "T2-N8"] }))
+const payslipEvents = (name: FeedName): Event[] => events(name).filter((e) => rowOf(e)["ref"] === run.refs.bPayslip)
+
+test("payslip events are masked", () => {
   fenced("a:payslip")
-  const mine = events("a:payslip").filter((e) => rowOf(e)["ref"] === run.refs.bPayslip)
-  const insert = mine.find((e) => e.eventType === "INSERT")
+  const insert = payslipEvents("a:payslip").find((e) => e.eventType === "INSERT")
   expect(insert?.new).toMatchObject({ dept: "eng", amount: null, bank_account: null })
-  const del = mine.find((e) => e.eventType === "DELETE")
-  expect(del?.old).toEqual({ ref: run.refs.bPayslip })
+})
+
+test("a DELETE reaches a subscriber who could see the row, with nothing masked in it (TEST-1-N1)", () => {
+  expectDefects(["TEST-1-N1"])
+  fenced("a:payslip")
+  const del = payslipEvents("a:payslip").find((e) => e.eventType === "DELETE")
+  expect(del?.old?.["ref"], "the deleted payslip's key").toBe(run.refs.bPayslip)
+  expect(del?.old?.["amount"] ?? null, "amount is the admin's").toBeNull()
+  expect(del?.old?.["bank_account"] ?? null, "bank_account is b's").toBeNull()
 })
 
 test("the payslip's owner receives their bank account", () => {
-  expectDefects(on({ 2: ["A3-N3", "T2-N8"] }))
-  fenced("a:payslip")
+  fenced("b:payslip")
   const insert = events("b:payslip").find((e) => e.eventType === "INSERT" && rowOf(e)["ref"] === run.refs.bPayslip)
   expect(insert?.new).toMatchObject({ bank_account: PEOPLE.b.bank, amount: null })
 })
 
 test("nobody learns of a row they cannot see (P03)", () => {
-  expectDefects(on({ 1: ["P03"], 2: ["A3-N3", "P03"] }))
   fenced("b:note")
   const aboutA = events("b:note").filter((e) => rowOf(e)["id"] === idOf("a"))
   expect(aboutA.map((e) => e.eventType), "a's note, insert, update and delete").toEqual([])
 })
 
 test("rows are keyed by their primary key, not the first column (M06)", () => {
-  expectDefects(on({ 1: ["M06"], 2: ["A3-N3", "M06"] }))
   fenced("a:ticket")
   const codes = events("a:ticket").map((e) => String(rowOf(e)["code"]))
   expect(codes, "a's own ticket").toContain(run.refs.ownTicket)
@@ -105,7 +105,6 @@ test("rows are keyed by their primary key, not the first column (M06)", () => {
 })
 
 test("realtime logs why it dropped an event (T2-N9)", () => {
-  expectDefects(on({ 1: ["T2-N9"], 2: ["A3-N3", "T2-N9"] }))
   fenced("b:note")
   expect(realtimeLogs()).toMatch(/drop/i)
 })

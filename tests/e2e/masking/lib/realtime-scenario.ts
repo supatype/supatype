@@ -88,13 +88,15 @@ async function driveNotes(): Promise<void> {
   await change(`insert into public.note (id, body) values (${q(id("b"))}, 'fence-b')`)
 }
 
-async function awaitFences(feeds: Record<FeedName, Feed>, fenceTicket: string): Promise<Record<string, boolean>> {
+async function awaitFences(feeds: Record<FeedName, Feed>, fenceTicket: string, bPayslip: string): Promise<Record<string, boolean>> {
   await change(`update public.employee set name = 'fence-a' where id = ${q(id("a"))}`)
   const fenceName = (e: Event) => e.new?.["name"] === "fence-a"
   const fences: Record<string, boolean> = {}
   for (const name of ["a:employee", "b:employee", "admin:employee"] as const) fences[name] = await waitFor(feeds[name].events, fenceName)
   fences["a:employee[grade]"] = await waitFor(feeds["a:employee[grade]"].events, (e) => e.new?.["id"] === id("b"))
-  fences["a:payslip"] = await waitFor(feeds["a:payslip"].events, (e) => e.eventType === "DELETE")
+  const payslipInsert = (e: Event) => e.eventType === "INSERT" && e.new?.["ref"] === bPayslip
+  fences["a:payslip"] = await waitFor(feeds["a:payslip"].events, payslipInsert)
+  fences["b:payslip"] = await waitFor(feeds["b:payslip"].events, payslipInsert)
   fences["a:ticket"] = await waitFor(feeds["a:ticket"].events, (e) => e.new?.["code"] === fenceTicket)
   fences["b:note"] = await waitFor(feeds["b:note"].events, (e) => e.new?.["id"] === id("b"))
   await sleep(2000)
@@ -109,7 +111,7 @@ export async function runScenario(): Promise<Scenario> {
   const bPayslip = await driveEmployees()
   const tickets = await driveTickets()
   await driveNotes()
-  const fences = await awaitFences(feeds, tickets.fenceTicket)
+  const fences = await awaitFences(feeds, tickets.fenceTicket, bPayslip)
   for (const f of Object.values(feeds)) f.unsubscribe()
   return { feeds, refs: { ...tickets, bPayslip }, fences }
 }

@@ -4,7 +4,7 @@ import { defineConfig } from "@playwright/test"
  * The positioning checks: what the site promises about `supatype dev` in a project made by `init`
  * ("change a field once, nothing else to update; rename a field and the build fails instead of
  * production"). `tests/integration/scripts/positioning-e2e.sh` makes the project, starts dev with
- * the schema watcher on, and runs this. Open defects are marked expected-fail (V-N1, V-N2).
+ * the schema watcher on, and runs this. Both checks were open defects (V-N1, V-N2), fixed by H6 and H7.
  */
 export default defineConfig({
   testDir: "./specs",

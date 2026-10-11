@@ -38,7 +38,7 @@ for (const caller of CALLERS) {
   })
 }
 
-// Embedding across two tables with masked columns works over REST (T1-N2 is GraphQL's alone).
+// Embedding across two tables with masked columns, over REST.
 for (const caller of ["a", "admin"] as const) {
   test(`${caller} embeds payslips in employees`, async () => {
     expectDefects(restReadDefects(tier, caller))
