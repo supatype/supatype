@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { resolve } from "node:path"
-import { readBody, sendJson, matchRoute, type RouteHandler } from "./http.js"
+import { HttpError, readBody, sendJson, matchRoute, type RouteHandler } from "./http.js"
 import { registerSchemaRoutes } from "./routes/schema.js"
 import { registerFunctionRoutes } from "./routes/functions.js"
 import { registerDeploymentRoutes } from "./routes/deployments.js"
@@ -43,6 +43,10 @@ export function createControlPlaneServer(): ReturnType<typeof createServer> {
         pathname: url.pathname,
       })
     } catch (err) {
+      if (err instanceof HttpError) {
+        sendJson(res, err.status, { error: err.code, message: err.message })
+        return
+      }
       const message = err instanceof Error ? err.message : String(err)
       sendJson(res, 500, { error: "internal_error", message })
     }

@@ -1,6 +1,7 @@
 import type { ServerResponse } from "node:http"
 import { route, sendJson } from "../http.js"
 import type { RouteHandler } from "../http.js"
+import { assertProject } from "../project.js"
 import {
   databaseUrlFromEnv,
   engineRefusal,
@@ -14,16 +15,6 @@ import {
   runEnginePush,
   runEngineRollback,
 } from "../engine-runner.js"
-
-function projectRef(): string {
-  return process.env["SUPATYPE_PROJECT_REF"] ?? "project"
-}
-
-function assertProject(ref: string): void {
-  if (ref !== projectRef()) {
-    throw new Error(`Unknown project ref: ${ref}`)
-  }
-}
 
 /** A list of strings in a request body, or undefined when it is absent or not one. */
 function stringList(value: unknown): string[] | undefined {

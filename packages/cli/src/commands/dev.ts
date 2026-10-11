@@ -22,7 +22,7 @@ import { isAbsolute, join, relative, resolve } from "node:path"
 import { loadConfig } from "../config.js"
 import type { ExtractedSchemaAstV2 } from "../schema-ast-v2.js"
 import {
-  apiSchemaList,
+  postgrestSchemaEnv,
   functionsPathCandidatesFromProject,
   resolveRuntimeProvider,
   schemaPathFromProject,
@@ -609,8 +609,10 @@ export function registerDev(program: Command): void {
           // Derived from schema.pg_schema (or schema.api_schemas), a hardcoded "public" here meant
           // a non-default pg_schema pushed correctly and then answered PGRST106 on every request.
           // Native dev has no masking extension either, so a schema with field rules is served from
-          // `api` here too: the case an "is the database external" rule would have got wrong.
-          PGRST_DB_SCHEMA: apiSchemaList(config, {
+          // `api` here too: the case an "is the database external" rule would have got wrong. The
+          // same tier picks the extra search path, which is what pg_graphql reflects: `api` under
+          // tier 2, `public` otherwise. Parity with self-host, which writes both from one call.
+          ...postgrestSchemaEnv(config, {
             // The installed archive decides: one downloaded before the masking library was bundled
             // has no extension, so its field rules are enforced by views instead.
             tier: fieldMaskingTierFromProject(cwd, config, nativeMaskLibraryPresent(pgBinDir)),
@@ -618,10 +620,6 @@ export function registerDev(program: Command): void {
             // PGRST106 against a stack that had migrated the views into place.
             drafts: projectHasVersionedModels(cwd, config),
           }),
-          // Parity with self-host, which has always set this. Unqualified names in column defaults
-          // (`uuid_generate_v4()`) resolve here, and with a non-public pg_schema the request schema
-          // alone does not reach them.
-          PGRST_DB_EXTRA_SEARCH_PATH: "public,extensions",
           PGRST_DB_ANON_ROLE: "anon",
           PGRST_SERVER_PORT: postgrestPort,
           PGRST_SERVER_HOST: "127.0.0.1",
