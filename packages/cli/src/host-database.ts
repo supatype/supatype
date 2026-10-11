@@ -16,7 +16,7 @@
 
 import { existsSync } from "node:fs"
 import { join } from "node:path"
-import { readEnvFile, readEnvValue } from "./env-file.js"
+import { readComposeEnvInt, readEnvFile } from "./env-file.js"
 import { devDatabaseUrl } from "./local-secrets.js"
 import {
   externalDatabaseUrl,
@@ -38,7 +38,8 @@ export const COMPOSE_DEV_DB_PORT = 54329
  */
 export function hostComposeDbUrl(
   cwd: string,
-  port: number | string = readEnvValue(cwd, "SUPATYPE_DEV_DB_PORT", String(COMPOSE_DEV_DB_PORT)),
+  // As compose binds it: an exported SUPATYPE_DEV_DB_PORT first, then `.env`.
+  port: number | string = readComposeEnvInt(cwd, "SUPATYPE_DEV_DB_PORT") ?? COMPOSE_DEV_DB_PORT,
 ): string {
   return devDatabaseUrl(cwd, `127.0.0.1:${port}`)
 }

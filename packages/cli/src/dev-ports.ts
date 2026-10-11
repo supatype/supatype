@@ -8,7 +8,7 @@ import { spawnSync } from "node:child_process"
 import { CLACK_CANCEL, isCancel, p } from "./ui/clack.js"
 import { COMPOSE_DEV_KONG_PORT } from "./project-config.js"
 import { isPortInUse } from "./postgres-ctl.js"
-import { readEnvInt, upsertEnvFile } from "./env-file.js"
+import { readComposeEnvInt, upsertEnvFile } from "./env-file.js"
 import { isInteractive } from "./ui/interactive.js"
 import { fatalError } from "./ui/fatal.js"
 import { COMPOSE_DEV_DB_PORT, hostComposeDbUrl } from "./host-database.js"
@@ -70,8 +70,9 @@ export async function findNextFreePort(start: number): Promise<number> {
   return port
 }
 
+/** The Kong port compose binds: an exported SUPATYPE_KONG_PORT first, then `.env`. */
 export function readPersistedKongPort(cwd: string): number | null {
-  return readEnvInt(cwd, "SUPATYPE_KONG_PORT")
+  return readComposeEnvInt(cwd, "SUPATYPE_KONG_PORT")
 }
 
 function persistKongPort(cwd: string, port: number): void {
@@ -241,26 +242,46 @@ async function promptPortConflictWithoutPersist(
   return port
 }
 
-export async function ensureDevDbPort(cwd: string): Promise<number> {
-  const persisted = readEnvInt(cwd, "SUPATYPE_DEV_DB_PORT")
+export interface EnsureDevDbPortOptions {
+  /** This directory's compose project: a port its own database publishes is kept, not moved. */
+  composeProject?: string
+  /**
+   * Only `supatype dev` moves the port, when something else holds it. Every other command keeps it
+   * or stops: moving it means rewriting `.env` and recreating the database under a running stack.
+   */
+  mayMove?: boolean
+}
 
-  const persist = (port: number): number => {
-    upsertEnvFile(cwd, {
-      SUPATYPE_DEV_DB_PORT: String(port),
-      DATABASE_URL: hostComposeDbUrl(cwd, port),
-    })
-    return port
+/**
+ * The host port for this project's Postgres, persisted in `.env` as SUPATYPE_DEV_DB_PORT.
+ *
+ * The project's own database holding the port is the normal state while `dev` runs, not a
+ * collision. Treating it as one moved the port on every push and doctor (A3-N2, A5-N5), rewrote
+ * `.env` and recreated the database under the running stack.
+ */
+export async function ensureDevDbPort(cwd: string, opts: EnsureDevDbPortOptions = {}): Promise<number> {
+  const persisted = readComposeEnvInt(cwd, "SUPATYPE_DEV_DB_PORT")
+  if (persisted === null) {
+    const free = (await isPortInUse(COMPOSE_DEV_DB_PORT)) ? await findNextFreePort(COMPOSE_DEV_DB_PORT + 1) : COMPOSE_DEV_DB_PORT
+    return persistDevDbPort(cwd, free)
   }
+  if (!(await isPortInUse(persisted))) return persisted
+  if (opts.composeProject !== undefined && portHeldByComposeProject(persisted, opts.composeProject)) {
+    return persisted
+  }
+  if (opts.mayMove !== true) {
+    throw new Error(
+      `Port ${persisted} (SUPATYPE_DEV_DB_PORT) is in use by something other than this project's ` +
+        "database. Stop it, or run `supatype dev`, which moves this project to a free port.",
+    )
+  }
+  return persistDevDbPort(cwd, await findNextFreePort(persisted + 1))
+}
 
-  if (persisted !== null) {
-    if (!(await isPortInUse(persisted))) return persisted
-    const next = await findNextFreePort(persisted + 1)
-    return persist(next)
-  }
-
-  let port = COMPOSE_DEV_DB_PORT
-  if (await isPortInUse(port)) {
-    port = await findNextFreePort(port + 1)
-  }
-  return persist(port)
+function persistDevDbPort(cwd: string, port: number): number {
+  upsertEnvFile(cwd, {
+    SUPATYPE_DEV_DB_PORT: String(port),
+    DATABASE_URL: hostComposeDbUrl(cwd, port),
+  })
+  return port
 }

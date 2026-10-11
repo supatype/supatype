@@ -59,7 +59,8 @@ describe("dev-ports", () => {
     )
     isPortInUseMock.mockImplementation(async (port) => port === 54329)
 
-    await expect(ensureDevDbPort(dir)).resolves.toBe(54330)
+    // Only dev moves the port, so this is dev's call.
+    await expect(ensureDevDbPort(dir, { mayMove: true })).resolves.toBe(54330)
 
     const env = readFileSync(join(dir, ".env"), "utf8")
     expect(env).toMatch(/^SUPATYPE_DEV_DB_PORT=54330$/m)

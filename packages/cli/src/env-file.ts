@@ -124,7 +124,11 @@ export function upsertEnvFile(
   }
 
   const body = [...kept.map((l) => l.text), ...appended].join("\n")
-  writeFileSync(envPath, `${body.replace(/\n+$/, "")}\n`, "utf8")
+  const next = `${body.replace(/\n+$/, "")}\n`
+  // Not written when nothing changed. `.env` is compose's input, and a command that only read the
+  // stack (push or doctor with dev running) has no business touching it.
+  if (next === existing.replace(/\r\n/g, "\n")) return
+  writeFileSync(envPath, next, "utf8")
 }
 
 /**
@@ -176,7 +180,21 @@ export function hasEnvValue(cwd: string, key: string): boolean {
 }
 
 export function readEnvInt(cwd: string, key: string): number | null {
-  const raw = readEnvValue(cwd, key, "")
+  return portNumber(readEnvValue(cwd, key, ""))
+}
+
+/**
+ * A port as `docker compose --env-file .env` resolves it: the caller's environment first, then
+ * `.env`. The CLI waits on the port compose binds, so it has to read it the way compose does: an
+ * exported SUPATYPE_KONG_PORT used to be bound by compose while dev and push waited on the one in
+ * `.env`.
+ */
+export function readComposeEnvInt(cwd: string, key: string): number | null {
+  const shell = process.env[key]?.trim()
+  return shell ? portNumber(shell) : readEnvInt(cwd, key)
+}
+
+function portNumber(raw: string): number | null {
   if (!raw) return null
   const port = Number(raw)
   return Number.isInteger(port) && port > 0 && port <= 65535 ? port : null

@@ -23,7 +23,7 @@ import {
 import { syncManifestHooks, writeHooksModule } from "./model-hooks.js"
 import { syncRowCacheEnv } from "./model-cache.js"
 import { anonKeyEnvUpdates } from "./commands/keys.js"
-import { signJwt } from "./jwt.js"
+import { devApiKeys } from "./dev-api-keys.js"
 import { ensureDevDbPort, ensureKongPort } from "./dev-ports.js"
 import { handleComposeProjectRename } from "./compose-rename.js"
 import { recoverStaleDevSession, writeDevSessionLock } from "./dev-session-lock.js"
@@ -65,7 +65,6 @@ import { readEnvValue, upsertEnvFile } from "./env-file.js"
 import {
   devDatabaseIdentity,
   devDatabaseUrl,
-  devJwtSecret,
   seedMissingDatabaseIdentity,
   seedMissingLocalSecrets,
 } from "./local-secrets.js"
@@ -134,14 +133,6 @@ export function composeDbUrl(cwd: string): string {
 }
 
 /**
- * Resolve the host Kong port for this project. Persisted in `.env` as
- * SUPATYPE_KONG_PORT; prompts when the configured port is already taken.
- */
-async function resolveDevDbPort(cwd: string): Promise<number> {
-  return ensureDevDbPort(cwd)
-}
-
-/**
  * The database URL to hand a tool, from wherever it happens to run.
  *
  * The compose helpers below describe the `db` *container*, on the host at
@@ -175,12 +166,9 @@ export async function ensureDockerDbPublishedForHostEngine(
 
   const project = composeProjectName(config.project.name)
   const kongPort = await resolveKongPort(cwd, project)
-  const devDbPort = await resolveDevDbPort(cwd)
+  const devDbPort = await ensureDevDbPort(cwd, { composeProject: project })
 
-  const now = Math.floor(Date.now() / 1000)
-  const jwtBase = { iss: "supatype", iat: now, exp: now + 315_360_000 }
-  const anonKey = signJwt({ ...jwtBase, role: "anon" }, devJwtSecret(cwd))
-  const serviceRoleKey = signJwt({ ...jwtBase, role: "service_role" }, devJwtSecret(cwd))
+  const { anonKey, serviceRoleKey } = devApiKeys(cwd)
   ensureDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, devDbPort)
 
   const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
@@ -1230,10 +1218,7 @@ export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfi
   }
 
   const kongPort = await resolveKongPort(cwd, project)
-  const now = Math.floor(Date.now() / 1000)
-  const jwtBase = { iss: "supatype", iat: now, exp: now + 315_360_000 }
-  const anonKey = signJwt({ ...jwtBase, role: "anon" }, devJwtSecret(cwd))
-  const serviceRoleKey = signJwt({ ...jwtBase, role: "service_role" }, devJwtSecret(cwd))
+  const { anonKey, serviceRoleKey } = devApiKeys(cwd)
   ensureDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, undefined)
 
   const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
@@ -1296,12 +1281,9 @@ export async function pushSchemaDocker(
   // Whatever compose publishes, `DATABASE_URL` has to point at. Gating this on
   // `overrides.engine` while the compose file published unconditionally is what left a project
   // with a database on 54329 and a URL still saying 5432.
-  const devDbPort = publishesDbToHost(config) ? await resolveDevDbPort(cwd) : undefined
+  const devDbPort = publishesDbToHost(config) ? await ensureDevDbPort(cwd, { composeProject: project }) : undefined
 
-  const now = Math.floor(Date.now() / 1000)
-  const jwtBase = { iss: "supatype", iat: now, exp: now + 315_360_000 }
-  const anonKey = signJwt({ ...jwtBase, role: "anon" }, devJwtSecret(cwd))
-  const serviceRoleKey = signJwt({ ...jwtBase, role: "service_role" }, devJwtSecret(cwd))
+  const { anonKey, serviceRoleKey } = devApiKeys(cwd)
   ensureDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, devDbPort)
 
   const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
@@ -1400,12 +1382,12 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   // Whatever compose publishes, `DATABASE_URL` has to point at. Gating this on
   // `overrides.engine` while the compose file published unconditionally is what left a project
   // with a database on 54329 and a URL still saying 5432.
-  const devDbPort = publishesDbToHost(config) ? await resolveDevDbPort(cwd) : undefined
+  // Only dev moves the port off something else that holds it.
+  const devDbPort = publishesDbToHost(config)
+    ? await ensureDevDbPort(cwd, { composeProject: project, mayMove: true })
+    : undefined
 
-  const now = Math.floor(Date.now() / 1000)
-  const jwtBase = { iss: "supatype", iat: now, exp: now + 315_360_000 }
-  const anonKey = signJwt({ ...jwtBase, role: "anon" }, devJwtSecret(cwd))
-  const serviceRoleKey = signJwt({ ...jwtBase, role: "service_role" }, devJwtSecret(cwd))
+  const { anonKey, serviceRoleKey } = devApiKeys(cwd)
 
   const devBrand = { intro: "Local development" }
   const localServerImage = await ensureLocalServerDockerImage(cwd, config, devBrand)
