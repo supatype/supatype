@@ -12,6 +12,16 @@
 
 ### Fixes
 
+* **migrate:** `supatype migrate` writes the SQL a push would apply (to stdout, or `-o <file>`)
+  instead of calling a history endpoint that applied nothing. Plain, the engine plans it without
+  taking any lock an application waits on and the file records nothing, which its header says;
+  `--record` has the engine rehearse the push so the file records the history and the ledger as a
+  push does, taking a push's table locks while it runs. `--force` allows destructive changes and
+  rewrites of large tables.
+* **push, dev:** a change the engine refuses because it rewrites a large table (IN-C 3) goes
+  through the same consent as a destructive one: a terminal is asked whether to lock the table
+  while it is rewritten, `push --yes` applies it, and anywhere else it is refused with the command
+  that applies it on purpose.
 * **doctor:** the rebaseline consent is renamed: `supatype doctor --rebaseline --accept-access-drift`
   records policies, grants, labels and RLS changed outside Supatype as the baseline too (sent as
   `accept_access_drift`, or `--accept-access-drift` to the engine binary). `--overwrite-drift` is
