@@ -19,7 +19,7 @@ vi.mock("node:child_process", async (importOriginal) => ({
   spawnSync: (cmd: string, args: readonly string[]) => spawnSync(cmd, args),
 }))
 
-const { readRecordedTier, recordedTierPath, syncRecordedTier, tierFromEngine, writeRecordedTier } =
+const { readRecordedTier, recordDatabaseTier, recordedTierPath, sameApiSurface, tierFromEngine, writeRecordedTier } =
   await import("../src/recorded-field-masking-tier.js")
 const { writeSelfHostCompose, selfHostComposePaths } = await import("../src/self-host-compose.js")
 
@@ -75,23 +75,29 @@ describe("the recorded tier", () => {
     expect(readRecordedTier(dir)).toBeUndefined()
   })
 
-  it("is read from the stack's database and kept, reporting only a change", () => {
+  it("is read from the stack's database and kept", () => {
     databaseRecords("views")
-    expect(syncRecordedTier(dir, stack)).toBe(true)
+    expect(recordDatabaseTier(dir, stack)).toBe("views")
     expect(readRecordedTier(dir)).toBe("views")
-    expect(syncRecordedTier(dir, stack)).toBe(false)
     databaseRecords("extension")
-    expect(syncRecordedTier(dir, stack)).toBe(true)
+    expect(recordDatabaseTier(dir, stack)).toBe("extension")
     expect(readRecordedTier(dir)).toBe("extension")
   })
 
   it("is left alone when the database cannot say", () => {
     writeRecordedTier(dir, "views")
     spawnSync.mockReturnValue({ status: 1, stdout: "", stderr: "no such service: db" })
-    expect(syncRecordedTier(dir, stack)).toBe(false)
+    expect(recordDatabaseTier(dir, stack)).toBeUndefined()
     databaseRecords("broken")
-    expect(syncRecordedTier(dir, stack)).toBe(false)
+    expect(recordDatabaseTier(dir, stack)).toBeUndefined()
     expect(readRecordedTier(dir)).toBe("views")
+  })
+
+  it("changes what PostgREST serves only between views and the rest", () => {
+    expect(sameApiSurface(config, "none", "extension")).toBe(true)
+    expect(sameApiSurface(config, undefined, "none")).toBe(true)
+    expect(sameApiSurface(config, "extension", "views")).toBe(false)
+    expect(sameApiSurface(config, "views", "views")).toBe(true)
   })
 })
 

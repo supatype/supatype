@@ -11,7 +11,7 @@ import { spawnSync } from "node:child_process"
 import { startProxyDevApp, resolveProxyDevScript } from "./app/proxy-dev-app.js"
 import { loadSchemaAst } from "./config.js"
 import { withComposeSchemaPushLock } from "./schema-push-lock.js"
-import { readRecordedTier, syncRecordedTier } from "./recorded-field-masking-tier.js"
+import { recordDatabaseTier, sameApiSurface } from "./recorded-field-masking-tier.js"
 import {
   connectionString,
   projectRootFromConfig,
@@ -46,6 +46,7 @@ import {
   runDockerCompose,
   schemaEngineImageForPush,
   writeSelfHostCompose,
+  composeFieldMaskingTier,
   selfHostComposePaths,
   type SelfHostComposePaths,
 } from "./self-host-compose.js"
@@ -926,10 +927,11 @@ async function runComposeSchemaPushQueued(
 
 /**
  * Point PostgREST at the field-masking tier the database recorded on the push just made, when it
- * differs from what compose was written with (T2-N6): `dev` and `push` predict the tier from the
- * image, and a database without `supatype_mask` runs tier 2 whatever its image is. Compose is
- * rendered again from the record. With `recreate`, PostgREST is recreated so a running stack serves
- * the new search path now; a caller about to run `compose up -d` leaves that to it.
+ * serves differently from what compose was written with (T2-N6): `dev` and `push` predict the tier
+ * from the image, and a database without `supatype_mask` runs tier 2 whatever its image is. The
+ * record is kept either way, and compose is rendered again from it. With `recreate`, PostgREST is
+ * recreated so a running stack serves the new search path now; a caller about to run
+ * `compose up -d` leaves that to it.
  */
 export function followRecordedTier(
   cwd: string,
@@ -939,9 +941,11 @@ export function followRecordedTier(
   if (usesExternalDatabase(config)) return
   const project = composeProjectName(config.project.name)
   const paths = selfHostComposePaths(cwd)
-  if (!syncRecordedTier(cwd, { project, composePath: paths.composePath })) return
+  const served = composeFieldMaskingTier(cwd, config)
+  const recorded = recordDatabaseTier(cwd, { project, composePath: paths.composePath })
+  if (recorded === undefined || sameApiSurface(config, served, recorded)) return
   writeSelfHostCompose(cwd, config, { devLocal: true })
-  console.log(`[supatype] The database runs field masking tier "${readRecordedTier(cwd)}"; PostgREST follows it.`)
+  console.log(`[supatype] The database runs field masking tier "${recorded}"; PostgREST follows it.`)
   if (!opts.recreate) return
   const status = runDockerCompose(paths.composePath, ["up", "-d", "--no-deps", "postgrest"], cwd, project, {
     quiet: true,

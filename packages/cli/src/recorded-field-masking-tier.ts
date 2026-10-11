@@ -20,6 +20,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { composeDbPsql, type ComposeStack } from "./compose-db-psql.js"
 import type { FieldMaskingTier } from "./field-masking-tier.js"
+import { postgrestSchemaEnv, type SupatypeProjectConfig } from "./project-config.js"
 
 const RECORDED_TIER_QUERY =
   "SELECT capabilities->'fieldMasking'->>'tier' FROM _supatype.schema_state WHERE id = 1"
@@ -81,13 +82,22 @@ export function queryRecordedTier(cwd: string, stack: ComposeStack): FieldMaskin
   return tierFromEngine(result.stdout ?? "")
 }
 
-/**
- * Read `stack`'s recorded tier and keep it. True when it is new, so compose has to be rendered
- * again for PostgREST to follow it.
- */
-export function syncRecordedTier(cwd: string, stack: ComposeStack): boolean {
+/** Read `stack`'s recorded tier and keep it. Undefined, and nothing kept, when it cannot be read. */
+export function recordDatabaseTier(cwd: string, stack: ComposeStack): FieldMaskingTier | undefined {
   const recorded = queryRecordedTier(cwd, stack)
-  if (recorded === undefined || recorded === readRecordedTier(cwd)) return false
-  writeRecordedTier(cwd, recorded)
-  return true
+  if (recorded !== undefined && recorded !== readRecordedTier(cwd)) writeRecordedTier(cwd, recorded)
+  return recorded
+}
+
+/**
+ * Whether PostgREST serves the same schemas under both tiers. Only `views` differs: `none` and
+ * `extension` both serve the managed schema, so moving between them recreates nothing.
+ */
+export function sameApiSurface(
+  config: SupatypeProjectConfig,
+  a: FieldMaskingTier | undefined,
+  b: FieldMaskingTier | undefined,
+): boolean {
+  const env = (tier: FieldMaskingTier | undefined): string => JSON.stringify(postgrestSchemaEnv(config, { tier }))
+  return env(a) === env(b)
 }

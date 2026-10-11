@@ -1144,6 +1144,14 @@ function resolveFieldMaskingTier(
   return recorded ?? fieldMaskingTierFromProject(cwd, config)
 }
 
+/** The tier compose is written with when no caller names one, which is what PostgREST serves. */
+export function composeFieldMaskingTier(
+  cwd: string,
+  config: SupatypeProjectConfig,
+): FieldMaskingTier | undefined {
+  return resolveFieldMaskingTier(cwd, config)
+}
+
 /**
  * Whether this project has a versioned model, unless the caller already knows.
  *
