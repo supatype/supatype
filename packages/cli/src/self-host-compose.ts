@@ -96,9 +96,15 @@ export function dockerImageRef(
 /**
  * When the user pins `versions` in config, sync matching SUPATYPE_*_IMAGE vars for Compose.
  * Unpinned components are omitted so compose falls back to :latest defaults.
+ *
+ * `database.image` is written whether or not `versions.postgres` is pinned. It used to reach
+ * compose only through the pin, so without one compose ran `supatype/postgres:latest` while the
+ * masking tier was chosen from the configured image, and the two disagreed (A3-N1).
  */
 export function composeDockerImageEnv(config: SupatypeProjectConfig): Record<string, string> {
   const env: Record<string, string> = {}
+  const image = config.database?.image?.trim()
+  if (image) env.SUPATYPE_POSTGRES_IMAGE = image
   const versions = config.versions
   if (!versions) return env
 
