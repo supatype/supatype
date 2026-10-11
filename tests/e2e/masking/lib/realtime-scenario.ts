@@ -23,7 +23,7 @@ export type FeedName =
 export interface Scenario {
   feeds: Record<FeedName, Feed>
   /** Keys of rows the scenario created, by their part in the story. */
-  refs: { bPayslip: string; strangerTicket: string; otherTicket: string; ownTicket: string; fenceTicket: string }
+  refs: { bPayslip: string; nullPayslip: string; strangerTicket: string; otherTicket: string; ownTicket: string; fenceTicket: string }
   fences: Record<string, boolean>
 }
 
@@ -59,17 +59,21 @@ const insertEmployee = (p: Person): string => {
   return `insert into public.employee (id, name, grade, salary, ssn) values (${[id(p), x.name, x.grade, x.salary, x.ssn].map(q).join(",")})`
 }
 
-async function driveEmployees(): Promise<string> {
+async function driveEmployees(): Promise<{ bPayslip: string; nullPayslip: string }> {
   await change(insertEmployee("b"))
   await change(`update public.employee set name = 'name-b2' where id = ${q(id("b"))}`)
   await change(insertEmployee("a"))
   const ref = await change(`insert into public.payslip (dept, employee_id, amount, bank_account) values ('eng', ${q(id("b"))}, 8000, ${q(PEOPLE.b.bank)}) returning ref`)
   await change(`update public.payslip set amount = 8100 where ref = ${q(ref)}`)
   await change(`delete from public.payslip where ref = ${q(ref)}`)
-  return ref
+  // The same delete of a row with NULL columns. Under REPLICA IDENTITY FULL wal2json leaves a NULL
+  // column out of the old row instead of sending it as null (TEST-1-N2).
+  const nullRef = await change(`insert into public.payslip (dept, employee_id) values ('eng', ${q(id("b"))}) returning ref`)
+  await change(`delete from public.payslip where ref = ${q(nullRef)}`)
+  return { bPayslip: ref, nullPayslip: nullRef }
 }
 
-async function driveTickets(): Promise<Omit<Scenario["refs"], "bPayslip">> {
+async function driveTickets(): Promise<Omit<Scenario["refs"], "bPayslip" | "nullPayslip">> {
   const ticket = (owner: Person, category: string, label: string) =>
     change(`insert into public.ticket (category, owner_id, label) values (${[category, id(owner), label].map(q).join(",")}) returning code`)
   const own = await ticket("a", "shared", "own")
@@ -108,10 +112,10 @@ export async function runScenario(): Promise<Scenario> {
   sql(`delete from public.employee where id in (${q(id("a"))}, ${q(id("b"))})`)
   const feeds = await subscribeAll()
   await sleep(1500)
-  const bPayslip = await driveEmployees()
+  const { bPayslip, nullPayslip } = await driveEmployees()
   const tickets = await driveTickets()
   await driveNotes()
   const fences = await awaitFences(feeds, tickets.fenceTicket, bPayslip)
   for (const f of Object.values(feeds)) f.unsubscribe()
-  return { feeds, refs: { ...tickets, bPayslip }, fences }
+  return { feeds, refs: { ...tickets, bPayslip, nullPayslip }, fences }
 }

@@ -12,6 +12,7 @@ import { test } from "@playwright/test"
  */
 export const OPEN_DEFECTS = {
   "T2-N6": "pg_graphql reflects no model for end users under tier 2",
+  "TEST-1-N2": "realtime withholds the DELETE of any row with a NULL column: wal2json leaves NULL columns out of the old row, and realtime reads that as an incomplete row",
 } as const satisfies Record<string, string>
 
 export type DefectId = keyof typeof OPEN_DEFECTS

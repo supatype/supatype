@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test"
+import { expectDefects } from "../lib/defects.js"
 import { rowOf, type Event } from "../lib/realtime.js"
 import { runScenario, type FeedName, type Scenario } from "../lib/realtime-scenario.js"
 import { realtimeLogs } from "../lib/stack.js"
@@ -81,6 +82,13 @@ test("a DELETE reaches a subscriber who could see the row, with nothing masked i
   expect(del?.old?.["ref"], "the deleted payslip's key").toBe(run.refs.bPayslip)
   expect(del?.old?.["amount"] ?? null, "amount is the admin's").toBeNull()
   expect(del?.old?.["bank_account"] ?? null, "bank_account is b's").toBeNull()
+})
+
+test("a DELETE of a row with NULL columns reaches a subscriber who could see it (TEST-1-N2)", () => {
+  expectDefects(["TEST-1-N2"])
+  fenced("a:payslip")
+  const del = events("a:payslip").find((e) => e.eventType === "DELETE" && rowOf(e)["ref"] === run.refs.nullPayslip)
+  expect(del?.old?.["ref"], "the deleted payslip's key").toBe(run.refs.nullPayslip)
 })
 
 test("the payslip's owner receives their bank account", () => {
