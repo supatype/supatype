@@ -65,15 +65,15 @@ Two 4xx are states, not faults, and the specs allow exactly these:
 | | |
 |---|---|
 | `401` before sign-in | the point of the sign-in page |
-| `404 /studio-config` | "schema not pushed yet" — a project with no generated admin config genuinely is that, and Studio reads it and carries on |
+| `404 /studio-config` | "schema not pushed yet": a project with no generated admin config genuinely is that, and Studio reads it and carries on |
 
 ## Open Studio on the origin it is configured with
 
 `E2E_BASE_URL` must be the URL in Studio's own config, which locally is
 `http://localhost:<kong>`. Open it on `http://127.0.0.1:<kong>` instead and the
 two are different origins: every credentialed request Studio makes through
-`/studio/proxy` is refused by CORS, and each view reads **"Failed to fetch"** —
-indistinguishable from a broken view. The runner passes the right one; the health
+`/studio/proxy` is refused by CORS, and each view reads **"Failed to fetch"**,
+which cannot be told apart from a broken view. The runner passes the right one; the health
 polling separately uses `127.0.0.1`, because `localhost` resolves to `::1` first
 on some hosts.
 
@@ -84,3 +84,24 @@ on `push`. Without it every view is the "No schema has been pushed yet" screen.
 The runner pushes if the file is missing and fails with an explanation if it
 still cannot, which locally means the host engine could not be downloaded: set
 `SUPATYPE_RELEASE_PUBLIC_KEY`, or `SUPATYPE_ALLOW_UNVERIFIED_DOWNLOADS=1`.
+
+## The masking matrix and the positioning checks
+
+Two suites here drive no browser at all. They are API and WebSocket clients, kept
+beside the browser specs because they share Playwright's runner and its
+expected-fail marks, and each has a runner script that brings its own stack up:
+
+| Suite | Runner | What it asserts |
+|---|---|---|
+| `masking/` | `bash tests/integration/scripts/masking-e2e.sh` | Field masking and row visibility on REST (with filter, order, count, cast and CSV oracles), REST writes, realtime and GraphQL, for anon, two users, an admin and service_role, in tier 1 (`supatype_mask`) and tier 2 (the `api` views) |
+| `positioning/` | `bash tests/integration/scripts/positioning-e2e.sh` | In a project made by `init`, under `supatype dev`: a new field reaches the generated types, and a rename never empties the column |
+
+A test that asserts correct behaviour while a known defect is open calls
+`expectDefects([...ids])` (`masking/lib/defects.ts`), which marks it expected to
+fail. The run is green while the defect is open; once it is fixed the test
+passes, Playwright reports "expected to fail, but passed", and the run is red
+until the id is removed from the test. Each id is an entry in
+Pre-Launch-Verification-Register.
+
+Both runners count a skipped test as a failure. Both are also suites of the
+release train (`scripts/release-train.sh`, `.github/workflows/release-train.yml`).

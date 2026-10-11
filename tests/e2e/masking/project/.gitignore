@@ -1,0 +1,6 @@
+.env
+.supatype/
+supatype/
+types/
+*.log
+functions/
