@@ -863,6 +863,29 @@ export function apiSchemaList(cfg: SupatypeProjectConfig, options?: ApiSchemaOpt
 }
 
 /**
+ * `PGRST_DB_EXTRA_SEARCH_PATH` value, which is also the search path pg_graphql reflects.
+ *
+ * Under tier 2 that is `api`, so GraphQL serves the masked views and never the base tables: with
+ * `public` there it reflected tables the API roles hold no privileges on, which left end users no
+ * model at all and gave service_role the unmasked rows (F64). Every other tier keeps `public`.
+ * Unqualified names in column defaults (`uuid_generate_v4()`) resolve through `extensions` either way.
+ */
+export function postgrestSearchPath(options?: ApiSchemaOptions): string {
+  return options?.tier === "views" ? "api,extensions" : "public,extensions"
+}
+
+/** The schema half of PostgREST's environment, both values decided by the same tier. */
+export function postgrestSchemaEnv(
+  cfg: SupatypeProjectConfig,
+  options?: ApiSchemaOptions,
+): { PGRST_DB_SCHEMA: string; PGRST_DB_EXTRA_SEARCH_PATH: string } {
+  return {
+    PGRST_DB_SCHEMA: apiSchemaList(cfg, options),
+    PGRST_DB_EXTRA_SEARCH_PATH: postgrestSearchPath(options),
+  }
+}
+
+/**
  * Studio roles that see every draft, beyond each record's own creator.
  *
  * All three of them, which is to say anyone with Studio write access. It was narrower, `admin` and

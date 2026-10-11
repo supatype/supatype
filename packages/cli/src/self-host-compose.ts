@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process"
 import { requireDockerDaemon, type DockerBrandOptions } from "./docker-runtime.js"
 import { fatalError } from "./ui/fatal.js"
 import {
-  apiSchemaList,
+  postgrestSchemaEnv,
   externalDatabaseUrl,
   hooksPathFromProject,
   preferredFunctionsPathFromProject,
@@ -407,8 +407,9 @@ export function renderSelfHostCompose(
   const kongMount = kongMountPath(cwd)
   const external = usesExternalDatabase(config)
   // Both halves come from the caller because both need the schema loaded, which this renderer does
-  // not do. See `SelfHostComposeOptions`.
-  const restSchemas = apiSchemaList(config, {
+  // not do. See `SelfHostComposeOptions`. One call, so the exposed schemas and the search path
+  // pg_graphql reflects are always decided by the same tier.
+  const postgrestSchemas = postgrestSchemaEnv(config, {
     ...(options?.fieldMaskingTier !== undefined && { tier: options.fieldMaskingTier }),
     drafts: options?.drafts === true,
   })
@@ -743,10 +744,12 @@ ${dbServiceBlock}  postgrest:
       # Derived from schema.pg_schema (or schema.api_schemas). Hardcoding this is why choosing a
       # non-public pg_schema used to give a correct push and an API that answered PGRST106 for
       # everything: the engine moved and PostgREST was never told.
-      PGRST_DB_SCHEMA: "${restSchemas}"
+      PGRST_DB_SCHEMA: "${postgrestSchemas.PGRST_DB_SCHEMA}"
       PGRST_DB_ANON_ROLE: anon
       PGRST_JWT_SECRET: \${JWT_SECRET:?JWT_SECRET is missing from .env}
-      PGRST_DB_EXTRA_SEARCH_PATH: public,extensions
+      # Also the search path pg_graphql reflects: "api" under tier 2, so GraphQL serves the masked
+      # views and never the base tables, and "public" otherwise. Decided by the same tier as above.
+      PGRST_DB_EXTRA_SEARCH_PATH: ${postgrestSchemas.PGRST_DB_EXTRA_SEARCH_PATH}
       PGRST_DB_POOL: 3
 ${dbDependency}
   storage:
