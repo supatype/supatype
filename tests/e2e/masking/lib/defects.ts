@@ -11,6 +11,7 @@ import { test } from "@playwright/test"
  * is removed. So the suite is green today, and a fix cannot land without the test that proves it.
  */
 export const OPEN_DEFECTS = {
+  "TRAIN-FIX-N1": "under tier 2, pg_graphql offers no nested relation: the api views carry a primary key for it and no foreign keys",
   "TEST-1-N2": "realtime withholds the DELETE of any row with a NULL column: wal2json leaves NULL columns out of the old row, and realtime reads that as an incomplete row",
 } as const satisfies Record<string, string>
 
