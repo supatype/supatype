@@ -9,32 +9,29 @@
  * only thing a reset changed was that there was no longer anything to refuse.
  *
  * So a failure is classified before anything else happens. A database that is not reachable yet is
- * retried, and the retry never removes anything. An image Docker could not pull means the engine
- * never ran, and `dev` stops saying so. A change that would drop data and was not agreed to leaves
- * the database as it was, so `dev` says why and carries on watching. Everything else is the
- * engine's answer, and `dev` stops with it. Resetting the database is `supatype dev --reset-db`, which is asked for, confirmed,
- * and removes only Postgres's volume.
+ * retried, and the retry never removes anything. A change that would drop data and was not agreed
+ * to leaves the database as it was, so `dev` says why and carries on watching. Every other refusal
+ * (an image Docker could not pull, access changed outside Supatype, another push holding the
+ * engine) is read as `push-refusal.ts` reads it on every path, and `dev` stops saying what to do.
+ * Anything else is the engine's answer, and `dev` stops with it. Resetting the database is
+ * `supatype dev --reset-db`, which is asked for, confirmed, and removes only Postgres's volume.
  */
-import { unmanagedTables } from "./adopt-walkthrough.js"
-import { destructiveRefusal } from "./destructive-consent.js"
+import { classifyPushRefusal, engineOutputOf, explainRefusal, type PushRefusal } from "./push-refusal.js"
+import { DEV_DESTRUCTIVE_POLICY } from "./destructive-consent.js"
 import { fatalError } from "./ui/fatal.js"
 import type { DockerBrandOptions } from "./docker-runtime.js"
-
-/**
- * What one failed push means for the next step. `destructive` is a change that would drop data and
- * was not agreed to: the database is untouched and still matches the last schema, so dev carries on.
- */
-export type PushFailureKind = "transient" | "unmanaged-tables" | "destructive" | "image-pull" | "engine"
 
 /**
  * How the initial push ended.
  *
  * A refusal is its own outcome rather than a thrown error so a caller can act on it: the
- * unmanaged-tables case is the one an adopt walkthrough will pick up.
+ * unmanaged-tables case is the one an adopt walkthrough will pick up. `refusal` is what refused
+ * it, or null for any other answer from the engine. A destructive refusal is a change that would
+ * drop data and was not agreed to: the database still matches the last schema, so dev carries on.
  */
 export type InitialPushOutcome =
   | { kind: "applied" }
-  | { kind: "refused"; reason: Exclude<PushFailureKind, "transient">; message: string }
+  | { kind: "refused"; refusal: PushRefusal | null; message: string }
   | { kind: "exhausted"; attempts: number; message: string }
 
 export type InitialPushFailure = Exclude<InitialPushOutcome, { kind: "applied" }>
@@ -66,58 +63,30 @@ const TRANSIENT_PATTERNS: readonly RegExp[] = [
   /timeout expired|timed out/i,
 ]
 
-/**
- * Output that means Docker could not pull an image the push runs in, so the engine never ran.
- *
- * The push is `docker compose run schema-engine`, and a pull it cannot complete fails it like any
- * other error. Reported as "the engine refused the schema push", that sent people to fix a schema
- * the engine had never seen, when the cause was a rate limit, a network or a missing tag. Daemon
- * wording, as Docker and compose print it: the Docker Hub rate limit (both its `toomanyrequests`
- * code and the 429 a resolve reports), a repository or tag that does not exist, and a registry the
- * daemon could not reach.
- */
-const IMAGE_PULL_PATTERNS: readonly RegExp[] = [
-  /\btoomanyrequests\b/i,
-  /pull rate limit/i,
-  /pull access denied/i,
-  /manifest unknown/i,
-  /no matching manifest/i,
-  /failed to resolve reference/i,
-  /error pulling image/i,
-  /Error response from daemon: Get "?https?:\/\/[^\s"]+\/v2\//,
-]
-
-/** True when the push failed on pulling an image rather than in the engine. */
-function isImagePullFailure(message: string): boolean {
-  return IMAGE_PULL_PATTERNS.some((pattern) => pattern.test(message))
+/** One failed push: everything it said, and what refused it, read once from the error itself. */
+interface FailedPush {
+  message: string
+  refusal: PushRefusal | null
 }
 
-/** True when the pull failed on Docker Hub's rate limit, which `docker login` raises. */
-function isRateLimited(message: string): boolean {
-  return /\btoomanyrequests\b|pull rate limit|\b429\b/i.test(message)
-}
-
-function classifyPushFailure(message: string): PushFailureKind {
-  // Checked first: the refusal is long prose, and it must not be retried because a word in it
-  // happens to look like a connection error. Read from the engine's JSON reason, with its wording
-  // only as the fallback for an engine that predates the JSON.
-  if (unmanagedTables(message) !== null) return "unmanaged-tables"
-  if (destructiveRefusal(message) !== null) return "destructive"
-  // Before the transient check: a registry that refused a connection is not Postgres starting up,
-  // and starting Postgres again would not pull the image.
-  if (isImagePullFailure(message)) return "image-pull"
-  if (TRANSIENT_PATTERNS.some((pattern) => pattern.test(message))) return "transient"
-  return "engine"
-}
-
-/** Run one push, returning the failure message instead of throwing it. */
-async function attemptPush(push: () => Promise<void>): Promise<string | null> {
+/** Run one push, returning how it failed instead of throwing. */
+async function attemptPush(push: () => Promise<void>): Promise<FailedPush | null> {
   try {
     await push()
     return null
   } catch (err: unknown) {
-    return err instanceof Error ? err.message : String(err)
+    // With the engine's stdout, where it names a refusal.
+    return { message: engineOutputOf(err), refusal: classifyPushRefusal(err) }
   }
+}
+
+/**
+ * Whether to start Postgres and push again. Never for a refusal: it is long prose, and it must not
+ * be retried because a word in it looks like a connection error. A registry that refused a
+ * connection is an image pull, and starting Postgres again would not pull the image.
+ */
+function isTransient(failure: FailedPush): boolean {
+  return failure.refusal === null && TRANSIENT_PATTERNS.some((pattern) => pattern.test(failure.message))
 }
 
 /** Push the schema, retrying only while Postgres is unreachable. */
@@ -129,14 +98,14 @@ export async function pushInitialSchema(
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const failure = await attemptPush(steps.push)
     if (failure === null) return { kind: "applied" }
-    message = failure
-    const kind = classifyPushFailure(failure)
+    message = failure.message
+    const refused = { kind: "refused" as const, refusal: failure.refusal, message }
     // Not a failure to diagnose: the person was told what would be lost and the database is as it was.
-    if (kind === "destructive") return { kind: "refused", reason: kind, message }
-    console.error(`[supatype] Initial schema push failed (attempt ${attempt}/${maxAttempts}):`, failure)
+    if (failure.refusal?.kind === "destructive") return refused
+    console.error(`[supatype] Initial schema push failed (attempt ${attempt}/${maxAttempts}):`, message)
     steps.dumpLogs(`schema push attempt ${attempt}/${maxAttempts}`)
 
-    if (kind !== "transient") return { kind: "refused", reason: kind, message }
+    if (!isTransient(failure)) return refused
     if (attempt < maxAttempts) {
       await steps.recoverDatabase()
       await steps.sleep(3000 * attempt)
@@ -144,6 +113,9 @@ export async function pushInitialSchema(
   }
   return { kind: "exhausted", attempts: maxAttempts, message }
 }
+
+/** dev never drops data itself: `push` is where that is done on purpose. */
+const DEV_REFUSAL_CONTEXT = { command: "supatype dev", applyDestructive: DEV_DESTRUCTIVE_POLICY.apply }
 
 /** Every refusal ends with this, because the old loop taught people a failure meant data loss. */
 const DATABASE_KEPT = "Your local database was left as it was."
@@ -158,30 +130,9 @@ export function exitInitialPushFailed(failure: InitialPushFailure, brand?: Docke
       opts,
     )
   }
-  if (failure.reason === "unmanaged-tables") {
-    fatalError(
-      "The engine refused the schema push. Nothing was applied.",
-      [
-        failure.message,
-        "Run `supatype adopt` to bring those tables under management, then run `supatype dev` again.",
-        DATABASE_KEPT,
-      ],
-      opts,
-    )
-  }
-  if (failure.reason === "image-pull") {
-    fatalError(
-      "Docker could not pull an image the schema push runs in. Nothing was applied.",
-      [
-        failure.message,
-        "The engine never ran, so this is not a problem with your schema.",
-        isRateLimited(failure.message)
-          ? "Docker Hub's pull rate limit was reached. Run `docker login` to raise it, or wait, then run `supatype dev` again."
-          : "Check your network and that the image exists, then run `supatype dev` again.",
-        DATABASE_KEPT,
-      ],
-      opts,
-    )
+  if (failure.refusal !== null) {
+    const { headline, hints } = explainRefusal(failure.refusal, DEV_REFUSAL_CONTEXT)
+    fatalError(headline, [...hints, DATABASE_KEPT], opts)
   }
   fatalError(
     "The engine refused the schema push.",

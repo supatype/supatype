@@ -13,6 +13,7 @@
 import { keyspaceInPostgres } from "../cache-provider.js"
 import { printPushWarnings, type EnginePushResult } from "../engine-push-output.js"
 import type { DiffResult } from "../engine-client.js"
+import { reportDevPushFailure } from "../push-refusal.js"
 import type { Command } from "commander"
 import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
@@ -46,7 +47,12 @@ import {
   postgresArchiveTag,
 } from "../binary-cache.js"
 import { ensureBinary } from "../ensure-binary.js"
-import { assertSupported, binaryCapabilities, OwnershipUnsupportedError } from "../engine-ownership-gate.js"
+import {
+  assertSupported,
+  binaryCapabilities,
+  EngineProbeFailed,
+  OwnershipUnsupportedError,
+} from "../engine-ownership-gate.js"
 import { startProxyDevApp } from "../app/proxy-dev-app.js"
 import { ProcessManager } from "../process-manager.js"
 import { STUDIO_DEV_PORT, startStudioViteDevServer } from "../studio-dev-server.js"
@@ -145,7 +151,7 @@ async function requireDevEngineSupports(
       assertSupported(binaryCapabilities(await ensureBinary("engine", config)), need)
     }
   } catch (err: unknown) {
-    if (err instanceof OwnershipUnsupportedError) fatalError(err.message)
+    if (err instanceof OwnershipUnsupportedError || err instanceof EngineProbeFailed) fatalError(err.message)
     throw err
   }
 }
@@ -375,7 +381,7 @@ export function registerDev(program: Command): void {
       const skipFieldKinds: ReadonlySet<string> = new Set(["geo", "vector"])
 
       await runSchemaPush(cwd, engineBin, schemaPath, dbURL, manifestPath, adminConfigPath, localStoragePath, skipFieldKinds, config, overwriteDrift).catch(
-        (e: unknown) => console.error("[supatype] Initial schema push failed:", (e as Error).message),
+        reportDevPushFailure,
       )
 
       const { ensureFirstAdminUser } = await import("./admin.js")
@@ -721,8 +727,8 @@ export function registerDev(program: Command): void {
           debounceTimer = setTimeout(() => {
             debounceTimer = null
             console.log(`\n[supatype] Change detected in ${filename}, checking schema...`)
-            runSchemaPush(cwd, engineBin, schemaPath, dbURL, manifestPath, adminConfigPath, localStoragePath, skipFieldKinds, config, overwriteDrift).catch((e: unknown) =>
-              console.error("[supatype] Schema push failed:", (e as Error).message),
+            runSchemaPush(cwd, engineBin, schemaPath, dbURL, manifestPath, adminConfigPath, localStoragePath, skipFieldKinds, config, overwriteDrift).catch(
+              reportDevPushFailure,
             )
           }, 300)
         })

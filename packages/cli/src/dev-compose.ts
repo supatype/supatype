@@ -33,12 +33,8 @@ import { cacheSeedingNotes } from "./api-config-cache.js"
 import { refreshFunctionsContext } from "./functions-context-refresh.js"
 import { DB_PORT_ENV, syncDatabaseUrlPort } from "./db-port.js"
 import { degraded } from "./strict.js"
-import {
-  DEV_DESTRUCTIVE_POLICY,
-  destructiveLines,
-  destructiveRefusal,
-  pushConsentingToDestructive,
-} from "./destructive-consent.js"
+import { DEV_DESTRUCTIVE_POLICY, destructiveLines, pushConsentingToDestructive } from "./destructive-consent.js"
+import { destructiveRefusal, reportDevPushFailure } from "./push-refusal.js"
 import {
   COMPOSE_PINNED_IMAGE_ENV_KEYS,
   composeDockerImageEnv,
@@ -86,12 +82,7 @@ import type { ExtractedSchemaAstV2 } from "./schema-ast-v2.js"
 import { ensureFirstAdminUserForProject } from "./commands/admin.js"
 import { publishDevReady } from "./dev-ready-panel.js"
 import { exitInitialPushFailed, pushInitialSchema, type InitialPushOutcome, type InitialPushSteps } from "./dev-initial-push.js"
-import {
-  offerAdoption,
-  targetAdoptionSteps,
-  unmanagedTables,
-  type AdoptionSteps,
-} from "./adopt-walkthrough.js"
+import { offerAdoption, targetAdoptionSteps, type AdoptionSteps } from "./adopt-walkthrough.js"
 import { resetDevDatabase } from "./dev-db-reset.js"
 import {
   adoptKeysNeed,
@@ -99,7 +90,10 @@ import {
   engineCapabilities,
   identityColumnsNeed,
   probeCapabilities,
+  capabilitiesCache,
+  rememberCapabilitiesSync,
   type Capabilities,
+  type CapabilitiesCache,
   type FeatureNeed,
 } from "./engine-ownership-gate.js"
 import { hostComposeDbUrl, resolveHostDatabaseUrl } from "./host-database.js"
@@ -965,22 +959,33 @@ async function runComposeEnginePush(
 export async function dockerEngineCapabilities(cwd: string, config: SupatypeProjectConfig): Promise<Capabilities> {
   if (hasEngineOverride(config)) return engineCapabilities()
   const engineImage = await schemaEngineImageForPush(config, cwd)
-  const cacheKey = `${cwd}\0${engineImage ?? ""}`
-  const known = dockerCapabilities.get(cacheKey)
-  if (known !== undefined) return known
-  const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
-  const project = composeProjectName(config.project.name)
-  const target = { cwd, project, composePath: paths.composePath, engineImage }
-  const caps = probeCapabilities((args) => {
-    const run = spawnComposeEngine(target, args, { runFlags: ["--no-deps"] })
-    return { status: run.status, stdout: run.stdout ?? "" }
-  })
-  dockerCapabilities.set(cacheKey, caps)
-  return caps
+  // An image Docker could not pull throws with the daemon's sentence, and is asked again next time.
+  const probe = (): Capabilities => {
+    const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
+    const target = { cwd, project: composeProjectName(config.project.name), composePath: paths.composePath, engineImage }
+    return probeCapabilities((args) => {
+      const run = spawnComposeEngine(target, args, { runFlags: ["--no-deps"] })
+      return { status: run.status, stdout: run.stdout ?? "", stderr: run.error?.message ?? run.stderr ?? "" }
+    })
+  }
+  const imageId = engineImage === undefined ? "compose-default" : localImageId(engineImage)
+  // Not pulled yet: the probe pulls it, and the next call keys on the ID it then has.
+  if (imageId === undefined) return probe()
+  return rememberCapabilitiesSync(dockerCapabilities, `${cwd}\0${engineImage ?? ""}\0${imageId}`, probe)
 }
 
-/** One answer per project and engine image for the life of the process: each costs a container. */
-const dockerCapabilities = new Map<string, Capabilities>()
+/**
+ * The local image's ID, or undefined when Docker does not have it. The answer is keyed on it, so
+ * a tag that now names another image (a pull, a rebuild) is asked again, and nothing else is.
+ */
+function localImageId(image: string): string | undefined {
+  const inspect = spawnSync("docker", ["image", "inspect", "--format", "{{.Id}}", image], { encoding: "utf8" })
+  const id = inspect.status === 0 ? inspect.stdout.trim() : ""
+  return id === "" ? undefined : id
+}
+
+/** Answers per project and engine image ID (`rememberCapabilitiesSync`): each probe costs a container. */
+const dockerCapabilities: CapabilitiesCache = capabilitiesCache()
 
 /** Refuse, before anything is sent, an ownership feature the docker project's engine lacks. */
 export async function requireDockerFeatures(
@@ -1302,7 +1307,7 @@ async function applyInitialSchema(
   }
   const outcome = await adoptingOnRefusal(await pushInitialSchema(steps), steps, cwd, config)
   if (outcome.kind === "applied") return
-  if (outcome.kind === "refused" && outcome.reason === "destructive") {
+  if (outcome.kind === "refused" && outcome.refusal?.kind === "destructive") {
     // Nothing was applied, so the database still matches the last schema it took. The stack can
     // come up on it, and the next save is pushed (and refused or asked about) like any other.
     console.warn(`[supatype] Initial schema push not applied:\n${outcome.message}`)
@@ -1325,9 +1330,8 @@ async function adoptingOnRefusal(
   cwd: string,
   config: SupatypeProjectConfig,
 ): Promise<InitialPushOutcome> {
-  if (outcome.kind !== "refused" || outcome.reason !== "unmanaged-tables") return outcome
-  const tables = unmanagedTables(outcome.message) ?? []
-  const adopted = await offerAdoption(tables, dockerAdoptionSteps(cwd, config), {
+  if (outcome.kind !== "refused" || outcome.refusal?.kind !== "unmanaged-tables") return outcome
+  const adopted = await offerAdoption(outcome.refusal.tables, dockerAdoptionSteps(cwd, config), {
     yes: false,
     retry: "supatype dev",
   })
@@ -1583,9 +1587,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
             const updatedAst = loadSchemaAst(schemaPath, cwd)
             await provisionDockerStorageBuckets(updatedAst, kongPort, serviceRoleKey)
           })
-          .catch((e: unknown) =>
-            console.error("[supatype] Schema push failed:", (e as Error).message),
-          )
+          .catch(reportDevPushFailure)
       }, 300)
     })
   }

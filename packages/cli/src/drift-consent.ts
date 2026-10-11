@@ -1,12 +1,13 @@
 /**
- * Plan 3.5 for a push that has no diff to read first (the docker provider): the engine refuses to
- * put back access changed outside Supatype, naming the objects, and the CLI shows them and asks.
+ * Plan 3.5 for the push itself: the engine refuses to put back access changed outside Supatype,
+ * naming the objects, and the CLI shows them and asks. The docker provider has no diff to read
+ * first, and on every other target a hand edit can land between the diff and the push (C08).
  *
  * A yes runs the push again with `--overwrite-drift`; anything else leaves the hand edits in place.
  * A push that cannot ask (`--yes`, no terminal) never takes that consent for itself.
  */
-import { engineOutputOf } from "./adopt-walkthrough.js"
-import { formatDriftedObjects, securityDriftRefusal } from "./diff-output.js"
+import { formatDriftedObjects } from "./diff-output.js"
+import { classifyPushRefusal } from "./push-refusal.js"
 import { confirm } from "./ui/confirm.js"
 import { isInteractive } from "./ui/interactive.js"
 import { plain } from "./ui/messages.js"
@@ -39,17 +40,12 @@ export async function pushConsentingToDrift<T>(
     return await push(policy.overwriteDrift)
   } catch (err: unknown) {
     if (policy.overwriteDrift) throw err
-    const objects = securityDriftRefusal(engineOutputOf(err))
-    if (objects === null) throw err
-    plain(`\n${objects.length} object(s) that decide who may read or write were changed outside Supatype:\n`)
-    for (const line of formatDriftedObjects(objects)) plain(line)
-    const interactive = (deps.interactive ?? isInteractive)()
-    if (policy.yes || !interactive) {
-      plain(
-        "\nNothing was applied. Run the push interactively to review this, or pass --overwrite-drift to put Supatype's definitions back.",
-      )
-      throw err
-    }
+    const refusal = classifyPushRefusal(err)
+    if (refusal?.kind !== "security-drift") throw err
+    // Nobody to ask: the command says what drifted and how to put it back (`explainingRefusal`).
+    if (policy.yes || !(deps.interactive ?? isInteractive)()) throw err
+    plain(`\n${refusal.objects.length} object(s) that decide who may read or write were changed outside Supatype:\n`)
+    for (const line of formatDriftedObjects(refusal.objects)) plain(line)
     if (!(await askToOverwrite(deps))) return undefined
     await deps.beforeOverwrite?.()
     return push(true)

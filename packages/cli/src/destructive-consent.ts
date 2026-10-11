@@ -7,26 +7,17 @@
  * unforced: the engine refuses a destructive change, and this asks in a terminal, or refuses with
  * the command that applies it on purpose anywhere else.
  */
-import { engineOutputOf } from "./adopt-walkthrough.js"
 import type { DiffResult } from "./engine-client.js"
 import { plannedChanges } from "./diff-output.js"
+import { destructiveRefusal, engineOutputOf } from "./push-refusal.js"
 import { confirm } from "./ui/confirm.js"
 import { isInteractive } from "./ui/interactive.js"
 import { plain, warn } from "./ui/messages.js"
-
-/** The engine's refusal of an unforced push that would drop something, as it words it. */
-const DESTRUCTIVE_REFUSAL = /(\d+) destructive operation\(s\) detected/i
 
 /** What a refused rename means, said with every refusal. */
 export const DESTRUCTIVE_CHANGE_HINT =
   "If you renamed a field, the engine did not recognise it as a rename and would drop the column " +
   "and its data. Rename it back to keep the data."
-
-/** How many destructive operations the engine refused, or null when `output` is not that refusal. */
-export function destructiveRefusal(output: string): number | null {
-  const match = DESTRUCTIVE_REFUSAL.exec(output)
-  return match?.[1] === undefined ? null : Number(match[1])
-}
 
 /** The changes a diff would make that lose data, one line each. */
 export function destructiveLines(diff: Pick<DiffResult, "operations" | "reconcile">): string[] {
@@ -94,7 +85,7 @@ async function showDestruction(count: number, describe?: () => Promise<string[]>
 
 function refusalMessage(output: string, policy: DestructiveConsentPolicy): string {
   const engineLine =
-    output.split(/\r?\n/).find((line) => DESTRUCTIVE_REFUSAL.test(line))?.trim() ?? output.trim()
+    output.split(/\r?\n/).find((line) => destructiveRefusal(line) !== null)?.trim() ?? output.trim()
   return [
     `Nothing was applied. ${engineLine}`,
     DESTRUCTIVE_CHANGE_HINT,

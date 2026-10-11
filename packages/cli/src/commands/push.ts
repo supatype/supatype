@@ -39,6 +39,7 @@ import { askToOverwrite, pushConsentingToDrift } from "../drift-consent.js"
 import { pushConsentingToDestructive } from "../destructive-consent.js"
 import { adoptKeysNeed, type FeatureNeed } from "../engine-ownership-gate.js"
 import { pushOfferingAdoption, targetAdoptionSteps } from "../adopt-walkthrough.js"
+import { explainingRefusal } from "../push-refusal.js"
 import { signJwt } from "../jwt.js"
 import { provisionBucketsFromAst } from "../storage-provision.js"
 import type { ExtractedSchemaAstV2 } from "../schema-ast-v2.js"
@@ -105,32 +106,39 @@ export function registerPush(program: Command): void {
       assertPreviewAddressesResolve(config)
 
       const run: PushRun = { yes: opts.yes ?? false, overwriteDrift: opts.overwriteDrift ?? false }
-      const linked = loadProjectLink(cwd)
-      const useDirect = opts.direct || opts.local || Boolean(opts.connection)
-
-      if (linked && !useDirect && !opts.connection) {
-        const target = resolveTarget(cwd, { env: opts.env })
-        await pushViaTarget(cwd, config, target, ast, pgSchema, run)
-        return
-      }
-
-      if (!opts.connection && !useDirect && resolveRuntimeProvider(config) === "docker") {
-        const localTarget = resolveTarget(cwd, { env: opts.env })
-        if (localTarget.mode === "local" && localTarget.token) {
-          await pushViaTarget(cwd, config, localTarget, ast, pgSchema, run)
-          return
-        }
-        await pushDocker(cwd, config, run)
-        return
-      }
-
-      const target = resolveTarget(cwd, {
-        env: opts.env,
-        direct: true,
-        connection: opts.connection,
-      })
-      await pushViaTarget(cwd, config, target, ast, pgSchema, run)
+      // A refusal (access changed by hand, another push running, an image Docker could not pull)
+      // ends with what to do about it, whichever way the push went.
+      // Unmanaged tables and lost data are spoken to by the push's own walkthrough.
+      await explainingRefusal("supatype push", () => pushWherever(cwd, config, { ast, pgSchema, run, opts }), [
+        "unmanaged-tables",
+        "destructive",
+      ])
     })
+}
+
+/** Where `push` sends the schema: a linked project, a docker stack, or a database directly. */
+async function pushWherever(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  push: { ast: unknown; pgSchema: string; run: PushRun; opts: { connection?: string; env?: string; direct?: boolean; local?: boolean } },
+): Promise<void> {
+  const { ast, pgSchema, run, opts } = push
+  const useDirect = opts.direct === true || opts.local === true || Boolean(opts.connection)
+  if (loadProjectLink(cwd) && !useDirect) {
+    await pushViaTarget(cwd, config, resolveTarget(cwd, { env: opts.env }), ast, pgSchema, run)
+    return
+  }
+  if (!useDirect && resolveRuntimeProvider(config) === "docker") {
+    const localTarget = resolveTarget(cwd, { env: opts.env })
+    if (localTarget.mode === "local" && localTarget.token) {
+      await pushViaTarget(cwd, config, localTarget, ast, pgSchema, run)
+      return
+    }
+    await pushDocker(cwd, config, run)
+    return
+  }
+  const target = resolveTarget(cwd, { env: opts.env, direct: true, connection: opts.connection })
+  await pushViaTarget(cwd, config, target, ast, pgSchema, run)
 }
 
 const OVERWRITE_DRIFT: FeatureNeed = { feature: "overwrite_drift", flag: "--overwrite-drift" }
@@ -242,23 +250,9 @@ async function pushViaTarget(
     await requireTargetFeatures(target, [OVERWRITE_DRIFT])
   }
 
-  const pushResult = await pushOfferingAdoption(
-    () =>
-      withSpinner(changes.length > 0 ? "Applying migration" : "Syncing with engine", () =>
-        targetSchemaPush(target, ast, {
-          force: true,
-          schema: pgSchema,
-          schemaSources: buildSchemaSourcesPayload(cwd, resolvePushedBy()),
-          overwriteDrift,
-        }),
-      ),
-    targetAdoptionSteps(
-      (yes, keys) => targetSchemaAdopt(target, ast, { schema: pgSchema, yes, ...(keys !== undefined && { keys }) }),
-      // Before anyone is asked: applying sends the previewed keys, which this target must honour.
-      (keys) => requireTargetFeatures(target, [adoptKeysNeed(keys)]),
-    ),
-    { yes: run.yes, retry: "supatype push" },
-  )
+  const pushResult = await applyToTarget(cwd, { target, ast, pgSchema }, { ...run, overwriteDrift }, changes.length > 0)
+  // Declined at the drift question: nothing more was applied, and that was said.
+  if (pushResult === undefined) return
 
   if ((pushResult as { status?: string }).status === "up_to_date") {
     info("Schema is up to date.")
@@ -306,6 +300,41 @@ async function pushViaTarget(
   if (envUrl) {
     plain(`\nProject API: ${envUrl}`)
   }
+}
+
+/**
+ * Push to `to`, offering adoption when it refuses unmanaged tables. `run.overwriteDrift` is the
+ * consent already given, by the flag or at the diff's question.
+ *
+ * The diff can be clean and the push still refused over access: a hand edit can land while the
+ * person reads the diff (C08). That refusal is asked about as the diff's drift is, and a yes pushes
+ * again with consent. Undefined when the person said no.
+ */
+function applyToTarget(
+  cwd: string,
+  to: { target: DeployTarget; ast: unknown; pgSchema: string },
+  run: PushRun,
+  migrating: boolean,
+): Promise<Awaited<ReturnType<typeof targetSchemaPush>> | undefined> {
+  const { target, ast, pgSchema } = to
+  const applying = (overwriteDrift: boolean) =>
+    withSpinner(migrating ? "Applying migration" : "Syncing with engine", () =>
+      targetSchemaPush(target, ast, {
+        force: true,
+        schema: pgSchema,
+        schemaSources: buildSchemaSourcesPayload(cwd, resolvePushedBy()),
+        overwriteDrift,
+      }),
+    )
+  return pushOfferingAdoption(
+    () => pushConsentingToDrift(applying, run, { beforeOverwrite: () => requireTargetFeatures(target, [OVERWRITE_DRIFT]) }),
+    targetAdoptionSteps(
+      (yes, keys) => targetSchemaAdopt(target, ast, { schema: pgSchema, yes, ...(keys !== undefined && { keys }) }),
+      // Before anyone is asked: applying sends the previewed keys, which this target must honour.
+      (keys) => requireTargetFeatures(target, [adoptKeysNeed(keys)]),
+    ),
+    { yes: run.yes, retry: "supatype push" },
+  )
 }
 
 /**
