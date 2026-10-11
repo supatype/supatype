@@ -108,6 +108,31 @@ export function destructiveRefusal(output: string): number | null {
   return match?.[1] === undefined ? null : Number(match[1])
 }
 
+/**
+ * The engine's refusal of an unforced push that would rewrite a large table, stopping its reads
+ * and writes while it runs (IN-C 3), as it words it.
+ */
+const REWRITE_WORDING = /(\d+) operation\(s\) rewrite a large table/i
+
+/** A refused push a person can consent to, and what consenting to it means. */
+export interface ConsentRefusal {
+  /** `destructive`: data is dropped. `rewrite`: a large table is locked while it is rewritten. */
+  kind: "destructive" | "rewrite"
+  count: number
+}
+
+/**
+ * A refusal `push --yes` (or a yes in a terminal) applies anyway: a destructive change, or a
+ * rewrite of a large table. Null for any other output. A push refused for both is named for the
+ * data it drops, which the engine checks first.
+ */
+export function consentRefusal(output: string): ConsentRefusal | null {
+  const destructive = destructiveRefusal(output)
+  if (destructive !== null) return { kind: "destructive", count: destructive }
+  const match = REWRITE_WORDING.exec(output)
+  return match?.[1] === undefined ? null : { kind: "rewrite", count: Number(match[1]) }
+}
+
 function refusalCodeOf(err: unknown): string | undefined {
   if (err instanceof EngineError) return err.reason
   if (err instanceof TargetApiError && err.status === 409) return err.code
