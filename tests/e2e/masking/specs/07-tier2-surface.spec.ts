@@ -3,7 +3,6 @@ import { cpSync, mkdirSync, rmSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { expect, test } from "@playwright/test"
-import { expectDefects } from "../lib/defects.js"
 import { hostDatabaseUrl, runCli } from "../lib/cli.js"
 import { rest } from "../lib/http.js"
 import { currentTier, PROJECT_DIR, sql } from "../lib/stack.js"
@@ -12,7 +11,7 @@ import { seed, tokenOf } from "../lib/world.js"
 /**
  * What only tier 2 has: the base tables behind the `api` views, the views' own options, and the
  * databases that are tier 2 because they are not supatype/postgres at all.
- * Ported from verify-scripts/t2/matrix.mjs (Accept-Profile), T2-N10.sh and T2-N8.sh / T2-N11.
+ * Ported from verify-scripts/t2/matrix.mjs (Accept-Profile), T2-N10.sh and T2-N8.sh (T2-N11).
  */
 const here = dirname(fileURLToPath(import.meta.url))
 
@@ -26,20 +25,20 @@ if (currentTier() === 2) {
     })
   }
 
-  test("doctor reports a hand change to an api view's options (T2-N10)", () => {
-    expectDefects(["T2-N10"])
+  // The dangerous direction: an api view switched back to invoker rights. Restored with RESET, so
+  // the view returns to the options the engine gave it.
+  test("doctor reports a hand change to an api view's options", () => {
     const url = hostDatabaseUrl()
     try {
-      sql("ALTER VIEW api.employee SET (security_invoker = false)")
-      const doctor = runCli(["doctor", "--connection", url])
-      expect(doctor.output).toMatch(/api\.employee/)
-    } finally {
       sql("ALTER VIEW api.employee SET (security_invoker = true)")
+      const doctor = runCli(["doctor", "--connection", url])
+      expect(doctor.output).toMatch(/View employee was changed outside Supatype/)
+    } finally {
+      sql("ALTER VIEW api.employee RESET (security_invoker)")
     }
   })
 
-  test("a push to a plain Postgres says what is missing (T2-N11)", () => {
-    expectDefects(["T2-N11"])
+  test("a push to a plain Postgres says what is missing", () => {
     test.setTimeout(240_000)
     const port = process.env["MASKING_BYO_PORT"] ?? "55449"
     const container = `${process.env["MASKING_PROJECT_NAME"] ?? "masking"}-byo-pg`

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test"
-import { expectDefects, type DefectId } from "../lib/defects.js"
+import { expectDefects } from "../lib/defects.js"
 import { byPerson, expectedEmployees, expectedPayslips } from "../lib/expect-rows.js"
 import { gql, nodes } from "../lib/http.js"
 import { graphqlDefects } from "../lib/matrix.js"
@@ -43,7 +43,6 @@ interface GqlOracle {
   collection: string
   read: (row: Record<string, unknown>) => string
   want: (caller: Caller) => string[]
-  adminDiffers: boolean
 }
 
 const privileged = (c: Caller): boolean => c === "admin" || c === "service_role"
@@ -56,7 +55,6 @@ const ORACLES: GqlOracle[] = [
     collection: "employeeCollection",
     read: who("id"),
     want: (c) => (privileged(c) ? ["a", "admin"] : []),
-    adminDiffers: true,
   },
   {
     name: "filter on another's ssn",
@@ -64,7 +62,6 @@ const ORACLES: GqlOracle[] = [
     collection: "employeeCollection",
     read: who("id"),
     want: (c) => (c === "b" || c === "service_role" ? ["b"] : []),
-    adminDiffers: false,
   },
   {
     name: "order by salary",
@@ -72,7 +69,6 @@ const ORACLES: GqlOracle[] = [
     collection: "employeeCollection",
     read: (row) => String(row["name"]),
     want: (c) => (privileged(c) ? ["name-z", "name-a", "name-b"] : ["name-a", "name-b", "name-z"]),
-    adminDiffers: true,
   },
   {
     name: "forged keyset cursor on salary",
@@ -80,7 +76,6 @@ const ORACLES: GqlOracle[] = [
     collection: "employeeCollection",
     read: who("id"),
     want: (c) => (privileged(c) ? ["a", "admin"] : []),
-    adminDiffers: true,
   },
   {
     name: "filter on payslip amount",
@@ -88,7 +83,6 @@ const ORACLES: GqlOracle[] = [
     collection: "payslipCollection",
     read: who("employee_id"),
     want: (c) => (privileged(c) ? ["a", "admin"] : []),
-    adminDiffers: true,
   },
 ]
 
@@ -97,8 +91,7 @@ const ordered = (o: GqlOracle): boolean => o.name.startsWith("order")
 for (const o of ORACLES) {
   for (const caller of ["a", "b", "admin", "service_role"] as const) {
     test(`${caller}: ${o.name}`, async () => {
-      const defects: DefectId[] = tier === 1 && caller === "admin" && !o.adminDiffers ? [] : graphqlDefects(tier, caller)
-      expectDefects(defects)
+      expectDefects(graphqlDefects(tier, caller))
       const r = await gql(tokenOf(caller), o.query)
       expect(r.errors).toEqual([])
       const got = nodes(r, o.collection).map(o.read)
@@ -107,12 +100,11 @@ for (const o of ORACLES) {
   }
 }
 
-// T1-N2: a nested collection fails whenever the related table has a masked column, even when no
-// masked column is selected. service_role is unmasked, so it is the control.
+// A nested collection over a table with a masked column (T1-N2, fixed by F66). service_role is
+// unmasked, so it is the control.
 for (const caller of ["a", "admin", "service_role"] as const) {
   test(`${caller} reads a nested relation (T1-N2)`, async () => {
-    const defects: DefectId[] = caller === "service_role" ? [] : tier === 1 ? ["T1-N2"] : graphqlDefects(tier, caller)
-    expectDefects(defects)
+    expectDefects(caller === "service_role" ? [] : graphqlDefects(tier, caller))
     const r = await gql(tokenOf(caller), "{ employeeCollection { edges { node { id payslipCollection { edges { node { dept } } } } } } }")
     expect(r.errors).toEqual([])
     const employees = nodes(r, "employeeCollection")

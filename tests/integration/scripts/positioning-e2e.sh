@@ -3,8 +3,8 @@
 #
 # Makes a project with `init`, gives it one model with three rows, starts `supatype dev` with the
 # schema watcher on, then runs tests/e2e/positioning: a new field must reach the generated types
-# (V-N2) and a rename must never empty the column (V-N1). Both are open defects, marked
-# expected-fail, so this is green today and turns red when either is fixed and still marked.
+# (V-N2) and a rename must never empty the column (V-N1). Both were open defects, fixed by H6 and
+# H7 (99ba568); a regression of either now fails the run.
 #
 # Usage:
 #   bash tests/integration/scripts/positioning-e2e.sh
@@ -51,9 +51,6 @@ rm -rf "$STATE_DIR"
 mkdir -p "$STATE_DIR"
 (cd "$STATE_DIR" && node "$MASKING_CLI" init "$NAME" --defaults --no-install --no-admin >/dev/null)
 [[ -f "$PROJECT_DIR/supatype.config.ts" ]] || { echo "ERROR: init did not create $PROJECT_DIR" >&2; exit 1; }
-if grep -q "output" "$PROJECT_DIR/supatype.config.ts"; then
-  echo "  note: init now writes an output section (H7 may have landed)"
-fi
 cat >"$PROJECT_DIR/schema/index.ts" <<'TS'
 import type { Model, Optional, Public, Role, UUID } from "@supatype/types"
 
