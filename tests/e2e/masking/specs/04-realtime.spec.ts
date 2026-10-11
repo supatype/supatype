@@ -1,5 +1,4 @@
 import { expect, test } from "@playwright/test"
-import { expectDefects } from "../lib/defects.js"
 import { rowOf, type Event } from "../lib/realtime.js"
 import { runScenario, type FeedName, type Scenario } from "../lib/realtime-scenario.js"
 import { realtimeLogs } from "../lib/stack.js"
@@ -11,8 +10,8 @@ import { PEOPLE, world } from "../lib/world.js"
  * row they cannot see, by INSERT, UPDATE or DELETE.
  *
  * Fences are INSERTs and UPDATEs only. A DELETE reaches a subscriber only when the table carries
- * its whole old row (REPLICA IDENTITY FULL), so DELETE delivery is asserted on its own
- * (TEST-1-N1) rather than gating the other checks.
+ * its whole old row (REPLICA IDENTITY FULL), so DELETE delivery is asserted on its own rather than
+ * gating the other checks (it was TEST-1-N1 until the engine set the identity, F68).
  */
 
 let run: Scenario
@@ -76,8 +75,7 @@ test("payslip events are masked", () => {
   expect(insert?.new).toMatchObject({ dept: "eng", amount: null, bank_account: null })
 })
 
-test("a DELETE reaches a subscriber who could see the row, with nothing masked in it (TEST-1-N1)", () => {
-  expectDefects(["TEST-1-N1"])
+test("a DELETE reaches a subscriber who could see the row, with nothing masked in it", () => {
   fenced("a:payslip")
   const del = payslipEvents("a:payslip").find((e) => e.eventType === "DELETE")
   expect(del?.old?.["ref"], "the deleted payslip's key").toBe(run.refs.bPayslip)

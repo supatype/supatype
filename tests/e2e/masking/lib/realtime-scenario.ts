@@ -9,7 +9,7 @@ import { PEOPLE, seed, world, type Person } from "./world.js"
  *
  * The changes are made in SQL as supatype_admin, not over REST as service_role (as the T1 script
  * did). Realtime reads them from the WAL either way, and this way the scenario does not depend on
- * the REST write path, which tier 2 breaks (T2-N4, T2-N7): a driver that threw there would leave
+ * the REST write path, which tier 2 once broke (T2-N4, T2-N7): a driver that threw there left
  * every realtime assertion unrun.
  *
  * Ported from verify-scripts/t1/realtime.mjs (masking and filters), a3/M06.ts (Ticket) and

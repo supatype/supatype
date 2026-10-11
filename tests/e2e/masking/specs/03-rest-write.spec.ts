@@ -1,7 +1,5 @@
 import { expect, test } from "@playwright/test"
-import { expectDefects, on } from "../lib/defects.js"
 import { rest, rows } from "../lib/http.js"
-import { tier2UpdateDefects } from "../lib/matrix.js"
 import { sql } from "../lib/stack.js"
 import { PEOPLE, seed, storedEmployee, tokenOf, world } from "../lib/world.js"
 
@@ -18,7 +16,6 @@ test.beforeEach(() => seed())
 const idOf = (p: "a" | "b" | "admin"): string => world()[p].id
 
 test("a user updates their own row", async () => {
-  expectDefects(on({ 2: tier2UpdateDefects() }))
   const r = await rest(tokenOf("a"), "PATCH", `employee?id=eq.${idOf("a")}`, { name: "renamed-a" })
   expect(r.status, r.text).toBe(200)
   expect(rows(r)).toHaveLength(1)
@@ -26,7 +23,6 @@ test("a user updates their own row", async () => {
 })
 
 test("a user cannot write the admin-only salary, even on their own row", async () => {
-  expectDefects(on({ 2: tier2UpdateDefects() }))
   const control = await rest(tokenOf("a"), "PATCH", `employee?id=eq.${idOf("a")}`, { name: "control-a" })
   expect(control.status, `control: ${control.text}`).toBe(200)
   await rest(tokenOf("a"), "PATCH", `employee?id=eq.${idOf("a")}`, { salary: 1 })
@@ -34,7 +30,6 @@ test("a user cannot write the admin-only salary, even on their own row", async (
 })
 
 test("a refused write does not disclose masked values (T2-N1)", async () => {
-  expectDefects(on({ 2: [...tier2UpdateDefects(), "T2-N1"] }))
   const own = await rest(tokenOf("b"), "PATCH", `employee?id=eq.${idOf("b")}`, { name: "control-b" })
   expect(own.status, `control: ${own.text}`).toBe(200)
   expect(rows(own)[0]?.["salary"] ?? null, "b's own salary is the admin's to read").toBeNull()
@@ -44,7 +39,6 @@ test("a refused write does not disclose masked values (T2-N1)", async () => {
 })
 
 test("an update or delete RLS refuses reports no row (T2-N2)", async () => {
-  expectDefects(on({ 2: [...tier2UpdateDefects(), "T2-N2"] }))
   const own = await rest(tokenOf("b"), "PATCH", `employee?id=eq.${idOf("b")}`, { name: "control-b" })
   expect(own.status, `control: ${own.text}`).toBe(200)
   const patch = await rest(tokenOf("b"), "PATCH", `employee?id=eq.${idOf("a")}`, { name: "hacked" })
@@ -55,7 +49,6 @@ test("an update or delete RLS refuses reports no row (T2-N2)", async () => {
 })
 
 test("an insert applies the field write rules (T2-N3)", async () => {
-  expectDefects(on({ 2: ["A3-N3", "T2-N3"] }))
   const del = await rest(tokenOf("a"), "DELETE", `employee?id=eq.${idOf("a")}`)
   expect(del.status, `control delete: ${del.text}`).toBe(200)
   expect(storedEmployee("a"), "control: a's own delete applied").toBeUndefined()
@@ -69,28 +62,24 @@ test("an insert applies the field write rules (T2-N3)", async () => {
 })
 
 test("an insert takes the column defaults (T2-N4)", async () => {
-  expectDefects(on({ 2: ["T2-N4"] }))
   const r = await rest(tokenOf("service_role"), "POST", "payslip", { dept: "ops", employee_id: idOf("b") })
   expect(r.status, r.text).toBe(201)
   expect(String(rows(r)[0]?.["ref"] ?? "")).toMatch(/^[0-9a-f-]{36}$/)
 })
 
 test("service_role writes a masked column (T2-N5)", async () => {
-  expectDefects(on({ 2: ["T2-N5", "T2-N7"] }))
   const r = await rest(tokenOf("service_role"), "PATCH", `employee?id=eq.${idOf("b")}`, { salary: 3 })
   expect(r.status, r.text).toBe(200)
   expect(storedEmployee("b")?.salary).toBe("3")
 })
 
 test("the admin writes a salary on their own row", async () => {
-  expectDefects(on({ 2: tier2UpdateDefects() }))
   const r = await rest(tokenOf("admin"), "PATCH", `employee?id=eq.${idOf("admin")}`, { salary: 310000 })
   expect(r.status, r.text).toBe(200)
   expect(storedEmployee("admin")?.salary).toBe("310000")
 })
 
 test("the admin cannot update another's row: updates are the owner's", async () => {
-  expectDefects(on({ 2: tier2UpdateDefects() }))
   const control = await rest(tokenOf("admin"), "PATCH", `employee?id=eq.${idOf("admin")}`, { name: "control-z" })
   expect(control.status, `control: ${control.text}`).toBe(200)
   await rest(tokenOf("admin"), "PATCH", `employee?id=eq.${idOf("a")}`, { salary: 2 })

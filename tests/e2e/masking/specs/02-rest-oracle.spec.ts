@@ -1,8 +1,5 @@
 import { expect, test } from "@playwright/test"
-import { expectDefects } from "../lib/defects.js"
 import { rest, rows, type Reply } from "../lib/http.js"
-import { restReadDefects } from "../lib/matrix.js"
-import { currentTier } from "../lib/stack.js"
 import { PEOPLE, personOf, seed, tokenOf, type Caller, type Person } from "../lib/world.js"
 
 /**
@@ -10,7 +7,6 @@ import { PEOPLE, personOf, seed, tokenOf, type Caller, type Person } from "../li
  * export may reveal what the caller cannot read. Each case says what every caller should get.
  * Ported from verify-scripts/t1/rest.mjs, t1/rest-extra.mjs and t2/matrix.mjs ("filter / sort").
  */
-const tier = currentTier()
 
 type Seen = string[]
 interface OracleCase {
@@ -100,7 +96,6 @@ test.beforeAll(() => seed())
 for (const c of CASES) {
   for (const caller of ["a", "b", "admin", "service_role"] as const) {
     test(`${caller}: ${c.name}`, async () => {
-      expectDefects(restReadDefects(tier, caller))
       const r = await rest(tokenOf(caller), "GET", c.path, undefined, c.headers ?? {})
       expect(r.status, r.text).toBeLessThan(300)
       expect(c.read(r)).toEqual(c.want(caller))

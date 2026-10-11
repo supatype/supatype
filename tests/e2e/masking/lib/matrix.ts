@@ -3,28 +3,15 @@ import type { Tier } from "./stack.js"
 import type { Caller } from "./world.js"
 
 /**
- * Which open defects stop a caller's correct result on each channel today. One place, so a fix that
- * lands is un-marked once rather than in every spec.
+ * Which open defects stop a caller's correct result on a channel today, in one place so a fix that
+ * lands is un-marked once rather than in every spec. REST, writes and realtime hold in both tiers.
  *
- * Tier 1 (supatype_mask): nothing is open (T1-N1 was fixed by H9). Tier 2 (the api views, as shipped): every signed-in caller is refused outright
- * (A3-N3), and service_role is masked like a stranger (T2-N5).
+ * GraphQL under this suite's tier 2 is still wrong for end users (T2-N6): the CLI decides the
+ * GraphQL search path from the tier it derives from the config (`supatype/postgres` means tier 1),
+ * not from an explicit `schema.api_schemas`, so a stack whose database lost `supatype_mask` keeps
+ * reflecting `public`. service_role sees the base tables, which is everything, as it should.
  */
-export function restReadDefects(tier: Tier, caller: Caller): DefectId[] {
-  if (tier === 1) return []
-  if (caller === "service_role") return ["T2-N5"]
-  return caller === "anon" ? [] : ["A3-N3"]
-}
-
-/** Tier 2's GraphQL reflects no model for an end user (T2-N6); service_role sees the base tables. */
 export function graphqlDefects(tier: Tier, caller: Caller): DefectId[] {
   if (tier === 1) return []
   return caller === "anon" || caller === "service_role" ? [] : ["T2-N6"]
-}
-
-/**
- * Updates through a tier-2 view: refused outright today (A3-N3), and once that is fixed the stale
- * mask labels on supatype/postgres still fail them (T2-N7).
- */
-export function tier2UpdateDefects(): DefectId[] {
-  return ["A3-N3", "T2-N7"]
 }
