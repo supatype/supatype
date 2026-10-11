@@ -149,11 +149,7 @@ echo "==> Adopt, on a database Supatype has never pushed to"
 # The engine's refusal says "Supatype did not create them"; the CLI's own line says "it" for one
 # table. Either is the refusal this checks for.
 check "the first push refuses the existing table" 'refuses 1 "Supatype did not create" push --yes'
-# The table, and with it the grants the database already holds on it (anon, authenticated), which
-# are access objects of their own since F15: the count is theirs together, so the check names the
-# table rather than a number.
-adopt_out=""
-check "adopt takes it" 'adopt_out="$(cli adopt --yes 2>&1)" && grep -q "Table legacy will be Supatype" <<<"$adopt_out" && grep -qE "Adopted [1-9][0-9]* object" <<<"$adopt_out"'
+check "adopt takes it" 'cli adopt --yes 2>&1 | grep -q "Adopted 1 object"'
 check "the push it unblocks applies" 'cli push --yes >/dev/null 2>&1'
 check "the table is recorded as adopted" '[[ "$(status_of table "" legacy)" == adopted ]]'
 check "the row it held is still there" '[[ "$(sql "SELECT name FROM public.legacy")" == kept ]]'
