@@ -612,11 +612,8 @@ function roleRemedy(missing: readonly string[], authenticatorPassword?: string):
         ? `'${authenticatorPassword.replace(/'/g, "''")}'`
         : `'${PASSWORD_PLACEHOLDER}'`
       lines.push(`CREATE ROLE authenticator LOGIN NOINHERIT PASSWORD ${pw};`)
-    } else if (role === "service_role") {
-      // BYPASSRLS is what makes seeds, migrations and server-side code work.
-      lines.push(`CREATE ROLE service_role NOLOGIN NOINHERIT BYPASSRLS;`)
     } else {
-      lines.push(`CREATE ROLE ${ident(role)} NOLOGIN NOINHERIT;`)
+      lines.push(apiRoleSql(role))
     }
   }
   if (missing.includes("authenticator") || missing.length > 0) {
@@ -625,6 +622,13 @@ function roleRemedy(missing: readonly string[], authenticatorPassword?: string):
     }
   }
   return lines.join("\n")
+}
+
+/** The statement that creates one of the API roles PostgREST switches to. */
+export function apiRoleSql(role: string): string {
+  // BYPASSRLS is what makes seeds, migrations and server-side code work.
+  if (role === "service_role") return "CREATE ROLE service_role NOLOGIN NOINHERIT BYPASSRLS;"
+  return `CREATE ROLE ${ident(role)} NOLOGIN NOINHERIT;`
 }
 
 /**

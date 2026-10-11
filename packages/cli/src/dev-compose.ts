@@ -24,6 +24,7 @@ import { syncManifestHooks, writeHooksModule } from "./model-hooks.js"
 import { syncRowCacheEnv } from "./model-cache.js"
 import { anonKeyEnvUpdates } from "./commands/keys.js"
 import { devApiKeys } from "./dev-api-keys.js"
+import { astRelatesToAuthUsers } from "./byo-preflight.js"
 import { ensureDevDbPort, ensureKongPort } from "./dev-ports.js"
 import { handleComposeProjectRename } from "./compose-rename.js"
 import { recoverStaleDevSession, writeDevSessionLock } from "./dev-session-lock.js"
@@ -866,7 +867,7 @@ async function runComposeSchemaPush(
     }
     _lastPushedAst = astJson
     _lastFailedAst = null
-    if (astHasSystemAuthRelation(ast)) {
+    if (astRelatesToAuthUsers(ast)) {
       grantAuthSchemaAccess(paths, cwd, composeProject)
     }
     console.log("[supatype] Schema applied.")
@@ -898,7 +899,7 @@ async function runComposeSchemaPush(
   _lastPushedAst = astJson
   _lastFailedAst = null
 
-  if (astHasSystemAuthRelation(ast)) {
+  if (astRelatesToAuthUsers(ast)) {
     grantAuthSchemaAccess(paths, cwd, composeProject)
   }
 }
@@ -1625,18 +1626,6 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
 
   // Until Ctrl+C or a signal: the shutdown hook takes the stack down and exits.
   await waitForDevShutdown()
-}
-
-function astHasSystemAuthRelation(ast: unknown): boolean {
-  const obj = ast as { models?: Array<{ fields?: Record<string, { kind?: string; target?: string }> }> }
-  if (!obj?.models) return false
-  for (const model of obj.models) {
-    if (!model.fields) continue
-    for (const field of Object.values(model.fields)) {
-      if (field.kind === "relation" && field.target === "supatype:user") return true
-    }
-  }
-  return false
 }
 
 /**
