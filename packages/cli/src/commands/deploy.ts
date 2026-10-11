@@ -31,6 +31,7 @@ import { spawnSync } from "node:child_process"
 import { error, info, plain, step, warn } from "../ui/messages.js"
 import { withSpinner } from "../ui/progress.js"
 import { printPushWarnings, type EnginePushResult } from "../engine-push-output.js"
+import { explainingRefusal } from "../push-refusal.js"
 
 /**
  * Plan 3.5: a deploy never asks, so access changed outside Supatype is put back only with
@@ -98,7 +99,7 @@ export function registerDeploy(program: Command): void {
         !opts.appOnly &&
         !opts.skipBuild
       ) {
-        await deploySchemaToLinkedProject(cwd, envName, { overwriteDrift })
+        await explainingRefusal("supatype deploy", () => deploySchemaToLinkedProject(cwd, envName, { overwriteDrift }))
         schemaDone = true
         if (opts.schemaOnly) {
           return
@@ -129,13 +130,15 @@ export function registerDeploy(program: Command): void {
 
           if (changes.length > 0) {
             info(`${changes.length} schema change(s) to apply.`)
-            const result = await engineRequest<EnginePushResult>("/push", {
-              ast,
-              database_url: resolveHostDatabaseUrl(cwd, config, { allowDerived: true }).dsn,
-              schema: "public",
-              force: true,
-              ...(overwriteDrift && { overwrite_drift: true }),
-            })
+            const result = await explainingRefusal("supatype deploy --local", () =>
+              engineRequest<EnginePushResult>("/push", {
+                ast,
+                database_url: resolveHostDatabaseUrl(cwd, config, { allowDerived: true }).dsn,
+                schema: "public",
+                force: true,
+                ...(overwriteDrift && { overwrite_drift: true }),
+              }),
+            )
             info("Schema changes applied.")
             printPushWarnings(result)
           } else {
@@ -143,7 +146,9 @@ export function registerDeploy(program: Command): void {
           }
         } else if (link) {
           step("Schema Push (linked)")
-          await pushSchemaToLinkedProject(cwd, { force: opts.yes ?? true, env: envName, overwriteDrift })
+          await explainingRefusal("supatype deploy", () =>
+            pushSchemaToLinkedProject(cwd, { force: opts.yes ?? true, env: envName, overwriteDrift }),
+          )
         } else {
           error(
             "Not linked to Supatype Cloud. Run: supatype link\n" +

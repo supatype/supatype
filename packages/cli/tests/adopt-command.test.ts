@@ -228,4 +228,50 @@ describe("supatype adopt", () => {
     // Adopting none is a feature of its own: an engine without it would adopt every conflict.
     expect(asked()).toEqual(["release", "adopt_none"])
   })
+
+  // C01: `--release X --yes` adopted every conflict there was besides releasing X.
+  it.each([
+    ["--release", "policy:post.post_select"],
+    ["--reclaim", "policy:post.post_select"],
+  ])("%s with --yes changes only the object it names: no conflict is adopted", async (flag, object) => {
+    targetSchemaAdopt.mockImplementation(async (_t, _a, opts: { yes: boolean; keys?: string[] }) => ({
+      status: "adopted",
+      adopt: opts.keys === undefined ? TWO_CONFLICTS.adopt : [],
+    }))
+    await adopt("--yes", flag, object)
+    expect(targetSchemaAdopt.mock.calls.map((call) => [call[2].yes, call[2].keys])).toEqual([[true, []]])
+    expect(asked()).toContain("adopt_none")
+  })
+
+  it("--key with --release adopts only the keys", async () => {
+    await adopt("--yes", "--release", "policy:post.post_select", "--key", "table:widget")
+    expect(targetSchemaAdopt.mock.calls.at(-1)?.[2].keys).toEqual(["table:widget"])
+  })
+
+  it("--adopt-none adopts no conflict, asking the target for adopt_none first", async () => {
+    await adopt("--yes", "--adopt-none")
+    expect(targetSchemaAdopt.mock.calls.map((call) => [call[2].yes, call[2].keys])).toEqual([[true, []]])
+    expect(asked()).toEqual(["adopt_none"])
+  })
+
+  it("refuses --adopt-none with --key, which contradict each other, before sending anything", async () => {
+    await expect(adopt("--yes", "--adopt-none", "--key", "table:widget")).rejects.toThrow(/--adopt-none.*--key/)
+    expect(targetSchemaAdopt).not.toHaveBeenCalled()
+  })
+
+  it("previews only the named objects for --release without --key, and applies adopting none", async () => {
+    vi.mocked(isInteractive).mockReturnValue(true)
+    confirmMock.mockResolvedValue(true)
+    targetSchemaAdopt.mockImplementation(async (_t, _a, opts: { yes: boolean }) => ({
+      status: opts.yes ? "adopted" : "preview",
+      adopt: opts.yes ? [] : TWO_CONFLICTS.adopt,
+      release: [{ kind: "policy", table: "post", name: "post_select", message: "Policy post.post_select will be left alone" }],
+    }))
+    const stdout = vi.mocked(console.log)
+    await adopt("--release", "policy:post.post_select")
+    const printed = stdout.mock.calls.flat().join("\n")
+    expect(printed).toContain("Policy post.post_select will be left alone")
+    expect(printed).not.toContain("Table widget")
+    expect(targetSchemaAdopt.mock.calls.at(-1)?.[2].keys).toEqual([])
+  })
 })

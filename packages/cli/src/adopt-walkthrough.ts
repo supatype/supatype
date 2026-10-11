@@ -11,46 +11,11 @@
  * adoption would take, and asks twice before taking it. Anywhere else it never adopts, because
  * agreeing to a push is not agreeing to take ownership of tables, and it prints the command instead.
  */
-import { ENGINE_BUSY, EngineError, type AdoptOutcome, type DoctorItem } from "./engine-client.js"
-import { TargetApiError } from "./target-client.js"
+import type { AdoptOutcome, DoctorItem } from "./engine-client.js"
+import { classifyPushRefusal, engineOutputOf, unmanagedTables } from "./push-refusal.js"
 import { confirm } from "./ui/confirm.js"
 import { isInteractive } from "./ui/interactive.js"
 import { plain, warn } from "./ui/messages.js"
-
-/** The `reason` the engine gives this refusal in its JSON output and its HTTP response. */
-export const UNMANAGED_MODEL_TABLES = "unmanaged_model_tables"
-
-/** An engine older than the JSON refusal says this and nothing machine-readable. */
-const LEGACY_WORDING = /declares model\(s\) for table\(s\) Supatype does not manage: ([^\n]+?)\.(?:\n|$)/i
-
-/**
- * The tables an unmanaged-tables refusal names, or null when the output is not that refusal.
- *
- * Read from the engine's JSON line first. The wording is only a fallback for an engine image that
- * predates it, which is what a pinned version can still be.
- */
-export function unmanagedTables(output: string): string[] | null {
-  for (const line of output.split(/\r?\n/)) {
-    const candidate = line.trim()
-    if (!candidate.startsWith("{")) continue
-    try {
-      const parsed = JSON.parse(candidate) as { reason?: unknown; tables?: unknown }
-      if (parsed.reason === UNMANAGED_MODEL_TABLES && Array.isArray(parsed.tables)) {
-        return parsed.tables.filter((t): t is string => typeof t === "string")
-      }
-    } catch {
-      /* not this line */
-    }
-  }
-  const legacy = LEGACY_WORDING.exec(output)
-  return legacy?.[1] ? legacy[1].split(",").map((t) => t.trim()).filter((t) => t !== "") : null
-}
-
-/** Everything a failed push printed: the engine's stdout carries the JSON refusal. */
-export function engineOutputOf(err: unknown): string {
-  if (err instanceof EngineError) return `${err.message}\n${err.stdout}`
-  return err instanceof Error ? err.message : String(err)
-}
 
 /** What adopting would take, one line per object, whichever engine answered. */
 export function adoptionLines(outcome: AdoptOutcome): string[] {
@@ -131,15 +96,11 @@ export async function offerAdoption(
 }
 
 /**
- * Whether `err` is the engine refusing because another push, adopt or rebaseline holds its lock:
- * nothing was written, and trying again is the answer. From the binary, or a server's 409.
+ * Whether `err` is the engine refusing because another writer holds its lock: nothing was written,
+ * and trying again is the answer. From the binary, a server's 409, or the docker path's output.
  */
 export function isEngineBusy(err: unknown): boolean {
-  if (err instanceof EngineError) return err.reason === ENGINE_BUSY
-  if (err instanceof TargetApiError) {
-    return err.status === 409 && (err.code === ENGINE_BUSY || /another push, adopt or rebaseline is running/i.test(err.message))
-  }
-  return false
+  return classifyPushRefusal(err)?.kind === "engine-busy"
 }
 
 /** What the CLI says when adopt met a busy engine. */

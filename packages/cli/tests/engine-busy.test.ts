@@ -32,6 +32,10 @@ describe("isEngineBusy()", () => {
     expect(isEngineBusy(new EngineError("Engine /adopt failed (exit 1): x", "/adopt", 1))).toBe(false)
     expect(isEngineBusy(new TargetApiError("another push, adopt or rebaseline is running", 409, "engine_busy"))).toBe(true)
     expect(isEngineBusy(new TargetApiError("conflict", 409))).toBe(false)
-    expect(isEngineBusy(new Error("another push, adopt or rebaseline is running"))).toBe(false)
+  })
+
+  it("reads the docker path's plain error by its wording, which is all it has (C07)", () => {
+    expect(isEngineBusy(new Error("another push, adopt or rebaseline is running"))).toBe(true)
+    expect(isEngineBusy(new Error("Error: relation does not exist"))).toBe(false)
   })
 })

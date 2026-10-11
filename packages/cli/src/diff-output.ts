@@ -1,4 +1,5 @@
 import type { DiffResult, Operation, ReconcileAction } from "./engine-client.js"
+import { findJsonLine } from "./engine-json-line.js"
 
 type Risk = NonNullable<Operation["risk"]>
 
@@ -239,17 +240,8 @@ export interface DriftedObject {
  * line the engine binary prints on stdout (or a server's JSON error body).
  */
 export function securityDriftRefusal(output: string): DriftedObject[] | null {
-  for (const line of output.split(/\r?\n/)) {
-    const candidate = line.trim()
-    if (!candidate.startsWith("{")) continue
-    try {
-      const parsed = JSON.parse(candidate) as { reason?: unknown; objects?: unknown }
-      if (parsed.reason === SECURITY_DRIFT && Array.isArray(parsed.objects)) return parsed.objects as DriftedObject[]
-    } catch {
-      /* not this line */
-    }
-  }
-  return null
+  const line = findJsonLine(output, (value) => value["reason"] === SECURITY_DRIFT && Array.isArray(value["objects"]))
+  return line === undefined ? null : (line["objects"] as DriftedObject[])
 }
 
 /** Each object a refusal names, with what Supatype recorded beside what the database holds now. */

@@ -22,9 +22,8 @@ const answers: boolean[] = []
 vi.mock("../src/ui/confirm.js", () => ({ confirm: vi.fn(async () => answers.shift() ?? false) }))
 
 const { EngineError } = await import("../src/engine-client.js")
-const { engineOutputOf, offerAdoption, pushOfferingAdoption, unmanagedTables } = await import(
-  "../src/adopt-walkthrough.js"
-)
+const { offerAdoption, pushOfferingAdoption } = await import("../src/adopt-walkthrough.js")
+const { engineOutputOf, unmanagedTables } = await import("../src/push-refusal.js")
 
 const REFUSAL = '{"status":"refused","reason":"unmanaged_model_tables","tables":["orders","items"]}'
 const POLICY = { yes: false, retry: "supatype push" }

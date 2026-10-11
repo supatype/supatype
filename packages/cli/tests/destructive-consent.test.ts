@@ -14,12 +14,10 @@ vi.mock("../src/ui/messages.js", () => ({
   warn: (line: string) => lines.push(`warn: ${line}`),
 }))
 
-const {
-  DESTRUCTIVE_CHANGE_HINT,
-  DestructiveChangeRefused,
-  destructiveRefusal,
-  pushConsentingToDestructive,
-} = await import("../src/destructive-consent.js")
+const { DESTRUCTIVE_CHANGE_HINT, DestructiveChangeRefused, pushConsentingToDestructive } = await import(
+  "../src/destructive-consent.js"
+)
+const { destructiveRefusal } = await import("../src/push-refusal.js")
 
 /** What the engine binary prints when a push without `--force` would drop something. */
 const REFUSAL_TEXT = "Error: 1 destructive operation(s) detected. Use --force to proceed."

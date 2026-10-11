@@ -21,6 +21,10 @@ vi.mock("../src/ui/messages.js", () => ({
 }))
 
 const { exitInitialPushFailed, pushInitialSchema } = await import("../src/dev-initial-push.js")
+const { classifyRefusalOutput } = await import("../src/push-refusal.js")
+
+/** A refused first push, as `pushInitialSchema` would return it for `message`. */
+const refused = (message: string) => ({ kind: "refused" as const, refusal: classifyRefusalOutput(message), message })
 
 const UNMANAGED = [
   "Error: Your schema declares model(s) for table(s) Supatype does not manage: public.orders.",
@@ -62,7 +66,7 @@ describe("an engine refusal on the first attempt", () => {
 
     const outcome = await pushInitialSchema(s)
 
-    expect(outcome).toEqual({ kind: "refused", reason: "unmanaged-tables", message: UNMANAGED })
+    expect(outcome).toEqual({ kind: "refused", refusal: expect.objectContaining({ kind: "unmanaged-tables" }), message: UNMANAGED })
     expect(s.push).toHaveBeenCalledTimes(1)
     expect(s.recoverDatabase).not.toHaveBeenCalled()
     expect(s.sleep).not.toHaveBeenCalled()
@@ -76,7 +80,7 @@ describe("an engine refusal on the first attempt", () => {
 
     const outcome = await pushInitialSchema(s)
 
-    expect(outcome).toMatchObject({ kind: "refused", reason: "unmanaged-tables" })
+    expect(outcome).toMatchObject({ kind: "refused", refusal: { kind: "unmanaged-tables" } })
   })
 
   it("names a change that would drop data as its own refusal, so dev can keep running", async () => {
@@ -84,7 +88,7 @@ describe("an engine refusal on the first attempt", () => {
 
     const outcome = await pushInitialSchema(s)
 
-    expect(outcome).toEqual({ kind: "refused", reason: "destructive", message: DESTRUCTIVE })
+    expect(outcome).toEqual({ kind: "refused", refusal: expect.objectContaining({ kind: "destructive" }), message: DESTRUCTIVE })
     expect(s.push).toHaveBeenCalledTimes(1)
     expect(s.recoverDatabase).not.toHaveBeenCalled()
     // A refusal the person was told about is not a failure to diagnose from the database logs.
@@ -97,7 +101,7 @@ describe("an engine refusal on the first attempt", () => {
 
     const outcome = await pushInitialSchema(s)
 
-    expect(outcome).toEqual({ kind: "refused", reason: "engine", message: other })
+    expect(outcome).toEqual({ kind: "refused", refusal: null, message: other })
     expect(s.push).toHaveBeenCalledTimes(1)
     expect(s.recoverDatabase).not.toHaveBeenCalled()
   })
@@ -108,12 +112,12 @@ describe("an engine refusal on the first attempt", () => {
     })
 
     expect(() =>
-      exitInitialPushFailed({ kind: "refused", reason: "unmanaged-tables", message: UNMANAGED }),
+      exitInitialPushFailed(refused(UNMANAGED)),
     ).toThrow("exit 1")
 
     expect(exit).toHaveBeenCalledWith(1)
     const out = lines.join("\n")
-    expect(out).toContain("Supatype does not manage: public.orders")
+    expect(out).toContain("Supatype did not create them: public.orders")
     expect(out).toContain("supatype adopt")
     expect(out).toContain("left as it was")
   })
@@ -143,7 +147,7 @@ describe("an image Docker could not pull", () => {
 
     const outcome = await pushInitialSchema(s)
 
-    expect(outcome).toEqual({ kind: "refused", reason: "image-pull", message })
+    expect(outcome).toEqual({ kind: "refused", refusal: expect.objectContaining({ kind: "image-pull" }), message })
     expect(s.push).toHaveBeenCalledTimes(1)
     // "connection refused" reads as Postgres starting up, but restarting Postgres pulls nothing.
     expect(s.recoverDatabase).not.toHaveBeenCalled()
@@ -153,7 +157,7 @@ describe("an image Docker could not pull", () => {
     vi.spyOn(process, "exit").mockImplementation((code) => {
       throw new Error(`exit ${String(code)}`)
     })
-    expect(() => exitInitialPushFailed({ kind: "refused", reason: "image-pull", message })).toThrow(
+    expect(() => exitInitialPushFailed(refused(message))).toThrow(
       "exit 1",
     )
     return lines.join("\n")

@@ -3,6 +3,7 @@
  */
 
 import { printDiffWarnings } from "./diff-output.js"
+import { findJsonLine } from "./engine-json-line.js"
 
 /**
  * Print what a push warned about, less anything the diff before it already showed.
@@ -33,15 +34,8 @@ export function parseEngineJsonOutput<T>(output: string): T | null {
   const trimmed = output.trim()
   if (!trimmed) return null
 
-  for (const line of trimmed.split(/\r?\n/)) {
-    const candidate = line.trim()
-    if (!candidate.startsWith("{") || !candidate.endsWith("}")) continue
-    try {
-      return JSON.parse(candidate) as T
-    } catch {
-      /* try next line */
-    }
-  }
+  const line = findJsonLine(trimmed)
+  if (line !== undefined) return line as T
 
   if (trimmed.startsWith("{")) {
     try {
