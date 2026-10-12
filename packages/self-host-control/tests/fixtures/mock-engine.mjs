@@ -49,7 +49,7 @@ if (cmd === "migrations" && args.includes("--name")) {
     console.error("error: unrecognized subcommand 'capabilities'")
     process.exit(2)
   }
-  console.log(JSON.stringify({ features: ["adopt_keys", "adopt_none", "release", "reclaim", "rebaseline", "accept_access_drift", "overwrite_drift", "engine_busy"] }))
+  console.log(JSON.stringify({ features: ["adopt_keys", "adopt_none", "release", "reclaim", "rebaseline", "accept_access_drift", "overwrite_drift", "engine_busy", ...(process.env["MOCK_ENGINE_NO_AUDIT"] === "1" ? [] : ["push_audit"])] }))
 } else if (process.env["MOCK_ENGINE_REFUSE"] === "security_drift") {
   console.log(JSON.stringify({
     status: "refused",

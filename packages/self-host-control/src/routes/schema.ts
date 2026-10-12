@@ -2,6 +2,7 @@ import type { ServerResponse } from "node:http"
 import { route, sendJson } from "../http.js"
 import type { RouteHandler } from "../http.js"
 import { assertProject } from "../project.js"
+import { PUSH_IDENTITY } from "../push-identity.js"
 import {
   databaseUrlFromEnv,
   engineRefusal,
@@ -66,6 +67,8 @@ export function registerSchemaRoutes(
       overwrite_drift?: boolean
       /** The spelling a CLI from before the capabilities check sent. */
       overwriteDrift?: boolean
+      /** Where the push comes from (a host, a CI run): context, kept as the client sent it. */
+      pushed_from?: unknown
     }
     const db = databaseUrlFromEnv()
     await answering(ctx.res, () =>
@@ -75,6 +78,13 @@ export function registerSchemaRoutes(
         schemaSourcesGzBase64: body.schemaSources?.dataBase64,
         schemaSourcesManifest: body.schemaSources?.manifest,
         overwriteDrift: body.overwrite_drift === true || body.overwriteDrift === true,
+        // The author is who this control plane authenticated: `pushed_by` and
+        // `pushed_by_verified` in the body are the client's claim, and are not read.
+        audit: {
+          ...PUSH_IDENTITY,
+          pushedVia: "self-host",
+          ...(typeof body.pushed_from === "string" && body.pushed_from !== "" && { pushedFrom: body.pushed_from }),
+        },
       }),
     )
   })
