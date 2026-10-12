@@ -26,6 +26,7 @@ import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import { useProjectProxy } from "../hooks/useProjectProxy.js"
+import { isMissingTable } from "../lib/database-error.js"
 import { safeParseJson } from "../lib/json.js"
 
 // --- Types ---
@@ -55,9 +56,12 @@ export interface SeedRunRow extends SeedRun {
   drifted: boolean
 }
 
+/** The seed ledger, as Postgres names it in a missing-relation error. */
+const SEEDS_TABLE = "_supatype.seeds"
+
 export const SEEDS_LIST_SQL = `SELECT id, file, ir_hash, schema_fingerprint, applied_at::TEXT,
        duration_ms, status, rows_written, error_message, engine_version
- FROM _supatype.seeds ORDER BY applied_at DESC, id DESC`
+ FROM ${SEEDS_TABLE} ORDER BY applied_at DESC, id DESC`
 
 const statusVariant: Record<SeedStatus, "green" | "red"> = {
   committed: "green",
@@ -148,6 +152,8 @@ export interface SeedHistoryViewProps {
   runs: SeedRunRow[] | null
   loading: boolean
   error: string | null
+  /** The SQLSTATE of `error`, when the proxy passed one on. */
+  errorCode?: string | null
   onRefresh: () => void
 }
 
@@ -235,6 +241,7 @@ export function SeedHistoryView({
   runs,
   loading,
   error,
+  errorCode = null,
   onRefresh,
 }: SeedHistoryViewProps): React.ReactElement {
   if (loading) {
@@ -247,7 +254,7 @@ export function SeedHistoryView({
 
   // The ledger table is created alongside `_supatype.migrations`, so its absence means this
   // database predates seeding rather than anything being broken.
-  if (error !== null && !error.includes("does not exist")) {
+  if (error !== null && !isMissingTable({ message: error, code: errorCode }, SEEDS_TABLE)) {
     return <ErrorBanner message={error} onRetry={onRefresh} />
   }
 
@@ -269,7 +276,7 @@ export function SeedHistoryView({
 export function SeedHistory(): React.ReactElement {
   const proxy = useProjectProxy()
 
-  const { data, loading, error, refetch } = useApiQuery(async () => {
+  const { data, loading, error, failure, refetch } = useApiQuery(async () => {
     const result = await proxy.sql(SEEDS_LIST_SQL)
     return result.rows.map(mapSeedRow)
   }, [proxy])
@@ -281,6 +288,7 @@ export function SeedHistory(): React.ReactElement {
       runs={runs}
       loading={loading}
       error={error}
+      errorCode={failure?.code ?? null}
       onRefresh={refetch}
     />
   )

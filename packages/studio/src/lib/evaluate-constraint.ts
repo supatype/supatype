@@ -1,5 +1,6 @@
 import type { FieldConfig } from "../config.js"
 import { itemCountOf, lengthOf } from "./measure-value.js"
+import { escapeRegExp } from "./utils.js"
 
 /**
  * Model constraints evaluated in the browser, against the same nodes the database compiled.
@@ -90,7 +91,7 @@ function orderable(value: Comparable): number | string {
 function compare(op: string, left: Comparable, right: Comparable): boolean | null {
   if (op === "like") {
     // `LIKE` is not a regex: `%` and `_` are its only wildcards.
-    const pattern = String(right).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    const pattern = escapeRegExp(String(right))
     const source = `^${pattern.replace(/%/g, ".*").replace(/_/g, ".")}$`
     return new RegExp(source).test(String(left))
   }

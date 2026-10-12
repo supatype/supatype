@@ -18,3 +18,8 @@ export function formatTimestamp(value: string): string {
   const at = new Date(value)
   return Number.isNaN(at.getTime()) ? value : at.toLocaleString()
 }
+
+/** `text` as a regular expression that matches it literally. */
+export function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}

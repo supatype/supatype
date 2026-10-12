@@ -157,6 +157,18 @@ const STATIC_SECTIONS: Record<string, SectionDef> = {
       },
     ],
   },
+  realtime: {
+    title: "Realtime",
+    groups: [
+      {
+        label: "Coming Soon",
+        items: [
+          { label: "Inspector", href: "/realtime/inspector", unavailable: { note: "The Realtime Inspector is coming soon" } },
+          { label: "Settings",  href: "/realtime/settings", unavailable: { note: "Realtime settings are coming soon" } },
+        ],
+      },
+    ],
+  },
 }
 
 // ─── Section detection ────────────────────────────────────────────────────────
@@ -176,6 +188,7 @@ function getSectionId(path: string): string | null {
   if (path.startsWith("/observability")) return "observability"
   if (path.startsWith("/ai")) return "ai"
   if (path.startsWith("/edge-functions")) return "functions"
+  if (path === "/realtime" || path.startsWith("/realtime/")) return "realtime"
   return null
 }
 
