@@ -4,11 +4,12 @@ import type { WalChange } from "./types.js"
 import {
   CatalogMismatch,
   FieldMaskCatalog,
-  maskRecord,
+  maskRecordWithReport,
   quotePredicateRef,
   type MaskingTier,
   type PredicateRef,
   type ReadMasks,
+  type RedactedColumns,
 } from "./field-mask.js"
 import { TableCatalog, type TableShape } from "./table-catalog.js"
 import { logDrop, sqlState, type DropSeverity } from "./drop-log.js"
@@ -26,12 +27,26 @@ function relationOf(change: WalChange): string {
 }
 
 /** Why a change was withheld from a subscriber. */
-interface Refusal {
+export interface Refusal {
   severity: DropSeverity
   reason: string
 }
 
-type Verdict = { send: WalChange } | Refusal
+/** A change to send and which of its columns were masked on the way. */
+interface Sendable {
+  send: WalChange
+  redacted: RedactedColumns
+}
+
+type Verdict = Sendable | Refusal
+
+/** What one subscriber gets of one change: the masked change, or why it gets nothing. */
+export type DeliveryVerdict = Sendable | { refused: Refusal }
+
+const NOTHING_REDACTED: RedactedColumns = { old: [], new: [] }
+
+/** At most this many connections judge changes for inspectors, so they never crowd out subscribers. */
+const INSPECT_POOL_MAX = 2
 
 const denied = (reason: string): Refusal => ({ severity: "denied", reason })
 const failed = (reason: string): Refusal => ({ severity: "failed", reason })
@@ -52,12 +67,14 @@ interface TableRules {
  */
 export class RlsFilter {
   private pool: pg.Pool
+  /** The inspector's own connections, opened on first use: see {@link inspectAs}. */
+  private inspectPool: pg.Pool | null = null
   private fieldMasks: FieldMaskCatalog
   private tables: TableCatalog
 
   /** `logLevel` decides whether a change the rules withheld is logged (see `drop-log.ts`). */
   constructor(
-    databaseUrl: string,
+    private databaseUrl: string,
     private logLevel: LogLevel = "info",
   ) {
     this.pool = new Pool({
@@ -103,34 +120,71 @@ export class RlsFilter {
     claims: JwtClaims | null,
     change: WalChange,
   ): Promise<WalChange | null> {
-    const verdict = await this.judge(claims, change)
+    const verdict = await this.judgeForDelivery(claims, change)
     if ("send" in verdict) return verdict.send
+    this.logRefusal(claims, change, verdict.refused)
+    return null
+  }
+
+  /**
+   * {@link visibleChange} without the logging, and with the detail it drops: which columns were
+   * masked, or why nothing is sent. The delivery path logs the refusal itself, through
+   * {@link logRefusal}, so the drop log reads exactly as it did.
+   */
+  async judgeForDelivery(claims: JwtClaims | null, change: WalChange): Promise<DeliveryVerdict> {
+    return asDelivery(await this.judge(this.pool, claims, change))
+  }
+
+  /**
+   * The change as `claims` would receive it, for the inspector's `viewer` view.
+   *
+   * The same judgement a subscriber gets, on a separate pool of at most two connections so an
+   * inspector never competes with delivery for the subscriber pool, and never logged: nothing was
+   * withheld from anybody, so a drop line would report a drop that did not happen.
+   */
+  async inspectAs(claims: JwtClaims | null, change: WalChange): Promise<DeliveryVerdict> {
+    return asDelivery(await this.judge(this.inspectorPool(), claims, change))
+  }
+
+  /** One drop-log line for a change withheld from a subscriber (see `drop-log.ts`). */
+  logRefusal(claims: JwtClaims | null, change: WalChange, refusal: Refusal): void {
     logDrop(
       {
         schema: change.schema,
         table: change.table,
         event: change.event,
         role: claims ? (claims.role ?? "authenticated") : "none",
-        reason: verdict.reason,
+        reason: refusal.reason,
       },
-      verdict.severity,
+      refusal.severity,
       this.logLevel,
     )
-    return null
   }
 
-  private async judge(claims: JwtClaims | null, change: WalChange): Promise<Verdict> {
+  private inspectorPool(): pg.Pool {
+    if (this.inspectPool) return this.inspectPool
+    const pool = new Pool({ connectionString: this.databaseUrl, max: INSPECT_POOL_MAX })
+    pool.on("error", (err) => {
+      console.error("[realtime] inspector pool error:", err)
+    })
+    this.inspectPool = pool
+    return pool
+  }
+
+  private async judge(pool: pg.Pool, claims: JwtClaims | null, change: WalChange): Promise<Verdict> {
     // Unauthenticated clients can't see anything in secure mode
     if (!claims) return denied("unauthenticated subscriber")
 
     // Service role bypasses RLS and is the role `supatype_mask` exempts, so tier 1's REST serves it
     // every column too. Tier 2's views are being brought to the same exemption (F63), so this
     // holds for both tiers.
-    if (claims.role === "service_role") return { send: await this.wholeForService(change) }
+    if (claims.role === "service_role") {
+      return { send: await this.wholeForService(change), redacted: NOTHING_REDACTED }
+    }
 
     const rules = await this.rulesFor(change)
     if ("reason" in rules) return rules
-    return this.judgeAsSubscriber(claims, withWholeOldRow(change, rules.shape), rules)
+    return this.judgeAsSubscriber(pool, claims, withWholeOldRow(change, rules.shape), rules)
   }
 
   /**
@@ -171,22 +225,24 @@ export class RlsFilter {
    * change against one snapshot with one set of claims.
    */
   private async judgeAsSubscriber(
+    pool: pg.Pool,
     claims: JwtClaims,
     change: WalChange,
     rules: TableRules,
   ): Promise<Verdict> {
     let client: pg.PoolClient
     try {
-      client = await this.pool.connect()
+      client = await pool.connect()
     } catch (err) {
       return failed(`no database connection (SQLSTATE ${sqlState(err)})`)
     }
     try {
       await this.beginAs(client, claims)
       const refusal = await this.visibilityRefusal(client, change, rules)
-      const verdict: Verdict = refusal ?? {
-        send: rules.masks.size === 0 ? change : await this.applyMasks(client, change, rules.masks),
-      }
+      const verdict: Verdict = refusal ??
+        (rules.masks.size === 0
+          ? { send: change, redacted: NOTHING_REDACTED }
+          : await this.applyMasks(client, change, rules.masks))
       await client.query("COMMIT")
       return verdict
     } catch (err) {
@@ -338,10 +394,10 @@ export class RlsFilter {
     client: pg.PoolClient,
     change: WalChange,
     masks: ReadMasks,
-  ): Promise<WalChange> {
+  ): Promise<Sendable> {
     const columns = [...masks.keys()]
     const sides = sidesOf(change)
-    if (sides.length === 0) return change
+    if (sides.length === 0) return { send: change, redacted: NOTHING_REDACTED }
 
     // Columns whose label could not be parsed are masked without asking.
     const askable = columns.filter((column) => masks.get(column) != null)
@@ -349,10 +405,13 @@ export class RlsFilter {
       ? await this.readVerdicts(client, change, sides, askable, masks)
       : new Map<string, Map<string, boolean | null>>()
 
+    const masked = {
+      new: maskRecordWithReport(change.newRecord, columns, verdicts.get("new") ?? new Map()),
+      old: maskRecordWithReport(change.oldRecord, columns, verdicts.get("old") ?? new Map()),
+    }
     return {
-      ...change,
-      newRecord: maskRecord(change.newRecord, columns, verdicts.get("new") ?? new Map()),
-      oldRecord: maskRecord(change.oldRecord, columns, verdicts.get("old") ?? new Map()),
+      send: { ...change, newRecord: masked.new.record, oldRecord: masked.old.record },
+      redacted: { old: masked.old.redacted, new: masked.new.redacted },
     }
   }
 
@@ -391,8 +450,12 @@ export class RlsFilter {
   }
 
   async shutdown(): Promise<void> {
-    await this.pool.end()
+    await Promise.all([this.pool.end(), this.inspectPool?.end()])
   }
+}
+
+function asDelivery(verdict: Verdict): DeliveryVerdict {
+  return "send" in verdict ? verdict : { refused: verdict }
 }
 
 /**

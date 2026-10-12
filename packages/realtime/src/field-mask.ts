@@ -405,15 +405,61 @@ export function maskRecord(
   masked: Iterable<string>,
   verdicts: Map<string, boolean | null>,
 ): Record<string, unknown> | null {
-  if (!record) return record
+  return maskRecordWithReport(record, masked, verdicts).record
+}
+
+/**
+ * {@link maskRecord}, and which columns it nulled.
+ *
+ * A masked column reaches a subscriber as `null`, indistinguishable from a stored null. The
+ * inspector needs the difference to show "redacted" rather than a value nobody stored, so the
+ * masking step reports it; the frame a subscriber receives is unchanged.
+ */
+export function maskRecordWithReport(
+  record: Record<string, unknown> | null,
+  masked: Iterable<string>,
+  verdicts: Map<string, boolean | null>,
+): { record: Record<string, unknown> | null; redacted: string[] } {
+  if (!record) return { record, redacted: [] }
 
   let copy: Record<string, unknown> | null = null
+  const redacted: string[] = []
   for (const column of masked) {
     if (!(column in record)) continue
     if (verdicts.get(column) === true) continue
     copy ??= { ...record }
     copy[column] = null
+    redacted.push(column)
   }
 
-  return copy ?? record
+  return { record: copy ?? record, redacted }
+}
+
+/** The columns of each side of a change shown as null because they were masked or redacted. */
+export interface RedactedColumns {
+  old: string[]
+  new: string[]
+}
+
+/**
+ * Null every read-restricted column of a delivered change, whoever it was delivered to.
+ *
+ * The inspector's `redacted` view, for a viewer who may read rows but has no project identity to
+ * judge field rules as. `restricted` is the table's restricted columns; `"*"` in it is the catalog's
+ * "unknown", which redacts every column rather than guessing which ones are safe.
+ */
+export function redactRestricted(
+  sides: { old: Record<string, unknown> | null; new: Record<string, unknown> | null },
+  restricted: ReadonlySet<string>,
+): { oldRecord: Record<string, unknown> | null; newRecord: Record<string, unknown> | null; redacted: RedactedColumns } {
+  const nothingAllowed = new Map<string, boolean | null>()
+  const side = (record: Record<string, unknown> | null) =>
+    maskRecordWithReport(record, restricted.has("*") && record ? Object.keys(record) : restricted, nothingAllowed)
+  const oldSide = side(sides.old)
+  const newSide = side(sides.new)
+  return {
+    oldRecord: oldSide.record,
+    newRecord: newSide.record,
+    redacted: { old: oldSide.redacted, new: newSide.redacted },
+  }
 }

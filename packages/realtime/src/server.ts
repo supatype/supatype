@@ -6,6 +6,8 @@ import { verifyToken, type JwtClaims } from "./auth.js"
 import {
   ChannelManager,
   admitChannelAction,
+  boundedUserAgent,
+  parseClientParam,
   presenceKey,
   type ChannelAction,
   type ConnectedClient,
@@ -15,6 +17,9 @@ import { RealtimeUnsupportedError } from "./capability.js"
 import { RlsFilter } from "./rls.js"
 import { filterIsMaskSafe } from "./field-mask.js"
 import { matchesFilter } from "./filter-match.js"
+import { AdminServer } from "./admin/server.js"
+import { Tap, type ChangeRecord } from "./admin/tap.js"
+import type { BroadcastInput } from "./admin/broadcast.js"
 import type {
   ClientMessage,
   ServerMessage,
@@ -25,6 +30,35 @@ import type {
   PresenceTrackMessage,
   BroadcastMessage,
 } from "./types.js"
+
+/** What a server can be given instead of building its own, for embedders and tests. */
+export interface RealtimeServerDeps {
+  rlsFilter?: RlsFilter | undefined
+  /** The inspector's message tap; one is created when not given. */
+  tap?: Tap | undefined
+}
+
+/** One subscriber of one table, as the dispatch loop walks them. */
+interface SubscriberEntry {
+  clientId: string
+  client: ConnectedClient
+  subscription: Subscription
+}
+
+/** Schemas whose changes a shared instance never forwards: platform and service internals. */
+function isInternalSchema(schema: string): boolean {
+  return (
+    schema.endsWith("_auth") ||
+    schema.endsWith("_internal") ||
+    schema === "auth" ||
+    schema === "_supatype" ||
+    schema === "storage" ||
+    schema === "extensions" ||
+    schema.startsWith("pg_") ||
+    schema === "_platform" ||
+    schema === "cron"
+  )
+}
 
 /** Cached routing table entry for multi-tenant mode. */
 interface ProjectRoute {
@@ -41,6 +75,10 @@ export class RealtimeServer {
   private replication: ReplicationListener
   private rlsFilter: RlsFilter
   private httpServer: ReturnType<typeof createServer> | null = null
+  /** The inspector's internal admin API, when `adminPort` is set. */
+  private admin: AdminServer | null = null
+  /** The inspector's message tap. Inactive, and costing one boolean check, until a stream opens. */
+  private readonly tap: Tap
   /** The in-flight initial replication connection, so shutdown and tests can await it. */
   private replicationStartup: Promise<void> = Promise.resolve()
   /** Set by `stop()`, so a startup abandoned by the shutdown is not reported as a failure. */
@@ -50,8 +88,9 @@ export class RealtimeServer {
   private projectRoutes = new Map<string, ProjectRoute>()
   private routingCacheTimer: ReturnType<typeof setInterval> | null = null
 
-  constructor(env: RealtimeEnv) {
+  constructor(env: RealtimeEnv, deps: RealtimeServerDeps = {}) {
     this.env = env
+    this.tap = deps.tap ?? new Tap()
     this.channels = new ChannelManager()
     this.replication = new ReplicationListener({
       databaseUrl: env.databaseUrl,
@@ -59,7 +98,7 @@ export class RealtimeServer {
       publicationName: env.publicationName,
       pollInterval: env.replicationPollInterval,
     })
-    this.rlsFilter = new RlsFilter(env.databaseUrl, env.logLevel)
+    this.rlsFilter = deps.rlsFilter ?? new RlsFilter(env.databaseUrl, env.logLevel)
   }
 
   async start(): Promise<void> {
@@ -110,7 +149,7 @@ export class RealtimeServer {
 
     // Start logical replication
     this.replication.onChange((change) => {
-      void this.handleWalChange(change)
+      void this.dispatchChange(change)
     })
     // A push can add, change or remove a field rule, and those are read from security
     // labels and cached, as are table shapes (keys, columns, predicates). Re-read them rather
@@ -130,6 +169,7 @@ export class RealtimeServer {
         resolve()
       })
     })
+    await this.startAdmin()
 
     this.replicationStartup = this.replication.start().catch((err) => {
       // A database that cannot do logical decoding is already reported by the listener, and the
@@ -144,6 +184,23 @@ export class RealtimeServer {
     })
   }
 
+  /** The admin listener, on its own port and only when one is configured. */
+  private async startAdmin(): Promise<void> {
+    const adminPort = this.env.adminPort ?? null
+    if (adminPort === null) return
+    this.admin = new AdminServer({
+      channels: this.channels,
+      tap: this.tap,
+      rules: this.rlsFilter,
+      service: () => ({ ready: this.replication.isConnected(), reason: this.replication.unsupportedReason() }),
+      connectionLimit: (projectRef) => this.connectionLimitFor(projectRef),
+      secretFor: (projectRef) => this.jwtSecretFor(projectRef),
+      multiTenant: this.env.multiTenant,
+      broadcast: (input, projectRef) => this.studioBroadcast(input, projectRef),
+    })
+    await this.admin.start(adminPort)
+  }
+
   /** Resolves when the initial replication connection has settled, tests await this. */
   async waitForReplicationStartup(): Promise<void> {
     await this.replicationStartup
@@ -155,6 +212,7 @@ export class RealtimeServer {
       clearInterval(this.routingCacheTimer)
       this.routingCacheTimer = null
     }
+    await this.admin?.stop()
     await this.replication.stop()
     await this.rlsFilter.shutdown()
 
@@ -198,23 +256,22 @@ export class RealtimeServer {
         return
       }
 
-      // Check connection limit for this project's tier
-      const limit = this.env.connectionLimits[route.tier] ?? 50
-      const currentCount = this.channels.getProjectConnectionCount(projectRef)
-      if (currentCount >= limit) {
-        ws.close(4429, "Connection limit exceeded")
-        return
-      }
     }
 
-    // Extract JWT: in multi-tenant mode, verify against per-project secret
+    const limit = this.connectionLimitFor(projectRef)
+    if (limit !== null && this.channels.connectionCount(projectRef) >= limit) {
+      ws.close(4429, "Connection limit exceeded")
+      return
+    }
+
+    // Extract JWT: in multi-tenant mode, verify against per-project secret. A socket without one
+    // may connect, and must send an `auth` message before it can subscribe.
     const claims = this.extractClaims(req, this.jwtSecretFor(projectRef))
 
-    if (this.env.secureChannels && !claims) {
-      // Allow connection but require auth message before subscribing
-    }
-
-    const clientId = this.channels.addClient(ws, claims, projectRef)
+    const clientId = this.channels.addClient(ws, claims, projectRef, {
+      client: parseClientParam(new URL(req.url ?? "/", "http://socket.local").searchParams.get("client")),
+      userAgent: boundedUserAgent(req.headers["user-agent"]),
+    })
 
     if (claims) {
       this.send(ws, { type: "system", status: "ok", message: "authenticated" })
@@ -223,6 +280,7 @@ export class RealtimeServer {
     }
 
     ws.on("message", (data) => {
+      this.channels.noteMessage(clientId)
       try {
         const msg = JSON.parse(String(data)) as ClientMessage
         this.handleMessage(clientId, msg)
@@ -238,6 +296,18 @@ export class RealtimeServer {
     ws.on("error", () => {
       this.handleDisconnect(clientId)
     })
+  }
+
+  /**
+   * The most sockets `projectRef` may hold, or null for no limit.
+   *
+   * Multi-tenant: by the project's tier. Single-tenant: `CONNECTION_LIMIT`, which is how each Cloud
+   * project's own realtime is limited, and unset on self-host.
+   */
+  private connectionLimitFor(projectRef: string | null): number | null {
+    if (!this.env.multiTenant) return this.env.connectionLimit ?? null
+    const tier = projectRef === null ? undefined : this.projectRoutes.get(projectRef)?.tier
+    return this.env.connectionLimits[tier ?? "free"] ?? 50
   }
 
   /** The claims of the token the upgrade request carries, verified with `secret`. */
@@ -383,10 +453,22 @@ export class RealtimeServer {
     channel: string,
     change: { joins: PresenceEntry[]; leaves: PresenceEntry[] },
   ): void {
-    const presenceMsg: ServerMessage = { type: "presence", channel, ...change }
-    for (const { client: other } of this.channels.getChannelClients(channel, client.projectRef)) {
-      this.send(other.ws, presenceMsg)
+    const frame = JSON.stringify({ type: "presence", channel, ...change } satisfies ServerMessage)
+    const members = this.channels.getChannelClients(channel, client.projectRef)
+    for (const { client: other } of members) {
+      this.sendFrame(other.ws, frame)
     }
+    this.channels.touchChannel(channel, client.projectRef)
+    if (this.tap.active) this.tapPresence(channel, change, members.length)
+  }
+
+  private tapPresence(
+    channel: string,
+    change: { joins: PresenceEntry[]; leaves: PresenceEntry[] },
+    recipients: number,
+  ): void {
+    for (const entry of change.joins) this.tap.presence({ channel, kind: "join", userId: entry.user_id, recipients })
+    for (const entry of change.leaves) this.tap.presence({ channel, kind: "leave", userId: entry.user_id, recipients })
   }
 
   private handlePresenceTrack(
@@ -422,67 +504,80 @@ export class RealtimeServer {
     sender: ConnectedClient,
     msg: BroadcastMessage,
   ): void {
-    const { channel, event, payload } = msg
-    const broadcastMsg: ServerMessage = {
-      type: "broadcast",
-      channel,
-      event,
-      payload,
-    }
+    this.fanOutBroadcast(msg, sender.projectRef, senderClientId)
+  }
 
-    const channelClients = this.channels.getChannelClients(channel, sender.projectRef)
-    for (const { clientId, client } of channelClients) {
-      // Don't echo back to sender
-      if (clientId !== senderClientId) {
-        this.send(client.ws, broadcastMsg)
-      }
+  /** A broadcast from the Studio tester: every member hears it, since no socket sent it. */
+  private studioBroadcast(input: BroadcastInput, projectRef: string | null): number {
+    return this.fanOutBroadcast(input, projectRef, null)
+  }
+
+  /**
+   * Send a broadcast to every member of its channel but its sender, and return how many it reached.
+   *
+   * The one fan-out for client broadcasts and the Studio tester, so a test broadcast reaches exactly
+   * who a client's would. The frame is serialised once, not once per member.
+   */
+  private fanOutBroadcast(
+    msg: { channel: string; event: string; payload: Record<string, unknown> },
+    projectRef: string | null,
+    senderClientId: string | null,
+  ): number {
+    const { channel, event, payload } = msg
+    const frame = JSON.stringify({ type: "broadcast", channel, event, payload } satisfies ServerMessage)
+    let recipients = 0
+    for (const { clientId, client } of this.channels.getChannelClients(channel, projectRef)) {
+      if (clientId === senderClientId) continue
+      if (this.sendFrame(client.ws, frame)) recipients++
     }
+    this.channels.touchChannel(channel, projectRef)
+    if (this.tap.active) {
+      this.tap.broadcast({
+        channel,
+        event,
+        origin: senderClientId === null ? "studio" : "client",
+        senderConnectionId: senderClientId,
+        recipients,
+        frame: recipients > 0 ? frame : null,
+        payload,
+      })
+    }
+    return recipients
   }
 
   // ─── WAL change processing ──────────────────────────────────────────────
 
-  private async handleWalChange(change: WalChange): Promise<void> {
-    // In multi-tenant mode, filter WAL changes by project schema
-    if (this.env.multiTenant) {
-      const schema = change.schema
-
-      // Filter out internal / system schemas (self-host + dedicated cloud)
-      if (
-        schema.endsWith("_auth") ||
-        schema.endsWith("_internal") ||
-        schema === "auth" ||
-        schema === "_supatype" ||
-        schema === "storage" ||
-        schema === "extensions" ||
-        schema.startsWith("pg_") ||
-        schema === "_platform" ||
-        schema === "cron"
-      ) {
-        return
-      }
-
-      // Legacy shared: schema name IS the project ref. Dedicated uses non-multiTenant path.
-      const projectRef = schema
-      const subscribers = this.channels.getSubscribersForProject(schema, change.table, projectRef)
-      if (subscribers.length === 0) return
-
-      const masked = await this.rlsFilter.maskedColumns(change.schema, change.table)
-
-      for (const { client, subscription } of subscribers) {
-        await this.deliverIfVisible(client, subscription, change, masked)
-      }
-      return
-    }
-
-    // Single-tenant mode: original behaviour
-    const subscribers = this.channels.getSubscribers(change.schema, change.table)
+  /**
+   * Deliver one WAL change to every subscriber allowed to see it.
+   *
+   * Called for each change replication decodes; public so an embedder or a test can feed changes
+   * without a replication slot.
+   */
+  async dispatchChange(change: WalChange): Promise<void> {
+    const subscribers = this.subscribersOf(change)
     if (subscribers.length === 0) return
+
+    // The inspector, when one is open. With none, this is the whole of its cost.
+    const record = this.tap.active
+      ? this.tap.begin(change, subscribers.map((s) => s.subscription.channel))
+      : null
 
     const masked = await this.rlsFilter.maskedColumns(change.schema, change.table)
 
-    for (const { client, subscription } of subscribers) {
-      await this.deliverIfVisible(client, subscription, change, masked)
+    for (const { clientId, client, subscription } of subscribers) {
+      await this.deliverIfVisible(clientId, client, subscription, change, masked, record)
     }
+    if (record) this.tap.end(record)
+  }
+
+  /**
+   * Who subscribes to the change's table. A shared instance reads the project from the schema
+   * (legacy shared: the schema name is the project ref) and never forwards internal schemas.
+   */
+  private subscribersOf(change: WalChange): SubscriberEntry[] {
+    if (!this.env.multiTenant) return this.channels.getSubscribers(change.schema, change.table)
+    if (isInternalSchema(change.schema)) return []
+    return this.channels.getSubscribersForProject(change.schema, change.table, change.schema)
   }
 
   /**
@@ -493,31 +588,40 @@ export class RealtimeServer {
    * two copies of it would be two chances to get it wrong.
    */
   private async deliverIfVisible(
+    clientId: string,
     client: ConnectedClient,
     subscription: Subscription,
     change: WalChange,
     masked: Set<string>,
+    record: ChangeRecord | null,
   ): Promise<void> {
-    if (subscription.event !== "*" && subscription.event !== change.event) return
-
     // Cheap pass before the round trip, valid only when the filter names nothing
     // restricted. Filters that do are matched against the masked record instead, because
     // "did I receive this event" would otherwise answer a question about a hidden value.
     if (
-      filterIsMaskSafe(subscription.filter, masked) &&
-      !matchesFilter(change, subscription.filter)
+      (subscription.event !== "*" && subscription.event !== change.event) ||
+      (filterIsMaskSafe(subscription.filter, masked) && !matchesFilter(change, subscription.filter))
     ) {
+      record?.unmatched()
       return
     }
 
     // Row visibility plus field masking, what comes back is already masked, or nothing.
-    const visible = await this.rlsFilter.visibleChange(client.claims, change)
-    if (!visible) return
+    const verdict = await this.rlsFilter.judgeForDelivery(client.claims, change)
+    if ("refused" in verdict) {
+      this.rlsFilter.logRefusal(client.claims, change, verdict.refused)
+      record?.refused(clientId, subscription.channel, verdict.refused)
+      return
+    }
+    const visible = verdict.send
 
     // Authoritative filter pass, against what this subscriber is actually allowed to see.
-    if (!matchesFilter(visible, subscription.filter)) return
+    if (!matchesFilter(visible, subscription.filter)) {
+      record?.unmatched()
+      return
+    }
 
-    this.send(client.ws, {
+    const frame = this.send(client.ws, {
       type: "change",
       channel: subscription.channel,
       event: change.event,
@@ -527,12 +631,22 @@ export class RealtimeServer {
         : {}),
       timestamp: change.commitTimestamp,
     })
+    if (frame === null) return
+    this.channels.touchChannel(subscription.channel, client.projectRef)
+    record?.delivered({ connectionId: clientId, channel: subscription.channel, frame, visible, redacted: verdict.redacted })
   }
 
-  private send(ws: WebSocket, msg: ServerMessage): void {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(msg))
-    }
+  /** Send `msg`, returning the frame it sent, or null when the socket was not open. */
+  private send(ws: WebSocket, msg: ServerMessage): string | null {
+    const frame = JSON.stringify(msg)
+    return this.sendFrame(ws, frame) ? frame : null
+  }
+
+  /** Send an already-serialised frame, reporting whether the socket was open to take it. */
+  private sendFrame(ws: WebSocket, frame: string): boolean {
+    if (ws.readyState !== WebSocket.OPEN) return false
+    ws.send(frame)
+    return true
   }
 
   // ─── Multi-tenant helpers ───────────────────────────────────────────────

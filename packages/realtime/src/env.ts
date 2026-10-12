@@ -13,9 +13,35 @@ export function parseLogLevel(raw: string | undefined): LogLevel {
   throw new Error(`REALTIME_LOG_LEVEL must be "debug" or "info", got "${raw}"`)
 }
 
+/**
+ * An optional whole-number setting: unset or empty is `null`, anything else must be a positive
+ * integer. A typo stops the service rather than silently meaning "none".
+ */
+export function parseOptionalPositiveInt(name: string, raw: string | undefined): number | null {
+  const value = (raw ?? "").trim()
+  if (value === "") return null
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`${name} must be a positive whole number, got "${raw}"`)
+  }
+  return parsed
+}
+
 /** Environment configuration for the realtime service. */
 export interface RealtimeEnv {
   port: number
+  /**
+   * `ADMIN_PORT`: the port of the internal admin API the Studio inspector reads through the control
+   * plane. Unset means no admin listener at all. It is its own listener, never a path on `port`,
+   * because the gateway proxies every path under `/realtime/v1` to `port`.
+   */
+  adminPort?: number | null | undefined
+  /**
+   * `CONNECTION_LIMIT`: the most sockets a single-tenant instance accepts; the next is closed with
+   * 4429. Unset means none, which is self-host's default. Multi-tenant mode uses
+   * {@link connectionLimits} by tier instead.
+   */
+  connectionLimit?: number | null | undefined
   databaseUrl: string
   jwtSecret: string
   slotName: string
@@ -62,6 +88,8 @@ export function loadEnv(): RealtimeEnv {
 
   return {
     port: Number(process.env["PORT"] ?? "4000"),
+    adminPort: parseOptionalPositiveInt("ADMIN_PORT", process.env["ADMIN_PORT"]),
+    connectionLimit: parseOptionalPositiveInt("CONNECTION_LIMIT", process.env["CONNECTION_LIMIT"]),
     databaseUrl,
     jwtSecret,
     slotName: process.env["SLOT_NAME"] ?? "supatype_realtime",
