@@ -4,6 +4,7 @@
  */
 
 import type { FieldValidation } from "@supatype/types"
+import type { RenameJournalEntry } from "./rename-journal.js"
 
 // Re-exported so consumers of these AST types need no second import for the one field that is
 // declared elsewhere: the bound contract lives beside the modifiers that compile into it.
@@ -230,6 +231,11 @@ export interface ExtractedStorageBucketAst {
 export interface ExtractedSchemaAstV2 {
   astVersion: typeof AST_VERSION
   models: ModelAstV2[]
+  /**
+   * The project's rename journal (`supatype/renames.json`), which the engine reads as declared
+   * renames. Attached by `loadSchemaAst`, absent when the journal is empty.
+   */
+  renameJournal?: RenameJournalEntry[]
   storageBuckets?: ExtractedStorageBucketAst[]
   locales?: string[]
   defaultLocale?: string

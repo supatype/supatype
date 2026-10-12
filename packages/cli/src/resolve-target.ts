@@ -2,8 +2,10 @@ import { existsSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { loadConfig } from "./config.js"
 import type { AdoptOutcome, ComposeEngine, DiffResult } from "./engine-client.js"
-import { ensureEngine, engineRequest } from "./engine-client.js"
+import { ensureEngine, enginePush, engineRequest } from "./engine-client.js"
 import type { SchemaSourcesPayload } from "./schema-sources.js"
+import type { AppliedRenameRecord } from "./rename-journal.js"
+import { pushAuditFields } from "./push-audit.js"
 import { resolveHostDatabaseUrl } from "./host-database.js"
 import {
   pgSchema,
@@ -370,7 +372,9 @@ export async function targetSchemaDiff(
 export async function targetSchemaPush(
   target: DeployTarget,
   ast: unknown,
-  opts?: {
+  opts: {
+    /** The project directory: whose push this is, for the audit trail. */
+    cwd: string
     force?: boolean
     schema?: string
     schemaSources?: SchemaSourcesPayload | null
@@ -390,7 +394,7 @@ export async function targetSchemaPush(
    */
   cache?: { tables?: string[]; honoured?: boolean }
 }> {
-  const overwriteDrift = opts?.overwriteDrift === true
+  const overwriteDrift = opts.overwriteDrift === true
   await requireTargetFeatures(target, [
     ...(overwriteDrift ? [{ feature: "overwrite_drift" as const, flag: "--overwrite-drift" }] : []),
     ...identityColumnsNeed(ast),
@@ -399,25 +403,28 @@ export async function targetSchemaPush(
     const body: Record<string, unknown> = {
       ast,
       database_url: target.databaseUrl!,
-      schema: opts?.schema ?? "public",
-      force: opts?.force ?? true,
+      schema: opts.schema ?? "public",
+      force: opts.force ?? true,
       ...(overwriteDrift && { overwrite_drift: true }),
     }
-    if (opts?.schemaSources) {
+    if (opts.schemaSources) {
       body["schema_sources_gz_base64"] = opts.schemaSources.dataBase64
       body["schema_sources_manifest"] = opts.schemaSources.manifest
     }
-    return engineHere(target, "/push", body)
+    if (target.compose === undefined) await ensureEngine()
+    return enginePush(opts.cwd, body, target.compose)
   }
 
   const pushBody: Record<string, unknown> = {
     ast,
-    force: opts?.force ?? true,
-    schema: opts?.schema ?? "public",
+    force: opts.force ?? true,
+    schema: opts.schema ?? "public",
     // The engine's own name, which a control plane forwards as it is.
     ...(overwriteDrift && { overwrite_drift: true }),
+    // Who is pushing. A control plane records the identity it authenticated instead.
+    ...pushAuditFields(opts.cwd),
   }
-  if (opts?.schemaSources) {
+  if (opts.schemaSources) {
     pushBody["schemaSources"] = {
       manifest: opts.schemaSources.manifest,
       dataBase64: opts.schemaSources.dataBase64,
@@ -457,6 +464,13 @@ export interface MigrationListEntry {
   engineVersion: string
   status: string
   schemaSourcesManifest?: SchemaSourcesManifestSummary | null
+  /** Who pushed it: verified when a control plane authenticated them. Absent before the audit trail. */
+  pushedBy?: string | null
+  pushedVia?: string | null
+  pushedFrom?: string | null
+  pushedByVerified?: boolean | null
+  /** Each rename it applied, with who declared it and when. */
+  renames?: AppliedRenameRecord[] | null
 }
 
 export async function targetSchemaRollback(

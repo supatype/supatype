@@ -15,6 +15,8 @@ import {
   targetSchemaRollback,
   targetListMigrations,
   schemaPgSchema,
+  type DeployTarget,
+  type MigrationListEntry,
   type SchemaRollbackResult,
 } from "../resolve-target.js"
 import {
@@ -22,6 +24,7 @@ import {
   findOrphanSchemaFiles,
   type SchemaSourcesManifest,
 } from "../schema-sources.js"
+import { renameLabel } from "../rename-journal.js"
 import { confirm } from "../ui/confirm.js"
 import { info, plain, warn } from "../ui/messages.js"
 
@@ -77,6 +80,47 @@ export function migrationSql(result: MigrateResult): string {
   return sql.trimEnd()
 }
 
+/** Where `migrations list` and `rename --prune` read the history from. */
+export interface MigrationsTargetOptions {
+  connection?: string
+  env?: string
+  direct?: boolean
+}
+
+/** The linked environment, unless `--direct` or `--connection` asks for a database directly. */
+export function migrationsTarget(cwd: string, opts: MigrationsTargetOptions): DeployTarget {
+  const useDirect = opts.direct === true || Boolean(opts.connection)
+  if (loadProjectLink(cwd) && !useDirect) return resolveTarget(cwd, { env: opts.env })
+  return resolveTarget(cwd, { env: opts.env, direct: true, connection: opts.connection })
+}
+
+/**
+ * One migration as `migrations list` prints it: when and how it was applied, who pushed it
+ * (verified when a control plane authenticated them, else their own claim), through what and from
+ * where, and each rename it applied with who declared it. A migration from before the audit
+ * columns names the manifest's `pushedBy`, which was always the client's word.
+ */
+export function formatMigration(m: MigrationListEntry): string {
+  const manifest = m.schemaSourcesManifest
+  const size = manifest?.compressedBytes !== undefined ? `${(manifest.compressedBytes / 1024).toFixed(1)} KB` : "-"
+  const rolled = m.rolledBack ? " (rolled back)" : ""
+  const lines = [
+    `${m.name}${rolled}`,
+    `  applied: ${m.appliedAt}  status: ${m.status}`,
+    `  author: ${migrationAuthor(m)}  via: ${m.pushedVia ?? "-"}  from: ${m.pushedFrom ?? "-"}`,
+    `  files: ${manifest?.fileCount ?? "-"}  snapshot: ${size}`,
+  ]
+  for (const r of m.renames ?? []) {
+    lines.push(`  renamed ${renameLabel(r)} (declared by ${r.declared_by ?? "-"}${r.declared_at ? ` at ${r.declared_at}` : ""})`)
+  }
+  return lines.join("\n")
+}
+
+function migrationAuthor(m: MigrationListEntry): string {
+  if (m.pushedBy == null) return m.schemaSourcesManifest?.pushedBy ?? "-"
+  return m.pushedByVerified === true ? `${m.pushedBy} (verified)` : `${m.pushedBy} (unverified)`
+}
+
 export function registerMigrate(program: Command): void {
   const migrations = program
     .command("migrations")
@@ -88,41 +132,13 @@ export function registerMigrate(program: Command): void {
     .option("--connection <url>", "Database connection URL (overrides config)")
     .option("--env <name>", "Target environment when linked")
     .option("--direct", "Use local engine subprocess (skip control plane)")
-    .action(async (opts: { connection?: string; env?: string; direct?: boolean }) => {
-      const cwd = process.cwd()
-      const link = loadProjectLink(cwd)
-      const useDirect = opts.direct || Boolean(opts.connection)
-
-      let target
-      if (link && !useDirect && !opts.connection) {
-        target = resolveTarget(cwd, { env: opts.env })
-      } else {
-        target = resolveTarget(cwd, {
-          env: opts.env,
-          direct: true,
-          connection: opts.connection,
-        })
-      }
-
-      const list = await targetListMigrations(target)
+    .action(async (opts: MigrationsTargetOptions) => {
+      const list = await targetListMigrations(migrationsTarget(process.cwd(), opts))
       if (list.length === 0) {
         info("No migrations applied.")
         return
       }
-
-      for (const m of list) {
-        const manifest = m.schemaSourcesManifest
-        const size =
-          manifest?.compressedBytes !== undefined
-            ? `${(manifest.compressedBytes / 1024).toFixed(1)} KB`
-            : "-"
-        const files = manifest?.fileCount ?? "-"
-        const author = manifest?.pushedBy ?? "-"
-        const rolled = m.rolledBack ? " (rolled back)" : ""
-        plain(
-          `${m.name}${rolled}\n  applied: ${m.appliedAt}  status: ${m.status}\n  author: ${author}  files: ${files}  snapshot: ${size}`,
-        )
-      }
+      for (const m of list) plain(formatMigration(m))
     })
 
   program

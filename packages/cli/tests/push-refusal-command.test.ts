@@ -40,7 +40,6 @@ vi.mock("../src/link.js", () => ({ loadProjectLink: () => ({ projectRef: "app" }
 vi.mock("../src/schema-sources.js", () => ({
   buildSchemaSourcesPayload: () => null,
   cacheSchemaSourcesLocally: () => undefined,
-  resolvePushedBy: () => "test",
 }))
 vi.mock("../src/resolve-target.js", () => ({
   resolveTarget: () => ({ mode: "self-host", environment: "prod", projectRef: "app", link: null }),

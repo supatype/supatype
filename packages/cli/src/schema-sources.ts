@@ -11,6 +11,7 @@ import { gzipSync, gunzipSync } from "node:zlib"
 import { collectSchemaSourcePaths, type SchemaSourceGraph } from "./type-extractor.js"
 import { loadConfig } from "./config.js"
 import { projectRootFromConfig, schemaPathFromProject } from "./project-config.js"
+import { projectAuthor } from "./push-audit.js"
 
 const MAX_COMPRESSED_BYTES = 2 * 1024 * 1024
 const WARN_COMPRESSED_BYTES = 512 * 1024
@@ -100,9 +101,13 @@ export function unpackSchemaSources(tar: Buffer, projectRoot: string): Map<strin
   return out
 }
 
+/**
+ * The schema's source files, packed, with a manifest naming who pushed them: the same author the
+ * migration row's `pushed_by` records ({@link projectAuthor}).
+ */
 export function buildSchemaSourcesPayload(
   cwd: string,
-  pushedBy?: string,
+  pushedBy: string = projectAuthor(cwd),
 ): SchemaSourcesPayload | null {
   const config = loadConfig(cwd)
   const root = projectRootFromConfig(config, cwd)
@@ -208,15 +213,6 @@ export function findOrphanSchemaFiles(
   return orphans
 }
 
-export function resolvePushedBy(): string {
-  return (
-    process.env["SUPATYPE_PUSHED_BY"] ??
-    process.env["USER"] ??
-    process.env["USERNAME"] ??
-    "local"
-  )
-}
-
 export interface SchemaSourcePushArtifacts {
   gzPath: string
   manifestPath: string
@@ -228,7 +224,7 @@ export interface SchemaSourcePushArtifacts {
 
 /** Write schema source blob + manifest under `.supatype/` for engine push (CLI + dev watch). */
 export function writeSchemaSourcePushArtifacts(cwd: string): SchemaSourcePushArtifacts | null {
-  const payload = buildSchemaSourcesPayload(cwd, resolvePushedBy())
+  const payload = buildSchemaSourcesPayload(cwd)
   if (!payload) return null
 
   const dir = join(cwd, ".supatype")

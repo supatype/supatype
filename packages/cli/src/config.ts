@@ -10,6 +10,7 @@ import {
   type SupatypeProjectConfig,
 } from "./project-config.js"
 import { extractSchemaAstFromTypes } from "./type-extractor.js"
+import { readRenameJournal, withRenameJournal } from "./rename-journal.js"
 import type { ExtractedSchemaAstV2 } from "./schema-ast-v2.js"
 import { uniqueFileToken } from "./unique-file-token.js"
 
@@ -263,13 +264,17 @@ function loadTsConfigWithoutCliImport(
   }
 }
 
-/** Load schema AST by evaluating the user's schema entry point via tsx. */
+/**
+ * Load schema AST by evaluating the user's schema entry point via tsx, carrying the project's
+ * rename journal (`supatype/renames.json`): every schema the CLI builds replays the renames recorded
+ * there, so every environment renames rather than drops.
+ */
 export function loadSchemaAst(
   schemaPath: string,
   cwd: string = process.cwd(),
 ): ExtractedSchemaAstV2 {
   const extracted = extractSchemaAstFromTypes(schemaPath, cwd)
-  if (extracted !== null) return extracted
+  if (extracted !== null) return withRenameJournal(extracted, readRenameJournal(cwd))
 
   const absPath = resolve(cwd, schemaPath)
   if (!existsSync(absPath)) {

@@ -14,6 +14,7 @@ import { withComposeSchemaPushLock } from "./schema-push-lock.js"
 import { recordDatabaseTier, sameApiSurface } from "./recorded-field-masking-tier.js"
 import {
   connectionString,
+  pgSchema,
   projectRootFromConfig,
   resolveRuntimeProvider,
   hooksPathFromProject,
@@ -35,7 +36,8 @@ import { cacheSeedingNotes } from "./api-config-cache.js"
 import { refreshFunctionsContext } from "./functions-context-refresh.js"
 import { DB_PORT_ENV, syncDatabaseUrlPort } from "./db-port.js"
 import { degraded } from "./strict.js"
-import { DEV_DESTRUCTIVE_POLICY, destructiveLines, pushConsentingToDestructive } from "./destructive-consent.js"
+import { DEV_DESTRUCTIVE_POLICY, consentDepsFromDiff, pushConsentingToDestructive } from "./destructive-consent.js"
+import { auditFlags, auditWhenSupported } from "./push-audit.js"
 import { consentRefusal, reportDevPushFailure } from "./push-refusal.js"
 import {
   COMPOSE_PINNED_IMAGE_ENV_KEYS,
@@ -58,7 +60,7 @@ import {
   usesLocalServerImage,
   LOCAL_SERVER_DOCKER_IMAGE,
 } from "./compose-local-server-image.js"
-import { ensureEngine, engineRequest, type AdoptOutcome, type ComposeEngine, type DiffResult } from "./engine-client.js"
+import { ensureEngine, enginePush, engineRequest, type AdoptOutcome, type ComposeEngine, type DiffResult } from "./engine-client.js"
 import { writeSchemaSourcePushArtifacts, type SchemaSourcePushArtifacts } from "./schema-sources.js"
 import { readEnvValue, upsertEnvFile } from "./env-file.js"
 import {
@@ -806,6 +808,8 @@ export interface ComposePushOptions {
    * did not recognise from emptying a column.
    */
   force?: boolean
+  /** The engine's audit flags (`composeAuditArgs`), empty for an engine that does not take them. */
+  audit?: readonly string[]
 }
 
 async function runComposeSchemaPush(
@@ -840,13 +844,12 @@ async function runComposeSchemaPush(
   if (hasEngineOverride(config)) {
     console.log("[supatype] Applying schema via local engine (overrides.engine)...")
     await ensureEngine()
-    const pgSchema = config.schema?.pg_schema ?? "public"
     const sources = writeSchemaSourcePushArtifacts(cwd)
     try {
-      const result = await engineRequest<EnginePushResult>("/push", {
+      const result = await enginePush<EnginePushResult>(cwd, {
         ast,
         database_url: projectDatabaseUrl(cwd, config),
-        schema: pgSchema,
+        schema: pgSchema(config),
         force: opts.force === true,
         ...(opts.overwriteDrift === true && { overwrite_drift: true }),
         ...(sources
@@ -872,13 +875,14 @@ async function runComposeSchemaPush(
 
   console.log("[supatype] Applying schema via compose schema-engine...")
   const sources = writeSchemaSourcePushArtifacts(cwd)
+  const audit = opts.audit ?? (await composeAuditArgs(cwd, config))
   const runPush = async () => {
-    let result = await runComposeEnginePush(paths, cwd, composeProject, config, sources, opts)
+    let result = await runComposeEnginePush(paths, cwd, composeProject, config, sources, { ...opts, audit })
     // Windows Docker bind mounts can lag briefly after the host write. A consent refusal is the
     // engine's considered answer, not a lagging mount, and running it again only repeats it.
     if (result.status !== 0 && consentRefusal(result.output) === null) {
       await new Promise((r) => setTimeout(r, 250))
-      result = await runComposeEnginePush(paths, cwd, composeProject, config, sources, opts)
+      result = await runComposeEnginePush(paths, cwd, composeProject, config, sources, { ...opts, audit })
     }
     return result
   }
@@ -959,7 +963,7 @@ export function followRecordedTier(
  * One push of a `dev` session, initial or on save. Never forced: a change that would drop data is
  * asked about in a terminal and refused anywhere else, and the refusal leaves dev running.
  */
-function runDevSchemaPush(
+async function runDevSchemaPush(
   cwd: string,
   config: SupatypeProjectConfig,
   paths: SelfHostComposePaths,
@@ -967,30 +971,40 @@ function runDevSchemaPush(
   composeProject: string,
   opts: ComposePushOptions,
 ): Promise<void> {
+  const audit = opts.audit ?? (hasEngineOverride(config) ? [] : await composeAuditArgs(cwd, config))
   return pushConsentingToDestructive(
-    (force) => runComposeSchemaPush(cwd, config, paths, schemaPath, composeProject, { ...opts, force }),
+    (force) => runComposeSchemaPush(cwd, config, paths, schemaPath, composeProject, { ...opts, audit, force }),
     DEV_DESTRUCTIVE_POLICY,
-    { describe: () => describeDockerDestruction(cwd, config) },
+    consentDepsFromDiff(cwd, () => dockerDiff(cwd, config)),
   )
 }
 
 /**
- * What a push of the current schema would destroy, from a diff against the stack's database. For
- * the question a destructive push asks: the engine's refusal gives only a count.
+ * A diff of the schema just pushed against the stack's database, for the questions a refused push
+ * asks: the engine's refusal gives only a count, not what would be lost or which drops and adds
+ * may be renames. Reads the AST the push wrote, so it is the schema that was refused.
  */
-export async function describeDockerDestruction(cwd: string, config: SupatypeProjectConfig): Promise<string[]> {
+export async function dockerDiff(cwd: string, config: SupatypeProjectConfig): Promise<DiffResult | undefined> {
   if (hasEngineOverride(config)) {
     const ast = JSON.parse(readFileSync(join(cwd, ".supatype", "schema.ast.json"), "utf8")) as unknown
-    const diff = await engineRequest<DiffResult>("/diff", {
+    return engineRequest<DiffResult>("/diff", {
       ast,
       database_url: projectDatabaseUrl(cwd, config),
-      schema: config.schema?.pg_schema ?? "public",
+      schema: pgSchema(config),
     })
-    return destructiveLines(diff)
   }
   const project = composeProjectName(config.project.name)
   const result = await runComposeEngineDiff(selfHostComposePaths(cwd), cwd, project, config)
-  return result.diff ? destructiveLines(result.diff) : []
+  return result.diff ?? undefined
+}
+
+/**
+ * The compose engine's audit flags, for an image that records them (`push_audit`). Asked once per
+ * command and passed to every attempt through `ComposePushOptions.audit`: each ask costs a
+ * `docker` run.
+ */
+export async function composeAuditArgs(cwd: string, config: SupatypeProjectConfig): Promise<string[]> {
+  return auditFlags((await auditWhenSupported(cwd, () => dockerEngineCapabilities(cwd, config))) ?? {})
 }
 
 /** The schema AST as the `schema-engine` container sees it, under the project mount. */
@@ -1093,6 +1107,7 @@ export function composeEnginePushArgs(
       sources.dockerManifestPath,
     )
   }
+  args.push(...(opts.audit ?? []))
   return args
 }
 
@@ -1128,7 +1143,7 @@ async function runComposeEngineCommand(
   config: SupatypeProjectConfig,
   command: readonly string[],
 ): Promise<EngineRun> {
-  const schema = config.schema?.pg_schema ?? "public"
+  const schema = pgSchema(config)
   const engineArgs = [...command, "-i", COMPOSE_SCHEMA_AST, "--schema", schema]
   return runComposeEngine(paths, cwd, composeProject, config, engineArgs)
 }
@@ -1211,7 +1226,7 @@ export async function adoptSchemaDocker(
     return engineRequest<AdoptOutcome>("/adopt", {
       ast: withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config),
       database_url: projectDatabaseUrl(cwd, config),
-      schema: config.schema?.pg_schema ?? "public",
+      schema: pgSchema(config),
       yes,
       ...(keys !== undefined && { keys }),
     })
@@ -1241,8 +1256,6 @@ export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfi
     throw new Error("diffSchemaDocker requires provider: docker")
   }
   const project = composeProjectName(config.project.name)
-  const pgSchema = config.schema?.pg_schema ?? "public"
-
   if (hasEngineOverride(config)) {
     const brand = { intro: "Schema diff" }
     await ensureDockerDbPublishedForHostEngine(cwd, config, brand)
@@ -1252,7 +1265,7 @@ export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfi
     return engineRequest<DiffResult>("/diff", {
       ast,
       database_url: projectDatabaseUrl(cwd, config),
-      schema: pgSchema,
+      schema: pgSchema(config),
     })
   }
 

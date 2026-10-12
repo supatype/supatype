@@ -38,7 +38,7 @@ import {
 } from "../diff-output.js"
 import { printPushWarnings } from "../engine-push-output.js"
 import { askToOverwrite, pushConsentingToDrift } from "../drift-consent.js"
-import { pushConsentingToDestructive } from "../destructive-consent.js"
+import { consentDepsFromDiff, pushConsentingToDestructive, settleRenames } from "../destructive-consent.js"
 import { adoptKeysNeed, type FeatureNeed } from "../engine-ownership-gate.js"
 import { pushOfferingAdoption, targetAdoptionSteps } from "../adopt-walkthrough.js"
 import { explainingRefusal } from "../push-refusal.js"
@@ -65,7 +65,6 @@ import { targetFetch } from "../target-client.js"
 import {
   buildSchemaSourcesPayload,
   cacheSchemaSourcesLocally,
-  resolvePushedBy,
 } from "../schema-sources.js"
 import { confirm, logSkippedConfirm } from "../ui/confirm.js"
 import { info, plain } from "../ui/messages.js"
@@ -101,7 +100,7 @@ export function registerPush(program: Command): void {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
       const pgSchema = schemaPgSchema(cwd)
-      const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
+      const ast = pushAst(cwd, config)
       assertModelHooksResolve(cwd, config, ast)
       assertServiceRoleGrantsResolve(cwd, config)
       assertEngineSupportsSchema(ast, pinnedVersion("engine", config))
@@ -116,6 +115,11 @@ export function registerPush(program: Command): void {
         "destructive",
       ])
     })
+}
+
+/** The schema a push sends: the project's, with its publishing config and its rename journal. */
+function pushAst(cwd: string, config: SupatypeProjectConfig): ExtractedSchemaAstV2 {
+  return withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
 }
 
 /** Where `push` sends the schema: a linked project, a docker stack, or a database directly. */
@@ -152,18 +156,19 @@ const OVERWRITE_DRIFT: FeatureNeed = { feature: "overwrite_drift", flag: "--over
  * no question asked; now it needs a yes in a terminal, or `--yes`.
  */
 async function pushDocker(cwd: string, config: SupatypeProjectConfig, run: PushRun): Promise<void> {
-  const { describeDockerDestruction, dockerAdoptionSteps, pushSchemaDocker, requireDockerFeatures } =
+  const { composeAuditArgs, dockerDiff, dockerAdoptionSteps, pushSchemaDocker, requireDockerFeatures } =
     await import("../dev-compose.js")
+  const audit = await composeAuditArgs(cwd, config)
   const gate = () => requireDockerFeatures(cwd, config, [OVERWRITE_DRIFT])
   if (run.overwriteDrift) await gate()
   const applying = (overwriteDrift: boolean) =>
     pushConsentingToDestructive(
       (force) =>
         withSpinner("Applying schema via Docker Compose", () =>
-          pushSchemaDocker(cwd, config, { overwriteDrift, force }),
+          pushSchemaDocker(cwd, config, { overwriteDrift, force, audit }),
         ),
       { yes: run.yes, apply: "supatype push --yes" },
-      { describe: () => describeDockerDestruction(cwd, config) },
+      consentDepsFromDiff(cwd, () => dockerDiff(cwd, config)),
     )
   await pushOfferingAdoption(
     () => pushConsentingToDrift(applying, run, { beforeOverwrite: gate }),
@@ -216,9 +221,14 @@ async function pushViaTarget(
   // Before anything is read or asked: a server or engine that cannot honour the flag says so now.
   if (run.overwriteDrift) await requireTargetFeatures(target, [OVERWRITE_DRIFT])
   if (!(await databaseIsReady(cwd, config, target, ast))) return
-  const diff = await withSpinner("Diffing against database", () =>
-    targetSchemaDiff(target, ast, { schema: pgSchema }),
-  )
+  const plan = (schema: unknown) =>
+    withSpinner("Diffing against database", () => targetSchemaDiff(target, schema, { schema: pgSchema }))
+  let diff = await plan(ast)
+  // A rename recorded is a different schema: built and planned again, with the journal carrying it.
+  if (await recordedRenames(cwd, diff, run)) {
+    ast = pushAst(cwd, config)
+    diff = await plan(ast)
+  }
   // The differ's operations and the reconcile's changes together: a push with only reconciled
   // objects to change still applies a migration, and is confirmed like any other.
   const changes = plannedChanges(diff)
@@ -262,7 +272,7 @@ async function pushViaTarget(
   } else {
     info((pushResult as { message?: string }).message ?? "Migration applied.")
     const migrationName = (pushResult as { name?: string }).name
-    const schemaSources = buildSchemaSourcesPayload(cwd, resolvePushedBy())
+    const schemaSources = buildSchemaSourcesPayload(cwd)
     if (migrationName && schemaSources) {
       cacheSchemaSourcesLocally(cwd, migrationName, schemaSources.gz)
     }
@@ -293,6 +303,20 @@ async function pushViaTarget(
 }
 
 /**
+ * The renames the diff offers, settled as every push settles them (`settleRenames`): asked about in
+ * a terminal, each yes recorded in the rename journal, or named with the command that records them
+ * anywhere else. True when one was recorded. `--yes` asks nothing: it is consent to the push as it
+ * stands.
+ */
+async function recordedRenames(cwd: string, diff: DiffResult, run: PushRun): Promise<boolean> {
+  if (run.yes) return false
+  const ask = (question: string) => confirm(question, { default: false })
+  const settled = await settleRenames(consentDepsFromDiff(cwd, async () => diff), isInteractive(), ask)
+  for (const line of settled.hint) plain(line)
+  return settled.written > 0
+}
+
+/**
  * Push to `to`, offering adoption when it refuses unmanaged tables. `run.overwriteDrift` is the
  * consent already given, by the flag or at the diff's question.
  *
@@ -310,9 +334,10 @@ function applyToTarget(
   const applying = (overwriteDrift: boolean) =>
     withSpinner(migrating ? "Applying migration" : "Syncing with engine", () =>
       targetSchemaPush(target, ast, {
+        cwd,
         force: true,
         schema: pgSchema,
-        schemaSources: buildSchemaSourcesPayload(cwd, resolvePushedBy()),
+        schemaSources: buildSchemaSourcesPayload(cwd),
         overwriteDrift,
       }),
     )
