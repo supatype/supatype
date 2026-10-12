@@ -22,6 +22,7 @@ import { isAbsolute, join, relative, resolve } from "node:path"
 import { loadConfig } from "../config.js"
 import type { ExtractedSchemaAstV2 } from "../schema-ast-v2.js"
 import {
+  pgSchema,
   postgrestSchemaEnv,
   functionsPathCandidatesFromProject,
   resolveRuntimeProvider,
@@ -746,40 +747,94 @@ let _lastPushedAst: string | null = null
 // AST that failed on its last attempt, always retried even if content is unchanged.
 let _lastFailedAst: string | null = null
 
+/** Where a native dev push goes, and what it was asked to do beyond the schema. */
+interface NativePushTarget {
+  dbURL: string
+  pgSchema: string
+  /** `dev --overwrite-drift`: put back access changed outside Supatype on every push. */
+  overwriteDrift: boolean
+}
+
+/** The schema a native dev push sends, and how to build it again once a rename is recorded. */
+interface NativeSchema {
+  ast: ExtractedSchemaAstV2
+  rebuild: () => Promise<ExtractedSchemaAstV2>
+}
+
 /**
  * One push of a native dev session. Never forced: a change that would drop data is asked about in
  * a terminal and refused anywhere else, and the caller logs the refusal while dev keeps watching.
+ *
+ * The schema is built again only after a rename confirmed at the prompt was recorded in the journal,
+ * which the next attempt has to carry. Returns the engine's answer and the schema that applied.
  */
 async function pushNativeSchema(
   cwd: string,
-  ast: unknown,
-  dbURL: string,
-  pgSchema: string,
-  overwriteDrift: boolean,
-): Promise<void> {
-  const { ensureEngine, engineRequest } = await import("../engine-client.js")
+  schema: NativeSchema,
+  target: NativePushTarget,
+): Promise<{ result: EnginePushResult; ast: ExtractedSchemaAstV2 }> {
+  const { ensureEngine, enginePush, engineRequest } = await import("../engine-client.js")
   const { writeSchemaSourcePushArtifacts } = await import("../schema-sources.js")
-  const { DEV_DESTRUCTIVE_POLICY, destructiveLines, pushConsentingToDestructive } = await import(
+  const { DEV_DESTRUCTIVE_POLICY, consentDepsFromDiff, pushConsentingToDestructive } = await import(
     "../destructive-consent.js"
   )
   await ensureEngine()
   const sources = writeSchemaSourcePushArtifacts(cwd)
-  const target = { ast, database_url: dbURL, schema: pgSchema }
+  let ast = schema.ast
+  let stale = false
+  const request = async () => {
+    if (stale) [ast, stale] = [await schema.rebuild(), false]
+    return { ast, database_url: target.dbURL, schema: target.pgSchema }
+  }
+  const deps = consentDepsFromDiff(cwd, async () => engineRequest<DiffResult>("/diff", await request()))
+  const journal = deps.renameWriter
   const result = await pushConsentingToDestructive(
-    (force) =>
-      engineRequest<EnginePushResult>("/push", {
-        ...target,
+    async (force) =>
+      enginePush<EnginePushResult>(cwd, {
+        ...(await request()),
         force,
-        ...(overwriteDrift && { overwrite_drift: true }),
+        ...(target.overwriteDrift && { overwrite_drift: true }),
         ...(sources && {
           schema_sources_gz_base64: sources.payload.dataBase64,
           schema_sources_manifest: sources.payload.manifest,
         }),
       }),
     DEV_DESTRUCTIVE_POLICY,
-    { describe: async () => destructiveLines(await engineRequest<DiffResult>("/diff", target)) },
+    {
+      ...deps,
+      ...(journal && {
+        renameWriter: {
+          write: async (candidate) => {
+            stale = true
+            await journal.write(candidate)
+          },
+        },
+      }),
+    },
   )
   printPushWarnings(result)
+  return { result, ast }
+}
+
+/**
+ * The AST native dev pushes, built from the schema file with its rename journal: with the
+ * publishing config, as `supatype push` sends it (the engine refuses a versioned schema without
+ * one), and with each field whose kind needs a missing Postgres extension replaced by JSONB, which
+ * `adapted` names.
+ */
+async function buildNativeAst(
+  cwd: string,
+  schemaPath: string,
+  config: import("../project-config.js").SupatypeProjectConfig | undefined,
+  skipFieldKinds: ReadonlySet<string> | undefined,
+): Promise<{ ast: ExtractedSchemaAstV2; adapted: string[] }> {
+  const { loadSchemaAst } = await import("../config.js")
+  const { withPublishing } = await import("../model-versioning.js")
+  const loaded = loadSchemaAst(schemaPath, cwd)
+  const ast = config ? withPublishing(loaded, config) : loaded
+  if (!skipFieldKinds || skipFieldKinds.size === 0) return { ast, adapted: [] }
+  const { filtered, adapted } = adaptUnsupportedKinds(ast, skipFieldKinds)
+  return { ast: filtered, adapted }
 }
 
 async function runSchemaPush(
@@ -795,25 +850,14 @@ async function runSchemaPush(
   /** `dev --overwrite-drift`: put back access changed outside Supatype on every push. */
   overwriteDrift = false,
 ): Promise<void> {
-  // Build AST JSON from schema file.
-  const { loadSchemaAst } = await import("../config.js")
-  const { withPublishing } = await import("../model-versioning.js")
-  const loaded = loadSchemaAst(schemaPath, cwd)
-  // As `supatype push` sends it: the engine refuses a versioned schema with no publishing config.
-  let ast = config ? withPublishing(loaded, config) : loaded
-
-  // Strip fields whose kind requires an unavailable Postgres extension.
-  if (skipFieldKinds && skipFieldKinds.size > 0) {
-    const { filtered, adapted } = adaptUnsupportedKinds(ast, skipFieldKinds)
-    ast = filtered
-    if (adapted.length > 0) {
-      console.warn(
-        `[supatype] ⚠  ${adapted.length} field(s) replaced with JSONB, required extensions not available:\n` +
-        adapted.map((s: string) => `    ${s}`).join("\n"),
-      )
-    }
+  const built = await buildNativeAst(cwd, schemaPath, config, skipFieldKinds)
+  if (built.adapted.length > 0) {
+    console.warn(
+      `[supatype] ${built.adapted.length} field(s) replaced with JSONB, required extensions not available:\n` +
+        built.adapted.map((s: string) => `    ${s}`).join("\n"),
+    )
   }
-
+  let ast = built.ast
   const astJson = JSON.stringify(ast)
 
   // Skip only when the last push of this exact AST succeeded.
@@ -829,13 +873,17 @@ async function runSchemaPush(
   // Push schema.
   console.log("[supatype] Applying schema...")
   try {
-    await pushNativeSchema(cwd, ast, dbURL, config?.schema?.pg_schema ?? "public", overwriteDrift)
+    const rebuild = async () => (await buildNativeAst(cwd, schemaPath, config, skipFieldKinds)).ast
+    const pgSchemaName = config ? pgSchema(config) : "public"
+    ast = (await pushNativeSchema(cwd, { ast, rebuild }, { dbURL, pgSchema: pgSchemaName, overwriteDrift })).ast
   } catch (err) {
     _lastFailedAst = astJson
     throw err
   }
-  _lastPushedAst = astJson
+  // What applied, which is the schema with any rename confirmed at the prompt declared on it.
+  _lastPushedAst = JSON.stringify(ast)
   _lastFailedAst = null
+  writeFileSync(astPath, _lastPushedAst)
 
   // Provision storage buckets declared in the schema.
   if (storagePath) {

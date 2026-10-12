@@ -16,13 +16,13 @@ import type { Command } from "commander"
 import { existsSync, readdirSync, statSync, createReadStream, mkdirSync, cpSync } from "node:fs"
 import { join, relative } from "node:path"
 import { loadConfig, loadSchemaAst } from "../config.js"
-import { schemaPathFromProject } from "../project-config.js"
+import { pgSchema, schemaPathFromProject } from "../project-config.js"
 import { resolveHostDatabaseUrl } from "../host-database.js"
 import { deploySchemaToLinkedProject, loadCloudConfig, pushSchemaToLinkedProject } from "./cloud.js"
 import { loadProjectLink } from "../link.js"
 import { resolveTarget } from "../resolve-target.js"
 import { targetFetch } from "../target-client.js"
-import { ensureEngine, engineRequest, type DiffResult } from "../engine-client.js"
+import { ensureEngine, enginePush, engineRequest, type DiffResult } from "../engine-client.js"
 import { formatSecurityDrift, plannedChanges, securityDrift } from "../diff-output.js"
 import { requireEngineFeatures } from "../engine-ownership-gate.js"
 import { resolveAppConfig, validateStaticMode, validateBuildOutput, detectPackageManager } from "../app/framework.js"
@@ -118,7 +118,7 @@ export function registerDeploy(program: Command): void {
           const diff = await engineRequest<DiffResult>("/diff", {
             ast,
             database_url: resolveHostDatabaseUrl(cwd, config, { allowDerived: true }).dsn,
-            schema: "public",
+            schema: pgSchema(config),
           })
 
           const changes = plannedChanges(diff)
@@ -131,10 +131,10 @@ export function registerDeploy(program: Command): void {
           if (changes.length > 0) {
             info(`${changes.length} schema change(s) to apply.`)
             const result = await explainingRefusal("supatype deploy --local", () =>
-              engineRequest<EnginePushResult>("/push", {
+              enginePush<EnginePushResult>(cwd, {
                 ast,
                 database_url: resolveHostDatabaseUrl(cwd, config, { allowDerived: true }).dsn,
-                schema: "public",
+                schema: pgSchema(config),
                 force: true,
                 ...(overwriteDrift && { overwrite_drift: true }),
               }),

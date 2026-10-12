@@ -71,6 +71,26 @@ export async function runEngineDiff(databaseUrl: string, ast: unknown, schema = 
   }
 }
 
+/**
+ * Who a push is recorded as being from (the audit trail). The author is the identity this control
+ * plane authenticated, never the client's word for it. The renames the push applies are recorded
+ * from the rename journal the schema itself carries (`renameJournal`).
+ */
+export interface PushAudit {
+  pushedBy: string
+  pushedVia: "self-host"
+  pushedFrom?: string
+  pushedByVerified: boolean
+}
+
+/** `audit` as the engine binary's flags. */
+function auditArgs(audit: PushAudit): string[] {
+  const args = ["--pushed-by", audit.pushedBy, "--pushed-via", audit.pushedVia]
+  if (audit.pushedFrom) args.push("--pushed-from", audit.pushedFrom)
+  if (audit.pushedByVerified) args.push("--pushed-by-verified")
+  return args
+}
+
 export async function runEnginePush(
   databaseUrl: string,
   ast: unknown,
@@ -81,6 +101,8 @@ export async function runEnginePush(
     schemaSourcesManifest?: unknown
     /** Put back access changed outside Supatype (plan 3.5). */
     overwriteDrift?: boolean
+    /** Recorded on the migration row by an engine that records it (`push_audit`). */
+    audit?: PushAudit
   },
 ): Promise<unknown> {
   const astPath = await writeTempJson(ast)
@@ -104,6 +126,11 @@ export async function runEnginePush(
       writeFileSync(manPath, JSON.stringify(opts.schemaSourcesManifest))
       tempFiles.push(manPath)
       args.push("--schema-sources-manifest", manPath)
+    }
+    // An engine from before the audit trail refuses the flags, and a push must not fail for want
+    // of its audit: the migration row then says nothing about who pushed, as it always did.
+    if (opts?.audit && (await runEngineCapabilities()).features.includes("push_audit")) {
+      args.push(...auditArgs(opts.audit))
     }
     const out = await runEngine("push", args, { inputPath: astPath })
     try {

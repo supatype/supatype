@@ -84,6 +84,47 @@ describe("schema routes (mock engine)", () => {
     assert.ok(!argsOf(plain.json).includes("--overwrite-drift"))
   })
 
+  /** The value after `flag` in the engine's arguments, or undefined when the flag is absent. */
+  const flagValue = (args: string[], flag: string): string | undefined => {
+    const at = args.indexOf(flag)
+    return at === -1 ? undefined : args[at + 1]
+  }
+
+  // The audit trail: only the gateway reaches this control plane (the shared secret), and the
+  // gateway forwards only a caller holding the service role. That is the identity recorded, as
+  // verified; whoever the client says it is, is not.
+  test("POST /schema/push records the service role as the verified author, ignoring the client's claim", async () => {
+    resetEngineCapabilities()
+    const res = await request(baseUrl, "POST", `/projects/${PROJECT}/schema/push`, {
+      ast: {},
+      pushed_by: "Mallory <mallory@example.com>",
+      pushed_by_verified: true,
+      pushed_via: "cli",
+      pushed_from: "mallorys-laptop",
+    })
+    assert.equal(res.status, 200)
+    const args = argsOf(res.json)
+    assert.equal(flagValue(args, "--pushed-by"), "service_role")
+    assert.equal(flagValue(args, "--pushed-via"), "self-host")
+    assert.ok(args.includes("--pushed-by-verified"))
+    assert.ok(!args.join(" ").includes("Mallory"), args.join(" "))
+    // Where the push came from is context, not identity: the client's word is kept.
+    assert.equal(flagValue(args, "--pushed-from"), "mallorys-laptop")
+  })
+
+  test("POST /schema/push sends no audit flag to an engine from before them", async () => {
+    resetEngineCapabilities()
+    process.env["MOCK_ENGINE_NO_AUDIT"] = "1"
+    try {
+      const res = await request(baseUrl, "POST", `/projects/${PROJECT}/schema/push`, { ast: {}, pushed_by: "x" })
+      assert.equal(res.status, 200)
+      assert.ok(!argsOf(res.json).some((a) => a.startsWith("--pushed")))
+    } finally {
+      delete process.env["MOCK_ENGINE_NO_AUDIT"]
+      resetEngineCapabilities()
+    }
+  })
+
   test("POST /schema/adopt forwards keys, release and reclaim", async () => {
     const res = await request(baseUrl, "POST", `/projects/${PROJECT}/schema/adopt`, {
       ast: {},

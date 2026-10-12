@@ -166,7 +166,7 @@ describe("targetSchemaPush() against a server", () => {
     )
     vi.stubGlobal("fetch", fetchMock)
     const { targetSchemaPush } = await import("../src/resolve-target.js")
-    await expect(targetSchemaPush(selfHost(), {}, { overwriteDrift: true })).rejects.toThrow(
+    await expect(targetSchemaPush(selfHost(), {}, { cwd: process.cwd(), overwriteDrift: true })).rejects.toThrow(
       "this server does not support --overwrite-drift; update it",
     )
     expect(fetchMock.mock.calls.map((c) => String(c[0]))).toEqual([
@@ -180,7 +180,7 @@ describe("targetSchemaPush() against a server", () => {
       vi.fn(async () => reply(200, { data: { features: ["release"] } })),
     )
     const { targetSchemaPush } = await import("../src/resolve-target.js")
-    await expect(targetSchemaPush(selfHost(), {}, { overwriteDrift: true })).rejects.toThrow(
+    await expect(targetSchemaPush(selfHost(), {}, { cwd: process.cwd(), overwriteDrift: true })).rejects.toThrow(
       "this server does not support --overwrite-drift",
     )
   })
@@ -191,7 +191,7 @@ describe("targetSchemaPush() against a server", () => {
     )
     vi.stubGlobal("fetch", fetchMock)
     const { targetSchemaPush } = await import("../src/resolve-target.js")
-    await targetSchemaPush(selfHost(), {}, { overwriteDrift: true })
+    await targetSchemaPush(selfHost(), {}, { cwd: process.cwd(), overwriteDrift: true })
     const push = fetchMock.mock.calls.find((c) => String(c[0]).endsWith("/schema/push"))!
     const body = JSON.parse(String(push[1]?.body)) as Record<string, unknown>
     expect(body["overwrite_drift"]).toBe(true)
@@ -204,7 +204,7 @@ describe("targetSchemaPush() against a server", () => {
     )
     vi.stubGlobal("fetch", fetchMock)
     const { targetSchemaPush, targetSchemaDiff } = await import("../src/resolve-target.js")
-    await expect(targetSchemaPush(selfHost(), NUMBERED, {})).rejects.toThrow(
+    await expect(targetSchemaPush(selfHost(), NUMBERED, { cwd: process.cwd() })).rejects.toThrow(
       "this server does not support identity and generated columns (Post.id, Post.title_lower); update it",
     )
     await expect(targetSchemaDiff(selfHost(), NUMBERED)).rejects.toThrow("identity and generated columns")
@@ -219,7 +219,7 @@ describe("targetSchemaPush() against a server", () => {
     )
     vi.stubGlobal("fetch", fetchMock)
     const { targetSchemaPush } = await import("../src/resolve-target.js")
-    await targetSchemaPush(selfHost(), NUMBERED, {})
+    await targetSchemaPush(selfHost(), NUMBERED, { cwd: process.cwd() })
     const push = fetchMock.mock.calls.find((c) => String(c[0]).endsWith("/schema/push"))!
     expect(JSON.parse(String(push[1]?.body)).ast).toEqual(NUMBERED)
   })
@@ -228,7 +228,7 @@ describe("targetSchemaPush() against a server", () => {
     const fetchMock = vi.fn(async (_url: string, _init?: { body?: string }) => reply(200, { data: { status: "applied" } }))
     vi.stubGlobal("fetch", fetchMock)
     const { targetSchemaPush } = await import("../src/resolve-target.js")
-    await targetSchemaPush(selfHost(), {}, {})
+    await targetSchemaPush(selfHost(), {}, { cwd: process.cwd() })
     expect(fetchMock.mock.calls.map((c) => String(c[0]))).toEqual(["http://cp.test/platform/v1/projects/app/schema/push"])
     const body = JSON.parse(String(fetchMock.mock.calls[0]![1]?.body)) as Record<string, unknown>
     expect(body).not.toHaveProperty("overwrite_drift")

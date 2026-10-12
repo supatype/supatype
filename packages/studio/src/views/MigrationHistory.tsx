@@ -6,6 +6,7 @@ import { useProjectProxy, type ProjectProxy } from "../hooks/useProjectProxy.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
+import { safeParseJson } from "../lib/json.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -44,7 +45,27 @@ interface ModelChange {
   fieldChanges: FieldChange[]
 }
 
-interface Migration {
+/** A rename a migration applied, with who declared it (the rename journal) and when. */
+interface AppliedRename {
+  kind: string
+  table: string
+  from: string
+  to: string
+  declared_by: string | null
+  declared_at: string | null
+}
+
+/** Who pushed a migration, through what and from where (the audit trail). */
+interface MigrationAuthor {
+  /** Verified when a control plane authenticated them; the client's own claim otherwise. */
+  pushed_by: string | null
+  pushed_by_verified: boolean | null
+  /** `cli`, `studio`, `cloud` or `self-host`. */
+  pushed_via: string | null
+  pushed_from: string | null
+}
+
+interface Migration extends MigrationAuthor {
   id: number
   name: string
   hash: string
@@ -55,11 +76,49 @@ interface Migration {
   schema_snapshot: AstSnapshot | null
   has_sql: boolean
   sql_up: string | null
+  renames: AppliedRename[]
 }
 
 const statusVariant: Record<MigrationStatus, "green" | "yellow"> = {
   applied: "green",
   rolled_back: "yellow",
+}
+
+function textOrNull(value: unknown): string | null {
+  return typeof value === "string" && value !== "" ? value : null
+}
+
+function boolOrNull(value: unknown): boolean | null {
+  if (value === true || value === "t" || value === "true") return true
+  if (value === false || value === "f" || value === "false") return false
+  return null
+}
+
+/** The `renames` column, which arrives as JSON or as its text depending on the proxy. */
+function mapRenames(raw: unknown): AppliedRename[] {
+  const value: unknown = typeof raw === "string" ? safeParseJson(raw) : raw
+  if (!Array.isArray(value)) return []
+  return value
+    .filter((r): r is Record<string, unknown> => typeof r === "object" && r !== null)
+    .map((r) => ({
+      kind: String(r["kind"] ?? "column"),
+      table: String(r["table"] ?? ""),
+      from: String(r["from"] ?? ""),
+      to: String(r["to"] ?? ""),
+      declared_by: textOrNull(r["declared_by"]),
+      declared_at: textOrNull(r["declared_at"]),
+    }))
+}
+
+/** The author columns, falling back to the manifest's `pushedBy` (always the client's claim). */
+function mapAuthor(row: Record<string, unknown>): MigrationAuthor {
+  const pushedBy = textOrNull(row["pushed_by"])
+  return {
+    pushed_by: pushedBy ?? textOrNull(row["manifest_pushed_by"]),
+    pushed_by_verified: pushedBy === null ? null : boolOrNull(row["pushed_by_verified"]),
+    pushed_via: textOrNull(row["pushed_via"]),
+    pushed_from: textOrNull(row["pushed_from"]),
+  }
 }
 
 function mapMigrationRow(row: Record<string, unknown>): Migration {
@@ -82,13 +141,30 @@ function mapMigrationRow(row: Record<string, unknown>): Migration {
     schema_snapshot: snapshot,
     has_sql: hasSql,
     sql_up: legacySql,
+    ...mapAuthor(row),
+    renames: mapRenames(row["renames"]),
   }
 }
 
-const MIGRATIONS_LIST_SQL = `SELECT id, name, hash, applied_at::TEXT, rolled_back, rolled_back_at::TEXT,
+/** Whether this history has the audit columns: one written by an engine from before them has not. */
+const AUDIT_COLUMNS_SQL = `SELECT EXISTS (SELECT 1 FROM information_schema.columns
+  WHERE table_schema = '_supatype' AND table_name = 'migrations' AND column_name = 'pushed_by') AS audited`
+
+/**
+ * The history, with the audit columns where it has them and nulls where it does not, so an older
+ * history reads as "no author recorded" rather than failing the whole query.
+ */
+export function migrationsListSql(audited: boolean): string {
+  const audit = audited
+    ? "pushed_by, pushed_by_verified, pushed_via, pushed_from, renames"
+    : "NULL AS pushed_by, NULL AS pushed_by_verified, NULL AS pushed_via, NULL AS pushed_from, NULL AS renames"
+  return `SELECT id, name, hash, applied_at::TEXT, rolled_back, rolled_back_at::TEXT,
        engine_version, schema_snapshot,
-       (sql_up IS NOT NULL AND btrim(sql_up) <> '') AS has_sql
+       (sql_up IS NOT NULL AND btrim(sql_up) <> '') AS has_sql,
+       ${audit},
+       schema_sources_manifest ->> 'pushedBy' AS manifest_pushed_by
  FROM _supatype.migrations ORDER BY id ASC`
+}
 
 /** Candidates for display: DDL rows, initial baseline, not legacy admin_refresh noise. */
 function isTrackedMigration(m: Migration): boolean {
@@ -259,6 +335,74 @@ function ChangeList({ changes }: { changes: ModelChange[] }): React.ReactElement
   )
 }
 
+// ─── Author and renames ───────────────────────────────────────────────────────
+
+/** Who pushed it, marked verified only when a control plane authenticated them. */
+function AuthorCell({ migration }: { migration: MigrationAuthor }): React.ReactElement {
+  if (migration.pushed_by === null) return <span className="text-muted-foreground/40">-</span>
+  return (
+    <span className="flex items-center gap-1.5">
+      <span className="truncate max-w-[180px]" title={migration.pushed_by}>{migration.pushed_by}</span>
+      <Badge variant={migration.pushed_by_verified === true ? "green" : "yellow"}>
+        {migration.pushed_by_verified === true ? "verified" : "unverified"}
+      </Badge>
+    </span>
+  )
+}
+
+function renameLabel(r: AppliedRename): string {
+  return r.kind === "table" ? `table ${r.from} -> ${r.to}` : `${r.table}.${r.from} -> ${r.to}`
+}
+
+/** Each rename the migration applied, with who declared it and when. */
+function RenameList({ renames }: { renames: AppliedRename[] }): React.ReactElement | null {
+  if (renames.length === 0) return null
+  return (
+    <div className="space-y-1">
+      {renames.map((r) => (
+        <div key={renameLabel(r)} className="flex items-center gap-2 text-[0.7rem] font-mono text-muted-foreground">
+          <Badge variant="yellow">renamed</Badge>
+          <span>{renameLabel(r)}</span>
+          {r.declared_by !== null && (
+            <span>
+              declared by {r.declared_by}
+              {r.declared_at !== null && ` at ${new Date(r.declared_at).toLocaleString()}`}
+            </span>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** The audit trail of one migration: author, channel, origin and renames. */
+/** One labelled line of a migration's details. */
+function DetailRow({ label, children }: { label: string; children: React.ReactNode }): React.ReactElement {
+  return (
+    <div className="flex justify-between text-[0.7rem] text-muted-foreground">
+      <span>{label}</span>
+      {children}
+    </div>
+  )
+}
+
+function AuditDetails({ migration }: { migration: Migration }): React.ReactElement {
+  return (
+    <div className="space-y-1.5">
+      <DetailRow label="Author">
+        <AuthorCell migration={migration} />
+      </DetailRow>
+      <DetailRow label="Channel">
+        <span className="font-mono">{migration.pushed_via ?? "-"}</span>
+      </DetailRow>
+      <DetailRow label="From">
+        <span className="font-mono truncate max-w-[260px]" title={migration.pushed_from ?? ""}>{migration.pushed_from ?? "-"}</span>
+      </DetailRow>
+      <RenameList renames={migration.renames} />
+    </div>
+  )
+}
+
 // ─── SQL block ────────────────────────────────────────────────────────────────
 
 function SqlBlock({ sql }: { sql: string }): React.ReactElement {
@@ -330,6 +474,9 @@ function ExpandedRow({ proxy, migration, changes, colSpan }: {
           <p className="text-xs text-red-400">{sqlError}</p>
         )}
         {tab === "sql" && sql && <SqlBlock sql={sql} />}
+        <div className="mt-3 pt-3 border-t border-border/50">
+          <AuditDetails migration={migration} />
+        </div>
         <div className="mt-3 pt-3 border-t border-border/50 flex items-center gap-4 text-[0.7rem] text-muted-foreground font-mono">
           <span>hash: {migration.hash.slice(0, 16)}…</span>
           {migration.rolled_back_at && (
@@ -403,6 +550,7 @@ function SlideOutPanel({ proxy, migration, changes, onClose }: {
             <span>Hash</span>
             <span>{migration.hash.slice(0, 16)}…</span>
           </div>
+          <AuditDetails migration={migration} />
         </div>
 
         {/* Tabs */}
@@ -451,7 +599,9 @@ export function MigrationHistory(): React.ReactElement {
 
   const { data: migrationsData, loading, error, refetch } = useApiQuery(
     async () => {
-      const result = await proxy.sql(MIGRATIONS_LIST_SQL)
+      const columns = await proxy.sql(AUDIT_COLUMNS_SQL)
+      const audited = boolOrNull(columns.rows[0]?.["audited"]) === true
+      const result = await proxy.sql(migrationsListSql(audited))
       return result.rows.map(mapMigrationRow)
     },
     [proxy],
@@ -595,6 +745,7 @@ export function MigrationHistory(): React.ReactElement {
               <Th>Status</Th>
               <Th>Changes</Th>
               <Th>Applied At</Th>
+              <Th>Author</Th>
               <Th>Engine</Th>
               <Th />
             </tr>
@@ -626,6 +777,7 @@ export function MigrationHistory(): React.ReactElement {
                     <Td><Badge variant={statusVariant[status]}>{status.replace("_", " ")}</Badge></Td>
                     <Td><ChangeSummaryPills changes={changes} hasSnapshot={m.schema_snapshot !== null} /></Td>
                     <Td className="text-xs text-muted-foreground">{new Date(m.applied_at).toLocaleString()}</Td>
+                    <Td className="text-xs"><AuthorCell migration={m} /></Td>
                     <Td className="text-xs text-muted-foreground font-mono">{m.engine_version}</Td>
                     <Td>
                       <Button
@@ -637,14 +789,14 @@ export function MigrationHistory(): React.ReactElement {
                     </Td>
                   </tr>
                   {isExpanded && (
-                    <ExpandedRow proxy={proxy} migration={m} changes={changes} colSpan={8} />
+                    <ExpandedRow proxy={proxy} migration={m} changes={changes} colSpan={9} />
                   )}
                 </React.Fragment>
               )
             })}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={8} className="text-center py-8 text-muted-foreground text-sm">
+                <td colSpan={9} className="text-center py-8 text-muted-foreground text-sm">
                   {linkedId !== null
                     ? `Migration #${linkedId} not found: no tracked schema migration has that id.`
                     : "No migrations match your filters"}

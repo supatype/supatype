@@ -18,6 +18,7 @@ import { hasProjectConfig, loadConfig } from "./config.js"
 import { cachedBinaryPath, currentPlatform, newestCachedVersion } from "./binary-cache.js"
 import { ensureBinary } from "./ensure-binary.js"
 import { findJsonLine } from "./engine-json-line.js"
+import { auditFlags, auditWhenSupported } from "./push-audit.js"
 
 // ---------------------------------------------------------------------------
 // Types (kept for backward compatibility with existing callers)
@@ -262,6 +263,24 @@ export async function engineRequest<T = unknown>(
   }
 
   return readEngineResult<T>(endpoint, result)
+}
+
+/**
+ * `/push` from the project at `cwd`, with its audit trail (who pushed, through what, from where)
+ * for an engine that records it: the binary here, or the project's engine image with `compose`.
+ * Every push the CLI runs an engine for goes through here, so each one says who it is from.
+ */
+export async function enginePush<T = unknown>(
+  cwd: string,
+  body: Record<string, unknown>,
+  compose?: ComposeEngine,
+): Promise<T> {
+  const capabilities = compose?.capabilities ?? (async () => {
+    const { binaryCapabilities } = await import("./engine-ownership-gate.js")
+    return binaryCapabilities(await getEngineBin())
+  })
+  const audit = await auditWhenSupported(cwd, capabilities)
+  return engineRequest<T>("/push", { ...body, ...audit }, compose)
 }
 
 /**
@@ -521,6 +540,8 @@ export function endpointToArgs(
         "--non-interactive",
         ...overwriteDrift,
         ...sourceArgs,
+        // Only in a body `enginePush` built for an engine that records them.
+        ...auditFlags(body),
       ]
     }
 

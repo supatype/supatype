@@ -96,6 +96,7 @@ export async function pushSchemaToLinkedProject(
   info(`Pushing schema to ${target.mode} project ${target.projectRef} (${target.environment})...`)
 
   const result = await targetSchemaPush(target, ast, {
+    cwd,
     force: opts?.force ?? true,
     schema: schemaPgSchema(cwd),
     ...(opts?.overwriteDrift !== undefined && { overwriteDrift: opts.overwriteDrift }),
