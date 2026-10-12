@@ -44,6 +44,20 @@ function getTertiaryGroups(path: string): NavGroup[] | null {
     }]
   }
 
+  // Realtime Inspector. Settings and metrics are listed, inert, until they are built.
+  if (/^\/realtime\/(channels|clients|stream|broadcast|settings|metrics)$/.test(path)) {
+    return [{
+      items: [
+        { label: "Channels",  href: "/realtime/channels",  activeWhen: (p) => p === "/realtime/channels" },
+        { label: "Clients",   href: "/realtime/clients",   activeWhen: (p) => p === "/realtime/clients" },
+        { label: "Stream",    href: "/realtime/stream",    activeWhen: (p) => p === "/realtime/stream" },
+        { label: "Broadcast", href: "/realtime/broadcast", activeWhen: (p) => p === "/realtime/broadcast" },
+        { label: "Settings",  href: "/realtime/settings",  unavailable: { note: "Coming in a later release" } },
+        { label: "Metrics",   href: "/realtime/metrics",   unavailable: { note: "Coming in a later release" } },
+      ],
+    }]
+  }
+
   // REST API
   if (path === "/api/rest" || path.startsWith("/api/rest/")) {
     return [{

@@ -48,9 +48,23 @@ const SECONDARY_NAV_ENTRIES: NavEntry[] = [
 
 // ─── Sidebar props ────────────────────────────────────────────────────────────
 
+/**
+ * The nav items a user's capability rules out, once the server has said what it is.
+ *
+ * Only what the server has refused is hidden: before the capability resolves, and on a deployment
+ * that does not report it, everything stays, and the destination says what it can.
+ */
+export function hiddenNavItems(capability: { role: string | null; permissions: Record<string, boolean> }): ReadonlySet<string> {
+  const hidden = new Set<string>()
+  if (capability.role !== null && capability.permissions["realtimeInspect"] !== true) hidden.add("realtime")
+  return hidden
+}
+
 interface SidebarProps {
   config: AdminConfig
   extraSections?: SidebarSection[] | undefined
+  /** Nav item ids this user may not use (see {@link hiddenNavItems}). */
+  hiddenItems?: ReadonlySet<string> | undefined
   className?: string | undefined
   /** @deprecated No longer used */
   collapsed?: boolean | undefined
@@ -60,7 +74,7 @@ interface SidebarProps {
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
 
-export function Sidebar({ config, extraSections, className }: SidebarProps): React.ReactElement {
+export function Sidebar({ config, extraSections, hiddenItems, className }: SidebarProps): React.ReactElement {
   const navigate = useNavigate()
   const location = useLocation()
   const path = location.pathname
@@ -158,6 +172,7 @@ export function Sidebar({ config, extraSections, className }: SidebarProps): Rea
             if (entry === "separator") {
               return <div key={`sep-${i}`} className="my-1 mx-3 border-t border-border/50" />
             }
+            if (hiddenItems?.has(entry.id) === true) return null
             return (
               <NavItem
                 key={entry.id}

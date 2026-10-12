@@ -117,12 +117,17 @@ export function Card({
 
 /* ─── Input ─── */
 
+/**
+ * Form controls carry `data-ui` naming the primitive, so a test can tell a control built from this
+ * module from a hand-rolled one by looking at the rendered tree.
+ */
 export function Input({
   className,
   ...props
 }: Omit<React.InputHTMLAttributes<HTMLInputElement>, "className"> & { className?: string }): React.ReactElement {
   return (
     <input
+      data-ui="input"
       // A disabled input has to *look* disabled. Without these it renders identically to an
       // editable one, so a field the form will never read looks like a field you forgot to
       // fill in, and clicking it does nothing with no explanation.
@@ -141,11 +146,31 @@ export function Select({
 }: Omit<React.SelectHTMLAttributes<HTMLSelectElement>, "className"> & { className?: string; children: React.ReactNode }): React.ReactElement {
   return (
     <select
+      data-ui="select"
       className={cn("px-3 py-1.5 rounded-md border border-border bg-background text-foreground text-sm focus:outline-none focus:border-ring focus:ring-2 focus:ring-ring/20", className)}
       {...props}
     >
       {children}
     </select>
+  )
+}
+
+/* ─── Textarea ─── */
+
+/**
+ * A multi-line input with {@link Input}'s border and focus ring, in the monospace face
+ * {@link CodeBlock} uses, for text that is code: a JSON payload, a query.
+ */
+export function Textarea({
+  className,
+  ...props
+}: Omit<React.TextareaHTMLAttributes<HTMLTextAreaElement>, "className"> & { className?: string }): React.ReactElement {
+  return (
+    <textarea
+      data-ui="textarea"
+      className={cn("w-full px-3 py-2 rounded-md border border-border bg-background text-foreground font-mono text-sm focus:outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed", className)}
+      {...props}
+    />
   )
 }
 
@@ -172,7 +197,7 @@ export function Checkbox({
         className,
       )}
     >
-      <input type="checkbox" className="rounded" disabled={disabled} {...props} />
+      <input type="checkbox" data-ui="checkbox" className="rounded" disabled={disabled} {...props} />
       {label}
     </label>
   )

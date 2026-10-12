@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 import pg from "pg"
 import { RlsFilter } from "../src/rls.js"
 import type { WalChange } from "../src/types.js"
@@ -139,6 +139,44 @@ describe.skipIf(!databaseUrl)("RlsFilter field masking", () => {
         `SECURITY LABEL FOR supatype ON COLUMN rt_posts.salary IS 'MASK READ public."can_read_rt_posts__salary"'`,
       )
       filter.invalidateCatalogs()
+    }
+  })
+
+  // What the inspector is told about one delivery: the masked change plus which columns were
+  // masked, so Studio can say "redacted" rather than show a null nobody stored.
+  it("reports which columns it masked for a delivery", async () => {
+    const verdict = await filter.judgeForDelivery(claimsFor("bob"), change())
+    if (!("send" in verdict)) throw new Error("expected the change to be sent")
+    expect(verdict.send.newRecord?.["salary"]).toBeNull()
+    expect(verdict.redacted.new).toContain("salary")
+    expect(verdict.redacted.old).toEqual([])
+
+    const own = await filter.judgeForDelivery(claimsFor("alice"), change())
+    if (!("send" in own)) throw new Error("expected the change to be sent")
+    expect(own.redacted.new).toEqual([])
+  })
+
+  it("names the refusal instead of returning nothing", async () => {
+    const verdict = await filter.judgeForDelivery(null, change())
+    expect(verdict).toMatchObject({ refused: { severity: "denied" } })
+  })
+
+  // Judging a change as the Studio viewer withholds nothing from anybody, so it must not write a
+  // drop line: the log would then report drops that never happened.
+  it("judges as an inspector's viewer without logging a drop", async () => {
+    const warn = vi.spyOn(console, "warn")
+    const debug = vi.spyOn(console, "debug")
+    try {
+      const hidden = await filter.inspectAs(claimsFor("bob"), change({ newRecord: { id: 999, title: "x", salary: 1, author_id: "bob" } }))
+      expect(hidden).toMatchObject({ refused: { severity: "denied" } })
+      const seen = await filter.inspectAs(claimsFor("bob"), change())
+      if (!("send" in seen)) throw new Error("expected the change to be visible")
+      expect(seen.redacted.new).toContain("salary")
+      expect(warn).not.toHaveBeenCalled()
+      expect(debug).not.toHaveBeenCalled()
+    } finally {
+      warn.mockRestore()
+      debug.mockRestore()
     }
   })
 })

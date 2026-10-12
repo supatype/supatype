@@ -149,4 +149,6 @@ export interface Subscription {
   event: ChangeEvent | "*"
   /** PostgREST-style column filters. */
   filter: Record<string, string>
+  /** When the subscription was made, in epoch milliseconds; stamped by `ChannelManager.subscribe`. */
+  createdAt?: number | undefined
 }

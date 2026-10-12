@@ -1,11 +1,18 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
-import { createServer } from "node:net"
-import jwt from "jsonwebtoken"
-import { WebSocket } from "ws"
 import { RealtimeServer } from "../src/server.js"
 import { ChannelManager } from "../src/channels.js"
-import type { RealtimeEnv } from "../src/env.js"
 import type { ServerMessage } from "../src/types.js"
+import {
+  anonKey,
+  connect,
+  freePort,
+  isSystem,
+  settle,
+  subscribe as subscribeTo,
+  testEnv,
+  userToken,
+  type Peer,
+} from "./fixtures/socket.js"
 
 /**
  * Broadcast and presence are only for a client that proved who it is and joined the channel.
@@ -17,109 +24,9 @@ import type { ServerMessage } from "../src/types.js"
  * helper.
  */
 
-const SECRET = "realtime-broadcast-presence-test-secret-0123456789"
 const CHANNEL = "room-1"
 
-function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const probe = createServer()
-    probe.once("error", reject)
-    probe.listen(0, "127.0.0.1", () => {
-      const addr = probe.address()
-      const port = typeof addr === "object" && addr !== null ? addr.port : 0
-      probe.close(() => resolve(port))
-    })
-  })
-}
-
-function testEnv(port: number, secureChannels: boolean): RealtimeEnv {
-  return {
-    port,
-    // Nothing listens here. Replication retries in the background, which is all these need:
-    // broadcast and presence never touch the database.
-    databaseUrl: "postgresql://nobody:nothing@127.0.0.1:1/none",
-    jwtSecret: SECRET,
-    slotName: "unused",
-    publicationName: "unused",
-    replicationPollInterval: 1000,
-    secureChannels,
-    logLevel: "info",
-    multiTenant: false,
-    routingTableRefreshMs: 60_000,
-    schemaFilterMode: "developer_only",
-    connectionLimits: {},
-  }
-}
-
-function userToken(sub: string): string {
-  return jwt.sign({ sub, role: "authenticated", aud: "authenticated" }, SECRET, { expiresIn: 600 })
-}
-
-/** The anon key a signed-out SDK client connects with: verified, but naming no user. */
-function anonKey(): string {
-  return jwt.sign({ role: "anon", iss: "supatype" }, SECRET, { expiresIn: 600 })
-}
-
-/** A socket and every frame it has received, so a test can wait for one or prove there was none. */
-interface Peer {
-  ws: WebSocket
-  frames: ServerMessage[]
-  send(msg: Record<string, unknown>): void
-  next(match: (m: ServerMessage) => boolean, timeoutMs?: number): Promise<ServerMessage>
-  close(): void
-}
-
-async function connect(port: number, token?: string): Promise<Peer> {
-  const url = token === undefined
-    ? `ws://127.0.0.1:${port}`
-    : `ws://127.0.0.1:${port}?token=${encodeURIComponent(token)}`
-  const ws = new WebSocket(url)
-  const frames: ServerMessage[] = []
-  const waiters: Array<{ match: (m: ServerMessage) => boolean; resolve: (m: ServerMessage) => void }> = []
-  ws.on("message", (data) => {
-    const msg = JSON.parse(String(data)) as ServerMessage
-    frames.push(msg)
-    for (const w of [...waiters]) {
-      if (w.match(msg)) {
-        waiters.splice(waiters.indexOf(w), 1)
-        w.resolve(msg)
-      }
-    }
-  })
-  await new Promise<void>((resolve, reject) => {
-    ws.once("open", () => resolve())
-    ws.once("error", reject)
-  })
-  return {
-    ws,
-    frames,
-    send: (msg) => ws.send(JSON.stringify(msg)),
-    next: (match, timeoutMs = 2000) => {
-      const seen = frames.find(match)
-      if (seen) return Promise.resolve(seen)
-      return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error("timed out waiting for a frame")), timeoutMs)
-        waiters.push({ match, resolve: (m) => { clearTimeout(timer); resolve(m) } })
-      })
-    },
-    close: () => ws.close(),
-  }
-}
-
-const isSystem = (status: "ok" | "error", text?: string) => (m: ServerMessage): boolean =>
-  m.type === "system" && m.status === status && (text === undefined || m.message.includes(text))
-
-async function subscribe(peer: Peer, channel = CHANNEL): Promise<void> {
-  peer.send({ type: "subscribe", channel })
-  await peer.next(isSystem("ok", `subscribed to ${channel}`))
-}
-
-/** Round-trips a frame, so anything the server was going to send before it has arrived. */
-async function settle(peer: Peer): Promise<void> {
-  const marker = `settle-${Math.random().toString(36).slice(2)}`
-  peer.send({ type: "unsubscribe", channel: marker })
-  await peer.next(isSystem("ok", `unsubscribed from ${marker}`))
-}
+const subscribe = (peer: Peer, channel = CHANNEL): Promise<void> => subscribeTo(peer, channel)
 
 function relayed(peer: Peer): ServerMessage[] {
   return peer.frames.filter((m) => m.type === "broadcast" || m.type === "presence")
@@ -137,7 +44,7 @@ describe.each([true, false])("broadcast and presence (secureChannels %s)", (secu
 
   beforeAll(async () => {
     port = await freePort()
-    server = new RealtimeServer(testEnv(port, secureChannels))
+    server = new RealtimeServer(testEnv(port, { secureChannels }))
     await server.start()
   })
 
