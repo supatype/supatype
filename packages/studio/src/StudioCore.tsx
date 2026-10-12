@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useMemo } from "react"
 import { Routes, Route, Navigate, Outlet, useNavigate, useLocation, useParams } from "react-router-dom"
 import type { StudioCoreProps } from "./types.js"
 import { AdminConfigContext, useAdminConfig } from "./hooks/useAdminConfig.js"
@@ -8,7 +8,8 @@ import { AdminClientContext, useAdminClient } from "./hooks/useAdminClient.js"
 import { LocaleContext, useLocaleState } from "./hooks/useLocale.js"
 import { CloudUrlContext } from "./hooks/useCloudUrl.js"
 import { PlatformCtx } from "./hooks/usePlatform.js"
-import { Sidebar, getPageBreadcrumbs } from "./components/Sidebar.js"
+import { Sidebar, getPageBreadcrumbs, hiddenNavItems } from "./components/Sidebar.js"
+import { useStudioCapability } from "./hooks/useStudioCapability.js"
 import { SecondaryPanel } from "./components/SecondaryPanel.js"
 import { TertiaryNav } from "./components/TertiaryNav.js"
 import { IconList } from "./components/icons.js"
@@ -49,6 +50,7 @@ import { ModelGraphQLDocs } from "./views/ModelGraphQLDocs.js"
 import { LogsViewer } from "./views/LogsViewer.js"
 import { Settings } from "./views/Settings.js"
 import { ComingSoon } from "./views/ComingSoon.js"
+import { RealtimeInspector } from "./views/RealtimeInspector.js"
 import { EdgeFunctions } from "./views/EdgeFunctions.js"
 import { PluginsMarketplace } from "./views/PluginsMarketplace.js"
 
@@ -83,6 +85,8 @@ interface StudioLayoutProps {
 function StudioLayout({ extensions, demoMode }: StudioLayoutProps): React.ReactElement {
   const location = useLocation()
   const configCtx = React.useContext(AdminConfigContext)
+  const capability = useStudioCapability()
+  const hiddenNav = useMemo(() => hiddenNavItems(capability), [capability])
   const [sidebarOpen, setSidebarOpen] = useState(false)
   // Tier 2 is docked from `md` up; below that it is an overlay this owns, because the
   // toggle lives in the tier-3 rail and the panel is a sibling of it.
@@ -127,6 +131,7 @@ function StudioLayout({ extensions, demoMode }: StudioLayoutProps): React.ReactE
         <Sidebar
           config={configCtx}
           extraSections={extensions?.sidebarSections}
+          hiddenItems={hiddenNav}
           className="hidden md:flex"
         />
 
@@ -140,6 +145,7 @@ function StudioLayout({ extensions, demoMode }: StudioLayoutProps): React.ReactE
             <Sidebar
               config={configCtx}
               extraSections={extensions?.sidebarSections}
+              hiddenItems={hiddenNav}
               className="fixed top-14 left-0 h-[calc(100vh-56px)] z-50 md:hidden"
             />
           </>
@@ -475,9 +481,12 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
               <Route path="edge-functions" element={<EdgeFunctions />} />
               <Route path="edge-functions/:functionSlug" element={<EdgeFunctions />} />
               <Route path="edge-functions/:functionSlug/:tab" element={<EdgeFunctions />} />
-              {/* Not built on Cloud or self-host: Cloud's pages were UI over stub endpoints. Coming
-                  soon on both until the Inspector ships (Phase-08 Appendix A). */}
-              <Route path="realtime"       element={<ComingSoon title="Realtime Inspector" description="Active channels, connected clients, a live message stream and a broadcast tester, with realtime settings to follow. The Realtime Inspector is coming soon." />} />
+              {/* The Inspector where this deployment's control plane serves it, "coming soon" where it
+                  does not (Phase-08 Appendix A). Settings and metrics are a later release. */}
+              <Route path="realtime"          element={<RealtimeInspector demoMode={demoMode ?? false} />} />
+              <Route path="realtime/settings" element={<ComingSoon title="Realtime Settings" description="Realtime settings are coming in a later release." />} />
+              <Route path="realtime/metrics"  element={<ComingSoon title="Realtime Metrics" description="Connection, throughput and latency charts are coming in a later release." />} />
+              <Route path="realtime/:tab"     element={<RealtimeInspector demoMode={demoMode ?? false} />} />
               <Route path="plugins"        element={<PluginsMarketplace />} />
               <Route path="webhooks"       element={<ComingSoon title="Webhooks" description="Schema-driven webhooks that fire on record create/update/delete. Configure endpoints, retry policies, and delivery history. Coming in Phase 17." />} />
               <Route path="jobs"           element={<ComingSoon title="Scheduled Jobs" description="Cron-scheduled SQL jobs and edge function invocations. View execution history and trigger manually. Coming in Phase 18." />} />
