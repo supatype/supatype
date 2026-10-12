@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import pg from "pg"
 import { RlsFilter } from "../src/rls.js"
+import { TableCatalog } from "../src/table-catalog.js"
 import type { JwtClaims } from "../src/auth.js"
 import type { LogLevel } from "../src/env.js"
 import type { WalChange } from "../src/types.js"
@@ -34,9 +35,14 @@ const SETUP = `
   ${ownedTable("rt_plain", "id text PRIMARY KEY, owner text")}
   ${readPredicate("rt_plain")}
   ${ownedTable("rt_nopred", "id text PRIMARY KEY, owner text", "ALTER TABLE rt_nopred REPLICA IDENTITY FULL;")}
+  ${ownedTable("rt_older", "id text PRIMARY KEY, owner text", "ALTER TABLE rt_older REPLICA IDENTITY FULL;")}
+  ${readPredicate("rt_older", { rowOnly: true })}
+  ${ownedTable("rt_strict", "id text PRIMARY KEY, owner text", "ALTER TABLE rt_strict REPLICA IDENTITY FULL;")}
+  CREATE FUNCTION public.can_read_rt_strict(rt_strict public.rt_strict, level int)
+    RETURNS boolean LANGUAGE sql STABLE AS $$ SELECT true $$;
 `
 
-const TABLES = ["rt_ticket", "rt_pair", "rt_nokey", "rt_note", "rt_plain", "rt_nopred"]
+const TABLES = ["rt_ticket", "rt_pair", "rt_nokey", "rt_note", "rt_plain", "rt_nopred", "rt_older", "rt_strict"]
 
 describe.skipIf(!databaseUrl)("RlsFilter row visibility", () => {
   let admin: pg.Client
@@ -118,6 +124,28 @@ describe.skipIf(!databaseUrl)("RlsFilter row visibility", () => {
     it("still sends every delete to service_role", async () => {
       const service = { sub: "svc", role: "service_role" } as JwtClaims
       expect((await filter.visibleChange(service, remove("rt_note", bobs)))?.oldRecord).toEqual(bobs)
+    })
+  })
+
+  describe("the row predicate's signature (CT3)", () => {
+    it("judges by the predicate an engine before 0.7 made, taking the row alone", async () => {
+      expect(await filter.visibleChange(alice, remove("rt_older", { id: "o-bob", owner: "bob" }))).toBeNull()
+      const mine = { id: "o-alice", owner: "alice" }
+      expect((await filter.visibleChange(alice, remove("rt_older", mine)))?.oldRecord).toEqual(mine)
+    })
+
+    it("finds the predicate in either shape, and not a same-named function that needs more than the row", async () => {
+      const pool = new pg.Pool({ connectionString: databaseUrl, max: 1 })
+      try {
+        const tables = new TableCatalog(pool)
+        const found = (table: string) => tables.shape("public", table).then((shape) => shape.readPredicate)
+        expect(await found("rt_note")).toEqual({ schema: "public", name: "can_read_rt_note" })
+        expect(await found("rt_older")).toEqual({ schema: "public", name: "can_read_rt_older" })
+        expect(await found("rt_strict")).toBeNull()
+      } finally {
+        await pool.end()
+      }
+      expect(await filter.visibleChange(alice, remove("rt_strict", { id: "s-1", owner: "alice" }))).toBeNull()
     })
   })
 
