@@ -126,11 +126,26 @@ export class RlsFilter {
     // Service role bypasses RLS and is the role `supatype_mask` exempts, so tier 1's REST serves it
     // every column too. Tier 2's views are being brought to the same exemption (F63), so this
     // holds for both tiers.
-    if (claims.role === "service_role") return { send: change }
+    if (claims.role === "service_role") return { send: await this.wholeForService(change) }
 
     const rules = await this.rulesFor(change)
     if ("reason" in rules) return rules
     return this.judgeAsSubscriber(claims, withWholeOldRow(change, rules.shape), rules)
+  }
+
+  /**
+   * service_role's change, with its old row made whole as every other subscriber's is, so a DELETE
+   * of a row with NULL columns has the same shape whoever receives it (RT3-1). It costs the cached
+   * table shape the other roles already read. If the shape cannot be read the change goes as
+   * wal2json decoded it: service_role may see all of it, so nothing is at stake but its shape.
+   */
+  private async wholeForService(change: WalChange): Promise<WalChange> {
+    if (!change.oldRecord) return change
+    try {
+      return withWholeOldRow(change, await this.tables.shape(change.schema, change.table))
+    } catch {
+      return change
+    }
   }
 
   /**
