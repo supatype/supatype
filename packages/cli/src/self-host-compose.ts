@@ -894,6 +894,9 @@ ${appEnv}
       SUPATYPE_API_HOST: 0.0.0.0
       SUPATYPE_API_PORT: 9999
       SUPATYPE_API_EXTERNAL_URL: \${API_EXTERNAL_URL:-${externalUrlFallback}}
+      # Browser origins besides the API's own, comma-separated. Unset, a standalone server answers
+      # its own origin only; dev mode allows every origin whatever this says.
+      SUPATYPE_CORS_ALLOW_ORIGINS: \${SUPATYPE_CORS_ALLOW_ORIGINS:-}
       SUPATYPE_DB_DRIVER: postgres
       SUPATYPE_DB_DATABASE_URL: "${authUrl}${authSearchPathSeparator}search_path=auth"
       SUPATYPE_SITE_URL: \${SITE_URL:-${siteUrlFallback}}

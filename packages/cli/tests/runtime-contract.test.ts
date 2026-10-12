@@ -119,6 +119,14 @@ describe("runtime contract", () => {
     expect(first).toBe(second)
   })
 
+  it("self-host compose hands the server the CORS allow-list from .env", () => {
+    // A standalone server answers browsers from its own origin only, unless
+    // SUPATYPE_CORS_ALLOW_ORIGINS lists others. Studio tells self-host operators to set it in
+    // .env, which does nothing unless the compose passes it through.
+    const server = serviceBlock(renderSelfHostCompose({ ...baseConfig, server: { mode: "standalone" } }), "server")
+    expect(server).toContain("SUPATYPE_CORS_ALLOW_ORIGINS: ${SUPATYPE_CORS_ALLOW_ORIGINS:-}")
+  })
+
   it("self-host compose exposes the managed schema over REST, not a hardcoded public", () => {
     // The literal here was the reason a non-default pg_schema pushed correctly and then answered
     // PGRST106 on every request: the engine had moved and PostgREST was never told.
