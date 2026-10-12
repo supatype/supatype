@@ -51,7 +51,9 @@ import {
   assertSupported,
   binaryCapabilities,
   EngineProbeFailed,
+  OVERWRITE_DRIFT_NEED,
   OwnershipUnsupportedError,
+  requireEngineFeatures,
 } from "../engine-ownership-gate.js"
 import { startProxyDevApp } from "../app/proxy-dev-app.js"
 import { ProcessManager } from "../process-manager.js"
@@ -142,7 +144,7 @@ async function requireDevEngineSupports(
   config: import("../project-config.js").SupatypeProjectConfig,
   docker: boolean,
 ): Promise<void> {
-  const need = [{ feature: "overwrite_drift", flag: "--overwrite-drift" }] as const
+  const need = [OVERWRITE_DRIFT_NEED]
   try {
     if (docker) {
       const { requireDockerFeatures } = await import("../dev-compose.js")
@@ -747,8 +749,9 @@ let _lastPushedAst: string | null = null
 let _lastFailedAst: string | null = null
 
 /**
- * One push of a native dev session. Never forced: a change that would drop data is asked about in
- * a terminal and refused anywhere else, and the caller logs the refusal while dev keeps watching.
+ * One push of a native dev session. Never forced: a change that would drop data, or one that would
+ * put back access changed outside Supatype, is asked about in a terminal as `push` asks it and
+ * refused anywhere else, and the caller logs the refusal (or the no) while dev keeps watching.
  */
 async function pushNativeSchema(
   cwd: string,
@@ -762,24 +765,30 @@ async function pushNativeSchema(
   const { DEV_DESTRUCTIVE_POLICY, destructiveLines, pushConsentingToDestructive } = await import(
     "../destructive-consent.js"
   )
+  const { devPushConsentingToDrift } = await import("../drift-consent.js")
   await ensureEngine()
   const sources = writeSchemaSourcePushArtifacts(cwd)
   const target = { ast, database_url: dbURL, schema: pgSchema }
-  const result = await pushConsentingToDestructive(
-    (force) =>
-      engineRequest<EnginePushResult>("/push", {
-        ...target,
-        force,
-        ...(overwriteDrift && { overwrite_drift: true }),
-        ...(sources && {
-          schema_sources_gz_base64: sources.payload.dataBase64,
-          schema_sources_manifest: sources.payload.manifest,
+  const once = async (overwrite: boolean): Promise<void> => {
+    const result = await pushConsentingToDestructive(
+      (force) =>
+        engineRequest<EnginePushResult>("/push", {
+          ...target,
+          force,
+          ...(overwrite && { overwrite_drift: true }),
+          ...(sources && {
+            schema_sources_gz_base64: sources.payload.dataBase64,
+            schema_sources_manifest: sources.payload.manifest,
+          }),
         }),
-      }),
-    DEV_DESTRUCTIVE_POLICY,
-    { describe: async () => destructiveLines(await engineRequest<DiffResult>("/diff", target)) },
-  )
-  printPushWarnings(result)
+      DEV_DESTRUCTIVE_POLICY,
+      { describe: async () => destructiveLines(await engineRequest<DiffResult>("/diff", target)) },
+    )
+    printPushWarnings(result)
+  }
+  await devPushConsentingToDrift(once, overwriteDrift, {
+    beforeOverwrite: () => requireEngineFeatures([OVERWRITE_DRIFT_NEED]),
+  })
 }
 
 async function runSchemaPush(

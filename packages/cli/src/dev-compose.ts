@@ -91,10 +91,12 @@ import {
   assertSupported,
   engineCapabilities,
   identityColumnsNeed,
+  OVERWRITE_DRIFT_NEED,
   probeCapabilities,
   type Capabilities,
   type FeatureNeed,
 } from "./engine-ownership-gate.js"
+import { devPushConsentingToDrift } from "./drift-consent.js"
 import { capabilitiesCache, rememberCapabilitiesSync, type CapabilitiesCache } from "@supatype/shared"
 import { hostComposeDbUrl, resolveHostDatabaseUrl } from "./host-database.js"
 import { grantAuthSchemaAccess, reconcileAuthenticatorPassword } from "./compose-db-roles.js"
@@ -954,8 +956,9 @@ export function followRecordedTier(
 }
 
 /**
- * One push of a `dev` session, initial or on save. Never forced: a change that would drop data is
- * asked about in a terminal and refused anywhere else, and the refusal leaves dev running.
+ * One push of a `dev` session, initial or on save. Never forced: a change that would drop data, or
+ * one that would put back access changed outside Supatype, is asked about in a terminal as `push`
+ * asks it, and refused anywhere else; a refusal or a no leaves dev running.
  */
 function runDevSchemaPush(
   cwd: string,
@@ -965,11 +968,15 @@ function runDevSchemaPush(
   composeProject: string,
   opts: ComposePushOptions,
 ): Promise<void> {
-  return pushConsentingToDestructive(
-    (force) => runComposeSchemaPush(cwd, config, paths, schemaPath, composeProject, { ...opts, force }),
-    DEV_DESTRUCTIVE_POLICY,
-    { describe: () => describeDockerDestruction(cwd, config) },
-  )
+  const once = (overwriteDrift: boolean) =>
+    pushConsentingToDestructive(
+      (force) => runComposeSchemaPush(cwd, config, paths, schemaPath, composeProject, { ...opts, overwriteDrift, force }),
+      DEV_DESTRUCTIVE_POLICY,
+      { describe: () => describeDockerDestruction(cwd, config) },
+    )
+  return devPushConsentingToDrift(once, opts.overwriteDrift === true, {
+    beforeOverwrite: () => requireDockerFeatures(cwd, config, [OVERWRITE_DRIFT_NEED]),
+  })
 }
 
 /**
@@ -1374,7 +1381,7 @@ async function applyInitialSchema(
   }
   const outcome = await adoptingOnRefusal(await pushInitialSchema(steps), steps, cwd, config)
   if (outcome.kind === "applied") return
-  if (outcome.kind === "refused" && outcome.refusal?.kind === "destructive") {
+  if (outcome.kind === "declined" || (outcome.kind === "refused" && outcome.refusal?.kind === "destructive")) {
     // Nothing was applied, so the database still matches the last schema it took. The stack can
     // come up on it, and the next save is pushed (and refused or asked about) like any other.
     console.warn(`[supatype] Initial schema push not applied:\n${outcome.message}`)

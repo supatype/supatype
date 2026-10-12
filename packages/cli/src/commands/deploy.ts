@@ -24,7 +24,7 @@ import { resolveTarget } from "../resolve-target.js"
 import { targetFetch } from "../target-client.js"
 import { ensureEngine, engineRequest, type DiffResult } from "../engine-client.js"
 import { formatSecurityDrift, plannedChanges, securityDrift } from "../diff-output.js"
-import { requireEngineFeatures } from "../engine-ownership-gate.js"
+import { OVERWRITE_DRIFT_NEED, requireEngineFeatures } from "../engine-ownership-gate.js"
 import { resolveAppConfig, validateStaticMode, validateBuildOutput, detectPackageManager } from "../app/framework.js"
 import { TIER_LIMITS, type Tier } from "./deploy-types.js"
 import { spawnSync } from "node:child_process"
@@ -113,7 +113,7 @@ export function registerDeploy(program: Command): void {
         if (opts.local) {
           step("Schema Push (local)")
           await ensureEngine()
-          if (overwriteDrift) await requireEngineFeatures([{ feature: "overwrite_drift", flag: "--overwrite-drift" }])
+          if (overwriteDrift) await requireEngineFeatures([OVERWRITE_DRIFT_NEED])
 
           const diff = await engineRequest<DiffResult>("/diff", {
             ast,

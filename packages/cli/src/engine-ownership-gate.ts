@@ -81,6 +81,9 @@ export function adoptNeeds(opts: {
   return needs
 }
 
+/** What putting back access changed outside Supatype needs (`--overwrite-drift`, or a yes to it). */
+export const OVERWRITE_DRIFT_NEED: FeatureNeed = { feature: "overwrite_drift", flag: "--overwrite-drift" }
+
 /**
  * What a rebaseline needs to record only the drift its preview showed. An engine or server without
  * it records whatever drift there is when it runs, including drift that appeared after the person
