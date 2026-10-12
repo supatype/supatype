@@ -52,6 +52,7 @@ import {
   selfHostComposePaths,
   type SelfHostComposePaths,
 } from "./self-host-compose.js"
+import { composeServiceIsRunning } from "./compose-kong.js"
 import type { DockerBrandOptions } from "./docker-runtime.js"
 import { hasEngineOverride } from "./binary-cache.js"
 import { STUDIO_DEV_PORT, startStudioViteDevServer } from "./studio-dev-server.js"
@@ -93,15 +94,15 @@ import {
   assertSupported,
   engineCapabilities,
   identityColumnsNeed,
+  OVERWRITE_DRIFT_NEED,
   probeCapabilities,
-  capabilitiesCache,
-  rememberCapabilitiesSync,
   type Capabilities,
-  type CapabilitiesCache,
   type FeatureNeed,
 } from "./engine-ownership-gate.js"
+import { devPushConsentingToDrift } from "./drift-consent.js"
+import { capabilitiesCache, rememberCapabilitiesSync, type CapabilitiesCache } from "@supatype/shared"
 import { hostComposeDbUrl, resolveHostDatabaseUrl } from "./host-database.js"
-import { grantAuthSchemaAccess, reconcileAuthenticatorPassword } from "./compose-db-roles.js"
+import { grantAuthSchemaAccess, privatizeTableDefaults, reconcileAuthenticatorPassword } from "./compose-db-roles.js"
 import { spawnComposeEngine } from "./compose-engine-run.js"
 
 /** Sync optional Docker image pins from config into `.env` (no JWT rotation). */
@@ -427,21 +428,6 @@ async function waitComposeHealthy(paths: SelfHostComposePaths, cwd: string, maxM
     await new Promise((r) => setTimeout(r, 2000))
   }
   throw new Error("Compose db service did not become healthy in time")
-}
-
-/** True when the named compose service has a running container. */
-function composeServiceIsRunning(
-  paths: SelfHostComposePaths,
-  cwd: string,
-  composeProject: string,
-  service: string,
-): boolean {
-  const envFile = join(cwd, ".env")
-  const args = ["compose", "-p", composeProject, "--project-directory", cwd, "-f", paths.composePath]
-  if (existsSync(envFile)) args.push("--env-file", envFile)
-  args.push("ps", "-q", "--status", "running", service)
-  const result = spawnSync("docker", args, { cwd, encoding: "utf8" })
-  return result.status === 0 && typeof result.stdout === "string" && result.stdout.trim() !== ""
 }
 
 /**
@@ -888,7 +874,7 @@ async function runComposeSchemaPush(
   }
   // B: only hold the advisory lock when realtime is already decoding, first-boot
   // push (db only) must not take the lock; that path crashed under lock+DDL in CI.
-  const push = composeServiceIsRunning(paths, cwd, composeProject, "realtime")
+  const push = composeServiceIsRunning(cwd, { composePath: paths.composePath, project: composeProject }, "realtime")
     ? await withComposeSchemaPushLock(paths, cwd, composeProject, runPush)
     : await runPush()
   if (push.status !== 0) {
@@ -960,8 +946,9 @@ export function followRecordedTier(
 }
 
 /**
- * One push of a `dev` session, initial or on save. Never forced: a change that would drop data is
- * asked about in a terminal and refused anywhere else, and the refusal leaves dev running.
+ * One push of a `dev` session, initial or on save. Never forced: a change that would drop data, or
+ * one that would put back access changed outside Supatype, is asked about in a terminal as `push`
+ * asks it, and refused anywhere else; a refusal or a no leaves dev running.
  */
 async function runDevSchemaPush(
   cwd: string,
@@ -972,11 +959,16 @@ async function runDevSchemaPush(
   opts: ComposePushOptions,
 ): Promise<void> {
   const audit = opts.audit ?? (hasEngineOverride(config) ? [] : await composeAuditArgs(cwd, config))
-  return pushConsentingToDestructive(
-    (force) => runComposeSchemaPush(cwd, config, paths, schemaPath, composeProject, { ...opts, audit, force }),
-    DEV_DESTRUCTIVE_POLICY,
-    consentDepsFromDiff(cwd, () => dockerDiff(cwd, config)),
-  )
+  const once = (overwriteDrift: boolean) =>
+    pushConsentingToDestructive(
+      (force) =>
+        runComposeSchemaPush(cwd, config, paths, schemaPath, composeProject, { ...opts, audit, overwriteDrift, force }),
+      DEV_DESTRUCTIVE_POLICY,
+      consentDepsFromDiff(cwd, () => dockerDiff(cwd, config)),
+    )
+  return devPushConsentingToDrift(once, opts.overwriteDrift === true, {
+    beforeOverwrite: () => requireDockerFeatures(cwd, config, [OVERWRITE_DRIFT_NEED]),
+  })
 }
 
 /**
@@ -1072,7 +1064,7 @@ function localImageId(image: string): string | undefined {
 }
 
 /** Answers per project and engine image ID (`rememberCapabilitiesSync`): each probe costs a container. */
-const dockerCapabilities: CapabilitiesCache = capabilitiesCache()
+const dockerCapabilities: CapabilitiesCache<Capabilities> = capabilitiesCache()
 
 /** Refuse, before anything is sent, an ownership feature the docker project's engine lacks. */
 export async function requireDockerFeatures(
@@ -1343,6 +1335,7 @@ export async function pushSchemaDocker(
 
   console.log(`[supatype] provider docker, applying schema via compose (project ${project})...`)
   await startComposeDatabase(config, paths, cwd, project, pushBrand)
+  if (!usesExternalDatabase(config)) privatizeTableDefaults(paths, cwd, project)
 
   const schemaPath = schemaPathFromProject(config, cwd)
   const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
@@ -1389,7 +1382,7 @@ async function applyInitialSchema(
   }
   const outcome = await adoptingOnRefusal(await pushInitialSchema(steps), steps, cwd, config)
   if (outcome.kind === "applied") return
-  if (outcome.kind === "refused" && outcome.refusal?.kind === "destructive") {
+  if (outcome.kind === "declined" || (outcome.kind === "refused" && outcome.refusal?.kind === "destructive")) {
     // Nothing was applied, so the database still matches the last schema it took. The stack can
     // come up on it, and the next save is pushed (and refused or asked about) like any other.
     console.warn(`[supatype] Initial schema push not applied:\n${outcome.message}`)
@@ -1515,6 +1508,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
 
   if (!usesExternalDatabase(config)) {
     reconcileAuthenticatorPassword(paths, cwd, project)
+    privatizeTableDefaults(paths, cwd, project)
   }
 
   // A: apply schema before realtime (and the rest of the stack) starts decoding WAL.

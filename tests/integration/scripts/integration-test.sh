@@ -290,7 +290,7 @@ if [[ "$SUPATYPE_PROVIDER" == "docker" ]]; then
       --build-arg ENGINE_IMAGE="${SUPATYPE_ENGINE_IMAGE:-supatype/schema-engine:ci-dev}" \
       -t "${SUPATYPE_CONTROL_PLANE_IMAGE:-supatype/control-plane:ci-dev}" \
       -f "$ROOT_DIR/packages/self-host-control/Dockerfile" \
-      "$ROOT_DIR/packages/self-host-control"
+      "$ROOT_DIR"
   fi
   export SUPATYPE_CONTROL_PLANE_IMAGE="${SUPATYPE_CONTROL_PLANE_IMAGE:-supatype/control-plane:ci-dev}"
   node "$SCRIPT_DIR/prepare-docker-env.mjs"

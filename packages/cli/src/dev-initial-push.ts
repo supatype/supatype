@@ -16,7 +16,7 @@
  * Anything else is the engine's answer, and `dev` stops with it. Resetting the database is
  * `supatype dev --reset-db`, which is asked for, confirmed, and removes only Postgres's volume.
  */
-import { classifyPushRefusal, engineOutputOf, explainRefusal, type PushRefusal } from "./push-refusal.js"
+import { classifyPushRefusal, DevPushDeclined, engineOutputOf, explainRefusal, type PushRefusal } from "./push-refusal.js"
 import { DEV_DESTRUCTIVE_POLICY } from "./destructive-consent.js"
 import { fatalError } from "./ui/fatal.js"
 import type { DockerBrandOptions } from "./docker-runtime.js"
@@ -28,10 +28,12 @@ import type { DockerBrandOptions } from "./docker-runtime.js"
  * unmanaged-tables case is the one an adopt walkthrough will pick up. `refusal` is what refused
  * it, or null for any other answer from the engine. A destructive refusal is a change that would
  * drop data and was not agreed to: the database still matches the last schema, so dev carries on.
+ * So does a push declined in a terminal (access changed outside Supatype, kept on a no).
  */
 export type InitialPushOutcome =
   | { kind: "applied" }
   | { kind: "refused"; refusal: PushRefusal | null; message: string }
+  | { kind: "declined"; message: string }
   | { kind: "exhausted"; attempts: number; message: string }
 
 export type InitialPushFailure = Exclude<InitialPushOutcome, { kind: "applied" }>
@@ -67,6 +69,8 @@ const TRANSIENT_PATTERNS: readonly RegExp[] = [
 interface FailedPush {
   message: string
   refusal: PushRefusal | null
+  /** A person was asked and said no: nothing to retry or diagnose. */
+  declined: boolean
 }
 
 /** Run one push, returning how it failed instead of throwing. */
@@ -76,7 +80,7 @@ async function attemptPush(push: () => Promise<void>): Promise<FailedPush | null
     return null
   } catch (err: unknown) {
     // With the engine's stdout, where it names a refusal.
-    return { message: engineOutputOf(err), refusal: classifyPushRefusal(err) }
+    return { message: engineOutputOf(err), refusal: classifyPushRefusal(err), declined: err instanceof DevPushDeclined }
   }
 }
 
@@ -99,6 +103,7 @@ export async function pushInitialSchema(
     const failure = await attemptPush(steps.push)
     if (failure === null) return { kind: "applied" }
     message = failure.message
+    if (failure.declined) return { kind: "declined", message }
     const refused = { kind: "refused" as const, refusal: failure.refusal, message }
     // Not a failure to diagnose: the person was told what would be lost and the database is as it was.
     if (failure.refusal?.kind === "destructive") return refused
@@ -123,6 +128,7 @@ const DATABASE_KEPT = "Your local database was left as it was."
 /** End `dev` with what the engine said, and what to do about it. */
 export function exitInitialPushFailed(failure: InitialPushFailure, brand?: DockerBrandOptions): never {
   const opts = { ...(brand !== undefined && { brand }) }
+  if (failure.kind === "declined") fatalError(failure.message, [DATABASE_KEPT], opts)
   if (failure.kind === "exhausted") {
     fatalError(
       `Initial schema push failed after ${failure.attempts} attempts: ${failure.message}`,

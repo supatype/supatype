@@ -33,6 +33,29 @@ export function adoptionKey(item: Pick<DoctorItem, "kind" | "table" | "name">): 
   return TABLE_LEVEL_KINDS.has(item.kind) ? `${item.kind}:${item.name}` : `${item.kind}:${item.table}.${item.name}`
 }
 
+/** The kinds that decide who may read or write a table: owned by it, and judged on their own. */
+const ACCESS_KINDS = new Set(["table_grant", "policy", "rls_attributes", "security_label"])
+
+/**
+ * The access objects (grants, policies, RLS, labels) of each table `keys` names that the preview
+ * shows as conflicts too and `keys` leaves out. Adopting the table alone leaves them conflicts, and
+ * the next push refuses them (DR2), so they are offered with it.
+ */
+export function tableAccessConflicts(preview: AdoptOutcome, keys: readonly string[]): DoctorItem[] {
+  const named = new Set(keys)
+  const tables = new Set(keys.filter(isTableKey).map((key) => key.slice(TABLE_KEY_PREFIX.length)))
+  return (preview.adopt ?? []).filter(
+    (item) => ACCESS_KINDS.has(item.kind) && tables.has(item.table) && !named.has(adoptionKey(item)),
+  )
+}
+
+const TABLE_KEY_PREFIX = "table:"
+
+/** A key naming a table (`table:name`). */
+export function isTableKey(key: string): boolean {
+  return key.startsWith(TABLE_KEY_PREFIX)
+}
+
 /**
  * The conflicts a preview showed, named for the engine, so applying adopts those and nothing the
  * database grew since. Undefined for an engine from before the ledger, which names none.
@@ -105,7 +128,7 @@ export function isEngineBusy(err: unknown): boolean {
 
 /** What the CLI says when adopt met a busy engine. */
 export const ENGINE_BUSY_MESSAGE =
-  "The database is busy: another push, adopt or rebaseline is running on it. Nothing was adopted; try again."
+  "The database is busy: another push, adopt, rebaseline or rollback is running on it. Nothing was adopted; try again."
 
 async function adoptAfterPreview(steps: AdoptionSteps, manual: string): Promise<AdoptionOutcome> {
   const lines = await steps.preview()

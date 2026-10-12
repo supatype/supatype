@@ -41,6 +41,7 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
+    "@supatype/shared": "workspace:*",
     "bcryptjs": "^3.0.2",
     "ink": "^5.2.1",
     "ink-select-input": "^6.2.0",

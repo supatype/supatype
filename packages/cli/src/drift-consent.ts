@@ -5,9 +5,12 @@
  *
  * A yes runs the push again with `--overwrite-drift`; anything else leaves the hand edits in place.
  * A push that cannot ask (`--yes`, no terminal) never takes that consent for itself.
+ *
+ * `supatype dev` asks the same question, on its first push and on every save (CR1). A no there
+ * leaves the database as it was and dev carries on watching, as it does after a declined drop.
  */
 import { formatDriftedObjects } from "./diff-output.js"
-import { classifyPushRefusal } from "./push-refusal.js"
+import { DevPushDeclined, classifyPushRefusal } from "./push-refusal.js"
 import { confirm } from "./ui/confirm.js"
 import { isInteractive } from "./ui/interactive.js"
 import { plain } from "./ui/messages.js"
@@ -24,6 +27,8 @@ export interface DriftConsentDeps {
   beforeOverwrite?: () => Promise<void>
   ask?: (question: string) => Promise<boolean>
   interactive?: () => boolean
+  /** What a no does. By default it says so and sets exit 1, for a command that ends there. */
+  declined?: () => void
 }
 
 /**
@@ -57,10 +62,39 @@ export async function pushConsentingToDrift<T>(
  * definitions back. A no keeps the hand edits, applies nothing and exits 1, on the docker path and
  * on a linked or self-hosted target alike, so a script sees the same refusal whichever ran it.
  */
-export async function askToOverwrite(deps: Pick<DriftConsentDeps, "ask"> = {}): Promise<boolean> {
+export async function askToOverwrite(deps: Pick<DriftConsentDeps, "ask" | "declined"> = {}): Promise<boolean> {
   const ask = deps.ask ?? (async (q: string) => (await confirm(q, { default: false })) === true)
   if (await ask("Put Supatype's definitions back?")) return true
+  const declined = deps.declined ?? declinedPush
+  declined()
+  return false
+}
+
+function declinedPush(): void {
   plain("Aborted. The changes made outside Supatype were kept; nothing was applied.")
   process.exitCode = 1
-  return false
+}
+
+/** What dev says when the person kept the changes; dev itself goes on running. */
+export const DEV_DRIFT_KEPT =
+  "The changes made outside Supatype were kept; nothing was applied. Save the schema to be asked again, " +
+  "or run `supatype doctor --rebaseline --accept-access-drift` to keep them as Supatype's."
+
+/**
+ * One push of a `dev` session (the first, or one on save) on the question `push` asks. In a
+ * terminal a security-drift refusal shows what drifted and asks, pushing again with
+ * `overwriteDrift` on a yes; a no throws {@link DevPushDeclined}, which dev reports and carries on
+ * from. Without a terminal the refusal is rethrown as it came, for dev's guidance.
+ */
+export async function devPushConsentingToDrift(
+  push: (overwriteDrift: boolean) => Promise<void>,
+  overwriteDrift: boolean,
+  deps: DriftConsentDeps = {},
+): Promise<void> {
+  await pushConsentingToDrift(push, { overwriteDrift, yes: false }, {
+    ...deps,
+    declined: () => {
+      throw new DevPushDeclined(DEV_DRIFT_KEPT)
+    },
+  })
 }

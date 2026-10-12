@@ -18,9 +18,11 @@ import {
   isEngineBusy,
   isStalePreview,
   previewedKeys,
+  isTableKey,
   STALE_PREVIEW_MESSAGE,
+  tableAccessConflicts,
 } from "../adopt-walkthrough.js"
-import type { AdoptOutcome } from "../engine-client.js"
+import type { AdoptOutcome, DoctorItem } from "../engine-client.js"
 import { declareAdoptedColumns, previewKeyedColumns } from "../adopt-columns.js"
 import { askConsent, confirm } from "../ui/confirm.js"
 import { isInteractive } from "../ui/interactive.js"
@@ -92,9 +94,29 @@ export function registerAdopt(program: Command): void {
   addRetiredNoCacheOption(command).action(adopt)
 }
 
+/** One `adopt` run: what it may adopt, and how it reaches the target. */
+interface AdoptRun {
+  /** The keys `--key` (or `--adopt-none`, `--release`, `--reclaim`) settled on; undefined is every conflict. */
+  named: string[] | undefined
+  run: (yes: boolean, keys?: string[]) => Promise<AdoptOutcome>
+  /** Refuse keys a preview chose that the target cannot honour (`--key`'s were checked already). */
+  requireKeys: (keys: string[]) => Promise<void>
+  /** Declare each adopted column in the schema (see adopt-columns.ts). */
+  declare: (outcome: AdoptOutcome) => Promise<void>
+  /** What adopting each `--key` column does, including the field the schema will gain. */
+  columnLines: (preview: AdoptOutcome) => Promise<string[]>
+}
+
 async function adopt(opts: AdoptOptions): Promise<void> {
   warnIfRetiredNoCache(opts)
-  const cwd = process.cwd()
+  const adoption = await adoptRun(opts, process.cwd())
+  // `--yes` already agreed, so one engine call does it and its outcome says what it took: only the
+  // named objects, or with nothing named, every conflict found as it runs.
+  if (opts.yes) await adoptAgreed(adoption)
+  else await adoptAsking(adoption)
+}
+
+async function adoptRun(opts: AdoptOptions, cwd: string): Promise<AdoptRun> {
   const config = loadConfig(cwd)
   const ast = await withSpinner("Loading schema", async () =>
     // As push sends it: the engine refuses a versioned schema that carries no publishing config.
@@ -113,68 +135,115 @@ async function adopt(opts: AdoptOptions): Promise<void> {
       ...(opts.reclaim !== undefined && { reclaim: opts.reclaim }),
       ...(keys !== undefined && { keys }),
     })
-  const entryPath = resolve(cwd, schemaPathFromProject(config, cwd))
-  // A column the database fills is declared as one only for an engine that reads it.
-  const identityColumns = (await targetCapabilities(target)).features.has("identity_columns")
-  const introspect = (): Promise<unknown> => targetSchemaIntrospect(target, { schema: pgSchema(config) })
-  // An adopted column is managed, so the schema declares it from now on (see adopt-columns.ts).
-  const declare = (outcome: AdoptOutcome) =>
-    declareAdoptedColumns(
-      outcome.adopt ?? [],
-      {
-        entryPath,
-        cwd,
-        yes: opts.yes ?? false,
-        interactive: isInteractive(),
-        identityColumns,
-      },
-      {
-        introspect,
-        confirm: async (question) => (await confirm(question, { default: false })) === true,
-        regenerate: () => regenerateTypes(cwd),
-        say: { info, warn, plain },
-      },
-    )
-  // `--yes` already agreed, so one engine call does it and its outcome says what it took: only the
-  // named objects, or with nothing named, every conflict found as it runs.
-  if (opts.yes) {
-    const outcome = await applying(() => run(true, named))
-    if (outcome === undefined) return
-    for (const line of previewLines(outcome)) plain(`  ${line}`)
-    report(outcome)
-    await declare(outcome)
-    return
+  const columns = {
+    entryPath: resolve(cwd, schemaPathFromProject(config, cwd)),
+    cwd,
+    // A column the database fills is declared as one only for an engine that reads it.
+    identityColumns: (await targetCapabilities(target)).features.has("identity_columns"),
   }
-  const preview = keyedOnly(await run(false), named)
-  // A column added outside Supatype is not a conflict, so the engine's preview does not list it:
-  // say here what adopting each keyed one does, including the field the schema will gain. Only for
-  // keys a person named with --key: `named` is also [] for a run that adopts nothing.
-  const columnLines =
-    opts.key === undefined
-      ? []
-      : await previewKeyedColumns(opts.key, previewedKeys(preview) ?? [], { entryPath, cwd, identityColumns }, { introspect })
-  if (!show([...previewLines(preview), ...columnLines], named !== undefined)) return
+  const introspect = (): Promise<unknown> => targetSchemaIntrospect(target, { schema: pgSchema(config) })
+  return {
+    named,
+    run,
+    requireKeys: (keys) => requireTargetFeatures(target, [adoptKeysNeed(keys)]),
+    // An adopted column is managed, so the schema declares it from now on (see adopt-columns.ts).
+    declare: async (outcome) => {
+      await declareAdoptedColumns(
+        outcome.adopt ?? [],
+        { ...columns, yes: opts.yes ?? false, interactive: isInteractive() },
+        {
+          introspect,
+          confirm: async (question) => (await confirm(question, { default: false })) === true,
+          regenerate: () => regenerateTypes(cwd),
+          say: { info, warn, plain },
+        },
+      )
+    },
+    // A column added outside Supatype is not a conflict, so the engine's preview does not list it.
+    // Only for keys a person named with --key: `named` is also [] for a run that adopts nothing.
+    columnLines: async (preview) =>
+      opts.key === undefined ? [] : previewKeyedColumns(opts.key, previewedKeys(preview) ?? [], columns, { introspect }),
+  }
+}
+
+/** `--yes`: adopt what was named in one call, then say what the next push would still refuse. */
+async function adoptAgreed(adoption: AdoptRun): Promise<void> {
+  const { named, run } = adoption
+  // Read before applying: once the table is Supatype's, nothing else is asked about it.
+  const leftOut = named?.some(isTableKey) === true ? tableAccessConflicts(await run(false), named) : []
+  await applyAndReport(adoption, named, leftOut, true)
+}
+
+/** Adopt `keys`, then say what was taken, and what of the table's access was left out. */
+async function applyAndReport(
+  { run, declare }: AdoptRun,
+  keys: string[] | undefined,
+  leftOut: readonly DoctorItem[],
+  echo: boolean,
+): Promise<void> {
+  const outcome = await applying(() => run(true, keys))
+  if (outcome === undefined) return
+  if (echo) for (const line of previewLines(outcome)) plain(`  ${line}`)
+  report(outcome)
+  sayAccessLeftOut(leftOut)
+  await declare(outcome)
+}
+
+/** Preview, offer each named table's access objects with it, then adopt on a yes. */
+async function adoptAsking(adoption: AdoptRun): Promise<void> {
+  const { named, run, requireKeys, columnLines } = adoption
+  const full = await run(false)
+  const { keys: withAccess, leftOut } = await offerTableAccess(full, named)
+  const preview = keyedOnly(full, withAccess)
+  if (!show([...previewLines(preview), ...(await columnLines(preview))], withAccess !== undefined)) return
   // The named objects are what is adopted. Otherwise what was just shown is what is agreed to:
   // applying names those conflicts, and the engine writes nothing if the database has changed
   // since. An engine from before the ledger names none.
-  const keys = named ?? previewedKeys(preview)
+  const keys = withAccess ?? previewedKeys(preview)
   // Before anyone is asked: applying sends what was shown, which the target must honour.
-  if (named === undefined && keys !== undefined) await requireTargetFeatures(target, [adoptKeysNeed(keys)])
+  if (named === undefined && keys !== undefined) await requireKeys(keys)
+  if (!(await agreedToAdopt())) return
+  await applyAndReport(adoption, keys, leftOut, false)
+}
+
+/** Whether the person agreed; without a terminal or `--yes`, nobody did, which is exit 1. */
+async function agreedToAdopt(): Promise<boolean> {
   const consent = await askConsent("Go ahead?", false)
   if (consent === "needs-yes") {
     // Not a decline: a pipeline that forgot --yes adopted nothing, and must not pass as if it had.
     error("adopt needs --yes when not interactive")
     process.exitCode = 1
-    return
   }
-  if (consent === "declined") {
-    plain("Adoption cancelled.")
-    return
-  }
-  const outcome = await applying(() => run(true, keys))
-  if (outcome === undefined) return
-  report(outcome)
-  await declare(outcome)
+  if (consent === "declined") plain("Adoption cancelled.")
+  return consent === "given"
+}
+
+/**
+ * With `--key table:x`, offer x's grants and policies that the preview also shows as conflicts, as
+ * one group: adopted without them, the next push refuses them (DR2). Returns the keys to adopt and
+ * the access objects left out. Without a terminal nothing is asked, and they are left out.
+ */
+async function offerTableAccess(
+  preview: AdoptOutcome,
+  named: string[] | undefined,
+): Promise<{ keys: string[] | undefined; leftOut: DoctorItem[] }> {
+  if (named === undefined) return { keys: named, leftOut: [] }
+  const access = tableAccessConflicts(preview, named)
+  if (access.length === 0) return { keys: named, leftOut: [] }
+  plain("\nThe access objects of the table named are not Supatype's either:\n")
+  for (const item of access) plain(`  ${adoptionKey(item)}  ${item.message}`)
+  const group = isInteractive() && (await confirm("Adopt these grants and policies with the table?", { default: false }))
+  return group ? { keys: [...named, ...access.map(adoptionKey)], leftOut: [] } : { keys: named, leftOut: access }
+}
+
+/** After adopting a table without its access objects: the next push refuses them, and how to adopt them. */
+function sayAccessLeftOut(leftOut: readonly DoctorItem[]): void {
+  if (leftOut.length === 0) return
+  const keys = leftOut.map(adoptionKey)
+  warn(
+    `The adopted table's grants and policies were left as they are, so the next push refuses them: ${keys.join(", ")}.`,
+  )
+  plain(`Adopt them with: supatype adopt ${keys.map((key) => `--key ${key}`).join(" ")}`)
 }
 
 /**

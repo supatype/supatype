@@ -13,6 +13,14 @@ export interface ComposeStack {
   composePath: string
 }
 
+/** `docker compose` arguments for `stack`, before the subcommand. */
+export function composeBaseArgs(cwd: string, stack: ComposeStack): string[] {
+  const args = ["compose", "-p", stack.project, "--project-directory", cwd, "-f", stack.composePath]
+  const envFile = resolve(cwd, ".env")
+  if (existsSync(envFile)) args.push("--env-file", envFile)
+  return args
+}
+
 /**
  * Arguments and environment to run `psql ...psqlArgs` in `stack`'s `db` container, logged in as
  * the project's database owner, against the project's database.
@@ -23,9 +31,7 @@ export interface ComposeStack {
 export function composeDbPsql(cwd: string, stack: ComposeStack, psqlArgs: string[]): DockerEnv {
   const { user, password, database } = devDatabaseIdentity(cwd)
   const secrets = dockerEnv({ PGPASSWORD: password })
-  const envFile = resolve(cwd, ".env")
-  const args = ["compose", "-p", stack.project, "--project-directory", cwd, "-f", stack.composePath]
-  if (existsSync(envFile)) args.push("--env-file", envFile)
+  const args = composeBaseArgs(cwd, stack)
   args.push("exec", "-T", ...secrets.args, "db", "psql", "-U", user, "-d", database, ...psqlArgs)
   return { args, env: secrets.env }
 }

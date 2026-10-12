@@ -39,7 +39,7 @@ import {
 import { printPushWarnings } from "../engine-push-output.js"
 import { askToOverwrite, pushConsentingToDrift } from "../drift-consent.js"
 import { consentDepsFromDiff, pushConsentingToDestructive, settleRenames } from "../destructive-consent.js"
-import { adoptKeysNeed, type FeatureNeed } from "../engine-ownership-gate.js"
+import { adoptKeysNeed, OVERWRITE_DRIFT_NEED } from "../engine-ownership-gate.js"
 import { pushOfferingAdoption, targetAdoptionSteps } from "../adopt-walkthrough.js"
 import { explainingRefusal } from "../push-refusal.js"
 import { signJwt } from "../jwt.js"
@@ -147,8 +147,6 @@ async function pushWherever(
   await pushViaTarget(cwd, config, target, ast, pgSchema, run)
 }
 
-const OVERWRITE_DRIFT: FeatureNeed = { feature: "overwrite_drift", flag: "--overwrite-drift" }
-
 /**
  * `supatype push` on a docker project with no local control plane. No diff is read first on this
  * path, so the engine's refusals are where drift, unmanaged tables and lost data show up, and each
@@ -159,7 +157,7 @@ async function pushDocker(cwd: string, config: SupatypeProjectConfig, run: PushR
   const { composeAuditArgs, dockerDiff, dockerAdoptionSteps, pushSchemaDocker, requireDockerFeatures } =
     await import("../dev-compose.js")
   const audit = await composeAuditArgs(cwd, config)
-  const gate = () => requireDockerFeatures(cwd, config, [OVERWRITE_DRIFT])
+  const gate = () => requireDockerFeatures(cwd, config, [OVERWRITE_DRIFT_NEED])
   if (run.overwriteDrift) await gate()
   const applying = (overwriteDrift: boolean) =>
     pushConsentingToDestructive(
@@ -219,7 +217,7 @@ async function pushViaTarget(
   run: PushRun,
 ): Promise<void> {
   // Before anything is read or asked: a server or engine that cannot honour the flag says so now.
-  if (run.overwriteDrift) await requireTargetFeatures(target, [OVERWRITE_DRIFT])
+  if (run.overwriteDrift) await requireTargetFeatures(target, [OVERWRITE_DRIFT_NEED])
   if (!(await databaseIsReady(cwd, config, target, ast))) return
   const plan = (schema: unknown) =>
     withSpinner("Diffing against database", () => targetSchemaDiff(target, schema, { schema: pgSchema }))
@@ -260,7 +258,7 @@ async function pushViaTarget(
   if (overwriteDrift === null) return
   // Consent given at the prompt rather than by the flag still sends the flag.
   if (overwriteDrift && !run.overwriteDrift) {
-    await requireTargetFeatures(target, [OVERWRITE_DRIFT])
+    await requireTargetFeatures(target, [OVERWRITE_DRIFT_NEED])
   }
 
   const pushResult = await applyToTarget(cwd, { target, ast, pgSchema }, { ...run, overwriteDrift }, changes.length > 0)
@@ -342,7 +340,7 @@ function applyToTarget(
       }),
     )
   return pushOfferingAdoption(
-    () => pushConsentingToDrift(applying, run, { beforeOverwrite: () => requireTargetFeatures(target, [OVERWRITE_DRIFT]) }),
+    () => pushConsentingToDrift(applying, run, { beforeOverwrite: () => requireTargetFeatures(target, [OVERWRITE_DRIFT_NEED]) }),
     targetAdoptionSteps(
       (yes, keys) => targetSchemaAdopt(target, ast, { schema: pgSchema, yes, ...(keys !== undefined && { keys }) }),
       // Before anyone is asked: applying sends the previewed keys, which this target must honour.

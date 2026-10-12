@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { probeCapabilities, type EngineProbe } from "../src/engine-ownership-gate.js"
+import { probeCapabilities, type Capabilities, type EngineProbe } from "../src/engine-ownership-gate.js"
 
 /**
  * C03 and A6-N2: what an engine or a server supports is asked once and remembered, so a probe that
@@ -24,9 +24,9 @@ describe("rememberCapabilities(): only an answer is remembered, and only for a w
   })
 
   it("asks again after a failed probe, then remembers the answer until it is stale", async () => {
-    const { capabilitiesCache, rememberCapabilities, CAPABILITIES_TTL_MS } = await import("../src/engine-ownership-gate.js")
+    const { capabilitiesCache, rememberCapabilities, CAPABILITIES_TTL_MS } = await import("@supatype/shared")
     vi.useFakeTimers()
-    const cache = capabilitiesCache(CAPABILITIES_TTL_MS)
+    const cache = capabilitiesCache<Capabilities>(CAPABILITIES_TTL_MS)
     let calls = 0
     const probe = async () => {
       calls++
@@ -95,9 +95,9 @@ describe("an engine's answer is keyed on the engine, not on the time", () => {
   })
 
   it("keeps an answer past any TTL when the cache has none: the key changes with the engine", async () => {
-    const { capabilitiesCache, rememberCapabilitiesSync, CAPABILITIES_TTL_MS } = await import("../src/engine-ownership-gate.js")
+    const { capabilitiesCache, rememberCapabilitiesSync, CAPABILITIES_TTL_MS } = await import("@supatype/shared")
     vi.useFakeTimers()
-    const cache = capabilitiesCache()
+    const cache = capabilitiesCache<Capabilities>()
     const probe = vi.fn(() => ({ features: new Set(ALL), source: "engine" as const }))
     rememberCapabilitiesSync(cache, "engine@1", probe)
     vi.advanceTimersByTime(CAPABILITIES_TTL_MS * 10)

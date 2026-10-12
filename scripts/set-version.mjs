@@ -23,6 +23,7 @@ const packagesDir = join(root, "packages")
 /** Published to npm on monorepo version tags (dependency order in release.yml). */
 const npmPackages = [
   "types",
+  "shared",
   "plugin-sdk",
   "client",
   "common",

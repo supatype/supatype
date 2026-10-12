@@ -18,7 +18,8 @@ import { hasStudioOverride, pinnedVersion, fetchLatestVersion, VERSION_PIN_LOCAL
 import { buildKongDeclarative } from "./kong-config.js"
 import { keyspaceInPostgres } from "./cache-provider.js"
 import { STUDIO_DEV_PORT } from "./studio-dev-server.js"
-import { readEnvFile } from "./env-file.js"
+import { readEnvFile, readEnvValue } from "./env-file.js"
+import { reloadKong } from "./compose-kong.js"
 import { CONTROL_PLANE_SECRET_ENV, ensureControlPlaneSecret } from "./local-secrets.js"
 import { fieldMaskingTierFromProject, type FieldMaskingTier } from "./field-masking-tier.js"
 import { readRecordedTier } from "./recorded-field-masking-tier.js"
@@ -392,6 +393,12 @@ export interface SelfHostComposeOptions {
   /** `supatype dev` with provider docker: internal-only db/server; Kong on host :18473. */
   devLocal?: boolean
   /**
+   * Whether functions were given a direct database URL that names the stack's `db`
+   * (`SUPATYPE_FUNCTIONS_DB_URL`), so the worker needs to reach Postgres. Read from `.env` by
+   * `writeSelfHostCompose`; see `functionsNetworks`.
+   */
+  functionsDatabase?: boolean
+  /**
    * Which mechanism enforces per-column rules, when the caller knows.
    *
    * Only the call sites that have loaded the schema can say, see `field-masking-tier.ts`. Left
@@ -407,6 +414,38 @@ export interface SelfHostComposeOptions {
    * unset the list is today's, which is correct for every project with no versioned model.
    */
   drafts?: boolean
+}
+
+/**
+ * SC3: the functions worker runs user code, so it does not share the stack's network. It sits on
+ * `functions` with the gateway only (Kong, and the server, which calls the worker): the database,
+ * the keyspace, storage, its object store and the control plane cannot be reached from it, and a
+ * function reaches the project through the API like any other client. The control plane's secret
+ * stays as defence in depth.
+ *
+ * A project that handed functions a direct database URL naming `db` also gets `functions-db`, which
+ * holds the worker and Postgres and nothing else.
+ */
+export const FUNCTIONS_NETWORK = "functions"
+export const FUNCTIONS_DB_NETWORK = "functions-db"
+
+/** A service's `networks:` list. */
+function networksClause(networks: readonly string[]): string {
+  return `    networks:\n${networks.map((network) => `      - ${network}\n`).join("")}`
+}
+
+/** The top-level `networks:` section: compose creates `default` itself. */
+function networksBlock(functionsDb: boolean): string {
+  return `networks:\n  ${FUNCTIONS_NETWORK}: {}\n${functionsDb ? `  ${FUNCTIONS_DB_NETWORK}: {}\n` : ""}`
+}
+
+/** Whether `url` (functions' direct database URL) names the stack's own `db` service. */
+export function namesComposeDatabase(url: string): boolean {
+  try {
+    return new URL(url.trim()).hostname === "db"
+  } catch {
+    return false
+  }
 }
 
 export function renderSelfHostCompose(
@@ -432,6 +471,9 @@ export function renderSelfHostCompose(
   const authSearchPathSeparator = externalDatabaseUrl(config)?.includes("?") ? "&" : "?"
   const postgrestUrl = postgrestDatabaseUrl(config)
   const devLocal = options?.devLocal === true
+  // An external database is not on any network of this stack.
+  const functionsDb = options?.functionsDatabase === true && !external
+  const gatewayNetworks = networksClause(["default", FUNCTIONS_NETWORK])
   const tlsEnabled = selfHostTlsEnabled(config, devLocal)
   const domain = config.server.domain?.trim() ?? ""
   // When TLS is on, default external URLs to https://<domain> so auth links/redirects use HTTPS.
@@ -714,7 +756,7 @@ ${dbDependency}`
 `
     : `  db:
     image: \${SUPATYPE_POSTGRES_IMAGE:-supatype/postgres:latest}
-    environment:
+${functionsDb ? networksClause(["default", FUNCTIONS_DB_NETWORK]) : ""}    environment:
       POSTGRES_USER: \${POSTGRES_USER:-supatype_admin}
       POSTGRES_PASSWORD: \${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is missing from .env}
       POSTGRES_DB: \${POSTGRES_DB:-supatype}
@@ -784,7 +826,7 @@ ${storageDependency}
     image: \${SUPATYPE_FUNCTIONS_WORKER_IMAGE:-supatype/functions-worker:latest}
     expose:
       - "8001"
-    volumes:
+${networksClause([FUNCTIONS_NETWORK, ...(functionsDb ? [FUNCTIONS_DB_NETWORK] : [])])}    volumes:
       - ${projectMount}:/project:ro
     environment:
       SUPATYPE_FUNCTIONS_ROOT: /project/functions
@@ -842,8 +884,8 @@ ${realtimeBlock}
       SUPATYPE_DEPLOYMENTS_DIR: /project/.supatype/deployments
       COMPOSE_PROJECT_NAME: ${composeProject}
       SUPATYPE_ENGINE_BIN: supatype-engine
-      # Every request must present this, and only the server is given it: the functions worker
-      # shares this network and runs user code, which could otherwise call here directly.
+      # Every request must present this, and only the server is given it. The functions worker runs
+      # user code and is kept off this network (SC3); the secret stays as defence in depth.
       ${CONTROL_PLANE_SECRET_REQUIRED}
 ${dbDependency}
   server:
@@ -862,7 +904,7 @@ ${dbDependency}
     # rather than unlimited, so a real misconfiguration still stops and
     # stays visible instead of hiding in a crash loop.
     restart: on-failure:5
-${serverPorts}    volumes:
+${gatewayNetworks}${serverPorts}    volumes:
       # The project is read-only: the server reads the schema, the manifest and the functions, and
       # has no business editing any of them.
       - ${projectMount}:/project:ro
@@ -947,7 +989,7 @@ ${objectStoreBlock}
     working_dir: /project
 ${dbDependency}${studioBlock}${valkeyBlock}${tlsHintComment}  kong:
     image: kong:3.6
-    # host.docker.internal is a Docker Desktop name. On Linux it does not resolve unless it is
+${gatewayNetworks}    # host.docker.internal is a Docker Desktop name. On Linux it does not resolve unless it is
     # mapped, so a project proxying the site or Studio to something on the host worked on macOS
     # and Windows and failed on Linux with nothing reaching the app. host-gateway is Docker's own
     # alias for the host, and needs 20.10, which this stack already requires.
@@ -970,15 +1012,10 @@ ${dbDependency}${studioBlock}${valkeyBlock}${tlsHintComment}  kong:
       # one carries API calls, that one the page, and a request that clears one and fails the other
       # is worse to diagnose than one that fails outright.
       KONG_NGINX_HTTP_LARGE_CLIENT_HEADER_BUFFERS: "4 32k"
-      # Upstreams are service names, and a recreated container comes back on a new address. Docker's
-      # DNS answers with a 600 s TTL and Kong serves a stale record for up to an hour while it
-      # refreshes, so after the server was recreated sign-in answered 502 until Kong restarted.
-      # Looked up again every few seconds instead, with no stale answers and failures forgotten
-      # at once: Docker's DNS is local, so the lookups cost nothing worth saving.
-      KONG_DNS_VALID_TTL: "5"
-      KONG_DNS_STALE_TTL: "0"
-      KONG_DNS_NOT_FOUND_TTL: "1"
-      KONG_DNS_ERROR_TTL: "1"
+      # Kong's DNS TTLs are its defaults on purpose. Shortened, Kong dropped the hosts-file entry
+      # for host.docker.internal after a few seconds and Studio's dev server became unreachable
+      # (CE1). A recreated upstream is handled where the CLI recreates it: Kong is reloaded then
+      # (runDockerCompose, EXT-N1).
 ${kongTlsEnv}    volumes:
       - ${kongMount}:/etc/kong/kong.yml:ro
     ports:
@@ -986,7 +1023,8 @@ ${kongPorts}
     depends_on:
 ${kongDependsOn}${kongValkeyDepends}
 
-${volumesBlock}`
+${volumesBlock}
+${networksBlock(functionsDb)}`
 }
 
 /** In-compose worker address: matches the `functions-worker` service this file always generates. */
@@ -1198,6 +1236,8 @@ export function writeSelfHostCompose(
     ...options,
     ...(tier !== undefined && { fieldMaskingTier: tier }),
     drafts: resolveDrafts(cwd, config, options),
+    functionsDatabase:
+      options?.functionsDatabase ?? namesComposeDatabase(readEnvValue(cwd, "SUPATYPE_FUNCTIONS_DB_URL", "")),
   }
   assertExternalUrlReachableFromContainers(config)
   const paths = selfHostComposePaths(cwd)
@@ -1293,6 +1333,11 @@ export function runDockerCompose(
     env,
     ...(options?.quiet ? { encoding: "utf8" as const } : {}),
   })
+  // Whatever `up` created or recreated keeps its name but not its address, and Kong would go on
+  // sending to the old one (EXT-N1), so a running Kong looks its upstreams up again.
+  if (result.status === 0 && args[0] === "up" && composeProject !== undefined) {
+    reloadKong(projectRoot, { project: composeProject, composePath })
+  }
   if (options?.quiet && result.status !== 0) {
     const detail = [result.stderr, result.stdout]
       .filter((s): s is string => typeof s === "string" && s.trim() !== "")

@@ -3,7 +3,7 @@
 #
 # `app.mode = "static"` is the deployment most users ship: one command, one origin, the API and the
 # page served together. Nothing asserted it. The example builds to ./dist and the config points at
-# it, so every way this breaks is silent — a build that emits nothing, a base path that makes every
+# it, so every way this breaks is silent: a build that emits nothing, a base path that makes every
 # asset 404, an anon key that was never injected, a fallback route that returns 404 instead of the
 # app shell. Each of those leaves a stack that is up and an app that is blank.
 #
@@ -62,13 +62,13 @@ echo "==> Building the SPA"
 (cd "$EXAMPLE_DIR" && VITE_SUPATYPE_ANON_KEY="$ANON_KEY" npx vite build)
 
 INDEX_BUILT="$EXAMPLE_DIR/dist/index.html"
-[[ -f "$INDEX_BUILT" ]] || fail "vite build produced no dist/index.html — nothing for static mode to serve"
+[[ -f "$INDEX_BUILT" ]] || fail "vite build produced no dist/index.html, so static mode has nothing to serve"
 
 echo "==> Bringing the stack up"
 (cd "$EXAMPLE_DIR" && node "$CLI_BIN" dev) &
 DEV_PID=$!
 
-ready() { http_ok "$BASE_URL/auth/v1/health"; }
+ready() { dev_started "$EXAMPLE_DIR" && http_ok "$BASE_URL/auth/v1/health"; }
 if ! wait_until "$MAX_WAIT" "$BASE_URL/auth/v1/health" ready; then
   echo "ERROR: the stack never became ready"
   exit 1
@@ -109,7 +109,7 @@ echo "==> The anon key reached the bundle"
 # A key that never made it into the build is the failure that looks exactly like a working app until
 # the first request: the page renders, and every call is a 401.
 grep -rqE 'eyJ[A-Za-z0-9_-]{6,}\.' "$EXAMPLE_DIR/dist/assets" \
-  || fail "no JWT in the built assets — VITE_SUPATYPE_ANON_KEY was not injected at build time"
+  || fail "no JWT in the built assets: VITE_SUPATYPE_ANON_KEY was not injected at build time"
 echo "  ok   a signed key is baked into the bundle"
 
 echo ""
