@@ -7,6 +7,7 @@ import type { SchemaSourcesPayload } from "./schema-sources.js"
 import type { AppliedRenameRecord } from "./rename-journal.js"
 import { pushAuditFields } from "./push-audit.js"
 import { resolveHostDatabaseUrl } from "./host-database.js"
+import { configuredServiceRoleKey } from "./dev-api-keys.js"
 import {
   pgSchema,
   resolveRuntimeProvider,
@@ -637,7 +638,10 @@ export async function targetSchemaAdopt(
   )) as AdoptOutcome
 }
 
-export async function targetStatus(target: DeployTarget): Promise<unknown> {
+/**
+ * The target's status from its control plane. `cwd` is the project, for the local stack's key.
+ */
+export async function targetStatus(target: DeployTarget, cwd: string = process.cwd()): Promise<unknown> {
   if (target.mode === "direct") {
     return { mode: "direct", environment: target.environment }
   }
@@ -645,8 +649,26 @@ export async function targetStatus(target: DeployTarget): Promise<unknown> {
   return targetFetch(
     target.apiBaseUrl,
     target.apiPrefix,
-    apiFetchOpts(target, "GET", projectPath(target, "/status")),
+    apiFetchOpts(withLocalStackKey(target, cwd), "GET", projectPath(target, "/status")),
   )
+}
+
+/**
+ * `target`, carrying the local dev stack's service-role key when it has no token of its own.
+ *
+ * An unlinked dev project resolves to a `local` target with no token, deliberately: without one
+ * its schema commands run the engine here instead of asking the control plane, so the key is added
+ * only for a request that has to ask the control plane anyway. The gateway requires the key on
+ * `/platform/v1` in dev too, and this used to send `Bearer undefined`, which passed only while dev
+ * waved every request through. With no key in `.env` either, nothing is sent at all.
+ */
+function withLocalStackKey(target: DeployTarget, cwd: string): DeployTarget {
+  if (target.mode !== "local" || target.token) return target
+  const token = configuredServiceRoleKey(cwd)
+  if (token === undefined) {
+    throw new Error("No service-role key for the local stack in .env. Run: supatype dev, or supatype keys")
+  }
+  return { ...target, token }
 }
 
 export function schemaPgSchema(cwd: string): string {
