@@ -12,6 +12,7 @@ import {
 } from "./field-mask.js"
 import { TableCatalog, type TableShape } from "./table-catalog.js"
 import { logDrop, sqlState, type DropSeverity } from "./drop-log.js"
+import type { LogLevel } from "./env.js"
 
 const { Pool } = pg
 
@@ -54,7 +55,11 @@ export class RlsFilter {
   private fieldMasks: FieldMaskCatalog
   private tables: TableCatalog
 
-  constructor(databaseUrl: string) {
+  /** `logLevel` decides whether a change the rules withheld is logged (see `drop-log.ts`). */
+  constructor(
+    databaseUrl: string,
+    private logLevel: LogLevel = "info",
+  ) {
     this.pool = new Pool({
       connectionString: databaseUrl,
       max: 10,
@@ -91,7 +96,8 @@ export class RlsFilter {
    * separate masking step: the only value a caller can obtain is the masked one, so a
    * dispatch path cannot forget to mask and send the real column instead.
    *
-   * Every drop is logged with its reason (see `drop-log.ts`), never with row data.
+   * A drop is logged with its reason (see `drop-log.ts`), never with row data: every failure, and
+   * at debug every denial too.
    */
   async visibleChange(
     claims: JwtClaims | null,
@@ -108,6 +114,7 @@ export class RlsFilter {
         reason: verdict.reason,
       },
       verdict.severity,
+      this.logLevel,
     )
     return null
   }

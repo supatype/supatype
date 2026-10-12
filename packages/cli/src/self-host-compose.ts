@@ -610,6 +610,9 @@ ${dbDependencyClause}      seaweedfs:
       # Matches the publication the supatype/postgres image creates. Read by nothing today,
       # wal2json decodes from the slot, and kept for a future pgoutput decoder.
       PUBLICATION_NAME: supatype_realtime
+      # debug also logs each change a subscriber's access rules withheld; info logs only the
+      # changes realtime could not judge. Set REALTIME_LOG_LEVEL in .env to change it.
+      REALTIME_LOG_LEVEL: \${REALTIME_LOG_LEVEL:-info}
 ${dbDependency}`
     : `  # No \`realtime\` service: database.external.realtime is false. Subscriptions are
   # unavailable; REST, storage, auth and functions are unaffected.

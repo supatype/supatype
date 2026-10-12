@@ -1,9 +1,11 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
+import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import pg from "pg"
 import { RlsFilter } from "../src/rls.js"
 import type { JwtClaims } from "../src/auth.js"
+import type { LogLevel } from "../src/env.js"
 import type { WalChange } from "../src/types.js"
 import { ownedTable, PREAMBLE, readPredicate, unreadableColumn } from "./fixtures/owned-table.js"
+import { captureConsole } from "./fixtures/console.js"
 
 /**
  * Row visibility against a real database (H3: M06 and P03).
@@ -119,25 +121,37 @@ describe.skipIf(!databaseUrl)("RlsFilter row visibility", () => {
     })
   })
 
-  describe("drop logging (T2-N9)", () => {
-    it("logs table, operation, role and reason, and no value from the row", async () => {
-      const lines: string[] = []
-      const capture = (...args: unknown[]): void => { lines.push(args.map(String).join(" ")) }
-      const log = vi.spyOn(console, "log").mockImplementation(capture)
-      const warn = vi.spyOn(console, "warn").mockImplementation(capture)
+  describe("drop logging (T2-N9, R2)", () => {
+    /** Every line logged while judging a denied DELETE and a failed one, at `level`. */
+    async function dropLines(level: LogLevel): Promise<string[]> {
+      const captured = captureConsole()
+      const judge = new RlsFilter(databaseUrl!, level)
       try {
-        await filter.visibleChange(alice, remove("rt_note", bobs))
-        await filter.visibleChange(alice, remove("rt_plain", { id: "p-secret-key" }))
+        await judge.visibleChange(alice, remove("rt_note", bobs))
+        await judge.visibleChange(alice, remove("rt_plain", { id: "p-secret-key" }))
       } finally {
-        log.mockRestore()
-        warn.mockRestore()
+        await judge.shutdown()
+        captured.restore()
       }
-      expect(lines).toHaveLength(2)
-      expect(lines[0]).toContain("dropped DELETE on public.rt_note for role authenticated")
-      expect(lines[1]).toContain("REPLICA IDENTITY FULL")
+      const lines = captured.calls.map((call) => call.args.map(String).join(" "))
       for (const line of lines) {
         expect(line).not.toMatch(/bob-private-body|s-bob|p-secret-key/)
       }
+      return lines
+    }
+
+    it("logs table, operation, role and reason, and no value from the row, at debug", async () => {
+      const lines = await dropLines("debug")
+      expect(lines).toHaveLength(2)
+      expect(lines[0]).toContain("dropped DELETE on public.rt_note for role authenticated")
+      expect(lines[1]).toContain("REPLICA IDENTITY FULL")
+    })
+
+    it("logs only the failure at info, not the subscriber the rules turned away", async () => {
+      const lines = await dropLines("info")
+      expect(lines).toHaveLength(1)
+      expect(lines[0]).toContain("dropped DELETE on public.rt_plain")
+      expect(lines[0]).toContain("REPLICA IDENTITY FULL")
     })
   })
 })
