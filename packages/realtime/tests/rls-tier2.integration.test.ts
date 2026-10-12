@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import pg from "pg"
 import { RlsFilter } from "../src/rls.js"
 import type { JwtClaims } from "../src/auth.js"
-import type { WalChange } from "../src/types.js"
+import { A, ADMIN, B, RECORDED_TIER_SQL, admin, bob, change, userA, userB } from "./fixtures/tier2/people.js"
 
 /**
  * Realtime under tier 2: a database without `supatype_mask`, where the engine enforces field rules
@@ -16,30 +16,10 @@ import type { WalChange } from "../src/types.js"
  */
 const databaseUrl = process.env["TIER2_DATABASE_URL"]
 
-const A = "0a0a0a0a-0000-4000-8000-00000000000a"
-const B = "0b0b0b0b-0000-4000-8000-00000000000b"
-const ADMIN = "0d0d0d0d-0000-4000-8000-00000000000d"
-
-const userA = { sub: A, role: "authenticated" } as JwtClaims
-const admin = { sub: ADMIN, role: "authenticated", app_metadata: { role: "admin" } } as JwtClaims
 const anon = { role: "anon" } as JwtClaims
 const service = { role: "service_role" } as JwtClaims
 
-const bob = { id: B, name: "Bob", salary: 90000, ssn: "B-SSN-222" }
 const bobsPayslip = { ref: "0e0e0e0e-0000-4000-8000-00000000000e", owner_id: B, month: "2026-09", amount: 7500 }
-
-function change(table: string, event: WalChange["event"], row: Record<string, unknown>): WalChange {
-  return {
-    schema: "public",
-    table,
-    event,
-    newRecord: event === "DELETE" ? null : row,
-    oldRecord: event === "DELETE" ? row : null,
-    exactColumns: {},
-    columnTypes: {},
-    commitTimestamp: new Date().toISOString(),
-  }
-}
 
 describe.skipIf(!databaseUrl)("RlsFilter under tier 2 (api views, no labels)", () => {
   let owner: pg.Client
@@ -48,9 +28,7 @@ describe.skipIf(!databaseUrl)("RlsFilter under tier 2 (api views, no labels)", (
   beforeAll(async () => {
     owner = new pg.Client({ connectionString: databaseUrl })
     await owner.connect()
-    const tier = await owner.query<{ tier: string | null }>(
-      `SELECT capabilities->'fieldMasking'->>'tier' AS tier FROM _supatype.schema_state`,
-    )
+    const tier = await owner.query<{ tier: string | null }>(RECORDED_TIER_SQL)
     // The premise of the suite: a database that would make the old code drop everything.
     expect(tier.rows[0]?.tier).toBe("views")
     await owner.query(`
@@ -85,7 +63,6 @@ describe.skipIf(!databaseUrl)("RlsFilter under tier 2 (api views, no labels)", (
   })
 
   it("delivers the owner their own ssn", async () => {
-    const userB = { sub: B, role: "authenticated" } as JwtClaims
     const visible = await filter.visibleChange(userB, change("employee", "UPDATE", bob))
     expect(visible?.newRecord).toEqual({ ...bob, salary: null })
   })
@@ -99,7 +76,6 @@ describe.skipIf(!databaseUrl)("RlsFilter under tier 2 (api views, no labels)", (
   it("applies an OwnerFrom field rule on a table not keyed by id", async () => {
     const forA = await filter.visibleChange(userA, change("payslip", "INSERT", bobsPayslip))
     expect(forA?.newRecord).toEqual({ ...bobsPayslip, amount: null })
-    const userB = { sub: B, role: "authenticated" } as JwtClaims
     const forB = await filter.visibleChange(userB, change("payslip", "INSERT", bobsPayslip))
     expect(forB?.newRecord).toEqual(bobsPayslip)
   })

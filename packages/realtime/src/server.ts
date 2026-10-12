@@ -59,7 +59,7 @@ export class RealtimeServer {
       publicationName: env.publicationName,
       pollInterval: env.replicationPollInterval,
     })
-    this.rlsFilter = new RlsFilter(env.databaseUrl)
+    this.rlsFilter = new RlsFilter(env.databaseUrl, env.logLevel)
   }
 
   async start(): Promise<void> {

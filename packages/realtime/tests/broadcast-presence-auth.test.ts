@@ -3,6 +3,7 @@ import { createServer } from "node:net"
 import jwt from "jsonwebtoken"
 import { WebSocket } from "ws"
 import { RealtimeServer } from "../src/server.js"
+import { ChannelManager } from "../src/channels.js"
 import type { RealtimeEnv } from "../src/env.js"
 import type { ServerMessage } from "../src/types.js"
 
@@ -42,6 +43,7 @@ function testEnv(port: number, secureChannels: boolean): RealtimeEnv {
     publicationName: "unused",
     replicationPollInterval: 1000,
     secureChannels,
+    logLevel: "info",
     multiTenant: false,
     routingTableRefreshMs: 60_000,
     schemaFilterMode: "developer_only",
@@ -244,8 +246,7 @@ describe.each([true, false])("broadcast and presence (secureChannels %s)", (secu
 })
 
 describe("channel members on a shared instance", () => {
-  it("are counted within the sender's project only", async () => {
-    const { ChannelManager } = await import("../src/channels.js")
+  it("are counted within the sender's project only", () => {
     const channels = new ChannelManager()
     const ws = { readyState: 1, send: () => {} } as unknown as Parameters<ChannelManager["addClient"]>[0]
     const claims = { sub: "u", role: "authenticated" }

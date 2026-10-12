@@ -1,9 +1,12 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
+import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import pg from "pg"
 import { RlsFilter } from "../src/rls.js"
+import { TableCatalog } from "../src/table-catalog.js"
 import type { JwtClaims } from "../src/auth.js"
+import type { LogLevel } from "../src/env.js"
 import type { WalChange } from "../src/types.js"
 import { ownedTable, PREAMBLE, readPredicate, unreadableColumn } from "./fixtures/owned-table.js"
+import { captureConsole } from "./fixtures/console.js"
 
 /**
  * Row visibility against a real database (H3: M06 and P03).
@@ -32,9 +35,14 @@ const SETUP = `
   ${ownedTable("rt_plain", "id text PRIMARY KEY, owner text")}
   ${readPredicate("rt_plain")}
   ${ownedTable("rt_nopred", "id text PRIMARY KEY, owner text", "ALTER TABLE rt_nopred REPLICA IDENTITY FULL;")}
+  ${ownedTable("rt_older", "id text PRIMARY KEY, owner text", "ALTER TABLE rt_older REPLICA IDENTITY FULL;")}
+  ${readPredicate("rt_older", { rowOnly: true })}
+  ${ownedTable("rt_strict", "id text PRIMARY KEY, owner text", "ALTER TABLE rt_strict REPLICA IDENTITY FULL;")}
+  CREATE FUNCTION public.can_read_rt_strict(rt_strict public.rt_strict, level int)
+    RETURNS boolean LANGUAGE sql STABLE AS $$ SELECT true $$;
 `
 
-const TABLES = ["rt_ticket", "rt_pair", "rt_nokey", "rt_note", "rt_plain", "rt_nopred"]
+const TABLES = ["rt_ticket", "rt_pair", "rt_nokey", "rt_note", "rt_plain", "rt_nopred", "rt_older", "rt_strict"]
 
 describe.skipIf(!databaseUrl)("RlsFilter row visibility", () => {
   let admin: pg.Client
@@ -119,25 +127,59 @@ describe.skipIf(!databaseUrl)("RlsFilter row visibility", () => {
     })
   })
 
-  describe("drop logging (T2-N9)", () => {
-    it("logs table, operation, role and reason, and no value from the row", async () => {
-      const lines: string[] = []
-      const capture = (...args: unknown[]): void => { lines.push(args.map(String).join(" ")) }
-      const log = vi.spyOn(console, "log").mockImplementation(capture)
-      const warn = vi.spyOn(console, "warn").mockImplementation(capture)
+  describe("the row predicate's signature (CT3)", () => {
+    it("judges by the predicate an engine before 0.7 made, taking the row alone", async () => {
+      expect(await filter.visibleChange(alice, remove("rt_older", { id: "o-bob", owner: "bob" }))).toBeNull()
+      const mine = { id: "o-alice", owner: "alice" }
+      expect((await filter.visibleChange(alice, remove("rt_older", mine)))?.oldRecord).toEqual(mine)
+    })
+
+    it("finds the predicate in either shape, and not a same-named function that needs more than the row", async () => {
+      const pool = new pg.Pool({ connectionString: databaseUrl, max: 1 })
       try {
-        await filter.visibleChange(alice, remove("rt_note", bobs))
-        await filter.visibleChange(alice, remove("rt_plain", { id: "p-secret-key" }))
+        const tables = new TableCatalog(pool)
+        const found = (table: string) => tables.shape("public", table).then((shape) => shape.readPredicate)
+        expect(await found("rt_note")).toEqual({ schema: "public", name: "can_read_rt_note" })
+        expect(await found("rt_older")).toEqual({ schema: "public", name: "can_read_rt_older" })
+        expect(await found("rt_strict")).toBeNull()
       } finally {
-        log.mockRestore()
-        warn.mockRestore()
+        await pool.end()
       }
-      expect(lines).toHaveLength(2)
-      expect(lines[0]).toContain("dropped DELETE on public.rt_note for role authenticated")
-      expect(lines[1]).toContain("REPLICA IDENTITY FULL")
+      expect(await filter.visibleChange(alice, remove("rt_strict", { id: "s-1", owner: "alice" }))).toBeNull()
+    })
+  })
+
+  describe("drop logging (T2-N9, R2)", () => {
+    /** Every line logged while judging a denied DELETE and a failed one, at `level`. */
+    async function dropLines(level: LogLevel): Promise<string[]> {
+      const captured = captureConsole()
+      const judge = new RlsFilter(databaseUrl!, level)
+      try {
+        await judge.visibleChange(alice, remove("rt_note", bobs))
+        await judge.visibleChange(alice, remove("rt_plain", { id: "p-secret-key" }))
+      } finally {
+        await judge.shutdown()
+        captured.restore()
+      }
+      const lines = captured.calls.map((call) => call.args.map(String).join(" "))
       for (const line of lines) {
         expect(line).not.toMatch(/bob-private-body|s-bob|p-secret-key/)
       }
+      return lines
+    }
+
+    it("logs table, operation, role and reason, and no value from the row, at debug", async () => {
+      const lines = await dropLines("debug")
+      expect(lines).toHaveLength(2)
+      expect(lines[0]).toContain("dropped DELETE on public.rt_note for role authenticated")
+      expect(lines[1]).toContain("REPLICA IDENTITY FULL")
+    })
+
+    it("logs only the failure at info, not the subscriber the rules turned away", async () => {
+      const lines = await dropLines("info")
+      expect(lines).toHaveLength(1)
+      expect(lines[0]).toContain("dropped DELETE on public.rt_plain")
+      expect(lines[0]).toContain("REPLICA IDENTITY FULL")
     })
   })
 })

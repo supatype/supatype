@@ -84,6 +84,18 @@ describe.skipIf(!databaseUrl)("DELETE of a row with NULL columns (TEST-1-N2)", (
     expect(await filter.visibleChange(alice, change)).toBeNull()
   })
 
+  // service_role sees every row and column, so nothing is withheld; the old row still arrives in the
+  // same shape every other subscriber gets, NULL columns present, rather than as wal2json left it.
+  it("delivers service_role the same whole old row, NULL columns included", async () => {
+    await admin.query(`INSERT INTO public.rt_null_full (id, owner, title) VALUES ('rt_null_full-carol', 'carol', 'c')`)
+    const change = await deleteThroughSlot("rt_null_full", "rt_null_full-carol")
+    expect(Object.keys(change.oldRecord ?? {}).sort()).toEqual(["id", "owner", "title"])
+    const service = { role: "service_role" } as JwtClaims
+    expect((await filter.visibleChange(service, change))?.oldRecord).toEqual({
+      id: "rt_null_full-carol", owner: "carol", title: "c", body: null, secret: null,
+    })
+  })
+
   it("still fails closed on a table without REPLICA IDENTITY FULL", async () => {
     const change = await deleteThroughSlot("rt_null_default", "rt_null_default-alice")
     expect(Object.keys(change.oldRecord ?? {})).toEqual(["id"])

@@ -18,8 +18,11 @@ export interface TableShape {
   /**
    * The engine-generated row predicate `can_read_<table>(<table>)`, or null when there is none.
    *
-   * Looked up in the table's own schema with the table's row type as its only argument, which is
-   * exactly the signature the engine emits, so a same-named function elsewhere is never picked up.
+   * Looked up in the table's own schema, taking the table's row type first and nothing else that
+   * lacks a default, so a same-named function elsewhere, or one a call with the row alone cannot
+   * reach, is never picked up. From 0.7 the engine adds a defaulted parameter that keeps the
+   * predicate out of GraphQL (CT3); an older engine's took the row alone. A call with the row
+   * alone fits both.
    */
   readPredicate: PredicateRef | null
   /**
@@ -47,8 +50,11 @@ const COLUMNS_SQL = `
 const READ_PREDICATE_SQL = `
   SELECT p.proname AS name
     FROM pg_proc p
-   WHERE p.oid = to_regprocedure(
-           format('%I.%I(%I.%I)', $1::text, $3::text, $1::text, $2::text))
+    JOIN pg_class c ON c.oid = to_regclass(format('%I.%I', $1::text, $2::text))
+   WHERE p.pronamespace = c.relnamespace
+     AND p.proname = $3
+     AND p.proargtypes[0] = c.reltype
+     AND p.pronargs - p.pronargdefaults = 1
      AND p.prorettype = 'boolean'::regtype`
 
 interface ColumnRow {

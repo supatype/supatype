@@ -12,6 +12,7 @@ import {
 } from "./field-mask.js"
 import { TableCatalog, type TableShape } from "./table-catalog.js"
 import { logDrop, sqlState, type DropSeverity } from "./drop-log.js"
+import type { LogLevel } from "./env.js"
 
 const { Pool } = pg
 
@@ -54,7 +55,11 @@ export class RlsFilter {
   private fieldMasks: FieldMaskCatalog
   private tables: TableCatalog
 
-  constructor(databaseUrl: string) {
+  /** `logLevel` decides whether a change the rules withheld is logged (see `drop-log.ts`). */
+  constructor(
+    databaseUrl: string,
+    private logLevel: LogLevel = "info",
+  ) {
     this.pool = new Pool({
       connectionString: databaseUrl,
       max: 10,
@@ -91,7 +96,8 @@ export class RlsFilter {
    * separate masking step: the only value a caller can obtain is the masked one, so a
    * dispatch path cannot forget to mask and send the real column instead.
    *
-   * Every drop is logged with its reason (see `drop-log.ts`), never with row data.
+   * A drop is logged with its reason (see `drop-log.ts`), never with row data: every failure, and
+   * at debug every denial too.
    */
   async visibleChange(
     claims: JwtClaims | null,
@@ -108,6 +114,7 @@ export class RlsFilter {
         reason: verdict.reason,
       },
       verdict.severity,
+      this.logLevel,
     )
     return null
   }
@@ -119,11 +126,26 @@ export class RlsFilter {
     // Service role bypasses RLS and is the role `supatype_mask` exempts, so tier 1's REST serves it
     // every column too. Tier 2's views are being brought to the same exemption (F63), so this
     // holds for both tiers.
-    if (claims.role === "service_role") return { send: change }
+    if (claims.role === "service_role") return { send: await this.wholeForService(change) }
 
     const rules = await this.rulesFor(change)
     if ("reason" in rules) return rules
     return this.judgeAsSubscriber(claims, withWholeOldRow(change, rules.shape), rules)
+  }
+
+  /**
+   * service_role's change, with its old row made whole as every other subscriber's is, so a DELETE
+   * of a row with NULL columns has the same shape whoever receives it (RT3-1). It costs the cached
+   * table shape the other roles already read. If the shape cannot be read the change goes as
+   * wal2json decoded it: service_role may see all of it, so nothing is at stake but its shape.
+   */
+  private async wholeForService(change: WalChange): Promise<WalChange> {
+    if (!change.oldRecord) return change
+    try {
+      return withWholeOldRow(change, await this.tables.shape(change.schema, change.table))
+    } catch {
+      return change
+    }
   }
 
   /**

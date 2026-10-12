@@ -58,7 +58,10 @@ psql_db() {
 # A fresh project directory state: no .env, no generated files, so each tier starts from nothing.
 reset_project() {
   rm -rf "$PROJECT_DIR/.env" "$PROJECT_DIR/.supatype" "$PROJECT_DIR/supatype" "$PROJECT_DIR/types"
-  printf 'SUPATYPE_KONG_PORT=%s\nSUPATYPE_DEV_DB_PORT=%s\n' "$SUPATYPE_KONG_PORT" "$DB_PORT" >"$PROJECT_DIR/.env"
+  # REALTIME_LOG_LEVEL=debug: the realtime spec checks the line logged for an event the access rules
+  # withheld, which realtime logs only at debug.
+  printf 'SUPATYPE_KONG_PORT=%s\nSUPATYPE_DEV_DB_PORT=%s\nREALTIME_LOG_LEVEL=debug\n' \
+    "$SUPATYPE_KONG_PORT" "$DB_PORT" >"$PROJECT_DIR/.env"
   if [[ -n "${MASKING_ENGINE_BIN:-}" ]]; then
     cp "$PROJECT_DIR/supatype.config.ts" "$PROJECT_DIR/.supatype.config.ts.orig"
     MASKING_ENGINE_BIN="$MASKING_ENGINE_BIN" node -e '
