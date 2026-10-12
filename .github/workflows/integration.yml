@@ -173,7 +173,7 @@ jobs:
             --build-arg ENGINE_IMAGE=supatype/schema-engine:latest \
             -t supatype/control-plane:ci \
             -f packages/self-host-control/Dockerfile \
-            packages/self-host-control
+            .
 
       # The caching and header-buffer assertions below test packages/studio/nginx.conf, so the
       # image under test has to be built from this checkout. Pulling supatype/studio:latest tested

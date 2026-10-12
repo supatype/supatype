@@ -10,7 +10,9 @@
     "dev": "tsx src/server.ts",
     "test": "node --import tsx/esm --test tests/*.test.ts"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@supatype/shared": "workspace:*"
+  },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "tsx": "^4.19.0",

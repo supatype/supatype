@@ -25,6 +25,7 @@
  */
 import { spawnSync } from "node:child_process"
 import { statSync } from "node:fs"
+import { capabilitiesCache, rememberCapabilitiesSync, type CapabilitiesCache } from "@supatype/shared"
 import { engineBinPath } from "./engine-client.js"
 import { compareVersions } from "./engine-floor.js"
 
@@ -192,51 +193,6 @@ export function probeCapabilities(probe: EngineProbe): Capabilities {
   throw new EngineProbeFailed(`Could not ask the Supatype engine what it supports: ${said ?? "it did not run"}`)
 }
 
-/** How long a server's answer is trusted before it is asked again. */
-export const CAPABILITIES_TTL_MS = 5 * 60_000
-
-/**
- * Answers by key (a binary, a project and image, a server), each with when it was given. With
- * `ttlMs`, an answer older than that is asked again; without, the key itself changes when the
- * engine does.
- */
-export interface CapabilitiesCache {
-  answers: Map<string, { caps: Capabilities; at: number }>
-  ttlMs?: number
-}
-
-/** A cache of answers, trusted for `ttlMs` when given. */
-export function capabilitiesCache(ttlMs?: number): CapabilitiesCache {
-  return { answers: new Map(), ...(ttlMs !== undefined && { ttlMs }) }
-}
-
-function recalled(cache: CapabilitiesCache, key: string): Capabilities | undefined {
-  const known = cache.answers.get(key)
-  if (known === undefined) return undefined
-  if (cache.ttlMs === undefined || Date.now() - known.at <= cache.ttlMs) return known.caps
-  cache.answers.delete(key)
-  return undefined
-}
-
-function remember(cache: CapabilitiesCache, key: string, caps: Capabilities): Capabilities {
-  cache.answers.set(key, { caps, at: Date.now() })
-  return caps
-}
-
-/** The answer for `key`, asked with `probe` unless one is known. A throw is not remembered. */
-export function rememberCapabilitiesSync(cache: CapabilitiesCache, key: string, probe: () => Capabilities): Capabilities {
-  return recalled(cache, key) ?? remember(cache, key, probe())
-}
-
-/** {@link rememberCapabilitiesSync} for a probe that has to wait, such as a request to a server. */
-export async function rememberCapabilities(
-  cache: CapabilitiesCache,
-  key: string,
-  probe: () => Promise<Capabilities>,
-): Promise<Capabilities> {
-  return recalled(cache, key) ?? remember(cache, key, await probe())
-}
-
 /** The first JSON value in `text`, which may follow log lines. */
 function firstJson(text: string): unknown {
   const start = text.indexOf("{")
@@ -248,7 +204,7 @@ function firstJson(text: string): unknown {
   }
 }
 
-const binaryCache = capabilitiesCache()
+const binaryCache: CapabilitiesCache<Capabilities> = capabilitiesCache()
 
 /** The binary as a cache key: a new file at the same path (an update, a rebuild) is a new key. */
 function binaryKey(bin: string): string {

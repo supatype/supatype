@@ -92,12 +92,10 @@ import {
   engineCapabilities,
   identityColumnsNeed,
   probeCapabilities,
-  capabilitiesCache,
-  rememberCapabilitiesSync,
   type Capabilities,
-  type CapabilitiesCache,
   type FeatureNeed,
 } from "./engine-ownership-gate.js"
+import { capabilitiesCache, rememberCapabilitiesSync, type CapabilitiesCache } from "@supatype/shared"
 import { hostComposeDbUrl, resolveHostDatabaseUrl } from "./host-database.js"
 import { grantAuthSchemaAccess, reconcileAuthenticatorPassword } from "./compose-db-roles.js"
 import { spawnComposeEngine } from "./compose-engine-run.js"
@@ -1058,7 +1056,7 @@ function localImageId(image: string): string | undefined {
 }
 
 /** Answers per project and engine image ID (`rememberCapabilitiesSync`): each probe costs a container. */
-const dockerCapabilities: CapabilitiesCache = capabilitiesCache()
+const dockerCapabilities: CapabilitiesCache<Capabilities> = capabilitiesCache()
 
 /** Refuse, before anything is sent, an ownership feature the docker project's engine lacks. */
 export async function requireDockerFeatures(

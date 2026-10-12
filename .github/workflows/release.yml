@@ -179,6 +179,7 @@ jobs:
           set -euo pipefail
           PACKAGES=(
             types
+            shared
             plugin-sdk
             client
             common
@@ -361,7 +362,7 @@ jobs:
       # engine image tag is NOT the monorepo version, always use :latest.
       - uses: docker/build-push-action@v5
         with:
-          context: packages/self-host-control
+          context: .
           file: packages/self-host-control/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { ENGINE_BUSY, EngineError, engineBusyMessage } from "../src/engine-client.js"
+import { ENGINE_BUSY } from "@supatype/shared"
+import { EngineError, engineBusyMessage } from "../src/engine-client.js"
 import { isEngineBusy } from "../src/adopt-walkthrough.js"
 import { TargetApiError } from "../src/target-client.js"
 

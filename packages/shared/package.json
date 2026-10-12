@@ -1,0 +1,29 @@
+{
+  "name": "@supatype/shared",
+  "version": "0.1.5",
+  "license": "Apache-2.0",
+  "description": "Rules the Supatype CLI and the self-host control plane must agree on",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "!dist/**/*.tsbuildinfo"
+  ],
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "typecheck": "tsc --project tsconfig.json --noEmit && tsc --project tsconfig.test.json",
+    "test": "vitest run",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "devDependencies": {
+    "typescript": "^5",
+    "vitest": "^4.0.18"
+  }
+}

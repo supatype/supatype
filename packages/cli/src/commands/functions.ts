@@ -8,7 +8,7 @@ import {
   writeFileSync,
   unlinkSync,
 } from "node:fs"
-import { resolve, join, basename, relative, isAbsolute } from "node:path"
+import { resolve, join, relative, isAbsolute } from "node:path"
 import { spawnSync, execSync } from "node:child_process"
 import { localKongBaseUrl } from "../local-gateway.js"
 import { loadConfig, rethrowIfConfigBroken } from "../config.js"
@@ -19,8 +19,10 @@ import {
   serviceRoleRoutes,
 } from "../project-config.js"
 import {
-  discoverTsFunctionsInDir,
+  discoverFunctionsOrExit,
+  functionNameProblem,
   generateFunctionsRouterSource,
+  type DiscoveredFunctionRoute,
 } from "../functions-router-gen.js"
 import { loadProjectLink } from "../link.js"
 import { resolveTarget } from "../resolve-target.js"
@@ -132,6 +134,12 @@ export function registerFunctions(program: Command): void {
 // ─── Scaffold ────────────────────────────────────────────────────────────────
 
 function scaffoldFunction(cwd: string, name: string): void {
+  // Before anything is written: a folder the control plane would refuse is never created.
+  const problem = functionNameProblem(name)
+  if (problem !== undefined) {
+    error(`Function ${problem}`)
+    process.exit(1)
+  }
   const functionsDir = resolveFunctionsDir(cwd, "write")
   const fnDir = resolve(functionsDir, name)
   if (existsSync(fnDir)) {
@@ -216,12 +224,6 @@ export default async function handler(req: Request, ctx: FunctionContext): Promi
 
 // ─── Discover functions ──────────────────────────────────────────────────────
 
-interface DiscoveredFunction {
-  name: string
-  entrypoint: string
-  absPath: string
-}
-
 function resolveFunctionsDir(cwd: string, mode: "read" | "write"): string {
   try {
     const cfg = loadConfig(cwd)
@@ -250,33 +252,8 @@ function resolveEnvFilePath(cwd: string, functionsDir: string, envFile: string):
   return resolve(functionsDir, envFile)
 }
 
-function discoverFunctions(cwd: string): DiscoveredFunction[] {
-  const functionsDir = resolveFunctionsDir(cwd, "read")
-  if (!existsSync(functionsDir)) return []
-
-  const entries = readdirSync(functionsDir)
-  const fns: DiscoveredFunction[] = []
-
-  for (const entry of entries) {
-    if (entry.startsWith("_") || entry.startsWith(".")) continue
-
-    const fullPath = join(functionsDir, entry)
-    const stat = statSync(fullPath)
-
-    if (stat.isDirectory()) {
-      // Directory function: look for index.ts
-      const indexPath = join(fullPath, "index.ts")
-      if (existsSync(indexPath)) {
-        fns.push({ name: entry, entrypoint: indexPath, absPath: fullPath })
-      }
-    } else if (entry.endsWith(".ts") && !entry.endsWith(".d.ts")) {
-      // Single-file function
-      const name = basename(entry, ".ts")
-      fns.push({ name, entrypoint: fullPath, absPath: fullPath })
-    }
-  }
-
-  return fns.sort((a, b) => a.name.localeCompare(b.name))
+function discoverFunctions(cwd: string): DiscoveredFunctionRoute[] {
+  return discoverFunctionsOrExit(resolveFunctionsDir(cwd, "read"))
 }
 
 // ─── Serve (local dev) ──────────────────────────────────────────────────────
@@ -285,7 +262,7 @@ async function serve(cwd: string, opts: { port: string; envFile: string }): Prom
   const config = loadConfig(cwd)
   const functionsDir = resolveFunctionsDir(cwd, "read")
   const functionsDirLabel = relativeFunctionsDir(cwd, functionsDir)
-  const routes = discoverTsFunctionsInDir(functionsDir)
+  const routes = discoverFunctionsOrExit(functionsDir)
   if (routes.length === 0) {
     error(`No functions found in ${functionsDirLabel}/`)
     error("Create one with: npx supatype functions new <name>")
@@ -407,7 +384,7 @@ async function deploy(cwd: string, opts: { only?: string; env?: string; dryRun?:
   await deployCloud(cwd, fns, opts.env)
 }
 
-async function deploySelfHosted(cwd: string, fns: DiscoveredFunction[]): Promise<void> {
+async function deploySelfHosted(cwd: string, fns: DiscoveredFunctionRoute[]): Promise<void> {
   info("Self-host Compose deployment.")
   plain("Functions are served from your project functions/ directory (no bundle step).\n")
 
@@ -424,7 +401,7 @@ async function deploySelfHosted(cwd: string, fns: DiscoveredFunction[]): Promise
 async function deployViaTarget(
   cwd: string,
   target: ReturnType<typeof resolveTarget>,
-  fns: DiscoveredFunction[],
+  fns: DiscoveredFunctionRoute[],
 ): Promise<void> {
   info(`Deploying to ${target.mode} project: ${target.projectRef} (${target.environment})`)
   plain()
@@ -467,7 +444,7 @@ async function deployViaTarget(
   void cwd
 }
 
-async function deployCloud(cwd: string, fns: DiscoveredFunction[], env?: string): Promise<void> {
+async function deployCloud(cwd: string, fns: DiscoveredFunctionRoute[], env?: string): Promise<void> {
   const { getLinkedProject, getCloudToken, getCloudApiUrl } = await loadCloudHelpers()
   const linked = getLinkedProject(cwd)
 
@@ -545,17 +522,17 @@ export function serviceRoleRoutesFor(cwd: string): string[] | undefined {
   }
 }
 
-function readFunctionSource(fn: DiscoveredFunction): string {
-  const stat = statSync(fn.absPath)
+function readFunctionSource(fn: DiscoveredFunctionRoute): string {
+  const stat = statSync(fn.path)
   if (stat.isFile()) {
-    return readFileSync(fn.absPath, "utf8")
+    return readFileSync(fn.path, "utf8")
   }
 
   // Directory function: read all .ts files
   const files: Record<string, string> = {}
-  const entries = readdirSync(fn.absPath, { recursive: true }) as string[]
+  const entries = readdirSync(fn.path, { recursive: true }) as string[]
   for (const entry of entries) {
-    const fullPath = join(fn.absPath, entry)
+    const fullPath = join(fn.path, entry)
     if (statSync(fullPath).isFile() && (entry.endsWith(".ts") || entry.endsWith(".js"))) {
       files[entry] = readFileSync(fullPath, "utf8")
     }

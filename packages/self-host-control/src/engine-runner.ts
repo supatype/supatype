@@ -4,6 +4,7 @@ import { writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { randomUUID } from "node:crypto"
+import { CAPABILITIES_TTL_MS, ENGINE_BUSY, capabilitiesCache, engineBusySentence, rememberCapabilities } from "@supatype/shared"
 
 function engineBin(): string {
   return process.env["SUPATYPE_ENGINE_BIN"] ?? "supatype-engine"
@@ -221,10 +222,11 @@ export async function runEngineAdoptWithAst(
   }
 }
 
-/** How long the engine's answer is trusted before it is asked again (an engine swapped underneath). */
-const CAPABILITIES_TTL_MS = 5 * 60_000
-
-let capabilities: { features: string[]; at: number } | undefined
+/**
+ * The engine's answer by binary, trusted for `CAPABILITIES_TTL_MS` (an engine swapped underneath),
+ * in the same cache the CLI keeps.
+ */
+const capabilities = capabilitiesCache<{ features: string[] }>(CAPABILITIES_TTL_MS)
 
 /**
  * What the engine this control plane runs supports (`supatype-engine capabilities`). An engine from
@@ -236,16 +238,14 @@ let capabilities: { features: string[]; at: number } | undefined
  * supporting nothing for the life of the process.
  */
 export async function runEngineCapabilities(): Promise<{ features: string[] }> {
-  if (capabilities !== undefined && Date.now() - capabilities.at <= CAPABILITIES_TTL_MS) {
-    return { features: capabilities.features }
-  }
   // Remembered once it has answered: a rejection never reaches the cache.
-  const { features } = await runEngine("capabilities", []).then(parseFeatures, (err: unknown) => {
-    if (err instanceof EngineRunError) return { features: [] }
-    throw err
-  })
-  capabilities = { features, at: Date.now() }
-  return { features }
+  const { features } = await rememberCapabilities(capabilities, engineBin(), () =>
+    runEngine("capabilities", []).then(parseFeatures, (err: unknown) => {
+      if (err instanceof EngineRunError) return { features: [] }
+      throw err
+    }),
+  )
+  return { features: [...features] }
 }
 
 function parseFeatures(out: string): { features: string[] } {
@@ -258,16 +258,8 @@ function parseFeatures(out: string): { features: string[] } {
 
 /** Forget the engine's answer (tests, or an engine swapped under a running control plane). */
 export function resetEngineCapabilities(): void {
-  capabilities = undefined
+  capabilities.answers.clear()
 }
-
-/**
- * The wording the engine gives a refusal over its lock, from before it named it on stdout. The list
- * of writers grew when rollback took the lock ("another push, adopt or rebaseline", then "another
- * push, adopt, rebaseline or rollback"), so any such list that starts with a push matches. The CLI
- * reads it the same way (`ENGINE_BUSY_WORDING` in its engine client).
- */
-const ENGINE_BUSY_WORDING = /another push(?:,? (?:or )?(?:adopt|rebaseline|rollback))* is running/i
 
 /**
  * A refusal the caller can act on, as the engine's own HTTP server answers it (409 with `reason`),
@@ -295,11 +287,9 @@ export function engineRefusal(
       /* not this line */
     }
   }
-  if (ENGINE_BUSY_WORDING.test(err.stderr)) {
-    const line = err.stderr.split(/\r?\n/).find((l) => ENGINE_BUSY_WORDING.test(l)) ?? ""
-    return { reason: "engine_busy", message: line.trim().replace(/^Error:\s*/, "") }
-  }
-  return undefined
+  // The wording from before the engine named the refusal on stdout, read as the CLI reads it.
+  const busy = engineBusySentence(err.stderr)
+  return busy === undefined ? undefined : { reason: ENGINE_BUSY, message: busy }
 }
 
 export function databaseUrlFromEnv(): string {

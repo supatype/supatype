@@ -1,16 +1,10 @@
 import { mkdirSync, readdirSync, writeFileSync, existsSync, readFileSync, rmSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { spawnSync } from "node:child_process"
+import { FUNCTION_NAME_RULE, isFunctionName } from "@supatype/shared"
 import { badRequest, route, sendJson } from "../http.js"
 import type { RouteHandler } from "../http.js"
 import { assertProject, projectRoot } from "../project.js"
-
-/**
- * A function name: lowercase letters, digits, `-` and `_`, starting with a letter or digit. The CLI
- * has no rule of its own (it sends whatever directory names it finds), so this is the strict one:
- * nothing in it can name a parent, a separator or a hidden entry.
- */
-const FUNCTION_NAME = /^[a-z0-9][a-z0-9_-]*$/
 
 interface DeployedFunction {
   name: string
@@ -33,12 +27,13 @@ function restartFunctionsWorker(): void {
   )
 }
 
-/** `name` when it passes the function-name rule; a 400 otherwise. */
+/**
+ * `name` when it passes the function-name rule the CLI also checks (`@supatype/shared`); a 400
+ * otherwise. Nothing the rule allows can name a parent, a separator or a hidden entry.
+ */
 function checkedName(name: unknown): string {
-  if (typeof name !== "string" || !FUNCTION_NAME.test(name)) {
-    throw badRequest(
-      `Invalid function name ${JSON.stringify(name)}: use lowercase letters, digits, "-" and "_", starting with a letter or digit`,
-    )
+  if (!isFunctionName(name)) {
+    throw badRequest(`Invalid function name ${JSON.stringify(name)}: ${FUNCTION_NAME_RULE}`)
   }
   return name
 }

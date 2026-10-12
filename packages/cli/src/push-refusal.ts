@@ -12,7 +12,8 @@
  * server answers 409 with the same `reason` and what it names. By wording second, for an engine or
  * a server from before the code, and for what is not the engine's at all (Docker's own errors).
  */
-import { ENGINE_BUSY, ENGINE_BUSY_WORDING, EngineError } from "./engine-client.js"
+import { ENGINE_BUSY, ENGINE_BUSY_WORDING } from "@supatype/shared"
+import { EngineError } from "./engine-client.js"
 import { TargetApiError } from "./target-client.js"
 import { formatDriftedObjects, SECURITY_DRIFT, type DriftedObject } from "./diff-output.js"
 import { findJsonLine, type JsonObject } from "./engine-json-line.js"

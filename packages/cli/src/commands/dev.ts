@@ -28,7 +28,7 @@ import {
   schemaPathFromProject,
   type SupatypeProjectConfig,
 } from "../project-config.js"
-import { discoverTsFunctionsInDir, writeDevFunctionsRouter } from "../functions-router-gen.js"
+import { discoverFunctionsOrExit, writeDevFunctionsRouter } from "../functions-router-gen.js"
 import { fieldMaskingTierFromProject } from "../field-masking-tier.js"
 import { projectHasVersionedModels } from "../model-versioning.js"
 import { signJwt } from "../jwt.js"
@@ -395,7 +395,7 @@ export function registerDev(program: Command): void {
       /** Always set when a functions dir exists so Studio admin API can list functions; Deno runtime is separate. */
       const denoFunctionsDir = hasFunctionsDir ? functionsDir : ""
       const functionRoutes = hasFunctionsDir && functionsDir !== undefined
-        ? discoverTsFunctionsInDir(functionsDir)
+        ? discoverFunctionsOrExit(functionsDir)
         : []
       const denoServeScriptAbs = hasFunctionsDir && functionsDir !== undefined
         ? (writeDevFunctionsRouter(cwd, functionsDir, functionRoutes) ?? "")
