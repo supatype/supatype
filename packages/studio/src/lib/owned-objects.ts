@@ -10,6 +10,7 @@
 
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import type { ProjectProxy } from "../hooks/useProjectProxy.js"
+import { isMissingTable, isPermissionDenied, type DatabaseFailure } from "./database-error.js"
 import { sqlText } from "./sql.js"
 
 const STAMP_PREFIX = "supatype:managed"
@@ -45,25 +46,27 @@ export function ownedObjectsQuery(schema: string): string {
  WHERE schema_name = ${sqlText(schema)} AND status <> 'released' AND parent <> ''`
 }
 
+/** The ledger, schema-qualified, as Postgres names it in a missing-relation error. */
+const LEDGER = "_supatype.managed_objects"
+
 /**
  * Whether a failed read is the ledger not being there: a database no engine with a ledger has
  * pushed to yet, which owns nothing by it. Anything else (a permission, a column an older ledger
  * lacks) is an error the screen has to show.
  */
-export function isMissingLedger(message: string): boolean {
-  // Postgres's missing-relation error for the ledger, or its schema: never "column … of relation
-  // … does not exist", which is a ledger that is there and lacks a column.
-  return /(?<!of )relation "_supatype\.managed_objects" does not exist|schema "_supatype" does not exist/.test(message)
+export function isMissingLedger(failure: DatabaseFailure): boolean {
+  return isMissingTable(failure, LEDGER)
 }
 
 /**
- * Whether a failed read leaves this role with no ledger to go by: the ledger is missing, or it is
- * behind a schema the role has no USAGE on. Studio's SQL role need not be able to read
- * `_supatype`, and such a role is no worse off than one on a database with no ledger yet: it owns
- * nothing by the ledger and falls back to the stamps. Any other permission is still an error.
+ * Whether a failed read leaves this role with no ledger to go by: the ledger is missing, or this
+ * role may not read it (no USAGE on `_supatype`, or USAGE and no SELECT on the ledger). Studio's
+ * SQL role need not be able to read `_supatype`, and such a role is no worse off than one on a
+ * database with no ledger yet: it owns nothing by the ledger and falls back to the stamps. The
+ * query reads nothing but the ledger, so any privilege failure is about the ledger.
  */
-export function isUnreadableLedger(message: string): boolean {
-  return isMissingLedger(message) || /permission denied for schema _supatype(?![\w$])/.test(message)
+export function isUnreadableLedger(failure: DatabaseFailure): boolean {
+  return isMissingLedger(failure) || isPermissionDenied(failure, LEDGER)
 }
 
 /** The owned objects, keyed by `ownedKey`, and why they could not be read, if they could not. */
@@ -77,7 +80,7 @@ export interface OwnedObjects {
  * nothing, without an error; any other failure is reported.
  */
 export function useOwnedObjects(proxy: ProjectProxy, schema: string): OwnedObjects {
-  const { data, error } = useApiQuery(
+  const { data, failure } = useApiQuery(
     () =>
       proxy.sql(ownedObjectsQuery(schema)).then((r) => ({
         proxy,
@@ -88,7 +91,9 @@ export function useOwnedObjects(proxy: ProjectProxy, schema: string): OwnedObjec
       })),
     [proxy, schema],
   )
-  if (error !== null) return { owned: NONE, error: isUnreadableLedger(error) ? null : error }
+  if (failure !== null) {
+    return { owned: NONE, error: isUnreadableLedger(failure) ? null : failure.message }
+  }
   // The query hook keeps its last answer while the next one loads, so after switching schema (or
   // project) that answer is the previous one's: it must not badge this schema's objects. Until the
   // answer for this one arrives, nothing is known to be owned.

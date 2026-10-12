@@ -87,6 +87,22 @@ describe("before any push has recorded anything", () => {
       expect(html).toContain("does not exist")
     }
   })
+
+  it("goes by the SQLSTATE when the proxy passed one, whatever language the message is in", () => {
+    const missing = render({ load: { error: "FEHLER: Relation existiert nicht", errorCode: "42P01", onRefresh: () => {} } })
+    expect(missing).toContain("No schema objects recorded yet")
+
+    // This screen is the ledger, so a role that may not read it is told so (unlike the badges,
+    // which fall back to the stamps without a word).
+    const denied = render({ load: { error: "FEHLER: keine Berechtigung", errorCode: "42501", onRefresh: () => {} } })
+    expect(denied).not.toContain("No schema objects recorded yet")
+    expect(denied).toContain("keine Berechtigung")
+
+    const column = render({
+      load: { error: 'relation "_supatype.managed_objects" does not exist', errorCode: "42703", onRefresh: () => {} },
+    })
+    expect(column).not.toContain("No schema objects recorded yet")
+  })
 })
 
 describe("a page of the recorded objects", () => {

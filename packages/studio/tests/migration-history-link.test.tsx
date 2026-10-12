@@ -91,3 +91,22 @@ describe("a link to one migration", () => {
     expect(container.textContent).not.toContain("No migrations match your filters")
   })
 })
+
+describe("when the migrations ledger cannot be read", () => {
+  it("shows a missing column as the failure it is, not as a database with no migrations", async () => {
+    proxy.sql.mockImplementationOnce(async () => {
+      throw Object.assign(new Error('column "engine_version" does not exist'), { code: "42703" })
+    })
+    await open("/migrations")
+    expect(container.textContent).toContain('column "engine_version" does not exist')
+    expect(container.textContent).not.toContain("No migrations yet")
+  })
+
+  it("treats a missing ledger as no migrations yet, whatever language the message is in", async () => {
+    proxy.sql.mockImplementationOnce(async () => {
+      throw Object.assign(new Error("FEHLER: Relation existiert nicht"), { code: "42P01" })
+    })
+    await open("/migrations")
+    expect(container.textContent).toContain("No migrations yet")
+  })
+})

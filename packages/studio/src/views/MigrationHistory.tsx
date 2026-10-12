@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from "react"
 import { useSearchParams } from "react-router-dom"
+import { isMissingTable } from "../lib/database-error.js"
 import { cn } from "../lib/utils.js"
 import { Badge, Button, Card, Input, Select, Th, Td } from "../components/ui.js"
 import { useProjectProxy, type ProjectProxy } from "../hooks/useProjectProxy.js"
@@ -85,10 +86,13 @@ function mapMigrationRow(row: Record<string, unknown>): Migration {
   }
 }
 
+/** The migrations ledger, as Postgres names it in a missing-relation error. */
+const MIGRATIONS_TABLE = "_supatype.migrations"
+
 const MIGRATIONS_LIST_SQL = `SELECT id, name, hash, applied_at::TEXT, rolled_back, rolled_back_at::TEXT,
        engine_version, schema_snapshot,
        (sql_up IS NOT NULL AND btrim(sql_up) <> '') AS has_sql
- FROM _supatype.migrations ORDER BY id ASC`
+ FROM ${MIGRATIONS_TABLE} ORDER BY id ASC`
 
 /** Candidates for display: DDL rows, initial baseline, not legacy admin_refresh noise. */
 function isTrackedMigration(m: Migration): boolean {
@@ -131,7 +135,7 @@ function useMigrationSql(
     setLoading(true)
     setError(null)
     void proxy
-      .sql(`SELECT sql_up FROM _supatype.migrations WHERE id = ${migrationId}`)
+      .sql(`SELECT sql_up FROM ${MIGRATIONS_TABLE} WHERE id = ${migrationId}`)
       .then((result) => {
         if (cancelled) return
         const row = result.rows[0]
@@ -449,7 +453,7 @@ export function linkedMigrationId(param: string | null): number | null {
 export function MigrationHistory(): React.ReactElement {
   const proxy = useProjectProxy()
 
-  const { data: migrationsData, loading, error, refetch } = useApiQuery(
+  const { data: migrationsData, loading, error, failure, refetch } = useApiQuery(
     async () => {
       const result = await proxy.sql(MIGRATIONS_LIST_SQL)
       return result.rows.map(mapMigrationRow)
@@ -520,7 +524,7 @@ export function MigrationHistory(): React.ReactElement {
   }
 
   if (error) {
-    if (error.includes("does not exist")) {
+    if (failure !== null && isMissingTable(failure, MIGRATIONS_TABLE)) {
       return (
         <EmptyState
           title="No migrations yet"

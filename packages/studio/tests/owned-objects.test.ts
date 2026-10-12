@@ -13,6 +13,7 @@ import {
   ownedKey,
   ownedObjectsQuery,
 } from "../src/lib/owned-objects.js"
+import type { DatabaseFailure } from "../src/lib/database-error.js"
 
 const OWNED = new Set([ownedKey("index", "posts", "posts_title_idx")])
 
@@ -57,30 +58,60 @@ describe("ownedObjectsQuery()", () => {
   })
 })
 
+/** A failure as a server that sends no SQLSTATE reports it: the message is all there is. */
+function said(message: string): DatabaseFailure {
+  return { message, code: null }
+}
+
+/** A failure with its SQLSTATE, in a message Studio cannot read (a server set to another language). */
+function coded(code: string): DatabaseFailure {
+  return { message: "FEHLER: eine Meldung in einer anderen Sprache", code }
+}
+
 describe("isUnreadableLedger()", () => {
-  it("is a ledger this role cannot read: missing, or behind a schema it may not use", () => {
-    expect(isUnreadableLedger('relation "_supatype.managed_objects" does not exist')).toBe(true)
-    expect(isUnreadableLedger("ERROR: permission denied for schema _supatype")).toBe(true)
+  it("is a ledger this role cannot read: missing, behind a schema it may not use, or a table it may not select", () => {
+    expect(isUnreadableLedger(said('relation "_supatype.managed_objects" does not exist'))).toBe(true)
+    expect(isUnreadableLedger(said("ERROR: permission denied for schema _supatype"))).toBe(true)
+    // USAGE on `_supatype` but no SELECT on the ledger: as good as no ledger, so no banner.
+    expect(isUnreadableLedger(said("permission denied for table managed_objects"))).toBe(true)
+    expect(isUnreadableLedger(said("permission denied for relation managed_objects"))).toBe(true)
   })
 
   it("is not a permission on anything else, nor a ledger missing a column", () => {
-    expect(isUnreadableLedger("permission denied for schema billing")).toBe(false)
-    expect(isUnreadableLedger("permission denied for schema _supatype_extra")).toBe(false)
-    expect(isUnreadableLedger("permission denied for table managed_objects")).toBe(false)
-    expect(isUnreadableLedger('column "kind" does not exist')).toBe(false)
+    expect(isUnreadableLedger(said("permission denied for schema billing"))).toBe(false)
+    expect(isUnreadableLedger(said("permission denied for schema _supatype_extra"))).toBe(false)
+    expect(isUnreadableLedger(said("permission denied for table managed_objects_v2"))).toBe(false)
+    expect(isUnreadableLedger(said('column "kind" does not exist'))).toBe(false)
+  })
+
+  it("goes by the SQLSTATE when there is one, whatever language the message is in", () => {
+    expect(isUnreadableLedger(coded("42501"))).toBe(true)
+    expect(isUnreadableLedger(coded("42P01"))).toBe(true)
+    expect(isUnreadableLedger(coded("3F000"))).toBe(true)
+    expect(isUnreadableLedger(coded("42703"))).toBe(false)
+  })
+
+  it("trusts the SQLSTATE over a message that happens to look like a ledger error", () => {
+    // A missing column whose message mentions the ledger is still a missing column.
+    expect(isUnreadableLedger({ message: "permission denied for schema _supatype", code: "42703" })).toBe(false)
   })
 })
 
 describe("isMissingLedger()", () => {
   it("is a database with no ledger yet", () => {
-    expect(isMissingLedger('relation "_supatype.managed_objects" does not exist')).toBe(true)
-    expect(isMissingLedger('schema "_supatype" does not exist')).toBe(true)
+    expect(isMissingLedger(said('relation "_supatype.managed_objects" does not exist'))).toBe(true)
+    expect(isMissingLedger(said('schema "_supatype" does not exist'))).toBe(true)
+    expect(isMissingLedger(coded("42P01"))).toBe(true)
+    expect(isMissingLedger(coded("3F000"))).toBe(true)
   })
 
   it("is not any other failure", () => {
-    expect(isMissingLedger("permission denied for table managed_objects")).toBe(false)
-    expect(isMissingLedger('column "kind" does not exist')).toBe(false)
-    expect(isMissingLedger('column "kind" of relation "_supatype.managed_objects" does not exist')).toBe(false)
-    expect(isMissingLedger('function _supatype.managed_objects_fp() does not exist')).toBe(false)
+    expect(isMissingLedger(said("permission denied for table managed_objects"))).toBe(false)
+    expect(isMissingLedger(said('column "kind" does not exist'))).toBe(false)
+    expect(isMissingLedger(said('column "kind" of relation "_supatype.managed_objects" does not exist'))).toBe(false)
+    expect(isMissingLedger(said('function _supatype.managed_objects_fp() does not exist'))).toBe(false)
+    // A role that may not read the ledger is not a database without one: Schema objects says so.
+    expect(isMissingLedger(coded("42501"))).toBe(false)
+    expect(isMissingLedger(coded("42703"))).toBe(false)
   })
 })
