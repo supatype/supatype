@@ -50,6 +50,7 @@ import {
   selfHostComposePaths,
   type SelfHostComposePaths,
 } from "./self-host-compose.js"
+import { composeServiceIsRunning } from "./compose-kong.js"
 import type { DockerBrandOptions } from "./docker-runtime.js"
 import { hasEngineOverride } from "./binary-cache.js"
 import { STUDIO_DEV_PORT, startStudioViteDevServer } from "./studio-dev-server.js"
@@ -425,21 +426,6 @@ async function waitComposeHealthy(paths: SelfHostComposePaths, cwd: string, maxM
     await new Promise((r) => setTimeout(r, 2000))
   }
   throw new Error("Compose db service did not become healthy in time")
-}
-
-/** True when the named compose service has a running container. */
-function composeServiceIsRunning(
-  paths: SelfHostComposePaths,
-  cwd: string,
-  composeProject: string,
-  service: string,
-): boolean {
-  const envFile = join(cwd, ".env")
-  const args = ["compose", "-p", composeProject, "--project-directory", cwd, "-f", paths.composePath]
-  if (existsSync(envFile)) args.push("--env-file", envFile)
-  args.push("ps", "-q", "--status", "running", service)
-  const result = spawnSync("docker", args, { cwd, encoding: "utf8" })
-  return result.status === 0 && typeof result.stdout === "string" && result.stdout.trim() !== ""
 }
 
 /**
@@ -884,7 +870,7 @@ async function runComposeSchemaPush(
   }
   // B: only hold the advisory lock when realtime is already decoding, first-boot
   // push (db only) must not take the lock; that path crashed under lock+DDL in CI.
-  const push = composeServiceIsRunning(paths, cwd, composeProject, "realtime")
+  const push = composeServiceIsRunning(cwd, { composePath: paths.composePath, project: composeProject }, "realtime")
     ? await withComposeSchemaPushLock(paths, cwd, composeProject, runPush)
     : await runPush()
   if (push.status !== 0) {
