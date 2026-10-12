@@ -6,6 +6,7 @@ import { PUSH_IDENTITY } from "../push-identity.js"
 import {
   databaseUrlFromEnv,
   engineRefusal,
+  type EngineRefusal,
   runEngineCapabilities,
   runEngineAdoptWithAst,
   runEngineDiff,
@@ -24,17 +25,23 @@ function stringList(value: unknown): string[] | undefined {
 
 /**
  * Run `work`, answering a refusal the engine names (security drift, unmanaged tables, a busy
- * engine, a rebaseline whose drift moved after its preview) as its own HTTP server does: 409 with
- * the reason and what it is about.
+ * engine, a rebaseline whose drift moved after its preview, a rollback with nothing to undo) as its
+ * own HTTP server does: 409 with the reason and what it is about. `statusOf` picks another status
+ * for a refusal this route has always answered differently.
  */
-async function answering(res: ServerResponse, work: () => Promise<unknown>): Promise<void> {
+async function answering(
+  res: ServerResponse,
+  work: () => Promise<unknown>,
+  statusOf: (refusal: EngineRefusal) => { status: number; error: string } | undefined = () => undefined,
+): Promise<void> {
   let data: unknown
   try {
     data = await work()
   } catch (err) {
     const refusal = engineRefusal(err)
     if (refusal === undefined) throw err
-    sendJson(res, 409, { error: refusal.reason, code: refusal.reason, ...refusal })
+    const answer = statusOf(refusal) ?? { status: 409, error: refusal.reason }
+    sendJson(res, answer.status, { ...refusal, error: answer.error, code: refusal.reason })
     return
   }
   sendJson(res, 200, { data })
@@ -93,8 +100,8 @@ export function registerSchemaRoutes(
     assertProject(ctx.params["ref"]!)
     const body = ctx.body as { schema?: string }
     const db = databaseUrlFromEnv()
-    const data = await runEngineRollback(db, body.schema ?? "public")
-    sendJson(ctx.res, 200, { data })
+    // Nothing to undo (`no_applied_migration`, `no_rollback_sql`) is a 409 naming which.
+    await answering(ctx.res, () => runEngineRollback(db, body.schema ?? "public"))
   })
 
   route(routes, "GET", "/projects/:ref/schema/migrations", async (ctx) => {
@@ -108,17 +115,13 @@ export function registerSchemaRoutes(
     assertProject(ctx.params["ref"]!)
     const name = ctx.params["name"]!
     const db = databaseUrlFromEnv()
-    try {
-      const data = await runEngineMigrationSources(db, name)
-      sendJson(ctx.res, 200, { data })
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      if (message.includes("no schema snapshot")) {
-        sendJson(ctx.res, 404, { error: "not_found", message })
-        return
-      }
-      throw err
-    }
+    // A migration that recorded no sources has none to return: a 404, as it has always been, now
+    // naming `no_schema_snapshot` as its code.
+    await answering(
+      ctx.res,
+      () => runEngineMigrationSources(db, name),
+      (refusal) => (refusal.reason === "no_schema_snapshot" ? { status: 404, error: "not_found" } : undefined),
+    )
   })
 
   route(routes, "POST", "/projects/:ref/schema/doctor", async (ctx) => {

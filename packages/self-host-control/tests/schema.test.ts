@@ -237,4 +237,41 @@ describe("schema routes (mock engine)", () => {
     const data = res.json.data as { status: string }
     assert.equal(data.status, "rolled_back")
   })
+
+  /** Run `work` with the mock engine refusing with `reason`, as an engine from before reasons when `wordsOnly`. */
+  async function refusing<T>(reason: string, wordsOnly: boolean, work: () => Promise<T>): Promise<T> {
+    process.env["MOCK_ENGINE_REFUSE"] = reason
+    if (wordsOnly) process.env["MOCK_ENGINE_WORDS_ONLY"] = "1"
+    try {
+      return await work()
+    } finally {
+      delete process.env["MOCK_ENGINE_REFUSE"]
+      delete process.env["MOCK_ENGINE_WORDS_ONLY"]
+    }
+  }
+
+  const sourcesPath = `/projects/${PROJECT}/schema/migrations/20240101_test/sources`
+
+  for (const wordsOnly of [false, true]) {
+    const engine = wordsOnly ? "an engine from before the reason, by its wording" : "by its reason"
+    test(`a migration with no schema snapshot is a 404 naming no_schema_snapshot, ${engine} (CL3)`, async () => {
+      const res = await refusing("no_schema_snapshot", wordsOnly, () => request(baseUrl, "GET", sourcesPath))
+      assert.equal(res.status, 404)
+      assert.equal(res.json["error"], "not_found")
+      assert.equal(res.json["code"], "no_schema_snapshot")
+      assert.match(String(res.json["message"]), /20240101_test/)
+    })
+
+    for (const reason of ["no_applied_migration", "no_rollback_sql"]) {
+      test(`a rollback refused with ${reason} is a 409 naming it, ${engine} (CL3)`, async () => {
+        const res = await refusing(reason, wordsOnly, () =>
+          request(baseUrl, "POST", `/projects/${PROJECT}/schema/rollback`, {}),
+        )
+        assert.equal(res.status, 409)
+        assert.equal(res.json["reason"], reason)
+        assert.equal(res.json["code"], reason)
+        assert.ok(String(res.json["message"]).length > 0)
+      })
+    }
+  }
 })
