@@ -8,6 +8,7 @@ import { devAuthenticatorPassword, devDatabaseIdentity } from "./local-secrets.j
 import type { SelfHostComposePaths } from "./self-host-compose.js"
 import { degraded } from "./strict.js"
 import { dockerEnv } from "./docker-env.js"
+import { PRIVATE_TABLE_DEFAULTS_SQL } from "./native-roles-sql.js"
 
 type ComposeTarget = Pick<SelfHostComposePaths, "composePath">
 
@@ -108,6 +109,22 @@ export function grantAuthSchemaAccess(
   if (result.status !== 0) {
     degraded(
       "Could not grant service_role access to auth.users, so Studio's relation preview cannot read users",
+      failureDetail(result),
+    )
+  }
+}
+
+/**
+ * Give tables in `public` to `service_role` only by default (CL-N2). The Postgres image grants
+ * every privilege on new tables to `anon` and `authenticated`, so a table made by hand in dev was
+ * open to anyone holding the anon key; a model table's grants come from the engine instead.
+ * Idempotent, and run on every start, so a database created before this changes too.
+ */
+export function privatizeTableDefaults(paths: ComposeTarget, cwd: string, composeProject: string): void {
+  const result = runOwnerPsql(paths, cwd, composeProject, PRIVATE_TABLE_DEFAULTS_SQL)
+  if (result.status !== 0) {
+    degraded(
+      "Could not take anon and authenticated out of the default table privileges, so a table made by hand is readable with the anon key",
       failureDetail(result),
     )
   }

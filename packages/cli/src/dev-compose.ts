@@ -100,7 +100,7 @@ import {
 import { devPushConsentingToDrift } from "./drift-consent.js"
 import { capabilitiesCache, rememberCapabilitiesSync, type CapabilitiesCache } from "@supatype/shared"
 import { hostComposeDbUrl, resolveHostDatabaseUrl } from "./host-database.js"
-import { grantAuthSchemaAccess, reconcileAuthenticatorPassword } from "./compose-db-roles.js"
+import { grantAuthSchemaAccess, privatizeTableDefaults, reconcileAuthenticatorPassword } from "./compose-db-roles.js"
 import { spawnComposeEngine } from "./compose-engine-run.js"
 
 /** Sync optional Docker image pins from config into `.env` (no JWT rotation). */
@@ -1321,6 +1321,7 @@ export async function pushSchemaDocker(
 
   console.log(`[supatype] provider docker, applying schema via compose (project ${project})...`)
   await startComposeDatabase(config, paths, cwd, project, pushBrand)
+  if (!usesExternalDatabase(config)) privatizeTableDefaults(paths, cwd, project)
 
   const schemaPath = schemaPathFromProject(config, cwd)
   const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
@@ -1493,6 +1494,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
 
   if (!usesExternalDatabase(config)) {
     reconcileAuthenticatorPassword(paths, cwd, project)
+    privatizeTableDefaults(paths, cwd, project)
   }
 
   // A: apply schema before realtime (and the rest of the stack) starts decoding WAL.
