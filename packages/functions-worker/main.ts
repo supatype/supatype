@@ -298,13 +298,16 @@ function installHookDepthPropagation(): void {
   }
 }
 
-/** The stack's own origin, or null when this worker was not told how to reach it. */
-/** The database URL a function may use, when the deployment gave the worker one. */
+/**
+ * The database URL a function may use, when the deployment gave the worker one: off unless the
+ * operator set SUPATYPE_FUNCTIONS_DB_URL (see `FunctionContext.dbUrl`).
+ */
 function dbUrlForFunctions(): string | undefined {
   const raw = Deno.env.get("SUPATYPE_DB_URL") ?? Deno.env.get("DATABASE_URL")
   return raw === undefined || raw.trim() === "" ? undefined : raw
 }
 
+/** The stack's own origin, or null when this worker was not told how to reach it. */
 function stackOrigin(): string | null {
   const raw = Deno.env.get("SUPATYPE_INTERNAL_URL") ?? Deno.env.get("SUPATYPE_URL")
   if (raw === undefined || raw.trim() === "") return null
@@ -317,7 +320,7 @@ function stackOrigin(): string | null {
 
 
 // `onListen` is supplied so Deno does not print its own "Listening on …" line. That line goes to
-// stderr, which this worker's patched console reports as `level: "error"` — and on cloud `level` is
+// stderr, which this worker's patched console reports as `level: "error"`, and on cloud `level` is
 // a Loki label, so every startup would appear in the dashboards as an error.
 Deno.serve({
   port,
@@ -354,6 +357,7 @@ Deno.serve({
   // to be serialised. This used to hold a lock across the whole handler, which meant the worker ran
   // one invocation at a time: a function waiting on a third-party API blocked every other function
   // in the project for as long as it waited.
+  const dbUrl = dbUrlForFunctions()
   const context: FunctionContext = {
     executionId: crypto.randomUUID(),
     functionName: fnName,
@@ -362,7 +366,7 @@ Deno.serve({
     // From the closure, not the environment: the key was withheld before any handler was imported,
     // and only a route the project granted it receives it here.
     ...(serviceRoleKey && serviceRoleGranted(fnName) && { serviceRoleKey }),
-    ...(dbUrlForFunctions() !== undefined && { dbUrl: dbUrlForFunctions() }),
+    ...(dbUrl !== undefined && { dbUrl }),
     region: Deno.env.get("SUPATYPE_REGION") ?? "local",
     env: await scopedEnvForFunction(fnName),
   }

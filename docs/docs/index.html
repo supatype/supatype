@@ -184,6 +184,14 @@
                 <code>supatype/functions-worker</code> and <code>supatype/control-plane</code>. Pin
                 versions with <code>SUPATYPE_*_IMAGE</code> in <code>.env</code> if you need to.
               </p>
+              <p>
+                Functions get no database connection by default. Setting
+                <code>SUPATYPE_FUNCTIONS_DB_URL</code> in <code>.env</code> hands every function that
+                URL as <code>ctx.dbUrl</code>: a raw Postgres connection as whichever role it names,
+                which bypasses row rules and field masking. Point it at a least-privilege role
+                granted only what your functions need, never the admin URL, for example
+                <code>postgresql://functions_reader:&lt;password&gt;@db:5432/my-app</code>.
+              </p>
             </div>
           </div>
 

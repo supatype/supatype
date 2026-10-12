@@ -38,6 +38,32 @@ Supatype image overrides in `.env` let you pin beta tags:
 
 If unset, compose defaults are used.
 
+### Direct database access for functions
+
+`SUPATYPE_FUNCTIONS_DB_URL` hands every function a raw Postgres URL as `ctx.dbUrl`. It is **off by
+default** (commented out in `.env.example`), and separate from `DATABASE_URL` on purpose. When the
+URL names the stack's `db` service, the functions worker joins the `functions-db` network to reach
+it.
+
+It is not a request through the API. It connects as whatever role the URL names and **bypasses row
+rules and field masking**, and every function is a public endpoint, so do not use the admin URL
+(`POSTGRES_USER`). Create a role granted only what the functions need:
+
+```sql
+-- once, as the admin
+CREATE ROLE functions_reader LOGIN PASSWORD 'change-me';
+GRANT USAGE ON SCHEMA public TO functions_reader;
+GRANT SELECT ON public.todo TO functions_reader;
+```
+
+```bash
+# .env
+SUPATYPE_FUNCTIONS_DB_URL=postgresql://functions_reader:change-me@db:5432/self_host_example
+```
+
+Then `pnpm run selfhost:render` and `pnpm run selfhost:up`. In a function, check
+`ctx.dbUrl !== undefined` before connecting, and never return or log the URL.
+
 2. Install dependencies (from repo root):
 
 ```bash

@@ -26,6 +26,13 @@ export interface FunctionContext {
   readonly anonKey: string
   /** Present only when the project granted this route the service role. */
   readonly serviceRoleKey?: string
+  /**
+   * A raw Postgres connection URL. Off by default: present only when the operator sets
+   * SUPATYPE_FUNCTIONS_DB_URL in .env. It connects as whatever role that URL names and is not a
+   * request through the API, so row rules and field masking do not apply to it. Set it to a
+   * least-privilege role granted only what the functions need, never the admin URL, and treat it
+   * as a credential: never return it or log it.
+   */
   readonly dbUrl?: string
   readonly region: string
   /** Values from .env and .env.<function>.local. */
