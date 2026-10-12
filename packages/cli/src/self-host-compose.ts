@@ -19,7 +19,7 @@ import { buildKongDeclarative } from "./kong-config.js"
 import { keyspaceInPostgres } from "./cache-provider.js"
 import { STUDIO_DEV_PORT } from "./studio-dev-server.js"
 import { readEnvFile, readEnvValue } from "./env-file.js"
-import { reloadKong } from "./compose-kong.js"
+import { upKeepingKongCurrent } from "./compose-kong.js"
 import { CONTROL_PLANE_SECRET_ENV, ensureControlPlaneSecret } from "./local-secrets.js"
 import { fieldMaskingTierFromProject, type FieldMaskingTier } from "./field-masking-tier.js"
 import { readRecordedTier } from "./recorded-field-masking-tier.js"
@@ -1327,17 +1327,19 @@ export function runDockerCompose(
     ? { ...process.env, COMPOSE_PROGRESS: "quiet" }
     : process.env
   const stdio = options?.quiet ? "pipe" : "inherit"
-  const result = spawnSync("docker", composeArgs, {
-    stdio,
-    cwd: projectRoot,
-    env,
-    ...(options?.quiet ? { encoding: "utf8" as const } : {}),
-  })
-  // Whatever `up` created or recreated keeps its name but not its address, and Kong would go on
-  // sending to the old one (EXT-N1), so a running Kong looks its upstreams up again.
-  if (result.status === 0 && args[0] === "up" && composeProject !== undefined) {
-    reloadKong(projectRoot, { project: composeProject, composePath })
-  }
+  const runCompose = () =>
+    spawnSync("docker", composeArgs, {
+      stdio,
+      cwd: projectRoot,
+      env,
+      ...(options?.quiet ? { encoding: "utf8" as const } : {}),
+    })
+  // Whatever `up` created or recreated keeps its name but not its address, and a Kong that was
+  // already running would go on sending to the old one (EXT-N1), so that Kong is reloaded.
+  const result =
+    args[0] === "up" && composeProject !== undefined
+      ? upKeepingKongCurrent(projectRoot, { project: composeProject, composePath }, runCompose)
+      : runCompose()
   if (options?.quiet && result.status !== 0) {
     const detail = [result.stderr, result.stdout]
       .filter((s): s is string => typeof s === "string" && s.trim() !== "")
