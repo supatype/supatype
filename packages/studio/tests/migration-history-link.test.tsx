@@ -23,9 +23,10 @@ const ROWS = [1, 2, 3].map((id) => ({
 }))
 
 const proxy = {
-  sql: vi.fn(async (query: string) =>
-    query.includes("ORDER BY id") ? { rows: ROWS } : { rows: [{ sql_up: "CREATE TABLE x ();" }] },
-  ),
+  sql: vi.fn(async (query: string) => {
+    if (query.includes("information_schema")) return { rows: [{ audited: false }] }
+    return query.includes("ORDER BY id") ? { rows: ROWS } : { rows: [{ sql_up: "CREATE TABLE x ();" }] }
+  }),
 }
 
 vi.mock("../src/hooks/useProjectProxy.js", () => ({ useProjectProxy: () => proxy }))
