@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest"
 import {
+  CatalogMismatch,
   filterIsMaskSafe,
   maskRecord,
   parseMaskLabel,
+  parseRecordedColumns,
   parsePredicateRef,
   quotePredicateRef,
+  recordedReadMasks,
 } from "../src/field-mask.js"
 
 // A masked column reaching a subscriber is the gap this module exists to close: logical
@@ -154,5 +157,56 @@ describe("filterIsMaskSafe", () => {
 
   it("refuses it when the restricted set is unknown", () => {
     expect(filterIsMaskSafe({ title: "eq.hello" }, new Set(["*"]))).toBe(false)
+  })
+})
+
+describe("parseRecordedColumns", () => {
+  it("reads the mapping as the engine records it", () => {
+    const recorded = [
+      { table: "appraisal", column: "notes_alpha", read: 'public."can_read_appraisal__notes"', write: null },
+      { table: "appraisal", column: "notes_beta", read: null, write: 'public."can_write_appraisal__notes"' },
+    ]
+    expect(parseRecordedColumns(recorded)).toEqual(recorded)
+  })
+
+  // An engine before 0.7.0 records no mapping; realtime then falls back to the naming rule.
+  it("says there is none when the engine recorded none", () => {
+    expect(parseRecordedColumns(undefined)).toBeNull()
+    expect(parseRecordedColumns(null)).toBeNull()
+  })
+
+  // A mapping that is there but unreadable cannot be trusted to name every masked column.
+  it.each([
+    ["an object", { appraisal: [] }],
+    ["an entry without a column", [{ table: "appraisal", read: "public.x" }]],
+    ["a predicate that is not text", [{ table: "appraisal", column: "c", read: 1 }]],
+  ])("fails closed on %s", (_, raw) => {
+    expect(() => parseRecordedColumns(raw)).toThrow(CatalogMismatch)
+  })
+})
+
+describe("recordedReadMasks", () => {
+  const recorded = [
+    { table: "appraisal", column: "notes_alpha", read: 'public."can_read_appraisal__notes"' },
+    { table: "appraisal", column: "notes_beta", read: 'public."can_read_appraisal__no_1"' },
+    { table: "appraisal", column: "rating", read: null },
+    { table: "employee", column: "salary", read: 'public."can_read_employee__salary"' },
+    { table: "appraisal", column: "elsewhere", read: 'other."can_read_appraisal__elsewhere"' },
+    { table: "appraisal", column: "garbled", read: "not a predicate; drop" },
+  ]
+
+  it("takes each column's predicate as recorded, numbered ones included", () => {
+    const masks = recordedReadMasks(recorded, "public", "appraisal")
+    expect(masks.get("notes_alpha")).toEqual({ schema: "public", name: "can_read_appraisal__notes" })
+    expect(masks.get("notes_beta")).toEqual({ schema: "public", name: "can_read_appraisal__no_1" })
+  })
+
+  it("leaves out write-only rules, other tables, and other schemas' tables", () => {
+    const masks = recordedReadMasks(recorded, "public", "appraisal")
+    expect([...masks.keys()].sort()).toEqual(["garbled", "notes_alpha", "notes_beta"])
+  })
+
+  it("masks a column whose predicate does not parse, unconditionally", () => {
+    expect(recordedReadMasks(recorded, "public", "appraisal").get("garbled")).toBeNull()
   })
 })
