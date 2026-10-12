@@ -90,6 +90,11 @@ export interface DbFieldAnnotations {
   foreignKey?: string
   serverGenerated?: boolean
   elementType?: string
+  /**
+   * A `SupatypeAuthUserId` field: it holds an `auth.users` id. The engine cannot tell one from any
+   * other UUID, and needs to: a model keyed by one is a user's own (O1).
+   */
+  authUserId?: true
 }
 
 export interface PlatformFieldAnnotations {
@@ -470,7 +475,7 @@ export function emitModel(
       // write path, and neither is something Postgres knows about.
       // `searchFields` sits in `platform` because it is an admin-UI concern: Studio's list view
       // renders its search box when a model has them and filters on the first. Postgres knows
-      // nothing about it, which is why it is not in `db` beside `indexes` — searching a column and
+      // nothing about it, which is why it is not in `db` beside `indexes`: searching a column and
       // indexing one are different asks, and `Indexed` already covers the latter.
       platform: {
         access,
@@ -480,7 +485,7 @@ export function emitModel(
         // Cache sits in `platform` beside `hooks` for the same reason, and travels the same way:
         // the route manifest, not this AST. The schema engine re-serialises its own parsed struct
         // when it writes `ast_snapshot`, and its `PlatformModelAnnotations` knows only `access`
-        // and `searchFields` — so this key, like `hooks` above it, does not survive that round
+        // and `searchFields`, so this key, like `hooks` above it, does not survive that round
         // trip and the manifest is what the server actually reads. Kept here because the AST is
         // the schema's own description of itself, and a reader looking for the declaration should
         // find it next to the other API-layer concerns.

@@ -1017,8 +1017,11 @@ function parseScalarType(
       parseScalarFieldOptions(typeNode.typeArguments?.[0], fieldName, ref, allow.identity === true)
     switch (ref) {
       case "UUID":
-      case "SupatypeAuthUserId":
         return scalar("uuid", { kernel: options() })
+      // Marked, because the engine cannot tell an auth user id from any other UUID: a model keyed
+      // by one is a user's own, which an owner relation may point at (O1).
+      case "SupatypeAuthUserId":
+        return scalar("uuid", { kernel: options(), db: { authUserId: true } })
       case "RichText": {
         const defaultArg = typeNode.typeArguments?.[0]
         if (!defaultArg) return scalar("richText")

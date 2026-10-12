@@ -526,8 +526,47 @@ export function validateProjectConfig(raw: unknown, filename: string): SupatypeP
 
   validateExternalDatabase(cfg, filename)
   validateCache(cfg, filename)
+  validateSchemaNames(cfg, filename)
 
   return raw as SupatypeProjectConfig
+}
+
+/** A Postgres name Supatype can write anywhere without quoting it (Q1, Q3). */
+const PLAIN_SCHEMA_NAME = /^[a-z_][a-z0-9_]*$/
+
+/** Postgres keeps 63 bytes of a name (`NAMEDATALEN` - 1) and cuts the rest. */
+const MAX_SCHEMA_NAME_BYTES = 63
+
+/**
+ * `schema.pg_schema` and every `schema.api_schemas` entry must be a plain identifier.
+ *
+ * They are written unquoted in places: the masking labels, `PGRST_DB_SCHEMA`, the search path. A
+ * `$` can end a dollar-quoted function body, and a capital or a hyphen means a different schema,
+ * or none, wherever the name is not quoted. Refused when the config is read, before anything is
+ * generated from it; the engine refuses the same names at its own boundary.
+ */
+function validateSchemaNames(cfg: Record<string, unknown>, filename: string): void {
+  const schema = cfg["schema"] as { pg_schema?: unknown; api_schemas?: unknown } | undefined
+  if (schema === undefined || schema === null) return
+  if (schema.pg_schema !== undefined) assertPlainSchemaName(schema.pg_schema, "schema.pg_schema", filename)
+  if (Array.isArray(schema.api_schemas)) {
+    for (const name of schema.api_schemas) assertPlainSchemaName(name, "schema.api_schemas", filename)
+  }
+}
+
+function assertPlainSchemaName(name: unknown, key: string, filename: string): void {
+  const text = typeof name === "string" ? name.trim() : name
+  if (
+    typeof text === "string" &&
+    PLAIN_SCHEMA_NAME.test(text) &&
+    Buffer.byteLength(text, "utf8") <= MAX_SCHEMA_NAME_BYTES
+  ) {
+    return
+  }
+  throw new Error(
+    `${filename}: ${key} ${JSON.stringify(name)} is not a plain identifier: a schema name must match ` +
+      `^[a-z_][a-z0-9_]*$ and be at most ${MAX_SCHEMA_NAME_BYTES} bytes`,
+  )
 }
 
 /**
