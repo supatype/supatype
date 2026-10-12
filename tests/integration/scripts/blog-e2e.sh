@@ -65,7 +65,7 @@ echo "==> Bringing the stack up (this starts Next too)"
 (cd "$EXAMPLE_DIR" && node "$CLI_BIN" dev) &
 DEV_PID=$!
 
-ready() { http_ok "$BASE_URL/auth/v1/health"; }
+ready() { dev_started "$EXAMPLE_DIR" && http_ok "$BASE_URL/auth/v1/health"; }
 if ! wait_until "$MAX_WAIT" "$BASE_URL/auth/v1/health" ready; then
   echo "ERROR: the stack never became ready"
   exit 1
@@ -73,7 +73,7 @@ fi
 
 app_ready() { [[ "$(http_status "$BASE_URL/")" == "200" ]]; }
 if ! wait_until "$APP_WAIT" "the Next app through the gateway" app_ready; then
-  echo "ERROR: / never answered 200 — the proxy never reached the app"
+  echo "ERROR: / never answered 200: the proxy never reached the app"
   exit 1
 fi
 
@@ -90,7 +90,7 @@ fi
 # there are posts, the empty state when there are none. Neither appears if the component threw, and
 # neither is in the shell a client-only render would send first.
 grep -qE 'Recent posts|No posts yet' <<<"$home" \
-  || fail "no server-rendered post list in the first response — the Server Component did not reach the API"
+  || fail "no server-rendered post list in the first response: the Server Component did not reach the API"
 echo "  ok   the post list was rendered server-side"
 
 echo ""

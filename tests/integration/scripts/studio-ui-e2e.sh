@@ -72,7 +72,7 @@ fi
 (cd "$INTEGRATION_DIR" && node "$CLI_BIN" dev) &
 DEV_PID=$!
 
-ready() { http_ok "$BASE_URL/auth/v1/health"; }
+ready() { dev_started "$INTEGRATION_DIR" && http_ok "$BASE_URL/auth/v1/health"; }
 if ! wait_until "$MAX_WAIT" "$BASE_URL/auth/v1/health" ready; then
   echo "ERROR: the stack never became ready"
   exit 1

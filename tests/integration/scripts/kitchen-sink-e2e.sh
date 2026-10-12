@@ -63,7 +63,7 @@ fail() { echo "  FAIL $*" >&2; exit 1; }
 start_stack() {
   (cd "$EXAMPLE_DIR" && node "$CLI_BIN" dev) &
   DEV_PID=$!
-  ready() { http_ok "$BASE_URL/auth/v1/health"; }
+  ready() { dev_started "$EXAMPLE_DIR" && http_ok "$BASE_URL/auth/v1/health"; }
   if ! wait_until "$MAX_WAIT" "$BASE_URL/auth/v1/health" ready; then
     echo "ERROR: the stack never became ready"
     exit 1

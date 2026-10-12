@@ -43,8 +43,8 @@ echo "==> Bringing the stack up"
 (cd "$EXAMPLE_DIR" && node "$CLI_BIN" dev) &
 DEV_PID=$!
 
-ready() { http_ok "$BASE_URL/auth/v1/health"; }
-if ! wait_until "$MAX_WAIT" "$BASE_URL/auth/v1/health" ready; then
+ready() { dev_started "$EXAMPLE_DIR" && http_ok "$BASE_URL/auth/v1/health"; }
+if ! wait_until "$MAX_WAIT" "dev to finish starting ($BASE_URL)" ready; then
   echo "ERROR: the stack never became ready"
   exit 1
 fi
