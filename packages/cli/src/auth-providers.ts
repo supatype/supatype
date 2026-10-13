@@ -11,6 +11,7 @@
  * `.env` spread last in native dev). Projects configured through `.env` alone keep working unchanged.
  */
 import type { SupatypeProjectConfig } from "./project-config.js"
+import { readEnvFile } from "./env-file.js"
 
 /**
  * Every OAuth provider the auth server has (its `ProviderConfiguration`), by the name
@@ -201,12 +202,21 @@ export function missingAuthProviderSecrets(
   })
 }
 
-/** Print {@link missingAuthProviderSecrets}, once per `dev` start. */
+/** Print {@link missingAuthProviderSecrets}, once per `dev` start or compose render. */
 export function warnMissingAuthProviderSecrets(
   config: SupatypeProjectConfig,
   environment: Readonly<Record<string, string | undefined>>,
 ): void {
   for (const line of missingAuthProviderSecrets(config, environment)) console.warn(`[supatype] ${line}`)
+}
+
+/**
+ * {@link warnMissingAuthProviderSecrets} against what compose will interpolate: the project's `.env`
+ * with the shell over it, as compose resolves the same names. One function for `dev` and
+ * `self-host compose`, so both say the same thing.
+ */
+export function warnProjectAuthProviderSecrets(cwd: string, config: SupatypeProjectConfig): void {
+  warnMissingAuthProviderSecrets(config, { ...readEnvFile(cwd), ...process.env })
 }
 
 // ---------------------------------------------------------------------------

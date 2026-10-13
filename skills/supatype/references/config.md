@@ -193,8 +193,8 @@ GOOGLE_SECRET=...
   `keycloak`, `linkedin`, `linkedin_oidc`, `notion`, `slack`, `slack_oidc`, `snapchat`, `spotify`,
   `twitch`, `twitter`, `vercel_marketplace`, `workos`, `x`, `zoom`. Anything else is rejected.
 - **Precedence:** a `SUPATYPE_EXTERNAL_<PROVIDER>_*` value already in `.env` wins over the config, so
-  a project configured through `.env` alone keeps working. `supatype dev` warns when a provider's
-  secret is set nowhere.
+  a project configured through `.env` alone keeps working. `supatype dev` and
+  `supatype self-host compose render`/`up` warn when an enabled provider's secret is set nowhere.
 - `supatype.local.config.ts` merges per provider, so it can swap in a development OAuth app's
   `clientId` without restating the rest.
 

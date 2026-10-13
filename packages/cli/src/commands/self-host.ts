@@ -20,6 +20,7 @@ import { generateUnits } from "../systemd.js"
 import { readPid } from "../process-manager.js"
 import { localStorageEnv } from "../local-storage.js"
 import { composeProjectName, exitComposeFailed, runDockerCompose, writeSelfHostCompose } from "../self-host-compose.js"
+import { warnProjectAuthProviderSecrets } from "../auth-providers.js"
 import { file, error, info, plain, warn } from "../ui/messages.js"
 import { nextSteps } from "../ui/next-steps.js"
 import { withSpinner } from "../ui/progress.js"
@@ -39,6 +40,7 @@ export function registerSelfHost(program: Command): void {
     .action(() => {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
+      warnProjectAuthProviderSecrets(cwd, config)
       const out = writeSelfHostCompose(cwd, config)
       file("wrote", out.composePath)
       file("wrote", out.kongPath)
@@ -61,6 +63,8 @@ export function registerSelfHost(program: Command): void {
       if (filled.length > 0) {
         console.log(`[supatype] Minted ${filled.join(" and ")} in .env from JWT_SECRET.`)
       }
+      // Before the spinner, so the warning is not drawn over.
+      warnProjectAuthProviderSecrets(cwd, config)
       const brand = { intro: "Self-host deployment" }
       const status = await withSpinner("Starting self-host Compose stack", async () => {
         const out = writeSelfHostCompose(cwd, config)

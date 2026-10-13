@@ -63,8 +63,8 @@ import {
 } from "./compose-local-server-image.js"
 import { ensureEngine, enginePush, engineRequest, type AdoptOutcome, type ComposeEngine, type DiffResult } from "./engine-client.js"
 import { writeSchemaSourcePushArtifacts, type SchemaSourcePushArtifacts } from "./schema-sources.js"
-import { readEnvFile, readEnvValue, upsertEnvFile } from "./env-file.js"
-import { warnMissingAuthProviderSecrets } from "./auth-providers.js"
+import { readEnvValue, upsertEnvFile } from "./env-file.js"
+import { warnProjectAuthProviderSecrets } from "./auth-providers.js"
 import {
   devDatabaseIdentity,
   devDatabaseUrl,
@@ -1440,7 +1440,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   const localServerImage = await ensureLocalServerDockerImage(cwd, config, devBrand)
 
   ensureDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, devDbPort)
-  warnMissingAuthProviderSecrets(config, { ...readEnvFile(cwd), ...process.env })
+  warnProjectAuthProviderSecrets(cwd, config)
 
   console.log(`[supatype] provider docker, starting self-host Compose stack (project ${project}, gateway :${kongPort})...`)
   const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
