@@ -412,6 +412,20 @@ export class AuthClient {
       }
     }
 
+    // The auth server marks the link it sent with `type`; a recovery link signs the user in so they
+    // can choose a new password, and the app needs to know that is why they arrived.
+    const recovery = (hashParams.get("type") ?? query.get("type")) === "recovery"
+    return this.announceRecovery(await this.sessionFromRedirect(query, hashParams), recovery)
+  }
+
+  /** The session a redirect carries: a PKCE code to exchange, or implicit-grant tokens. */
+  private async sessionFromRedirect(
+    query: URLSearchParams,
+    hashParams: URLSearchParams,
+  ): Promise<{
+    data: { session: Session | null; user: User | null }
+    error: SupatypeError | null
+  }> {
     const code = query.get("code") ?? hashParams.get("code")
     if (code !== null && code !== "") {
       return this.exchangeCodeForSession(code)
@@ -432,6 +446,22 @@ export class AuthClient {
         status: 400,
       },
     }
+  }
+
+  /**
+   * Emit `PASSWORD_RECOVERY` once a recovery link or code has produced a session.
+   *
+   * After the `SIGNED_IN` that establishing the session already emitted, as `MFA_CHALLENGE_VERIFIED`
+   * follows it, so a listener keyed on sign-in still sees one and a reset page can key on this.
+   */
+  private announceRecovery<T extends { data: { session: Session | null }; error: SupatypeError | null }>(
+    result: T,
+    recovery: boolean,
+  ): T {
+    if (recovery && result.error === null && result.data.session !== null) {
+      this._emitEvent("PASSWORD_RECOVERY", result.data.session)
+    }
+    return result
   }
 
   async signInWithOtp(opts: {
@@ -601,8 +631,23 @@ export class AuthClient {
         },
       }
     }
-    const raw = await res.json() as Record<string, unknown>
-    return { data: { user: this._parseUser(raw) }, error: null }
+    const user = this._parseUser(await res.json() as Record<string, unknown>)
+    this.applyUpdatedUser(user)
+    return { data: { user }, error: null }
+  }
+
+  /**
+   * Put the server's updated user on the session, persist it, and tell listeners.
+   *
+   * The tokens are unchanged, so this neither reschedules the refresh nor emits `TOKEN_REFRESHED`;
+   * without it the session kept the old email and metadata until the next refresh.
+   */
+  private applyUpdatedUser(user: User): void {
+    if (this.currentSession === null) return
+    const session: Session = { ...this.currentSession, user }
+    this.currentSession = session
+    this.syncPersistedSession(session)
+    this._emitEvent("USER_UPDATED", session)
   }
 
   /**
@@ -634,7 +679,7 @@ export class AuthClient {
       headers: this.baseHeaders,
       body: JSON.stringify(body),
     })
-    return this._parseAuthResponse(res)
+    return this.announceRecovery(await this._parseAuthResponse(res), params.type === "recovery")
   }
 
   /**
