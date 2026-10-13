@@ -33,6 +33,7 @@ CONFIG="$EXAMPLE_DIR/supatype.config.ts"
 
 source "$SCRIPT_DIR/lib/http-wait.sh"
 source "$SCRIPT_DIR/lib/example-keys.sh"
+source "$SCRIPT_DIR/lib/expo-export.sh"
 
 DEV_PID=""
 BG_PIDS=()
@@ -103,8 +104,9 @@ stub_ready() { http_ok "http://127.0.0.1:${STUB_PORT}/calls"; }
 wait_until 30 "the OAuth stub" stub_ready || fail "the OAuth stub never answered"
 
 echo "==> Building the app for web"
-# EXPO_PUBLIC_* are inlined at build time, so this follows the .env written above.
-(cd "$EXAMPLE_DIR" && CI=1 npx expo export --platform web --output-dir dist >/dev/null)
+# EXPO_PUBLIC_* are inlined at build time, so this follows the .env written above. The Metro cache
+# is this export's own: a shared one serves another run's URL (lib/expo-export.sh).
+expo_web_export "$EXAMPLE_DIR" dist
 [[ -f "$EXAMPLE_DIR/dist/index.html" ]] || fail "expo export produced no dist/index.html"
 node "$E2E_DIR/expo-auth/spa-server.mjs" "$EXAMPLE_DIR/dist" "$WEB_PORT" &
 BG_PIDS+=("$!")
