@@ -47,7 +47,7 @@
   <section class="hero">
     <div class="wrap">
       <div class="hero-copy">
-        <div class="eyebrow">MIT SDKs · Apache 2.0 CLI &amp; services · Schema engine binary under its own licence</div>
+        <div class="eyebrow">MIT SDKs · Apache 2.0 CLI &amp; services · <a href="/licensing.html">Schema engine BSL 1.1</a></div>
         <h1>Zero <span class="gradient">drift.</span></h1>
         <p class="lede">
           Postgres, migrations, row-level security, API, realtime, storage, Studio and the typed
@@ -158,7 +158,7 @@
         <div class="card">
           <div class="n">05</div>
           <h3>Realtime</h3>
-          <p>Subscribe to changes on any model from the client, with row-level security enforced on every event.</p>
+          <p>Subscribe to changes on any model from the client. Every event, deletes included, reaches only the subscribers whose access rules let them read that row.</p>
         </div>
         <div class="card">
           <div class="n">06</div>
@@ -226,7 +226,7 @@
       </div>
       <ul class="compare">
         <li><strong>tRPC</strong> End-to-end types across the API. You still write the database and policies.</li>
-        <li><strong>Prisma</strong> Schema to types. Stops at the client.</li>
+        <li><strong>Prisma</strong> Schema to types and migrations. You still write the access rules and the API.</li>
         <li><strong>Supabase</strong> A backend. Types introspected after the fact.</li>
         <li class="us"><strong>Supatype</strong> One set of types, database to component.</li>
       </ul>
@@ -238,14 +238,14 @@
     <div class="wrap">
       <div class="section-head">
         <div class="eyebrow">Quick start</div>
-        <h2>Four commands<br />
+        <h2>Three commands<br />
           <span class="gradient">to a running stack.</span></h2>
         <p>Supatype runs the stack in Docker by default. <a href="/docs/#local-dev">Local development</a> covers native mode, ports and the frontend proxy.</p>
       </div>
       <pre class="code quickstart"><span class="p">$</span> npm install -g @supatype/cli
 <span class="p">$</span> supatype init
-<span class="p">$</span> supatype dev
-<span class="p">$</span> supatype push</pre>
+<span class="p">$</span> supatype dev</pre>
+      <p><code>supatype dev</code> applies your schema, then watches it: save a change and it migrates the database and regenerates the typed client. Run <code>supatype push</code> to apply the schema to another database, such as staging or production.</p>
     </div>
   </section>
 
@@ -278,7 +278,7 @@
     <div class="footer-brand">
       <img src="/supatype.svg" alt="Supatype" width="108" height="20" />
       <p>Zero drift. One set of types, database to component.</p>
-      <p class="mono">SDKs MIT · CLI &amp; services Apache 2.0 · Schema engine binary under its own licence</p>
+      <p class="mono">SDKs MIT · CLI &amp; services Apache 2.0 · Schema engine BSL 1.1 · <a href="/licensing.html">Licensing</a></p>
       <p class="mono">Active development</p>
     </div>
     <div class="footer-links">
