@@ -97,7 +97,8 @@ export function bearerToken(headers: Record<string, string>): string {
 // with plain `fetch` as it always has.
 export type { RequestTransport }
 
-async function fetchWithOptional401Retry(
+/** Send once; on a 401, let the session refresh and send again with freshly resolved headers. */
+export async function fetchWithOptional401Retry(
   send: RequestTransport,
   url: string,
   init: RequestInit & FetchOptions,

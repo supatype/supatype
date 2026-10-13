@@ -1,7 +1,7 @@
 import { AuthClient } from "./auth.js"
 import { onIdentityChange } from "./identity.js"
 import { PreviewCredential } from "./preview.js"
-import { QueryBuilder, MutationBuilder, type HeadersProvider, type RequestTransport } from "./query.js"
+import { QueryBuilder, MutationBuilder, fetchWithOptional401Retry, type HeadersProvider, type RequestTransport } from "./query.js"
 import { defaultQueryCache, type QueryCache } from "./query-cache.js"
 import { StorageClient } from "./storage.js"
 import { RealtimeClient } from "./realtime.js"
@@ -723,38 +723,30 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
       params?: FunctionArgs<TDatabase, TFn> | undefined,
       options?: RpcOptions | undefined,
     ): Promise<RpcResult<FunctionReturns<TDatabase, TFn>>> {
-      const headers: Record<string, string> = { ...(await getAuthHeaders()) }
       const method = options?.head === true ? "HEAD" : "POST"
-
-      if (options?.count !== undefined) {
-        headers["Prefer"] = `count=${options.count}`
-      }
-      // PostgREST resolves `/rpc/<name>` against the default profile, so a function in any other
-      // schema is unreachable without this. `Content-Profile` rather than `Accept-Profile`, because
-      // an RPC call is a POST and PostgREST reads the write-side header for it.
-      if (options?.schema !== undefined) {
-        headers["Content-Profile"] = options.schema
-      }
+      // Resolved per attempt, so the resend after a 401 carries the same `Prefer` and profile as
+      // the first send. It used to rebuild only `Prefer` and drop the schema.
+      const rpcHeaders = async (): Promise<Record<string, string>> => ({
+        ...(await getAuthHeaders()),
+        ...(options?.count !== undefined && { Prefer: `count=${options.count}` }),
+        // PostgREST resolves `/rpc/<name>` against the default profile, so a function in any other
+        // schema is unreachable without this. `Content-Profile` rather than `Accept-Profile`,
+        // because an RPC call is a POST and PostgREST reads the write-side header for it.
+        ...(options?.schema !== undefined && { "Content-Profile": options.schema }),
+      })
 
       let res: Response
       try {
-        res = await doFetch(`${config.url}/rest/v1/rpc/${fn}`, {
-          method,
-          headers,
-          ...(params !== undefined && method !== "HEAD" && { body: JSON.stringify(params) }),
-        })
-        if (res.status === 401 && onUnauthorized !== undefined) {
-          await onUnauthorized()
-          const retryHeaders: Record<string, string> = { ...(await getAuthHeaders()) }
-          if (options?.count !== undefined) {
-            retryHeaders["Prefer"] = `count=${options.count}`
-          }
-          res = await doFetch(`${config.url}/rest/v1/rpc/${fn}`, {
+        res = await fetchWithOptional401Retry(
+          doFetch,
+          `${config.url}/rest/v1/rpc/${fn}`,
+          {
             method,
-            headers: retryHeaders,
             ...(params !== undefined && method !== "HEAD" && { body: JSON.stringify(params) }),
-          })
-        }
+          },
+          rpcHeaders,
+          onUnauthorized,
+        )
       } catch (e) {
         return { data: null, error: transportFailure(e) }
       }
