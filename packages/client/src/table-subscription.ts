@@ -1,13 +1,40 @@
-import type { RealtimeClient, RealtimeEvent, RealtimePayload } from "./realtime.js"
+import type { ChannelStatus, RealtimeClient, RealtimeEvent, RealtimePayload } from "./realtime.js"
+import type { SupatypeError } from "./types.js"
 
 /**
- * One table's subscription: the channel wiring `from(table).subscribe()` uses.
+ * A table's live rows, for `from(table).subscribe()` and for the Vue, Svelte and Solid bindings.
+ *
+ * Each binding carried its own copy of the channel wiring, the status mapping and the row merge,
+ * beside the client's own wiring for `from(table).subscribe()`. The copies drifted the way copies
+ * do: none of the three bindings mapped SUBSCRIBING, so while a sign-in swapped the socket all
+ * three read "connected" with no join anywhere, and all three still shared one `public:table`
+ * channel that the client's own subscribe had long since stopped sharing. One copy here means
+ * each binding is only the adapter between this and its framework's state.
  */
 
-export interface TableSubscribeOptions {
+/** What a binding shows for a subscription's connection. */
+export type SubscriptionState = "connecting" | "connected" | "disconnected" | "error"
+
+/** A binding's status and error, as one channel status implies them. */
+export interface SubscriptionView {
+  status: SubscriptionState
+  error: SupatypeError | null
+}
+
+export interface TableWatchOptions {
   event?: RealtimeEvent | undefined
   filter?: string | undefined
+}
+
+export interface TableSubscribeOptions extends TableWatchOptions {
   schema?: string | undefined
+}
+
+export interface TableWatchHandlers<TRow> {
+  /** The rows seen so far, after each change. */
+  rows(rows: TRow[]): void
+  /** The connection, after each status the channel reports. */
+  status(view: SubscriptionView): void
 }
 
 export interface TableSubscription {
@@ -56,4 +83,71 @@ export function subscribeToTable<TRow>(
     // and the callback waited forever unless something else on the client had joined already.
     .subscribe()
   return { channel, unsubscribe: () => channel.unsubscribe() }
+}
+
+/**
+ * The status and error a binding shows for a channel status.
+ *
+ * A refused join and a reconnect that gave up are both errors: neither is going to deliver
+ * anything without the caller doing something about it.
+ */
+export function subscriptionViewOf(status: ChannelStatus): SubscriptionView {
+  switch (status) {
+    case "SUBSCRIBING":
+      return { status: "connecting", error: null }
+    case "SUBSCRIBED":
+      return { status: "connected", error: null }
+    case "CLOSED":
+      return { status: "disconnected", error: null }
+    case "CHANNEL_ERROR":
+      return { status: "error", error: { message: "Subscription error" } }
+    case "TIMED_OUT":
+      return { status: "error", error: { message: "Realtime connection timed out" } }
+  }
+}
+
+function rowId(row: unknown): unknown {
+  return (row as Record<string, unknown> | null)?.["id"]
+}
+
+/** The rows after one change, matched on `id`. */
+export function applyRowChange<TRow>(rows: TRow[] | null, payload: RealtimePayload<TRow>): TRow[] {
+  const current = rows ?? []
+  switch (payload.eventType) {
+    case "INSERT":
+      return [...current, payload.new as TRow]
+    case "UPDATE":
+      return current.map((row) => (rowId(row) === rowId(payload.new) ? (payload.new as TRow) : row))
+    case "DELETE":
+      return current.filter((row) => rowId(row) !== rowId(payload.old))
+    default:
+      return current
+  }
+}
+
+/**
+ * Subscribe to changes on a `public` table, and return the unsubscribe.
+ *
+ * The handlers are told the rows and the connection status; the binding decides where they live.
+ * The status is watched on the channel `subscribeToTable` already joined, which is what its
+ * channel's `subscribe(cb)` is for.
+ */
+export function watchTable<TRow>(
+  realtime: RealtimeClient,
+  table: string,
+  options: TableWatchOptions | undefined,
+  handlers: TableWatchHandlers<TRow>,
+): () => void {
+  let rows: TRow[] | null = null
+  const subscription = subscribeToTable<TRow>(
+    realtime,
+    table,
+    (payload) => {
+      rows = applyRowChange(rows, payload)
+      handlers.rows(rows)
+    },
+    options,
+  )
+  subscription.channel.subscribe((status) => handlers.status(subscriptionViewOf(status)))
+  return subscription.unsubscribe
 }

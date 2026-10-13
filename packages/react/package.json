@@ -15,7 +15,8 @@
   "scripts": {
     "build": "tsc --project tsconfig.json",
     "dev": "tsc --project tsconfig.json --watch",
-    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "typecheck": "tsc --project tsconfig.json --noEmit && tsc --project tests/tsconfig.json --noEmit",
+    "test": "vitest run",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
@@ -26,8 +27,12 @@
     "react": ">=18"
   },
   "devDependencies": {
+    "@types/node": "^22",
     "@types/react": "^18",
+    "@types/react-test-renderer": "^18",
     "react": "^18",
-    "typescript": "^5"
+    "react-test-renderer": "^18",
+    "typescript": "^5",
+    "vitest": "^4.0.18"
   }
 }

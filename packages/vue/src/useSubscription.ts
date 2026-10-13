@@ -1,22 +1,31 @@
 import { ref, onMounted, onUnmounted, type Ref } from "vue"
-import type { AugmentedDatabase, AnyDatabase, SupatypeError, RealtimePayload, RealtimeEvent, ChannelStatus } from "@supatype/client"
+import {
+  watchTable,
+  type AugmentedDatabase,
+  type AnyDatabase,
+  type SupatypeError,
+  type RealtimeEvent,
+  type SubscriptionState,
+  type TableWatchOptions,
+} from "@supatype/client"
 import { useSupatype } from "./context.js"
 
 export type SubscriptionEvent = RealtimeEvent
 
-export interface UseSubscriptionOptions {
-  event?: SubscriptionEvent | undefined
-  filter?: string | undefined
-}
+/** Which changes to receive. The same options `watchTable` takes, since they go straight to it. */
+export type UseSubscriptionOptions = TableWatchOptions
 
 export interface UseSubscriptionReturn<TRow> {
   data: Ref<TRow[] | null>
   error: Ref<SupatypeError | null>
-  status: Ref<"connecting" | "connected" | "disconnected" | "error">
+  status: Ref<SubscriptionState>
 }
 
 /**
  * Real-time subscription composable.
+ *
+ * The channel, the status and the row merge are `watchTable`'s, shared with the Svelte and Solid
+ * bindings; this only puts what it reports into refs.
  *
  * @example
  * ```vue
@@ -41,59 +50,20 @@ export function useSubscription<
   const client = useSupatype<TDatabase>()
   const data = ref<TRow[] | null>(null) as Ref<TRow[] | null>
   const error = ref<SupatypeError | null>(null)
-  const status = ref<"connecting" | "connected" | "disconnected" | "error">("connecting")
+  const status = ref<SubscriptionState>("connecting")
 
   let unsubscribe: (() => void) | null = null
 
   onMounted(() => {
-    const event: RealtimeEvent = (options?.event as RealtimeEvent) ?? "*"
-    const channelOpts: {
-      event: RealtimeEvent
-      schema: string
-      table: string
-      filter?: string | undefined
-    } = {
-      event,
-      schema: "public",
-      table,
-    }
-    if (options?.filter) {
-      channelOpts.filter = options.filter
-    }
-
-    const channel = client.realtime.channel<TRow>(`public:${table}`)
-
-    channel.on("postgres_changes", channelOpts, (payload: RealtimePayload<TRow>) => {
-      if (!data.value) data.value = []
-
-      if (payload.eventType === "INSERT") {
-        data.value = [...data.value, payload.new as TRow]
-      } else if (payload.eventType === "UPDATE") {
-        data.value = data.value.map((row) => {
-          const r = row as Record<string, unknown>
-          const n = payload.new as Record<string, unknown>
-          return r["id"] === n["id"] ? (payload.new as TRow) : row
-        })
-      } else if (payload.eventType === "DELETE") {
-        const old = payload.old as Record<string, unknown>
-        data.value = data.value.filter((row) => (row as Record<string, unknown>)["id"] !== old["id"])
-      }
+    unsubscribe = watchTable<TRow>(client.realtime, table, options, {
+      rows: (rows) => {
+        data.value = rows
+      },
+      status: (view) => {
+        status.value = view.status
+        error.value = view.error
+      },
     })
-
-    channel.subscribe((newStatus: ChannelStatus) => {
-      if (newStatus === "SUBSCRIBED") {
-        status.value = "connected"
-      } else if (newStatus === "CHANNEL_ERROR") {
-        status.value = "error"
-        error.value = { message: "Subscription error" }
-      } else if (newStatus === "CLOSED") {
-        status.value = "disconnected"
-      }
-    })
-
-    unsubscribe = () => {
-      channel.unsubscribe()
-    }
   })
 
   onUnmounted(() => {

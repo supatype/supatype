@@ -1,19 +1,30 @@
 import { createSignal, onMount, onCleanup } from "solid-js"
 import type { Accessor } from "solid-js"
-import type { AugmentedDatabase, AnyDatabase, SupatypeError, RealtimePayload, RealtimeEvent, ChannelStatus } from "@supatype/client"
+import {
+  watchTable,
+  type AugmentedDatabase,
+  type AnyDatabase,
+  type SupatypeError,
+  type SubscriptionState,
+  type TableWatchOptions,
+} from "@supatype/client"
 import { useSupatype } from "./context.js"
 
-export interface SubscriptionOptions {
-  event?: RealtimeEvent | undefined
-  filter?: string | undefined
-}
+/** Which changes to receive. The same options `watchTable` takes, since they go straight to it. */
+export type SubscriptionOptions = TableWatchOptions
 
 export interface SubscriptionResult<TRow> {
   data: Accessor<TRow[] | null>
   error: Accessor<SupatypeError | null>
-  status: Accessor<"connecting" | "connected" | "disconnected" | "error">
+  status: Accessor<SubscriptionState>
 }
 
+/**
+ * Real-time subscription signals.
+ *
+ * The channel, the status and the row merge are `watchTable`'s, shared with the Vue and Svelte
+ * bindings; this only puts what it reports into signals.
+ */
 export function createSubscription<
   TDatabase extends AnyDatabase = AugmentedDatabase,
   TTable extends keyof TDatabase["public"]["Tables"] & string = keyof TDatabase["public"]["Tables"] & string,
@@ -25,62 +36,17 @@ export function createSubscription<
   const client = useSupatype<TDatabase>()
   const [data, setData] = createSignal<TRow[] | null>(null)
   const [error, setError] = createSignal<SupatypeError | null>(null)
-  const [status, setStatus] = createSignal<"connecting" | "connected" | "disconnected" | "error">("connecting")
-
-  let channel: ReturnType<typeof client.realtime.channel<TRow>> | null = null
+  const [status, setStatus] = createSignal<SubscriptionState>("connecting")
 
   onMount(() => {
-    const event: RealtimeEvent = (options?.event as RealtimeEvent) ?? "*"
-    const channelOpts: {
-      event: RealtimeEvent
-      schema: string
-      table: string
-      filter?: string | undefined
-    } = {
-      event,
-      schema: "public",
-      table,
-    }
-    if (options?.filter) {
-      channelOpts.filter = options.filter
-    }
-
-    channel = client.realtime.channel<TRow>(`public:${table}`)
-
-    channel.on("postgres_changes", channelOpts, (payload: RealtimePayload<TRow>) => {
-      setData((current) => {
-        const rows = current ?? []
-
-        if (payload.eventType === "INSERT") {
-          return [...rows, payload.new as TRow]
-        } else if (payload.eventType === "UPDATE") {
-          return rows.map((row) => {
-            const r = row as Record<string, unknown>
-            const n = payload.new as Record<string, unknown>
-            return r["id"] === n["id"] ? (payload.new as TRow) : row
-          })
-        } else if (payload.eventType === "DELETE") {
-          const old = payload.old as Record<string, unknown>
-          return rows.filter((row) => (row as Record<string, unknown>)["id"] !== old["id"])
-        }
-        return rows
-      })
+    const unsubscribe = watchTable<TRow>(client.realtime, table, options, {
+      rows: (rows) => setData(() => rows),
+      status: (view) => {
+        setStatus(view.status)
+        setError(view.error)
+      },
     })
-
-    channel.subscribe((newStatus: ChannelStatus) => {
-      if (newStatus === "SUBSCRIBED") {
-        setStatus("connected")
-      } else if (newStatus === "CHANNEL_ERROR") {
-        setStatus("error")
-        setError({ message: "Subscription error" })
-      } else if (newStatus === "CLOSED") {
-        setStatus("disconnected")
-      }
-    })
-  })
-
-  onCleanup(() => {
-    channel?.unsubscribe()
+    onCleanup(unsubscribe)
   })
 
   return { data, error, status }
