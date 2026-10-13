@@ -46,24 +46,26 @@ describe("realtime (F15)", () => {
       { event: "INSERT", filter: `slug=eq.${slug}` },
     )
 
-    await waitForSubscribe((cb) => channel.subscribe(cb))
-    await sleep(300)
+    try {
+      await waitForSubscribe((cb) => channel.subscribe(cb))
+      await sleep(300)
 
-    const started = Date.now()
-    const { error } = await admin.from("post").insert({ title: "Realtime INSERT", slug })
-    assert.ifError(error)
+      const started = Date.now()
+      const { error } = await admin.from("post").insert({ title: "Realtime INSERT", slug })
+      assert.ifError(error)
 
-    await waitForEvents(() => events.length, 1)
-    const elapsed = Date.now() - started
-    assert.ok(elapsed <= REALTIME_LATENCY_MS, `INSERT event took ${elapsed}ms (budget ${REALTIME_LATENCY_MS}ms)`)
+      await waitForEvents(() => events.length, 1)
+      const elapsed = Date.now() - started
+      assert.ok(elapsed <= REALTIME_LATENCY_MS, `INSERT event took ${elapsed}ms (budget ${REALTIME_LATENCY_MS}ms)`)
 
-    assert.equal(events[0]?.eventType, "INSERT")
-    assert.equal(events[0]?.table, "post")
-    assert.equal((events[0]?.new as { slug?: string } | null)?.slug, slug)
-
-    unsubscribe()
-    client.realtime.disconnect()
-    await admin.from("post").delete().eq("slug", slug)
+      assert.equal(events[0]?.eventType, "INSERT")
+      assert.equal(events[0]?.table, "post")
+      assert.equal((events[0]?.new as { slug?: string } | null)?.slug, slug)
+    } finally {
+      unsubscribe()
+      client.realtime.disconnect()
+      await admin.from("post").delete().eq("slug", slug)
+    }
   })
 
   test("UPDATE on post emits postgres_changes", async () => {
@@ -79,30 +81,35 @@ describe("realtime (F15)", () => {
     const postId = (inserted as Array<{ id: string }>)[0]?.id
     assert.ok(postId)
 
+    // Filtered to this row: api.test.ts runs beside this file and updates posts of its own, and the
+    // first UPDATE to arrive was then sometimes that one ("Hello Integration (updated)").
     const channel = client.realtime
       .channel("public:post")
       .on(
         "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "post" },
+        { event: "UPDATE", schema: "public", table: "post", filter: `id=eq.${postId}` },
         (payload) => events.push(payload),
       )
 
-    await waitForSubscribe((cb) => channel.subscribe(cb))
-    await sleep(300)
+    try {
+      await waitForSubscribe((cb) => channel.subscribe(cb))
+      await sleep(300)
 
-    const { error: updateError } = await admin
-      .from("post")
-      .update({ title: "After" })
-      .eq("id", postId)
-    assert.ifError(updateError)
+      const { error: updateError } = await admin
+        .from("post")
+        .update({ title: "After" })
+        .eq("id", postId)
+      assert.ifError(updateError)
 
-    await waitForEvents(() => events.length, 1)
-    assert.equal(events[0]?.eventType, "UPDATE")
-    assert.equal((events[0]?.new as { title?: string } | null)?.title, "After")
-
-    channel.unsubscribe()
-    client.realtime.disconnect()
-    await admin.from("post").delete().eq("id", postId)
+      await waitForEvents(() => events.length, 1)
+      assert.equal(events[0]?.eventType, "UPDATE")
+      assert.equal((events[0]?.new as { title?: string } | null)?.title, "After")
+    } finally {
+      // An open socket keeps the test process alive, so a failed assertion must still close it.
+      channel.unsubscribe()
+      client.realtime.disconnect()
+      await admin.from("post").delete().eq("id", postId)
+    }
   })
 
   test("DELETE on post emits postgres_changes", async () => {
@@ -118,25 +125,29 @@ describe("realtime (F15)", () => {
     const postId = (inserted as Array<{ id: string }>)[0]?.id
     assert.ok(postId)
 
+    // Filtered to this row, for the same reason as the UPDATE test: api.test.ts deletes posts too.
     const channel = client.realtime
       .channel("public:post")
       .on(
         "postgres_changes",
-        { event: "DELETE", schema: "public", table: "post" },
+        { event: "DELETE", schema: "public", table: "post", filter: `id=eq.${postId}` },
         (payload) => events.push(payload),
       )
 
-    await waitForSubscribe((cb) => channel.subscribe(cb))
-    await sleep(300)
+    try {
+      await waitForSubscribe((cb) => channel.subscribe(cb))
+      await sleep(300)
 
-    const { error: deleteError } = await admin.from("post").delete().eq("id", postId)
-    assert.ifError(deleteError)
+      const { error: deleteError } = await admin.from("post").delete().eq("id", postId)
+      assert.ifError(deleteError)
 
-    await waitForEvents(() => events.length, 1)
-    assert.equal(events[0]?.eventType, "DELETE")
-
-    channel.unsubscribe()
-    client.realtime.disconnect()
+      await waitForEvents(() => events.length, 1)
+      assert.equal(events[0]?.eventType, "DELETE")
+      assert.equal((events[0]?.old as { id?: string } | null)?.id, postId)
+    } finally {
+      channel.unsubscribe()
+      client.realtime.disconnect()
+    }
   })
 
   test("column filter delivers only matching INSERT", async () => {
@@ -159,29 +170,31 @@ describe("realtime (F15)", () => {
         (payload) => events.push(payload),
       )
 
-    await waitForSubscribe((cb) => channel.subscribe(cb))
-    await sleep(300)
+    try {
+      await waitForSubscribe((cb) => channel.subscribe(cb))
+      await sleep(300)
 
-    const { error: otherError } = await admin
-      .from("post")
-      .insert({ title: "Other", slug: otherSlug })
-    assert.ifError(otherError)
+      const { error: otherError } = await admin
+        .from("post")
+        .insert({ title: "Other", slug: otherSlug })
+      assert.ifError(otherError)
 
-    await sleep(800)
-    assert.equal(events.length, 0)
+      await sleep(800)
+      assert.equal(events.length, 0)
 
-    const { error: matchError } = await admin
-      .from("post")
-      .insert({ title: "Match", slug: matchSlug })
-    assert.ifError(matchError)
+      const { error: matchError } = await admin
+        .from("post")
+        .insert({ title: "Match", slug: matchSlug })
+      assert.ifError(matchError)
 
-    await waitForEvents(() => events.length, 1)
-    assert.equal((events[0]?.new as { slug?: string } | null)?.slug, matchSlug)
-
-    channel.unsubscribe()
-    client.realtime.disconnect()
-    await admin.from("post").delete().eq("slug", matchSlug)
-    await admin.from("post").delete().eq("slug", otherSlug)
+      await waitForEvents(() => events.length, 1)
+      assert.equal((events[0]?.new as { slug?: string } | null)?.slug, matchSlug)
+    } finally {
+      channel.unsubscribe()
+      client.realtime.disconnect()
+      await admin.from("post").delete().eq("slug", matchSlug)
+      await admin.from("post").delete().eq("slug", otherSlug)
+    }
   })
 })
 
@@ -218,36 +231,35 @@ describe("realtime (F17 RLS)", () => {
         (payload) => events.push(payload),
       )
 
-    await waitForSubscribe((cb) => channel.subscribe(cb))
-    await sleep(400)
+    const created: string[] = []
+    try {
+      await waitForSubscribe((cb) => channel.subscribe(cb))
+      await sleep(400)
 
-    const externalB = String(Date.now())
-    const { data: subB, error: subBError } = await admin
-      .from("subscription")
-      .insert(newSubscriptionRow(userB.userId, externalB))
-    assert.ifError(subBError)
-    const subBId = (subB as Array<{ id: string }>)[0]?.id
+      const { data: subB, error: subBError } = await admin
+        .from("subscription")
+        .insert(newSubscriptionRow(userB.userId, String(Date.now())))
+      assert.ifError(subBError)
+      created.push(...(subB as Array<{ id: string }>).map((row) => row.id))
 
-    await waitForQuiet(() => events.length, 2000)
+      await waitForQuiet(() => events.length, 2000)
 
-    const externalA = String(Date.now() + 1)
-    const { data: subA, error: subAError } = await admin
-      .from("subscription")
-      .insert(newSubscriptionRow(userA.userId, externalA))
-    assert.ifError(subAError)
-    const subAId = (subA as Array<{ id: string }>)[0]?.id
+      const { data: subA, error: subAError } = await admin
+        .from("subscription")
+        .insert(newSubscriptionRow(userA.userId, String(Date.now() + 1)))
+      assert.ifError(subAError)
+      created.push(...(subA as Array<{ id: string }>).map((row) => row.id))
 
-    await waitForEvents(() => events.length, 1)
-    assert.equal(events.length, 1)
-    assert.equal((events[0]?.new as { subscriber_id?: string } | null)?.subscriber_id, userA.userId)
-
-    channel.unsubscribe()
-    realtimeA.disconnect()
-
-    if (subAId) await admin.from("subscription").delete().eq("id", subAId)
-    if (subBId) await admin.from("subscription").delete().eq("id", subBId)
-    await admin.from("author").delete().eq("id", userA.userId)
-    await admin.from("author").delete().eq("id", userB.userId)
+      await waitForEvents(() => events.length, 1)
+      assert.equal(events.length, 1)
+      assert.equal((events[0]?.new as { subscriber_id?: string } | null)?.subscriber_id, userA.userId)
+    } finally {
+      channel.unsubscribe()
+      realtimeA.disconnect()
+      for (const id of created) await admin.from("subscription").delete().eq("id", id)
+      await admin.from("author").delete().eq("id", userA.userId)
+      await admin.from("author").delete().eq("id", userB.userId)
+    }
   })
 })
 
@@ -272,21 +284,23 @@ describe("realtime (presence & broadcast)", () => {
         }
       })
 
-    await waitForSubscribe((cb) => chA.subscribe(cb))
-    await waitForSubscribe((cb) => chB.subscribe(cb))
-    await sleep(200)
+    try {
+      await waitForSubscribe((cb) => chA.subscribe(cb))
+      await waitForSubscribe((cb) => chB.subscribe(cb))
+      await sleep(200)
 
-    chA.track({ status: "online" })
-    await waitForEvents(() => presenceJoins.length, 1, 5000)
-    assert.ok(presenceJoins.includes(userA.userId))
+      chA.track({ status: "online" })
+      await waitForEvents(() => presenceJoins.length, 1, 5000)
+      assert.ok(presenceJoins.includes(userA.userId))
 
-    chA.broadcast("ping", { hello: "world" })
-    await waitForEvents(() => broadcasts.length, 1, 5000)
-    assert.equal(broadcasts[0]?.["hello"], "world")
-
-    chA.unsubscribe()
-    chB.unsubscribe()
-    rtA.disconnect()
-    rtB.disconnect()
+      chA.broadcast("ping", { hello: "world" })
+      await waitForEvents(() => broadcasts.length, 1, 5000)
+      assert.equal(broadcasts[0]?.["hello"], "world")
+    } finally {
+      chA.unsubscribe()
+      chB.unsubscribe()
+      rtA.disconnect()
+      rtB.disconnect()
+    }
   })
 })
