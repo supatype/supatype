@@ -623,3 +623,42 @@ describe("AuthClient stale persisted session", () => {
     expect(events).toContain("SIGNED_OUT")
   })
 })
+
+// The server reads `redirect_to` from the query string (or a header), never from a JSON body. A
+// redirect sent anywhere else is dropped without an error, and the email links to SITE_URL instead,
+// which on a phone is not the deep link the app listens for.
+describe("email links carry the caller's redirect", () => {
+  beforeEach(() => vi.restoreAllMocks())
+
+  function calledUrl(fetchSpy: ReturnType<typeof vi.fn>): URL {
+    return new URL(String(fetchSpy.mock.calls[0]?.[0]))
+  }
+
+  it("signInWithOtp sends emailRedirectTo as the redirect_to query parameter", async () => {
+    const fetchSpy = mockFetch({})
+    vi.stubGlobal("fetch", fetchSpy)
+    await freshClient().signInWithOtp({
+      email: "test@example.com",
+      options: { emailRedirectTo: "myapp://auth/callback" },
+    })
+    const url = calledUrl(fetchSpy)
+    expect(url.pathname).toBe("/otp")
+    expect(url.searchParams.get("redirect_to")).toBe("myapp://auth/callback")
+  })
+
+  it("signInWithOtp sends no redirect_to when none is given", async () => {
+    const fetchSpy = mockFetch({})
+    vi.stubGlobal("fetch", fetchSpy)
+    await freshClient().signInWithOtp({ email: "test@example.com" })
+    expect(calledUrl(fetchSpy).searchParams.has("redirect_to")).toBe(false)
+  })
+
+  it("resetPasswordForEmail sends redirectTo as the redirect_to query parameter", async () => {
+    const fetchSpy = mockFetch({})
+    vi.stubGlobal("fetch", fetchSpy)
+    await freshClient().resetPasswordForEmail("test@example.com", { redirectTo: "myapp://auth/callback" })
+    const url = calledUrl(fetchSpy)
+    expect(url.pathname).toBe("/recover")
+    expect(url.searchParams.get("redirect_to")).toBe("myapp://auth/callback")
+  })
+})

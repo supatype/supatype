@@ -277,9 +277,12 @@ jobs:
           TRAIN_SUPATYPE_DIR: ${{ github.workspace }}/src/supatype
           TRAIN_ENGINE_BIN: ${{ github.workspace }}/artifacts/supatype-engine-linux-amd64
           TRAIN_HARNESS_DIR: ${{ github.workspace }}/harness
-          TRAIN_INSTALL_BROWSER: ${{ (matrix.suite == 'studio-ui' || matrix.suite == 'kitchen-sink') && '1' || '0' }}
+          SUITE: ${{ matrix.suite }}
         run: |
           set -euo pipefail
+          # Which suites drive a browser is said once, in suites.sh, beside the list itself.
+          source harness/scripts/release-train/suites.sh
+          if suite_needs_browser "$SUITE"; then export TRAIN_INSTALL_BROWSER=1; else export TRAIN_INSTALL_BROWSER=0; fi
           if [ -z "${SUPATYPE_RELEASE_PUBLIC_KEY:-}" ]; then
             echo "SUPATYPE_RELEASE_PUBLIC_KEY=$(grep -o 'RW[A-Za-z0-9+/=]\{40,\}' src/supatype/scripts/install.sh | head -1)" >>"$GITHUB_ENV"
           fi

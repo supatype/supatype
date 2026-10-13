@@ -18,7 +18,7 @@ const { mutate, loading: saving } = useMutation<Database, "task", Task>("task", 
 const ping = useFunction<{ ok: boolean }>("ping")
 
 // Note the shape: these bindings take the table and accumulate rows into `data` themselves, where
-// `@supatype/react` takes a channel name and hands you a callback. Same feature, different API —
+// `@supatype/react` takes a channel name and hands you a callback. Same feature, different API,
 // which is the sort of thing this example exists to make visible.
 //
 // So "somebody else inserted a row" is a change to `live`, and each framework watches it its own
@@ -33,8 +33,11 @@ async function submitAuth(mode: "in" | "up"): Promise<void> {
 }
 
 async function addTask(): Promise<void> {
-  if (title.value.trim() === "") return
-  await mutate({ title: title.value.trim(), done: false })
+  const owner = user.value?.id
+  if (title.value.trim() === "" || owner === undefined) return
+  // The row is owned by whoever added it: `update` and `delete` are `OwnerFrom<"authUser">`, and a
+  // row inserted without an owner is one nobody can ever change.
+  await mutate({ title: title.value.trim(), done: false, auth_user_id: owner })
   title.value = ""
   await refetch()
 }
@@ -42,7 +45,7 @@ async function addTask(): Promise<void> {
 
 <template>
   <main class="shell">
-    <h1>Parity — Vue</h1>
+    <h1>Parity: Vue</h1>
 
     <p v-if="authLoading" class="muted">Loading session…</p>
 
