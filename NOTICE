@@ -1,7 +1,7 @@
 Supatype
-Copyright 2026 Supatype
+Copyright 2026 Supatype Ltd
 
-This product includes software developed at Supatype.
+This product includes software developed at Supatype Ltd.
 
 Licensing is per package; see the LICENSE file and the "license" field in each package
 directory.
@@ -10,8 +10,11 @@ directory.
   shared UI (client, types, react, react-auth, react-native, react-native-auth, vue,
   svelte, solid, ssr, plugin-sdk, plugin-seo, plugin-color-picker, plugin-phone-field,
   ui, common).
-- Apache-2.0: the CLI and services (cli, studio, storage, realtime) and the remainder
-  of this repository.
+- Apache-2.0: the CLI and services (cli, studio, storage, realtime, functions-worker,
+  self-host-control) and the remainder of this repository.
 
-The schema engine binary that the CLI downloads is not part of this repository and is
-distributed under its own proprietary license.
+The schema engine that the CLI downloads, and that the self-host-control image includes, is not
+part of this repository. It is licensed by Supatype Ltd under the Business Source License 1.1
+(BUSL-1.1), and each version becomes available under the Apache License 2.0 on its Change Date.
+The engine carries its own LICENSE; `supatype-engine licence` prints it. See
+https://www.supatype.com/licensing.html.
