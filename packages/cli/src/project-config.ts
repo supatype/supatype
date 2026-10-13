@@ -3,6 +3,7 @@ import { resolve } from "node:path"
 import { readComposeEnvInt } from "./env-file.js"
 import type { ComponentVersions } from "./components.js"
 import { validateAuthProviders, type AuthProvidersConfig } from "./auth-providers.js"
+import { STUDIO_ROLES, type StudioRole } from "./studio-roles.js"
 
 // ---------------------------------------------------------------------------
 // Config schema (single canonical shape; loaded from supatype.config.ts)
@@ -304,7 +305,7 @@ export interface SupatypeProjectConfig {
      * Studio can override this at runtime for a project that needs to change it without a push.
      * This is the reviewable default that lives in git.
      */
-    draft_visibility?: readonly ("admin" | "developer" | "editor")[]
+    draft_visibility?: readonly StudioRole[]
     /** Signed, expiring links that let someone without an account read a draft. */
     preview?: {
       /** Lifetime of a minted link when the request does not ask for one, in seconds. Default 900. */
@@ -963,7 +964,8 @@ export function postgrestSchemaEnv(
 /**
  * Studio roles that see every draft, beyond each record's own creator.
  *
- * All three of them, which is to say anyone with Studio write access. It was narrower, `admin` and
+ * Every role that writes, which is to say anyone with Studio write access; a `viewer` writes nothing
+ * and sees drafts only when the project names them. It was narrower, `admin` and
  * `developer` only, and that put two decisions in conflict: whoever may **update** a record may
  * draft and publish it, so an `editor` could edit a record whose pending draft they could not see,
  * and their save would be built on the live row and silently discard a colleague's work. Two editors
@@ -978,8 +980,8 @@ export function postgrestSchemaEnv(
  */
 export const DEFAULT_DRAFT_VISIBILITY = ["admin", "developer", "editor"] as const
 
-/** Studio roles a Supatype project understands, most privileged first. */
-export const STUDIO_ROLES = ["admin", "developer", "editor"] as const
+/** Studio roles a Supatype project understands, most privileged first (`studio-roles.ts`). */
+export { STUDIO_ROLES }
 
 /**
  * The configured draft-visibility roles, or the default when the project states none.
