@@ -19,7 +19,8 @@
     "schema",
     "supatype.config.ts",
     "supatype/generated",
-    "vite.*.config.ts"
+    "vite.*.config.ts",
+    "vite.shared.ts"
   ],
   "exclude": [
     "functions"
