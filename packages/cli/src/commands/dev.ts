@@ -34,6 +34,7 @@ import { discoverFunctionsOrExit, writeDevFunctionsRouter } from "../functions-r
 import { fieldMaskingTierFromProject } from "../field-masking-tier.js"
 import { projectHasVersionedModels } from "../model-versioning.js"
 import { signJwt } from "../jwt.js"
+import { requireUsableJwtSecret } from "../jwt-secret-length.js"
 import {
   devAuthenticatorPassword,
   devJwtSecret,
@@ -225,6 +226,10 @@ export function registerDev(program: Command): void {
         }
         console.warn("")
       }
+
+      // Both providers, before anything starts: the secret a docker stack is seeded with when .env
+      // has none is the same fallback this reads.
+      requireUsableJwtSecret(devJwtSecret(cwd))
 
       if (provider === "docker") {
         const { runDevCompose } = await import("../dev-compose.js")
