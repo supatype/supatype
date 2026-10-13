@@ -52,3 +52,11 @@ describe("channel status across the socket swap on sign-in", () => {
     expect(seen).toEqual(["SUBSCRIBED"])
   })
 })
+
+describe("channel status on an explicit disconnect", () => {
+  it("reports CLOSED, since nothing will reconnect the join it had", () => {
+    harness.realtime.disconnect()
+
+    expect(seen).toEqual(["SUBSCRIBED", "CLOSED"])
+  })
+})

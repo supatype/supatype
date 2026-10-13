@@ -341,9 +341,13 @@ export class RealtimeClient {
    * disconnect from scheduling its own reconnect: the close handler is detached first. It also
    * cancels a connect still waiting on its token, which would otherwise install a socket after the
    * caller asked for none.
+   *
+   * A channel still registered is told CLOSED: its join went with the socket and nothing will
+   * reconnect it, so the SUBSCRIBED it last reported is no longer true.
    */
   disconnect(): void {
     this.abandonSocket("client disconnect")
+    this.notifyChannels("CLOSED")
   }
 
   // ─── Internal ──────────────────────────────────────────────────────────

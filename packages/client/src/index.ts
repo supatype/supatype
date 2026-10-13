@@ -5,7 +5,8 @@ import { QueryBuilder, MutationBuilder, type HeadersProvider } from "./query.js"
 import { defaultQueryCache, type QueryCache } from "./query-cache.js"
 import { StorageClient } from "./storage.js"
 import { RealtimeClient } from "./realtime.js"
-import type { RealtimeEvent, RealtimePayload } from "./realtime.js"
+import type { RealtimePayload } from "./realtime.js"
+import { subscribeToTable, type TableSubscribeOptions, type TableSubscription } from "./table-subscription.js"
 import { PostgrestError } from "./errors.js"
 import { createRetryFetch } from "./retry.js"
 import { warnIfServerlessDirectConnection } from "./fetch-with-retry.js"
@@ -76,6 +77,7 @@ export { StorageClient, BucketClient } from "./storage.js"
 export type { StorageObject, TransformOptions } from "./storage.js"
 export { RealtimeClient } from "./realtime.js"
 export type { RealtimeEvent, RealtimePayload, ChannelStatus, PresenceEntry } from "./realtime.js"
+export type { TableSubscribeOptions, TableSubscription } from "./table-subscription.js"
 export * from "./errors.js"
 
 // Called by the generated `supatype/client.ts`, which is how a project tells the client which
@@ -104,14 +106,6 @@ interface TableDef {
   Insert: Record<string, unknown>
   Update: Record<string, unknown>
 }
-
-/**
- * Makes each `from(table).subscribe()` channel name unique.
- *
- * Module-wide rather than per client because it only has to be unique, and a name never seen by
- * one client cannot collide on another.
- */
-let tableSubscriptionCount = 0
 
 class TableClient<TDef extends TableDef> {
   private readonly baseUrl: string
@@ -244,47 +238,14 @@ class TableClient<TDef extends TableDef> {
    * Phase 10.6 F11: preferred over raw `client.realtime.channel(...)`. The returned `channel` is
    * already subscribed; call `channel.subscribe(cb)` only to watch its status.
    *
-   * Each call gets a channel of its own, named `schema:table:n`. The server keys a subscription by
-   * channel, so two calls sharing `schema:table` shared one filter and one event, and the first to
-   * unsubscribe removed the channel out from under the second. The name still reads as
-   * `schema:table` to anything that splits it, which is what a server predating `table` in the
-   * subscribe frame falls back to.
+   * Each call gets a channel of its own; `subscribeToTable` says why. The framework bindings join
+   * through the same function, so a table subscribed either way behaves the same.
    */
   subscribe(
     callback: (payload: RealtimePayload<TDef["Row"]>) => void,
-    opts?: {
-      event?: RealtimeEvent | undefined
-      filter?: string | undefined
-      schema?: string | undefined
-    } | undefined,
-  ): {
-    unsubscribe: () => void
-    channel: ReturnType<RealtimeClient["channel"]>
-  } {
-    const event = opts?.event ?? "*"
-    const schema = opts?.schema ?? "public"
-    tableSubscriptionCount += 1
-    const channel = this.realtime
-      .channel(`${schema}:${this.table}:${tableSubscriptionCount}`)
-      .on(
-        "postgres_changes",
-        {
-          event,
-          schema,
-          table: this.table,
-          ...(opts?.filter !== undefined && { filter: opts.filter }),
-        },
-        callback,
-      )
-      // `on()` only records the listener. Without this nothing opened a socket or sent the join,
-      // and the callback waited forever unless something else on the client had joined already.
-      .subscribe()
-    return {
-      channel,
-      unsubscribe: () => {
-        channel.unsubscribe()
-      },
-    }
+    opts?: TableSubscribeOptions | undefined,
+  ): TableSubscription {
+    return subscribeToTable(this.realtime, this.table, callback, opts)
   }
 }
 
