@@ -90,7 +90,15 @@ async function taskOwner(account: Account, title: string): Promise<string | null
  * join was acknowledged and whether the insert was ever delivered.
  */
 let frames: string[] = []
+let joinedAnon = false
 let joinedSignedIn = false
+
+/**
+ * Each socket status the page showed, in order, with whether the signed-in socket's join had been
+ * acknowledged when it did. Read off the page by a MutationObserver, so a status shown for a single
+ * frame is still recorded.
+ */
+let statuses: { status: string; joinedSignedIn: boolean }[] = []
 
 /** The role a realtime socket authenticated as, read from the token in its URL. */
 function socketRole(url: string): string {
@@ -103,9 +111,41 @@ function socketRole(url: string): string {
   }
 }
 
-function recordRealtime(page: Page): void {
+/**
+ * The status after "socket" in the status line, or the whole line if it has none.
+ *
+ * Named outright rather than read as a word: in the Solid app the "sign out" button's text follows
+ * the status with no space between them, so a word read "connectedsign".
+ */
+function statusWord(text: string): string {
+  return /socket (connecting|connected|disconnected|error)/.exec(text)?.[1] ?? text
+}
+
+async function recordStatus(page: Page): Promise<void> {
+  statuses = []
+  await page.exposeFunction("__parityStatus", (text: string) => {
+    const status = statusWord(text)
+    if (statuses.at(-1)?.status !== status) statuses.push({ status, joinedSignedIn })
+  })
+  await page.addInitScript(() => {
+    // Only a changed line crosses to the test: every keystroke and list render is a mutation too.
+    let last = ""
+    const report = (): void => {
+      const line = Array.from(document.querySelectorAll("p.muted")).find((p) => p.textContent?.includes("socket"))
+      const text = line?.textContent ?? ""
+      if (text === "" || text === last) return
+      last = text
+      ;(window as unknown as { __parityStatus(text: string): void }).__parityStatus(text)
+    }
+    new MutationObserver(report).observe(document, { subtree: true, childList: true, characterData: true })
+  })
+}
+
+async function recordRealtime(page: Page): Promise<void> {
   frames = []
+  joinedAnon = false
   joinedSignedIn = false
+  await recordStatus(page)
   page.on("websocket", (ws) => {
     const role = socketRole(ws.url())
     const stamp = (dir: string, payload: string | Buffer): void => {
@@ -115,7 +155,9 @@ function recordRealtime(page: Page): void {
     ws.on("framesent", (f) => stamp(">", f.payload))
     ws.on("framereceived", (f) => {
       stamp("<", f.payload)
-      if (role === "authenticated" && String(f.payload).includes("subscribed to public:task")) joinedSignedIn = true
+      if (!String(f.payload).includes("subscribed to public:task")) return
+      if (role === "authenticated") joinedSignedIn = true
+      if (role === "anon") joinedAnon = true
     })
     ws.on("close", () => stamp("close", ""))
   })
@@ -123,7 +165,8 @@ function recordRealtime(page: Page): void {
 
 async function reportRealtime(testInfo: TestInfo): Promise<void> {
   if (testInfo.status === testInfo.expectedStatus) return
-  const body = frames.join("\n")
+  const shown = statuses.map((s) => `${s.status}${s.joinedSignedIn ? " (signed-in join acknowledged)" : ""}`)
+  const body = [...frames, "", "statuses shown:", ...shown].join("\n")
   // Printed as well as attached: the train keeps the suite's output, not Playwright's report.
   console.log(`realtime frames for "${testInfo.title}":\n${body}`)
   await testInfo.attach("realtime-frames", { body, contentType: "text/plain" })
@@ -134,6 +177,9 @@ const listItem = (page: Page, title: string) => page.locator("ul.list li", { has
 async function signIn(page: Page, fw: Framework, account: Account): Promise<string> {
   await page.goto(appUrl(fw))
   await expect(page.getByRole("heading", { level: 1 })).toContainText(new RegExp(fw, "i"))
+  // The socket opened on page load is anon. Waiting for its join makes the sign-in below a swap of
+  // a joined socket every time, which is the case the status has to get right.
+  await expect.poll(() => joinedAnon, { message: "the anon realtime channel never joined" }).toBe(true)
   await page.getByPlaceholder("email").fill(account.email)
   await page.getByPlaceholder("password").fill(PASSWORD)
   await page.getByRole("button", { name: "Sign in", exact: true }).click()
@@ -141,11 +187,19 @@ async function signIn(page: Page, fw: Framework, account: Account): Promise<stri
   await expect(status).toContainText(account.email)
   // The subscription is what step four depends on; an insert made before it joined is one it
   // was never going to see, and that would be a broken test rather than a broken binding.
-  await expect(status).toContainText("socket connected")
-  // And joined as the user who signed in. The socket opened on page load is anon, the client
-  // reopens it with the user's token on sign-in, and the status above still reads "connected"
-  // from the first one while that happens. Only the signed-in socket can deliver a task.
   await expect.poll(() => joinedSignedIn, { message: "the realtime channel never joined as the signed-in user" }).toBe(true)
+  await expect(status).toContainText("socket connected")
+  // The client reopens the socket with the user's token on sign-in. The status must say so: it
+  // reads "connecting" from the swap until the signed-in join is acknowledged, so the "connected"
+  // it shows now is that join's and not the anon socket's left standing.
+  expect(
+    statuses.some((s) => s.status === "connecting"),
+    "the status never read connecting while the socket was swapped",
+  ).toBe(true)
+  expect(statuses.at(-1), "the status read connected before the signed-in join was acknowledged").toEqual({
+    status: "connected",
+    joinedSignedIn: true,
+  })
   return (await status.textContent())?.split("·")[0]?.trim() ?? ""
 }
 
@@ -186,7 +240,7 @@ test.describe.serial("framework parity: the same five steps in Vue, Svelte and S
 
   for (const fw of FRAMEWORKS) {
     test(`${fw}: sign in, list, add, watch an insert arrive, call a function, sign out`, async ({ page }) => {
-      recordRealtime(page)
+      await recordRealtime(page)
       const me = await signUp(fw)
 
       const signedInAs = await signIn(page, fw, me)
