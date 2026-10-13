@@ -17,8 +17,9 @@ export type InspectorAvailability = "checking" | "coming-soon" | "forbidden" | "
 export function availabilityFromStatus(status: number | null): InspectorAvailability {
   if (status === 401 || status === 403) return "forbidden"
   if (status === 404 || status === null) return "coming-soon"
-  // 200, and also 501 (realtime off) and 503 (realtime down): the Inspector is here, and its tabs
-  // say why there is nothing to inspect.
+  // 200, and also 503 (realtime down): the Inspector is here, and its tabs say why there is nothing
+  // to inspect. Neither probe answers 501: self-host's project route does not ask realtime, and
+  // Cloud serves realtime on every plan. Self-host's realtime-off answer reaches the tabs instead.
   return "ready"
 }
 
