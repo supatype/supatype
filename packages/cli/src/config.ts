@@ -13,6 +13,7 @@ import { extractSchemaAstFromTypes } from "./type-extractor.js"
 import { readRenameJournal, withRenameJournal } from "./rename-journal.js"
 import type { ExtractedSchemaAstV2 } from "./schema-ast-v2.js"
 import { uniqueFileToken } from "./unique-file-token.js"
+import { envReference, type EnvReference } from "./auth-providers.js"
 
 export type { SupatypeProjectConfig } from "./project-config.js"
 
@@ -77,6 +78,16 @@ export interface AppConfig {
 /** Identity helper: provides type inference for config files. */
 export function defineConfig(config: SupatypeProjectConfig): SupatypeProjectConfig {
   return config
+}
+
+/**
+ * A config value read from the environment when the stack starts: `env("GITHUB_SECRET")`.
+ *
+ * It evaluates to the `env(GITHUB_SECRET)` reference Supabase's config.toml uses, not to the value,
+ * so the generated compose file names the variable and never holds the secret.
+ */
+export function env(name: string): EnvReference {
+  return envReference(name)
 }
 
 const LEGACY_TOML = "supatype.config.toml"
@@ -233,6 +244,9 @@ function shouldStripCliImportOnLoadFailure(failure: string): boolean {
   )
 }
 
+/** A value import from @supatype/cli that names `defineConfig` or `env`, the two a config uses. */
+const CLI_VALUE_IMPORT = /^import\s+\{[^}]*\b(?:defineConfig|env)\b[^}]*\}\s+from\s+["']@supatype\/cli["'];?\s*$/gm
+
 function loadTsConfigWithoutCliImport(
   configPath: string,
   cwd: string,
@@ -240,13 +254,17 @@ function loadTsConfigWithoutCliImport(
   const original = readFileSync(configPath, "utf8")
   const patched = original
     .replace(/^import\s+type\s+\{[^}]*\}\s+from\s+["']@supatype\/cli["'];?\s*$/gm, "")
-    .replace(/^import\s+\{[^}]*defineConfig[^}]*\}\s+from\s+["']@supatype\/cli["'];?\s*$/gm, "")
+    .replace(CLI_VALUE_IMPORT, "")
 
   // If the file didn't import from @supatype/cli, this fallback won't help.
   if (patched === original) return null
 
   const tmpPath = join(tmpdir(), `supatype-config-fallback-${uniqueFileToken()}.mts`)
-  const wrapper = `const defineConfig = (config) => config\n${patched}`
+  // Stand-ins for what the stripped import provided, and only those: a config with its own `env`
+  // binding would otherwise fail to compile on a second declaration.
+  const importedNames = [...original.matchAll(CLI_VALUE_IMPORT)].map((m) => m[0]).join(" ")
+  const envShim = /\benv\b/.test(importedNames) ? "const env = (name) => `env(${name})`\n" : ""
+  const wrapper = `const defineConfig = (config) => config\n${envShim}${patched}`
   // The config can hold credentials, and the system temp directory is shared: this user's only,
   // and never written through a name that already exists.
   writeFileSync(tmpPath, wrapper, { encoding: "utf8", mode: 0o600, flag: "wx" })
