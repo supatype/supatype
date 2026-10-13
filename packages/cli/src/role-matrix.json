@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "roles": ["owner", "admin", "developer", "editor", "billing", "viewer"],
+  "selfHostRoles": ["admin", "developer", "editor", "viewer"],
+  "permissions": {
+    "read": ["owner", "admin", "developer", "editor", "viewer"],
+    "write": ["owner", "admin", "developer", "editor"],
+    "schemaView": ["owner", "admin", "developer", "viewer"],
+    "pushSchema": ["owner", "admin", "developer"],
+    "deploy": ["owner", "admin", "developer"],
+    "sqlEditor": ["owner", "admin", "developer"],
+    "elevatedSql": ["owner", "admin"],
+    "realtimeInspect": ["owner", "admin", "developer"],
+    "viewLogs": ["owner", "admin", "developer", "viewer"],
+    "manageKeys": ["owner", "admin"],
+    "manageDomains": ["owner", "admin"],
+    "manageMembers": ["owner", "admin"],
+    "billing": ["owner", "admin", "billing"],
+    "ownOrg": ["owner"],
+    "orgSettings": ["owner", "admin"],
+    "createProject": ["owner", "admin", "developer"],
+    "deleteProject": ["owner", "admin"],
+    "viewUsage": ["owner", "admin", "developer", "billing"]
+  }
+}

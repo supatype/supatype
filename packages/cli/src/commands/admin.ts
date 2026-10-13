@@ -12,6 +12,7 @@ import type { Pool, QueryResult } from "pg"
 import { loadConfig } from "../config.js"
 import { resolveRuntimeProvider, type SupatypeProjectConfig } from "../project-config.js"
 import { resolveHostDatabaseUrl } from "../host-database.js"
+import { STUDIO_ROLES } from "../studio-roles.js"
 import { readEnvValue, upsertEnvFile } from "../env-file.js"
 import { devDatabaseIdentity } from "../local-secrets.js"
 import { composeDbPsql, type ComposeStack } from "../compose-db-psql.js"
@@ -31,15 +32,9 @@ export const ADMIN_PASSWORD_ENV = "SUPATYPE_ADMIN_PASSWORD"
 
 const BCRYPT_ROUNDS = 10
 
-/**
- * Studio roles a membership row may hold, most privileged first.
- *
- * Must match `studioRolePermissions` in supatype-server and
- * `STUDIO_ROLE_PERMISSIONS` in the control plane: capability checks refuse a role
- * they do not recognise, so an unvalidated `--role` here would create a user who
- * is locked out of the very panel they were made for.
- */
-export const STUDIO_ROLES = ["admin", "developer", "editor"] as const
+// Studio roles a membership row may hold. An unvalidated `--role` would create a
+// user locked out of the very panel they were made for (see studio-roles.ts).
+export { STUDIO_ROLES }
 
 function assertStudioRole(role: string): void {
   if ((STUDIO_ROLES as readonly string[]).includes(role)) return

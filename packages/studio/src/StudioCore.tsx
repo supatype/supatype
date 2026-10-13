@@ -18,6 +18,7 @@ import {
   ElevatedModeBanner,
   ElevatedNoticeProvider,
 } from "./components/ElevatedModeBanner.js"
+import { LinkAccountPrompt } from "./components/LinkAccountPrompt.js"
 
 // Re-export for dev tool views that import useStudioClient
 export const useStudioClient = useAdminClient
@@ -184,6 +185,9 @@ function StudioLayout({ extensions, demoMode }: StudioLayoutProps): React.ReactE
                 Renders only while a view showing project rows is mounted, see
                 `useShowsProjectRows`. */}
             <ElevatedModeBanner />
+            {/* On Cloud, a member with no linked project login is refused project rows;
+                this says why where they would be, and links the login. */}
+            <LinkAccountPrompt />
             <Outlet />
           </main>
         </div>
