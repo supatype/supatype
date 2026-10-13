@@ -9,7 +9,7 @@ description: >-
 
 # Supatype
 
-Guide for working with Supatype projects. If unsure about a command or flag, run `supatype --help` (or `supatype <command> --help`) — published docs may lag the installed CLI.
+Guide for working with Supatype projects. If unsure about a command or flag, run `supatype --help` (or `supatype <command> --help`): published docs may lag the installed CLI.
 
 ## Quick reference
 
@@ -34,10 +34,12 @@ npx @supatype/cli init <project-name> --mode standalone  # self-host target
 cd <project-name>
 npm install
 supatype keys                              # → ANON_KEY + SERVICE_ROLE_KEY in .env
-supatype push                              # migrate + generate types
-supatype dev                               # terminal 1 — Docker Compose; Kong :18473
-npm run vite                               # terminal 2 — if app.vite_dev_url is set
+supatype dev                               # terminal 1: Docker Compose, Kong :18473; applies the schema, generates types, watches both
+npm run vite                               # terminal 2: if app.vite_dev_url is set
 ```
+
+`supatype dev` applies the schema to the local stack, so there is no `push` step locally. `push` is
+for another database: `supatype push --env <name>`, or a linked target.
 
 Install matching versions of CLI, client, and types from npm:
 
@@ -61,8 +63,8 @@ Omit `versions` in `supatype.config.ts` so Docker pulls `:latest` images.
 ## Daily workflow
 
 1. Edit `schema/index.ts` (source of truth: type-first, not DB introspection)
-2. `supatype diff`: preview changes
-3. `supatype push`: apply migration + regenerate types
+2. With `supatype dev` running, the change is applied and the types regenerated on save
+3. `supatype diff --env <name>` then `supatype push --env <name>`: apply it to another database
 4. Use generated types with `@supatype/client` in app code
 
 ## Core facts
@@ -89,7 +91,7 @@ const supatype = createClient<Database>({
 const { data } = await supatype.from("posts").select("*")
 ```
 
-Add `@supatype/client` when wiring a frontend. Run `supatype push` after schema changes.
+Add `@supatype/client` when wiring a frontend. `supatype dev` applies schema changes locally as you save; `supatype push --env <name>` applies them elsewhere.
 
 **Prefer first-party framework bindings over the raw client.** For React use `@supatype/react` (`SupatypeProvider`, `useAuth`, `useQuery`, `useMutation`, `useSubscription`) and `@supatype/react-auth` (`LoginForm`, `SignUpForm`, `OAuthButton`); equivalents exist for Vue/Solid/Svelte, plus `@supatype/ssr` for server rendering. Don't hand-roll auth forms or auth state. See [references/frontend.md](references/frontend.md).
 
@@ -99,7 +101,7 @@ Add `@supatype/client` when wiring a frontend. Run `supatype push` after schema 
 |-------|-----|
 | Docker not running | Start Docker before `supatype dev` |
 | Port in use | `supatype dev` prompts for another port, or set a unique `SUPATYPE_KONG_PORT` per project in `.env` |
-| Wrong project / holding page | Another stack may own your Kong port — use the URL from `supatype dev` output |
+| Wrong project / holding page | Another stack may own your Kong port: use the URL from `supatype dev` output |
 | Docker still running after dev | Run `supatype self-host compose down`; check Docker Desktop for orphaned `supatype-*` stacks |
 | Renamed project, old containers | Next `supatype dev` offers to stop the old stack; or `docker compose -p supatype-<old-name> down` |
 | Missing JWT keys | `supatype keys` → update `.env` |

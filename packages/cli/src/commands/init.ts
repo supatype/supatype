@@ -1457,41 +1457,56 @@ function warnDockerUnavailableForProvider(provider: ScaffoldOptions["provider"])
   plain()
 }
 
-function printNextSteps(args: {
+/** What `init` did and was asked for, which decides the steps it prints. */
+export interface InitStepsArgs {
   name: string | undefined
-  result: WizardResult
+  result: Pick<WizardResult, "provider" | "kongPort" | "adminEmail" | "packageManager" | "helloFunction">
   installed: boolean
   keysGenerated: boolean
   binariesReady: boolean
-}): void {
+}
+
+/** True when nothing is left to set up, only to run. */
+function initSetupComplete(args: InitStepsArgs): boolean {
+  return args.installed && args.keysGenerated && args.binariesReady
+}
+
+function printNextSteps(args: InitStepsArgs & { result: WizardResult }): void {
+  const { name, result } = args
+  info(`Supatype project ready${name ? ` in ${name}/` : ""}.`)
+  nextSteps(initSetupComplete(args) ? "Next steps:" : "Finish setup:", initFirstSteps(args))
+  printProductionSteps(result)
+}
+
+/** The commands to run next, in order, after `init`. */
+export function initFirstSteps(args: InitStepsArgs): string[] {
   const { name, result, installed, keysGenerated, binariesReady } = args
-  const setupComplete = installed && keysGenerated && binariesReady
   const steps: string[] = []
   if (name) steps.push(`cd ${name}`)
-  const kongHint =
-    result.provider === "docker" && result.kongPort !== undefined
-      ? `supatype dev          # Docker Compose stack (Kong :${result.kongPort})`
-      : "supatype dev          # Docker Compose stack (Kong :18473)"
-  if (setupComplete) {
-    steps.push(kongHint)
-    steps.push("supatype push         # apply schema + generate types")
-    if (result.adminEmail) {
-      steps.push("                      # first admin user is created on dev or push")
-    }
-  } else {
+  if (!initSetupComplete(args)) {
     if (!installed) steps.push(`${result.packageManager} install`)
     if (!binariesReady) steps.push("supatype update        # download component binaries")
     if (!keysGenerated) steps.push("supatype keys")
-    steps.push(kongHint)
-    steps.push("supatype push         # apply schema + generate types")
+  }
+  // dev is the last step: it applies the schema and generates the types, then watches both. `push`
+  // is for another database (`push --env <name>`), and listing it here sent people to it anyway.
+  const stack =
+    result.provider === "docker"
+      ? `Docker Compose stack, API on http://localhost:${result.kongPort ?? 18473}`
+      : "native binaries, API on http://localhost:54321"
+  steps.push("supatype dev          # applies the schema, generates types, and watches both")
+  steps.push(`                      # ${stack}`)
+  if (result.adminEmail) {
+    steps.push("                      # first admin user is created on dev")
   }
   if (result.helloFunction) {
     steps.push("supatype functions serve   # run edge functions locally")
   }
+  return steps
+}
 
-  info(`Supatype project ready${name ? ` in ${name}/` : ""}.`)
-  nextSteps(setupComplete ? "Next steps:" : "Finish setup:", steps)
-
+/** The secrets, frontend and production blocks printed after the first steps. */
+function printProductionSteps(result: WizardResult): void {
   // Shown once, at creation. These are generated per project rather than shipped as
   // constants, so this is the moment to say they exist and where they live, nothing prints
   // them again, and the JWT secret is only echoed as a fingerprint from here on.
@@ -1518,28 +1533,31 @@ function printNextSteps(args: {
     ])
     info("supatype.local.config.ts keeps `supatype dev` local while the committed config targets cloud.")
   } else if (result.productionTarget === "self-host") {
-    const selfHostSteps: string[] = []
-    const domain = result.domain?.trim()
-    if (domain) {
-      selfHostSteps.push(`1. Point DNS: an A record for ${domain} -> your server's public IP`)
-      selfHostSteps.push("2. Open ports 80 and 443 on the server firewall")
-      if (!result.tlsEmail) {
-        selfHostSteps.push("3. Set server.tls.email in supatype.config.ts (required for HTTPS)")
-      }
-      selfHostSteps.push("supatype self-host compose up -d   # Kong provisions HTTPS automatically")
-      selfHostSteps.push(`Your Supatype platform goes live at https://${domain}`)
-      selfHostSteps.push(
-        "Your app, REST, Auth, Storage, Realtime, Functions, and Studio, all behind one HTTPS domain (certificates outlive restarts)",
-      )
-    } else {
-      selfHostSteps.push(
-        "Set server.domain + server.tls.email in supatype.config.ts to enable automatic HTTPS",
-      )
-      selfHostSteps.push("supatype self-host compose up -d   # Docker stack")
-    }
-    selfHostSteps.push("supatype link --env production ... # then: supatype push --env production")
-    nextSteps("Self-host production (your own server):", selfHostSteps)
+    nextSteps("Self-host production (your own server):", selfHostProductionSteps(result))
     info("supatype.local.config.ts keeps `supatype dev` local while the committed config targets self-host.")
   }
   plain()
+}
+
+/** Taking a self-host project to its own server, with or without a domain for HTTPS. */
+function selfHostProductionSteps(result: Pick<WizardResult, "domain" | "tlsEmail">): string[] {
+  const steps: string[] = []
+  const domain = result.domain?.trim()
+  if (domain) {
+    steps.push(`1. Point DNS: an A record for ${domain} -> your server's public IP`)
+    steps.push("2. Open ports 80 and 443 on the server firewall")
+    if (!result.tlsEmail) {
+      steps.push("3. Set server.tls.email in supatype.config.ts (required for HTTPS)")
+    }
+    steps.push("supatype self-host compose up -d   # Kong provisions HTTPS automatically")
+    steps.push(`Your Supatype platform goes live at https://${domain}`)
+    steps.push(
+      "Your app, REST, Auth, Storage, Realtime, Functions, and Studio, all behind one HTTPS domain (certificates outlive restarts)",
+    )
+  } else {
+    steps.push("Set server.domain + server.tls.email in supatype.config.ts to enable automatic HTTPS")
+    steps.push("supatype self-host compose up -d   # Docker stack")
+  }
+  steps.push("supatype link --env production ... # then: supatype push --env production")
+  return steps
 }

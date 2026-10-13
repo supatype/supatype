@@ -113,8 +113,7 @@ Example: [`examples/edge-kit`](https://github.com/supatype/supatype/tree/main/ex
 supatype init my-app && cd my-app
 npm install && supatype keys
 # paste keys into .env
-supatype dev
-supatype push
+supatype dev   # applies the schema and generates types, then watches both; no push needed locally
 ```
 
 **Remote self-host (no local Postgres):**
