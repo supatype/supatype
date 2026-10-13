@@ -3,6 +3,7 @@ import { buildCacheKey, defaultQueryCache } from "./query-cache.js"
 import type { MaskedField, QueryResult, SelectQueryOptions, SupatypeError } from "./types.js"
 import { parseRowsExactly, tableFromPath } from "./exact-response.js"
 import { stringifyWithBigInts } from "./exact-values.js"
+import { FilterBuilder } from "./filters.js"
 
 const DEBUG_AUTH =
   (typeof process !== "undefined" && process.env["NEXT_PUBLIC_SUPATYPE_DEBUG_AUTH"] === "1") ||
@@ -107,13 +108,12 @@ async function fetchWithOptional401Retry(
 
 // ─── QueryBuilder ─────────────────────────────────────────────────────────────
 
-export class QueryBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
+export class QueryBuilder<TRow> extends FilterBuilder implements PromiseLike<QueryResult<TRow[]>> {
   private readonly baseUrl: string
   private readonly path: string
   private readonly getHeaders: HeadersProvider
   private readonly onUnauthorized: (() => Promise<void>) | undefined
   private readonly extraHeaders: Record<string, string>
-  private readonly params: URLSearchParams
   private readonly queryCache: QueryCache
   private cacheOptions: QueryCacheOptions | undefined
   private readonly countMode: SelectQueryOptions["count"]
@@ -128,12 +128,12 @@ export class QueryBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
     onUnauthorized?: (() => Promise<void>) | undefined,
     selectOptions?: SelectQueryOptions | undefined,
   ) {
+    super()
     this.baseUrl = baseUrl
     this.path = path
     this.getHeaders = asHeadersProvider(headers)
     this.onUnauthorized = onUnauthorized
     this.extraHeaders = {}
-    this.params = new URLSearchParams()
     this.queryCache = queryCache
     this.countMode = selectOptions?.count
     this.head = selectOptions?.head === true
@@ -159,77 +159,6 @@ export class QueryBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
 
   select(columns: string): this {
     this.params.set("select", columns)
-    return this
-  }
-
-  eq(column: string, value: unknown): this {
-    this.params.append(column, `eq.${String(value)}`)
-    return this
-  }
-
-  neq(column: string, value: unknown): this {
-    this.params.append(column, `neq.${String(value)}`)
-    return this
-  }
-
-  gt(column: string, value: unknown): this {
-    this.params.append(column, `gt.${String(value)}`)
-    return this
-  }
-
-  gte(column: string, value: unknown): this {
-    this.params.append(column, `gte.${String(value)}`)
-    return this
-  }
-
-  lt(column: string, value: unknown): this {
-    this.params.append(column, `lt.${String(value)}`)
-    return this
-  }
-
-  lte(column: string, value: unknown): this {
-    this.params.append(column, `lte.${String(value)}`)
-    return this
-  }
-
-  like(column: string, pattern: string): this {
-    this.params.append(column, `like.${pattern}`)
-    return this
-  }
-
-  ilike(column: string, pattern: string): this {
-    this.params.append(column, `ilike.${pattern}`)
-    return this
-  }
-
-  in(column: string, values: unknown[]): this {
-    this.params.append(column, `in.(${values.map(String).join(",")})`)
-    return this
-  }
-
-  is(column: string, value: null | boolean): this {
-    this.params.append(column, `is.${String(value)}`)
-    return this
-  }
-
-  not(column: string, op: string, value: unknown): this {
-    this.params.append(column, `not.${op}.${String(value)}`)
-    return this
-  }
-
-  contains(column: string, value: unknown): this {
-    this.params.append(column, `cs.${JSON.stringify(value)}`)
-    return this
-  }
-
-  containedBy(column: string, value: unknown): this {
-    this.params.append(column, `cd.${JSON.stringify(value)}`)
-    return this
-  }
-
-  /** PostgREST OR filter: pass conditions in PostgREST syntax, e.g. `"status.eq.active,owner_id.eq.123"`. */
-  or(filters: string): this {
-    this.params.append("or", `(${filters})`)
     return this
   }
 
@@ -441,7 +370,7 @@ export class QueryBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
 
 type HttpMethod = "POST" | "PATCH" | "DELETE"
 
-export class MutationBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
+export class MutationBuilder<TRow> extends FilterBuilder implements PromiseLike<QueryResult<TRow[]>> {
   private readonly baseUrl: string
   private readonly path: string
   private readonly getHeaders: HeadersProvider
@@ -449,7 +378,6 @@ export class MutationBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
   private readonly extraHeaders: Record<string, string>
   private readonly method: HttpMethod
   private readonly body: unknown
-  private readonly params: URLSearchParams
 
   constructor(
     baseUrl: string,
@@ -460,6 +388,7 @@ export class MutationBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
     opts?: { upsert?: boolean | undefined } | undefined,
     onUnauthorized?: (() => Promise<void>) | undefined,
   ) {
+    super()
     this.baseUrl = baseUrl
     this.path = path
     this.getHeaders = asHeadersProvider(headers)
@@ -467,36 +396,27 @@ export class MutationBuilder<TRow> implements PromiseLike<QueryResult<TRow[]>> {
     this.extraHeaders = {}
     this.method = method
     this.body = body
-    this.params = new URLSearchParams()
 
-    if (opts?.upsert === true) {
-      this.extraHeaders["Prefer"] = "resolution=merge-duplicates"
-    }
-
+    if (opts?.upsert === true) this.prefer("resolution=merge-duplicates")
     // Return inserted/updated rows
-    if (method !== "DELETE") {
-      this.extraHeaders["Prefer"] = (this.extraHeaders["Prefer"] ?? "") + ",return=representation"
-    }
+    if (method !== "DELETE") this.prefer("return=representation")
   }
 
-  eq(column: string, value: unknown): this {
-    this.params.append(column, `eq.${String(value)}`)
-    return this
+  private prefer(preference: string): void {
+    const current = this.extraHeaders["Prefer"]
+    if (current?.split(",").includes(preference) === true) return
+    this.extraHeaders["Prefer"] = current === undefined ? preference : `${current},${preference}`
   }
 
-  neq(column: string, value: unknown): this {
-    this.params.append(column, `neq.${String(value)}`)
-    return this
-  }
-
-  in(column: string, values: unknown[]): this {
-    this.params.append(column, `in.(${values.map(String).join(",")})`)
-    return this
-  }
-
-  /** Limit returned columns on the mutation response (requires `return=representation`). */
+  /**
+   * Return the written rows, limited to `columns`.
+   *
+   * Asks for the representation too, which a delete does not by default: without it PostgREST
+   * answers 204 and `delete().select()` returned no rows although it had deleted some.
+   */
   select(columns?: string): this {
     this.params.set("select", columns ?? "*")
+    this.prefer("return=representation")
     return this
   }
 
