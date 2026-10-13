@@ -195,6 +195,12 @@ GOOGLE_SECRET=...
 - **Precedence:** a `SUPATYPE_EXTERNAL_<PROVIDER>_*` value already in `.env` wins over the config, so
   a project configured through `.env` alone keeps working. `supatype dev` and
   `supatype self-host compose render`/`up` warn when an enabled provider's secret is set nowhere.
+- **Configured only through `.env`:** nothing is rendered for a provider the config does not list,
+  so it gets no default redirect. Set `SUPATYPE_EXTERNAL_<PROVIDER>_REDIRECT_URI` yourself, to
+  `<public API URL>/auth/v1/callback` (for example
+  `SUPATYPE_EXTERNAL_GITHUB_REDIRECT_URI=http://localhost:18473/auth/v1/callback`); without it the
+  server refuses the provider. Listing the provider under `auth.providers` is the recommended route,
+  since it supplies that default.
 - `supatype.local.config.ts` merges per provider, so it can swap in a development OAuth app's
   `clientId` without restating the rest.
 
