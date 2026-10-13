@@ -114,6 +114,17 @@ async function fetchWithOptional401Retry(
   return res
 }
 
+/**
+ * The total from PostgREST's `Content-Range: <range>/<total>`, or null when there is none.
+ *
+ * PostgREST sends the header on every read, and the total is `*` unless the request asked for a
+ * count with `Prefer: count=...`. Reading `*` as a number gave `NaN` on every ordinary query.
+ */
+export function parseContentRangeTotal(header: string | null): number | null {
+  const total = header?.split("/")[1]
+  return total !== undefined && /^\d+$/.test(total) ? Number(total) : null
+}
+
 // ─── QueryBuilder ─────────────────────────────────────────────────────────────
 
 export class QueryBuilder<TRow> extends FilterBuilder implements PromiseLike<QueryResult<TRow[]>> {
@@ -299,11 +310,7 @@ export class QueryBuilder<TRow> extends FilterBuilder implements PromiseLike<Que
       return { data: null, error: transportFailure(e), count: null }
     }
 
-    const contentRange = res.headers.get("content-range")
-    const count =
-      contentRange !== null
-        ? parseInt(contentRange.split("/")[1] ?? "0", 10)
-        : null
+    const count = parseContentRangeTotal(res.headers.get("content-range"))
 
     const maskedFields = parseMaskedFields(res.headers.get("X-Supatype-Masked-Fields"))
     const serverCacheStatus = res.headers.get("X-Supatype-Cache-Status") as CacheStatus | null
