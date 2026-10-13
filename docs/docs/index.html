@@ -182,6 +182,14 @@
                 The gateway listens on <code>http://&lt;your-host&gt;:18473</code> with Studio at
                 <code>/studio/</code>. Put a reverse proxy in front for HTTPS.
               </p>
+              <div class="note">
+                <span class="label">REST BEFORE THE FIRST PUSH</span>
+                Until the first <code>supatype push</code>, every REST request answers
+                <code>503</code> with <code>PGRST002</code>: PostgREST will not serve until the schemas it
+                exposes exist, and the push creates them. After a push PostgREST can take up to about
+                30 seconds to notice, so <code>push</code> waits (at most 40 seconds) until REST answers,
+                printing one line while it does.
+              </div>
               <p>
                 Images come from Docker Hub at <code>:latest</code>: <code>supatype/postgres:17-latest</code>,
                 <code>supatype/server</code> (which includes realtime), <code>supatype/storage</code>,

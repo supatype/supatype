@@ -12,6 +12,11 @@
 
 ### Fixes
 
+* **push:** a push to the project's compose stack, or to a linked self-host server, waits (at most
+  40 s, one line while it does) until REST stops answering 503. PostgREST 14 refuses to serve until
+  the schemas it exposes exist, so a fresh stack answers `PGRST002` until the first push, and after
+  the push PostgREST can take about 30 s to retry; the push used to report success while REST still
+  refused. `supatype dev` is unchanged: it pushes before PostgREST starts.
 * **self-host:** the generated compose file names every bind mount by absolute host path and names
   its compose project. Its paths were relative to the project root, which only `--project-directory`
   makes them; a hand-run `docker compose -f .supatype/self-host/docker-compose.yml` resolved them
