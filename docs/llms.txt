@@ -1,39 +1,47 @@
 # Supatype
 
-> Type-first backend platform for PostgreSQL: define `Model<>` types in TypeScript and generate schema, migrations, RLS, REST/GraphQL API, auth, storage, realtime, and Studio CMS, self-hostable by default.
+> Zero drift: one set of TypeScript types runs the whole stack, database to component. Define `Model<>` types and Supatype derives the Postgres tables, migrations, row-level security, REST and GraphQL APIs, auth, storage, realtime, Studio editing views and the typed client your components use. Change a field once; rename a field and the build fails instead of production.
 
-Supatype is an open-source TypeScript SDK and platform: client SDKs are MIT, the CLI and services are Apache 2.0, and the schema engine is proprietary. The TypeScript schema is the source of truth; SQL, APIs, policies, and admin UI are generated from it rather than maintained by hand. Local development uses `supatype dev` (native or Docker Compose). Production can self-host (`supatype/server` on Docker Hub) or use Supatype Cloud.
+Supatype is a type-first backend platform on real Postgres 17. The TypeScript schema is the source of truth; SQL, policies, APIs, the typed client and admin UI are generated from it rather than kept in step by hand. `supatype dev` runs the full stack locally (Docker Compose by default), applies schema changes as you save and regenerates the typed client. Production can self-host with Docker Compose (`supatype self-host compose up`) or use Supatype Cloud (EU-hosted, early access).
 
-Primary audience: TypeScript developers and stack owners on Postgres who want end-to-end type safety without stitching Supabase-style infra, a separate CMS, and hand-written migrations.
+Licensing: client SDKs, framework bindings and plugins are MIT; the CLI, Studio and services are Apache 2.0; the schema engine is source-available under the Business Source License 1.1 (production use allowed except offering a competing hosted service or product; each version becomes Apache 2.0 four years after release).
+
+Primary audience: TypeScript developers on Postgres who want end-to-end type safety without stitching a backend, a separate CMS and hand-written migrations together.
 
 Official site: https://www.supatype.com/
 Organization: https://github.com/supatype
-Contact: see GitHub org and Discord linked from the site.
+Contact: GitHub and Discord, linked from the site. Licensing questions: licensing@supatype.com
 
 ## Product
 
-- [Home](https://www.supatype.com/): Marketing overview: schema-first Postgres platform, positioning vs Supabase / Payload / Convex, feature grid, local-dev walkthrough
-- [Full LLM context](https://www.supatype.com/llms-full.txt): Self-contained Markdown summary of product, stack, CLI, and differentiators for agents with limited round-trips
-- [Sitemap](https://www.supatype.com/sitemap.xml): Machine-readable list of public Pages URLs
+- [Home](https://www.supatype.com/): Overview: one set of types from database to component, how it works, frameworks, comparison, quick start
+- [Full LLM context](https://www.supatype.com/llms-full.txt): Self-contained summary of the product, CLI, workflow, licensing and status for agents with limited round-trips
+- [Licensing](https://www.supatype.com/licensing.html): What is MIT, Apache 2.0 and BSL 1.1, what you can and cannot do, Change Dates, contributing
+- [Sitemap](https://www.supatype.com/sitemap.xml): Machine-readable list of public URLs
 
 ## Docs & guides
 
-- [Local development (on-page)](https://www.supatype.com/#local-dev): How `supatype init` / `supatype dev` run a full local stack
+- [Docs](https://www.supatype.com/docs/): Local development, self-hosting, deploying changes, upgrading
+- [Local development](https://www.supatype.com/docs/#local-dev): `supatype init` and `supatype dev` run a full local stack
+- [Self-hosting](https://www.supatype.com/docs/#self-host): Docker Compose on a server you own
+- [Upgrading](https://www.supatype.com/docs/#upgrading): Updating images and binaries, then pushing the schema
+- [Upgrade notes for 0.7.0](https://github.com/supatype/supatype/blob/main/UPGRADING.md): Ownership checks, declared renames, identity columns, realtime DELETE rules, lock waits, licence
 - [VM deploy with GitHub Actions](https://www.supatype.com/deploy-vm-github-actions.html): Self-host deploy path using GitHub Actions onto a VM
+- [Agent skill](https://github.com/supatype/supatype/tree/main/skills/supatype): Schema, config, CLI and self-host reference for coding agents
 
 ## Platform capabilities
 
-- [Schema-first migrations](https://www.supatype.com/#features): TypeScript schema drives forward/rollback SQL with risk analysis
-- [Auth & RLS](https://www.supatype.com/#features): Built-in auth; access rules on models generate Postgres RLS
-- [Storage](https://www.supatype.com/#features): File/image fields create buckets and permissions
-- [Realtime](https://www.supatype.com/#features): WebSocket subscriptions generated per model / table changes
-- [Studio CMS](https://www.supatype.com/#features): Schema-generated content admin (lists, forms, media)
-- [REST + GraphQL](https://www.supatype.com/#features): PostgREST and pg_graphql with typed clients
+- [Migrations](https://www.supatype.com/#how-it-works): The Rust schema engine diffs types against the live database, classifies each change as safe, cautious or destructive, applies it in one transaction with a recorded rollback, and never guesses a rename (renames are declared with `supatype rename`)
+- [Access rules](https://www.supatype.com/#how-it-works): `Public`, `LoggedIn`, `Owner<>`, `OwnerFrom<>`, `Role<>` on models and fields compile to Postgres row-level security
+- [Studio](https://www.supatype.com/#how-it-works): Schema-generated admin and CMS: lists, forms, rich text, blocks, media library, drafts, versions, live preview
+- [Storage](https://www.supatype.com/#how-it-works): `Bucket<>` types with accept lists, size limits and access rules; image transforms; time-limited signed URLs
+- [Realtime](https://www.supatype.com/#how-it-works): Change subscriptions, presence and broadcast; each event, deletes included, reaches only subscribers allowed to read that row
+- [APIs](https://www.supatype.com/#how-it-works): REST through PostgREST and GraphQL through pg_graphql, both running as the caller so row-level security applies
 
 ## Community
 
-- [GitHub organization](https://github.com/supatype): Source repos (SDK monorepo, server, engine, Postgres images)
-- [supatype/supatype](https://github.com/supatype/supatype): Main monorepo: CLI, client, Studio, realtime package
+- [GitHub organization](https://github.com/supatype): Source repositories
+- [supatype/supatype](https://github.com/supatype/supatype): Main monorepo: CLI, client SDKs, framework bindings, Studio, storage, realtime
 - [Discord](https://discord.gg/TzMtynufEH): Community and product discussion
 
 ## Optional

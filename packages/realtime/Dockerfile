@@ -15,6 +15,7 @@ RUN pnpm --filter @supatype/realtime deploy --legacy --prod /out
 
 FROM node:22-slim
 WORKDIR /app
+COPY --chmod=0644 packages/realtime/LICENSE /LICENSE
 COPY --from=builder /out/node_modules ./node_modules
 COPY --from=builder /out/package.json ./
 COPY --from=builder /out/dist ./dist

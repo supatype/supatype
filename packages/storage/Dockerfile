@@ -7,6 +7,7 @@ COPY dist/ ./dist/
 FROM node:22-slim
 RUN apt-get update && apt-get install -y --no-install-recommends libvips-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
+COPY --chmod=0644 LICENSE /LICENSE
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/package.json ./

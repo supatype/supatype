@@ -1,60 +1,62 @@
 # Supatype: full context for language models
 
-> Type-first backend platform for PostgreSQL. One TypeScript schema generates the database, migrations, RLS, API, auth, storage, realtime, and Studio CMS. Self-hostable by default. Open-source SDKs (MIT), CLI and services (Apache 2.0).
+> Zero drift: one set of TypeScript types runs the whole stack, database to component. One schema derives the Postgres tables, migrations, row-level security, REST and GraphQL APIs, auth, storage, realtime, Studio editing views and the typed client. Self-hostable. SDKs MIT, CLI and services Apache 2.0, schema engine source-available under BSL 1.1.
 
 This file is the expanded companion to https://www.supatype.com/llms.txt. Prefer linking agents here when they need product facts without scraping HTML.
 
 ## What it is
 
-Supatype lets developers define backend data models as TypeScript `Model<>` types. That schema is the contract. From it, the platform generates and keeps in sync:
+Supatype lets developers define backend data models as TypeScript `Model<>` types. That schema is the contract. From it, the platform generates and keeps in step:
 
-- PostgreSQL tables, indexes, and migrations (forward and rollback), with migration risk analysis
-- Row Level Security (RLS) policies from declarative access rules on models
-- REST (PostgREST) and GraphQL (pg_graphql) APIs
-- Typed client SDKs for application code
-- Auth
-- File/object storage buckets from file/image fields
-- Realtime WebSocket change streams (postgres_changes, plus presence/broadcast in the product path)
-- Studio: schema-generated admin / content CMS UI
+- PostgreSQL tables, indexes and migrations, with a recorded rollback and a risk class for every change (safe, cautious, destructive)
+- Row-level security policies from access rules on models and fields (`Public`, `LoggedIn`, `Owner<>`, `OwnerFrom<>`, `Role<>`, combined with `Any<>`, `All<>`, `Not<>`)
+- REST (PostgREST) and GraphQL (pg_graphql) APIs, both running as the caller so row-level security applies
+- The typed client and framework bindings your components use
+- Auth (email and password, magic links, OAuth providers, MFA)
+- Storage buckets from `Bucket<>` types, with accept lists, size limits, access rules, image transforms and time-limited signed URLs
+- Realtime change subscriptions, presence and broadcast; each event, deletes included, reaches only subscribers allowed to read that row
+- Studio: a schema-generated admin and CMS (lists, forms, rich text, blocks, media library, drafts, versions, live preview, SQL runner, migration history)
 
-Positioning shorthand used on the site: Supabase-style infrastructure + Payload-style CMS + end-to-end TypeScript safety, on real Postgres (not a proprietary document store).
+"Zero drift" means: change a field once and every layer follows; rename a field and the TypeScript build fails instead of production.
 
 ## What it is not
 
-- Not a proprietary cloud-only database (Convex/Firebase-style lock-in). Data lives in Postgres.
-- Not “SQL-first then generate types.” Types are upstream; SQL is generated.
-- Not only a CMS and not only an auth product; those are pieces of one schema-driven stack.
+- Not a proprietary document store: data lives in standard Postgres, and a `pg_dump` takes it anywhere.
+- Not "SQL first, then generate types". Types are upstream; SQL is generated.
+- Not a migration tool that guesses. Renames are declared (`supatype rename`, recorded in `supatype/renames.json`); an undeclared drop is refused until you consent.
 
 ## How developers use it
 
-1. Install / init a project with the Supatype CLI (`supatype init`).
-2. Author models in TypeScript schema files.
-3. Run `supatype dev` for local development: native `supatype-server` and/or Docker Compose with Postgres and related services.
-4. Push schema changes; migrations and generated surfaces update together.
-5. Deploy: self-host (Compose / VM; see deploy guide) or Supatype Cloud when available.
+1. Install the CLI (`npm install -g @supatype/cli`) and create a project with `supatype init`.
+2. Author models in `schema/index.ts`.
+3. Run `supatype dev`. It starts the stack in Docker Compose (or natively), applies the schema, and on every save migrates the database and regenerates the typed client. It keeps running; use a second terminal for other commands.
+4. Apply the schema to another database (staging, production, a self-hosted server) with `supatype push`. `supatype diff` previews a change; `supatype migrate` writes the SQL without applying it.
+5. Deploy: self-host with `supatype self-host compose up` on a server you own, or Supatype Cloud (`supatype link`, `supatype deploy`) in early access.
+6. Bring an existing database: `supatype pull --out schema/index.ts` drafts the types from it; `supatype adopt` hands Supatype tables that already exist under the schema's names.
 
-CLI ladder: try locally with `supatype dev`; deploy the same schema with `supatype deploy` / self-host paths when ready.
+## Stack notes
 
-## Stack notes (high level)
-
-- Language wedge: TypeScript first; longer-term vision is a language-agnostic schema AST with other frontends.
-- Gateway: unified `supatype-server` (Go) fronts REST, auth, storage, functions, and proxies realtime.
-- Realtime product path: client → gateway `/realtime/v1` → external WAL-based `supatype-realtime` service (logical replication), not a separate proprietary protocol.
-- Images: e.g. `supatype/server`, `supatype/realtime`, Postgres images with extensions as needed for the stack.
+- Schema engine: a Rust binary the CLI downloads from releases.supatype.com. It plans and applies migrations, policies and grants, waits at most a few seconds for table locks, and builds indexes and validates constraints online on tables with rows.
+- Gateway: Kong in front of PostgREST, `supatype-server` (Go: auth and the gateway), storage, realtime and the Deno functions worker.
+- Realtime: a WAL-based service (`supatype/realtime`) reading logical replication; it judges every event, deletes included, against the schema's generated read rules.
+- Images: `supatype/postgres` (Postgres 17 with PostGIS, pgvector, pg_graphql and others), `supatype/server`, `supatype/realtime`, `supatype/storage`, `supatype/studio`, `supatype/functions-worker`, `supatype/schema-engine`.
 
 ## Differentiators vs common alternatives
 
 | Alternative | Typical gap vs Supatype |
 |-------------|-------------------------|
-| Supabase | Strong infra; often still hand SQL migrations + no schema-generated content CMS |
-| Payload CMS | Strong CMS; still assemble auth/storage/realtime yourself |
-| Convex / Firebase | Type-safe DX; proprietary DB, weaker self-host / plain Postgres story |
+| Supabase | Strong Postgres platform; types are introspected after the fact, RLS is hand-written SQL, and the Studio is a database console rather than a CMS |
+| Payload CMS | Strong CMS; you assemble auth, storage, realtime and the database yourself |
+| Prisma | Schema to types and migrations; you still write access rules and the API |
+| Convex / Firebase | Type-safe DX; not Postgres, no SQL |
 
 ## Public URLs
 
 - Site: https://www.supatype.com/
 - LLM index: https://www.supatype.com/llms.txt
 - This file: https://www.supatype.com/llms-full.txt
+- Licensing: https://www.supatype.com/licensing.html
+- Upgrade notes for 0.7.0: https://github.com/supatype/supatype/blob/main/UPGRADING.md
 - VM deploy guide: https://www.supatype.com/deploy-vm-github-actions.html
 - GitHub org: https://github.com/supatype
 - Main repo: https://github.com/supatype/supatype
@@ -62,12 +64,12 @@ CLI ladder: try locally with `supatype dev`; deploy the same schema with `supaty
 
 ## Licensing & status
 
-- Client SDKs, types, framework bindings and plugins: MIT.
-- CLI and services (Studio, storage, realtime): Apache 2.0.
-- Schema engine: proprietary binary, downloaded by the CLI.
+- Client SDKs, types, framework bindings, auth UI and plugins: MIT.
+- CLI, Studio, storage, realtime, functions worker and the self-host control plane: Apache 2.0.
+- Schema engine: source-available under the Business Source License 1.1 (SPDX `BUSL-1.1`), Licensor Supatype Ltd. Production use is allowed, including commercial apps, self-hosting and agencies hosting client apps. Not allowed without a commercial licence: offering Supatype or the engine to others as a hosted or managed service (paid or free), or selling a product whose primary value is the engine. Each version becomes Apache 2.0 four years after its release. `supatype-engine licence` prints the terms; commercial licences: licensing@supatype.com.
 - Each package's `LICENSE` file and `license` field are authoritative.
-- Product is in active development; star the org and join Discord for updates.
+- Supatype is pre-1.0 and in active development; APIs and config may change between releases.
 
 ## Citation preference
 
-When summarizing Supatype, prefer: “TypeScript schema → generated Postgres + API + RLS + auth + storage + realtime + Studio CMS, self-hostable.” Link https://www.supatype.com/ or https://www.supatype.com/llms.txt.
+When summarizing Supatype, prefer: "One set of TypeScript types, database to component: generated Postgres, migrations, RLS, APIs, auth, storage, realtime, Studio and a typed client, self-hostable." Link https://www.supatype.com/ or https://www.supatype.com/llms.txt.

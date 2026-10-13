@@ -2,6 +2,7 @@
 FROM denoland/deno:debian-2.2.0
 
 WORKDIR /app
+COPY --chmod=0644 LICENSE /LICENSE
 # Every .ts beside main.ts, not a list of them.
 #
 # `COPY deno.json main.ts ./` left out the modules main.ts imports, so the image exited at once
