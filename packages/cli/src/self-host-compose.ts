@@ -951,6 +951,13 @@ ${appEnv}
       SUPATYPE_JWT_DEFAULT_GROUP_NAME: authenticated
       SUPATYPE_JWT_ADMIN_ROLES: service_role,supatype_admin
       SUPATYPE_MAILER_AUTOCONFIRM: \${SUPATYPE_MAILER_AUTOCONFIRM:-true}
+      # Emailed links are SUPATYPE_API_EXTERNAL_URL plus these paths. The external URL is the
+      # gateway's root, where / belongs to the app, so the server's default of /verify sent every
+      # confirmation, magic-link and recovery link to a 404. The auth routes are under /auth/v1/.
+      SUPATYPE_MAILER_URLPATHS_CONFIRMATION: /auth/v1/verify
+      SUPATYPE_MAILER_URLPATHS_INVITE: /auth/v1/verify
+      SUPATYPE_MAILER_URLPATHS_RECOVERY: /auth/v1/verify
+      SUPATYPE_MAILER_URLPATHS_EMAIL_CHANGE: /auth/v1/verify
       # email.provider and email.smtp are config, and nothing used to carry
       # them here: with no provider and no SMTP host the auth service falls
       # through to its noop client, so every message was dropped in silence and
