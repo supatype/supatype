@@ -13,7 +13,7 @@
  * terminal the refusal names `supatype rename`, which records the same answer.
  */
 import type { DiffResult, RenameCandidate } from "./engine-client.js"
-import { plannedChanges } from "./diff-output.js"
+import { plannedChanges, withoutEngineForceAdvice } from "./diff-output.js"
 import { consentRefusal, engineOutputOf } from "./push-refusal.js"
 import { RENAME_JOURNAL_FILE, journalRenameWriter, renameCommandHint } from "./rename-journal.js"
 import { confirm } from "./ui/confirm.js"
@@ -222,8 +222,9 @@ function showRewrite(count: number, output: string): void {
 }
 
 function refusalMessage(output: string, policy: DestructiveConsentPolicy, rewrite: boolean): string {
-  const engineLine =
-    output.split(/\r?\n/).find((line) => consentRefusal(line) !== null)?.trim() ?? output.trim()
+  const engineLine = withoutEngineForceAdvice(
+    output.split(/\r?\n/).find((line) => consentRefusal(line) !== null)?.trim() ?? output.trim(),
+  )
   if (rewrite) {
     return [
       `Nothing was applied. ${engineLine}`,
