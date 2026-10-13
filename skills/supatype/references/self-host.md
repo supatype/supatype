@@ -77,7 +77,12 @@ supatype self-host compose render    # write docker-compose.yml (includes contro
 supatype self-host compose up -d     # start production stack
 supatype self-host compose down      # stop
 supatype self-host compose status    # health check
+supatype self-host compose restart server   # recreate one service after a .env change
 ```
+
+Use `restart <service>` rather than a hand-typed `docker compose` command. The generated
+`.supatype/self-host/docker-compose.yml` names the project's folders by absolute path, and every
+`self-host compose` command renders it again, so a project that moved is picked up there.
 
 ## Custom domain + automatic HTTPS
 

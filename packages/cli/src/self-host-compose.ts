@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { dirname, join, relative, resolve } from "node:path"
+import { dirname, join, resolve, sep } from "node:path"
 import { spawnSync } from "node:child_process"
 import { requireDockerDaemon, type DockerBrandOptions } from "./docker-runtime.js"
 import { fatalError } from "./ui/fatal.js"
@@ -58,7 +58,6 @@ export const COMPOSE_IMAGE_ENV_KEYS = [
 const SEAWEEDFS_IMAGE =
   "chrislusf/seaweedfs:4.46@sha256:08d516132314207d10c8e37cbffc1f32b147d870169688734cc61c6231625b62"
 
-/** Credentials the object store is configured with and the storage service is handed. */
 /**
  * The prefix Kong's ACME plugin stores its certificates under.
  *
@@ -70,11 +69,9 @@ const SEAWEEDFS_IMAGE =
  */
 const ACME_KEY_PREFIX = "kong_acme:"
 
+/** Credentials the object store is configured with and the storage service is handed. */
 const OBJECT_STORE_ACCESS_KEY = "supatype"
 const OBJECT_STORE_SECRET_KEY = "supatype-secret"
-
-/** Where the rendered SeaweedFS identity file sits, resolved from the project root like kong.yml. */
-const SEAWEED_CONFIG_MOUNT = ".supatype/self-host/s3.json"
 
 /**
  * The compose volume key Postgres keeps its data in. Docker names the volume
@@ -280,25 +277,43 @@ export function staticDirForCompose(config: SupatypeProjectConfig): string | und
 }
 
 /**
- * Bind-mount source for `/project` in generated compose files.
- * Paths are resolved from `--project-directory` (always the project root in `runDockerCompose`),
- * not from the compose file directory, use `.` not `../..`.
+ * A host path as the generated compose file names it: absolute, with forward slashes.
+ *
+ * Absolute because compose resolves a relative bind source against `--project-directory`, and
+ * without that flag against the compose file's own folder, `.supatype/self-host`. The CLI always
+ * passes the flag. Someone running `docker compose -f .supatype/self-host/docker-compose.yml` by
+ * hand does not, and the server came up with that folder as its project: no admin config, manifest,
+ * API config, functions or hooks, and an empty `.supatype/self-host/.supatype` left on the host
+ * (SA3). Every compose command renders the file again on this machine, so a project that moved is
+ * named at its new place the next time one runs. Forward slashes because Docker Desktop on Windows
+ * reads `C:/...` as a host path and YAML needs no escaping for them.
  */
-function projectMountPath(_cwd: string): string {
-  return "."
+export function composeHostPath(path: string): string {
+  const absolute = resolve(path)
+  return sep === "\\" ? absolute.replace(/\\/g, "/") : absolute
 }
 
-/** Paths in generated compose are resolved from `--project-directory` (project root). */
-function relativeFromProjectRoot(cwd: string, target: string): string {
-  let rel = relative(resolve(cwd), resolve(target)).replace(/\\/g, "/")
-  if (!rel.startsWith(".") && !rel.startsWith("/")) {
-    rel = `./${rel}`
+/** One bind mount in compose's long syntax, where no colon in a host path can be misread. */
+function bindMount(source: string, target: string, readOnly: boolean): string {
+  return [
+    "      - type: bind",
+    `        source: ${JSON.stringify(composeHostPath(source))}`,
+    `        target: ${target}`,
+    ...(readOnly ? ["        read_only: true"] : []),
+  ].join("\n")
+}
+
+/** The bind mounts the generated stack uses, each naming its host path absolutely. */
+function projectMounts(cwd: string) {
+  const root = resolve(cwd)
+  const paths = selfHostComposePaths(cwd)
+  return {
+    projectReadOnly: bindMount(root, "/project", true),
+    projectWritable: bindMount(root, "/project", false),
+    projectState: bindMount(join(root, ".supatype"), "/project/.supatype", false),
+    kong: bindMount(paths.kongPath, "/etc/kong/kong.yml", true),
+    seaweed: bindMount(paths.s3ConfigPath, "/etc/seaweedfs/s3.json", true),
   }
-  return rel
-}
-
-function kongMountPath(_cwd: string): string {
-  return ".supatype/self-host/kong.yml"
 }
 
 /**
@@ -455,8 +470,7 @@ export function renderSelfHostCompose(
   cwd: string = process.cwd(),
   options?: SelfHostComposeOptions,
 ): string {
-  const projectMount = projectMountPath(cwd)
-  const kongMount = kongMountPath(cwd)
+  const mounts = projectMounts(cwd)
   const external = usesExternalDatabase(config)
   // Both halves come from the caller because both need the schema loaded, which this renderer does
   // not do. See `SelfHostComposeOptions`. One call, so the exposed schemas and the search path
@@ -556,7 +570,7 @@ ${studioService}
     command: server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json
     volumes:
       - storage-data:/data
-      - ${SEAWEED_CONFIG_MOUNT}:/etc/seaweedfs/s3.json:ro
+${mounts.seaweed}
     healthcheck:
       # Any HTTP status line means the S3 endpoint is listening, which is the whole question.
       # Success cannot be "HTTP 200": an unauthenticated GET on the root answers 403 by design,
@@ -794,6 +808,9 @@ ${keyspaceDbEnv}${dbPorts}${keyspaceExpose}    volumes:
 
   return `# Generated by supatype self-host compose
 # Kong → supatype-server (unified gateway) → internal PostgREST / storage / etc.
+# Named, so a compose command run by hand reaches this stack instead of starting a second one
+# under the folder's name. \`supatype self-host compose restart <service>\` saves running one.
+name: ${composeProject}
 services:
 ${dbServiceBlock}  postgrest:
     image: ${POSTGREST_IMAGE}
@@ -838,7 +855,7 @@ ${storageDependency}
     expose:
       - "8001"
 ${networksClause([FUNCTIONS_NETWORK, ...(functionsDb ? [FUNCTIONS_DB_NETWORK] : [])])}    volumes:
-      - ${projectMount}:/project:ro
+${mounts.projectReadOnly}
     environment:
       SUPATYPE_FUNCTIONS_ROOT: /project/functions
       SUPATYPE_DENO_FUNCTIONS_DIR: /project/functions
@@ -883,7 +900,7 @@ ${realtimeBlock}
     expose:
       - "8080"
     volumes:
-      - ${projectMount}:/project
+${mounts.projectWritable}
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       PORT: "8080"
@@ -920,7 +937,7 @@ ${realtimeControlPlaneEnv}${dbDependency}
 ${gatewayNetworks}${serverPorts}    volumes:
       # The project is read-only: the server reads the schema, the manifest and the functions, and
       # has no business editing any of them.
-      - ${projectMount}:/project:ro
+${mounts.projectReadOnly}
       # .supatype is the exception, and only because one file in it is not project source.
       # api-config.json is the operator's runtime state: which tables have caching switched on,
       # the project TTL, max_rows. PATCH /admin/v1/config/rest writes it, which is what Studio's
@@ -928,7 +945,7 @@ ${gatewayNetworks}${serverPorts}    volumes:
       # fails with "read-only file system", so a cache a model declares can be read back as
       # declared and never actually switched on. A narrower bind than making the whole project
       # writable, because the rest of the tree keeps the guarantee.
-      - ${projectMount}/.supatype:/project/.supatype
+${mounts.projectState}
     working_dir: /project
     environment:
       SUPATYPE_MODE: ${devLocal ? "dev" : "standalone"}
@@ -1005,7 +1022,7 @@ ${objectStoreBlock}
     profiles: ["tools"]
     entrypoint: ["supatype-engine"]
     volumes:
-      - ${projectMount}:/project
+${mounts.projectWritable}
     working_dir: /project
 ${dbDependency}${studioBlock}${valkeyBlock}${tlsHintComment}  kong:
     image: kong:3.6
@@ -1037,7 +1054,7 @@ ${gatewayNetworks}    # host.docker.internal is a Docker Desktop name. On Linux 
       # (CE1). A recreated upstream is handled where the CLI recreates it: Kong is reloaded then
       # (runDockerCompose, EXT-N1).
 ${kongTlsEnv}    volumes:
-      - ${kongMount}:/etc/kong/kong.yml:ro
+${mounts.kong}
     ports:
 ${kongPorts}
     depends_on:

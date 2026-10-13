@@ -263,10 +263,17 @@
                     <tr>
                       <td><code>.env</code></td>
                       <td>Restart <code>supatype dev</code></td>
-                      <td><code>compose up -d</code></td>
+                      <td><code>compose up -d</code>, or <code>compose restart &lt;service&gt;</code> for one service</td>
                     </tr>
                   </tbody>
                 </table>
+              </div>
+              <div class="note">
+                <span class="label">ONE SERVICE</span>
+                <code>supatype self-host compose restart server</code> recreates just that service with the
+                current config and <code>.env</code>. Use it rather than typing a <code>docker compose</code>
+                command yourself: the CLI renders the compose file first, so it always names this project's
+                folders where they are now.
               </div>
             </div>
           </div>
