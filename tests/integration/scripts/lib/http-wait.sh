@@ -79,3 +79,21 @@ wait_until() {
   echo "ERROR: ${label} did not become ready within ${limit}s" >&2
   return 1
 }
+
+# stop_pid_bounded <pid> - stops a process this script started and waits for it, for at most 20s.
+# `supatype dev` runs compose down on the way out, which can hang in CI, so the wait is bounded and
+# a process still there afterwards is killed outright.
+stop_pid_bounded() {
+  local pid="$1"
+  [[ -n "$pid" ]] || return 0
+  kill "$pid" 2>/dev/null || true
+  for _ in $(seq 1 20); do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 1
+  done
+  if kill -0 "$pid" 2>/dev/null; then
+    echo "  Force-killing hung process (pid $pid)..."
+    kill -9 "$pid" 2>/dev/null || true
+  fi
+  wait "$pid" 2>/dev/null || true
+}

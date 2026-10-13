@@ -18,7 +18,8 @@
 #   SUPATYPE_KONG_PORT   gateway port for the stack (default 18476)
 #   MASKING_DB_PORT      host port the stack publishes Postgres on (default 54476)
 #   MASKING_BYO_PORT     host port for the plain Postgres the T2-N11 case starts (default 55449)
-#   MASKING_PROJECT_NAME compose project is supatype-<name> (default masking)
+#   MASKING_PROJECT_NAME compose project is supatype-<name> (default SUPATYPE_E2E_PROJECT, then
+#                        masking)
 #   MASKING_CLI          the CLI to test (default this checkout's packages/cli/bin/supatype.js)
 #   MASKING_ENGINE_BIN   optional local engine binary, written into overrides.engine
 #   SUPATYPE_*_IMAGE     images for the stack, as for every other suite
@@ -29,7 +30,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 E2E_DIR="$ROOT_DIR/tests/e2e"
 PROJECT_DIR="$E2E_DIR/masking/project"
 export MASKING_CLI="${MASKING_CLI:-$ROOT_DIR/packages/cli/bin/supatype.js}"
-export MASKING_PROJECT_NAME="${MASKING_PROJECT_NAME:-masking}"
+export MASKING_PROJECT_NAME="${MASKING_PROJECT_NAME:-${SUPATYPE_E2E_PROJECT:-masking}}"
 export SUPATYPE_KONG_PORT="${SUPATYPE_KONG_PORT:-18476}"
 export MASKING_BYO_PORT="${MASKING_BYO_PORT:-55449}"
 DB_PORT="${MASKING_DB_PORT:-54476}"
