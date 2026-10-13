@@ -8,9 +8,9 @@
 # ownership commands, the masking matrix and positioning checks, and the engine's integration
 # tests against the train's Postgres.
 #
-# A suite named here that has no runnable command is a failure, not a skip: the live examples
-# (edge-kit, framework-parity, expo-auth) have no automated suite yet, and the train says so on
-# every run until they do.
+# A suite named here that has no runnable command is a failure, not a skip. The three live examples
+# (edge-kit, framework-parity, expo-auth) each have a suite of their own, which drives the example
+# against a stack the way its README describes.
 
 TRAIN_SUITES=(
   ownership
@@ -30,7 +30,9 @@ TRAIN_SUITES=(
   hook-adapter
   engine-integration
   realtime-tier2
-  live-examples
+  edge-kit
+  framework-parity
+  expo-auth
   # Last: the candidate's data-plane-e2e.sh rebuilds storage and realtime under the train's tags
   # (fixed on main, not yet in the stack), and every stack started after it would run those builds.
   data-plane
@@ -44,7 +46,7 @@ suite_checks_ledgers() {
 
 # Suites that drive a browser need Playwright's Chromium installed first.
 suite_needs_browser() {
-  case "$1" in studio-ui|kitchen-sink) return 0 ;; *) return 1 ;; esac
+  case "$1" in studio-ui|kitchen-sink|framework-parity|expo-auth) return 0 ;; *) return 1 ;; esac
 }
 
 # Prints the shell command for a suite. Runs under `bash -c` from the candidate checkout.
@@ -71,7 +73,9 @@ suite_command() {
     hook-adapter) echo "bash $s/hook-adapter.sh" ;;
     engine-integration) echo "bash \"\$TRAIN_HARNESS_DIR/scripts/release-train/engine-integration.sh\"" ;;
     realtime-tier2) echo "bash \"\$TRAIN_HARNESS_DIR/scripts/release-train/realtime-tier2.sh\"" ;;
-    live-examples) echo "echo 'edge-kit, framework-parity and expo-auth have no automated live suite yet (L3).' >&2; exit 1" ;;
+    edge-kit) echo "bash $s/edge-kit-e2e.sh" ;;
+    framework-parity) echo "bash $s/framework-parity-e2e.sh" ;;
+    expo-auth) echo "bash $s/expo-auth-e2e.sh" ;;
     *) return 1 ;;
   esac
 }
