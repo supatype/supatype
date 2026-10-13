@@ -4,7 +4,7 @@ import type { MaskedField, QueryResult, SelectQueryOptions, SupatypeError } from
 import { parseRowsExactly, tableFromPath } from "./exact-response.js"
 import { stringifyWithBigInts } from "./exact-values.js"
 import { FilterBuilder } from "./filters.js"
-import { transportFailure } from "./errors.js"
+import { PostgrestErrorCodes, transportFailure } from "./errors.js"
 import { plainFetch, type FetchOptions, type RequestTransport } from "./fetch-with-retry.js"
 
 const DEBUG_AUTH =
@@ -48,6 +48,14 @@ export function parseMaskedFields(header: string | null): MaskedField[] | undefi
   }
 
   return fields.length > 0 ? fields : undefined
+}
+
+/**
+ * `.single()` answered without exactly one row, worded as PostgREST 14 words it, so a caller sees
+ * the same error whether PostgREST refused the request or the client found the rows wrong.
+ */
+function notOneRow(): SupatypeError {
+  return { message: "Cannot coerce the result to a single JSON object", code: PostgrestErrorCodes.NOT_FOUND }
 }
 
 function withMeta<T>(
@@ -223,7 +231,7 @@ export class QueryBuilder<TRow> extends FilterBuilder implements PromiseLike<Que
     if (row === undefined) {
       return {
         data: null,
-        error: { message: "JSON object requested, multiple (or no) rows returned", code: "PGRST116" },
+        error: notOneRow(),
         count: null,
         ...(meta && { meta }),
       }
@@ -448,7 +456,7 @@ export class MutationBuilder<TRow> extends FilterBuilder implements PromiseLike<
     if (row === null) {
       return {
         data: null,
-        error: { message: "JSON object requested, multiple (or no) rows returned" },
+        error: notOneRow(),
         count: null,
         ...(meta && { meta }),
       }
