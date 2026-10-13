@@ -1,4 +1,6 @@
 import type { SupatypeError } from "./types.js"
+import { transportFailure } from "./errors.js"
+import { plainFetch, type RequestTransport } from "./fetch-with-retry.js"
 
 export interface StorageObject {
   id: string
@@ -35,6 +37,7 @@ export type AuthHeaders = () => Promise<Record<string, string>>
 export class StorageClient {
   private readonly url: string
   private readonly headers: AuthHeaders
+  private readonly send: RequestTransport
 
   /**
    * Headers are asked for per request, not captured here.
@@ -47,18 +50,19 @@ export class StorageClient {
    * Every other client on this object already took the same function. Storage was the one that did
    * not.
    */
-  constructor(url: string, headers: AuthHeaders) {
+  constructor(url: string, headers: AuthHeaders, transport: RequestTransport = plainFetch) {
+    this.send = transport
     this.url = url
     this.headers = headers
   }
 
   from(bucket: string): BucketClient {
-    return new BucketClient(this.url, bucket, this.headers)
+    return new BucketClient(this.url, bucket, this.headers, this.send)
   }
 
   async listBuckets(): Promise<{ data: StorageBucketMeta[] | null; error: SupatypeError | null }> {
     try {
-      const res = await fetch(`${this.url}/bucket`, { headers: await this.headers() })
+      const res = await this.send(`${this.url}/bucket`, { headers: await this.headers() })
       if (!res.ok) {
         const err = await res.json().catch(() => ({ message: "Error" })) as { message?: string }
         return { data: null, error: { message: err.message ?? "Failed to list buckets" } }
@@ -66,7 +70,7 @@ export class StorageClient {
       const data = await res.json() as StorageBucketMeta[]
       return { data, error: null }
     } catch (e) {
-      return { data: null, error: { message: e instanceof Error ? e.message : "Network error" } }
+      return { data: null, error: transportFailure(e) }
     }
   }
 
@@ -82,7 +86,7 @@ export class StorageClient {
         ...(options?.fileSizeLimit !== undefined && { file_size_limit: options.fileSizeLimit }),
         ...(options?.allowedMimeTypes !== undefined && { allowed_mime_types: options.allowedMimeTypes }),
       }
-      const res = await fetch(`${this.url}/bucket`, {
+      const res = await this.send(`${this.url}/bucket`, {
         method: "POST",
         headers: { ...(await this.headers()), "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -93,7 +97,7 @@ export class StorageClient {
       }
       return { data: { name }, error: null }
     } catch (e) {
-      return { data: null, error: { message: e instanceof Error ? e.message : "Network error" } }
+      return { data: null, error: transportFailure(e) }
     }
   }
 }
@@ -102,8 +106,10 @@ export class BucketClient {
   private readonly url: string
   private readonly bucket: string
   private readonly headers: AuthHeaders
+  private readonly send: RequestTransport
 
-  constructor(url: string, bucket: string, headers: AuthHeaders) {
+  constructor(url: string, bucket: string, headers: AuthHeaders, transport: RequestTransport = plainFetch) {
+    this.send = transport
     this.url = url
     this.bucket = bucket
     this.headers = headers
@@ -122,7 +128,7 @@ export class BucketClient {
     if (options?.upsert === true) {
       headers["x-upsert"] = "true"
     }
-    const res = await fetch(`${this.url}/object/${this.bucket}/${path}`, {
+    const res = await this.send(`${this.url}/object/${this.bucket}/${path}`, {
       method: "POST",
       headers,
       body: file,
@@ -139,7 +145,7 @@ export class BucketClient {
     options?: { transform?: TransformOptions | undefined } | undefined,
   ): Promise<{ data: Blob | null; error: SupatypeError | null }> {
     const url = this.buildObjectUrl("authenticated", path, options?.transform)
-    const res = await fetch(url, { headers: await this.headers() })
+    const res = await this.send(url, { headers: await this.headers() })
     if (!res.ok) {
       const err = await res.json().catch(() => ({ message: "Download failed" })) as Record<string, unknown>
       return { data: null, error: { message: String(err["message"] ?? err["error"] ?? "Download failed"), status: res.status } }
@@ -176,8 +182,10 @@ export class BucketClient {
     path: string,
     expiresIn: number,
   ): Promise<{ data: { signedUrl: string } | null; error: SupatypeError | null }> {
-    const res = await fetch(`${this.url}/object/sign/${this.bucket}/${path}`, {
+    const res = await this.send(`${this.url}/object/sign/${this.bucket}/${path}`, {
       method: "POST",
+      // Signing creates nothing on the server, so a second request is harmless.
+      idempotent: true,
       headers: { ...(await this.headers()), "Content-Type": "application/json" },
       body: JSON.stringify({ expiresIn }),
     })
@@ -206,7 +214,7 @@ export class BucketClient {
   }
 
   async remove(paths: string[]): Promise<{ data: StorageObject[] | null; error: SupatypeError | null }> {
-    const res = await fetch(`${this.url}/object/${this.bucket}`, {
+    const res = await this.send(`${this.url}/object/${this.bucket}`, {
       method: "DELETE",
       headers: { ...(await this.headers()), "Content-Type": "application/json" },
       body: JSON.stringify({ prefixes: paths }),
@@ -228,8 +236,10 @@ export class BucketClient {
       ...(options?.limit !== undefined && { limit: options.limit }),
       ...(options?.offset !== undefined && { offset: options.offset }),
     }
-    const res = await fetch(`${this.url}/object/list/${this.bucket}`, {
+    const res = await this.send(`${this.url}/object/list/${this.bucket}`, {
       method: "POST",
+      // A read that happens to be sent as POST.
+      idempotent: true,
       headers: { ...(await this.headers()), "Content-Type": "application/json" },
       body: JSON.stringify(body),
     })

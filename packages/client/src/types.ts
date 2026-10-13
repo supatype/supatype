@@ -192,6 +192,14 @@ export interface RpcOptions {
   count?: "exact" | "planned" | "estimated" | undefined
   /** Postgres schema holding the function, sent as `Content-Profile`. */
   schema?: string | undefined
+  /**
+   * Retry this call on a transient failure (a dropped connection, a 5xx, a 429). Default: false.
+   *
+   * An RPC is a POST, and the client cannot tell a read from a write: a call that failed in flight
+   * may already have run, and running it again could apply its writes twice. Set this for a
+   * function that only reads, or whose writes are safe to repeat. A `head` call is always retried.
+   */
+  idempotent?: boolean | undefined
 }
 
 export interface RpcResult<TData> {
@@ -373,13 +381,21 @@ export interface SupatypeClientConfig {
     storage?: AuthStorage | undefined
   } | undefined
   /**
-   * Disable automatic retry for transient errors.
-   * Default: true (retries enabled).
+   * Retry a transient failure (a dropped connection, a 5xx, a 429). Default: true.
+   *
+   * Only reads are retried: GET and HEAD requests (table selects, storage downloads, `getUser`), and
+   * the few reads sent as POST (storage `list`, signed URLs). Every other request is sent once,
+   * whatever this says: a write that failed in flight may still have been applied, and sending it
+   * again could apply it twice. `rpc`, `graphql` and `functions.invoke` take `idempotent: true` per
+   * call to opt in.
    */
   retry?: boolean | undefined
   /**
    * Request timeout in milliseconds. Default: 30000 (30 seconds).
-   * Applied to every HTTP request made by the client.
+   *
+   * Applies to every HTTP request the client makes: tables, `rpc`, `graphql`, `functions`, auth and
+   * storage, uploads included, so raise it for large uploads on slow links. The realtime socket is
+   * not an HTTP request and is not covered.
    */
   timeout?: number | undefined
   /**

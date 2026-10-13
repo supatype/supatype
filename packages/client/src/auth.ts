@@ -16,6 +16,7 @@ import {
   generateCodeVerifier,
   PKCE_METHOD_S256,
 } from "./pkce.js"
+import { plainFetch, type RequestTransport } from "./fetch-with-retry.js"
 
 export type AuthListener = (event: AuthChangeEvent, session: Session | null) => void
 
@@ -26,11 +27,33 @@ interface AuthClientOptions {
   cookiePrefix?: string | undefined
   /** Custom session store (replaces browser localStorage/cookies when set). */
   storage?: AuthStorage | undefined
+  /** How requests are sent. `createClient` passes its fetch, so `timeout` and `retry` apply here too. */
+  transport?: RequestTransport | undefined
 }
 
 const DEFAULT_STORAGE_KEY = "supatype.auth.session"
 const DEFAULT_COOKIE_PREFIX = "st"
 const DEBUG_AUTH = typeof process !== "undefined" && process.env["NEXT_PUBLIC_SUPATYPE_DEBUG_AUTH"] === "1"
+
+/**
+ * The auth server's refusal as a `SupatypeError`, with its machine-readable code kept.
+ *
+ * Two body shapes arrive: `{ code, error_code, msg }` from the API, and the OAuth token endpoint's
+ * `{ error, error_description }`, where `error` is the code. The code is what an app branches on
+ * (`invalid_credentials`, `weak_password`, `email_not_confirmed`); the numeric `code` in the first
+ * shape is only the HTTP status again, so it is not used. Message precedence follows supabase-js.
+ */
+function authErrorFromBody(body: Record<string, unknown>, status: number): SupatypeError {
+  const text = (key: string): string | undefined => {
+    const value = body[key]
+    return typeof value === "string" && value !== "" ? value : undefined
+  }
+  const code = text("error_code") ?? text("error")
+  const message =
+    text("msg") ?? text("message") ?? text("error_description") ?? text("error") ??
+    `Auth request failed (HTTP ${status})`
+  return { message, status, ...(code !== undefined && { code }) }
+}
 
 export class AuthClient {
   private readonly url: string
@@ -42,6 +65,8 @@ export class AuthClient {
   private readonly storageKey: string
   private readonly cookieName: string
   private readonly storage: AuthStorage | null
+  /** The client's fetch, with its timeout; only reads are retried. */
+  private readonly send: RequestTransport
   /** When true, session is also mirrored to document.cookie (browser default path only). */
   private readonly useCookies: boolean
   /** Resolves when async storage hydration completes (immediate when not used). */
@@ -62,6 +87,7 @@ export class AuthClient {
     this.cookieName = `${cookiePrefix}-auth-token`
     this.useCookies = opts.storage === undefined
     this.storage = opts.storage ?? this.getBrowserStorage()
+    this.send = opts.transport ?? plainFetch
 
     if (opts.initialSession !== undefined) {
       this.currentSession = opts.initialSession
@@ -218,7 +244,7 @@ export class AuthClient {
     if (credentials.options?.data !== undefined) {
       body["data"] = credentials.options.data
     }
-    const res = await fetch(`${this.url}/signup`, {
+    const res = await this.send(`${this.url}/signup`, {
       method: "POST",
       headers: this.baseHeaders,
       body: JSON.stringify(body),
@@ -233,7 +259,7 @@ export class AuthClient {
     data: { session: Session | null; user: User | null }
     error: SupatypeError | null
   }> {
-    const res = await fetch(`${this.url}/token?grant_type=password`, {
+    const res = await this.send(`${this.url}/token?grant_type=password`, {
       method: "POST",
       headers: this.baseHeaders,
       body: JSON.stringify({
@@ -260,7 +286,7 @@ export class AuthClient {
     if (credentials?.options?.captchaToken !== undefined) {
       body["supatype_meta_security"] = { captcha_token: credentials.options.captchaToken }
     }
-    const res = await fetch(`${this.url}/signup`, {
+    const res = await this.send(`${this.url}/signup`, {
       method: "POST",
       headers: this.baseHeaders,
       body: JSON.stringify(body),
@@ -316,7 +342,7 @@ export class AuthClient {
     data: { session: Session | null; user: User | null }
     error: SupatypeError | null
   }> {
-    const res = await fetch(`${this.url}/user`, {
+    const res = await this.send(`${this.url}/user`, {
       headers: {
         ...this.baseHeaders,
         Authorization: `Bearer ${params.accessToken}`,
@@ -365,7 +391,7 @@ export class AuthClient {
         },
       }
     }
-    const res = await fetch(`${this.url}/token?grant_type=pkce`, {
+    const res = await this.send(`${this.url}/token?grant_type=pkce`, {
       method: "POST",
       headers: this.baseHeaders,
       body: JSON.stringify({
@@ -400,18 +426,26 @@ export class AuthClient {
       parsed.hash.startsWith("#") ? parsed.hash.slice(1) : parsed.hash,
     )
 
-    const errorDescription =
-      query.get("error_description") ??
-      hashParams.get("error_description") ??
-      query.get("error") ??
-      hashParams.get("error")
-    if (errorDescription !== null && errorDescription !== "") {
-      return {
-        data: { session: null, user: null },
-        error: { message: errorDescription, status: 400 },
-      }
+    // A refused link comes back with the same fields as a refused request, in the URL instead.
+    const redirectError = { ...Object.fromEntries(hashParams), ...Object.fromEntries(query) }
+    if (redirectError["error_description"] || redirectError["error"]) {
+      return { data: { session: null, user: null }, error: authErrorFromBody(redirectError, 400) }
     }
 
+    // The auth server marks the link it sent with `type`; a recovery link signs the user in so they
+    // can choose a new password, and the app needs to know that is why they arrived.
+    const recovery = (hashParams.get("type") ?? query.get("type")) === "recovery"
+    return this.announceRecovery(await this.sessionFromRedirect(query, hashParams), recovery)
+  }
+
+  /** The session a redirect carries: a PKCE code to exchange, or implicit-grant tokens. */
+  private async sessionFromRedirect(
+    query: URLSearchParams,
+    hashParams: URLSearchParams,
+  ): Promise<{
+    data: { session: Session | null; user: User | null }
+    error: SupatypeError | null
+  }> {
     const code = query.get("code") ?? hashParams.get("code")
     if (code !== null && code !== "") {
       return this.exchangeCodeForSession(code)
@@ -432,6 +466,22 @@ export class AuthClient {
         status: 400,
       },
     }
+  }
+
+  /**
+   * Emit `PASSWORD_RECOVERY` once a recovery link or code has produced a session.
+   *
+   * After the `SIGNED_IN` that establishing the session already emitted, as `MFA_CHALLENGE_VERIFIED`
+   * follows it, so a listener keyed on sign-in still sees one and a reset page can key on this.
+   */
+  private announceRecovery<T extends { data: { session: Session | null }; error: SupatypeError | null }>(
+    result: T,
+    recovery: boolean,
+  ): T {
+    if (recovery && result.error === null && result.data.session !== null) {
+      this._emitEvent("PASSWORD_RECOVERY", result.data.session)
+    }
+    return result
   }
 
   async signInWithOtp(opts: {
@@ -455,7 +505,7 @@ export class AuthClient {
         body["channel"] = opts.options.channel
       }
     }
-    const res = await fetch(this.endpoint("/otp", opts.options?.emailRedirectTo).toString(), {
+    const res = await this.send(this.endpoint("/otp", opts.options?.emailRedirectTo).toString(), {
       method: "POST",
       headers: this.baseHeaders,
       body: JSON.stringify(body),
@@ -469,19 +519,12 @@ export class AuthClient {
         error: null,
       }
     }
-    const err = await res.json().catch(() => ({})) as Record<string, unknown>
-    return {
-      data: {},
-      error: {
-        message: String(err["error_description"] ?? err["msg"] ?? "Error"),
-        status: res.status,
-      },
-    }
+    return { data: {}, error: await this._parseError(res) }
   }
 
   async signOut(): Promise<{ error: SupatypeError | null }> {
     if (this.currentSession !== null) {
-      await fetch(`${this.url}/logout`, {
+      await this.send(`${this.url}/logout`, {
         method: "POST",
         headers: {
           ...this.baseHeaders,
@@ -509,17 +552,14 @@ export class AuthClient {
     if (this.currentSession === null) {
       return { data: { user: null }, error: null }
     }
-    const res = await fetch(`${this.url}/user`, {
+    const res = await this.send(`${this.url}/user`, {
       headers: {
         ...this.baseHeaders,
         Authorization: `Bearer ${this.currentSession.accessToken}`,
       },
     })
     if (!res.ok) {
-      return {
-        data: { user: null },
-        error: { message: "Could not get user", status: res.status },
-      }
+      return { data: { user: null }, error: await this._parseError(res) }
     }
     const raw = await res.json() as Record<string, unknown>
     return { data: { user: this._parseUser(raw) }, error: null }
@@ -537,7 +577,7 @@ export class AuthClient {
       return { data: { session: null }, error: { message: "No refresh token" } }
     }
     try {
-      const res = await fetch(`${this.url}/token?grant_type=refresh_token`, {
+      const res = await this.send(`${this.url}/token?grant_type=refresh_token`, {
         method: "POST",
         headers: this.baseHeaders,
         body: JSON.stringify({ refresh_token: this.currentSession.refreshToken }),
@@ -559,20 +599,13 @@ export class AuthClient {
     email: string,
     options?: { redirectTo?: string | undefined } | undefined,
   ): Promise<{ data: Record<string, never>; error: SupatypeError | null }> {
-    const res = await fetch(this.endpoint("/recover", options?.redirectTo).toString(), {
+    const res = await this.send(this.endpoint("/recover", options?.redirectTo).toString(), {
       method: "POST",
       headers: this.baseHeaders,
       body: JSON.stringify({ email }),
     })
     if (res.ok) return { data: {}, error: null }
-    const err = await res.json().catch(() => ({})) as Record<string, unknown>
-    return {
-      data: {},
-      error: {
-        message: String(err["error_description"] ?? err["msg"] ?? "Error"),
-        status: res.status,
-      },
-    }
+    return { data: {}, error: await this._parseError(res) }
   }
 
   async updateUser(updates: {
@@ -583,7 +616,7 @@ export class AuthClient {
     if (this.currentSession === null) {
       return { data: { user: null }, error: { message: "Not authenticated" } }
     }
-    const res = await fetch(`${this.url}/user`, {
+    const res = await this.send(`${this.url}/user`, {
       method: "PUT",
       headers: {
         ...this.baseHeaders,
@@ -592,17 +625,25 @@ export class AuthClient {
       body: JSON.stringify(updates),
     })
     if (!res.ok) {
-      const err = await res.json().catch(() => ({})) as Record<string, unknown>
-      return {
-        data: { user: null },
-        error: {
-          message: String(err["error_description"] ?? err["msg"] ?? "Error"),
-          status: res.status,
-        },
-      }
+      return { data: { user: null }, error: await this._parseError(res) }
     }
-    const raw = await res.json() as Record<string, unknown>
-    return { data: { user: this._parseUser(raw) }, error: null }
+    const user = this._parseUser(await res.json() as Record<string, unknown>)
+    this.applyUpdatedUser(user)
+    return { data: { user }, error: null }
+  }
+
+  /**
+   * Put the server's updated user on the session, persist it, and tell listeners.
+   *
+   * The tokens are unchanged, so this neither reschedules the refresh nor emits `TOKEN_REFRESHED`;
+   * without it the session kept the old email and metadata until the next refresh.
+   */
+  private applyUpdatedUser(user: User): void {
+    if (this.currentSession === null) return
+    const session: Session = { ...this.currentSession, user }
+    this.currentSession = session
+    this.syncPersistedSession(session)
+    this._emitEvent("USER_UPDATED", session)
   }
 
   /**
@@ -629,12 +670,12 @@ export class AuthClient {
       if (params.email !== undefined) body["email"] = params.email
       if (params.phone !== undefined) body["phone"] = params.phone
     }
-    const res = await fetch(`${this.url}/verify`, {
+    const res = await this.send(`${this.url}/verify`, {
       method: "POST",
       headers: this.baseHeaders,
       body: JSON.stringify(body),
     })
-    return this._parseAuthResponse(res)
+    return this.announceRecovery(await this._parseAuthResponse(res), params.type === "recovery")
   }
 
   /**
@@ -656,7 +697,7 @@ export class AuthClient {
     if (credentials.nonce !== undefined) {
       body["nonce"] = credentials.nonce
     }
-    const res = await fetch(`${this.url}/token?grant_type=id_token`, {
+    const res = await this.send(`${this.url}/token?grant_type=id_token`, {
       method: "POST",
       headers: this.baseHeaders,
       body: JSON.stringify(body),
@@ -675,7 +716,7 @@ export class AuthClient {
     const body: Record<string, unknown> = { type: params.type }
     if (params.email !== undefined) body["email"] = params.email
     if (params.phone !== undefined) body["phone"] = params.phone
-    const res = await fetch(`${this.url}/resend`, {
+    const res = await this.send(`${this.url}/resend`, {
       method: "POST",
       headers: this.baseHeaders,
       body: JSON.stringify(body),
@@ -689,14 +730,7 @@ export class AuthClient {
         error: null,
       }
     }
-    const err = await res.json().catch(() => ({})) as Record<string, unknown>
-    return {
-      data: {},
-      error: {
-        message: String(err["error_description"] ?? err["msg"] ?? "Error"),
-        status: res.status,
-      },
-    }
+    return { data: {}, error: await this._parseError(res) }
   }
 
   // ─── MFA ──────────────────────────────────────────────────────────────────────
@@ -729,7 +763,7 @@ export class AuthClient {
         if (params.friendlyName !== undefined) body["friendly_name"] = params.friendlyName
         if (params.issuer !== undefined) body["issuer"] = params.issuer
         if (params.phone !== undefined) body["phone"] = params.phone
-        const res = await fetch(`${this.url}/factors`, {
+        const res = await this.send(`${this.url}/factors`, {
           method: "POST",
           headers: {
             ...this.baseHeaders,
@@ -773,7 +807,7 @@ export class AuthClient {
         }
         const body: Record<string, unknown> = {}
         if (params.channel !== undefined) body["channel"] = params.channel
-        const res = await fetch(
+        const res = await this.send(
           `${this.url}/factors/${params.factorId}/challenge`,
           {
             method: "POST",
@@ -816,7 +850,7 @@ export class AuthClient {
             error: { message: "Not authenticated" },
           }
         }
-        const res = await fetch(
+        const res = await this.send(
           `${this.url}/factors/${params.factorId}/verify`,
           {
             method: "POST",
@@ -875,7 +909,7 @@ export class AuthClient {
         if (this.currentSession === null) {
           return { data: null, error: { message: "Not authenticated" } }
         }
-        const res = await fetch(
+        const res = await this.send(
           `${this.url}/factors/${params.factorId}`,
           {
             method: "DELETE",
@@ -1299,13 +1333,10 @@ export class AuthClient {
     }
   }
 
+  /** Every refusal from the auth server goes through here, so none of them drops the code. */
   private async _parseError(res: Response): Promise<SupatypeError> {
-    const err = await res.json().catch(() => ({})) as Record<string, unknown>
-    return {
-      message: String(err["error_description"] ?? err["msg"] ?? err["message"] ?? "Error"),
-      status: res.status,
-      ...(err["error_code"] !== undefined && { code: String(err["error_code"]) }),
-    }
+    const body = await res.json().catch(() => ({})) as Record<string, unknown>
+    return authErrorFromBody(body, res.status)
   }
 
   private async _parseAuthResponse(res: Response): Promise<{
@@ -1313,14 +1344,7 @@ export class AuthClient {
     error: SupatypeError | null
   }> {
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ msg: "Unknown error" })) as Record<string, unknown>
-      return {
-        data: { session: null, user: null },
-        error: {
-          message: String(err["error_description"] ?? err["msg"] ?? "Error"),
-          status: res.status,
-        },
-      }
+      return { data: { session: null, user: null }, error: await this._parseError(res) }
     }
     const json = await res.json() as Record<string, unknown>
     const user = this._parseUser((json["user"] ?? {}) as Record<string, unknown>)

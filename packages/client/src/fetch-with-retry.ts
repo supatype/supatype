@@ -11,98 +11,108 @@ export interface FetchOptions {
   timeout?: number | undefined
   /** Disable automatic retry. */
   retry?: boolean | undefined
+  /**
+   * Retry this request although its method is not GET or HEAD.
+   *
+   * Only GET and HEAD are retried by default. A POST, PUT, PATCH or DELETE that failed in flight may
+   * still have been applied, and sending it again could apply it twice. Set this when the caller
+   * knows repeating the request is harmless: a read sent as POST, or a write keyed so that a second
+   * copy changes nothing.
+   */
+  idempotent?: boolean | undefined
 }
+
+/** How a request is sent: `fetch`, or the client's retrying fetch with its timeout. */
+export type RequestTransport = (url: string, init: RequestInit & FetchOptions) => Promise<Response>
+
+/** Plain `fetch`, for a client built without a transport. */
+export const plainFetch: RequestTransport = (url, init) => fetch(url, init)
 
 const DEFAULT_MAX_RETRIES = 3
 const DEFAULT_TIMEOUT = 30000
 const RETRY_DELAYS = [200, 1000, 3000]
+const SAFE_METHODS = new Set(["GET", "HEAD"])
+
+/** Whether sending this request twice is harmless: GET, HEAD, or marked `idempotent`. */
+function isRepeatable(init: (RequestInit & FetchOptions) | undefined): boolean {
+  return SAFE_METHODS.has((init?.method ?? "GET").toUpperCase()) || init?.idempotent === true
+}
+
+/** How many times this request may be repeated: none unless it is safe to send twice. */
+function allowedRetries(init: (RequestInit & FetchOptions) | undefined): number {
+  if (init?.retry === false || !isRepeatable(init)) return 0
+  return init?.maxRetries ?? DEFAULT_MAX_RETRIES
+}
+
+/** A failure that never produced a response, as the typed error callers branch on. */
+function networkFailure(err: Error, url: string, timeout: number): NetworkError {
+  if (err.name === "AbortError") {
+    return new NetworkError(`Request timed out after ${timeout}ms`, NetworkErrorCodes.TIMEOUT)
+  }
+  const message = err.message.toLowerCase()
+  if (message.includes("econnrefused")) {
+    return new NetworkError(`Connection refused: ${url}`, NetworkErrorCodes.CONNECTION_REFUSED)
+  }
+  if (message.includes("enotfound") || message.includes("dns")) {
+    return new NetworkError(`DNS lookup failed: ${url}`, NetworkErrorCodes.DNS_FAILURE)
+  }
+  return new NetworkError(err.message)
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit | undefined, timeout: number): Promise<Response> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeout)
+  try {
+    return await fetch(url, { ...init, signal: controller.signal })
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
 
 /**
- * Fetch with automatic retry for transient errors and rate limit handling.
+ * Fetch with a timeout on every request, and retry for transient errors on requests safe to repeat.
  *
- * Retries on:
- * - Network errors (connection refused, timeout, DNS)
- * - 5xx server errors
+ * Retries GET and HEAD, and any request marked `idempotent`, on:
+ * - network errors (connection refused, DNS), but never a timeout;
+ * - 5xx server errors;
+ * - 429, after its `Retry-After`, throwing `RateLimitError` once the retries run out.
  *
- * Does NOT retry:
- * - 4xx client errors (except 429 which is handled specially)
+ * Does not retry 4xx client errors. Any other request (a POST, PUT, PATCH or DELETE not marked
+ * `idempotent`) is sent once and its response returned as it came, a 429 included, so the caller
+ * sees the server's own error rather than a `RateLimitError`.
  */
 export async function fetchWithRetry(
   url: string,
   init?: RequestInit & FetchOptions,
 ): Promise<Response> {
-  const maxRetries = init?.retry === false ? 0 : (init?.maxRetries ?? DEFAULT_MAX_RETRIES)
+  const maxRetries = allowedRetries(init)
   const timeout = init?.timeout ?? DEFAULT_TIMEOUT
-  let lastError: Error | undefined
 
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+  for (let attempt = 0; ; attempt++) {
+    const canRetry = attempt < maxRetries
+    let response: Response
     try {
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), timeout)
-
-      const response = await fetch(url, {
-        ...init,
-        signal: controller.signal,
-      })
-
-      clearTimeout(timeoutId)
-
-      // Handle rate limiting
-      if (response.status === 429) {
-        const retryAfter = parseInt(response.headers.get("Retry-After") || "5", 10)
-        if (attempt < maxRetries) {
-          await sleep(retryAfter * 1000)
-          continue
-        }
-        throw new RateLimitError(retryAfter)
-      }
-
-      // Retry on 5xx server errors
-      if (response.status >= 500 && attempt < maxRetries) {
-        await sleep(RETRY_DELAYS[attempt] ?? 3000)
-        continue
-      }
-
-      return response
+      response = await fetchWithTimeout(url, init, timeout)
     } catch (err) {
-      if (err instanceof RateLimitError) throw err
       if (err instanceof SupatypeError) throw err
-
-      lastError = err instanceof Error ? err : new Error(String(err))
-
-      // Classify the error
-      if (lastError.name === "AbortError") {
-        throw new NetworkError(
-          `Request timed out after ${timeout}ms`,
-          NetworkErrorCodes.TIMEOUT,
-        )
-      }
-
-      // Retry on network errors
-      if (attempt < maxRetries) {
-        await sleep(RETRY_DELAYS[attempt] ?? 3000)
-        continue
-      }
-
-      // Classify and throw
-      const message = lastError.message.toLowerCase()
-      if (message.includes("econnrefused")) {
-        throw new NetworkError(
-          `Connection refused: ${url}`,
-          NetworkErrorCodes.CONNECTION_REFUSED,
-        )
-      }
-      if (message.includes("enotfound") || message.includes("dns")) {
-        throw new NetworkError(
-          `DNS lookup failed: ${url}`,
-          NetworkErrorCodes.DNS_FAILURE,
-        )
-      }
-      throw new NetworkError(lastError.message)
+      const error = err instanceof Error ? err : new Error(String(err))
+      if (error.name === "AbortError" || !canRetry) throw networkFailure(error, url, timeout)
+      await sleep(RETRY_DELAYS[attempt] ?? 3000)
+      continue
     }
-  }
 
-  throw new NetworkError(lastError?.message || "Request failed after retries")
+    if (response.status === 429 && isRepeatable(init)) {
+      const retryAfter = parseInt(response.headers.get("Retry-After") || "5", 10)
+      if (!canRetry) throw new RateLimitError(retryAfter)
+      await sleep(retryAfter * 1000)
+      continue
+    }
+    if (response.status >= 500 && canRetry) {
+      await sleep(RETRY_DELAYS[attempt] ?? 3000)
+      continue
+    }
+    return response
+  }
 }
 
 function sleep(ms: number): Promise<void> {

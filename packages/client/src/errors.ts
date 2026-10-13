@@ -1,3 +1,5 @@
+import type { SupatypeError as SupatypeErrorShape } from "./types.js"
+
 /**
  * Typed error hierarchy for the Supatype SDK.
  * Every error has a machine-readable `code` field and optional `helpUrl`.
@@ -199,3 +201,20 @@ export const ErrorCodes = {
   Realtime: RealtimeErrorCodes,
   Network: NetworkErrorCodes,
 } as const
+
+/**
+ * A request that never got an answer, as a result rather than a throw.
+ *
+ * The client's fetch throws typed errors (a timeout, a rate limit after the last retry), and their
+ * code and status are what lets a caller tell "try again later" from "the server is gone".
+ */
+export function transportFailure(e: unknown): SupatypeErrorShape {
+  if (e instanceof SupatypeError) {
+    return {
+      message: e.message,
+      code: e.code,
+      ...(e.statusCode !== undefined && { status: e.statusCode }),
+    }
+  }
+  return { message: e instanceof Error ? e.message : "Network error" }
+}
