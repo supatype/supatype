@@ -9,7 +9,13 @@
 #   SUPATYPE_SERVER        Path to local server binary
 #   SUPATYPE_POSTGRES_DIR  Path to local Postgres installation directory
 #   SUPATYPE_ANON_KEY      Anon key for tests (default: integration-anon-key)
-#   SUPATYPE_URL           Base URL for tests (default: http://localhost:54399)
+#   SUPATYPE_KONG_PORT     Gateway port (default: what `supatype dev` picks, from 18473); the
+#                          tests follow it
+#   SUPATYPE_DEV_DB_PORT   Host port for Postgres (default: the first free one from 54329)
+#   SUPATYPE_STUDIO_DEV_PORT  Studio dev server port (default 3002)
+#   SUPATYPE_E2E_PROJECT   Compose project name for this run (default supatype-integration, so
+#                          supatype-supatype-integration). With the ports above, a run from another
+#                          checkout can go beside this one. See lib/e2e-project.sh.
 
 set -euo pipefail
 
@@ -17,6 +23,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INTEGRATION_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ROOT_DIR="$(cd "$INTEGRATION_DIR/../.." && pwd)"
 source "$SCRIPT_DIR/lib/http-wait.sh"
+source "$SCRIPT_DIR/lib/e2e-project.sh"
 
 resolve_engine_binary() {
   local base="$ROOT_DIR/../supatype-schema-engine/target/release/supatype-engine"
@@ -74,31 +81,19 @@ SUPATYPE_PID=""
 cleanup() {
   echo ""
   echo "==> Teardown"
-  # Capture Postgres evidence before killing `supatype dev` (its shutdown runs compose down).
-  if declare -F dump_compose_diagnostics >/dev/null 2>&1; then
-    dump_compose_diagnostics || true
-  fi
-  if [[ -n "$SUPATYPE_PID" ]]; then
-    kill "$SUPATYPE_PID" 2>/dev/null || true
-    # Compose-down during graceful shutdown can hang in CI, bound the wait.
-    for _ in $(seq 1 20); do
-      if ! kill -0 "$SUPATYPE_PID" 2>/dev/null; then
-        break
-      fi
-      sleep 1
-    done
-    if kill -0 "$SUPATYPE_PID" 2>/dev/null; then
-      echo "  Force-killing hung supatype dev (pid $SUPATYPE_PID)..."
-      kill -9 "$SUPATYPE_PID" 2>/dev/null || true
+  # A run refused at the lock or the project check started nothing, and the stack it would name
+  # belongs to the run holding them.
+  if e2e_project_claimed; then
+    # Capture Postgres evidence before killing `supatype dev` (its shutdown runs compose down).
+    if declare -F dump_compose_diagnostics >/dev/null 2>&1; then
+      dump_compose_diagnostics || true
     fi
-    wait "$SUPATYPE_PID" 2>/dev/null || true
+    stop_pid_bounded "$SUPATYPE_PID"
+    if declare -F remove_compose_stack >/dev/null 2>&1; then
+      remove_compose_stack || true
+    fi
   fi
-  if declare -F stop_compose_stack >/dev/null 2>&1; then
-    stop_compose_stack || true
-  fi
-  if [[ -n "${INTEGRATION_LOCK_DIR:-}" ]]; then
-    rmdir "$INTEGRATION_LOCK_DIR" 2>/dev/null || true
-  fi
+  e2e_project_release
   echo "  Done."
 }
 trap cleanup EXIT INT TERM
@@ -145,7 +140,13 @@ export SUPATYPE_SERVER="${SUPATYPE_SERVER:-$(resolve_server_binary)}"
 export SUPATYPE_REALTIME="${SUPATYPE_REALTIME:-$ROOT_DIR/packages/realtime/dist/index.js}"
 export SUPATYPE_PROVIDER="${SUPATYPE_PROVIDER:-docker}"
 
+# One run per checkout, taken before anything is written into it: overlapping runs share one
+# .env, one database and fixed slugs. A run beside this one goes in another checkout, under its
+# own SUPATYPE_E2E_PROJECT.
+e2e_lock "$INTEGRATION_DIR"
 node "$SCRIPT_DIR/write-local-config.mjs" "$INTEGRATION_DIR/supatype.local.config.ts"
+# After the file above, which it merges into when the project is renamed.
+e2e_project_use "$INTEGRATION_DIR" supatype-integration
 
 # ── Step 3: Docker images + supatype dev ─────────────────────────────────────
 
@@ -156,16 +157,7 @@ export SUPATYPE_URL="$BASE_URL"
 
 cd "$INTEGRATION_DIR"
 
-# Prevent concurrent runs: overlapping runs share one DB and flake on fixed slugs.
-INTEGRATION_LOCK_DIR="$INTEGRATION_DIR/.supatype/.integration-test.lock.d"
-mkdir -p "$(dirname "$INTEGRATION_LOCK_DIR")"
-if ! mkdir "$INTEGRATION_LOCK_DIR" 2>/dev/null; then
-  echo "ERROR: Another integration test is already running."
-  echo "  Stop other terminals (Ctrl+C) or remove: $INTEGRATION_LOCK_DIR"
-  exit 1
-fi
-
-COMPOSE_PROJECT="supatype-supatype-integration"
+COMPOSE_PROJECT="$E2E_COMPOSE_PROJECT"
 COMPOSE_FILE="$INTEGRATION_DIR/.supatype/self-host/docker-compose.yml"
 
 compose_args() {
@@ -214,6 +206,17 @@ dump_compose_diagnostics() {
   dmesg -T 2>/dev/null | tail -n 100 >"$out/dmesg-tail.txt" || true
 }
 
+# compose_down <down-args...> - `docker compose down` for this run's stack, bounded: it can hang in CI.
+compose_down() {
+  local args
+  mapfile -t args < <(compose_args)
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 120 docker "${args[@]}" down "$@" >/dev/null 2>&1 || true
+  else
+    docker "${args[@]}" down "$@" >/dev/null 2>&1 || true
+  fi
+}
+
 stop_compose_stack() {
   if [[ ! -f "$COMPOSE_FILE" ]]; then
     echo "  (no compose file, skip)"
@@ -228,12 +231,17 @@ stop_compose_stack() {
     return 0
   fi
   echo "  Stopping $running container(s)..."
-  if command -v timeout >/dev/null 2>&1; then
-    timeout 120 docker "${args[@]}" down --remove-orphans >/dev/null 2>&1 || true
-  else
-    docker "${args[@]}" down --remove-orphans >/dev/null 2>&1 || true
-  fi
+  compose_down --remove-orphans
   echo "  Compose stack stopped."
+}
+
+# The teardown, with the volumes. `supatype dev` stops the containers on its way out, so
+# stop_compose_stack found nothing running and left the database volume behind, and the next run
+# under the same project, from any checkout, started on that old database.
+remove_compose_stack() {
+  [[ -f "$COMPOSE_FILE" ]] || return 0
+  compose_down -v --remove-orphans
+  echo "  Compose stack and its volumes removed."
 }
 
 if [[ "$SUPATYPE_PROVIDER" == "docker" ]]; then

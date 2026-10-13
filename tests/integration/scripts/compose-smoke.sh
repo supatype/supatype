@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Smoke-test self-host Docker images (supatype/postgres, supatype/server, etc.).
+#
+# Beside another run, from another checkout: SUPATYPE_E2E_PROJECT names this run's compose project,
+# and SUPATYPE_KONG_PORT, SUPATYPE_SERVER_PORT and SUPATYPE_SEAWEEDFS_PORT move its ports. See
+# lib/e2e-project.sh.
 set -euo pipefail
-
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/http-wait.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INTEGRATION_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -13,10 +15,19 @@ KONG_PORT="${SUPATYPE_KONG_PORT:-18473}"
 BASE_URL="${COMPOSE_SMOKE_URL:-http://localhost:${KONG_PORT}}"
 MAX_WAIT=120
 
+source "$SCRIPT_DIR/lib/http-wait.sh"
+source "$SCRIPT_DIR/lib/e2e-project.sh"
+
+e2e_project_use "$INTEGRATION_DIR" supatype-integration
+# Exported so compose binds the port this script waits on, whatever an old .env says.
+export SUPATYPE_KONG_PORT="$KONG_PORT"
+
 cleanup() {
-  if [[ -d "$COMPOSE_DIR" ]]; then
-    (cd "$INTEGRATION_DIR" && node "$CLI_BIN" self-host compose down) || true
-  fi
+  # By project name, with the volumes. This used `self-host compose down`, which keeps them: the
+  # project's database outlived the run, and the next stack under the same name, the integration
+  # suite's included, started on it.
+  e2e_project_down
+  e2e_project_release
 }
 trap cleanup EXIT INT TERM
 
@@ -44,8 +55,10 @@ compose_ready() { http_ok "$BASE_URL/auth/v1/health"; }
 
 if ! wait_until "$MAX_WAIT" "$BASE_URL/auth/v1/health" compose_ready; then
   echo "  ERROR: Compose stack did not become ready within ${MAX_WAIT}s"
-  docker compose -f "$COMPOSE_DIR/docker-compose.yml" ps || true
-  docker logs integration-server-1 2>&1 | tail -20 || true
+  # By project name: without -p compose derives one from the directory and finds no containers,
+  # and the server container is `<project>-server-1`, not the `integration-server-1` this once named.
+  docker compose -p "$E2E_COMPOSE_PROJECT" -f "$COMPOSE_DIR/docker-compose.yml" ps || true
+  docker compose -p "$E2E_COMPOSE_PROJECT" -f "$COMPOSE_DIR/docker-compose.yml" logs --tail 20 server 2>&1 || true
   exit 1
 fi
 # Studio's caching and the header-buffer raise, asserted against the running images rather than the

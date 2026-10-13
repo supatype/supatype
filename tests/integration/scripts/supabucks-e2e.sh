@@ -9,6 +9,9 @@
 #
 # Usage:
 #   bash tests/integration/scripts/supabucks-e2e.sh
+#
+# Beside another run, from another checkout: SUPATYPE_E2E_PROJECT names this run's compose project
+# and SUPATYPE_KONG_PORT moves the gateway. See lib/e2e-project.sh.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,6 +26,11 @@ MAX_WAIT="${SUPABUCKS_E2E_MAX_WAIT:-300}"
 
 source "$SCRIPT_DIR/lib/http-wait.sh"
 source "$SCRIPT_DIR/lib/example-keys.sh"
+source "$SCRIPT_DIR/lib/e2e-project.sh"
+
+e2e_project_use "$EXAMPLE_DIR" supabucks
+# Exported so `supatype dev` binds the port this script waits on, rather than the next free one.
+export SUPATYPE_KONG_PORT="$KONG_PORT"
 
 DEV_PID=""
 ENV_EXISTED="no"
@@ -34,15 +42,17 @@ cleanup() {
   # 401 and by the time anyone could ask it why, the database was gone. Set this to keep the stack
   # up and query it, the way `zero-to-running` already allows.
   if [[ "${SUPATYPE_E2E_KEEP:-}" == "1" ]]; then
-    echo "==> teardown skipped (SUPATYPE_E2E_KEEP=1); stack left running at $BASE_URL"
+    echo "==> teardown skipped (SUPATYPE_E2E_KEEP=1); stack $E2E_COMPOSE_PROJECT left running at $BASE_URL"
     if [[ -n "$DEV_PID" ]]; then kill "$DEV_PID" 2>/dev/null || true; fi
+    e2e_project_release
     return
   fi
   echo "==> teardown"
   if [[ -n "$DEV_PID" ]]; then kill "$DEV_PID" 2>/dev/null || true; fi
-  (cd "$EXAMPLE_DIR" && docker compose -p supatype-supabucks down -v --remove-orphans) >/dev/null 2>&1 || true
+  e2e_project_down
   # The .env this script mints into is not gitignored here, so a failure must not leave a key behind.
   if [[ "$ENV_EXISTED" == "no" ]]; then rm -f "$EXAMPLE_DIR/.env"; fi
+  e2e_project_release
 }
 trap cleanup EXIT INT TERM
 

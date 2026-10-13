@@ -12,7 +12,8 @@
 # Environment:
 #   SUPATYPE_KONG_PORT        gateway port (default 18477)
 #   POSITIONING_DB_PORT       host port for Postgres (default 54477)
-#   POSITIONING_PROJECT_NAME  project and compose name suffix (default positioning)
+#   POSITIONING_PROJECT_NAME  project and compose name suffix (default SUPATYPE_E2E_PROJECT, then
+#                             positioning)
 #   MASKING_CLI               the CLI to test (default this checkout's)
 #   MASKING_ENGINE_BIN        optional local engine binary, written into overrides.engine
 set -euo pipefail
@@ -20,7 +21,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 E2E_DIR="$ROOT_DIR/tests/e2e"
-NAME="${POSITIONING_PROJECT_NAME:-positioning}"
+NAME="${POSITIONING_PROJECT_NAME:-${SUPATYPE_E2E_PROJECT:-positioning}}"
 STATE_DIR="$E2E_DIR/positioning/.state"
 # Inside tests/e2e, so the project resolves @supatype/* from the workspace without an install.
 PROJECT_DIR="$STATE_DIR/$NAME"

@@ -14,14 +14,20 @@
 #   bash tests/integration/scripts/hook-adapter.sh
 #
 # Environment:
-#   SUPATYPE_HOOK_PORT   host port for the worker (default 8099)
+#   SUPATYPE_HOOK_PORT   host port for the worker, and the three after it (default 8099)
+#   SUPATYPE_HOOK_INTERNAL_PORT  host port for the stub internal API (default 8098)
+#   SUPATYPE_HOOK_EXTERNAL_PORT  host port for the stub external API (default 8097)
+#   SUPATYPE_E2E_PROJECT suffixes the container names, to run beside another run
 #   SUPATYPE_DENO_IMAGE  Deno image (default denoland/deno:2.1.4)
 set -euo pipefail
 
 PORT="${SUPATYPE_HOOK_PORT:-8099}"
+INTERNAL_STUB_PORT="${SUPATYPE_HOOK_INTERNAL_PORT:-8098}"
+EXTERNAL_STUB_PORT="${SUPATYPE_HOOK_EXTERNAL_PORT:-8097}"
 DENO_IMAGE="${SUPATYPE_DENO_IMAGE:-denoland/deno:2.1.4}"
-CONTAINER="supatype-hook-adapter-test"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+source "$REPO_ROOT/tests/integration/scripts/lib/e2e-project.sh"
+CONTAINER="$(e2e_scoped supatype-hook-adapter-test)"
 WORK="$(mktemp -d)"
 STUB_PID=""
 STUB2_PID=""
@@ -182,13 +188,13 @@ cp "$REPO_ROOT"/packages/functions-worker/*.ts "$REPO_ROOT/packages/functions-wo
 
 STUB_LOG="$WORK/stub.log"
 : > "$STUB_LOG"
-node "$WORK/previous-stub.mjs" 8098 "$STUB_LOG" &
+node "$WORK/previous-stub.mjs" "$INTERNAL_STUB_PORT" "$STUB_LOG" &
 STUB_PID=$!
 
 # Somebody else's API, so the test can tell "carried onward" from "leaked to everyone".
 EXTERNAL_LOG="$WORK/external.log"
 : > "$EXTERNAL_LOG"
-node "$WORK/previous-stub.mjs" 8097 "$EXTERNAL_LOG" &
+node "$WORK/previous-stub.mjs" "$EXTERNAL_STUB_PORT" "$EXTERNAL_LOG" &
 STUB2_PID=$!
 
 # Docker is the more faithful runtime, but a local `deno` runs the same worker code and keeps this
@@ -205,8 +211,8 @@ if ! docker info >/dev/null 2>&1; then
     SUPATYPE_HOOKS_ROOT="$WORK/hooks" \
     SUPATYPE_SERVICE_ROLE_KEY=super-secret-admin-key \
     SUPATYPE_SERVICE_ROLE_ROUTES=granted-fn \
-    SUPATYPE_INTERNAL_URL="http://localhost:8098" \
-    SUPATYPE_EXTERNAL_URL="http://localhost:8097" \
+    SUPATYPE_INTERNAL_URL="http://localhost:${INTERNAL_STUB_PORT}" \
+    SUPATYPE_EXTERNAL_URL="http://localhost:${EXTERNAL_STUB_PORT}" \
     PORT="$PORT" \
     deno run --allow-all "$WORK/worker/main.ts" > "$WORK/worker.log" 2>&1 &
     echo $! > "$WORK/worker.pid"
@@ -230,8 +236,8 @@ if ! MSYS_NO_PATHCONV=1 docker run -d --name "$CONTAINER" \
   -e SUPATYPE_HOOKS_ROOT=/project/hooks \
   -e SUPATYPE_SERVICE_ROLE_KEY=super-secret-admin-key \
   -e SUPATYPE_SERVICE_ROLE_ROUTES=granted-fn \
-  -e SUPATYPE_INTERNAL_URL=http://host.docker.internal:8098 \
-  -e SUPATYPE_EXTERNAL_URL=http://host.docker.internal:8097 \
+  -e SUPATYPE_INTERNAL_URL="http://host.docker.internal:${INTERNAL_STUB_PORT}" \
+  -e SUPATYPE_EXTERNAL_URL="http://host.docker.internal:${EXTERNAL_STUB_PORT}" \
   -e PORT=8001 \
   --add-host host.docker.internal:host-gateway \
   -v "$(mount_path "$WORK"):/project:ro" \
