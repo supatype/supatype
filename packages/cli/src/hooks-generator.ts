@@ -1,5 +1,5 @@
 /**
- * Generate `functions/_supatype/hooks.ts`: the typed handler surface for model hooks.
+ * Generate `hooks/_supatype/hooks.ts`: the typed handler surface for model hooks.
  *
  * Generated into the project rather than shipped as a package, for two reasons: a Deno function
  * resolves a relative `.ts` import with no npm involved, and the types then move in lockstep with the
@@ -413,7 +413,7 @@ function json(body: unknown, status: number): Response {
  * Replace cross-package type imports the client types use but a hook cannot resolve.
  *
  * `RichText` normally generates `import("@supatype/types/lexical").SerializedEditorState`. That works
- * in an app, where the package is installed, but this file lives in `functions/`, is imported by a
+ * in an app, where the package is installed, but this file lives in `hooks/`, is imported by a
  * Deno handler, and has no node_modules to reach into. Left alone, any hooked model with a rich-text
  * column emitted a module that failed to compile in the user's editor. Caught by compiling the
  * generated file in a test rather than by a reader reporting it.
