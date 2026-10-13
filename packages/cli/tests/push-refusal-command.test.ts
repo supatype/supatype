@@ -41,8 +41,16 @@ vi.mock("../src/schema-sources.js", () => ({
   buildSchemaSourcesPayload: () => null,
   cacheSchemaSourcesLocally: () => undefined,
 }))
+// Waiting for the linked server's REST API is rest-ready.test.ts's subject, not this one's.
+vi.mock("../src/rest-ready.js", () => ({ waitForRestReady: async () => true }))
 vi.mock("../src/resolve-target.js", () => ({
-  resolveTarget: () => ({ mode: "self-host", environment: "prod", projectRef: "app", link: null }),
+  resolveTarget: () => ({
+    mode: "self-host",
+    environment: "prod",
+    projectRef: "app",
+    apiBaseUrl: "https://app.example.test",
+    link: null,
+  }),
   targetSchemaDiff: async () => ({ operations: [], reconcile: [] }),
   targetSchemaPush,
   targetSchemaAdopt: vi.fn(),

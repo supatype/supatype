@@ -77,7 +77,19 @@ supatype self-host compose render    # write docker-compose.yml (includes contro
 supatype self-host compose up -d     # start production stack
 supatype self-host compose down      # stop
 supatype self-host compose status    # health check
+supatype self-host compose restart server   # recreate one service after a .env change
 ```
+
+Use `restart <service>` rather than a hand-typed `docker compose` command. The generated
+`.supatype/self-host/docker-compose.yml` names the project's folders by absolute path, and every
+`self-host compose` command renders it again, so a project that moved is picked up there.
+
+**REST answers 503 until the first push.** A fresh stack returns `503` with `PGRST002` on every
+`/rest/v1/` request: PostgREST will not serve until the schemas it exposes exist, and `supatype
+push` creates them. This is expected, not a fault; run `supatype push` after `compose up -d`.
+PostgREST then notices on its next retry, which can be up to about 30 s later, so `push` against
+the compose stack waits (at most 40 s) until REST stops answering 503, printing one line while it
+waits and saying so if it gives up. `supatype dev` is unaffected: it pushes before PostgREST starts.
 
 ## Custom domain + automatic HTTPS
 

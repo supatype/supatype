@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { runtimeRouteSpec } from "../src/runtime-routes.js"
 import { buildKongDeclarative } from "../src/kong-config.js"
-import { composeDockerImageEnv, composePullNeedsIgnoreFailures, hasLocalVersionPins, isRegistryPullableImageRef, renderSelfHostCompose, writeSelfHostCompose } from "../src/self-host-compose.js"
+import { composeDockerImageEnv, composeHostPath, composePullNeedsIgnoreFailures, hasLocalVersionPins, isRegistryPullableImageRef, renderSelfHostCompose, writeSelfHostCompose } from "../src/self-host-compose.js"
 import { updateAppConfigInProject, updateServerConfigInProject } from "../src/app-config.js"
 import type { SupatypeProjectConfig } from "../src/project-config.js"
 import { DENO_RELEASE_PIN } from "../src/release-pins.js"
@@ -278,17 +278,8 @@ describe("runtime contract", () => {
     }
   })
 
-  it("self-host compose mounts project root at /project (project-directory relative)", () => {
-    const compose = renderSelfHostCompose(baseConfig)
-    expect(compose).toContain("- .:/project")
-    expect(compose).not.toMatch(/- \.\.\/\.\.:\/project/)
-  })
-
-  it("self-host compose mounts kong.yml from .supatype/self-host (project-directory relative)", () => {
-    const compose = renderSelfHostCompose(baseConfig)
-    expect(compose).toContain("- .supatype/self-host/kong.yml:/etc/kong/kong.yml:ro")
-    expect(compose).not.toContain("- ./kong.yml:/etc/kong/kong.yml:ro")
-  })
+  // Where the project, kong.yml and s3.json are mounted from is pinned in
+  // self-host-compose-mounts.test.ts: absolute host paths, so a hand-run compose agrees (SA3).
 
   it("devLocal compose omits the production ports", () => {
     const compose = renderSelfHostCompose(baseConfig, process.cwd(), { devLocal: true })
@@ -760,7 +751,7 @@ export default defineConfig({
       // wrong renders a stack that starts cleanly and fails on the first upload.
       expect(compose).toContain("S3_ENDPOINT: http://seaweedfs:8333")
       expect(compose).toContain("-s3.config=/etc/seaweedfs/s3.json")
-      expect(compose).toContain(".supatype/self-host/s3.json:/etc/seaweedfs/s3.json:ro")
+      expect(compose).toContain(`source: ${JSON.stringify(composeHostPath(out.s3ConfigPath))}\n        target: /etc/seaweedfs/s3.json`)
       expect(compose).toContain("  storage-data:")
 
       // Same credentials in both halves, checked rather than assumed: a mismatch here does not

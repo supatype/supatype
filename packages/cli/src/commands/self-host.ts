@@ -69,13 +69,12 @@ export function registerSelfHost(program: Command): void {
       }
       // Before the spinner, so the warning is not drawn over.
       warnProjectAuthProviderSecrets(cwd, config)
-      const brand = { intro: "Self-host deployment" }
       const status = await withSpinner("Starting self-host Compose stack", async () => {
         const out = writeSelfHostCompose(cwd, config)
-        return runDockerCompose(out.composePath, args, cwd, project, { brand })
+        return runDockerCompose(out.composePath, args, cwd, project, { brand: SELF_HOST_BRAND })
       })
       if (status !== 0) {
-        exitComposeFailed(status, "Could not start the self-host Compose stack.", brand)
+        exitComposeFailed(status, "Could not start the self-host Compose stack.", SELF_HOST_BRAND)
       }
     })
 
@@ -83,19 +82,22 @@ export function registerSelfHost(program: Command): void {
     .command("down")
     .description("Stop compose services")
     .action(() => {
-      const cwd = process.cwd()
-      const config = loadConfig(cwd)
-      const out = writeSelfHostCompose(cwd, config)
-      const brand = { intro: "Self-host deployment" }
-      const status = runDockerCompose(
-        out.composePath,
-        ["down"],
-        cwd,
-        composeProjectName(config.project.name),
-        { brand },
-      )
+      const status = renderAndRunCompose(["down"])
       if (status !== 0) {
-        exitComposeFailed(status, "Could not stop the self-host Compose stack.", brand)
+        exitComposeFailed(status, "Could not stop the self-host Compose stack.", SELF_HOST_BRAND)
+      }
+    })
+
+  // Recreated rather than `docker compose restart`, which keeps the container as it was created:
+  // a changed .env or config would not reach it, and that is what a restart is usually for.
+  // Through `up`, so a Kong in front of a recreated service is reloaded onto its new address.
+  composeCmd
+    .command("restart <service>")
+    .description("Recreate one service with the current config and .env, leaving the others running")
+    .action((service: string) => {
+      const status = renderAndRunCompose(["up", "-d", "--force-recreate", "--no-deps", service])
+      if (status !== 0) {
+        exitComposeFailed(status, `Could not restart ${service}.`, SELF_HOST_BRAND)
       }
     })
 
@@ -103,16 +105,7 @@ export function registerSelfHost(program: Command): void {
     .command("status")
     .description("Show compose service status")
     .action(() => {
-      const cwd = process.cwd()
-      const config = loadConfig(cwd)
-      const out = writeSelfHostCompose(cwd, config)
-      process.exitCode = runDockerCompose(
-        out.composePath,
-        ["ps"],
-        cwd,
-        composeProjectName(config.project.name),
-        { brand: { intro: "Self-host deployment" } },
-      )
+      process.exitCode = renderAndRunCompose(["ps"])
     })
 
   composeCmd
@@ -121,19 +114,10 @@ export function registerSelfHost(program: Command): void {
     .option("--service <name>", "Filter to one service")
     .option("-f, --follow", "Follow log output", true)
     .action((opts: { service?: string; follow?: boolean }) => {
-      const cwd = process.cwd()
-      const config = loadConfig(cwd)
-      const out = writeSelfHostCompose(cwd, config)
       const args = ["logs"]
       if (opts.follow) args.push("-f")
       if (opts.service) args.push(opts.service)
-      process.exitCode = runDockerCompose(
-        out.composePath,
-        args,
-        cwd,
-        composeProjectName(config.project.name),
-        { brand: { intro: "Self-host deployment" } },
-      )
+      process.exitCode = renderAndRunCompose(args)
     })
 
   // ── Native/systemd helpers (hidden; compose is the default self-host path) ─────
@@ -406,6 +390,21 @@ export function registerSelfHost(program: Command): void {
         process.exit(1)
       }
     })
+}
+
+const SELF_HOST_BRAND = { intro: "Self-host deployment" }
+
+/**
+ * Render the compose file from the current config, then run `args` against this project's stack.
+ * Rendered first every time, so the file never names a stale host path or a config that changed.
+ */
+function renderAndRunCompose(args: string[]): number {
+  const cwd = process.cwd()
+  const config = loadConfig(cwd)
+  const out = writeSelfHostCompose(cwd, config)
+  return runDockerCompose(out.composePath, args, cwd, composeProjectName(config.project.name), {
+    brand: SELF_HOST_BRAND,
+  })
 }
 
 function logNativeHint(cmd: string): void {
