@@ -478,12 +478,9 @@ export class MutationBuilder<TRow> extends FilterBuilder implements PromiseLike<
       ...this.extraHeaders,
       ...fetchHeaders,
     })
-    const init: RequestInit & FetchOptions = {
+    // POST, PATCH and DELETE: the transport applies the timeout and never retries them.
+    const init: RequestInit = {
       method: this.method,
-      // The timeout applies, the retry never does. A write that failed with a 5xx or a dropped
-      // connection may still have been applied, and sending it again would insert the row twice
-      // or run its triggers twice.
-      retry: false,
       // Not `JSON.stringify`: it throws on a bigint, so reading a row with a bigInt column and
       // writing it back would fail now that the generated types declare one.
       ...(this.body !== undefined && { body: stringifyWithBigInts(this.body) }),

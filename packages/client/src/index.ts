@@ -1,7 +1,8 @@
 import { AuthClient } from "./auth.js"
 import { onIdentityChange } from "./identity.js"
 import { PreviewCredential } from "./preview.js"
-import { QueryBuilder, MutationBuilder, fetchWithOptional401Retry, type HeadersProvider, type RequestTransport } from "./query.js"
+import { QueryBuilder, MutationBuilder, fetchWithOptional401Retry, type HeadersProvider } from "./query.js"
+import type { FetchOptions, RequestTransport } from "./fetch-with-retry.js"
 import { defaultQueryCache, type QueryCache } from "./query-cache.js"
 import { StorageClient } from "./storage.js"
 import { RealtimeClient } from "./realtime.js"
@@ -390,18 +391,26 @@ export interface FunctionInvokeOptions {
   headers?: Record<string, string> | undefined
   /** Request body (JSON-serialisable) */
   body?: unknown | undefined
+  /**
+   * Retry this call on a transient failure although it is not a GET. Default: false.
+   *
+   * Only GET calls are retried otherwise: a POST that failed in flight may already have run the
+   * function, and running it again could charge a card or send an email twice. Set this when a
+   * second run is harmless.
+   */
+  idempotent?: boolean | undefined
 }
 
 class FunctionsClient {
   private readonly baseUrl: string
   private readonly getHeaders: HeadersProvider
   private readonly onUnauthorized: (() => Promise<void>) | undefined
-  private readonly doFetch: (url: string, init?: RequestInit) => Promise<Response>
+  private readonly doFetch: RequestTransport
 
   constructor(
     baseUrl: string,
     getHeaders: HeadersProvider,
-    doFetch: (url: string, init?: RequestInit) => Promise<Response>,
+    doFetch: RequestTransport,
     onUnauthorized?: (() => Promise<void>) | undefined,
   ) {
     this.baseUrl = baseUrl
@@ -431,8 +440,9 @@ class FunctionsClient {
       ...options?.headers,
     })
 
-    const fetchOpts: RequestInit = {
+    const fetchOpts: RequestInit & FetchOptions = {
       method,
+      ...(options?.idempotent === true && { idempotent: true }),
     }
 
     if (options?.body !== undefined && method !== "GET") {
@@ -440,19 +450,13 @@ class FunctionsClient {
     }
 
     try {
-      let headers = await resolveHeaders()
-      let res = await this.doFetch(
+      const res = await fetchWithOptional401Retry(
+        this.doFetch,
         `${this.baseUrl}/functions/v1/${functionName}`,
-        { ...fetchOpts, headers },
+        fetchOpts,
+        resolveHeaders,
+        this.onUnauthorized,
       )
-      if (res.status === 401 && this.onUnauthorized !== undefined) {
-        await this.onUnauthorized()
-        headers = await resolveHeaders()
-        res = await this.doFetch(
-          `${this.baseUrl}/functions/v1/${functionName}`,
-          { ...fetchOpts, headers },
-        )
-      }
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({})) as Record<string, unknown>
@@ -493,9 +497,11 @@ export interface SupatypeClient<TDatabase extends AnyDatabase = AugmentedDatabas
   storage: StorageClient
   realtime: RealtimeClient
   functions: FunctionsClient
+  /** `options.idempotent`: retry on a transient failure, for a query that is not a mutation. */
   graphql(
     query: string,
     variables?: Record<string, unknown> | undefined,
+    options?: { idempotent?: boolean | undefined } | undefined,
   ): Promise<{ data: unknown; error: SupatypeError | null }>
   /**
    * Call a Postgres function via PostgREST's `/rpc/function_name` endpoint.
@@ -672,9 +678,14 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
     realtime,
     functions,
 
+    /**
+     * Run a GraphQL query. Sent as a POST, so it is not retried unless `options.idempotent` says a
+     * second copy is harmless, as it is for any query that is not a mutation.
+     */
     async graphql(
       query: string,
       variables?: Record<string, unknown> | undefined,
+      options?: { idempotent?: boolean | undefined } | undefined,
     ): Promise<{ data: unknown; error: SupatypeError | null }> {
       const body: Record<string, unknown> = { query }
       if (variables !== undefined) {
@@ -682,19 +693,13 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
       }
       let res: Response
       try {
-        res = await doFetch(`${config.url}/graphql/v1`, {
-          method: "POST",
-          headers: await getAuthHeaders(),
-          body: JSON.stringify(body),
-        })
-        if (res.status === 401 && onUnauthorized !== undefined) {
-          await onUnauthorized()
-          res = await doFetch(`${config.url}/graphql/v1`, {
-            method: "POST",
-            headers: await getAuthHeaders(),
-            body: JSON.stringify(body),
-          })
-        }
+        res = await fetchWithOptional401Retry(
+          doFetch,
+          `${config.url}/graphql/v1`,
+          { method: "POST", body: JSON.stringify(body), ...(options?.idempotent === true && { idempotent: true }) },
+          getAuthHeaders,
+          onUnauthorized,
+        )
       } catch (e) {
         return { data: null, error: transportFailure(e) }
       }
@@ -743,6 +748,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
           {
             method,
             ...(params !== undefined && method !== "HEAD" && { body: JSON.stringify(params) }),
+            ...(options?.idempotent === true && { idempotent: true }),
           },
           rpcHeaders,
           onUnauthorized,

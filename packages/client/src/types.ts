@@ -192,6 +192,14 @@ export interface RpcOptions {
   count?: "exact" | "planned" | "estimated" | undefined
   /** Postgres schema holding the function, sent as `Content-Profile`. */
   schema?: string | undefined
+  /**
+   * Retry this call on a transient failure (a dropped connection, a 5xx, a 429). Default: false.
+   *
+   * An RPC is a POST, and the client cannot tell a read from a write: a call that failed in flight
+   * may already have run, and running it again could apply its writes twice. Set this for a
+   * function that only reads, or whose writes are safe to repeat. A `head` call is always retried.
+   */
+  idempotent?: boolean | undefined
 }
 
 export interface RpcResult<TData> {
@@ -375,9 +383,10 @@ export interface SupatypeClientConfig {
   /**
    * Retry a transient failure (a dropped connection, a 5xx, a 429). Default: true.
    *
-   * Applies to table reads (`select`) and to `rpc`, `graphql` and `functions`. Table writes
-   * (`insert`, `upsert`, `update`, `delete`) are never retried, whatever this says: a write that
-   * failed in flight may still have been applied, and sending it again could apply it twice.
+   * Only GET and HEAD requests are retried, such as table selects. Every other request is sent
+   * once, whatever this says: a write that failed in flight may still have been applied, and
+   * sending it again could apply it twice. `rpc`, `graphql` and `functions.invoke` take
+   * `idempotent: true` per call to opt in.
    */
   retry?: boolean | undefined
   /**
