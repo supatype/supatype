@@ -22,6 +22,7 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates libssl3 docker.io && \
     rm -rf /var/lib/apt/lists/*
 
+COPY --chmod=0644 packages/self-host-control/LICENSE /LICENSE
 COPY --from=engine /usr/local/bin/supatype-engine /usr/local/bin/supatype-engine
 
 COPY --from=builder /out/node_modules ./node_modules
