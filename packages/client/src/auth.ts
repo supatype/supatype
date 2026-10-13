@@ -32,6 +32,26 @@ const DEFAULT_STORAGE_KEY = "supatype.auth.session"
 const DEFAULT_COOKIE_PREFIX = "st"
 const DEBUG_AUTH = typeof process !== "undefined" && process.env["NEXT_PUBLIC_SUPATYPE_DEBUG_AUTH"] === "1"
 
+/**
+ * The auth server's refusal as a `SupatypeError`, with its machine-readable code kept.
+ *
+ * Two body shapes arrive: `{ code, error_code, msg }` from the API, and the OAuth token endpoint's
+ * `{ error, error_description }`, where `error` is the code. The code is what an app branches on
+ * (`invalid_credentials`, `weak_password`, `email_not_confirmed`); the numeric `code` in the first
+ * shape is only the HTTP status again, so it is not used. Message precedence follows supabase-js.
+ */
+function authErrorFromBody(body: Record<string, unknown>, status: number): SupatypeError {
+  const text = (key: string): string | undefined => {
+    const value = body[key]
+    return typeof value === "string" && value !== "" ? value : undefined
+  }
+  const code = text("error_code") ?? text("error")
+  const message =
+    text("msg") ?? text("message") ?? text("error_description") ?? text("error") ??
+    `Auth request failed (HTTP ${status})`
+  return { message, status, ...(code !== undefined && { code }) }
+}
+
 export class AuthClient {
   private readonly url: string
   private readonly baseHeaders: Record<string, string>
@@ -400,16 +420,10 @@ export class AuthClient {
       parsed.hash.startsWith("#") ? parsed.hash.slice(1) : parsed.hash,
     )
 
-    const errorDescription =
-      query.get("error_description") ??
-      hashParams.get("error_description") ??
-      query.get("error") ??
-      hashParams.get("error")
-    if (errorDescription !== null && errorDescription !== "") {
-      return {
-        data: { session: null, user: null },
-        error: { message: errorDescription, status: 400 },
-      }
+    // A refused link comes back with the same fields as a refused request, in the URL instead.
+    const redirectError = { ...Object.fromEntries(hashParams), ...Object.fromEntries(query) }
+    if (redirectError["error_description"] || redirectError["error"]) {
+      return { data: { session: null, user: null }, error: authErrorFromBody(redirectError, 400) }
     }
 
     // The auth server marks the link it sent with `type`; a recovery link signs the user in so they
@@ -499,14 +513,7 @@ export class AuthClient {
         error: null,
       }
     }
-    const err = await res.json().catch(() => ({})) as Record<string, unknown>
-    return {
-      data: {},
-      error: {
-        message: String(err["error_description"] ?? err["msg"] ?? "Error"),
-        status: res.status,
-      },
-    }
+    return { data: {}, error: await this._parseError(res) }
   }
 
   async signOut(): Promise<{ error: SupatypeError | null }> {
@@ -546,10 +553,7 @@ export class AuthClient {
       },
     })
     if (!res.ok) {
-      return {
-        data: { user: null },
-        error: { message: "Could not get user", status: res.status },
-      }
+      return { data: { user: null }, error: await this._parseError(res) }
     }
     const raw = await res.json() as Record<string, unknown>
     return { data: { user: this._parseUser(raw) }, error: null }
@@ -595,14 +599,7 @@ export class AuthClient {
       body: JSON.stringify({ email }),
     })
     if (res.ok) return { data: {}, error: null }
-    const err = await res.json().catch(() => ({})) as Record<string, unknown>
-    return {
-      data: {},
-      error: {
-        message: String(err["error_description"] ?? err["msg"] ?? "Error"),
-        status: res.status,
-      },
-    }
+    return { data: {}, error: await this._parseError(res) }
   }
 
   async updateUser(updates: {
@@ -622,14 +619,7 @@ export class AuthClient {
       body: JSON.stringify(updates),
     })
     if (!res.ok) {
-      const err = await res.json().catch(() => ({})) as Record<string, unknown>
-      return {
-        data: { user: null },
-        error: {
-          message: String(err["error_description"] ?? err["msg"] ?? "Error"),
-          status: res.status,
-        },
-      }
+      return { data: { user: null }, error: await this._parseError(res) }
     }
     const user = this._parseUser(await res.json() as Record<string, unknown>)
     this.applyUpdatedUser(user)
@@ -734,14 +724,7 @@ export class AuthClient {
         error: null,
       }
     }
-    const err = await res.json().catch(() => ({})) as Record<string, unknown>
-    return {
-      data: {},
-      error: {
-        message: String(err["error_description"] ?? err["msg"] ?? "Error"),
-        status: res.status,
-      },
-    }
+    return { data: {}, error: await this._parseError(res) }
   }
 
   // ─── MFA ──────────────────────────────────────────────────────────────────────
@@ -1344,13 +1327,10 @@ export class AuthClient {
     }
   }
 
+  /** Every refusal from the auth server goes through here, so none of them drops the code. */
   private async _parseError(res: Response): Promise<SupatypeError> {
-    const err = await res.json().catch(() => ({})) as Record<string, unknown>
-    return {
-      message: String(err["error_description"] ?? err["msg"] ?? err["message"] ?? "Error"),
-      status: res.status,
-      ...(err["error_code"] !== undefined && { code: String(err["error_code"]) }),
-    }
+    const body = await res.json().catch(() => ({})) as Record<string, unknown>
+    return authErrorFromBody(body, res.status)
   }
 
   private async _parseAuthResponse(res: Response): Promise<{
@@ -1358,14 +1338,7 @@ export class AuthClient {
     error: SupatypeError | null
   }> {
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ msg: "Unknown error" })) as Record<string, unknown>
-      return {
-        data: { session: null, user: null },
-        error: {
-          message: String(err["error_description"] ?? err["msg"] ?? "Error"),
-          status: res.status,
-        },
-      }
+      return { data: { session: null, user: null }, error: await this._parseError(res) }
     }
     const json = await res.json() as Record<string, unknown>
     const user = this._parseUser((json["user"] ?? {}) as Record<string, unknown>)
