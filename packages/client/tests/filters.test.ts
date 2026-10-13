@@ -25,6 +25,57 @@ function sentFilters(fetch: ReturnType<typeof vi.fn>): string[] {
   return [...new URL(url).searchParams.entries()].map(([key, value]) => `${key}=${value}`)
 }
 
+describe("contains / containedBy: PostgREST operand syntax", () => {
+  beforeEach(() => vi.restoreAllMocks())
+
+  it("an array becomes a Postgres array literal, not JSON", async () => {
+    const fetch = stubFetch()
+    await new QueryBuilder<Post>(BASE, PATH, HEADERS).contains("tags", ["a", "b"])
+    expect(sentFilters(fetch)).toEqual(["tags=cs.{a,b}"])
+  })
+
+  it("array elements PostgreSQL would split or misread are quoted and escaped", async () => {
+    const fetch = stubFetch()
+    await new QueryBuilder<Post>(BASE, PATH, HEADERS).containedBy("tags", [
+      "plain",
+      "a,b",
+      "with space",
+      'say "hi"',
+      "back\\slash",
+      "{brace}",
+      "",
+      "null",
+      7,
+      null,
+    ])
+    expect(sentFilters(fetch)).toEqual([
+      'tags=cd.{plain,"a,b","with space","say \\"hi\\"","back\\\\slash","{brace}","","null",7,NULL}',
+    ])
+  })
+
+  it("an object becomes JSON, for jsonb columns", async () => {
+    const fetch = stubFetch()
+    await new QueryBuilder<Post>(BASE, PATH, HEADERS).contains("meta", { tier: "gold" })
+    expect(sentFilters(fetch)).toEqual(['meta=cs.{"tier":"gold"}'])
+  })
+
+  it("a string is sent as written, for range types and hand-written literals", async () => {
+    const fetch = stubFetch()
+    await new QueryBuilder<Post>(BASE, PATH, HEADERS).containedBy("during", "[2026-01-01,2026-02-01)")
+    expect(sentFilters(fetch)).toEqual(["during=cd.[2026-01-01,2026-02-01)"])
+  })
+})
+
+describe("in(): values PostgREST would split are quoted", () => {
+  beforeEach(() => vi.restoreAllMocks())
+
+  it("quotes a value holding a comma or parenthesis", async () => {
+    const fetch = stubFetch()
+    await new QueryBuilder<Post>(BASE, PATH, HEADERS).in("title", ["a,b", "c(d)", "plain", 3])
+    expect(sentFilters(fetch)).toEqual(['title=in.("a,b","c(d)",plain,3)'])
+  })
+})
+
 describe("MutationBuilder: the same filter set as QueryBuilder", () => {
   beforeEach(() => vi.restoreAllMocks())
 
@@ -53,7 +104,7 @@ describe("MutationBuilder: the same filter set as QueryBuilder", () => {
       "deleted_at=is.null",
       "status=not.eq.draft",
       "or=(owner.eq.1,owner.eq.2)",
-      'tags=cs.["a"]',
+      "tags=cs.{a}",
       'meta=cd.{"k":1}',
       "author=eq.ann",
       "lang=eq.en",
