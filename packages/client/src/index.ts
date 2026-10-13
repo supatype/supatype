@@ -77,15 +77,8 @@ export { StorageClient, BucketClient } from "./storage.js"
 export type { StorageObject, TransformOptions } from "./storage.js"
 export { RealtimeClient } from "./realtime.js"
 export type { RealtimeEvent, RealtimePayload, ChannelStatus, PresenceEntry } from "./realtime.js"
-export { watchTable, subscribeToTable, subscriptionViewOf, applyRowChange } from "./table-subscription.js"
-export type {
-  SubscriptionState,
-  SubscriptionView,
-  TableWatchOptions,
-  TableWatchHandlers,
-  TableSubscribeOptions,
-  TableSubscription,
-} from "./table-subscription.js"
+// The bindings' shared subscription helpers are on `@supatype/client/bindings`, not here.
+export type { TableSubscribeOptions, TableSubscription } from "./table-subscription.js"
 export * from "./errors.js"
 
 // Called by the generated `supatype/client.ts`, which is how a project tells the client which

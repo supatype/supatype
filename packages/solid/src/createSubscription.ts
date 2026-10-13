@@ -1,13 +1,7 @@
 import { createSignal, onMount, onCleanup } from "solid-js"
 import type { Accessor } from "solid-js"
-import {
-  watchTable,
-  type AugmentedDatabase,
-  type AnyDatabase,
-  type SupatypeError,
-  type SubscriptionState,
-  type TableWatchOptions,
-} from "@supatype/client"
+import type { AugmentedDatabase, AnyDatabase, SupatypeError } from "@supatype/client"
+import { watchTable, type SubscriptionState, type TableWatchOptions } from "@supatype/client/bindings"
 import { useSupatype } from "./context.js"
 
 /** Which changes to receive. The same options `watchTable` takes, since they go straight to it. */

@@ -1,13 +1,7 @@
 import { writable, type Readable } from "svelte/store"
 import { onDestroy } from "svelte"
-import {
-  watchTable,
-  type AugmentedDatabase,
-  type AnyDatabase,
-  type SupatypeError,
-  type SubscriptionState,
-  type TableWatchOptions,
-} from "@supatype/client"
+import type { AugmentedDatabase, AnyDatabase, SupatypeError } from "@supatype/client"
+import { watchTable, type SubscriptionState, type TableWatchOptions } from "@supatype/client/bindings"
 import { getSupatypeClient } from "./context.js"
 
 /** Which changes to receive. The same options `watchTable` takes, since they go straight to it. */
