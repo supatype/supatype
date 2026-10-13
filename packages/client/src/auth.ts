@@ -16,6 +16,7 @@ import {
   generateCodeVerifier,
   PKCE_METHOD_S256,
 } from "./pkce.js"
+import { plainFetch, type RequestTransport } from "./fetch-with-retry.js"
 
 export type AuthListener = (event: AuthChangeEvent, session: Session | null) => void
 
@@ -26,6 +27,8 @@ interface AuthClientOptions {
   cookiePrefix?: string | undefined
   /** Custom session store (replaces browser localStorage/cookies when set). */
   storage?: AuthStorage | undefined
+  /** How requests are sent. `createClient` passes its fetch, so `timeout` and `retry` apply here too. */
+  transport?: RequestTransport | undefined
 }
 
 const DEFAULT_STORAGE_KEY = "supatype.auth.session"
@@ -62,6 +65,8 @@ export class AuthClient {
   private readonly storageKey: string
   private readonly cookieName: string
   private readonly storage: AuthStorage | null
+  /** The client's fetch, with its timeout; only reads are retried. */
+  private readonly send: RequestTransport
   /** When true, session is also mirrored to document.cookie (browser default path only). */
   private readonly useCookies: boolean
   /** Resolves when async storage hydration completes (immediate when not used). */
@@ -82,6 +87,7 @@ export class AuthClient {
     this.cookieName = `${cookiePrefix}-auth-token`
     this.useCookies = opts.storage === undefined
     this.storage = opts.storage ?? this.getBrowserStorage()
+    this.send = opts.transport ?? plainFetch
 
     if (opts.initialSession !== undefined) {
       this.currentSession = opts.initialSession
@@ -238,7 +244,7 @@ export class AuthClient {
     if (credentials.options?.data !== undefined) {
       body["data"] = credentials.options.data
     }
-    const res = await fetch(`${this.url}/signup`, {
+    const res = await this.send(`${this.url}/signup`, {
       method: "POST",
       headers: this.baseHeaders,
       body: JSON.stringify(body),
@@ -253,7 +259,7 @@ export class AuthClient {
     data: { session: Session | null; user: User | null }
     error: SupatypeError | null
   }> {
-    const res = await fetch(`${this.url}/token?grant_type=password`, {
+    const res = await this.send(`${this.url}/token?grant_type=password`, {
       method: "POST",
       headers: this.baseHeaders,
       body: JSON.stringify({
@@ -280,7 +286,7 @@ export class AuthClient {
     if (credentials?.options?.captchaToken !== undefined) {
       body["supatype_meta_security"] = { captcha_token: credentials.options.captchaToken }
     }
-    const res = await fetch(`${this.url}/signup`, {
+    const res = await this.send(`${this.url}/signup`, {
       method: "POST",
       headers: this.baseHeaders,
       body: JSON.stringify(body),
@@ -336,7 +342,7 @@ export class AuthClient {
     data: { session: Session | null; user: User | null }
     error: SupatypeError | null
   }> {
-    const res = await fetch(`${this.url}/user`, {
+    const res = await this.send(`${this.url}/user`, {
       headers: {
         ...this.baseHeaders,
         Authorization: `Bearer ${params.accessToken}`,
@@ -385,7 +391,7 @@ export class AuthClient {
         },
       }
     }
-    const res = await fetch(`${this.url}/token?grant_type=pkce`, {
+    const res = await this.send(`${this.url}/token?grant_type=pkce`, {
       method: "POST",
       headers: this.baseHeaders,
       body: JSON.stringify({
@@ -499,7 +505,7 @@ export class AuthClient {
         body["channel"] = opts.options.channel
       }
     }
-    const res = await fetch(this.endpoint("/otp", opts.options?.emailRedirectTo).toString(), {
+    const res = await this.send(this.endpoint("/otp", opts.options?.emailRedirectTo).toString(), {
       method: "POST",
       headers: this.baseHeaders,
       body: JSON.stringify(body),
@@ -518,7 +524,7 @@ export class AuthClient {
 
   async signOut(): Promise<{ error: SupatypeError | null }> {
     if (this.currentSession !== null) {
-      await fetch(`${this.url}/logout`, {
+      await this.send(`${this.url}/logout`, {
         method: "POST",
         headers: {
           ...this.baseHeaders,
@@ -546,7 +552,7 @@ export class AuthClient {
     if (this.currentSession === null) {
       return { data: { user: null }, error: null }
     }
-    const res = await fetch(`${this.url}/user`, {
+    const res = await this.send(`${this.url}/user`, {
       headers: {
         ...this.baseHeaders,
         Authorization: `Bearer ${this.currentSession.accessToken}`,
@@ -571,7 +577,7 @@ export class AuthClient {
       return { data: { session: null }, error: { message: "No refresh token" } }
     }
     try {
-      const res = await fetch(`${this.url}/token?grant_type=refresh_token`, {
+      const res = await this.send(`${this.url}/token?grant_type=refresh_token`, {
         method: "POST",
         headers: this.baseHeaders,
         body: JSON.stringify({ refresh_token: this.currentSession.refreshToken }),
@@ -593,7 +599,7 @@ export class AuthClient {
     email: string,
     options?: { redirectTo?: string | undefined } | undefined,
   ): Promise<{ data: Record<string, never>; error: SupatypeError | null }> {
-    const res = await fetch(this.endpoint("/recover", options?.redirectTo).toString(), {
+    const res = await this.send(this.endpoint("/recover", options?.redirectTo).toString(), {
       method: "POST",
       headers: this.baseHeaders,
       body: JSON.stringify({ email }),
@@ -610,7 +616,7 @@ export class AuthClient {
     if (this.currentSession === null) {
       return { data: { user: null }, error: { message: "Not authenticated" } }
     }
-    const res = await fetch(`${this.url}/user`, {
+    const res = await this.send(`${this.url}/user`, {
       method: "PUT",
       headers: {
         ...this.baseHeaders,
@@ -664,7 +670,7 @@ export class AuthClient {
       if (params.email !== undefined) body["email"] = params.email
       if (params.phone !== undefined) body["phone"] = params.phone
     }
-    const res = await fetch(`${this.url}/verify`, {
+    const res = await this.send(`${this.url}/verify`, {
       method: "POST",
       headers: this.baseHeaders,
       body: JSON.stringify(body),
@@ -691,7 +697,7 @@ export class AuthClient {
     if (credentials.nonce !== undefined) {
       body["nonce"] = credentials.nonce
     }
-    const res = await fetch(`${this.url}/token?grant_type=id_token`, {
+    const res = await this.send(`${this.url}/token?grant_type=id_token`, {
       method: "POST",
       headers: this.baseHeaders,
       body: JSON.stringify(body),
@@ -710,7 +716,7 @@ export class AuthClient {
     const body: Record<string, unknown> = { type: params.type }
     if (params.email !== undefined) body["email"] = params.email
     if (params.phone !== undefined) body["phone"] = params.phone
-    const res = await fetch(`${this.url}/resend`, {
+    const res = await this.send(`${this.url}/resend`, {
       method: "POST",
       headers: this.baseHeaders,
       body: JSON.stringify(body),
@@ -757,7 +763,7 @@ export class AuthClient {
         if (params.friendlyName !== undefined) body["friendly_name"] = params.friendlyName
         if (params.issuer !== undefined) body["issuer"] = params.issuer
         if (params.phone !== undefined) body["phone"] = params.phone
-        const res = await fetch(`${this.url}/factors`, {
+        const res = await this.send(`${this.url}/factors`, {
           method: "POST",
           headers: {
             ...this.baseHeaders,
@@ -801,7 +807,7 @@ export class AuthClient {
         }
         const body: Record<string, unknown> = {}
         if (params.channel !== undefined) body["channel"] = params.channel
-        const res = await fetch(
+        const res = await this.send(
           `${this.url}/factors/${params.factorId}/challenge`,
           {
             method: "POST",
@@ -844,7 +850,7 @@ export class AuthClient {
             error: { message: "Not authenticated" },
           }
         }
-        const res = await fetch(
+        const res = await this.send(
           `${this.url}/factors/${params.factorId}/verify`,
           {
             method: "POST",
@@ -903,7 +909,7 @@ export class AuthClient {
         if (this.currentSession === null) {
           return { data: null, error: { message: "Not authenticated" } }
         }
-        const res = await fetch(
+        const res = await this.send(
           `${this.url}/factors/${params.factorId}`,
           {
             method: "DELETE",

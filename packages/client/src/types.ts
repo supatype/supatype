@@ -383,17 +383,19 @@ export interface SupatypeClientConfig {
   /**
    * Retry a transient failure (a dropped connection, a 5xx, a 429). Default: true.
    *
-   * Only GET and HEAD requests are retried, such as table selects. Every other request is sent
-   * once, whatever this says: a write that failed in flight may still have been applied, and
-   * sending it again could apply it twice. `rpc`, `graphql` and `functions.invoke` take
-   * `idempotent: true` per call to opt in.
+   * Only reads are retried: GET and HEAD requests (table selects, storage downloads, `getUser`), and
+   * the few reads sent as POST (storage `list`, signed URLs). Every other request is sent once,
+   * whatever this says: a write that failed in flight may still have been applied, and sending it
+   * again could apply it twice. `rpc`, `graphql` and `functions.invoke` take `idempotent: true` per
+   * call to opt in.
    */
   retry?: boolean | undefined
   /**
    * Request timeout in milliseconds. Default: 30000 (30 seconds).
    *
-   * Applies to table reads and writes, `rpc`, `graphql` and `functions`. Auth and storage requests
-   * and the realtime socket are not covered by it.
+   * Applies to every HTTP request the client makes: tables, `rpc`, `graphql`, `functions`, auth and
+   * storage, uploads included, so raise it for large uploads on slow links. The realtime socket is
+   * not an HTTP request and is not covered.
    */
   timeout?: number | undefined
   /**

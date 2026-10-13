@@ -566,6 +566,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
     storageKey: config.auth?.storageKey,
     cookiePrefix: config.auth?.cookiePrefix,
     storage: config.auth?.storage,
+    transport: doFetch,
   })
   const queryCache = config.queryCache ?? defaultQueryCache
 
@@ -607,7 +608,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
   // request carried the anon key for the life of the page. An app's per-user storage policies saw
   // `anon` rather than the caller, and through Studio's proxy the request was refused outright,
   // because an anon key carries no `sub` and the proxy requires one.
-  const storage = new StorageClient(`${config.url}/storage/v1`, getAuthHeaders)
+  const storage = new StorageClient(`${config.url}/storage/v1`, getAuthHeaders, doFetch)
 
   // The same provider the other sub-clients get, not `baseHeaders`.
   //

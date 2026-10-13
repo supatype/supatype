@@ -119,3 +119,57 @@ describe("rpc, graphql and functions: retried only when the call says it is idem
     expect(fetch).toHaveBeenCalledTimes(2)
   })
 })
+
+describe("auth and storage use the client's transport", () => {
+  beforeEach(() => vi.restoreAllMocks())
+
+  it("a sign-in that never answers ends at the timeout", { timeout: 2000 }, async () => {
+    hanging()
+    await expect(
+      client({ timeout: 50 }).auth.signInWithPassword({ email: "a@example.com", password: "pw" }),
+    ).rejects.toMatchObject({ code: "NETWORK_TIMEOUT" })
+  })
+
+  it("a sign-in is not retried after a 503", async () => {
+    const fetch = flaky({})
+    const { error } = await client().auth.signInWithPassword({ email: "a@example.com", password: "pw" })
+    expect(error?.status).toBe(503)
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("a rate-limited sign-in returns the server's error rather than throwing", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      respond({ code: 429, error_code: "over_request_rate_limit", msg: "Request rate limit reached" }, 429),
+    ))
+    const { error } = await client().auth.signInWithPassword({ email: "a@example.com", password: "pw" })
+    expect(error).toEqual({ message: "Request rate limit reached", status: 429, code: "over_request_rate_limit" })
+  })
+
+  it("a storage upload that never answers ends at the timeout", { timeout: 2000 }, async () => {
+    hanging()
+    await expect(
+      client({ timeout: 50 }).storage.from("b").upload("f.txt", new Blob(["x"])),
+    ).rejects.toMatchObject({ code: "NETWORK_TIMEOUT" })
+  })
+
+  it("a storage download (GET) is retried after a 503", { timeout: 5000 }, async () => {
+    const fetch = flaky({ ok: true })
+    const { error } = await client().storage.from("b").download("f.txt")
+    expect(error).toBeNull()
+    expect(fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it("a storage list (a read sent as POST) is retried after a 503", { timeout: 5000 }, async () => {
+    const fetch = flaky([])
+    const { error } = await client().storage.from("b").list()
+    expect(error).toBeNull()
+    expect(fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it("a storage upload is not retried after a 503", async () => {
+    const fetch = flaky({ Key: "b/f.txt" })
+    const { error } = await client().storage.from("b").upload("f.txt", new Blob(["x"]))
+    expect(error?.status).toBe(503)
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+})
