@@ -160,7 +160,7 @@
 POSTGRES_USER=supatype_admin
 POSTGRES_PASSWORD=CHANGE_ME
 POSTGRES_DB=my-blog
-JWT_SECRET=CHANGE_ME-long-random-string
+JWT_SECRET=CHANGE_ME          <span class="c"># at least 32 characters: openssl rand -base64 48</span>
 ANON_KEY=eyJ...            <span class="c"># from supatype keys on first setup</span>
 SERVICE_ROLE_KEY=eyJ...
 API_EXTERNAL_URL=https://api.example.com

@@ -25,6 +25,7 @@ import { CONTROL_PLANE_SECRET_ENV, ensureControlPlaneSecret } from "./local-secr
 import { fieldMaskingTierFromProject, type FieldMaskingTier } from "./field-masking-tier.js"
 import { readRecordedTier } from "./recorded-field-masking-tier.js"
 import { projectHasVersionedModels } from "./model-versioning.js"
+import { POSTGREST_IMAGE } from "./postgrest-release.js"
 
 /**
  * The control plane secret as the server and the control plane receive it, and nobody else.
@@ -795,7 +796,7 @@ ${keyspaceDbEnv}${dbPorts}${keyspaceExpose}    volumes:
 # Kong → supatype-server (unified gateway) → internal PostgREST / storage / etc.
 services:
 ${dbServiceBlock}  postgrest:
-    image: postgrest/postgrest:v12.2.8
+    image: ${POSTGREST_IMAGE}
     expose:
       - "3000"
     environment:

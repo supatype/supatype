@@ -84,6 +84,61 @@ describe("posts REST CRUD", () => {
   })
 })
 
+// ── Writes filtered with or() ──────────────────────────────────────────────────
+
+/**
+ * A PATCH or DELETE filtered with `or` whose `select` leaves out the filtered column.
+ *
+ * PostgREST before 14.4 (PostgREST#3707) applied the filter to the returned representation as
+ * well as to the write, so it referenced a column the representation did not carry. Both writes
+ * failed with `column post.slug does not exist`, and the delete deleted nothing.
+ */
+describe("writes filtered with or()", () => {
+  const stamp = Date.now()
+  const slugs = ["first", "second", "third"].map((name) => `or-filter-${name}-${stamp}`)
+  const [first = "", second = "", third = ""] = slugs
+  const ids = new Map<string, string>()
+  const firstTwo = `slug.eq.${first},slug.eq.${second}`
+
+  const sortedIds = (rows: Array<{ id: string }> | null): string[] =>
+    (rows ?? []).map((row) => row.id).sort()
+
+  before(async () => {
+    const { data, error } = await client
+      .from("post")
+      .insert(slugs.map((slug) => ({ title: `Or filter ${slug}`, slug })))
+    assert.ifError(error)
+    for (const row of data as Array<{ id: string; slug: string }>) ids.set(row.slug, row.id)
+    assert.equal(ids.size, 3)
+  })
+
+  after(async () => {
+    await client.from("post").delete().in("slug", slugs)
+  })
+
+  test("update returns the rows it wrote", async () => {
+    const { data, error } = await client
+      .from("post")
+      .update({ excerpt: "touched" })
+      .or(firstTwo)
+      .select("id")
+
+    assert.ifError(error)
+    assert.deepEqual(sortedIds(data as Array<{ id: string }>), [ids.get(first), ids.get(second)].sort())
+  })
+
+  test("delete returns the rows it deleted and leaves the rest", async () => {
+    const { data, error } = await client.from("post").delete().or(firstTwo).select("id")
+
+    assert.ifError(error)
+    assert.deepEqual(sortedIds(data as Array<{ id: string }>), [ids.get(first), ids.get(second)].sort())
+
+    const { data: left, error: readError } = await client.from("post").select("id").in("slug", slugs)
+    assert.ifError(readError)
+    assert.deepEqual(sortedIds(left as Array<{ id: string }>), [ids.get(third)])
+  })
+})
+
 // ── Comments CRUD ──────────────────────────────────────────────────────────────
 
 describe("comments REST CRUD", () => {
