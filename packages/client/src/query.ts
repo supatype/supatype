@@ -4,6 +4,8 @@ import type { MaskedField, QueryResult, SelectQueryOptions, SupatypeError } from
 import { parseRowsExactly, tableFromPath } from "./exact-response.js"
 import { stringifyWithBigInts } from "./exact-values.js"
 import { FilterBuilder } from "./filters.js"
+import { transportFailure } from "./errors.js"
+import { plainFetch, type FetchOptions, type RequestTransport } from "./fetch-with-retry.js"
 
 const DEBUG_AUTH =
   (typeof process !== "undefined" && process.env["NEXT_PUBLIC_SUPATYPE_DEBUG_AUTH"] === "1") ||
@@ -90,18 +92,24 @@ export function bearerToken(headers: Record<string, string>): string {
   return headers["apikey"] ?? headers["Apikey"] ?? ""
 }
 
+// `createClient` passes its retrying fetch, so `config.timeout` and `config.retry` reach table reads
+// and writes as they reach every other request. A builder constructed directly, without one, sends
+// with plain `fetch` as it always has.
+export type { RequestTransport }
+
 async function fetchWithOptional401Retry(
+  send: RequestTransport,
   url: string,
-  init: RequestInit,
+  init: RequestInit & FetchOptions,
   resolveHeaders: () => Promise<Record<string, string>>,
   onUnauthorized?: (() => Promise<void>) | undefined,
 ): Promise<Response> {
   let headers = await resolveHeaders()
-  let res = await fetch(url, { ...init, headers })
+  let res = await send(url, { ...init, headers })
   if (res.status === 401 && onUnauthorized !== undefined) {
     await onUnauthorized()
     headers = await resolveHeaders()
-    res = await fetch(url, { ...init, headers })
+    res = await send(url, { ...init, headers })
   }
   return res
 }
@@ -113,6 +121,7 @@ export class QueryBuilder<TRow> extends FilterBuilder implements PromiseLike<Que
   private readonly path: string
   private readonly getHeaders: HeadersProvider
   private readonly onUnauthorized: (() => Promise<void>) | undefined
+  private readonly send: RequestTransport
   private readonly extraHeaders: Record<string, string>
   private readonly queryCache: QueryCache
   private cacheOptions: QueryCacheOptions | undefined
@@ -127,12 +136,14 @@ export class QueryBuilder<TRow> extends FilterBuilder implements PromiseLike<Que
     queryCache: QueryCache = defaultQueryCache,
     onUnauthorized?: (() => Promise<void>) | undefined,
     selectOptions?: SelectQueryOptions | undefined,
+    transport: RequestTransport = plainFetch,
   ) {
     super()
     this.baseUrl = baseUrl
     this.path = path
     this.getHeaders = asHeadersProvider(headers)
     this.onUnauthorized = onUnauthorized
+    this.send = transport
     this.extraHeaders = {}
     this.queryCache = queryCache
     this.countMode = selectOptions?.count
@@ -278,17 +289,14 @@ export class QueryBuilder<TRow> extends FilterBuilder implements PromiseLike<Que
     let res: Response
     try {
       res = await fetchWithOptional401Retry(
+        this.send,
         url,
         { method },
         resolveRequestHeaders,
         this.onUnauthorized,
       )
     } catch (e) {
-      return {
-        data: null,
-        error: { message: e instanceof Error ? e.message : "Network error" },
-        count: null,
-      }
+      return { data: null, error: transportFailure(e), count: null }
     }
 
     const contentRange = res.headers.get("content-range")
@@ -375,6 +383,7 @@ export class MutationBuilder<TRow> extends FilterBuilder implements PromiseLike<
   private readonly path: string
   private readonly getHeaders: HeadersProvider
   private readonly onUnauthorized: (() => Promise<void>) | undefined
+  private readonly send: RequestTransport
   private readonly extraHeaders: Record<string, string>
   private readonly method: HttpMethod
   private readonly body: unknown
@@ -387,12 +396,14 @@ export class MutationBuilder<TRow> extends FilterBuilder implements PromiseLike<
     body?: unknown,
     opts?: { upsert?: boolean | undefined } | undefined,
     onUnauthorized?: (() => Promise<void>) | undefined,
+    transport: RequestTransport = plainFetch,
   ) {
     super()
     this.baseUrl = baseUrl
     this.path = path
     this.getHeaders = asHeadersProvider(headers)
     this.onUnauthorized = onUnauthorized
+    this.send = transport
     this.extraHeaders = {}
     this.method = method
     this.body = body
@@ -459,8 +470,12 @@ export class MutationBuilder<TRow> extends FilterBuilder implements PromiseLike<
       ...this.extraHeaders,
       ...fetchHeaders,
     })
-    const init: RequestInit = {
+    const init: RequestInit & FetchOptions = {
       method: this.method,
+      // The timeout applies, the retry never does. A write that failed with a 5xx or a dropped
+      // connection may still have been applied, and sending it again would insert the row twice
+      // or run its triggers twice.
+      retry: false,
       // Not `JSON.stringify`: it throws on a bigint, so reading a row with a bigInt column and
       // writing it back would fail now that the generated types declare one.
       ...(this.body !== undefined && { body: stringifyWithBigInts(this.body) }),
@@ -468,17 +483,14 @@ export class MutationBuilder<TRow> extends FilterBuilder implements PromiseLike<
     let res: Response
     try {
       res = await fetchWithOptional401Retry(
+        this.send,
         url,
         init,
         resolveRequestHeaders,
         this.onUnauthorized,
       )
     } catch (e) {
-      return {
-        data: null,
-        error: { message: e instanceof Error ? e.message : "Network error" },
-        count: null,
-      }
+      return { data: null, error: transportFailure(e), count: null }
     }
 
     if (!res.ok) {

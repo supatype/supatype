@@ -13,6 +13,12 @@ export interface FetchOptions {
   retry?: boolean | undefined
 }
 
+/** How a request is sent: `fetch`, or the client's retrying fetch with its timeout. */
+export type RequestTransport = (url: string, init: RequestInit & FetchOptions) => Promise<Response>
+
+/** Plain `fetch`, for a client built without a transport. */
+export const plainFetch: RequestTransport = (url, init) => fetch(url, init)
+
 const DEFAULT_MAX_RETRIES = 3
 const DEFAULT_TIMEOUT = 30000
 const RETRY_DELAYS = [200, 1000, 3000]

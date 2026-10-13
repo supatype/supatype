@@ -1,12 +1,12 @@
 import { AuthClient } from "./auth.js"
 import { onIdentityChange } from "./identity.js"
 import { PreviewCredential } from "./preview.js"
-import { QueryBuilder, MutationBuilder, type HeadersProvider } from "./query.js"
+import { QueryBuilder, MutationBuilder, type HeadersProvider, type RequestTransport } from "./query.js"
 import { defaultQueryCache, type QueryCache } from "./query-cache.js"
 import { StorageClient } from "./storage.js"
 import { RealtimeClient } from "./realtime.js"
 import type { RealtimeEvent, RealtimePayload } from "./realtime.js"
-import { PostgrestError } from "./errors.js"
+import { PostgrestError, transportFailure } from "./errors.js"
 import { createRetryFetch } from "./retry.js"
 import { warnIfServerlessDirectConnection } from "./fetch-with-retry.js"
 import type {
@@ -70,7 +70,7 @@ export type AnyClient = SupatypeClient<AnyDatabase>
 export type { QueryCacheOptions, CacheStatus } from "./query-cache.js"
 export { AuthClient } from "./auth.js"
 export { onIdentityChange, type IdentitySource } from "./identity.js"
-export { QueryBuilder, MutationBuilder, type HeadersProvider } from "./query.js"
+export { QueryBuilder, MutationBuilder, type HeadersProvider, type RequestTransport } from "./query.js"
 export { QueryCache, defaultQueryCache } from "./query-cache.js"
 export { StorageClient, BucketClient } from "./storage.js"
 export type { StorageObject, TransformOptions } from "./storage.js"
@@ -119,6 +119,8 @@ class TableClient<TDef extends TableDef> {
   private readonly path: string
   private readonly getHeaders: HeadersProvider
   private readonly onUnauthorized: (() => Promise<void>) | undefined
+  /** The client's retry-aware fetch, so `timeout` and `retry` reach table requests too. */
+  private readonly send: RequestTransport
   private readonly queryCache: QueryCache
   private readonly realtime: RealtimeClient
   /**
@@ -136,7 +138,8 @@ class TableClient<TDef extends TableDef> {
     getHeaders: HeadersProvider,
     realtime: RealtimeClient,
     queryCache: QueryCache = defaultQueryCache,
-    onUnauthorized?: (() => Promise<void>) | undefined,
+    onUnauthorized: (() => Promise<void>) | undefined,
+    send: RequestTransport,
   ) {
     this.baseUrl = baseUrl
     this.table = table
@@ -145,6 +148,7 @@ class TableClient<TDef extends TableDef> {
     this.realtime = realtime
     this.onUnauthorized = onUnauthorized
     this.queryCache = queryCache
+    this.send = send
   }
 
   /**
@@ -183,6 +187,7 @@ class TableClient<TDef extends TableDef> {
       // The profile joins the select options rather than riding a longer constructor: it is a
       // property of the request being described, like `count` and `head` beside it.
       { ...options, ...(this.profile !== undefined && { profile: this.profile }) },
+      this.send,
     )
   }
 
@@ -197,6 +202,7 @@ class TableClient<TDef extends TableDef> {
       data,
       undefined,
       this.onUnauthorized,
+      this.send,
     )
   }
 
@@ -211,6 +217,7 @@ class TableClient<TDef extends TableDef> {
       data,
       { upsert: true },
       this.onUnauthorized,
+      this.send,
     )
   }
 
@@ -223,6 +230,7 @@ class TableClient<TDef extends TableDef> {
       data,
       undefined,
       this.onUnauthorized,
+      this.send,
     )
   }
 
@@ -235,6 +243,7 @@ class TableClient<TDef extends TableDef> {
       undefined,
       undefined,
       this.onUnauthorized,
+      this.send,
     )
   }
 
@@ -465,10 +474,7 @@ class FunctionsClient {
       const text = await res.text()
       return { data: text as unknown as EdgeFunctionReturns<TFn>, error: null }
     } catch (e) {
-      return {
-        data: null,
-        error: { message: e instanceof Error ? e.message : "Network error" },
-      }
+      return { data: null, error: transportFailure(e) }
     }
   }
 }
@@ -626,6 +632,10 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
     void realtime.reauthenticate()
   })
 
+  // One place that wires a table to this client's headers, cache, auth refresh and fetch.
+  const tableClient = <TDef extends TableDef>(table: string): TableClient<TDef> =>
+    new TableClient<TDef>(config.url, table, getAuthHeaders, realtime, queryCache, onUnauthorized, doFetch)
+
   return {
     url: config.url,
     serviceRoleKey: config.serviceRoleKey,
@@ -634,7 +644,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
       table: TTable,
     ): TableClient<TDatabase["public"]["Tables"][TTable]> {
       type TDef = TDatabase["public"]["Tables"][TTable]
-      return new TableClient<TDef>(config.url, table, getAuthHeaders, realtime, queryCache, onUnauthorized)
+      return tableClient<TDef>(table)
     },
 
     global<TRow extends Record<string, unknown> = Record<string, unknown>>(name: string): GlobalClient<TRow> {
@@ -642,12 +652,12 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
       type TDef = { Row: TRow; Insert: TRow; Update: Partial<TRow> }
       return {
         async get(): Promise<{ data: TRow | null; error: SupatypeError | null }> {
-          const tc = new TableClient<TDef>(config.url, tableName, getAuthHeaders, realtime, queryCache, onUnauthorized)
+          const tc = tableClient<TDef>(tableName)
           const result = await tc.select().limit(1).maybeSingle()
           return { data: result.data ?? null, error: result.error }
         },
         async update(data: Partial<TRow>): Promise<{ data: TRow | null; error: SupatypeError | null }> {
-          const tc = new TableClient<TDef>(config.url, tableName, getAuthHeaders, realtime, queryCache, onUnauthorized)
+          const tc = tableClient<TDef>(tableName)
           const result = await tc.upsert(data as TRow)
           const row = Array.isArray(result.data) ? (result.data[0] as TRow | undefined) ?? null : null
           return { data: row, error: result.error }
@@ -684,7 +694,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
           })
         }
       } catch (e) {
-        return { data: null, error: { message: e instanceof Error ? e.message : "Network error" } }
+        return { data: null, error: transportFailure(e) }
       }
       let json: Record<string, unknown>
       try {
@@ -744,7 +754,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
           })
         }
       } catch (e) {
-        return { data: null, error: { message: e instanceof Error ? e.message : "Network error" } }
+        return { data: null, error: transportFailure(e) }
       }
 
       if (!res.ok) {

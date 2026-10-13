@@ -373,13 +373,18 @@ export interface SupatypeClientConfig {
     storage?: AuthStorage | undefined
   } | undefined
   /**
-   * Disable automatic retry for transient errors.
-   * Default: true (retries enabled).
+   * Retry a transient failure (a dropped connection, a 5xx, a 429). Default: true.
+   *
+   * Applies to table reads (`select`) and to `rpc`, `graphql` and `functions`. Table writes
+   * (`insert`, `upsert`, `update`, `delete`) are never retried, whatever this says: a write that
+   * failed in flight may still have been applied, and sending it again could apply it twice.
    */
   retry?: boolean | undefined
   /**
    * Request timeout in milliseconds. Default: 30000 (30 seconds).
-   * Applied to every HTTP request made by the client.
+   *
+   * Applies to table reads and writes, `rpc`, `graphql` and `functions`. Auth and storage requests
+   * and the realtime socket are not covered by it.
    */
   timeout?: number | undefined
   /**

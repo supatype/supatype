@@ -1,4 +1,5 @@
 import type { SupatypeError } from "./types.js"
+import { transportFailure } from "./errors.js"
 
 export interface StorageObject {
   id: string
@@ -66,7 +67,7 @@ export class StorageClient {
       const data = await res.json() as StorageBucketMeta[]
       return { data, error: null }
     } catch (e) {
-      return { data: null, error: { message: e instanceof Error ? e.message : "Network error" } }
+      return { data: null, error: transportFailure(e) }
     }
   }
 
@@ -93,7 +94,7 @@ export class StorageClient {
       }
       return { data: { name }, error: null }
     } catch (e) {
-      return { data: null, error: { message: e instanceof Error ? e.message : "Network error" } }
+      return { data: null, error: transportFailure(e) }
     }
   }
 }
