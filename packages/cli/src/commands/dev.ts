@@ -59,6 +59,7 @@ import {
 } from "../engine-ownership-gate.js"
 import { startProxyDevApp } from "../app/proxy-dev-app.js"
 import { ProcessManager } from "../process-manager.js"
+import { POSTGREST_VERSION, postgrestArchiveName, postgrestArchiveUrl } from "../postgrest-release.js"
 import { STUDIO_DEV_PORT, startStudioViteDevServer } from "../studio-dev-server.js"
 import { restoreSystemRelationTargets } from "../restore-system-relation-targets.js"
 import { localStorageEnv } from "../local-storage.js"
@@ -1109,9 +1110,6 @@ async function extractPostgresArchive(
 // PostgREST resolver: downloads from GitHub releases if not cached
 // ---------------------------------------------------------------------------
 
-const POSTGREST_DEFAULT_VERSION = "12.2.3"
-const POSTGREST_GITHUB = "https://github.com/PostgREST/postgrest/releases/download"
-
 async function resolvePostgrestBin(overridePath?: string): Promise<string | null> {
   // Honour local override (same pattern as engine/server).
   if (overridePath) {
@@ -1125,18 +1123,12 @@ async function resolvePostgrestBin(overridePath?: string): Promise<string | null
     return null
   }
 
-  const version = POSTGREST_DEFAULT_VERSION
+  const version = POSTGREST_VERSION
   const platform = currentPlatform()
-  const arch = platform.arch === "arm64" ? "aarch64" : "x86_64"
   const binName = platform.os === "windows" ? "postgrest.exe" : "postgrest"
   const cacheDir = cachePath("postgres", version).replace(/postgres/, "postgrest")
   const binPath = join(cacheDir, binName)
-  const archiveName = platform.os === "windows"
-    ? `postgrest-v${version}-windows-x64.zip`
-    : platform.os === "darwin"
-      ? `postgrest-v${version}-macos-${arch}.tar.xz`
-      : `postgrest-v${version}-linux-static-${arch}.tar.xz`
-  const archivePath = join(cacheDir, archiveName)
+  const archivePath = join(cacheDir, postgrestArchiveName(platform, version))
 
   if (existsSync(binPath)) {
     // Backfill DLLs for older cached Windows installs where only postgrest.exe
@@ -1151,7 +1143,7 @@ async function resolvePostgrestBin(overridePath?: string): Promise<string | null
   }
 
   // Download from GitHub releases.
-  const url = `${POSTGREST_GITHUB}/v${version}/${archiveName}`
+  const url = postgrestArchiveUrl(platform, version)
 
   console.log(`[supatype] Downloading PostgREST v${version}...`)
   mkdirSync(cacheDir, { recursive: true })
