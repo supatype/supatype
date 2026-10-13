@@ -51,6 +51,11 @@ export function useShowsProjectRows(): void {
   useEffect(() => register(), [register])
 }
 
+/** Whether a view that puts project rows on screen is mounted: what notices about those rows wait for. */
+export function useProjectRowsOnScreen(): boolean {
+  return useContext(ElevatedNoticeContext).active
+}
+
 /**
  * Says when Studio is reading past Row Level Security.
  *

@@ -30,6 +30,12 @@ export interface StudioCapability {
    */
   seesDrafts: boolean
   permissions: Record<string, boolean>
+  /**
+   * On Cloud, whether the caller has linked the project login they act as in self mode. A member
+   * with no link is refused project data until they link one. Null where the host has no links:
+   * on self-host the caller already is a project user.
+   */
+  identityLink: { linked: boolean; email: string | null } | null
 }
 
 const UNRESOLVED: StudioCapability = {
@@ -40,6 +46,15 @@ const UNRESOLVED: StudioCapability = {
   canManageMembers: false,
   seesDrafts: false,
   permissions: {},
+  identityLink: null,
+}
+
+/** The server's `identityLink`, or null when it sent none or sent something else. */
+function readIdentityLink(raw: unknown): StudioCapability["identityLink"] {
+  if (typeof raw !== "object" || raw === null) return null
+  const { linked, email } = raw as { linked?: unknown; email?: unknown }
+  if (typeof linked !== "boolean") return null
+  return { linked, email: typeof email === "string" ? email : null }
 }
 
 /**
@@ -72,6 +87,7 @@ export function useStudioCapability(): StudioCapability {
           canElevate?: boolean
           seesDrafts?: boolean
           permissions?: Record<string, boolean>
+          identityLink?: unknown
         }
         if (cancelled) return
 
@@ -84,6 +100,7 @@ export function useStudioCapability(): StudioCapability {
           canManageMembers: permissions["manageMembers"] === true,
           seesDrafts: json.seesDrafts === true,
           permissions,
+          identityLink: readIdentityLink(json.identityLink),
         })
       } catch {
         // Leave it unresolved: the UI then offers nothing, and the server refuses
