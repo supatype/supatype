@@ -198,6 +198,46 @@ export default defineConfig({
     expect(cfg.project?.name).toBe("fresh")
     expect(cfg.schema?.path).toBe("./schema/index.ts")
   })
+
+  it("loads env() references before @supatype/cli is installed, keeping the reference", () => {
+    writeFileSync(
+      join(tmpDir, "supatype.config.ts"),
+      `import { defineConfig, env } from "@supatype/cli"
+
+export default defineConfig({
+  project: { name: "fresh" },
+  database: { provider: "docker" },
+  server: { mode: "dev" },
+  app: { mode: "none" },
+  auth: { providers: { github: { clientId: "gh", secret: env("GITHUB_SECRET") } } },
+})
+`,
+    )
+    writeFileSync(join(tmpDir, ".env"), "GITHUB_SECRET=must-not-be-read-into-the-config\n")
+    const cfg = loadConfig(tmpDir)
+    expect(cfg.auth?.providers?.github?.secret).toBe("env(GITHUB_SECRET)")
+  })
+})
+
+describe("mergeProjectConfig() auth", () => {
+  it("merges auth.providers a provider at a time", () => {
+    const merged = mergeProjectConfig(
+      {
+        ...minimalProject("p"),
+        auth: {
+          providers: {
+            github: { clientId: "prod", secret: "env(GITHUB_SECRET)" },
+            google: { clientId: "g" },
+          },
+        },
+      },
+      { auth: { providers: { github: { clientId: "dev" } } } },
+    )
+    expect(merged.auth?.providers).toEqual({
+      github: { clientId: "dev", secret: "env(GITHUB_SECRET)" },
+      google: { clientId: "g" },
+    })
+  })
 })
 
 describe("resolveRuntimeProvider()", () => {

@@ -20,6 +20,7 @@ import { keyspaceInPostgres } from "./cache-provider.js"
 import { STUDIO_DEV_PORT } from "./studio-dev-server.js"
 import { readEnvFile, readEnvValue } from "./env-file.js"
 import { upKeepingKongCurrent } from "./compose-kong.js"
+import { composeAuthProviderEnv } from "./auth-providers.js"
 import { CONTROL_PLANE_SECRET_ENV, ensureControlPlaneSecret } from "./local-secrets.js"
 import { fieldMaskingTierFromProject, type FieldMaskingTier } from "./field-masking-tier.js"
 import { readRecordedTier } from "./recorded-field-masking-tier.js"
@@ -479,6 +480,8 @@ export function renderSelfHostCompose(
   // When TLS is on, default external URLs to https://<domain> so auth links/redirects use HTTPS.
   const externalUrlFallback = tlsEnabled ? `https://${domain}` : "http://localhost:18473"
   const siteUrlFallback = tlsEnabled ? `https://${domain}` : "http://localhost:3000"
+  // OAuth providers hang their default callback off the same public URL the server is told it has.
+  const authProviderEnv = composeAuthProviderEnv(config, `\${API_EXTERNAL_URL:-${externalUrlFallback}}`)
   const studioHostDev = devLocal && hasStudioOverride(config)
   const appEnv = serverAppEnvForCompose(config, devLocal)
   const staticDir = staticDirForCompose(config) ?? "./dist"
@@ -984,7 +987,7 @@ ${appEnv}
       SUPATYPE_SMTP_ADMIN_EMAIL: \${SUPATYPE_SMTP_ADMIN_EMAIL:-}
       SUPATYPE_SMTP_SENDER_NAME: \${SUPATYPE_SMTP_SENDER_NAME:-}
       SUPATYPE_DISABLE_SIGNUP: \${DISABLE_SIGNUP:-false}
-${devLocal ? "      STUDIO_OPEN_DEV: \"${STUDIO_OPEN_DEV:-1}\"\n" : ""}
+${authProviderEnv}${devLocal ? "      STUDIO_OPEN_DEV: \"${STUDIO_OPEN_DEV:-1}\"\n" : ""}
     depends_on:
 ${dbDependencyClause}${keyspaceInPg ? "" : "      valkey:\n        condition: service_started\n"}      postgrest:
         condition: service_started

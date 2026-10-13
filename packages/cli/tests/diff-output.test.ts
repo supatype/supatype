@@ -111,9 +111,10 @@ describe("plannedChanges()", () => {
       ],
     }
     const changes = plannedChanges(diff)
+    // Without the engine's "Use --force": no CLI command takes that flag, `push --yes` is the consent.
     expect(changes.filter(isRisky)).toEqual([
       {
-        label: "posts.id: is no longer an identity column; an insert must now give it a value. Use --force to proceed (destructive).",
+        label: "posts.id: is no longer an identity column; an insert must now give it a value.",
         risk: "destructive",
       },
     ])

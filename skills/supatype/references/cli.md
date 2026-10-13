@@ -27,7 +27,8 @@ All targets use `.supatype/link.json` with an `environments` map:
 | `supatype link --env staging --url ... --token ...` | Add another environment |
 | `supatype envs list` | List linked environments |
 | `supatype envs use <name>` | Set default environment |
-| `supatype envs create <name> --url ... --token ...` | Add environment to link.json |
+| `supatype envs create <staging\|preview>` | Create a Supatype Cloud environment and add it to link.json (cloud link only; any other name is refused). For self-host, use `supatype link --env <name> --url ... --token ...` |
+| `supatype domains list` / `add <domain>` / `verify <id>` / `remove <id>` | Cloud custom domains; `verify` and `remove` take the ID `list` prints |
 
 Legacy `.supatype/cloud.json` and `.supatype/linked.json` migrate into `link.json` on first read.
 
@@ -113,8 +114,7 @@ Example: [`examples/edge-kit`](https://github.com/supatype/supatype/tree/main/ex
 supatype init my-app && cd my-app
 npm install && supatype keys
 # paste keys into .env
-supatype dev
-supatype push
+supatype dev   # applies the schema and generates types, then watches both; no push needed locally
 ```
 
 **Remote self-host (no local Postgres):**

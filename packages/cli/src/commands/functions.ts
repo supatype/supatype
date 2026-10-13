@@ -25,6 +25,7 @@ import {
   type DiscoveredFunctionRoute,
 } from "../functions-router-gen.js"
 import { loadProjectLink } from "../link.js"
+import { resolveCloudAccessToken } from "../cloud-credentials.js"
 import { resolveTarget } from "../resolve-target.js"
 import { targetFetch } from "../target-client.js"
 import {
@@ -39,6 +40,9 @@ import { nextSteps } from "../ui/next-steps.js"
 const SHARED_DIR = "_shared"
 const ENV_LOCAL = ".env.local"
 const ENV_PRODUCTION = ".env.production"
+// The commands that exist: there is no `supatype cloud` group, login and link are top level.
+const NOT_LOGGED_IN = "Not logged in. Run: supatype login"
+const NOT_LINKED = "No linked project. Run: supatype link"
 
 // ─── Registration ────────────────────────────────────────────────────────────
 
@@ -374,17 +378,30 @@ async function deploy(cwd: string, opts: { only?: string; env?: string; dryRun?:
     }
   }
 
-  const { selfHostComposePaths } = await import("../self-host-compose.js")
+  const { composeProjectName, selfHostComposePaths } = await import("../self-host-compose.js")
   const composePath = selfHostComposePaths(cwd).composePath
   if (existsSync(composePath)) {
-    await deploySelfHosted(cwd, fns)
+    // The compose file exists, so the config it was rendered from does too.
+    const restart = functionsWorkerRestartCommand(cwd, composePath, composeProjectName(loadConfig(cwd).project.name))
+    deploySelfHosted(cwd, fns, restart)
     return
   }
 
   await deployCloud(cwd, fns, opts.env)
 }
 
-async function deploySelfHosted(cwd: string, fns: DiscoveredFunctionRoute[]): Promise<void> {
+/**
+ * The command that restarts this project's functions worker.
+ *
+ * `supatype self-host compose` has no `restart`, so this is Compose's own, against the project's
+ * compose file and project name, as the CLI runs it.
+ */
+function functionsWorkerRestartCommand(cwd: string, composePath: string, project: string): string {
+  const file = relative(cwd, composePath).replace(/\\/g, "/")
+  return `docker compose -p ${project} -f ${file} restart functions-worker`
+}
+
+function deploySelfHosted(cwd: string, fns: DiscoveredFunctionRoute[], restartCommand: string): void {
   info("Self-host Compose deployment.")
   plain("Functions are served from your project functions/ directory (no bundle step).\n")
 
@@ -394,7 +411,7 @@ async function deploySelfHosted(cwd: string, fns: DiscoveredFunctionRoute[]): Pr
 
   plain(`\n${fns.length} function(s) ready on disk.`)
   info("Restart the functions-worker container to load changes:")
-  plain("  supatype self-host compose restart functions-worker")
+  plain(`  ${restartCommand}`)
   plain("\nKong → supatype-server → functions-worker (per-project worker).")
 }
 
@@ -449,13 +466,13 @@ async function deployCloud(cwd: string, fns: DiscoveredFunctionRoute[], env?: st
   const linked = getLinkedProject(cwd)
 
   if (!linked) {
-    error("No linked project. Run: npx supatype cloud link")
+    error(NOT_LINKED)
     process.exit(1)
   }
 
   const token = getCloudToken(cwd)
   if (!token) {
-    error("Not logged in. Run: npx supatype cloud login")
+    error(NOT_LOGGED_IN)
     process.exit(1)
   }
 
@@ -562,7 +579,7 @@ async function listFunctions(cwd: string): Promise<void> {
 
   const token = getCloudToken(cwd)
   if (!token) {
-    error("Not logged in. Run: npx supatype cloud login")
+    error(NOT_LOGGED_IN)
     process.exit(1)
   }
 
@@ -610,13 +627,13 @@ async function deleteFunction(cwd: string, name: string): Promise<void> {
   const linked = getLinkedProject(cwd)
 
   if (!linked) {
-    error("No linked project. Run: npx supatype cloud link")
+    error(NOT_LINKED)
     process.exit(1)
   }
 
   const token = getCloudToken(cwd)
   if (!token) {
-    error("Not logged in. Run: npx supatype cloud login")
+    error(NOT_LOGGED_IN)
     process.exit(1)
   }
 
@@ -650,13 +667,13 @@ async function functionLogs(cwd: string, name: string, opts: { since: string }):
   const linked = getLinkedProject(cwd)
 
   if (!linked) {
-    error("No linked project. Run: npx supatype cloud link")
+    error(NOT_LINKED)
     process.exit(1)
   }
 
   const token = getCloudToken(cwd)
   if (!token) {
-    error("Not logged in. Run: npx supatype cloud login")
+    error(NOT_LOGGED_IN)
     process.exit(1)
   }
 
@@ -799,7 +816,7 @@ async function envList(cwd: string): Promise<void> {
 
   const token = getCloudToken(cwd)
   if (!token) {
-    error("Not logged in. Run: npx supatype cloud login")
+    error(NOT_LOGGED_IN)
     process.exit(1)
   }
 
@@ -867,7 +884,7 @@ async function envSet(cwd: string, keyvalue: string): Promise<void> {
 
   const token = getCloudToken(cwd)
   if (!token) {
-    error("Not logged in. Run: npx supatype cloud login")
+    error(NOT_LOGGED_IN)
     process.exit(1)
   }
 
@@ -917,7 +934,7 @@ async function envUnset(cwd: string, key: string): Promise<void> {
 
   const token = getCloudToken(cwd)
   if (!token) {
-    error("Not logged in. Run: npx supatype cloud login")
+    error(NOT_LOGGED_IN)
     process.exit(1)
   }
 
@@ -968,14 +985,10 @@ async function loadCloudHelpers(): Promise<CloudHelpers> {
       if (process.env["SUPATYPE_ACCESS_TOKEN"]) {
         return process.env["SUPATYPE_ACCESS_TOKEN"]
       }
+      // The link's own token, else the session `supatype login` saved. This used to read
+      // ~/.supatype/token, which nothing writes, so a fresh login still read as logged out.
       const link = loadProjectLink(cwd)
-      if (link?.token) return link.token
-      const tokenPath = resolve(
-        process.env["HOME"] ?? process.env["USERPROFILE"] ?? "~",
-        ".supatype/token",
-      )
-      if (!existsSync(tokenPath)) return null
-      return readFileSync(tokenPath, "utf8").trim() || null
+      return link === null ? null : resolveCloudAccessToken(link) ?? null
     },
 
     getCloudApiUrl(cwd: string): string {

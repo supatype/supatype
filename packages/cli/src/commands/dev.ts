@@ -70,6 +70,7 @@ import { registerDevShutdown, waitForDevShutdown } from "../dev-shutdown.js"
 import { patchRouteManifest } from "../route-manifest.js"
 import { resolveRealtimeLaunch } from "../realtime-launch.js"
 import { writeAppViteEnv } from "../app-vite-env.js"
+import { nativeAuthProviderEnv, warnMissingAuthProviderSecrets } from "../auth-providers.js"
 import { AUTHENTICATOR_PASSWORD_ENV, nativeRolesSql } from "../native-roles-sql.js"
 import { ensureValkeySidecar, probeTcp, stopValkeySidecar } from "../valkey-sidecar.js"
 import {
@@ -502,6 +503,9 @@ export function registerDev(program: Command): void {
         ? { addr: nativeKeyspaceAddr, containerName: null, started: false }
         : ensureValkeySidecar(projectName)
 
+      // What an env("NAME") in auth.providers resolves against: the shell over .env, as for the config.
+      const providerEnvironment = { ...loadDotEnv(cwd), ...process.env }
+      warnMissingAuthProviderSecrets(config, providerEnvironment)
       const serverEnv: Record<string, string> = {
         // supatype-server outer layer
         SUPATYPE_MODE: config.server.mode ?? "dev",
@@ -579,6 +583,8 @@ export function registerDev(program: Command): void {
             }
           : {}),
         ...(config.storage?.provider !== "s3" ? localStorageEnv(stateRoot) : {}),
+        // .env last, so a SUPATYPE_EXTERNAL_* value there wins over auth.providers in the config.
+        ...nativeAuthProviderEnv(config, `http://localhost:${serverPort}`, providerEnvironment),
         ...loadDotEnv(cwd),
       }
 

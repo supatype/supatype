@@ -2,6 +2,7 @@ import { existsSync } from "node:fs"
 import { resolve } from "node:path"
 import { readComposeEnvInt } from "./env-file.js"
 import type { ComponentVersions } from "./components.js"
+import { validateAuthProviders, type AuthProvidersConfig } from "./auth-providers.js"
 
 // ---------------------------------------------------------------------------
 // Config schema (single canonical shape; loaded from supatype.config.ts)
@@ -236,6 +237,21 @@ export interface SupatypeProjectConfig {
      */
     send_email_hook_secrets?: string
   }
+  /** The auth server's sign-in options beyond email. */
+  auth?: {
+    /**
+     * OAuth providers, keyed by the name `signInWithOAuth({ provider })` takes:
+     *
+     * ```ts
+     * auth: { providers: { github: { clientId: "Iv1.abc", secret: env("GITHUB_SECRET") } } }
+     * ```
+     *
+     * Rendered as the `SUPATYPE_EXTERNAL_<PROVIDER>_*` variables the server reads, for `dev` and
+     * for the self-host compose file. The redirect URI defaults to `<public API URL>/auth/v1/callback`;
+     * register that URL with the provider. A `SUPATYPE_EXTERNAL_*` value in `.env` wins over this.
+     */
+    providers?: AuthProvidersConfig
+  }
   storage?: {
     /**
      * Storage backend.
@@ -458,6 +474,7 @@ export function mergeProjectConfig(
           }
         })()
       : {}),
+    ...mergeAuth(base.auth, override.auth),
     ...(base.storage !== undefined || override.storage !== undefined
       ? {
           storage: {
@@ -504,6 +521,24 @@ export function mergeProjectConfig(
   }
 }
 
+/**
+ * `auth` from the local config on top of the base, a provider at a time, so a local file can swap one
+ * provider's client id for a development OAuth app without restating the others.
+ */
+function mergeAuth(
+  base: SupatypeProjectConfig["auth"],
+  override: SupatypeProjectConfig["auth"],
+): Pick<SupatypeProjectConfig, "auth"> {
+  if (base === undefined && override === undefined) return {}
+  const names = new Set([...Object.keys(base?.providers ?? {}), ...Object.keys(override?.providers ?? {})])
+  if (names.size === 0) return { auth: { ...base, ...override } }
+  const providers: AuthProvidersConfig = {}
+  for (const name of names as Set<keyof AuthProvidersConfig>) {
+    providers[name] = { ...base?.providers?.[name], ...override?.providers?.[name] }
+  }
+  return { auth: { ...base, ...override, providers } }
+}
+
 export function validateProjectConfig(raw: unknown, filename: string): SupatypeProjectConfig {
   if (typeof raw !== "object" || raw === null) {
     throw new Error(`${filename}: expected a config object at the root`)
@@ -527,6 +562,7 @@ export function validateProjectConfig(raw: unknown, filename: string): SupatypeP
   validateExternalDatabase(cfg, filename)
   validateCache(cfg, filename)
   validateSchemaNames(cfg, filename)
+  validateAuthProviders(cfg, filename)
 
   return raw as SupatypeProjectConfig
 }

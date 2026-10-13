@@ -46,12 +46,12 @@ export function declaredHooks(ast: unknown): DeclaredHook[] {
 }
 
 /** Function directory names available to be used as hooks. */
-function availableFunctions(functionsDir: string): string[] {
-  if (!existsSync(functionsDir)) return []
-  return readdirSync(functionsDir)
+function availableFunctions(hooksDir: string): string[] {
+  if (!existsSync(hooksDir)) return []
+  return readdirSync(hooksDir)
     .filter((entry) => !entry.startsWith("_") && !entry.startsWith("."))
     .filter((entry) => {
-      const full = join(functionsDir, entry)
+      const full = join(hooksDir, entry)
       // A function is a directory with an index.ts, matching how the worker discovers them.
       return statSync(full).isDirectory() && existsSync(join(full, "index.ts"))
     })
@@ -66,18 +66,18 @@ function availableFunctions(functionsDir: string): string[] {
  */
 export function validateModelHooks(
   ast: unknown,
-  functionsDir: string,
+  hooksDir: string,
   cwd: string,
 ): string[] {
   const hooks = declaredHooks(ast)
   if (hooks.length === 0) return []
 
-  const available = availableFunctions(functionsDir)
+  const available = availableFunctions(hooksDir)
   const known = new Set(available)
   const missing = hooks.filter((hook) => !known.has(hook.function))
   if (missing.length === 0) return []
 
-  const where = relative(cwd, functionsDir) || functionsDir
+  const where = relative(cwd, hooksDir) || hooksDir
   const lines = missing.map(
     (hook) => `  ${hook.model}.${hook.event} → "${hook.function}" (no ${where}/${hook.function}/index.ts)`,
   )
@@ -91,7 +91,8 @@ export function validateModelHooks(
 }
 
 /**
- * Write `functions/_supatype/hooks.ts`, or remove a stale one when no hooks remain.
+ * Write `hooks/_supatype/hooks.ts`, under the project's hooks directory (`hooksPathFromProject`),
+ * or remove a stale one when no hooks remain.
  *
  * Removal matters as much as writing: deleting the last hook from a schema should leave no typed
  * module behind claiming tables are hooked, and a handler importing it should start failing to
@@ -99,9 +100,9 @@ export function validateModelHooks(
  *
  * Returns the project-relative path written, or null when there was nothing to write.
  */
-export function writeHooksModule(cwd: string, functionsDir: string, ast: unknown): string | null {
+export function writeHooksModule(cwd: string, hooksDir: string, ast: unknown): string | null {
   const module = generateHooksModule(ast)
-  const dir = join(functionsDir, "_supatype")
+  const dir = join(hooksDir, "_supatype")
   const file = join(dir, "hooks.ts")
 
   if (module === null) {
@@ -257,18 +258,18 @@ export function manifestValidators(ast: unknown): Record<string, Record<string, 
  */
 export function validateModelValidators(
   ast: unknown,
-  functionsDir: string,
+  hooksDir: string,
   cwd: string,
 ): string[] {
   const validators = declaredValidators(ast)
   if (validators.length === 0) return []
 
-  const available = availableFunctions(functionsDir)
+  const available = availableFunctions(hooksDir)
   const known = new Set(available)
   const missing = validators.filter((entry) => !known.has(entry.function))
   if (missing.length === 0) return []
 
-  const where = relative(cwd, functionsDir) || functionsDir
+  const where = relative(cwd, hooksDir) || hooksDir
   const lines = missing.map(
     (entry) =>
       `  ${entry.model}.${entry.field} → "${entry.function}" (no ${where}/${entry.function}/index.ts)`,
@@ -296,7 +297,7 @@ export const DEFAULT_HOOK_TIMEOUT_MS = 2000
  *
  * `cache` is here for a third reason of the same kind: the declaration is a ceiling the server
  * enforces, and a manifest carrying a stale one lets a table be cached that the schema has since
- * stopped permitting — or stops one the schema now allows, which is merely slow rather than wrong.
+ * stopped permitting, or stops one the schema now allows, which is merely slow rather than wrong.
  * The first of those is why it is written at push and not left to drift.
  *
  * **Only updates a manifest that is already there.** Creating one from scratch here would be a
@@ -387,7 +388,7 @@ export interface HooksReport {
  * The case worth catching: hooks declared while `functions_enabled` is false. Nothing fails, no error
  * appears, and every hook silently never fires.
  */
-export function hooksReport(cwd: string, functionsDir: string, ast: unknown): HooksReport {
+export function hooksReport(cwd: string, hooksDir: string, ast: unknown): HooksReport {
   const declared = declaredHooks(ast)
   const validators = declaredValidators(ast)
   const manifestPath = join(cwd, ".supatype", "manifest.json")
@@ -407,13 +408,13 @@ export function hooksReport(cwd: string, functionsDir: string, ast: unknown): Ho
   }
 
   const known = new Set(
-    existsSync(functionsDir)
-      ? readdirSync(functionsDir).filter(
+    existsSync(hooksDir)
+      ? readdirSync(hooksDir).filter(
           (entry) =>
             !entry.startsWith("_") &&
             !entry.startsWith(".") &&
-            statSync(join(functionsDir, entry)).isDirectory() &&
-            existsSync(join(functionsDir, entry, "index.ts")),
+            statSync(join(hooksDir, entry)).isDirectory() &&
+            existsSync(join(hooksDir, entry, "index.ts")),
         )
       : [],
   )
