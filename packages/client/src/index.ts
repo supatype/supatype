@@ -165,8 +165,10 @@ class TableClient<TDef extends TableDef> {
    * **Read-only, and permission is not the read rule.** A draft is visible to the record's creator
    * and to the project's elevated Studio roles, or to a caller holding a signed preview link. A
    * caller who may read published content is not thereby entitled to read what has not been
-   * published. Write with the ordinary `update`, which records a new draft version; publish with
-   * `supatype.publish`.
+   * published. Write with the ordinary `update`, which records a new draft version. Publish by
+   * calling the generated `publish` database function in the `supatype` schema; there is no client
+   * method for it:
+   * `rpc("publish", { model_table: "posts", record_id: id }, { schema: "supatype" })`.
    */
   draft(): this {
     this.profile = DRAFT_SCHEMA
