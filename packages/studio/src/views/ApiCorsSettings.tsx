@@ -16,13 +16,19 @@ const SOURCE_LABEL: Record<OriginSource, string> = {
 
 function sourceOf(origin: string, data: CorsOrigins): OriginSource {
   if (data.platform.includes(origin)) return "platform"
-  if (data.source === "saved") return "saved"
-  return origin === data.siteOrigin ? "site" : "configured"
+  // Checked before "saved": the server allows the site URL whatever is saved (SHc).
+  if (origin === data.siteOrigin) return "site"
+  return data.source === "saved" ? "saved" : "configured"
 }
 
-/** The project's own list: what is in force without the platform's origins. */
+/** Origins the server allows whatever is saved, so nothing here offers to remove them. */
+function isFixed(origin: string, data: CorsOrigins): boolean {
+  return data.platform.includes(origin) || origin === data.siteOrigin
+}
+
+/** The list this page saves: what is in force, less what the server allows anyway. */
 function projectList(data: CorsOrigins): string[] {
-  return data.origins.filter((o) => !data.platform.includes(o))
+  return data.origins.filter((o) => !isFixed(o, data))
 }
 
 /**
@@ -116,7 +122,7 @@ function OriginRow({ origin, source, onRemove }: {
         <code className="text-sm font-mono truncate">{origin}</code>
         <Badge variant={source === "platform" ? "indigo" : source === "saved" ? "blue" : "outline"}>{SOURCE_LABEL[source]}</Badge>
       </div>
-      {onRemove && source !== "platform" ? (
+      {onRemove && source !== "platform" && source !== "site" ? (
         <Button size="xs" variant="ghost" onClick={() => onRemove(origin)}>Remove</Button>
       ) : null}
     </div>

@@ -95,7 +95,8 @@ describe("the Allowed origins page", () => {
     for (let i = 0; i < 3; i++) await act(async () => {})
 
     const put = calls.find((c) => c.method === "PUT")
-    expect(put?.body).toEqual({ origins: ["https://app.example.com", "https://admin.example.com", "https://partner.example"] })
+    // The site URL is left out: the server allows it whatever is saved (SHc).
+    expect(put?.body).toEqual({ origins: ["https://admin.example.com", "https://partner.example"] })
     expect(container.textContent).toContain("Saved here")
     expect(button("Reset to default")).toBeDefined()
   })
@@ -127,5 +128,29 @@ describe("the Allowed origins page", () => {
     await act(async () => root!.render(<AdminClientContext.Provider value={CLIENT}><ApiCorsSettings /></AdminClientContext.Provider>))
     for (let i = 0; i < 5; i++) await act(async () => {})
     expect(container.textContent).toContain("invalid origin")
+  })
+})
+
+describe("the site URL on the Allowed origins page (SHc)", () => {
+  it("stays marked as the site URL, with no Remove, while a saved list is in force", async () => {
+    const saved = {
+      ...DEFAULT,
+      source: "saved",
+      saved: ["https://partner.example"],
+      origins: ["https://app.example.com", "https://partner.example"],
+    }
+    await render({ manageDomains: true }, () => saved)
+    const rows = [...container.querySelectorAll("code")].map((c) => c.closest("div")?.parentElement)
+    const siteRow = rows.find((r) => r?.textContent?.includes("https://app.example.com"))
+    expect(siteRow?.textContent).toContain("Site URL")
+    expect([...(siteRow?.querySelectorAll("button") ?? [])].some((b) => b.textContent === "Remove")).toBe(false)
+  })
+
+  it("leaves the site URL out of what it saves, since the server always allows it", async () => {
+    const saved = { ...DEFAULT, source: "saved", saved: ["https://partner.example"], origins: ["https://app.example.com", "https://partner.example"] }
+    await render({ manageDomains: true }, () => saved)
+    await act(async () => { button("Remove")!.click() })
+    for (let i = 0; i < 3; i++) await act(async () => {})
+    expect(calls.find((c) => c.method === "PUT")?.body).toEqual({ origins: [] })
   })
 })

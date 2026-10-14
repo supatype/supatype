@@ -106,7 +106,7 @@ Outside dev mode the gateway answers CORS for every service behind it, with one 
 - **Saved in Studio:** the Settings page's CORS tab. Owners and admins can add and remove origins
   there. The list is stored in the project's database (`auth.cors_origins`), so it survives a
   restart, and every replica reads it within ten seconds. It replaces the default until someone
-  presses Reset.
+  presses Reset. The site URL stays allowed whatever is saved.
 - **Everything else is refused:** a preflight from another origin gets `403`, and other responses
   carry no CORS headers.
 - **`*`** allows every origin, and only when someone writes it in one of those places.
