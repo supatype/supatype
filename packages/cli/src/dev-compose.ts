@@ -19,6 +19,7 @@ import {
   resolveRuntimeProvider,
   hooksPathFromProject,
   schemaPathFromProject,
+  selfHostTlsEnabled,
   usesExternalDatabase,
   type SupatypeProjectConfig,
 } from "./project-config.js"
@@ -106,6 +107,7 @@ import { hostComposeDbUrl, resolveHostDatabaseUrl } from "./host-database.js"
 import { grantAuthSchemaAccess, privatizeTableDefaults, reconcileAuthenticatorPassword } from "./compose-db-roles.js"
 import { spawnComposeEngine } from "./compose-engine-run.js"
 import { waitForRestReady } from "./rest-ready.js"
+import { claimDevRenderMode, composeRenderMode, composeRenderOptions, type ComposeRenderMode } from "./compose-render-mode.js"
 
 /** Sync optional Docker image pins from config into `.env` (no JWT rotation). */
 export function syncComposeImagePins(cwd: string, config: SupatypeProjectConfig): void {
@@ -167,13 +169,12 @@ export async function ensureDockerDbPublishedForHostEngine(
   }
 
   const project = composeProjectName(config.project.name)
-  const kongPort = await resolveKongPort(cwd, project)
-  const devDbPort = await ensureDevDbPort(cwd, { composeProject: project })
+  // A standalone stack already publishes its database (SUPATYPE_DB_PORT), and its .env is the
+  // operator's: only a dev stack gets the dev port and the dev values (SH1).
+  const mode = composeRenderMode(cwd, config.project.name)
+  if (mode === "dev") await prepareDevComposeEnv(cwd, config, project, await resolveKongPort(cwd, project))
 
-  const { anonKey, serviceRoleKey } = devApiKeys(cwd)
-  ensureDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, devDbPort)
-
-  const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
+  const paths = writeSelfHostCompose(cwd, config, { devLocal: mode === "dev" })
   await startComposeDatabase(config, paths, cwd, project, brand)
 }
 
@@ -226,7 +227,7 @@ export async function projectComposeEngine(
 ): Promise<ComposeEngine | undefined> {
   if (resolveRuntimeProvider(config) !== "docker" || hasEngineOverride(config)) return undefined
   if (config.connection?.trim()) return undefined
-  const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
+  const paths = writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name))
   const project = composeProjectName(config.project.name)
   const engineImage = await schemaEngineImageForPush(config, cwd)
   return {
@@ -399,6 +400,29 @@ function ensureDevComposeEnv(
   devDbPort?: number,
 ): void {
   upsertDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, devDbPort)
+}
+
+/**
+ * The dev `.env` a push to a dev stack keeps current: the dev database port and the dev values.
+ * Only for a dev stack: on a standalone one these are the operator's, and a push that wrote
+ * `SITE_URL`, `SUPATYPE_MAILER_AUTOCONFIRM=true` and a dev `DATABASE_URL` over them broke the
+ * deployment's links and turned email confirmation off (SH1).
+ */
+async function prepareDevComposeEnv(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  project: string,
+  kongPort: number,
+): Promise<void> {
+  // No dev db port for an external database: `ensureDevDbPort` allocates a host port for the `db`
+  // container *and persists a matching DATABASE_URL*, which overwrote the operator's own URL, the
+  // one the whole stack and every CLI command reads.
+  // Whatever compose publishes, `DATABASE_URL` has to point at. Gating this on
+  // `overrides.engine` while the compose file published unconditionally is what left a project
+  // with a database on 54329 and a URL still saying 5432.
+  const devDbPort = publishesDbToHost(config) ? await ensureDevDbPort(cwd, { composeProject: project }) : undefined
+  const { anonKey, serviceRoleKey } = devApiKeys(cwd)
+  ensureDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, devDbPort)
 }
 
 async function waitComposeHealthy(paths: SelfHostComposePaths, cwd: string, maxMs: number, composeProject: string): Promise<void> {
@@ -936,7 +960,7 @@ export function followRecordedTier(
   const served = composeFieldMaskingTier(cwd, config)
   const recorded = recordDatabaseTier(cwd, { project, composePath: paths.composePath })
   if (recorded === undefined || sameApiSurface(config, served, recorded)) return
-  writeSelfHostCompose(cwd, config, { devLocal: true })
+  writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name))
   console.log(`[supatype] The database runs field masking tier "${recorded}"; PostgREST follows it.`)
   if (!opts.recreate) return
   const status = runDockerCompose(paths.composePath, ["up", "-d", "--no-deps", "postgrest"], cwd, project, {
@@ -1042,7 +1066,7 @@ export async function dockerEngineCapabilities(cwd: string, config: SupatypeProj
   const engineImage = await schemaEngineImageForPush(config, cwd)
   // An image Docker could not pull throws with the daemon's sentence, and is asked again next time.
   const probe = (): Capabilities => {
-    const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
+    const paths = writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name))
     const target = { cwd, project: composeProjectName(config.project.name), composePath: paths.composePath, engineImage }
     return probeCapabilities((args) => {
       const run = spawnComposeEngine(target, args, { runFlags: ["--no-deps"] })
@@ -1230,7 +1254,7 @@ export async function adoptSchemaDocker(
     config,
     identityColumnsNeed(withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)),
   )
-  const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
+  const paths = writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name))
   const command = adoptCommand(yes, keys)
   const result = await runComposeEngineCommand(paths, cwd, project, config, command)
   const parsed = adoptResultFrom(result)
@@ -1263,11 +1287,14 @@ export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfi
     })
   }
 
-  const kongPort = await resolveKongPort(cwd, project)
-  const { anonKey, serviceRoleKey } = devApiKeys(cwd)
-  ensureDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, undefined)
+  // A diff of a standalone stack must not write dev values over the operator's .env (SH1).
+  const mode = composeRenderMode(cwd, config.project.name)
+  if (mode === "dev") {
+    const { anonKey, serviceRoleKey } = devApiKeys(cwd)
+    ensureDevComposeEnv(cwd, config, anonKey, serviceRoleKey, await resolveKongPort(cwd, project), undefined)
+  }
 
-  const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
+  const paths = writeSelfHostCompose(cwd, config, { devLocal: mode === "dev" })
   const diffBrand = { intro: "Schema diff" }
 
   await startComposeDatabase(config, paths, cwd, project, diffBrand)
@@ -1320,19 +1347,15 @@ export async function pushSchemaDocker(
     throw new Error("pushSchemaDocker requires provider: docker")
   }
   const project = composeProjectName(config.project.name)
+  // The stack's own mode, never dev by default: a push to a production stack used to render it as
+  // dev and recreate it that way, and write dev values over the operator's .env (SH1).
+  const mode = composeRenderMode(cwd, config.project.name)
   const kongPort = await resolveKongPort(cwd, project)
-  // No dev db port for an external database: `ensureDevDbPort` allocates a host port for the `db`
-  // container *and persists a matching DATABASE_URL*, which overwrote the operator's own URL, the
-  // one the whole stack and every CLI command reads.
-  // Whatever compose publishes, `DATABASE_URL` has to point at. Gating this on
-  // `overrides.engine` while the compose file published unconditionally is what left a project
-  // with a database on 54329 and a URL still saying 5432.
-  const devDbPort = publishesDbToHost(config) ? await ensureDevDbPort(cwd, { composeProject: project }) : undefined
-
+  if (mode === "dev") await prepareDevComposeEnv(cwd, config, project, kongPort)
+  const gatewayPort = composeGatewayHostPort(config, mode, kongPort)
   const { anonKey, serviceRoleKey } = devApiKeys(cwd)
-  ensureDevComposeEnv(cwd, config, anonKey, serviceRoleKey, kongPort, devDbPort)
 
-  const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
+  const paths = writeSelfHostCompose(cwd, config, { devLocal: mode === "dev" })
   const pushBrand = { intro: "Push schema" }
 
   console.log(`[supatype] provider docker, applying schema via compose (project ${project})...`)
@@ -1345,16 +1368,45 @@ export async function pushSchemaDocker(
   // `up -d` below recreates PostgREST when the tier changed its environment.
   followRecordedTier(cwd, config, { recreate: false })
 
-  const upGateway = runDockerCompose(paths.composePath, ["up", "-d"], cwd, project, {
-    quiet: true,
-    brand: pushBrand,
+  await bringPushedStackUp(cwd, config, { paths, project, gatewayPort, brand: pushBrand }, ast, {
+    anonKey,
+    serviceRoleKey,
   })
+  console.log("[supatype] Schema pushed.")
+}
+
+/**
+ * The host port the stack's gateway answers plain HTTP on. A standalone stack with TLS publishes
+ * Kong on 80 and 443 instead of SUPATYPE_KONG_PORT. Before SH1 a push never met one: it turned every
+ * stack into dev, and dev never has TLS, first.
+ */
+export function composeGatewayHostPort(
+  config: SupatypeProjectConfig,
+  mode: ComposeRenderMode,
+  kongPort: number,
+): number {
+  return selfHostTlsEnabled(config, mode === "dev") ? 80 : kongPort
+}
+
+/**
+ * After a compose push: the rest of the stack up, then what the schema asks of it once it answers
+ * (buckets, the first admin), then REST, which is the last to catch up with the new schema.
+ */
+async function bringPushedStackUp(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  stack: { paths: SelfHostComposePaths; project: string; gatewayPort: number; brand: DockerBrandOptions },
+  ast: ExtractedSchemaAstV2,
+  keys: { anonKey: string; serviceRoleKey: string },
+): Promise<void> {
+  const { paths, project, gatewayPort, brand } = stack
+  const upGateway = runDockerCompose(paths.composePath, ["up", "-d"], cwd, project, { quiet: true, brand })
   if (upGateway !== 0) {
-    exitComposeFailed(upGateway, "Could not start the Compose gateway stack.", pushBrand)
+    exitComposeFailed(upGateway, "Could not start the Compose gateway stack.", brand)
   }
-  await waitKongReady(kongPort, 120, { composePath: paths.composePath, cwd, project })
-  await waitStorageApiReady(kongPort, serviceRoleKey, 90)
-  await provisionDockerStorageBuckets(ast, kongPort, serviceRoleKey)
+  await waitKongReady(gatewayPort, 120, { composePath: paths.composePath, cwd, project })
+  await waitStorageApiReady(gatewayPort, keys.serviceRoleKey, 90)
+  await provisionDockerStorageBuckets(ast, gatewayPort, keys.serviceRoleKey)
 
   await ensureFirstAdminUserForProject(cwd, config, {
     compose: { project, composePath: paths.composePath },
@@ -1362,8 +1414,7 @@ export async function pushSchemaDocker(
 
   // Last, so the admin user and the buckets are not held up by it. `supatype dev` never comes
   // through here: it pushes before PostgREST starts, so PostgREST finds the schemas on its first try.
-  await waitForRestReady(loopbackBase(kongPort), anonKey)
-  console.log("[supatype] Schema pushed.")
+  await waitForRestReady(loopbackBase(gatewayPort), keys.anonKey)
 }
 
 /**
@@ -1422,6 +1473,9 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   if (resolveRuntimeProvider(config) !== "docker") {
     throw new Error("runDevCompose requires provider: docker")
   }
+  // dev is what makes a stack dev. Claimed first, so every render this process makes on the way up
+  // and after it is dev, before the session's lock file exists (see compose-render-mode.ts).
+  claimDevRenderMode()
 
   // Per-project compose name + port isolate this project from any other Supatype
   // stack on the machine (own containers, volumes, network, and gateway port).
@@ -1447,7 +1501,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   warnProjectAuthProviderSecrets(cwd, config)
 
   console.log(`[supatype] provider docker, starting self-host Compose stack (project ${project}, gateway :${kongPort})...`)
-  const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
+  const paths = writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name))
   if (ensureDevApiConfig(cwd)) {
     console.log("[supatype] API config written to .supatype/api-config.json")
   }

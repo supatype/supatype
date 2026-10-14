@@ -21,6 +21,7 @@ import { generateUnits } from "../systemd.js"
 import { readPid } from "../process-manager.js"
 import { localStorageEnv } from "../local-storage.js"
 import { composeProjectName, exitComposeFailed, runDockerCompose, writeSelfHostCompose } from "../self-host-compose.js"
+import { composeRenderOptions } from "../compose-render-mode.js"
 import { warnProjectAuthProviderSecrets } from "../auth-providers.js"
 import { file, error, info, plain, warn } from "../ui/messages.js"
 import { nextSteps } from "../ui/next-steps.js"
@@ -42,7 +43,7 @@ export function registerSelfHost(program: Command): void {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
       warnProjectAuthProviderSecrets(cwd, config)
-      const out = writeSelfHostCompose(cwd, config)
+      const out = writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name))
       file("wrote", out.composePath)
       file("wrote", out.kongPath)
     })
@@ -70,7 +71,7 @@ export function registerSelfHost(program: Command): void {
       // Before the spinner, so the warning is not drawn over.
       warnProjectAuthProviderSecrets(cwd, config)
       const status = await withSpinner("Starting self-host Compose stack", async () => {
-        const out = writeSelfHostCompose(cwd, config)
+        const out = writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name))
         return runDockerCompose(out.composePath, args, cwd, project, { brand: SELF_HOST_BRAND })
       })
       if (status !== 0) {
@@ -401,7 +402,7 @@ const SELF_HOST_BRAND = { intro: "Self-host deployment" }
 function renderAndRunCompose(args: string[]): number {
   const cwd = process.cwd()
   const config = loadConfig(cwd)
-  const out = writeSelfHostCompose(cwd, config)
+  const out = writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name))
   return runDockerCompose(out.composePath, args, cwd, composeProjectName(config.project.name), {
     brand: SELF_HOST_BRAND,
   })
