@@ -42,7 +42,7 @@ LOCAL_ENV_EXISTED="no"
 cleanup() {
   echo ""
   echo "==> teardown"
-  if [[ -n "$DEV_PID" ]]; then kill "$DEV_PID" 2>/dev/null || true; fi
+  stop_pid_bounded "$DEV_PID"
   e2e_project_down
   # Both files hold a signed key and neither is gitignored, so a failure must not leave one behind.
   if [[ "$ENV_EXISTED" == "no" ]]; then rm -f "$EXAMPLE_DIR/.env"; fi
@@ -71,7 +71,7 @@ SUPATYPE_AUTH_COOKIE_PREFIX=st
 ENV
 
 echo "==> Bringing the stack up (this starts Next too)"
-(cd "$EXAMPLE_DIR" && node "$CLI_BIN" dev) &
+(cd "$EXAMPLE_DIR" && exec node "$CLI_BIN" dev) &
 DEV_PID=$!
 
 ready() { dev_started "$EXAMPLE_DIR" && http_ok "$BASE_URL/auth/v1/health"; }

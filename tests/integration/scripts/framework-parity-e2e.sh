@@ -45,7 +45,7 @@ cleanup() {
   echo ""
   echo "==> teardown"
   for pid in "${PREVIEW_PIDS[@]}"; do kill "$pid" 2>/dev/null || true; done
-  if [[ -n "$DEV_PID" ]]; then kill "$DEV_PID" 2>/dev/null || true; fi
+  stop_pid_bounded "$DEV_PID"
   e2e_project_down
   if [[ "$ENV_EXISTED" == "no" ]]; then rm -f "$EXAMPLE_DIR/.env"; fi
   e2e_project_release
@@ -72,7 +72,7 @@ for fw in "${FRAMEWORKS[@]}"; do
 done
 
 echo "==> Bringing the stack up"
-(cd "$EXAMPLE_DIR" && node "$CLI_BIN" dev) &
+(cd "$EXAMPLE_DIR" && exec node "$CLI_BIN" dev) &
 DEV_PID=$!
 
 ready() { dev_started "$EXAMPLE_DIR" && http_ok "$BASE_URL/auth/v1/health"; }

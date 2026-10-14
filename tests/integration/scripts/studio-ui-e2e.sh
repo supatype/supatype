@@ -50,7 +50,7 @@ DEV_PID=""
 cleanup() {
   echo ""
   echo "==> teardown"
-  if [[ -n "$DEV_PID" ]]; then kill "$DEV_PID" 2>/dev/null || true; fi
+  stop_pid_bounded "$DEV_PID"
   e2e_project_down
   e2e_project_release
 }
@@ -78,7 +78,7 @@ if grep -q "^STUDIO_OPEN_DEV=" "$INTEGRATION_DIR/.env" 2>/dev/null; then
 else
   { echo ""; echo "STUDIO_OPEN_DEV=0"; } >> "$INTEGRATION_DIR/.env"
 fi
-(cd "$INTEGRATION_DIR" && node "$CLI_BIN" dev) &
+(cd "$INTEGRATION_DIR" && exec node "$CLI_BIN" dev) &
 DEV_PID=$!
 
 ready() { dev_started "$INTEGRATION_DIR" && http_ok "$BASE_URL/auth/v1/health"; }

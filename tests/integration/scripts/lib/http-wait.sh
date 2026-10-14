@@ -83,6 +83,10 @@ wait_until() {
 # stop_pid_bounded <pid> - stops a process this script started and waits for it, for at most 20s.
 # `supatype dev` runs compose down on the way out, which can hang in CI, so the wait is bounded and
 # a process still there afterwards is killed outright.
+#
+# Start the process as `(cd "$DIR" && exec node ...) &`, so the PID is the process itself. Without
+# `exec`, $! is the subshell's: on bash 3.2 and 4.4 (macOS ships 3.2) killing it left the process
+# running, so `supatype dev` outlived the script.
 stop_pid_bounded() {
   local pid="$1"
   [[ -n "$pid" ]] || return 0
