@@ -231,6 +231,12 @@ What you get:
 - The extensions' own functions are no longer API endpoints: `/rest/v1/rpc/st_distance` answers
   404. To call one from the API, write a SQL function of your own in `public` that calls it, and
   call that with `rpc()`.
+- A model index can name its method: `{ fields: ["location"], using: "gist" }` for a `Geo` or
+  `GeoPoint` field, `{ fields: ["embedding"], using: "hnsw" }` for a `Vector` field. An `hnsw`
+  index uses cosine distance (`vector_cosine_ops`); add `distance: "l2"` or
+  `distance: "innerProduct"` for the other two. A query ordered by a different distance than its
+  index's does not use the index. `hnsw` indexes used to fail to push, because pgvector needs the
+  operator class named.
 
 **Existing projects.** The first push after you upgrade moves `vector`, `unaccent` and `pgcrypto`
 out of `public` with `ALTER EXTENSION ... SET SCHEMA extensions`. Columns, indexes and rows are not

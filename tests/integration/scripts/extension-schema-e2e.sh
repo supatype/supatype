@@ -9,6 +9,7 @@
 #
 # Asserts, on a stack nothing has touched before:
 #   1. the OpenAPI root answers 200, within a second, from the moment the pushed table is served;
+#   then that the declared GiST and HNSW indexes exist, the HNSW one with pgvector's cosine class;
 #   2. Geo, GeoPoint and Vector columns write, read and filter through REST and GraphQL;
 #   3. no PostGIS, pgvector or unaccent function is an endpoint (`/rest/v1/rpc/st_distance`).
 #
@@ -167,6 +168,27 @@ FAILED=0
 echo ""
 echo "==> 1. The OpenAPI root answers at once after the push"
 root_answers_at_once || FAILED=1
+
+# A query against the project's database, through the container: nothing publishes its port.
+db_query() {
+  local env="$PROJECT_DIR/.env"
+  docker exec -e PGPASSWORD="$(grep -E '^POSTGRES_PASSWORD=' "$env" | cut -d= -f2-)" "${COMPOSE_PROJECT}-db-1" \
+    psql -U "$(grep -E '^POSTGRES_USER=' "$env" | cut -d= -f2-)" -d "$(grep -E '^POSTGRES_DB=' "$env" | cut -d= -f2-)" \
+    -tAc "$1"
+}
+
+echo ""
+echo "==> The indexes the schema declares, with the operator class pgvector needs"
+INDEXES="$(db_query "SELECT string_agg(indexdef, E'\n' ORDER BY indexname) FROM pg_indexes
+                      WHERE schemaname = 'public' AND tablename = 'place'
+                        AND (indexdef LIKE '%USING gist%' OR indexdef LIKE '%USING hnsw%')")"
+echo "$INDEXES" | sed 's/^/  /'
+if [[ "$INDEXES" == *"USING gist (location)"* && "$INDEXES" == *"USING hnsw (embedding "*"vector_cosine_ops)"* ]]; then
+  echo "  ok   a GiST index on the point and an HNSW cosine index on the vector"
+else
+  echo "  FAIL the GiST and HNSW indexes the schema declares are not both there" >&2
+  FAILED=1
+fi
 
 echo ""
 echo "==> 2 and 3. The columns through REST and GraphQL, and no extension endpoint"
