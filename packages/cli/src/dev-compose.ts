@@ -104,7 +104,12 @@ import {
 import { devPushConsentingToDrift } from "./drift-consent.js"
 import { capabilitiesCache, rememberCapabilitiesSync, type CapabilitiesCache } from "@supatype/shared"
 import { hostComposeDbUrl, resolveHostDatabaseUrl } from "./host-database.js"
-import { grantAuthSchemaAccess, privatizeTableDefaults, reconcileAuthenticatorPassword } from "./compose-db-roles.js"
+import {
+  grantAuthSchemaAccess,
+  privatizeTableDefaults,
+  reconcileAuthenticatorPassword,
+  reconcileSqlEditorPassword,
+} from "./compose-db-roles.js"
 import { spawnComposeEngine } from "./compose-engine-run.js"
 import { waitForRestReady } from "./rest-ready.js"
 import { claimDevRenderMode, composeRenderMode, composeRenderOptions, type ComposeRenderMode } from "./compose-render-mode.js"
@@ -1568,6 +1573,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
 
   if (!usesExternalDatabase(config)) {
     reconcileAuthenticatorPassword(paths, cwd, project)
+    reconcileSqlEditorPassword(paths, cwd, project)
     privatizeTableDefaults(paths, cwd, project)
   }
 

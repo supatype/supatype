@@ -21,7 +21,11 @@ import { STUDIO_DEV_PORT } from "./studio-dev-server.js"
 import { readEnvFile, readEnvValue } from "./env-file.js"
 import { upKeepingKongCurrent } from "./compose-kong.js"
 import { composeAuthProviderEnv } from "./auth-providers.js"
-import { CONTROL_PLANE_SECRET_ENV, ensureControlPlaneSecret } from "./local-secrets.js"
+import {
+  CONTROL_PLANE_SECRET_ENV,
+  SQL_EDITOR_PASSWORD_ENV,
+  ensureControlPlaneSecret,
+} from "./local-secrets.js"
 import { fieldMaskingTierFromProject, type FieldMaskingTier } from "./field-masking-tier.js"
 import { readRecordedTier } from "./recorded-field-masking-tier.js"
 import { projectHasVersionedModels } from "./model-versioning.js"
@@ -346,15 +350,28 @@ function ownerDatabaseUrl(config: SupatypeProjectConfig, scheme = "postgresql"):
  * A hostname is not the secret here; the password is, and it stays out of the generated file.
  */
 function postgrestDatabaseUrl(config: SupatypeProjectConfig): string {
-  const password = "${AUTHENTICATOR_PASSWORD:?AUTHENTICATOR_PASSWORD is missing from .env}"
+  return roleDatabaseUrl(config, "authenticator", "AUTHENTICATOR_PASSWORD")
+}
+
+/**
+ * The Studio SQL editor's DSN, which connects as `supatype_sql_editor`, a role that is not a
+ * superuser. Built the same way as {@link postgrestDatabaseUrl}, for the same reasons.
+ */
+function sqlEditorDatabaseUrl(config: SupatypeProjectConfig): string {
+  return roleDatabaseUrl(config, "supatype_sql_editor", SQL_EDITOR_PASSWORD_ENV)
+}
+
+/** A DSN for `role`, with its password left as the required `.env` variable `passwordVar`. */
+function roleDatabaseUrl(config: SupatypeProjectConfig, role: string, passwordVar: string): string {
+  const password = `\${${passwordVar}:?${passwordVar} is missing from .env}`
   const externalUrl = externalDatabaseUrl(config)
   if (externalUrl === undefined) {
-    return `postgresql://authenticator:${password}@db:5432/\${POSTGRES_DB:-supatype}`
+    return `postgresql://${role}:${password}@db:5432/\${POSTGRES_DB:-supatype}`
   }
 
   const parsed = new URL(externalUrl)
   const port = parsed.port ? `:${parsed.port}` : ""
-  return `postgresql://authenticator:${password}@${parsed.hostname}${port}${parsed.pathname}${parsed.search}`
+  return `postgresql://${role}:${password}@${parsed.hostname}${port}${parsed.pathname}${parsed.search}`
 }
 
 /**
@@ -496,6 +513,7 @@ export function renderSelfHostCompose(
   // providers), and appending a second `?` produces a DSN that fails to parse.
   const authSearchPathSeparator = externalDatabaseUrl(config)?.includes("?") ? "&" : "?"
   const postgrestUrl = postgrestDatabaseUrl(config)
+  const sqlEditorUrl = sqlEditorDatabaseUrl(config)
   const devLocal = options?.devLocal === true
   // An external database is not on any network of this stack.
   const functionsDb = options?.functionsDatabase === true && !external
@@ -797,6 +815,8 @@ ${functionsDb ? networksClause(["default", FUNCTIONS_DB_NETWORK]) : ""}    envir
       POSTGRES_DB: \${POSTGRES_DB:-supatype}
       # Read by the image's init to password the \`authenticator\` role PostgREST connects as.
       AUTHENTICATOR_PASSWORD: \${AUTHENTICATOR_PASSWORD:?AUTHENTICATOR_PASSWORD is missing from .env}
+      # Read by the image's bootstrap to password \`supatype_sql_editor\`, Studio's SQL editor login.
+      SUPATYPE_SQL_EDITOR_PASSWORD: \${SUPATYPE_SQL_EDITOR_PASSWORD:?SUPATYPE_SQL_EDITOR_PASSWORD is missing from .env}
 ${keyspaceDbEnv}${dbPorts}${keyspaceExpose}    volumes:
       - ${DB_VOLUME_KEY}:/var/lib/postgresql/data
     healthcheck:
@@ -969,6 +989,9 @@ ${mounts.projectState}
       SUPATYPE_ANON_KEY: \${ANON_KEY:-}
       SUPATYPE_SERVICE_ROLE_KEY: \${SERVICE_ROLE_KEY:-}
       SUPATYPE_SQL_DATABASE_URL: "${ownerUrl}"
+      # The SQL editor's own login, not a superuser. The owner URL above stays: the server falls
+      # back to it and uses it for role membership.
+      SUPATYPE_SQL_EDITOR_DATABASE_URL: "${sqlEditorUrl}"
       SUPATYPE_DENO_FUNCTIONS_DIR: /project/functions
       SUPATYPE_FUNCTIONS_WORKER_URL: http://functions-worker:8001
 ${realtimeServerEnv}

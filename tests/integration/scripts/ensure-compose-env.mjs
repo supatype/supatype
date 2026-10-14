@@ -37,6 +37,8 @@ const updates = {
   // create, so the compose file interpolates it as required with no default. A fixture is the
   // operator here, so it supplies its own, the stack does not start without it.
   AUTHENTICATOR_PASSWORD: "authenticator-ci-password",
+  // Required by compose in the same way, for Studio's SQL editor role.
+  SUPATYPE_SQL_EDITOR_PASSWORD: "sql-editor-ci-password",
   JWT_SECRET,
   ANON_KEY: anonKey,
   SERVICE_ROLE_KEY: serviceRoleKey,

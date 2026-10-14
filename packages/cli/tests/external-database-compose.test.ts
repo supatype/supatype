@@ -92,6 +92,17 @@ describe("external database: compose", () => {
     expect(compose).toContain("@db.example.com:5432/app?sslmode=require")
   })
 
+  it("derives the SQL editor's DSN from the URL, as supatype_sql_editor", () => {
+    // Same host, port, database and query string as the owner URL, so the editor can never be
+    // pointed at a different database from the one migrations land in.
+    const compose = renderSelfHostCompose(
+      external("postgres://owner:secret@db.example.com:5432/app?sslmode=require"),
+    )
+    expect(compose).toContain(
+      'SUPATYPE_SQL_EDITOR_DATABASE_URL: "postgresql://supatype_sql_editor:${SUPATYPE_SQL_EDITOR_PASSWORD:?SUPATYPE_SQL_EDITOR_PASSWORD is missing from .env}@db.example.com:5432/app?sslmode=require"',
+    )
+  })
+
   it("appends the auth search_path with the right separator", () => {
     // A URL that already has a query string needs `&`; a second `?` produces a DSN that fails to
     // parse, and the service would exit rather than run its auth migrations.
@@ -242,7 +253,7 @@ describe("the server's own configuration keys", () => {
 
   it("reads its override from the current name too, not the retired one", () => {
     // Interpolating from GOTRUE_MAILER_AUTOCONFIRM would require the operator to keep that key in
-    // `.env` — and the server reads config files into its environment before checking for retired
+    // `.env`. The server reads config files into its environment before checking for retired
     // names, so its presence there is fatal. The old spelling cannot be the escape hatch when
     // having it set at all is the failure.
     expect(compose).toContain("SUPATYPE_MAILER_AUTOCONFIRM: ${SUPATYPE_MAILER_AUTOCONFIRM:-true}")
