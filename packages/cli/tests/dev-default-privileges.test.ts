@@ -33,6 +33,14 @@ describe("native dev's roles script", () => {
       expect(sql).toContain(PRIVATE_TABLE_DEFAULTS_SQL)
     })
   }
+
+  // The engine installs PostGIS, pgvector and unaccent in `extensions`, and a request resolves a
+  // column's type and a filter's operator through it as the role it runs as.
+  it("creates the extensions schema and lets the API roles use it", () => {
+    const sql = nativeRolesSql(false)
+    expect(sql).toContain("CREATE SCHEMA IF NOT EXISTS extensions;")
+    expect(sql).toContain("GRANT USAGE ON SCHEMA extensions TO anon, authenticated, service_role;")
+  })
 })
 
 describe("the docker dev database", () => {
