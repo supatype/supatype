@@ -1,11 +1,14 @@
 import React, { useState } from "react"
 import { useProjectProxy } from "../../hooks/useProjectProxy.js"
+import { useSqlEditorOffered } from "../../hooks/useSqlEditorOffered.js"
 import { useApiQuery } from "../../hooks/useApiQuery.js"
 import { Badge, Button, Card } from "../../components/ui.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 
 export function ExtensionsView(): React.ReactElement {
   const proxy = useProjectProxy()
+  // Writes go through the SQL editor's route, so only its roles are offered them (RQ4).
+  const sqlWrites = useSqlEditorOffered()
   const [search, setSearch] = useState("")
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -69,14 +72,16 @@ export function ExtensionsView(): React.ReactElement {
                     <td className="px-4 py-3"><Badge variant="blue">{row["extversion"] as string}</Badge></td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">{(row["description"] as string | null) ?? "-"}</td>
                     <td className="px-4 py-3 text-right">
-                      <Button
-                        variant="destructive"
-                        size="xs"
-                        disabled={busy === (row["extname"] as string)}
-                        onClick={() => { void toggleExtension(row["extname"] as string, false) }}
-                      >
-                        Disable
-                      </Button>
+                      {sqlWrites ? (
+                        <Button
+                          variant="destructive"
+                          size="xs"
+                          disabled={busy === (row["extname"] as string)}
+                          onClick={() => { void toggleExtension(row["extname"] as string, false) }}
+                        >
+                          Disable
+                        </Button>
+                      ) : null}
                     </td>
                   </tr>
                 ))}
@@ -109,14 +114,16 @@ export function ExtensionsView(): React.ReactElement {
                   <Badge variant="blue">{row["default_version"] as string}</Badge>
                 </div>
                 {row["comment"] ? <p className="text-xs text-muted-foreground line-clamp-2">{row["comment"] as string}</p> : null}
-                <Button
-                  variant="primary"
-                  size="xs"
-                  disabled={isInstalling || installedNames.has(name)}
-                  onClick={() => { void toggleExtension(name, true) }}
-                >
-                  {isInstalling ? "Enabling…" : "Enable"}
-                </Button>
+                {sqlWrites ? (
+                  <Button
+                    variant="primary"
+                    size="xs"
+                    disabled={isInstalling || installedNames.has(name)}
+                    onClick={() => { void toggleExtension(name, true) }}
+                  >
+                    {isInstalling ? "Enabling…" : "Enable"}
+                  </Button>
+                ) : null}
               </div>
             )
           })}

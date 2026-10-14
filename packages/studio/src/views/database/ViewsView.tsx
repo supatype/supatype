@@ -1,5 +1,6 @@
 import React, { useState } from "react"
 import { useProjectProxy } from "../../hooks/useProjectProxy.js"
+import { useSqlEditorOffered } from "../../hooks/useSqlEditorOffered.js"
 import { useSchemaPicker } from "../../hooks/useSchemaPicker.js"
 import { useApiQuery } from "../../hooks/useApiQuery.js"
 import { Button, Card, CodeBlock } from "../../components/ui.js"
@@ -9,6 +10,8 @@ import { SlidePanel } from "../../components/SlidePanel.js"
 
 export function ViewsView(): React.ReactElement {
   const proxy = useProjectProxy()
+  // Writes go through the SQL editor's route, so only its roles are offered them (RQ4).
+  const sqlWrites = useSqlEditorOffered()
   const { schemas, schema, setSchema } = useSchemaPicker()
   const [selected, setSelected] = useState<{ name: string; def: string } | null>(null)
   const [sqlModal, setSqlModal] = useState<{ mode: "create" | "drop"; name?: string } | null>(null)
@@ -44,7 +47,7 @@ export function ViewsView(): React.ReactElement {
             {(schemas.length > 0 ? schemas : [schema]).map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
-        <Button variant="primary" onClick={() => { setSqlText(`CREATE VIEW ${schema}.new_view AS\nSELECT 1;`); setSqlModal({ mode: "create" }) }}>Create view</Button>
+        {sqlWrites ? (<Button variant="primary" onClick={() => { setSqlText(`CREATE VIEW ${schema}.new_view AS\nSELECT 1;`); setSqlModal({ mode: "create" }) }}>Create view</Button>) : null}
       </div>
 
       {error && <ErrorBanner message={error} />}
@@ -70,8 +73,8 @@ export function ViewsView(): React.ReactElement {
                   <td className="px-4 py-3 text-xs text-muted-foreground truncate max-w-[400px]">{(row["view_definition"] as string)?.slice(0, 100)}…</td>
                   <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                     <span className="flex items-center justify-end gap-3">
-                      <button type="button" className="text-xs text-primary hover:underline" onClick={() => { setSqlText(`CREATE OR REPLACE VIEW ${schema}.${row["view_name"] as string} AS\n${row["view_definition"] as string}`); setSqlModal({ mode: "create" }) }}>Edit</button>
-                      <button type="button" className="text-xs text-destructive hover:underline" onClick={() => { setSqlText(`DROP VIEW ${schema}.${row["view_name"] as string};`); setSqlModal({ mode: "drop", name: row["view_name"] as string }) }}>Drop</button>
+                      {sqlWrites ? (<button type="button" className="text-xs text-primary hover:underline" onClick={() => { setSqlText(`CREATE OR REPLACE VIEW ${schema}.${row["view_name"] as string} AS\n${row["view_definition"] as string}`); setSqlModal({ mode: "create" }) }}>Edit</button>) : null}
+                      {sqlWrites ? (<button type="button" className="text-xs text-destructive hover:underline" onClick={() => { setSqlText(`DROP VIEW ${schema}.${row["view_name"] as string};`); setSqlModal({ mode: "drop", name: row["view_name"] as string }) }}>Drop</button>) : null}
                     </span>
                   </td>
                 </tr>

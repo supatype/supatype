@@ -1,6 +1,7 @@
 import React, { useState } from "react"
 import { useParams } from "react-router-dom"
 import { useProjectProxy } from "../../hooks/useProjectProxy.js"
+import { useSqlEditorOffered } from "../../hooks/useSqlEditorOffered.js"
 import { useApiQuery } from "../../hooks/useApiQuery.js"
 import { Badge, Button, Card } from "../../components/ui.js"
 import { EmptyState } from "../../components/EmptyState.js"
@@ -24,6 +25,8 @@ const RLS_STATUS_QUERY = `
 
 export function StoragePoliciesView(): React.ReactElement {
   const proxy = useProjectProxy()
+  // Writes go through the SQL editor's route, so only its roles are offered them (RQ4).
+  const sqlWrites = useSqlEditorOffered()
   const params = useParams<{ bucket?: string }>()
   const [sqlModal, setSqlModal] = useState(false)
   const [manualPolicyWarningOpen, setManualPolicyWarningOpen] = useState(false)
@@ -84,11 +87,13 @@ export function StoragePoliciesView(): React.ReactElement {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold text-foreground">Storage Policies</h1>
-        <Button variant="primary" onClick={() => {
-          setManualPolicyWarningOpen(true)
-        }}>
-          Create policy
-        </Button>
+        {sqlWrites ? (
+          <Button variant="primary" onClick={() => {
+            setManualPolicyWarningOpen(true)
+          }}>
+            Create policy
+          </Button>
+        ) : null}
       </div>
 
       {error && <ErrorBanner message={error} />}
@@ -115,9 +120,11 @@ export function StoragePoliciesView(): React.ReactElement {
                     <span className="font-mono text-sm font-medium text-foreground">storage.{tableName}</span>
                     <Badge variant={rlsEnabled ? "green" : "red"}>{rlsEnabled ? "RLS on" : "RLS off"}</Badge>
                   </div>
-                  <Button size="xs" variant={rlsEnabled ? "destructive" : "primary"} onClick={() => { void toggleRls(tableName, !rlsEnabled) }}>
-                    {rlsEnabled ? "Disable RLS" : "Enable RLS"}
-                  </Button>
+                  {sqlWrites ? (
+                    <Button size="xs" variant={rlsEnabled ? "destructive" : "primary"} onClick={() => { void toggleRls(tableName, !rlsEnabled) }}>
+                      {rlsEnabled ? "Disable RLS" : "Enable RLS"}
+                    </Button>
+                  ) : null}
                 </div>
                 <table className="w-full text-sm">
                   <thead>
@@ -147,7 +154,7 @@ export function StoragePoliciesView(): React.ReactElement {
                           </div>
                         </td>
                         <td className="px-4 py-2.5 text-right">
-                          <button type="button" className="text-xs text-destructive hover:underline" onClick={() => { setSqlText(`DROP POLICY ${p["policyname"] as string} ON storage.${tableName};`); setSqlModal(true) }}>Drop</button>
+                          {sqlWrites ? (<button type="button" className="text-xs text-destructive hover:underline" onClick={() => { setSqlText(`DROP POLICY ${p["policyname"] as string} ON storage.${tableName};`); setSqlModal(true) }}>Drop</button>) : null}
                         </td>
                       </tr>
                     )})}

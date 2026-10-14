@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom"
 import type { AdminConfig } from "../../config.js"
 import { useAdminConfig } from "../../hooks/useAdminConfig.js"
 import { useProjectProxy } from "../../hooks/useProjectProxy.js"
+import { useSqlEditorOffered } from "../../hooks/useSqlEditorOffered.js"
 import { useSchemaPicker } from "../../hooks/useSchemaPicker.js"
 import { useApiQuery } from "../../hooks/useApiQuery.js"
 import { Button, Card } from "../../components/ui.js"
@@ -30,6 +31,8 @@ function modelNameForTable(admin: AdminConfig, physicalTable: string): string | 
 export function TablesView(): React.ReactElement {
   const admin = useAdminConfig()
   const proxy = useProjectProxy()
+  // Writes go through the SQL editor's route, so only its roles are offered them (RQ4).
+  const sqlWrites = useSqlEditorOffered()
   const navigate = useNavigate()
   const { schemas, schema, setSchema } = useSchemaPicker()
   const [selectedTable, setSelectedTable] = useState<string | null>(null)
@@ -82,16 +85,17 @@ export function TablesView(): React.ReactElement {
             {(schemas.length > 0 ? schemas : [schema]).map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
-        <Button
-          variant="primary"
-         
-          onClick={() => {
-            setSqlText(`CREATE TABLE ${schema}.new_table (\n  id bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY\n);`)
-            setSqlModal({ mode: "create" })
-          }}
-        >
-          Create table
-        </Button>
+        {sqlWrites ? (
+          <Button
+            variant="primary"
+            onClick={() => {
+              setSqlText(`CREATE TABLE ${schema}.new_table (\n  id bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY\n);`)
+              setSqlModal({ mode: "create" })
+            }}
+          >
+            Create table
+          </Button>
+        ) : null}
       </div>
 
       {error && <ErrorBanner message={error} />}
@@ -126,7 +130,7 @@ export function TablesView(): React.ReactElement {
                   <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                     <span className="flex items-center justify-end gap-3">
                       <button type="button" className="text-xs text-primary hover:underline" onClick={() => navigate(browseDataPath(row["table_name"] as string))}>Browse data</button>
-                      <button type="button" className="text-xs text-destructive hover:underline" onClick={() => { setSqlText(`DROP TABLE ${schema}.${row["table_name"] as string};`); setSqlModal({ mode: "drop", table: row["table_name"] as string }) }}>Drop</button>
+                      {sqlWrites ? (<button type="button" className="text-xs text-destructive hover:underline" onClick={() => { setSqlText(`DROP TABLE ${schema}.${row["table_name"] as string};`); setSqlModal({ mode: "drop", table: row["table_name"] as string }) }}>Drop</button>) : null}
                     </span>
                   </td>
                 </tr>
