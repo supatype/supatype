@@ -23,9 +23,9 @@ const ROWS = [1, 2, 3].map((id) => ({
 }))
 
 const proxy = {
-  sql: vi.fn(async (query: string) => {
-    if (query.includes("information_schema")) return { rows: [{ audited: false }] }
-    return query.includes("ORDER BY id") ? { rows: ROWS } : { rows: [{ sql_up: "CREATE TABLE x ();" }] }
+  metadata: vi.fn(async (name: string) => {
+    if (name === "migrations_audited") return { rows: [{ audited: false }] }
+    return name === "migrations_legacy" ? { rows: ROWS } : { rows: [{ sql_up: "CREATE TABLE x ();" }] }
   }),
 }
 
@@ -95,7 +95,7 @@ describe("a link to one migration", () => {
 
 describe("when the migrations ledger cannot be read", () => {
   it("shows a missing column as the failure it is, not as a database with no migrations", async () => {
-    proxy.sql.mockImplementationOnce(async () => {
+    proxy.metadata.mockImplementationOnce(async () => {
       throw Object.assign(new Error('column "engine_version" does not exist'), { code: "42703" })
     })
     await open("/migrations")
@@ -104,7 +104,7 @@ describe("when the migrations ledger cannot be read", () => {
   })
 
   it("treats a missing ledger as no migrations yet, whatever language the message is in", async () => {
-    proxy.sql.mockImplementationOnce(async () => {
+    proxy.metadata.mockImplementationOnce(async () => {
       throw Object.assign(new Error("FEHLER: Relation existiert nicht"), { code: "42P01" })
     })
     await open("/migrations")

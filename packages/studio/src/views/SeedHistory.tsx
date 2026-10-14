@@ -59,10 +59,6 @@ export interface SeedRunRow extends SeedRun {
 /** The seed ledger, as Postgres names it in a missing-relation error. */
 const SEEDS_TABLE = "_supatype.seeds"
 
-export const SEEDS_LIST_SQL = `SELECT id, file, ir_hash, schema_fingerprint, applied_at::TEXT,
-       duration_ms, status, rows_written, error_message, engine_version
- FROM ${SEEDS_TABLE} ORDER BY applied_at DESC, id DESC`
-
 const statusVariant: Record<SeedStatus, "green" | "red"> = {
   committed: "green",
   // Red rather than the yellow a rolled-back migration gets: that is a deliberate
@@ -277,7 +273,8 @@ export function SeedHistory(): React.ReactElement {
   const proxy = useProjectProxy()
 
   const { data, loading, error, failure, refetch } = useApiQuery(async () => {
-    const result = await proxy.sql(SEEDS_LIST_SQL)
+    // Through the metadata catalogue (RQ3b), so a viewer sees the seed runs too.
+    const result = await proxy.metadata("seeds")
     return result.rows.map(mapSeedRow)
   }, [proxy])
 

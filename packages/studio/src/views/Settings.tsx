@@ -819,10 +819,17 @@ function DangerZone(): React.ReactElement {
 
 // ─── Database Settings Tab ────────────────────────────────────────────────────
 
+/** A server setting as shown, or a dash when the server did not report it. */
+function settingText(value: unknown): string {
+  return typeof value === "string" ? value : "-"
+}
+
 function DatabaseSettings({ client }: { client: ReturnType<typeof useStudioClient> }): React.ReactElement {
   const proxy = useProjectProxy()
-  const { data: maxConns } = useApiQuery(() => proxy.sql("SHOW max_connections").then((r) => r.rows[0]?.["max_connections"] as string ?? "-"), [proxy])
-  const { data: stmtTimeout } = useApiQuery(() => proxy.sql("SHOW statement_timeout").then((r) => r.rows[0]?.["statement_timeout"] as string ?? "-"), [proxy])
+  // Through the metadata catalogue (RQ3b), so a viewer sees the settings too.
+  const { data: dbSettings } = useApiQuery(() => proxy.metadata("database_settings").then((r) => r.rows[0] ?? {}), [proxy])
+  const maxConns = dbSettings === null ? null : settingText(dbSettings["max_connections"])
+  const stmtTimeout = dbSettings === null ? null : settingText(dbSettings["statement_timeout"])
   const [credStatus, setCredStatus] = useState<{ mode: string; password_status: string; can_reveal: boolean; generation: number; message?: string } | null>(null)
   const [credLoading, setCredLoading] = useState(false)
   const [credError, setCredError] = useState<string | null>(null)

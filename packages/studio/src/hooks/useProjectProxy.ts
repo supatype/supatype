@@ -49,6 +49,14 @@ export type MetadataName =
   | "ledger_kinds"
   | "ledger_objects"
   | "ledger_count"
+  | "policies"
+  | "rls_status"
+  | "migrations_audited"
+  | "migrations"
+  | "migrations_legacy"
+  | "migration_sql"
+  | "seeds"
+  | "database_settings"
 
 /** A metadata query's parameters, by name: plain values only, bound by the server. */
 export type MetadataParams = Record<string, string | number | boolean | null>

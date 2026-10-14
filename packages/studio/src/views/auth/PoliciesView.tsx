@@ -60,26 +60,6 @@ function describeAppliesTo(row: Record<string, unknown>): string {
   return "Custom"
 }
 
-const LIST_QUERY = (schema: string) => `
-  SELECT schemaname, tablename, policyname, permissive, cmd, qual, with_check,
-    CASE
-      WHEN COALESCE(array_length(roles, 1), 0) = 0 THEN 'all'
-      ELSE array_to_string(roles::text[], ', ')
-    END AS roles_label
-  FROM pg_catalog.pg_policies
-  WHERE lower(schemaname) = lower('${schema}')
-  ORDER BY tablename, policyname
-`
-
-const RLS_STATUS_QUERY = (schema: string) => `
-  SELECT t.tablename, c.relrowsecurity AS rls_enabled
-  FROM pg_catalog.pg_tables t
-  JOIN pg_catalog.pg_class c ON c.relname = t.tablename
-  JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace AND lower(n.nspname) = lower('${schema}')
-  WHERE lower(t.schemaname) = lower('${schema}')
-  ORDER BY t.tablename
-`
-
 export function PoliciesView(): React.ReactElement {
   const proxy = useProjectProxy()
   // Writes go through the SQL editor's route, so only its roles are offered them (RQ4).
@@ -92,12 +72,13 @@ export function PoliciesView(): React.ReactElement {
   const [runError, setRunError] = useState<string | null>(null)
   const [runBusy, setRunBusy] = useState(false)
 
+  // Reads go through the metadata catalogue (RQ3b), so a viewer sees the policies too.
   const { data: policies, loading, error, refetch } = useApiQuery(
-    () => proxy.sql(LIST_QUERY(schemaSql)).then((r) => r.rows),
+    () => proxy.metadata("policies", { schema: schemaSql }).then((r) => r.rows),
     [proxy, schemaSql],
   )
   const { data: rlsStatus } = useApiQuery(
-    () => proxy.sql(RLS_STATUS_QUERY(schemaSql)).then((r) => r.rows),
+    () => proxy.metadata("rls_status", { schema: schemaSql }).then((r) => r.rows),
     [proxy, schemaSql],
   )
 

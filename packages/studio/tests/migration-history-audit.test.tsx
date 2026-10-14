@@ -44,15 +44,15 @@ const ROWS = [
 ]
 
 const proxy = {
-  sql: vi.fn(async (query: string) => {
-    if (query.includes("information_schema")) return { rows: [{ audited: true }] }
-    return query.includes("ORDER BY id") ? { rows: ROWS } : { rows: [{ sql_up: "ALTER TABLE x;" }] }
+  metadata: vi.fn(async (name: string) => {
+    if (name === "migrations_audited") return { rows: [{ audited: true }] }
+    return name === "migrations" ? { rows: ROWS } : { rows: [{ sql_up: "ALTER TABLE x;" }] }
   }),
 }
 
 vi.mock("../src/hooks/useProjectProxy.js", () => ({ useProjectProxy: () => proxy }))
 
-import { MigrationHistory, migrationsListSql } from "../src/views/MigrationHistory.js"
+import { MigrationHistory, migrationsQuery } from "../src/views/MigrationHistory.js"
 
 let container: HTMLDivElement
 let root: Root
@@ -80,13 +80,12 @@ async function open(url: string): Promise<void> {
 }
 
 describe("the migration history's audit trail", () => {
-  it("reads the audit columns by name, and nulls from a history from before them", async () => {
+  it("reads the audit columns where the history has them, and the legacy shape where it does not", async () => {
     await open("/migrations")
-    const query = proxy.sql.mock.calls.map(([q]) => q).find((q) => q.includes("ORDER BY id")) ?? ""
-    expect(query).toContain("pushed_by, pushed_by_verified")
-    expect(query).not.toContain("to_jsonb")
-    expect(migrationsListSql(false)).toContain("NULL AS pushed_by")
-    expect(migrationsListSql(false)).toContain("schema_sources_manifest ->> 'pushedBy'")
+    const asked = proxy.metadata.mock.calls.map(([name]) => name)
+    expect(asked).toEqual(expect.arrayContaining(["migrations_audited", "migrations"]))
+    expect(migrationsQuery(true)).toBe("migrations")
+    expect(migrationsQuery(false)).toBe("migrations_legacy")
   })
 
   it("names each author, verified only where a control plane said so", async () => {

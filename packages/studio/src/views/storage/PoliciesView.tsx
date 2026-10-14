@@ -7,21 +7,13 @@ import { Badge, Button, Card } from "../../components/ui.js"
 import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 
-const LIST_QUERY = `
-  SELECT policyname, tablename, cmd, permissive, roles, qual, with_check
-  FROM pg_policies
-  WHERE schemaname = 'storage' AND tablename IN ('objects', 'buckets')
-  ORDER BY tablename, policyname
-`
+/** The storage tables whose policies this view shows. */
+const STORAGE_TABLES = new Set(["objects", "buckets"])
 
-const RLS_STATUS_QUERY = `
-  SELECT t.tablename, c.relrowsecurity AS rls_enabled
-  FROM pg_tables t
-  JOIN pg_class c ON c.relname = t.tablename
-  JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = 'storage'
-  WHERE t.schemaname = 'storage' AND t.tablename IN ('objects', 'buckets')
-  ORDER BY t.tablename
-`
+/** The rows that belong to one of the storage tables. */
+function storageRows(rows: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  return rows.filter((r) => STORAGE_TABLES.has(r["tablename"] as string))
+}
 
 export function StoragePoliciesView(): React.ReactElement {
   const proxy = useProjectProxy()
@@ -34,12 +26,13 @@ export function StoragePoliciesView(): React.ReactElement {
   const [runError, setRunError] = useState<string | null>(null)
   const [runBusy, setRunBusy] = useState(false)
 
+  // Reads go through the metadata catalogue (RQ3b), so a viewer sees the policies too.
   const { data: policies, loading, error, refetch } = useApiQuery(
-    () => proxy.sql(LIST_QUERY).then((r) => r.rows),
+    () => proxy.metadata("policies", { schema: "storage" }).then((r) => storageRows(r.rows)),
     [proxy],
   )
   const { data: rlsStatus, refetch: refetchRls } = useApiQuery(
-    () => proxy.sql(RLS_STATUS_QUERY).then((r) => r.rows),
+    () => proxy.metadata("rls_status", { schema: "storage" }).then((r) => storageRows(r.rows)),
     [proxy],
   )
 
