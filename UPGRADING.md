@@ -299,6 +299,19 @@ as `ctx.dbUrl`. It connects as whatever role the URL names, so it bypasses row r
 masking. Use a least-privilege role, never the admin URL. See
 [the functions worker README](https://github.com/supatype/supatype/blob/main/packages/functions-worker/README.md).
 
+## Native Postgres checks passwords
+
+- `supatype dev` with `provider: "native"` (and `supatype pg start`) used to initialise Postgres
+  with `--auth trust`, so any local process could connect as any role, the superuser included,
+  with any password or none. New data directories use `scram-sha-256` for local and host
+  connections, with `.env`'s `POSTGRES_PASSWORD` for the superuser and `AUTHENTICATOR_PASSWORD`
+  for PostgREST's role. Either is generated and written to `.env` when missing.
+- **Nothing to do for an existing native data directory.** The first start under 0.7.0 gives the
+  superuser `.env`'s password, rewrites `pg_hba.conf` from `trust` to `scram-sha-256`, and says
+  so: "This Postgres trusted every local connection; it now checks passwords."
+- Tools that connected without a password now need `.env`'s `POSTGRES_PASSWORD` (for `psql`,
+  `PGPASSWORD`). `supatype pg psql` passes it for you.
+
 ## Configuration checks
 
 - Schema names in `schema.pg_schema` and `schema.api_schemas` must be plain identifiers

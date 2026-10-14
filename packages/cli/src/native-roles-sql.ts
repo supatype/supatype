@@ -36,7 +36,8 @@ END $$;
  *
  * `authenticator` is created outside the `DO` block because psql does not substitute its
  * variables inside a dollar-quoted body; `\gexec` runs the `CREATE ROLE` only when the role is
- * missing.
+ * missing. Its password is then set from `.env` every time: the cluster checks passwords, and a
+ * role made before it did has whatever password it was given then.
  */
 export function nativeRolesSql(withMask: boolean): string {
   return `${withMask ? "CREATE EXTENSION IF NOT EXISTS supatype_mask;\n" : ""}CREATE SCHEMA IF NOT EXISTS auth;
@@ -52,6 +53,7 @@ END $$;
 \\getenv authenticator_password ${AUTHENTICATOR_PASSWORD_ENV}
 SELECT format('CREATE ROLE authenticator LOGIN NOINHERIT PASSWORD %L', :'authenticator_password')
   WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticator') \\gexec
+SELECT format('ALTER ROLE authenticator PASSWORD %L', :'authenticator_password') \\gexec
 GRANT anon, authenticated, service_role TO postgres;
 GRANT anon, authenticated, service_role TO authenticator;
 GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
