@@ -78,6 +78,33 @@ export function devPostgresPassword(cwd: string): string {
 }
 
 /**
+ * The native superuser's password: `.env`'s, or a generated one written there first.
+ *
+ * Native Postgres checks passwords now, so the published fallback would be a superuser password
+ * anyone can look up. Unlike the docker path there is no volume baked with an older password to
+ * stay compatible with: a native cluster made before is converted from trust on its next start
+ * and given this one.
+ */
+export function ensureNativeSuperuserPassword(cwd: string): string {
+  ensureGeneratedPassword(cwd, "POSTGRES_PASSWORD")
+  return devPostgresPassword(cwd)
+}
+
+/**
+ * The native `authenticator` password, generated the same way. It is set on the role at every
+ * start (native-roles-sql.ts), and the role reaches `service_role`, so a published value would
+ * open every table.
+ */
+export function ensureNativeAuthenticatorPassword(cwd: string): string {
+  ensureGeneratedPassword(cwd, "AUTHENTICATOR_PASSWORD")
+  return devAuthenticatorPassword(cwd)
+}
+
+function ensureGeneratedPassword(cwd: string, key: string): void {
+  if (!hasEnvValue(cwd, key)) upsertEnvFile(cwd, { [key]: randomBytes(24).toString("base64url") })
+}
+
+/**
  * The password for `authenticator`, the role PostgREST connects as.
  *
  * Separate from {@link devPostgresPassword} for the same reason the deployed paths keep them

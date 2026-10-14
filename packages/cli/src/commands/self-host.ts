@@ -13,6 +13,7 @@ import { spawnSync } from "node:child_process"
 import { gzipSync } from "node:zlib"
 import { loadConfig } from "../config.js"
 import { connectionString } from "../project-config.js"
+import { devPostgresPassword } from "../local-secrets.js"
 import { splitPassword } from "../host-database.js"
 import { fillMissingKeys, resolveSecret } from "./keys.js"
 import { requireUsableJwtSecret } from "../jwt-secret-length.js"
@@ -360,7 +361,7 @@ export function registerSelfHost(program: Command): void {
       logNativeHint("backup")
       const cwd = process.cwd()
       const config = loadConfig(cwd)
-      const conn = opts.connection ?? connectionString(config)
+      const conn = opts.connection ?? connectionString(config, devPostgresPassword(cwd))
       const outFile = opts.output ?? resolve(
         cwd,
         "backups",

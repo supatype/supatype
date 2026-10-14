@@ -870,18 +870,24 @@ export function serviceRoleRoutes(cfg: SupatypeProjectConfig): string[] {
 /** Kong gateway port when `provider: docker` (self-host compose dev). */
 export const COMPOSE_DEV_KONG_PORT = 18473
 
-/** The local Postgres DSN derived from project name (dev default). */
-export function localDSN(cfg: SupatypeProjectConfig): string {
+/**
+ * The local Postgres DSN derived from project name (dev default).
+ *
+ * `password` is the superuser's, `.env`'s POSTGRES_PASSWORD (`devPostgresPassword`). The native
+ * cluster checks it, so the `postgres` default only reaches a cluster still set up that way.
+ */
+export function localDSN(cfg: SupatypeProjectConfig, password = "postgres"): string {
   const port = 5432 // standard; per-project state dir isolates data dirs
-  return `postgres://postgres:postgres@127.0.0.1:${port}/${cfg.project.name}?sslmode=disable`
+  return `postgres://postgres:${encodeURIComponent(password)}@127.0.0.1:${port}/${cfg.project.name}?sslmode=disable`
 }
 
 /**
  * Resolve the database connection string.
- * Prefers optional `connection` in config, then `DATABASE_URL` env, then a local default DSN.
+ * Prefers optional `connection` in config, then `DATABASE_URL` env, then a local default DSN with
+ * `localPassword` as the superuser's password.
  */
-export function connectionString(cfg: SupatypeProjectConfig): string {
-  return externalDatabaseUrl(cfg) ?? cfg.connection ?? process.env["DATABASE_URL"] ?? localDSN(cfg)
+export function connectionString(cfg: SupatypeProjectConfig, localPassword?: string): string {
+  return externalDatabaseUrl(cfg) ?? cfg.connection ?? process.env["DATABASE_URL"] ?? localDSN(cfg, localPassword)
 }
 
 /** True when the project points at a Postgres it does not manage. */
