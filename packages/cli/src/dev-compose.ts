@@ -9,7 +9,7 @@ import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import { spawnSync } from "node:child_process"
 import { startProxyDevApp, resolveProxyDevScript } from "./app/proxy-dev-app.js"
-import { loadSchemaAst } from "./config.js"
+import { loadSchemaAst, projectNameInFile } from "./config.js"
 import { withComposeSchemaPushLock } from "./schema-push-lock.js"
 import { recordDatabaseTier, sameApiSurface } from "./recorded-field-masking-tier.js"
 import {
@@ -1488,7 +1488,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   })
 
   await recoverStaleDevSession(cwd)
-  await handleComposeProjectRename(cwd, config.project.name, paths)
+  await handleComposeProjectRename(cwd, projectNameInFile(config), paths)
 
   // Only on request, and before Postgres starts, so it comes up on an empty volume.
   if (opts.resetDb) {
@@ -1586,7 +1586,8 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
     target: "local",
     apiUrl: `http://localhost:${kongPort}`,
     databaseUrl: projectDatabaseUrl(cwd, config, !hasEngineOverride(config)),
-    projectRef: config.project.name,
+    // The file's name: this outlives the run, and a run under SUPATYPE_PROJECT_NAME is not a rename.
+    projectRef: projectNameInFile(config),
     kongPort,
     provider: "docker",
   })

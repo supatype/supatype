@@ -109,6 +109,11 @@ Example: [`examples/edge-kit`](https://github.com/supatype/supatype/tree/main/ex
 **Renaming `project.name`:**
 - Docker compose project slug changes (`supatype-{name}`). On the next `supatype dev`, the CLI detects the rename via `.supatype/environment.json` and offers to stop the old stack (volumes preserved).
 
+**One run under another name (`SUPATYPE_PROJECT_NAME`, `--project-name`):**
+- Either renames the project for that command only, over `project.name`, and writes no file: the compose project, the database and the state directory all follow it. Use it to run two stacks of one project side by side, from two checkouts, each with its own `SUPATYPE_KONG_PORT`.
+- It must be lower case letters, digits, `-` and `_`, starting with a letter or digit.
+- It is not a rename: `.supatype/environment.json` keeps the config's name, so the next run without it does not offer to stop anything.
+
 ## Typical sequences
 
 **First run:**

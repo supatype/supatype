@@ -145,7 +145,6 @@ export SUPATYPE_PROVIDER="${SUPATYPE_PROVIDER:-docker}"
 # own SUPATYPE_E2E_PROJECT.
 e2e_lock "$INTEGRATION_DIR"
 node "$SCRIPT_DIR/write-local-config.mjs" "$INTEGRATION_DIR/supatype.local.config.ts"
-# After the file above, which it merges into when the project is renamed.
 e2e_project_use "$INTEGRATION_DIR" supatype-integration
 
 # ── Step 3: Docker images + supatype dev ─────────────────────────────────────
