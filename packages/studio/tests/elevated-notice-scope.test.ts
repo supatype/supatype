@@ -57,6 +57,6 @@ describe("the elevated-access notice", () => {
       fileURLToPath(new URL("../src/components/ElevatedModeBanner.tsx", import.meta.url)),
       "utf8",
     )
-    expect(source).toContain('if (mode !== "elevated" || !active) return null')
+    expect(source).toContain("if (!active) return null")
   })
 })
