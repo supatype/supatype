@@ -10,21 +10,30 @@ import { AdminConfigContext } from "../src/hooks/useAdminConfig.js"
 import { PlatformCtx, type PlatformContext } from "../src/hooks/usePlatform.js"
 
 /**
- * CORS on a self-hosted server: same-origin unless `SUPATYPE_CORS_ALLOW_ORIGINS` lists other
- * origins, read once when the server starts. Studio cannot edit or read that list, so the tab says
- * how to set it. It used to show a Cloud upsell instead, and the Cloud banner beside it says an
- * unset list is "a permissive default", which is true of Cloud and the opposite of self-host.
+ * The Settings CORS tab is the allowed-origins page (SHb): it shows what the gateway enforces, read
+ * from `/admin/cors-origins`, on self-host and Cloud alike. It used to say that Studio could not
+ * read the list, and on Cloud it edited a project setting the gateway's own rule never consulted.
  */
 const SELF_HOST: PlatformContext = { platformUrl: undefined, projectRef: undefined }
 const CONFIG = { models: [], globals: [] } as unknown as AdminConfig
-const CLIENT = { url: "http://localhost:8000" } as unknown as SupatypeClient
+const CLIENT = { url: "http://localhost:8000/studio/proxy", auth: { currentAccessToken: "t" } } as unknown as SupatypeClient
+const IN_FORCE = {
+  origins: ["https://app.example.com"], source: "default", default: ["https://app.example.com"],
+  siteOrigin: "https://app.example.com", configured: [], platform: [], saved: null, updatedAt: null,
+  mode: "standalone", enforced: true, editable: true,
+}
 
 let container: HTMLDivElement
 let root: Root
+let requested: string[] = []
 
 beforeEach(() => {
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-  vi.stubGlobal("fetch", () => new Promise<Response>(() => {}))
+  requested = []
+  vi.stubGlobal("fetch", async (url: string) => {
+    requested.push(url)
+    return Response.json(url.endsWith("/cors-origins") ? IN_FORCE : {})
+  })
   container = document.createElement("div")
   document.body.appendChild(container)
   root = createRoot(container)
@@ -33,6 +42,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount())
   container.remove()
+  vi.unstubAllGlobals()
 })
 
 async function corsTab(platform: PlatformContext, demoMode = false): Promise<string> {
@@ -50,23 +60,26 @@ async function corsTab(platform: PlatformContext, demoMode = false): Promise<str
   const tab = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "CORS")
   expect(tab, "the CORS tab").toBeDefined()
   await act(async () => tab!.click())
+  for (let i = 0; i < 5; i++) await act(async () => {})
   return container.textContent ?? ""
 }
 
-describe.each([
-  ["self-host", false],
-  ["demo mode", true],
-])("the CORS tab, on %s", (_name, demoMode) => {
-  it("says how to set the allow-list, since Studio cannot read it", async () => {
-    const text = await corsTab(SELF_HOST, demoMode)
-    expect(text).toContain("SUPATYPE_CORS_ALLOW_ORIGINS")
-    expect(text).toContain(".env")
-    expect(text).toContain("own origin")
+describe("the CORS tab", () => {
+  it("shows the origins the gateway enforces, read from its API", async () => {
+    const text = await corsTab(SELF_HOST)
+    expect(requested).toContain("http://localhost:8000/admin/cors-origins")
+    expect(text).toContain("https://app.example.com")
+    expect(text).toContain("Site URL")
   })
 
-  it("makes no Cloud claim and no claim that unset is permissive", async () => {
-    const text = await corsTab(SELF_HOST, demoMode)
-    expect(text).not.toContain("Supatype Cloud")
-    expect(text).not.toMatch(/permissive/i)
+  it("makes no claim that an unset list is permissive", async () => {
+    expect(await corsTab(SELF_HOST)).not.toMatch(/permissive/i)
+  })
+
+  it("in the demo build, says where the list comes from without asking a gateway", async () => {
+    const text = await corsTab(SELF_HOST, true)
+    expect(text).toContain("SUPATYPE_CORS_ALLOW_ORIGINS")
+    expect(text).toContain("api.corsOrigins")
+    expect(requested.filter((u) => u.endsWith("/cors-origins"))).toEqual([])
   })
 })
