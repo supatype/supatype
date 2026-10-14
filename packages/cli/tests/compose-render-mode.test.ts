@@ -1,4 +1,5 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { execFileSync } from "node:child_process"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -83,12 +84,20 @@ afterEach(() => {
   rmSync(cwd, { recursive: true, force: true })
 })
 
-function holdDevLock(): void {
+const lockPath = (): string => join(cwd, ".supatype", "dev-session.json")
+
+/** A dev session lock held by `pid`: by default this test's own process, which is alive. */
+function holdDevLock(pid: number = process.pid): void {
   mkdirSync(join(cwd, ".supatype"), { recursive: true })
   writeFileSync(
-    join(cwd, ".supatype", "dev-session.json"),
-    JSON.stringify({ version: 1, composeProject: "supatype-acme", projectRef: "acme", composePath: "x", kongPort: 55560, startedAt: "t" }),
+    lockPath(),
+    JSON.stringify({ version: 1, composeProject: "supatype-acme", projectRef: "acme", composePath: "x", kongPort: 55560, startedAt: "t", pid }),
   )
+}
+
+/** The pid of a process that ran and exited, so nothing is alive under it now. */
+function deadPid(): number {
+  return Number(execFileSync(process.execPath, ["-e", "process.stdout.write(String(process.pid))"], { encoding: "utf8" }))
 }
 
 const envValue = (key: string): string | undefined =>
@@ -111,6 +120,36 @@ describe("which mode a compose render uses (SH1, SH2)", () => {
 
   it("is standalone when nothing is running and no dev session holds the lock", () => {
     expect(composeRenderMode(cwd, "acme")).toBe("standalone")
+  })
+})
+
+/**
+ * SHa: a `supatype dev` killed without its exit hooks leaves its lock behind, and the lock alone used
+ * to make every later render dev, so a production stack rendered by `push` or `self-host compose up`
+ * came up open. A lock counts only while the process that wrote it is alive; a stale one is ignored
+ * and removed.
+ */
+describe("a dev session lock left by a dev that is gone (SHa)", () => {
+  it("is ignored, so a standalone stack renders standalone, and is removed", () => {
+    holdDevLock(deadPid())
+    docker.serverMode = "standalone"
+
+    expect(composeRenderMode(cwd, "acme")).toBe("standalone")
+    expect(existsSync(lockPath())).toBe(false)
+  })
+
+  it("is ignored when it names no process at all, as a lock from before pids were recorded", () => {
+    mkdirSync(join(cwd, ".supatype"), { recursive: true })
+    writeFileSync(lockPath(), JSON.stringify({ version: 1, composeProject: "supatype-acme", projectRef: "acme", composePath: "x", kongPort: 1, startedAt: "t" }))
+
+    expect(composeRenderMode(cwd, "acme")).toBe("standalone")
+    expect(existsSync(lockPath())).toBe(false)
+  })
+
+  it("still counts while its process is alive", () => {
+    holdDevLock(process.pid)
+    expect(composeRenderMode(cwd, "acme")).toBe("dev")
+    expect(existsSync(lockPath())).toBe(true)
   })
 })
 

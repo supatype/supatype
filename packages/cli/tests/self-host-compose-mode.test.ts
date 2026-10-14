@@ -68,7 +68,7 @@ function holdDevLock(): void {
   mkdirSync(join(projectDir, ".supatype"), { recursive: true })
   writeFileSync(
     join(projectDir, ".supatype", "dev-session.json"),
-    JSON.stringify({ version: 1, composeProject: "supatype-acme", projectRef: "acme", composePath: "x", kongPort: 1, startedAt: "t" }),
+    JSON.stringify({ version: 1, composeProject: "supatype-acme", projectRef: "acme", composePath: "x", kongPort: 1, startedAt: "t", pid: process.pid }),
   )
 }
 

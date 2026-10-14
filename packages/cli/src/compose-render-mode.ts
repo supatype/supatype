@@ -9,7 +9,8 @@
  * `self-host compose` command rendered standalone, so restarting one service of a `supatype dev`
  * stack turned that service into production. The rule now looks at the stack instead:
  *
- * 1. a `supatype dev` session holds the project's lock: dev;
+ * 1. a running `supatype dev` session holds the project's lock: dev (a lock its process left behind
+ *    is removed and does not count, SHa);
  * 2. otherwise, a server container is running: the mode it is running in;
  * 3. otherwise: standalone, the safe one.
  *
@@ -17,7 +18,7 @@
  */
 
 import { spawnSync } from "node:child_process"
-import { readDevSessionLock } from "./dev-session-lock.js"
+import { liveDevSessionLock } from "./dev-session-lock.js"
 import { composeProjectName } from "./self-host-compose.js"
 
 export type ComposeRenderMode = "dev" | "standalone"
@@ -66,7 +67,7 @@ export function claimDevRenderMode(): void {
 }
 
 const liveProbe: ComposeRenderModeProbe = {
-  devSessionLocked: (cwd) => devSessionInThisProcess || readDevSessionLock(cwd) !== null,
+  devSessionLocked: (cwd) => devSessionInThisProcess || liveDevSessionLock(cwd) !== null,
   runningServerMode: runningServerModeFromDocker,
 }
 

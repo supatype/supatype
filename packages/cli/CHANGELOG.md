@@ -12,6 +12,9 @@
 
 ### Fixes
 
+* **security:** a `supatype dev` lock left behind by a dev that was killed made every later compose
+  render dev. A lock now records its process and counts only while that process is alive; a stale
+  one is removed.
 * **security:** `supatype push` (and `diff`, `adopt`, `update`) against a stack started with
   `self-host compose up` rendered it as a dev stack and recreated it that way: every origin allowed
   by CORS, Studio open without a login (`STUDIO_OPEN_DEV=1`), the database moved to a loopback dev
