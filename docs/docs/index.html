@@ -190,6 +190,15 @@
                 30 seconds to notice, so <code>push</code> waits (at most 40 seconds) until REST answers,
                 printing one line while it does.
               </div>
+              <div class="note">
+                <span class="label">ALLOWED ORIGINS</span>
+                Browsers may call the API from the origin of <code>SITE_URL</code> and from the origins in
+                <code>api.corsOrigins</code> (<code>supatype.config.ts</code>) or
+                <code>SUPATYPE_CORS_ALLOW_ORIGINS</code> (<code>.env</code>). Any other origin is refused.
+                Owners and admins can change the list in Studio, on the Settings page's CORS tab: a
+                saved list is kept in the database and replaces the default until it is reset.
+                <code>*</code> allows every origin, and only when you write it.
+              </div>
               <p>
                 Images come from Docker Hub at <code>:latest</code>: <code>supatype/postgres:17-latest</code>,
                 <code>supatype/server</code> (which includes realtime), <code>supatype/storage</code>,

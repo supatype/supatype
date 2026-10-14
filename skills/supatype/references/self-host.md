@@ -97,6 +97,26 @@ PostgREST then notices on its next retry, which can be up to about 30 s later, s
 the compose stack waits (at most 40 s) until REST stops answering 503, printing one line while it
 waits and saying so if it gives up. `supatype dev` is unaffected: it pushes before PostgREST starts.
 
+## Allowed browser origins (CORS)
+
+Outside dev mode the gateway answers CORS for every service behind it, with one rule:
+
+- **Default:** the origin of `SITE_URL`, then `api.corsOrigins` from `supatype.config.ts`, then
+  `SUPATYPE_CORS_ALLOW_ORIGINS` in `.env`.
+- **Saved in Studio:** the Settings page's CORS tab. Owners and admins can add and remove origins
+  there. The list is stored in the project's database (`auth.cors_origins`), so it survives a
+  restart, and every replica reads it within ten seconds. It replaces the default until someone
+  presses Reset.
+- **Everything else is refused:** a preflight from another origin gets `403`, and other responses
+  carry no CORS headers.
+- **`*`** allows every origin, and only when someone writes it in one of those places.
+
+Dev mode reflects every origin, whatever the list says.
+
+```ts
+api: { corsOrigins: ["https://admin.example.com", "http://localhost:5173"] },
+```
+
 ## Custom domain + automatic HTTPS
 
 Add a domain at any time with one command (interactive prompts for the domain and a Let's Encrypt email):

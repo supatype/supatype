@@ -15,6 +15,9 @@
 * **security:** a `supatype dev` lock left behind by a dev that was killed made every later compose
   render dev. A lock now records its process and counts only while that process is alive; a stale
   one is removed.
+* **config:** `api.corsOrigins` names the browser origins a standalone server allows besides the
+  site URL. It reaches the server ahead of `SUPATYPE_CORS_ALLOW_ORIGINS` from `.env`, and an entry
+  that is not an origin or `*` is refused when the config is read.
 * **security:** `supatype push` (and `diff`, `adopt`, `update`) against a stack started with
   `self-host compose up` rendered it as a dev stack and recreated it that way: every origin allowed
   by CORS, Studio open without a login (`STUDIO_OPEN_DEV=1`), the database moved to a loopback dev

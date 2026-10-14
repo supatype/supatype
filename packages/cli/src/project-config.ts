@@ -103,6 +103,17 @@ export interface SupatypeProjectConfig {
       provider?: "kong" | "none"
     }
   }
+  /** The API as browsers reach it. */
+  api?: {
+    /**
+     * Browser origins allowed to call the API outside dev mode, besides the site URL (`SITE_URL`).
+     * Each is `scheme://host[:port]`; `"*"` allows every origin and is never a default.
+     * `SUPATYPE_CORS_ALLOW_ORIGINS` in `.env` adds to this list. A list saved in Studio (the
+     * Settings page's CORS tab) replaces both until it is reset. Dev mode allows every origin
+     * whatever this says.
+     */
+    corsOrigins?: string[]
+  }
   /**
    * Where the REST response cache and Kong's ACME certificates live.
    *
@@ -564,8 +575,45 @@ export function validateProjectConfig(raw: unknown, filename: string): SupatypeP
   validateCache(cfg, filename)
   validateSchemaNames(cfg, filename)
   validateAuthProviders(cfg, filename)
+  validateCorsOrigins(cfg, filename)
 
   return raw as SupatypeProjectConfig
+}
+
+/**
+ * True for `*` or an origin the server will match: an http or https scheme and a host, an optional
+ * port, and nothing after it. The server refuses anything else when a list is saved, and a config
+ * entry it could never match would only look like an allowed origin.
+ */
+export function isCorsOriginEntry(entry: string): boolean {
+  if (entry === "*") return true
+  try {
+    const url = new URL(entry)
+    const afterScheme = entry.replace(/^[a-z]+:\/\//i, "").replace(/\/$/, "")
+    return (
+      (url.protocol === "http:" || url.protocol === "https:") &&
+      url.hostname !== "" &&
+      !/[/?#@]/.test(afterScheme)
+    )
+  } catch {
+    return false
+  }
+}
+
+/** `api.corsOrigins`: an array of origins or `*`, refused when the config is read. */
+function validateCorsOrigins(cfg: Record<string, unknown>, filename: string): void {
+  const api = cfg["api"] as Record<string, unknown> | undefined
+  const origins = api?.["corsOrigins"]
+  if (origins === undefined) return
+  const bad = Array.isArray(origins)
+    ? origins.filter((o) => typeof o !== "string" || !isCorsOriginEntry(o.trim()))
+    : [origins]
+  if (bad.length > 0) {
+    throw new Error(
+      `${filename}: api.corsOrigins must be an array of origins (scheme://host[:port]) or "*"; ` +
+        `not ${bad.map((b) => JSON.stringify(b)).join(", ")}`,
+    )
+  }
 }
 
 /** A Postgres name Supatype can write anywhere without quoting it (Q1, Q3). */
