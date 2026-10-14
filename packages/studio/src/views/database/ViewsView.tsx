@@ -7,13 +7,6 @@ import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 import { SlidePanel } from "../../components/SlidePanel.js"
 
-const LIST_QUERY = (schema: string) => `
-  SELECT table_name AS view_name, view_definition
-  FROM information_schema.views
-  WHERE table_schema = '${schema}'
-  ORDER BY table_name
-`
-
 export function ViewsView(): React.ReactElement {
   const proxy = useProjectProxy()
   const { schemas, schema, setSchema } = useSchemaPicker()
@@ -24,7 +17,7 @@ export function ViewsView(): React.ReactElement {
   const [runBusy, setRunBusy] = useState(false)
 
   const { data: views, loading, error, refetch } = useApiQuery(
-    () => proxy.sql(LIST_QUERY(schema)).then((r) => r.rows),
+    () => proxy.metadata("views", { schema }).then((r) => r.rows),
     [proxy, schema],
   )
 

@@ -31,9 +31,33 @@ export interface SchemaTable {
   columns: SchemaColumn[]
 }
 
+/** The queries in the server's metadata catalogue (`studio-metadata.json` on both hosts). */
+export type MetadataName =
+  | "schemas"
+  | "tables"
+  | "columns"
+  | "constraints"
+  | "indexes"
+  | "functions"
+  | "triggers"
+  | "types"
+  | "views"
+  | "extensions_installed"
+  | "extensions_available"
+  | "roles"
+  | "owned_objects"
+  | "ledger_kinds"
+  | "ledger_objects"
+  | "ledger_count"
+
+/** A metadata query's parameters, by name: plain values only, bound by the server. */
+export type MetadataParams = Record<string, string | number | boolean | null>
+
 export interface ProjectProxy {
   /** Execute a SQL query. Optionally hint a schema, server enforces access. */
   sql: (query: string, schema?: string) => Promise<SqlResult>
+  /** One named, read-only metadata query (RQ3): the Database views read through this. */
+  metadata: (name: MetadataName, params?: MetadataParams) => Promise<SqlResult>
   /** Introspect tables in the given schema (server validates JWT role). */
   introspect: (schema?: string) => Promise<SchemaTable[]>
   /** List schemas accessible to the current JWT role. */
@@ -196,32 +220,26 @@ export function useProjectProxy(): ProjectProxy {
     return Array.from(tableMap.values())
   }, [sql])
 
-  // List schemas that contain at least one base table (hide empty public/extensions/auth shells).
-  const schemas = useCallback(async (): Promise<string[]> => {
-    const result = await sql(`
-      SELECT s.schema_name
-      FROM information_schema.schemata s
-      WHERE s.schema_name NOT IN ('information_schema','pg_catalog','pg_toast','pg_temp_1','pg_toast_temp_1')
-        AND s.schema_name NOT LIKE 'pg_temp_%'
-        AND s.schema_name NOT LIKE 'pg_toast_temp_%'
-        AND left(s.schema_name, 1) <> '_'
-        AND EXISTS (
-          SELECT 1
-          FROM information_schema.tables t
-          WHERE t.table_schema = s.schema_name
-            AND t.table_type = 'BASE TABLE'
-        )
-      ORDER BY
-        CASE
-          WHEN s.schema_name = 'public' THEN 0
-          WHEN s.schema_name IN ('auth', 'extensions', 'storage') THEN 2
-          WHEN s.schema_name LIKE '%\\_auth' ESCAPE '\\' OR s.schema_name LIKE '%\\_internal' ESCAPE '\\' THEN 2
-          ELSE 1
-        END,
-        s.schema_name
-    `)
-    return result.rows.map((r) => r["schema_name"] as string)
-  }, [sql])
+  // RQ3: one named, read-only query from the server's metadata catalogue, its parameters bound
+  // server-side. Open to every role with schema view, where `sql` is for the SQL editor's roles.
+  const metadata = useCallback(
+    async (name: MetadataName, params: MetadataParams = {}): Promise<SqlResult> => {
+      const res = await fetch(`${client.url}/metadata`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...studioGatewayHeaders(), ...studioAuthHeaders(client) },
+        credentials: "include",
+        body: JSON.stringify({ name, params }),
+      })
+      return readSqlResponse(res)
+    },
+    [client],
+  )
 
-  return useMemo(() => ({ sql, introspect, schemas }), [sql, introspect, schemas])
+  // Schemas that contain at least one base table (hides empty public/extensions/auth shells).
+  const schemas = useCallback(async (): Promise<string[]> => {
+    const result = await metadata("schemas")
+    return result.rows.map((r) => r["schema_name"] as string)
+  }, [metadata])
+
+  return useMemo(() => ({ sql, metadata, introspect, schemas }), [sql, metadata, introspect, schemas])
 }

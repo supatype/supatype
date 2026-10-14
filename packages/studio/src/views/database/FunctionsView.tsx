@@ -7,14 +7,6 @@ import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 import { SlidePanel } from "../../components/SlidePanel.js"
 
-const LIST_QUERY = (schema: string) => `
-  SELECT routine_name, routine_type, data_type AS return_type,
-         external_language AS language, is_deterministic, routine_definition
-  FROM information_schema.routines
-  WHERE routine_schema = '${schema}'
-  ORDER BY routine_name
-`
-
 export function FunctionsView(): React.ReactElement {
   const proxy = useProjectProxy()
   const { schemas, schema, setSchema } = useSchemaPicker()
@@ -25,7 +17,7 @@ export function FunctionsView(): React.ReactElement {
   const [runBusy, setRunBusy] = useState(false)
 
   const { data: fns, loading, error, refetch } = useApiQuery(
-    () => proxy.sql(LIST_QUERY(schema)).then((r) => r.rows),
+    () => proxy.metadata("functions", { schema }).then((r) => r.rows),
     [proxy, schema],
   )
 

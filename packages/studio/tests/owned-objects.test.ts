@@ -11,7 +11,6 @@ import {
   isOwned,
   isUnreadableLedger,
   ownedKey,
-  ownedObjectsQuery,
 } from "../src/lib/owned-objects.js"
 import type { DatabaseFailure } from "../src/lib/database-error.js"
 
@@ -46,15 +45,6 @@ describe("isOwned()", () => {
     expect(isOwned(owned, INDEX_KINDS, "posts", "posts_slug_key", null)).toBe(true)
     expect(isOwned(owned, INDEX_KINDS, "posts", "posts_pkey", null)).toBe(true)
     expect(isOwned(owned, CONSTRAINT_KINDS["FOREIGN KEY"]!, "posts", "posts_pkey", null)).toBe(false)
-  })
-})
-
-describe("ownedObjectsQuery()", () => {
-  it("reads each unreleased row's kind, with the schema quoted", () => {
-    const sql = ownedObjectsQuery("o'brien")
-    expect(sql).toContain("SELECT kind, parent, name")
-    expect(sql).toContain("schema_name = 'o''brien'")
-    expect(sql).toContain("status <> 'released'")
   })
 })
 

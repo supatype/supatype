@@ -10,17 +10,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
  */
 
 interface Pending {
-  query: string
+  name: string
+  params: Record<string, unknown>
   resolve: (rows: Record<string, unknown>[]) => void
 }
 
 const pending: Pending[] = []
 const proxy = {
-  sql: vi.fn(
-    (query: string) =>
+  metadata: vi.fn(
+    (name: string, params: Record<string, unknown> = {}) =>
       new Promise<{ rows: Record<string, unknown>[] }>((resolve) => {
-        if (query.startsWith("SELECT DISTINCT kind")) resolve({ rows: [{ kind: "table" }] })
-        else pending.push({ query, resolve: (rows) => resolve({ rows }) })
+        if (name === "ledger_kinds") resolve({ rows: [{ kind: "table" }] })
+        else pending.push({ name, params, resolve: (rows) => resolve({ rows }) })
       }),
   ),
 }
@@ -38,7 +39,7 @@ beforeEach(() => {
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   vi.useFakeTimers()
   pending.length = 0
-  proxy.sql.mockClear()
+  proxy.metadata.mockClear()
   container = document.createElement("div")
   document.body.appendChild(container)
   root = createRoot(container)
@@ -72,7 +73,7 @@ function buttonNamed(name: string): HTMLButtonElement {
 }
 
 /** The page queries sent so far, by the table they filter on ("" for none). */
-const asked = () => pending.map((p) => /ILIKE '%(.*?)%'/.exec(p.query)?.[1] ?? "")
+const asked = () => pending.map((p) => String(p.params["table_pattern"] ?? "").replace(/^%|%$/g, ""))
 
 /** Render the screen and answer its first page with `firstRow`. */
 async function openScreen(firstRow: Record<string, unknown> = table("first")): Promise<void> {
@@ -107,11 +108,10 @@ describe("Schema objects against the ledger", () => {
 
     await type("bulk07")
     // While typing, nothing is asked: not page 0 of the old filter, which would flash on screen.
-    expect(pending.map((p) => p.query)).toEqual([])
+    expect(pending.map((p) => p.name)).toEqual([])
     await act(async () => vi.advanceTimersByTime(FILTER_DEBOUNCE_MS))
     expect(pending).toHaveLength(1)
-    expect(pending[0]!.query).toContain("ILIKE '%bulk07%'")
-    expect(pending[0]!.query).toContain("OFFSET 0")
+    expect(pending[0]!.params).toMatchObject({ table_pattern: "%bulk07%", offset: 0 })
   })
 
   it("shows the answer to the latest filter, not an older one that arrives after it", async () => {

@@ -4,20 +4,6 @@ import { useApiQuery } from "../../hooks/useApiQuery.js"
 import { Badge, Button, Card } from "../../components/ui.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 
-const INSTALLED_QUERY = `
-  SELECT e.extname, e.extversion, d.description
-  FROM pg_extension e
-  LEFT JOIN pg_description d ON d.objoid = e.oid AND d.classoid = 'pg_extension'::regclass
-  ORDER BY e.extname
-`
-
-const AVAILABLE_QUERY = `
-  SELECT name, default_version, comment
-  FROM pg_available_extensions
-  WHERE installed_version IS NULL
-  ORDER BY name
-`
-
 export function ExtensionsView(): React.ReactElement {
   const proxy = useProjectProxy()
   const [search, setSearch] = useState("")
@@ -25,11 +11,11 @@ export function ExtensionsView(): React.ReactElement {
   const [error, setError] = useState<string | null>(null)
 
   const { data: installed, refetch: refetchInstalled } = useApiQuery(
-    () => proxy.sql(INSTALLED_QUERY).then((r) => r.rows),
+    () => proxy.metadata("extensions_installed").then((r) => r.rows),
     [proxy],
   )
   const { data: available } = useApiQuery(
-    () => proxy.sql(AVAILABLE_QUERY).then((r) => r.rows),
+    () => proxy.metadata("extensions_available").then((r) => r.rows),
     [proxy],
   )
 

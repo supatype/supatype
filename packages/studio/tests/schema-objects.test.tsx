@@ -9,13 +9,11 @@ import { MemoryRouter } from "react-router-dom"
 import { describe, expect, it } from "vitest"
 import {
   fetchObjectPage,
-  KINDS_SQL,
   lastPage,
+  ledgerParams,
   mapObjectRow,
-  objectsCountQuery,
   migrationLink,
   NO_FILTERS,
-  objectsQuery,
   PAGE_SIZE,
   SchemaObjectsView,
   toPage,
@@ -138,16 +136,16 @@ describe("a page of the recorded objects", () => {
 describe("fetchObjectPage()", () => {
   const row = (name: string, total: number) => ({ kind: "table", schema_name: "public", parent: "", name, status: "managed", total })
 
-  /** A ledger of `total` objects, answering each page with what is on it. */
+  /** A ledger of `total` objects, answering each metadata query as the server would. */
   function ledger(total: number) {
-    const asked: string[] = []
+    const asked: Array<{ name: string; params: Record<string, unknown> }> = []
     return {
       asked,
-      sql: async (query: string) => {
-        asked.push(query)
-        if (query === KINDS_SQL) return { rows: [{ kind: "table" }] }
-        if (query.startsWith("SELECT count(*) AS total")) return { rows: [{ total: String(total) }] }
-        const offset = Number(/OFFSET (\d+)/.exec(query)?.[1] ?? 0)
+      metadata: async (name: string, params: Record<string, unknown> = {}) => {
+        asked.push({ name, params })
+        if (name === "ledger_kinds") return { rows: [{ kind: "table" }] }
+        if (name === "ledger_count") return { rows: [{ total: String(total) }] }
+        const offset = Number(params["offset"] ?? 0)
         const names = Array.from({ length: Math.max(0, Math.min(PAGE_SIZE, total - offset)) }, (_, i) => `t${offset + i}`)
         return { rows: names.map((n) => row(n, total)) }
       },
@@ -173,56 +171,34 @@ describe("fetchObjectPage()", () => {
     expect(page).toMatchObject({ page: 0, total: 0, objects: [] })
   })
 
-  it("counts with the same filters it pages with", () => {
-    expect(objectsCountQuery({ ...NO_FILTERS, kind: "index" })).toContain("WHERE kind = 'index'")
+  it("counts with the same filters it pages with", async () => {
+    const reader = ledger(0)
+    const filters = { ...NO_FILTERS, kind: "index" }
+    await fetchObjectPage(reader, { filters, page: 2 })
+    const count = reader.asked.find((a) => a.name === "ledger_count")
+    expect(count?.params).toEqual(ledgerParams(filters))
     expect(lastPage(0)).toBe(0)
     expect(lastPage(PAGE_SIZE)).toBe(0)
     expect(lastPage(PAGE_SIZE + 1)).toBe(1)
   })
 })
 
-/** The `WHERE` clause of a query, on one line. */
-function whereOf(sql: string): string {
-  return (/WHERE([\s\S]*?)ORDER BY/.exec(sql)?.[1] ?? "").replace(/\s+/g, " ")
-}
-
-describe("objectsQuery()", () => {
-  it("asks for one page, with the count of every match", () => {
-    const sql = objectsQuery({ filters: NO_FILTERS, page: 2 })
-    expect(sql).toContain(`LIMIT ${PAGE_SIZE} OFFSET ${2 * PAGE_SIZE}`)
-    expect(sql).toContain("count(*) OVER ()")
-    expect(sql).not.toContain("WHERE")
+// The ledger queries live in the server's metadata catalogue, which binds these values.
+describe("ledgerParams()", () => {
+  it("asks for no filter when none is set", () => {
+    expect(ledgerParams(NO_FILTERS)).toEqual({ kind: null, status: null, table_pattern: null, tableless: false })
   })
 
-  it("filters by kind and status in the query", () => {
-    const sql = objectsQuery({ filters: { ...NO_FILTERS, kind: "index", status: "released" }, page: 0 })
-    expect(sql).toContain("kind = 'index'")
-    expect(sql).toContain("status = 'released'")
+  it("filters by kind and status", () => {
+    expect(ledgerParams({ ...NO_FILTERS, kind: "index", status: "released" })).toMatchObject({ kind: "index", status: "released" })
   })
 
-  it("matches a table by its own row or as the first part of a column's parent", () => {
-    const sql = objectsQuery({ filters: { ...NO_FILTERS, table: "posts" }, page: 0 })
-    expect(sql).toContain("split_part(parent, '.', 1)")
-    expect(sql).toContain("ILIKE '%posts%'")
+  it("matches a table anywhere in its name, taking LIKE's wildcards literally", () => {
+    expect(ledgerParams({ ...NO_FILTERS, table: " o'brien_% " }).table_pattern).toBe("%o'brien\\_\\%%")
   })
 
-  it("matches a table-less object (a function, a view) only when asked to, and then by its own name", () => {
-    const tablesOnly = whereOf(objectsQuery({ filters: { ...NO_FILTERS, table: "post" }, page: 0 }))
-    expect(tablesOnly).toContain("parent = '' AND kind = 'table' AND name ILIKE '%post%'")
-    expect(tablesOnly).not.toMatch(/WHEN parent = ''/)
-    expect(tablesOnly).not.toMatch(/parent = '' AND name ILIKE/)
-
-    const withTableless = whereOf(objectsQuery({ filters: { ...NO_FILTERS, table: "post", tableless: true }, page: 0 }))
-    expect(withTableless).toContain("parent = '' AND name ILIKE '%post%'")
-  })
-
-  it("leaves table-less objects in when there is no table filter, whatever the toggle says", () => {
-    expect(objectsQuery({ filters: { ...NO_FILTERS, tableless: true }, page: 0 })).not.toContain("WHERE")
-  })
-
-  it("quotes what was typed, and takes LIKE's wildcards literally", () => {
-    const sql = objectsQuery({ filters: { ...NO_FILTERS, table: "o'brien_%" }, page: 0 })
-    expect(sql).toContain("'%o''brien\\_\\%%'")
+  it("passes the table-less toggle on as asked", () => {
+    expect(ledgerParams({ ...NO_FILTERS, table: "post", tableless: true }).tableless).toBe(true)
   })
 })
 

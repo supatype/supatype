@@ -6,19 +6,6 @@ import { Badge, Button, Card } from "../../components/ui.js"
 import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 
-const LIST_QUERY = (schema: string) => `
-  SELECT t.typname, t.typtype,
-    array_agg(e.enumlabel ORDER BY e.enumsortorder) FILTER (WHERE t.typtype = 'e') AS enum_values
-  FROM pg_type t
-  LEFT JOIN pg_enum e ON e.enumtypid = t.oid
-  JOIN pg_namespace n ON n.oid = t.typnamespace
-  WHERE n.nspname = '${schema}'
-    AND t.typtype IN ('e','c')
-    AND t.typname NOT LIKE '\\_%'
-  GROUP BY t.typname, t.typtype
-  ORDER BY t.typname
-`
-
 export function TypesView(): React.ReactElement {
   const proxy = useProjectProxy()
   const { schemas, schema, setSchema } = useSchemaPicker()
@@ -30,7 +17,7 @@ export function TypesView(): React.ReactElement {
   const [dropModal, setDropModal] = useState<string | null>(null)
 
   const { data: types, loading, error, refetch } = useApiQuery(
-    () => proxy.sql(LIST_QUERY(schema)).then((r) => r.rows),
+    () => proxy.metadata("types", { schema }).then((r) => r.rows),
     [proxy, schema],
   )
 

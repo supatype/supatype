@@ -7,14 +7,6 @@ import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 import { SlidePanel } from "../../components/SlidePanel.js"
 
-const LIST_QUERY = (schema: string) => `
-  SELECT trigger_name, event_manipulation, event_object_table,
-         action_timing, action_orientation, action_statement
-  FROM information_schema.triggers
-  WHERE trigger_schema = '${schema}'
-  ORDER BY event_object_table, trigger_name
-`
-
 export function TriggersView(): React.ReactElement {
   const proxy = useProjectProxy()
   const { schemas, schema, setSchema } = useSchemaPicker()
@@ -25,7 +17,7 @@ export function TriggersView(): React.ReactElement {
   const [runBusy, setRunBusy] = useState(false)
 
   const { data: triggers, loading, error, refetch } = useApiQuery(
-    () => proxy.sql(LIST_QUERY(schema)).then((r) => r.rows),
+    () => proxy.metadata("triggers", { schema }).then((r) => r.rows),
     [proxy, schema],
   )
 

@@ -11,7 +11,6 @@
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import type { ProjectProxy } from "../hooks/useProjectProxy.js"
 import { isMissingTable, isPermissionDenied, type DatabaseFailure } from "./database-error.js"
-import { sqlText } from "./sql.js"
 
 const STAMP_PREFIX = "supatype:managed"
 
@@ -38,12 +37,6 @@ export const CONSTRAINT_KINDS: Readonly<Record<string, readonly string[]>> = {
   "FOREIGN KEY": ["foreign_key"],
   UNIQUE: ["unique"],
   CHECK: ["check"],
-}
-
-/** The ledger's objects in `schema` that are Supatype's. */
-export function ownedObjectsQuery(schema: string): string {
-  return `SELECT kind, parent, name FROM _supatype.managed_objects
- WHERE schema_name = ${sqlText(schema)} AND status <> 'released' AND parent <> ''`
 }
 
 /** The ledger, schema-qualified, as Postgres names it in a missing-relation error. */
@@ -82,7 +75,7 @@ export interface OwnedObjects {
 export function useOwnedObjects(proxy: ProjectProxy, schema: string): OwnedObjects {
   const { data, failure } = useApiQuery(
     () =>
-      proxy.sql(ownedObjectsQuery(schema)).then((r) => ({
+      proxy.metadata("owned_objects", { schema }).then((r) => ({
         proxy,
         schema,
         owned: new Set(

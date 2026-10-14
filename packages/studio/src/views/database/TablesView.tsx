@@ -10,25 +10,6 @@ import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 import { SlidePanel } from "../../components/SlidePanel.js"
 
-const LIST_QUERY = (schema: string) => `
-  SELECT
-    t.table_name,
-    GREATEST(c.reltuples::bigint, 0) AS row_estimate,
-    pg_total_relation_size(quote_ident('${schema}') || '.' || quote_ident(t.table_name))::bigint AS bytes
-  FROM information_schema.tables t
-  JOIN pg_class c ON c.relname = t.table_name
-  JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = '${schema}'
-  WHERE t.table_schema = '${schema}' AND t.table_type = 'BASE TABLE'
-  ORDER BY t.table_name
-`
-
-const COLUMNS_QUERY = (schema: string, table: string) => `
-  SELECT column_name, udt_name, is_nullable, column_default
-  FROM information_schema.columns
-  WHERE table_schema = '${schema}' AND table_name = '${table}'
-  ORDER BY ordinal_position
-`
-
 function formatBytes(b: number): string {
   if (b < 1024) return `${b} B`
   if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`
@@ -58,11 +39,11 @@ export function TablesView(): React.ReactElement {
   const [runBusy, setRunBusy] = useState(false)
 
   const { data: tables, loading, error, refetch } = useApiQuery(
-    () => proxy.sql(LIST_QUERY(schema)).then((r) => r.rows),
+    () => proxy.metadata("tables", { schema }).then((r) => r.rows),
     [proxy, schema],
   )
   const { data: columns } = useApiQuery(
-    () => selectedTable ? proxy.sql(COLUMNS_QUERY(schema, selectedTable)).then((r) => r.rows) : Promise.resolve([]),
+    () => selectedTable ? proxy.metadata("columns", { schema, table: selectedTable }).then((r) => r.rows) : Promise.resolve([]),
     [proxy, schema, selectedTable],
   )
 

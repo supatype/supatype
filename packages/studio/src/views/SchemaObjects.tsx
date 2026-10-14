@@ -17,7 +17,7 @@ import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import { useProjectProxy } from "../hooks/useProjectProxy.js"
-import { containing, sqlText } from "../lib/sql.js"
+import type { MetadataName, MetadataParams } from "../hooks/useProjectProxy.js"
 import { isMissingLedger } from "../lib/owned-objects.js"
 import { formatTimestamp } from "../lib/utils.js"
 
@@ -71,12 +71,12 @@ export interface ObjectPage {
 
 export const NO_FILTERS: ObjectFilters = { kind: "all", table: "", status: "all", tableless: false }
 
+/** Rows per page: the `ledger_objects` query's LIMIT in the server's metadata catalogue. */
 export const PAGE_SIZE = 50
 
 /** How long typing in the table filter waits before it asks the database. */
 export const FILTER_DEBOUNCE_MS = 300
 
-export const KINDS_SQL = "SELECT DISTINCT kind FROM _supatype.managed_objects ORDER BY kind"
 
 const statusVariant: Record<ObjectStatus, BadgeVariant> = {
   managed: "green",
@@ -93,44 +93,27 @@ function knownStatus(status: string): ObjectStatus | undefined {
 
 // --- Reading the ledger ---
 
+/** A LIKE pattern matching `value` anywhere, with LIKE's own wildcards taken literally. */
+function containingPattern(value: string): string {
+  return `%${value.replace(/[\\%_]/g, (c) => `\\${c}`)}%`
+}
+
 /**
- * The rows the table filter `table` matches. A table matches by its own name, and an object on a
- * table by its parent: the table, or `table.column` for a column's security label, of which only
- * the table counts. The objects on no table (functions, views and the like) match by their own
- * name, and only when `tableless` asks for them: otherwise "post" would bring in a function that
- * merely mentions posts, or `slugify` for "slug".
+ * The ledger queries' parameters for `filters`, bound by the server (RQ3): kind and status when
+ * filtered, and the table to match, which matches a table by its own row or as the first part of
+ * a column's parent, and a table-less object (a function, a view) by its own name only when
+ * `tableless` is on.
  */
-function tableMatch(table: string, tableless: boolean): string {
-  const like = `ILIKE ${containing(table)} ESCAPE '\\'`
-  const own = `parent = ''${tableless ? "" : " AND kind = 'table'"} AND name ${like}`
-  return `((${own}) OR (parent <> '' AND split_part(parent, '.', 1) ${like}))`
-}
-
-/** The `WHERE` clause the filters make, or an empty string for none. */
-function whereClause(filters: ObjectFilters): string {
-  const where: string[] = []
-  if (filters.kind !== "all") where.push(`kind = ${sqlText(filters.kind)}`)
-  if (filters.status !== "all") where.push(`status = ${sqlText(filters.status)}`)
+export function ledgerParams(filters: ObjectFilters): MetadataParams {
   const table = filters.table.trim()
-  if (table !== "") where.push(tableMatch(table, filters.tableless))
-  return where.length > 0 ? `\n WHERE ${where.join(" AND ")}` : ""
+  return {
+    kind: filters.kind === "all" ? null : filters.kind,
+    status: filters.status === "all" ? null : filters.status,
+    table_pattern: table === "" ? null : containingPattern(table),
+    tableless: filters.tableless,
+  }
 }
 
-/** The page of `_supatype.managed_objects` that `query` asks for, with the count of all matches. */
-export function objectsQuery({ filters, page }: ObjectQuery): string {
-  return `SELECT kind, schema_name, parent, name, status, migration_id, updated_at::TEXT,
-       count(*) OVER () AS total
- FROM _supatype.managed_objects${whereClause(filters)}
- ORDER BY kind, schema_name, parent, name
- LIMIT ${PAGE_SIZE} OFFSET ${page * PAGE_SIZE}`
-}
-
-/** How many objects match the filters, for a page past the end, which carries no count. */
-export function objectsCountQuery(filters: ObjectFilters): string {
-  return `SELECT count(*) AS total FROM _supatype.managed_objects${whereClause(filters)}`
-}
-
-/** The last zero-based page `total` objects fill (page 0 when there are none). */
 export function lastPage(total: number): number {
   return Math.max(0, Math.ceil(total / PAGE_SIZE) - 1)
 }
@@ -149,29 +132,34 @@ export function mapObjectRow(row: Record<string, unknown>): ManagedObject {
   }
 }
 
-/** The page the rows of `objectsQuery` make, given the ledger's kinds and which page they are. */
+/** The page a `ledger_objects` answer makes, given the ledger's kinds and which page it is. */
 export function toPage(rows: readonly Record<string, unknown>[], kinds: string[], page = 0): ObjectPage {
   return { objects: rows.map(mapObjectRow), page, total: Number(rows[0]?.["total"] ?? 0), kinds }
 }
 
-/** What `fetchObjectPage` needs of the project proxy. */
-export interface SqlRunner {
-  sql: (query: string) => Promise<{ rows: Record<string, unknown>[] }>
+/** What `fetchObjectPage` needs of the project proxy: the read-only metadata route. */
+export interface LedgerReader {
+  metadata: (name: MetadataName, params?: MetadataParams) => Promise<{ rows: Record<string, unknown>[] }>
+}
+
+/** One page of the ledger, filtered. */
+function ledgerPage(proxy: LedgerReader, { filters, page }: ObjectQuery) {
+  return proxy.metadata("ledger_objects", { ...ledgerParams(filters), offset: page * PAGE_SIZE })
 }
 
 /**
  * The page `query` asks for. A page past the end (objects removed since it was shown, so page 3 of
  * what is now 1) comes back as the last page there is, rather than an empty "Page 3 of 1 (0)".
  */
-export async function fetchObjectPage(proxy: SqlRunner, query: ObjectQuery): Promise<ObjectPage> {
-  const [rows, kindRows] = await Promise.all([proxy.sql(objectsQuery(query)), proxy.sql(KINDS_SQL)])
+export async function fetchObjectPage(proxy: LedgerReader, query: ObjectQuery): Promise<ObjectPage> {
+  const [rows, kindRows] = await Promise.all([ledgerPage(proxy, query), proxy.metadata("ledger_kinds")])
   const kinds = kindRows.rows.map((r) => String(r["kind"] ?? ""))
   const page = toPage(rows.rows, kinds, query.page)
   if (page.objects.length > 0 || query.page === 0) return page
-  const count = await proxy.sql(objectsCountQuery(query.filters))
+  const count = await proxy.metadata("ledger_count", ledgerParams(query.filters))
   const last = lastPage(Number(count.rows[0]?.["total"] ?? 0))
   if (last >= query.page) return page
-  const again = await proxy.sql(objectsQuery({ ...query, page: last }))
+  const again = await ledgerPage(proxy, { ...query, page: last })
   return toPage(again.rows, kinds, last)
 }
 

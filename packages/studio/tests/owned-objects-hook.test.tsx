@@ -17,7 +17,7 @@ function Probe({ proxy, schema = "public" }: { proxy: ProjectProxy; schema?: str
 }
 
 function proxyAnswering(answer: () => Promise<{ rows: Record<string, unknown>[] }>): ProjectProxy {
-  return { sql: answer } as unknown as ProjectProxy
+  return { metadata: answer } as unknown as ProjectProxy
 }
 
 async function read(proxy: ProjectProxy): Promise<OwnedObjects> {
@@ -108,8 +108,8 @@ describe("useOwnedObjects()", () => {
   it("never shows the previous schema's objects while the next schema's are loading", async () => {
     let release: (rows: { rows: Record<string, unknown>[] }) => void = () => {}
     const proxy = proxyAnswering(async () => ({ rows: [] }))
-    proxy.sql = async (query: string) =>
-      query.includes("'public'")
+    proxy.metadata = async (_name: string, params?: Record<string, unknown>) =>
+      params?.["schema"] === "public"
         ? { rows: [{ kind: "index", parent: "posts", name: "i" }] }
         : new Promise((resolve) => {
             release = resolve as typeof release
