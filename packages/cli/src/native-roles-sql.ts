@@ -40,6 +40,7 @@ END $$;
  */
 export function nativeRolesSql(withMask: boolean): string {
   return `${withMask ? "CREATE EXTENSION IF NOT EXISTS supatype_mask;\n" : ""}CREATE SCHEMA IF NOT EXISTS auth;
+CREATE SCHEMA IF NOT EXISTS extensions;
 DO $$ BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'anon')
     THEN CREATE ROLE anon NOLOGIN; END IF;
@@ -54,6 +55,9 @@ SELECT format('CREATE ROLE authenticator LOGIN NOINHERIT PASSWORD %L', :'authent
 GRANT anon, authenticated, service_role TO postgres;
 GRANT anon, authenticated, service_role TO authenticator;
 GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+-- Where the engine installs PostGIS, pgvector and unaccent: a request resolves a column's type and
+-- a filter's operator through it, and PostgREST's extra search path names it.
+GRANT USAGE ON SCHEMA extensions TO anon, authenticated, service_role;
 -- Tables are service_role's by default. anon and authenticated get a model table's grants from
 -- the engine, as the schema's access rules say, and nothing on a table made by hand (CL-N2).
 GRANT ALL ON ALL TABLES IN SCHEMA public TO service_role;

@@ -788,6 +788,40 @@ export type Message = Model<{
     })
   })
 
+  it("extracts an index's method and a vector index's distance", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-vector-index-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { GeoPoint, Model, Optional, UUID, Vector } from "@supatype/types"
+
+export type Doc = Model<{
+  id: UUID
+  near: Optional<GeoPoint>
+  embedding: Optional<Vector<3>>
+  title: Optional<Vector<3>>
+}, {
+  indexes: [
+    { fields: ["near"], using: "gist" },
+    { fields: ["embedding"], using: "hnsw" },
+    { fields: ["title"], using: "hnsw", distance: "innerProduct" },
+  ]
+}>
+`,
+      "utf8",
+    )
+
+    const doc = extractSchemaAstFromTypes(schemaPath, dir)?.models.find((m) => m.name === "Doc")
+    const indexes = doc?.annotations.db.indexes as Array<Record<string, unknown>>
+    expect(indexes).toEqual([
+      { using: "gist", unique: false, fields: ["near"] },
+      { using: "hnsw", unique: false, fields: ["embedding"] },
+      { using: "hnsw", unique: false, fields: ["title"], distance: "innerProduct" },
+    ])
+  })
+
   it("extracts ManyToMany relations with through table option", () => {
     const dir = mkdtempSync(join(tmpdir(), "supatype-many-to-many-"))
     dirs.push(dir)

@@ -2383,6 +2383,8 @@ function parseModelIndexes(
         if (name !== null) indexDef.name = name
       } else if (key === "unique" && isBooleanLiteralType(member.type, true)) {
         indexDef.unique = true
+      } else if (key === "using" || key === "distance") {
+        indexDef[key] = indexOption(key, literalStringType(member.type))
       } else if (key === "fields" && ts.isTupleTypeNode(member.type)) {
         indexDef.fields = member.type.elements
           .map((fieldNode) => {
@@ -2397,6 +2399,21 @@ function parseModelIndexes(
     }
   }
   return indexes
+}
+
+/** The values `ModelIndex.using` and `ModelIndex.distance` accept, as `@supatype/types` lists them. */
+const INDEX_OPTIONS = {
+  using: ["btree", "gin", "gist", "hnsw", "brin"],
+  distance: ["cosine", "l2", "innerProduct"],
+} as const
+
+/** An index option's value, refused when it is not one the engine knows. */
+function indexOption(key: keyof typeof INDEX_OPTIONS, value: string | null): string {
+  const allowed: readonly string[] = INDEX_OPTIONS[key]
+  if (value === null || !allowed.includes(value)) {
+    throw new Error(`An index's \`${key}\` must be one of ${allowed.map((v) => `"${v}"`).join(", ")}.`)
+  }
+  return value
 }
 
 function resolveIndexFieldName(fieldName: string, fields: Record<string, FieldAstV2>): string | null {

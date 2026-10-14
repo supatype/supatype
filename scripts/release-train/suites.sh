@@ -25,6 +25,7 @@ TRAIN_SUITES=(
   supabucks
   blog
   field-conformance
+  extension-schema
   studio-ui
   zero-to-running
   hook-adapter
@@ -68,6 +69,7 @@ suite_command() {
     supabucks) echo "bash $s/supabucks-e2e.sh" ;;
     blog) echo "bash $s/blog-e2e.sh" ;;
     field-conformance) echo "bash $s/field-conformance.sh" ;;
+    extension-schema) echo "bash $s/extension-schema-e2e.sh" ;;
     studio-ui) echo "bash $s/studio-ui-e2e.sh" ;;
     zero-to-running) echo "SUPATYPE_ZTR_INSTALL=workspace SUPATYPE_ZTR_WORK_ROOT=\"\${TMPDIR:-/tmp}/train-ztr\" bash $s/zero-to-running.sh" ;;
     hook-adapter) echo "bash $s/hook-adapter.sh" ;;
