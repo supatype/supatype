@@ -52,7 +52,7 @@ DEV_PID=""
 cleanup() {
   echo ""
   echo "==> teardown"
-  if [[ -n "$DEV_PID" ]]; then kill "$DEV_PID" 2>/dev/null || true; fi
+  stop_pid_bounded "$DEV_PID"
   e2e_project_down
   docker rm -f "$MAILPIT_NAME" >/dev/null 2>&1 || true
   # Restore the config this script edits so a failure does not leave it changed.
@@ -132,7 +132,7 @@ set_env_key "SUPATYPE_KONG_PORT" "$KONG_PORT"
 set_env_key "SUPATYPE_STORAGE_IMAGE" "$STORAGE_IMAGE"
 set_env_key "SUPATYPE_REALTIME_IMAGE" "$REALTIME_IMAGE"
 
-(cd "$INTEGRATION_DIR" && node "$CLI_BIN" dev) &
+(cd "$INTEGRATION_DIR" && exec node "$CLI_BIN" dev) &
 DEV_PID=$!
 
 ready() { dev_started "$INTEGRATION_DIR" && http_ok "$BASE_URL/auth/v1/health"; }

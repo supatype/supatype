@@ -43,12 +43,12 @@ cleanup() {
   # up and query it, the way `zero-to-running` already allows.
   if [[ "${SUPATYPE_E2E_KEEP:-}" == "1" ]]; then
     echo "==> teardown skipped (SUPATYPE_E2E_KEEP=1); stack $E2E_COMPOSE_PROJECT left running at $BASE_URL"
-    if [[ -n "$DEV_PID" ]]; then kill "$DEV_PID" 2>/dev/null || true; fi
+    stop_pid_bounded "$DEV_PID"
     e2e_project_release
     return
   fi
   echo "==> teardown"
-  if [[ -n "$DEV_PID" ]]; then kill "$DEV_PID" 2>/dev/null || true; fi
+  stop_pid_bounded "$DEV_PID"
   e2e_project_down
   # The .env this script mints into is not gitignored here, so a failure must not leave a key behind.
   if [[ "$ENV_EXISTED" == "no" ]]; then rm -f "$EXAMPLE_DIR/.env"; fi
@@ -75,7 +75,7 @@ INDEX_BUILT="$EXAMPLE_DIR/dist/index.html"
 [[ -f "$INDEX_BUILT" ]] || fail "vite build produced no dist/index.html, so static mode has nothing to serve"
 
 echo "==> Bringing the stack up"
-(cd "$EXAMPLE_DIR" && node "$CLI_BIN" dev) &
+(cd "$EXAMPLE_DIR" && exec node "$CLI_BIN" dev) &
 DEV_PID=$!
 
 ready() { dev_started "$EXAMPLE_DIR" && http_ok "$BASE_URL/auth/v1/health"; }

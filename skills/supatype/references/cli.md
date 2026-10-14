@@ -100,7 +100,7 @@ Example: [`examples/edge-kit`](https://github.com/supatype/supatype/tree/main/ex
 - Open the URL printed by `supatype dev`, not always `:18473`.
 
 **Stopping the stack:**
-- `supatype dev` runs `docker compose down` on Ctrl+C, terminal close, and as a sync fallback on process exit.
+- `supatype dev` runs `docker compose down` on Ctrl+C, terminal close, and as a sync fallback on process exit. It also stops, the same way, within a few seconds of the process that started it exiting (a script killed outright, a cancelled CI job), so it never runs on orphaned. To keep a stack up with nothing attached, use `supatype self-host compose up -d`.
 - Ownership flags (`--overwrite-drift`, `adopt --key/--release/--reclaim`, `doctor --rebaseline/--accept-access-drift`, and the keys an agreed adopt sends) are checked first against what will run them: a linked server's `GET .../schema/capabilities`, or the engine binary's `capabilities` (its version for an older one). A server or engine that lacks one is refused with "this server does not support <flag>; update it", never sent the flag to drop it.
 - A failed schema push never resets the database. `dev` retries only while Postgres is unreachable; an engine refusal (for example unmanaged tables, fixed with `supatype adopt`) stops `dev` with the engine's message. `supatype dev --reset-db` is the only way `dev` removes data, and it removes only the Postgres volume.
 - `.supatype/dev-session.json` tracks the active dev session; the next `supatype dev` offers to clean up a stack left running after an unclean exit.
@@ -108,6 +108,11 @@ Example: [`examples/edge-kit`](https://github.com/supatype/supatype/tree/main/ex
 
 **Renaming `project.name`:**
 - Docker compose project slug changes (`supatype-{name}`). On the next `supatype dev`, the CLI detects the rename via `.supatype/environment.json` and offers to stop the old stack (volumes preserved).
+
+**One run under another name (`SUPATYPE_PROJECT_NAME`, `--project-name`):**
+- Either renames the project for that command only, over `project.name`, and writes no file: the compose project, the database and the state directory all follow it. Use it to run two stacks of one project side by side, from two checkouts, each with its own `SUPATYPE_KONG_PORT`.
+- It must be lower case letters, digits, `-` and `_`, starting with a letter or digit.
+- It is not a rename: `.supatype/environment.json` keeps the config's name, so the next run without it does not offer to stop anything.
 
 ## Typical sequences
 

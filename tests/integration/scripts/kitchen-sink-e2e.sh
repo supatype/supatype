@@ -52,7 +52,7 @@ export SUPATYPE_KONG_PORT="$KONG_PORT"
 cleanup() {
   echo ""
   echo "==> teardown"
-  if [[ -n "$DEV_PID" ]]; then kill "$DEV_PID" 2>/dev/null || true; fi
+  stop_pid_bounded "$DEV_PID"
   e2e_project_down
   # The mode walk rewrites the committed config, which is what `supatype app` does. Put it back so
   # a failure does not leave the example configured for whichever mode it died in.
@@ -70,7 +70,7 @@ fi
 fail() { echo "  FAIL $*" >&2; exit 1; }
 
 start_stack() {
-  (cd "$EXAMPLE_DIR" && node "$CLI_BIN" dev) &
+  (cd "$EXAMPLE_DIR" && exec node "$CLI_BIN" dev) &
   DEV_PID=$!
   ready() { dev_started "$EXAMPLE_DIR" && http_ok "$BASE_URL/auth/v1/health"; }
   if ! wait_until "$MAX_WAIT" "$BASE_URL/auth/v1/health" ready; then
@@ -80,7 +80,7 @@ start_stack() {
 }
 
 stop_stack() {
-  if [[ -n "$DEV_PID" ]]; then kill "$DEV_PID" 2>/dev/null || true; fi
+  stop_pid_bounded "$DEV_PID"
   DEV_PID=""
   e2e_project_down --remove-orphans
 }

@@ -39,7 +39,7 @@ cleanup() {
   # The dev process first, always, even when the stack is being kept: it holds the project
   # directory open, and the next run's `rm -rf` then fails with "Device or resource busy" before it
   # has done anything. Every sibling script kills it; this one did not.
-  if [[ -n "$DEV_PID" ]]; then kill "$DEV_PID" 2>/dev/null || true; fi
+  stop_pid_bounded "$DEV_PID"
   if [[ "${SUPATYPE_E2E_KEEP:-}" == "1" ]]; then
     echo "==> teardown skipped (SUPATYPE_E2E_KEEP=1); stack left at $BASE_URL"
     return
@@ -116,7 +116,7 @@ sed -i "s/^SUPATYPE_KONG_PORT=.*/SUPATYPE_KONG_PORT=${KONG_PORT}/" "$PROJECT_DIR
 # edit. Not hidden, so the upload-on-failure step picks it up.
 DEV_LOG="$PROJECT_DIR/conformance-dev.log"
 : > "$DEV_LOG"
-(cd "$PROJECT_DIR" && node "$CLI_BIN" dev) > >(tee -a "$DEV_LOG") 2>&1 &
+(cd "$PROJECT_DIR" && exec node "$CLI_BIN" dev) > >(tee -a "$DEV_LOG") 2>&1 &
 DEV_PID=$!
 
 echo "==> Waiting for the API (up to 300s)"

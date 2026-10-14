@@ -1,12 +1,13 @@
 /**
- * Graceful shutdown for `supatype dev`, SIGINT, TUI Ctrl+C, terminal close,
- * and a synchronous compose-down fallback on process exit.
+ * Graceful shutdown for `supatype dev`, SIGINT, TUI Ctrl+C, terminal close, the process that
+ * started it exiting, and a synchronous compose-down fallback on process exit.
  */
 
 import { existsSync } from "node:fs"
 import { endDevSession } from "./dev-session.js"
 import { clearDevSessionLock } from "./dev-session-lock.js"
 import { runDockerCompose } from "./self-host-compose.js"
+import { watchParent, windowsParentOf, type ParentWatch } from "./parent-watch.js"
 
 export interface DevComposeShutdownFallback {
   cwd: string
@@ -22,6 +23,24 @@ let shutdownCompleted = false
 let forceQuitRequested = false
 let hooksRegistered = false
 let ignoreSigintUntil = 0
+let parentWatch: ParentWatch | null = null
+
+/**
+ * Stops `dev` once the process that started it is gone (parent-watch.ts). A script killed
+ * outright runs no cleanup, so this is the only thing left that can stop the stack.
+ */
+function watchForOrphaning(): void {
+  parentWatch = watchParent(() => {
+    process.stderr.write("\n[supatype] The process that started `supatype dev` has exited.\n")
+    void runDevShutdown()
+  })
+  if (process.platform === "win32") {
+    const watch = parentWatch
+    void windowsParentOf(process.ppid).then((grandparent) => {
+      if (grandparent !== undefined) watch.watchAlso(grandparent)
+    })
+  }
+}
 
 /** SIGINT/SIGTERM hooks: call as soon as `supatype dev` starts (before compose is up). */
 export function ensureDevShutdownHooks(): void {
@@ -34,6 +53,7 @@ export function ensureDevShutdownHooks(): void {
     process.on("SIGBREAK", onSignal)
   }
   process.on("exit", onProcessExit)
+  watchForOrphaning()
 
   if (process.stdin.isTTY) {
     process.stdin.on("end", onStdinClose)
@@ -127,6 +147,8 @@ export function resetDevShutdownForTests(): void {
   forceQuitRequested = false
   hooksRegistered = false
   ignoreSigintUntil = 0
+  parentWatch?.stop()
+  parentWatch = null
 }
 
 async function runDevShutdown(): Promise<void> {

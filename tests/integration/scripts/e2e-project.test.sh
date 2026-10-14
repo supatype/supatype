@@ -3,8 +3,9 @@
 #
 # Two runs of one suite, from two checkouts, shared one compose project: the second `supatype dev`
 # took over the first run's containers and the first run's `down -v` removed the second's. This
-# checks the pieces that keep them apart: the name an override gives the CLI, the developer's own
-# local config kept and restored, one run per directory, and a project another directory runs
+# checks the pieces that keep them apart: the name an override gives the CLI (SUPATYPE_PROJECT_NAME,
+# with no file written), the developer's own local config untouched, one run per directory, and a
+# project another directory runs
 # refused rather than taken over. Needs `pnpm build` (it asks the built CLI for the merged config)
 # and Docker (it starts one idle container with compose labels).
 #
@@ -81,13 +82,14 @@ echo "==> override: the CLI runs the project under the run's name"
   check "compose project is supatype-run-b2" '[[ "$E2E_COMPOSE_PROJECT" == supatype-run-b2 ]]'
   check "the CLI loads run-b2" '[[ "$(cli_config "$dir")" == "run-b2 -" ]]'
   check "container names carry the run" '[[ "$(e2e_scoped mailpit)" == mailpit-run-b2 ]]'
+  check "and no local config is written for it" '[[ ! -e "$dir/supatype.local.config.ts" ]]'
   e2e_project_release
-  check "the local config is gone again" '[[ ! -e "$dir/supatype.local.config.ts" ]]'
+  check "the run's name is gone again" '[[ -z "${SUPATYPE_PROJECT_NAME:-}" ]]'
   check "the CLI loads example-b again" '[[ "$(cli_config "$dir")" == "example-b -" ]]'
   exit "$failures"
 ) || failures=$((failures + $?))
 
-echo "==> override over a developer's local config: merged, then restored byte for byte"
+echo "==> override beside a developer's local config: merged by the CLI, the file never touched"
 (
   failures=0
   dir="$(new_project mine example-c)"
@@ -99,8 +101,8 @@ echo "==> override over a developer's local config: merged, then restored byte f
   check "the CLI loads run-c and keeps the engine override" \
     '[[ "$(cli_config "$dir")" == "run-c D:/engines/mine.exe" ]]'
   e2e_project_release
-  check "the developer's file is back unchanged" 'cmp -s "$dir/supatype.local.config.ts" "$WORK/mine.orig"'
-  check "no copy left beside it" '[[ ! -e "$dir/supatype.local.config.e2e-previous.ts" ]]'
+  check "the developer's file is unchanged" 'cmp -s "$dir/supatype.local.config.ts" "$WORK/mine.orig"'
+  check "nothing written beside it" '[[ ! -e "$dir/supatype.local.config.e2e-previous.ts" ]]'
   exit "$failures"
 ) || failures=$((failures + $?))
 
