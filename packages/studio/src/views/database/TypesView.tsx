@@ -1,26 +1,16 @@
 import React, { useState } from "react"
 import { useProjectProxy } from "../../hooks/useProjectProxy.js"
+import { useSqlEditorOffered } from "../../hooks/useSqlEditorOffered.js"
 import { useSchemaPicker } from "../../hooks/useSchemaPicker.js"
 import { useApiQuery } from "../../hooks/useApiQuery.js"
 import { Badge, Button, Card } from "../../components/ui.js"
 import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 
-const LIST_QUERY = (schema: string) => `
-  SELECT t.typname, t.typtype,
-    array_agg(e.enumlabel ORDER BY e.enumsortorder) FILTER (WHERE t.typtype = 'e') AS enum_values
-  FROM pg_type t
-  LEFT JOIN pg_enum e ON e.enumtypid = t.oid
-  JOIN pg_namespace n ON n.oid = t.typnamespace
-  WHERE n.nspname = '${schema}'
-    AND t.typtype IN ('e','c')
-    AND t.typname NOT LIKE '\\_%'
-  GROUP BY t.typname, t.typtype
-  ORDER BY t.typname
-`
-
 export function TypesView(): React.ReactElement {
   const proxy = useProjectProxy()
+  // Writes go through the SQL editor's route, so only its roles are offered them (RQ4).
+  const sqlWrites = useSqlEditorOffered()
   const { schemas, schema, setSchema } = useSchemaPicker()
   const [newEnumName, setNewEnumName] = useState("")
   const [newEnumValues, setNewEnumValues] = useState("")
@@ -30,7 +20,7 @@ export function TypesView(): React.ReactElement {
   const [dropModal, setDropModal] = useState<string | null>(null)
 
   const { data: types, loading, error, refetch } = useApiQuery(
-    () => proxy.sql(LIST_QUERY(schema)).then((r) => r.rows),
+    () => proxy.metadata("types", { schema }).then((r) => r.rows),
     [proxy, schema],
   )
 
@@ -75,7 +65,7 @@ export function TypesView(): React.ReactElement {
             {(schemas.length > 0 ? schemas : [schema]).map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
-        <Button variant="primary" onClick={() => setShowCreate(true)}>Create enum</Button>
+        {sqlWrites ? (<Button variant="primary" onClick={() => setShowCreate(true)}>Create enum</Button>) : null}
       </div>
 
       {error && <ErrorBanner message={error} />}
@@ -125,7 +115,7 @@ export function TypesView(): React.ReactElement {
                   </td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">{((row["enum_values"] as string[] | null) ?? []).join(", ") || "-"}</td>
                   <td className="px-4 py-3 text-right">
-                    <button type="button" className="text-xs text-destructive hover:underline" onClick={() => setDropModal(row["typname"] as string)}>Drop</button>
+                    {sqlWrites ? (<button type="button" className="text-xs text-destructive hover:underline" onClick={() => setDropModal(row["typname"] as string)}>Drop</button>) : null}
                   </td>
                 </tr>
               ))}

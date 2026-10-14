@@ -509,11 +509,16 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
       ? null
       : new PreviewCredential(config.url, config.previewCode)
 
+  // `headers` may be a function, read on every request: Studio changes the acting mode it asks for
+  // without rebuilding its client (and losing its session and sockets).
+  const extraHeaders = (): Record<string, string> =>
+    typeof config.headers === "function" ? config.headers() : (config.headers ?? {})
+
   const baseHeaders: Record<string, string> = {
     apikey: config.anonKey,
     Authorization: `Bearer ${config.anonKey}`,
     "Content-Type": "application/json",
-    ...config.headers,
+    ...extraHeaders(),
   }
 
   // Create a retry-aware fetch bound to client-level config
@@ -532,7 +537,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
   })
   const queryCache = config.queryCache ?? defaultQueryCache
 
-  const getAuthHeaders = async (): Promise<Record<string, string>> => {
+  const credentialHeaders = async (): Promise<Record<string, string>> => {
     // Studio and other admin tools pass serviceRoleKey, use it for table/RPC/GraphQL
     // so supatype_admin RLS policies and bypass rules apply (anon would fail).
     if (config.serviceRoleKey) {
@@ -540,7 +545,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
         apikey: config.serviceRoleKey,
         Authorization: `Bearer ${config.serviceRoleKey}`,
         "Content-Type": "application/json",
-        ...config.headers,
+        ...extraHeaders(),
       }
     }
     // A preview link is the whole credential, and it comes before any session on purpose: whoever
@@ -563,6 +568,12 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
     }
     return baseHeaders
   }
+
+  // Every request's headers: its credential, then the caller's own extra headers as they are now.
+  const getAuthHeaders = async (): Promise<Record<string, string>> => ({
+    ...(await credentialHeaders()),
+    ...extraHeaders(),
+  })
 
   // Storage asks for headers per request, like every other client here.
   //

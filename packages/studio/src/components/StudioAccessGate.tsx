@@ -4,6 +4,7 @@ import type { Session, SupatypeClient } from "@supatype/client"
 import { createClient } from "@supatype/client"
 import React, { useMemo } from "react"
 import { StudioAuthClientContext } from "../hooks/useAdminClient.js"
+import { actingModeHeaders } from "../lib/acting-mode.js"
 import { useStudioAccess } from "../hooks/useStudioAccess.js"
 import { useStudioAuth } from "../hooks/useStudioAuth.js"
 import { StudioLogin } from "../views/StudioLogin.js"
@@ -29,10 +30,13 @@ export function proxyClientOptions(
   anonKey: string,
   session: Session | null,
 ): Parameters<typeof createClient>[0] {
+  const url = `${apiBaseUrl.replace(/\/$/, "")}/studio/proxy`
   return {
-    url: `${apiBaseUrl.replace(/\/$/, "")}/studio/proxy`,
+    url,
     anonKey,
     auth: { storageKey: STUDIO_SESSION_KEY },
+    // Read per request, so the acting mode an admin switches to applies without a new client.
+    headers: () => actingModeHeaders(url),
     ...(session !== null && { initialSession: session }),
   }
 }

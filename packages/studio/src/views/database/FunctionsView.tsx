@@ -1,5 +1,6 @@
 import React, { useState } from "react"
 import { useProjectProxy } from "../../hooks/useProjectProxy.js"
+import { useSqlEditorOffered } from "../../hooks/useSqlEditorOffered.js"
 import { useSchemaPicker } from "../../hooks/useSchemaPicker.js"
 import { useApiQuery } from "../../hooks/useApiQuery.js"
 import { Badge, Button, Card, CodeBlock } from "../../components/ui.js"
@@ -7,16 +8,10 @@ import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 import { SlidePanel } from "../../components/SlidePanel.js"
 
-const LIST_QUERY = (schema: string) => `
-  SELECT routine_name, routine_type, data_type AS return_type,
-         external_language AS language, is_deterministic, routine_definition
-  FROM information_schema.routines
-  WHERE routine_schema = '${schema}'
-  ORDER BY routine_name
-`
-
 export function FunctionsView(): React.ReactElement {
   const proxy = useProjectProxy()
+  // Writes go through the SQL editor's route, so only its roles are offered them (RQ4).
+  const sqlWrites = useSqlEditorOffered()
   const { schemas, schema, setSchema } = useSchemaPicker()
   const [selected, setSelected] = useState<Record<string, unknown> | null>(null)
   const [sqlModal, setSqlModal] = useState(false)
@@ -25,7 +20,7 @@ export function FunctionsView(): React.ReactElement {
   const [runBusy, setRunBusy] = useState(false)
 
   const { data: fns, loading, error, refetch } = useApiQuery(
-    () => proxy.sql(LIST_QUERY(schema)).then((r) => r.rows),
+    () => proxy.metadata("functions", { schema }).then((r) => r.rows),
     [proxy, schema],
   )
 
@@ -52,7 +47,7 @@ export function FunctionsView(): React.ReactElement {
             {(schemas.length > 0 ? schemas : [schema]).map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
-        <Button variant="primary" onClick={() => { setSqlText(`CREATE OR REPLACE FUNCTION ${schema}.my_function()\nRETURNS void\nLANGUAGE plpgsql\nAS $$\nBEGIN\n  -- body\nEND;\n$$;`); setSqlModal(true) }}>Create function</Button>
+        {sqlWrites ? (<Button variant="primary" onClick={() => { setSqlText(`CREATE OR REPLACE FUNCTION ${schema}.my_function()\nRETURNS void\nLANGUAGE plpgsql\nAS $$\nBEGIN\n  -- body\nEND;\n$$;`); setSqlModal(true) }}>Create function</Button>) : null}
       </div>
 
       {error && <ErrorBanner message={error} />}
@@ -79,7 +74,7 @@ export function FunctionsView(): React.ReactElement {
                   <td className="px-4 py-3 text-xs text-muted-foreground">{row["return_type"] as string}</td>
                   <td className="px-4 py-3"><Badge variant="blue">{(row["language"] as string)?.toLowerCase()}</Badge></td>
                   <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
-                    <button type="button" className="text-xs text-destructive hover:underline" onClick={() => { setSqlText(`DROP FUNCTION ${schema}.${row["routine_name"] as string}();`); setSqlModal(true) }}>Drop</button>
+                    {sqlWrites ? (<button type="button" className="text-xs text-destructive hover:underline" onClick={() => { setSqlText(`DROP FUNCTION ${schema}.${row["routine_name"] as string}();`); setSqlModal(true) }}>Drop</button>) : null}
                   </td>
                 </tr>
               ))}

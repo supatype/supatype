@@ -7,7 +7,10 @@ import { useStudioClient } from "../StudioCore.js"
 import { useProjectProxy } from "../hooks/useProjectProxy.js"
 import { cn } from "../lib/utils.js"
 import { Badge, Button, Card, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
-import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
+import { ElevatedNotice } from "../components/ElevatedModeBanner.js"
+import { EmptyState } from "../components/EmptyState.js"
+import { useStudioCapability } from "../hooks/useStudioCapability.js"
+import { sqlEditorOffered } from "../lib/sql-editor-access.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -270,11 +273,37 @@ function exportJson(rows: Record<string, unknown>[]): void {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
+/**
+ * The SQL editor, for the roles offered it (RX1): owners, admins and developers. It runs as the
+ * project's owning role, so row level security does not apply to it. Anyone else who opens its URL
+ * is told why there is nothing here rather than shown an editor whose every query is refused.
+ */
 export function SqlRunner(): React.ReactElement {
-  // Rows here are read with the service role, so the elevated-access notice applies
-  // to this view. See `useShowsProjectRows`.
-  useShowsProjectRows()
+  const capability = useStudioCapability()
+  if (!sqlEditorOffered(capability)) {
+    return (
+      <EmptyState
+        title="The SQL editor is not available to your role"
+        description="It runs with full access to the database, so it is for owners, admins and developers."
+      />
+    )
+  }
+  // Its own notice, not the acting-mode banner: the editor is elevated whatever mode the caller's
+  // data requests act in, so the banner would say "acting as yourself" over rows that are not.
+  return (
+    <>
+      <ElevatedNotice>
+        <span>
+          <strong className="font-medium">Full access</strong>: the SQL editor runs as the
+          project&apos;s owning role, so Row Level Security does not apply to it. Every query is recorded.
+        </span>
+      </ElevatedNotice>
+      <SqlEditorView />
+    </>
+  )
+}
 
+function SqlEditorView(): React.ReactElement {
   const client = useStudioClient()
   const { sql, introspect } = useProjectProxy()
 

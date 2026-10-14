@@ -3,31 +3,13 @@ import { useNavigate } from "react-router-dom"
 import type { AdminConfig } from "../../config.js"
 import { useAdminConfig } from "../../hooks/useAdminConfig.js"
 import { useProjectProxy } from "../../hooks/useProjectProxy.js"
+import { useSqlEditorOffered } from "../../hooks/useSqlEditorOffered.js"
 import { useSchemaPicker } from "../../hooks/useSchemaPicker.js"
 import { useApiQuery } from "../../hooks/useApiQuery.js"
 import { Button, Card } from "../../components/ui.js"
 import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 import { SlidePanel } from "../../components/SlidePanel.js"
-
-const LIST_QUERY = (schema: string) => `
-  SELECT
-    t.table_name,
-    GREATEST(c.reltuples::bigint, 0) AS row_estimate,
-    pg_total_relation_size(quote_ident('${schema}') || '.' || quote_ident(t.table_name))::bigint AS bytes
-  FROM information_schema.tables t
-  JOIN pg_class c ON c.relname = t.table_name
-  JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = '${schema}'
-  WHERE t.table_schema = '${schema}' AND t.table_type = 'BASE TABLE'
-  ORDER BY t.table_name
-`
-
-const COLUMNS_QUERY = (schema: string, table: string) => `
-  SELECT column_name, udt_name, is_nullable, column_default
-  FROM information_schema.columns
-  WHERE table_schema = '${schema}' AND table_name = '${table}'
-  ORDER BY ordinal_position
-`
 
 function formatBytes(b: number): string {
   if (b < 1024) return `${b} B`
@@ -49,6 +31,8 @@ function modelNameForTable(admin: AdminConfig, physicalTable: string): string | 
 export function TablesView(): React.ReactElement {
   const admin = useAdminConfig()
   const proxy = useProjectProxy()
+  // Writes go through the SQL editor's route, so only its roles are offered them (RQ4).
+  const sqlWrites = useSqlEditorOffered()
   const navigate = useNavigate()
   const { schemas, schema, setSchema } = useSchemaPicker()
   const [selectedTable, setSelectedTable] = useState<string | null>(null)
@@ -58,11 +42,11 @@ export function TablesView(): React.ReactElement {
   const [runBusy, setRunBusy] = useState(false)
 
   const { data: tables, loading, error, refetch } = useApiQuery(
-    () => proxy.sql(LIST_QUERY(schema)).then((r) => r.rows),
+    () => proxy.metadata("tables", { schema }).then((r) => r.rows),
     [proxy, schema],
   )
   const { data: columns } = useApiQuery(
-    () => selectedTable ? proxy.sql(COLUMNS_QUERY(schema, selectedTable)).then((r) => r.rows) : Promise.resolve([]),
+    () => selectedTable ? proxy.metadata("columns", { schema, table: selectedTable }).then((r) => r.rows) : Promise.resolve([]),
     [proxy, schema, selectedTable],
   )
 
@@ -101,16 +85,17 @@ export function TablesView(): React.ReactElement {
             {(schemas.length > 0 ? schemas : [schema]).map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
-        <Button
-          variant="primary"
-         
-          onClick={() => {
-            setSqlText(`CREATE TABLE ${schema}.new_table (\n  id bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY\n);`)
-            setSqlModal({ mode: "create" })
-          }}
-        >
-          Create table
-        </Button>
+        {sqlWrites ? (
+          <Button
+            variant="primary"
+            onClick={() => {
+              setSqlText(`CREATE TABLE ${schema}.new_table (\n  id bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY\n);`)
+              setSqlModal({ mode: "create" })
+            }}
+          >
+            Create table
+          </Button>
+        ) : null}
       </div>
 
       {error && <ErrorBanner message={error} />}
@@ -145,7 +130,7 @@ export function TablesView(): React.ReactElement {
                   <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                     <span className="flex items-center justify-end gap-3">
                       <button type="button" className="text-xs text-primary hover:underline" onClick={() => navigate(browseDataPath(row["table_name"] as string))}>Browse data</button>
-                      <button type="button" className="text-xs text-destructive hover:underline" onClick={() => { setSqlText(`DROP TABLE ${schema}.${row["table_name"] as string};`); setSqlModal({ mode: "drop", table: row["table_name"] as string }) }}>Drop</button>
+                      {sqlWrites ? (<button type="button" className="text-xs text-destructive hover:underline" onClick={() => { setSqlText(`DROP TABLE ${schema}.${row["table_name"] as string};`); setSqlModal({ mode: "drop", table: row["table_name"] as string }) }}>Drop</button>) : null}
                     </span>
                   </td>
                 </tr>

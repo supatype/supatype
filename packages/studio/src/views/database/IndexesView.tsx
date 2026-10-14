@@ -7,7 +7,6 @@ import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 import { SlidePanel } from "../../components/SlidePanel.js"
 import { INDEX_KINDS, isOwned, useOwnedObjects } from "../../lib/owned-objects.js"
-import { sqlText } from "../../lib/sql.js"
 
 /**
  * Every index the database holds, whether or not Supatype declared it.
@@ -20,24 +19,6 @@ import { sqlText } from "../../lib/sql.js"
  * Read-only. Creating an index is a schema change and belongs in the schema, where the next push
  * will not drop it again.
  */
-const LIST_QUERY = (schema: string): string => `
-  SELECT t.relname AS table_name, i.relname AS index_name, am.amname AS method,
-         ix.indisunique AS is_unique, ix.indisprimary AS is_primary,
-         pg_size_pretty(pg_relation_size(ix.indexrelid)) AS size,
-         (SELECT string_agg(a.attname, ', ' ORDER BY k.ord)
-            FROM unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord)
-            JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum) AS columns,
-         pg_get_indexdef(ix.indexrelid) AS definition,
-         obj_description(i.oid, 'pg_class') AS comment
-  FROM pg_index ix
-  JOIN pg_class i ON i.oid = ix.indexrelid
-  JOIN pg_class t ON t.oid = ix.indrelid
-  JOIN pg_namespace n ON n.oid = t.relnamespace
-  JOIN pg_am am ON am.oid = i.relam
-  WHERE n.nspname = ${sqlText(schema)}
-  ORDER BY t.relname, i.relname
-`
-
 export function IndexesView(): React.ReactElement {
   const proxy = useProjectProxy()
   const { schemas, schema, setSchema } = useSchemaPicker()
@@ -45,7 +26,7 @@ export function IndexesView(): React.ReactElement {
   const [selected, setSelected] = useState<Record<string, unknown> | null>(null)
 
   const { data: indexes, loading, error } = useApiQuery(
-    () => proxy.sql(LIST_QUERY(schema)).then((r) => r.rows),
+    () => proxy.metadata("indexes", { schema }).then((r) => r.rows),
     [proxy, schema],
   )
 
