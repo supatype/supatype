@@ -174,14 +174,25 @@ test.describe("Studio views", () => {
     expect(failures, "requests that failed on the providers view").toEqual([])
   })
 
-  test("auth: configuration shows the settings it can change", async ({ page }) => {
+  // Read-only by decision: the page shows what the auth server reports and where each value is
+  // set, because no host has a route that changes these from Studio. A form here could only
+  // pretend to save, so a Save button or an input on this page is a regression.
+  test("auth: configuration shows the server's settings and where each is set", async ({ page }) => {
     const failures = watchFailures(page)
+    const settings = page.waitForResponse((r) => new URL(r.url()).pathname === "/studio/proxy/auth/v1/settings")
     await page.goto("/studio/authentication/configuration", { waitUntil: "networkidle" })
+    expect((await settings).status(), "GET /studio/proxy/auth/v1/settings").toBe(200)
 
     const main = page.locator("main, [role='main']").first()
-    await expect(main).toContainText(/jwt expiry/i)
-    await expect(main).toContainText(/site url/i)
-    await expect(main).toContainText(/session timeout/i)
+    await expect(main.getByRole("heading", { name: "Sign-up and confirmation" })).toBeVisible()
+    await expect(main.getByRole("heading", { name: "Sign-in methods" })).toBeVisible()
+    await expect(main.getByRole("columnheader", { name: "Set by" })).toHaveCount(2)
+    // A sign-up row and a sign-in row, each naming the variable that sets it.
+    await expect(main.getByRole("row", { name: /^New signups/ })).toContainText("DISABLE_SIGNUP")
+    await expect(main.getByRole("row", { name: /^email\b/ })).toContainText("SUPATYPE_EXTERNAL_EMAIL_ENABLED")
+
+    await expect(main.getByRole("button", { name: /save/i })).toHaveCount(0)
+    await expect(main.locator("input, textarea, select")).toHaveCount(0)
     await expect(page.locator("body")).not.toContainText(/failed to fetch/i)
 
     expect(failures, "requests that failed on the configuration view").toEqual([])
