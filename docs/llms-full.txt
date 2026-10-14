@@ -29,7 +29,7 @@ Supatype lets developers define backend data models as TypeScript `Model<>` type
 
 1. Install the CLI (`npm install -g @supatype/cli`) and create a project with `supatype init`.
 2. Author models in `schema/index.ts`.
-3. Run `supatype dev`. It starts the stack in Docker Compose (or natively), applies the schema, and on every save migrates the database and regenerates the typed client. It keeps running; use a second terminal for other commands.
+3. Run `supatype dev`. It starts the stack in Docker Compose (or natively), applies the schema, and on every save migrates the database and regenerates the typed client. It keeps running; use a second terminal for other commands. It stops with its stack when the process that started it exits (a killed script, a cancelled CI job), as on Ctrl+C; to leave a stack running with nothing attached, use `supatype self-host compose up -d`.
 4. Apply the schema to another database (staging, production, a self-hosted server) with `supatype push`. `supatype diff` previews a change; `supatype migrate` writes the SQL without applying it.
 5. Deploy: self-host with `supatype self-host compose up` on a server you own, or Supatype Cloud (`supatype link`, `supatype deploy`) in early access.
 6. Bring an existing database: `supatype pull --out schema/index.ts` drafts the types from it; `supatype adopt` hands Supatype tables that already exist under the schema's names.
