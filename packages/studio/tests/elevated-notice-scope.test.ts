@@ -18,7 +18,10 @@ import { describe, expect, it } from "vitest"
 
 const VIEWS_DIR = fileURLToPath(new URL("../src/views", import.meta.url))
 
-/** Views that put project records on screen. Every one of these reads with the service role. */
+/**
+ * Views that put project records on screen, read in the caller's acting mode. The SQL runner is not
+ * one: it is elevated whatever the mode, and carries its own full-access notice.
+ */
 const SHOWS_ROWS = [
   "AuthManagement",
   "Dashboard",
@@ -27,7 +30,6 @@ const SHOWS_ROWS = [
   "GlobalEditView",
   "ListView",
   "MediaLibrary",
-  "SqlRunner",
   "VersionHistory",
 ]
 

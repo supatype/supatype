@@ -5,6 +5,8 @@ import { useAdminConfig } from "../hooks/useAdminConfig.js"
 import type { ModelConfig } from "../config.js"
 import type { SupatypeClient } from "@supatype/client"
 import { studioRestHeaders } from "../lib/studio-auth-headers.js"
+import { SQL_EDITOR_HREF, sqlEditorOffered } from "../lib/sql-editor-access.js"
+import { useStudioCapability } from "../hooks/useStudioCapability.js"
 import { IconX } from "./icons.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -69,6 +71,16 @@ function buildRouteItems(models: ModelConfig[], globals: { name: string; label: 
   }
 
   return items
+}
+
+/** The routes this caller may jump to: every route, less the SQL editor for a role not offered it. */
+export function jumpTargetsFor(
+  capability: { role: string | null; permissions: Record<string, boolean> },
+  models: ModelConfig[] = [],
+  globals: { name: string; label: string }[] = [],
+): SearchItem[] {
+  const items = buildRouteItems(models, globals)
+  return sqlEditorOffered(capability) ? items : items.filter((item) => item.href !== SQL_EDITOR_HREF)
 }
 
 // ─── Live data search ─────────────────────────────────────────────────────────
@@ -153,6 +165,7 @@ interface JumpToSearchProps {
 
 export function JumpToSearch({ compact = false }: JumpToSearchProps): React.ReactElement {
   const config = useAdminConfig()
+  const capability = useStudioCapability()
   const client = useAdminClient()
   const navigate = useNavigate()
   const [query, setQuery] = useState("")
@@ -163,8 +176,8 @@ export function JumpToSearch({ compact = false }: JumpToSearchProps): React.Reac
   const inputRef = useRef<HTMLInputElement>(null)
 
   const routeItems = useMemo(
-    () => buildRouteItems(config.models, config.globals),
-    [config.models, config.globals],
+    () => jumpTargetsFor(capability, config.models, config.globals),
+    [capability, config.models, config.globals],
   )
 
   const routeMatches = useMemo((): SearchItem[] => {
