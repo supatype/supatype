@@ -84,6 +84,12 @@ Use `restart <service>` rather than a hand-typed `docker compose` command. The g
 `.supatype/self-host/docker-compose.yml` names the project's folders by absolute path, and every
 `self-host compose` command renders it again, so a project that moved is picked up there.
 
+**A stack keeps its mode.** Every command that renders the compose file (`push`, `diff`, `adopt`,
+`update`, every `self-host compose` command) uses one rule: dev while `supatype dev` runs for the
+project, otherwise the mode the running server is in, otherwise standalone. So `supatype push` on a
+production stack leaves it standalone and leaves `.env` alone, and `self-host compose restart` on a
+`supatype dev` stack keeps it dev.
+
 **REST answers 503 until the first push.** A fresh stack returns `503` with `PGRST002` on every
 `/rest/v1/` request: PostgREST will not serve until the schemas it exposes exist, and `supatype
 push` creates them. This is expected, not a fault; run `supatype push` after `compose up -d`.

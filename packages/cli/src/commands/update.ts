@@ -9,6 +9,7 @@ import { basename, resolve } from "node:path"
 import { loadConfig } from "../config.js"
 import { resolveRuntimeProvider } from "../project-config.js"
 import { runDockerCompose, writeSelfHostCompose, composePullNeedsIgnoreFailures, composeProjectName, exitComposeFailed } from "../self-host-compose.js"
+import { composeRenderOptions } from "../compose-render-mode.js"
 import { syncComposeImagePins } from "../dev-compose.js"
 import { download, currentPlatform, fetchAllLatestVersions, pinnedVersion, type Component } from "../binary-cache.js"
 import { error, info, plain } from "../ui/messages.js"
@@ -57,7 +58,7 @@ export function registerUpdate(program: Command): void {
           info("Docker provider: run `supatype update` without --check to pull the compose images.")
           return
         }
-        const paths = writeSelfHostCompose(cwd, config, { devLocal: true })
+        const paths = writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name))
         syncComposeImagePins(cwd, config)
         info("Pulling self-host compose images...")
         const pullArgs = ["pull"]

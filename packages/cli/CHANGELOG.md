@@ -12,6 +12,14 @@
 
 ### Fixes
 
+* **security:** `supatype push` (and `diff`, `adopt`, `update`) against a stack started with
+  `self-host compose up` rendered it as a dev stack and recreated it that way: every origin allowed
+  by CORS, Studio open without a login (`STUDIO_OPEN_DEV=1`), the database moved to a loopback dev
+  port, and dev values written over the operator's `.env` (`SITE_URL`,
+  `SUPATYPE_MAILER_AUTOCONFIRM=true`, a dev `DATABASE_URL`). Every command that renders the compose
+  file now uses one rule for its mode: dev while a `supatype dev` session holds the project, else the
+  mode the running server is in, else standalone. The same rule keeps a `supatype dev` stack dev
+  through `self-host compose restart` and `up`, which used to recreate it as standalone.
 * **push:** a push to the project's compose stack, or to a linked self-host server, waits (at most
   40 s, one line while it does) until REST stops answering 503. PostgREST 14 refuses to serve until
   the schemas it exposes exist, so a fresh stack answers `PGRST002` until the first push, and after
