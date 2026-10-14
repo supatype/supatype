@@ -8,7 +8,7 @@ import { draftVisibilityRoles, type SupatypeProjectConfig } from "../src/project
  * The shared role document. supatype-server embeds the same file and the control plane carries it,
  * and each pins this hash, so what a role may do changes in all three hosts or fails in one.
  */
-const ROLE_MATRIX_SHA256 = "fd20d03babf333ad04fa46f5cddda7c3faa391149239724ab2e5e9c667d56129"
+const ROLE_MATRIX_SHA256 = "db2e046d93ac5142cbf5a1920d9715f5f4537ddce8394059dffeceeb4e2ead0b"
 
 const raw = readFileSync(new URL("../src/role-matrix.json", import.meta.url), "utf8")
 const document = JSON.parse(raw) as { selfHostRoles: string[] }
