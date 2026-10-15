@@ -378,12 +378,9 @@ async function deploy(cwd: string, opts: { only?: string; env?: string; dryRun?:
     }
   }
 
-  const { composeProjectName, selfHostComposePaths } = await import("../self-host-compose.js")
-  const composePath = selfHostComposePaths(cwd).composePath
-  if (existsSync(composePath)) {
-    // The compose file exists, so the config it was rendered from does too.
-    const restart = functionsWorkerRestartCommand(cwd, composePath, composeProjectName(loadConfig(cwd).project.name))
-    deploySelfHosted(cwd, fns, restart)
+  const { selfHostComposePaths } = await import("../self-host-compose.js")
+  if (existsSync(selfHostComposePaths(cwd).composePath)) {
+    deploySelfHosted(cwd, fns, FUNCTIONS_WORKER_RESTART_COMMAND)
     return
   }
 
@@ -391,15 +388,10 @@ async function deploy(cwd: string, opts: { only?: string; env?: string; dryRun?:
 }
 
 /**
- * The command that restarts this project's functions worker.
- *
- * `supatype self-host compose` has no `restart`, so this is Compose's own, against the project's
- * compose file and project name, as the CLI runs it.
+ * The command that restarts this project's functions worker: the CLI's own, which recreates it
+ * with the current config and .env under the right project name, wherever it is run from.
  */
-function functionsWorkerRestartCommand(cwd: string, composePath: string, project: string): string {
-  const file = relative(cwd, composePath).replace(/\\/g, "/")
-  return `docker compose -p ${project} -f ${file} restart functions-worker`
-}
+const FUNCTIONS_WORKER_RESTART_COMMAND = "supatype self-host compose restart functions-worker"
 
 function deploySelfHosted(cwd: string, fns: DiscoveredFunctionRoute[], restartCommand: string): void {
   info("Self-host Compose deployment.")
