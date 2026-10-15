@@ -104,8 +104,10 @@ echo "  ok   the post list was rendered server-side"
 
 echo ""
 echo "==> The client routes are served through the same origin"
+# next dev compiles a route on its first request, and that took over 8 s for / on a loaded
+# runner, so http_status's 5 s limit would report 000 for a page that is only still compiling.
 for path in /login /signup; do
-  status="$(http_status "$BASE_URL$path")"
+  status="$(http_status --max-time 30 "$BASE_URL$path")"
   [[ "$status" == "200" ]] || fail "GET $path returned $status, expected 200"
 done
 echo "  ok   /login and /signup answer through the gateway"
