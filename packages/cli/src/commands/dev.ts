@@ -10,7 +10,7 @@
  * Deno is not provisioned by the CLI on those paths.
  */
 
-import { keyspaceInPostgres } from "../cache-provider.js"
+import { nativeKeyspaceWanted } from "../cache-provider.js"
 import { printPushWarnings, type EnginePushResult } from "../engine-push-output.js"
 import type { DiffResult } from "../engine-client.js"
 import type { DestructiveConsentDeps } from "../destructive-consent.js"
@@ -319,7 +319,7 @@ export function registerDev(program: Command): void {
         // be: the native path asks the archive what it carries rather than the config what it
         // wants, so a project that deliberately kept the sidecar would otherwise find Postgres
         // serving RESP anyway and the sidecar never started.
-        const wantsPgKeyspace = keyspaceInPostgres(config)
+        const wantsPgKeyspace = nativeKeyspaceWanted(config)
         keyspacePort =
           wantsPgKeyspace && nativeKeyspaceLibraryPresent(pgBinDir)
             ? await firstFreePort(KEYSPACE_PORT_BASE, KEYSPACE_PORT_SPAN)

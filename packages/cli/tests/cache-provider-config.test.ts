@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { validateProjectConfig } from "../src/project-config.js"
-import { cacheProvider } from "../src/cache-provider.js"
+import { cacheProvider, nativeKeyspaceWanted } from "../src/cache-provider.js"
 
 /**
  * `cache.provider` picks the RESP server the response cache and Kong's ACME
@@ -63,7 +63,7 @@ describe("cache.durablePrefixes", () => {
   // `,` separates entries and `=` separates a prefix from its tier in
   // pg_keyspace.durability_overrides. A prefix containing either would be read
   // as two settings, and the first sign of it would be a database that will
-  // not start — long after the config was written.
+  // not start, long after the config was written.
   it("refuses a prefix carrying one of the separators", () => {
     for (const bad of ["a,b", "a=b"]) {
       expect(() => validate({ provider: "pg_keyspace", durablePrefixes: [bad] })).toThrow(
@@ -78,7 +78,7 @@ describe("which provider a project actually runs", () => {
    * P9 flipped the default. The resolver is one function because the answer depends on two fields:
    * an absent `cache.provider` means pg_keyspace beside a database this stack starts and Valkey
    * beside an external one. A default written into the parser would have to be wrong for one of
-   * them, or applied twice — and applied twice is how the compose file and the native path end up
+   * them, or applied twice, and applied twice is how the compose file and the native path end up
    * disagreeing about which server is running, which is a cache that silently never hits and, with
    * TLS on, a Kong that cannot store its certificate.
    */
@@ -97,16 +97,19 @@ describe("which provider a project actually runs", () => {
     expect(cacheProvider(project({ cache: { durablePrefixes: ["session:"] } }))).toBe("pg_keyspace")
   })
 
-  it("keeps Valkey for a project that pins its Postgres image", () => {
-    // The image honours SUPATYPE_KEYSPACE_ENABLED from the release that introduced it, and an
-    // older one ignores it and starts with no RESP listener — no error anywhere, just a cache that
-    // never hits. A pin says this project's image is fixed; a default cannot assume something
-    // about a fixed image it has no way to check. Saying `pg_keyspace` explicitly still works, and
-    // is the whole instruction for a project whose pin does carry the toggle.
-    expect(cacheProvider(project({ versions: { postgres: "17.2" } }))).toBe("valkey")
-    expect(
-      cacheProvider(project({ versions: { postgres: "17.2" }, cache: { provider: "pg_keyspace" } })),
-    ).toBe("pg_keyspace")
+  it("follows the image a major.minor pin runs, which is the major's latest", () => {
+    // VK2: "17.2" runs supatype/postgres:17-latest, which carries the keyspace toggle, so a pin
+    // like this no longer buys a Valkey sidecar. Exact pins are covered in postgres-image.test.ts.
+    expect(cacheProvider(project({ versions: { postgres: "17.2" } }))).toBe("pg_keyspace")
+    expect(cacheProvider(project({ versions: { postgres: "17.2" }, cache: { provider: "valkey" } }))).toBe("valkey")
+  })
+
+  it("leaves native dev on the rule it had: any pin keeps Valkey unless pg_keyspace is named", () => {
+    expect(nativeKeyspaceWanted(project({}))).toBe(true)
+    expect(nativeKeyspaceWanted(project({ versions: { postgres: "17.2" } }))).toBe(false)
+    expect(nativeKeyspaceWanted(project({ versions: { postgres: "17.2" }, cache: { provider: "pg_keyspace" } }))).toBe(true)
+    expect(nativeKeyspaceWanted(project({ cache: { provider: "valkey" } }))).toBe(false)
+    expect(nativeKeyspaceWanted(project({ database: { external: { url: "postgres://u:p@h:5432/d" } } }))).toBe(false)
   })
 
   it("is unaffected by a pin on anything else", () => {

@@ -42,10 +42,9 @@ const baseConfig: SupatypeProjectConfig = {
 /**
  * The same project with no `versions.postgres` pin.
  *
- * The keyspace is served by the image, and an image pinned to a release older than the toggle
- * ignores `SUPATYPE_KEYSPACE_ENABLED` and comes up with no RESP listener, which is not an error
- * anywhere. So a pin resolves the default to Valkey, and the tests about the default have to say
- * which world they are in rather than inheriting one by accident.
+ * The keyspace is served by the image, and the cache provider follows the image a pin resolves to
+ * (see postgres-image.ts). The tests about the default run on the compose default image, so they
+ * say which world they are in rather than inheriting one from how a pin resolves.
  */
 const unpinnedPostgres = (config: SupatypeProjectConfig): SupatypeProjectConfig => {
   const { postgres: _dropped, ...rest } = config.versions ?? {}
@@ -709,7 +708,8 @@ export default defineConfig({
       expect(readFileSync(out.composePath, "utf8")).toContain("services:")
       expect(readFileSync(out.kongPath, "utf8")).toContain("/rest/v1/")
       const compose = readFileSync(out.composePath, "utf8")
-      expect(compose).toContain("${SUPATYPE_POSTGRES_IMAGE:-supatype/postgres:latest}")
+      // baseConfig pins postgres "17.2", which runs the major's latest.
+      expect(compose).toContain("${SUPATYPE_POSTGRES_IMAGE:-supatype/postgres:17-latest}")
       expect(compose).toContain("${SUPATYPE_SERVER_IMAGE:-${SUPATYPE_AUTH_IMAGE:-supatype/server:latest}}")
       expect(compose).toContain("${SUPATYPE_STORAGE_IMAGE:-supatype/storage:latest}")
       expect(compose).toContain("${SUPATYPE_STUDIO_IMAGE:-supatype/studio:latest}")
@@ -900,18 +900,12 @@ export default defineConfig({
     expect(compose).not.toContain("SUPATYPE_KEYSPACE_ENABLED")
   })
 
-  it("self-host compose keeps Valkey for a project that pins its Postgres image", () => {
-    // The toggle is honoured by the image, from the release that introduced it. An older pinned
-    // image ignores it and starts with no RESP listener: a stack that comes up, and a cache that
-    // never hits. A pin says the image is fixed, and a default must not assume something about a
-    // fixed image it cannot check; `cache: { provider: "pg_keyspace" }` is how a project on a
-    // capable pin says so.
+  it("self-host compose serves the keyspace for a major.minor pin, which runs the major's latest", () => {
+    // VK2: "17.2" runs supatype/postgres:17-latest, which honours the toggle, so the pin no longer
+    // buys a Valkey sidecar. Exact pins before the toggle are covered in postgres-image.test.ts.
     const compose = renderSelfHostCompose(baseConfig)
-    expect(compose).toContain("\n  valkey:\n")
-    expect(compose).not.toContain("SUPATYPE_KEYSPACE_ENABLED")
-
-    const asked = renderSelfHostCompose({ ...baseConfig, cache: { provider: "pg_keyspace" } })
-    expect(asked).toContain('SUPATYPE_KEYSPACE_ENABLED: "1"')
+    expect(compose).not.toContain("\n  valkey:\n")
+    expect(compose).toContain('SUPATYPE_KEYSPACE_ENABLED: "1"')
   })
 
   it("self-host compose gives an external database Valkey, because nothing else can run", () => {

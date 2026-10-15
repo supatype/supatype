@@ -24,9 +24,9 @@ export default defineConfig({
     postgres: "17.2.10",
     deno: "2.2.0",
   },
-  // Named because a `versions.postgres` pin makes the CLI fall back to Valkey: it
-  // cannot tell whether a pinned image serves the keyspace. This release's image
-  // does, so the cache and Kong's certificates live in Postgres, as they do by default.
+  // Named so the example shows where the cache lives. The pinned image serves the
+  // keyspace (17.2.9 and later do), so the cache and Kong's certificates live in
+  // Postgres, as they do by default.
   cache: { provider: "pg_keyspace" },
   email: { provider: "console" },
   storage: { provider: "local", local_path: ".supatype/storage" },
