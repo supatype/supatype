@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.7.0
+
+No changes to the storage service. Its Docker image now carries the package's LICENSE file.
+
+## 0.3.6 (2026-10-02)
 
 ### Bug Fixes
 
