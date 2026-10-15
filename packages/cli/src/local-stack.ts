@@ -36,7 +36,7 @@ export function isProjectDatabase(
 ): boolean {
   if (usesExternalDatabase(config)) return false
   if (databaseUrl === undefined) return true
-  if (resolveRuntimeProvider(config) !== "docker") return sameDatabase(databaseUrl, connectionString(config))
+  if (resolveRuntimeProvider(config) !== "docker") return sameDatabase(databaseUrl, connectionString(config, undefined, cwd))
   const port = readComposeEnvInt(cwd, "SUPATYPE_DEV_DB_PORT") ?? COMPOSE_DEV_DB_PORT
   const own = parse(databaseUrl)
   return (

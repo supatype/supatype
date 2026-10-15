@@ -1,6 +1,8 @@
 import { existsSync } from "node:fs"
-import { resolve } from "node:path"
+import { homedir } from "node:os"
+import { join, resolve } from "node:path"
 import { readComposeEnvInt } from "./env-file.js"
+import { DEV_DB_PORT_ENV } from "./db-port.js"
 import type { ComponentVersions } from "./components.js"
 import { validateAuthProviders, type AuthProvidersConfig } from "./auth-providers.js"
 import { STUDIO_ROLES, type StudioRole } from "./studio-roles.js"
@@ -72,6 +74,11 @@ export interface SupatypeProjectConfig {
      */
     data_dir?: string
     /**
+     * Port the native Postgres listens on (provider=native, default 5432). `SUPATYPE_DEV_DB_PORT`,
+     * exported or in `.env`, wins over it, as it does for the Docker provider's Postgres.
+     */
+    port?: number
+    /**
      * Docker image to use (provider=docker).
      * Defaults to supatype/postgres:latest.
      * Override in supatype.local.config.ts for local builds.
@@ -90,6 +97,11 @@ export interface SupatypeProjectConfig {
     port?: number
     /** Port PostgREST listens on in local dev (default: 3001). */
     postgrestPort?: number
+    /**
+     * Port realtime listens on in native dev (default: 4000). `SUPATYPE_REALTIME_PORT`, exported
+     * or in `.env`, wins over it.
+     */
+    realtimePort?: number
     /** Domain for ACME TLS certificate (mode=standalone). */
     domain?: string
     /**
@@ -876,18 +888,58 @@ export const COMPOSE_DEV_KONG_PORT = 18473
  * `password` is the superuser's, `.env`'s POSTGRES_PASSWORD (`devPostgresPassword`). The native
  * cluster checks it, so the `postgres` default only reaches a cluster still set up that way.
  */
-export function localDSN(cfg: SupatypeProjectConfig, password = "postgres"): string {
-  const port = 5432 // standard; per-project state dir isolates data dirs
+export function localDSN(cfg: SupatypeProjectConfig, password = "postgres", cwd: string = process.cwd()): string {
+  const port = nativeDbPort(cfg, cwd)
   return `postgres://postgres:${encodeURIComponent(password)}@127.0.0.1:${port}/${cfg.project.name}?sslmode=disable`
+}
+
+/** Where native Postgres listens when nothing moves it. */
+export const NATIVE_DB_PORT = 5432
+
+/** Where native realtime listens when nothing moves it. */
+export const NATIVE_REALTIME_PORT = 4000
+
+/** The environment key that moves native realtime, read like the Docker provider's port keys. */
+export const REALTIME_PORT_ENV = "SUPATYPE_REALTIME_PORT"
+
+/**
+ * The port native Postgres listens on: `SUPATYPE_DEV_DB_PORT` (exported, then `.env`), then
+ * `database.port`, then 5432.
+ *
+ * The same key as the Docker provider's dev Postgres, because it means the same thing: the port
+ * on this machine where the project's dev database answers. It used to be fixed at 5432, so native
+ * dev could not run beside any other Postgres.
+ */
+export function nativeDbPort(cfg: SupatypeProjectConfig, cwd: string = process.cwd()): number {
+  return readComposeEnvInt(cwd, DEV_DB_PORT_ENV) ?? cfg.database?.port ?? NATIVE_DB_PORT
+}
+
+/** Where native dev keeps a project's Postgres data, logs, pid files and local storage. */
+export function nativeStateRoot(cfg: SupatypeProjectConfig): string {
+  return join(homedir(), ".supatype", "projects", cfg.project.name)
+}
+
+/** The native Postgres data directory: `database.data_dir`, or the one in the state directory. */
+export function nativeDataDir(cfg: SupatypeProjectConfig): string {
+  return cfg.database.data_dir ?? join(nativeStateRoot(cfg), "data")
+}
+
+/** The port native realtime listens on: `SUPATYPE_REALTIME_PORT`, then `server.realtimePort`, then 4000. */
+export function nativeRealtimePort(cfg: SupatypeProjectConfig, cwd: string = process.cwd()): number {
+  return readComposeEnvInt(cwd, REALTIME_PORT_ENV) ?? cfg.server?.realtimePort ?? NATIVE_REALTIME_PORT
 }
 
 /**
  * Resolve the database connection string.
  * Prefers optional `connection` in config, then `DATABASE_URL` env, then a local default DSN with
- * `localPassword` as the superuser's password.
+ * `localPassword` as the superuser's password, on the native port `cwd`'s `.env` names.
  */
-export function connectionString(cfg: SupatypeProjectConfig, localPassword?: string): string {
-  return externalDatabaseUrl(cfg) ?? cfg.connection ?? process.env["DATABASE_URL"] ?? localDSN(cfg, localPassword)
+export function connectionString(
+  cfg: SupatypeProjectConfig,
+  localPassword?: string,
+  cwd: string = process.cwd(),
+): string {
+  return externalDatabaseUrl(cfg) ?? cfg.connection ?? process.env["DATABASE_URL"] ?? localDSN(cfg, localPassword, cwd)
 }
 
 /** True when the project points at a Postgres it does not manage. */

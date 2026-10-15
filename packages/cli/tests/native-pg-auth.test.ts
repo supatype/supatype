@@ -6,7 +6,7 @@ import * as ctl from "../src/postgres-ctl.js"
 import * as auth from "../src/native-pg-auth.js"
 import * as secrets from "../src/local-secrets.js"
 import { nativeRolesSql } from "../src/native-roles-sql.js"
-import { localDSN, type SupatypeProjectConfig } from "../src/project-config.js"
+import { localDSN, STACK_API_SCHEMAS, type SupatypeProjectConfig } from "../src/project-config.js"
 
 // Native `supatype dev` initialised its cluster with `--auth trust`: the passwords the CLI
 // generates were never checked, so any local process could connect as any role, the superuser
@@ -90,5 +90,70 @@ describe("authenticator", () => {
     // A cluster that predates password checks has the role already, under whatever password it
     // had; with trust gone, PostgREST connects with .env's and must get in.
     expect(nativeRolesSql(false)).toMatch(/ALTER ROLE authenticator[^;]*PASSWORD %L/)
+  })
+})
+
+describe("the schemas PostgREST is told to serve", () => {
+  // PostgREST answers 503 on every request when a schema in its list does not exist. The
+  // supatype/postgres image creates `graphql_public`; a native Postgres has no pg_graphql and
+  // nothing created the schema, so `/rest/v1/` was down on every native project. `supatype` is
+  // the engine's, created by the first push, which runs before PostgREST starts.
+  const createdByEngine = new Set(["supatype"])
+
+  for (const schema of STACK_API_SCHEMAS.filter((s) => !createdByEngine.has(s))) {
+    it(`includes ${schema}, which the native bootstrap creates`, () => {
+      for (const withMask of [false, true]) {
+        expect(nativeRolesSql(withMask)).toContain(`CREATE SCHEMA IF NOT EXISTS ${schema};`)
+      }
+    })
+  }
+
+  it("lets the API roles use graphql_public, as the image's pg_graphql migration does", () => {
+    expect(nativeRolesSql(false)).toContain(
+      "GRANT USAGE ON SCHEMA graphql_public TO anon, authenticated, service_role;",
+    )
+  })
+})
+
+describe("a data directory whose superuser password is gone from .env", () => {
+  // With POSTGRES_PASSWORD deleted, the CLI generated a new one, wrote it to .env, and the next
+  // start failed on a bare "password authentication failed": the cluster still has the old one.
+  function cluster(hba: string): string {
+    const dataDir = mkdtempSync(join(tmpdir(), "supatype-native-data-"))
+    writeFileSync(join(dataDir, "PG_VERSION"), "17\n")
+    writeFileSync(join(dataDir, "pg_hba.conf"), hba)
+    return dataDir
+  }
+  const scramHba = "host    all             all             127.0.0.1/32            scram-sha-256\n"
+  const trustHba = "host    all             all             127.0.0.1/32            trust\n"
+
+  it("is recognised when the cluster checks passwords and .env has none", () => {
+    const project = mkdtempSync(join(tmpdir(), "supatype-native-pw-"))
+    expect(auth.superuserPasswordMissing(project, cluster(scramHba))).toBe(true)
+  })
+
+  it("is not a problem when .env has the password", () => {
+    const project = mkdtempSync(join(tmpdir(), "supatype-native-pw-"))
+    writeFileSync(join(project, ".env"), "POSTGRES_PASSWORD=mine-0123456789\n")
+    expect(auth.superuserPasswordMissing(project, cluster(scramHba))).toBe(false)
+  })
+
+  it("is not a problem for a cluster that still trusts, which is given the new password", () => {
+    const project = mkdtempSync(join(tmpdir(), "supatype-native-pw-"))
+    expect(auth.superuserPasswordMissing(project, cluster(trustHba))).toBe(false)
+  })
+
+  it("is not a problem before initdb, or after `supatype pg reset` empties the directory", () => {
+    const project = mkdtempSync(join(tmpdir(), "supatype-native-pw-"))
+    expect(auth.superuserPasswordMissing(project, mkdtempSync(join(tmpdir(), "supatype-empty-")))).toBe(false)
+    expect(auth.superuserPasswordMissing(project, join(project, "no-such-dir"))).toBe(false)
+  })
+
+  it("is explained with both ways out, and the data directory", () => {
+    const message = auth.superuserPasswordMissingMessage("/data/demo")
+    expect(message.title).toMatch(/POSTGRES_PASSWORD/)
+    expect(message.title).toContain("/data/demo")
+    expect(message.hints.join("\n")).toMatch(/restore POSTGRES_PASSWORD/i)
+    expect(message.hints.join("\n")).toContain("supatype pg reset")
   })
 })

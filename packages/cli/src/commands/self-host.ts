@@ -361,7 +361,7 @@ export function registerSelfHost(program: Command): void {
       logNativeHint("backup")
       const cwd = process.cwd()
       const config = loadConfig(cwd)
-      const conn = opts.connection ?? connectionString(config, devPostgresPassword(cwd))
+      const conn = opts.connection ?? connectionString(config, devPostgresPassword(cwd), cwd)
       const outFile = opts.output ?? resolve(
         cwd,
         "backups",
