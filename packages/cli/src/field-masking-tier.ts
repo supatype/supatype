@@ -31,6 +31,7 @@ import { existsSync } from "node:fs"
 // by the tests that run the built binary rather than the source.
 import { loadSchemaAst } from "./config.js"
 export { nativeMaskLibraryPresent } from "./postgres-ctl.js"
+import { postgresImageFor } from "./postgres-image.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
 import {
   resolveRuntimeProvider,
@@ -47,7 +48,7 @@ function postgresImage(config: SupatypeProjectConfig): string | undefined {
   if (config.database.provider !== "docker" && resolveRuntimeProvider(config) !== "docker") {
     return undefined
   }
-  return config.database.image?.trim() || "supatype/postgres:latest"
+  return postgresImageFor(config).ref ?? "supatype/postgres:latest"
 }
 
 /** True when the Postgres this project runs is one that carries `supatype_mask`. */

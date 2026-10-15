@@ -438,11 +438,16 @@ upgrade a production server.
   `provider: "docker"`, but a config without the line (and without `database.provider`) used to
   run the native stack. It now runs the Docker Compose stack, the same as a scaffolded project. To
   keep the native stack, add `provider: "native"` to `supatype.config.ts`.
-- **A `versions.postgres` pin runs Valkey for the cache unless you say otherwise.** Without a
-  pin, the response cache and Kong's certificates live in pg_keyspace inside Postgres. With one,
-  the CLI cannot tell whether the pinned image serves the keyspace, so it starts a Valkey
-  sidecar. If you copied the self-host example's old `postgres: "17.2"` pin, move it to
-  `"17.2.10"` and add `cache: { provider: "pg_keyspace" }`, as the example now does.
+- **`versions.postgres` now pins the image it names, and the cache follows that image.** An
+  exact `"X.Y.Z"` (or `"vX.Y.Z"`) runs `supatype/postgres:X.Y.Z`; if that tag is not published
+  (or cannot be checked and is not on the machine), the CLI warns, naming the pin, and runs
+  `X-latest` instead. `"X"` or `"X.Y"` runs `X-latest`, never an old `X.Y` tag. A `-latest` pin and
+  `database.image` run as written. Without an explicit `cache.provider`, the response cache and
+  Kong's certificates live in pg_keyspace inside Postgres when the image run is an `X-latest` or an
+  exact version from 17.2.9 (the first whose entrypoint honours `SUPATYPE_KEYSPACE_ENABLED`), and
+  in a Valkey sidecar for an exact version before it, a custom `database.image`, or
+  `database.external`. So a `"17"` or `"17.2"` pin no longer starts Valkey. The native provider is
+  unchanged: any pin there still keeps Valkey unless you name `cache: { provider: "pg_keyspace" }`.
 - **`--project-name` or `SUPATYPE_PROJECT_NAME`** renames the project for one run (its compose
   project, database and state directory follow) without changing any file.
 - **`supatype self-host compose restart <service>`** recreates one service with the current config
