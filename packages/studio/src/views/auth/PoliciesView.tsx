@@ -1,5 +1,7 @@
-import React, { useMemo, useState } from "react"
-import { useProjectProxy } from "../../hooks/useProjectProxy.js"
+import React, { useCallback, useMemo, useState } from "react"
+import { isStudioAdminSchema, useProjectProxy } from "../../hooks/useProjectProxy.js"
+import { usePolicyWrites } from "../../hooks/usePolicyWrites.js"
+import { PolicyCreatePanel, type PolicyTarget } from "../../components/database/PolicyCreatePanel.js"
 import { useSqlEditorOffered } from "../../hooks/useSqlEditorOffered.js"
 import { useSchemaPicker } from "../../hooks/useSchemaPicker.js"
 import { useApiQuery } from "../../hooks/useApiQuery.js"
@@ -62,7 +64,7 @@ function describeAppliesTo(row: Record<string, unknown>): string {
 
 export function PoliciesView(): React.ReactElement {
   const proxy = useProjectProxy()
-  // Writes go through the SQL editor's route, so only its roles are offered them (RQ4).
+  // Writes are open to the SQL editor's roles only, on whichever route they take (RQ4, SQ2).
   const sqlWrites = useSqlEditorOffered()
   const { schemas, schema, setSchema } = useSchemaPicker()
   const schemaSql = useMemo(() => safeSchemaName(schema), [schema])
@@ -71,16 +73,22 @@ export function PoliciesView(): React.ReactElement {
   const [sqlText, setSqlText] = useState("")
   const [runError, setRunError] = useState<string | null>(null)
   const [runBusy, setRunBusy] = useState(false)
+  const [createTarget, setCreateTarget] = useState<PolicyTarget | null>(null)
 
   // Reads go through the metadata catalogue (RQ3b), so a viewer sees the policies too.
   const { data: policies, loading, error, refetch } = useApiQuery(
     () => proxy.metadata("policies", { schema: schemaSql }).then((r) => r.rows),
     [proxy, schemaSql],
   )
-  const { data: rlsStatus } = useApiQuery(
+  const { data: rlsStatus, refetch: refetchRls } = useApiQuery(
     () => proxy.metadata("rls_status", { schema: schemaSql }).then((r) => r.rows),
     [proxy, schemaSql],
   )
+  const refresh = useCallback(() => { refetch(); refetchRls() }, [refetch, refetchRls])
+  const writes = usePolicyWrites(refresh)
+  // The SQL editor's login cannot alter auth or storage tables, so those writes go through
+  // `/studio-admin` (SQ2); any other schema keeps the SQL editor's route.
+  const adminSchema = isStudioAdminSchema(schemaSql) ? schemaSql : null
 
   const policyRows = useMemo(() => normalizePolicyRows(policies), [policies])
 
@@ -99,6 +107,9 @@ export function PoliciesView(): React.ReactElement {
     return m
   }, [policyRows])
 
+  /** Every table the view has seen in this schema, with or without a policy yet. */
+  const knownTables = useMemo(() => [...new Set([...rlsMap.keys(), ...grouped.keys()])].filter((t) => t !== "").sort(), [rlsMap, grouped])
+
   async function runSql() {
     setRunBusy(true)
     setRunError(null)
@@ -113,13 +124,28 @@ export function PoliciesView(): React.ReactElement {
     }
   }
 
-  async function toggleRls(table: string, enable: boolean) {
-    try {
-      await proxy.sql(`ALTER TABLE ${schemaSql}.${table} ${enable ? "ENABLE" : "DISABLE"} ROW LEVEL SECURITY;`, schemaSql)
-      refetch()
-    } catch {
-      // ignore
+  function toggleRls(table: string, enable: boolean): Promise<void> {
+    if (adminSchema) return writes.toggleRls(adminSchema, table, enable)
+    return writes.run(() => proxy.sql(`ALTER TABLE ${schemaSql}.${table} ${enable ? "ENABLE" : "DISABLE"} ROW LEVEL SECURITY;`, schemaSql))
+  }
+
+  function dropPolicy(table: string, name: string): void {
+    if (adminSchema) {
+      void writes.dropPolicy(adminSchema, table, name)
+      return
     }
+    setSqlText(`DROP POLICY ${name} ON ${schemaSql}.${table};`)
+    setCreateModal(true)
+  }
+
+  function openCreate(): void {
+    setManualPolicyWarningOpen(false)
+    if (adminSchema) {
+      setCreateTarget({ schema: adminSchema, tables: knownTables })
+      return
+    }
+    setSqlText(`CREATE POLICY my_policy ON ${schemaSql}.my_table\n  AS PERMISSIVE\n  FOR ALL\n  TO authenticated\n  USING (true)\n  WITH CHECK (true);`)
+    setCreateModal(true)
   }
 
   return (
@@ -139,6 +165,7 @@ export function PoliciesView(): React.ReactElement {
       </div>
 
       {error && <ErrorBanner message={error} />}
+      {writes.writeError && <ErrorBanner message={writes.writeError} />}
 
       {loading ? (
         <div className="space-y-2">{[1, 2, 3].map((i) => <div key={i} className="h-10 rounded-md bg-muted animate-pulse" />)}</div>
@@ -204,7 +231,7 @@ export function PoliciesView(): React.ReactElement {
                         </td>
                         <td className="px-4 py-2.5 text-xs text-muted-foreground">{describeAppliesTo(p)}</td>
                         <td className="px-4 py-2.5 text-right">
-                          {sqlWrites ? (<button type="button" className="text-xs text-destructive hover:underline" onClick={() => { setSqlText(`DROP POLICY ${pname} ON ${schemaSql}.${tableName};`); setCreateModal(true) }}>Drop</button>) : null}
+                          {sqlWrites ? (<button type="button" className="text-xs text-destructive hover:underline" onClick={() => { dropPolicy(tableName, pname) }}>Drop</button>) : null}
                         </td>
                       </tr>
                     )})}
@@ -230,6 +257,11 @@ export function PoliciesView(): React.ReactElement {
         </div>
       )}
 
+      <PolicyCreatePanel
+        target={createTarget}
+        onClose={(created) => { setCreateTarget(null); if (created) refresh() }}
+      />
+
       {manualPolicyWarningOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="bg-card border border-border rounded-lg p-6 w-full max-w-xl space-y-4 shadow-xl">
@@ -244,14 +276,7 @@ export function PoliciesView(): React.ReactElement {
             </p>
             <div className="flex justify-end gap-2">
               <Button onClick={() => setManualPolicyWarningOpen(false)}>Cancel</Button>
-              <Button
-                variant="primary"
-                onClick={() => {
-                  setManualPolicyWarningOpen(false)
-                  setSqlText(`CREATE POLICY my_policy ON ${schemaSql}.my_table\n  AS PERMISSIVE\n  FOR ALL\n  TO authenticated\n  USING (true)\n  WITH CHECK (true);`)
-                  setCreateModal(true)
-                }}
-              >
+              <Button variant="primary" onClick={openCreate}>
                 I understand, continue
               </Button>
             </div>

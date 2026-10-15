@@ -1,8 +1,10 @@
-import React, { useState } from "react"
+import React, { useCallback, useState } from "react"
 import { useParams } from "react-router-dom"
 import { useProjectProxy } from "../../hooks/useProjectProxy.js"
+import { usePolicyWrites } from "../../hooks/usePolicyWrites.js"
 import { useSqlEditorOffered } from "../../hooks/useSqlEditorOffered.js"
 import { useApiQuery } from "../../hooks/useApiQuery.js"
+import { PolicyCreatePanel, type PolicyTarget } from "../../components/database/PolicyCreatePanel.js"
 import { Badge, Button, Card } from "../../components/ui.js"
 import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
@@ -15,16 +17,16 @@ function storageRows(rows: Array<Record<string, unknown>>): Array<Record<string,
   return rows.filter((r) => STORAGE_TABLES.has(r["tablename"] as string))
 }
 
+/** Where a new storage policy may go. */
+const STORAGE_TARGET: PolicyTarget = { schema: "storage", tables: [...STORAGE_TABLES] }
+
 export function StoragePoliciesView(): React.ReactElement {
   const proxy = useProjectProxy()
-  // Writes go through the SQL editor's route, so only its roles are offered them (RQ4).
+  // Writes go through `/studio-admin`, open to the SQL editor's roles only (RQ4, SQ2).
   const sqlWrites = useSqlEditorOffered()
   const params = useParams<{ bucket?: string }>()
-  const [sqlModal, setSqlModal] = useState(false)
   const [manualPolicyWarningOpen, setManualPolicyWarningOpen] = useState(false)
-  const [sqlText, setSqlText] = useState("")
-  const [runError, setRunError] = useState<string | null>(null)
-  const [runBusy, setRunBusy] = useState(false)
+  const [createTarget, setCreateTarget] = useState<PolicyTarget | null>(null)
 
   // Reads go through the metadata catalogue (RQ3b), so a viewer sees the policies too.
   const { data: policies, loading, error, refetch } = useApiQuery(
@@ -53,28 +55,8 @@ export function StoragePoliciesView(): React.ReactElement {
     grouped.get(t)!.push(p)
   }
 
-  async function runSql() {
-    setRunBusy(true)
-    setRunError(null)
-    try {
-      await proxy.sql(sqlText)
-      setSqlModal(false)
-      refetch()
-    } catch (e) {
-      setRunError((e as Error).message)
-    } finally {
-      setRunBusy(false)
-    }
-  }
-
-  async function toggleRls(table: string, enable: boolean) {
-    try {
-      await proxy.sql(`ALTER TABLE storage.${table} ${enable ? "ENABLE" : "DISABLE"} ROW LEVEL SECURITY;`)
-      refetchRls()
-    } catch {
-      // ignore
-    }
-  }
+  const refresh = useCallback(() => { refetch(); refetchRls() }, [refetch, refetchRls])
+  const writes = usePolicyWrites(refresh)
 
   return (
     <div className="space-y-4">
@@ -90,6 +72,7 @@ export function StoragePoliciesView(): React.ReactElement {
       </div>
 
       {error && <ErrorBanner message={error} />}
+      {writes.writeError && <ErrorBanner message={writes.writeError} />}
 
       {loading ? (
         <div className="space-y-2">{[1, 2].map((i) => <div key={i} className="h-10 rounded-md bg-muted animate-pulse" />)}</div>
@@ -114,7 +97,7 @@ export function StoragePoliciesView(): React.ReactElement {
                     <Badge variant={rlsEnabled ? "green" : "red"}>{rlsEnabled ? "RLS on" : "RLS off"}</Badge>
                   </div>
                   {sqlWrites ? (
-                    <Button size="xs" variant={rlsEnabled ? "destructive" : "primary"} onClick={() => { void toggleRls(tableName, !rlsEnabled) }}>
+                    <Button size="xs" variant={rlsEnabled ? "destructive" : "primary"} onClick={() => { void writes.toggleRls("storage", tableName, !rlsEnabled) }}>
                       {rlsEnabled ? "Disable RLS" : "Enable RLS"}
                     </Button>
                   ) : null}
@@ -147,7 +130,7 @@ export function StoragePoliciesView(): React.ReactElement {
                           </div>
                         </td>
                         <td className="px-4 py-2.5 text-right">
-                          {sqlWrites ? (<button type="button" className="text-xs text-destructive hover:underline" onClick={() => { setSqlText(`DROP POLICY ${p["policyname"] as string} ON storage.${tableName};`); setSqlModal(true) }}>Drop</button>) : null}
+                          {sqlWrites ? (<button type="button" className="text-xs text-destructive hover:underline" onClick={() => { void writes.dropPolicy("storage", tableName, p["policyname"] as string) }}>Drop</button>) : null}
                         </td>
                       </tr>
                     )})}
@@ -159,19 +142,10 @@ export function StoragePoliciesView(): React.ReactElement {
         </div>
       )}
 
-      {sqlModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-card border border-border rounded-lg p-6 w-full max-w-lg space-y-4 shadow-xl">
-            <h2 className="text-base font-semibold text-foreground">SQL</h2>
-            <textarea className="w-full font-mono text-sm px-3 py-2 rounded-md border border-border bg-background text-foreground focus:outline-none min-h-[140px] resize-y" value={sqlText} onChange={(e) => setSqlText(e.target.value)} />
-            {runError && <p className="text-xs text-destructive">{runError}</p>}
-            <div className="flex justify-end gap-2">
-              <Button onClick={() => { setSqlModal(false); setRunError(null) }}>Cancel</Button>
-              <Button variant="primary" disabled={runBusy} onClick={() => { void runSql() }}>{runBusy ? "Running…" : "Run SQL"}</Button>
-            </div>
-          </div>
-        </div>
-      )}
+      <PolicyCreatePanel
+        target={createTarget}
+        onClose={(created) => { setCreateTarget(null); if (created) refresh() }}
+      />
 
       {manualPolicyWarningOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -191,8 +165,7 @@ export function StoragePoliciesView(): React.ReactElement {
                 variant="primary"
                 onClick={() => {
                   setManualPolicyWarningOpen(false)
-                  setSqlText(`CREATE POLICY allow_public_read ON storage.objects\n  FOR SELECT\n  USING (bucket_id = 'public');`)
-                  setSqlModal(true)
+                  setCreateTarget(STORAGE_TARGET)
                 }}
               >
                 I understand, continue
