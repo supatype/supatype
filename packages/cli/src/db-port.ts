@@ -41,6 +41,31 @@ export const DEV_DB_PORT_ENV = "SUPATYPE_DEV_DB_PORT"
 /** What compose binds when neither variable is set, and what `init` writes into the URL. */
 export const DEFAULT_DB_PORT = 5432
 
+/** Where a dev stack publishes Postgres when `SUPATYPE_DEV_DB_PORT` is not set. */
+export const COMPOSE_DEV_DB_PORT = 54329
+
+/** How the compose `db` service is published on the host in one layout. */
+export interface ComposeDbPublish {
+  /** The variable compose reads the host port from. */
+  envKey: typeof DEV_DB_PORT_ENV | typeof DB_PORT_ENV
+  /** The port compose binds when that variable is not set. */
+  defaultPort: number
+  /** Prefix of the host side of the mapping: loopback only in dev, every interface otherwise. */
+  bindAddress: "127.0.0.1:" | ""
+}
+
+/**
+ * The one definition of where Postgres is published, for a dev stack (`devLocal`) or a production
+ * one. The compose template writes its port mapping from this and every host-side command reads
+ * the port back through it, so the two cannot name different variables (M1: host commands read
+ * `SUPATYPE_DEV_DB_PORT` on a production stack that publishes `SUPATYPE_DB_PORT`).
+ */
+export function composeDbPublish(devLocal: boolean): ComposeDbPublish {
+  return devLocal
+    ? { envKey: DEV_DB_PORT_ENV, defaultPort: COMPOSE_DEV_DB_PORT, bindAddress: "127.0.0.1:" }
+    : { envKey: DB_PORT_ENV, defaultPort: DEFAULT_DB_PORT, bindAddress: "" }
+}
+
 /** Hosts whose port is ours to correct. Anything else is somebody else's database. */
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"])
 

@@ -10,12 +10,27 @@
  * command and half an hour.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { DsnNotFound, redact, resolveHostDatabaseUrl } from "../src/host-database.js"
 import type { SupatypeProjectConfig } from "../src/project-config.js"
+
+/**
+ * The derived URL follows the stack's layout, which is read from Docker: these stand in a running
+ * dev stack, so a real stack of the same name on this machine cannot change the answer. The
+ * production layout is covered in compose-db-host-port.test.ts.
+ */
+vi.mock("node:child_process", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:child_process")>()),
+  spawnSync: (cmd: string, args: readonly string[]) => {
+    if (cmd === "docker" && args[0] === "ps") return { status: 0, stdout: "c0ffee\n", stderr: "" }
+    if (cmd === "docker" && args[0] === "inspect") return { status: 0, stdout: "SUPATYPE_MODE=dev\n", stderr: "" }
+    return { status: 1, stdout: "", stderr: "" }
+  },
+}))
+
+const { DsnNotFound, redact, resolveHostDatabaseUrl } = await import("../src/host-database.js")
 
 const SECRET = "postgres://user:s3cret@db.example.test:5432/app"
 

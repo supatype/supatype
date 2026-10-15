@@ -71,14 +71,27 @@ const liveProbe: ComposeRenderModeProbe = {
   runningServerMode: runningServerModeFromDocker,
 }
 
+/**
+ * The layout of the project's stack while one is running: dev while a `supatype dev` session holds
+ * it, otherwise the mode its server container runs in. Undefined when neither runs, which is when
+ * there is no stack database to reach (M1b).
+ */
+export function runningStackMode(
+  cwd: string,
+  projectName: string,
+  probe: ComposeRenderModeProbe = liveProbe,
+): ComposeRenderMode | undefined {
+  if (probe.devSessionLocked(cwd)) return "dev"
+  return probe.runningServerMode(composeProjectName(projectName))
+}
+
 /** The mode a render for the project `projectName` at `cwd` should use (see the module comment). */
 export function composeRenderMode(
   cwd: string,
   projectName: string,
   probe: ComposeRenderModeProbe = liveProbe,
 ): ComposeRenderMode {
-  if (probe.devSessionLocked(cwd)) return "dev"
-  return probe.runningServerMode(composeProjectName(projectName)) ?? "standalone"
+  return runningStackMode(cwd, projectName, probe) ?? "standalone"
 }
 
 /** `composeRenderMode` as the render options take it. */

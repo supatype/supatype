@@ -18,7 +18,7 @@ import {
   resolveRuntimeProvider,
   schemaPathFromProject,
 } from "../project-config.js"
-import { isProjectDatabase, projectStackUrl } from "../local-stack.js"
+import { isProjectDatabase, projectStackUrl, studioUrlAt } from "../local-stack.js"
 import { byoPreflight } from "../byo-preflight.js"
 import { devApiKeys } from "../dev-api-keys.js"
 import { ensureEngine, engineRequest, type DiffResult } from "../engine-client.js"
@@ -363,11 +363,12 @@ function applyToTarget(
  */
 async function finishLocalPush(cwd: string, config: SupatypeProjectConfig, target: DeployTarget, ast: unknown): Promise<void> {
   await writeLocalAdminConfig(ast, config)
+  const stackUrl = projectStackUrl(cwd, config, target.databaseUrl)
+  const studioUrl = stackUrl === undefined ? undefined : studioUrlAt(stackUrl)
   if (target.databaseUrl) {
-    await ensureFirstAdminUser(target.databaseUrl, { cwd })
+    await ensureFirstAdminUser(target.databaseUrl, { cwd, studioUrl })
   }
   await generateTypesLocal(ast, config, isProjectDatabase(cwd, config, target.databaseUrl))
-  const stackUrl = projectStackUrl(cwd, config, target.databaseUrl)
   if (stackUrl !== undefined && resolveRuntimeProvider(config) === "docker") {
     // A push to the running stack's database can change its tier (T2-N6), and PostgREST follows.
     const { followRecordedTier } = await import("../dev-compose.js")
@@ -378,7 +379,7 @@ async function finishLocalPush(cwd: string, config: SupatypeProjectConfig, targe
     await waitForRestReady(stackUrl, devApiKeys(cwd).anonKey)
   }
   reportCacheSeeding(cwd, ast)
-  if (stackUrl !== undefined) plain(`\nStudio: ${stackUrl}/studio/`)
+  if (studioUrl !== undefined) plain(`\nStudio: ${studioUrl}`)
 }
 
 /**

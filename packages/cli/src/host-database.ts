@@ -16,6 +16,8 @@
 
 import { existsSync } from "node:fs"
 import { join } from "node:path"
+import { runningStackMode, type ComposeRenderMode } from "./compose-render-mode.js"
+import { composeDbPublish } from "./db-port.js"
 import { readComposeEnvInt, readEnvFile } from "./env-file.js"
 import { devDatabaseUrl, devPostgresPassword } from "./local-secrets.js"
 import {
@@ -26,22 +28,61 @@ import {
   type SupatypeProjectConfig,
 } from "./project-config.js"
 
-/** Where `supatype dev` publishes a docker project's Postgres when `.env` does not say. */
-export const COMPOSE_DEV_DB_PORT = 54329
+export { COMPOSE_DEV_DB_PORT } from "./db-port.js"
 
 /**
- * A docker project's own Postgres, as reached from the host: the port `supatype dev` publishes it
- * on, with the credentials and database the stack was created with, all read from `.env`.
- *
- * `port` is for the moment `dev` has chosen one and not yet written it. IPv4 because compose
- * publishes the port on `127.0.0.1` only, and `localhost` can resolve to `::1` first.
+ * The host port a docker project's Postgres is published on in the stack's layout: the variable
+ * the compose file binds for that layout (exported first, then `.env`, as compose reads it), or
+ * the port it binds when the variable is unset. Read through {@link composeDbPublish}, the same
+ * definition the compose template is written from.
  */
-export function hostComposeDbUrl(
-  cwd: string,
-  // As compose binds it: an exported SUPATYPE_DEV_DB_PORT first, then `.env`.
-  port: number | string = readComposeEnvInt(cwd, "SUPATYPE_DEV_DB_PORT") ?? COMPOSE_DEV_DB_PORT,
-): string {
+export function composeDbHostPort(cwd: string, mode: ComposeRenderMode): number {
+  const { envKey, defaultPort } = composeDbPublish(mode === "dev")
+  return readComposeEnvInt(cwd, envKey) ?? defaultPort
+}
+
+/**
+ * A docker project's own Postgres at host port `port`, with the credentials and database the
+ * stack was created with, read from `.env`.
+ *
+ * IPv4 because a dev stack publishes the port on `127.0.0.1` only, and `localhost` can resolve to
+ * `::1` first.
+ */
+export function hostComposeDbUrl(cwd: string, port: number | string): string {
   return devDatabaseUrl(cwd, `127.0.0.1:${port}`)
+}
+
+/** No stack runs for the project, so there is no stack database to derive. */
+export class NoStackRunning extends Error {
+  constructor(readonly projectName: string) {
+    super(
+      `No stack is running for ${projectName}. Start it with \`supatype dev\` or \`supatype self-host compose up -d\`.`,
+    )
+    this.name = "NoStackRunning"
+  }
+}
+
+/**
+ * The layout of the project's running stack ({@link runningStackMode}), or {@link NoStackRunning}
+ * when none runs. Guessing a layout then (production, port 5432) reached whatever Postgres the host
+ * had there, which need not be this project's (M1b).
+ */
+export function requireRunningStack(cwd: string, projectName: string): ComposeRenderMode {
+  const mode = runningStackMode(cwd, projectName)
+  if (mode === undefined) throw new NoStackRunning(projectName)
+  return mode
+}
+
+/**
+ * The project's stack database as reached from the host, at the port its layout publishes.
+ *
+ * The layout is the running stack's own: dev while a `supatype dev` session holds it or its server
+ * runs in dev mode, otherwise production. Host-side commands used to read the dev port whatever the
+ * stack was (M1), so on a production stack they reached 54329, where nothing listened or another
+ * project's dev database did. With no stack running it refuses ({@link requireRunningStack}).
+ */
+export function stackHostDbUrl(cwd: string, projectName: string): string {
+  return hostComposeDbUrl(cwd, composeDbHostPort(cwd, requireRunningStack(cwd, projectName)))
 }
 
 /**
@@ -53,9 +94,12 @@ export function hostComposeDbUrl(
  */
 function derivedDsn(root: string, config: SupatypeProjectConfig): string {
   return resolveRuntimeProvider(config) === "docker"
-    ? hostComposeDbUrl(root)
+    ? stackHostDbUrl(root, config.project.name)
     : localDSN(config, devPostgresPassword(root), root)
 }
+
+/** The `source` of a {@link ResolvedDsn} derived from the project's own stack, not named by anyone. */
+export const DERIVED_DSN_SOURCE = "the project's own local database"
 
 /** One place a connection string could have come from. */
 export interface DsnSource {
@@ -159,11 +203,11 @@ export function resolveHostDatabaseUrl(
 
   if (options.allowDerived === true) {
     const derived = derivedDsn(root, config)
-    tried.push({ name: "the project's own local database", detail: redact(derived), found: true })
-    return { dsn: derived, source: "the project's own local database", tried }
+    tried.push({ name: DERIVED_DSN_SOURCE, detail: redact(derived), found: true })
+    return { dsn: derived, source: DERIVED_DSN_SOURCE, tried }
   }
   tried.push({
-    name: "the project's own local database",
+    name: DERIVED_DSN_SOURCE,
     detail: "this project points at a database it does not manage, so there is no default",
     found: false,
   })

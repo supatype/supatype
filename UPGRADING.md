@@ -434,6 +434,10 @@ upgrade a production server.
 
 ## CLI
 
+- **A config with no `provider` line now runs Docker.** `init` has always written
+  `provider: "docker"`, but a config without the line (and without `database.provider`) used to
+  run the native stack. It now runs the Docker Compose stack, the same as a scaffolded project. To
+  keep the native stack, add `provider: "native"` to `supatype.config.ts`.
 - **`--project-name` or `SUPATYPE_PROJECT_NAME`** renames the project for one run (its compose
   project, database and state directory follow) without changing any file.
 - **`supatype self-host compose restart <service>`** recreates one service with the current config

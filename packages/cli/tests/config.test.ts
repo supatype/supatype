@@ -250,13 +250,26 @@ describe("resolveRuntimeProvider()", () => {
     expect(resolveRuntimeProvider(cfg)).toBe("docker")
   })
 
-  it("falls back to database.provider then native", () => {
+  it("falls back to database.provider", () => {
     expect(resolveRuntimeProvider(defineConfig({ ...minimalProject("p"), database: { provider: "docker" } }))).toBe(
       "docker",
     )
     expect(resolveRuntimeProvider(defineConfig({ ...minimalProject("p"), database: { provider: "native" } }))).toBe(
       "native",
     )
+  })
+
+  it("respects an explicit top-level provider", () => {
+    expect(resolveRuntimeProvider(defineConfig({ ...minimalProject("p"), provider: "native", database: {} }))).toBe(
+      "native",
+    )
+    expect(resolveRuntimeProvider(defineConfig({ ...minimalProject("p"), provider: "docker", database: {} }))).toBe(
+      "docker",
+    )
+  })
+
+  it("runs Docker when no provider is set anywhere, as init scaffolds", () => {
+    expect(resolveRuntimeProvider(defineConfig({ ...minimalProject("p"), database: {} }))).toBe("docker")
   })
 })
 
