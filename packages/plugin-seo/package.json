@@ -1,6 +1,6 @@
 {
   "name": "@supatype/plugin-seo",
-  "version": "0.1.5",
+  "version": "0.7.0",
   "license": "MIT",
   "description": "SEO meta composite with meta title, description, OG image, canonical URL, and no-index toggle",
   "type": "module",

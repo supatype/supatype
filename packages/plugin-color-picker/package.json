@@ -1,6 +1,6 @@
 {
   "name": "@supatype/plugin-color-picker",
-  "version": "0.1.5",
+  "version": "0.7.0",
   "license": "MIT",
   "description": "Colour picker widget for text and varchar fields with hex colour validation",
   "type": "module",

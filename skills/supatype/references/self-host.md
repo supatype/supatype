@@ -251,7 +251,7 @@ So an unpinned project (tracking latest) gets the keyspace, and a pinned one
 keeps the sidecar until it says otherwise:
 
 ```ts
-versions: { postgres: "17.2.9" },
+versions: { postgres: "17.2.10" },
 cache: { provider: "pg_keyspace" },
 ```
 

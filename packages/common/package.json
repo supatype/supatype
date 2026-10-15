@@ -1,6 +1,6 @@
 {
   "name": "@supatype/common",
-  "version": "0.1.5",
+  "version": "0.7.0",
   "license": "MIT",
   "description": "Shared auth, config, and analytics for Supatype web apps",
   "type": "module",

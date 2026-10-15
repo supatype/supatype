@@ -24,6 +24,10 @@ RUN apt-get update && \
 
 COPY --chmod=0644 packages/self-host-control/LICENSE /LICENSE
 COPY --from=engine /usr/local/bin/supatype-engine /usr/local/bin/supatype-engine
+# The engine binary is BUSL-1.1, so its licence and third-party notices travel with it. The engine
+# image carries both from 0.7.0 on; an older ENGINE_IMAGE fails here rather than ship without them.
+COPY --from=engine /LICENSE /licenses/supatype-engine/LICENSE
+COPY --from=engine /THIRD-PARTY-NOTICES /licenses/supatype-engine/THIRD-PARTY-NOTICES
 
 COPY --from=builder /out/node_modules ./node_modules
 COPY --from=builder /out/dist ./dist
