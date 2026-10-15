@@ -1061,10 +1061,14 @@ export type ModelMeta<TFields extends Record<string, unknown>> = {
      * without read is unrepresentable, otherwise a caller could round-trip away a
      * value they were never shown.
      *
-     * **`INSERT` cannot evaluate a row-dependent write rule**: there is no row
-     * yet, so the column falls back to its default instead of accepting the
-     * submitted value. Use an identity-only rule (`Role<>`, `LoggedIn`,
-     * `Claim<>`) for a column that must be settable at creation time.
+     * **On `INSERT` a write rule is judged against the row being stored**,
+     * defaults included, as RLS `WITH CHECK` is, so a row-dependent rule
+     * (`Owner<"id">`, `OwnerFrom`, a membership) can pass on create: an
+     * `owner_id DEFAULT auth.uid()` is what it reads. A value the rule allows is
+     * stored; one it refuses fails the insert with `42501`. Sending nothing,
+     * `NULL`, `DEFAULT` or the column default's own value stores the default
+     * without judging the rule. On `UPDATE`, a field the caller cannot read keeps
+     * its stored value, and a real change is judged by the write rule.
      *
      * Relations are named by their column (`author_id`), because that is what the
      * restriction applies to: `author` is not a column at all.
