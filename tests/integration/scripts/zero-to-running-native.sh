@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Zero to running, native path (no Docker): a new project through to an API that answers.
 # Phase-10.6 row C21 asked for it; the name says what it does.
-# Requires: a published CDN CLI (from a v* release) plus realtime-v*, or local overrides.
+# Requires: a published CDN CLI and realtime binaries (both ship from one v* release), or local overrides.
 #
 # Usage:
 #   bash tests/integration/scripts/zero-to-running-native.sh

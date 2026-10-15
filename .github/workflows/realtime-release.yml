@@ -1,26 +1,67 @@
 # Publish supatype-realtime standalone binaries to releases.supatype.com/realtime/
+#
+# Same shape as every other component the CLI downloads (engine, server, postgres, deno): the
+# binaries, a checksums.sha256 covering all of them, its minisign signature, then latest.json.
+# The CLI refuses a release without a signed checksums manifest, and published paths are
+# immutable, so a version that goes out unsigned can never be fixed, only superseded. Nothing is
+# uploaded until every binary is built and the manifest is signed, and latest.json goes last so it
+# never advertises a version whose files are not all readable yet.
 name: Realtime release
 
+# Called by release.yml on a v* tag, so the realtime binaries carry the same version as the CLI,
+# the npm packages and the supatype/realtime image. There is no realtime-v* tag any more, for the
+# reason cli-v* went: a second tag namespace is a second version of one product, and a stack
+# whose CLI and realtime come from different releases is one nothing tested together. The
+# dispatch is for re-running a release by hand, with the same version the tag carried.
 on:
-  push:
-    tags:
-      - "realtime-v*"
+  workflow_call:
+    inputs:
+      version:
+        description: Version to publish, without a leading v (e.g. 0.1.8)
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       version:
-        description: Version string (e.g. 0.1.0)
+        description: Version to publish, without a leading v (e.g. 0.1.8)
         required: true
+        type: string
 
 permissions:
   contents: read
 
 jobs:
+  # Resolved once and handed to every job. Always from the caller: release.yml derives it from
+  # the tag, so the tag is the single source of the version here as it is for the CLI.
+  version:
+    name: Version is a version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Resolve the release version
+        id: version
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.version }}"
+          VERSION="${VERSION#v}"
+          if ! printf '%s' "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::Refusing to publish '${VERSION}': not a semantic version." \
+              "Push a v1.2.3 tag, or dispatch with version=1.2.3."
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "publishing realtime v${VERSION}"
+
   build:
     name: ${{ matrix.platform }}
+    needs: version
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
+        # `output` must be the CLI's binaryName("realtime", ...) for the platform, and the set must
+        # match RELEASE_BINARIES in packages/realtime/scripts/release-manifest.mjs.
         include:
           - platform: linux-amd64
             runner: ubuntu-24.04
@@ -63,35 +104,102 @@ jobs:
         run: |
           npx --yes @yao-pkg/pkg@6.6.0 packages/realtime/release-bundle/supatype-realtime-bundle.cjs --targets ${{ matrix.pkg_target }} --output ${{ matrix.output }}
 
-      - name: Upload to CDN
+      - name: Upload binary (for the sign-and-publish job)
+        uses: actions/upload-artifact@v4
+        with:
+          name: realtime-${{ matrix.platform }}
+          path: ${{ matrix.output }}
+          if-no-files-found: error
+          retention-days: 1
+
+  sign-and-publish:
+    name: Sign & publish
+    needs: [version, build]
+    runs-on: ubuntu-24.04
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: realtime-*
+          merge-multiple: true
+          path: release
+
+      # Refuses a missing platform rather than signing a manifest without it.
+      - name: Generate checksums.sha256 and latest.json
+        run: node packages/realtime/scripts/release-manifest.mjs release "${VERSION}" latest.json
+
+      - name: Install minisign
+        run: sudo apt-get install -y minisign
+
+      - name: Sign checksums.sha256
+        env:
+          MINISIGN_PRIVATE_KEY: ${{ secrets.MINISIGN_PRIVATE_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          cd release
+          printf '%s' "$MINISIGN_PRIVATE_KEY" > /tmp/minisign.key
+          echo "$MINISIGN_PASSWORD" | minisign \
+            -S -s /tmp/minisign.key \
+            -m checksums.sha256 \
+            -t "supatype realtime releases v${VERSION}"
+          rm -f /tmp/minisign.key
+          test -s checksums.sha256.minisig
+
+      - name: Publish to the CDN
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.CDN_AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.CDN_AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: ${{ secrets.CDN_AWS_REGION }}
+          # Hetzner needs path addressing and s3v4, and refuses instance metadata lookups.
+          AWS_EC2_METADATA_DISABLED: "true"
+          AWS_RETRY_MODE: standard
+          AWS_MAX_ATTEMPTS: "10"
         run: |
-          VERSION="${{ github.ref_name }}"
-          VERSION="${VERSION#realtime-v}"
-          if [ -n "${{ inputs.version }}" ]; then VERSION="${{ inputs.version }}"; fi
+          set -euo pipefail
+          aws configure set default.s3.addressing_style path >/dev/null
+          aws configure set default.s3.signature_version s3v4 >/dev/null
+
           EP="${{ secrets.CDN_ENDPOINT }}"
           EP="${EP%/}"
           BUCKET="${{ secrets.CDN_BUCKET }}"
           BASE="s3://${BUCKET}/realtime/v${VERSION}"
-          aws s3 cp "${{ matrix.output }}" "${BASE}/${{ matrix.output }}" --endpoint-url "${EP}" --no-progress
+          CACHE_IMMUTABLE="public, max-age=31536000, immutable"
 
-  publish-manifest:
-    needs: build
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Write realtime/latest.json
+          # An immutable prefix is never rewritten: a client may already hold a binary and a
+          # manifest from it, and replacing either is how the postgres checksum skew happened.
+          if aws s3 ls "${BASE}/checksums.sha256.minisig" --endpoint-url "${EP}" >/dev/null 2>&1; then
+            echo "::error::realtime/v${VERSION}/ is already published. Release a new version instead."
+            exit 1
+          fi
+
+          # Binaries first, then the manifest that names them, then its signature.
+          for f in release/supatype-realtime-* release/checksums.sha256 release/checksums.sha256.minisig; do
+            aws s3 cp "${f}" "${BASE}/$(basename "${f}")" \
+              --endpoint-url "${EP}" \
+              --cache-control "${CACHE_IMMUTABLE}" \
+              --no-progress
+          done
+
+      # A prerelease publishes its binaries but must not become `latest`: the CLI resolves an
+      # unpinned realtime through this file, so moving it to an rc would ship one to everyone.
+      - name: Update realtime/latest.json
+        if: ${{ !contains(needs.version.outputs.version, '-') }}
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.CDN_AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.CDN_AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: ${{ secrets.CDN_AWS_REGION }}
+          AWS_EC2_METADATA_DISABLED: "true"
         run: |
-          VERSION="${{ github.ref_name }}"
-          VERSION="${VERSION#realtime-v}"
-          if [ -n "${{ inputs.version }}" ]; then VERSION="${{ inputs.version }}"; fi
+          set -euo pipefail
+          aws configure set default.s3.addressing_style path >/dev/null
+          aws configure set default.s3.signature_version s3v4 >/dev/null
           EP="${{ secrets.CDN_ENDPOINT }}"
-          BUCKET="${{ secrets.CDN_BUCKET }}"
-          printf '{"version":"%s","date":"%s"}\n' "${VERSION}" "$(date -u +%Y-%m-%d)" > latest.json
-          aws s3 cp latest.json "s3://${BUCKET}/realtime/latest.json" --endpoint-url "${EP%/}" --cache-control "no-cache" --no-progress
+          aws s3 cp latest.json "s3://${{ secrets.CDN_BUCKET }}/realtime/latest.json" \
+            --endpoint-url "${EP%/}" \
+            --cache-control "no-cache, no-store, must-revalidate" \
+            --no-progress
