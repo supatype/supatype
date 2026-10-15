@@ -6,8 +6,6 @@ import { fatalError } from "./ui/fatal.js"
 import {
   postgrestSchemaEnv,
   externalDatabaseUrl,
-  hooksPathFromProject,
-  preferredFunctionsPathFromProject,
   realtimeEnabled,
   serviceRoleRoutes,
   selfHostTlsEnabled,
@@ -22,6 +20,7 @@ import { readEnvFile, readEnvValue } from "./env-file.js"
 import { upKeepingKongCurrent } from "./compose-kong.js"
 import { composeAuthProviderEnv } from "./auth-providers.js"
 import {
+  BUNDLED_DB_USER,
   CONTROL_PLANE_SECRET_ENV,
   SQL_EDITOR_PASSWORD_ENV,
   ensureControlPlaneSecret,
@@ -1152,12 +1151,45 @@ function repairComposeFunctionsFlag(manifestPath: string): void {
   writeFileSync(manifestPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8")
 }
 
-function ensureProjectFunctionsDir(cwd: string, config: SupatypeProjectConfig): void {
-  mkdirSync(preferredFunctionsPathFromProject(config, cwd), { recursive: true })
-  // Both roots must exist before compose mounts the project read-only: a missing directory becomes
-  // a bind mount of a file that is not there, and the worker fails to start rather than serving the
-  // half it does have.
-  mkdirSync(hooksPathFromProject(config, cwd), { recursive: true })
+/**
+ * `POSTGRES_USER`, when the bundled database is in use and it names a role the image cannot run as.
+ *
+ * The image's first start checks the cluster as {@link BUNDLED_DB_USER}, so any other superuser
+ * leaves the db container exiting with "password authentication failed for user supatype_admin",
+ * and `dev` waiting ninety seconds to report only that the database never became healthy. The CLI
+ * writes this value itself, so a hand-written `.env` is how a project gets here (edge-kit's template
+ * did). An external database is the operator's, with whatever user its URL names.
+ *
+ * Read from the shell first, then `.env`, which is the order Compose resolves it in. An empty value
+ * is Compose's `${POSTGRES_USER:-supatype_admin}` default, not a different user.
+ */
+export function unsupportedBundledDbUser(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  if (usesExternalDatabase(config)) return undefined
+  const user = (env["POSTGRES_USER"] ?? readEnvFile(cwd)["POSTGRES_USER"])?.trim()
+  if (user === undefined || user === "" || user === BUNDLED_DB_USER) return undefined
+  return user
+}
+
+function assertBundledDbUser(cwd: string, config: SupatypeProjectConfig): void {
+  const user = unsupportedBundledDbUser(cwd, config)
+  if (user === undefined) return
+  fatalError(
+    `POSTGRES_USER is "${user}", and the bundled Postgres runs as ${BUNDLED_DB_USER}`,
+    [
+      `The database image checks the cluster as ${BUNDLED_DB_USER} on first start, so with any other`,
+      "user the db container exits before the stack can start.",
+      `Set POSTGRES_USER=${BUNDLED_DB_USER} in .env, and the same user in DATABASE_URL.`,
+      `Earlier CLIs did not check this. If this stack's data volume was created as "${user}", either`,
+      `create the role in it first (as "${user}": CREATE ROLE ${BUNDLED_DB_USER} WITH SUPERUSER LOGIN`,
+      "PASSWORD '<POSTGRES_PASSWORD>'), or start from an empty database with `supatype dev --reset-db`.",
+      "To use a Postgres you run yourself, with its own user, set database.external.url instead.",
+    ],
+    { brand: { intro: "Self-host compose" } },
+  )
 }
 
 /**
@@ -1301,6 +1333,7 @@ export function writeSelfHostCompose(
   options?: SelfHostComposeOptions,
 ): SelfHostComposePaths {
   assertExternalUrlMatchesEnv(cwd, config)
+  assertBundledDbUser(cwd, config)
   const tier = resolveFieldMaskingTier(cwd, config, options)
   const resolved: SelfHostComposeOptions = {
     ...options,
@@ -1314,7 +1347,9 @@ export function writeSelfHostCompose(
   mkdirSync(paths.dir, { recursive: true })
   // Before the file that requires it is written, so no stack is ever rendered without one.
   ensureControlPlaneSecret(cwd)
-  ensureProjectFunctionsDir(cwd, config)
+  // No functions/ or hooks/ here: the worker mounts the whole project and treats a missing root as
+  // nothing to serve, while an empty functions/ made `dev` scaffold function types into projects
+  // that have no functions. `functions new` and `init` create it when there is one.
   ensureComposeManifest(cwd, config)
   writeFileSync(paths.composePath, renderSelfHostCompose(config, cwd, resolved), "utf8")
   writeFileSync(paths.s3ConfigPath, renderSeaweedIdentities(), "utf8")

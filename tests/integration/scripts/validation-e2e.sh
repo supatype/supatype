@@ -27,6 +27,8 @@ MAX_WAIT=180
 EMAIL="e2e@example.com"
 PASSWORD="e2e-password-12345"
 
+source "$SCRIPT_DIR/lib/compose-reset.sh"
+
 failures=0
 
 source "$SCRIPT_DIR/lib/e2e-project.sh"
@@ -34,8 +36,10 @@ e2e_project_use "$EXAMPLE_DIR" validation
 # Exported so compose binds the port this script waits on, whatever an old .env says.
 export SUPATYPE_KONG_PORT="$KONG_PORT"
 
+# By project name, with the volumes, which `self-host compose down` keeps (see compose-smoke.sh).
+# The assertions insert fixed rows with unique slugs, so a database that outlived the last run
+# answers them with 409 and the run fails for no reason.
 cleanup() {
-  # By project name, with the volumes, which `self-host compose down` keeps (see compose-smoke.sh).
   e2e_project_down
   e2e_project_release
 }
@@ -52,6 +56,10 @@ cd "$EXAMPLE_DIR"
 # second copy of the secret list: the hand-rolled version here wrote JWT_SECRET and the keys but
 # not AUTHENTICATOR_PASSWORD, and compose refuses to interpolate a variable it cannot resolve.
 node "$SCRIPT_DIR/ensure-compose-env.mjs" "$EXAMPLE_DIR"
+
+# Only after e2e_project_use, which claims the project and refuses one another directory is running.
+echo "==> Removing anything a previous run left in $E2E_COMPOSE_PROJECT"
+remove_compose_project "$E2E_COMPOSE_PROJECT"
 
 echo "==> Bringing the stack up"
 node "$CLI_BIN" self-host compose up -d
