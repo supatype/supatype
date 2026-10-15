@@ -16,8 +16,9 @@ import { registerFunctions } from "../src/commands/functions.js"
 /**
  * What `supatype functions` tells someone to run next has to be a command that exists.
  *
- * It named `supatype self-host compose restart`, which there is no such subcommand for, and
- * `npx supatype cloud login` / `cloud link`, which are `supatype login` and `supatype link`. It also
+ * It named `supatype self-host compose restart` before that subcommand existed, then a raw
+ * `docker compose ... restart` after it did, and `npx supatype cloud login` / `cloud link`, which
+ * are `supatype login` and `supatype link`. It also
  * looked for a session in `~/.supatype/token`, a file nothing writes, so a user who had just run
  * `supatype login` was told they were not logged in.
  */
@@ -71,8 +72,9 @@ describe("functions deploy on a self-host compose stack", () => {
 
     const run = await runCommand(registerFunctions, ["functions", "deploy"], project.dir)
 
-    expect(run.output).not.toContain("self-host compose restart")
-    expect(run.output).toContain("docker compose -p supatype-acme -f .supatype/self-host/docker-compose.yml restart functions-worker")
+    // The CLI's own command, which recreates the service with the current config and .env.
+    expect(run.output).toContain("supatype self-host compose restart functions-worker")
+    expect(run.output).not.toContain("docker compose -p")
   })
 })
 

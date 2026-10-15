@@ -7,6 +7,8 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "
 import { join, resolve } from "node:path"
 import { spawnSync } from "node:child_process"
 import { runDockerCompose } from "./self-host-compose.js"
+import { projectNameInFile } from "./project-name-override.js"
+import type { SupatypeProjectConfig } from "./project-config.js"
 import { confirm as uiConfirm } from "./ui/confirm.js"
 import { success, warn } from "./ui/messages.js"
 import { isInteractive } from "./ui/interactive.js"
@@ -64,6 +66,21 @@ export function liveDevSessionLock(cwd: string): DevSessionLock | null {
   if (lock.pid !== undefined && processAlive(lock.pid)) return lock
   clearDevSessionLock(cwd)
   return null
+}
+
+/**
+ * The session record for a stack `dev` has started.
+ *
+ * `projectRef` is the config file's name, as `environment.json` records it: under
+ * `--project-name` / SUPATYPE_PROJECT_NAME the run has a name of its own, which is the compose
+ * project's and not the project's.
+ */
+export function devSessionLockFor(
+  config: SupatypeProjectConfig,
+  stack: Pick<DevSessionLock, "composeProject" | "composePath" | "kongPort">,
+  startedAt: Date = new Date(),
+): Omit<DevSessionLock, "version" | "pid"> {
+  return { ...stack, projectRef: projectNameInFile(config), startedAt: startedAt.toISOString() }
 }
 
 export function writeDevSessionLock(cwd: string, lock: Omit<DevSessionLock, "version" | "pid">): void {

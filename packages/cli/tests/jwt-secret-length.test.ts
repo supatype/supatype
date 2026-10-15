@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { MIN_JWT_SECRET_LENGTH, jwtSecretTooShort } from "../src/jwt-secret-length.js"
+import { JWT_SECRET_REMEDY, MIN_JWT_SECRET_LENGTH, jwtSecretTooShort } from "../src/jwt-secret-length.js"
 import { FALLBACK_JWT_SECRET } from "../src/local-secrets.js"
 
 /**
@@ -24,5 +24,13 @@ describe("JWT secret length", () => {
 
   it("accepts the fallback a project without .env runs with", () => {
     expect(jwtSecretTooShort(FALLBACK_JWT_SECRET)).toBeNull()
+  })
+})
+
+describe("what a too-short secret tells you to do", () => {
+  // The keys already in .env were signed with the old secret, and `keys --write` alone only fills
+  // blank ones, so it left them signed with the secret the user was told to replace.
+  it("names the command that replaces the keys already in .env", () => {
+    expect(JWT_SECRET_REMEDY.join("\n")).toContain("supatype keys --write --force")
   })
 })
