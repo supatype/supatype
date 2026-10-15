@@ -226,7 +226,6 @@ function UserForm({
 
 interface UserDetailActions {
   onToggleDisable: () => void
-  onImpersonate: () => void
   onEdit: () => void
   onDelete: () => void
   onRevokeSession: (sessionId: string) => void
@@ -243,9 +242,8 @@ function UserDetail({
   sessions: AuthSession[]
   actions: UserDetailActions
 }): React.ReactElement {
-  const { onToggleDisable, onImpersonate, onEdit, onDelete, onRevokeSession, onConfirmEmail } = actions
+  const { onToggleDisable, onEdit, onDelete, onRevokeSession, onConfirmEmail } = actions
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const [showImpersonateInfo, setShowImpersonateInfo] = useState(false)
   const userSessions = sessions.filter((s) => s.user_id === user.id)
 
   return (
@@ -383,12 +381,7 @@ function UserDetail({
         <Button onClick={onToggleDisable}>
           {user.disabled ? "Enable User" : "Disable User"}
         </Button>
-        <Button onClick={() => {
-          setShowImpersonateInfo(true)
-          onImpersonate()
-        }}>
-          Impersonate
-        </Button>
+        {/* No Impersonate action until Studio can run its own editors as the user (IMP1). */}
         {!confirmDelete ? (
           <Button variant="destructive" onClick={() => setConfirmDelete(true)}>Delete User</Button>
         ) : (
@@ -399,19 +392,6 @@ function UserDetail({
           </div>
         )}
       </div>
-
-      {showImpersonateInfo ? (
-        <div className="mt-4 p-3 bg-accent/30 rounded-md">
-          <p className="text-xs text-muted-foreground">
-            A short-lived JWT has been generated for <strong>{user.email}</strong>.
-            You can use this token to test the application as this user.
-          </p>
-          <code className="text-xs text-primary block mt-1 break-all">
-            {`eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIke${user.id}IiwicmVhbCI6Im1vY2sifQ.placeholder`}
-          </code>
-          <Button size="xs" className="mt-2" onClick={() => setShowImpersonateInfo(false)}>Dismiss</Button>
-        </div>
-      ) : null}
     </div>
   )
 }
@@ -722,10 +702,6 @@ export function AuthManagement(): React.ReactElement {
     refetchSessions()
   }, [authAdminFetch, refetchSessions])
 
-  const handleImpersonate = useCallback((_userId: string) => {
-    // Impersonation placeholder: shown in detail view
-  }, [])
-
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12 text-muted-foreground text-sm">
@@ -873,7 +849,7 @@ export function AuthManagement(): React.ReactElement {
                     <Button size="xs" onClick={() => runAction(() => handleToggleDisable(u.id))}>
                       {u.disabled ? "Enable" : "Disable"}
                     </Button>
-                    <Button size="xs" onClick={() => openUser(u)} title="View details + impersonate">
+                    <Button size="xs" onClick={() => openUser(u)} title="View details">
                       View
                     </Button>
                   </div>
@@ -909,7 +885,6 @@ export function AuthManagement(): React.ReactElement {
             sessions={sessions}
             actions={{
               onToggleDisable: () => runAction(() => handleToggleDisable(selectedUser.id)),
-              onImpersonate: () => handleImpersonate(selectedUser.id),
               onEdit: () => setEditingUser(selectedUser),
               onDelete: () => runAction(() => handleDeleteUser(selectedUser.id)),
               onRevokeSession: (id) => runAction(() => handleRevokeSession(id)),

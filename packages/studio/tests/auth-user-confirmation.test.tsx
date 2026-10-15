@@ -216,3 +216,14 @@ describe("confirming an existing user's email", () => {
     expect(button(panel(), "Confirm email")).toBeUndefined()
   })
 })
+
+// IMP1: the panel offered "Impersonate" and then printed a made-up JWT as if one had been minted.
+// Nothing was minted, and showing a real token would hand out the user's credential. Until Studio
+// can run its own editors as a user, the panel offers no impersonation at all.
+describe("impersonating a user", () => {
+  it("is not offered", async () => {
+    await renderUsers({ autoconfirm: false, manageUsers: true, open: CONFIRMED })
+    expect(panel().textContent).toContain("Edit User")
+    expect(button(panel(), "Impersonate")).toBeUndefined()
+  })
+})
