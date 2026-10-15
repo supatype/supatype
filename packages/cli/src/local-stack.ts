@@ -10,7 +10,8 @@
  */
 
 import { readComposeEnvInt } from "./env-file.js"
-import { COMPOSE_DEV_DB_PORT } from "./host-database.js"
+import { composeDbHostPort } from "./host-database.js"
+import { composeRenderMode } from "./compose-render-mode.js"
 import { devDatabaseIdentity } from "./local-secrets.js"
 import { portHeldByComposeProject } from "./dev-ports.js"
 import { composeProjectName } from "./self-host-compose.js"
@@ -37,7 +38,7 @@ export function isProjectDatabase(
   if (usesExternalDatabase(config)) return false
   if (databaseUrl === undefined) return true
   if (resolveRuntimeProvider(config) !== "docker") return sameDatabase(databaseUrl, connectionString(config, undefined, cwd))
-  const port = readComposeEnvInt(cwd, "SUPATYPE_DEV_DB_PORT") ?? COMPOSE_DEV_DB_PORT
+  const port = composeDbHostPort(cwd, composeRenderMode(cwd, config.project.name))
   const own = parse(databaseUrl)
   return (
     own !== null &&
@@ -65,6 +66,21 @@ export function projectStackUrl(
   if (kongPort === null) return undefined
   if (!portHeldByComposeProject(kongPort, composeProjectName(config.project.name))) return undefined
   return `http://localhost:${kongPort}`
+}
+
+/** Studio under a stack's API address: it is served at `/studio/` behind the gateway. */
+export function studioUrlAt(apiUrl: string): string {
+  return `${apiUrl.replace(/\/$/, "")}/studio/`
+}
+
+/** Studio on the project's own running stack, when `databaseUrl` is its database (see {@link projectStackUrl}). */
+export function projectStudioUrl(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  databaseUrl: string | undefined,
+): string | undefined {
+  const stackUrl = projectStackUrl(cwd, config, databaseUrl)
+  return stackUrl === undefined ? undefined : studioUrlAt(stackUrl)
 }
 
 function sameDatabase(a: string, b: string): boolean {

@@ -12,6 +12,7 @@ import type { Pool, QueryResult } from "pg"
 import { loadConfig } from "../config.js"
 import { resolveRuntimeProvider, usesExternalDatabase, type SupatypeProjectConfig } from "../project-config.js"
 import { resolveHostDatabaseUrl } from "../host-database.js"
+import { projectStudioUrl } from "../local-stack.js"
 import { STUDIO_ROLES } from "../studio-roles.js"
 import { readEnvValue, upsertEnvFile } from "../env-file.js"
 import { devDatabaseIdentity } from "../local-secrets.js"
@@ -81,6 +82,18 @@ export interface EnsureFirstAdminOptions {
   role?: string
   connection?: string
   compose?: ComposeStack
+  /** Studio on the stack the admin was made for, named in the "log in" line when known. */
+  studioUrl?: string | undefined
+}
+
+/**
+ * Where to log in once an admin exists. Studio is served at `/studio/`; this used to say
+ * `/admin`, which nothing serves (M3).
+ */
+export function studioLoginHint(studioUrl: string | undefined): string {
+  return studioUrl === undefined
+    ? "Log in to Studio at /studio/ on the project's API URL once the stack is running."
+    : `Log in to Studio at ${studioUrl}`
 }
 
 function resolveAdminConnection(
@@ -154,7 +167,7 @@ export function registerAdmin(program: Command): void {
               await pool.end()
             }
           }
-          info("This user can now log in to the admin panel at /admin")
+          info(studioLoginHint(projectStudioUrl(cwd, config, opts.connection)))
         } catch (err) {
           const message = err instanceof Error ? err.message : "Unknown error"
           error(`Failed to create admin user: ${message}`)
@@ -316,7 +329,11 @@ export async function ensureFirstAdminUserForProject(
   options: EnsureFirstAdminOptions = {},
 ): Promise<void> {
   const root = resolve(cwd)
-  const merged: EnsureFirstAdminOptions = { cwd: root, ...options }
+  const merged: EnsureFirstAdminOptions = {
+    cwd: root,
+    ...options,
+    studioUrl: options.studioUrl ?? projectStudioUrl(root, config, options.connection),
+  }
 
   if (writesAdminThroughCompose(config, merged) && merged.compose) {
     try {
@@ -385,17 +402,13 @@ export async function ensureFirstAdminWithQuery(
     return
   }
   clearAdminSeedPassword(cwd)
-  logFirstAdminCreated(credentials.email, role)
+  logFirstAdminCreated(credentials.email, role, options.studioUrl)
 }
 
-function logFirstAdminCreated(email: string, role: string): void {
-  if (getActiveDevSession()?.isTui()) {
-    console.log(`Admin user "${email}" created (role: ${role}).`)
-    console.log("Log in at /admin after starting the dev server.")
-    return
-  }
-  info(`Admin user "${email}" created (role: ${role}).`)
-  info("Log in at /admin after starting the dev server.")
+function logFirstAdminCreated(email: string, role: string, studioUrl: string | undefined): void {
+  const say = getActiveDevSession()?.isTui() ? (line: string) => console.log(line) : info
+  say(`Admin user "${email}" created (role: ${role}).`)
+  say(studioLoginHint(studioUrl))
 }
 
 /**

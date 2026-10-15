@@ -19,7 +19,7 @@ import { loadConfig, loadSchemaAst, type SupatypeConfig } from "../config.js"
 import { engineRequest, ensureEngine } from "../engine-client.js"
 import { seedUnsupportedByPinnedEngine } from "../engine-floor.js"
 import { pgSchema, projectRootFromConfig, schemaPathFromProject } from "../project-config.js"
-import { DsnNotFound, redact, resolveHostDatabaseUrl } from "../host-database.js"
+import { redact, resolveHostDatabaseUrl } from "../host-database.js"
 import { collectSeed, SeedCollectionFailed } from "../seed-runner.js"
 import { seedBuilderPathWithDefaults } from "../type-generation.js"
 import type { SeedConfig, SeedIr } from "../seed.js"
@@ -104,7 +104,8 @@ export async function runSeed(file: string | undefined, opts: SeedFlags): Promis
       allowDerived: true,
     }).dsn
   } catch (e) {
-    error(e instanceof DsnNotFound ? e.message : String(e))
+    // DsnNotFound and NoStackRunning say what to do in their message; the class name adds nothing.
+    error(e instanceof Error ? e.message : String(e))
     return 2
   }
 
