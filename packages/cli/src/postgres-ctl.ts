@@ -137,6 +137,18 @@ export function nativeKeyspaceLibraryPresent(pgBinDir: string | null | undefined
 }
 
 /**
+ * What supatype-server is told about GraphQL for a native Postgres install: switched off when the
+ * install has no pg_graphql, which no native archive carries (it is a pgrx extension, built only
+ * into the supatype/postgres image). The server then answers `/graphql/v1` with 501
+ * `graphql_unavailable` instead of PostgREST's "could not find the function
+ * graphql_public.graphql". Asked of the filesystem, like the mask, so an install that does carry
+ * the library keeps GraphQL.
+ */
+export function nativeGraphqlServerEnv(pgBinDir: string | null | undefined): Record<string, string> {
+  return nativeLibraryPresent(pgBinDir, "pg_graphql") ? {} : { SUPATYPE_GRAPHQL_DISABLED: "true" }
+}
+
+/**
  * Two layouts: Linux and macOS put extension libraries in `lib/`, the Windows
  * archive in `lib/postgresql/`.
  */

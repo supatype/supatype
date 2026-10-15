@@ -87,6 +87,7 @@ import {
   KEYSPACE_PORT_BASE,
   KEYSPACE_PORT_SPAN,
   nativeKeyspaceLibraryPresent,
+  nativeGraphqlServerEnv,
   nativeMaskLibraryPresent,
   start as pgStart,
   stop as pgStop,
@@ -564,6 +565,8 @@ export function registerDev(program: Command): void {
         SUPATYPE_MANIFEST_PATH: manifestPath,
         SUPATYPE_ADMIN_CONFIG_PATH: adminConfigPath,
         SUPATYPE_POSTGREST_URL: `http://127.0.0.1:${postgrestPort}`,
+        // A clear 501 on /graphql/v1 rather than "function not found" from PostgREST.
+        ...nativeGraphqlServerEnv(pgBinDir),
         SUPATYPE_DENO_FUNCTIONS_DIR: denoFunctionsDir,
         ...(denoFunctionsDir !== "" ? { SUPATYPE_SHARED_ENV_FILE: resolve(denoFunctionsDir, ".env.local") } : {}),
         ...(denoBinPath !== undefined ? { SUPATYPE_DENO_PATH: denoBinPath } : {}),
