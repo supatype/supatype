@@ -58,7 +58,7 @@ export default { server: { mode: "dev" } }
 
 | Field | Notes |
 |-------|-------|
-| `provider` | Top-level runtime: `"docker"` (default scaffold) or `"native"` |
+| `provider` | Top-level runtime: `"docker"` (the default, also when omitted) or `"native"` |
 | `database.provider` | Same values; used when `provider` omitted |
 | `server.mode` | `"dev"`, `"standalone"` (self-host with HTTPS), or `"managed"` (cloud) |
 | `server.port` | supatype-server port (native dev) |

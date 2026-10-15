@@ -59,7 +59,7 @@ describe("imageShipsMaskExtension", () => {
     expect(imageShipsMaskExtension(project({ provider: "docker" }))).toBe(true)
   })
 
-  it("is false for native, which is the default `supatype dev`", () => {
+  it("is false for a native `supatype dev`", () => {
     // The case that makes "is it external" the wrong rule.
     expect(imageShipsMaskExtension(project({ provider: "native" }))).toBe(false)
   })
