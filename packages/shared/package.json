@@ -1,6 +1,6 @@
 {
   "name": "@supatype/shared",
-  "version": "0.1.5",
+  "version": "0.7.0",
   "license": "Apache-2.0",
   "description": "Rules the Supatype CLI and the self-host control plane must agree on",
   "type": "module",

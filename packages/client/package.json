@@ -1,6 +1,6 @@
 {
   "name": "@supatype/client",
-  "version": "0.1.5",
+  "version": "0.7.0",
   "license": "MIT",
   "description": "Supatype client SDK: typed REST, auth, storage, realtime",
   "type": "module",
