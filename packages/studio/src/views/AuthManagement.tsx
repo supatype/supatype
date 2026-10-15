@@ -4,9 +4,10 @@ import { useStudioClient } from "../StudioCore.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import { useStudioMembers } from "../hooks/useStudioMembers.js"
 import { useStudioCapability } from "../hooks/useStudioCapability.js"
+import { useAuthSettings } from "../hooks/useAuthSettings.js"
 import { StudioAccessCell } from "../components/StudioAccessCell.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
-import { Badge, Button, Card, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
+import { Badge, Button, Card, Checkbox, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { SlidePanel } from "../components/SlidePanel.js"
@@ -79,33 +80,65 @@ const statusFilters = ["all", "active", "disabled", "unconfirmed"]
 
 // ─── Create/Edit User Form ────────────────────────────────────────────────────
 
+/** What the form offers only when creating a user. */
+interface CreateUserOptions {
+  /**
+   * Studio roles this viewer may grant, empty when they may not grant any.
+   *
+   * An existing user's Studio access is edited in the list, where the server's own refusals (no
+   * self-change, no demoting the last admin) are already handled.
+   */
+  studioRoles: readonly string[]
+  /**
+   * The project's email auto-confirm setting, which seeds the Auto-confirm email checkbox; null
+   * until the auth server has answered. The auth server confirms an admin-created user only when
+   * asked to: its own auto-confirm setting covers public sign-ups, not this API.
+   */
+  autoConfirmDefault: boolean | null
+}
+
+interface UserFormData {
+  email: string
+  role: string
+  password?: string
+  metadata: Record<string, unknown>
+  studioRole?: string
+  /** Create only: whether the auth server marks the address confirmed. */
+  emailConfirm?: boolean
+}
+
+function AutoConfirmField({ checked, onChange }: { checked: boolean; onChange: (checked: boolean) => void }): React.ReactElement {
+  return (
+    <div>
+      <Checkbox label="Auto-confirm email" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <p className="text-[0.75rem] text-muted-foreground mt-1">
+        Marks the address as confirmed, so the user can sign in without a confirmation email.
+        Defaults to the project's email confirmation setting.
+      </p>
+    </div>
+  )
+}
+
 function UserForm({
   user,
-  studioRoles,
+  create,
   onSave,
   onCancel,
 }: {
   user: AuthUser | null
-  /**
-   * Studio roles this viewer may grant, empty when they may not grant any.
-   *
-   * Only offered when creating. An existing user's Studio access is edited in the list, where the
-   * server's own refusals (no self-change, no demoting the last admin) are already handled.
-   */
-  studioRoles: readonly string[]
-  onSave: (data: {
-    email: string
-    role: string
-    password?: string
-    metadata: Record<string, unknown>
-    studioRole?: string
-  }) => void
+  /** Present when creating, absent when editing `user`. */
+  create?: CreateUserOptions
+  onSave: (data: UserFormData) => void
   onCancel: () => void
 }): React.ReactElement {
+  const studioRoles = create?.studioRoles ?? []
   const [email, setEmail] = useState(user?.email ?? "")
   const role = user?.role ?? "authenticated"
   const [studioRole, setStudioRole] = useState("")
   const [password, setPassword] = useState("")
+  // Null until the checkbox is touched, so the default follows the setting when it arrives late.
+  const [autoConfirmChoice, setAutoConfirmChoice] = useState<boolean | null>(null)
+  const autoConfirm = autoConfirmChoice ?? create?.autoConfirmDefault ?? false
   const [metadataJson, setMetadataJson] = useState(JSON.stringify(user?.metadata ?? {}, null, 2))
   const [error, setError] = useState<string | null>(null)
 
@@ -127,6 +160,7 @@ function UserForm({
       ...(password.trim() ? { password: password.trim() } : {}),
       metadata,
       ...(studioRole !== "" ? { studioRole } : {}),
+      ...(create !== undefined ? { emailConfirm: autoConfirm } : {}),
     })
   }
 
@@ -143,6 +177,7 @@ function UserForm({
           </label>
           <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
         </div>
+        {create !== undefined ? <AutoConfirmField checked={autoConfirm} onChange={setAutoConfirmChoice} /> : null}
         <div>
           <label className="block text-[0.8rem] text-muted-foreground mb-1">Project role</label>
           <Input value={role} disabled readOnly />
@@ -150,7 +185,7 @@ function UserForm({
             Project users are always provisioned as <code>authenticated</code>.
           </p>
         </div>
-        {user === null && studioRoles.length > 0 ? (
+        {studioRoles.length > 0 ? (
           <div>
             <label className="block text-[0.8rem] text-muted-foreground mb-1">Studio access</label>
             <Select value={studioRole} onChange={(e) => setStudioRole(e.target.value)}>
@@ -189,23 +224,26 @@ function UserForm({
 
 // ─── User Detail View ─────────────────────────────────────────────────────────
 
-function UserDetail({
-  user,
-  sessions,
-  onToggleDisable,
-  onImpersonate,
-  onEdit,
-  onDelete,
-  onRevokeSession,
-}: {
-  user: AuthUser
-  sessions: AuthSession[]
+interface UserDetailActions {
   onToggleDisable: () => void
   onImpersonate: () => void
   onEdit: () => void
   onDelete: () => void
   onRevokeSession: (sessionId: string) => void
+  /** Undefined when the viewer may not administer users, so the action is not offered. */
+  onConfirmEmail: (() => void) | undefined
+}
+
+function UserDetail({
+  user,
+  sessions,
+  actions,
+}: {
+  user: AuthUser
+  sessions: AuthSession[]
+  actions: UserDetailActions
 }): React.ReactElement {
+  const { onToggleDisable, onImpersonate, onEdit, onDelete, onRevokeSession, onConfirmEmail } = actions
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [showImpersonateInfo, setShowImpersonateInfo] = useState(false)
   const userSessions = sessions.filter((s) => s.user_id === user.id)
@@ -341,6 +379,7 @@ function UserDetail({
       {/* Actions */}
       <div className="flex gap-2 flex-wrap">
         <Button onClick={onEdit}>Edit User</Button>
+        {!user.confirmed && onConfirmEmail ? <Button onClick={onConfirmEmail}>Confirm email</Button> : null}
         <Button onClick={onToggleDisable}>
           {user.disabled ? "Enable User" : "Disable User"}
         </Button>
@@ -499,6 +538,12 @@ export function AuthManagement(): React.ReactElement {
   const grantableStudioRoles = studioAccess.canManageMembers
     ? studioMembers.roles.map((r) => r.role)
     : []
+  // The same reading the auth Configuration page shows, so the form's default cannot disagree with it.
+  const { settings: authSettings } = useAuthSettings()
+  const createOptions: CreateUserOptions = {
+    studioRoles: grantableStudioRoles,
+    autoConfirmDefault: authSettings?.mailer_autoconfirm ?? null,
+  }
 
   const authAdminFetch = useCallback(async (path: string, options?: RequestInit) => {
     const res = await fetch(`${client.url}/auth/v1/admin${path}`, {
@@ -549,6 +594,13 @@ export function AuthManagement(): React.ReactElement {
   const [editingUser, setEditingUser] = useState<AuthUser | null>(null)
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [showInviteForm, setShowInviteForm] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
+
+  /** Run one user action, showing the auth server's refusal rather than dropping it. */
+  const runAction = useCallback((action: () => Promise<void>) => {
+    setActionError(null)
+    action().catch((err: unknown) => setActionError(err instanceof Error ? err.message : String(err)))
+  }, [])
 
   const openUser = useCallback((u: AuthUser) => {
     setSelectedUser(u)
@@ -607,13 +659,7 @@ export function AuthManagement(): React.ReactElement {
     setSelectedUser(null)
   }, [authAdminFetch, refetch])
 
-  const handleCreateUser = useCallback(async (data: {
-    email: string
-    role: string
-    password?: string
-    metadata: Record<string, unknown>
-    studioRole?: string
-  }) => {
+  const handleCreateUser = useCallback(async (data: UserFormData) => {
     const created = (await authAdminFetch("/users", {
       method: "POST",
       body: JSON.stringify({
@@ -621,6 +667,7 @@ export function AuthManagement(): React.ReactElement {
         password: data.password,
         user_metadata: data.metadata,
         role: data.role,
+        email_confirm: data.emailConfirm ?? false,
       }),
     })) as { id?: string }
 
@@ -636,7 +683,16 @@ export function AuthManagement(): React.ReactElement {
     setShowCreateForm(false)
   }, [authAdminFetch, refetch, studioMembers])
 
-  const handleEditUser = useCallback(async (data: { email: string; role: string; password?: string; metadata: Record<string, unknown> }) => {
+  const handleConfirmEmail = useCallback(async (userId: string) => {
+    const updated = (await authAdminFetch(`/users/${encodeURIComponent(userId)}`, {
+      method: "PUT",
+      body: JSON.stringify({ email_confirm: true }),
+    })) as AuthUserResponse
+    setSelectedUser(mapAuthUser(updated))
+    refetch()
+  }, [authAdminFetch, refetch])
+
+  const handleEditUser = useCallback(async (data: UserFormData) => {
     if (!editingUser) return
     await authAdminFetch(`/users/${editingUser.id}`, {
       method: "PUT",
@@ -683,6 +739,8 @@ export function AuthManagement(): React.ReactElement {
   }
 
   const panelOpen = selectedUser !== null || editingUser !== null || showCreateForm || showInviteForm
+  // Shown inside the panel while it is open, since it covers the page.
+  const actionBanner = actionError ? <div className="mb-4"><ErrorBanner message={actionError} /></div> : null
   const panelTitle = editingUser ? "Edit User"
     : showCreateForm ? "Create User"
     : showInviteForm ? "Invite User"
@@ -696,6 +754,7 @@ export function AuthManagement(): React.ReactElement {
     setEditingUser(null)
     setShowCreateForm(false)
     setShowInviteForm(false)
+    setActionError(null)
     if (searchParams.has("user")) {
       const next = new URLSearchParams(searchParams)
       next.delete("user")
@@ -739,6 +798,8 @@ export function AuthManagement(): React.ReactElement {
         <Button onClick={() => setShowInviteForm(true)}>Invite User</Button>
         <Button variant="primary" onClick={() => setShowCreateForm(true)}>+ Create User</Button>
       </div>
+
+      {panelOpen ? null : actionBanner}
 
       {/* User list */}
       <Card className="overflow-auto">
@@ -809,7 +870,7 @@ export function AuthManagement(): React.ReactElement {
                 <Td className="text-xs text-muted-foreground">{new Date(u.created_at).toLocaleDateString()}</Td>
                 <Td>
                   <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-                    <Button size="xs" onClick={() => { void handleToggleDisable(u.id) }}>
+                    <Button size="xs" onClick={() => runAction(() => handleToggleDisable(u.id))}>
                       {u.disabled ? "Enable" : "Disable"}
                     </Button>
                     <Button size="xs" onClick={() => openUser(u)} title="View details + impersonate">
@@ -841,36 +902,42 @@ export function AuthManagement(): React.ReactElement {
         subtitle={panelSubtitle}
         width="max-w-[560px]"
       >
+        {actionBanner}
         {selectedUser && !editingUser && !showCreateForm && !showInviteForm && (
           <UserDetail
             user={selectedUser}
             sessions={sessions}
-            onToggleDisable={() => { void handleToggleDisable(selectedUser.id) }}
-            onImpersonate={() => handleImpersonate(selectedUser.id)}
-            onEdit={() => setEditingUser(selectedUser)}
-            onDelete={() => { void handleDeleteUser(selectedUser.id) }}
-            onRevokeSession={(id) => { void handleRevokeSession(id) }}
+            actions={{
+              onToggleDisable: () => runAction(() => handleToggleDisable(selectedUser.id)),
+              onImpersonate: () => handleImpersonate(selectedUser.id),
+              onEdit: () => setEditingUser(selectedUser),
+              onDelete: () => runAction(() => handleDeleteUser(selectedUser.id)),
+              onRevokeSession: (id) => runAction(() => handleRevokeSession(id)),
+              // Both hosts gate the whole auth admin API on `manageMembers`.
+              onConfirmEmail: studioAccess.canManageMembers
+                ? () => runAction(() => handleConfirmEmail(selectedUser.id))
+                : undefined,
+            }}
           />
         )}
         {editingUser && (
           <UserForm
             user={editingUser}
-            studioRoles={[]}
-            onSave={(data) => { void handleEditUser(data) }}
+            onSave={(data) => runAction(() => handleEditUser(data))}
             onCancel={() => setEditingUser(null)}
           />
         )}
         {showCreateForm && (
           <UserForm
             user={null}
-            studioRoles={grantableStudioRoles}
-            onSave={(data) => { void handleCreateUser(data) }}
+            create={createOptions}
+            onSave={(data) => runAction(() => handleCreateUser(data))}
             onCancel={() => setShowCreateForm(false)}
           />
         )}
         {showInviteForm && (
           <InviteUserForm
-            onInvite={(email, role) => { void handleInviteUser(email, role) }}
+            onInvite={(email, role) => runAction(() => handleInviteUser(email, role))}
             onCancel={() => setShowInviteForm(false)}
           />
         )}
