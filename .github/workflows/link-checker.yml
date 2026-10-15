@@ -12,24 +12,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: "pnpm"
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build www
-        run: pnpm turbo run build --filter="@supatype/www"
-
-      - name: Build docs
-        run: pnpm turbo run build --filter="@supatype/docs"
-
+      # The site is the static docs/ folder that GitHub Pages serves as www.supatype.com, so
+      # there is nothing to build. --root-dir resolves its root-relative links ("/docs/",
+      # "/site.css") against that folder, and --index-files lets "/docs/#self-host" find its
+      # anchor in docs/docs/index.html.
       - name: Check links
         uses: lycheeverse/lychee-action@v2
         with:
-          args: --verbose --no-progress "apps/www/dist/**/*.html" "apps/docs/dist/**/*.html"
+          args: >-
+            --verbose --no-progress
+            --root-dir "${{ github.workspace }}/docs"
+            --index-files index.html
+            --include-fragments
+            "docs/**/*.html"
           fail: true
