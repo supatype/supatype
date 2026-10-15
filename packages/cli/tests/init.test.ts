@@ -87,6 +87,17 @@ describe("scaffold()", () => {
     expect(content).toContain("POSTGRES_DB=")
   })
 
+  it(".env carries a generated SQL editor password, distinct from the others", () => {
+    scaffold(tmpRoot, defaultScaffoldOptions("my-app"))
+    const content = readFileSync(join(tmpRoot, ".env"), "utf8")
+    const value = (key: string): string | undefined =>
+      content.match(new RegExp(`^${key}=(.+)$`, "m"))?.[1]
+    const editor = value("SUPATYPE_SQL_EDITOR_PASSWORD")
+    expect(editor).toMatch(/^[A-Za-z0-9_-]{32}$/)
+    expect(editor).not.toBe(value("POSTGRES_PASSWORD"))
+    expect(editor).not.toBe(value("AUTHENTICATOR_PASSWORD"))
+  })
+
   it(".env contains ANON_KEY, SERVICE_ROLE_KEY, and SITE_URL placeholders", () => {
     scaffold(tmpRoot, defaultScaffoldOptions("my-app"))
     const content = readFileSync(join(tmpRoot, ".env"), "utf8")

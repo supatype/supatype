@@ -61,6 +61,12 @@ export const FALLBACK_POSTGRES_PASSWORD = "postgres"
 /** Fallback password for the role PostgREST connects as. */
 export const FALLBACK_AUTHENTICATOR_PASSWORD = "authenticator-local"
 
+/** Fallback password for `supatype_sql_editor`, the role Studio's SQL editor connects as. */
+export const FALLBACK_SQL_EDITOR_PASSWORD = "sql-editor-local"
+
+/** The `.env` key holding the SQL editor role's password. */
+export const SQL_EDITOR_PASSWORD_ENV = "SUPATYPE_SQL_EDITOR_PASSWORD"
+
 /**
  * The superuser the bundled Postgres image runs as. Its first start checks the cluster as this
  * role, so it is not a choice the project gets to make, and not a value read from `.env`.
@@ -115,6 +121,16 @@ export function devAuthenticatorPassword(cwd: string): string {
 }
 
 /**
+ * The password for `supatype_sql_editor`, the non-superuser role Studio's SQL editor connects as.
+ *
+ * Its own credential for the same reason as {@link devAuthenticatorPassword}: rotating the
+ * owner's password must not lock the editor out, and the editor must never hold the owner's.
+ */
+export function devSqlEditorPassword(cwd: string): string {
+  return readEnvValue(cwd, SQL_EDITOR_PASSWORD_ENV, FALLBACK_SQL_EDITOR_PASSWORD)
+}
+
+/**
  * The secrets that are missing from `.env` and must be written so the stack can start.
  *
  * The compose template requires these with `${VAR:?}` rather than defaulting them, because a
@@ -134,6 +150,9 @@ export function seedMissingLocalSecrets(cwd: string): Record<string, string> {
   if (!hasEnvValue(cwd, "POSTGRES_PASSWORD")) out.POSTGRES_PASSWORD = FALLBACK_POSTGRES_PASSWORD
   if (!hasEnvValue(cwd, "AUTHENTICATOR_PASSWORD")) {
     out.AUTHENTICATOR_PASSWORD = FALLBACK_AUTHENTICATOR_PASSWORD
+  }
+  if (!hasEnvValue(cwd, SQL_EDITOR_PASSWORD_ENV)) {
+    out[SQL_EDITOR_PASSWORD_ENV] = FALLBACK_SQL_EDITOR_PASSWORD
   }
   return out
 }

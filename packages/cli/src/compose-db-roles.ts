@@ -4,7 +4,12 @@
 
 import { dirname } from "node:path"
 import { spawnSync, type SpawnSyncReturns } from "node:child_process"
-import { devAuthenticatorPassword, devDatabaseIdentity } from "./local-secrets.js"
+import {
+  SQL_EDITOR_PASSWORD_ENV,
+  devAuthenticatorPassword,
+  devDatabaseIdentity,
+  devSqlEditorPassword,
+} from "./local-secrets.js"
 import type { SelfHostComposePaths } from "./self-host-compose.js"
 import { degraded } from "./strict.js"
 import { dockerEnv } from "./docker-env.js"
@@ -15,6 +20,16 @@ type ComposeTarget = Pick<SelfHostComposePaths, "composePath">
 const RECONCILE_AUTHENTICATOR_SQL = [
   "\\getenv pw SUPATYPE_AUTHENTICATOR_PASSWORD",
   "ALTER ROLE authenticator WITH LOGIN PASSWORD :'pw';",
+  "",
+].join("\n")
+
+// `\gexec` rather than a DO block: psql does not interpolate `:'pw'` inside a dollar-quoted body.
+// The WHERE clause yields no statement at all on a volume whose image predates the role.
+const RECONCILE_SQL_EDITOR_SQL = [
+  `\\getenv pw ${SQL_EDITOR_PASSWORD_ENV}`,
+  "SELECT format('ALTER ROLE supatype_sql_editor WITH LOGIN PASSWORD %L', :'pw')",
+  "WHERE EXISTS (SELECT FROM pg_roles WHERE rolname = 'supatype_sql_editor')",
+  "\\gexec",
   "",
 ].join("\n")
 
@@ -91,6 +106,29 @@ export function reconcileAuthenticatorPassword(
   if (result.status !== 0) {
     degraded(
       "Could not set the authenticator password, so the REST API will answer 502",
+      failureDetail(result),
+    )
+  }
+}
+
+/**
+ * Set `supatype_sql_editor`'s password to the one `.env` holds, every time the stack starts.
+ *
+ * The image passwords that role once, at bootstrap, so the same drift as
+ * {@link reconcileAuthenticatorPassword} applies: a `.env` that moved after the volume was made
+ * leaves Studio's SQL editor unable to log in. Skipped when the role does not exist yet.
+ */
+export function reconcileSqlEditorPassword(
+  paths: ComposeTarget,
+  cwd: string,
+  composeProject: string,
+): void {
+  const result = runOwnerPsql(paths, cwd, composeProject, RECONCILE_SQL_EDITOR_SQL, {
+    [SQL_EDITOR_PASSWORD_ENV]: devSqlEditorPassword(cwd),
+  })
+  if (result.status !== 0) {
+    degraded(
+      "Could not set the SQL editor password, so Studio's SQL editor cannot connect",
       failureDetail(result),
     )
   }

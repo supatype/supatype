@@ -6,12 +6,15 @@ import {
   FALLBACK_AUTHENTICATOR_PASSWORD,
   FALLBACK_JWT_SECRET,
   FALLBACK_POSTGRES_PASSWORD,
+  FALLBACK_SQL_EDITOR_PASSWORD,
   devAuthenticatorPassword,
   devDatabaseIdentity,
   devDatabaseUrl,
   devJwtSecret,
   devPostgresPassword,
+  devSqlEditorPassword,
   secretFingerprint,
+  seedMissingLocalSecrets,
 } from "../src/local-secrets.js"
 import { upsertEnvFile } from "../src/env-file.js"
 
@@ -40,6 +43,27 @@ describe("resolving local secrets", () => {
     expect(devJwtSecret(dir)).toBe(FALLBACK_JWT_SECRET)
     expect(devPostgresPassword(dir)).toBe(FALLBACK_POSTGRES_PASSWORD)
     expect(devAuthenticatorPassword(dir)).toBe(FALLBACK_AUTHENTICATOR_PASSWORD)
+  })
+
+  it("resolves the SQL editor password from .env, falling back when absent", () => {
+    expect(devSqlEditorPassword(project("SUPATYPE_SQL_EDITOR_PASSWORD=editor-mine\n"))).toBe(
+      "editor-mine",
+    )
+    expect(devSqlEditorPassword(project())).toBe(FALLBACK_SQL_EDITOR_PASSWORD)
+  })
+})
+
+describe("seedMissingLocalSecrets and the SQL editor password", () => {
+  it("fills the editor password with the fallback when .env has none", () => {
+    expect(seedMissingLocalSecrets(project())["SUPATYPE_SQL_EDITOR_PASSWORD"]).toBe(
+      FALLBACK_SQL_EDITOR_PASSWORD,
+    )
+  })
+
+  // The role's password lives in the volume; replacing the project's value would lock it out.
+  it("does not hand back an editor password the project already has", () => {
+    const seeded = seedMissingLocalSecrets(project("SUPATYPE_SQL_EDITOR_PASSWORD=generated-editor\n"))
+    expect(seeded).not.toHaveProperty("SUPATYPE_SQL_EDITOR_PASSWORD")
   })
 })
 
