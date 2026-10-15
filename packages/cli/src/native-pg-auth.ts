@@ -13,8 +13,13 @@ import { spawnSync } from "node:child_process"
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { NATIVE_AUTH_METHOD, pgBin, pgSpawnEnv, reload, type PgOptions } from "./postgres-ctl.js"
+import { hasEnvValue } from "./env-file.js"
+import { fatalError } from "./ui/fatal.js"
 
 const SUPERUSER_PASSWORD_ENV = "SUPATYPE_SUPERUSER_PASSWORD"
+
+/** The `.env` key holding the native superuser's password. */
+const SUPERUSER_PASSWORD_KEY = "POSTGRES_PASSWORD"
 
 /**
  * pg_hba.conf with every entry that grants `trust` switched to scram-sha-256, or null when none
@@ -35,6 +40,44 @@ export function hbaWithoutTrust(text: string): string | null {
 export function clusterGrantsTrust(dataDir: string): boolean {
   const hba = join(dataDir, "pg_hba.conf")
   return existsSync(hba) && hbaWithoutTrust(readFileSync(hba, "utf8")) !== null
+}
+
+/**
+ * True when `.env` has no POSTGRES_PASSWORD but the data directory holds a cluster that checks
+ * passwords. That cluster's superuser still has the password `.env` used to carry; generating a
+ * new one, as a missing key otherwise does, only moves the failure to the first connection, where
+ * it reads as a bare "password authentication failed".
+ *
+ * A cluster that still trusts is fine: its next start gives the superuser the new password.
+ */
+export function superuserPasswordMissing(cwd: string, dataDir: string): boolean {
+  if (hasEnvValue(cwd, SUPERUSER_PASSWORD_KEY)) return false
+  return existsSync(join(dataDir, "PG_VERSION")) && !clusterGrantsTrust(dataDir)
+}
+
+/** What to say when the superuser's password is missing from `.env`, or refused by the cluster. */
+export function superuserPasswordMissingMessage(dataDir: string): { title: string; hints: string[] } {
+  return {
+    title:
+      `The Postgres data directory ${dataDir} checks the superuser's password, ` +
+      `and .env has no ${SUPERUSER_PASSWORD_KEY} it accepts.`,
+    hints: [
+      `Restore ${SUPERUSER_PASSWORD_KEY} in .env to the value this data directory was created with.`,
+      "Or start over with an empty database: `supatype pg reset` deletes the data directory and creates a new one with a new password.",
+    ],
+  }
+}
+
+/** Stop with {@link superuserPasswordMissingMessage} when the password is missing; otherwise do nothing. */
+export function requireSuperuserPassword(cwd: string, dataDir: string): void {
+  if (!superuserPasswordMissing(cwd, dataDir)) return
+  const { title, hints } = superuserPasswordMissingMessage(dataDir)
+  fatalError(title, hints)
+}
+
+/** True when a client's error output is Postgres refusing its password. */
+export function isPasswordRejected(stderr: string): boolean {
+  return /password authentication failed/i.test(stderr)
 }
 
 /** The environment for a client of the native cluster, as `user` with `password`. */

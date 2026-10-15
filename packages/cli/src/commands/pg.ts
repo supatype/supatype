@@ -7,19 +7,20 @@
 import type { Command } from "commander"
 import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, rmSync } from "node:fs"
-import { homedir } from "node:os"
 import { join } from "node:path"
 import { loadConfig } from "../config.js"
-import { resolveBinary } from "../binary-cache.js"
+import { nativeDataDir, nativeDbPort, nativeStateRoot } from "../project-config.js"
 import { confirm } from "../ui/confirm.js"
 import { info, plain } from "../ui/messages.js"
 import {
   initdb,
+  pgBin,
   start as pgStart,
   stop as pgStop,
   waitReady,
+  type PgOptions,
 } from "../postgres-ctl.js"
-import { pgClientEnv, requirePasswordAuth } from "../native-pg-auth.js"
+import { pgClientEnv, requirePasswordAuth, requireSuperuserPassword } from "../native-pg-auth.js"
 import { devPostgresPassword, ensureNativeSuperuserPassword } from "../local-secrets.js"
 
 export function registerPg(program: Command): void {
@@ -33,6 +34,7 @@ export function registerPg(program: Command): void {
     .action(async () => {
       const config = loadConfig()
       const opts = await pgOpts(config)
+      requireSuperuserPassword(process.cwd(), opts.dataDir)
       const password = ensureNativeSuperuserPassword(process.cwd())
       initdb(opts, password)
       pgStart(opts)
@@ -90,7 +92,7 @@ export function registerPg(program: Command): void {
       const config = loadConfig()
       const opts = await pgOpts(config)
       const db = dbname ?? config.project.name
-      const psql = join(opts.pgBinDir, "psql")
+      const psql = pgBin(opts.pgBinDir, "psql")
 
       const result = spawnSync(
         psql,
@@ -105,29 +107,21 @@ export function registerPg(program: Command): void {
 // Helper: build PgOptions from config
 // ---------------------------------------------------------------------------
 
-async function pgOpts(
-  config: ReturnType<typeof loadConfig>,
-): Promise<import("../postgres-ctl.js").PgOptions> {
-  const projectName = config.project.name
-  const stateRoot = join(homedir(), ".supatype", "projects", projectName)
-  const dataDir = config.database.data_dir ?? join(stateRoot, "data")
-  const logsDir = join(stateRoot, "logs")
+/**
+ * The cluster `supatype dev` runs for this project: the same binaries, data directory and port.
+ *
+ * It used to resolve its own: port 5432 whatever the project set, and an override directory
+ * without the path normalisation dev applies, so `pg` could manage a different cluster from the
+ * one dev started.
+ */
+async function pgOpts(config: ReturnType<typeof loadConfig>): Promise<PgOptions> {
+  const logsDir = join(nativeStateRoot(config), "logs")
   mkdirSync(logsDir, { recursive: true })
-
-  // Resolve pg binary dir.
-  const pgCacheDir = await (async () => {
-    const override = config.overrides?.postgres_dir
-    if (override) return join(override, "bin")
-    const { cachePath, currentPlatform, resolveVersionFor } = await import("../binary-cache.js")
-    const platform = currentPlatform()
-    const version = await resolveVersionFor("postgres", config)
-    return join(cachePath("postgres", version), `pg-${version}`, "bin")
-  })()
-
+  const { resolvePgBinDir } = await import("./dev.js")
   return {
-    pgBinDir: pgCacheDir,
-    dataDir,
-    port: 5432,
+    pgBinDir: await resolvePgBinDir(config),
+    dataDir: nativeDataDir(config),
+    port: nativeDbPort(config),
     logPath: join(logsDir, "postgres.log"),
   }
 }
