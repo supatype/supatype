@@ -446,8 +446,10 @@ upgrade a production server.
   Kong's certificates live in pg_keyspace inside Postgres when the image run is an `X-latest` or an
   exact version from 17.2.9 (the first whose entrypoint honours `SUPATYPE_KEYSPACE_ENABLED`), and
   in a Valkey sidecar for an exact version before it, a custom `database.image`, or
-  `database.external`. So a `"17"` or `"17.2"` pin no longer starts Valkey. The native provider is
-  unchanged: any pin there still keeps Valkey unless you name `cache: { provider: "pg_keyspace" }`.
+  `database.external`. So a `"17"` or `"17.2"` pin no longer starts Valkey. On the native provider
+  a pin no longer decides the cache either: pg_keyspace is used whenever the downloaded Postgres
+  archive carries the library and its RESP port answers, and the Valkey sidecar otherwise (an
+  explicit `cache.provider` and `database.external` still decide as before).
 - **`--project-name` or `SUPATYPE_PROJECT_NAME`** renames the project for one run (its compose
   project, database and state directory follow) without changing any file.
 - **`supatype self-host compose restart <service>`** recreates one service with the current config

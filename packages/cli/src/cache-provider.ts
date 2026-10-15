@@ -18,7 +18,6 @@
  * native path end up disagreeing about which server is running: a cache that silently never hits
  * and, with TLS on, a Kong that cannot store its certificate.
  */
-import { pinnedVersion } from "./binary-cache.js"
 import { postgresImageFor } from "./postgres-image.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
 
@@ -52,14 +51,14 @@ export function keyspaceInPostgres(config: SupatypeProjectConfig): boolean {
 }
 
 /**
- * Whether native dev asks its Postgres for the keyspace. The rule from before VK2, kept as it was
- * for the native provider: an explicit choice wins, an external database is Valkey, and any
- * `versions.postgres` pin is Valkey. Native then also checks that the archive carries the library
- * and that RESP answers, falling back to the Valkey sidecar if not.
+ * Whether native dev asks its Postgres for the keyspace: an explicit choice wins, an external
+ * database is Valkey, and otherwise yes. A `versions.postgres` pin does not decide, unlike under
+ * Docker, because native sets pg_keyspace up itself rather than through an image toggle: it checks
+ * that the archive carries the library and that RESP answers, and falls back to the Valkey sidecar
+ * if either does not (native-keyspace.ts).
  */
 export function nativeKeyspaceWanted(config: SupatypeProjectConfig): boolean {
   const declared = config.cache?.provider
   if (declared === "valkey" || declared === "pg_keyspace") return declared === "pg_keyspace"
-  if (config.database?.external) return false
-  return pinnedVersion("postgres", config) === undefined
+  return !config.database?.external
 }
