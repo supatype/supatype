@@ -18,7 +18,6 @@ import { reportDevPushFailure } from "../push-refusal.js"
 import type { Command } from "commander"
 import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { homedir } from "node:os"
 import { isAbsolute, join, relative, resolve } from "node:path"
 import { loadConfig } from "../config.js"
 import type { ExtractedSchemaAstV2 } from "../schema-ast-v2.js"
@@ -26,19 +25,26 @@ import {
   pgSchema,
   postgrestSchemaEnv,
   functionsPathCandidatesFromProject,
+  localDSN,
+  nativeDataDir,
+  nativeDbPort,
+  nativeRealtimePort,
+  nativeStateRoot,
+  REALTIME_PORT_ENV,
   resolveRuntimeProvider,
   schemaPathFromProject,
   type SupatypeProjectConfig,
 } from "../project-config.js"
+import { DEV_DB_PORT_ENV } from "../db-port.js"
 import { discoverFunctionsOrExit, writeDevFunctionsRouter } from "../functions-router-gen.js"
 import { fieldMaskingTierFromProject } from "../field-masking-tier.js"
 import { projectHasVersionedModels } from "../model-versioning.js"
 import { signJwt } from "../jwt.js"
 import { requireUsableJwtSecret } from "../jwt-secret-length.js"
 import {
-  devAuthenticatorPassword,
+  ensureNativeAuthenticatorPassword,
   devJwtSecret,
-  devPostgresPassword,
+  ensureNativeSuperuserPassword,
   secretFingerprint,
 } from "../local-secrets.js"
 import {
@@ -86,8 +92,14 @@ import {
   stop as pgStop,
   waitReady as pgWaitReady,
   isPortInUse,
-  pgSpawnEnv,
 } from "../postgres-ctl.js"
+import {
+  isPasswordRejected,
+  pgClientEnv,
+  requirePasswordAuth,
+  requireSuperuserPassword,
+  superuserPasswordMissingMessage,
+} from "../native-pg-auth.js"
 /** Map `email.smtp` from supatype.config.ts into SUPATYPE_SMTP_* for the embedded auth service. */
 function authSMTPFromEmailConfig(email: SupatypeProjectConfig["email"] | undefined): Record<string, string> {
   const s = email?.smtp
@@ -106,37 +118,46 @@ function authSMTPFromEmailConfig(email: SupatypeProjectConfig["email"] | undefin
   return out
 }
 
-const NATIVE_PG_PORT = 5432
-const REALTIME_PORT = "4000"
-
 function portCheckCommand(port: number): string {
   return process.platform === "win32"
     ? `netstat -ano | findstr :${port}`
     : `lsof -i :${port}`
 }
 
-async function assertNativeDevPortsFree(serverPort: number, postgrestPort: number): Promise<void> {
-  const brand = { intro: "Local development" }
-  if (await isPortInUse(NATIVE_PG_PORT)) {
-    fatalError(
-      `Port ${NATIVE_PG_PORT} is already in use.`,
-      ["Another Postgres instance may be running.", `Check: ${portCheckCommand(NATIVE_PG_PORT)}`],
-      { brand },
-    )
-  }
-  if (await isPortInUse(serverPort)) {
-    fatalError(
-      `Port ${serverPort} is already in use.`,
-      ["Another supatype-server may be running.", `Check: ${portCheckCommand(serverPort)}`],
-      { brand },
-    )
-  }
-  if (await isPortInUse(postgrestPort)) {
-    fatalError(
-      `Port ${postgrestPort} is already in use.`,
-      ["Another service may be running.", `Check: ${portCheckCommand(postgrestPort)}`],
-      { brand },
-    )
+/** The ports native dev binds, each with what usually holds it and how to move it. */
+interface NativeDevPorts {
+  postgres: number
+  server: number
+  postgrest: number
+  realtime: number
+}
+
+const NATIVE_PORT_HINTS: Record<keyof NativeDevPorts, { holder: string; move: string }> = {
+  postgres: {
+    holder: "Another Postgres instance may be running.",
+    move: `Move this project's with ${DEV_DB_PORT_ENV} in .env, or database.port in supatype.config.ts.`,
+  },
+  server: {
+    holder: "Another supatype-server may be running.",
+    move: "Move this project's with server.port in supatype.config.ts, or `supatype dev --port`.",
+  },
+  postgrest: {
+    holder: "Another service may be running.",
+    move: "Move this project's with server.postgrestPort in supatype.config.ts.",
+  },
+  realtime: {
+    holder: "Another realtime service, or any app on this port, may be running.",
+    move: `Move this project's with ${REALTIME_PORT_ENV} in .env, or server.realtimePort in supatype.config.ts.`,
+  },
+}
+
+async function assertNativeDevPortsFree(ports: NativeDevPorts): Promise<void> {
+  for (const [service, port] of Object.entries(ports) as [keyof NativeDevPorts, number][]) {
+    if (!(await isPortInUse(port))) continue
+    const { holder, move } = NATIVE_PORT_HINTS[service]
+    fatalError(`Port ${port} is already in use.`, [holder, `Check: ${portCheckCommand(port)}`, move], {
+      brand: { intro: "Local development" },
+    })
   }
 }
 
@@ -209,9 +230,19 @@ export function registerDev(program: Command): void {
       const projectName = config.project.name
       const serverPort = opts.port ?? String(config.server.port ?? 54321)
       const postgrestPort = String(config.server.postgrestPort ?? 3001)
+      const pgPort = nativeDbPort(config, cwd)
+      const realtimePort = String(nativeRealtimePort(config, cwd))
 
       if (provider !== "docker") {
-        await assertNativeDevPortsFree(Number(serverPort), Number(postgrestPort))
+        await assertNativeDevPortsFree({
+          postgres: pgPort,
+          server: Number(serverPort),
+          postgrest: Number(postgrestPort),
+          realtime: Number(realtimePort),
+        })
+        // Before anything is generated: a missing password would otherwise be replaced in .env
+        // with a new one the existing cluster has never heard of.
+        requireSuperuserPassword(cwd, nativeDataDir(config))
       }
 
       // Before the session takes the terminal, so a refusal reaches it.
@@ -250,7 +281,7 @@ export function registerDev(program: Command): void {
       ])
 
       // ── 3. Per-project state directories ─────────────────────────────────
-      const stateRoot = join(homedir(), ".supatype", "projects", projectName)
+      const stateRoot = nativeStateRoot(config)
       const pidDir = join(stateRoot, "pid")
       const logsDir = join(stateRoot, "logs")
       const tmpDir = join(stateRoot, "tmp")
@@ -264,12 +295,12 @@ export function registerDev(program: Command): void {
       /** What PostgREST connects as, deliberately not `dbURL`, which is a superuser. */
       let postgrestDbURL: string
       let stopPostgres: () => void | Promise<void>
-      const pgPort = NATIVE_PG_PORT
-      const pgPassword = devPostgresPassword(cwd)
+      // Checked by the cluster (native-pg-auth.ts): .env's, or generated and written there.
+      const pgPassword = ensureNativeSuperuserPassword(cwd)
       // Distinct from pgPassword even locally, so the split the other paths enforce is the
       // one developers see. Read from .env when present so it matches a stack the user has
-      // already provisioned.
-      const authenticatorPassword = devAuthenticatorPassword(cwd)
+      // already provisioned, generated otherwise.
+      const authenticatorPassword = ensureNativeAuthenticatorPassword(cwd)
       // pgBinDir is set on the native path and used to add DLL search path for
       // PostgREST on Windows (PostgREST links against libpq + SSL from MinGW).
       let pgBinDir: string | null = null
@@ -280,7 +311,7 @@ export function registerDev(program: Command): void {
       {
         // native: resolve pg bin dir and manage with pg_ctl
         pgBinDir = await resolvePgBinDir(config)
-        const dataDir = config.database.data_dir ?? join(stateRoot, "data")
+        const dataDir = nativeDataDir(config)
         mkdirSync(dataDir, { recursive: true })
         // The RESP keyspace, when this archive carries it: one process instead
         // of a Postgres and a Valkey container. The port is chosen rather than
@@ -315,20 +346,23 @@ export function registerDev(program: Command): void {
         }
 
         console.log("[supatype] Initialising Postgres data directory...")
-        initdb(pgOpts)
+        initdb(pgOpts, pgPassword)
         console.log("[supatype] Starting Postgres...")
         pgStart(pgOpts)
         await pgWaitReady(pgOpts, 15_000)
         console.log("[supatype] Postgres is ready.")
-        dbURL = `postgres://postgres:${pgPassword}@127.0.0.1:${pgPort}/${projectName}?sslmode=disable`
-        postgrestDbURL = `postgres://authenticator:${authenticatorPassword}@127.0.0.1:${pgPort}/${projectName}?sslmode=disable`
+        if (requirePasswordAuth(pgOpts, pgPassword)) {
+          console.log("[supatype] This Postgres trusted every local connection; it now checks passwords.")
+        }
+        dbURL = localDSN(config, pgPassword, cwd)
+        postgrestDbURL = `postgres://authenticator:${encodeURIComponent(authenticatorPassword)}@127.0.0.1:${pgPort}/${projectName}?sslmode=disable`
         stopPostgres = () => pgStop(pgOpts)
 
         // Create project database if it doesn't exist (native only).
         const psqlBin    = join(pgBinDir, process.platform === "win32" ? "psql.exe"    : "psql")
         const createdbBin = join(pgBinDir, process.platform === "win32" ? "createdb.exe" : "createdb")
         const pgConnArgs = ["-h", "127.0.0.1", "-p", String(pgPort), "-U", "postgres"]
-        const pgEnv = pgSpawnEnv(pgBinDir)
+        const pgEnv = pgClientEnv(pgBinDir, pgPassword)
         const createDbResult = spawnSync(
           createdbBin,
           [...pgConnArgs, projectName],
@@ -336,6 +370,11 @@ export function registerDev(program: Command): void {
         )
         if (createDbResult.status !== 0) {
           const stderr = createDbResult.stderr ?? ""
+          // A POSTGRES_PASSWORD changed by hand reaches here; a deleted one was stopped earlier.
+          if (isPasswordRejected(stderr)) {
+            const { title, hints } = superuserPasswordMissingMessage(dataDir)
+            throw new Error([title, ...hints].join("\n  "))
+          }
           if (!stderr.includes("already exists")) {
             throw new Error(`Failed to create database "${projectName}": ${stderr}`)
           }
@@ -362,12 +401,17 @@ export function registerDev(program: Command): void {
         //
         // Conditional on the library being bundled: an archive downloaded before it was would fail
         // the CREATE, and there is nothing the developer could do about it from here.
-        spawnSync(psqlBin, [...pgConnArgs, "-d", projectName, "-f", "-"], {
+        const rolesResult = spawnSync(psqlBin, [...pgConnArgs, "-d", projectName, "-X", "-v", "ON_ERROR_STOP=1", "-f", "-"], {
           stdio: "pipe",
           encoding: "utf8",
           input: nativeRolesSql(nativeMaskLibraryPresent(pgBinDir)),
           env: { ...pgEnv, [AUTHENTICATOR_PASSWORD_ENV]: authenticatorPassword },
         })
+        // Unchecked, a failure here surfaced much later as PostgREST refusing to connect or
+        // answering 503, with nothing pointing back at the roles or schemas it needed.
+        if (rolesResult.status !== 0) {
+          throw new Error(`Failed to set up the API roles and schemas: ${(rolesResult.stderr ?? "").trim()}`)
+        }
       }
 
       const LOCAL_JWT_SECRET = devJwtSecret(cwd)
@@ -444,7 +488,7 @@ export function registerDev(program: Command): void {
       const anonKey        = signJwt({ ...jwtBase, role: "anon" },         LOCAL_JWT_SECRET)
       const serviceRoleKey = signJwt({ ...jwtBase, role: "service_role" }, LOCAL_JWT_SECRET)
 
-      const realtimeUrl = `http://127.0.0.1:${REALTIME_PORT}`
+      const realtimeUrl = `http://127.0.0.1:${realtimePort}`
       patchRouteManifest(manifestPath, {
         realtime_enabled: true,
         realtime_url: realtimeUrl,
@@ -462,7 +506,7 @@ export function registerDev(program: Command): void {
           env: {
             DATABASE_URL: dbURL,
             JWT_SECRET: LOCAL_JWT_SECRET,
-            PORT: REALTIME_PORT,
+            PORT: realtimePort,
             SLOT_NAME: "supatype_realtime",
             PUBLICATION_NAME: "supatype_realtime",
           },
@@ -1046,7 +1090,7 @@ function provisionStorageBuckets(
 // Resolve Postgres bin dir
 // ---------------------------------------------------------------------------
 
-async function resolvePgBinDir(config: Awaited<ReturnType<typeof loadConfig>>): Promise<string> {
+export async function resolvePgBinDir(config: Awaited<ReturnType<typeof loadConfig>>): Promise<string> {
   const override = config.overrides?.postgres_dir
   if (override) {
     // Normalize Git Bash (/c/Users/...) paths to Win32 form (C:\Users\...) on Windows.

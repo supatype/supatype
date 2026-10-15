@@ -29,7 +29,7 @@ Pin all `@supatype/*` packages to the **same version**. Use `file:` links only w
 Committed `supatype.config.ts` targets production; `supatype.local.config.ts` (gitignored) keeps local HTTP:
 
 ```typescript
-// supatype.config.ts — committed
+// supatype.config.ts (committed)
 export default defineConfig({
   project: { name: "my-app" },
   provider: "docker",
@@ -50,7 +50,7 @@ export default defineConfig({
   storage: { provider: "local", local_path: ".supatype/storage" },
   schema: { path: "schema/index.ts", pg_schema: "public" },
   output: { types: "supatype/generated/database.ts" },
-  // Optional — for `supatype deploy`:
+  // Optional, for `supatype deploy`:
   build: {
     framework: "vite",
     buildCommand: "vite build",
@@ -59,11 +59,11 @@ export default defineConfig({
   },
 })
 
-// supatype.local.config.ts — gitignored
+// supatype.local.config.ts (gitignored)
 export default { server: { mode: "dev" } } satisfies Partial<SupatypeConfig>
 ```
 
-**Do not pin `versions` for Docker** unless you need a specific release — omit the block so compose uses `:latest` image tags.
+**Do not pin `versions` for Docker** unless you need a specific release. Omit the block so compose uses `:latest` image tags.
 
 Run `supatype push` after schema changes to refresh types.
 
@@ -133,8 +133,8 @@ export default {
 { "scripts": { "dev": "supatype dev", "vite": "vite", "build": "vite build" } }
 ```
 
-1. `npm run dev` — one terminal: Supatype stack + auto-spawned Vite (when `app.mode` is `proxy` locally)
-2. Open **http://localhost:18473** — same origin as API; Docker rewrites upstream to `host.docker.internal:5173`
+1. `npm run dev` in one terminal: Supatype stack + auto-spawned Vite (when `app.mode` is `proxy` locally)
+2. Open **http://localhost:18473**, the same origin as the API; Docker rewrites upstream to `host.docker.internal:5173`
 
 For static-only local dev (no proxy), use `static` + `vite_dev_url` and run `npm run vite` in a second terminal instead.
 
@@ -162,13 +162,56 @@ const { data: posts } = await supatype.from("posts").select("*")
 await supatype.from("posts").insert({ title: "Hello", author_id: userId })
 await supatype.from("posts").update({ title: "Updated" }).eq("id", postId)
 await supatype.from("posts").delete().eq("id", postId)
+
+// Writes take every read filter: gt/gte/lt/lte, like/ilike, in, is, not, contains, match, or
+await supatype.from("posts").update({ status: "archived" }).lt("created_at", cutoff).select("id")
+const { data: gone } = await supatype.from("posts").delete().or("slug.eq.a,slug.eq.b").select("id")
+
+// Array columns: contains/containedBy send a Postgres array literal; an object goes as jsonb
+await supatype.from("posts").select("*").contains("tags", ["news", "featured"])
+
+// count is null unless asked for, never NaN
+const { count } = await supatype.from("posts").select("*", { count: "exact", head: true })
 ```
 
 Access rules in `schema/index.ts` enforce what each role can do.
 
+### Client behaviour to rely on
+
+- **Errors.** Every call returns `{ data, error }`. REST errors carry PostgREST 14 codes: database
+  errors as bare SQLSTATE (`23505`, `23503`, `42501`), PostgREST's own as `PGRST...`
+  (`PGRST116` from `.single()`, `PGRST205` unknown table, `PGRST204` unknown column, `PGRST301`
+  bad token, `PGRST303` expired token). Constants: `PostgrestErrorCodes` from `@supatype/client`.
+  Never compare against `PGRST23505`-style codes; they are not sent.
+- **Auth errors** carry the server's code in `error.code` on every auth method:
+  `invalid_credentials`, `email_not_confirmed`, `weak_password`, `user_already_exists`,
+  `otp_expired`. Branch on the code, not the message.
+- **Auth events:** `SIGNED_IN`, `SIGNED_OUT`, `TOKEN_REFRESHED`, `USER_UPDATED` (after
+  `updateUser`), `PASSWORD_RECOVERY` (a reset link or `verifyOtp({ type: "recovery" })` produced a
+  session), `MFA_CHALLENGE_VERIFIED`.
+- **Timeouts and retries.** `createClient({ timeout, retry })`: `timeout` (default 30000 ms)
+  applies to every HTTP request; `retry` (default true) retries only GET and HEAD (plus storage
+  `list` and `createSignedUrl`) up to 3 times on a dropped connection, 5xx or 429. Writes, sign-in
+  and `rpc`/`graphql`/`functions.invoke` are sent once unless the call passes `idempotent: true`.
+  A transport failure comes back as `error.code` `NETWORK_TIMEOUT`, `NETWORK_CONNECTION_REFUSED`,
+  `NETWORK_DNS_FAILURE`, `NETWORK_ERROR` or `RATE_LIMITED`.
+- **GraphQL** (`supatype.graphql`) runs as the caller, under the same access rules as REST.
+- **Realtime status.** Signing in or out swaps the socket; every channel reports `SUBSCRIBING`
+  until the new socket rejoins, then `SUBSCRIBED`. Each `from(table).subscribe()` gets its own
+  channel. React's `useSubscription` returns the raw channel status and shares a channel between
+  hooks given the same name; the Vue, Svelte and Solid bindings return `connecting`, `connected`,
+  `disconnected` or `error` plus an `error` that clears on reconnect.
+- **`@supatype/client/bindings`** is an internal subpath the framework bindings share
+  (`watchTable`, `subscribeToTable`, `subscriptionViewOf`, `applyRowChange`). App code should use
+  `from(table).subscribe()` or a binding, not this subpath.
+- **JWT secret.** PostgREST 14 needs `JWT_SECRET` of at least 32 characters; `supatype dev` and
+  `supatype self-host compose up` refuse a shorter one with
+  `JWT_SECRET in .env is N characters, and the REST API needs at least 32.` Fix: a longer secret,
+  then `supatype keys --write --force`.
+
 ## Framework packages (use these instead of hand-rolling)
 
-Supatype ships first-party bindings — prefer them over wiring the raw client by hand:
+Supatype ships first-party bindings. Prefer them over wiring the raw client by hand:
 
 | Package | What it gives you |
 |---------|-------------------|
@@ -254,7 +297,7 @@ import { LoginForm, SignUpForm, OAuthButton } from "@supatype/react-auth"
 <OAuthButton provider="github" redirectTo="/dashboard" />
 ```
 
-Form components apply no styles of their own — pass `className` and style descendants. `OAuthButton` has default styles only when no `className` is given.
+Form components apply no styles of their own: pass `className` and style descendants. `OAuthButton` has default styles only when no `className` is given.
 
 ## Gotcha: keep a single `@supatype/client` version
 

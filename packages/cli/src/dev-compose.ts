@@ -30,7 +30,7 @@ import { devApiKeys } from "./dev-api-keys.js"
 import { astRelatesToAuthUsers } from "./byo-preflight.js"
 import { ensureDevDbPort, ensureKongPort } from "./dev-ports.js"
 import { handleComposeProjectRename } from "./compose-rename.js"
-import { recoverStaleDevSession, writeDevSessionLock } from "./dev-session-lock.js"
+import { devSessionLockFor, recoverStaleDevSession, writeDevSessionLock } from "./dev-session-lock.js"
 import { endDevSession, startDevSession } from "./dev-session.js"
 import { ensureDevApiConfig } from "./ensure-dev-api-config.js"
 import { cacheSeedingNotes } from "./api-config-cache.js"
@@ -1652,13 +1652,10 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
     provider: "docker",
   })
 
-  writeDevSessionLock(cwd, {
-    composeProject: project,
-    projectRef: config.project.name,
-    composePath: paths.composePath,
-    kongPort,
-    startedAt: new Date().toISOString(),
-  })
+  writeDevSessionLock(
+    cwd,
+    devSessionLockFor(config, { composeProject: project, composePath: paths.composePath, kongPort }),
+  )
 
   const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
   await provisionDockerStorageBuckets(ast, kongPort, serviceRoleKey)

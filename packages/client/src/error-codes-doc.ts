@@ -8,8 +8,10 @@
  * on the documentation page.
  */
 
+import { AuthErrorCodes } from "./errors.js"
+
 export interface ErrorCodeEntry {
-  /** Machine-readable error code (e.g. "AUTH_INVALID_CREDENTIALS"). */
+  /** Machine-readable error code, as the error carries it (e.g. "invalid_credentials"). */
   code: string
   /** Human-readable short description. */
   description: string
@@ -24,91 +26,91 @@ export interface ErrorCodeEntry {
 export const ERROR_CODES_DOCUMENTATION: readonly ErrorCodeEntry[] = [
   // ── Auth errors ──────────────────────────────────────────────────────────
   {
-    code: "AUTH_INVALID_CREDENTIALS",
+    code: AuthErrorCodes.INVALID_CREDENTIALS,
     description: "The email/password combination is incorrect.",
     suggestion: "Check the email and password. If forgotten, use resetPasswordForEmail().",
     httpStatus: 400,
     category: "auth",
   },
   {
-    code: "AUTH_USER_NOT_FOUND",
+    code: AuthErrorCodes.USER_NOT_FOUND,
     description: "No user exists with the provided identifier.",
     suggestion: "Verify the email address. The user may need to sign up first.",
     httpStatus: 404,
     category: "auth",
   },
   {
-    code: "AUTH_EMAIL_NOT_CONFIRMED",
+    code: AuthErrorCodes.EMAIL_NOT_CONFIRMED,
     description: "The user's email has not been confirmed yet.",
     suggestion: "Check inbox for the confirmation email. Use auth.resend({ type: 'signup' }) to re-send.",
     httpStatus: 403,
     category: "auth",
   },
   {
-    code: "AUTH_PHONE_NOT_CONFIRMED",
+    code: AuthErrorCodes.PHONE_NOT_CONFIRMED,
     description: "The user's phone number has not been verified.",
     suggestion: "Complete the phone OTP verification flow.",
     httpStatus: 403,
     category: "auth",
   },
   {
-    code: "AUTH_SESSION_EXPIRED",
+    code: AuthErrorCodes.SESSION_EXPIRED,
     description: "The session has expired and the refresh token is no longer valid.",
     suggestion: "Sign the user in again. Implement automatic token refresh with onAuthStateChange.",
     httpStatus: 401,
     category: "auth",
   },
   {
-    code: "AUTH_INVALID_TOKEN",
+    code: AuthErrorCodes.INVALID_TOKEN,
     description: "The provided JWT is malformed, expired, or signed with a different secret.",
     suggestion: "Ensure the token is from the correct project. Check expiry. Re-authenticate.",
     httpStatus: 401,
     category: "auth",
   },
   {
-    code: "AUTH_MFA_REQUIRED",
+    code: AuthErrorCodes.MFA_REQUIRED,
     description: "Multi-factor authentication is required to complete this action.",
     suggestion: "Call mfa.challenge() and mfa.verify() with the user's TOTP code.",
     httpStatus: 403,
     category: "auth",
   },
   {
-    code: "AUTH_MFA_CHALLENGE_EXPIRED",
+    code: AuthErrorCodes.MFA_CHALLENGE_EXPIRED,
     description: "The MFA challenge has expired.",
     suggestion: "Create a new challenge with mfa.challenge() and try again.",
     httpStatus: 400,
     category: "auth",
   },
   {
-    code: "AUTH_MFA_VERIFICATION_FAILED",
+    code: AuthErrorCodes.MFA_VERIFICATION_FAILED,
     description: "The MFA verification code is incorrect.",
     suggestion: "Ensure the TOTP code is current (codes rotate every 30 seconds).",
     httpStatus: 400,
     category: "auth",
   },
   {
-    code: "AUTH_WEAK_PASSWORD",
+    code: AuthErrorCodes.WEAK_PASSWORD,
     description: "The password does not meet the minimum strength requirements.",
     suggestion: "Use a password with at least 8 characters including mixed case and numbers.",
     httpStatus: 422,
     category: "auth",
   },
   {
-    code: "AUTH_USER_ALREADY_EXISTS",
+    code: AuthErrorCodes.USER_ALREADY_EXISTS,
     description: "A user with this email or phone already exists.",
     suggestion: "Use signInWithPassword() instead, or try a different email.",
     httpStatus: 409,
     category: "auth",
   },
   {
-    code: "AUTH_OAUTH_CALLBACK_ERROR",
+    code: AuthErrorCodes.OAUTH_CALLBACK_ERROR,
     description: "The OAuth provider returned an error during the callback.",
     suggestion: "Check the provider configuration (client ID, secret, redirect URL).",
     httpStatus: 400,
     category: "auth",
   },
   {
-    code: "AUTH_MAGIC_LINK_EXPIRED",
+    code: AuthErrorCodes.MAGIC_LINK_EXPIRED,
     description: "The magic link has expired (default: 10 minutes).",
     suggestion: "Request a new magic link with signInWithOtp({ email }).",
     httpStatus: 400,

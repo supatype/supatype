@@ -36,11 +36,16 @@ END $$;
  *
  * `authenticator` is created outside the `DO` block because psql does not substitute its
  * variables inside a dollar-quoted body; `\gexec` runs the `CREATE ROLE` only when the role is
- * missing.
+ * missing. Its password is then set from `.env` every time: the cluster checks passwords, and a
+ * role made before it did has whatever password it was given then.
  */
 export function nativeRolesSql(withMask: boolean): string {
   return `${withMask ? "CREATE EXTENSION IF NOT EXISTS supatype_mask;\n" : ""}CREATE SCHEMA IF NOT EXISTS auth;
 CREATE SCHEMA IF NOT EXISTS extensions;
+-- PostgREST is told to serve graphql_public (STACK_API_SCHEMAS) and answers 503 on every request
+-- when a schema in its list is missing. The image's pg_graphql migration creates it; a native
+-- Postgres has no pg_graphql, so it is created here, empty, and /graphql/v1 finds no function.
+CREATE SCHEMA IF NOT EXISTS graphql_public;
 DO $$ BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'anon')
     THEN CREATE ROLE anon NOLOGIN; END IF;
@@ -52,9 +57,11 @@ END $$;
 \\getenv authenticator_password ${AUTHENTICATOR_PASSWORD_ENV}
 SELECT format('CREATE ROLE authenticator LOGIN NOINHERIT PASSWORD %L', :'authenticator_password')
   WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticator') \\gexec
+SELECT format('ALTER ROLE authenticator PASSWORD %L', :'authenticator_password') \\gexec
 GRANT anon, authenticated, service_role TO postgres;
 GRANT anon, authenticated, service_role TO authenticator;
 GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+GRANT USAGE ON SCHEMA graphql_public TO anon, authenticated, service_role;
 -- Where the engine installs PostGIS, pgvector and unaccent: a request resolves a column's type and
 -- a filter's operator through it, and PostgREST's extra search path names it.
 GRANT USAGE ON SCHEMA extensions TO anon, authenticated, service_role;

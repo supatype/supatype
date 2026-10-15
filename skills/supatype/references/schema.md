@@ -64,6 +64,23 @@ export type Post = Model<{
 
 Relation kinds: `RelatedTo`, `HasMany`, `HasOne`, `ManyToMany` (from `@supatype/types`).
 
+`RelatedTo<T, { onDelete: "cascade"; onUpdate: "restrict" }>`: both take `"cascade"`, `"setNull"`,
+`"restrict"` or `"noAction"` and become the foreign key's `ON DELETE` / `ON UPDATE`. `onDelete`
+defaults to `"restrict"`, `onUpdate` to `"cascade"`. (`onUpdate` was ignored before 0.7.0; every key
+was `ON UPDATE CASCADE`, which is still the default, so leaving it out changes nothing.)
+
+## Field rules on INSERT
+
+`access.fields.<column>.write` (or `read`, when there is no `write`) is judged on INSERT against the
+row being stored, defaults included, like RLS `WITH CHECK`, so `Owner<"user_id">` works on create.
+Leaving the field out, sending `null`, `DEFAULT`, or a value equal to the column default is not a
+write: the default is stored and the rule is not judged. Any other value the rule refuses fails the
+whole insert with `42501` (tier 1: `column "<table>"."<col>" cannot be written by this role`;
+tier 2: `permission denied for column <col> of relation <table>`). `service_role` is exempt. UPDATE
+is unchanged (cannot read: stored value kept silently; can read but not write: `42501`). Before
+0.7.0 such a value was silently replaced by the default, so a create form that sends a field the
+caller may not set must now leave it out.
+
 ## Singleton globals
 
 Studio-editable site settings:
@@ -134,6 +151,49 @@ in `access` is an error.
 `string`, `Int`, `SmallInt`, `UUID`, `Email`, `Timestamp`, `DateOnly`, `JSON`, `RichText`, `Blocks`, `ImageAsset`, `Optional<T>`, `Unique<T>`, `SupatypeAuthUserId`
 
 Import from `@supatype/types`. Use `Optional<T>` for nullable fields.
+
+## Indexes, PostGIS and pgvector
+
+`Indexed<T>` is a single-field B-tree. Anything else goes in the model's `indexes`:
+
+```typescript
+import type { GeoPoint, Model, UUID, Vector } from "@supatype/types"
+
+export type Place = Model<{
+  id: UUID
+  location: GeoPoint
+  embedding: Vector<1536>
+}, {
+  tableName: "places"
+  indexes: [
+    { fields: ["location"]; using: "gist" },
+    { fields: ["embedding"]; using: "hnsw"; distance: "cosine" },
+  ]
+}>
+```
+
+- `using`: `"btree"` (default), `"gin"`, `"gist"` (for `Geo` / `GeoPoint`), `"hnsw"` (for `Vector`), `"brin"`.
+- `distance` (hnsw only): `"cosine"` (default, `vector_cosine_ops`), `"l2"`, `"innerProduct"`. A query
+  ordered by another distance does not use the index. `distance` on a non-hnsw index, or hnsw on a
+  non-Vector field, is refused.
+
+Extensions (`postgis`, `vector`, `unaccent`, `pgcrypto`) are created in the `extensions` schema on
+every tier, not `public`. Columns still read, write and filter through REST and GraphQL, but the
+extensions' own functions are **not** API endpoints (`/rest/v1/rpc/st_distance` is 404). To expose
+one, write your own SQL function in `public` with `SET search_path = public, extensions`, leave it
+`SECURITY INVOKER`, run `NOTIFY pgrst, 'reload schema'`, and call it with `supatype.rpc(...)`; the
+push leaves functions it did not make alone. On an upgraded project the first push moves `vector`,
+`unaccent` and `pgcrypto` out of `public` (a cautious change, asked for; `--yes` agrees). PostGIS
+cannot be moved by a push: it stays in `public` with a warning on every push, and moving it is the
+manual reload in UPGRADING.md, "Extensions move to the extensions schema" (docs:
+`/docs/schema/fields#where-the-extensions-live`). Hand-written SQL must not prefix their objects with
+`public.`.
+
+A push that has to drop and re-add a column (a type it cannot convert, a column becoming generated,
+a generated expression changing) puts back every index, constraint, foreign key (both directions),
+trigger (with its enabled state) and policy on it from the catalog definition. A view on the column,
+or a dependent in another schema, makes the push refuse before changing anything; drop it, push,
+then recreate it.
 
 ## Identity and generated columns
 

@@ -2,16 +2,24 @@
 
 Install: `npm install -g @supatype/cli` or use `npx @supatype/cli`.
 
-Global flags (all commands): `--config`, `--env`, `--verbose`, `--json`, `--no-color`.
+Global flags (all commands): `--project-name <name>` (one run under another project name, see
+below), `-V`/`--version`, `-h`/`--help`. There is no global `--config`, `--verbose`, `--json` or
+`--no-color`; `--env`, `--connection` and `--json` are per-command options where a command takes them.
+
+Downloaded components land in `~/.supatype/cache/<component>/<version>/`, each checked against its
+release's signed checksums. With the schema engine the CLI also saves its `LICENSE` there and
+prints `[supatype] Supatype engine is licensed under BUSL-1.1; see <path>/LICENSE` (or warns
+`The engine's LICENSE was not saved: <reason>. The engine is licensed under BUSL-1.1.` when the
+release publishes none; the engine still installs).
 
 ## Project lifecycle
 
 | Command | Purpose |
 |---------|---------|
 | `supatype init [name]` | Scaffold project. Flags: `--mode dev \| standalone` |
-| `supatype keys` | Generate `ANON_KEY` + `SERVICE_ROLE_KEY` from `JWT_SECRET` |
-| `supatype dev` | Start local stack + control-plane. Docker default (Kong :18473). Flags: `--no-watch`, `--port`, `--reset-db` (remove only the Postgres data volume, after confirmation), `--yes` (skip that confirmation; required for `--reset-db` without a TTY), `--overwrite-drift` (every push of the session puts back access changed outside Supatype) |
-| `supatype push` | Diff, migrate, generate types. Flags: `--yes`, `--connection`, `--env`, `--direct`, `--overwrite-drift`. On the Docker provider a push the engine refuses over access changed outside Supatype shows each object and, in a terminal, asks before putting it back. On every path, declining keeps the hand edits, applies nothing and exits 1. A change that rewrites a table of more than 100k estimated rows (a type change that is not binary-compatible, say) locks it while it runs: the plan says so with the table's size, and the push asks in a terminal, applies it with `--yes`, and refuses it anywhere else. Each attempt waits at most 3 seconds for a table lock and the push tries again a few times; if a session still holds the table, it fails naming the table and that session's pid, state and age, having applied nothing. A new index on a table with rows is built concurrently, and a new foreign key or check validated, after the migration commits, so neither stops the application's writes |
+| `supatype keys` | Generate `ANON_KEY` + `SERVICE_ROLE_KEY` from `JWT_SECRET` (printed; `--write` fills blanks in `.env`, `--write --force` replaces them). `JWT_SECRET` must be at least 32 characters: `dev` and `self-host compose up` refuse a shorter one with `JWT_SECRET in .env is <n> characters, and the REST API needs at least 32.` |
+| `supatype dev` | Start local stack + control-plane. Docker default (Kong :18473). Flags: `--no-watch`, `--stream`, `--port`, `--reset-db` (remove only the Postgres data volume, after confirmation), `--yes` (skip that confirmation; required for `--reset-db` without a TTY), `--overwrite-drift` (every push of the session puts back access changed outside Supatype). Renders `auth.providers` for the auth server and warns about an enabled provider whose secret is set nowhere (config.md, OAuth providers). Native: Postgres checks passwords (`scram-sha-256`, `.env`'s `POSTGRES_PASSWORD` and `AUTHENTICATOR_PASSWORD`, generated when missing); a `trust` data directory from an older CLI is converted on its next start, printing "This Postgres trusted every local connection; it now checks passwords." `supatype pg psql` passes the password |
+| `supatype push` | Diff, migrate, generate types. Flags: `--yes`, `--connection`, `--env`, `--direct`, `--overwrite-drift`. Against the project's compose stack or a linked self-host server it then waits (at most 40 s, printing `[supatype] Waiting for the REST API to load the new schema (PostgREST answers 503 until it does)...`) until `/rest/v1/` stops answering 503; giving up does not fail the push. On the Docker provider a push the engine refuses over access changed outside Supatype shows each object and, in a terminal, asks before putting it back. On every path, declining keeps the hand edits, applies nothing and exits 1. A change that rewrites a table of more than 100k estimated rows (a type change that is not binary-compatible, say) locks it while it runs: the plan says so with the table's size, and the push asks in a terminal, applies it with `--yes`, and refuses it anywhere else. Each attempt waits at most 3 seconds for a table lock and the push tries again a few times; if a session still holds the table, it fails naming the table and that session's pid, state and age, having applied nothing. A new index on a table with rows is built concurrently, and a new foreign key or check validated, after the migration commits, so neither stops the application's writes |
 | `supatype diff` | Dry-run schema changes. Flags: `--connection`, `--env`, `--direct` |
 | `supatype generate` | Regenerate types without migration |
 | `supatype seed [file]` | Apply seed data in one transaction. Flags: `--atomic`, `--status`, `--connection`, `--environment`, `--force`. See [references/seeding.md](references/seeding.md) |
@@ -47,7 +55,7 @@ Auth flag: `--token` (cloud = platform PAT; self-host = `SERVICE_ROLE_KEY`). `--
 | `supatype rename <from> <to>` | Record a rename in `supatype/renames.json` (commit it): `member.name member.title` for a column, `member members` for a table. Every push replays the journal, so each database renames instead of dropping. `--prune` removes entries the target already applied. In a terminal, `dev` and `push` offer to record a likely rename before asking to drop data |
 | `supatype db connection-string` | Show DB URL (cloud linked projects) |
 | `supatype db reset-password` | Reset cloud project DB password |
-| `supatype pg` | Postgres helpers |
+| `supatype pg start` / `stop` / `reset` / `psql [db]` | Native Postgres helpers; `psql` passes `.env`'s `POSTGRES_PASSWORD` |
 | `supatype pull` | Draft `schema/index.ts` from live DB introspection (review before push); identity and generated columns are declared as such. Flags: `--connection`, `--out`, `--dry-run` |
 
 ## App and deploy
@@ -61,7 +69,8 @@ Auth flag: `--token` (cloud = platform PAT; self-host = `SERVICE_ROLE_KEY`). `--
 | `supatype self-host compose up -d` | Start production stack |
 | `supatype self-host compose down` | Stop stack |
 | `supatype self-host compose status` | Health check |
-| `supatype self-host compose restart <service>` | Recreate one service (e.g. `server`) with the current config and `.env`; the others keep running |
+| `supatype self-host compose restart <service>` | Recreate one service (e.g. `server`, `functions-worker`) with the current config and `.env`; the others keep running |
+| `supatype self-host compose logs` | Follow logs. `--service <name>` for one service |
 | `supatype deploy` | Deploy schema + static app to linked target. Flags: `--local`, `--env`, `--schema-only`, `--overwrite-drift` (without it a deploy refuses on access changed outside Supatype) |
 | `supatype deploy status` | Current static deployment |
 | `supatype deploy rollback` | Roll back static deployment. Flags: `--env`, `--to <deployment-id>` |
@@ -72,7 +81,7 @@ Auth flag: `--token` (cloud = platform PAT; self-host = `SERVICE_ROLE_KEY`). `--
 |---------|---------|
 | `supatype functions new <name>` | Scaffold `functions/<name>/index.ts` plus Deno IDE types (`functions/deno.d.ts`, `functions/tsconfig.json`) |
 | `supatype functions serve` | Local Deno server for all functions |
-| `supatype functions deploy` | Deploy edge functions via control plane when linked |
+| `supatype functions deploy` | Deploy edge functions via control plane when linked. On a self-host compose stack nothing is uploaded (the worker reads `functions/` from disk): run `supatype self-host compose restart functions-worker` to load changes |
 | `supatype functions list` | List deployed functions |
 | `supatype plugins` | Plugin scaffolding |
 | `supatype types` | Type utilities |
@@ -100,10 +109,10 @@ Example: [`examples/edge-kit`](https://github.com/supatype/supatype/tree/main/ex
 - Open the URL printed by `supatype dev`, not always `:18473`.
 
 **Stopping the stack:**
-- `supatype dev` runs `docker compose down` on Ctrl+C, terminal close, and as a sync fallback on process exit. It also stops, the same way, within a few seconds of the process that started it exiting (a script killed outright, a cancelled CI job), so it never runs on orphaned. To keep a stack up with nothing attached, use `supatype self-host compose up -d`.
+- `supatype dev` runs `docker compose down` on Ctrl+C, terminal close, and as a sync fallback on process exit. It also stops, the same way, within a few seconds of the process that started it exiting (a script killed outright, a cancelled CI job), so it never runs on orphaned. It says so as it stops. `dev` has no option to outlive its parent: to keep a stack up with nothing attached, use `supatype self-host compose up -d`. A script that backgrounds `dev` should `exec` it, `(cd app && exec npx supatype dev) & DEV_PID=$!`, so the PID it later kills is `dev` itself (without `exec`, older bash leaves `$!` naming a subshell and killing it left `dev` running).
 - Ownership flags (`--overwrite-drift`, `adopt --key/--release/--reclaim`, `doctor --rebaseline/--accept-access-drift`, and the keys an agreed adopt sends) are checked first against what will run them: a linked server's `GET .../schema/capabilities`, or the engine binary's `capabilities` (its version for an older one). A server or engine that lacks one is refused with "this server does not support <flag>; update it", never sent the flag to drop it.
 - A failed schema push never resets the database. `dev` retries only while Postgres is unreachable; an engine refusal (for example unmanaged tables, fixed with `supatype adopt`) stops `dev` with the engine's message. `supatype dev --reset-db` is the only way `dev` removes data, and it removes only the Postgres volume.
-- `.supatype/dev-session.json` tracks the active dev session; the next `supatype dev` offers to clean up a stack left running after an unclean exit.
+- `.supatype/dev-session.json` tracks the active dev session, with `dev`'s process ID; the next `supatype dev` offers to clean up a stack left running after an unclean exit. A file whose process is gone (or that names none) is removed and ignored, so it never makes another command render the stack as dev.
 - `supatype push` may start **Postgres only** and leave it running (intentional for prod/self-host workflows). Stop with `supatype self-host compose down`.
 
 **Renaming `project.name`:**
@@ -118,9 +127,7 @@ Example: [`examples/edge-kit`](https://github.com/supatype/supatype/tree/main/ex
 
 **First run:**
 ```bash
-supatype init my-app && cd my-app
-npm install && supatype keys
-# paste keys into .env
+supatype init my-app && cd my-app   # installs dependencies and writes the keys into .env
 supatype dev   # applies the schema and generates types, then watches both; no push needed locally
 ```
 
