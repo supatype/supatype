@@ -212,7 +212,7 @@ describe("runtime contract", () => {
   it("seeds the SQL editor password on the dev path, with no published default in compose", () => {
     const dir = mkdtempSync(join(tmpdir(), "supatype-editor-seed-"))
     try {
-      expect(Object.keys(seedMissingLocalSecrets(dir))).toContain("SUPATYPE_SQL_EDITOR_PASSWORD")
+      expect(Object.keys(seedMissingLocalSecrets(dir, baseConfig))).toContain("SUPATYPE_SQL_EDITOR_PASSWORD")
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

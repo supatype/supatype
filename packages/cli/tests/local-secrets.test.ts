@@ -17,6 +17,19 @@ import {
   seedMissingLocalSecrets,
 } from "../src/local-secrets.js"
 import { upsertEnvFile } from "../src/env-file.js"
+import { validateProjectConfig, type SupatypeProjectConfig } from "../src/project-config.js"
+
+/** A project on the bundled database, the only kind `seedMissingLocalSecrets` seeds a password for. */
+const bundledConfig = (): SupatypeProjectConfig =>
+  validateProjectConfig(
+    {
+      project: { name: "acme" },
+      server: { mode: "dev" },
+      app: { mode: "none" },
+      database: { provider: "docker" },
+    },
+    "supatype.config.ts",
+  )
 
 // The bug these exist to prevent: `supatype dev` used to pin POSTGRES_PASSWORD and JWT_SECRET
 // to published constants in `.env` on every run, the same `.env` a self-host deployment reads.
@@ -55,14 +68,17 @@ describe("resolving local secrets", () => {
 
 describe("seedMissingLocalSecrets and the SQL editor password", () => {
   it("fills the editor password with the fallback when .env has none", () => {
-    expect(seedMissingLocalSecrets(project())["SUPATYPE_SQL_EDITOR_PASSWORD"]).toBe(
+    expect(seedMissingLocalSecrets(project(), bundledConfig())["SUPATYPE_SQL_EDITOR_PASSWORD"]).toBe(
       FALLBACK_SQL_EDITOR_PASSWORD,
     )
   })
 
   // The role's password lives in the volume; replacing the project's value would lock it out.
   it("does not hand back an editor password the project already has", () => {
-    const seeded = seedMissingLocalSecrets(project("SUPATYPE_SQL_EDITOR_PASSWORD=generated-editor\n"))
+    const seeded = seedMissingLocalSecrets(
+      project("SUPATYPE_SQL_EDITOR_PASSWORD=generated-editor\n"),
+      bundledConfig(),
+    )
     expect(seeded).not.toHaveProperty("SUPATYPE_SQL_EDITOR_PASSWORD")
   })
 })
