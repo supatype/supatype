@@ -8,11 +8,13 @@ import {
   authJwtAud,
   hashPasswordForAuth,
   resolveAuthConfirmedAtColumn,
+  writesAdminThroughCompose,
 } from "../src/commands/admin.js"
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { scaffold, defaultScaffoldOptions } from "../src/commands/init.js"
+import { validateProjectConfig, type SupatypeProjectConfig } from "../src/project-config.js"
 
 describe("hashPasswordForAuth", () => {
   it("produces a bcrypt hash", async () => {
@@ -135,5 +137,25 @@ describe("init admin seed in .env", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+})
+
+describe("where the first admin user is written", () => {
+  const compose = { project: "supatype-acme", composePath: "/tmp/acme/docker-compose.yml" }
+  const config = (database: unknown): SupatypeProjectConfig =>
+    validateProjectConfig(
+      { project: { name: "acme" }, provider: "docker", server: { mode: "dev" }, app: { mode: "none" }, database },
+      "supatype.config.ts",
+    )
+
+  it("is the bundled db container when there is one", () => {
+    expect(writesAdminThroughCompose(config({ provider: "docker" }), { compose })).toBe(true)
+  })
+
+  // A BYO stack has no `db` service, so exec'ing into it failed with "service \"db\" is not
+  // running" and no admin was created. Its URL reaches the database instead.
+  it("is the external URL when the database is external", () => {
+    const external = config({ external: { url: "postgres://owner:secret@db.example.com:5432/app" } })
+    expect(writesAdminThroughCompose(external, { compose })).toBe(false)
   })
 })

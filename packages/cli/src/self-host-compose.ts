@@ -20,6 +20,7 @@ import { readEnvFile, readEnvValue } from "./env-file.js"
 import { upKeepingKongCurrent } from "./compose-kong.js"
 import { composeAuthProviderEnv } from "./auth-providers.js"
 import {
+  BUNDLED_DB_USER,
   CONTROL_PLANE_SECRET_ENV,
   SQL_EDITOR_PASSWORD_ENV,
   ensureControlPlaneSecret,
@@ -1151,6 +1152,47 @@ function repairComposeFunctionsFlag(manifestPath: string): void {
 }
 
 /**
+ * `POSTGRES_USER`, when the bundled database is in use and it names a role the image cannot run as.
+ *
+ * The image's first start checks the cluster as {@link BUNDLED_DB_USER}, so any other superuser
+ * leaves the db container exiting with "password authentication failed for user supatype_admin",
+ * and `dev` waiting ninety seconds to report only that the database never became healthy. The CLI
+ * writes this value itself, so a hand-written `.env` is how a project gets here (edge-kit's template
+ * did). An external database is the operator's, with whatever user its URL names.
+ *
+ * Read from the shell first, then `.env`, which is the order Compose resolves it in. An empty value
+ * is Compose's `${POSTGRES_USER:-supatype_admin}` default, not a different user.
+ */
+export function unsupportedBundledDbUser(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  if (usesExternalDatabase(config)) return undefined
+  const user = (env["POSTGRES_USER"] ?? readEnvFile(cwd)["POSTGRES_USER"])?.trim()
+  if (user === undefined || user === "" || user === BUNDLED_DB_USER) return undefined
+  return user
+}
+
+function assertBundledDbUser(cwd: string, config: SupatypeProjectConfig): void {
+  const user = unsupportedBundledDbUser(cwd, config)
+  if (user === undefined) return
+  fatalError(
+    `POSTGRES_USER is "${user}", and the bundled Postgres runs as ${BUNDLED_DB_USER}`,
+    [
+      `The database image checks the cluster as ${BUNDLED_DB_USER} on first start, so with any other`,
+      "user the db container exits before the stack can start.",
+      `Set POSTGRES_USER=${BUNDLED_DB_USER} in .env, and the same user in DATABASE_URL.`,
+      `Earlier CLIs did not check this. If this stack's data volume was created as "${user}", either`,
+      `create the role in it first (as "${user}": CREATE ROLE ${BUNDLED_DB_USER} WITH SUPERUSER LOGIN`,
+      "PASSWORD '<POSTGRES_PASSWORD>'), or start from an empty database with `supatype dev --reset-db`.",
+      "To use a Postgres you run yourself, with its own user, set database.external.url instead.",
+    ],
+    { brand: { intro: "Self-host compose" } },
+  )
+}
+
+/**
  * The config's external URL and `.env`'s `DATABASE_URL` must be the same string.
  *
  * The CLI resolves the URL from config; Compose substitutes `.env` at up-time. If the two disagree,
@@ -1291,6 +1333,7 @@ export function writeSelfHostCompose(
   options?: SelfHostComposeOptions,
 ): SelfHostComposePaths {
   assertExternalUrlMatchesEnv(cwd, config)
+  assertBundledDbUser(cwd, config)
   const tier = resolveFieldMaskingTier(cwd, config, options)
   const resolved: SelfHostComposeOptions = {
     ...options,
