@@ -75,8 +75,7 @@ import { publishDevReady } from "../dev-ready-panel.js"
 import { probeDockerDaemon, reportDockerUnavailable } from "../docker-runtime.js"
 import { fatalError } from "../ui/fatal.js"
 import { registerDevShutdown, waitForDevShutdown } from "../dev-shutdown.js"
-import { patchRouteManifest } from "../route-manifest.js"
-import { resolveRealtimeLaunch } from "../realtime-launch.js"
+import { startNativeRealtime } from "../native-realtime.js"
 import { writeAppViteEnv } from "../app-vite-env.js"
 import { nativeAuthProviderEnv, warnMissingAuthProviderSecrets } from "../auth-providers.js"
 import { AUTHENTICATOR_PASSWORD_ENV, nativeRolesSql } from "../native-roles-sql.js"
@@ -489,36 +488,13 @@ export function registerDev(program: Command): void {
       const serviceRoleKey = signJwt({ ...jwtBase, role: "service_role" }, LOCAL_JWT_SECRET)
 
       const realtimeUrl = `http://127.0.0.1:${realtimePort}`
-      patchRouteManifest(manifestPath, {
-        realtime_enabled: true,
-        realtime_url: realtimeUrl,
-      })
 
       writeAppViteEnv(cwd, config, `http://localhost:${serverPort}`, anonKey)
 
-      let realtimeProc: ProcessManager | null = null
-      try {
-        const launch = await resolveRealtimeLaunch(config, cwd)
-        realtimeProc = new ProcessManager(launch.bin, launch.args, {
-          label: "realtime",
-          pidDir,
-          colour: "\x1b[35m",
-          env: {
-            DATABASE_URL: dbURL,
-            JWT_SECRET: LOCAL_JWT_SECRET,
-            PORT: realtimePort,
-            SLOT_NAME: "supatype_realtime",
-            PUBLICATION_NAME: "supatype_realtime",
-          },
-        })
-        realtimeProc.start()
-        console.log(`[supatype] Realtime service: ${realtimeUrl}`)
-      } catch (err) {
-        console.warn(
-          `[supatype] ⚠  Realtime unavailable, WebSocket subscriptions will not work.\n` +
-            `  ${(err as Error).message}`,
-        )
-      }
+      const realtimeProc = await startNativeRealtime({
+        config, cwd, manifestPath, pidDir, url: realtimeUrl, port: realtimePort,
+        databaseUrl: dbURL, jwtSecret: LOCAL_JWT_SECRET,
+      })
 
 
       const emailProvider = config.email?.provider ?? "console"
@@ -742,8 +718,10 @@ export function registerDev(program: Command): void {
         { label: "REST", url: `http://localhost:${serverPort}/rest/v1/` },
         { label: "Auth", url: `http://localhost:${serverPort}/auth/v1/` },
         { label: "Storage", url: `http://localhost:${serverPort}/storage/v1/` },
-        { label: "Realtime", url: `ws://localhost:${serverPort}/realtime/v1/` },
       ]
+      if (realtimeProc) {
+        links.push({ label: "Realtime", url: `ws://localhost:${serverPort}/realtime/v1/` })
+      }
       if (studioProc) {
         links.push({ label: "Studio", url: `http://localhost:${studioPort}` })
       }
