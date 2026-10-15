@@ -28,8 +28,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 CLI_BIN="$ROOT_DIR/packages/cli/bin/supatype.js"
 source "$SCRIPT_DIR/lib/http-wait.sh"
+source "$SCRIPT_DIR/lib/compose-reset.sh"
 
 PROJECT_NAME="${SUPATYPE_ZTR_PROJECT:-${SUPATYPE_E2E_PROJECT:-ztr-smoke}}"
+# `dev` names the stack after the project, normalised as the CLI does.
+COMPOSE_PROJECT="$(compose_project_name "$PROJECT_NAME")"
 MAX_WAIT="${SUPATYPE_ZTR_MAX_WAIT:-300}"
 INSTALL_MODE="${SUPATYPE_ZTR_INSTALL:-workspace}"
 WORK_PARENT="${SUPATYPE_ZTR_WORK_ROOT:-}"
@@ -43,11 +46,10 @@ FAILED=0
 # `dev` stops its containers on the way out and keeps the volumes, as it should for a project
 # someone works in. This project is thrown away, and a database volume that outlives it is reused
 # by the next run under the same name, which then refuses that run's new password.
+# Only once this run has started `dev`: before that the project may be another run's.
 remove_stack() {
-  local compose_file="$PROJECT_DIR/.supatype/self-host/docker-compose.yml"
-  [[ -n "$SUPATYPE_PID" && -f "$compose_file" ]] || return 0
-  docker compose -p "supatype-${PROJECT_NAME}" -f "$compose_file" --project-directory "$PROJECT_DIR" \
-    down -v --remove-orphans >/dev/null 2>&1 || true
+  [[ -n "$SUPATYPE_PID" ]] || return 0
+  remove_compose_project "$COMPOSE_PROJECT"
 }
 
 cleanup() {
@@ -55,7 +57,7 @@ cleanup() {
   echo "==> zero-to-running teardown"
   stop_pid_bounded "$SUPATYPE_PID"
   if [[ "$FAILED" == "1" && "${SUPATYPE_ZTR_KEEP_ON_FAILURE:-}" == "1" ]]; then
-    echo "  Keeping work dir for debugging: $CREATED_WORK_ROOT"
+    echo "  Keeping work dir and stack for debugging: $CREATED_WORK_ROOT"
   else
     remove_stack
     if [[ -n "$CREATED_WORK_ROOT" && -d "$CREATED_WORK_ROOT" ]]; then rm -rf "$CREATED_WORK_ROOT"; fi
@@ -150,7 +152,7 @@ dump_failure_logs() {
   fi
   # The CLI names the compose project `supatype-<name>`; without -p, compose derives it from the
   # directory and finds no containers, so the dump comes out empty.
-  local compose=(docker compose -p "supatype-${PROJECT_NAME}" -f "$compose_file" --project-directory "$project_dir")
+  local compose=(docker compose -p "$COMPOSE_PROJECT" -f "$compose_file" --project-directory "$project_dir")
   echo "==> Compose ps"
   "${compose[@]}" ps -a || true
   echo "==> Recent server logs"
@@ -167,6 +169,9 @@ init_project() {
     mkdir -p "$WORK_PARENT"
   fi
   CREATED_WORK_ROOT="$WORK_PARENT"
+
+  echo "==> Removing anything a previous run left in $COMPOSE_PROJECT"
+  remove_compose_project "$COMPOSE_PROJECT"
 
   echo "==> supatype init $PROJECT_NAME (docker default, non-interactive)"
   cd "$WORK_PARENT"

@@ -20,6 +20,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 source "$SCRIPT_DIR/lib/http-wait.sh"
 CONFORMANCE_DIR="$ROOT_DIR/tests/integration/conformance"
+source "$SCRIPT_DIR/lib/compose-reset.sh"
 # Scaffolded outside the repo, and unique per run.
 #
 # Inside it, the directory showed up in `git status`, and a `dev` child process keeping it as its
@@ -55,15 +56,8 @@ if [[ ! -f "$CLI_BIN" ]]; then
 fi
 
 echo "==> Removing anything left by a previous run"
-# Before scaffolding, not only after. Each run generates a fresh POSTGRES_PASSWORD, and Postgres
-# only applies one on first init, so a database volume that outlived the last run rejects the new
-# credentials with "password authentication failed" and `dev` resets and retries until it times
-# out. A harness that depends on its own teardown having succeeded is not one you can trust.
-#
-# Exactly this project's: Docker's name filter matches a substring, so `supatype-conformance` also
-# removed the containers and volumes of a run named `supatype-conformance-2` beside it.
-docker rm -f $(docker ps -aq --filter "label=com.docker.compose.project=${COMPOSE_PROJECT}" 2>/dev/null) >/dev/null 2>&1 || true
-docker volume rm -f $(docker volume ls -q 2>/dev/null | grep -E "^${COMPOSE_PROJECT}_") >/dev/null 2>&1 || true
+# Before scaffolding, not only after: lib/compose-reset.sh says why, and why by label.
+remove_compose_project "$COMPOSE_PROJECT"
 
 echo "==> Scaffolding a project of its own"
 # Its own project, not the shared integration fixture: this pushes a table, drops columns from it
