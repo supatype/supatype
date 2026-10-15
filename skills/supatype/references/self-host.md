@@ -254,9 +254,11 @@ and with TLS on Kong cannot store its certificate. So the image decides:
 | an exact version that is not published | `17-latest`, with a warning | pg_keyspace |
 | `database.image` other than a `supatype/postgres` tag | that image | Valkey |
 
-An explicit `cache.provider` always wins. The native provider keeps its own
-rule: any `versions.postgres` pin there keeps Valkey unless you name
-`cache: { provider: "pg_keyspace" }`.
+An explicit `cache.provider` always wins. On the native provider a
+`versions.postgres` pin does not decide the cache: native dev uses pg_keyspace
+when the downloaded Postgres archive carries the library and its RESP port
+answers, and falls back to the Valkey sidecar when either does not.
+`database.external` is Valkey there too.
 
 ### What survives a restart, and what does not
 
