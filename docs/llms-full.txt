@@ -15,7 +15,7 @@ Supatype lets developers define backend data models as TypeScript `Model<>` type
 - Auth (email and password, magic links, OAuth providers, MFA)
 - Storage buckets from `Bucket<>` types, with accept lists, size limits, access rules, image transforms and time-limited signed URLs
 - Realtime change subscriptions, presence and broadcast; each event, deletes included, reaches only subscribers allowed to read that row
-- Studio: a schema-generated admin and CMS (lists, forms, rich text, blocks, media library, drafts, versions, live preview, SQL runner, migration history)
+- Studio: a schema-generated admin and CMS (lists, forms, rich text, blocks, media library, drafts, versions, live preview, SQL runner, migration history). Six roles: owner, admin, developer, editor, billing and viewer, each acting under the project's own access rules unless an owner or admin acts elevated
 
 "Zero drift" means: change a field once and every layer follows; rename a field and the TypeScript build fails instead of production.
 
@@ -37,7 +37,8 @@ Supatype lets developers define backend data models as TypeScript `Model<>` type
 ## Stack notes
 
 - Schema engine: a Rust binary the CLI downloads from releases.supatype.com. It plans and applies migrations, policies and grants, waits at most a few seconds for table locks, and builds indexes and validates constraints online on tables with rows.
-- Gateway: Kong in front of PostgREST, `supatype-server` (Go: auth and the gateway), storage, realtime and the Deno functions worker.
+- Gateway: Kong in front of PostgREST, `supatype-server` (Go: auth and the gateway), storage, realtime and the Deno functions worker. The gateway decides CORS: the site URL, `api.corsOrigins` and a list saved in Studio; `*` only when written.
+- Extensions (PostGIS, pgvector, unaccent, pgcrypto) are created in the `extensions` schema; their functions are not API endpoints, so expose one through a SQL function of your own. REST is PostgREST 14.18, which needs a JWT secret of at least 32 characters.
 - Realtime: a WAL-based service (`supatype/realtime`) reading logical replication; it judges every event, deletes included, against the schema's generated read rules.
 - Images: `supatype/postgres` (Postgres 17 with PostGIS, pgvector, pg_graphql and others), `supatype/server`, `supatype/realtime`, `supatype/storage`, `supatype/studio`, `supatype/functions-worker`, `supatype/schema-engine`.
 
