@@ -23,12 +23,18 @@ export function jwtSecretTooShort(secret: string): string | null {
   )
 }
 
+/**
+ * What to do about a short secret. `--force`, because the keys already in .env were signed with
+ * the old secret and `keys --write` on its own only fills blank ones.
+ */
+export const JWT_SECRET_REMEDY: readonly string[] = [
+  "Generate a longer one, for example with `openssl rand -base64 48`, and put it in .env as JWT_SECRET.",
+  "Then run `supatype keys --write --force` to sign ANON_KEY and SERVICE_ROLE_KEY with it again.",
+]
+
 /** Stop before starting a stack whose REST API could not start with `secret`. */
 export function requireUsableJwtSecret(secret: string): void {
   const problem = jwtSecretTooShort(secret)
   if (problem === null) return
-  fatalError(problem, [
-    "Generate a longer one, for example with `openssl rand -base64 48`, and put it in .env as JWT_SECRET.",
-    "Then run `supatype keys --write` to sign ANON_KEY and SERVICE_ROLE_KEY with it.",
-  ])
+  fatalError(problem, [...JWT_SECRET_REMEDY])
 }
