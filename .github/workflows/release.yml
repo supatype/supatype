@@ -79,8 +79,8 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-  # ── Docker Hub `latest`: stable releases always move it; alpha/beta/rc move it until
-  #     any vX.Y.Z (non-prerelease) tag exists in the repo, then prereleases stop moving it ──
+  # ── Docker Hub `latest`: stable releases always move it; a prerelease (any version with a
+  #     '-') moves it only until a vX.Y.Z tag exists in the repo, then prereleases stop moving it ──
   docker-latest-policy:
     runs-on: ubuntu-latest
     needs: prepare
@@ -97,10 +97,10 @@ jobs:
         run: |
           set -euo pipefail
           VERSION='${{ needs.prepare.outputs.version }}'
-          VERSION_LC=$(echo "$VERSION" | tr '[:upper:]' '[:lower:]')
+          # The one prerelease rule every latest channel uses: a '-' anywhere in the version.
           IS_PRE=false
-          case "$VERSION_LC" in
-            *alpha*|*beta*|*-rc*|*.rc.*|*preview*) IS_PRE=true ;;
+          case "$VERSION" in
+            *-*) IS_PRE=true ;;
           esac
 
           HAS_STABLE=false
@@ -135,8 +135,19 @@ jobs:
       version: ${{ needs.prepare.outputs.version }}
     secrets: inherit
 
+  # The standalone realtime binaries `supatype dev` runs natively, from the same tag and version
+  # as the CLI and the supatype/realtime image. npm waits on it for the reason it waits on the
+  # CLI: the CDN half is additive and immutable, the npm half cannot be undone, so a realtime
+  # build or signing failure stops the release while it can still be superseded.
+  realtime:
+    needs: prepare
+    uses: ./.github/workflows/realtime-release.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+    secrets: inherit
+
   npm:
-    needs: [prepare, cli]
+    needs: [prepare, cli, realtime]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -155,6 +166,10 @@ jobs:
         run: echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" >> ~/.npmrc
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # `Test` below runs the CLI's signing tests, which fail rather than skip under CI without it.
+      - name: Install minisign
+        run: sudo apt-get install -y -qq minisign
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -204,7 +219,10 @@ jobs:
           done
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_PUBLISH_TAG: ${{ contains(needs.prepare.outputs.version, 'alpha') && 'alpha' || contains(needs.prepare.outputs.version, 'beta') && 'beta' || 'latest' }}
+          # A prerelease (any version with a '-') never takes `latest`, which is what a bare
+          # `npm install @supatype/cli` resolves. Alphas and betas keep their own dist-tags;
+          # every other prerelease, such as an rc, goes to `next`.
+          NPM_PUBLISH_TAG: ${{ contains(needs.prepare.outputs.version, '-') && (contains(needs.prepare.outputs.version, 'alpha') && 'alpha' || contains(needs.prepare.outputs.version, 'beta') && 'beta' || 'next') || 'latest' }}
 
   # ── Build and push Docker images ────────────────────────────────────────────
   docker-storage:
@@ -386,7 +404,8 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
-          prerelease: ${{ contains(needs.prepare.outputs.version, 'alpha') || contains(needs.prepare.outputs.version, 'beta') || contains(needs.prepare.outputs.version, 'rc') }}
+          # A prerelease is never the repository's "latest" release on GitHub.
+          prerelease: ${{ contains(needs.prepare.outputs.version, '-') }}
           generate_release_notes: true
 
   # Homebrew lives here, not inside the reusable CLI workflow. It used to, and because npm
@@ -398,11 +417,15 @@ jobs:
   # Gated on a repo variable, not on whether the token exists: secrets are unavailable in any
   # `if:`, and inferring "configured" from a credential's presence reports an expired token as
   # a green skip.
+  #
+  # The tap has one formula and `brew upgrade` moves every user to it, so a prerelease (any
+  # version with a '-') must not replace it. verify-homebrew-install needs this job and has no
+  # always(), so it is skipped with it.
   homebrew-formula:
     name: Homebrew formula
     needs: [prepare, cli]
     runs-on: ubuntu-24.04
-    if: vars.HOMEBREW_TAP_REPO != ''
+    if: vars.HOMEBREW_TAP_REPO != '' && !contains(needs.prepare.outputs.version, '-')
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
     steps:
