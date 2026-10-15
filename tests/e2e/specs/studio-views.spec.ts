@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test"
+import { expect, test, type Locator, type Page } from "@playwright/test"
 import { signInToStudio } from "../lib/studio-session.js"
 
 /**
@@ -46,6 +46,38 @@ function watchFailures(page: Page): string[] {
 
 const signIn = (page: Page): Promise<void> =>
   signInToStudio(page, { email: EMAIL, password: PASSWORD })
+
+/** An address no earlier run created, so a leftover user cannot satisfy an assertion. */
+const newUserEmail = (label: string): string => `studio-${label}-${Date.now()}@example.com`
+
+/**
+ * Create a user from the users view with Auto-confirm email set as asked.
+ *
+ * Set explicitly rather than left at its default, because the default follows the project's own
+ * email confirmation setting, which is a property of the stack and not of this test.
+ */
+async function createUser(page: Page, email: string, autoConfirm: boolean): Promise<void> {
+  await page.goto("/studio/authentication/users", { waitUntil: "networkidle" })
+  await page.getByRole("button", { name: "+ Create User" }).click()
+
+  const panel = page.getByRole("dialog")
+  await panel.locator("input").first().fill(email)
+  await panel.locator("input[type='password']").fill("StudioUser123!")
+  const checkbox = panel.getByLabel("Auto-confirm email")
+  await expect(checkbox).toBeVisible()
+  await checkbox.setChecked(autoConfirm)
+
+  const created = page.waitForResponse(
+    (r) => r.request().method() === "POST" && new URL(r.url()).pathname.endsWith("/auth/v1/admin/users"),
+  )
+  await panel.getByRole("button", { name: "Create User", exact: true }).click()
+  expect((await created).status(), "POST /auth/v1/admin/users").toBeLessThan(300)
+  await expect(page.locator("tbody tr", { hasText: email })).toBeVisible()
+}
+
+/** The Confirmed value in the open user's detail panel, rather than the list column behind it. */
+const confirmedField = (page: Page): Locator =>
+  page.getByRole("dialog").locator("label", { hasText: /^Confirmed$/ }).locator("xpath=following-sibling::span")
 
 test.describe("Studio views", () => {
   test.beforeEach(async ({ page }) => {
@@ -157,6 +189,52 @@ test.describe("Studio views", () => {
     await expect(page.locator("body")).not.toContainText(/failed to fetch/i)
 
     expect(failures, "requests that failed on the users view").toEqual([])
+  })
+
+  // The auth server confirms a user created through its admin API only when the request asks it to:
+  // the project's auto-confirm setting covers public sign-ups, not this. Before the create form had
+  // the checkbox, every user added in Studio sat unconfirmed with no way to confirm them from here.
+  test("auth: a user created unconfirmed shows Pending, and Confirm email confirms them", async ({ page }) => {
+    const failures = watchFailures(page)
+    const email = newUserEmail("pending")
+    await createUser(page, email, false)
+
+    const row = page.locator("tbody tr", { hasText: email })
+    await expect(row).toContainText("Pending")
+    await row.locator("td").first().click()
+
+    const panel = page.getByRole("dialog")
+    await expect(confirmedField(page)).toHaveText("Pending")
+    const confirmed = page.waitForResponse(
+      (r) => r.request().method() === "PUT" && new URL(r.url()).pathname.includes("/auth/v1/admin/users/"),
+    )
+    await panel.getByRole("button", { name: "Confirm email", exact: true }).click()
+    expect((await confirmed).status(), "PUT /auth/v1/admin/users/:id").toBe(200)
+    await expect(confirmedField(page)).toHaveText("Yes")
+    await expect(panel.getByRole("button", { name: "Confirm email", exact: true })).toHaveCount(0)
+
+    // Read back from the auth server, not the panel's copy of the user: the URL still names the
+    // user, so the reload reopens their detail from a fresh fetch.
+    await page.reload({ waitUntil: "networkidle" })
+    await expect(confirmedField(page)).toHaveText("Yes")
+    await expect(page.locator("tbody tr", { hasText: email })).toContainText("Yes")
+
+    expect(failures, "requests that failed creating and confirming a user").toEqual([])
+  })
+
+  test("auth: a user created with Auto-confirm email ticked is confirmed straight away", async ({ page }) => {
+    const failures = watchFailures(page)
+    const email = newUserEmail("autoconfirmed")
+    await createUser(page, email, true)
+
+    const row = page.locator("tbody tr", { hasText: email })
+    await expect(row).toContainText("Yes")
+    await row.locator("td").first().click()
+
+    await expect(confirmedField(page)).toHaveText("Yes")
+    await expect(page.getByRole("dialog").getByRole("button", { name: "Confirm email", exact: true })).toHaveCount(0)
+
+    expect(failures, "requests that failed creating a confirmed user").toEqual([])
   })
 
   test("auth: providers lists each one with its enabled state", async ({ page }) => {
