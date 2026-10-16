@@ -49,12 +49,12 @@ const anyRules = {
 };
 
 /** The parser for a framework's own file type, with TypeScript parsing its script blocks. */
-function frameworkFiles(extension, parser) {
+function frameworkFiles(extension, parser, typed = typedParserOptions) {
   return {
     files: [`**/*${extension}`],
     languageOptions: {
       parser,
-      parserOptions: { ...typedParserOptions, parser: tseslint.parser },
+      parserOptions: { ...typed, parser: tseslint.parser },
     },
   };
 }
@@ -88,7 +88,13 @@ export default [
   },
   frameworkFiles(".vue", vueParser),
   frameworkFiles(".svelte", svelteParser),
-  frameworkFiles(".astro", astroParser),
+  // astro-eslint-parser does not take the project service: it warns and falls back to `project: true`,
+  // which finds the same nearest tsconfig.json for each file, so that is asked for directly.
+  frameworkFiles(".astro", astroParser, {
+    project: true,
+    tsconfigRootDir: import.meta.dirname,
+    extraFileExtensions,
+  }),
   {
     files: ["**/*.{ts,tsx,mts,cts,vue,svelte,astro}"],
     linterOptions: { noInlineConfig: true },
