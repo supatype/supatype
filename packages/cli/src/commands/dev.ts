@@ -181,7 +181,7 @@ export function registerDev(program: Command): void {
   program
     .command("dev")
     .description("Start local Postgres, apply schema, and run supatype-server")
-    .option("--no-watch", "Start services but do not watch for schema changes")
+    .option("--no-watch", "Start services but do not watch for schema changes, or (Docker) for function changes")
     .option("--stream", "Print interleaved logs instead of the interactive TUI")
     .option("--port <port>", "Port for supatype-server (overrides config)", String)
     .option("--reset-db", "Remove the local Postgres data volume before starting (asks first; storage is kept)")

@@ -35,6 +35,7 @@ import { endDevSession, startDevSession } from "./dev-session.js"
 import { ensureDevApiConfig } from "./ensure-dev-api-config.js"
 import { cacheSeedingNotes } from "./api-config-cache.js"
 import { refreshFunctionsContext } from "./functions-context-refresh.js"
+import { restartComposeFunctionsWorker, watchFunctionSources } from "./dev-functions-watch.js"
 import { DB_PORT_ENV, syncDatabaseUrlPort } from "./db-port.js"
 import { degraded } from "./strict.js"
 import { DEV_DESTRUCTIVE_POLICY, consentDepsFromDiff, pushConsentingToDestructive } from "./destructive-consent.js"
@@ -1536,17 +1537,21 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
     studioProc: StudioProc
     appProc: AppProc
     schemaWatcher: import("node:fs").FSWatcher | null
+    functionsWatcher: { close: () => void } | null
     debounceTimer: ReturnType<typeof setTimeout> | null
   } = {
     studioProc: null,
     appProc: null,
     schemaWatcher: null,
+    functionsWatcher: null,
     debounceTimer: null,
   }
 
   registerDevShutdown(async () => {
     shutdownState.schemaWatcher?.close()
     shutdownState.schemaWatcher = null
+    shutdownState.functionsWatcher?.close()
+    shutdownState.functionsWatcher = null
     if (shutdownState.debounceTimer) {
       clearTimeout(shutdownState.debounceTimer)
       shutdownState.debounceTimer = null
@@ -1765,6 +1770,9 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
           .catch(reportDevPushFailure)
       }, 300)
     })
+    // The worker imports its handlers once; without this an edited function kept its old code.
+    const worker = { composePath: paths.composePath, cwd, project }
+    shutdownState.functionsWatcher = watchFunctionSources(cwd, () => restartComposeFunctionsWorker(worker))
   }
 
   // Until Ctrl+C or a signal: the shutdown hook takes the stack down and exits.
