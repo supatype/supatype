@@ -13,7 +13,7 @@ import { DENO_RELEASE_PIN } from "../src/release-pins.js"
  * after 5 s. So the compose file leaves Kong's DNS alone, and the CLI reloads Kong whenever it
  * recreates a container behind it.
  */
-const spawnSync = vi.hoisted(() => vi.fn())
+const spawnSync = vi.hoisted(() => vi.fn<(cmd: string, args: string[]) => { status: number | undefined; stdout: string; stderr?: string }>())
 vi.mock("node:child_process", async (importOriginal) => ({
   ...(await importOriginal<typeof import("node:child_process")>()),
   spawnSync,
@@ -63,7 +63,7 @@ describe("Kong after an up the CLI runs", () => {
   /** Each docker call made, from its subcommand on; an inspect is its subcommand alone. */
   const ran = (): string[][] =>
     spawnSync.mock.calls.map((call) => {
-      const args = call[1] as string[]
+      const args = call[1]
       const at = args.findIndex((a) => ["ps", "up", "exec", "restart", "inspect"].includes(a))
       return args[at] === "inspect" ? ["inspect"] : args.slice(at)
     })

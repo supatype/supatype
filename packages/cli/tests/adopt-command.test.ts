@@ -1,7 +1,8 @@
 import { Command } from "commander"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest"
+import type { AdoptCallOptions, TargetCall } from "./support/engine-mocks.js"
 
-const targetSchemaAdopt = vi.hoisted(() => vi.fn())
+const targetSchemaAdopt = vi.hoisted(() => vi.fn<TargetCall<AdoptCallOptions>>())
 const requireTarget = vi.hoisted(() => vi.fn(async (_target: unknown, _needs: Array<{ feature: string; flag: string }>) => undefined))
 const confirmMock = vi.hoisted(() => vi.fn())
 
@@ -48,11 +49,11 @@ async function adopt(...args: string[]): Promise<void> {
 }
 
 describe("supatype adopt", () => {
-  let stderr: ReturnType<typeof vi.spyOn>
+  let stderr: MockInstance<typeof console.error>
 
   beforeEach(() => {
     targetSchemaAdopt.mockReset()
-    targetSchemaAdopt.mockImplementation(async (_t, _a, opts: { yes: boolean }) =>
+    targetSchemaAdopt.mockImplementation(async (_t, _a, opts) =>
       opts.yes ? { status: "adopted", adopt: PREVIEW.adopt } : PREVIEW,
     )
     requireTarget.mockClear()
@@ -110,7 +111,7 @@ describe("supatype adopt", () => {
   it("says busy, try again when another writer holds the engine's lock", async () => {
     const { EngineError } = await import("../src/engine-client.js")
     const { ENGINE_BUSY } = await import("@supatype/shared")
-    targetSchemaAdopt.mockImplementation(async (_t, _a, opts: { yes: boolean }) => {
+    targetSchemaAdopt.mockImplementation(async (_t, _a, opts) => {
       if (!opts.yes) return PREVIEW
       throw new EngineError("Another push, adopt or rebaseline is running on this database; try again.", "/adopt", 1, "", ENGINE_BUSY)
     })
@@ -149,7 +150,7 @@ describe("supatype adopt", () => {
   it("sends no keys to an engine from before the ledger, and does not gate it", async () => {
     vi.mocked(isInteractive).mockReturnValue(true)
     confirmMock.mockResolvedValue(true)
-    targetSchemaAdopt.mockImplementation(async (_t, _a, opts: { yes: boolean }) =>
+    targetSchemaAdopt.mockImplementation(async (_t, _a, opts) =>
       opts.yes ? { status: "adopted", stamped: 1 } : { status: "preview", stampStatements: ["COMMENT ON ..."] },
     )
     await adopt()
@@ -160,7 +161,7 @@ describe("supatype adopt", () => {
   it("exits 1 and says to run it again when the database changed since the preview", async () => {
     vi.mocked(isInteractive).mockReturnValue(true)
     confirmMock.mockResolvedValue(true)
-    targetSchemaAdopt.mockImplementation(async (_t, _a, opts: { yes: boolean }) => {
+    targetSchemaAdopt.mockImplementation(async (_t, _a, opts) => {
       if (!opts.yes) return PREVIEW
       throw new Error(STALE)
     })
@@ -174,7 +175,7 @@ describe("supatype adopt", () => {
   it("lets any other failure to apply through", async () => {
     vi.mocked(isInteractive).mockReturnValue(true)
     confirmMock.mockResolvedValue(true)
-    targetSchemaAdopt.mockImplementation(async (_t, _a, opts: { yes: boolean }) => {
+    targetSchemaAdopt.mockImplementation(async (_t, _a, opts) => {
       if (!opts.yes) return PREVIEW
       throw new Error("connection refused")
     })
@@ -190,7 +191,7 @@ describe("supatype adopt", () => {
   })
 
   it("exits 1 with --key when one is no longer a conflict", async () => {
-    targetSchemaAdopt.mockImplementation(async (_t, _a, opts: { yes: boolean }) => {
+    targetSchemaAdopt.mockImplementation(async (_t, _a, opts) => {
       if (!opts.yes) return PREVIEW
       throw new Error(STALE)
     })
@@ -202,7 +203,7 @@ describe("supatype adopt", () => {
   it("shows only the conflicts --key names before asking", async () => {
     vi.mocked(isInteractive).mockReturnValue(true)
     confirmMock.mockResolvedValue(true)
-    targetSchemaAdopt.mockImplementation(async (_t, _a, opts: { yes: boolean }) =>
+    targetSchemaAdopt.mockImplementation(async (_t, _a, opts) =>
       opts.yes ? { status: "adopted", adopt: [PREVIEW.adopt[0]] } : TWO_CONFLICTS,
     )
     const stdout = vi.mocked(console.log)
@@ -216,7 +217,7 @@ describe("supatype adopt", () => {
   it("agrees to adopt nothing when the preview listed only what to release", async () => {
     vi.mocked(isInteractive).mockReturnValue(true)
     confirmMock.mockResolvedValue(true)
-    targetSchemaAdopt.mockImplementation(async (_t, _a, opts: { yes: boolean }) => ({
+    targetSchemaAdopt.mockImplementation(async (_t, _a, opts) => ({
       status: opts.yes ? "adopted" : "preview",
       adopt: [],
       release: [{ kind: "table", table: "widget", name: "widget", message: "Table widget will be left alone" }],
@@ -235,7 +236,7 @@ describe("supatype adopt", () => {
     ["--release", "policy:post.post_select"],
     ["--reclaim", "policy:post.post_select"],
   ])("%s with --yes changes only the object it names: no conflict is adopted", async (flag, object) => {
-    targetSchemaAdopt.mockImplementation(async (_t, _a, opts: { yes: boolean; keys?: string[] }) => ({
+    targetSchemaAdopt.mockImplementation(async (_t, _a, opts) => ({
       status: "adopted",
       adopt: opts.keys === undefined ? TWO_CONFLICTS.adopt : [],
     }))
@@ -263,7 +264,7 @@ describe("supatype adopt", () => {
   it("previews only the named objects for --release without --key, and applies adopting none", async () => {
     vi.mocked(isInteractive).mockReturnValue(true)
     confirmMock.mockResolvedValue(true)
-    targetSchemaAdopt.mockImplementation(async (_t, _a, opts: { yes: boolean }) => ({
+    targetSchemaAdopt.mockImplementation(async (_t, _a, opts) => ({
       status: opts.yes ? "adopted" : "preview",
       adopt: opts.yes ? [] : TWO_CONFLICTS.adopt,
       release: [{ kind: "policy", table: "post", name: "post_select", message: "Policy post.post_select will be left alone" }],

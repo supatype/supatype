@@ -44,8 +44,11 @@ describe("filling the self-host keys", () => {
     writeFileSync(envPath(), `JWT_SECRET=${SECRET}\nANON_KEY=\nSERVICE_ROLE_KEY=\n`)
     fillMissingKeys(dir)
 
-    const claims = (jwt: string): Record<string, unknown> =>
-      JSON.parse(Buffer.from(jwt.split(".")[1] as string, "base64url").toString("utf8"))
+    const claims = (jwt: string): Record<string, unknown> => {
+      const payload: unknown = JSON.parse(Buffer.from(jwt.split(".")[1] as string, "base64url").toString("utf8"))
+      if (typeof payload !== "object" || payload === null) throw new Error("JWT payload is not an object")
+      return payload as Record<string, unknown>
+    }
 
     expect(claims(valueOf("ANON_KEY")).role).toBe("anon")
     expect(claims(valueOf("SERVICE_ROLE_KEY")).role).toBe("service_role")

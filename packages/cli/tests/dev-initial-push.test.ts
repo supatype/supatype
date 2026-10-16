@@ -66,7 +66,7 @@ describe("an engine refusal on the first attempt", () => {
 
     const outcome = await pushInitialSchema(s)
 
-    expect(outcome).toEqual({ kind: "refused", refusal: expect.objectContaining({ kind: "unmanaged-tables" }), message: UNMANAGED })
+    expect(outcome).toMatchObject({ kind: "refused", refusal: { kind: "unmanaged-tables" }, message: UNMANAGED })
     expect(s.push).toHaveBeenCalledTimes(1)
     expect(s.recoverDatabase).not.toHaveBeenCalled()
     expect(s.sleep).not.toHaveBeenCalled()
@@ -88,7 +88,7 @@ describe("an engine refusal on the first attempt", () => {
 
     const outcome = await pushInitialSchema(s)
 
-    expect(outcome).toEqual({ kind: "refused", refusal: expect.objectContaining({ kind: "destructive" }), message: DESTRUCTIVE })
+    expect(outcome).toMatchObject({ kind: "refused", refusal: { kind: "destructive" }, message: DESTRUCTIVE })
     expect(s.push).toHaveBeenCalledTimes(1)
     expect(s.recoverDatabase).not.toHaveBeenCalled()
     // A refusal the person was told about is not a failure to diagnose from the database logs.
@@ -147,7 +147,7 @@ describe("an image Docker could not pull", () => {
 
     const outcome = await pushInitialSchema(s)
 
-    expect(outcome).toEqual({ kind: "refused", refusal: expect.objectContaining({ kind: "image-pull" }), message })
+    expect(outcome).toMatchObject({ kind: "refused", refusal: { kind: "image-pull" }, message })
     expect(s.push).toHaveBeenCalledTimes(1)
     // "connection refused" reads as Postgres starting up, but restarting Postgres pulls nothing.
     expect(s.recoverDatabase).not.toHaveBeenCalled()
