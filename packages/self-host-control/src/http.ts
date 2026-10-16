@@ -33,7 +33,7 @@ export function sendJson(res: ServerResponse, status: number, payload: unknown):
 export function readBody(req: IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = []
-    req.on("data", (c) => chunks.push(c))
+    req.on("data", (c: unknown) => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(String(c))))
     req.on("end", () => {
       if (chunks.length === 0) {
         resolve({})
