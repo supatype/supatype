@@ -21,6 +21,17 @@ export interface TransformOptions {
   resize?: "cover" | "contain" | "fill" | "inside" | "outside" | undefined
 }
 
+/**
+ * What an `ImageAsset` or `FileAsset` column stores: the bucket and path `upload()` wrote to.
+ * Studio also records `mimeType` and `size` when it does the upload.
+ */
+export interface StorageReference {
+  bucket: string
+  path: string
+  mimeType?: string | undefined
+  size?: number | undefined
+}
+
 export interface StorageBucketMeta {
   id: string
   name: string
@@ -58,6 +69,27 @@ export class StorageClient {
 
   from(bucket: string): BucketClient {
     return new BucketClient(this.url, bucket, this.headers, this.send)
+  }
+
+  /**
+   * The public URL of what an `ImageAsset` or `FileAsset` column holds.
+   *
+   * The column stores a {@link StorageReference}, never a URL: a stored URL goes stale and bakes in
+   * the host, and the bucket and path rebuild it anywhere. This is that rebuild, so a component can
+   * write `src={supatype.storage.publicUrl(speaker.headshot)}` instead of reading a `url` field that
+   * is not there. Pass `transform` for a derivative resized or re-encoded on read.
+   *
+   * Null for an empty column or a reference without a bucket or path. Only meaningful for a public
+   * bucket; a private one needs `from(bucket).createSignedUrl(path)`.
+   */
+  publicUrl(
+    reference: StorageReference | null | undefined,
+    options?: { transform?: TransformOptions | undefined } | undefined,
+  ): string | null {
+    if (reference === null || reference === undefined) return null
+    const { bucket, path } = reference
+    if (typeof bucket !== "string" || bucket === "" || typeof path !== "string" || path === "") return null
+    return this.from(bucket).getPublicUrl(path, options).data.publicUrl
   }
 
   async listBuckets(): Promise<{ data: StorageBucketMeta[] | null; error: SupatypeError | null }> {
