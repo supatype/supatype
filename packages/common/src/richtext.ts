@@ -35,7 +35,9 @@ function styleText(style: RichTextStyle): string {
 
 function attributeText(attributes: RichTextAttributes): string {
   let out = ""
-  for (const [name, value] of Object.entries(attributes)) {
+  // `Object.entries` types an interface's values as `any`; read each through its own key instead.
+  for (const name of Object.keys(attributes) as Array<keyof RichTextAttributes>) {
+    const value = attributes[name]
     if (value === undefined || value === false) continue
     if (value === true) out += ` ${name}`
     else if (typeof value === "object") out += ` ${name}="${escapeHtml(styleText(value))}"`
