@@ -211,6 +211,14 @@ export default defineConfig({
   provider sends users back to a path that answers 404.
 - `supatype dev` warns when an enabled provider's secret is set nowhere.
 
+## Email confirmation in dev
+
+- **The client no longer signs in a sign-up that is waiting for confirmation.** `signUp` returns
+  `{ user, session: null }` and stores nothing, as supabase-js does. It used to store an empty
+  session (`accessToken: ""`, user id `""`) that looked signed in and survived a reload. The Vue,
+  Svelte and Solid `signUp` now return `{ data: { session, user }, error }` like React's, so an app
+  can tell the two apart; code that reads only `error` is unaffected.
+
 ## Framework bindings and realtime status
 
 - **Vue, Svelte and Solid:** a subscription's status now follows the socket. When signing in or out

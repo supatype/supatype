@@ -1436,9 +1436,16 @@ export class AuthClient {
       return { data: { session: null, user: null }, error: await this._parseError(res) }
     }
     const json = await res.json() as Record<string, unknown>
+    const accessToken = json["access_token"]
+    // A sign-up still waiting for its email confirmation is answered with the bare user and no
+    // tokens. That is not a session, so nothing is stored and no SIGNED_IN is emitted.
+    if (typeof accessToken !== "string" || accessToken === "") {
+      const raw = (json["user"] ?? json) as Record<string, unknown>
+      return { data: { session: null, user: this._parseUser(raw) }, error: null }
+    }
     const user = this._parseUser((json["user"] ?? {}) as Record<string, unknown>)
     const session: Session = {
-      accessToken: String(json["access_token"] ?? ""),
+      accessToken,
       tokenType: String(json["token_type"] ?? "bearer"),
       expiresIn: Number(json["expires_in"] ?? 3600),
       ...(json["expires_at"] !== undefined && { expiresAt: Number(json["expires_at"]) }),

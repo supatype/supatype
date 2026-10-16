@@ -11,7 +11,11 @@ export interface AuthResult {
   /** The sign-in the auth server refused and reported in the page's URL, or null. */
   error: Accessor<AuthRedirectError | null>
   signIn: (email: string, password: string) => Promise<{ error: SupatypeError | null }>
-  signUp: (email: string, password: string) => Promise<{ error: SupatypeError | null }>
+  /** A null `data.session` with a user means the project wants the email confirmed first. */
+  signUp: (email: string, password: string) => Promise<{
+    data: { session: Session | null; user: User | null }
+    error: SupatypeError | null
+  }>
   signOut: () => Promise<{ error: SupatypeError | null }>
   /** Send the browser to the provider; a refusal (provider not enabled) is returned instead. */
   signInWithOAuth: (provider: string) => Promise<{ error: SupatypeError | null }>
@@ -58,10 +62,7 @@ export function createAuth<TDatabase extends AnyDatabase = AugmentedDatabase>():
     return { error }
   }
 
-  const signUp = async (email: string, password: string) => {
-    const { error } = await client.auth.signUp({ email, password })
-    return { error }
-  }
+  const signUp = (email: string, password: string) => client.auth.signUp({ email, password })
 
   const signOut = async () => {
     const { error } = await client.auth.signOut()

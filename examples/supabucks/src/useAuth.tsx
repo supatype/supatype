@@ -77,6 +77,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signUp = async (name: string, email: string, password: string): Promise<string | null> => {
     const { data, error } = await supatype.auth.signUp({ email, password, options: { data: { name } } })
     if (error) return error.message
+    // No session means the project wants the email confirmed before the first sign-in.
+    if (data.session === null) return "Check your email to confirm your account, then sign in."
     const u = data.user
     setUser(u)
     await load(u)

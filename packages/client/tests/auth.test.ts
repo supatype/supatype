@@ -89,6 +89,52 @@ describe("AuthClient.signUp()", () => {
   })
 })
 
+describe("AuthClient.signUp() waiting for email confirmation", () => {
+  beforeEach(() => vi.restoreAllMocks())
+
+  // With confirmation on, /signup answers with the bare user and no tokens.
+  const PENDING_USER = { ...RAW_USER, id: "user-pending", confirmation_sent_at: "2024-01-01T00:00:00Z" }
+
+  it("returns the user with a null session", async () => {
+    vi.stubGlobal("fetch", mockFetch(PENDING_USER))
+
+    const { data, error } = await freshClient().signUp({ email: "a@b.com", password: "s" })
+
+    expect(error).toBeNull()
+    expect(data.session).toBeNull()
+    expect(data.user?.id).toBe("user-pending")
+    expect(data.user?.email).toBe("test@example.com")
+  })
+
+  it("stores nothing and emits no SIGNED_IN", async () => {
+    const storage = {
+      getItem: vi.fn().mockResolvedValue(null),
+      setItem: vi.fn().mockResolvedValue(undefined),
+      removeItem: vi.fn().mockResolvedValue(undefined),
+    }
+    const client = new AuthClient(SUPATYPE_URL, HEADERS, { storage })
+    await client.whenReady()
+    const events: string[] = []
+    client.onAuthStateChange((event) => events.push(event))
+    vi.stubGlobal("fetch", mockFetch(PENDING_USER))
+
+    await client.signUp({ email: "a@b.com", password: "s" })
+
+    expect(storage.setItem).not.toHaveBeenCalled()
+    expect(events).not.toContain("SIGNED_IN")
+    expect((await client.getSession()).data.session).toBeNull()
+  })
+
+  it("keeps the empty identities of the answer for an address already registered", async () => {
+    vi.stubGlobal("fetch", mockFetch({ ...PENDING_USER, identities: [] }))
+
+    const { data } = await freshClient().signUp({ email: "a@b.com", password: "s" })
+
+    expect(data.session).toBeNull()
+    expect(data.user?.identities).toEqual([])
+  })
+})
+
 describe("AuthClient.signInAnonymously()", () => {
   beforeEach(() => vi.restoreAllMocks())
 
