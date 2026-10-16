@@ -190,7 +190,7 @@ export function Dashboard(): React.ReactElement {
       {/* Block grid */}
       {loading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {[...Array(4)].map((_, i) => (
+          {Array.from({ length: 4 }, (_, i) => (
             <div key={i} className="rounded-lg border border-border bg-card p-5 animate-pulse h-24" />
           ))}
         </div>
@@ -672,7 +672,7 @@ function normalizeLayout(layout: unknown, models: ModelConfig[]): DashboardBlock
   const result: DashboardBlock[] = []
 
   for (let i = 0; i < layout.length; i += 1) {
-    const item = layout[i]
+    const item: unknown = layout[i]
     if (!item || typeof item !== "object") continue
 
     const candidate = item as Partial<DashboardBlock>

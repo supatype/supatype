@@ -15,7 +15,7 @@ import {
   Panel,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
-import dagre from "@dagrejs/dagre"
+import dagre, { type EdgeLabel, type GraphLabel, type NodeLabel } from "@dagrejs/dagre"
 import { cn } from "../lib/utils.js"
 import { Badge, Button, Card, Th, Td } from "../components/ui.js"
 import { useProjectProxy, type SchemaTable } from "../hooks/useProjectProxy.js"
@@ -115,7 +115,7 @@ function applyDagreLayout(
   edges: Edge[],
   direction: "TB" | "LR" = "LR",
 ): Node[] {
-  const g = new dagre.graphlib.Graph()
+  const g = new dagre.graphlib.Graph<GraphLabel, NodeLabel, EdgeLabel>()
   g.setDefaultEdgeLabel(() => ({}))
   g.setGraph({ rankdir: direction, nodesep: 40, ranksep: 80 })
 
@@ -140,7 +140,8 @@ function applyDagreLayout(
     const pos = g.node(node.id)
     const w = node.measured?.width ?? NODE_WIDTH
     const h = node.measured?.height ?? 200
-    return { ...node, position: { x: pos.x - w / 2, y: pos.y - h / 2 } }
+    // dagre sets every node's centre during layout; its type leaves them optional.
+    return { ...node, position: { x: (pos.x ?? 0) - w / 2, y: (pos.y ?? 0) - h / 2 } }
   })
 }
 

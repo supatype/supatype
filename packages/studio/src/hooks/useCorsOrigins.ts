@@ -3,6 +3,7 @@ import { membershipBase } from "../lib/membership-url.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { studioGatewayHeaders } from "../lib/studio-gateway-headers.js"
 import { useAdminClient } from "./useAdminClient.js"
+import { readJsonObject } from "../lib/json.js"
 
 /** What the gateway enforces, and where each part comes from. */
 export interface CorsOrigins {
@@ -63,7 +64,7 @@ export function useCorsOrigins(): UseCorsOriginsReturn {
           ...init?.headers,
         },
       })
-      const json = (await res.json().catch(() => ({}))) as Record<string, unknown>
+      const json = await readJsonObject(res)
       if (!res.ok) {
         throw new Error((json["message"] as string | undefined) ?? `Request failed (${res.status})`)
       }

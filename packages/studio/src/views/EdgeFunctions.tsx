@@ -122,7 +122,7 @@ function InvokeTab({
       setStatus(res.status)
       setDurationMs(elapsed)
       try {
-        const json = JSON.parse(text)
+        const json: unknown = JSON.parse(text)
         setResponseText(JSON.stringify(json, null, 2))
       } catch {
         setResponseText(text)

@@ -96,7 +96,7 @@ function JsonTreeNode({ data, depth = 0 }: { data: unknown; depth?: number }): R
         </button>
         {expanded ? (
           <div className="ml-4">
-            {data.map((item, i) => (
+            {(data as unknown[]).map((item, i) => (
               <div key={i} className="flex gap-1">
                 <span className="text-zinc-600">{i}:</span>
                 <JsonTreeNode data={item} depth={depth + 1} />

@@ -5,6 +5,7 @@ import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { Button, Card, CodeBlock, Input } from "../components/ui.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { cn } from "../lib/utils.js"
+import { bodyMessage, readJsonObject } from "../lib/json.js"
 
 const AUTH_TYPES = [
   { label: "Users",      types: "UsersNode · UsersEdge · UsersConnection" },
@@ -74,8 +75,8 @@ export function GraphQLSettings(): React.ReactElement {
         }),
       })
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        throw new Error((body as { message?: string }).message ?? `${res.status} ${res.statusText}`)
+        const body = await readJsonObject(res)
+        throw new Error(bodyMessage(body) ?? `${res.status} ${res.statusText}`)
       }
       setCommitted({ introspection, maxQueryDepth, defaultMaxRows })
       setSavedOk(true)

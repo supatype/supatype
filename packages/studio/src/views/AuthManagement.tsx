@@ -119,6 +119,23 @@ function AutoConfirmField({ checked, onChange }: { checked: boolean; onChange: (
   )
 }
 
+/**
+ * The metadata editor's text as an object, or why it is not one. Valid JSON is not enough: `[]`,
+ * `"x"` and `null` all parse, and each used to be saved as the user's metadata.
+ */
+export function parseMetadata(json: string): { metadata: Record<string, unknown> } | { error: string } {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(json)
+  } catch {
+    return { error: "Invalid JSON in metadata" }
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return { error: "Metadata must be a JSON object" }
+  }
+  return { metadata: parsed as Record<string, unknown> }
+}
+
 function UserForm({
   user,
   create,
@@ -146,13 +163,9 @@ function UserForm({
     if (!email.trim()) { setError("Email is required"); return }
     if (!user && !password.trim()) { setError("Password is required for new users"); return }
 
-    let metadata: Record<string, unknown> = {}
-    try {
-      metadata = JSON.parse(metadataJson)
-    } catch {
-      setError("Invalid JSON in metadata")
-      return
-    }
+    const parsed = parseMetadata(metadataJson)
+    if ("error" in parsed) { setError(parsed.error); return }
+    const { metadata } = parsed
 
     onSave({
       email: email.trim(),
