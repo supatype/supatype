@@ -85,11 +85,25 @@ async function readFor(res: Response, ms: number): Promise<string> {
   return text
 }
 
-function changeEvents(text: string): Array<{ deliveries: Array<{ connectionId: string; payload?: { new: Record<string, unknown> }; redacted?: { new: string[] } }>; viewer?: { visible: boolean; payload?: { new: Record<string, unknown> }; redacted?: { new: string[] } } }> {
+interface ChangeEvent {
+  deliveries: Array<{ connectionId: string; payload?: { new: Record<string, unknown> }; redacted?: { new: string[] } }>
+  viewer?: { visible: boolean; payload?: { new: Record<string, unknown> }; redacted?: { new: string[] } }
+}
+
+/** Enough of a change event to read its deliveries: the stream is JSON, so `any` until checked. */
+function isChangeEvent(value: unknown): value is ChangeEvent {
+  return typeof value === "object" && value !== null && Array.isArray((value as { deliveries?: unknown }).deliveries)
+}
+
+function changeEvents(text: string): ChangeEvent[] {
   return text
     .split("\n\n")
     .filter((block) => block.startsWith("event: change\n"))
-    .map((block) => JSON.parse(block.split("\ndata: ")[1]!))
+    .map((block) => {
+      const event: unknown = JSON.parse(block.split("\ndata: ")[1]!)
+      if (!isChangeEvent(event)) throw new Error(`Not a change event: ${block}`)
+      return event
+    })
 }
 
 test.beforeAll(async () => {
