@@ -145,11 +145,33 @@ describe("@supatype/types primitives", () => {
     expectTypeOf<Note>().toHaveProperty("owner_id")
   })
 
+  it("accepts the key of an optional relation", () => {
+    type Event = Model<{
+      id: UUID
+      organizer: Optional<RelatedTo<SupatypeAuthUser>>
+    }, {
+      access: { update: Owner<"organizer_id"> }
+    }>
+    expectTypeOf<Event>().toHaveProperty("organizer")
+
+    type Via = Model<{
+      id: UUID
+      organizer: Optional<RelatedTo<SupatypeAuthUser>>
+    }, {
+      access: { update: OwnerFrom<"organizer"> }
+    }>
+    expectTypeOf<Via>().toHaveProperty("organizer")
+  })
+
   it("rejects an owner field that does not hold a user id", () => {
     // @ts-expect-error - a string column cannot own a row
     type _Text = Model<{ id: UUID; title: string }, { access: { update: Owner<"title"> } }>
     // @ts-expect-error - an Email column is tagged, but not as a user id
     type _Email = Model<{ id: UUID; contact: Email }, { access: { update: Owner<"contact"> } }>
+    // @ts-expect-error - a RichText column holds a document, not a user id
+    type _RichText = Model<{ id: UUID; body: RichText }, { access: { update: Owner<"body"> } }>
+    // @ts-expect-error - nor does an optional one
+    type _OptionalRichText = Model<{ id: UUID; body: Optional<RichText> }, { access: { update: Owner<"body"> } }>
   })
 
   it("applies the same owner rule to field-level access", () => {

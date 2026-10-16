@@ -147,7 +147,7 @@ export type Button = Primitive<"Button", ButtonValue>
  * - Lexical document: pass a JSON string literal or use `Default<RichText, '{"root":…}'>`
  */
 export type RichText<D extends string = never> = Primitive<
-  D extends never ? "RichText" : `RichText:${D}`,
+  [D] extends [never] ? "RichText" : `RichText:${D}`,
   SerializedEditorState | string
 >
 
@@ -475,14 +475,14 @@ type ModelFieldKeys<TModel> =
     : never
 type RelationFieldKeys<TFields extends Record<string, unknown>> = Extract<{
   [K in keyof TFields]-?: K extends string
-    ? TFields[K] extends { readonly __relationKind: "relatedTo" }
+    ? NonNullable<UnwrapModelFieldType<TFields[K]>> extends { readonly __relationKind: "relatedTo" }
       ? K
       : never
     : never
 }[keyof TFields], string>
 type RelationOwnerKeys<TFields extends Record<string, unknown>> = Extract<{
   [K in keyof TFields]-?: K extends string
-    ? TFields[K] extends { readonly __relationKind: "relatedTo" }
+    ? NonNullable<UnwrapModelFieldType<TFields[K]>> extends { readonly __relationKind: "relatedTo" }
       ? `${K}_id`
       : never
     : never
