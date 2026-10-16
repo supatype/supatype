@@ -13,7 +13,7 @@
 import { readFileSync, existsSync } from "node:fs"
 import { resolve, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
-import type { AugmentedDatabase, RealtimePayload } from "@supatype/client"
+import type { AugmentedDatabase, RealtimePayload, SupatypeClient } from "@supatype/client"
 import { RealtimeClient } from "@supatype/client"
 import {
   createNativeClient,
@@ -77,8 +77,57 @@ function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error(msg)
 }
 
+const OAUTH_REDIRECT = "supatype-expo-auth://auth/callback"
+
+/** Sign-in methods the server reports in `external` that are not OAuth providers. */
+const NOT_OAUTH = new Set(["email", "phone", "anonymous_users"])
+
+/** The OAuth providers the auth server reports as on, from the same settings the client asks. */
+async function enabledOAuthProviders(): Promise<string[]> {
+  const res = await fetch(`${GATEWAY}/auth/v1/settings`, { headers: { apikey: ANON } })
+  assert(res.ok, `auth settings failed: ${res.status}`)
+  const { external } = (await res.json()) as { external: Record<string, boolean> }
+  return Object.entries(external)
+    .filter(([name, on]) => on && !NOT_OAUTH.has(name))
+    .map(([name]) => name)
+}
+
+/**
+ * The PKCE authorize URL and the cancelled path, for a provider the server has enabled: GitHub when
+ * it is (the expo-auth suite points it at a stub), otherwise the first that is. With none enabled,
+ * which is a stock `supatype dev`, the client must refuse before it builds a URL, so that is checked.
+ */
+async function checkOAuth(client: SupatypeClient<AugmentedDatabase>): Promise<void> {
+  const enabled = await enabledOAuthProviders()
+  const provider = enabled.includes("github") ? "github" : enabled[0]
+  if (provider === undefined) {
+    const { error } = await client.auth.signInWithOAuth({ provider: "github", options: { flowType: "pkce" } })
+    assert(error?.code === "provider_disabled", `expected github to be refused, got ${error?.code ?? "a URL"}`)
+    console.log("✓ signInWithOAuth refuses a provider the server reports off (enable one to check PKCE)")
+    return
+  }
+
+  const { data: oauth, error: oauthErr } = await client.auth.signInWithOAuth({
+    provider,
+    options: { flowType: "pkce", redirectTo: OAUTH_REDIRECT },
+  })
+  assert(oauthErr === null, `oauth error: ${oauthErr?.message}`)
+  const authUrl = new URL(oauth.url)
+  assert(authUrl.searchParams.get("code_challenge_method") === "s256", "missing s256")
+  assert((authUrl.searchParams.get("code_challenge") ?? "").length >= 43, "bad challenge")
+  console.log(`✓ signInWithOAuth PKCE challenge (${provider})`)
+
+  const cancelled = await openOAuth(client, {
+    provider,
+    redirectTo: OAUTH_REDIRECT,
+    webBrowser: { openAuthSessionAsync: async () => ({ type: "dismiss" }) },
+  })
+  assert(cancelled.cancelled === true, "expected cancelled")
+  console.log("✓ openOAuth cancelled path")
+}
+
 async function main(): Promise<void> {
-  assert(ANON.length > 0, "Missing ANON_KEY — run `supatype keys` or `supatype dev` in examples/expo-auth")
+  assert(ANON.length > 0, "Missing ANON_KEY: run `supatype keys` or `supatype dev` in examples/expo-auth")
   console.log(`Smoke target: ${GATEWAY}`)
 
   const health = await fetch(`${GATEWAY}/auth/v1/health`)
@@ -137,7 +186,7 @@ async function main(): Promise<void> {
   assert(profile?.displayName === "smoke", "profile displayName mismatch")
   console.log("✓ profile upsert + select (schema REST)")
 
-  // Realtime lobby chat (user JWT — LoggedIn RLS)
+  // Realtime lobby chat, as the signed-in user, since its RLS is LoggedIn
   const accessToken = sessionData.session?.accessToken
   assert(accessToken !== undefined && accessToken.length > 0, "missing access token for realtime")
   const rtEvents: RealtimePayload<Record<string, unknown>>[] = []
@@ -204,30 +253,7 @@ async function main(): Promise<void> {
   assert(hydrated.session.user.email === email || hydrated.session.user.id.length > 0, "bad user")
   console.log("✓ hydrate session after relaunch")
 
-  // PKCE authorize URL
-  const { data: oauth, error: oauthErr } = await client2.auth.signInWithOAuth({
-    provider: "google",
-    options: {
-      flowType: "pkce",
-      redirectTo: "supatype-expo-auth://auth/callback",
-    },
-  })
-  assert(oauthErr === null, `oauth error: ${oauthErr?.message}`)
-  const authUrl = new URL(oauth.url)
-  assert(authUrl.searchParams.get("code_challenge_method") === "s256", "missing s256")
-  assert((authUrl.searchParams.get("code_challenge") ?? "").length >= 43, "bad challenge")
-  console.log("✓ signInWithOAuth PKCE challenge")
-
-  // openOAuth cancel path
-  const cancelled = await openOAuth(client2, {
-    provider: "google",
-    redirectTo: "supatype-expo-auth://auth/callback",
-    webBrowser: {
-      openAuthSessionAsync: async () => ({ type: "dismiss" }),
-    },
-  })
-  assert(cancelled.cancelled === true, "expected cancelled")
-  console.log("✓ openOAuth cancelled path")
+  await checkOAuth(client2)
 
   // Deep-link listener wires without throwing
   const unsub = createAuthUrlListener(client2, {
