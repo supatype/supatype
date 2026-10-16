@@ -1,6 +1,7 @@
 import type {
   AuthChangeEvent,
   AuthFlowType,
+  AuthRedirectError,
   AuthMFAChallengeResponse,
   AuthMFAEnrollResponse,
   AuthMFAListFactorsResponse,
@@ -17,6 +18,13 @@ import {
   PKCE_METHOD_S256,
 } from "./pkce.js"
 import { plainFetch, type RequestTransport } from "./fetch-with-retry.js"
+import {
+  browserHref,
+  carriesImplicitResult,
+  cleanBrowserUrl,
+  redirectParam,
+  redirectParams,
+} from "./auth-redirect.js"
 
 export type AuthListener = (event: AuthChangeEvent, session: Session | null) => void
 
@@ -29,10 +37,15 @@ interface AuthClientOptions {
   storage?: AuthStorage | undefined
   /** How requests are sent. `createClient` passes its fetch, so `timeout` and `retry` apply here too. */
   transport?: RequestTransport | undefined
+  /** Finish a sign-in carried by the page's URL on start (browser only). Default: true. */
+  detectSessionInUrl?: boolean | undefined
 }
 
 const DEFAULT_STORAGE_KEY = "supatype.auth.session"
 const DEFAULT_COOKIE_PREFIX = "st"
+/** Storage key suffixes for the state an OAuth redirect has to survive. */
+const VERIFIER_SUFFIX = "-code-verifier"
+const PROVIDER_SUFFIX = "-oauth-provider"
 const DEBUG_AUTH = typeof process !== "undefined" && process.env["NEXT_PUBLIC_SUPATYPE_DEBUG_AUTH"] === "1"
 
 /**
@@ -69,8 +82,10 @@ export class AuthClient {
   private readonly send: RequestTransport
   /** When true, session is also mirrored to document.cookie (browser default path only). */
   private readonly useCookies: boolean
-  /** Resolves when async storage hydration completes (immediate when not used). */
+  /** Resolves when async storage hydration and any sign-in carried by the page's URL complete. */
   private readonly ready: Promise<void>
+  /** What `ready` settles with: the refusal the page's URL reported, if any. */
+  private readonly initialized: Promise<{ error: AuthRedirectError | null }>
   /** Pending auto-refresh timer; refreshes the access token shortly before it expires. */
   private refreshTimer: ReturnType<typeof setTimeout> | null = null
   /** Dedupes concurrent refresh attempts (getSession + auto-refresh). */
@@ -89,33 +104,11 @@ export class AuthClient {
     this.storage = opts.storage ?? this.getBrowserStorage()
     this.send = opts.transport ?? plainFetch
 
-    if (opts.initialSession !== undefined) {
-      this.currentSession = opts.initialSession
-      this.ready = Promise.resolve()
-      if (DEBUG_AUTH) {
-        console.debug("[supatype:auth] constructor initialSession provided", {
-          hasSession: true,
-          userId: opts.initialSession.user.id,
-        })
-      }
-    } else if (this.persistSession) {
-      if (opts.storage !== undefined) {
-        this.ready = this.hydrateFromStorage()
-      } else {
-        this.currentSession = this.loadPersistedSession()
-        this.ready = Promise.resolve()
-        if (DEBUG_AUTH) {
-          console.debug("[supatype:auth] constructor loaded persisted session", {
-            hasSession: this.currentSession !== null,
-            userId: this.currentSession?.user.id ?? null,
-            storageKey: this.storageKey,
-            cookieName: this.cookieName,
-          })
-        }
-      }
-    } else {
-      this.ready = Promise.resolve()
-    }
+    const hydrated = this.loadInitialSession(opts)
+    this.initialized = opts.detectSessionInUrl === false
+      ? hydrated.then(() => ({ error: null }))
+      : hydrated.then(() => this.completeRedirect())
+    this.ready = this.initialized.then(() => undefined)
     // Keep the access token fresh while the app is open (and refresh immediately
     // if a persisted session loaded already expired).
     this.scheduleAutoRefresh()
@@ -124,9 +117,73 @@ export class AuthClient {
     }
   }
 
-  /** Resolves when custom storage hydration finishes (no-op resolve when sync). */
+  /** The session the client starts with: the one passed in, else the persisted one. */
+  private loadInitialSession(opts: AuthClientOptions): Promise<void> {
+    if (opts.initialSession !== undefined) {
+      this.currentSession = opts.initialSession
+      if (DEBUG_AUTH) {
+        console.debug("[supatype:auth] constructor initialSession provided", {
+          hasSession: true,
+          userId: opts.initialSession.user.id,
+        })
+      }
+      return Promise.resolve()
+    }
+    if (!this.persistSession) return Promise.resolve()
+    if (opts.storage !== undefined) return this.hydrateFromStorage()
+    this.currentSession = this.loadPersistedSession()
+    if (DEBUG_AUTH) {
+      console.debug("[supatype:auth] constructor loaded persisted session", {
+        hasSession: this.currentSession !== null,
+        userId: this.currentSession?.user.id ?? null,
+        storageKey: this.storageKey,
+        cookieName: this.cookieName,
+      })
+    }
+    return Promise.resolve()
+  }
+
+  /** Resolves when the client has its starting session (storage hydrated, any URL sign-in done). */
   whenReady(): Promise<void> {
     return this.ready
+  }
+
+  /**
+   * Wait for the client's start, and learn whether a sign-in in the page's URL was refused.
+   *
+   * The same shape as supabase-js's `initialize()`. A refused OAuth sign-in comes back as
+   * `?error=...&error_description=...`; this is where an app (or `useAuth`) reads it.
+   */
+  initialize(): Promise<{ error: AuthRedirectError | null }> {
+    return this.initialized
+  }
+
+  /**
+   * Finish the sign-in the page's URL carries, as supabase-js's `detectSessionInUrl` does.
+   *
+   * Whatever session was stored is set aside first, so a new sign-in is announced as `SIGNED_IN`
+   * and a refused one leaves the browser signed out, as supabase-js does after a failed attempt.
+   */
+  private async completeRedirect(): Promise<{ error: AuthRedirectError | null }> {
+    const href = browserHref()
+    if (href === null || !(await this.isAuthRedirect(href))) return { error: null }
+    const provider = await this.takeFlowItem(PROVIDER_SUFFIX)
+    this.currentSession = null
+    const { error } = await this.getSessionFromUrl(href).catch((err: unknown) => ({
+      error: { message: err instanceof Error ? err.message : "Could not finish the sign-in" },
+    }))
+    cleanBrowserUrl(href)
+    if (error === null) return { error: null }
+    this._setSession(null)
+    return { error: { ...error, ...(provider !== null && { provider }) } }
+  }
+
+  /** A URL with tokens or a refusal, or with a `code` for a PKCE flow this client started. */
+  private async isAuthRedirect(href: string): Promise<boolean> {
+    const params = redirectParams(href)
+    if (params === null) return false
+    if (carriesImplicitResult(params)) return true
+    return redirectParam(params, "code") !== null && (await this.readCodeVerifier()) !== null
   }
 
   private async hydrateFromStorage(): Promise<void> {
@@ -317,6 +374,13 @@ export class AuthClient {
     data: { url: string; provider: string }
     error: SupatypeError | null
   }> {
+    // The server answers /authorize for a disabled provider with a bare JSON 400, which a browser
+    // navigating there shows as raw text; asking first lets the caller show a message instead.
+    if (await this.providerDisabled(opts.provider)) {
+      const message = `Sign-in with ${opts.provider} is not enabled for this project.`
+      return { data: { url: "", provider: opts.provider }, error: { message, status: 400, code: "provider_disabled" } }
+    }
+    await this.writeFlowItem(PROVIDER_SUFFIX, opts.provider)
     const url = this.endpoint("/authorize", opts.options?.redirectTo)
     url.searchParams.set("provider", opts.provider)
     if (opts.options?.scopes !== undefined) {
@@ -329,6 +393,21 @@ export class AuthClient {
       url.searchParams.set("code_challenge_method", PKCE_METHOD_S256)
     }
     return { data: { url: url.toString(), provider: opts.provider }, error: null }
+  }
+
+  /**
+   * True only when the server's `/settings` list the provider as off. A provider they do not list
+   * (a `custom:` one) or settings that cannot be read leave the decision to `/authorize`.
+   */
+  private async providerDisabled(provider: string): Promise<boolean> {
+    try {
+      const res = await this.send(`${this.url}/settings`, { headers: this.baseHeaders })
+      if (!res.ok) return false
+      const body = await res.json() as { external?: Record<string, unknown> | undefined }
+      return body.external?.[provider] === false
+    } catch {
+      return false
+    }
   }
 
   /**
@@ -411,20 +490,14 @@ export class AuthClient {
     data: { session: Session | null; user: User | null }
     error: SupatypeError | null
   }> {
-    let parsed: URL
-    try {
-      parsed = new URL(url)
-    } catch {
+    const params = redirectParams(url)
+    if (params === null) {
       return {
         data: { session: null, user: null },
         error: { message: `Invalid redirect URL: ${url}`, status: 400 },
       }
     }
-
-    const query = parsed.searchParams
-    const hashParams = new URLSearchParams(
-      parsed.hash.startsWith("#") ? parsed.hash.slice(1) : parsed.hash,
-    )
+    const { query, fragment: hashParams } = params
 
     // A refused link comes back with the same fields as a refused request, in the URL instead.
     const redirectError = { ...Object.fromEntries(hashParams), ...Object.fromEntries(query) }
@@ -1031,44 +1104,60 @@ export class AuthClient {
     }
   }
 
-  private codeVerifierStorageKey(): string {
-    return `${this.storageKey}-code-verifier`
+  /**
+   * Keep a value for the OAuth redirect to find on the way back (a new page load, so not memory).
+   * A write that fails is ignored: same-process flows still have the in-memory copy.
+   */
+  private async writeFlowItem(suffix: string, value: string): Promise<void> {
+    if (!this.persistSession || this.storage === null) return
+    try {
+      await this.storage.setItem(`${this.storageKey}${suffix}`, value)
+    } catch {
+      // Ignore storage write failures.
+    }
+  }
+
+  private async readFlowItem(suffix: string): Promise<string | null> {
+    if (this.storage === null) return null
+    try {
+      const stored = await this.storage.getItem(`${this.storageKey}${suffix}`)
+      return stored !== null && stored !== "" ? stored : null
+    } catch {
+      return null
+    }
+  }
+
+  private async removeFlowItem(suffix: string): Promise<void> {
+    if (this.storage === null) return
+    try {
+      await this.storage.removeItem(`${this.storageKey}${suffix}`)
+    } catch {
+      // Ignore
+    }
+  }
+
+  /** Read a flow value once: the redirect it was kept for has now arrived. */
+  private async takeFlowItem(suffix: string): Promise<string | null> {
+    const value = await this.readFlowItem(suffix)
+    if (value !== null) await this.removeFlowItem(suffix)
+    return value
   }
 
   private async beginPkce(): Promise<void> {
     const verifier = generateCodeVerifier()
     this.codeVerifier = verifier
-    if (!this.persistSession || this.storage === null) return
-    try {
-      await this.storage.setItem(this.codeVerifierStorageKey(), verifier)
-    } catch {
-      // Ignore storage write failures, in-memory verifier still works for same-process flows.
-    }
+    await this.writeFlowItem(VERIFIER_SUFFIX, verifier)
   }
 
   private async readCodeVerifier(): Promise<string | null> {
     if (this.codeVerifier !== null) return this.codeVerifier
-    if (this.storage === null) return null
-    try {
-      const stored = await this.storage.getItem(this.codeVerifierStorageKey())
-      if (stored !== null && stored !== "") {
-        this.codeVerifier = stored
-        return stored
-      }
-    } catch {
-      // fall through
-    }
-    return null
+    this.codeVerifier = await this.readFlowItem(VERIFIER_SUFFIX)
+    return this.codeVerifier
   }
 
   private async clearCodeVerifier(): Promise<void> {
     this.codeVerifier = null
-    if (this.storage === null) return
-    try {
-      await this.storage.removeItem(this.codeVerifierStorageKey())
-    } catch {
-      // Ignore
-    }
+    await this.removeFlowItem(VERIFIER_SUFFIX)
   }
 
   /** Decode JWT `exp` claim without verifying the signature. */

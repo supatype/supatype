@@ -149,6 +149,19 @@ describe("@supatype/react-native-auth", () => {
     expect(onSuccess).toHaveBeenCalledWith(SESSION)
   })
 
+  it("OAuthButton announces the label it shows", async () => {
+    const webBrowser = { openAuthSessionAsync: vi.fn() }
+    let tree: ReturnType<typeof create>
+    await act(async () => {
+      tree = create(
+        <OAuthButton provider="keycloak" redirectTo="myapp://cb" webBrowser={webBrowser}>
+          Sign in with Mock SSO
+        </OAuthButton>,
+      )
+    })
+    expect(findByTestId(tree!, "st-oauth-keycloak").props.accessibilityLabel).toBe("Sign in with Mock SSO")
+  })
+
   it("ResetPassword request mode calls recover", async () => {
     resetPasswordForEmail.mockResolvedValue({ data: {}, error: null })
     let tree: ReturnType<typeof create>

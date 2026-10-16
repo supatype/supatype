@@ -56,3 +56,10 @@ An app that styles bare elements globally (`label`, `input`, `button`) can skip 
 <OAuthButton provider="github" redirectTo="/dashboard" />
 <OAuthButton provider="google" className="btn" />
 ```
+
+The sign-in finishes on its own when the provider sends the browser back: the client reads the
+session from the URL on start (`auth.detectSessionInUrl`, on by default), removes it from the address
+bar, and `useAuth()` shows the user. `onError` is called with a clear message when the provider is
+not enabled for the project (before any redirect), and when the server sends the browser back with
+a refusal for the sign-in that button started. The button's text is its accessible name, so a label
+given as `children` is what a screen reader announces.

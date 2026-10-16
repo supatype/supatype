@@ -12,7 +12,7 @@
  * ```
  */
 
-import React, { useState, type ReactNode } from "react"
+import React, { useEffect, useRef, useState, type ReactNode } from "react"
 import { useAuth } from "@supatype/react"
 
 export interface OAuthButtonProps {
@@ -54,62 +54,22 @@ const PROVIDER_ICONS: Record<string, string> = {
     '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M17.05 20.28c-.98.95-2.05.88-3.08.4-1.09-.5-2.08-.53-3.23 0-1.44.62-2.2.44-3.06-.4C3.79 16.17 4.36 9.33 8.93 9.07c1.23.07 2.09.72 2.81.77.99-.2 1.94-.78 3.01-.7 1.28.1 2.24.6 2.87 1.52-2.63 1.57-2 5.07.63 6.06-.5 1.3-.99 2.58-2.19 3.56zM12.03 9c-.12-2.08 1.55-3.82 3.47-3.97.26 2.29-2.07 4.01-3.47 3.97z"/></svg>',
 }
 
-/**
- * A pre-styled OAuth sign-in button with provider logo.
- *
- * Must be rendered inside a `<SupatypeProvider>`.
- */
-export function OAuthButton({
-  provider,
-  redirectTo,
-  className,
-  children,
-  onError,
-  popup,
-  disabled,
-}: OAuthButtonProps): React.ReactElement {
-  const { signInWithOAuth } = useAuth()
-  const [loading, setLoading] = useState(false)
-
-  const providerName = displayName(provider)
-  const iconSvg = PROVIDER_ICONS[provider.toLowerCase()]
-
-  async function handleClick(): Promise<void> {
-    setLoading(true)
-    try {
-      const { data, error } = await signInWithOAuth({
-        provider,
-        ...(redirectTo !== undefined && { options: { redirectTo } }),
-      })
-
-      if (error !== null) {
-        onError?.(error)
-        return
-      }
-
-      if (data.url) {
-        if (popup === true) {
-          const width = 500
-          const height = 700
-          const left = window.screenX + (window.outerWidth - width) / 2
-          const top = window.screenY + (window.outerHeight - height) / 2
-          window.open(
-            data.url,
-            `supatype-oauth-${provider}`,
-            `width=${width},height=${height},left=${left},top=${top}`,
-          )
-        } else {
-          window.location.href = data.url
-        }
-      }
-    } catch (err) {
-      onError?.({ message: err instanceof Error ? err.message : "OAuth failed" })
-    } finally {
-      setLoading(false)
-    }
+/** Send the browser to the provider: this window, or a centred popup. */
+function openOAuthUrl(url: string, provider: string, popup: boolean): void {
+  if (!popup) {
+    window.location.href = url
+    return
   }
+  const width = 500
+  const height = 700
+  const left = window.screenX + (window.outerWidth - width) / 2
+  const top = window.screenY + (window.outerHeight - height) / 2
+  window.open(url, `supatype-oauth-${provider}`, `width=${width},height=${height},left=${left},top=${top}`)
+}
 
-  const defaultStyle: React.CSSProperties = {
+/** The button's look when the app gives it no class. */
+function defaultStyle(busy: boolean): React.CSSProperties {
+  return {
     display: "inline-flex",
     alignItems: "center",
     gap: "8px",
@@ -120,20 +80,77 @@ export function OAuthButton({
     color: "#374151",
     fontSize: "14px",
     fontWeight: 500,
-    cursor: disabled === true || loading ? "not-allowed" : "pointer",
-    opacity: disabled === true || loading ? 0.6 : 1,
+    cursor: busy ? "not-allowed" : "pointer",
+    opacity: busy ? 0.6 : 1,
     transition: "background-color 0.15s, border-color 0.15s",
     lineHeight: 1,
   }
+}
+
+/**
+ * Report a refusal the auth server sent back in the URL, when this button's provider started it.
+ *
+ * Through a ref so an inline `onError` does not report the same refusal on every render.
+ */
+function useRedirectError(provider: string, onError: OAuthButtonProps["onError"]): void {
+  const { error } = useAuth()
+  const onErrorRef = useRef(onError)
+  onErrorRef.current = onError
+  useEffect(() => {
+    if (error !== null && error.provider === provider) onErrorRef.current?.(error)
+  }, [error, provider])
+}
+
+/**
+ * The button's click: ask for the provider's URL and go there, or report why not.
+ *
+ * Also reports a refusal the server sent back in the URL for this provider (`useRedirectError`).
+ */
+function useOAuthStart(props: OAuthButtonProps): { loading: boolean; start: () => Promise<void> } {
+  const { provider, redirectTo, onError, popup } = props
+  const { signInWithOAuth } = useAuth()
+  const [loading, setLoading] = useState(false)
+  useRedirectError(provider, onError)
+
+  async function start(): Promise<void> {
+    setLoading(true)
+    try {
+      const { data, error } = await signInWithOAuth({
+        provider,
+        ...(redirectTo !== undefined && { options: { redirectTo } }),
+      })
+      if (error !== null) onError?.(error)
+      else if (data.url) openOAuthUrl(data.url, provider, popup === true)
+    } catch (err) {
+      onError?.({ message: err instanceof Error ? err.message : "OAuth failed" })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return { loading, start }
+}
+
+/**
+ * A pre-styled OAuth sign-in button with provider logo.
+ *
+ * Must be rendered inside a `<SupatypeProvider>`. Its accessible name is its visible text, so a
+ * label passed as `children` is what a screen reader announces too.
+ */
+export function OAuthButton(props: OAuthButtonProps): React.ReactElement {
+  const { provider, className, children, disabled } = props
+  const { loading, start } = useOAuthStart(props)
+  const providerName = displayName(provider)
+  const iconSvg = PROVIDER_ICONS[provider.toLowerCase()]
+  const busy = disabled === true || loading
 
   return (
     <button
       type="button"
       className={className}
-      style={className !== undefined ? undefined : defaultStyle}
-      onClick={() => { void handleClick() }}
-      disabled={disabled === true || loading}
-      aria-label={`Sign in with ${providerName}`}
+      style={className !== undefined ? undefined : defaultStyle(busy)}
+      onClick={() => { void start() }}
+      disabled={busy}
     >
       {iconSvg !== undefined && (
         <span

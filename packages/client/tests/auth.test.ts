@@ -192,13 +192,13 @@ describe("AuthClient.signInWithPassword()", () => {
 })
 
 describe("AuthClient.signInWithOAuth()", () => {
-  it("returns redirect URL without making a fetch call", async () => {
+  it("returns redirect URL after reading only the provider settings", async () => {
     const fetchSpy = vi.fn()
     vi.stubGlobal("fetch", fetchSpy)
 
     const { data, error } = await freshClient().signInWithOAuth({ provider: "google" })
 
-    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(fetchSpy.mock.calls.map(([url]) => String(url))).toEqual([`${SUPATYPE_URL}/settings`])
     expect(error).toBeNull()
     expect(data.url).toContain("authorize")
     expect(data.url).toContain("provider=google")

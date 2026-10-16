@@ -91,6 +91,10 @@ export function createNativeClient<TDatabase extends AnyDatabase = AugmentedData
       ...(auth?.storageKey !== undefined && { storageKey: auth.storageKey }),
       ...(auth?.cookiePrefix !== undefined && { cookiePrefix: auth.cookiePrefix }),
       storage,
+      // A native app takes redirects through its deep-link handling (`createAuthUrlListener`,
+      // `openOAuth`), as supabase-js advises for React Native. On web the OAuth popup lands on the
+      // app itself, and reading its `?code=` there would spend the code the opener is waiting for.
+      detectSessionInUrl: auth?.detectSessionInUrl ?? false,
     },
   })
 }

@@ -311,6 +311,8 @@ const authClassNames: AuthFormClassNames = {
 
 **The forms ship no stylesheet.** There is no CSS to import and nothing to add to Tailwind `content`. `className` styles only the `<form>`; `classNames` puts a class on each element inside it (`title`, `error`, `field`, `label`, `input`, `submit`, and `message` for `SignUpForm`'s "check your email" state). Render them without `classNames` in an app that only styles classes and they show browser defaults: labels inline beside narrow inputs and a grey button. Skip `classNames` only if the app styles bare `label`/`input`/`button` elements globally. `OAuthButton` has default styles only when no `className` is given.
 
+**Don't write an OAuth callback handler.** The client finishes the sign-in from the redirect URL on start (`auth: { detectSessionInUrl }`, default `true`, as in supabase-js), cleans the URL and emits `SIGNED_IN`, so `useAuth()` shows the user. A refusal the server sends back is `useAuth().error` (with `provider`), and `OAuthButton`'s `onError` receives it, as it does a provider the project has not enabled.
+
 ## Gotcha: keep a single `@supatype/client` version
 
 `@supatype/react` and `@supatype/react-auth` declare their own `@supatype/client` dependency. If your app installs a **newer** client than the one they were published against, TypeScript fails with:
