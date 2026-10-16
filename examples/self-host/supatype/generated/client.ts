@@ -34,6 +34,7 @@ declare module "@supatype/client" {
         owner_id?: string
         created_at?: string
       }
+      Relationships: []
     }
   }
 }

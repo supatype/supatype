@@ -31,6 +31,7 @@ declare module "@supatype/client" {
         author?: string
         created_at?: string
       }
+      Relationships: []
     }
   }
 }

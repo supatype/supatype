@@ -34,6 +34,7 @@ declare module "@supatype/client" {
         created_at?: string
         updated_at?: string
       }
+      Relationships: []
     }
     activity: {
       Row: {
@@ -69,6 +70,20 @@ declare module "@supatype/client" {
         amount?: number | null
         created_at?: string
       }
+      Relationships: [
+        {
+          columns: ["auth_user_id"]
+          isOneToOne: false
+          referencedRelation: "supatype:user"
+          referencedColumns: ["id"]
+        },
+        {
+          columns: ["customer_id"]
+          isOneToOne: false
+          referencedRelation: "customer"
+          referencedColumns: ["id"]
+        },
+      ]
     }
   }
 }

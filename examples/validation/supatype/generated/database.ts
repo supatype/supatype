@@ -24,7 +24,7 @@ export type Database = {
           slug: string | null
           description: RichText | null
           tags: string[] | null
-          setupItems: Json | null
+          setupItems: { label: string; minutes: number }[] | null
           notes: ({ type: "note"; data: { text: string } })[] | null
           rating: number | null
           availableFrom: string | null
@@ -41,7 +41,7 @@ export type Database = {
           slug?: string | null
           description?: RichText | string | null
           tags?: string[] | null
-          setupItems?: Json | null
+          setupItems?: { label: string; minutes: number }[] | null
           notes?: ({ type: "note"; data: { text: string } })[] | null
           rating?: number | null
           availableFrom?: string | null
@@ -58,7 +58,7 @@ export type Database = {
           slug?: string | null
           description?: RichText | string | null
           tags?: string[] | null
-          setupItems?: Json | null
+          setupItems?: { label: string; minutes: number }[] | null
           notes?: ({ type: "note"; data: { text: string } })[] | null
           rating?: number | null
           availableFrom?: string | null
