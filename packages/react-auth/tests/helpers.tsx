@@ -35,6 +35,6 @@ export function textOf(node: ReactTestInstance): string {
 }
 
 /** The class on each element of this type, in order. */
-export function classesOf(root: ReactTestInstance, type: string): Array<string | undefined> {
+export function classesOf(root: ReactTestInstance, type: keyof React.JSX.IntrinsicElements): Array<string | undefined> {
   return root.findAllByType(type).map((node) => node.props["className"] as string | undefined)
 }

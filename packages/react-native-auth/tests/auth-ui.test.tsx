@@ -2,6 +2,7 @@ import React from "react"
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { create, act } from "react-test-renderer"
 import type { Session } from "@supatype/client"
+import { Text } from "react-native"
 
 const signIn = vi.fn()
 const signUp = vi.fn()
@@ -9,7 +10,7 @@ const signInWithOtp = vi.fn()
 const resetPasswordForEmail = vi.fn()
 const updateUser = vi.fn()
 const getSession = vi.fn()
-const openOAuth = vi.fn()
+const openOAuth = vi.fn<(...args: unknown[]) => Promise<unknown>>()
 
 vi.mock("@supatype/react", () => ({
   useAuth: () => ({
@@ -63,6 +64,21 @@ function findByTestId(root: ReturnType<typeof create>, testID: string) {
   return root.root.findByProps({ testID })
 }
 
+/** The node's `prop` handler, which the test renderer types as `any`, checked to be a function. */
+function handler(root: ReturnType<typeof create>, testID: string, prop: string): (...args: unknown[]) => unknown {
+  const value: unknown = findByTestId(root, testID).props[prop]
+  if (typeof value !== "function") throw new Error(`${testID} has no ${prop} handler`)
+  return value as (...args: unknown[]) => unknown
+}
+
+function changeText(root: ReturnType<typeof create>, testID: string, text: string): void {
+  handler(root, testID, "onChangeText")(text)
+}
+
+function press(root: ReturnType<typeof create>, testID: string): void {
+  handler(root, testID, "onPress")()
+}
+
 describe("@supatype/react-native-auth", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -77,11 +93,11 @@ describe("@supatype/react-native-auth", () => {
     })
 
     await act(async () => {
-      findByTestId(tree!, "st-login-email").props.onChangeText("a@b.com")
-      findByTestId(tree!, "st-login-password").props.onChangeText("secret")
+      changeText(tree!, "st-login-email", "a@b.com")
+      changeText(tree!, "st-login-password", "secret")
     })
     await act(async () => {
-      findByTestId(tree!, "st-login-submit").props.onPress()
+      press(tree!, "st-login-submit")
     })
 
     expect(signIn).toHaveBeenCalledWith({ email: "a@b.com", password: "secret" })
@@ -95,11 +111,11 @@ describe("@supatype/react-native-auth", () => {
       tree = create(<SignUpForm />)
     })
     await act(async () => {
-      findByTestId(tree!, "st-signup-email").props.onChangeText("a@b.com")
-      findByTestId(tree!, "st-signup-password").props.onChangeText("secret12")
-      findByTestId(tree!, "st-signup-submit").props.onPress()
+      changeText(tree!, "st-signup-email", "a@b.com")
+      changeText(tree!, "st-signup-password", "secret12")
+      press(tree!, "st-signup-submit")
     })
-    expect(tree!.root.findAllByType("Text").some((n) =>
+    expect(tree!.root.findAllByType(Text).some((n) =>
       String(n.props.children).includes("Check your email"),
     )).toBe(true)
   })
@@ -111,10 +127,10 @@ describe("@supatype/react-native-auth", () => {
       tree = create(<MagicLinkForm redirectTo="myapp://auth/callback" />)
     })
     await act(async () => {
-      findByTestId(tree!, "st-magic-link-email").props.onChangeText("a@b.com")
+      changeText(tree!, "st-magic-link-email", "a@b.com")
     })
     await act(async () => {
-      findByTestId(tree!, "st-magic-link-submit").props.onPress()
+      press(tree!, "st-magic-link-submit")
     })
     expect(signInWithOtp).toHaveBeenCalledWith({
       email: "a@b.com",
@@ -143,7 +159,7 @@ describe("@supatype/react-native-auth", () => {
       )
     })
     await act(async () => {
-      findByTestId(tree!, "st-oauth-google").props.onPress()
+      press(tree!, "st-oauth-google")
     })
     expect(openOAuth).toHaveBeenCalled()
     expect(onSuccess).toHaveBeenCalledWith(SESSION)
@@ -169,10 +185,10 @@ describe("@supatype/react-native-auth", () => {
       tree = create(<ResetPassword redirectTo="myapp://reset" />)
     })
     await act(async () => {
-      findByTestId(tree!, "st-reset-email").props.onChangeText("a@b.com")
+      changeText(tree!, "st-reset-email", "a@b.com")
     })
     await act(async () => {
-      findByTestId(tree!, "st-reset-submit").props.onPress()
+      press(tree!, "st-reset-submit")
     })
     expect(resetPasswordForEmail).toHaveBeenCalledWith("a@b.com", { redirectTo: "myapp://reset" })
     expect(findByTestId(tree!, "st-reset-sent")).toBeTruthy()
@@ -187,7 +203,7 @@ describe("@supatype/react-native-auth", () => {
         </AuthGate>,
       )
     })
-    expect(tree!.root.findByType("Fallback")).toBeTruthy()
+    expect(tree!.root.findByType(TextStub)).toBeTruthy()
   })
 })
 
