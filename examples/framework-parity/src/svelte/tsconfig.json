@@ -4,11 +4,10 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "jsx": "preserve",
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "types": ["vite/client"]
+    "types": ["vite/client", "svelte"]
   },
-  "include": ["src/vue/**/*.ts", "src/vue/**/*.vue", "src/client.ts", "supatype/generated"]
+  "include": ["./**/*.ts", "./**/*.svelte", "../client.ts", "../../supatype/generated"]
 }

@@ -64,13 +64,16 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # No `any` in any TypeScript file: eslint.config.mjs turns on that one rule and makes
-      # `eslint-disable` comments inert, so it cannot be switched off for a line. Needs no build.
-      - name: Lint (no any)
-        run: pnpm lint
-
       - name: Build
         run: pnpm turbo run build
+
+      # No `any`, written or inherited from a library, in any TypeScript, Vue, Svelte or Astro file:
+      # eslint.config.mjs turns those rules on and makes `eslint-disable` comments inert, so none can
+      # be switched off for a line. The `no-unsafe-*` rules read types, and workspace packages resolve
+      # one another through `dist`, so this runs after the build: before it, every import of a sibling
+      # package would be `any`.
+      - name: Lint (no any)
+        run: pnpm lint
 
       - name: Typecheck
         run: pnpm turbo run typecheck

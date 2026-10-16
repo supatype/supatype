@@ -4,12 +4,14 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "jsx": "preserve",
-    "jsxImportSource": "solid-js",
     "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "moduleDetection": "force",
+    "jsx": "react-jsx",
     "skipLibCheck": true,
     "noEmit": true,
-    "types": ["vite/client"]
+    "types": ["node", "vite/client"]
   },
-  "include": ["src/solid/**/*.ts", "src/solid/**/*.tsx", "src/client.ts", "supatype/generated"]
+  "include": ["./**/*.ts"],
+  "exclude": ["functions", "supatype/generated", "node_modules"]
 }

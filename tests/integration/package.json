@@ -8,7 +8,8 @@
     "test:integration": "bash scripts/integration-test.sh",
     "test:integration:docker": "SUPATYPE_PROVIDER=docker bash scripts/integration-test.sh",
     "test:integration:docker:quick": "SUPATYPE_PROVIDER=docker bash scripts/integration-test.sh --skip-build --skip-docker-build",
-    "test:integration:quick": "bash scripts/integration-test.sh --skip-build"
+    "test:integration:quick": "bash scripts/integration-test.sh --skip-build",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@supatype/cli": "workspace:*",
@@ -16,7 +17,9 @@
     "@supatype/types": "workspace:*"
   },
   "devDependencies": {
+    "@types/node": "^22",
     "tsx": "^4.19.2",
+    "typescript": "^5",
     "vite": "^6.0.0"
   }
 }

@@ -1,7 +1,7 @@
 /**
  * Tell TypeScript what a `.vue` file is.
  *
- * Without this, `import App from "./App.vue"` is an unresolved module and `tsconfig.vue.json` fails
+ * Without this, `import App from "./App.vue"` is an unresolved module and `src/vue/tsconfig.json` fails
  * to typecheck, which it had been doing silently: the per-framework configs are not what the
  * example's default `tsconfig.json` checks, so nothing ran this one.
  *
