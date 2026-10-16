@@ -178,28 +178,115 @@ test.describe("the kitchen-sink attendee app", () => {
   test("renders the prebuilt auth forms as the app's own fields, not browser defaults", async ({ page }) => {
     // Needs no session and no seed, so it also runs against `vite` on its own.
     await page.goto("/", { waitUntil: "networkidle" })
-    for (const mode of ["sign-up", "sign-in"]) {
-      if (mode === "sign-in") await page.getByRole("button", { name: /already have an account/i }).click()
-      const card = page.locator(".ks-card").first()
-      const input = card.locator('input[type="email"]')
-      const submit = card.locator('button[type="submit"]')
-      await expect(input, mode).toBeVisible()
+    await expectStyledForm(page, "sign-up", 'input[type="email"]')
+    await page.getByRole("button", { name: /already have an account/i }).click()
+    await expectStyledForm(page, "sign-in", 'input[type="email"]')
+  })
 
-      // The forms ship no stylesheet. Unstyled, the label sits inline beside a narrow square input
-      // and the button is the browser's grey one; the card around them gives no hint of that.
-      await expect(card.locator("label").first(), mode).toHaveCSS("display", "block")
-      await expect(input, mode).toHaveCSS("border-radius", "8px")
-      const widths = await Promise.all([input, card].map((l) => l.evaluate((el) => el.clientWidth)))
-      expect(widths[0], `${mode}: input fills the card`).toBeGreaterThan((widths[1] ?? 0) * 0.8)
-      const accent = await page.evaluate(() => {
-        const probe = document.createElement("span")
-        probe.style.color = "var(--ks-accent)"
-        document.body.append(probe)
-        const color = getComputedStyle(probe).color
-        probe.remove()
-        return color
-      })
-      await expect(submit, mode).toHaveCSS("background-color", accent)
-    }
+  test("offers a password reset and an emailed sign-in link from signing in, styled the same", async ({ page }) => {
+    // Vite-only too: these render and validate in the browser before any request is made.
+    await page.goto("/", { waitUntil: "networkidle" })
+    await page.getByRole("button", { name: /already have an account/i }).click()
+    await expectSameLook(page, ["Forgot password?", "Email me a sign-in link", "Need an account? Sign up"])
+
+    await page.getByRole("button", { name: "Forgot password?" }).click()
+    await expect(page.getByRole("heading", { name: "Reset your password" })).toBeVisible()
+    await expect(page.getByLabel("Email address")).toBeVisible()
+    await expectStyledForm(page, "forgot password", 'input[type="email"]')
+    await page.getByRole("button", { name: "Back to sign in" }).click()
+
+    await page.getByRole("button", { name: "Email me a sign-in link" }).click()
+    await expect(page.getByRole("heading", { name: "Sign in with a magic link" })).toBeVisible()
+    await expectStyledForm(page, "magic link", 'input[type="email"]')
+    await page.getByRole("button", { name: "Back to sign in" }).click()
+    await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible()
+  })
+
+  test("lands a password reset link on a styled new-password form, not the conference", async ({ page }) => {
+    // The auth server is stood in for, so this runs against `vite` with no stack: a reset link
+    // arrives with implicit-grant tokens and `type=recovery` in the fragment, the client fetches the
+    // user for them, and then emits PASSWORD_RECOVERY, which is what the app keys on.
+    const updates: unknown[] = []
+    await page.route("**/auth/v1/user", async (route) => {
+      if (route.request().method() === "PUT") updates.push(route.request().postDataJSON())
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(RECOVERED_USER) })
+    })
+    await page.goto(`/#${RECOVERY_FRAGMENT}`, { waitUntil: "networkidle" })
+
+    await expect(page.getByRole("heading", { name: "Set a new password" })).toBeVisible()
+    await expect(page.getByRole("button", { name: "Programme", exact: true })).toHaveCount(0)
+    expect(page.url(), "the tokens leave the address bar").not.toContain("access_token")
+    await expectStyledForm(page, "update password", 'input[type="password"]')
+
+    await page.getByLabel("New password").fill(PASSWORD)
+    await page.getByRole("button", { name: "Update password" }).click()
+    await expect(page.getByText("Your password has been updated.")).toBeVisible()
+    expect(updates).toEqual([{ password: PASSWORD }])
   })
 })
+
+/** What `/auth/v1/user` answers for the user a reset link signed in. */
+const RECOVERED_USER = {
+  id: "00000000-0000-4000-8000-000000000001",
+  email: "reset@example.com",
+  created_at: "2026-01-01T00:00:00Z",
+  updated_at: "2026-01-01T00:00:00Z",
+  app_metadata: { provider: "email" },
+  user_metadata: {},
+}
+
+/** The fragment a reset link lands with: the auth server's implicit grant, marked as a recovery. */
+const RECOVERY_FRAGMENT = new URLSearchParams({
+  access_token: "recovery-access-token",
+  refresh_token: "recovery-refresh-token",
+  expires_in: "3600",
+  token_type: "bearer",
+  type: "recovery",
+}).toString()
+
+/**
+ * The auth card's form drawn with the app's own fields.
+ *
+ * The forms ship no stylesheet. Unstyled, the label sits inline beside a narrow square input and the
+ * button is the browser's grey one; the card around them gives no hint of that.
+ */
+async function expectStyledForm(page: Page, mode: string, inputSelector: string): Promise<void> {
+  const card = page.locator(".ks-card").first()
+  const input = card.locator(inputSelector)
+  const submit = card.locator('button[type="submit"]')
+  await expect(input, mode).toBeVisible()
+  await expect(card.locator("label").first(), mode).toHaveCSS("display", "block")
+  await expect(card.locator("h2").first(), mode).toHaveCSS("font-size", "17px")
+  await expect(input, mode).toHaveCSS("border-radius", "8px")
+  const widths = await Promise.all([input, card].map((l) => l.evaluate((el) => el.clientWidth)))
+  expect(widths[0], `${mode}: input fills the card`).toBeGreaterThan((widths[1] ?? 0) * 0.8)
+  await expect(submit, mode).toHaveCSS("background-color", await accentColor(page))
+}
+
+/**
+ * The alternative actions under the card drawn alike: one variant, one resting background.
+ *
+ * The pointer is moved off first. The click that opened the screen leaves it over whichever button
+ * now sits there, and a hovered ghost button is filled, which is the hover state and not a mismatch.
+ */
+async function expectSameLook(page: Page, names: string[]): Promise<void> {
+  await page.mouse.move(0, 0)
+  const looks = await Promise.all(
+    names.map((name) =>
+      page.getByRole("button", { name, exact: true }).evaluate((el) => `${el.className} | ${getComputedStyle(el).backgroundColor}`),
+    ),
+  )
+  expect(new Set(looks).size, looks.join(" / ")).toBe(1)
+}
+
+/** `--ks-accent` as the browser computes it, so the assertion follows the theme. */
+async function accentColor(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const probe = document.createElement("span")
+    probe.style.color = "var(--ks-accent)"
+    document.body.append(probe)
+    const color = getComputedStyle(probe).color
+    probe.remove()
+    return color
+  })
+}

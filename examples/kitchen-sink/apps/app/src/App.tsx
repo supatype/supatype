@@ -1,6 +1,7 @@
 import React, { useState } from "react"
 import { useAuth, useQuery } from "@supatype/react"
-import { AuthScreen } from "./AuthScreen.js"
+import { usePasswordRecovery } from "@supatype/react-auth"
+import { AuthScreen, PasswordRecoveryScreen } from "./AuthScreen.js"
 import { ProgrammeScreen } from "./ProgrammeScreen.js"
 import { SpeakersScreen } from "./SpeakersScreen.js"
 import { LobbyScreen } from "./LobbyScreen.js"
@@ -18,7 +19,7 @@ type SiteSettings = TableRow<"_global_site_settings">
  *
  * Organised by what an attendee does, not by which API each screen exercises. The previous version
  * had tabs called "Media" and "Rules" with a `Proves: useQuery, relations, ordering` caption under
- * the navigation — which covered the same surfaces while reading as a test fixture rather than a
+ * the navigation, which covered the same surfaces while reading as a test fixture rather than a
  * conference. Uploading is now part of an account, and the three refusals happen where an attendee
  * would actually meet them: on the chat composer, when a message is rejected.
  *
@@ -38,6 +39,8 @@ type ScreenId = (typeof SCREENS)[number]["id"]
 
 export function App(): React.ReactElement {
   const { user, loading, signOut } = useAuth()
+  // A password reset link signs the user in; until they choose a new password, ask for one.
+  const recovery = usePasswordRecovery()
   const [screen, setScreen] = useState<ScreenId>("programme")
 
   if (loading) {
@@ -51,6 +54,7 @@ export function App(): React.ReactElement {
   // Not a route guard bolted on: every model below is unreadable to `anon` by its own access rule,
   // so signing out empties these screens whatever the UI does.
   if (!user) return <AuthScreen />
+  if (recovery.active) return <PasswordRecoveryScreen onDone={recovery.finish} />
 
   return (
     <div className="ks-app">
@@ -109,7 +113,7 @@ function NavItems({
  * The conference's own name, from the database rather than a constant.
  *
  * `SiteSettings` is a singleton an editor owns in Studio, and until now nothing in this half of the
- * example read it — the app announced itself as "Kitchen Sink", which is the name of the sample
+ * example read it, and the app announced itself as "Kitchen Sink", which is the name of the sample
  * rather than the name of the event it is pretending to run.
  */
 function ConferenceBar({
