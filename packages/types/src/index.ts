@@ -843,7 +843,7 @@ export type Exists<TSource> = Access<"Exists", {
 type BoundOwnerForFields<TFields extends Record<string, unknown>> = Access<"Owner", {
   readonly kind: "Owner"
   readonly key: OwnerEligibleFieldKeys<TFields>
-  readonly __ownerModel?: Model<TFields, any>
+  readonly __ownerModel?: Model<TFields, ModelMeta<TFields>>
 }>
 type BoundOwnerFromForFields<TFields extends Record<string, unknown>> = Access<"OwnerFrom", {
   readonly kind: "OwnerFrom"

@@ -97,7 +97,8 @@ function InitialStatePlugin({ value }: { value: unknown }): null {
 
 // ── Main widget ───────────────────────────────────────────────────────────────
 
-const EDITOR_NODES = [HeadingNode, QuoteNode, ListNode, ListItemNode, LinkNode, AutoLinkNode]
+/** The node classes the editor registers: everything a saved document can contain beyond Lexical's core. */
+export const EDITOR_NODES = [HeadingNode, QuoteNode, ListNode, ListItemNode, LinkNode, AutoLinkNode]
 
 const EDITOR_THEME = {
   heading: { h1: "st-rt-h1", h2: "st-rt-h2", h3: "st-rt-h3" },

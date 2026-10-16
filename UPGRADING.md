@@ -238,6 +238,33 @@ into `.env` on every start, so a dev stack could not send a confirmation email a
 - `@supatype/client/bindings` is a new subpath the framework bindings use internally. It is not a
   public API; do not import it from application code.
 
+## Rendering rich text
+
+`RichText` in `@supatype/react` and `renderRichText` in `@supatype/common/richtext` now render
+what the Lexical editor saves. Before, they expected a node shape no editor writes: bold, italic
+and code were lost (Lexical stores formatting as a bit number), numbered and check lists came out
+as bullets, quotes, line breaks and autolinks vanished, and handing them the saved editor state
+(`{ root }`), which is what a `RichText` column holds, rendered nothing.
+
+- **Every node the editor saves is rendered:** paragraphs, headings `h1` to `h6`, quotes, bullet,
+  numbered (with `start`) and check lists, nested lists, links and autolinks, line breaks, tabs,
+  code blocks and horizontal rules, with alignment, indent and direction. Every text format bit
+  is rendered: bold, italic, strikethrough, underline, code, subscript, superscript, highlight,
+  and the lowercase, uppercase and capitalize transforms. Inline `style` strings on text are not.
+- **`content` takes the column value as it is:** the editor state, its root node, or a list of
+  nodes. Drop any code that dug out `.root` or cast the value to fit; `content={post.body.en}`
+  works.
+- **Links are checked.** A link is only rendered for `http`, `https`, `mailto`, `tel` and `sms`
+  URLs or relative ones; anything else (`javascript:`, `data:`, `vbscript:`) renders its text
+  without a link. `target="_blank"` always gets `rel="noopener noreferrer"`.
+- **`RichText` builds React elements** instead of setting `dangerouslySetInnerHTML`. The props are
+  unchanged.
+- **`RichTextNode` is now Lexical's serialized node** (`SerializedLexicalNode` from
+  `@supatype/types/lexical`). The old hand-written union and the node types only it had
+  (`blockquote`, `callout`, `code-tabs`, `cta`, `embed`, `image`, a `list` with
+  `listType: "ordered" | "unordered"`, text `format` as an object) are gone: no editor saves
+  them. A node type the renderer does not know renders its text rather than nothing.
+
 ## Extensions move to the extensions schema
 
 A push now creates the extensions a schema needs (`postgis` for `Geo` and `GeoPoint`, `vector` for

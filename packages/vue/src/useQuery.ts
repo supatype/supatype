@@ -1,5 +1,5 @@
 import { ref, onMounted, onUnmounted, watch, type Ref } from "vue"
-import type { AugmentedDatabase, AnyDatabase, SupatypeError } from "@supatype/client"
+import type { AugmentedDatabase, AnyClient, AnyDatabase, SupatypeError } from "@supatype/client"
 import { onIdentityChange } from "@supatype/client"
 import { useSupatype } from "./context.js"
 
@@ -59,8 +59,9 @@ export function useQuery<
     error.value = null
 
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let query = (client.from(table) as any).select(options?.columns)
+      // Through the untyped client: the generated row types do not survive a table name known
+      // only at run time, so the rows are typed as `TRow` once they arrive.
+      let query = (client as AnyClient).from(table).select(options?.columns)
 
       if (options?.filter) {
         for (const [col, val] of Object.entries(options.filter)) {
