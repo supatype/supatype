@@ -18,6 +18,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { compositeKinds, deferredKinds, testableKinds, unreachableKinds } from "./kinds.js"
 import { fieldName } from "./generate-schema.js"
+import { rowColumns } from "./row-type.js"
 import { createClient } from "@supatype/client"
 import { pathToFileURL } from "node:url"
 
@@ -72,7 +73,7 @@ function check(ok: boolean, what: string, detail?: string): void {
     console.log(`  ok   ${what}`)
     return
   }
-  console.log(`  FAIL ${what}${detail ? ` — ${detail}` : ""}`)
+  console.log(`  FAIL ${what}${detail ? `: ${detail}` : ""}`)
   failures.push(what)
 }
 
@@ -155,22 +156,23 @@ async function main(): Promise<void> {
     join(PROJECT, "supatype", "generated", "database.ts"),
     "utf8",
   )
-  const rowBlock = block(generated, "probe_all", "Row")
+  const row = rowColumns(generated, "probe_all")
+  check(row !== undefined, "the generated types declare probe_all's Row")
   for (const [kind] of kinds) {
     const name = columnOf(kind)
     const col = byName.get(name)
     if (!col) continue
-    const line = rowBlock.split("\n").find((l) => l.trim().startsWith(`${name}:`))
-    if (line === undefined) {
+    const typed = row?.get(name)
+    if (typed === undefined) {
       check(false, `${kind}: appears in the generated Row type`)
       continue
     }
     // Every probe column is optional in the schema, so every one must be nullable in the Row type.
     // The inverse of the relation bug, where a NOT NULL column was typed `| null`.
     check(
-      (col.is_nullable === "YES") === line.includes("| null"),
+      (col.is_nullable === "YES") === typed.nullable,
       `${kind}: Row nullability matches the column`,
-      `column nullable=${col.is_nullable}, type=${line.trim()}`,
+      `column nullable=${col.is_nullable}, type=${name}: ${typed.type}`,
     )
   }
 
@@ -296,17 +298,6 @@ function columnOf(kind: string): string {
 /** The type family, so `NUMERIC(19,4)` and `numeric` compare equal but `TEXT` and `numeric` do not. */
 function family(pgType: string): string {
   return pgType.toLowerCase().replace(/\(.*\)$/, "").replace(/\s+/g, " ").trim()
-}
-
-/** One `Row` / `Insert` / `Update` block of one table in the generated types. */
-function block(src: string, table: string, mode: "Row" | "Insert" | "Update"): string {
-  const start = src.indexOf(`      ${table}: {`)
-  if (start === -1) return ""
-  const rest = src.slice(start)
-  const open = rest.indexOf(`${mode}: {`)
-  if (open === -1) return ""
-  const close = rest.indexOf("}", open)
-  return rest.slice(open, close)
 }
 
 main().catch((err: unknown) => {

@@ -1118,6 +1118,9 @@ importers:
       tsx:
         specifier: ^4.19.2
         version: 4.21.0
+      typescript:
+        specifier: ^5
+        version: 5.9.3
       vite:
         specifier: ^6.0.0
         version: 6.4.1(@types/node@24.12.0)(jiti@1.21.7)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.8.2)

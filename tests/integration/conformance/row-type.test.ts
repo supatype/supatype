@@ -1,0 +1,103 @@
+/**
+ * The verifier's reading of a generated `Row` type, against the shape the engine writes.
+ *
+ * The fixture is the engine's own output for the conformance schema, cut to the columns around the
+ * JSON probe. Release train 7 read it wrongly: the JSON column's object type ended the `Row` block
+ * early, so it lost its `| null` and the six columns after it were reported missing.
+ */
+import { strict as assert } from "node:assert"
+import { describe, it } from "node:test"
+import { rowColumns } from "./row-type.js"
+
+const GENERATED = `export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[]
+
+export type Database = {
+  public: {
+    Tables: {
+      probe_target: {
+        Row: {
+          id: string
+          label: string | null
+        }
+        Insert: {
+          id?: string
+        }
+        Update: {
+          id?: string
+        }
+        Relationships: []
+      }
+      probe_all: {
+        Row: {
+          id: string
+          probeArray: string[] | null
+          probeJson: { a: number } | null
+          probeNested: { a: number; inner: { b: string | null } } | null
+          probeStrict: { a: number | null }
+          probeBlocks: Json[] | null
+          probeEnum: "one" | "two" | null
+          probeBoolean: boolean | null
+          "probe-quoted": string
+          target_id: string | null
+        }
+        Insert: {
+          id?: string
+          probeJson?: { a: number } | null
+        }
+        Update: {
+          id?: string
+        }
+        Relationships: []
+      }
+    }
+  }
+}
+`
+
+describe("rowColumns", () => {
+  const columns = rowColumns(GENERATED, "probe_all")
+
+  it("reads every column, including those after a JSON object type", () => {
+    assert.deepEqual([...(columns?.keys() ?? [])], [
+      "id",
+      "probeArray",
+      "probeJson",
+      "probeNested",
+      "probeStrict",
+      "probeBlocks",
+      "probeEnum",
+      "probeBoolean",
+      "probe-quoted",
+      "target_id",
+    ])
+  })
+
+  it("keeps a JSON column's whole type, braces and all", () => {
+    assert.equal(columns?.get("probeNested")?.type, "{ a: number; inner: { b: string | null } } | null")
+  })
+
+  it("calls a column nullable only when null is a member of its own union", () => {
+    const nullable = Object.fromEntries([...(columns ?? [])].map(([name, c]) => [name, c.nullable]))
+    assert.deepEqual(nullable, {
+      id: false,
+      probeArray: true,
+      probeJson: true,
+      probeNested: true,
+      probeStrict: false,
+      probeBlocks: true,
+      probeEnum: true,
+      probeBoolean: true,
+      "probe-quoted": false,
+      target_id: true,
+    })
+  })
+
+  it("reads the table asked for, not a neighbour", () => {
+    assert.deepEqual([...(rowColumns(GENERATED, "probe_target")?.keys() ?? [])], ["id", "label"])
+  })
+
+  it("says so when the table is not there", () => {
+    assert.equal(rowColumns(GENERATED, "missing"), undefined)
+    assert.equal(rowColumns("export type Other = {}", "probe_all"), undefined)
+  })
+})

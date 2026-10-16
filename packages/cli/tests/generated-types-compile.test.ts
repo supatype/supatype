@@ -55,6 +55,7 @@ export type Post = Model<{
   title: Localized<string>
   features: Optional<Localized<JSON<Feature[]>>>
   settings: JSON<Settings>
+  shape: Optional<JSON<{ a: number; inner: { b: string } }>>
   untyped: Optional<JSON>
   author: RelatedTo<Author, { required: true }>
   tags: ManyToMany<Tag, { through: "post_tags" }>
@@ -124,6 +125,14 @@ describe("the generated augmentation, as TypeScript reads it", () => {
         type Settings = { theme: "light" | "dark"; flags?: string[]; limits: { [key: string]: number } | null }
         assert<Equal<TableRow<"posts">["features"], { [locale: string]: Feature[] } | null>>()
         assert<Equal<TableRow<"posts">["settings"], Settings>>()
+      `),
+    ).toEqual([])
+  })
+
+  it("makes an optional JSON<T> with an object shape nullable, as its column is", () => {
+    expect(
+      compile(dir, `
+        assert<Equal<TableRow<"posts">["shape"], { a: number; inner: { b: string } } | null>>()
       `),
     ).toEqual([])
   })
