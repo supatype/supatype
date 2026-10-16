@@ -2,8 +2,8 @@
  * The Realtime Inspector on a running self-host stack (Phase-08 Appendix A, 8.3).
  *
  * Drives the masking project's stack (`tests/e2e/masking/project`, `employee.salary` readable by the
- * app role `admin`, `ssn` by its owner), brought up with `supatype dev`, with the dev Studio bypass
- * off (`STUDIO_OPEN_DEV=0` in its `.env`) so Studio roles apply:
+ * app role `admin`, `ssn` by its owner), brought up with `supatype dev`. Studio signs in and its
+ * roles apply, as on every deployment:
  *
  *   MASKING_PROJECT_NAME=<name> SUPATYPE_KONG_PORT=<port> REALTIME_INSPECTOR_E2E=1 \
  *     E2E_BASE_URL=http://localhost:<port> pnpm exec playwright test specs/realtime-inspector.spec.ts

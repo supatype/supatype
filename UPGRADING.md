@@ -408,6 +408,12 @@ members and invitations are migrated; scripts that send `role: "member"` must se
   hides the Database screens' create, drop and policy controls from other roles; viewers still read
   the Database views, policies and migration history through a read-only metadata catalogue.
 - **Sessions** in the Users view are listed and revoked through the auth admin API.
+- **`STUDIO_OPEN_DEV` is gone.** Earlier CLIs wrote it into the dev compose file, and with it the
+  server's Studio proxy answered unauthenticated requests as the service role. The CLI no longer
+  writes it, and the server ignores it and logs a warning if it is still set. Studio in dev is
+  unchanged: it asks for an admin sign-in, as it always did. If you have no admin yet, create one
+  with `supatype admin create-user`. Scripts that called `/studio/proxy` without a session must
+  sign in, or call the API with the service role key directly.
 
 ## The SQL editor's connection
 

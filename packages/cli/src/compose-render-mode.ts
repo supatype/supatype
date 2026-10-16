@@ -2,10 +2,10 @@
  * Which mode a re-render of the compose file uses, decided one way for every command (SH1, SH2).
  *
  * The file has two modes. Dev turns on what a laptop wants and a server must not have: every origin
- * allowed by CORS, Studio open without a login (`STUDIO_OPEN_DEV`), the database on a loopback dev
- * port. Standalone is the production stack `supatype self-host compose up` starts. Commands used to
- * pick a mode by who they were: everything `push`, `diff` or `adopt` touched rendered dev, so a push
- * to a production stack re-rendered it as dev and `up -d` recreated it that way; and every
+ * allowed by CORS, the database on a loopback dev port, dev values in `.env`. Standalone is the
+ * production stack `supatype self-host compose up` starts. Commands used to pick a mode by who they
+ * were: everything `push`, `diff` or `adopt` touched rendered dev, so a push to a production stack
+ * re-rendered it as dev and `up -d` recreated it that way; and every
  * `self-host compose` command rendered standalone, so restarting one service of a `supatype dev`
  * stack turned that service into production. The rule now looks at the stack instead:
  *

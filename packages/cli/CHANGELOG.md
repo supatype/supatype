@@ -18,6 +18,12 @@ self-host, the gateway decides CORS, compose mounts use absolute paths, and
   `autoIncrement: true` in the AST. A serial column made when it compiled to one satisfies it: every
   push leaves it exactly as it is, with no change and no warning. An explicit `Identity<...>` on a
   serial column converts it.
+* **security:** `supatype dev` no longer writes `STUDIO_OPEN_DEV` into the compose file, and the
+  server no longer reads it. With it set, the server's Studio proxy admitted unauthenticated
+  requests as the service role, and dev allows every CORS origin, so any web page open in the
+  developer's browser could read and write the whole database through it. Studio itself never used
+  it: it always asked for a sign-in. Nothing changes for Studio in dev; scripts that called
+  `/studio/proxy` without a session must sign in or use the service role key directly.
 
 ### Features
 
@@ -77,7 +83,8 @@ self-host, the gateway decides CORS, compose mounts use absolute paths, and
   that is not an origin or `*` is refused when the config is read.
 * **security:** `supatype push` (and `diff`, `adopt`, `update`) against a stack started with
   `self-host compose up` rendered it as a dev stack and recreated it that way: every origin allowed
-  by CORS, Studio open without a login (`STUDIO_OPEN_DEV=1`), the database moved to a loopback dev
+  by CORS, the Studio proxy answering unauthenticated requests as the service role
+  (`STUDIO_OPEN_DEV=1`, since removed; see Breaking Changes), the database moved to a loopback dev
   port, and dev values written over the operator's `.env` (`SITE_URL`,
   `SUPATYPE_MAILER_AUTOCONFIRM=true`, a dev `DATABASE_URL`). Every command that renders the compose
   file now uses one rule for its mode: dev while a `supatype dev` session holds the project, else the
