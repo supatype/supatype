@@ -64,6 +64,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # No `any` in any TypeScript file: eslint.config.mjs turns on that one rule and makes
+      # `eslint-disable` comments inert, so it cannot be switched off for a line. Needs no build.
+      - name: Lint (no any)
+        run: pnpm lint
+
       - name: Build
         run: pnpm turbo run build
 

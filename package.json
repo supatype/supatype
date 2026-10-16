@@ -9,7 +9,7 @@
     "pg:stop": "tsx tests/integration/run-dev.ts pg stop",
     "pg:psql": "tsx tests/integration/run-dev.ts pg psql",
     "test": "turbo run test",
-    "lint": "turbo run lint",
+    "lint": "eslint --quiet .",
     "typecheck": "turbo run typecheck",
     "build:engine": "cargo build --workspace",
     "build:engine:release": "cargo build --workspace --release",
@@ -19,8 +19,10 @@
     "coverage:examples": "node scripts/check-example-coverage.mjs --write"
   },
   "devDependencies": {
+    "eslint": "9.39.5",
     "turbo": "^2",
     "typescript": "^5",
+    "typescript-eslint": "8.71.1",
     "vitest": "^4.0.18"
   },
   "packageManager": "pnpm@10.6.0",
