@@ -225,6 +225,77 @@ test.describe("the kitchen-sink attendee app", () => {
   })
 })
 
+/**
+ * A 24x24 JPEG, small enough to inline. A real one matters: the transform has to decode it.
+ */
+const AVATAR_JPEG = Buffer.from(
+  "/9j/2wBDAA0JCgsKCA0LCgsODg0PEyAVExISEyccHhcgLikxMC4pLSwzOko+MzZGNywtQFdBRkxOUlNSMj5aYVpQYEpRUk//2wBDAQ4ODhMREyYVFSZPNS01T09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT0//wAARCAAYABgDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAL/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFgEBAQEAAAAAAAAAAAAAAAAAAAIG/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AkBLNAAAAAAP/2Q==",
+  "base64",
+)
+
+/**
+ * Signs in as `E2E_KS_EMAIL` / `E2E_KS_PASSWORD` when both are set, otherwise signs up a fresh
+ * attendee. A stack with email confirmation on gives a new sign-up no session, so the account tests
+ * need an existing, confirmed user there.
+ */
+async function signInForAccount(page: Page): Promise<void> {
+  const email = process.env.E2E_KS_EMAIL
+  const password = process.env.E2E_KS_PASSWORD
+  if (email === undefined || password === undefined) {
+    await signUp(page)
+    return
+  }
+  await page.goto("/", { waitUntil: "networkidle" })
+  await page.getByRole("button", { name: /already have an account/i }).click()
+  await page.locator('input[type="email"]').first().fill(email)
+  await page.locator('input[type="password"]').first().fill(password)
+  await page.getByRole("button", { name: /^sign in$/i }).click()
+  await expect(page.getByRole("button", { name: "Programme", exact: true })).toBeVisible({ timeout: 30_000 })
+}
+
+/** Fetch an image URL from the page and say what came back. */
+async function fetched(page: Page, url: string): Promise<{ status: number; type: string; bytes: number }> {
+  return page.evaluate(async (u) => {
+    const res = await fetch(u)
+    return { status: res.status, type: res.headers.get("content-type") ?? "", bytes: (await res.arrayBuffer()).byteLength }
+  }, url)
+}
+
+test.describe("the kitchen-sink account screen", () => {
+  test("stores the picked picture's bytes and serves both the original and the transform", async ({ page }) => {
+    // Manual testing found an avatar stored as 0 bytes whose transform answered 500. Both URLs
+    // returning image bytes is the whole point of this screen.
+    await signInForAccount(page)
+    await open(page, "Account")
+    await page.getByLabel("Choose a picture").setInputFiles({ name: "avatar.jpg", mimeType: "image/jpeg", buffer: AVATAR_JPEG })
+
+    const original = page.getByAltText("the bytes that were uploaded")
+    const transformed = page.getByAltText("resized and re-encoded on read")
+    await expect(original).toBeVisible()
+
+    const asUploaded = await fetched(page, (await original.getAttribute("src")) ?? "")
+    expect(asUploaded).toEqual({ status: 200, type: "image/jpeg", bytes: AVATAR_JPEG.length })
+    const derived = await fetched(page, (await transformed.getAttribute("src")) ?? "")
+    expect(derived.status).toBe(200)
+    expect(derived.type).toBe("image/webp")
+    expect(derived.bytes).toBeGreaterThan(0)
+    // Decoded by the browser, not merely fetched. 24px, not 160: the transform never enlarges.
+    await expect.poll(() => transformed.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0)
+  })
+
+  test("refuses an empty file instead of storing it", async ({ page }) => {
+    await signInForAccount(page)
+    await open(page, "Account")
+    const uploads: string[] = []
+    page.on("request", (r) => {
+      if (r.method() === "POST" && r.url().includes("/storage/v1/object/")) uploads.push(r.url())
+    })
+    await page.getByLabel("Choose a picture").setInputFiles({ name: "test.jpg", mimeType: "image/jpeg", buffer: Buffer.alloc(0) })
+    await expect(page.getByText("test.jpg is empty (0 bytes). Choose another picture.")).toBeVisible()
+    expect(uploads).toEqual([])
+  })
+})
+
 /** What `/auth/v1/user` answers for the user a reset link signed in. */
 const RECOVERED_USER = {
   id: "00000000-0000-4000-8000-000000000001",
