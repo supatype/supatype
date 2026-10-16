@@ -214,8 +214,8 @@ class TableClient<
 
   insert(
     data: TDef["Insert"] | TDef["Insert"][],
-  ): MutationBuilder<TDef["Row"]> {
-    return new MutationBuilder<TDef["Row"]>(
+  ): MutationBuilder<TDef["Row"], TTables, TName> {
+    return new MutationBuilder<TDef["Row"], TTables, TName>(
       this.baseUrl,
       this.path,
       this.getHeaders,
@@ -229,8 +229,8 @@ class TableClient<
 
   upsert(
     data: TDef["Insert"] | TDef["Insert"][],
-  ): MutationBuilder<TDef["Row"]> {
-    return new MutationBuilder<TDef["Row"]>(
+  ): MutationBuilder<TDef["Row"], TTables, TName> {
+    return new MutationBuilder<TDef["Row"], TTables, TName>(
       this.baseUrl,
       this.path,
       this.getHeaders,
@@ -242,8 +242,8 @@ class TableClient<
     )
   }
 
-  update(data: TDef["Update"]): MutationBuilder<TDef["Row"]> {
-    return new MutationBuilder<TDef["Row"]>(
+  update(data: TDef["Update"]): MutationBuilder<TDef["Row"], TTables, TName> {
+    return new MutationBuilder<TDef["Row"], TTables, TName>(
       this.baseUrl,
       this.path,
       this.getHeaders,
@@ -255,8 +255,8 @@ class TableClient<
     )
   }
 
-  delete(): MutationBuilder<TDef["Row"]> {
-    return new MutationBuilder<TDef["Row"]>(
+  delete(): MutationBuilder<TDef["Row"], TTables, TName> {
+    return new MutationBuilder<TDef["Row"], TTables, TName>(
       this.baseUrl,
       this.path,
       this.getHeaders,
