@@ -86,6 +86,14 @@ set_env_key EXPO_PUBLIC_SUPATYPE_URL "$BASE_URL"
 set_env_key EXPO_PUBLIC_SUPATYPE_ANON_KEY "$ANON_KEY"
 # The auth server loads the project's .env at boot, which is where a provider is configured.
 oauth_stub_point_github "$EXAMPLE_DIR/.env" "$STUB_PORT" "$BASE_URL"
+# Google is enabled too, with credentials Google would refuse: its server half cannot run against a
+# stub (the auth server pins Google's issuer), so the spec asserts only the authorize request the
+# app makes. The client asks /auth/v1/settings before it sends that request and refuses a provider
+# the server reports off, so a Google that is not enabled never gets as far as the request.
+set_env_key SUPATYPE_EXTERNAL_GOOGLE_ENABLED true
+set_env_key SUPATYPE_EXTERNAL_GOOGLE_CLIENT_ID expo-e2e-google-client
+set_env_key SUPATYPE_EXTERNAL_GOOGLE_SECRET expo-e2e-google-secret
+set_env_key SUPATYPE_EXTERNAL_GOOGLE_REDIRECT_URI "$BASE_URL/auth/v1/callback"
 
 echo "==> SMTP catcher"
 docker rm -f "$MAILPIT_NAME" >/dev/null 2>&1 || true
