@@ -79,7 +79,20 @@ export type Database = {
           amount?: number | null
           created_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            columns: ["auth_user_id"]
+            isOneToOne: false
+            referencedRelation: "supatype:user"
+            referencedColumns: ["id"]
+          },
+          {
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customer"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {

@@ -23,7 +23,7 @@ declare module "@supatype/client" {
         slug: string | null
         description: RichText | null
         tags: Record<string, unknown> | null
-        setupItems: Record<string, unknown> | null
+        setupItems: { label: string; minutes: number }[] | null
         notes: Record<string, unknown> | null
         rating: number | null
         availableFrom: string | null
@@ -38,7 +38,7 @@ declare module "@supatype/client" {
         slug?: string | null
         description?: RichText | string | null
         tags?: Record<string, unknown> | null
-        setupItems?: Record<string, unknown> | null
+        setupItems?: { label: string; minutes: number }[] | null
         notes?: Record<string, unknown> | null
         rating?: number | null
         availableFrom?: string | null
@@ -53,7 +53,7 @@ declare module "@supatype/client" {
         slug?: string | null
         description?: RichText | string | null
         tags?: Record<string, unknown> | null
-        setupItems?: Record<string, unknown> | null
+        setupItems?: { label: string; minutes: number }[] | null
         notes?: Record<string, unknown> | null
         rating?: number | null
         availableFrom?: string | null
@@ -62,6 +62,7 @@ declare module "@supatype/client" {
         sku?: string | null
         status?: "draft" | "published"
       }
+      Relationships: []
     }
   }
 }

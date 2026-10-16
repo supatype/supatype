@@ -39,7 +39,14 @@ export type Database = {
           created_at?: string
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            columns: ["auth_user_id"]
+            isOneToOne: false
+            referencedRelation: "supatype:user"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {

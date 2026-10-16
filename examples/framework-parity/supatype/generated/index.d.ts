@@ -30,6 +30,14 @@ declare module "@supatype/client" {
         created_at?: string
         updated_at?: string
       }
+      Relationships: [
+        {
+          columns: ["auth_user_id"]
+          isOneToOne: false
+          referencedRelation: "supatype:user"
+          referencedColumns: ["id"]
+        },
+      ]
     }
   }
 }

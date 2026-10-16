@@ -13,6 +13,8 @@ import type {
   TableRow,
   TableInsert,
   TableUpdate,
+  SelectError,
+  AnyDatabase,
 } from "../src/index.js"
 // Brings the suite-wide `SupatypeModels` augmentation into this compilation as well as the types.
 import type { Post, PostInsert, Comment } from "./fixtures/models.js"
@@ -141,5 +143,106 @@ describe("table type helpers", () => {
     // A helper that returned the same shape for every table would satisfy the assertions above.
     expectTypeOf<TableRow<"comments">>().toEqualTypeOf<Comment>()
     expectTypeOf<TableRow<"comments">>().not.toEqualTypeOf<Post>()
+  })
+})
+
+// ─── select-string inference ──────────────────────────────────────────────────
+
+type Rel<TColumn extends string, TTable extends string, TOne extends boolean = false> = {
+  columns: [TColumn]
+  isOneToOne: TOne
+  referencedRelation: TTable
+  referencedColumns: ["id"]
+}
+
+type Author_ = { id: string; name: string }
+type Article = { id: string; title: string; author_id: string; editor_id: string | null }
+type Label = { id: string; text: string }
+type Profile = { id: string; author_id: string; bio: string }
+
+type JoinDB = {
+  public: {
+    Tables: {
+      authors: { Row: Author_; Insert: Author_; Update: Partial<Author_>; Relationships: [] }
+      articles: {
+        Row: Article
+        Insert: Article
+        Update: Partial<Article>
+        Relationships: [Rel<"author_id", "authors">, Rel<"editor_id", "authors">]
+      }
+      labels: { Row: Label; Insert: Label; Update: Partial<Label>; Relationships: [] }
+      article_labels: {
+        Row: { article_id: string; label_id: string }
+        Insert: { article_id: string; label_id: string }
+        Update: { article_id?: string; label_id?: string }
+        Relationships: [Rel<"article_id", "articles">, Rel<"label_id", "labels">]
+      }
+      profiles: {
+        Row: Profile
+        Insert: Profile
+        Update: Partial<Profile>
+        Relationships: [Rel<"author_id", "authors", true>]
+      }
+    }
+  }
+}
+
+const joins = createClient<JoinDB>({ url: "http://localhost:18473", anonKey: "test" })
+
+type RowOf<Q> = Q extends QueryBuilder<infer R> ? R : never
+
+describe("select-string inference", () => {
+  it("picks and aliases columns", () => {
+    const q = joins.from("articles").select("id, heading:title")
+    expectTypeOf<RowOf<typeof q>>().toEqualTypeOf<{ id: string; heading: string }>()
+  })
+
+  it("types * as the row itself", () => {
+    expectTypeOf(joins.from("articles").select("*")).toEqualTypeOf<QueryBuilder<Article>>()
+    expectTypeOf(joins.from("articles").select()).toEqualTypeOf<QueryBuilder<Article>>()
+  })
+
+  it("embeds a to-one relation as the row or null, and !inner as the row", () => {
+    const q = joins.from("articles").select("id, author:authors!author_id(name)")
+    expectTypeOf<RowOf<typeof q>>().toEqualTypeOf<{ id: string; author: { name: string } | null }>()
+    const inner = joins.from("articles").select("author:authors!author_id!inner(*)")
+    expectTypeOf<RowOf<typeof inner>>().toEqualTypeOf<{ author: Author_ }>()
+  })
+
+  it("embeds the other side of a key as many rows, or one when the key is unique", () => {
+    const q = joins.from("authors").select("name, articles(title), profiles(bio)")
+    expectTypeOf<RowOf<typeof q>>().toEqualTypeOf<{
+      name: string
+      articles: Array<{ title: string }>
+      profiles: { bio: string } | null
+    }>()
+  })
+
+  it("embeds through a junction, directly or by naming it", () => {
+    const direct = joins.from("articles").select("labels(text)")
+    expectTypeOf<RowOf<typeof direct>>().toEqualTypeOf<{ labels: Array<{ text: string }> }>()
+    const named = joins.from("articles").select("article_labels(label:labels(*))")
+    expectTypeOf<RowOf<typeof named>>().toEqualTypeOf<{
+      article_labels: Array<{ label: Label | null }>
+    }>()
+  })
+
+  it("reads JSON paths and casts as unknown values keyed by their last name", () => {
+    const q = joins.from("articles").select("id::text, title->>en")
+    expectTypeOf<RowOf<typeof q>>().toEqualTypeOf<{ id: unknown; en: unknown }>()
+  })
+
+  it("puts the reason in the type when a name does not resolve", () => {
+    const q = joins.from("articles").select("nope, writer:writers(*)")
+    expectTypeOf<RowOf<typeof q>["nope"]>().toEqualTypeOf<
+      SelectError<"column 'nope' does not exist on 'articles'">
+    >()
+    expectTypeOf<RowOf<typeof q>["writer"]>().toEqualTypeOf<SelectError<"'writers' is not a table">>()
+  })
+
+  it("leaves an untyped database's embeds unknown rather than refusing them", () => {
+    const loose = createClient<AnyDatabase>({ url: "http://localhost:18473", anonKey: "test" })
+    const q = loose.from("anything").select("id, other(*)")
+    expectTypeOf<RowOf<typeof q>>().toEqualTypeOf<{ id: unknown; other: unknown }>()
   })
 })
