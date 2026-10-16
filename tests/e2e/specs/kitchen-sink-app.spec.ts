@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test"
+import { expect, test, type Page, type Route } from "@playwright/test"
 
 /**
  * The kitchen-sink attendee app, which had no browser coverage at all.
@@ -93,22 +93,23 @@ test.describe("the kitchen-sink attendee app", () => {
     await expect(page.getByText("No English bio yet.")).toHaveCount(0)
   })
 
-  test("refuses a message the schema refuses, and says which rule", async ({ page }) => {
+  test("refuses a message the schema refuses, and says what to change", async ({ page }) => {
     await signUp(page)
     await open(page, "Lobby")
 
     const box = page.getByLabel("Message")
+    const note = page.locator(".ks-note--error")
 
-    // A model constraint: `Gte<Length<"body">, Literal<2>>`. Refused by Postgres, so the message
-    // is a constraint violation rather than anything the field can explain.
+    // The model constraint `Gte<Length<"body">, Literal<2>>`, which the lobby checks before sending.
     await box.fill("x")
     await page.getByRole("button", { name: "Send" }).click()
-    await expect(page.locator(".ks-note--error")).toBeVisible()
+    await expect(note).toContainText(/at least 2 characters/i)
+    await expect(note).not.toContainText(/violates|constraint/i)
 
-    // A validator: the only one of the three that can name the field and say what to change.
+    // The validator's rule, also checked first, in the validator's own words.
     await box.fill("HELLO EVERYONE AT THIS CONFERENCE")
     await page.getByRole("button", { name: "Send" }).click()
-    await expect(page.locator(".ks-note--error")).toContainText(/shouting|lower case/i)
+    await expect(note).toContainText(/shouting|lower case/i)
   })
 
   test("delivers an accepted message back through the socket", async ({ page }) => {
@@ -225,6 +226,101 @@ test.describe("the kitchen-sink attendee app", () => {
   })
 })
 
+type Respond = (route: Route) => Promise<void>
+
+/** Answer a refused write the way the stack does: the bodies here were captured from it. */
+function refuseWith(status: number, body: Record<string, unknown>): Respond {
+  return (route) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) })
+}
+
+/** The write accepted, for the tests that expect it never to be made. */
+const accept: Respond = (route) => route.fulfill({ status: 201, contentType: "application/json", body: "[]" })
+
+const SERVER_REFUSALS: { what: string; respond: Respond; shows: RegExp; logs?: string }[] = [
+  {
+    what: "a check constraint (23514)",
+    respond: refuseWith(400, {
+      code: "23514",
+      details: null,
+      hint: null,
+      message: 'new row for relation "chat_message" violates check constraint "chat_message_body_min_length"',
+    }),
+    shows: /between 2 and 500 characters/i,
+    logs: "chat_message_body_min_length",
+  },
+  {
+    what: "a permission refusal (42501)",
+    respond: refuseWith(403, { code: "42501", details: null, hint: null, message: "permission denied for table chat_message" }),
+    shows: /not allowed to post/i,
+    logs: "permission denied",
+  },
+  {
+    what: "a validator refusal",
+    respond: refuseWith(422, { field: "body", message: "Say something kinder.", error: "Say something kinder." }),
+    shows: /say something kinder/i,
+  },
+  { what: "a network failure", respond: (route) => route.abort("internetdisconnected"), shows: /connection/i },
+]
+
+test.describe("the kitchen-sink lobby composer", () => {
+  // Vite-only: the auth server and the REST API are stood in for, so these run with no stack.
+  test("stops a one-character message before sending it", async ({ page }) => {
+    const sent = await openStubbedLobby(page)
+    await page.getByLabel("Message").fill("x")
+    await page.getByRole("button", { name: "Send" }).click()
+
+    await expect(page.locator(".ks-note--error")).toContainText(/at least 2 characters/i)
+    expect(sent, "nothing reached the API").toEqual([])
+  })
+
+  test("stops a message over 500 characters before sending it", async ({ page }) => {
+    const sent = await openStubbedLobby(page)
+    await page.getByLabel("Message").fill("a".repeat(501))
+    await page.getByRole("button", { name: "Send" }).click()
+
+    await expect(page.locator(".ks-note--error")).toContainText(/500 characters/i)
+    expect(sent).toEqual([])
+  })
+
+  for (const refusal of SERVER_REFUSALS) {
+    test(`explains ${refusal.what} without the server's wording`, async ({ page }) => {
+      const logged: string[] = []
+      page.on("console", (m) => { if (m.type() === "error") logged.push(m.text()) })
+      const sent = await openStubbedLobby(page, refusal.respond)
+      await page.getByLabel("Message").fill("hello lobby")
+      await page.getByRole("button", { name: "Send" }).click()
+
+      const note = page.locator(".ks-note--error")
+      await expect(note).toContainText(refusal.shows)
+      await expect(note).not.toContainText(/chat_message|violates|permission denied|Failed to fetch/i)
+      expect(sent).toHaveLength(1)
+      // The developer still gets the raw error, in the console rather than on the screen.
+      if (refusal.logs !== undefined) expect(logged.join("\n")).toContain(refusal.logs)
+    })
+  }
+})
+
+/**
+ * Signed in and on the lobby with no stack behind it.
+ *
+ * A magic-link fragment gives the client a session, `/auth/v1/user` answers for it, and every read
+ * returns no rows. Returns the chat messages the page tried to write, answered by `respond`.
+ */
+async function openStubbedLobby(page: Page, respond: Respond = accept): Promise<unknown[]> {
+  const sent: unknown[] = []
+  await page.route("**/auth/v1/user", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(RECOVERED_USER) }),
+  )
+  await page.route("**/rest/v1/**", async (route) => {
+    if (route.request().method() !== "POST") return route.fulfill({ status: 200, contentType: "application/json", body: "[]" })
+    sent.push(route.request().postDataJSON())
+    return respond(route)
+  })
+  await page.goto(`/#${SIGNED_IN_FRAGMENT}`, { waitUntil: "networkidle" })
+  await open(page, "Lobby")
+  return sent
+}
+
 /**
  * A 24x24 JPEG, small enough to inline. A real one matters: the transform has to decode it.
  */
@@ -313,6 +409,15 @@ const RECOVERY_FRAGMENT = new URLSearchParams({
   expires_in: "3600",
   token_type: "bearer",
   type: "recovery",
+}).toString()
+
+/** A magic link's fragment: the same implicit grant, signing the user straight in. */
+const SIGNED_IN_FRAGMENT = new URLSearchParams({
+  access_token: "magic-access-token",
+  refresh_token: "magic-refresh-token",
+  expires_in: "3600",
+  token_type: "bearer",
+  type: "magiclink",
 }).toString()
 
 /**
