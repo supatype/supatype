@@ -2,7 +2,8 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 /**
- * Marks a value the CLI wrote from `versions` in `supatype.config.ts`.
+ * Marks a value the CLI wrote from `supatype.config.ts`: an image pin from `versions`, or
+ * `SUPATYPE_MAILER_AUTOCONFIRM` from `auth.email.enableConfirmations`.
  *
  * Provenance, so that removing a pin from config can clean up the stale image reference it left
  * behind *without* deleting a value the operator wrote by hand. Before this, the image keys derived
@@ -10,7 +11,15 @@ import { join } from "node:path"
  * `SUPATYPE_REALTIME_IMAGE` from `.env` and could not override `SUPATYPE_SERVER_IMAGE`, because the
  * latter is derivable from a pin and the former is not. Same file, same shape, different rules.
  */
-export const MANAGED_MARKER = "# supatype:managed, value from versions in supatype.config.ts"
+export const MANAGED_MARKER = "# supatype:managed, value from supatype.config.ts"
+
+/** The marker's wording when it only ever introduced image pins, still in `.env` files it wrote. */
+const LEGACY_MANAGED_MARKER = "# supatype:managed, value from versions in supatype.config.ts"
+
+function isMarker(text: string | undefined): boolean {
+  const trimmed = text?.trim()
+  return trimmed === MANAGED_MARKER || trimmed === LEGACY_MANAGED_MARKER
+}
 
 interface EnvLine {
   /** `KEY` for an assignment, undefined for comments and blanks. */
@@ -30,7 +39,7 @@ function parseLines(text: string): EnvLine[] {
   while (raws.length > 0 && raws[raws.length - 1] === "") raws.pop()
   for (const raw of raws) {
     const trimmed = raw.trim()
-    if (trimmed === MANAGED_MARKER) {
+    if (isMarker(trimmed)) {
       markerPending = true
       out.push({ text: raw, managed: false })
       continue
@@ -96,16 +105,16 @@ export function upsertEnvFile(
 
     if (removeAlways.has(key) || (removeManaged.has(key) && line.managed)) {
       // Drop the marker that introduced it, so no orphan comment is left behind.
-      if (line.managed && kept[kept.length - 1]?.text.trim() === MANAGED_MARKER) kept.pop()
+      if (line.managed && isMarker(kept[kept.length - 1]?.text)) kept.pop()
       continue
     }
 
     if (key in updates) {
       const wantsMarker = managed.has(key)
-      if (wantsMarker && kept[kept.length - 1]?.text.trim() !== MANAGED_MARKER) {
+      if (wantsMarker && !isMarker(kept[kept.length - 1]?.text)) {
         kept.push({ text: MANAGED_MARKER, managed: false })
       }
-      if (!wantsMarker && line.managed && kept[kept.length - 1]?.text.trim() === MANAGED_MARKER) {
+      if (!wantsMarker && line.managed && isMarker(kept[kept.length - 1]?.text)) {
         kept.pop()
       }
       kept.push({ key, text: `${key}=${updates[key]}`, managed: wantsMarker })
@@ -181,6 +190,18 @@ export function readEnvValue(cwd: string, key: string, fallback: string): string
 export function hasEnvValue(cwd: string, key: string): boolean {
   const text = envText(cwd)
   return text !== null && new RegExp(`^${key}=(.+)$`, "m").test(text)
+}
+
+/**
+ * Who wrote `key` in `.env`: "cli" when it carries [`MANAGED_MARKER`], "operator" when it does not,
+ * or null when `.env` has no such key.
+ */
+export function envValueOwner(cwd: string, key: string): "cli" | "operator" | null {
+  const text = envText(cwd)
+  // The last assignment, as compose reads it.
+  const line = text === null ? undefined : parseLines(text).filter((l) => l.key === key).pop()
+  if (line === undefined) return null
+  return line.managed ? "cli" : "operator"
 }
 
 export function readEnvInt(cwd: string, key: string): number | null {

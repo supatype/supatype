@@ -19,7 +19,7 @@ async function talkBySlug(slug: string): Promise<Talk | null> {
  *
  * This is the half a client-rendered app cannot do: a crawler that does not run JavaScript sees
  * whatever the first response contained, so metadata assembled in the browser is metadata nobody
- * indexes. The og:image is a *derivative* — the headshot resized on read rather than a second
+ * indexes. The og:image is a *derivative*: the headshot resized on read rather than a second
  * upload kept in step by hand.
  */
 export async function generateMetadata({
@@ -43,7 +43,7 @@ export async function generateMetadata({
 
   return {
     title: talk.title,
-    description: speaker ? `${talk.title} — ${speaker.name}` : talk.title,
+    description: speaker ? `${talk.title}, by ${speaker.name}` : talk.title,
     openGraph: {
       title: talk.title,
       type: "article",
@@ -90,12 +90,12 @@ export default async function TalkPage({
       </p>
       {abstract === null ? (
         <p className="ks-muted">
-          Nothing written in {locale} yet — and nothing in another language shown in its place. A
+          Nothing written in {locale} yet, and nothing in another language shown in its place. A
           localized column holds every locale at once, so an untranslated one is <em>absent</em>
           rather than silently swapped.
         </p>
       ) : (
-        <RichText content={abstract as never} className="ks-prose" />
+        <RichText content={abstract} className="ks-prose" />
       )}
     </article>
   )

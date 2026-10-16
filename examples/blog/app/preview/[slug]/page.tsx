@@ -2,6 +2,7 @@ import React from "react"
 import { createClient } from "../../../supatype/generated/client"
 import type { TableRow } from "@supatype/client"
 import { RichText } from "@supatype/react"
+import { postBodyIn } from "@/lib/rich-text"
 
 type Post = TableRow<"post">
 
@@ -73,20 +74,19 @@ export default async function PreviewPage({
   if (post === null) return <p className="empty">No draft to preview.</p>
 
   const language = locale ?? "en"
-  // A localized column arrives as the whole locale record, so the page picks the language rather
-  // than the API guessing at one. `Accept-Language` only feeds the cache key today.
-  const body = (post.body as unknown as Record<string, unknown> | null)?.[language]
+  // `Accept-Language` only feeds the cache key today, so the page picks the language itself.
+  const body = postBodyIn(post.body, language)
 
   return (
     <article>
       <div className="preview-banner">
-        Preview — this is a draft and is not published{locale !== undefined && ` (${language})`}.
+        Preview: this is a draft and is not published{locale !== undefined && ` (${language})`}.
       </div>
       <h1>{post.title}</h1>
-      {body === undefined || body === null ? (
+      {body === null ? (
         <p className="empty">Nothing written in {language} yet.</p>
       ) : (
-        <RichText content={body as never} className="richtext" />
+        <RichText content={body} className="richtext" />
       )}
     </article>
   )

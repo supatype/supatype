@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react"
 import { useMutation, useQuery, useSubscription } from "@supatype/react"
 import { supatype } from "./client.js"
 import { Avatar, Badge, Button, Card, Input, Note, PageHeader, ProvesNote, Row } from "./components/ui.js"
+import { checkChatBody, explainRefusal } from "./lib/chatRules.js"
 import type { TableRow } from "@supatype/client"
 
 type ChatMessage = TableRow<"chat_message">
@@ -18,9 +19,13 @@ const ROOM = "lobby"
  * It is also where all three refusals live, and deliberately not on a screen of their own. The old
  * "Rules" tab listed the three mechanisms with a **Try it** button beside each, which taught the
  * taxonomy and nothing about the experience. Here you write a message that is too long, too short
- * or shouted, the write is refused, and the difference between the three is what the error can
- * tell you: a bound and a constraint come back as database errors, while the validator names the
- * field and says what to change.
+ * or shouted, and the composer tells you what to change before anything is sent: good practice is
+ * to check what you can where the person is typing (`lib/chatRules.ts`).
+ *
+ * The database still enforces all three, for every caller, so a refusal can still arrive (a rule
+ * the app has not caught up with, a lost connection, a revoked session). That one is turned into
+ * words for the sender by its error code, and the raw error goes to the console for the developer.
+ * Database wording such as a constraint name never reaches the screen.
  */
 export function LobbyScreen({ userId, email }: { userId: string; email: string }): React.ReactElement {
   const [live, setLive] = useState<ChatMessage[]>([])
@@ -100,13 +105,15 @@ export function LobbyScreen({ userId, email }: { userId: string; email: string }
     event.preventDefault()
     const body = draft.trim()
     if (body === "") return
-    setRefusal(null)
 
-    // Deliberately not pre-validated in the browser. A client-side check would hide which of the
-    // three mechanisms refused the write, and this screen exists to make that visible.
+    // Checked here first so a mistake costs no round trip. The database checks again regardless.
+    const problem = checkChatBody(body)
+    setRefusal(problem)
+    if (problem !== null) return
+
     const { error } = await mutate({ room: ROOM, body })
     if (error) {
-      setRefusal(error.message)
+      setRefusal(explainRefusal(error))
       return
     }
     setDraft("")
@@ -138,10 +145,15 @@ export function LobbyScreen({ userId, email }: { userId: string; email: string }
           connection. Messages appearing without a refetch is what proves delivery.
         </p>
         <p>
-          Try sending <code>hi</code> (under two characters), something over 500 characters, or
-          <code> HELLO EVERYONE</code>. Each is refused by a different mechanism: a model
-          constraint, a field bound, and a validator. Only the validator can name the field and say
-          what to change, which is the whole reason all three exist.
+          Try sending <code>h</code> (under two characters), something over 500 characters, or
+          <code> HELLO EVERYONE</code>. The schema refuses each with a different mechanism: a model
+          constraint, a field bound, and a validator. The composer checks all three before
+          sending, so you are told what to change without a round trip.
+        </p>
+        <p>
+          The database still enforces every one of them, for <code>psql</code> and scripts as much
+          as for this app. If a write is refused anyway, the app explains it from the error code
+          and logs the raw error to the console, rather than showing you a constraint name.
         </p>
       </ProvesNote>
 

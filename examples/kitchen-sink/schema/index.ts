@@ -372,6 +372,10 @@ export type Ticket = Model<{
  * The three deliberately live on a model a signed-in caller may write. Putting them on an
  * editor-only model would make them unreachable from the app, and a refusal nobody can trigger
  * teaches nothing about how the three differ.
+ *
+ * The lobby checks all three before it sends (`apps/app/src/lib/chatRules.ts`), so the person
+ * typing is told what to change without a round trip. That is a courtesy, not the rule: these
+ * declarations are what every caller meets, the app included when its copy falls behind.
  */
 export type ChatMessage = Model<{
   id: UUID

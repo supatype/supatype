@@ -1,7 +1,8 @@
-import React, { useState, type FormEvent } from "react"
+import React, { useState } from "react"
 import type { Session, SupatypeError } from "@supatype/client"
 import { useAuth } from "@supatype/react"
-import { errorProps, type AuthFormClassNames } from "./classNames.js"
+import type { AuthFormClassNames } from "./classNames.js"
+import { FormField, FormShell, FormMessage, useAuthSubmit, withDefaults, type Filled } from "./formParts.js"
 
 export interface SignUpFormLabels {
   title?: string | undefined
@@ -29,7 +30,7 @@ export interface SignUpFormProps {
   metadata?: Record<string, unknown> | undefined
 }
 
-const DEFAULT_LABELS: Required<SignUpFormLabels> = {
+const DEFAULT_LABELS: Filled<SignUpFormLabels> = {
   title: "Create account",
   email: "Email address",
   password: "Password",
@@ -53,89 +54,49 @@ const DEFAULT_LABELS: Required<SignUpFormLabels> = {
  */
 export function SignUpForm({ onSuccess, onError, className, classNames, labels, metadata }: SignUpFormProps): React.ReactElement {
   const { signUp } = useAuth()
-  const l = { ...DEFAULT_LABELS, ...labels }
+  const l = withDefaults(DEFAULT_LABELS, labels)
 
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
-  const [loading, setLoading] = useState(false)
-  const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [confirmed, setConfirmed] = useState(false)
-
-  async function handleSubmit(e: FormEvent<HTMLFormElement>): Promise<void> {
-    e.preventDefault()
-    setErrorMessage(null)
-    setLoading(true)
-    try {
-      const { data, error } = await signUp({
-        email,
-        password,
-        ...(metadata !== undefined && { options: { data: metadata } }),
-      })
-      if (error !== null) {
-        setErrorMessage(error.message)
-        onError?.(error)
-      } else {
-        if (data.session === null) {
-          // Email confirmation required
-          setConfirmed(true)
-        }
-        onSuccess?.(data.session)
-      }
-    } finally {
-      setLoading(false)
-    }
+  const options = metadata !== undefined ? { options: { data: metadata } } : {}
+  const onDone = ({ session }: { session: Session | null }): void => {
+    // No session: the project requires the email to be confirmed first.
+    if (session === null) setConfirmed(true)
+    onSuccess?.(session)
   }
+  const request = useAuthSubmit(() => signUp({ email, password, ...options }), { onDone, onError })
 
   if (confirmed) {
-    return (
-      <p role="status" aria-live="polite" className={classNames?.message}>
-        {l.successMessage}
-      </p>
-    )
+    return <FormMessage text={l.successMessage} classNames={classNames} />
   }
 
   return (
-    <form onSubmit={(e) => { void handleSubmit(e) }} className={className} noValidate>
-      <h2 className={classNames?.title}>{l.title}</h2>
+    <FormShell request={request} text={{ title: l.title, submit: l.submit, busy: "Creating account…" }} className={className} classNames={classNames}>
+      <FormField
+        id="st-signup-email"
+        label={l.email}
+        classNames={classNames}
+        type="email"
+        autoComplete="email"
+        required
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        disabled={request.loading}
+      />
 
-      {errorMessage !== null && (
-        <p role="alert" aria-live="polite" {...errorProps(classNames)}>
-          {errorMessage}
-        </p>
-      )}
-
-      <div className={classNames?.field}>
-        <label className={classNames?.label} htmlFor="st-signup-email">{l.email}</label>
-        <input
-          className={classNames?.input}
-          id="st-signup-email"
-          type="email"
-          autoComplete="email"
-          required
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          disabled={loading}
-        />
-      </div>
-
-      <div className={classNames?.field}>
-        <label className={classNames?.label} htmlFor="st-signup-password">{l.password}</label>
-        <input
-          className={classNames?.input}
-          id="st-signup-password"
-          type="password"
-          autoComplete="new-password"
-          required
-          minLength={8}
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          disabled={loading}
-        />
-      </div>
-
-      <button type="submit" className={classNames?.submit} disabled={loading}>
-        {loading ? "Creating account…" : l.submit}
-      </button>
-    </form>
+      <FormField
+        id="st-signup-password"
+        label={l.password}
+        classNames={classNames}
+        type="password"
+        autoComplete="new-password"
+        required
+        minLength={8}
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        disabled={request.loading}
+      />
+    </FormShell>
   )
 }

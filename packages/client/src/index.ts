@@ -30,6 +30,7 @@ export type {
   AuthChangeEvent,
   AuthFlowType,
   SupatypeError,
+  AuthRedirectError,
   QueryResult,
   MaskedField,
   RpcResult,
@@ -533,6 +534,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
     storageKey: config.auth?.storageKey,
     cookiePrefix: config.auth?.cookiePrefix,
     storage: config.auth?.storage,
+    detectSessionInUrl: config.auth?.detectSessionInUrl,
     transport: doFetch,
   })
   const queryCache = config.queryCache ?? defaultQueryCache

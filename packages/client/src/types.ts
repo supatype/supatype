@@ -139,6 +139,16 @@ export interface SupatypeError {
   field?: string | undefined
 }
 
+/**
+ * A sign-in the auth server refused and reported back in the redirect URL.
+ *
+ * `provider` names the OAuth provider this browser started the sign-in with, when the client
+ * remembers one, so an app showing one button per provider can put the message by the right one.
+ */
+export interface AuthRedirectError extends SupatypeError {
+  provider?: string | undefined
+}
+
 // ─── Query result ─────────────────────────────────────────────────────────────
 
 /**
@@ -379,6 +389,13 @@ export interface SupatypeClientConfig {
      * React Native: pass an AsyncStorage or expo-secure-store adapter.
      */
     storage?: AuthStorage | undefined
+    /**
+     * Finish a sign-in the auth server has just redirected back with (OAuth, magic link, recovery
+     * link): tokens in the URL fragment or a PKCE `code` in the query become the session, `SIGNED_IN`
+     * is emitted, and the parameters are removed from the address bar. Browser only. Default: true,
+     * as supabase-js's option of the same name. `auth.initialize()` reports a refusal in the URL.
+     */
+    detectSessionInUrl?: boolean | undefined
   } | undefined
   /**
    * Retry a transient failure (a dropped connection, a 5xx, a 429). Default: true.

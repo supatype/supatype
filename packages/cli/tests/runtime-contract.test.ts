@@ -503,16 +503,14 @@ describe("runtime contract", () => {
     }
   })
 
-  it("devLocal compose enables STUDIO_OPEN_DEV on supatype-server, and lets it be turned off", () => {
-    const compose = renderSelfHostCompose(baseConfig, process.cwd(), { devLocal: true })
-    // Defaulted rather than hardcoded. `supatype dev` still opens Studio without a sign-in, and
-    // the browser suite can set STUDIO_OPEN_DEV=0 to drive the gate a deployment actually has.
-    // Held as a literal "1" there was no way to test Studio with its authorization on at all.
-    expect(compose).toContain('STUDIO_OPEN_DEV: "${STUDIO_OPEN_DEV:-1}"')
-  })
-
-  it("production self-host compose does not enable STUDIO_OPEN_DEV", () => {
-    const compose = renderSelfHostCompose(baseConfig)
+  // STUDIO_OPEN_DEV made the server's Studio proxy admit unauthenticated requests as the service
+  // role, and dev allows every CORS origin, so any page in the developer's browser could use it.
+  // The server no longer has the switch; neither mode may write it.
+  it.each([
+    ["dev", { devLocal: true }],
+    ["production", {}],
+  ] as const)("%s compose does not set STUDIO_OPEN_DEV", (_mode, options) => {
+    const compose = renderSelfHostCompose(baseConfig, process.cwd(), options)
     expect(compose).not.toContain("STUDIO_OPEN_DEV")
   })
 

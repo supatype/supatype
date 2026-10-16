@@ -3,7 +3,7 @@ import type { RequestContext } from "../server.js"
 import { sendJson, readBody, readJson } from "../server.js"
 import * as db from "../db.js"
 import * as s3 from "../s3.js"
-import { parseTransformParams, transformImage } from "../transform.js"
+import { parseTransformParams, transformImage, UnrenderableImageError } from "../transform.js"
 import { config } from "../env.js"
 import { validateFileSize, validateContentType, validateStorageQuota } from "../middleware/storage-limits.js"
 import { checkReadAccess } from "../middleware/access-control.js"
@@ -447,6 +447,10 @@ async function serveObject(ctx: RequestContext, bucketId: string, objectPath: st
   } catch (err) {
     if (isMissingObject(err)) {
       sendJson(ctx.res, 404, { error: "Object not found" })
+    } else if (err instanceof UnrenderableImageError) {
+      // An empty or non-image object asked for a transform: the request is wrong, the server is
+      // not. Supabase answers this 400 with the same message.
+      sendJson(ctx.res, 400, { error: err.message })
     } else {
       throw err
     }

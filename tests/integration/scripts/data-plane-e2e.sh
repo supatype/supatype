@@ -44,6 +44,7 @@ REALTIME_IMAGE="${SUPATYPE_REALTIME_IMAGE:-supatype/realtime:ci-dev}"
 
 source "$SCRIPT_DIR/lib/http-wait.sh"
 source "$SCRIPT_DIR/lib/e2e-project.sh"
+source "$SCRIPT_DIR/lib/env-file.sh"
 
 e2e_project_use "$INTEGRATION_DIR" supatype-integration
 MAILPIT_NAME="$(e2e_scoped supatype-authflows-mailpit)"
@@ -65,15 +66,7 @@ trap cleanup EXIT INT TERM
 
 # Set a key in the project's `.env`, which is where `supatype dev` reads pinned images and the
 # gateway port from.
-set_env_key() {
-  local key="$1" value="$2"
-  touch "$INTEGRATION_DIR/.env"
-  if grep -q "^${key}=" "$INTEGRATION_DIR/.env"; then
-    sed -i "s|^${key}=.*|${key}=${value}|" "$INTEGRATION_DIR/.env"
-  else
-    printf '\n%s=%s\n' "$key" "$value" >> "$INTEGRATION_DIR/.env"
-  fi
-}
+set_env_key() { env_file_set "$INTEGRATION_DIR/.env" "$1" "$2"; }
 
 if [[ ! -f "$CLI_BIN" ]]; then
   echo "ERROR: CLI not found at $CLI_BIN, run 'pnpm build' first"

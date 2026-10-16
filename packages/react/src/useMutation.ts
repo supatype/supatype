@@ -1,10 +1,12 @@
 "use client"
 
 import { useState, useCallback } from "react"
-import type { AnyDatabase, AugmentedDatabase, SupatypeError } from "@supatype/client"
+import type { AnyClient, AnyDatabase, AugmentedDatabase, MutationBuilder, SupatypeError } from "@supatype/client"
 import { useSupatype } from "./context.js"
 
 export type MutationOperation = "insert" | "update" | "delete" | "upsert"
+
+type MutationRows = Record<string, unknown> | Record<string, unknown>[]
 
 export interface MutationOptions {
   /** Simple equality filters for update/delete operations */
@@ -52,33 +54,23 @@ export function useMutation<
       setLoading(true)
       setError(null)
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const tableClient = client.from(table) as any
-
-      let result: { data: TRow[] | null; error: SupatypeError | null; count: number | null }
-
+      // Through the untyped client: the generated Insert and Update types do not survive a table
+      // name known only at run time, so `data` goes out as the caller wrote it and PostgREST is
+      // what checks it.
+      const tableClient = (client as AnyClient).from(table)
+      let pending: MutationBuilder<Record<string, unknown>>
       if (operation === "insert") {
-        result = await tableClient.insert(data)
+        pending = tableClient.insert(data as MutationRows)
       } else if (operation === "upsert") {
-        result = await tableClient.upsert(data)
-      } else if (operation === "update") {
-        let q = tableClient.update(data)
-        if (options?.filter !== undefined) {
-          for (const [col, val] of Object.entries(options.filter)) {
-            q = q.eq(col, val)
-          }
-        }
-        result = await q
+        pending = tableClient.upsert(data as MutationRows)
       } else {
-        // delete
-        let q = tableClient.delete()
-        if (options?.filter !== undefined) {
-          for (const [col, val] of Object.entries(options.filter)) {
-            q = q.eq(col, val)
-          }
+        pending =
+          operation === "update" ? tableClient.update(data as Record<string, unknown>) : tableClient.delete()
+        for (const [col, val] of Object.entries(options?.filter ?? {})) {
+          pending = pending.eq(col, val)
         }
-        result = await q
       }
+      const result = (await pending) as { data: TRow[] | null; error: SupatypeError | null; count: number | null }
 
       setLoading(false)
       if (result.error !== null) setError(result.error)

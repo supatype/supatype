@@ -247,7 +247,8 @@ export function Input({
  *
  * The package ships no stylesheet. Rendered without these, its labels, inputs and button fall back
  * to browser defaults inside an otherwise styled card, which is how the sign-in screen used to look.
- * Spread onto `LoginForm` or `SignUpForm`: `<LoginForm {...authForm} />`.
+ * Spread onto any of its forms (`LoginForm`, `SignUpForm`, `ForgotPasswordForm`, `MagicLinkForm`,
+ * `UpdatePasswordForm`): `<LoginForm {...authForm} />`.
  */
 export const authForm: { className: string; classNames: AuthFormClassNames } = {
   className: "ks-form",

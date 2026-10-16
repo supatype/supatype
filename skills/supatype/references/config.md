@@ -74,6 +74,7 @@ export default { server: { mode: "dev" } }
 | `versions.*` | Optional pin for engine, server, postgres, deno. **Omit for Docker `:latest`** |
 | `connection` | Override database URL (else `DATABASE_URL` env) |
 | `auth.providers` | OAuth providers (`github`, `google`, ...): `clientId`, `secret: env("NAME")`, optional `redirectUri`, `url`. See [OAuth providers](#oauth-providers) |
+| `auth.email.enableConfirmations` | `true` makes a new email sign-up confirm its address before it can sign in. Off when unset: dev auto-confirms. Written as `SUPATYPE_MAILER_AUTOCONFIRM` for docker dev, native dev and the self-host compose file; a value you put in `.env` yourself wins. See [Email confirmation](#email-confirmation) |
 | `api.corsOrigins` | Browser origins allowed to call the API besides `SITE_URL`, e.g. `["https://admin.example.com"]`. `"*"` allows every origin and is never a default. `SUPATYPE_CORS_ALLOW_ORIGINS` in `.env` adds to it; a list saved in Studio (Settings, CORS tab) replaces both until reset (the site URL is always allowed). Dev mode allows every origin |
 
 ## .env essentials
@@ -205,6 +206,31 @@ GOOGLE_SECRET=...
   since it supplies that default.
 - `supatype.local.config.ts` merges per provider, so it can swap in a development OAuth app's
   `clientId` without restating the rest.
+
+## Email confirmation
+
+A dev stack confirms every email sign-up by itself, so `signUp` returns a session straight away.
+To test the confirmation email instead, turn confirmations on (the same switch as Supabase's
+`[auth.email] enable_confirmations`):
+
+```typescript
+// docs:no-check (a fragment: the rest of your config stays as it is)
+import { defineConfig } from "@supatype/cli"
+
+export default defineConfig({
+  auth: { email: { enableConfirmations: true } },
+})
+```
+
+- `signUp` then returns the user with `session: null`, stores nothing and emits no `SIGNED_IN`;
+  `SignUpForm` shows "Check your email to confirm your account."
+- Docker `supatype dev` writes `SUPATYPE_MAILER_AUTOCONFIRM` into `.env` under a
+  `# supatype:managed` marker and updates it on every start; native dev passes it to the server;
+  `supatype self-host compose` uses it as the fallback for `${SUPATYPE_MAILER_AUTOCONFIRM:-...}`.
+- **Your own `.env` value wins.** A `SUPATYPE_MAILER_AUTOCONFIRM` without the marker is left alone,
+  except `true` with no marker, which is what earlier CLIs wrote on every start and is replaced.
+  A value in `.env.local` always wins in native dev.
+- The emails go wherever `email.provider` sends them: `console` (the default) logs them.
 
 ## Switching to native dev
 

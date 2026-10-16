@@ -5,13 +5,16 @@
 # from one that merely opens, an access rule that filters from a query that matched nothing, a
 # transform that re-encodes from a CDN echoing the original. Then the app-mode walk asserts the
 # other half of the example's premise: `app` is a single setting, the two front ends take turns,
-# and `supatype app` is what moves between them.
+# and `supatype app` is what moves between them. In between, the browser signs in with GitHub
+# through a stub provider (lib/oauth-stub.sh) the stack's GitHub provider is pointed at, so the
+# whole OAuth round trip runs against the real auth server and the app's own button.
 #
 # Usage:
 #   bash tests/integration/scripts/kitchen-sink-e2e.sh
 #
 # Beside another run, from another checkout: SUPATYPE_E2E_PROJECT names this run's compose project,
-# and SUPATYPE_KONG_PORT and SUPATYPE_DEV_DB_PORT move its ports. See lib/e2e-project.sh.
+# and SUPATYPE_KONG_PORT, SUPATYPE_DEV_DB_PORT and OAUTH_STUB_PORT move its ports. See
+# lib/e2e-project.sh.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,14 +22,20 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 EXAMPLE_DIR="$ROOT_DIR/examples/kitchen-sink"
 CLI_BIN="$ROOT_DIR/packages/cli/bin/supatype.js"
 MAX_WAIT="${KITCHEN_SINK_E2E_MAX_WAIT:-300}"
+# Not expo-auth's 18998, so the two suites can run side by side from two checkouts.
+STUB_PORT="${OAUTH_STUB_PORT:-18997}"
+STUB_EMAIL="ks-octo-${RANDOM}${RANDOM}@example.com"
 
 source "$SCRIPT_DIR/lib/http-wait.sh"
 source "$SCRIPT_DIR/lib/example-keys.sh"
 source "$SCRIPT_DIR/lib/e2e-project.sh"
+source "$SCRIPT_DIR/lib/env-file.sh"
+source "$SCRIPT_DIR/lib/oauth-stub.sh"
 
 e2e_project_use "$EXAMPLE_DIR" kitchen-sink
 
 DEV_PID=""
+OAUTH_STUB_PID=""
 ENV_EXISTED="no"
 [[ -f "$EXAMPLE_DIR/.env" ]] && ENV_EXISTED="yes"
 
@@ -34,8 +43,13 @@ ENV_EXISTED="no"
 # fallbacks (database `supatype`, password `postgres`), which is the one configuration in which a
 # path that hardcodes those values cannot fail. The `auth.users` grant did exactly that, so Studio's
 # relation preview was broken for every project that followed the README, and this job was green.
+#
+# A developer's own .env is kept aside and put back on exit: this run points its GitHub provider at
+# a stub that is gone once the run ends.
 if [[ "$ENV_EXISTED" == "no" ]]; then
   cp "$EXAMPLE_DIR/.env.example" "$EXAMPLE_DIR/.env"
+else
+  cp "$EXAMPLE_DIR/.env" "$EXAMPLE_DIR/.env.e2e-bak"
 fi
 
 # The example pins its gateway port in .env so its URLs are true; follow it rather than assuming.
@@ -54,10 +68,12 @@ cleanup() {
   echo "==> teardown"
   stop_pid_bounded "$DEV_PID"
   e2e_project_down
+  [[ -z "$OAUTH_STUB_PID" ]] || kill "$OAUTH_STUB_PID" 2>/dev/null || true
   # The mode walk rewrites the committed config, which is what `supatype app` does. Put it back so
   # a failure does not leave the example configured for whichever mode it died in.
   git -C "$ROOT_DIR" checkout -- examples/kitchen-sink/supatype.config.ts 2>/dev/null || true
   if [[ "$ENV_EXISTED" == "no" ]]; then rm -f "$EXAMPLE_DIR/.env"; fi
+  if [[ -f "$EXAMPLE_DIR/.env.e2e-bak" ]]; then mv -f "$EXAMPLE_DIR/.env.e2e-bak" "$EXAMPLE_DIR/.env"; fi
   e2e_project_release
 }
 trap cleanup EXIT INT TERM
@@ -102,12 +118,13 @@ echo ""
 # nothing listening and the seed failed with ECONNREFUSED. Naming the port is the request; the
 # compose generator publishes it because it was named.
 SUPATYPE_DEV_DB_PORT="${SUPATYPE_DEV_DB_PORT:-54329}"
-if grep -q "^SUPATYPE_DEV_DB_PORT=" "$EXAMPLE_DIR/.env" 2>/dev/null; then
-  sed -i "s/^SUPATYPE_DEV_DB_PORT=.*/SUPATYPE_DEV_DB_PORT=${SUPATYPE_DEV_DB_PORT}/" "$EXAMPLE_DIR/.env"
-else
-  { echo ""; echo "SUPATYPE_DEV_DB_PORT=${SUPATYPE_DEV_DB_PORT}"; } >> "$EXAMPLE_DIR/.env"
-fi
+env_file_set "$EXAMPLE_DIR/.env" SUPATYPE_DEV_DB_PORT "$SUPATYPE_DEV_DB_PORT"
 export SUPATYPE_DEV_DB_PORT
+
+echo "==> OAuth stub provider"
+# Before the stack: the auth server reads its providers from .env when it boots.
+oauth_stub_start "$ROOT_DIR" "$STUB_PORT" "$STUB_EMAIL" || fail "the OAuth stub never answered"
+oauth_stub_point_github "$EXAMPLE_DIR/.env" "$STUB_PORT" "$BASE_URL"
 
 echo "==> Bringing the stack up (static mode: the SPA is what / serves)"
 # Opt the functions worker into a database URL, so the path that was broken is the one exercised.
@@ -142,6 +159,11 @@ if (cd "$ROOT_DIR/tests/e2e" && npx playwright install --dry-run chromium >/dev/
   (cd "$ROOT_DIR/tests/e2e" && E2E_BASE_URL="$BASE_URL" npx playwright test specs/kitchen-sink-app.spec.ts) \
     || fail "the attendee app's browser tests did not pass"
   echo "  ok   the attendee app renders what the schema says it should"
+  (cd "$ROOT_DIR/tests/e2e" && E2E_BASE_URL="$BASE_URL" SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY" \
+    OAUTH_STUB_URL="http://127.0.0.1:${STUB_PORT}" OAUTH_STUB_EMAIL="$STUB_EMAIL" \
+    npx playwright test specs/kitchen-sink-oauth.spec.ts) \
+    || fail "signing in with GitHub through the stub provider did not pass"
+  echo "  ok   the GitHub button signs in end to end and leaves no tokens in the address bar"
 else
   echo "  skip Playwright's chromium is not installed; run 'npx playwright install chromium'"
 fi

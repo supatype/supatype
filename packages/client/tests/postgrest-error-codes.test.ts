@@ -60,3 +60,26 @@ describe("single() without exactly one row", () => {
     expect(error).toEqual({ message: SINGLE_ROW_MESSAGE, code: "PGRST116" })
   })
 })
+
+describe("a field validator's refusal", () => {
+  // Recorded from the kitchen-sink stack: what the gateway answers when `validate-chat-body` refuses.
+  const refused = (): Response =>
+    new Response(
+      JSON.stringify({ field: "body", message: "That reads as shouting.", error: "That reads as shouting." }),
+      { status: 422, headers: { "Content-Type": "application/json" } },
+    )
+
+  it("keeps the field on a read", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(refused()))
+    const { error } = await new QueryBuilder("http://x", "/rest/v1/t", {})
+    vi.unstubAllGlobals()
+    expect(error).toEqual({ message: "That reads as shouting.", status: 422, field: "body" })
+  })
+
+  it("keeps the field on a write, which is where a validator runs", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(refused()))
+    const { error } = await new MutationBuilder("http://x", "/rest/v1/t", { body: "HELLO" }, "POST", {})
+    vi.unstubAllGlobals()
+    expect(error).toEqual({ message: "That reads as shouting.", status: 422, field: "body" })
+  })
+})

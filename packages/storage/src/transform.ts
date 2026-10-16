@@ -28,11 +28,36 @@ export function parseTransformParams(params: URLSearchParams): TransformOptions 
   return opts
 }
 
+/**
+ * The stored bytes cannot be rendered: empty, not an image, or a format sharp cannot decode.
+ *
+ * The caller asked to transform something that is not a picture, so the route answers 400 with
+ * Supabase's message for the same case rather than letting sharp's error become a 500.
+ */
+export class UnrenderableImageError extends Error {
+  constructor(cause: unknown) {
+    super("The source image is invalid or unsupported for rendering", { cause })
+    this.name = "UnrenderableImageError"
+  }
+}
+
 /** Apply image transformations and return the result buffer + content type. */
 export async function transformImage(
   input: Buffer,
   opts: TransformOptions,
 ): Promise<{ buffer: Buffer; contentType: string }> {
+  const format = opts.format ?? "webp"
+  try {
+    const buffer = await pipelineFor(input, opts, format).toBuffer()
+    return { buffer, contentType: `image/${format}` }
+  } catch (err) {
+    // Every failure here is sharp refusing its input: an empty buffer is refused when the
+    // pipeline is built, an undecodable one when it runs.
+    throw new UnrenderableImageError(err)
+  }
+}
+
+function pipelineFor(input: Buffer, opts: TransformOptions, format: NonNullable<TransformOptions["format"]>): sharp.Sharp {
   let pipeline = sharp(input)
 
   if (opts.width !== undefined || opts.height !== undefined) {
@@ -42,26 +67,17 @@ export async function transformImage(
     })
   }
 
-  const format = opts.format ?? "webp"
   const quality = opts.quality ?? 80
-
   switch (format) {
     case "webp":
-      pipeline = pipeline.webp({ quality })
-      break
+      return pipeline.webp({ quality })
     case "avif":
-      pipeline = pipeline.avif({ quality })
-      break
+      return pipeline.avif({ quality })
     case "png":
-      pipeline = pipeline.png({ quality })
-      break
+      return pipeline.png({ quality })
     case "jpeg":
-      pipeline = pipeline.jpeg({ quality })
-      break
+      return pipeline.jpeg({ quality })
   }
-
-  const buffer = await pipeline.toBuffer()
-  return { buffer, contentType: `image/${format}` }
 }
 
 function clamp(value: number, min: number, max: number): number {

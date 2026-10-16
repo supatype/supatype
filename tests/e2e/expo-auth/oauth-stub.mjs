@@ -1,5 +1,6 @@
 /**
- * A stand-in OAuth provider for the expo-auth suite, shaped like GitHub Enterprise.
+ * A stand-in OAuth provider for the expo-auth and kitchen-sink suites, shaped like GitHub
+ * Enterprise. The suites start it through tests/integration/scripts/lib/oauth-stub.sh.
  *
  * The auth server's GitHub provider takes a base URL (SUPATYPE_EXTERNAL_GITHUB_URL) and calls
  * `<url>/login/oauth/authorize`, `<url>/login/oauth/access_token`, `<url>/api/v3/user` and

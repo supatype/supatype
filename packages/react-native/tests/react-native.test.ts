@@ -89,6 +89,24 @@ describe("createNativeClient", () => {
     expect(values.some((v) => v.includes("accessToken") || v.includes("at"))).toBe(true)
   })
 
+  it("leaves a redirect in the URL to the app's own deep-link handling", async () => {
+    // On web (Expo), an OAuth popup lands on the app with `?code=` while the opener waits to
+    // exchange it; a client that read the URL itself would spend the code first and fail the opener.
+    const ss = memorySecureStore()
+    ss.store.set("supatype.auth.session-code-verifier", "verifier-1")
+    const replaceState = vi.fn()
+    vi.stubGlobal("window", { location: { href: "http://localhost:8081/auth/callback?code=c1" }, history: { state: null, replaceState } })
+    const fetch = vi.fn()
+    vi.stubGlobal("fetch", fetch)
+
+    const client = createNativeClient({ url: AUTH_URL, anonKey: ANON, secureStore: ss })
+    await client.auth.whenReady()
+
+    expect(fetch).not.toHaveBeenCalled()
+    expect(replaceState).not.toHaveBeenCalled()
+    vi.unstubAllGlobals()
+  })
+
   it("throws when no storage module is provided", () => {
     expect(() =>
       createNativeClient({ url: AUTH_URL, anonKey: ANON }),

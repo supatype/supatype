@@ -1300,7 +1300,8 @@ SMTP_PASS=
 SMTP_SENDER_NAME=${projectName}`
     case "console":
     default:
-      return `# SMTP: leave empty to use email autoconfirm in dev (no emails sent)
+      return `# SMTP: unused while email.provider is console, which logs each email instead of sending it.
+# Email confirmation is auth.email.enableConfirmations in supatype.config.ts.
 SMTP_HOST=
 SMTP_PORT=
 SMTP_USER=

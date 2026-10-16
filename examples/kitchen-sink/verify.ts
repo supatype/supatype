@@ -292,6 +292,26 @@ async function main(): Promise<void> {
   })
   check(anonIssue.status === 401, "issue-ticket refuses an anon caller", String(anonIssue.status))
 
+  // And the happy path: the same function, called by the user signed up above, issues a ticket.
+  // It writes with the service role, so this fails with "This route was not granted the service
+  // role." unless `functions.serviceRole` in supatype.config.ts names it.
+  const { data: signedIn } = await anon.auth.getSession()
+  const signedIssue = await fetch(`${URL}/functions/v1/issue-ticket`, {
+    method: "POST",
+    headers: {
+      apikey: key,
+      Authorization: `Bearer ${signedIn.session?.accessToken ?? ""}`,
+      "Content-Type": "application/json",
+    },
+    body: "{}",
+  })
+  const issued = (await signedIssue.json()) as { reference?: string; error?: string }
+  check(
+    signedIssue.status === 201 && typeof issued.reference === "string",
+    "issue-ticket issues a ticket to a signed-in caller",
+    `${signedIssue.status} ${JSON.stringify(issued)}`,
+  )
+
   console.log("")
   if (failures.length > 0) {
     console.error(`FAIL: ${failures.length} of the checks above did not hold`)

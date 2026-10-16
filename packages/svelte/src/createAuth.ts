@@ -1,15 +1,23 @@
 import { writable, type Readable } from "svelte/store"
 import { onDestroy } from "svelte"
-import type { AugmentedDatabase, AnyDatabase, SupatypeError, User, Session, AuthChangeEvent } from "@supatype/client"
+import type { AugmentedDatabase, AnyDatabase, AuthRedirectError, SupatypeError, User, Session, AuthChangeEvent } from "@supatype/client"
+import { startOAuthRedirect } from "@supatype/client/bindings"
 import { getSupatypeClient } from "./context.js"
 
 export interface AuthStore {
   user: Readable<User | null>
   session: Readable<Session | null>
   loading: Readable<boolean>
+  /** The sign-in the auth server refused and reported in the page's URL, or null. */
+  error: Readable<AuthRedirectError | null>
   signIn: (email: string, password: string) => Promise<{ error: SupatypeError | null }>
-  signUp: (email: string, password: string) => Promise<{ error: SupatypeError | null }>
+  /** A null `data.session` with a user means the project wants the email confirmed first. */
+  signUp: (email: string, password: string) => Promise<{
+    data: { session: Session | null; user: User | null }
+    error: SupatypeError | null
+  }>
   signOut: () => Promise<{ error: SupatypeError | null }>
+  /** Send the browser to the provider; a refusal (provider not enabled) is returned instead. */
   signInWithOAuth: (provider: string) => Promise<{ error: SupatypeError | null }>
   resetPassword: (email: string) => Promise<{ error: SupatypeError | null }>
 }
@@ -19,9 +27,13 @@ export function createAuth<TDatabase extends AnyDatabase = AugmentedDatabase>():
   const user = writable<User | null>(null)
   const session = writable<Session | null>(null)
   const loading = writable(true)
+  const error = writable<AuthRedirectError | null>(null)
 
-  // Get initial session
-  client.auth.getSession().then(({ data }) => {
+  // The initial session, once the client has finished any sign-in the page's URL carries
+  client.auth.initialize().then(({ error: redirectError }) => {
+    error.set(redirectError)
+    return client.auth.getSession()
+  }).then(({ data }) => {
     if (data.session) {
       session.set(data.session)
       user.set(data.session.user)
@@ -46,20 +58,14 @@ export function createAuth<TDatabase extends AnyDatabase = AugmentedDatabase>():
     return { error }
   }
 
-  const signUp = async (email: string, password: string) => {
-    const { error } = await client.auth.signUp({ email, password })
-    return { error }
-  }
+  const signUp = (email: string, password: string) => client.auth.signUp({ email, password })
 
   const signOut = async () => {
     const { error } = await client.auth.signOut()
     return { error }
   }
 
-  const signInWithOAuth = async (provider: string) => {
-    const { error } = await client.auth.signInWithOAuth({ provider })
-    return { error }
-  }
+  const signInWithOAuth = (provider: string) => startOAuthRedirect(client.auth, provider)
 
   const resetPassword = async (email: string) => {
     const { error } = await client.auth.resetPasswordForEmail(email)
@@ -70,6 +76,7 @@ export function createAuth<TDatabase extends AnyDatabase = AugmentedDatabase>():
     user: { subscribe: user.subscribe },
     session: { subscribe: session.subscribe },
     loading: { subscribe: loading.subscribe },
+    error: { subscribe: error.subscribe },
     signIn,
     signUp,
     signOut,

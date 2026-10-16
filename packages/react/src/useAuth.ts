@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import type { Session, User, AuthChangeEvent, SupatypeError } from "@supatype/client"
+import type { Session, User, AuthChangeEvent, AuthRedirectError, SupatypeError } from "@supatype/client"
 import { useSupatype } from "./context.js"
 
 export interface UseAuthReturn {
@@ -9,8 +9,13 @@ export interface UseAuthReturn {
   user: User | null
   /** The current session (includes access token), or null. */
   session: Session | null
-  /** True while loading the initial auth state. */
+  /**
+   * True while loading the initial auth state, which includes finishing a sign-in the page's URL
+   * carries (an OAuth or email-link redirect).
+   */
   loading: boolean
+  /** The sign-in the auth server refused and reported in the page's URL, or null. */
+  error: AuthRedirectError | null
   /** Sign up with email and password. */
   signUp(credentials: {
     email: string
@@ -50,33 +55,37 @@ export interface UseAuthReturn {
  */
 export function useAuth(): UseAuthReturn {
   const client = useSupatype()
-  const [user, setUser] = useState<User | null>(null)
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<AuthRedirectError | null>(null)
 
   useEffect(() => {
-    // Seed from current session
-    void client.auth.getSession().then(({ data }) => {
+    let active = true
+    // Seed once the client has started: the stored session, or the one the page's URL carried.
+    void client.auth.initialize().then(async ({ error: redirectError }) => {
+      const { data } = await client.auth.getSession()
+      if (!active) return
       setSession(data.session)
-      setUser(data.session?.user ?? null)
+      setError(redirectError)
       setLoading(false)
     })
 
     // Subscribe to future changes
     const { data: { subscription } } = client.auth.onAuthStateChange(
-      (_event: AuthChangeEvent, newSession: Session | null) => {
-        setSession(newSession)
-        setUser(newSession?.user ?? null)
-      },
+      (_event: AuthChangeEvent, newSession: Session | null) => setSession(newSession),
     )
 
-    return () => subscription.unsubscribe()
+    return () => {
+      active = false
+      subscription.unsubscribe()
+    }
   }, [client])
 
   return {
-    user,
+    user: session?.user ?? null,
     session,
     loading,
+    error,
     signUp: (creds) => client.auth.signUp(creds),
     signIn: (creds) => client.auth.signInWithPassword(creds),
     signInWithOAuth: (opts) => client.auth.signInWithOAuth(opts),
