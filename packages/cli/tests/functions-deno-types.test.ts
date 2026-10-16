@@ -9,6 +9,7 @@ import {
   functionsDenoAmbientSource,
   functionsTsConfigSource,
 } from "../src/functions-deno-types.js"
+import { generateFunctionsRouterSource } from "../src/functions-router-gen.js"
 
 const require = createRequire(import.meta.url)
 
@@ -192,6 +193,25 @@ describe("functions Deno types (tsc manual check)", () => {
     const { status, stdout, stderr } = runTsc(functionsDir)
     const out = `${stdout}\n${stderr}`
     expect(out, `tsc stderr/stdout:\n${out}`).not.toMatch(/Cannot find name 'Deno'|TS2304/)
+    expect(status, `tsc failed:\n${out}`).toBe(0)
+  })
+
+  // The router the CLI writes imports `node:async_hooks`. Deno provides it at runtime, but the
+  // scaffolded tsconfig loads no Node types, so the declaration has to come from deno.d.ts.
+  it("tsc passes for the generated functions router after ensureFunctionsDenoTypes", () => {
+    tmpRoot = mkdtempSync(join(tmpdir(), "supatype-deno-tsc-router-"))
+    const functionsDir = join(tmpRoot, "functions")
+    const entrypoint = join(functionsDir, "hello", "index.ts")
+    mkdirSync(dirname(entrypoint), { recursive: true })
+    writeFileSync(entrypoint, HANDLER_WITH_DENO, "utf8")
+    ensureFunctionsDenoTypes(tmpRoot, functionsDir)
+    const routerPath = join(functionsDir, "router.ts")
+    const router = generateFunctionsRouterSource(routerPath, [{ name: "hello", entrypoint }])
+    expect(router).toContain('from "node:async_hooks"')
+    writeFileSync(routerPath, router, "utf8")
+
+    const { status, stdout, stderr } = runTsc(functionsDir)
+    const out = `${stdout}\n${stderr}`
     expect(status, `tsc failed:\n${out}`).toBe(0)
   })
 })
