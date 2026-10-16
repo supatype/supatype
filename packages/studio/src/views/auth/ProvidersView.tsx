@@ -1,110 +1,45 @@
-import React, { useState } from "react"
-import { Badge, Button, Card, Input } from "../../components/ui.js"
+import React from "react"
 import { EmptyState } from "../../components/EmptyState.js"
+import { ErrorBanner } from "../../components/ErrorBanner.js"
+import { useAuthSettings } from "../../hooks/useAuthSettings.js"
+import { usePlatform } from "../../hooks/usePlatform.js"
+import { oauthProviderRows, SettingsLoading, SettingsTable } from "./AuthSettingsTable.js"
 
-interface ProviderConfig {
-  provider: string
-  enabled: boolean
-  clientId: string
-  clientSecretSet: boolean
-  scopes: string
+/**
+ * The project's OAuth providers, as its auth server reports them in `GET /auth/v1/settings`, the
+ * same source the Configuration page reads.
+ *
+ * Read-only on purpose. This page used to show a hard-coded list, every provider disabled, with
+ * Enable and Configure buttons that changed only the page's own state. No host accepts a provider
+ * change from Studio: self-host renders them from `auth.providers` in supatype.config.ts (or
+ * `SUPATYPE_EXTERNAL_*` in `.env`) when the stack starts, and Cloud manages them.
+ */
+
+function howToChange(cloud: boolean): string {
+  return cloud
+    ? "OAuth providers are managed by Supatype Cloud for this project and cannot be changed from Studio."
+    : "OAuth providers come from auth.providers in supatype.config.ts, or SUPATYPE_EXTERNAL_<PROVIDER>_* in the project's .env, which wins. Change them there and restart the stack. Studio cannot change them."
 }
 
-const DEFAULT_PROVIDERS: ProviderConfig[] = [
-  { provider: "email", enabled: true, clientId: "", clientSecretSet: false, scopes: "" },
-  { provider: "github", enabled: false, clientId: "", clientSecretSet: false, scopes: "user:email" },
-  { provider: "google", enabled: false, clientId: "", clientSecretSet: false, scopes: "openid email profile" },
-  { provider: "gitlab", enabled: false, clientId: "", clientSecretSet: false, scopes: "read_user" },
-  { provider: "bitbucket", enabled: false, clientId: "", clientSecretSet: false, scopes: "account" },
-  { provider: "azure", enabled: false, clientId: "", clientSecretSet: false, scopes: "openid email profile" },
-  { provider: "discord", enabled: false, clientId: "", clientSecretSet: false, scopes: "identify email" },
-  { provider: "facebook", enabled: false, clientId: "", clientSecretSet: false, scopes: "email" },
-  { provider: "slack", enabled: false, clientId: "", clientSecretSet: false, scopes: "openid email profile" },
-  { provider: "spotify", enabled: false, clientId: "", clientSecretSet: false, scopes: "user-read-email" },
-  { provider: "twitter", enabled: false, clientId: "", clientSecretSet: false, scopes: "" },
-  { provider: "apple", enabled: false, clientId: "", clientSecretSet: false, scopes: "name email" },
-  { provider: "linkedin", enabled: false, clientId: "", clientSecretSet: false, scopes: "openid profile email" },
-  { provider: "keycloak", enabled: false, clientId: "", clientSecretSet: false, scopes: "openid" },
-]
-
 export function ProvidersView(): React.ReactElement {
-  const [providers, setProviders] = useState<ProviderConfig[]>(DEFAULT_PROVIDERS)
-  const [editing, setEditing] = useState<string | null>(null)
-  const [editClientId, setEditClientId] = useState("")
-  const [editSecret, setEditSecret] = useState("")
-  const [editScopes, setEditScopes] = useState("")
-
-  function toggle(provider: string) {
-    setProviders((prev) => prev.map((p) => p.provider === provider ? { ...p, enabled: !p.enabled } : p))
-  }
-
-  function startEdit(p: ProviderConfig) {
-    setEditing(p.provider)
-    setEditClientId(p.clientId)
-    setEditSecret("")
-    setEditScopes(p.scopes)
-  }
-
-  function saveEdit() {
-    if (!editing) return
-    setProviders((prev) => prev.map((p) => p.provider === editing ? {
-      ...p,
-      clientId: editClientId,
-      clientSecretSet: editSecret.length > 0 || p.clientSecretSet,
-      scopes: editScopes,
-    } : p))
-    setEditing(null)
-  }
+  const { settings, error, loading } = useAuthSettings()
+  const cloud = usePlatform().platformUrl !== undefined
+  const rows = settings ? oauthProviderRows(settings) : []
 
   return (
-    <div className="space-y-4 max-w-3xl">
+    <div className="space-y-5 max-w-3xl">
       <h1 className="text-xl font-semibold text-foreground">Providers</h1>
+      <p className="text-sm text-muted-foreground">{howToChange(cloud)}</p>
 
-      <Card className="p-4">
-        <div className="space-y-3">
-          {providers.length === 0 ? (
-            <EmptyState title="No providers" description="Configure OAuth providers for your project." />
-          ) : null}
-          {providers.map((p) => (
-            <div key={p.provider} className="border border-border rounded-md p-3 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <Badge variant={p.enabled ? "green" : "red"}>{p.enabled ? "Enabled" : "Disabled"}</Badge>
-                  <span className="font-medium text-sm capitalize text-foreground">{p.provider}</span>
-                  {p.clientId && <code className="text-xs text-muted-foreground">{p.clientId.slice(0, 15)}…</code>}
-                </div>
-                <div className="flex gap-2">
-                  <Button size="xs" onClick={() => toggle(p.provider)}>{p.enabled ? "Disable" : "Enable"}</Button>
-                  {p.provider !== "email" && <Button size="xs" onClick={() => startEdit(p)}>Configure</Button>}
-                </div>
-              </div>
+      {error && <ErrorBanner message={error} />}
+      {loading && <SettingsLoading />}
 
-              {editing === p.provider && (
-                <div className="pt-3 border-t border-border grid gap-3 max-w-[480px]">
-                  <div>
-                    <label className="block text-xs text-muted-foreground mb-1">Client ID</label>
-                    <Input value={editClientId} onChange={(e) => setEditClientId(e.target.value)} />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-muted-foreground mb-1">
-                      Client Secret {p.clientSecretSet ? "(already set, leave blank to keep)" : ""}
-                    </label>
-                    <Input type="password" value={editSecret} onChange={(e) => setEditSecret(e.target.value)} />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-muted-foreground mb-1">Scopes</label>
-                    <Input value={editScopes} onChange={(e) => setEditScopes(e.target.value)} placeholder="openid email profile" />
-                  </div>
-                  <div className="flex gap-2">
-                    <Button variant="primary" onClick={saveEdit}>Save</Button>
-                    <Button onClick={() => setEditing(null)}>Cancel</Button>
-                  </div>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      </Card>
+      {settings &&
+        (rows.length > 0 ? (
+          <SettingsTable title="OAuth providers" rows={rows} cloud={cloud} />
+        ) : (
+          <EmptyState title="No OAuth providers reported" description="The auth server reported no OAuth providers." />
+        ))}
     </div>
   )
 }
