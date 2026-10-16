@@ -50,6 +50,11 @@ export interface Testable {
    * loosening the assertion for every kind.
    */
   readonly expect?: (returned: unknown) => boolean
+  /**
+   * The type the generated `Row` gives the column, less its `| null`, where the kind has a shape
+   * worth pinning. A `Blocks` column was typed one way by each generator and stored a third way.
+   */
+  readonly rowType?: string
 }
 
 /** A kind no public type can produce, with the evidence. */
@@ -87,7 +92,7 @@ const t = (
   imports: readonly string[],
   pgDataType: string,
   sample: unknown,
-  extra: Partial<Pick<Testable, "pgUdtName" | "expect">> = {},
+  extra: Partial<Pick<Testable, "pgUdtName" | "expect" | "rowType">> = {},
 ): Testable => ({ form: "testable", declare, imports, pgDataType, sample, ...extra })
 
 /** Numeric columns come back with the scale Postgres stores, so compare numerically. */
@@ -210,8 +215,19 @@ export const KIND_SPECS: Record<FieldKind, KindSpec> = {
 
   // ── Collections and structured values ─────────────────────────────────────
   array: t("Optional<string[]>", [], "ARRAY", ["a", "b"]),
-  json: t("Optional<JSON<{ a: number }>>", ["JSON"], "jsonb", { a: 1 }),
-  blocks: t("Optional<Blocks>", ["Blocks"], "jsonb", []),
+  json: t("Optional<JSON<{ a: number }>>", ["JSON"], "jsonb", { a: 1 }, { rowType: "{ a: number }" }),
+  // One block declared, and a sample in the shape Studio's block editor writes: the block's
+  // fields under `data`, never beside `type`.
+  blocks: t(
+    "Optional<Blocks<Block<\"link\", { label: string; href: string }>>>",
+    ["Blocks", "Block"],
+    "jsonb",
+    [{ type: "link", data: { label: "Go", href: "/x" } }],
+    {
+      expect: sameShape([{ type: "link", data: { label: "Go", href: "/x" } }]),
+      rowType: "({ type: \"link\"; data: { label: string; href: string } })[]",
+    },
+  ),
   button: t("Optional<Button>", ["Button"], "jsonb", { label: "Go", href: "/x" }, {
     expect: sameShape({ label: "Go", href: "/x" }),
   }),

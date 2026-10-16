@@ -1,5 +1,10 @@
 /**
- * The columns of a table's `Row` type in a generated `database.ts`, read with TypeScript's parser.
+ * The columns of a table's `Row` type in a generated file, read with TypeScript's parser.
+ *
+ * Two files describe the same rows, written by two generators: the engine's `database.ts`
+ * (`Database["public"]["Tables"][table]["Row"]`) and the CLI's client augmentation, `index.d.ts`
+ * (`SupatypeModels[table]["Row"]` inside `declare module "@supatype/client"`). Both are read here,
+ * so a column the two generators type differently is caught by the same assertion.
  *
  * The verifier used to find the `Row` block by searching for the first `}` after `Row: {`. A
  * `JSON<T>` column is emitted with `T` written out, `probeJson: { a: number } | null`, so that
@@ -17,23 +22,19 @@ export interface RowColumn {
   nullable: boolean
 }
 
+type Members = ts.NodeArray<ts.TypeElement>
+
 /**
- * Every column of `Database["public"]["Tables"][table]["Row"]`, by name, or `undefined` when the
+ * Every column of `table`'s `Row`, by name, from either generated file, or `undefined` when the
  * file does not declare that table's `Row`.
  */
 export function rowColumns(source: string, table: string): Map<string, RowColumn> | undefined {
-  const file = ts.createSourceFile("database.ts", source, ts.ScriptTarget.Latest, true)
-  const database = file.statements.find(
-    (s): s is ts.TypeAliasDeclaration => ts.isTypeAliasDeclaration(s) && s.name.text === "Database",
-  )
-  const row = ["public", "Tables", table, "Row"].reduce<ts.TypeNode | undefined>(
-    (node, key) => (node === undefined ? undefined : member(node, key)),
-    database?.type,
-  )
-  if (row === undefined || !ts.isTypeLiteralNode(row)) return undefined
+  const file = ts.createSourceFile("generated.ts", source, ts.ScriptTarget.Latest, true)
+  const row = databaseRow(file, table) ?? augmentationRow(file, table)
+  if (row === undefined) return undefined
 
   const columns = new Map<string, RowColumn>()
-  for (const m of row.members) {
+  for (const m of row) {
     const name = propertyName(m)
     if (name === undefined || !ts.isPropertySignature(m) || m.type === undefined) continue
     columns.set(name, { type: m.type.getText(file), nullable: admitsNull(m.type) })
@@ -41,11 +42,39 @@ export function rowColumns(source: string, table: string): Map<string, RowColumn
   return columns
 }
 
-/** The type of property `key` of an object type literal. */
-function member(node: ts.TypeNode, key: string): ts.TypeNode | undefined {
-  if (!ts.isTypeLiteralNode(node)) return undefined
-  const found = node.members.find((m) => propertyName(m) === key)
-  return found !== undefined && ts.isPropertySignature(found) ? found.type : undefined
+/** `Database["public"]["Tables"][table]["Row"]`, as the engine's `database.ts` declares it. */
+function databaseRow(file: ts.SourceFile, table: string): Members | undefined {
+  const database = file.statements.find(
+    (s): s is ts.TypeAliasDeclaration => ts.isTypeAliasDeclaration(s) && s.name.text === "Database",
+  )
+  if (database === undefined || !ts.isTypeLiteralNode(database.type)) return undefined
+  return path(database.type.members, ["public", "Tables", table, "Row"])
+}
+
+/** `SupatypeModels[table]["Row"]`, as the client augmentation declares it. */
+function augmentationRow(file: ts.SourceFile, table: string): Members | undefined {
+  for (const statement of file.statements) {
+    if (!ts.isModuleDeclaration(statement) || statement.body === undefined) continue
+    if (!ts.isModuleBlock(statement.body)) continue
+    const models = statement.body.statements.find(
+      (s): s is ts.InterfaceDeclaration =>
+        ts.isInterfaceDeclaration(s) && s.name.text === "SupatypeModels",
+    )
+    if (models !== undefined) return path(models.members, [table, "Row"])
+  }
+  return undefined
+}
+
+/** The members of the object type reached by following `keys` from `members`. */
+function path(members: Members, keys: readonly string[]): Members | undefined {
+  let current: Members | undefined = members
+  for (const key of keys) {
+    const found: ts.TypeElement | undefined = current?.find((m) => propertyName(m) === key)
+    const type: ts.TypeNode | undefined =
+      found !== undefined && ts.isPropertySignature(found) ? found.type : undefined
+    current = type !== undefined && ts.isTypeLiteralNode(type) ? type.members : undefined
+  }
+  return current
 }
 
 /** A member's name, whether written bare (`probe_all`) or quoted (`"probe-all"`). */

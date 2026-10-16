@@ -16,9 +16,16 @@
 import { execFileSync } from "node:child_process"
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { compositeKinds, deferredKinds, testableKinds, unreachableKinds } from "./kinds.js"
+import type { FieldKind } from "../../../packages/cli/src/schema-ast-v2.js"
+import {
+  compositeKinds,
+  deferredKinds,
+  testableKinds,
+  unreachableKinds,
+  type Testable,
+} from "./kinds.js"
 import { fieldName } from "./generate-schema.js"
-import { rowColumns } from "./row-type.js"
+import { rowColumns, type RowColumn } from "./row-type.js"
 import { createClient } from "@supatype/client"
 import { pathToFileURL } from "node:url"
 
@@ -151,29 +158,14 @@ async function main(): Promise<void> {
   }
 
   // ── 3. the generated TypeScript matches ─────────────────────────────────────
+  //
+  // In both files that describe the row, because two generators write them: the engine's
+  // `database.ts` and the CLI's client augmentation. A `Blocks` column was typed differently by
+  // each, and only a check that reads both can see that.
   console.log("\n==> 3. the generated TypeScript matches the column")
-  const generated = readFileSync(
-    join(PROJECT, "supatype", "generated", "database.ts"),
-    "utf8",
-  )
-  const row = rowColumns(generated, "probe_all")
-  check(row !== undefined, "the generated types declare probe_all's Row")
-  for (const [kind] of kinds) {
-    const name = columnOf(kind)
-    const col = byName.get(name)
-    if (!col) continue
-    const typed = row?.get(name)
-    if (typed === undefined) {
-      check(false, `${kind}: appears in the generated Row type`)
-      continue
-    }
-    // Every probe column is optional in the schema, so every one must be nullable in the Row type.
-    // The inverse of the relation bug, where a NOT NULL column was typed `| null`.
-    check(
-      (col.is_nullable === "YES") === typed.nullable,
-      `${kind}: Row nullability matches the column`,
-      `column nullable=${col.is_nullable}, type=${name}: ${typed.type}`,
-    )
+  for (const [file, label] of GENERATED_ROW_FILES) {
+    const generated = readFileSync(join(PROJECT, "supatype", "generated", file), "utf8")
+    checkRowTypes(label, rowColumns(generated, "probe_all"), kinds, byName)
   }
 
   // ── 4. a value round trips ──────────────────────────────────────────────────
@@ -293,6 +285,46 @@ async function main(): Promise<void> {
  */
 function columnOf(kind: string): string {
   return kind === "relation" ? "target_id" : fieldName(kind)
+}
+
+/** The generated files that declare the row, and what to call each in a check. */
+const GENERATED_ROW_FILES = [
+  ["database.ts", "database.ts"],
+  ["index.d.ts", "client augmentation"],
+] as const
+
+/**
+ * One generated file's `Row` against the columns Postgres created: every column present, nullable
+ * exactly when the column is, and typed as the kind says where it pins a shape.
+ */
+function checkRowTypes(
+  label: string,
+  row: Map<string, RowColumn> | undefined,
+  kinds: [FieldKind, Testable][],
+  byName: Map<string, ColumnRow>,
+): void {
+  check(row !== undefined, `${label} declares probe_all's Row`)
+  for (const [kind, spec] of kinds) {
+    const name = columnOf(kind)
+    const col = byName.get(name)
+    if (!col) continue
+    const typed = row?.get(name)
+    if (typed === undefined) {
+      check(false, `${kind}: appears in the ${label} Row type`)
+      continue
+    }
+    // Every probe column is optional in the schema, so every one must be nullable in the Row type.
+    // The inverse of the relation bug, where a NOT NULL column was typed `| null`.
+    check(
+      (col.is_nullable === "YES") === typed.nullable,
+      `${kind}: ${label} Row nullability matches the column`,
+      `column nullable=${col.is_nullable}, type=${name}: ${typed.type}`,
+    )
+    if (spec.rowType !== undefined) {
+      const want = `${spec.rowType} | null`
+      check(typed.type === want, `${kind}: ${label} Row type is ${want}`, `got ${typed.type}`)
+    }
+  }
 }
 
 /** The type family, so `NUMERIC(19,4)` and `numeric` compare equal but `TEXT` and `numeric` do not. */

@@ -391,3 +391,76 @@ describe("agreement with the engine's generator", () => {
     expect(positions).toEqual([...positions].sort((a, b) => a - b))
   })
 })
+
+/**
+ * A `Blocks` column holds what Studio's block editor writes, one `{ type, data }` entry per block
+ * with the block's fields under `data`. This side typed the column `Record<string, unknown>`, which
+ * is not even an array, while the engine's `database.ts` described the entries. The expected text is
+ * the engine's, so the two files say the same thing about the same column.
+ */
+describe("blocks columns", () => {
+  const ast = {
+    models: [
+      {
+        name: "Speaker",
+        annotations: { db: { tableName: "speaker", indexes: [] } },
+        fields: {
+          id: { kind: "uuid", required: true, primaryKey: true },
+          links: {
+            kind: "blocks",
+            required: false,
+            blocks: [
+              {
+                name: "link",
+                fields: {
+                  label: { kind: "text", pgType: "TEXT", required: true },
+                  href: { kind: "text", pgType: "TEXT", required: true },
+                },
+              },
+            ],
+          },
+          body: {
+            kind: "blocks",
+            required: true,
+            blocks: [
+              {
+                name: "hero",
+                fields: {
+                  heading: { kind: "text", pgType: "JSONB", required: true, localized: true },
+                  cta: { kind: "button", pgType: "JSONB", required: false },
+                  "my-key": { kind: "integer", pgType: "INTEGER", required: false },
+                },
+              },
+              { name: "divider", fields: {} },
+            ],
+          },
+          loose: { kind: "blocks", required: false, blocks: [] },
+        },
+      },
+    ],
+  }
+  const out = generateClientAugmentation(ast)
+  const links = '({ type: "link"; data: { label: string; href: string } })[]'
+
+  it("keeps a block's fields under data, and an optional column admits null", () => {
+    expect(out).toContain(`links: ${links} | null\n`)
+    expect(out).toContain(`links?: ${links} | null\n`)
+  })
+
+  it("types a block's fields as the same fields would be on a column", () => {
+    const body =
+      '({ type: "hero"; data: { heading: { [locale: string]: string }; cta?: Button; "my-key"?: number } }' +
+      ' | { type: "divider"; data: {} })[]'
+    expect(out).toContain(`body: ${body}\n`)
+    expect(out).not.toContain(`body: ${body} | null`)
+  })
+
+  it("says type and data even when no block is declared", () => {
+    expect(out).toContain("loose: { type: string; data: { [key: string]: unknown } }[] | null\n")
+  })
+
+  it("declares the Button alias a block's field names, as the engine does", () => {
+    expect(out).toContain('export type ButtonTarget = "_self" | "_blank"')
+    expect(out).toContain("export type Button = {")
+  })
+})
