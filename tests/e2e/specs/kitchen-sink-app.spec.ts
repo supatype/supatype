@@ -174,4 +174,32 @@ test.describe("the kitchen-sink attendee app", () => {
     )
     expect(overflow).toBeLessThanOrEqual(1)
   })
+
+  test("renders the prebuilt auth forms as the app's own fields, not browser defaults", async ({ page }) => {
+    // Needs no session and no seed, so it also runs against `vite` on its own.
+    await page.goto("/", { waitUntil: "networkidle" })
+    for (const mode of ["sign-up", "sign-in"]) {
+      if (mode === "sign-in") await page.getByRole("button", { name: /already have an account/i }).click()
+      const card = page.locator(".ks-card").first()
+      const input = card.locator('input[type="email"]')
+      const submit = card.locator('button[type="submit"]')
+      await expect(input, mode).toBeVisible()
+
+      // The forms ship no stylesheet. Unstyled, the label sits inline beside a narrow square input
+      // and the button is the browser's grey one; the card around them gives no hint of that.
+      await expect(card.locator("label").first(), mode).toHaveCSS("display", "block")
+      await expect(input, mode).toHaveCSS("border-radius", "8px")
+      const widths = await Promise.all([input, card].map((l) => l.evaluate((el) => el.clientWidth)))
+      expect(widths[0], `${mode}: input fills the card`).toBeGreaterThan((widths[1] ?? 0) * 0.8)
+      const accent = await page.evaluate(() => {
+        const probe = document.createElement("span")
+        probe.style.color = "var(--ks-accent)"
+        document.body.append(probe)
+        const color = getComputedStyle(probe).color
+        probe.remove()
+        return color
+      })
+      await expect(submit, mode).toHaveCSS("background-color", accent)
+    }
+  })
 })

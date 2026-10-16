@@ -297,6 +297,10 @@ a { color: var(--ks-accent); }
 .ks-input:focus-visible { outline: 2px solid var(--ks-accent); outline-offset: 1px; }
 .ks-input--invalid { border-color: var(--ks-error); }
 
+/* A form of stacked fields with its heading; `authForm` in ui.tsx puts these on the auth forms. */
+.ks-form { display: flex; flex-direction: column; gap: 14px; margin: 0; }
+.ks-form__title { margin: 0; font-size: 17px; font-weight: 650; line-height: 1.3; }
+
 /* ── Avatar ────────────────────────────────────────────────────────────────── */
 
 .ks-avatar {
