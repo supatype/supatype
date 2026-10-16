@@ -93,6 +93,20 @@ test.describe("the kitchen-sink attendee app", () => {
     await expect(page.getByText("No English bio yet.")).toHaveCount(0)
   })
 
+  test("shows a speaker's photo from the reference the column stores", async ({ page }) => {
+    // Stubbed, so it runs against `vite` with no stack. The column holds `{ bucket, path }` and no
+    // URL; the screen used to read a `url` field that is never there, so every photo was initials.
+    await openStubbedSpeakers(page, HEADSHOT_SPEAKER)
+    const photo = page.locator(".ks-avatar img")
+    await expect(photo).toHaveCount(1)
+    const origin = new URL(page.url()).origin
+    await expect(photo).toHaveAttribute(
+      "src",
+      `${origin}/storage/v1/object/public/speaker-headshots/avatars/ada.jpg?width=104&height=104&format=webp&resize=cover`,
+    )
+    await expect.poll(() => photo.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0)
+  })
+
   test("refuses a message the schema refuses, and says what to change", async ({ page }) => {
     await signUp(page)
     await open(page, "Lobby")
@@ -308,9 +322,7 @@ test.describe("the kitchen-sink lobby composer", () => {
  */
 async function openStubbedLobby(page: Page, respond: Respond = accept): Promise<unknown[]> {
   const sent: unknown[] = []
-  await page.route("**/auth/v1/user", (route) =>
-    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(RECOVERED_USER) }),
-  )
+  await stubSignedInUser(page)
   await page.route("**/rest/v1/**", async (route) => {
     if (route.request().method() !== "POST") return route.fulfill({ status: 200, contentType: "application/json", body: "[]" })
     sent.push(route.request().postDataJSON())
@@ -319,6 +331,44 @@ async function openStubbedLobby(page: Page, respond: Respond = accept): Promise<
   await page.goto(`/#${SIGNED_IN_FRAGMENT}`, { waitUntil: "networkidle" })
   await open(page, "Lobby")
   return sent
+}
+
+/** `/auth/v1/user` answering for the session a magic-link fragment hands the client. */
+async function stubSignedInUser(page: Page): Promise<void> {
+  await page.route("**/auth/v1/user", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(RECOVERED_USER) }),
+  )
+}
+
+/** A published speaker whose headshot column holds what an upload stores: a bucket and a path. */
+const HEADSHOT_SPEAKER = {
+  id: "00000000-0000-4000-8000-0000000000a1",
+  name: "Ada Buckley",
+  slug: "ada-buckley",
+  bio: { en: "Writes compilers." },
+  headshot: { bucket: "speaker-headshots", path: "avatars/ada.jpg", mimeType: "image/jpeg", size: 812 },
+  links: null,
+  email: null,
+  published_at: "2026-01-01T00:00:00Z",
+  created_at: "2026-01-01T00:00:00Z",
+  updated_at: "2026-01-01T00:00:00Z",
+}
+
+/**
+ * Signed in and on the speakers screen with no stack behind it: the speaker table answers with
+ * `speaker`, every other read with no rows, and every public object with a real JPEG.
+ */
+async function openStubbedSpeakers(page: Page, speaker: typeof HEADSHOT_SPEAKER): Promise<void> {
+  await stubSignedInUser(page)
+  await page.route("**/rest/v1/**", (route) => {
+    const isSpeaker = new URL(route.request().url()).pathname.endsWith("/rest/v1/speaker")
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(isSpeaker ? [speaker] : []) })
+  })
+  await page.route("**/storage/v1/object/public/**", (route) =>
+    route.fulfill({ status: 200, contentType: "image/jpeg", body: AVATAR_JPEG }),
+  )
+  await page.goto(`/#${SIGNED_IN_FRAGMENT}`, { waitUntil: "networkidle" })
+  await open(page, "Speakers")
 }
 
 /**

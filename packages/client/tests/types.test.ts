@@ -246,3 +246,38 @@ describe("select-string inference", () => {
     expectTypeOf<RowOf<typeof q>>().toEqualTypeOf<{ id: unknown; other: unknown }>()
   })
 })
+
+type WrittenRow<M> = M extends PromiseLike<QueryResult<Array<infer R>>> ? R : never
+
+describe("select-string inference after a write", () => {
+  it("types the returned rows from the string on insert, update, upsert and delete", () => {
+    const row: Article = { id: "a", title: "t", author_id: "u", editor_id: null }
+    const inserted = joins.from("articles").insert(row).select("id, heading:title")
+    expectTypeOf<WrittenRow<typeof inserted>>().toEqualTypeOf<{ id: string; heading: string }>()
+    const updated = joins.from("articles").update({ title: "u" }).eq("id", "a").select("title")
+    expectTypeOf<WrittenRow<typeof updated>>().toEqualTypeOf<{ title: string }>()
+    const upserted = joins.from("articles").upsert(row).select("author:authors!author_id(name)")
+    expectTypeOf<WrittenRow<typeof upserted>>().toEqualTypeOf<{ author: { name: string } | null }>()
+    const deleted = joins.from("articles").delete().eq("id", "a").select("id")
+    expectTypeOf<WrittenRow<typeof deleted>>().toEqualTypeOf<{ id: string }>()
+  })
+
+  it("keeps the whole row for no argument and for *", () => {
+    const row: Article = { id: "a", title: "t", author_id: "u", editor_id: null }
+    const bare = joins.from("articles").insert(row).select()
+    expectTypeOf<WrittenRow<typeof bare>>().toEqualTypeOf<Article>()
+    const star = joins.from("articles").update({ title: "u" }).select("*")
+    expectTypeOf<WrittenRow<typeof star>>().toEqualTypeOf<Article>()
+  })
+
+  it("lets an explicit type parameter override the string", () => {
+    type Custom = { id: string; extra: number }
+    const q = joins.from("articles").delete().select<Custom>("id, extra")
+    expectTypeOf<WrittenRow<typeof q>>().toEqualTypeOf<Custom>()
+  })
+
+  it("narrows .single() after a select", () => {
+    const q = joins.from("articles").update({ title: "u" }).eq("id", "a").select("id").single()
+    expectTypeOf(q).resolves.toEqualTypeOf<QueryResult<{ id: string }>>()
+  })
+})

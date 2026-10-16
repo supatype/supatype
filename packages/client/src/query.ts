@@ -1,6 +1,7 @@
 import type { QueryCache, QueryCacheOptions, CacheStatus } from "./query-cache.js"
 import { buildCacheKey, defaultQueryCache } from "./query-cache.js"
-import type { MaskedField, QueryResult, SelectQueryOptions, SupatypeError } from "./types.js"
+import type { MaskedField, QueryResult, SelectQueryOptions, SupatypeError, TableDef } from "./types.js"
+import type { SelectRow } from "./select-types.js"
 import { parseRowsExactly, tableFromPath } from "./exact-response.js"
 import { stringifyWithBigInts } from "./exact-values.js"
 import { FilterBuilder } from "./filters.js"
@@ -400,7 +401,18 @@ export class QueryBuilder<TRow> extends FilterBuilder implements PromiseLike<Que
 
 type HttpMethod = "POST" | "PATCH" | "DELETE"
 
-export class MutationBuilder<TRow> extends FilterBuilder implements PromiseLike<QueryResult<TRow[]>> {
+/**
+ * The rows a write hands back for `select(columns)`.
+ *
+ * Read from the string, as `TableClient.select` does, when the builder knows the tables it was
+ * written against. A builder constructed by hand knows only its row, so there it stays the row.
+ */
+type ReturnedRow<TRow, TTables, TName extends string, TColumns extends string> =
+  [TTables] extends [Record<string, TableDef>] ? SelectRow<TTables, TName, TColumns> : TRow
+
+export class MutationBuilder<TRow, TTables = unknown, TName extends string = string>
+  extends FilterBuilder
+  implements PromiseLike<QueryResult<TRow[]>> {
   private readonly baseUrl: string
   private readonly path: string
   private readonly getHeaders: HeadersProvider
@@ -447,10 +459,16 @@ export class MutationBuilder<TRow> extends FilterBuilder implements PromiseLike<
    * Asks for the representation too, which a delete does not by default: without it PostgREST
    * answers 204 and `delete().select()` returned no rows although it had deleted some.
    */
-  select(columns?: string): this {
+  select<TColumns extends string = "*">(
+    columns?: TColumns | undefined,
+  ): MutationBuilder<ReturnedRow<TRow, TTables, TName, TColumns>, TTables, TName>
+  /** Return the written rows typed as `TResult`, for a shape the select string cannot describe. */
+  select<TResult>(columns?: string | undefined): MutationBuilder<TResult, TTables, TName>
+  select<TResult>(columns?: string | undefined): MutationBuilder<TResult, TTables, TName> {
     this.params.set("select", columns ?? "*")
     this.prefer("return=representation")
-    return this
+    // The same request, now described as returning the selected shape rather than the whole row.
+    return this as MutationBuilder<unknown, TTables, TName> as MutationBuilder<TResult, TTables, TName>
   }
 
   async single(): Promise<QueryResult<TRow>> {
