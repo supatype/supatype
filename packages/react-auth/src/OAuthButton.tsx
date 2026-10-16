@@ -32,9 +32,16 @@ export interface OAuthButtonProps {
   disabled?: boolean | undefined
 }
 
-/** Capitalise the first letter of a string. */
-function capitalize(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1)
+/** Names whose capitalisation is not just a capital first letter. */
+const PROVIDER_NAMES: Record<string, string> = {
+  github: "GitHub",
+  gitlab: "GitLab",
+  linkedin: "LinkedIn",
+}
+
+/** The provider's display name: its own spelling where known, else a capital first letter. */
+function displayName(provider: string): string {
+  return PROVIDER_NAMES[provider.toLowerCase()] ?? provider.charAt(0).toUpperCase() + provider.slice(1)
 }
 
 /** Provider logo SVGs (inline to avoid external dependencies). */
@@ -64,7 +71,7 @@ export function OAuthButton({
   const { signInWithOAuth } = useAuth()
   const [loading, setLoading] = useState(false)
 
-  const providerName = capitalize(provider)
+  const providerName = displayName(provider)
   const iconSvg = PROVIDER_ICONS[provider.toLowerCase()]
 
   async function handleClick(): Promise<void> {
