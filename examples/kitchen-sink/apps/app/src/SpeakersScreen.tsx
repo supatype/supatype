@@ -2,6 +2,7 @@ import React from "react"
 import { useQuery } from "@supatype/react"
 import { Avatar, Card, EmptyState, Grid, Note, PageHeader, ProvesNote, Row, Skeleton, Stack } from "./components/ui.js"
 import { localized } from "./lib/localized.js"
+import { headshotUrl } from "./lib/headshot.js"
 import type { TableRow } from "@supatype/client"
 
 type Speaker = TableRow<"speaker">
@@ -31,7 +32,9 @@ export function SpeakersScreen(): React.ReactElement {
         join.
       </p>
       <p>
-        Headshots live in a public bucket, so the URL on the row is enough. Compare{" "}
+        A headshot is an <code>ImageAsset</code>: the row stores its bucket and path, and{" "}
+        <code>storage.publicUrl()</code> turns that into a URL, resized on read. The bucket is
+        public, so nothing is signed. Compare{" "}
         <strong>My ticket</strong>, where the PDF is private and needs a signed URL.
       </p>
     </ProvesNote>
@@ -85,7 +88,6 @@ export function SpeakersScreen(): React.ReactElement {
 
 function SpeakerCard({ speaker }: { speaker: Speaker }): React.ReactElement {
   const bio = localized(speaker.bio, "en")
-  const asset = speaker.headshot as { url?: string } | null
   // Typed from the schema's `JSON<{ label: string; href: string }[]>`, so no cast and no guessing.
   const links = speaker.links ?? []
 
@@ -93,7 +95,7 @@ function SpeakerCard({ speaker }: { speaker: Speaker }): React.ReactElement {
     <Card>
       <Stack gap={12}>
         <Row gap={12} align="top">
-          <Avatar name={speaker.name} src={asset?.url ?? null} size={52} />
+          <Avatar name={speaker.name} src={headshotUrl(speaker, 52)} size={52} />
           <div style={{ minWidth: 0 }}>
             <div className="ks-strong">{speaker.name}</div>
             {speaker.email != null && (

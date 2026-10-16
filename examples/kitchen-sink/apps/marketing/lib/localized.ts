@@ -1,5 +1,3 @@
-import type { TransformOptions } from "@supatype/client"
-
 /** What a localized column actually holds: every language at once. */
 type LocaleMap<T> = { [locale: string]: T }
 
@@ -27,41 +25,4 @@ export function localized<T>(value: LocaleMap<T> | T | null | undefined, locale:
   if (!looksLocalized) return value as T
 
   return (record[locale] as T | undefined) ?? null
-}
-
-/** What an image or file column carries: what `storage.upload()` produced, and where it went. */
-type StorageReference = { bucket: string; path: string }
-
-/** Where this project's storage API lives, for building a public object URL without a session. */
-const STORAGE_URL = `${process.env["NEXT_PUBLIC_SUPATYPE_URL"] ?? ""}/storage/v1`
-
-/**
- * A public object's URL, optionally transformed on read.
- *
- * Built here rather than with the storage client because a Server Component has no session to
- * carry: a public bucket's object is reachable by URL alone, and an og:image must be, or the
- * crawler fetching it gets a 401.
- *
- * It is derived rather than read off the column. This previously expected a `url` field, declared
- * in a fourth private copy of the asset shape, and returned null whenever it was absent, which was
- * always, so every og:image silently resolved to nothing. A URL is not stored because a stored one
- * goes stale and bakes in the host; the bucket and path are enough to rebuild it anywhere.
- */
-export function publicImageUrl(
-  asset: StorageReference | null | undefined,
-  transform?: TransformOptions,
-): string | null {
-  if (asset === null || asset === undefined) return null
-  if (typeof asset.bucket !== "string" || typeof asset.path !== "string") return null
-
-  const url = `${STORAGE_URL}/object/public/${asset.bucket}/${asset.path}`
-  if (transform === undefined) return url
-
-  const query = new URLSearchParams()
-  if (transform.width !== undefined) query.set("width", String(transform.width))
-  if (transform.height !== undefined) query.set("height", String(transform.height))
-  if (transform.resize !== undefined) query.set("resize", transform.resize)
-  if (transform.format !== undefined) query.set("format", transform.format)
-  if (transform.quality !== undefined) query.set("quality", String(transform.quality))
-  return `${url}?${query.toString()}`
 }
