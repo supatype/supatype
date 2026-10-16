@@ -451,97 +451,28 @@ export interface SupatypeProjectConfig {
 // Merge + validate
 // ---------------------------------------------------------------------------
 
-/**
- * Merge each top-level section from `override` on top of `base`.
- * Within each section, override values win. New optional sections in override are added.
- */
-export function mergeProjectConfig(
-  base: SupatypeProjectConfig,
-  override: Partial<SupatypeProjectConfig>,
-): SupatypeProjectConfig {
-  return {
-    ...(base.provider !== undefined || override.provider !== undefined
-      ? { provider: override.provider ?? base.provider }
-      : {}),
-    ...(base.supatype !== undefined || override.supatype !== undefined
-      ? { supatype: { ...base.supatype, ...override.supatype } as NonNullable<SupatypeProjectConfig["supatype"]> }
-      : {}),
-    project: { ...base.project, ...override.project },
-    database: { ...base.database, ...override.database },
-    server: { ...base.server, ...override.server },
-    app: { ...base.app, ...override.app },
-    ...(base.versions !== undefined || override.versions !== undefined
-      ? { versions: { ...base.versions, ...override.versions } }
-      : {}),
-    ...(base.overrides !== undefined || override.overrides !== undefined
-      ? {
-          overrides: {
-            ...base.overrides,
-            ...override.overrides,
-          } as NonNullable<SupatypeProjectConfig["overrides"]>,
-        }
-      : {}),
-    ...(base.email !== undefined || override.email !== undefined
-      ? (() => {
-          const b = base.email
-          const o = override.email
-          const mergedSmtp =
-            b?.smtp !== undefined || o?.smtp !== undefined
-              ? { ...(b?.smtp ?? {}), ...(o?.smtp ?? {}) }
-              : undefined
-          return {
-            email: {
-              ...b,
-              ...o,
-              ...(mergedSmtp !== undefined ? { smtp: mergedSmtp } : {}),
-            } as NonNullable<SupatypeProjectConfig["email"]>,
-          }
-        })()
-      : {}),
-    ...mergeAuth(base.auth, override.auth),
-    ...(base.storage !== undefined || override.storage !== undefined
-      ? {
-          storage: {
-            ...base.storage,
-            ...override.storage,
-          } as NonNullable<SupatypeProjectConfig["storage"]>,
-        }
-      : {}),
-    ...(base.schema !== undefined || override.schema !== undefined
-      ? { schema: { ...base.schema, ...override.schema } as NonNullable<SupatypeProjectConfig["schema"]> }
-      : {}),
-    ...(base.functions !== undefined || override.functions !== undefined
-      ? { functions: { ...base.functions, ...override.functions } as NonNullable<SupatypeProjectConfig["functions"]> }
-      : {}),
-    ...(base.output !== undefined || override.output !== undefined
-      ? { output: { ...base.output, ...override.output } as NonNullable<SupatypeProjectConfig["output"]> }
-      : {}),
-    ...(base.build !== undefined || override.build !== undefined
-      ? { build: { ...base.build, ...override.build } as NonNullable<SupatypeProjectConfig["build"]> }
-      : {}),
-    ...(base.connection !== undefined || override.connection !== undefined
-      ? { connection: override.connection ?? base.connection }
-      : {}),
-    ...(base.admin !== undefined || override.admin !== undefined
-      ? { admin: { ...base.admin, ...override.admin } as NonNullable<SupatypeProjectConfig["admin"]> }
-      : {}),
-    ...(base.environments !== undefined || override.environments !== undefined
-      ? (() => {
-          const b = base.environments
-          const o = override.environments
-          const mergedBranchDefaults =
-            b?.branchDefaults !== undefined || o?.branchDefaults !== undefined
-              ? { ...(b?.branchDefaults ?? {}), ...(o?.branchDefaults ?? {}) }
-              : undefined
-          return {
-            environments: {
-              ...b,
-              ...o,
-              ...(mergedBranchDefaults !== undefined ? { branchDefaults: mergedBranchDefaults } : {}),
-            } as NonNullable<SupatypeProjectConfig["environments"]>,
-          }
-        })()
-      : {}),
+type ConfigKey = keyof SupatypeProjectConfig
+type Section<K extends ConfigKey> = NonNullable<SupatypeProjectConfig[K]>
+type MergeFn<K extends ConfigKey> = (base: SupatypeProjectConfig[K], override: SupatypeProjectConfig[K]) => SupatypeProjectConfig[K]
+
+/** A value the local config replaces whole (a string, a choice). */
+function replace<T>(base: T, override: T): T {
+  return override ?? base
+}
+
+/** A section merged a field at a time, the local config's fields winning. */
+function shallow<T extends object>(base: T | undefined, override: T | undefined): T {
+  return { ...base, ...override } as T
+}
+
+/** A section merged a field at a time, with its `field` (itself a section) merged the same way. */
+function nested<T extends object, N extends keyof T>(field: N): (base: T | undefined, override: T | undefined) => T {
+  return (base, override) => {
+    const merged = shallow(base, override)
+    const b = base?.[field] as object | undefined
+    const o = override?.[field] as object | undefined
+    if (b === undefined && o === undefined) return merged
+    return { ...merged, [field]: { ...b, ...o } }
   }
 }
 
@@ -552,15 +483,70 @@ export function mergeProjectConfig(
 function mergeAuth(
   base: SupatypeProjectConfig["auth"],
   override: SupatypeProjectConfig["auth"],
-): Pick<SupatypeProjectConfig, "auth"> {
-  if (base === undefined && override === undefined) return {}
+): SupatypeProjectConfig["auth"] {
   const names = new Set([...Object.keys(base?.providers ?? {}), ...Object.keys(override?.providers ?? {})])
-  if (names.size === 0) return { auth: { ...base, ...override } }
+  if (names.size === 0) return { ...base, ...override }
   const providers: AuthProvidersConfig = {}
   for (const name of names as Set<keyof AuthProvidersConfig>) {
     providers[name] = { ...base?.providers?.[name], ...override?.providers?.[name] }
   }
-  return { auth: { ...base, ...override, providers } }
+  return { ...base, ...override, providers }
+}
+
+/**
+ * How each top-level key is merged. Typed over every key of the config, so a key added to
+ * `SupatypeProjectConfig` does not compile until it is given a rule here: the fixed list this
+ * replaced dropped `cache`, `api` and `publishing` from a local config without a word.
+ */
+const MERGE_RULES: { [K in ConfigKey]: MergeFn<K> } = {
+  provider: replace,
+  supatype: shallow,
+  project: shallow,
+  database: shallow,
+  server: shallow,
+  api: shallow,
+  cache: shallow,
+  app: shallow,
+  versions: shallow,
+  overrides: shallow,
+  email: nested<Section<"email">, "smtp">("smtp"),
+  auth: mergeAuth,
+  storage: shallow,
+  schema: shallow,
+  publishing: nested<Section<"publishing">, "preview">("preview"),
+  functions: shallow,
+  output: shallow,
+  build: shallow,
+  environments: nested<Section<"environments">, "branchDefaults">("branchDefaults"),
+  connection: replace,
+  admin: shallow,
+}
+
+/** One top-level key of the merged config, by its rule. */
+function mergeKey<K extends ConfigKey>(
+  key: K,
+  base: SupatypeProjectConfig,
+  override: Partial<SupatypeProjectConfig>,
+): SupatypeProjectConfig[K] {
+  const rule: MergeFn<K> = MERGE_RULES[key]
+  return rule(base[key], override[key] as SupatypeProjectConfig[K])
+}
+
+/**
+ * Merge each top-level section from `override` on top of `base`.
+ * Within each section, override values win. New optional sections in override are added, and a key
+ * with no rule (one a config sets that the type does not know) is kept, the override winning.
+ */
+export function mergeProjectConfig(
+  base: SupatypeProjectConfig,
+  override: Partial<SupatypeProjectConfig>,
+): SupatypeProjectConfig {
+  const merged: Record<string, unknown> = { ...base, ...override }
+  for (const key of Object.keys(MERGE_RULES) as ConfigKey[]) {
+    if (base[key] === undefined && override[key] === undefined) delete merged[key]
+    else merged[key] = mergeKey(key, base, override)
+  }
+  return merged as unknown as SupatypeProjectConfig
 }
 
 export function validateProjectConfig(raw: unknown, filename: string): SupatypeProjectConfig {
