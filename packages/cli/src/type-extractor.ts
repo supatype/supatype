@@ -28,6 +28,7 @@ import {
   type IdentityAst,
   type ParsedField,
 } from "./schema-ast-v2.js"
+import { jsonTypeArgText } from "./json-type-text.js"
 import { compileBounds, measureFormFor, type DeclaredBounds } from "./field-bounds.js"
 
 export type { ExtractedSchemaAstV2 as ExtractedSchemaAst, ExtractedStorageBucketAst } from "./schema-ast-v2.js"
@@ -817,6 +818,15 @@ function parseFieldType(
   const jsonIsArray = parsed.kind === "json" && jsonTypeArgIsArray(current, sourceFile)
   if (jsonIsArray) {
     parsed = { ...parsed, kernel: { ...parsed.kernel, jsonArray: true } }
+  }
+  // `JSON<T>` keeps its `T` in the generated row. Kinds that set their own shape (`Duration`,
+  // `Code`, `Currency`) are JSON too and already carry `tsType`; theirs stands.
+  const jsonType =
+    parsed.kind === "json" && parsed.kernel.tsType === undefined
+      ? jsonTypeArgText(current, resolveCtx)
+      : undefined
+  if (jsonType !== undefined) {
+    parsed = { ...parsed, kernel: { ...parsed.kernel, tsType: jsonType } }
   }
 
   if (Object.keys(flags.bounds).length > 0) {
