@@ -25,11 +25,9 @@ import { NAV_RAIL } from "../src/components/ui.js"
 
 function nav(path: string, leading?: React.ReactNode): string {
   return renderToStaticMarkup(
-    React.createElement(
-      MemoryRouter,
-      { initialEntries: [path] },
-      React.createElement(TertiaryNav, leading === undefined ? {} : { leading }),
-    ),
+    <MemoryRouter initialEntries={[path]}>
+      <TertiaryNav leading={leading} />
+    </MemoryRouter>,
   )
 }
 

@@ -110,7 +110,7 @@ describe("useOwnedObjects()", () => {
     const proxy = proxyAnswering(async () => ({ rows: [] }))
     proxy.metadata = async (_name: string, params?: Record<string, unknown>) =>
       params?.["schema"] === "public"
-        ? { rows: [{ kind: "index", parent: "posts", name: "i" }] }
+        ? { rows: [{ kind: "index", parent: "posts", name: "i" }], rowCount: 1 }
         : new Promise((resolve) => {
             release = resolve as typeof release
           })

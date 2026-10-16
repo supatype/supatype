@@ -10,6 +10,7 @@ import {
   normaliseFieldAccess,
   normaliseTableAccess,
   type StudioFieldAccess,
+  type TableAccessMap,
 } from "../src/hooks/useStudioFieldAccess.js"
 import { applyFieldAccess } from "../src/lib/field-access-layout.js"
 import type { FieldConfig } from "../src/config.js"
@@ -154,7 +155,7 @@ describe("write and create predicates", () => {
 })
 
 describe("isOperationOffered", () => {
-  const tables = { posts: { read: "allow", create: "deny", update: "row", delete: "deny" } }
+  const tables: TableAccessMap = { posts: { read: "allow", create: "deny", update: "row", delete: "deny" } }
   const resolved = access({}, { tables })
 
   it("withdraws a control the caller certainly cannot use", () => {
@@ -179,7 +180,7 @@ describe("isOperationOffered", () => {
 })
 
 describe("per-record checks", () => {
-  const tables = { posts: { delete: "row", update: "deny", create: "allow" } }
+  const tables: TableAccessMap = { posts: { delete: "row", update: "deny", create: "allow" } }
 
   // Asked only where the answer genuinely varies. Requesting the affordance column on a table the
   // engine does not manage would fail the whole query, not just this check.

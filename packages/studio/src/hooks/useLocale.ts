@@ -5,7 +5,7 @@ import type { AdminConfig } from "../config.js"
 
 const LOCALE_PARAM = "locale"
 
-interface LocaleState {
+export interface LocaleState {
   currentLocale: string
   setLocale: (locale: string) => void
   locales: Array<{ code: string; label: string }>
