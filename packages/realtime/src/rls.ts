@@ -406,8 +406,8 @@ export class RlsFilter {
       : new Map<string, Map<string, boolean | null>>()
 
     const masked = {
-      new: maskRecordWithReport(change.newRecord, columns, verdicts.get("new") ?? new Map()),
-      old: maskRecordWithReport(change.oldRecord, columns, verdicts.get("old") ?? new Map()),
+      new: maskRecordWithReport(change.newRecord, columns, verdicts.get("new") ?? new Map<string, boolean | null>()),
+      old: maskRecordWithReport(change.oldRecord, columns, verdicts.get("old") ?? new Map<string, boolean | null>()),
     }
     return {
       send: { ...change, newRecord: masked.new.record, oldRecord: masked.old.record },

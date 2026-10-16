@@ -9,7 +9,7 @@ import type { HasMany, HasOne, Model, ManyToMany, RelatedTo, UUID } from "../src
  * `RelatedTo`, or a `RelatedTo` both ways, failed with `TS2589: Type instantiation is excessively
  * deep and possibly infinite`. A one-to-one relation was therefore inexpressible.
  *
- * Nothing at runtime can catch that, which is why this file is typechecked (`tsconfig.test.json`)
+ * Nothing at runtime can catch that, which is why this file is typechecked (`tests/tsconfig.json`)
  * rather than only executed: a regression is a compile error here, not a failing assertion.
  */
 

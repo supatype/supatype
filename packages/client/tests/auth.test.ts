@@ -470,7 +470,8 @@ describe("AuthClient custom storage", () => {
     expect(storage.setItem).toHaveBeenCalled()
     const [key, value] = storage.setItem.mock.calls[0] as [string, string]
     expect(key).toBe("supatype.auth.session")
-    expect(JSON.parse(value).accessToken).toBe("access-token-123")
+    const stored: unknown = JSON.parse(value)
+    expect(stored).toHaveProperty("accessToken", "access-token-123")
   })
 
   it("survives corrupt async storage without throwing", async () => {

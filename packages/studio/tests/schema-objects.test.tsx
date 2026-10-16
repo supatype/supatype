@@ -60,7 +60,7 @@ function render(props: Partial<React.ComponentProps<typeof SchemaObjectsView>>):
 
 describe("before any push has recorded anything", () => {
   it("says so, and says what to do about it", () => {
-    const html = render({ result: { objects: [], total: 0, kinds: [] } })
+    const html = render({ result: { objects: [], page: 1, total: 0, kinds: [] } })
     expect(html).toContain("No schema objects recorded yet")
     expect(html).toContain("supatype push")
   })

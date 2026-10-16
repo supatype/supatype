@@ -50,3 +50,14 @@ declare namespace Deno {
     handler: (req: Request) => Response | Promise<Response>,
   ): void
 }
+
+/**
+ * The slice of Node's async_hooks the functions router uses. Deno provides the module at runtime;
+ * a functions tsconfig loads no Node types, so without it the import resolves to nothing.
+ */
+declare module "node:async_hooks" {
+  export class AsyncLocalStorage<T> {
+    getStore(): T | undefined
+    run<R>(store: T, callback: () => R): R
+  }
+}

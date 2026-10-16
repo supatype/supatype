@@ -10,10 +10,14 @@
     "selfhost:status": "supatype self-host compose status",
     "selfhost:logs": "supatype self-host compose logs",
     "push": "supatype push --yes",
-    "studio": "echo Studio: http://localhost:3002 and http://localhost:18473/studio/"
+    "studio": "echo Studio: http://localhost:3002 and http://localhost:18473/studio/",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@supatype/cli": "workspace:*",
     "@supatype/types": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5"
   }
 }

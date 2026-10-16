@@ -55,7 +55,7 @@ function body(locales: Record<string, LocaleState>, scheduled?: Record<string, s
     <AdminClientContext.Provider value={client}>
       <LocaleContext.Provider value={locale}>
         <PublishBarBody
-          record={{ modelTable: "posts", recordId: "r1", previewUrl: "https://example.com/p/x" }}
+          record={{ modelName: "post", modelTable: "posts", recordId: "r1", previewUrl: "https://example.com/p/x" }}
           view={{
             locales: Object.keys(locales),
             wholeRecord: false,

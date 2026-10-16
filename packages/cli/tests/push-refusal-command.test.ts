@@ -1,5 +1,6 @@
 import { Command } from "commander"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type { TargetCall } from "./support/engine-mocks.js"
 
 /**
  * C08: the diff `push` reads first showed no drift, a policy was hand-edited while the person
@@ -7,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
  * error and exited 1 without the question it asks when the diff shows the same drift.
  */
 
-const targetSchemaPush = vi.hoisted(() => vi.fn())
+const targetSchemaPush = vi.hoisted(() => vi.fn<TargetCall<{ overwriteDrift?: boolean }>>())
 const askMock = vi.hoisted(() => vi.fn(async () => true))
 const interactive = vi.hoisted(() => ({ value: true }))
 

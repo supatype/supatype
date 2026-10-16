@@ -3,15 +3,16 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Command } from "commander"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type { AdoptCallOptions, TargetCall } from "./support/engine-mocks.js"
 
 /**
  * `supatype adopt --key column:t.c` through the command, with the engine mocked: the column is
  * adopted, and then declared in the schema (asked first in a terminal, without asking under --yes).
  */
-const targetSchemaAdopt = vi.hoisted(() => vi.fn())
+const targetSchemaAdopt = vi.hoisted(() => vi.fn<TargetCall<AdoptCallOptions>>())
 const targetSchemaIntrospect = vi.hoisted(() => vi.fn())
 const regenerateTypes = vi.hoisted(() => vi.fn(async () => ["Types written"]))
-const confirmMock = vi.hoisted(() => vi.fn())
+const confirmMock = vi.hoisted(() => vi.fn<(prompt: { message: string }) => Promise<unknown>>())
 const schemaPath = vi.hoisted(() => ({ value: "" }))
 
 vi.mock("../src/config.js", () => ({ loadConfig: () => ({ project: { name: "app" } }), loadSchemaAst: () => ({}) }))
@@ -54,7 +55,7 @@ beforeEach(() => {
   schemaPath.value = join(dir, "index.ts")
   writeFileSync(schemaPath.value, SCHEMA)
   targetSchemaAdopt.mockReset()
-  targetSchemaAdopt.mockImplementation(async (_t, _a, opts: { yes: boolean }) =>
+  targetSchemaAdopt.mockImplementation(async (_t, _a, opts) =>
     opts.yes ? { status: "adopted", adopt: [COLUMN] } : { status: "preview", adopt: [] },
   )
   targetSchemaIntrospect.mockReset()
@@ -97,7 +98,7 @@ describe("supatype adopt column:<table>.<name>", () => {
       `column widget.colour: record as managed by Supatype, and add \`colour: Optional<string>\` to ${schemaPath.value} (Widget)`,
     )
     expect(output().indexOf("Adopt will:")).toBeLessThan(output().indexOf("column widget.colour: record"))
-    expect(confirmMock.mock.calls[0]?.[0]).toMatchObject({ message: expect.stringContaining("Go ahead?") })
+    expect(confirmMock.mock.calls[0]?.[0].message).toContain("Go ahead?")
     // Once for the adopt, once for the edit.
     expect(confirmMock).toHaveBeenCalledTimes(2)
     expect(readFileSync(schemaPath.value, "utf8")).toContain("colour: Optional<string>")

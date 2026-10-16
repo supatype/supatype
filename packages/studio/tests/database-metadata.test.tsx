@@ -28,13 +28,21 @@ const CLIENT = { url: PROXY, auth: { currentAccessToken: "token" } } as unknown 
 
 let root: Root | null = null
 let container: HTMLElement
-let calls: Array<{ url: string; body: { name?: string; params?: Record<string, unknown> } }> = []
+type MetadataBody = { name?: string; params?: Record<string, unknown> }
+let calls: Array<{ url: string; body: MetadataBody }> = []
+
+/** The request's JSON body, checked to be an object before it is read as one. */
+function bodyOf(init?: RequestInit): MetadataBody {
+  const parsed: unknown = init?.body ? JSON.parse(String(init.body)) : {}
+  return typeof parsed === "object" && parsed !== null ? (parsed as MetadataBody) : {}
+}
 
 function stubFetch(): void {
   calls = []
   vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
-    calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : {} })
-    const name = init?.body ? (JSON.parse(String(init.body)) as { name?: string }).name : undefined
+    const body = bodyOf(init)
+    calls.push({ url, body })
+    const name = body.name
     const rows = name === "schemas" ? [{ schema_name: "public" }] : []
     return Response.json({ rows, rowCount: rows.length })
   })

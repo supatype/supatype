@@ -185,8 +185,10 @@ async function loadHandlers(routes: DiscoveredRoute[]): Promise<Record<string, H
       })
       continue
     }
-    const mod = await import(entrypointImportUrl(route.entrypoint))
-    const handler = mod.default ?? mod.handler
+    // A module loaded by URL is typed `any`; read its exports as unknown until checked.
+    const mod: unknown = await import(entrypointImportUrl(route.entrypoint))
+    const exported = typeof mod === "object" && mod !== null ? (mod as Record<string, unknown>) : {}
+    const handler = exported["default"] ?? exported["handler"]
     if (typeof handler !== "function") {
       throw new Error(`Function "${route.name}" has no default export handler`)
     }

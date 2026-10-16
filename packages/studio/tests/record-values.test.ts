@@ -27,11 +27,11 @@ const model = (fields: FieldConfig[]): ModelConfig =>
     listColumns: [],
     searchFields: [],
     publishable: false,
-    versioning: false,
+    versions: null,
     softDelete: false,
     timestamps: false,
     hasHooks: false,
-  }) as ModelConfig
+  })
 
 describe("serializeRecordForApi: blank normalisation", () => {
   it("sends a blank text field as null, not an empty string", () => {

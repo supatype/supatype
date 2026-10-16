@@ -1,5 +1,6 @@
 import { Command } from "commander"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type { AdoptCallOptions, TargetCall } from "./support/engine-mocks.js"
 
 /**
  * DR2: since the engine treats a table's grants and policies as objects of their own (ENG-DRIFT),
@@ -8,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
  * table's access objects with it, as one group, and says what is left when they are not taken.
  */
 
-const targetSchemaAdopt = vi.hoisted(() => vi.fn())
+const targetSchemaAdopt = vi.hoisted(() => vi.fn<TargetCall<AdoptCallOptions>>())
 const confirmMock = vi.hoisted(() => vi.fn())
 
 vi.mock("../src/config.js", () => ({ loadConfig: () => ({ project: { name: "app" } }), loadSchemaAst: () => ({}) }))
@@ -62,7 +63,7 @@ async function adopt(...args: string[]): Promise<void> {
 
 beforeEach(() => {
   targetSchemaAdopt.mockReset()
-  targetSchemaAdopt.mockImplementation(async (_t, _a, opts: { yes: boolean; keys?: string[] }) =>
+  targetSchemaAdopt.mockImplementation(async (_t, _a, opts) =>
     opts.yes ? { status: "adopted", adopt: PREVIEW.adopt.filter((i) => opts.keys?.includes(`${i.kind}:${i.kind === "table" ? i.name : `${i.table}.${i.name}`}`)) } : PREVIEW,
   )
   confirmMock.mockReset()

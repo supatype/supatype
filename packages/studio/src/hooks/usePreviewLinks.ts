@@ -3,6 +3,7 @@ import { membershipBase } from "../lib/membership-url.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { studioGatewayHeaders } from "../lib/studio-gateway-headers.js"
 import { useAdminClient } from "./useAdminClient.js"
+import { readJsonObject } from "../lib/json.js"
 
 /** What one link covers. */
 export type PreviewScope = "record" | "project"
@@ -80,7 +81,7 @@ export function usePreviewLinks(): UsePreviewLinksReturn {
         },
         ...(init.body !== undefined && { body: JSON.stringify(init.body) }),
       })
-      const json = (await res.json().catch(() => ({}))) as Record<string, unknown>
+      const json = await readJsonObject(res)
       if (!res.ok) {
         throw new Error(
           (json["message"] as string | undefined) ??

@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { RealtimeServer } from "../src/server.js"
+import { nextText } from "./fixtures/stream.js"
 import {
   connect,
   freePort,
@@ -87,9 +88,9 @@ describe("POST /admin/v1/broadcast", () => {
     let raw = ""
     const seen = (async () => {
       while (!raw.includes("event: broadcast\n")) {
-        const { value, done } = await reader.read()
-        if (done) break
-        raw += decoder.decode(value, { stream: true })
+        const text = await nextText(reader, decoder)
+        if (text === null) break
+        raw += text
       }
     })()
     try {

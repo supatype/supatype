@@ -59,7 +59,7 @@ export default async function handler(req: Request, ctx: FunctionContext): Promi
     body: JSON.stringify({ body: text }),
   })
 
-  const payload = await res.json().catch(() => null)
+  const payload: unknown = await res.json().catch(() => null)
   if (!res.ok) {
     return json(
       {
@@ -76,6 +76,6 @@ export default async function handler(req: Request, ctx: FunctionContext): Promi
     ok: true,
     function: "write-note",
     baseUrl,
-    note: Array.isArray(payload) ? payload[0] ?? null : payload,
+    note: Array.isArray(payload) ? (payload as unknown[])[0] ?? null : payload,
   })
 }

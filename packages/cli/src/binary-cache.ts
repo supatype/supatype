@@ -747,8 +747,11 @@ async function streamToFileWithProgress(url: string, destPath: string): Promise<
 
   try {
     while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
+      // Node types a fetch body's chunks as `any`; a byte stream yields `Uint8Array`, so check it.
+      const chunk: { done: boolean; value?: unknown } = await reader.read()
+      if (chunk.done) break
+      const value = chunk.value
+      if (!(value instanceof Uint8Array)) throw new Error(`Download of ${url} yielded a chunk that is not bytes`)
 
       await new Promise<void>((res, rej) => {
         file.write(value, (err) => (err ? rej(err) : res()))

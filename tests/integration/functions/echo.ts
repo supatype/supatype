@@ -1,5 +1,5 @@
 export default async function echo(req: Request): Promise<Response> {
-  const body = await req.json().catch(() => null)
+  const body: unknown = await req.json().catch(() => null)
 
   return new Response(
     JSON.stringify({

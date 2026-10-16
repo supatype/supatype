@@ -20,6 +20,10 @@
   },
   "include": [
     "src",
+    "schema",
+    "tests",
+    "seed.ts",
+    "supatype.config.ts",
     "vite.config.ts",
     "supatype/generated"
   ]

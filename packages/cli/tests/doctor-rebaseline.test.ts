@@ -1,7 +1,8 @@
 import { Command } from "commander"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type { TargetCall } from "./support/engine-mocks.js"
 
-const targetSchemaDoctor = vi.hoisted(() => vi.fn())
+const targetSchemaDoctor = vi.hoisted(() => vi.fn<TargetCall<{ rebaseline?: boolean; acceptAccessDrift?: boolean }>>())
 const requireEngine = vi.hoisted(() => vi.fn(async (_target: unknown, _needs: Array<{ feature: string; flag: string }>) => undefined))
 /** Every feature the target was asked for. */
 const asked = (): string[] => requireEngine.mock.calls.flatMap((call) => call[1].map((need) => need.feature))

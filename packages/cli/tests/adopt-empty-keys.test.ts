@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
  * "adopt every conflict", so an empty key list goes to it as `--adopt-none` (see
  * `endpointToArgs`): one call, with no second preview first.
  */
-const engineRequest = vi.hoisted(() => vi.fn())
+const engineRequest = vi.hoisted(() => vi.fn<(endpoint: string, body: { keys?: unknown }) => Promise<unknown>>())
 vi.mock("../src/engine-client.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/engine-client.js")>()),
   ensureEngine: vi.fn(async () => undefined),

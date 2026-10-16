@@ -1,7 +1,7 @@
 /**
  * Type inference tests: verify that TypeScript generics produce the correct
  * types throughout the client API.  These assertions are checked at compile
- * time by `tsc -p tsconfig.test.json`. They are NOT checked by `vitest run`: `expectTypeOf` is a
+ * time by `tsc -p tests/tsconfig.json`. They are NOT checked by `vitest run`: `expectTypeOf` is a
  * no-op at runtime, so a false assertion here passes the test suite and is caught only by the
  * typecheck. This file previously claimed both and was covered by neither.
  */
