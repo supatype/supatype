@@ -179,7 +179,7 @@ describe("Task 91: SDK rate limit integration", () => {
 
     const res = await promise
     expect(res.ok).toBe(true)
-    const data = await res.json()
+    const data: unknown = await res.json()
     expect(data).toEqual(expectedData)
   })
 })
