@@ -1,4 +1,5 @@
 import React, { useState } from "react"
+import type { AuthFormClassNames } from "@supatype/react-auth"
 
 /**
  * The example's own primitives.
@@ -94,7 +95,7 @@ export function PageHeader({
  *
  * The explanation used to sit in the app's chrome as `Proves: useQuery, relations, ordering`,
  * directly under the navigation, which made a conference app read as a test harness. It is still
- * worth having — reading the example is the point — so it stays, one click away, where it does not
+ * worth having, since reading the example is the point, so it stays one click away, where it does not
  * dress the product up as a fixture.
  */
 export function ProvesNote({ children }: { children: React.ReactNode }): React.ReactElement {
@@ -237,6 +238,28 @@ export function Input({
   className?: string
 } & Omit<React.InputHTMLAttributes<HTMLInputElement>, "className">): React.ReactElement {
   return <input className={cx("ks-input", invalid && "ks-input--invalid", className)} {...rest} />
+}
+
+/* ── Auth forms ────────────────────────────────────────────────────────────── */
+
+/**
+ * The classes `@supatype/react-auth` puts on its forms, so they render as this app's own fields.
+ *
+ * The package ships no stylesheet. Rendered without these, its labels, inputs and button fall back
+ * to browser defaults inside an otherwise styled card, which is how the sign-in screen used to look.
+ * Spread onto `LoginForm` or `SignUpForm`: `<LoginForm {...authForm} />`.
+ */
+export const authForm: { className: string; classNames: AuthFormClassNames } = {
+  className: "ks-form",
+  classNames: {
+    title: "ks-form__title",
+    error: "ks-note ks-note--error",
+    field: "ks-field",
+    label: "ks-field__label",
+    input: "ks-input",
+    submit: "ks-btn ks-btn--primary",
+    message: "ks-note ks-note--info",
+  },
 }
 
 /* ── Avatar ────────────────────────────────────────────────────────────────── */

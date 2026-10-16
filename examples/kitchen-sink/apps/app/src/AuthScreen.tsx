@@ -1,6 +1,6 @@
 import React, { useState } from "react"
 import { LoginForm, OAuthButton, SignUpForm } from "@supatype/react-auth"
-import { Button, Card, Note, Stack } from "./components/ui.js"
+import { authForm, Button, Card, Note, Stack } from "./components/ui.js"
 
 /**
  * Auth, using the prebuilt forms rather than a hand-rolled pair.
@@ -26,7 +26,7 @@ export function AuthScreen(): React.ReactElement {
 
           <Card>
             <Stack gap={14}>
-              {mode === "signUp" ? <SignUpForm /> : <LoginForm />}
+              {mode === "signUp" ? <SignUpForm {...authForm} /> : <LoginForm {...authForm} />}
 
               <div className="ks-faint ks-small" style={{ textAlign: "center" }}>or</div>
 

@@ -1,6 +1,7 @@
 import React, { useState, type FormEvent } from "react"
 import type { Session, SupatypeError } from "@supatype/client"
 import { useAuth } from "@supatype/react"
+import { errorProps, type AuthFormClassNames } from "./classNames.js"
 
 export interface SignUpFormLabels {
   title?: string | undefined
@@ -19,6 +20,8 @@ export interface SignUpFormProps {
   className?: string | undefined
   /** Override display labels. */
   labels?: SignUpFormLabels | undefined
+  /** Class names for the elements inside the form, so an app can style them with its own classes. */
+  classNames?: AuthFormClassNames | undefined
   /**
    * Additional metadata stored on the user's `user_metadata`.
    * Merge with any custom fields collected in the form.
@@ -48,7 +51,7 @@ const DEFAULT_LABELS: Required<SignUpFormLabels> = {
  * />
  * ```
  */
-export function SignUpForm({ onSuccess, onError, className, labels, metadata }: SignUpFormProps): React.ReactElement {
+export function SignUpForm({ onSuccess, onError, className, classNames, labels, metadata }: SignUpFormProps): React.ReactElement {
   const { signUp } = useAuth()
   const l = { ...DEFAULT_LABELS, ...labels }
 
@@ -85,7 +88,7 @@ export function SignUpForm({ onSuccess, onError, className, labels, metadata }: 
 
   if (confirmed) {
     return (
-      <p role="status" aria-live="polite">
+      <p role="status" aria-live="polite" className={classNames?.message}>
         {l.successMessage}
       </p>
     )
@@ -93,17 +96,18 @@ export function SignUpForm({ onSuccess, onError, className, labels, metadata }: 
 
   return (
     <form onSubmit={(e) => { void handleSubmit(e) }} className={className} noValidate>
-      <h2>{l.title}</h2>
+      <h2 className={classNames?.title}>{l.title}</h2>
 
       {errorMessage !== null && (
-        <p role="alert" aria-live="polite" style={{ color: "red" }}>
+        <p role="alert" aria-live="polite" {...errorProps(classNames)}>
           {errorMessage}
         </p>
       )}
 
-      <div>
-        <label htmlFor="st-signup-email">{l.email}</label>
+      <div className={classNames?.field}>
+        <label className={classNames?.label} htmlFor="st-signup-email">{l.email}</label>
         <input
+          className={classNames?.input}
           id="st-signup-email"
           type="email"
           autoComplete="email"
@@ -114,9 +118,10 @@ export function SignUpForm({ onSuccess, onError, className, labels, metadata }: 
         />
       </div>
 
-      <div>
-        <label htmlFor="st-signup-password">{l.password}</label>
+      <div className={classNames?.field}>
+        <label className={classNames?.label} htmlFor="st-signup-password">{l.password}</label>
         <input
+          className={classNames?.input}
           id="st-signup-password"
           type="password"
           autoComplete="new-password"
@@ -128,7 +133,7 @@ export function SignUpForm({ onSuccess, onError, className, labels, metadata }: 
         />
       </div>
 
-      <button type="submit" disabled={loading}>
+      <button type="submit" className={classNames?.submit} disabled={loading}>
         {loading ? "Creating account…" : l.submit}
       </button>
     </form>
