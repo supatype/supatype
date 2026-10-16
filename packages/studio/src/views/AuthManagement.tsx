@@ -402,7 +402,7 @@ function InviteUserForm({
   onInvite,
   onCancel,
 }: {
-  onInvite: (email: string, role: string) => void
+  onInvite: (email: string) => void
   onCancel: () => void
 }): React.ReactElement {
   const [email, setEmail] = useState("")
@@ -422,7 +422,7 @@ function InviteUserForm({
           <label className="block text-[0.8rem] text-muted-foreground mb-1">Role</label>
           <Input value={role} disabled />
         </div>
-        <Button variant="primary" onClick={() => { if (email.trim()) onInvite(email.trim(), role) }}>
+        <Button variant="primary" onClick={() => { if (email.trim()) onInvite(email.trim()) }}>
           Send Invite
         </Button>
         <Button onClick={onCancel}>Cancel</Button>
@@ -525,8 +525,9 @@ export function AuthManagement(): React.ReactElement {
     autoConfirmDefault: authSettings?.mailer_autoconfirm ?? null,
   }
 
-  const authAdminFetch = useCallback(async (path: string, options?: RequestInit) => {
-    const res = await fetch(`${client.url}/auth/v1/admin${path}`, {
+  /** One call to the auth server through Studio's proxy, which adds the service role key. */
+  const authFetch = useCallback(async (path: string, options?: RequestInit): Promise<unknown> => {
+    const res = await fetch(`${client.url}/auth/v1${path}`, {
       ...options,
       headers: {
         "Content-Type": "application/json",
@@ -535,15 +536,19 @@ export function AuthManagement(): React.ReactElement {
       },
       credentials: "include",
     })
-    const json = await res.json()
+    const json = (await res.json()) as { msg?: string; message?: string }
     if (!res.ok) throw new Error(json.msg ?? json.message ?? "Auth API error")
     return json
   }, [client])
+  const authAdminFetch = useCallback(
+    (path: string, options?: RequestInit) => authFetch(`/admin${path}`, options),
+    [authFetch],
+  )
 
   const { data: usersData, loading, error, refetch } = useApiQuery(
     async () => {
-      const json = await authAdminFetch("/users?page=1&per_page=50")
-      return (json.users as AuthUserResponse[]).map(mapAuthUser)
+      const json = (await authAdminFetch("/users?page=1&per_page=50")) as { users: AuthUserResponse[] }
+      return json.users.map(mapAuthUser)
     },
     [authAdminFetch],
   )
@@ -552,8 +557,8 @@ export function AuthManagement(): React.ReactElement {
   // route, which is for different roles and cannot touch the tables the auth service owns.
   const { data: sessionsData, refetch: refetchSessions } = useApiQuery(
     async () => {
-      const json = await authAdminFetch("/sessions")
-      return (json.sessions as AuthSessionResponse[]).map(mapAuthSession)
+      const json = (await authAdminFetch("/sessions")) as { sessions: AuthSessionResponse[] }
+      return json.sessions.map(mapAuthSession)
     },
     [authAdminFetch],
   )
@@ -599,7 +604,7 @@ export function AuthManagement(): React.ReactElement {
     }
     if (loading) return
     void authAdminFetch(`/users/${encodeURIComponent(userIdParam)}`)
-      .then((raw) => setSelectedUser(mapAuthUser(raw)))
+      .then((raw) => setSelectedUser(mapAuthUser(raw as AuthUserResponse)))
       .catch(() => {
         setSearchParams({}, { replace: true })
       })
@@ -688,14 +693,19 @@ export function AuthManagement(): React.ReactElement {
     setSelectedUser(null)
   }, [editingUser, authAdminFetch, refetch])
 
-  const handleInviteUser = useCallback(async (email: string, role: string) => {
-    await authAdminFetch("/users", {
+  // The invite endpoint, not admin user creation: only it mails the invitation link, and the user
+  // it creates gets the server's default role, which is what the form shows. Sent without a
+  // Referer: the server takes one as the link's redirect, which landed the invitee on this Studio
+  // page. Without it the link goes to the project's site URL, the app.
+  const handleInviteUser = useCallback(async (email: string) => {
+    await authFetch("/invite", {
       method: "POST",
-      body: JSON.stringify({ email, role }),
+      body: JSON.stringify({ email }),
+      referrerPolicy: "no-referrer",
     })
     refetch()
     setShowInviteForm(false)
-  }, [authAdminFetch, refetch])
+  }, [authFetch, refetch])
 
   const handleRevokeSession = useCallback(async (sessionId: string) => {
     await authAdminFetch(`/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" })
@@ -912,7 +922,7 @@ export function AuthManagement(): React.ReactElement {
         )}
         {showInviteForm && (
           <InviteUserForm
-            onInvite={(email, role) => runAction(() => handleInviteUser(email, role))}
+            onInvite={(email) => runAction(() => handleInviteUser(email))}
             onCancel={() => setShowInviteForm(false)}
           />
         )}

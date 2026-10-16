@@ -237,6 +237,26 @@ test.describe("Studio views", () => {
     expect(failures, "requests that failed creating a confirmed user").toEqual([])
   })
 
+  // Invite User used to create the user through the admin users API, which mails nothing, so the
+  // invited person could never sign in. Only the invite endpoint sends the invitation link.
+  test("auth: Invite User goes through the invite endpoint and lists the invited user as Pending", async ({ page }) => {
+    const failures = watchFailures(page)
+    const email = newUserEmail("invited")
+    await page.goto("/studio/authentication/users", { waitUntil: "networkidle" })
+    await page.getByRole("button", { name: "Invite User" }).click()
+
+    const panel = page.getByRole("dialog")
+    await panel.locator("input").first().fill(email)
+    const invited = page.waitForResponse(
+      (r) => r.request().method() === "POST" && new URL(r.url()).pathname.endsWith("/auth/v1/invite"),
+    )
+    await panel.getByRole("button", { name: "Send Invite", exact: true }).click()
+    expect((await invited).status(), "POST /auth/v1/invite").toBeLessThan(300)
+    await expect(page.locator("tbody tr", { hasText: email })).toContainText("Pending")
+
+    expect(failures, "requests that failed inviting a user").toEqual([])
+  })
+
   test("auth: providers lists each one with its enabled state", async ({ page }) => {
     const failures = watchFailures(page)
     await page.goto("/studio/authentication/providers", { waitUntil: "networkidle" })
