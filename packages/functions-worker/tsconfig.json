@@ -6,6 +6,7 @@
     "moduleResolution": "bundler",
     "strict": true,
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "skipLibCheck": true
   },
   "include": ["main.ts", "deno.d.ts"]
