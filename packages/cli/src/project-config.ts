@@ -5,6 +5,7 @@ import { readComposeEnvInt } from "./env-file.js"
 import { DEV_DB_PORT_ENV } from "./db-port.js"
 import type { ComponentVersions } from "./components.js"
 import { validateAuthProviders, type AuthProvidersConfig } from "./auth-providers.js"
+import { validateAuthEmail } from "./mailer-autoconfirm.js"
 import { STUDIO_ROLES, type StudioRole } from "./studio-roles.js"
 
 // ---------------------------------------------------------------------------
@@ -261,8 +262,18 @@ export interface SupatypeProjectConfig {
      */
     send_email_hook_secrets?: string
   }
-  /** The auth server's sign-in options beyond email. */
+  /** The auth server's sign-in options. Email delivery itself is `email` above. */
   auth?: {
+    email?: {
+      /**
+       * Make a new email sign-up confirm the address before it can sign in, as Supabase's
+       * `[auth.email] enable_confirmations`. Off when unset: a dev stack auto-confirms.
+       *
+       * Rendered as `SUPATYPE_MAILER_AUTOCONFIRM` for `dev`, native `dev` and the self-host compose
+       * file. A `SUPATYPE_MAILER_AUTOCONFIRM` you write into `.env` yourself wins over this.
+       */
+      enableConfirmations?: boolean
+    }
     /**
      * OAuth providers, keyed by the name `signInWithOAuth({ provider })` takes:
      *
@@ -573,6 +584,7 @@ export function validateProjectConfig(raw: unknown, filename: string): SupatypeP
   validateCache(cfg, filename)
   validateSchemaNames(cfg, filename)
   validateAuthProviders(cfg, filename)
+  validateAuthEmail(cfg, filename)
   validateCorsOrigins(cfg, filename)
 
   return raw as SupatypeProjectConfig

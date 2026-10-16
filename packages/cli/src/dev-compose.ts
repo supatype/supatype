@@ -121,6 +121,7 @@ import {
 import { spawnComposeEngine } from "./compose-engine-run.js"
 import { waitForRestReady } from "./rest-ready.js"
 import { claimDevRenderMode, composeRenderMode, composeRenderOptions, type ComposeRenderMode } from "./compose-render-mode.js"
+import { devMailerAutoconfirmUpdate, MAILER_AUTOCONFIRM_ENV } from "./mailer-autoconfirm.js"
 
 /** Sync optional Docker image pins from config into `.env` (no JWT rotation). */
 export function syncComposeImagePins(cwd: string, config: SupatypeProjectConfig): void {
@@ -359,7 +360,8 @@ export function upsertDevComposeEnv(
     SUPATYPE_KONG_PORT: String(kongPort),
     API_EXTERNAL_URL: apiUrl,
     SITE_URL: apiUrl,
-    SUPATYPE_MAILER_AUTOCONFIRM: "true",
+    // From auth.email.enableConfirmations, unless the developer set their own in .env.
+    ...devMailerAutoconfirmUpdate(cwd, config),
     ...composeMailerEnv(config),
     ...imagePins,
   }
@@ -395,7 +397,7 @@ export function upsertDevComposeEnv(
   const retiredKeys = ["GOTRUE_MAILER_AUTOCONFIRM"]
   upsertEnvFile(cwd, updates, {
     removeManaged: removeImageKeys,
-    managed: managedImageKeys,
+    managed: [...managedImageKeys, MAILER_AUTOCONFIRM_ENV],
     // A local image left in `.env` after the project stopped asking for one would keep pointing
     // compose at a stale build, and it carries no marker for `removeManaged` to act on.
     remove: [

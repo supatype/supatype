@@ -213,6 +213,15 @@ export default defineConfig({
 
 ## Email confirmation in dev
 
+`auth.email.enableConfirmations: true` in `supatype.config.ts` makes a new email sign-up confirm
+its address before it can sign in. Before, `supatype dev` wrote `SUPATYPE_MAILER_AUTOCONFIRM=true`
+into `.env` on every start, so a dev stack could not send a confirmation email at all.
+
+- **Nothing changes unless you set it.** Unset, dev still auto-confirms and the self-host compose
+  file still falls back to `true`.
+- **`.env` now marks the value** with `# supatype:managed` when `supatype dev` writes it. The `true`
+  earlier CLIs left there unmarked is treated as theirs and replaced; any other value you wrote
+  yourself is kept and wins over the config.
 - **The client no longer signs in a sign-up that is waiting for confirmation.** `signUp` returns
   `{ user, session: null }` and stores nothing, as supabase-js does. It used to store an empty
   session (`accessToken: ""`, user id `""`) that looked signed in and survived a reload. The Vue,

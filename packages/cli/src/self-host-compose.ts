@@ -31,6 +31,7 @@ import { fieldMaskingTierFromProject, type FieldMaskingTier } from "./field-mask
 import { readRecordedTier } from "./recorded-field-masking-tier.js"
 import { projectHasVersionedModels } from "./model-versioning.js"
 import { POSTGREST_IMAGE } from "./postgrest-release.js"
+import { configMailerAutoconfirm } from "./mailer-autoconfirm.js"
 
 /**
  * The control plane secret as the server and the control plane receive it, and nobody else.
@@ -998,7 +999,8 @@ ${appEnv}
       SUPATYPE_JWT_AUD: authenticated
       SUPATYPE_JWT_DEFAULT_GROUP_NAME: authenticated
       SUPATYPE_JWT_ADMIN_ROLES: service_role,supatype_admin
-      SUPATYPE_MAILER_AUTOCONFIRM: \${SUPATYPE_MAILER_AUTOCONFIRM:-true}
+      # auth.email.enableConfirmations decides the fallback; a value in .env wins.
+      SUPATYPE_MAILER_AUTOCONFIRM: \${SUPATYPE_MAILER_AUTOCONFIRM:-${configMailerAutoconfirm(config)}}
       # Emailed links are SUPATYPE_API_EXTERNAL_URL plus these paths. The external URL is the
       # gateway's root, where / belongs to the app, so the server's default of /verify sent every
       # confirmation, magic-link and recovery link to a 404. The auth routes are under /auth/v1/.
