@@ -57,6 +57,7 @@ export type MetadataName =
   | "migrations"
   | "migrations_legacy"
   | "migration_sql"
+  | "schema_push_status"
   | "seeds"
   | "database_settings"
 
