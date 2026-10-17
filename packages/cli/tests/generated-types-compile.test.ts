@@ -27,7 +27,7 @@ const PACKAGES = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 
 const SCHEMA = `
 import type {
-  HasMany, JSON, Localized, ManyToMany, Model, Optional, RelatedTo, Timestamp, UUID,
+  Block, Blocks, HasMany, JSON, Localized, ManyToMany, Model, Optional, RelatedTo, Timestamp, UUID,
 } from "@supatype/types"
 
 export type Feature = { title: string; description: string; icon: string }
@@ -55,6 +55,8 @@ export type Post = Model<{
   title: Localized<string>
   features: Optional<Localized<JSON<Feature[]>>>
   settings: JSON<Settings>
+  shape: Optional<JSON<{ a: number; inner: { b: string } }>>
+  links: Optional<Blocks<Block<"link", { label: string; href: string }>>>
   untyped: Optional<JSON>
   author: RelatedTo<Author, { required: true }>
   tags: ManyToMany<Tag, { through: "post_tags" }>
@@ -124,6 +126,23 @@ describe("the generated augmentation, as TypeScript reads it", () => {
         type Settings = { theme: "light" | "dark"; flags?: string[]; limits: { [key: string]: number } | null }
         assert<Equal<TableRow<"posts">["features"], { [locale: string]: Feature[] } | null>>()
         assert<Equal<TableRow<"posts">["settings"], Settings>>()
+      `),
+    ).toEqual([])
+  })
+
+  it("makes an optional JSON<T> with an object shape nullable, as its column is", () => {
+    expect(
+      compile(dir, `
+        assert<Equal<TableRow<"posts">["shape"], { a: number; inner: { b: string } } | null>>()
+      `),
+    ).toEqual([])
+  })
+
+  it("types a Blocks column as the { type, data } entries Studio stores", () => {
+    expect(
+      compile(dir, `
+        type Link = { type: "link"; data: { label: string; href: string } }
+        assert<Equal<TableRow<"posts">["links"], Link[] | null>>()
       `),
     ).toEqual([])
   })

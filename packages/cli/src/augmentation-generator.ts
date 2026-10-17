@@ -70,14 +70,50 @@ export function generateClientAugmentation(ast: unknown): string {
   ].join("\n")
 }
 
+/**
+ * Every kind the schema uses, including the kinds of the fields its blocks declare: a block's
+ * fields are typed like columns, so a `Button` in a block needs the alias as much as a column does.
+ */
 function fieldKinds(models: AstModel[]): Set<string> {
   const kinds = new Set<string>()
-  for (const model of models) {
-    for (const meta of Object.values(model.fields ?? {})) {
-      if (typeof meta["kind"] === "string") kinds.add(meta["kind"])
-    }
+  const visit = (meta: Record<string, unknown>): void => {
+    if (typeof meta["kind"] === "string") kinds.add(meta["kind"])
+    for (const block of recordsIn(meta["blocks"])) recordsIn(block["fields"]).forEach(visit)
   }
+  for (const model of models) Object.values(model.fields ?? {}).forEach(visit)
   return kinds
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+/** The objects in an array, or the object values of a map: the two ways the AST nests fields. */
+function recordsIn(value: unknown): Record<string, unknown>[] {
+  const items = Array.isArray(value) ? value : isRecord(value) ? Object.values(value) : []
+  return items.filter(isRecord)
+}
+
+/** A `Blocks` column: one `{ type, data }` entry per block, which is what Studio's editor stores. */
+function blocksTsType(meta: Record<string, unknown>): string {
+  const blocks = recordsIn(meta["blocks"])
+  if (blocks.length === 0) return "{ type: string; data: { [key: string]: unknown } }[]"
+  return `(${blocks.map(blockVariant).join(" | ")})[]`
+}
+
+/** One block's entry, its fields under `data` typed as the same fields would be on a column. */
+function blockVariant(block: Record<string, unknown>): string {
+  const name = typeof block["name"] === "string" ? block["name"] : ""
+  const declared = isRecord(block["fields"]) ? Object.entries(block["fields"]) : []
+  const fields = declared
+    .filter((entry): entry is [string, Record<string, unknown>] => isRecord(entry[1]))
+    .filter(([, field]) => field["kind"] !== "relation")
+    .map(([key, field]) => {
+      const optional = field["required"] === true ? "" : "?"
+      return `${quoteKey(key)}${optional}: ${toTsType({ ...field, required: true })}`
+    })
+  const data = fields.length === 0 ? "{}" : `{ ${fields.join("; ")} }`
+  return `{ type: ${JSON.stringify(name)}; data: ${data} }`
 }
 
 /** The aliases a column type may name, emitted only where the schema uses them. */
@@ -89,6 +125,19 @@ function sharedTypeLines(kinds: Set<string>): string[] {
   }
   if (kinds.has("image") || kinds.has("file")) {
     lines.push("export type StorageReference = {", "  bucket: string", "  path: string", "}", "")
+  }
+  // The engine's alias, spelled the same, so both generated files name one type.
+  if (kinds.has("button")) {
+    lines.push('export type ButtonTarget = "_self" | "_blank"', "")
+    lines.push(
+      "export type Button = {",
+      "  label: string",
+      "  href: string",
+      "  ariaLabel?: string",
+      "  target?: ButtonTarget",
+      "}",
+      "",
+    )
   }
   return lines
 }
@@ -277,8 +326,11 @@ function toTsType(meta: Record<string, unknown>, prose = false): string {
         return "bigint"
       case "boolean":
         return "boolean"
-      case "json":
       case "blocks":
+        return blocksTsType(meta)
+      case "button":
+        return "Button"
+      case "json":
       case "geo":
       case "vector":
       case "relation":
