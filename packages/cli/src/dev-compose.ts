@@ -660,10 +660,11 @@ let _composePushInFlight = false
 let _composePushQueued = false
 
 /**
- * Regenerate everything derived from the schema after a push: the AST-derived files, then the
- * types and admin config from the engine. A docker project with no `overrides.engine` uses its own
- * engine image, the one that pushed (A5-N3); otherwise the host binary, falling back to the image
- * when the binary cannot be fetched.
+ * Regenerate everything derived from the schema once a push has applied it: the AST-derived files,
+ * then the types and admin config from the engine. Never called for a push that was refused or
+ * failed. A docker project with no `overrides.engine` uses its own engine image, the one that
+ * pushed (A5-N3); otherwise the host binary, falling back to the image when the binary cannot be
+ * fetched.
  */
 async function refreshSchemaArtifacts(
   cwd: string,
@@ -683,10 +684,10 @@ async function refreshSchemaArtifacts(
   await writeEngineArtifacts(cwd, config, ast, adminConfigPath, engine)
 }
 
-/** The files read straight off the AST, written whatever happens with the engine afterwards. */
+/** The files read straight off the applied AST, written whatever happens with the generator afterwards. */
 function writeAstDerivedArtifacts(cwd: string, config: SupatypeProjectConfig, ast: unknown): void {
-  // Before the engine: these are read straight off the AST, so a push whose engine is
-  // unavailable should still leave the server the right maps. The server watches this file, so a
+  // Before the generator: these are read straight off the AST, so an applied push whose engine
+  // cannot generate still leaves the server the right maps. The server watches this file, so a
   // hook or validator added to the schema takes effect without restarting the stack.
   //
   // `dev` used to skip both entirely, because only the `direct`/`local` push branch wrote them.
@@ -853,7 +854,18 @@ export interface ComposePushOptions {
   audit?: readonly string[]
 }
 
-async function runComposeSchemaPush(
+/**
+ * One push of the schema to a docker project's database, then the files that describe it.
+ *
+ * Those files (admin-config.json, the generated types and client, the hook and function types,
+ * the manifest's hook maps) are written only once the engine has applied the schema. They used to
+ * be written first, "so Studio stays in sync even when migration fails", which is the opposite of
+ * in sync: a push the engine refused left Studio offering fields the database did not have, and an
+ * upload to a field whose bucket was never created answered "Bucket not found". A refusal followed
+ * by a forced push also wrote every file twice. Now a refused or failed push rewrites nothing, and
+ * Studio and the code keep describing the schema that is live.
+ */
+export async function runComposeSchemaPush(
   cwd: string,
   config: SupatypeProjectConfig,
   paths: SelfHostComposePaths,
@@ -863,90 +875,87 @@ async function runComposeSchemaPush(
 ): Promise<void> {
   const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
   const astJson = JSON.stringify(ast)
-
-  const supatypeDir = join(cwd, ".supatype")
-  mkdirSync(supatypeDir, { recursive: true })
-  const astPath = join(supatypeDir, "schema.ast.json")
-  // Always materialise on disk, schema-engine reads via bind mount; skip must not omit the write.
-  writeFileSync(astPath, astJson)
+  // Before the skip below: the schema-engine container reads the AST through its bind mount.
+  writeSchemaAstFile(cwd, astJson)
   if (astJson === _lastPushedAst && astJson !== _lastFailedAst) return
-
-  if (!existsSync(astPath)) {
-    throw new Error(`Failed to write schema AST at ${astPath}`)
-  }
   // Identity and generated columns only to an engine that reads them (the override's binary is
   // asked by `engineRequest`).
   if (!hasEngineOverride(config)) await requireDockerFeatures(cwd, config, identityColumnsNeed(ast))
-
-  // Admin + types come from the AST only (no DB), refresh before push so Studio stays
-  // in sync even when migration fails (e.g. bad engine image, lossy column change).
-  await refreshSchemaArtifacts(cwd, config, ast)
-
-  if (hasEngineOverride(config)) {
-    console.log("[supatype] Applying schema via local engine (overrides.engine)...")
-    await ensureEngine()
-    const sources = writeSchemaSourcePushArtifacts(cwd)
-    try {
-      const result = await enginePush(
-        cwd,
-        {
-          ast,
-          database_url: projectDatabaseUrl(cwd, config),
-          schema: pgSchema(config),
-          force: opts.force === true,
-          ...(opts.overwriteDrift === true && { overwrite_drift: true }),
-          ...(sources
-            ? {
-                schema_sources_gz_base64: sources.payload.dataBase64,
-                schema_sources_manifest: sources.payload.manifest,
-              }
-            : {}),
-        },
-        isEnginePushResult,
-      )
-      printPushWarnings(result)
-    } catch (err) {
-      _lastFailedAst = astJson
-      throw err
-    }
-    _lastPushedAst = astJson
-    _lastFailedAst = null
-    if (astRelatesToAuthUsers(ast)) {
-      grantAuthSchemaAccess(paths, cwd, composeProject)
-    }
-    console.log("[supatype] Schema applied.")
-    return
+  try {
+    if (hasEngineOverride(config)) await applyViaHostEngine(cwd, config, ast, opts)
+    else await applyViaComposeEngine(cwd, config, { paths, composeProject }, opts)
+  } catch (err) {
+    _lastFailedAst = astJson
+    throw err
   }
+  _lastPushedAst = astJson
+  _lastFailedAst = null
+  if (astRelatesToAuthUsers(ast)) grantAuthSchemaAccess(paths, cwd, composeProject)
+  await refreshSchemaArtifacts(cwd, config, ast)
+}
 
+/** The AST the push sends, at `.supatype/schema.ast.json`, where both engines read it. */
+function writeSchemaAstFile(cwd: string, astJson: string): void {
+  const supatypeDir = join(cwd, ".supatype")
+  mkdirSync(supatypeDir, { recursive: true })
+  const astPath = join(supatypeDir, "schema.ast.json")
+  writeFileSync(astPath, astJson)
+  if (!existsSync(astPath)) throw new Error(`Failed to write schema AST at ${astPath}`)
+}
+
+/** Apply `ast` with the host engine binary `overrides.engine` names. Throws when it is not applied. */
+async function applyViaHostEngine(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  ast: ExtractedSchemaAstV2,
+  opts: ComposePushOptions,
+): Promise<void> {
+  console.log("[supatype] Applying schema via local engine (overrides.engine)...")
+  await ensureEngine()
+  const sources = writeSchemaSourcePushArtifacts(cwd)
+  const body = {
+    ast,
+    database_url: projectDatabaseUrl(cwd, config),
+    schema: pgSchema(config),
+    force: opts.force === true,
+    ...(opts.overwriteDrift === true && { overwrite_drift: true }),
+    ...(sources !== null && {
+      schema_sources_gz_base64: sources.payload.dataBase64,
+      schema_sources_manifest: sources.payload.manifest,
+    }),
+  }
+  printPushWarnings(await enginePush(cwd, body, isEnginePushResult))
+  console.log("[supatype] Schema applied.")
+}
+
+/** Apply the AST on disk with the stack's schema-engine container. Throws when it is not applied. */
+async function applyViaComposeEngine(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  stack: { paths: SelfHostComposePaths; composeProject: string },
+  opts: ComposePushOptions,
+): Promise<void> {
   console.log("[supatype] Applying schema via compose schema-engine...")
+  const { paths, composeProject } = stack
   const sources = writeSchemaSourcePushArtifacts(cwd)
   const audit = opts.audit ?? (await composeAuditArgs(cwd, config))
+  const pushOnce = () => runComposeEnginePush(paths, cwd, composeProject, config, sources, { ...opts, audit })
   const runPush = async () => {
-    let result = await runComposeEnginePush(paths, cwd, composeProject, config, sources, { ...opts, audit })
+    const first = await pushOnce()
     // Windows Docker bind mounts can lag briefly after the host write. A consent refusal is the
     // engine's considered answer, not a lagging mount, and running it again only repeats it.
-    if (result.status !== 0 && consentRefusal(result.output) === null) {
-      await new Promise((r) => setTimeout(r, 250))
-      result = await runComposeEnginePush(paths, cwd, composeProject, config, sources, { ...opts, audit })
-    }
-    return result
+    if (first.status === 0 || consentRefusal(first.output) !== null) return first
+    await new Promise((r) => setTimeout(r, 250))
+    return pushOnce()
   }
   // B: only hold the advisory lock when realtime is already decoding, first-boot
   // push (db only) must not take the lock; that path crashed under lock+DDL in CI.
   const push = composeServiceIsRunning(cwd, { composePath: paths.composePath, project: composeProject }, "realtime")
     ? await withComposeSchemaPushLock(paths, cwd, composeProject, runPush)
     : await runPush()
-  if (push.status !== 0) {
-    _lastFailedAst = astJson
-    const detail = filterComposeNoise(push.output) || push.output
-    throw new Error(detail || `Engine schema push failed (exit ${push.status})`)
-  }
-  _lastPushedAst = astJson
-  _lastFailedAst = null
-
-  if (astRelatesToAuthUsers(ast)) {
-    grantAuthSchemaAccess(paths, cwd, composeProject)
-  }
+  if (push.status === 0) return
+  const detail = filterComposeNoise(push.output) || push.output
+  throw new Error(detail || `Engine schema push failed (exit ${push.status})`)
 }
 
 /** Serialize watch-triggered pushes so docker output cannot interleave. */
