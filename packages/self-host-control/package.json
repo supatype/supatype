@@ -10,7 +10,7 @@
     "start": "node dist/server.js",
     "dev": "tsx src/server.ts",
     "test": "node --import tsx/esm --test tests/*.test.ts",
-    "typecheck": "tsc --noEmit && tsc -p tests/tsconfig.json --noEmit"
+    "typecheck": "tsc --project tests/tsconfig.json --noEmit"
   },
   "dependencies": {
     "@supatype/shared": "workspace:*",

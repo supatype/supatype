@@ -20,6 +20,35 @@ env:
   DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
 
 jobs:
+  # No `any`, written or inherited from a library, and no cast that narrows to a type nobody checked,
+  # in any TypeScript, Vue or Svelte file: eslint.config.mjs turns those rules on and makes
+  # `eslint-disable` comments inert, so none can be switched off for a line.
+  #
+  # A job of its own so it runs beside `check` rather than before its typecheck and tests: it is the
+  # longest single step there, and nothing else waits on it. The rules read types, and workspace
+  # packages resolve one another through `dist`, so the packages are built first: before that, every
+  # import of a sibling package would be `any`. The examples' own builds are not needed for that.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the packages
+        run: pnpm turbo run build --filter="./packages/*"
+
+      - name: Lint (no any)
+        run: pnpm lint
+
   check:
     runs-on: ubuntu-latest
     steps:
@@ -67,22 +96,15 @@ jobs:
       - name: Build
         run: pnpm turbo run build
 
-      # No `any`, written or inherited from a library, in any TypeScript, Vue, Svelte or Astro file:
-      # eslint.config.mjs turns those rules on and makes `eslint-disable` comments inert, so none can
-      # be switched off for a line. The `no-unsafe-*` rules read types, and workspace packages resolve
-      # one another through `dist`, so this runs after the build: before it, every import of a sibling
-      # package would be `any`.
-      - name: Lint (no any)
-        run: pnpm lint
-
+      # Every package's typecheck, then the root tsconfig.json (the config files beside each
+      # package's build config, which no package's typecheck covers).
       - name: Typecheck
-        run: pnpm turbo run typecheck
+        run: pnpm typecheck
 
+      # The build above has already built @supatype/types and @supatype/client.
       - name: RFC v2 migration checks
         run: |
-          pnpm --filter @supatype/types build
           pnpm --filter @supatype/types test
-          pnpm --filter @supatype/client build
           pnpm --filter @supatype/client test -- tests/types.test.ts
           pnpm --filter @supatype/cli exec vitest run tests/augmentation-generator.test.ts tests/migrate-from-v1.test.ts tests/type-extractor.test.ts
 
