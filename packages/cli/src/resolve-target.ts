@@ -3,7 +3,7 @@ import { existsSync } from "node:fs"
 import { resolve } from "node:path"
 import { loadConfig } from "./config.js"
 import type { AdoptOutcome, ComposeEngine, DiffResult } from "./engine-client.js"
-import { ensureEngine, enginePush, engineRequest } from "./engine-client.js"
+import { asTheEngineRefused, ensureEngine, enginePush, engineRequest } from "./engine-client.js"
 import {
   isAdoptOutcome,
   isDatabaseStateJson,
@@ -489,12 +489,16 @@ export async function targetSchemaRollback(
   opts?: { schema?: string },
 ): Promise<SchemaRollbackResult> {
   if (target.mode === "direct" || (target.mode === "local" && !target.token)) {
+    // A refused rollback (nothing to undo, or dropped data undo cannot bring back) is said as the
+    // engine says it, as a control plane's 409 already is.
     return engineHere(
       target,
       "/rollback",
       { database_url: target.databaseUrl!, schema: opts?.schema ?? "public" },
       isSchemaRollbackResult,
-    )
+    ).catch((err: unknown) => {
+      throw asTheEngineRefused(err)
+    })
   }
 
   return targetFetch(
