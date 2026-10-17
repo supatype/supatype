@@ -256,15 +256,19 @@ function walk(node: RichTextNode, context: WalkContext): RichTextChild[] {
   return (RENDERERS.get(node.type) ?? unknownNode)(node, context)
 }
 
-function topLevelNodes(content: RichTextContent): readonly unknown[] {
-  // The type says document, but a column value is whatever was written to it.
+function topLevelNodes(content: unknown): readonly unknown[] {
   if (typeof content !== "object" || content === null) return []
   if (Array.isArray(content)) return content
   if (isNode(content)) return [content]
   return "root" in content ? [content.root] : []
 }
 
-/** Walk a saved document into the element tree every renderer prints. */
-export function richTextTree(content: RichTextContent): RichTextChild[] {
+/**
+ * Walk a saved document into the element tree every renderer prints.
+ *
+ * Takes any value, not only a `RichTextContent`: a column holds whatever was written to it, and
+ * anything that is not a document prints as nothing.
+ */
+export function richTextTree(content: unknown): RichTextChild[] {
   return topLevelNodes(content).flatMap((node) => (isNode(node) ? walk(node, TOP) : []))
 }

@@ -3,6 +3,7 @@ import { writable, type Readable } from "svelte/store"
 import type { AugmentedDatabase, AnyClient, AnyDatabase, SupatypeError } from "@supatype/client"
 import { onIdentityChange } from "@supatype/client"
 import { getSupatypeClient } from "./context.js"
+import { isRowsOf } from "./caller-types.js"
 
 export interface QueryOptions {
   columns?: string | undefined
@@ -65,7 +66,7 @@ export function createQuery<
       }
 
       const result = await query
-      data.set(result.data as TRow[] | null)
+      data.set(isRowsOf<TRow>(result.data) ? result.data : null)
       if (result.error) {
         error.set(result.error)
       }

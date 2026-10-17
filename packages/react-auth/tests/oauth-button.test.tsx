@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, create, type ReactTestInstance } from "react-test-renderer"
 import type { AuthRedirectError, SupatypeError } from "@supatype/client"
 import { OAuthButton } from "../src/index.js"
+import { fire, stringProp } from "./props.js"
 
 type OAuthResult = { data: { url: string; provider: string }; error: SupatypeError | null }
 
@@ -17,7 +18,7 @@ vi.mock("@supatype/react", () => ({
 
 /** The text a screen reader announces for the button: its aria-label when set, else its content. */
 function accessibleName(button: ReactTestInstance): string {
-  const label = button.props["aria-label"] as string | undefined
+  const label = stringProp(button, "aria-label")
   if (label !== undefined) return label
   return button.children.filter((child): child is string => typeof child === "string").join("")
 }
@@ -49,7 +50,7 @@ describe("OAuthButton errors", () => {
     const onError = vi.fn()
 
     const button = create(<OAuthButton provider="github" onError={onError} />).root.findByType("button")
-    await act(async () => { (button.props["onClick"] as () => void)() })
+    await act(async () => { await fire(button, "onClick") })
 
     expect(onError).toHaveBeenCalledWith(error)
     expect(location.href).toBe("https://app.example/")

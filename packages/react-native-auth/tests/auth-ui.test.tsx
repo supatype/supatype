@@ -64,11 +64,16 @@ function findByTestId(root: ReturnType<typeof create>, testID: string) {
   return root.root.findByProps({ testID })
 }
 
+/** A prop that is a function: what it is called with is the test's to choose. */
+function isHandler(value: unknown): value is (...args: unknown[]) => unknown {
+  return typeof value === "function"
+}
+
 /** The node's `prop` handler, which the test renderer types as `any`, checked to be a function. */
 function handler(root: ReturnType<typeof create>, testID: string, prop: string): (...args: unknown[]) => unknown {
   const value: unknown = findByTestId(root, testID).props[prop]
-  if (typeof value !== "function") throw new Error(`${testID} has no ${prop} handler`)
-  return value as (...args: unknown[]) => unknown
+  if (!isHandler(value)) throw new Error(`${testID} has no ${prop} handler`)
+  return value
 }
 
 function changeText(root: ReturnType<typeof create>, testID: string, text: string): void {

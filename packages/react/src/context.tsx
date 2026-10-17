@@ -2,6 +2,7 @@
 
 import React from "react"
 import type { AnyClient, SupatypeClient, AnyDatabase, AugmentedDatabase } from "@supatype/client"
+import { isClientFor } from "./caller-types.js"
 
 /** Typed at `AnyClient`, narrowed on read. See `AnyClient` for why it is neither generic nor `any`. */
 export const SupatypeContext = React.createContext<AnyClient | null>(null)
@@ -37,8 +38,8 @@ export function SupatypeProvider({ client, children }: SupatypeProviderProps): R
  * higher-level hooks (useAuth, useQuery, useMutation) instead.
  */
 export function useSupatype<TDatabase extends AnyDatabase = AugmentedDatabase>(): SupatypeClient<TDatabase> {
-  const client = React.useContext(SupatypeContext) as SupatypeClient<TDatabase> | null
-  if (client === null) {
+  const client = React.useContext(SupatypeContext)
+  if (client === null || !isClientFor<TDatabase>(client)) {
     throw new Error("useSupatype must be used inside a <SupatypeProvider>")
   }
   return client

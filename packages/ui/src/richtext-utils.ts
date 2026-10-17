@@ -67,7 +67,7 @@ function isLexicalDocument(value: unknown): value is SerializedEditorState {
     typeof value === "object" &&
     value !== null &&
     "root" in value &&
-    typeof (value as SerializedEditorState).root === "object"
+    typeof value.root === "object"
   )
 }
 

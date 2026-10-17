@@ -9,9 +9,6 @@ import {
   PLUGIN_API_VERSION,
   type PluginMeta,
   type PluginType,
-  type ProviderDefinition,
-  type FieldTypeDefinition,
-  type CompositeDefinition,
   type CompositeFieldDef,
 } from "./types.js"
 import {
@@ -165,22 +162,22 @@ export interface PluginConflict {
  * Detect conflicts between a set of plugin definitions.
  */
 export function detectConflicts(plugins: Array<{ packageName: string; definition: AnyPluginDefinition }>): PluginConflict[] {
-  const seen = new Map<string, string[]>()
+  const seen = new Map<string, { type: PluginType; name: string; packages: string[] }>()
   const conflicts: PluginConflict[] = []
 
   for (const p of plugins) {
-    const key = `${p.definition.__supatype}:${(p.definition as { name: string }).name}`
-    const existing = seen.get(key) ?? []
-    existing.push(p.packageName)
-    seen.set(key, existing)
+    const { __supatype: type, name } = p.definition
+    const key = `${type}:${name}`
+    const entry = seen.get(key) ?? { type, name, packages: [] }
+    entry.packages.push(p.packageName)
+    seen.set(key, entry)
   }
 
-  for (const [key, packages] of seen) {
+  for (const { type, name, packages } of seen.values()) {
     if (packages.length > 1) {
-      const [type, name] = key.split(":", 2)
       conflicts.push({
-        type: type as PluginType,
-        name: name!,
+        type,
+        name,
         packages,
         message: `Multiple plugins define ${type} "${name}": ${packages.join(", ")}. ` +
           `Resolve by explicitly listing plugins in supatype.config.ts.`,
@@ -229,7 +226,7 @@ export function validateProviders(
   for (const cp of configuredProviders) {
     // Find matching registered provider plugin
     const registered = getRegisteredPlugins().find(
-      p => p.definition.__supatype === "provider" && (p.definition as ProviderDefinition).name === cp.name,
+      p => p.definition.__supatype === "provider" && p.definition.name === cp.name,
     )
 
     if (!registered) {
@@ -242,7 +239,8 @@ export function validateProviders(
       continue
     }
 
-    const def = registered.definition as ProviderDefinition
+    const def = registered.definition
+    if (def.__supatype !== "provider") continue
 
     // Check create() method
     if (typeof def.create !== "function") {
@@ -297,8 +295,8 @@ export function getPluginFieldTypeMap(): Map<string, string> {
   const map = new Map<string, string>()
 
   for (const plugin of getPluginsByType("field")) {
-    if (plugin.status !== "active") continue
-    const def = plugin.definition as FieldTypeDefinition & { __supatype: "field" }
+    const def = plugin.definition
+    if (plugin.status !== "active" || def.__supatype !== "field") continue
     map.set(def.name, def.tsType)
   }
 
@@ -320,8 +318,8 @@ export function getPluginFieldPgTypeMap(): Map<string, FieldPgTypeInfo> {
   const map = new Map<string, FieldPgTypeInfo>()
 
   for (const plugin of getPluginsByType("field")) {
-    if (plugin.status !== "active") continue
-    const def = plugin.definition as FieldTypeDefinition & { __supatype: "field" }
+    const def = plugin.definition
+    if (plugin.status !== "active" || def.__supatype !== "field") continue
     map.set(def.name, {
       pgType: def.pgType,
       ...(def.constraints !== undefined ? { constraints: def.constraints } : {}),
@@ -374,8 +372,8 @@ export function expandPluginComposites(): Map<string, CompositeExpansion> {
   const pluginFieldPgTypes = getPluginFieldPgTypeMap()
 
   for (const plugin of getPluginsByType("composite")) {
-    if (plugin.status !== "active") continue
-    const def = plugin.definition as CompositeDefinition & { __supatype: "composite" }
+    const def = plugin.definition
+    if (plugin.status !== "active" || def.__supatype !== "composite") continue
 
     const fields = def.fields.map((f: CompositeFieldDef) => {
       // Resolve pgType: plugin fields first, then built-ins, then TEXT fallback

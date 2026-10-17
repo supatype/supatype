@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react"
 import type { AnyDatabase, AugmentedDatabase, SupatypeError } from "@supatype/client"
 import { useSupatype } from "./context.js"
+import { isCallerValue } from "./caller-types.js"
 
 export interface FunctionCallOptions {
   /** HTTP method. Default: POST */
@@ -54,15 +55,18 @@ export function useFunction<
       setLoading(true)
       setError(null)
 
-      const result = await client.functions.invoke(functionName, {
-        ...options,
-        ...(body !== undefined ? { body } : {}),
-      })
-
-      setLoading(false)
-      setData(result.data as TResponse | null)
-      if (result.error !== null) setError(result.error)
-      return result as { data: TResponse | null; error: SupatypeError | null }
+      try {
+        const result = await client.functions.invoke(functionName, {
+          ...options,
+          ...(body !== undefined ? { body } : {}),
+        })
+        const answer = { data: isCallerValue<TResponse>(result.data) ? result.data : null, error: result.error }
+        setData(answer.data)
+        if (answer.error !== null) setError(answer.error)
+        return answer
+      } finally {
+        setLoading(false)
+      }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [client, functionName],
