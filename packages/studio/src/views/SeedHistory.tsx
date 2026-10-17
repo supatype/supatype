@@ -27,7 +27,7 @@ import { ErrorBanner } from "../components/ErrorBanner.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import { useProjectProxy } from "../hooks/useProjectProxy.js"
 import { isMissingTable } from "../lib/database-error.js"
-import { safeParseJson } from "../lib/json.js"
+import { isJsonObject, safeParseJson } from "../lib/json.js"
 
 // --- Types ---
 
@@ -79,7 +79,7 @@ export function mapSeedRow(row: Record<string, unknown>): SeedRun {
     duration_ms: Number(row["duration_ms"] ?? 0),
     status: row["status"] === "rolled_back" ? "rolled_back" : "committed",
     rows_written: asCounts(row["rows_written"]),
-    error_message: (row["error_message"] as string | null) ?? null,
+    error_message: typeof row["error_message"] === "string" ? row["error_message"] : null,
     engine_version: String(row["engine_version"] ?? ""),
   }
 }
@@ -91,11 +91,10 @@ export function mapSeedRow(row: Record<string, unknown>): SeedRun {
  * says a run wrote nothing and a run that wrote plenty.
  */
 function asCounts(value: unknown): Record<string, number> {
-  const source: unknown =
-    typeof value === "string" ? safeParseJson(value) : value
-  if (source === null || typeof source !== "object" || Array.isArray(source)) return {}
+  const source = typeof value === "string" ? safeParseJson(value) : value
+  if (!isJsonObject(source)) return {}
   const out: Record<string, number> = {}
-  for (const [model, count] of Object.entries(source as Record<string, unknown>)) {
+  for (const [model, count] of Object.entries(source)) {
     const n = Number(count)
     if (Number.isFinite(n)) out[model] = n
   }

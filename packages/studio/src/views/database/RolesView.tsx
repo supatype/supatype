@@ -6,6 +6,7 @@ import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 import { useStudioCapability } from "../../hooks/useStudioCapability.js"
 import { SQL_EDITOR_HREF, sqlEditorOffered } from "../../lib/sql-editor-access.js"
+import { cellText, cellTextOrNull } from "../metadata-row.js"
 
 export function RolesView(): React.ReactElement {
   const proxy = useProjectProxy()
@@ -54,16 +55,16 @@ export function RolesView(): React.ReactElement {
                 if (row["rolcreatedb"]) caps.push("createdb")
                 if (row["rolcreaterole"]) caps.push("createrole")
                 return (
-                  <tr key={row["rolname"] as string} className="border-b border-border last:border-0">
-                    <td className="px-4 py-3 font-mono text-sm text-foreground">{row["rolname"] as string}</td>
+                  <tr key={cellText(row, "rolname")} className="border-b border-border last:border-0">
+                    <td className="px-4 py-3 font-mono text-sm text-foreground">{cellText(row, "rolname")}</td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-1">
                         {caps.map((c) => <Badge key={c} variant="blue">{c}</Badge>)}
                         {caps.length === 0 && <span className="text-xs text-muted-foreground">-</span>}
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground">{(row["rolconnlimit"] as number) === -1 ? "unlimited" : String(row["rolconnlimit"])}</td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground">{(row["rolvaliduntil"] as string | null) ?? "never"}</td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground">{row["rolconnlimit"] === -1 ? "unlimited" : String(row["rolconnlimit"])}</td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground">{cellTextOrNull(row, "rolvaliduntil") ?? "never"}</td>
                   </tr>
                 )
               })}

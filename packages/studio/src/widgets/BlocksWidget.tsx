@@ -6,11 +6,43 @@ import {
   getLocalizedFallbackPlaceholder,
   setLocalizedFieldValue,
 } from "../lib/localized-field.js"
+import { isJsonObject } from "../lib/json.js"
+import { mapEngineFields } from "../lib/normalize-admin-config.js"
 import { FieldWidget as FieldWidgetComponent } from "./FieldWidget.js"
 
 interface BlockEntry {
   type: string
   data: Record<string, unknown>
+  /** Whatever else a stored block carries, kept as it is when the block is edited. */
+  [key: string]: unknown
+}
+
+/** A stored block, with `type` and `data` read defensively; anything that is not an object is no block. */
+function toBlockEntry(raw: unknown): BlockEntry | null {
+  if (!isJsonObject(raw)) return null
+  const { type, data } = raw
+  return { ...raw, type: typeof type === "string" ? type : "", data: isJsonObject(data) ? data : {} }
+}
+
+function blockEntriesOf(value: unknown): BlockEntry[] {
+  if (!Array.isArray(value)) return []
+  return value.map(toBlockEntry).filter((entry): entry is BlockEntry => entry !== null)
+}
+
+/** The block types the engine lists under `options.blockTypes`, their fields read like any model's. */
+function blockTypesOf(options: Record<string, unknown> | undefined): BlockTypeConfig[] {
+  const raw = options?.["blockTypes"]
+  if (!Array.isArray(raw)) return []
+  return raw.filter(isJsonObject).map((bt) => {
+    const name = String(bt["name"] ?? "")
+    const icon = bt["icon"]
+    return {
+      name,
+      label: typeof bt["label"] === "string" ? bt["label"] : name,
+      ...(typeof icon === "string" && { icon }),
+      fields: mapEngineFields(bt["fields"]),
+    }
+  })
 }
 
 function resolveBlockSubFieldValue(
@@ -69,8 +101,8 @@ export function BlocksWidget({
     config.localized,
     currentLocale,
   )
-  const blocks = (Array.isArray(blocksValue) ? blocksValue : []) as BlockEntry[]
-  const blockTypes = (config.options?.["blockTypes"] ?? []) as BlockTypeConfig[]
+  const blocks = blockEntriesOf(blocksValue)
+  const blockTypes = blockTypesOf(config.options)
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null)
   const [showPicker, setShowPicker] = useState(false)
 
@@ -118,7 +150,9 @@ export function BlocksWidget({
   }
 
   const duplicateBlock = (index: number) => {
-    const copy = JSON.parse(JSON.stringify(blocks[index])) as BlockEntry
+    const source = blocks[index]
+    const copy = source === undefined ? null : toBlockEntry(JSON.parse(JSON.stringify(source)))
+    if (copy === null) return
     const next = [...blocks]
     next.splice(index + 1, 0, copy)
     commitBlocks(next)

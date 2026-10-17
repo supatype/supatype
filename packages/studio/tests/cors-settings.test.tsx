@@ -2,12 +2,12 @@
 import React, { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import type { SupatypeClient } from "@supatype/client"
 import type { AdminConfig } from "../src/config.js"
 import { Settings } from "../src/views/Settings.js"
 import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { AdminConfigContext } from "../src/hooks/useAdminConfig.js"
 import { PlatformCtx, type PlatformContext } from "../src/hooks/usePlatform.js"
+import { testClient, testConfig } from "./support.js"
 
 /**
  * The Settings CORS tab is the allowed-origins page (SHb): it shows what the gateway enforces, read
@@ -15,8 +15,8 @@ import { PlatformCtx, type PlatformContext } from "../src/hooks/usePlatform.js"
  * read the list, and on Cloud it edited a project setting the gateway's own rule never consulted.
  */
 const SELF_HOST: PlatformContext = { platformUrl: undefined, projectRef: undefined }
-const CONFIG = { models: [], globals: [] } as unknown as AdminConfig
-const CLIENT = { url: "http://localhost:8000/studio/proxy", auth: { currentAccessToken: "t" } } as unknown as SupatypeClient
+const CONFIG: AdminConfig = testConfig()
+const CLIENT = testClient({ url: "http://localhost:8000/studio/proxy", token: "t" })
 const IN_FORCE = {
   origins: ["https://app.example.com"], source: "default", default: ["https://app.example.com"],
   siteOrigin: "https://app.example.com", configured: [], platform: [], saved: null, updatedAt: null,
@@ -28,7 +28,7 @@ let root: Root
 let requested: string[] = []
 
 beforeEach(() => {
-  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true
   requested = []
   vi.stubGlobal("fetch", async (url: string) => {
     requested.push(url)

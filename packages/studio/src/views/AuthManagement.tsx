@@ -7,6 +7,20 @@ import { useStudioCapability } from "../hooks/useStudioCapability.js"
 import { useAuthSettings } from "../hooks/useAuthSettings.js"
 import { StudioAccessCell } from "../components/StudioAccessCell.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
+import {
+  type Guard,
+  bodyMessage,
+  isArrayOf,
+  isJsonObject,
+  isShape,
+  isString,
+  isUnknown,
+  nullable,
+  optional,
+  parseJsonObject,
+  readJson,
+  readJsonObject,
+} from "../lib/json.js"
 import { Badge, Button, Card, Checkbox, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
@@ -70,6 +84,15 @@ interface AuthSessionResponse {
   updated_at: string
 }
 
+const isAuthSessionResponse: Guard<AuthSessionResponse> = isShape({
+  id: isString,
+  user_id: isString,
+  ip: nullable(isString),
+  user_agent: nullable(isString),
+  created_at: isString,
+  updated_at: isString,
+})
+
 function mapAuthSession(s: AuthSessionResponse): AuthSession {
   return { ...s, ip: s.ip ?? "", user_agent: s.user_agent ?? "" }
 }
@@ -124,16 +147,9 @@ function AutoConfirmField({ checked, onChange }: { checked: boolean; onChange: (
  * `"x"` and `null` all parse, and each used to be saved as the user's metadata.
  */
 export function parseMetadata(json: string): { metadata: Record<string, unknown> } | { error: string } {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(json)
-  } catch {
-    return { error: "Invalid JSON in metadata" }
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return { error: "Metadata must be a JSON object" }
-  }
-  return { metadata: parsed as Record<string, unknown> }
+  const parsed = parseJsonObject(json)
+  if (parsed.ok) return { metadata: parsed.value }
+  return { error: parsed.error === "not-json" ? "Invalid JSON in metadata" : "Metadata must be a JSON object" }
 }
 
 function UserForm({
@@ -452,9 +468,9 @@ function InviteUserForm({
  * the name merged the two declarations and made every field of the rendered user
  * optional.
  *
- * Every field optional, because this describes someone else's JSON rather than a value we
- * constructed: a server that stops sending `factors` should narrow what Studio can show, not throw
- * while mapping. `any` here would have hidden exactly that.
+ * Every field but the ids optional, because this describes someone else's JSON rather than a
+ * value we constructed: a server that stops sending `factors` or a timestamp should narrow what
+ * Studio can show, not throw while mapping. `any` here would have hidden exactly that.
  */
 interface AuthUserResponse {
   id: string
@@ -464,8 +480,8 @@ interface AuthUserResponse {
   email_confirmed_at?: string | null
   banned_until?: string | null
   last_sign_in_at?: string | null
-  created_at: string
-  updated_at: string
+  created_at?: string | null
+  updated_at?: string | null
   user_metadata?: Record<string, unknown> | null
   identities?: AuthIdentityResponse[] | null
   factors?: AuthFactorResponse[] | null
@@ -475,7 +491,7 @@ interface AuthIdentityResponse {
   provider: string
   identity_id?: string | null
   id?: string | null
-  created_at: string
+  created_at?: string | null
 }
 
 interface AuthFactorResponse {
@@ -483,8 +499,51 @@ interface AuthFactorResponse {
   factor_type?: string | null
   type?: string | null
   friendly_name?: string | null
-  created_at: string
+  created_at?: string | null
   status?: string | null
+}
+
+const optionalText = optional(nullable(isString))
+
+const isAuthIdentityResponse: Guard<AuthIdentityResponse> = isShape({
+  provider: isString,
+  identity_id: optionalText,
+  id: optionalText,
+  created_at: optionalText,
+})
+
+const isAuthFactorResponse: Guard<AuthFactorResponse> = isShape({
+  id: isString,
+  factor_type: optionalText,
+  type: optionalText,
+  friendly_name: optionalText,
+  created_at: optionalText,
+  status: optionalText,
+})
+
+const isAuthUserResponse: Guard<AuthUserResponse> = isShape({
+  id: isString,
+  email: optionalText,
+  phone: optionalText,
+  role: optionalText,
+  email_confirmed_at: optionalText,
+  banned_until: optionalText,
+  last_sign_in_at: optionalText,
+  created_at: optionalText,
+  updated_at: optionalText,
+  user_metadata: optional(nullable(isJsonObject)),
+  identities: optional(nullable(isArrayOf(isAuthIdentityResponse))),
+  factors: optional(nullable(isArrayOf(isAuthFactorResponse))),
+})
+
+const isUserList = isShape({ users: isArrayOf(isAuthUserResponse) })
+const isSessionList = isShape({ sessions: isArrayOf(isAuthSessionResponse) })
+const isCreatedUser = isShape({ id: optional(isUnknown) })
+
+/** The auth server's refusal, in its own words when it gave any. */
+function authErrorMessage(body: Record<string, unknown>): string {
+  const msg = body["msg"]
+  return (typeof msg === "string" ? msg : bodyMessage(body)) ?? "Auth API error"
 }
 
 function mapAuthUser(raw: AuthUserResponse): AuthUser {
@@ -496,14 +555,14 @@ function mapAuthUser(raw: AuthUserResponse): AuthUser {
     confirmed: raw.email_confirmed_at != null,
     disabled: raw.banned_until != null,
     last_sign_in: raw.last_sign_in_at ?? null,
-    created_at: raw.created_at,
-    updated_at: raw.updated_at,
+    created_at: raw.created_at ?? "",
+    updated_at: raw.updated_at ?? "",
     metadata: raw.user_metadata ?? {},
     providers: Array.isArray(raw.identities)
       ? raw.identities.map((i) => ({
           provider: i.provider,
           provider_id: i.identity_id ?? i.id ?? "",
-          linked_at: i.created_at,
+          linked_at: i.created_at ?? "",
         }))
       : [],
     mfa_factors: Array.isArray(raw.factors)
@@ -511,7 +570,7 @@ function mapAuthUser(raw: AuthUserResponse): AuthUser {
           id: f.id,
           type: f.factor_type ?? f.type ?? "totp",
           friendly_name: f.friendly_name ?? null,
-          created_at: f.created_at,
+          created_at: f.created_at ?? "",
           verified: f.status === "verified",
         }))
       : [],
@@ -539,7 +598,7 @@ export function AuthManagement(): React.ReactElement {
   }
 
   /** One call to the auth server through Studio's proxy, which adds the service role key. */
-  const authFetch = useCallback(async (path: string, options?: RequestInit): Promise<unknown> => {
+  const authFetch = useCallback(async <T,>(path: string, guard: Guard<T>, options?: RequestInit): Promise<T> => {
     const res = await fetch(`${client.url}/auth/v1${path}`, {
       ...options,
       headers: {
@@ -549,18 +608,17 @@ export function AuthManagement(): React.ReactElement {
       },
       credentials: "include",
     })
-    const json = (await res.json()) as { msg?: string; message?: string }
-    if (!res.ok) throw new Error(json.msg ?? json.message ?? "Auth API error")
-    return json
+    if (!res.ok) throw new Error(authErrorMessage(await readJsonObject(res)))
+    return readJson(res, guard)
   }, [client])
   const authAdminFetch = useCallback(
-    (path: string, options?: RequestInit) => authFetch(`/admin${path}`, options),
+    <T,>(path: string, guard: Guard<T>, options?: RequestInit) => authFetch(`/admin${path}`, guard, options),
     [authFetch],
   )
 
   const { data: usersData, loading, error, refetch } = useApiQuery(
     async () => {
-      const json = (await authAdminFetch("/users?page=1&per_page=50")) as { users: AuthUserResponse[] }
+      const json = await authAdminFetch("/users?page=1&per_page=50", isUserList)
       return json.users.map(mapAuthUser)
     },
     [authAdminFetch],
@@ -570,7 +628,7 @@ export function AuthManagement(): React.ReactElement {
   // route, which is for different roles and cannot touch the tables the auth service owns.
   const { data: sessionsData, refetch: refetchSessions } = useApiQuery(
     async () => {
-      const json = (await authAdminFetch("/sessions")) as { sessions: AuthSessionResponse[] }
+      const json = await authAdminFetch("/sessions", isSessionList)
       return json.sessions.map(mapAuthSession)
     },
     [authAdminFetch],
@@ -616,8 +674,8 @@ export function AuthManagement(): React.ReactElement {
       return
     }
     if (loading) return
-    void authAdminFetch(`/users/${encodeURIComponent(userIdParam)}`)
-      .then((raw) => setSelectedUser(mapAuthUser(raw as AuthUserResponse)))
+    void authAdminFetch(`/users/${encodeURIComponent(userIdParam)}`, isAuthUserResponse)
+      .then((raw) => setSelectedUser(mapAuthUser(raw)))
       .catch(() => {
         setSearchParams({}, { replace: true })
       })
@@ -627,7 +685,9 @@ export function AuthManagement(): React.ReactElement {
   const filtered = users.filter((u) => {
     if (search) {
       const s = search.toLowerCase()
-      if (!u.email.toLowerCase().includes(s) && !(u.metadata.full_name as string || "").toLowerCase().includes(s) && !u.id.includes(s)) {
+      const fullName = u.metadata["full_name"]
+      const name = typeof fullName === "string" ? fullName : ""
+      if (!u.email.toLowerCase().includes(s) && !name.toLowerCase().includes(s) && !u.id.includes(s)) {
         return false
       }
     }
@@ -643,7 +703,7 @@ export function AuthManagement(): React.ReactElement {
     const user = users.find((u) => u.id === userId)
     if (!user) return
     const ban_duration = user.disabled ? "none" : "876000h"
-    await authAdminFetch(`/users/${userId}`, {
+    await authAdminFetch(`/users/${userId}`, isUnknown, {
       method: "PUT",
       body: JSON.stringify({ ban_duration }),
     })
@@ -652,13 +712,13 @@ export function AuthManagement(): React.ReactElement {
   }, [users, authAdminFetch, refetch])
 
   const handleDeleteUser = useCallback(async (userId: string) => {
-    await authAdminFetch(`/users/${userId}`, { method: "DELETE" })
+    await authAdminFetch(`/users/${userId}`, isUnknown, { method: "DELETE" })
     refetch()
     setSelectedUser(null)
   }, [authAdminFetch, refetch])
 
   const handleCreateUser = useCallback(async (data: UserFormData) => {
-    const created = (await authAdminFetch("/users", {
+    const created = await authAdminFetch("/users", isCreatedUser, {
       method: "POST",
       body: JSON.stringify({
         email: data.email,
@@ -667,7 +727,7 @@ export function AuthManagement(): React.ReactElement {
         role: data.role,
         email_confirm: data.emailConfirm ?? false,
       }),
-    })) as { id?: string }
+    })
 
     // Two calls because they are two different things: the account lives in `auth.users`, the
     // Studio grant lives in `_supatype.studio_members`, and only the first is the auth service’s to create.
@@ -682,17 +742,17 @@ export function AuthManagement(): React.ReactElement {
   }, [authAdminFetch, refetch, studioMembers])
 
   const handleConfirmEmail = useCallback(async (userId: string) => {
-    const updated = (await authAdminFetch(`/users/${encodeURIComponent(userId)}`, {
+    const updated = await authAdminFetch(`/users/${encodeURIComponent(userId)}`, isAuthUserResponse, {
       method: "PUT",
       body: JSON.stringify({ email_confirm: true }),
-    })) as AuthUserResponse
+    })
     setSelectedUser(mapAuthUser(updated))
     refetch()
   }, [authAdminFetch, refetch])
 
   const handleEditUser = useCallback(async (data: UserFormData) => {
     if (!editingUser) return
-    await authAdminFetch(`/users/${editingUser.id}`, {
+    await authAdminFetch(`/users/${editingUser.id}`, isUnknown, {
       method: "PUT",
       body: JSON.stringify({
         email: data.email,
@@ -711,7 +771,7 @@ export function AuthManagement(): React.ReactElement {
   // Referer: the server takes one as the link's redirect, which landed the invitee on this Studio
   // page. Without it the link goes to the project's site URL, the app.
   const handleInviteUser = useCallback(async (email: string) => {
-    await authFetch("/invite", {
+    await authFetch("/invite", isUnknown, {
       method: "POST",
       body: JSON.stringify({ email }),
       referrerPolicy: "no-referrer",
@@ -721,7 +781,7 @@ export function AuthManagement(): React.ReactElement {
   }, [authFetch, refetch])
 
   const handleRevokeSession = useCallback(async (sessionId: string) => {
-    await authAdminFetch(`/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" })
+    await authAdminFetch(`/sessions/${encodeURIComponent(sessionId)}`, isUnknown, { method: "DELETE" })
     refetchSessions()
   }, [authAdminFetch, refetchSessions])
 

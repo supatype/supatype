@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   fetchRecordStates,
   publishableLocales,
@@ -11,6 +11,7 @@ import {
   type RecordVersion,
 } from "../src/lib/publishing.js"
 import type { ModelVersionsConfig } from "../src/config.js"
+import { testClient, testModel } from "./support.js"
 
 // What the editor shows about a record is derived from its version rows rather than stored, because
 // a stored answer is a second source of truth about publication and the rows already say it exactly.
@@ -140,19 +141,18 @@ describe("what the history says about a record", () => {
 })
 
 describe("what a list says each record is", () => {
-  const model = {
-    tableName: "posts",
-    primaryKey: "id",
+  const model = testModel({
     versions: versions({ versionsTable: "posts_versions", localizedColumns: ["body"] }),
-  } as unknown as Parameters<typeof fetchRecordStates>[1]
+  })
 
-  function clientReturning(rows: unknown[]): Parameters<typeof fetchRecordStates>[0] {
-    const chain = {
-      select: () => chain,
-      in: () => chain,
-      order: () => Promise.resolve({ data: rows, error: null }),
-    }
-    return { from: () => chain } as unknown as Parameters<typeof fetchRecordStates>[0]
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  /** A real client whose version query is answered with `rows`, as PostgREST would. */
+  function clientReturning(rows: unknown[]): ReturnType<typeof testClient> {
+    vi.stubGlobal("fetch", async () => Response.json(rows))
+    return testClient({ url: "http://localhost:8000" })
   }
 
   const LIVE = "2026-09-05T09:00:00Z"
@@ -203,21 +203,17 @@ describe("what a list says each record is", () => {
 
   it("asks nothing of the server when there is nothing to ask about", async () => {
     // A list of fifty records should cost one request; an empty page should cost none.
-    let called = false
-    const client = {
-      from: () => {
-        called = true
-        return { select: () => ({ in: () => ({ order: () => Promise.resolve({ data: [], error: null }) }) }) }
-      },
-    } as unknown as Parameters<typeof fetchRecordStates>[0]
+    const sent = vi.fn(async () => Response.json([]))
+    vi.stubGlobal("fetch", sent)
+    const client = testClient({ url: "http://localhost:8000" })
     expect((await fetchRecordStates(client, model, [], ["en"])).size).toBe(0)
-    expect(called).toBe(false)
+    expect(sent).not.toHaveBeenCalled()
   })
 })
 
 describe("the state a shut publishing section stands for", () => {
   function state(locales: Record<string, LocaleState>): PublishingState {
-    return { locales, newest: null } as unknown as PublishingState
+    return { versions: [], newest: null, hasPendingDraft: false, locales }
   }
 
   // It returns a state rather than a label. The words live in one table beside the badge that
@@ -255,7 +251,7 @@ describe("the state a shut publishing section stands for", () => {
 
 describe("partly published", () => {
   function state(locales: Record<string, LocaleState>): PublishingState {
-    return { locales, newest: null } as unknown as PublishingState
+    return { versions: [], newest: null, hasPendingDraft: false, locales }
   }
 
   it("outranks every other state, because every other word hides it", () => {

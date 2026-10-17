@@ -223,7 +223,7 @@ export function MediaLibrary(): React.ReactElement {
             {filteredFiles.map((file) => (
               <tr key={file.name}>
                 <td>{file.name.split("/").pop()}</td>
-                <td>{file.metadata?.["mimetype"] as string ?? "-"}</td>
+                <td>{String(file.metadata?.["mimetype"] ?? "-")}</td>
                 <td>{file.updated_at ? new Date(file.updated_at).toLocaleDateString() : "-"}</td>
                 <td>
                   <button

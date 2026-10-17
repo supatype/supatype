@@ -532,7 +532,10 @@ function SdkContent({ framework, setFramework, variant, setVariant }: SdkContent
           <label className="text-xs text-muted-foreground font-medium">Framework</label>
           <Select
             value={framework}
-            onChange={e => setFramework(e.target.value as Framework)}
+            onChange={e => {
+              const next = FRAMEWORKS.find(f => f.id === e.target.value)
+              if (next) setFramework(next.id)
+            }}
             className="w-full"
           >
             {FRAMEWORKS.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
@@ -543,7 +546,10 @@ function SdkContent({ framework, setFramework, variant, setVariant }: SdkContent
             <label className="text-xs text-muted-foreground font-medium">Variant</label>
             <Select
               value={variant}
-              onChange={e => setVariant(e.target.value as NextVariant)}
+              onChange={e => {
+                const next = NEXT_VARIANTS.find(v => v.id === e.target.value)
+                if (next) setVariant(next.id)
+              }}
               className="w-full"
             >
               {NEXT_VARIANTS.map(v => <option key={v.id} value={v.id}>{v.label}</option>)}

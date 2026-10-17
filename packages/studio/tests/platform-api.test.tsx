@@ -2,19 +2,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import React, { act } from "react"
 import { createRoot } from "react-dom/client"
-import type { SupatypeClient } from "@supatype/client"
 import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { PlatformCtx, type PlatformContext } from "../src/hooks/usePlatform.js"
 import { usePlatformApi, type PlatformApi } from "../src/hooks/usePlatformApi.js"
+import { testClient } from "./support.js"
 
 // ST-1: Studio reaches the project's control plane the same way in both modes. Self-host goes
 // through the Studio proxy with the session in the Authorization header, and asks once which
 // project it serves; Cloud uses the platform URL it was given, with the session cookie.
 
-const SELF_HOST_CLIENT = {
-  url: "http://localhost:8000/studio/proxy",
-  auth: { currentAccessToken: "studio-session-token" },
-} as unknown as SupatypeClient
+const SELF_HOST_CLIENT = testClient({ url: "http://localhost:8000/studio/proxy", token: "studio-session-token" })
 
 interface Call {
   url: string
@@ -28,7 +25,7 @@ function respond(url: string): Response {
 }
 
 beforeEach(() => {
-  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true
   calls.length = 0
   vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
     calls.push({ url, init })

@@ -1,5 +1,16 @@
 import { DRAFT_SCHEMA, type SupatypeClient } from "@supatype/client"
 import type { ModelConfig, ModelVersionsConfig } from "../config.js"
+import {
+  isJsonObject,
+  isNumber,
+  isOneOf,
+  isRecordOf,
+  isShape,
+  isString,
+  isUnknown,
+  nullable,
+  type Guard,
+} from "./json.js"
 
 /**
  * The publishing operations, as calls rather than as SQL.
@@ -33,6 +44,34 @@ export interface RecordVersion {
   /** Locales this version is due to go live for, mapped to when. */
   scheduled_locales: Record<string, string>
 }
+
+const isLocaleTimes = isRecordOf(isString)
+
+/** A row of the snapshot table, as the engine's versions DDL declares it. */
+const isRecordVersion: Guard<RecordVersion> = isShape({
+  id: isString,
+  version: isNumber,
+  status: isOneOf(["draft", "published"] as const),
+  created_at: isString,
+  created_by: nullable(isString),
+  data: isJsonObject,
+  published_locales: isLocaleTimes,
+  scheduled_locales: isLocaleTimes,
+})
+
+/**
+ * The columns a list's state query selects. Only the ones the derivation reads: selecting `data` for
+ * every version of every row on screen would pull the whole table through the list.
+ */
+const isStateRow = isShape({
+  record_id: isUnknown,
+  version: isNumber,
+  published_locales: nullable(isLocaleTimes),
+  scheduled_locales: nullable(isLocaleTimes),
+})
+
+/** The part of a version that says where it is published, which is all the per-locale derivation reads. */
+type VersionPublication = Pick<RecordVersion, "version" | "published_locales" | "scheduled_locales">
 
 /** What a record's history says about one locale. */
 export type LocaleState = "live" | "pending" | "scheduled" | "absent"
@@ -79,13 +118,13 @@ export async function fetchVersions(
   if (versions === null) return []
 
   const result = await client
-    .from(versions.versionsTable as never)
+    .from(versions.versionsTable)
     .select("id, version, status, created_at, created_by, data, published_locales, scheduled_locales")
     .eq("record_id", recordId)
     .order("version", { ascending: false })
 
   if (result.error !== null || result.data === null) return []
-  return result.data as unknown as RecordVersion[]
+  return result.data.filter(isRecordVersion)
 }
 
 /**
@@ -103,6 +142,17 @@ export function publishingState(
   locales: string[],
 ): PublishingState {
   const newest = versions[0] ?? null
+  return {
+    versions,
+    newest,
+    hasPendingDraft: newest !== null && Object.keys(newest.published_locales).length === 0,
+    locales: localeStates(versions, locales),
+  }
+}
+
+/** Each locale's state, from a history ordered newest first. */
+function localeStates(versions: readonly VersionPublication[], locales: string[]): Record<string, LocaleState> {
+  const newest = versions[0] ?? null
   const states: Record<string, LocaleState> = {}
 
   for (const locale of locales) {
@@ -117,13 +167,7 @@ export function publishingState(
     }
     states[locale] = "live"
   }
-
-  return {
-    versions,
-    newest,
-    hasPendingDraft: newest !== null && Object.keys(newest.published_locales).length === 0,
-    locales: states,
-  }
+  return states
 }
 
 /** Read the pending draft's values, which is what an editor opens. */
@@ -133,14 +177,14 @@ export async function fetchDraft(
   recordId: string,
 ): Promise<Record<string, unknown> | null> {
   const result = await client
-    .from(model.tableName as never)
+    .from(model.tableName)
     .draft()
     .select()
     .eq(model.primaryKey, recordId)
     .maybeSingle()
 
   if (result.error !== null) return null
-  return (result.data as Record<string, unknown> | null) ?? null
+  return isJsonObject(result.data) ? result.data : null
 }
 
 /**
@@ -169,7 +213,7 @@ export type RecordState = LocaleState | "partial"
  * list must not reach it through a vacuous `every`.
  */
 export function publishingSummary(
-  state: PublishingState | null,
+  state: Pick<PublishingState, "locales"> | null,
   locales: string[],
 ): RecordState {
   const states = locales.map((locale) => state?.locales[locale] ?? "absent")
@@ -209,7 +253,7 @@ async function call(
   fn: string,
   params: Record<string, unknown>,
 ): Promise<{ error: string | null }> {
-  const result = await client.rpc(fn as never, params as never, { schema: RPC_SCHEMA })
+  const result = await client.rpc(fn, params, { schema: RPC_SCHEMA })
   return { error: result.error?.message ?? null }
 }
 
@@ -335,7 +379,7 @@ export async function fetchRecordForEditing(
   }
 
   const result = await client
-    .from(model.tableName as never)
+    .from(model.tableName)
     .select()
     .eq(model.primaryKey, recordId)
     .single()
@@ -344,9 +388,9 @@ export async function fetchRecordForEditing(
     return { values: null, fromDraft: false, error: result.error.message }
   }
   // A proxy may drop `Accept: object+json` and answer with a one-row array.
-  const raw = result.data as unknown
-  const row = (Array.isArray(raw) ? raw[0] : raw) as Record<string, unknown> | undefined
-  if (row === undefined || typeof row !== "object") {
+  const raw: unknown = result.data
+  const row = Array.isArray(raw) ? raw[0] : raw
+  if (!isJsonObject(row)) {
     return { values: null, fromDraft: false, error: "Record not found" }
   }
   return { values: row, fromDraft: false, error: null }
@@ -375,31 +419,22 @@ export async function fetchRecordStates(
   if (versions === null || !versions.drafts || recordIds.length === 0) return new Map()
 
   const result = await client
-    .from(versions.versionsTable as never)
+    .from(versions.versionsTable)
     .select("record_id, version, published_locales, scheduled_locales")
     .in("record_id", recordIds)
     .order("version", { ascending: false })
 
   if (result.error !== null || result.data === null) return new Map()
 
-  // Only the columns the derivation reads. Selecting `data` for every version of every row on
-  // screen would pull the whole table through the list.
-  type StateRow = {
-    record_id: string
-    version: number
-    published_locales: Record<string, string> | null
-    scheduled_locales: Record<string, string> | null
-  }
-
-  const rows = new Map<string, RecordVersion[]>()
-  for (const raw of result.data as unknown as StateRow[]) {
+  const rows = new Map<string, VersionPublication[]>()
+  for (const raw of result.data.filter(isStateRow)) {
     const id = String(raw.record_id)
     const list = rows.get(id) ?? []
     list.push({
       version: raw.version,
       published_locales: raw.published_locales ?? {},
       scheduled_locales: raw.scheduled_locales ?? {},
-    } as RecordVersion)
+    })
     rows.set(id, list)
   }
 
@@ -407,7 +442,7 @@ export async function fetchRecordStates(
   for (const [id, list] of rows) {
     // Reuses the per-locale derivation rather than repeating it, so a list badge and the editor's
     // own badge cannot disagree about the same record.
-    states.set(id, publishingSummary(publishingState(list, locales), locales))
+    states.set(id, publishingSummary({ locales: localeStates(list, locales) }, locales))
   }
   return states
 }

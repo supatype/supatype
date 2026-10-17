@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest"
 import { renderToStaticMarkup } from "react-dom/server"
 import React from "react"
 import { MemoryRouter } from "react-router-dom"
-import type { SupatypeClient } from "@supatype/client"
 import { SecondaryPanel } from "../src/components/SecondaryPanel.js"
 import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { PlatformCtx, type PlatformContext } from "../src/hooks/usePlatform.js"
+import { testClient } from "./support.js"
 
 /**
  * Replication, Warehouse, Backups, SSO, AI Usage and the Realtime Inspector and its settings are
@@ -20,7 +20,7 @@ const SELF_HOST: PlatformContext = { platformUrl: undefined, projectRef: undefin
 const CLOUD: PlatformContext = { platformUrl: "https://api.example.test", projectRef: "abc123" }
 
 function panel(path: string, platform: PlatformContext): string {
-  const client = { url: "http://localhost:8000" } as unknown as SupatypeClient
+  const client = testClient({ url: "http://localhost:8000" })
   return renderToStaticMarkup(
     React.createElement(
       MemoryRouter,

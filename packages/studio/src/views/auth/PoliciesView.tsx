@@ -8,6 +8,7 @@ import { useApiQuery } from "../../hooks/useApiQuery.js"
 import { Badge, Button, Card } from "../../components/ui.js"
 import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
+import { isJsonObject } from "../../lib/json.js"
 
 /** Match server-side identifier rules so schema hints stay safe in SQL text. */
 function safeSchemaName(schema: string): string {
@@ -30,8 +31,7 @@ function rowText(row: Record<string, unknown>, ...keys: string[]): string {
 }
 
 function normalizePolicyRows(raw: unknown): Record<string, unknown>[] {
-  if (Array.isArray(raw)) return raw as Record<string, unknown>[]
-  return []
+  return Array.isArray(raw) ? raw.filter(isJsonObject) : []
 }
 
 function describeAppliesTo(row: Record<string, unknown>): string {
@@ -118,7 +118,7 @@ export function PoliciesView(): React.ReactElement {
       setCreateModal(false)
       refetch()
     } catch (e) {
-      setRunError((e as Error).message)
+      setRunError(e instanceof Error ? e.message : String(e))
     } finally {
       setRunBusy(false)
     }

@@ -36,7 +36,7 @@ let container: HTMLDivElement
 let root: Root
 
 beforeEach(() => {
-  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true
   vi.useFakeTimers()
   pending.length = 0
   proxy.metadata.mockClear()

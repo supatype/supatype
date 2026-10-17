@@ -8,7 +8,23 @@ import type { DashboardBlock, ModelConfig } from "../config.js"
 import { DASHBOARD_VIEW_LIMITS } from "../config.js"
 import { JumpToSearch } from "../components/JumpToSearch.js"
 import { studioRestHeaders } from "../lib/studio-auth-headers.js"
+import { type Guard, isArrayOf, isNumber, isShape, isString, isUnknown, nullable, optional, readJson } from "../lib/json.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
+
+// ─── Response bodies ──────────────────────────────────────────────────────────
+
+/** The auth admin user list: a count when the server gives one, else the page of users. */
+const isUserCountBody = isShape({ total: optional(nullable(isNumber)), users: optional(isUnknown) })
+
+function userCount(body: { total?: number | null; users?: unknown }): number {
+  return body.total ?? (Array.isArray(body.users) ? body.users.length : 0)
+}
+
+/** `storage_stats()`: `RETURNS TABLE(file_count BIGINT, total_bytes BIGINT)`, both never null. */
+const isStorageStats = isArrayOf(isShape({ file_count: isNumber, total_bytes: isNumber }))
+
+/** `db_stats()`: `RETURNS TABLE(db_size_bytes BIGINT, db_size_pretty TEXT)`. */
+const isDbStats = isArrayOf(isShape({ db_size_bytes: isNumber, db_size_pretty: isString }))
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
@@ -315,11 +331,12 @@ function RecentBlock({ block }: { block: DashboardBlock }): React.ReactElement {
   const modelConfig = config.models.find((m) => m.tableName === block.model)
 
   useEffect(() => {
-    if (!block.model) return
+    const model = block.model
+    if (!model) return
     void (async () => {
       try {
         const result = await client
-          .from(block.model as never)
+          .from(model)
           .select()
           .order("created_at", { ascending: false })
           .limit(5)
@@ -380,12 +397,10 @@ function AuthBlock(): React.ReactElement {
         ])
 
         if (totalRes.ok) {
-          const data = await totalRes.json() as { total?: number; users?: unknown[] }
-          setTotal(data.total ?? (Array.isArray(data.users) ? data.users.length : 0))
+          setTotal(userCount(await readJson(totalRes, isUserCountBody)))
         }
         if (weekRes.ok) {
-          const data = await weekRes.json() as { total?: number; users?: unknown[] }
-          setNewThisWeek(data.total ?? (Array.isArray(data.users) ? data.users.length : 0))
+          setNewThisWeek(userCount(await readJson(weekRes, isUserCountBody)))
         }
       } catch {
         setTotal(0)
@@ -424,7 +439,7 @@ function StorageBlock(): React.ReactElement {
           body: "{}",
         })
         if (res.ok) {
-          const rows = await res.json() as Array<{ file_count: number; total_bytes: number }>
+          const rows = await readJson(res, isStorageStats)
           if (rows[0]) { setFileCount(rows[0].file_count); setSizeBytes(rows[0].total_bytes) }
         }
       } catch {
@@ -483,6 +498,9 @@ function QuickActionsBlock(): React.ReactElement {
 
 type DailyRow = { day: string; count: number }
 
+/** `daily_signups` and `daily_content_creates`: `RETURNS TABLE(day DATE, count INT)`. */
+const isDailyRows: Guard<DailyRow[]> = isArrayOf(isShape({ day: isString, count: isNumber }))
+
 function SignupsChartBlock(): React.ReactElement {
   const client = useAdminClient()
   const [data, setData] = useState<DailyRow[]>([])
@@ -494,7 +512,7 @@ function SignupsChartBlock(): React.ReactElement {
           `${client.url}/rest/v1/rpc/daily_signups?days=30`,
           { headers: studioRestHeaders(client, { "Accept-Profile": "supatype" }) },
         )
-        if (res.ok) setData((await res.json()) as DailyRow[])
+        if (res.ok) setData(await readJson(res, isDailyRows))
       } catch { /* leave empty */ }
     })()
   }, [client])
@@ -551,7 +569,7 @@ function DbSizeBlock(): React.ReactElement {
           },
         )
         if (res.ok) {
-          const rows = await res.json() as Array<{ db_size_bytes: number; db_size_pretty: string }>
+          const rows = await readJson(res, isDbStats)
           if (rows[0]) { setSizeBytes(rows[0].db_size_bytes); setSizePretty(rows[0].db_size_pretty) }
         }
       } catch { /* leave empty */ }
@@ -592,7 +610,7 @@ function ContentChartBlock({ block }: { block: DashboardBlock }): React.ReactEle
             body: JSON.stringify({ table_name: model, days: 30 }),
           },
         )
-        if (res.ok) setData((await res.json()) as DailyRow[])
+        if (res.ok) setData(await readJson(res, isDailyRows))
       } catch { /* leave empty */ }
     })()
   }, [client, model])

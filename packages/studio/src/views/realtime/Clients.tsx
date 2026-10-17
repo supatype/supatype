@@ -2,6 +2,7 @@ import React from "react"
 import { Badge, Card, Td, Th } from "../../components/ui.js"
 import { EmptyState } from "../../components/EmptyState.js"
 import { useInspectorResource } from "../../hooks/useInspectorResource.js"
+import { isConnectionsData } from "../../lib/realtime-guards.js"
 import type { InspectorTabProps } from "./InspectorTab.js"
 import { InspectorFailureView, When } from "./shared.js"
 import type { ConnectionSummary, ConnectionsData } from "./types.js"
@@ -64,7 +65,7 @@ export function ClientsTable({ data }: { data: ConnectionsData }): React.ReactEl
 }
 
 export function Clients({ api }: InspectorTabProps): React.ReactElement {
-  const { data, failure, loading, refresh } = useInspectorResource<ConnectionsData>(api.fetch, "realtime/connections?limit=100", REFRESH_MS)
+  const { data, failure, loading, refresh } = useInspectorResource(api.fetch, "realtime/connections?limit=100", REFRESH_MS, isConnectionsData)
   if (failure && data === null) return <InspectorFailureView failure={failure} mode={api.mode} onRetry={refresh} />
   if (loading || data === null) return <p className="text-sm text-muted-foreground py-6">Loading clients…</p>
   return <ClientsTable data={data} />

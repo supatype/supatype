@@ -7,6 +7,7 @@ import { useStudioClient } from "../StudioCore.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import type { AdminConfig } from "../config.js"
 import { cn } from "../lib/utils.js"
+import { isJsonObject, isShape, isString, type Guard } from "../lib/json.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { Button, NAV_RAIL } from "./ui.js"
 import { useInspectorAvailability, type InspectorAvailability } from "../hooks/useInspectorAvailability.js"
@@ -40,6 +41,7 @@ type SectionDef = { title: string; groups: NavGroup[] }
 interface FunctionMeta {
   name: string
 }
+const isFunctionMeta: Guard<FunctionMeta> = isShape({ name: isString })
 interface StorageBucketMeta {
   id: string
   name: string
@@ -323,8 +325,9 @@ export function SecondaryPanel({
       if (sectionId !== "functions") return []
       const res = await adminFetch("/list")
       if (!res.ok) return []
-      const json = await res.json() as { data: FunctionMeta[] }
-      return json.data ?? []
+      const json = await res.json()
+      const data = isJsonObject(json) ? json["data"] : undefined
+      return Array.isArray(data) ? data.filter(isFunctionMeta) : []
     },
     [sectionId, adminFetch],
   )

@@ -1,9 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
-import { membershipBase } from "../lib/membership-url.js"
-import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
-import { studioGatewayHeaders } from "../lib/studio-gateway-headers.js"
+import { useCallback, useEffect, useState } from "react"
+import { isBoolean, isJsonObject, isRecordOf, isUnknown } from "../lib/json.js"
+import { membershipRequest, type MembershipInit } from "../lib/membership-request.js"
 import { useAdminClient } from "./useAdminClient.js"
-import { readJsonObject } from "../lib/json.js"
 
 /** Who may use Studio for this project, and with what capability set. */
 export interface StudioMember {
@@ -56,33 +54,6 @@ export function useStudioMembers(): UseStudioMembersReturn {
   const [error, setError] = useState<string | null>(null)
   const [generation, setGeneration] = useState(0)
 
-  const base = useMemo(() => membershipBase(client.url), [client.url])
-
-  const request = useCallback(
-    async (path: string, init?: RequestInit): Promise<unknown> => {
-      const res = await fetch(`${base}${path}`, {
-        ...init,
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          ...studioGatewayHeaders(),
-          ...studioAuthHeaders(client),
-          ...init?.headers,
-        },
-      })
-      const json = await readJsonObject(res)
-      if (!res.ok) {
-        throw new Error(
-          (json["message"] as string | undefined) ??
-            (json["error"] as string | undefined) ??
-            `Request failed (${res.status})`,
-        )
-      }
-      return json
-    },
-    [base, client],
-  )
-
   useEffect(() => {
     let cancelled = false
     setLoading(true)
@@ -91,8 +62,8 @@ export function useStudioMembers(): UseStudioMembersReturn {
     void (async () => {
       try {
         const [memberBody, roleBody] = await Promise.all([
-          request("/studio-members"),
-          request("/studio-roles"),
+          membershipRequest(client, "/studio-members", isJsonObject),
+          membershipRequest(client, "/studio-roles", isJsonObject),
         ])
         if (cancelled) return
         setMembers(readMembers(memberBody))
@@ -108,7 +79,7 @@ export function useStudioMembers(): UseStudioMembersReturn {
     return () => {
       cancelled = true
     }
-  }, [request, generation])
+  }, [client, generation])
 
   const refresh = useCallback(() => setGeneration((g) => g + 1), [])
 
@@ -116,10 +87,11 @@ export function useStudioMembers(): UseStudioMembersReturn {
   // something other than what was asked (or nothing at all), and the membership
   // list is small.
   const mutate = useCallback(
-    async (path: string, init: RequestInit): Promise<boolean> => {
+    async (path: string, init: MembershipInit): Promise<boolean> => {
       setError(null)
       try {
-        await request(path, init)
+        // The answer is not read: the refetch below is what the list shows.
+        await membershipRequest(client, path, isUnknown, init)
         refresh()
         return true
       } catch (err) {
@@ -127,15 +99,12 @@ export function useStudioMembers(): UseStudioMembersReturn {
         return false
       }
     },
-    [request, refresh],
+    [client, refresh],
   )
 
   const setRole = useCallback(
     (userId: string, role: string) =>
-      mutate(`/studio-members/${encodeURIComponent(userId)}`, {
-        method: "PATCH",
-        body: JSON.stringify({ role }),
-      }),
+      mutate(`/studio-members/${encodeURIComponent(userId)}`, { method: "PATCH", body: { role } }),
     [mutate],
   )
 
@@ -167,11 +136,13 @@ function readMembers(body: unknown): StudioMember[] {
 
 function readRoles(body: unknown): StudioRoleInfo[] {
   const rows = pickArray(body, "roles")
-  return rows.map((row) => ({
-    role: String(row["role"] ?? ""),
-    permissions: (row["permissions"] as Record<string, boolean> | undefined) ?? {},
-  }))
+  return rows.map((row) => {
+    const permissions = row["permissions"]
+    return { role: String(row["role"] ?? ""), permissions: isPermissionMap(permissions) ? permissions : {} }
+  })
 }
+
+const isPermissionMap = isRecordOf(isBoolean)
 
 /**
  * Both hosts answer with the same shape under different wrappers, self-host
@@ -179,17 +150,14 @@ function readRoles(body: unknown): StudioRoleInfo[] {
  * and the cloud role catalogue is a plain string array.
  */
 function pickArray(body: unknown, key: string): Record<string, unknown>[] {
-  if (body === null || typeof body !== "object") return []
-  const record = body as Record<string, unknown>
-  const candidate = record[key] ?? record["data"]
+  if (!isJsonObject(body)) return []
+  const candidate = body[key] ?? body["data"]
 
   if (Array.isArray(candidate)) {
-    return candidate.map((entry) =>
-      typeof entry === "string" ? { role: entry } : (entry as Record<string, unknown>),
-    )
+    return candidate.flatMap((entry) => {
+      if (typeof entry === "string") return [{ role: entry }]
+      return isJsonObject(entry) ? [entry] : []
+    })
   }
-  if (candidate !== null && typeof candidate === "object") {
-    return pickArray(candidate, key)
-  }
-  return []
+  return pickArray(candidate, key)
 }

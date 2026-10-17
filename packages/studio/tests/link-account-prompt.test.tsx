@@ -2,10 +2,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import React, { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
-import type { SupatypeClient } from "@supatype/client"
 import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { ElevatedNoticeProvider, useShowsProjectRows } from "../src/components/ElevatedModeBanner.js"
 import { LinkAccountPrompt } from "../src/components/LinkAccountPrompt.js"
+import { elementOf, testClient } from "./support.js"
 
 /**
  * WP14 (RD2, RL2): on Cloud a Studio member acts as their linked project user, and a member with no
@@ -15,7 +15,7 @@ import { LinkAccountPrompt } from "../src/components/LinkAccountPrompt.js"
  */
 
 const PROXY = "https://api.example.test/api/v1/projects/abc/proxy"
-const CLIENT = { url: PROXY, auth: { currentAccessToken: "platform-token" } } as unknown as SupatypeClient
+const CLIENT = testClient({ url: PROXY, token: "platform-token" })
 
 interface Verify {
   mode: "self" | "elevated"
@@ -61,7 +61,7 @@ async function render(verify: Verify, onLinked = vi.fn()): Promise<typeof onLink
 }
 
 function field(name: string): HTMLInputElement {
-  return container.querySelector(`input[name="${name}"]`) as HTMLInputElement
+  return elementOf(container, `input[name="${name}"]`, HTMLInputElement)
 }
 
 function type(input: HTMLInputElement, value: string): void {

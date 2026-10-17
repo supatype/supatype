@@ -64,8 +64,9 @@ function exampleForField(f: FieldConfig): string {
     case "date": return "2026-01-15"
     case "json": case "blocks": return "{}"
     case "select": {
-      const values = (f.options?.["values"] as string[] | undefined)
-      return values?.[0] ?? "value"
+      const values = f.options?.["values"]
+      const first: unknown = Array.isArray(values) ? values[0] : undefined
+      return typeof first === "string" ? first : "value"
     }
     default: return `example_${f.name}`
   }

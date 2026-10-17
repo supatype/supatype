@@ -32,7 +32,7 @@ export function GlobalEditView({ global: globalConfig }: GlobalEditViewProps): R
       setLoading(true)
       try {
         const result = await client
-          .from(globalConfig.tableName as never)
+          .from(globalConfig.tableName)
           .select()
           .limit(1)
           .single()
@@ -69,8 +69,8 @@ export function GlobalEditView({ global: globalConfig }: GlobalEditViewProps): R
     setError(null)
     try {
       const result = await client
-        .from(globalConfig.tableName as never)
-        .upsert(values as never)
+        .from(globalConfig.tableName)
+        .upsert(values)
 
       if (result.error) {
         setError(result.error.message)

@@ -7,6 +7,7 @@ import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 import { SlidePanel } from "../../components/SlidePanel.js"
 import { INDEX_KINDS, isOwned, useOwnedObjects } from "../../lib/owned-objects.js"
+import { cellText, cellTextOrNull } from "../metadata-row.js"
 
 /**
  * Every index the database holds, whether or not Supatype declared it.
@@ -80,7 +81,7 @@ export function IndexesView(): React.ReactElement {
                     onClick={() => setSelected(row)}
                   >
                     <Td className="px-4 py-3 font-mono">
-                      {row["index_name"] as string}
+                      {cellText(row, "index_name")}
                       {/* Says who owns it. An index without this badge is one a push will not
                           maintain and will not drop, which is worth knowing before editing it. */}
                       {isOwned(owned, INDEX_KINDS, row["table_name"], row["index_name"], row["comment"]) && (
@@ -90,14 +91,14 @@ export function IndexesView(): React.ReactElement {
                       )}
                     </Td>
                     <Td className="px-4 py-3 text-muted-foreground text-xs font-mono">
-                      {row["table_name"] as string}
+                      {cellText(row, "table_name")}
                     </Td>
                     <Td className="px-4 py-3 text-muted-foreground text-xs font-mono">
-                      {(row["columns"] as string) ?? "-"}
+                      {cellTextOrNull(row, "columns") ?? "-"}
                     </Td>
                     <Td className="px-4 py-3">
                       <span className="text-xs text-muted-foreground uppercase">
-                        {row["method"] as string}
+                        {cellText(row, "method")}
                       </span>
                       {row["is_primary"] === true && (
                         <Badge variant="indigo" className="ml-2">
@@ -111,7 +112,7 @@ export function IndexesView(): React.ReactElement {
                       )}
                     </Td>
                     <Td className="px-4 py-3 text-xs text-muted-foreground">
-                      {row["size"] as string}
+                      {cellText(row, "size")}
                     </Td>
                   </tr>
                 ))}
@@ -124,11 +125,11 @@ export function IndexesView(): React.ReactElement {
       <SlidePanel
         open={selected !== null}
         onClose={() => setSelected(null)}
-        title={(selected?.["index_name"] as string) ?? ""}
-        subtitle={selected ? `on ${selected["table_name"] as string}` : undefined}
+        title={selected ? cellText(selected, "index_name") : ""}
+        subtitle={selected ? `on ${cellText(selected, "table_name")}` : undefined}
         width="max-w-[540px]"
       >
-        {selected && <CodeBlock>{(selected["definition"] as string) ?? ""}</CodeBlock>}
+        {selected && <CodeBlock>{cellText(selected, "definition")}</CodeBlock>}
       </SlidePanel>
     </div>
   )

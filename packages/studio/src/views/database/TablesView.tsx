@@ -10,6 +10,7 @@ import { Button, Card } from "../../components/ui.js"
 import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 import { SlidePanel } from "../../components/SlidePanel.js"
+import { cellNumber, cellText, cellTextOrNull } from "../metadata-row.js"
 
 function formatBytes(b: number): string {
   if (b < 1024) return `${b} B`
@@ -66,7 +67,7 @@ export function TablesView(): React.ReactElement {
       setSqlModal(null)
       refetch()
     } catch (e) {
-      setRunError((e as Error).message)
+      setRunError(e instanceof Error ? e.message : String(e))
     } finally {
       setRunBusy(false)
     }
@@ -120,17 +121,17 @@ export function TablesView(): React.ReactElement {
             <tbody>
               {tables?.map((row) => (
                 <tr
-                  key={row["table_name"] as string}
+                  key={cellText(row, "table_name")}
                   className="border-b border-border last:border-0 hover:bg-muted/20 cursor-pointer"
-                  onClick={() => setSelectedTable(row["table_name"] as string)}
+                  onClick={() => setSelectedTable(cellText(row, "table_name"))}
                 >
-                  <td className="px-4 py-3 font-mono text-sm text-foreground">{row["table_name"] as string}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{(row["row_estimate"] as number).toLocaleString()}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{formatBytes(row["bytes"] as number)}</td>
+                  <td className="px-4 py-3 font-mono text-sm text-foreground">{cellText(row, "table_name")}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{cellNumber(row, "row_estimate").toLocaleString()}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{formatBytes(cellNumber(row, "bytes"))}</td>
                   <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                     <span className="flex items-center justify-end gap-3">
-                      <button type="button" className="text-xs text-primary hover:underline" onClick={() => navigate(browseDataPath(row["table_name"] as string))}>Browse data</button>
-                      {sqlWrites ? (<button type="button" className="text-xs text-destructive hover:underline" onClick={() => { setSqlText(`DROP TABLE ${schema}.${row["table_name"] as string};`); setSqlModal({ mode: "drop", table: row["table_name"] as string }) }}>Drop</button>) : null}
+                      <button type="button" className="text-xs text-primary hover:underline" onClick={() => navigate(browseDataPath(cellText(row, "table_name")))}>Browse data</button>
+                      {sqlWrites ? (<button type="button" className="text-xs text-destructive hover:underline" onClick={() => { setSqlText(`DROP TABLE ${schema}.${cellText(row, "table_name")};`); setSqlModal({ mode: "drop", table: cellText(row, "table_name") }) }}>Drop</button>) : null}
                     </span>
                   </td>
                 </tr>
@@ -159,11 +160,11 @@ export function TablesView(): React.ReactElement {
           </thead>
           <tbody>
             {(columns ?? []).map((col) => (
-              <tr key={col["column_name"] as string} className="border-b border-border last:border-0">
-                <td className="py-2 font-mono text-xs text-foreground">{col["column_name"] as string}</td>
-                <td className="py-2 text-xs text-muted-foreground">{col["udt_name"] as string}</td>
+              <tr key={cellText(col, "column_name")} className="border-b border-border last:border-0">
+                <td className="py-2 font-mono text-xs text-foreground">{cellText(col, "column_name")}</td>
+                <td className="py-2 text-xs text-muted-foreground">{cellText(col, "udt_name")}</td>
                 <td className="py-2 text-xs">{col["is_nullable"] === "YES" ? "✓" : "-"}</td>
-                <td className="py-2 text-xs text-muted-foreground font-mono truncate max-w-[100px]">{(col["column_default"] as string | null) ?? "-"}</td>
+                <td className="py-2 text-xs text-muted-foreground font-mono truncate max-w-[100px]">{cellTextOrNull(col, "column_default") ?? "-"}</td>
               </tr>
             ))}
           </tbody>

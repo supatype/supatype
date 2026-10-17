@@ -3,11 +3,11 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import React, { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { MemoryRouter } from "react-router-dom"
-import type { SupatypeClient } from "@supatype/client"
 import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { AdminConfigContext } from "../src/hooks/useAdminConfig.js"
 import { mockConfig } from "../src/fixtures/mockConfig.js"
 import { AuthManagement } from "../src/views/AuthManagement.js"
+import { testClient } from "./support.js"
 
 /**
  * The Users view lists active sessions and revokes one through the project's auth admin API, the
@@ -17,7 +17,7 @@ import { AuthManagement } from "../src/views/AuthManagement.js"
  */
 
 const PROXY = "http://localhost:8000/studio/proxy"
-const CLIENT = { url: PROXY, auth: { currentAccessToken: "token" } } as unknown as SupatypeClient
+const CLIENT = testClient({ url: PROXY, token: "token" })
 const USER = { id: "11111111-1111-1111-1111-111111111111", email: "ada@example.com", created_at: "2026-10-01T10:00:00Z", app_metadata: {}, user_metadata: {}, identities: [] }
 const SESSION = { id: "22222222-2222-2222-2222-222222222222", user_id: USER.id, ip: "203.0.113.7", user_agent: "test-agent", created_at: "2026-10-01T10:00:00Z", updated_at: "2026-10-01T11:00:00Z", not_after: null }
 
@@ -26,7 +26,7 @@ let container: HTMLElement
 let calls: Array<{ url: string; method: string }> = []
 
 function stubFetch(): void {
-  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true
   calls = []
   vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
     calls.push({ url, method: init?.method ?? "GET" })

@@ -49,7 +49,7 @@ export function CurrencyWidget({ config, value, onChange, readOnly }: WidgetProp
           inputMode="numeric"
           placeholder="minor units, e.g. 1050"
           readOnly={readOnly}
-          onChange={(e) => onChange?.({ ...current, amount: e.target.value } as never)}
+          onChange={(e) => onChange?.({ ...current, amount: e.target.value })}
         />
         <input
           className="st-input w-24 rounded-md border border-border bg-background px-3 py-2 uppercase"
@@ -57,7 +57,7 @@ export function CurrencyWidget({ config, value, onChange, readOnly }: WidgetProp
           placeholder="GBP"
           maxLength={3}
           readOnly={readOnly}
-          onChange={(e) => onChange?.({ ...current, code: e.target.value.toUpperCase() } as never)}
+          onChange={(e) => onChange?.({ ...current, code: e.target.value.toUpperCase() })}
         />
       </div>
       <p className="st-field-hint text-xs text-muted-foreground">

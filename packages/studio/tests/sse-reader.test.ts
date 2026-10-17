@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { isNumber, isShape } from "../src/lib/json.js"
 import { parseSseEvents, readSse, sseJson, type SseEvent } from "../src/lib/sse-reader.js"
 
 // The Server-Sent Events reader Studio's live streams share. Events are named (the Realtime
@@ -38,9 +39,15 @@ describe("parseSseEvents", () => {
 })
 
 describe("sseJson", () => {
+  const isA = isShape({ a: isNumber })
+
   it("skips data that is not JSON rather than throwing", () => {
-    expect(sseJson({ event: "change", data: "{not json" })).toBeNull()
-    expect(sseJson<{ a: number }>({ event: "change", data: '{"a":1}' })).toEqual({ a: 1 })
+    expect(sseJson({ event: "change", data: "{not json" }, isA)).toBeNull()
+    expect(sseJson({ event: "change", data: '{"a":1}' }, isA)).toEqual({ a: 1 })
+  })
+
+  it("skips JSON the guard refuses", () => {
+    expect(sseJson({ event: "change", data: '{"a":"one"}' }, isA)).toBeNull()
   })
 })
 

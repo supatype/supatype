@@ -7,6 +7,18 @@ import { EmptyState } from "../components/EmptyState.js"
 import { useFunctionLogTail } from "../hooks/useFunctionLogTail.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { cn } from "../lib/utils.js"
+import {
+  type Guard,
+  isArrayOf,
+  isNumber,
+  isOneOf,
+  isShape,
+  isString,
+  nullable,
+  optional,
+  readJson,
+  readJsonObject,
+} from "../lib/json.js"
 import { studioAuthHeaders, usesSessionProxy } from "../lib/studio-auth-headers.js"
 import type { SupatypeClient } from "@supatype/client"
 
@@ -14,7 +26,8 @@ import type { SupatypeClient } from "@supatype/client"
 
 interface FunctionMeta {
   name: string
-  deployedAt: string
+  /** Absent when the runtime could not stat the function's file. */
+  deployedAt?: string | null
   invocations24h: number
   avgDurationMs: number
 }
@@ -24,6 +37,30 @@ interface LogEntry {
   level: string
   message: string
 }
+
+const isFunctionMeta: Guard<FunctionMeta> = isShape({
+  name: isString,
+  deployedAt: optional(nullable(isString)),
+  invocations24h: isNumber,
+  avgDurationMs: isNumber,
+})
+
+const isLogEntry: Guard<LogEntry> = isShape({ timestamp: isString, level: isString, message: isString })
+
+/** The functions admin API's list bodies: `{ data: [...] }`, where an empty list may be null. */
+function isDataList<T>(item: Guard<T>): Guard<{ data?: T[] | null }> {
+  return isShape({ data: optional(nullable(isArrayOf(item))) })
+}
+
+/** The admin API's refusal, in its own words when it gave any. */
+async function adminError(res: Response, fallback: string): Promise<Error> {
+  const body = await readJsonObject(res)
+  const error = body["error"]
+  return new Error(typeof error === "string" ? error : fallback)
+}
+
+const isHttpMethod = isOneOf(["GET", "POST"] as const)
+const isAuthMode = isOneOf(["none", "service_role", "custom"] as const)
 
 const BUILTIN_RUNTIME_ENV_VARS: Array<{ key: string; description: string }> = [
   { key: "SUPATYPE_URL", description: "API gateway URL for this project." },
@@ -143,7 +180,7 @@ function InvokeTab({
           <label className="text-xs text-muted-foreground">Method</label>
           <select
             value={method}
-            onChange={(e) => setMethod(e.target.value as "GET" | "POST")}
+            onChange={(e) => { const next = e.target.value; if (isHttpMethod(next)) setMethod(next) }}
             className="rounded-md border border-border bg-background px-2 py-1 text-xs"
           >
             <option value="POST">POST</option>
@@ -153,7 +190,7 @@ function InvokeTab({
           <label className="text-xs text-muted-foreground ml-3">Auth</label>
           <select
             value={authMode}
-            onChange={(e) => setAuthMode(e.target.value as "none" | "service_role" | "custom")}
+            onChange={(e) => { const next = e.target.value; if (isAuthMode(next)) setAuthMode(next) }}
             className="rounded-md border border-border bg-background px-2 py-1 text-xs"
           >
             <option value="none">None</option>
@@ -241,7 +278,7 @@ function LogsTab({
       if (tailing) return []
       const res = await adminFetch(`/${encodeURIComponent(functionName)}/logs?since=${since}`)
       if (!res.ok) return []
-      const json = (await res.json()) as { data: LogEntry[] }
+      const json = await readJson(res, isDataList(isLogEntry))
       return json.data ?? []
     },
     [functionName, since, tailing],
@@ -393,7 +430,7 @@ function EnvVarsTab({
     async () => {
       const res = await adminFetch(envBasePath)
       if (!res.ok) return []
-      const json = await res.json() as { data: string[] }
+      const json = await readJson(res, isDataList(isString))
       return json.data ?? []
     },
     [envBasePath],
@@ -411,10 +448,7 @@ function EnvVarsTab({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ key: newKey.trim(), value: newValue }),
       })
-      if (!res.ok) {
-        const json = await res.json() as { error?: string }
-        throw new Error(json.error ?? "Failed to set variable")
-      }
+      if (!res.ok) throw await adminError(res, "Failed to set variable")
       setNewKey("")
       setNewValue("")
       refetch()
@@ -428,10 +462,7 @@ function EnvVarsTab({
   const handleDelete = async (key: string) => {
     try {
       const res = await adminFetch(`${envBasePath}/${encodeURIComponent(key)}`, { method: "DELETE" })
-      if (!res.ok) {
-        const json = await res.json() as { error?: string }
-        throw new Error(json.error ?? "Failed to delete variable")
-      }
+      if (!res.ok) throw await adminError(res, "Failed to delete variable")
       refetch()
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred")
@@ -611,7 +642,7 @@ export function EdgeFunctions(): React.ReactElement {
     async () => {
       const res = await adminFetch("/list")
       if (!res.ok) return []
-      const json = await res.json() as { data: FunctionMeta[] }
+      const json = await readJson(res, isDataList(isFunctionMeta))
       return json.data ?? []
     },
     [adminFetch],

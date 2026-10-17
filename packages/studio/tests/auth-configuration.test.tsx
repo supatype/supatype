@@ -2,10 +2,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import React, { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
-import type { SupatypeClient } from "@supatype/client"
 import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { PlatformCtx, type PlatformContext } from "../src/hooks/usePlatform.js"
 import { ConfigurationView } from "../src/views/auth/ConfigurationView.js"
+import { testClient } from "./support.js"
 
 /**
  * SA1: the auth Configuration page offered a Save button that sent nothing and said "Saved".
@@ -16,10 +16,7 @@ import { ConfigurationView } from "../src/views/auth/ConfigurationView.js"
 
 const SELF_HOST: PlatformContext = { platformUrl: undefined, projectRef: undefined }
 const CLOUD: PlatformContext = { platformUrl: "https://api.example.test/api/v1", projectRef: "abc123" }
-const CLIENT = {
-  url: "http://localhost:8000/studio/proxy",
-  auth: { currentAccessToken: "token" },
-} as unknown as SupatypeClient
+const CLIENT = testClient({ url: "http://localhost:8000/studio/proxy", token: "token" })
 
 const SETTINGS = {
   external: { email: true, phone: false, github: true, google: false, anonymous_users: false },
@@ -56,7 +53,7 @@ async function render(platform: PlatformContext, answer: () => Response): Promis
 }
 
 beforeEach(() => {
-  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true
 })
 
 afterEach(() => {

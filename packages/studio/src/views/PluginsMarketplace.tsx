@@ -2,26 +2,41 @@ import React, { useState } from "react"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import { Badge, Button, Card } from "../components/ui.js"
 import { cn } from "../lib/utils.js"
+import { type Guard, isArrayOf, isNumber, isShape, isString, optional, readJson } from "../lib/json.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+/** The parts of an npm search result the card shows. npm omits a description or keywords a package lacks. */
 interface NpmPackage {
   name: string
   version: string
-  description: string
-  keywords: string[]
+  description?: string
+  keywords?: string[]
   links: { npm: string }
-  publisher: { username: string }
   date: string
   downloads?: { weekly: number }
 }
 
 interface NpmSearchResult {
   package: NpmPackage
-  score: { final: number }
 }
 
-type PluginCategory = "all" | "field" | "composite" | "provider" | "widget"
+const isNpmPackage: Guard<NpmPackage> = isShape({
+  name: isString,
+  version: isString,
+  description: optional(isString),
+  keywords: optional(isArrayOf(isString)),
+  links: isShape({ npm: isString }),
+  date: isString,
+  downloads: optional(isShape({ weekly: isNumber })),
+})
+
+const isNpmSearch = isShape({ objects: isArrayOf(isShape({ package: isNpmPackage })) })
+
+const PLUGIN_KINDS = ["field", "composite", "provider", "widget"] as const
+const CATEGORIES = ["all", ...PLUGIN_KINDS] as const
+
+type PluginCategory = (typeof CATEGORIES)[number]
 
 const CATEGORY_LABELS: Record<PluginCategory, string> = {
   all: "All",
@@ -39,10 +54,7 @@ const CATEGORY_KEYWORDS: Record<Exclude<PluginCategory, "all">, string> = {
 }
 
 function detectCategory(keywords: string[]): Exclude<PluginCategory, "all"> | null {
-  for (const [cat, kw] of Object.entries(CATEGORY_KEYWORDS) as [Exclude<PluginCategory, "all">, string][]) {
-    if (keywords.includes(kw)) return cat
-  }
-  return null
+  return PLUGIN_KINDS.find((kind) => keywords.includes(CATEGORY_KEYWORDS[kind])) ?? null
 }
 
 // ─── Skeleton cards ───────────────────────────────────────────────────────────
@@ -97,7 +109,7 @@ function CopyButton({ text }: { text: string }): React.ReactElement {
 // ─── Plugin card ──────────────────────────────────────────────────────────────
 
 function PluginCard({ pkg }: { pkg: NpmPackage }): React.ReactElement {
-  const category = detectCategory(pkg.keywords)
+  const category = detectCategory(pkg.keywords ?? [])
   const installCmd = `npx supatype plugins add ${pkg.name}`
   const publishedDate = new Date(pkg.date).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
 
@@ -165,7 +177,7 @@ export function PluginsMarketplace(): React.ReactElement {
       const url = `https://registry.npmjs.org/-/v1/search?text=${encodeURIComponent(searchQuery)}&size=50`
       const res = await fetch(url)
       if (!res.ok) throw new Error("Failed to fetch plugins from npm registry")
-      const json = await res.json() as { objects: NpmSearchResult[] }
+      const json = await readJson(res, isNpmSearch)
       return json.objects
     },
     [searchQuery],
@@ -213,7 +225,7 @@ export function PluginsMarketplace(): React.ReactElement {
         </div>
 
         <div className="flex gap-1">
-          {(Object.keys(CATEGORY_LABELS) as PluginCategory[]).map((cat) => (
+          {CATEGORIES.map((cat) => (
             <button
               key={cat}
               type="button"

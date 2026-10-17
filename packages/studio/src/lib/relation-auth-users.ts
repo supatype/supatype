@@ -1,4 +1,5 @@
 import type { SupatypeClient } from "@supatype/client"
+import { isJsonObject, isShape, isString, nullable, optional, type Guard } from "./json.js"
 import { studioAuthHeaders } from "./studio-auth-headers.js"
 
 export const SYSTEM_AUTH_USER = "supatype:user"
@@ -26,10 +27,23 @@ export interface RelationDisplay {
   initials: string
 }
 
-type AuthUser = {
+export type AuthUser = {
   id: string
-  email?: string
-  user_metadata?: Record<string, unknown>
+  email?: string | null
+  user_metadata?: Record<string, unknown> | null
+}
+
+/** A user as the auth admin API returns one; only the keys Studio reads are checked. */
+export const isAuthUser: Guard<AuthUser> = isShape({
+  id: isString,
+  email: optional(nullable(isString)),
+  user_metadata: optional(nullable(isJsonObject)),
+})
+
+/** The users in an admin list body (`{ users: [...] }`), skipping any entry that is not one. */
+export function authUsersIn(body: unknown): AuthUser[] {
+  const users = isJsonObject(body) ? body["users"] : undefined
+  return Array.isArray(users) ? users.filter(isAuthUser) : []
 }
 
 export function authUserSummary(raw: AuthUser): AuthUserSummary {
@@ -68,10 +82,10 @@ export async function fetchAuthUsers(
 ): Promise<AuthUserSummary[]> {
   const res = await authAdminFetch(client, "/users?page=1&per_page=200")
   if (!res.ok) return []
-  const data = await res.json() as { users?: AuthUser[] }
+  const users = authUsersIn(await res.json())
   const q = term.trim().toLowerCase()
   const results: AuthUserSummary[] = []
-  for (const raw of data.users ?? []) {
+  for (const raw of users) {
     const summary = authUserSummary(raw)
     if (!q) {
       results.push(summary)
@@ -89,7 +103,8 @@ export async function fetchAuthUserById(
 ): Promise<AuthUserSummary | null> {
   const res = await authAdminFetch(client, `/users/${encodeURIComponent(id)}`)
   if (!res.ok) return null
-  return authUserSummary(await res.json() as AuthUser)
+  const user = await res.json()
+  return isAuthUser(user) ? authUserSummary(user) : null
 }
 
 export async function fetchAuthUsersByIds(

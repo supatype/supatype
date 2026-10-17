@@ -101,7 +101,7 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
     const column = affordanceColumn(model.tableName, "delete")
     void (async () => {
       const result = await client
-        .from(model.tableName as never)
+        .from(model.tableName)
         .select(`${model.primaryKey},${column}`)
         .eq(model.primaryKey, recordId)
         .single()
@@ -182,8 +182,8 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
       if (isCreate) {
         const { [model.primaryKey]: _pk, ...insertValues } = serializeRecordForApi(model, values)
         const result = await client
-          .from(model.tableName as never)
-          .insert(insertValues as never)
+          .from(model.tableName)
+          .insert(insertValues)
 
         if (result.error) {
           setError(result.error.message)
@@ -235,8 +235,8 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
         }
 
         const result = await client
-          .from(model.tableName as never)
-          .update(updateValues as never)
+          .from(model.tableName)
+          .update(updateValues)
           .eq(model.primaryKey, recordId!)
 
         if (result.error) {
@@ -261,7 +261,7 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
 
     try {
       await client
-        .from(model.tableName as never)
+        .from(model.tableName)
         .delete()
         .eq(model.primaryKey, recordId)
 
@@ -280,8 +280,8 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
 
     try {
       const result = await client
-        .from(model.tableName as never)
-        .insert(duplicateValues as never)
+        .from(model.tableName)
+        .insert(duplicateValues)
 
       if (result.error) {
         setError(result.error.message)

@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import React, { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { MemoryRouter } from "react-router-dom"
-import type { SupatypeClient } from "@supatype/client"
 import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { AdminConfigContext } from "../src/hooks/useAdminConfig.js"
 import { mockConfig } from "../src/fixtures/mockConfig.js"
@@ -16,6 +15,7 @@ import { FunctionsView } from "../src/views/database/FunctionsView.js"
 import { TriggersView } from "../src/views/database/TriggersView.js"
 import { TypesView } from "../src/views/database/TypesView.js"
 import { ViewsView } from "../src/views/database/ViewsView.js"
+import { metadataBody, testClient, type MetadataBody } from "./support.js"
 
 /**
  * RQ3: Studio's Database views read schema metadata through the read-only metadata route, by name
@@ -24,23 +24,16 @@ import { ViewsView } from "../src/views/database/ViewsView.js"
  */
 
 const PROXY = "http://localhost:8000/studio/proxy"
-const CLIENT = { url: PROXY, auth: { currentAccessToken: "token" } } as unknown as SupatypeClient
+const CLIENT = testClient({ url: PROXY, token: "token" })
 
 let root: Root | null = null
 let container: HTMLElement
-type MetadataBody = { name?: string; params?: Record<string, unknown> }
 let calls: Array<{ url: string; body: MetadataBody }> = []
-
-/** The request's JSON body, checked to be an object before it is read as one. */
-function bodyOf(init?: RequestInit): MetadataBody {
-  const parsed: unknown = init?.body ? JSON.parse(String(init.body)) : {}
-  return typeof parsed === "object" && parsed !== null ? (parsed as MetadataBody) : {}
-}
 
 function stubFetch(): void {
   calls = []
   vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
-    const body = bodyOf(init)
+    const body = metadataBody(init)
     calls.push({ url, body })
     const name = body.name
     const rows = name === "schemas" ? [{ schema_name: "public" }] : []

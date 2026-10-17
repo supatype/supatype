@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import type { SupatypeClient } from "@supatype/client"
+import { isJsonObject, readJsonObject } from "../lib/json.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { studioGatewayHeaders } from "../lib/studio-gateway-headers.js"
 
@@ -32,21 +33,22 @@ const EMPTY: EmailTemplate = { subject: "", content: "", savedAt: null }
 
 /** Read defensively: an older server sends `body` rather than `content`, and no `saved`. */
 export function templateFromResponse(raw: unknown): EmailTemplate {
-  const body = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {}
-  const text = (key: string): string => (typeof body[key] === "string" ? (body[key] as string) : "")
+  const body = isJsonObject(raw) ? raw : {}
+  const text = (key: string): string => {
+    const value = body[key]
+    return typeof value === "string" ? value : ""
+  }
   const savedAt = body["saved"] === true && typeof body["saved_at"] === "string" ? body["saved_at"] : null
   return { subject: text("subject"), content: text("content") || text("body"), savedAt }
 }
 
 /** The server's own reason for refusing a request (`msg`), or the status when it gives none. */
 export async function refusalMessage(res: Response, action: string): Promise<string> {
-  try {
-    const body = (await res.json()) as Record<string, unknown>
-    for (const key of ["msg", "message", "error_description"]) {
-      if (typeof body[key] === "string" && body[key] !== "") return body[key] as string
-    }
-  } catch {
-    // Not JSON: the status is all there is to say.
+  // A body that is not JSON reads as `{}`: the status is all there is to say.
+  const body = await readJsonObject(res)
+  for (const key of ["msg", "message", "error_description"]) {
+    const value = body[key]
+    if (typeof value === "string" && value !== "") return value
   }
   return `${action} failed: ${res.status}`
 }

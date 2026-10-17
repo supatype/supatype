@@ -1,4 +1,5 @@
 import type { SupatypeClient } from "@supatype/client"
+import { isJsonObject } from "./json.js"
 
 export interface StorageRef {
   bucket: string
@@ -11,8 +12,9 @@ export interface StorageRef {
 export function parseStorageRef(value: unknown, fallbackBucket?: string): StorageRef | null {
   if (value == null) return null
 
-  if (typeof value === "object") {
-    const row = value as Record<string, unknown>
+  // An array names no file, and falls through to the `null` at the end.
+  if (isJsonObject(value)) {
+    const row = value
     const bucket = String(row["bucket"] ?? fallbackBucket ?? "")
     const path = String(row["path"] ?? "")
     if (!bucket || !path) return null
@@ -29,7 +31,7 @@ export function parseStorageRef(value: unknown, fallbackBucket?: string): Storag
     if (!trimmed) return null
     if (trimmed.startsWith("{")) {
       try {
-        return parseStorageRef(JSON.parse(trimmed) as unknown, fallbackBucket)
+        return parseStorageRef(JSON.parse(trimmed), fallbackBucket)
       } catch {
         return null
       }

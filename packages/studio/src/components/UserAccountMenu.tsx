@@ -6,6 +6,7 @@ import { Link } from "react-router-dom"
 
 import { useCloudUrl } from "../hooks/useCloudUrl.js"
 import { useStudioAuth } from "../hooks/useStudioAuth.js"
+import { isShape, isString, optional, type Guard } from "../lib/json.js"
 
 import {
   DropdownMenu,
@@ -22,12 +23,20 @@ interface PlatformCookieUser {
   avatar?: string
 }
 
+/** The display info Cloud writes into `st-platform-user` when it signs a user in. */
+const isPlatformCookieUser: Guard<PlatformCookieUser> = isShape({
+  name: isString,
+  email: isString,
+  avatar: optional(isString),
+})
+
 function getPlatformCookieUser(): PlatformCookieUser | null {
   if (typeof document === "undefined") return null
   const cookie = document.cookie.split("; ").find((c) => c.startsWith("st-platform-user="))
   if (!cookie) return null
   try {
-    return JSON.parse(decodeURIComponent(cookie.split("=")[1]!)) as PlatformCookieUser
+    const user = JSON.parse(decodeURIComponent(cookie.split("=")[1]!))
+    return isPlatformCookieUser(user) ? user : null
   } catch {
     return null
   }

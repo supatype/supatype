@@ -12,9 +12,7 @@ const STATUS_TRANSITIONS: Record<PublishStatus, PublishStatus[]> = {
 }
 
 export function PublishWidget({ config, value, onChange, readOnly }: WidgetProps): React.ReactElement {
-  const currentStatus = (typeof value === "string" && STATUSES.includes(value as PublishStatus))
-    ? value as PublishStatus
-    : "draft"
+  const currentStatus = STATUSES.find((status) => status === value) ?? "draft"
 
   const allowedTransitions = STATUS_TRANSITIONS[currentStatus] ?? []
 

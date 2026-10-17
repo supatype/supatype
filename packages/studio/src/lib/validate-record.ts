@@ -1,4 +1,5 @@
 import type { FieldConfig, FieldValidation } from "../config.js"
+import { isJsonObject } from "./json.js"
 import { lengthOf } from "./measure-value.js"
 import {
   describeConstraint,
@@ -45,9 +46,8 @@ export interface FieldViolation {
  * find which one is long.
  */
 function valuesToCheck(raw: unknown, localized: boolean): Array<[string | null, unknown]> {
-  if (!localized) return [[null, raw]]
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return [[null, raw]]
-  return Object.entries(raw as Record<string, unknown>)
+  if (!localized || !isJsonObject(raw)) return [[null, raw]]
+  return Object.entries(raw)
 }
 
 function lengthMessage(rules: FieldValidation, value: unknown): string | null {
@@ -192,8 +192,8 @@ function localesIn(columns: readonly string[], values: Record<string, unknown>):
   const seen = new Set<string>()
   for (const column of columns) {
     const raw = values[column]
-    if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
-      for (const key of Object.keys(raw as Record<string, unknown>)) seen.add(key)
+    if (isJsonObject(raw)) {
+      for (const key of Object.keys(raw)) seen.add(key)
     }
   }
   return seen.size > 0 ? [...seen] : [null]
