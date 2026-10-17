@@ -2,41 +2,28 @@
 //
 // Deliberately narrow. No preset is spread in, so nothing but the rules below is on.
 // `no-explicit-any` stops `any` being written; the five `no-unsafe-*` rules stop it arriving from a
-// library (`JSON.parse`, `res.json()`, an untyped package) and flowing on unchecked. Those five need
-// type information, so the parser runs with the TypeScript project service, which finds each file's
-// nearest tsconfig.json. Implicit `any` is the compiler's job: every tsconfig here sets `strict`.
+// library (an untyped package, a loosely typed callback) and flowing on unchecked. `res.json()` and
+// `JSON.parse` return `unknown` here (ts-reset.d.ts).
 //
-// `.vue`, `.svelte` and `.astro` files get the same rules: their framework parser hands each script
-// block to the TypeScript parser, typed like any other file.
+// The five need type information, so the parser runs with the TypeScript project service, which
+// gives each file the nearest tsconfig.json that includes it. Every TypeScript file in the repository
+// is in one: a package's own, or the root tsconfig.json for the config files beside a package's build
+// config. Implicit `any` is the compiler's job: every tsconfig here sets `strict`.
+//
+// `.vue` and `.svelte` files get the same rules: their framework parser hands each script block to the
+// TypeScript parser, typed like any other file.
 //
 // `noInlineConfig` makes every `eslint-disable` comment inert, so no rule can be switched off for a
 // line or a file. Such a comment lints as a warning; `pnpm lint` runs `--quiet`, which hides every
 // warning, so a rule added here later must be an error to be seen.
-import * as astroParser from "astro-eslint-parser";
 import * as svelteParser from "svelte-eslint-parser";
 import tseslint from "typescript-eslint";
 import * as vueParser from "vue-eslint-parser";
 
-const extraFileExtensions = [".vue", ".svelte", ".astro"];
-
 const typedParserOptions = {
-  projectService: {
-    // Every other file is in the tsconfig.json nearest to it, which is also what typechecks it. These
-    // few sit beside a package's build config (whose `rootDir` is `src`) with no tsconfig of their
-    // own, so they are typed against the base options instead. Single-star globs only: the project
-    // service refuses `**` here, and a new file that matches none of these fails the lint until it is
-    // given a tsconfig.
-    allowDefaultProject: [
-      "packages/*/vitest.config.ts",
-      "packages/*/vite.config.ts",
-      "packages/studio/tailwind.*.ts",
-      "packages/cli/bin/*.ts",
-      "packages/cli/deno.d.ts",
-    ],
-    defaultProject: "tsconfig.base.json",
-  },
+  projectService: true,
   tsconfigRootDir: import.meta.dirname,
-  extraFileExtensions,
+  extraFileExtensions: [".vue", ".svelte"],
 };
 
 const anyRules = {
@@ -49,12 +36,12 @@ const anyRules = {
 };
 
 /** The parser for a framework's own file type, with TypeScript parsing its script blocks. */
-function frameworkFiles(extension, parser, typed = typedParserOptions) {
+function frameworkFiles(extension, parser) {
   return {
     files: [`**/*${extension}`],
     languageOptions: {
       parser,
-      parserOptions: { ...typed, parser: tseslint.parser },
+      parserOptions: { ...typedParserOptions, parser: tseslint.parser },
     },
   };
 }
@@ -71,7 +58,6 @@ export default [
       "**/build/**",
       "**/coverage/**",
       "**/.next/**",
-      "**/.astro/**",
       "**/.expo/**",
       "**/.svelte-kit/**",
       "**/.turbo/**",
@@ -88,15 +74,8 @@ export default [
   },
   frameworkFiles(".vue", vueParser),
   frameworkFiles(".svelte", svelteParser),
-  // astro-eslint-parser does not take the project service: it warns and falls back to `project: true`,
-  // which finds the same nearest tsconfig.json for each file, so that is asked for directly.
-  frameworkFiles(".astro", astroParser, {
-    project: true,
-    tsconfigRootDir: import.meta.dirname,
-    extraFileExtensions,
-  }),
   {
-    files: ["**/*.{ts,tsx,mts,cts,vue,svelte,astro}"],
+    files: ["**/*.{ts,tsx,mts,cts,vue,svelte}"],
     linterOptions: { noInlineConfig: true },
     plugins: { "@typescript-eslint": tseslint.plugin },
     rules: anyRules,
