@@ -877,7 +877,10 @@ export async function runComposeSchemaPush(
   const astJson = JSON.stringify(ast)
   // Before the skip below: the schema-engine container reads the AST through its bind mount.
   writeSchemaAstFile(cwd, astJson)
-  if (astJson === _lastPushedAst && astJson !== _lastFailedAst) return
+  // Skipped only while nothing has failed since the last push applied. Putting a refused change
+  // back yields the applied schema again, and that still has to reach the engine: the up-to-date
+  // push is what marks the refusal superseded and clears Studio's notice.
+  if (astJson === _lastPushedAst && _lastFailedAst === null) return
   // Identity and generated columns only to an engine that reads them (the override's binary is
   // asked by `engineRequest`).
   if (!hasEngineOverride(config)) await requireDockerFeatures(cwd, config, identityColumnsNeed(ast))

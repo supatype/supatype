@@ -19,7 +19,10 @@ import { projectConfig } from "./support/project-config.js"
 const REFUSAL = "3 destructive operation(s) detected. Nothing was applied. Use --force to apply."
 
 /** What each engine does with the next push: apply it, or refuse it as destructive. */
-const engine = vi.hoisted(() => ({ refuseUnforced: false, refuseAll: false }))
+const engine = vi.hoisted(() => ({ refuseUnforced: false, refuseAll: false, pushes: 0 }))
+
+/** The schema the next push reads, so a test can change it and put it back. */
+const schema = vi.hoisted((): { ast: { version: number; models: string[] } } => ({ ast: { version: 2, models: [] } }))
 
 const engineRequest = vi.hoisted(() => vi.fn<(endpoint: string, body: unknown) => Promise<unknown>>())
 const enginePush = vi.hoisted(() => vi.fn<(cwd: string, body: Record<string, unknown>) => Promise<unknown>>())
@@ -33,6 +36,7 @@ vi.mock("../src/engine-client.js", async (importOriginal) => {
 vi.mock("../src/compose-engine-run.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/compose-engine-run.js")>()),
   spawnComposeEngine: (_target: unknown, args: readonly string[]) => {
+    engine.pushes += 1
     const refused = engine.refuseAll || (engine.refuseUnforced && !args.includes("--force"))
     return refused
       ? { status: 1, stdout: "", stderr: REFUSAL, pid: 0, output: [], signal: null }
@@ -59,7 +63,7 @@ vi.mock("../src/self-host-compose.js", async (importOriginal) => ({
 
 vi.mock("../src/config.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/config.js")>()),
-  loadSchemaAst: () => ({ version: 2, models: [] }),
+  loadSchemaAst: () => schema.ast,
 }))
 
 vi.mock("../src/schema-sources.js", async (importOriginal) => ({
@@ -121,12 +125,15 @@ beforeEach(() => {
   seedApplied()
   engine.refuseUnforced = false
   engine.refuseAll = false
+  engine.pushes = 0
+  schema.ast = { version: 2, models: [] }
   engineRequest.mockReset()
   engineRequest.mockImplementation(async (endpoint) =>
     endpoint === "/generate" ? { code: "export type Pushed = 1\n" } : { models: [], pushed: true },
   )
   enginePush.mockReset()
   enginePush.mockImplementation(async (_cwd, body) => {
+    engine.pushes += 1
     const refused = engine.refuseAll || (engine.refuseUnforced && body["force"] !== true)
     if (refused) throw new Error(REFUSAL)
     return { status: "applied" }
@@ -173,6 +180,27 @@ describe.each([
     expect(JSON.parse(read(ADMIN))).toMatchObject({ pushed: true })
     expect(read(TYPES)).toContain("export type Pushed")
     expect(existsSync(join(cwd, CLIENT))).toBe(true)
+  })
+
+  it("pushes again when a refused change is put back, so the engine can clear the refusal", async () => {
+    const { devPush } = await loadPush(over)
+    await devPush()
+    schema.ast = { version: 2, models: ["a field dropped"] }
+    engine.refuseAll = true
+    await expect(devPush()).rejects.toThrow(/Nothing was applied/)
+    const beforeRevert = engine.pushes
+    schema.ast = { version: 2, models: [] }
+    engine.refuseAll = false
+    await devPush()
+    expect(engine.pushes).toBe(beforeRevert + 1)
+  })
+
+  it("does not push a schema that has not changed since it applied", async () => {
+    const { devPush } = await loadPush(over)
+    await devPush()
+    const afterFirst = engine.pushes
+    await devPush()
+    expect(engine.pushes).toBe(afterFirst)
   })
 
   it("writes them once when the first push applies", async () => {
