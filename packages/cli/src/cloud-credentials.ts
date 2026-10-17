@@ -2,7 +2,7 @@
  * Cloud session credentials (access + refresh) for CLI ↔ control plane.
  * Self-host links keep using long-lived SERVICE_ROLE_KEY and ignore this store.
  */
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import {
@@ -10,6 +10,9 @@ import {
   saveProjectLink,
   type ProjectLink,
 } from "./link.js"
+import { isOneOf, isShape, isString, optional } from "@supatype/shared"
+import { readAuthAnswer } from "./auth-answer.js"
+import { readJsonFile } from "./json-file.js"
 
 export const CREDENTIALS_VERSION = 1 as const
 
@@ -22,6 +25,19 @@ export interface CloudCredentials {
   updatedAt: string
 }
 
+/**
+ * The file as it may be on disk. Only the URL and token are needed to use it: a file written by
+ * hand, or by an older CLI, may lack the version and timestamp, and was always accepted without them.
+ */
+const isStoredCredentials = isShape({
+  version: optional(isOneOf([CREDENTIALS_VERSION])),
+  apiUrl: isString,
+  accessToken: isString,
+  refreshToken: optional(isString),
+  email: optional(isString),
+  updatedAt: optional(isString),
+})
+
 export function credentialsPath(): string {
   return join(homedir(), ".supatype", "credentials.json")
 }
@@ -29,13 +45,9 @@ export function credentialsPath(): string {
 export function loadCloudCredentials(): CloudCredentials | null {
   const path = credentialsPath()
   if (!existsSync(path)) return null
-  try {
-    const raw = JSON.parse(readFileSync(path, "utf8")) as CloudCredentials
-    if (!raw.accessToken || !raw.apiUrl) return null
-    return raw
-  } catch {
-    return null
-  }
+  const raw = readJsonFile(path, isStoredCredentials)
+  if (!raw?.accessToken || !raw.apiUrl) return null
+  return { ...raw, version: CREDENTIALS_VERSION, updatedAt: raw.updatedAt ?? "" }
 }
 
 export function saveCloudCredentials(creds: CloudCredentials): void {
@@ -134,24 +146,16 @@ export async function cloudPasswordLogin(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email: email.toLowerCase(), password }),
   })
-  const json = (await res.json().catch(() => ({}))) as {
-    message?: string
-    error?: string
-    access_token?: string
-    refresh_token?: string
-    expires_in?: number
-    user?: { email?: string }
+  const answer = readAuthAnswer(await res.json().catch(() => ({})))
+  if (!res.ok || !answer.accessToken) {
+    throw new Error(answer.failure ?? `Login failed (${res.status})`)
   }
-  if (!res.ok || !json.access_token) {
-    throw new Error(json.message ?? json.error ?? `Login failed (${res.status})`)
-  }
+  const { accessToken, refreshToken, expiresIn } = answer
   return {
-    accessToken: json.access_token,
-    ...(json.refresh_token !== undefined ? { refreshToken: json.refresh_token } : {}),
-    ...(json.expires_in !== undefined ? { expiresIn: json.expires_in } : {}),
-    ...(json.user?.email !== undefined
-      ? { email: json.user.email }
-      : { email: email.toLowerCase() }),
+    accessToken,
+    ...(refreshToken !== undefined && { refreshToken }),
+    ...(expiresIn !== undefined && { expiresIn }),
+    email: answer.email ?? email.toLowerCase(),
   }
 }
 
@@ -165,19 +169,10 @@ export async function cloudRefreshSession(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ refresh_token: refreshToken }),
   })
-  const json = (await res.json().catch(() => ({}))) as {
-    message?: string
-    error?: string
-    access_token?: string
-    refresh_token?: string
-    expires_in?: number
+  const answer = readAuthAnswer(await res.json().catch(() => ({})))
+  if (!res.ok || !answer.accessToken) {
+    throw new Error(answer.failure ?? `Token refresh failed (${res.status})`)
   }
-  if (!res.ok || !json.access_token) {
-    throw new Error(json.message ?? json.error ?? `Token refresh failed (${res.status})`)
-  }
-  return {
-    accessToken: json.access_token,
-    ...(json.refresh_token !== undefined ? { refreshToken: json.refresh_token } : {}),
-    ...(json.expires_in !== undefined ? { expiresIn: json.expires_in } : {}),
-  }
+  const { accessToken, refreshToken: next, expiresIn } = answer
+  return { accessToken, ...(next !== undefined && { refreshToken: next }), ...(expiresIn !== undefined && { expiresIn }) }
 }

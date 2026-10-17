@@ -33,6 +33,15 @@ export type RichTextValue = { readonly root: { readonly children: readonly unkno
 /** A stored file, and the bucket it went to. */
 export type StorageReference = { readonly bucket: string; readonly path: string }
 
+/** Any JSON value: a JSON, geo or undeclared column, as the engine's `database.ts` types it. */
+export type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: Json | undefined }
+  | Json[]
+
 export interface HookTables {
   "chat_message": {
     Row: {
@@ -72,7 +81,7 @@ export interface HookTables {
       starts_at: string
       ends_at: string
       length: { ms: number }
-      embedding: Record<string, unknown> | null
+      embedding: number[] | null
       published_at: string | null
       created_at: string
       updated_at: string
@@ -88,7 +97,7 @@ export interface HookTables {
       starts_at: string
       ends_at: string
       length: { ms: number }
-      embedding?: Record<string, unknown> | null
+      embedding?: number[] | null
       published_at?: string | null
       created_at?: string
       updated_at?: string
@@ -104,7 +113,7 @@ export interface HookTables {
       starts_at?: string
       ends_at?: string
       length?: { ms: number }
-      embedding?: Record<string, unknown> | null
+      embedding?: number[] | null
       published_at?: string | null
       created_at?: string
       updated_at?: string
@@ -216,13 +225,36 @@ export type FieldValidator<T extends HookedTable, F extends keyof HookTables[T][
   ctx: FieldValidatorContext<T, F>,
 ) => FieldVerdict | Promise<FieldVerdict>
 
-interface WireValidatorContext {
-  table?: string
-  operation?: string
-  field?: string
-  value?: unknown
-  user?: unknown
-  requestId?: string
+/** A JSON object: the server's payload is read from one key by key. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+/** The string the payload carries under `key`, or undefined. */
+function text(body: Record<string, unknown>, key: string): string | undefined {
+  const value = body[key]
+  return typeof value === "string" ? value : undefined
+}
+
+/**
+ * Where the payload meets a handler's types: the one check this file cannot make.
+ *
+ * Every key of the context was read with a check, but that its rows are the named table's rows is
+ * the server's contract: it names the table and sends that table's columns. A handler is typed to
+ * take `never`, so any typed handler is accepted, and this hands the context over.
+ */
+function isHandlerContext(_ctx: Record<string, unknown>): _ctx is never {
+  return true
+}
+
+/** The request's JSON body as an object, or null when it is not JSON. Not an object reads as `{}`. */
+async function payload(req: Request): Promise<Record<string, unknown> | null> {
+  try {
+    const body: unknown = await req.json()
+    return isRecord(body) ? body : {}
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -241,24 +273,21 @@ export function fieldValidator(
       return json({ message: "A validator is invoked with POST" }, 405)
     }
 
-    let wire: WireValidatorContext
-    try {
-      wire = (await req.json()) as WireValidatorContext
-    } catch {
-      return json({ message: "Validator payload was not JSON" }, 400)
-    }
+    const wire = await payload(req)
+    if (wire === null) return json({ message: "Validator payload was not JSON" }, 400)
 
-    const field = wire.field ?? ""
+    const field = text(wire, "field") ?? ""
     const ctx = {
-      table: wire.table ?? "",
-      operation: wire.operation === "update" ? "update" : "insert",
+      table: text(wire, "table") ?? "",
+      operation: wire["operation"] === "update" ? "update" : "insert",
       field,
-      value: wire.value,
-      user: (wire.user ?? null) as never,
-      requestId: wire.requestId ?? "",
+      value: wire["value"],
+      user: wire["user"] ?? null,
+      requestId: text(wire, "requestId") ?? "",
     }
+    if (!isHandlerContext(ctx)) return json({ message: "Validator context was not built" }, 500)
 
-    const verdict = await handler(ctx as never)
+    const verdict = await handler(ctx)
     if (verdict === true) return json({}, 200)
     return json({ field, message: String(verdict), error: String(verdict) }, 422)
   }
@@ -274,21 +303,37 @@ export interface HookHandlers<T extends HookedTable> {
 
 type AnyHandler = (ctx: never) => unknown
 
-interface WireContext {
-  table?: string
-  operation?: string
-  user?: unknown
-  requestId?: string
-  rows?: unknown[]
-  patch?: unknown
-  filter?: string
-  /**
-   * Server callback **path** for pre-write rows; absent when there are none to fetch.
-   *
-   * A path rather than a URL because the server does not know its own in-network address, while this
-   * worker is already told how to reach the stack.
-   */
-  previousPath?: string
+/**
+ * A hook's context from the server's payload. `previousPath` is the server callback **path** for
+ * pre-write rows, absent when there are none to fetch: a path rather than a URL because the server
+ * does not know its own in-network address, while this worker is already told how to reach the stack.
+ */
+function hookContext(wire: Record<string, unknown>, signature: string | null): Record<string, unknown> {
+  const filter = text(wire, "filter")
+  const previousPath = text(wire, "previousPath")
+  return {
+    table: text(wire, "table") ?? "",
+    operation: text(wire, "operation") ?? "",
+    user: wire["user"] ?? null,
+    requestId: text(wire, "requestId") ?? "",
+    ...(wire["rows"] !== undefined && { rows: wire["rows"] }),
+    ...(wire["patch"] !== undefined && { patch: wire["patch"] }),
+    ...(filter !== undefined && { filter }),
+    ...(previousPath !== undefined && { previous: () => fetchPrevious(previousPath, signature) }),
+  }
+}
+
+/** A hook's `{ reject }` as a response: always a 4xx, 422 unless the hook chose another. */
+function rejectionResponse(rejection: unknown): Response {
+  const detail = isRecord(rejection) ? rejection : { message: rejection }
+  const status = typeof detail["status"] === "number" ? detail["status"] : 422
+  const code = detail["code"]
+  return json(
+    { message: detail["message"], ...(code !== undefined && { code }) },
+    // A rejection must be a 4xx: a hook that answered 500 would be read as unavailable and
+    // handed to onUnavailable, which is a different decision from "no".
+    status >= 400 && status < 500 ? status : 422,
+  )
 }
 
 /**
@@ -304,31 +349,16 @@ export function hook(handler: AnyHandler): (req: Request) => Promise<Response> {
       return json({ message: "A hook is invoked with POST" }, 405)
     }
 
-    let wire: WireContext
-    try {
-      wire = (await req.json()) as WireContext
-    } catch {
-      // A 400 rather than a 500: the payload was wrong, the handler never ran.
-      return json({ message: "Hook payload was not JSON" }, 400)
-    }
+    // A 400 rather than a 500: the payload was wrong, the handler never ran.
+    const wire = await payload(req)
+    if (wire === null) return json({ message: "Hook payload was not JSON" }, 400)
 
-    const signature = req.headers.get("webhook-signature")
-    const ctx = {
-      table: wire.table ?? "",
-      operation: wire.operation ?? "",
-      user: wire.user ?? null,
-      requestId: wire.requestId ?? "",
-      ...(wire.rows !== undefined && { rows: wire.rows }),
-      ...(wire.patch !== undefined && { patch: wire.patch }),
-      ...(wire.filter !== undefined && { filter: wire.filter }),
-      ...(wire.previousPath !== undefined && {
-        previous: () => fetchPrevious(wire.previousPath as string, signature),
-      }),
-    }
+    const ctx = hookContext(wire, req.headers.get("webhook-signature"))
+    if (!isHandlerContext(ctx)) return json({ message: "Hook context was not built" }, 500)
 
     let verdict: unknown
     try {
-      verdict = await handler(ctx as never)
+      verdict = await handler(ctx)
     } catch (err) {
       // An exception is not a rejection: the hook broke, so the server's onUnavailable policy should
       // decide, and that is what a 500 asks for.
@@ -336,20 +366,9 @@ export function hook(handler: AnyHandler): (req: Request) => Promise<Response> {
     }
 
     if (verdict === undefined || verdict === null) return json({}, 200)
-
-    const rejection = (verdict as HookRejection).reject
-    if (rejection !== undefined) {
-      const detail = typeof rejection === "string" ? { message: rejection } : rejection
-      const status = typeof detail.status === "number" ? detail.status : 422
-      return json(
-        { message: detail.message, ...(detail.code !== undefined && { code: detail.code }) },
-        // A rejection must be a 4xx: a hook that answered 500 would be read as unavailable and
-        // handed to onUnavailable, which is a different decision from "no".
-        status >= 400 && status < 500 ? status : 422,
-      )
-    }
-
-    return json(verdict as Record<string, unknown>, 200)
+    const rejection = isRecord(verdict) ? verdict["reject"] : undefined
+    if (rejection !== undefined) return rejectionResponse(rejection)
+    return json(verdict, 200)
   }
 }
 
@@ -408,8 +427,9 @@ async function fetchPrevious(
   if (!res.ok) {
     throw new Error(`Could not read the rows this write affects (${res.status})`)
   }
-  const body = (await res.json()) as { rows?: unknown[]; truncated?: boolean }
-  return { rows: body.rows ?? [], truncated: body.truncated === true }
+  const body: unknown = await res.json()
+  const rows = isRecord(body) && Array.isArray(body["rows"]) ? body["rows"] : []
+  return { rows, truncated: isRecord(body) && body["truncated"] === true }
 }
 
 function json(body: unknown, status: number): Response {

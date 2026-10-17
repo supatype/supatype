@@ -34,15 +34,15 @@ export function FlowApp({ bind }: FlowAppProps): React.ReactElement {
       setSpinner(message) {
         setSpinner(message)
       },
-      waitForPrompt<T>(spec: ActiveFlowPrompt): Promise<T> {
-        return new Promise<T>((resolve) => {
+      waitForPrompt(spec: ActiveFlowPrompt): Promise<unknown> {
+        return new Promise<unknown>((resolve) => {
           setLogLines([])
           setSpinner(null)
           setPrompt(spec)
           setPromptResolver(() => (value: unknown) => {
             setPrompt(null)
             setPromptResolver(null)
-            resolve(value as T)
+            resolve(value)
           })
         })
       },

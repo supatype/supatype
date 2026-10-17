@@ -2,7 +2,9 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
+import { isJsonObject, isShape, isUnknown, optional } from "@supatype/shared"
 import { freeTierCacheNote, seedApiConfigCache } from "../src/api-config-cache.js"
+import { parseJsonAs } from "./support/json.js"
 
 /**
  * Two things have to be true for a cached read to be served: the schema declares the table (the
@@ -30,11 +32,11 @@ function project(apiConfig: unknown | null): string {
   return dir
 }
 
-/** The file as it now stands, typed loosely because these assertions are about what is in it. */
-const read = (dir: string): { rest?: { cache_tables?: Record<string, unknown>; cache_max_ttl?: unknown } } =>
-  JSON.parse(readFileSync(join(dir, ".supatype", "api-config.json"), "utf8")) as {
-    rest?: { cache_tables?: Record<string, unknown>; cache_max_ttl?: unknown }
-  }
+/** The file as it now stands, checked loosely because these assertions are about what is in it. */
+const isApiConfig = isShape({
+  rest: optional(isShape({ cache_tables: optional(isJsonObject), cache_max_ttl: optional(isUnknown) })),
+})
+const read = (dir: string) => parseJsonAs(readFileSync(join(dir, ".supatype", "api-config.json"), "utf8"), isApiConfig)
 
 const ast = (cache: unknown, table = "posts") => ({
   models: [{ name: "Post", annotations: { db: { tableName: table }, platform: { cache } } }],
@@ -144,7 +146,7 @@ describe("files it will not touch", () => {
 
 describe("the free-tier note", () => {
   // §13.4: a free project with `cache` in its schema has asked for the paid feature in code, which
-  // is better qualified than any banner — and it is why the note names the tables. "Your cache is
+  // is better qualified than any banner, and that is why the note names the tables. "Your cache is
   // off" is a fact about the plan; "posts is served from PostgREST on every request" is a fact
   // about their project.
   it("names the tables rather than the feature", () => {

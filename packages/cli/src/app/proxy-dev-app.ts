@@ -6,6 +6,7 @@ import { execSync } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { detectPackageManager } from "./framework.js"
+import { parsePackageJson } from "../package-json.js"
 import { appendDevTaskLog } from "../dev-session.js"
 import { ProcessManager, readPid } from "../process-manager.js"
 import { projectRootFromConfig, type SupatypeProjectConfig } from "../project-config.js"
@@ -134,10 +135,8 @@ export function startProxyDevApp(
     return null
   }
 
-  const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as {
-    scripts?: Record<string, string>
-  }
-  if (!pkg.scripts?.[script]) {
+  const pkg = parsePackageJson(readFileSync(pkgPath, "utf8"))
+  if (!pkg.scripts[script]) {
     console.warn(
       `[supatype] app.mode=proxy: package.json has no "${script}" script.\n` +
         `  Add "scripts.${script}" or set app.start in supatype.config.ts`,

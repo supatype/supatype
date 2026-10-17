@@ -14,6 +14,8 @@ import { existsSync } from "node:fs"
 import { loadSchemaAst } from "./config.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
 import type { ExtractedSchemaAstV2 } from "./schema-ast-v2.js"
+import { isJsonObject } from "@supatype/shared"
+import { astModels, isNonEmptyObject, objectAt } from "./ast-read.js"
 import { draftVisibilityRoles, previewLimits, schemaPathFromProject } from "./project-config.js"
 
 /** Versions kept per record when the model states no retention. */
@@ -36,12 +38,6 @@ export type VersionedModel = {
   options: VersionsOptions
 }
 
-type LooseModel = {
-  name?: unknown
-  options?: Record<string, unknown>
-  annotations?: { db?: { tableName?: unknown }; platform?: { access?: Record<string, unknown> } }
-}
-
 /**
  * Normalise a `versions` value from the AST.
  *
@@ -51,28 +47,23 @@ type LooseModel = {
  */
 export function resolveVersionsOptions(raw: unknown): VersionsOptions | undefined {
   if (raw === true) return { drafts: true, keep: DEFAULT_VERSIONS_KEPT }
-  if (typeof raw !== "object" || raw === null) return undefined
-  const record = raw as { drafts?: unknown; keep?: unknown }
+  if (!isJsonObject(raw)) return undefined
+  const { keep: declared, drafts } = raw
   const keep =
-    typeof record.keep === "number" && Number.isFinite(record.keep) && record.keep >= 1
-      ? Math.floor(record.keep)
+    typeof declared === "number" && Number.isFinite(declared) && declared >= 1
+      ? Math.floor(declared)
       : DEFAULT_VERSIONS_KEPT
-  return { drafts: record.drafts !== false, keep }
+  return { drafts: drafts !== false, keep }
 }
 
 /** Every model in the schema that declares `versions`, in declaration order. */
 export function versionedModels(ast: unknown): VersionedModel[] {
-  const models = (ast as { models?: unknown[] } | null)?.models
-  if (!Array.isArray(models)) return []
-
   const out: VersionedModel[] = []
-  for (const entry of models) {
-    const model = entry as LooseModel | null
-    if (model === null || typeof model !== "object") continue
-    const options = resolveVersionsOptions(model.options?.["versions"])
+  for (const model of astModels(ast)) {
+    const options = resolveVersionsOptions(objectAt(model, "options")?.["versions"])
     if (options === undefined) continue
-    const name = typeof model.name === "string" ? model.name : ""
-    const tableName = model.annotations?.db?.tableName
+    const name = typeof model["name"] === "string" ? model["name"] : ""
+    const tableName = objectAt(model, "annotations", "db")?.["tableName"]
     out.push({
       name,
       tableName: typeof tableName === "string" ? tableName : name,
@@ -98,21 +89,15 @@ export function schemaHasVersionedModels(ast: unknown): boolean {
  *
  * Per model, and that matters: under the view tier the managed schema comes off the exposed list but
  * the API roles keep their privileges on the base tables, so a `security_invoker` view in an exposed
- * schema — which is exactly what `draft.<table>` is — reaches past the `api` layer. A project may
+ * schema (which is exactly what `draft.<table>` is) reaches past the `api` layer. A project may
  * hold a masked model and a versioned model at once; one model may not be both.
  */
 export function modelsWithVersionsAndFieldRules(ast: unknown): string[] {
-  const models = (ast as { models?: unknown[] } | null)?.models
-  if (!Array.isArray(models)) return []
-
   const out: string[] = []
-  for (const entry of models) {
-    const model = entry as LooseModel | null
-    if (model === null || typeof model !== "object") continue
-    if (resolveVersionsOptions(model.options?.["versions"]) === undefined) continue
-    const fields = model.annotations?.platform?.access?.["fields"]
-    if (typeof fields !== "object" || fields === null || Object.keys(fields).length === 0) continue
-    out.push(typeof model.name === "string" ? model.name : "(unnamed model)")
+  for (const model of astModels(ast)) {
+    if (resolveVersionsOptions(objectAt(model, "options")?.["versions"]) === undefined) continue
+    if (!isNonEmptyObject(objectAt(model, "annotations", "platform", "access")?.["fields"])) continue
+    out.push(typeof model["name"] === "string" ? model["name"] : "(unnamed model)")
   }
   return out
 }

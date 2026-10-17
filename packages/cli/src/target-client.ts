@@ -1,3 +1,6 @@
+import { isJsonObject, isUnknown, type Guard } from "@supatype/shared"
+import { readAuthAnswer } from "./auth-answer.js"
+
 export interface TargetFetchOptions {
   method: string
   path: string
@@ -50,84 +53,87 @@ async function refreshAccessToken(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ refresh_token: authRefresh.refreshToken }),
   })
-  const json = (await res.json().catch(() => ({}))) as {
-    access_token?: string
-    refresh_token?: string
-    message?: string
-    error?: string
-  }
-  if (!res.ok || !json.access_token) {
-    throw new Error(
-      `${json.message ?? json.error ?? "Token refresh failed"}. Run: supatype login`,
-    )
+  const answer = readAuthAnswer(await res.json().catch(() => ({})))
+  if (!res.ok || !answer.accessToken) {
+    throw new Error(`${answer.failure ?? "Token refresh failed"}. Run: supatype login`)
   }
   authRefresh.onRefreshed({
-    accessToken: json.access_token,
-    ...(json.refresh_token !== undefined ? { refreshToken: json.refresh_token } : {}),
+    accessToken: answer.accessToken,
+    ...(answer.refreshToken !== undefined ? { refreshToken: answer.refreshToken } : {}),
   })
-  return json.access_token
+  return answer.accessToken
 }
 
+/** One response: its status and its body, which is `{}` when the body is not JSON. */
+interface FetchAnswer {
+  ok: boolean
+  status: number
+  json: unknown
+}
+
+/** A string field of the body, for reading an error's `message`, `error` and `code`. */
+function bodyString(json: unknown, key: string): string | undefined {
+  const value = isJsonObject(json) ? json[key] : undefined
+  return typeof value === "string" ? value : undefined
+}
+
+async function fetchOnce(url: string, opts: TargetFetchOptions, token: string): Promise<FetchAnswer> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${token}`,
+  }
+  if (opts.orgId) headers["X-Org-Id"] = opts.orgId
+  if (opts.environment) headers["X-Supatype-Environment"] = opts.environment
+
+  const res = await fetch(url, {
+    method: opts.method,
+    headers,
+    ...(opts.body !== undefined ? { body: JSON.stringify(opts.body) } : {}),
+  })
+  return { ok: res.ok, status: res.status, json: await res.json().catch(() => ({})) }
+}
+
+/** The error a refused request throws, naming an expired session when that is the reason. */
+function refusal(result: FetchAnswer, url: string, opts: TargetFetchOptions): TargetApiError {
+  const code = bodyString(result.json, "code")
+  const message =
+    bodyString(result.json, "message") ?? bodyString(result.json, "error") ?? `API error: ${result.status} ${url}`
+  if (isAuthExpiry(result.status, code, message) && !opts.authRefresh) {
+    return new TargetApiError(`${message}. Session expired, run: supatype login`, result.status, code)
+  }
+  return new TargetApiError(message, result.status, code, isJsonObject(result.json) ? result.json : undefined)
+}
+
+/**
+ * A request to the control plane or a project's API. The answer is the body's `data` when it has
+ * one, else the body. Without a guard it is `unknown`; with one, an answer the guard refuses throws.
+ */
+export async function targetFetch(
+  baseUrl: string,
+  apiPrefix: "/api/v1" | "/platform/v1",
+  opts: TargetFetchOptions,
+): Promise<unknown>
 export async function targetFetch<T>(
   baseUrl: string,
   apiPrefix: "/api/v1" | "/platform/v1",
   opts: TargetFetchOptions,
-): Promise<T> {
+  guard: Guard<T>,
+): Promise<T>
+export async function targetFetch(
+  baseUrl: string,
+  apiPrefix: "/api/v1" | "/platform/v1",
+  opts: TargetFetchOptions,
+  guard: Guard<unknown> = isUnknown,
+): Promise<unknown> {
   const url = `${baseUrl.replace(/\/$/, "")}${apiPrefix}${opts.path}`
-
-  const doFetch = async (token: string): Promise<{
-    ok: boolean
-    status: number
-    json: { data?: T; error?: string; message?: string; code?: string }
-  }> => {
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    }
-    if (opts.orgId) headers["X-Org-Id"] = opts.orgId
-    if (opts.environment) headers["X-Supatype-Environment"] = opts.environment
-
-    const res = await fetch(url, {
-      method: opts.method,
-      headers,
-      ...(opts.body !== undefined ? { body: JSON.stringify(opts.body) } : {}),
-    })
-
-    const json = (await res.json().catch(() => ({}))) as {
-      data?: T
-      error?: string
-      message?: string
-      code?: string
-    }
-    return { ok: res.ok, status: res.status, json }
+  let result = await fetchOnce(url, opts, opts.token)
+  const reason = bodyString(result.json, "message") ?? bodyString(result.json, "error")
+  if (!result.ok && opts.authRefresh && isAuthExpiry(result.status, bodyString(result.json, "code"), reason)) {
+    result = await fetchOnce(url, opts, await refreshAccessToken(opts.authRefresh))
   }
+  if (!result.ok) throw refusal(result, url, opts)
 
-  let token = opts.token
-  let result = await doFetch(token)
-
-  if (
-    !result.ok &&
-    opts.authRefresh &&
-    isAuthExpiry(result.status, result.json.code, result.json.message ?? result.json.error)
-  ) {
-    token = await refreshAccessToken(opts.authRefresh)
-    result = await doFetch(token)
-  }
-
-  if (!result.ok) {
-    const message = result.json.message ?? result.json.error ?? `API error: ${result.status} ${url}`
-    if (
-      isAuthExpiry(result.status, result.json.code, message) &&
-      !opts.authRefresh
-    ) {
-      throw new TargetApiError(
-        `${message}. Session expired, run: supatype login`,
-        result.status,
-        result.json.code,
-      )
-    }
-    throw new TargetApiError(message, result.status, result.json.code, result.json)
-  }
-
-  return (result.json.data !== undefined ? result.json.data : result.json) as T
+  const answer = isJsonObject(result.json) && result.json["data"] !== undefined ? result.json["data"] : result.json
+  if (!guard(answer)) throw new Error(`Unexpected response from ${url} (HTTP ${result.status})`)
+  return answer
 }

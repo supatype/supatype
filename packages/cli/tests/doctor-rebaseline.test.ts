@@ -1,8 +1,11 @@
 import { Command } from "commander"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { TargetCall } from "./support/engine-mocks.js"
+import { exitThrows } from "./support/process-exit.js"
 
-const targetSchemaDoctor = vi.hoisted(() => vi.fn<TargetCall<{ rebaseline?: boolean; acceptAccessDrift?: boolean }>>())
+const targetSchemaDoctor = vi.hoisted(() =>
+  vi.fn<TargetCall<{ rebaseline?: boolean; acceptAccessDrift?: boolean; keys?: string[] }>>(),
+)
 const requireEngine = vi.hoisted(() => vi.fn(async (_target: unknown, _needs: Array<{ feature: string; flag: string }>) => undefined))
 /** Every feature the target was asked for. */
 const asked = (): string[] => requireEngine.mock.calls.flatMap((call) => call[1].map((need) => need.feature))
@@ -117,9 +120,7 @@ describe("supatype doctor --rebaseline", () => {
   })
 
   it("refuses --overwrite-drift on doctor, pointing at --accept-access-drift, before anything is read", async () => {
-    vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
-      throw new Error(`exit ${code}`)
-    }) as never)
+    exitThrows()
     let out = ""
     await doctor("--rebaseline", "--overwrite-drift", "--yes").catch((err: Error) => {
       out = vi.mocked(console.error).mock.calls.flat().join(" ")
@@ -130,9 +131,7 @@ describe("supatype doctor --rebaseline", () => {
   })
 
   it("refuses --accept-access-drift without --rebaseline", async () => {
-    vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
-      throw new Error(`exit ${code}`)
-    }) as never)
+    exitThrows()
     await expect(doctor("--accept-access-drift")).rejects.toThrow("exit 1")
     expect(targetSchemaDoctor).not.toHaveBeenCalled()
   })
@@ -187,12 +186,13 @@ describe("doctor --rebaseline records only what the preview showed (C04, F29)", 
 
   it("sends the key of every drifted object the preview showed, recorded or left drifted", async () => {
     await doctor("--rebaseline", "--yes")
-    const applied = targetSchemaDoctor.mock.calls[1]![2] as { keys?: string[] }
-    expect(applied.keys).toEqual(["check:posts.posts_title_bounds", "policy:posts.posts_select"])
+    const applied = targetSchemaDoctor.mock.calls[1]?.[2]
+    expect(applied?.keys).toEqual(["check:posts.posts_title_bounds", "policy:posts.posts_select"])
     // Asked before the preview is shown, so an engine that would ignore the keys is refused first.
     expect(asked()).toContain("rebaseline_keys")
-    const preview = targetSchemaDoctor.mock.calls[0]![2] as { keys?: string[] }
-    expect(preview.keys).toBeUndefined()
+    const preview = targetSchemaDoctor.mock.calls[0]?.[2]
+    expect(preview).toBeDefined()
+    expect(preview?.keys).toBeUndefined()
   })
 
   it("names what moved since the preview, says nothing was recorded, and exits 1 (binary)", async () => {
@@ -200,9 +200,7 @@ describe("doctor --rebaseline records only what the preview showed (C04, F29)", 
       if (!opts.rebaseline) return PREVIEW
       throw new EngineError("Engine /doctor failed (exit 1): Error: The drift changed", "/doctor", 1, DRIFT_CHANGED_LINE)
     })
-    vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
-      throw new Error(`exit ${code}`)
-    }) as never)
+    exitThrows()
     await expect(doctor("--rebaseline", "--yes")).rejects.toThrow("exit 1")
     const out = [...vi.mocked(console.error).mock.calls, ...vi.mocked(console.log).mock.calls].flat().join("\n")
     expect(out).toContain("The drift changed after the preview, so nothing was recorded")
@@ -222,9 +220,7 @@ describe("doctor --rebaseline records only what the preview showed (C04, F29)", 
         gone: [],
       })
     })
-    vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
-      throw new Error(`exit ${code}`)
-    }) as never)
+    exitThrows()
     await expect(doctor("--rebaseline", "--accept-access-drift", "--yes")).rejects.toThrow("exit 1")
     const out = [...vi.mocked(console.error).mock.calls, ...vi.mocked(console.log).mock.calls].flat().join("\n")
     expect(out).toContain("New since the preview: policy:tag.tag_select")

@@ -34,8 +34,9 @@ export function parseRenameArgs(from: string, to: string): RenameCandidate {
     if (from === to) throw new Error(`"${from}" and "${to}" are the same name. ${USAGE}`)
     return { kind: "table", table: from, from, to }
   }
-  const [table, column] = source as [string, string]
-  const [toTable, toColumn] = target as [string, string]
+  // Both have two parts here; the defaults only satisfy the type.
+  const [table = "", column = ""] = source
+  const [toTable = "", toColumn = ""] = target
   if (table !== toTable) {
     throw new Error(`A column is renamed within the same table: "${from}" and "${to}" name two. ${USAGE}`)
   }

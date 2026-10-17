@@ -11,6 +11,7 @@ import { fileURLToPath, pathToFileURL } from "node:url"
 import { tmpdir } from "node:os"
 import { uniqueFileToken } from "./unique-file-token.js"
 import { isCompiledBinary } from "./cli-install-method.js"
+import { parsePackageJson } from "./package-json.js"
 
 const _require = createRequire(import.meta.url)
 
@@ -35,9 +36,7 @@ export function cliModuleUrl(name: string): string {
 function findTsxBin(): string {
   try {
     const pkgPath = _require.resolve("tsx/package.json")
-    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as {
-      bin?: string | Record<string, string>
-    }
+    const pkg = parsePackageJson(readFileSync(pkgPath, "utf8"))
     const binRelative =
       typeof pkg.bin === "string"
         ? pkg.bin

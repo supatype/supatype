@@ -3,6 +3,7 @@
  */
 
 import { projectOutputPaths, writeAstDerivedOutputs } from "./type-generation.js"
+import { errorMessage } from "./error-message.js"
 import { withPublishing } from "./model-versioning.js"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
@@ -64,6 +65,14 @@ import {
   LOCAL_SERVER_DOCKER_IMAGE,
 } from "./compose-local-server-image.js"
 import { ensureEngine, enginePush, engineRequest, type AdoptOutcome, type ComposeEngine, type DiffResult } from "./engine-client.js"
+import {
+  isAdoptOutcome,
+  isAnyAnswer,
+  isDiffResult,
+  isEnginePushResult,
+  isGenerateAnswer,
+  isObjectAnswer,
+} from "./engine-answers.js"
 import { writeSchemaSourcePushArtifacts, type SchemaSourcePushArtifacts } from "./schema-sources.js"
 import { readEnvValue, upsertEnvFile } from "./env-file.js"
 import { warnProjectAuthProviderSecrets } from "./auth-providers.js"
@@ -667,7 +676,7 @@ async function refreshSchemaArtifacts(
   try {
     engine = await projectComposeEngine(cwd, config)
   } catch (err) {
-    degraded("The project's engine image could not be resolved, admin config and types not refreshed", (err as Error).message)
+    degraded("The project's engine image could not be resolved, admin config and types not refreshed", errorMessage(err))
     return
   }
   if (engine === undefined && !(await hostEngineOrComposeFallback(cwd, config, ast, adminConfigPath))) return
@@ -737,7 +746,7 @@ async function hostEngineOrComposeFallback(
   } catch (err) {
     // A project that named its engine gets that engine or an error, never a stand-in.
     if (hasEngineOverride(config)) {
-      degraded("overrides.engine could not be used, admin config and types not refreshed", (err as Error).message)
+      degraded("overrides.engine could not be used, admin config and types not refreshed", errorMessage(err))
       return false
     }
     // The host engine is a CDN download and this machine could not complete it. The schema is
@@ -750,7 +759,7 @@ async function hostEngineOrComposeFallback(
       .catch(() => false)
     // Reported through `degraded` rather than warned, so a run that takes this path says so where
     // CI looks, rather than in a line that scrolls past.
-    const message = (err as Error).message
+    const message = errorMessage(err)
     if (wrote) {
       degraded("Host engine unavailable, used the in-compose engine instead", message)
     } else {
@@ -776,26 +785,26 @@ async function writeEngineArtifacts(
   // wrote one: gated on `output.types`, a renamed field left the typed client on the old name.
   const { typesPath } = projectOutputPaths(config.output)
   try {
-    const result = await engineRequest<{ code?: string; message?: string }>("/generate", { ast, lang: "typescript" }, engine)
+    const result = await engineRequest("/generate", { ast, lang: "typescript" }, isGenerateAnswer, engine)
     if (writeEngineTypes(cwd, typesPath, result.code ?? result.message)) {
       console.log(`[supatype] Types written to ${typesPath}`)
     } else {
       console.warn("[supatype] Type generation produced no output.")
     }
   } catch (err) {
-    console.warn(`[supatype] Type generation failed: ${(err as Error).message}`)
+    console.warn(`[supatype] Type generation failed: ${errorMessage(err)}`)
   }
 
   writeDevAstOutputs(cwd, ast, config, "")
 
   try {
-    const admin = withAdminRoles(await engineRequest<unknown>("/admin", { ast }, engine), config)
+    const admin = withAdminRoles(await engineRequest("/admin", { ast }, isAnyAnswer, engine), config)
     restoreSystemRelationTargets(admin, ast)
     writeFileSync(adminConfigPath, `${JSON.stringify(admin, null, 2)}\n`)
     console.log("[supatype] Admin config written to .supatype/admin-config.json")
   } catch (err) {
     console.warn(
-      `[supatype] Admin config generation failed, Studio may show stale field widgets: ${(err as Error).message}`,
+      `[supatype] Admin config generation failed, Studio may show stale field widgets: ${errorMessage(err)}`,
     )
   }
 }
@@ -826,7 +835,7 @@ function writeDevAstOutputs(cwd: string, ast: unknown, config: SupatypeProjectCo
       console.log(`[supatype] ${message}${suffix}`)
     }
   } catch (err) {
-    console.warn(`[supatype] Generated output failed: ${(err as Error).message}`)
+    console.warn(`[supatype] Generated output failed: ${errorMessage(err)}`)
   }
 }
 
@@ -878,19 +887,23 @@ async function runComposeSchemaPush(
     await ensureEngine()
     const sources = writeSchemaSourcePushArtifacts(cwd)
     try {
-      const result = await enginePush<EnginePushResult>(cwd, {
-        ast,
-        database_url: projectDatabaseUrl(cwd, config),
-        schema: pgSchema(config),
-        force: opts.force === true,
-        ...(opts.overwriteDrift === true && { overwrite_drift: true }),
-        ...(sources
-          ? {
-              schema_sources_gz_base64: sources.payload.dataBase64,
-              schema_sources_manifest: sources.payload.manifest,
-            }
-          : {}),
-      })
+      const result = await enginePush(
+        cwd,
+        {
+          ast,
+          database_url: projectDatabaseUrl(cwd, config),
+          schema: pgSchema(config),
+          force: opts.force === true,
+          ...(opts.overwriteDrift === true && { overwrite_drift: true }),
+          ...(sources
+            ? {
+                schema_sources_gz_base64: sources.payload.dataBase64,
+                schema_sources_manifest: sources.payload.manifest,
+              }
+            : {}),
+        },
+        isEnginePushResult,
+      )
       printPushWarnings(result)
     } catch (err) {
       _lastFailedAst = astJson
@@ -1024,12 +1037,12 @@ async function runDevSchemaPush(
  */
 export async function dockerDiff(cwd: string, config: SupatypeProjectConfig): Promise<DiffResult | undefined> {
   if (hasEngineOverride(config)) {
-    const ast = JSON.parse(readFileSync(join(cwd, ".supatype", "schema.ast.json"), "utf8")) as unknown
-    return engineRequest<DiffResult>("/diff", {
-      ast,
-      database_url: projectDatabaseUrl(cwd, config),
-      schema: pgSchema(config),
-    })
+    const ast = JSON.parse(readFileSync(join(cwd, ".supatype", "schema.ast.json"), "utf8"))
+    return engineRequest(
+      "/diff",
+      { ast, database_url: projectDatabaseUrl(cwd, config), schema: pgSchema(config) },
+      isDiffResult,
+    )
   }
   const project = composeProjectName(config.project.name)
   const result = await runComposeEngineDiff(selfHostComposePaths(cwd), cwd, project, config)
@@ -1164,7 +1177,7 @@ export interface EngineRun {
  * it did not parse at all, so a preview that worked was reported as a failed adopt.
  */
 export function adoptResultFrom(run: EngineRun): AdoptOutcome | null {
-  return run.status === 0 ? parseEngineJsonOutput<AdoptOutcome>(run.stdout) : null
+  return run.status === 0 ? parseEngineJsonOutput(run.stdout, isAdoptOutcome) : null
 }
 
 /**
@@ -1218,7 +1231,7 @@ async function runComposeEngineDiff(
   config: SupatypeProjectConfig,
 ): Promise<{ status: number; output: string; diff: DiffResult | null }> {
   const result = await runComposeEngineCommand(paths, cwd, composeProject, config, ["diff"])
-  return { ...result, diff: parseEngineJsonOutput<DiffResult>(result.output) }
+  return { ...result, diff: parseEngineJsonOutput(result.output, isDiffResult) }
 }
 
 /**
@@ -1261,13 +1274,17 @@ export async function adoptSchemaDocker(
   if (hasEngineOverride(config)) {
     await ensureDockerDbPublishedForHostEngine(cwd, config, { intro: "Adopt" })
     await ensureEngine()
-    return engineRequest<AdoptOutcome>("/adopt", {
-      ast: withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config),
-      database_url: projectDatabaseUrl(cwd, config),
-      schema: pgSchema(config),
-      yes,
-      ...(keys !== undefined && { keys }),
-    })
+    return engineRequest(
+      "/adopt",
+      {
+        ast: withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config),
+        database_url: projectDatabaseUrl(cwd, config),
+        schema: pgSchema(config),
+        yes,
+        ...(keys !== undefined && { keys }),
+      },
+      isAdoptOutcome,
+    )
   }
   await requireDockerFeatures(
     cwd,
@@ -1300,11 +1317,11 @@ export async function diffSchemaDocker(cwd: string, config: SupatypeProjectConfi
     const schemaPath = schemaPathFromProject(config, cwd)
     const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
     await ensureEngine()
-    return engineRequest<DiffResult>("/diff", {
-      ast,
-      database_url: projectDatabaseUrl(cwd, config),
-      schema: pgSchema(config),
-    })
+    return engineRequest(
+      "/diff",
+      { ast, database_url: projectDatabaseUrl(cwd, config), schema: pgSchema(config) },
+      isDiffResult,
+    )
   }
 
   // A diff of a standalone stack must not write dev values over the operator's .env (SH1).
@@ -1837,7 +1854,7 @@ export async function generateViaComposeEngine(
 
   const adminOut = await runComposeEngineGenerator(paths, cwd, composeProject, config, ["admin"])
   if (!adminOut) return false
-  const parsed = parseEngineJsonOutput<unknown>(adminOut)
+  const parsed = parseEngineJsonOutput(adminOut, isObjectAnswer)
   if (parsed === null) return false
 
   const admin = withAdminRoles(parsed, config)

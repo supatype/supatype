@@ -111,7 +111,7 @@ const MANIFEST: Manifest = {
 function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical)
   if (value !== null && typeof value === "object") {
-    const entries = Object.entries(value as Record<string, unknown>)
+    const entries = Object.entries(value)
     entries.sort(([a], [b]) => a.localeCompare(b))
     return Object.fromEntries(entries.map(([key, inner]) => [key, canonical(inner)]))
   }
@@ -125,27 +125,18 @@ function collector(): SeedCollector {
 /**
  * The seed a person would write to produce the golden document.
  *
- * Typed loosely on purpose: the generated builder is what supplies the real types, and this
- * test is about what the collector emits rather than about what compiles.
+ * Typed loosely on purpose: with no generated builder registered, `SeedDb` falls back to a
+ * record of loosely typed models, and this test is about what the collector emits rather than
+ * about what compiles.
  */
 function writeTheGoldenSeed(db: SeedDb): void {
-  const models = db as unknown as Record<string, {
-    create: (data: Record<string, unknown>, options?: { id?: string }) => Record<string, unknown>
-    createMany: (rows: Record<string, unknown>[]) => void
-    upsert: (args: {
-      where: Record<string, unknown>
-      data: Record<string, unknown>
-      id?: string
-    }) => Record<string, unknown>
-  }>
-
-  const alex = models["profile"]!.upsert({
+  const alex = db["profile"]!.upsert({
     where: { id: "a0000000-0000-4000-8000-000000000001" },
     data: { display_name: "Alex Rivera", full_name: "Alex Rivera" },
     id: "alex",
   })
 
-  models["organiser"]!.upsert({
+  db["organiser"]!.upsert({
     where: { slug: "northern-lights-events" },
     data: {
       name: "Northern Lights Events",
@@ -173,7 +164,7 @@ function writeTheGoldenSeed(db: SeedDb): void {
   })
 
   const venue = { connect: { slug: "northern-lights-events" } }
-  models["venue"]!.createMany([
+  db["venue"]!.createMany([
     {
       name: "The Exchange",
       city: "Bristol",
@@ -191,14 +182,14 @@ function writeTheGoldenSeed(db: SeedDb): void {
   ])
 
   db.$if({ notExists: { model: "SiteSettings" } }, () => {
-    models["_global_site_settings"]!.create({
+    db["_global_site_settings"]!.create({
       site_name: "Launch Test Tickets",
       default_currency: "GBP",
     })
   })
 
   db.$if({ exists: { model: "Event", where: eq("status", "published") } }, () => {
-    models["promo_code"]!.create({
+    db["promo_code"]!.create({
       code: "EARLY20",
       discount_kind: "percentage",
       discount_value: 20,
@@ -242,10 +233,7 @@ describe("the builder against the golden IR", () => {
 describe("what the collector encodes", () => {
   it("labels an operation only when something points at it", () => {
     const collect = collector()
-    const models = collect.db() as unknown as Record<
-      string,
-      { create: (data: Record<string, unknown>) => Record<string, unknown> }
-    >
+    const models = collect.db()
     models["profile"]!.create({ display_name: "Unreferenced" })
     const referenced = models["profile"]!.create({ display_name: "Referenced" })
     models["organiser"]!.create({ name: "N", owner: { connect: { id: referenced["id"] } } })
@@ -261,10 +249,7 @@ describe("what the collector encodes", () => {
    */
   it("sends an exact-decimal column as text and leaves other numbers alone", () => {
     const collect = collector()
-    const models = collect.db() as unknown as Record<
-      string,
-      { create: (data: Record<string, unknown>) => Record<string, unknown> }
-    >
+    const models = collect.db()
     models["ticket_type"]!.create({ name: "Early", price: 75.5, quantity: 100 })
 
     const operation = collect.finish().ir.operations[0]
@@ -276,10 +261,7 @@ describe("what the collector encodes", () => {
 
   it("renders a Date as an instant", () => {
     const collect = collector()
-    const models = collect.db() as unknown as Record<
-      string,
-      { create: (data: Record<string, unknown>) => Record<string, unknown> }
-    >
+    const models = collect.db()
     models["event"]!.create({ title: "Conf", starts_at: new Date("2026-01-01T09:00:00.000Z") })
 
     expect(collect.finish().ir.operations[0]).toMatchObject({
@@ -290,10 +272,7 @@ describe("what the collector encodes", () => {
   /** `expr.now()` is already the shape the engine reads, so it must pass through untouched. */
   it("leaves an expression alone rather than encoding it again", () => {
     const collect = collector()
-    const models = collect.db() as unknown as Record<
-      string,
-      { create: (data: Record<string, unknown>) => Record<string, unknown> }
-    >
+    const models = collect.db()
     models["event"]!.create({ title: "Conf", created_at: expr.now() })
 
     expect(collect.finish().ir.operations[0]).toMatchObject({
@@ -304,14 +283,10 @@ describe("what the collector encodes", () => {
   it("collects a group's operations into the group, not beside it", () => {
     const collect = collector()
     const db = collect.db()
-    const models = db as unknown as Record<
-      string,
-      { create: (data: Record<string, unknown>) => Record<string, unknown> }
-    >
     db.$if({ notExists: { model: "SiteSettings" } }, () => {
-      models["profile"]!.create({ display_name: "Inside" })
+      db["profile"]!.create({ display_name: "Inside" })
     })
-    models["profile"]!.create({ display_name: "Outside" })
+    db["profile"]!.create({ display_name: "Outside" })
 
     const operations = collect.finish().ir.operations
     expect(operations).toHaveLength(2)
@@ -329,17 +304,13 @@ describe("what the collector encodes", () => {
   it("leaves the block it was collecting into when a group throws", () => {
     const collect = collector()
     const db = collect.db()
-    const models = db as unknown as Record<
-      string,
-      { create: (data: Record<string, unknown>) => Record<string, unknown> }
-    >
     expect(() => {
       db.$if({ notExists: { model: "SiteSettings" } }, () => {
         throw new Error("the seed failed")
       })
     }).toThrow("the seed failed")
 
-    models["profile"]!.create({ display_name: "After" })
+    db["profile"]!.create({ display_name: "After" })
     const operations = collect.finish().ir.operations
     expect(operations).toHaveLength(1)
     expect(operations[0]).toMatchObject({ op: "create" })
@@ -347,10 +318,7 @@ describe("what the collector encodes", () => {
 
   it("normalises a hasOne nested create into the list the IR carries", () => {
     const collect = collector()
-    const models = collect.db() as unknown as Record<
-      string,
-      { create: (data: Record<string, unknown>) => Record<string, unknown> }
-    >
+    const models = collect.db()
     models["organiser"]!.create({
       name: "N",
       events: { create: { title: "Only one" } },
@@ -364,10 +332,7 @@ describe("what the collector encodes", () => {
   /** A reference is a thenable-looking object, and awaiting one must not hang. */
   it("does not answer to `then`, so a builder call can be awaited harmlessly", async () => {
     const collect = collector()
-    const models = collect.db() as unknown as Record<
-      string,
-      { create: (data: Record<string, unknown>) => Record<string, unknown> }
-    >
+    const models = collect.db()
     const row = models["profile"]!.create({ display_name: "Alex" })
     await expect(Promise.resolve(row)).resolves.toBeDefined()
   })

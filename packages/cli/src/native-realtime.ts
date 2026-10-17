@@ -1,4 +1,5 @@
 import { ProcessManager } from "./process-manager.js"
+import { errorMessage } from "./error-message.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
 import { resolveRealtimeLaunch, type RealtimeLaunchSpec } from "./realtime-launch.js"
 import { patchRouteManifest } from "./route-manifest.js"
@@ -55,7 +56,7 @@ export async function startNativeRealtime(
     patchRouteManifest(opts.manifestPath, { realtime_enabled: false, realtime_url: undefined })
     console.warn(
       "[supatype] ⚠  Realtime unavailable, so the gateway will answer realtime requests with " +
-        `"realtime disabled" and WebSocket subscriptions will not work.\n  ${(err as Error).message}`,
+        `"realtime disabled" and WebSocket subscriptions will not work.\n  ${errorMessage(err)}`,
     )
     return null
   }

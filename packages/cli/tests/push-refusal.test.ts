@@ -17,10 +17,11 @@ vi.mock("../src/ui/messages.js", async (importOriginal) => ({
 }))
 
 const { EngineError, engineBusyMessage } = await import("../src/engine-client.js")
-const { ENGINE_BUSY } = await import("@supatype/shared")
+const { ENGINE_BUSY, isJsonObject } = await import("@supatype/shared")
 const { TargetApiError } = await import("../src/target-client.js")
 const { isEngineBusy } = await import("../src/adopt-walkthrough.js")
 const { exitInitialPushFailed, pushInitialSchema } = await import("../src/dev-initial-push.js")
+const { parseJsonAs } = await import("./support/json.js")
 /** Imported per test, so the paths that exist on the base still run without the new module. */
 const refusal = () => import("../src/push-refusal.js")
 
@@ -86,10 +87,11 @@ describe("C02: dev's first push", () => {
   it("security_drift is its own refusal, and dev names `supatype dev --overwrite-drift`", async () => {
     const outcome = await pushInitialSchema(steps([`${DRIFT_JSON}\n${DRIFT_STDERR}`]))
     expect(outcome).toMatchObject({ kind: "refused", refusal: { kind: "security-drift" } })
+    if (outcome.kind === "applied") throw new Error("the push was applied")
     const exit = vi.spyOn(process, "exit").mockImplementation(() => {
       throw new Error("exit")
     })
-    expect(() => exitInitialPushFailed(outcome as Parameters<typeof exitInitialPushFailed>[0])).toThrow("exit")
+    expect(() => exitInitialPushFailed(outcome)).toThrow("exit")
     expect(exit).toHaveBeenCalledWith(1)
     const said = lines.join("\n")
     expect(said).toContain("`supatype dev --overwrite-drift`")
@@ -102,10 +104,11 @@ describe("C02: dev's first push", () => {
     const outcome = await pushInitialSchema(s)
     expect(outcome).toMatchObject({ kind: "refused", refusal: { kind: "engine-busy" } })
     expect(s.recoverDatabase).not.toHaveBeenCalled()
+    if (outcome.kind === "applied") throw new Error("the push was applied")
     vi.spyOn(process, "exit").mockImplementation(() => {
       throw new Error("exit")
     })
-    expect(() => exitInitialPushFailed(outcome as Parameters<typeof exitInitialPushFailed>[0])).toThrow("exit")
+    expect(() => exitInitialPushFailed(outcome)).toThrow("exit")
     const said = lines.join("\n")
     expect(said).toMatch(/another push is running/i)
     expect(said).toMatch(/try again/i)
@@ -142,7 +145,7 @@ describe("classifyPushRefusal(): code first, wording second", () => {
   it("reads each refusal from the engine binary, a server's 409 and the docker path alike", async () => {
     expect((await refusal()).classifyPushRefusal(new EngineError(BUSY_SENTENCE, "/push", 1, BUSY_JSON, ENGINE_BUSY))?.kind).toBe("engine-busy")
     expect((await refusal()).classifyPushRefusal(new EngineError("Engine /push failed (exit 1): x", "/push", 1, DRIFT_JSON))?.kind).toBe("security-drift")
-    const http = new TargetApiError("1 object(s) ... changed outside Supatype", 409, "security_drift", JSON.parse(DRIFT_JSON) as Record<string, unknown>)
+    const http = new TargetApiError("1 object(s) ... changed outside Supatype", 409, "security_drift", parseJsonAs(DRIFT_JSON, isJsonObject))
     const drift = (await refusal()).classifyPushRefusal(http)
     expect(drift?.kind === "security-drift" && drift.objects.map((o) => o.key.name)).toEqual(["post_select"])
     expect((await refusal()).classifyPushRefusal(new Error(PULL_FAILED))?.kind).toBe("image-pull")

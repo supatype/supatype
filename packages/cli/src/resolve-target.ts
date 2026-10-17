@@ -1,8 +1,24 @@
-import { existsSync, readFileSync } from "node:fs"
+import { execSync } from "node:child_process"
+import { existsSync } from "node:fs"
 import { resolve } from "node:path"
 import { loadConfig } from "./config.js"
 import type { AdoptOutcome, ComposeEngine, DiffResult } from "./engine-client.js"
 import { ensureEngine, enginePush, engineRequest } from "./engine-client.js"
+import {
+  isAdoptOutcome,
+  isDatabaseStateJson,
+  isDiffResult,
+  isDoctorReport,
+  isEnginePushResult,
+  isMigrationList,
+  isMigrationsAnswer,
+  isSchemaRollbackResult,
+} from "./engine-answers.js"
+import type { EnginePushResult } from "./engine-push-output.js"
+import type { DoctorReport } from "./commands/doctor.js"
+import type { DatabaseStateJson } from "./pull-utils.js"
+import { readJsonFileOrThrow } from "./json-file.js"
+import { isShape, isString, optional, type Guard } from "@supatype/shared"
 import type { SchemaSourcesPayload } from "./schema-sources.js"
 import type { AppliedRenameRecord } from "./rename-journal.js"
 import { pushAuditFields } from "./push-audit.js"
@@ -21,6 +37,7 @@ import {
   loadProjectLink,
   resolveEnvironmentName,
   resolveEnvironmentToken,
+  isBranchContext,
   type BranchContext,
   type LocalEnvironment,
   type ProjectLink,
@@ -89,7 +106,7 @@ function resolveLocalToken(cwd: string): string | undefined {
 export function loadBranchContext(cwd: string): BranchContext | null {
   const path = resolve(cwd, ".supatype/branch.json")
   if (!existsSync(path)) return null
-  return JSON.parse(readFileSync(path, "utf8")) as BranchContext
+  return readJsonFileOrThrow(path, isBranchContext, "a branch context")
 }
 
 function resolveBranchDefaults(cwd: string, configEnvDefault?: string): string | undefined {
@@ -98,7 +115,6 @@ function resolveBranchDefaults(cwd: string, configEnvDefault?: string): string |
     const config = loadConfig(cwd)
     const branchDefaults = config.environments?.branchDefaults
     if (!branchDefaults) return undefined
-    const { execSync } = require("node:child_process") as typeof import("node:child_process")
     const branch = execSync("git rev-parse --abbrev-ref HEAD", { cwd, encoding: "utf8" }).trim()
     return branchDefaults[branch]
   } catch {
@@ -267,9 +283,14 @@ function projectPath(target: DeployTarget, subpath: string): string {
 /**
  * Run the engine for `target`: in the project's engine image when it has one, else the host binary.
  */
-async function engineHere<T = unknown>(target: DeployTarget, endpoint: string, body: Record<string, unknown>): Promise<T> {
+async function engineHere<T>(
+  target: DeployTarget,
+  endpoint: string,
+  body: Record<string, unknown>,
+  guard: Guard<T>,
+): Promise<T> {
   if (target.compose === undefined) await ensureEngine()
-  return engineRequest<T>(endpoint, body, target.compose)
+  return engineRequest(endpoint, body, guard, target.compose)
 }
 
 /** Whether `target` runs the engine binary here rather than asking a control plane. */
@@ -306,7 +327,7 @@ export async function targetCapabilities(target: DeployTarget): Promise<Capabili
 async function serverCapabilities(target: DeployTarget): Promise<Capabilities> {
   let answer: unknown
   try {
-    answer = await targetFetch<unknown>(
+    answer = await targetFetch(
       target.apiBaseUrl,
       target.apiPrefix,
       apiFetchOpts(target, "GET", projectPath(target, "/schema/capabilities")),
@@ -351,20 +372,22 @@ export async function targetSchemaDiff(
 ): Promise<DiffResult> {
   await requireTargetFeatures(target, identityColumnsNeed(ast))
   if (target.mode === "direct" || (target.mode === "local" && !target.token)) {
-    return engineHere<DiffResult>(target, "/diff", {
-      ast,
-      database_url: target.databaseUrl!,
-      schema: opts?.schema ?? "public",
-    })
+    return engineHere(
+      target,
+      "/diff",
+      { ast, database_url: target.databaseUrl!, schema: opts?.schema ?? "public" },
+      isDiffResult,
+    )
   }
 
-  return targetFetch<DiffResult>(
+  return targetFetch(
     target.apiBaseUrl,
     target.apiPrefix,
     apiFetchOpts(target, "POST", projectPath(target, "/schema/diff"), {
       ast,
       schema: opts?.schema ?? "public",
     }),
+    isDiffResult,
   )
 }
 
@@ -380,19 +403,7 @@ export async function targetSchemaPush(
     /** Put back access changed outside Supatype (plan 3.5); only after consent. */
     overwriteDrift?: boolean
   },
-): Promise<{
-  message?: string
-  status?: string
-  name?: string
-  /** The schema's warnings, then any found once applied. See `printPushWarnings`. */
-  warnings?: string[]
-  /**
-   * What the control plane made of this schema's cache declaration. Absent from an engine push and
-   * from a control plane too old to send it, which is why every reader of it has to treat absence
-   * as "nothing to say" rather than as an empty declaration.
-   */
-  cache?: { tables?: string[]; honoured?: boolean }
-}> {
+): Promise<EnginePushResult> {
   const overwriteDrift = opts.overwriteDrift === true
   await requireTargetFeatures(target, [
     ...(overwriteDrift ? [{ feature: "overwrite_drift" as const, flag: "--overwrite-drift" }] : []),
@@ -411,7 +422,7 @@ export async function targetSchemaPush(
       body["schema_sources_manifest"] = opts.schemaSources.manifest
     }
     if (target.compose === undefined) await ensureEngine()
-    return enginePush(opts.cwd, body, target.compose)
+    return enginePush(opts.cwd, body, isEnginePushResult, target.compose)
   }
 
   const pushBody: Record<string, unknown> = {
@@ -434,6 +445,7 @@ export async function targetSchemaPush(
     target.apiBaseUrl,
     target.apiPrefix,
     apiFetchOpts(target, "POST", projectPath(target, "/schema/push"), pushBody),
+    isEnginePushResult,
   )
 }
 
@@ -441,8 +453,8 @@ export interface SchemaRollbackResult {
   status: string
   name: string
   message: string
-  restoredMigrationName?: string
-  schemaSourcesManifest?: SchemaSourcesManifestSummary
+  restoredMigrationName?: string | null
+  schemaSourcesManifest?: SchemaSourcesManifestSummary | null
   schemaSourcesBase64?: string
 }
 
@@ -477,18 +489,21 @@ export async function targetSchemaRollback(
   opts?: { schema?: string },
 ): Promise<SchemaRollbackResult> {
   if (target.mode === "direct" || (target.mode === "local" && !target.token)) {
-    return engineHere<SchemaRollbackResult>(target, "/rollback", {
-      database_url: target.databaseUrl!,
-      schema: opts?.schema ?? "public",
-    })
+    return engineHere(
+      target,
+      "/rollback",
+      { database_url: target.databaseUrl!, schema: opts?.schema ?? "public" },
+      isSchemaRollbackResult,
+    )
   }
 
-  return targetFetch<SchemaRollbackResult>(
+  return targetFetch(
     target.apiBaseUrl,
     target.apiPrefix,
     apiFetchOpts(target, "POST", projectPath(target, "/schema/rollback"), {
       schema: opts?.schema ?? "public",
     }),
+    isSchemaRollbackResult,
   )
 }
 
@@ -496,18 +511,20 @@ export async function targetListMigrations(
   target: DeployTarget,
 ): Promise<MigrationListEntry[]> {
   if (target.mode === "direct" || (target.mode === "local" && !target.token)) {
-    const result = await engineHere<{ migrations?: MigrationListEntry[] } | MigrationListEntry[]>(
+    const result = await engineHere(
       target,
       "/migrations",
       { database_url: target.databaseUrl!, action: "list" },
+      isMigrationsAnswer,
     )
     return Array.isArray(result) ? result : (result.migrations ?? [])
   }
 
-  return targetFetch<MigrationListEntry[]>(
+  return targetFetch(
     target.apiBaseUrl,
     target.apiPrefix,
     apiFetchOpts(target, "GET", projectPath(target, "/schema/migrations")),
+    isMigrationList,
   )
 }
 
@@ -550,7 +567,7 @@ export async function targetSchemaDoctor(
   target: DeployTarget,
   ast: unknown,
   opts?: { schema?: string; rebaseline?: boolean; acceptAccessDrift?: boolean; keys?: string[] },
-): Promise<unknown> {
+): Promise<DoctorReport> {
   const rebaseline = opts?.rebaseline === true
   const acceptAccessDrift = rebaseline && opts?.acceptAccessDrift === true
   const keys = rebaseline ? opts?.keys : undefined
@@ -569,25 +586,28 @@ export async function targetSchemaDoctor(
     ...identityColumnsNeed(ast),
   ])
   if (runsEngineHere(target)) {
-    return engineHere(target, "/doctor", { ...body, database_url: target.databaseUrl! })
+    return engineHere(target, "/doctor", { ...body, database_url: target.databaseUrl! }, isDoctorReport)
   }
 
   return targetFetch(
     target.apiBaseUrl,
     target.apiPrefix,
     apiFetchOpts(target, "POST", projectPath(target, "/schema/doctor"), body),
+    isDoctorReport,
   )
 }
 
 export async function targetSchemaIntrospect(
   target: DeployTarget,
   opts?: { schema?: string },
-): Promise<unknown> {
+): Promise<DatabaseStateJson> {
   if (target.mode === "direct" || (target.mode === "local" && !target.token)) {
-    return engineHere(target, "/introspect", {
-      database_url: target.databaseUrl!,
-      schema: opts?.schema ?? "public",
-    })
+    return engineHere(
+      target,
+      "/introspect",
+      { database_url: target.databaseUrl!, schema: opts?.schema ?? "public" },
+      isDatabaseStateJson,
+    )
   }
 
   return targetFetch(
@@ -596,6 +616,7 @@ export async function targetSchemaIntrospect(
     apiFetchOpts(target, "POST", projectPath(target, "/schema/introspect"), {
       schema: opts?.schema ?? "public",
     }),
+    isDatabaseStateJson,
   )
 }
 
@@ -627,13 +648,14 @@ export async function targetSchemaAdopt(
   // adopt instead of release: refused before sending, never degraded.
   await requireTargetFeatures(target, [...adoptNeeds({ keys: opts?.keys, release, reclaim }), ...identityColumnsNeed(ast)])
   if (runsEngineHere(target)) {
-    return engineHere<AdoptOutcome>(target, "/adopt", { ...body, database_url: target.databaseUrl! })
+    return engineHere(target, "/adopt", { ...body, database_url: target.databaseUrl! }, isAdoptOutcome)
   }
-  return (await targetFetch(
+  return targetFetch(
     target.apiBaseUrl,
     target.apiPrefix,
     apiFetchOpts(target, "POST", projectPath(target, "/schema/adopt"), body),
-  )) as AdoptOutcome
+    isAdoptOutcome,
+  )
 }
 
 /**

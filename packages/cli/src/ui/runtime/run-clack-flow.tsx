@@ -5,13 +5,13 @@ import { createClackApi, type ClackApi } from "../clack-api.js"
 import { FlowApp } from "../flows/FlowApp.js"
 import { restoreStdinAfterInk } from "./stdin-after-ink.js"
 
-interface RunClackFlowRootProps {
-  run: (api: ClackApi) => Promise<unknown>
-  onComplete: (value: unknown) => void
+interface RunClackFlowRootProps<T> {
+  run: (api: ClackApi) => Promise<T>
+  onComplete: (value: T) => void
   onError: (err: unknown) => void
 }
 
-function RunClackFlowRoot({ run, onComplete, onError }: RunClackFlowRootProps): React.ReactElement {
+function RunClackFlowRoot<T>({ run, onComplete, onError }: RunClackFlowRootProps<T>): React.ReactElement {
   const started = useRef(false)
 
   return (
@@ -36,10 +36,10 @@ export async function runClackFlow<T>(run: (api: ClackApi) => Promise<T>): Promi
   return new Promise<T>((resolve, reject) => {
     const instance = render(
       <RunClackFlowRoot
-        run={run as (api: ClackApi) => Promise<unknown>}
+        run={run}
         onComplete={(value) => {
           teardownInk(instance)
-          resolve(value as T)
+          resolve(value)
         }}
         onError={(err) => {
           teardownInk(instance)

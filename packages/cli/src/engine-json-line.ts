@@ -3,6 +3,8 @@
  * among log lines and Docker's. Every reader of that output finds the line here.
  */
 
+import { isJsonObject } from "@supatype/shared"
+
 /** A JSON object as read off a line, before anyone has checked its fields. */
 export type JsonObject = Readonly<Record<string, unknown>>
 
@@ -12,8 +14,8 @@ export function findJsonLine(output: string, accept: (value: JsonObject) => bool
     const candidate = line.trim()
     if (!candidate.startsWith("{")) continue
     try {
-      const parsed: unknown = JSON.parse(candidate)
-      if (typeof parsed === "object" && parsed !== null && accept(parsed as JsonObject)) return parsed as JsonObject
+      const parsed = JSON.parse(candidate)
+      if (isJsonObject(parsed) && accept(parsed)) return parsed
     } catch {
       /* not this line */
     }

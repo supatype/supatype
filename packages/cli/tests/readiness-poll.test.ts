@@ -1,7 +1,6 @@
 import { createServer, type Server } from "node:http"
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
-import type { AddressInfo } from "node:net"
 import { afterEach, describe, expect, it } from "vitest"
 
 /**
@@ -31,7 +30,9 @@ async function blackHole(): Promise<number> {
   })
   servers.push(server)
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
-  return (server.address() as AddressInfo).port
+  const address = server.address()
+  if (address === null || typeof address === "string") throw new Error("the server has no TCP port")
+  return address.port
 }
 
 const devCompose = (): string =>

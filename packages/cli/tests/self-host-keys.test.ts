@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fillMissingKeys } from "../src/commands/keys.js"
+import { verifyJwt } from "../src/jwt.js"
 
 /**
  * A self-host `.env` copied from the template arrives with ANON_KEY and
@@ -15,11 +16,17 @@ import { fillMissingKeys } from "../src/commands/keys.js"
 const SECRET = "a-local-development-secret-at-least-32-chars"
 
 let dir: string
+// A JWT_SECRET in the environment wins over the file's, so the runner's own would decide which
+// secret the keys are signed with, and whether a test without one in the file mints at all.
+const savedSecret = process.env["JWT_SECRET"]
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "selfhost-keys-"))
+  delete process.env["JWT_SECRET"]
 })
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
+  if (savedSecret === undefined) delete process.env["JWT_SECRET"]
+  else process.env["JWT_SECRET"] = savedSecret
 })
 
 const envPath = () => join(dir, ".env")
@@ -44,14 +51,16 @@ describe("filling the self-host keys", () => {
     writeFileSync(envPath(), `JWT_SECRET=${SECRET}\nANON_KEY=\nSERVICE_ROLE_KEY=\n`)
     fillMissingKeys(dir)
 
-    const claims = (jwt: string): Record<string, unknown> => {
-      const payload: unknown = JSON.parse(Buffer.from(jwt.split(".")[1] as string, "base64url").toString("utf8"))
-      if (typeof payload !== "object" || payload === null) throw new Error("JWT payload is not an object")
-      return payload as Record<string, unknown>
+    // Checked against the signature, not only decoded: a key signed with anything but the file's
+    // secret is one the server refuses.
+    const claims = (name: string): Record<string, unknown> => {
+      const verified = verifyJwt(valueOf(name), SECRET)
+      if (verified === null) throw new Error(`${name} does not verify against the file's JWT_SECRET`)
+      return verified
     }
 
-    expect(claims(valueOf("ANON_KEY")).role).toBe("anon")
-    expect(claims(valueOf("SERVICE_ROLE_KEY")).role).toBe("service_role")
+    expect(claims("ANON_KEY")["role"]).toBe("anon")
+    expect(claims("SERVICE_ROLE_KEY")["role"]).toBe("service_role")
   })
 
   it("leaves a key the operator already set alone", () => {

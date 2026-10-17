@@ -3,9 +3,12 @@
  * A second CLI process waits for an in-flight download instead of racing the CDN.
  */
 
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
+import { isNumber, isOneOf, isShape, isString, type Guard } from "@supatype/shared"
 import { cachePath, type Component } from "./binary-cache.js"
+import { BINARY_COMPONENTS } from "./components.js"
+import { readJsonFile } from "./json-file.js"
 
 const LOCK_VERSION = 1 as const
 const STALE_MS = 30 * 60 * 1000
@@ -19,6 +22,15 @@ interface DownloadLockPayload {
   semver: string
   startedAt: string
 }
+
+/** A lock this version of the CLI wrote. One from another version reads as no lock. */
+const isDownloadLock: Guard<DownloadLockPayload> = isShape({
+  version: isOneOf([LOCK_VERSION]),
+  pid: isNumber,
+  component: isOneOf(BINARY_COMPONENTS),
+  semver: isString,
+  startedAt: isString,
+})
 
 function lockPath(component: Component, version: string): string {
   return join(cachePath(component, version), ".downloading")
@@ -40,13 +52,7 @@ function isPidAlive(pid: number): boolean {
 function readLock(component: Component, version: string): DownloadLockPayload | null {
   const path = lockPath(component, version)
   if (!existsSync(path)) return null
-  try {
-    const data = JSON.parse(readFileSync(path, "utf8")) as DownloadLockPayload
-    if (data.version !== LOCK_VERSION) return null
-    return data
-  } catch {
-    return null
-  }
+  return readJsonFile(path, isDownloadLock) ?? null
 }
 
 function isLockStale(lock: DownloadLockPayload): boolean {

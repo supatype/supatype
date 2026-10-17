@@ -10,7 +10,8 @@ import type { AdoptCallOptions, TargetCall } from "./support/engine-mocks.js"
  */
 
 const targetSchemaAdopt = vi.hoisted(() => vi.fn<TargetCall<AdoptCallOptions>>())
-const confirmMock = vi.hoisted(() => vi.fn())
+/** clack's `confirm`, as far as the walkthrough uses it. */
+const confirmMock = vi.hoisted(() => vi.fn<(opts: { message: string }) => Promise<boolean | symbol>>())
 
 vi.mock("../src/config.js", () => ({ loadConfig: () => ({ project: { name: "app" } }), loadSchemaAst: () => ({}) }))
 vi.mock("../src/project-config.js", () => ({ schemaPathFromProject: () => "schema", pgSchema: () => "public" }))
@@ -82,7 +83,7 @@ describe("adopt --key table:item", () => {
     confirmMock.mockResolvedValue(true)
     await adopt("--key", "table:item")
     expect(applied()).toEqual([["table:item", ...ACCESS]])
-    const questions = confirmMock.mock.calls.map((call) => (call[0] as { message: string }).message)
+    const questions = confirmMock.mock.calls.map(([opts]) => opts.message)
     expect(questions.some((q) => /grants and policies/.test(q))).toBe(true)
     for (const key of ACCESS) expect(printed()).toContain(key)
     // Another table's conflicts are not offered: only what belongs to the table named.

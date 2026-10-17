@@ -7,6 +7,7 @@ import { loadConfig, loadSchemaAst } from "../config.js"
 import { projectRootFromConfig, schemaPathFromProject } from "../project-config.js"
 import { resolveHostDatabaseUrl } from "../host-database.js"
 import { ensureEngine, engineRequest } from "../engine-client.js"
+import { isEnginePushResult, isMigrateAnswer } from "../engine-answers.js"
 import { plannedChanges } from "../diff-output.js"
 import { loadProjectLink } from "../link.js"
 import {
@@ -22,7 +23,7 @@ import {
 import {
   restoreSchemaSourcesFromGz,
   findOrphanSchemaFiles,
-  type SchemaSourcesManifest,
+  isSchemaSourcesManifest,
 } from "../schema-sources.js"
 import { renameLabel } from "../rename-journal.js"
 import { confirm } from "../ui/confirm.js"
@@ -163,9 +164,10 @@ export function registerMigrate(program: Command): void {
       const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
 
       await ensureEngine()
-      const result = await engineRequest<MigrateResult>(
+      const result = await engineRequest(
         "/migrate",
         migrateRequest(ast, connection, schemaPgSchema(cwd), opts),
+        isMigrateAnswer,
       )
       const sql = migrationSql(result)
       if (opts.output === undefined) {
@@ -241,12 +243,11 @@ export function registerMigrate(program: Command): void {
 
       await ensureEngine()
       const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
-      const result = await engineRequest<EnginePushResult>("/push", {
-        ast,
-        database_url: connection,
-        schema: "public",
-        force: true,
-      })
+      const result = await engineRequest(
+        "/push",
+        { ast, database_url: connection, schema: "public", force: true },
+        isEnginePushResult,
+      )
       info(result.message ?? "Reset complete.")
       printPushWarnings(result)
     })
@@ -260,10 +261,10 @@ async function offerSchemaRestore(
   pgSchema: string,
   autoSync: boolean,
 ): Promise<void> {
-  const manifest = result.schemaSourcesManifest as SchemaSourcesManifest | undefined
+  const manifest = result.schemaSourcesManifest
   const gzB64 = result.schemaSourcesBase64
 
-  if (!gzB64 || !manifest) {
+  if (!gzB64 || !isSchemaSourcesManifest(manifest)) {
     warn(
       "No schema source snapshot on the restored migration (legacy push). Run `supatype pull` to draft from DB if needed.",
     )

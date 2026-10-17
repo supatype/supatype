@@ -8,6 +8,7 @@ import {
   usesLocalServerImage,
 } from "../src/compose-local-server-image.js"
 import type { SupatypeProjectConfig } from "../src/project-config.js"
+import { projectConfig } from "./support/project-config.js"
 
 /**
  * `overrides.server` has to survive the next `.env` write, whichever command makes it.
@@ -38,14 +39,13 @@ function project(versions?: SupatypeProjectConfig["versions"]): {
 
   return {
     cwd,
-    config: {
-      project: { name: "demo" },
+    config: projectConfig({
       // Every loaded config has one; the env write reads it to tell a bundled database from an
       // external one.
       database: { provider: "docker" },
       ...(versions !== undefined && { versions }),
       overrides: { server: join(serverRoot, "supatype-server.exe") },
-    } as SupatypeProjectConfig,
+    }),
   }
 }
 
@@ -60,7 +60,7 @@ describe("the locally built server image", () => {
   it("is not claimed when the override points nowhere near a Dockerfile", () => {
     const { cwd, config } = project({ server: "local" })
     const stray = { ...config, overrides: { server: join(cwd, "nope", "server.exe") } }
-    expect(usesLocalServerImage(cwd, stray as SupatypeProjectConfig)).toBe(false)
+    expect(usesLocalServerImage(cwd, stray)).toBe(false)
   })
 
   it("is not claimed when versions.server names a release", () => {
@@ -78,7 +78,7 @@ describe("the locally built server image", () => {
     upsertDevComposeEnv(cwd, config, "anon-key", "service-key", 54321)
     expect(envOf(cwd)).toContain(`SUPATYPE_SERVER_IMAGE=${LOCAL_SERVER_DOCKER_IMAGE}`)
 
-    syncComposeImagePins(cwd, { project: { name: "demo" } } as SupatypeProjectConfig)
+    syncComposeImagePins(cwd, projectConfig())
     expect(envOf(cwd)).toContain(`SUPATYPE_SERVER_IMAGE=${LOCAL_SERVER_DOCKER_IMAGE}`)
   })
 
@@ -88,7 +88,7 @@ describe("the locally built server image", () => {
     writeFileSync(join(cwd, ".env"), "JWT_SECRET=x\n", "utf8")
     upsertDevComposeEnv(cwd, config, "anon-key", "service-key", 54321)
 
-    const released = { ...config, versions: { server: "1.2.3" } } as SupatypeProjectConfig
+    const released: SupatypeProjectConfig = { ...config, versions: { server: "1.2.3" } }
     upsertDevComposeEnv(cwd, released, "anon-key", "service-key", 54321)
 
     expect(envOf(cwd)).not.toContain(LOCAL_SERVER_DOCKER_IMAGE)

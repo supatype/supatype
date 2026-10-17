@@ -20,6 +20,9 @@ import { isAbsolute, normalize, relative, sep } from "node:path"
 import { Node, Project, ts, type SourceFile, type TypeLiteralNode, type TypeNode } from "ts-morph"
 import { extractSchemaAstFromTypes, walkSchemaSourceAbsPaths } from "./type-extractor.js"
 import type { DbColumnState } from "./pull-utils.js"
+import { isJsonObject } from "@supatype/shared"
+import { objectAt } from "./ast-read.js"
+import { isDbColumnState } from "./engine-answers.js"
 import type { ExtractedSchemaAstV2, ModelAstV2 } from "./schema-ast-v2.js"
 
 const TYPES_MODULE = "@supatype/types"
@@ -479,7 +482,7 @@ function fieldMismatch(field: ModelAstV2["fields"][string], expect: ExpectedFiel
   if (expect.scale !== undefined && field["scale"] !== expect.scale) return "its scale differs"
   if (field["identity"] !== expect.identity) return "its identity differs"
   if (field["autoIncrement"] !== expect.autoIncrement) return "it reads as another kind of identity"
-  const generated = (field["generated"] as { expression?: unknown } | undefined)?.expression
+  const generated = objectAt(field, "generated")?.["expression"]
   if (generated !== expect.generated) return "its generated expression differs"
   return undefined
 }
@@ -916,12 +919,14 @@ function printManual(result: ColumnDeclarationManual, cwd: string, say: DeclareD
 
 function liveColumns(state: unknown): Map<string, LiveColumn> {
   const out = new Map<string, LiveColumn>()
-  const tables = (state as { tables?: unknown } | null)?.tables
+  const tables = isJsonObject(state) ? state["tables"] : undefined
   if (!Array.isArray(tables)) return out
-  for (const table of tables as Array<{ name?: unknown; columns?: unknown }>) {
-    if (typeof table.name !== "string" || !Array.isArray(table.columns)) continue
-    for (const col of table.columns as LiveColumn[]) {
-      if (typeof col?.name === "string") out.set(`${table.name}.${col.name}`, col)
+  for (const table of tables) {
+    const name = isJsonObject(table) ? table["name"] : undefined
+    const columns = isJsonObject(table) ? table["columns"] : undefined
+    if (typeof name !== "string" || !Array.isArray(columns)) continue
+    for (const col of columns) {
+      if (isDbColumnState(col)) out.set(`${name}.${col.name}`, col)
     }
   }
   return out

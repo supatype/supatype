@@ -17,6 +17,9 @@
  */
 
 import { createHash, createPublicKey, verify as cryptoVerify } from "node:crypto"
+import { isJsonObject } from "@supatype/shared"
+import { errorMessage } from "./error-message.js"
+import { readJsonObjectFile } from "./json-file.js"
 import {
   closeSync,
   copyFileSync,
@@ -106,18 +109,14 @@ export function isLinkedToCloudProject(cwd: string, config: SupatypeProjectConfi
 
   const linkedPath = join(cwd, ".supatype", "linked.json")
   if (existsSync(linkedPath)) {
-    try {
-      const data = JSON.parse(readFileSync(linkedPath, "utf8")) as Record<string, unknown>
-      if (typeof data["ref"] === "string" && (data["ref"] as string).trim() !== "") return true
-    } catch { /* ignore */ }
+    const ref = readJsonObjectFile(linkedPath)?.["ref"]
+    if (typeof ref === "string" && ref.trim() !== "") return true
   }
 
   const cloudPath = join(cwd, ".supatype", "cloud.json")
   if (existsSync(cloudPath)) {
-    try {
-      const data = JSON.parse(readFileSync(cloudPath, "utf8")) as { projectSlug?: string }
-      if (typeof data.projectSlug === "string" && data.projectSlug.trim() !== "") return true
-    } catch { /* ignore */ }
+    const slug = readJsonObjectFile(cloudPath)?.["projectSlug"]
+    if (typeof slug === "string" && slug.trim() !== "") return true
   }
 
   return false
@@ -461,7 +460,7 @@ export async function download(
     try { if (existsSync(destPath)) unlinkSync(destPath) } catch { /* ignore */ }
     try { rmdirSync(dir) } catch { /* dir not empty or already removed */ }
     throw new Error(
-      `Failed to download ${component} v${version} from ${CDN_BASE}: ${(err as Error).message}`,
+      `Failed to download ${component} v${version} from ${CDN_BASE}: ${errorMessage(err)}`,
     )
   } finally {
     releaseDownloadLock(component, version)
@@ -549,7 +548,7 @@ async function fetchEngineLicense(manifest: string, releaseUrl: string, target: 
     writeFileSync(target, body)
     return undefined
   } catch (err) {
-    return (err as Error).message
+    return errorMessage(err)
   }
 }
 
@@ -941,7 +940,7 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
       if (i === attempts) throw err
       const delay = Math.pow(3, i - 1) * 1_000 // 1 s, 3 s, 9 s
       console.error(
-        `[supatype] Download attempt ${i}/${attempts} failed: ${(err as Error).message}. ` +
+        `[supatype] Download attempt ${i}/${attempts} failed: ${errorMessage(err)}. ` +
           `Retrying in ${delay / 1_000}s...`,
       )
       await new Promise((r) => setTimeout(r, delay))
@@ -1013,11 +1012,17 @@ export async function fetchLatestVersion(component: Component): Promise<string> 
   if (!resp.ok) {
     throw new Error(`Failed to fetch latest version for ${component} from ${url}: HTTP ${resp.status}`)
   }
-  const data = await resp.json() as { version?: unknown }
-  if (typeof data.version !== "string" || data.version.trim() === "") {
-    throw new Error(`Invalid latest.json for ${component}: missing "version" field`)
+  return readLatestVersion(resp, `latest.json for ${component}`)
+}
+
+/** The version a CDN `latest.json` (`{"version":"x.y.z"}`) names, or a throw naming the file. */
+export async function readLatestVersion(resp: Response, what: string): Promise<string> {
+  const data = await resp.json()
+  const version = isJsonObject(data) ? data["version"] : undefined
+  if (typeof version !== "string" || version.trim() === "") {
+    throw new Error(`Invalid ${what}: missing "version" field`)
   }
-  return data.version.trim()
+  return version.trim()
 }
 
 /** Fetch the latest version for all components concurrently. Missing CDN entries are omitted. */
@@ -1090,7 +1095,7 @@ export async function downloadAll(
     try {
       await download(component, version, platform)
     } catch (err) {
-      const msg = `[supatype] Failed to download ${component}: ${(err as Error).message}`
+      const msg = `[supatype] Failed to download ${component}: ${errorMessage(err)}`
       if (graceful) {
         console.error(msg)
       } else {

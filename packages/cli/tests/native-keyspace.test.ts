@@ -11,6 +11,7 @@ import {
 } from "../src/postgres-ctl.js"
 import { nativeKeyspaceAddr, nativeKeyspacePort, type NativeKeyspaceChecks } from "../src/native-keyspace.js"
 import type { SupatypeProjectConfig } from "../src/project-config.js"
+import { projectConfig } from "./support/project-config.js"
 
 /**
  * Native `supatype dev` starts one Postgres, and what that Postgres can do
@@ -132,15 +133,9 @@ describe("choosing the keyspace port", () => {
 })
 
 describe("whether native dev serves the keyspace from Postgres", () => {
-  const project = (over: Record<string, unknown>) =>
-    ({
-      project: { name: "acme" },
-      database: { provider: "native" },
-      server: { mode: "dev" },
-      app: { mode: "none" },
-      ...over,
-    }) as unknown as SupatypeProjectConfig
-  const pinned = { versions: { postgres: "17.2" } }
+  const project = (over: Partial<SupatypeProjectConfig>) =>
+    projectConfig({ project: { name: "acme" }, database: { provider: "native" }, ...over })
+  const pinned: Partial<SupatypeProjectConfig> = { versions: { postgres: "17.2" } }
   // The real filesystem check against a fake archive; only the port is stubbed.
   const checks: NativeKeyspaceChecks = {
     libraryPresent: nativeKeyspaceLibraryPresent,

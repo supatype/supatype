@@ -8,8 +8,10 @@ import { spawnSync } from "node:child_process"
 import { existsSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import bcrypt from "bcryptjs"
-import type { Pool, QueryResult } from "pg"
+import type { Pool } from "pg"
+import { isNumber, isShape, isString, isUnknown } from "@supatype/shared"
 import { loadConfig } from "../config.js"
+import { queryRows, type RowQueryable, type UnknownRow } from "../db-rows.js"
 import { resolveRuntimeProvider, usesExternalDatabase, type SupatypeProjectConfig } from "../project-config.js"
 import { resolveHostDatabaseUrl } from "../host-database.js"
 import { projectStudioUrl } from "../local-stack.js"
@@ -55,8 +57,22 @@ export function authJwtAud(cwd: string): string {
   return readEnvValue(cwd, "SUPATYPE_JWT_AUD", "authenticated")
 }
 
-type DbQuery = (sql: string, params?: unknown[]) => Promise<QueryResult<Record<string, unknown>>>
+type DbQuery = (sql: string, params?: unknown[]) => Promise<{ rows: UnknownRow[] }>
 type AuthConfirmedColumn = "email_confirmed_at" | "confirmed_at"
+
+/** `db` as a `DbQuery`, its rows checked to be rows. */
+function rowsQuery(db: RowQueryable): DbQuery {
+  return async (sql, params) => ({ rows: await queryRows(db, sql, params) })
+}
+
+const hasUserId = isShape({ id: isString })
+
+/** The user id in the first row, or a throw naming the statement that should have returned it. */
+function firstUserId(rows: UnknownRow[], what: string): string {
+  const row = rows[0]
+  if (!hasUserId(row)) throw new Error(`${what} did not return the user's id`)
+  return row.id
+}
 
 /** Prefer the migrated column when present; fall back to postgres init `confirmed_at`. */
 export async function resolveAuthConfirmedAtColumn(query: DbQuery): Promise<AuthConfirmedColumn> {
@@ -69,8 +85,8 @@ export async function resolveAuthConfirmedAtColumn(query: DbQuery): Promise<Auth
      ORDER BY CASE column_name WHEN 'email_confirmed_at' THEN 0 ELSE 1 END
      LIMIT 1`,
   )
-  const row = result.rows[0] as { column_name?: string; value?: string } | undefined
-  const name = row?.column_name ?? row?.value
+  const row = result.rows[0]
+  const name = row?.["column_name"] ?? row?.["value"]
   if (name === "email_confirmed_at" || name === "confirmed_at") return name
   return "confirmed_at"
 }
@@ -162,7 +178,7 @@ export function registerAdmin(program: Command): void {
             const pool = new pg.Pool({ connectionString: connection, max: 2 })
             try {
               await ensureAuthUsersTable(pool)
-              await createAdminUser(pool, email, password, role, { cwd })
+              await createAdminUser(rowsQuery(pool), email, password, role, { cwd })
             } finally {
               await pool.end()
             }
@@ -197,8 +213,9 @@ export function registerAdmin(program: Command): void {
           // `app_metadata`: that key is the developer's namespace for their own
           // app roles, and writing Studio access there means assigning an app
           // role could hand out admin UI access by accident.
-          await ensureStudioMembersTable((sql, params) => pool.query(sql, params))
-          const result = await pool.query(
+          await ensureStudioMembersTable(rowsQuery(pool))
+          const rows = await queryRows(
+            pool,
             `WITH target AS (
                SELECT id, email FROM auth.users WHERE email = $2
              ), upsert AS (
@@ -212,16 +229,15 @@ export function registerAdmin(program: Command): void {
             [opts.role, opts.email.toLowerCase()],
           )
 
-          if (result.rows.length === 0) {
+          if (rows.length === 0) {
             error(`No user found with email "${opts.email}".`)
             process.exit(1)
           }
 
-          const user = result.rows[0] as { id: string; email: string }
-
+          const userId = firstUserId(rows, "The role update")
           info("Role updated successfully.")
-          plain(`  ID:    ${user.id}`)
-          plain(`  Email: ${user.email}`)
+          plain(`  ID:    ${userId}`)
+          plain(`  Email: ${opts.email.toLowerCase()}`)
           plain(`  Role:  ${opts.role}`)
         } catch (err) {
           const message =
@@ -251,7 +267,8 @@ export function registerAdmin(program: Command): void {
         // actually decides admission. LEFT JOIN, because a membership held by a
         // Supatype Cloud account has no row in this project's `auth.users`;
         // hiding those would make `list-users` disagree with who can log in.
-        const result = await pool.query(
+        const rows = await queryRows(
+          pool,
           `SELECT COALESCE(m.user_id, m.platform_user_id) AS id,
                   COALESCE(u.email, '(cloud account)') AS email,
                   m.role, m.created_at
@@ -260,7 +277,7 @@ export function registerAdmin(program: Command): void {
             ORDER BY m.created_at ASC`,
         )
 
-        if (result.rows.length === 0) {
+        if (rows.length === 0) {
           info("No admin users found.")
           info("Create one with: supatype admin create-user --email admin@example.com --role admin")
           return
@@ -270,18 +287,7 @@ export function registerAdmin(program: Command): void {
           "\n  ID                                     Email                          Role         Created",
         )
         plain("  " + "-".repeat(100))
-        for (const row of result.rows) {
-          const r = row as {
-            id: string
-            email: string
-            role: string
-            created_at: string
-          }
-          const date = new Date(r.created_at).toISOString().slice(0, 10)
-          plain(
-            `  ${r.id}  ${r.email.padEnd(30)} ${r.role.padEnd(12)} ${date}`,
-          )
-        }
+        for (const row of rows) plain(memberLine(row))
         plain()
       } catch (err) {
         const message =
@@ -292,6 +298,17 @@ export function registerAdmin(program: Command): void {
         await pool.end()
       }
     })
+}
+
+const isMemberRow = isShape({ id: isString, email: isString, role: isString, created_at: isUnknown })
+
+/** One `list-users` line: id, email, role and the date access was granted. */
+function memberLine(row: UnknownRow): string {
+  if (!isMemberRow(row)) throw new Error("A Studio membership row is missing its id, email or role")
+  const created = row.created_at
+  const date =
+    created instanceof Date || typeof created === "string" ? new Date(created).toISOString().slice(0, 10) : "?"
+  return `  ${row.id}  ${row.email.padEnd(30)} ${row.role.padEnd(12)} ${date}`
 }
 
 /** @deprecated Use ensureFirstAdminUser */
@@ -308,10 +325,7 @@ export async function ensureFirstAdminUser(
   const pg = await importPg()
   const pool = new pg.Pool({ connectionString: connection, max: 2 })
   try {
-    await ensureFirstAdminWithQuery(
-      (sql, params) => pool.query(sql, params),
-      options,
-    )
+    await ensureFirstAdminWithQuery(rowsQuery(pool), options)
   } catch {
     // Non-fatal: skip when DB is unreachable or auth schema is not ready
   } finally {
@@ -488,17 +502,12 @@ export async function hashPasswordForAuth(password: string): Promise<string> {
 }
 
 async function createAdminUser(
-  db: Pool | DbQuery,
+  query: DbQuery,
   email: string,
   password: string,
   role: string,
   opts: { quiet?: boolean; aud?: string; cwd?: string } = {},
-): Promise<{ id: string; email: string }> {
-  const query: DbQuery =
-    typeof (db as Pool).query === "function"
-      ? (sql, params) => (db as Pool).query<Record<string, unknown>>(sql, params)
-      : (db as DbQuery)
-
+): Promise<void> {
   const normalized = email.toLowerCase()
   const aud = opts.aud ?? (opts.cwd ? authJwtAud(opts.cwd) : "authenticated")
   const existing = await query(
@@ -513,18 +522,24 @@ async function createAdminUser(
     throw new Error(`User with email "${email}" already exists.`)
   }
 
-  const passwordHash = await hashPasswordForAuth(password)
+  const userId = await insertAuthUser(query, normalized, aud, await hashPasswordForAuth(password))
+  await recordStudioMembership(query, userId, role)
+  if (!opts.quiet) {
+    info("Admin user created successfully.")
+    plain(`  ID:    ${userId}`)
+    plain(`  Email: ${normalized}`)
+    plain(`  Role:  ${role}`)
+  }
+}
+
+/** Insert the user into `auth.users` and return its new id. */
+async function insertAuthUser(query: DbQuery, email: string, aud: string, passwordHash: string): Promise<string> {
   // No `role` here: `app_metadata` is the developer's namespace for their own
   // application roles, and Studio access is granted through
   // `_supatype.studio_members` instead. Writing it in both places means an app
   // role assignment can silently confer admin UI access.
-  const appMetadata = JSON.stringify({
-    provider: "email",
-    providers: ["email"],
-  })
-  const userMetadata = JSON.stringify({})
+  const appMetadata = JSON.stringify({ provider: "email", providers: ["email"] })
   const confirmedCol = await resolveAuthConfirmedAtColumn(query)
-
   const result = await query(
     `INSERT INTO auth.users (
       instance_id, id, aud, role, email, encrypted_password,
@@ -543,18 +558,9 @@ async function createAdminUser(
       false, false,
       now(), now()
     ) RETURNING id, email`,
-    [SUPATYPE_NIL_INSTANCE_ID, aud, normalized, passwordHash, appMetadata, userMetadata],
+    [SUPATYPE_NIL_INSTANCE_ID, aud, email, passwordHash, appMetadata, JSON.stringify({})],
   )
-
-  const user = result.rows[0] as { id: string; email: string }
-  await recordStudioMembership(query, user.id, role)
-  if (!opts.quiet) {
-    info("Admin user created successfully.")
-    plain(`  ID:    ${user.id}`)
-    plain(`  Email: ${user.email}`)
-    plain(`  Role:  ${role}`)
-  }
-  return user
+  return firstUserId(result.rows, "Creating the user")
 }
 
 /**
@@ -645,8 +651,8 @@ async function hasAdminUsers(query: DbQuery): Promise<boolean> {
        JOIN auth.users u ON u.id = m.user_id
       WHERE m.role <> 'authenticated'`,
   )
-  const count = (adminCount.rows[0] as { count: number } | undefined)?.count ?? 0
-  return count > 0
+  const count = adminCount.rows[0]?.["count"]
+  return isNumber(count) && count > 0
 }
 
 /**
@@ -714,13 +720,13 @@ async function composeExecQuery(
   compose: ComposeStack,
   sql: string,
   params: unknown[] = [],
-): Promise<QueryResult<Record<string, unknown>>> {
+): Promise<{ rows: UnknownRow[] }> {
   if (params.length === 0) {
     const text = runComposePsql(cwd, compose, ["-tAc", sql])
     if (sql.trim().toUpperCase().startsWith("SELECT")) {
-      return queryResult("SELECT", parsePsqlScalarRows(sql, text), 1)
+      return { rows: parsePsqlScalarRows(sql, text) }
     }
-    return queryResult("INSERT", [], 0)
+    return { rows: [] }
   }
 
   // On stdin: the values include the new user's password hash, which has no place on docker's
@@ -730,9 +736,9 @@ async function composeExecQuery(
     /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\s+\|\s+(.+)/i,
   )
   if (idMatch) {
-    return queryResult("INSERT", [{ id: idMatch[1], email: idMatch[2]?.trim() }], 1)
+    return { rows: [{ id: idMatch[1], email: idMatch[2]?.trim() }] }
   }
-  return queryResult("INSERT", [], 0)
+  return { rows: [] }
 }
 
 /**
@@ -753,15 +759,7 @@ function runComposePsql(cwd: string, compose: ComposeStack, psqlArgs: string[], 
   return (result.stdout ?? "").trim()
 }
 
-function queryResult(
-  command: "SELECT" | "INSERT",
-  rows: Record<string, unknown>[],
-  rowCount: number,
-): QueryResult<Record<string, unknown>> {
-  return { rows, rowCount, command, oid: 0, fields: [] }
-}
-
-function parsePsqlScalarRows(sql: string, text: string): Record<string, unknown>[] {
+function parsePsqlScalarRows(sql: string, text: string): UnknownRow[] {
   const upper = sql.toUpperCase()
   if (upper.includes(" AS EXISTS")) {
     return [{ exists: text === "t" }]

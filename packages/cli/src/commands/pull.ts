@@ -3,6 +3,7 @@ import { writeFileSync } from "node:fs"
 import { loadConfig } from "../config.js"
 import { schemaPathFromProject } from "../project-config.js"
 import { ensureEngine, engineRequest } from "../engine-client.js"
+import { isDatabaseStateJson } from "../engine-answers.js"
 import { resolveHostEngineDatabaseUrl } from "../dev-compose.js"
 import { engineCapabilities } from "../engine-ownership-gate.js"
 import { databaseStateToSchemaScaffold, type DatabaseStateJson } from "../pull-utils.js"
@@ -24,10 +25,11 @@ export function registerPull(program: Command): void {
       await ensureEngine()
 
       info("Introspecting database...")
-      const state = await engineRequest<DatabaseStateJson>("/introspect", {
-        database_url: connection,
-        schema: pgSchema,
-      })
+      const state = await engineRequest(
+        "/introspect",
+        { database_url: connection, schema: pgSchema },
+        isDatabaseStateJson,
+      )
 
       // Identity, generated and serial columns are drafted as such only for an engine that reads them.
       const identityColumns = (await engineCapabilities()).features.has("identity_columns")

@@ -18,9 +18,16 @@
  */
 
 import pg from "pg"
+import { toUnknownRows, type UnknownRow } from "./db-rows.js"
 
+export type { UnknownRow }
+
+/**
+ * The tagged-template SQL a seed script runs. Each result row is an `UnknownRow`: read a column with a check
+ * (`typeof row["id"] === "string"`), since nothing here knows the table's shape.
+ */
 export interface SeedSql {
-  (strings: TemplateStringsArray, ...values: unknown[]): Promise<pg.QueryResult>
+  (strings: TemplateStringsArray, ...values: unknown[]): Promise<pg.QueryResult<UnknownRow>>
   end(): Promise<void>
 }
 
@@ -39,7 +46,7 @@ export function sql(connectionString: string): SeedSql {
   const tag = async (
     strings: TemplateStringsArray,
     ...values: unknown[]
-  ): Promise<pg.QueryResult> => {
+  ): Promise<pg.QueryResult<UnknownRow>> => {
     await ensureConnected()
     let text = ""
     for (let i = 0; i < strings.length; i++) {
@@ -48,7 +55,8 @@ export function sql(connectionString: string): SeedSql {
         text += `$${i + 1}`
       }
     }
-    return client.query(text, values)
+    const result = await client.query(text, values)
+    return { ...result, rows: toUnknownRows(result.rows) }
   }
 
   return Object.assign(tag, {
@@ -162,10 +170,10 @@ function interval(spec: IntervalSpec): IntervalSpec {
   return out
 }
 
-function shifted(base: Operand, spec: IntervalSpec | undefined, ahead: boolean): TimeExpr {
-  if (spec === undefined) return base as TimeExpr
+function shifted(base: TimeExpr, spec: IntervalSpec | undefined, ahead: boolean): TimeExpr {
+  if (spec === undefined) return base
   const amount = interval(spec)
-  if (Object.keys(amount).length === 0) return base as TimeExpr
+  if (Object.keys(amount).length === 0) return base
   return ahead
     ? { kind: "after", base, interval: amount }
     : { kind: "before", base, interval: amount }
@@ -302,6 +310,8 @@ export type SeedValue =
   | string
   | number
   | boolean
+  | bigint
+  | Date
   | null
   | readonly SeedValue[]
   | RefValue

@@ -1,5 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { resolve } from "node:path"
+import { isNumber, isOneOf, isRecordOf, isShape, isString, optional, type Guard } from "@supatype/shared"
+import { readJsonFileOrThrow } from "./json-file.js"
 import { warn } from "./ui/messages.js"
 
 export const LINK_VERSION = 1 as const
@@ -27,7 +29,8 @@ export interface ProjectLink {
   refreshToken?: string
   orgId?: string | undefined
   cloudApiUrl?: string
-  linkedAt: string
+  /** When the link was made. Never read, and absent from a hand-written link. */
+  linkedAt?: string
   environments: Record<string, EnvironmentTarget>
 }
 
@@ -59,6 +62,52 @@ interface LegacyLinkedFile {
   orgId?: string
 }
 
+const isEnvironmentTarget: Guard<EnvironmentTarget> = isShape({
+  name: isString,
+  apiUrl: isString,
+  token: optional(isString),
+  linkedAt: isString,
+})
+
+const isProjectLink: Guard<ProjectLink> = isShape({
+  version: isOneOf([LINK_VERSION]),
+  kind: isOneOf(["cloud", "self-host", "local"] as const),
+  projectRef: isString,
+  defaultEnvironment: isString,
+  token: optional(isString),
+  refreshToken: optional(isString),
+  orgId: optional(isString),
+  cloudApiUrl: optional(isString),
+  linkedAt: optional(isString),
+  environments: isRecordOf(isEnvironmentTarget),
+})
+
+const isLocalEnvironment: Guard<LocalEnvironment> = isShape({
+  target: isOneOf(["local"] as const),
+  apiUrl: isString,
+  databaseUrl: isString,
+  projectRef: isString,
+  kongPort: isNumber,
+  provider: isOneOf(["docker", "native"] as const),
+})
+
+/** `.supatype/branch.json`: the branch a directory is pointed at. */
+export const isBranchContext: Guard<BranchContext> = isShape({
+  mode: isOneOf(["branch"] as const),
+  branchId: isString,
+  apiUrl: isString,
+  token: optional(isString),
+})
+
+const isLegacyCloudFile: Guard<LegacyCloudFile> = isShape({
+  apiUrl: optional(isString),
+  token: optional(isString),
+  projectSlug: optional(isString),
+  orgId: optional(isString),
+})
+
+const isLegacyLinkedFile: Guard<LegacyLinkedFile> = isShape({ ref: optional(isString), orgId: optional(isString) })
+
 export function writeLocalEnvironment(cwd: string, env: LocalEnvironment): void {
   const dir = resolve(cwd, ".supatype")
   mkdirSync(dir, { recursive: true })
@@ -68,7 +117,7 @@ export function writeLocalEnvironment(cwd: string, env: LocalEnvironment): void 
 export function loadLocalEnvironment(cwd: string): LocalEnvironment | null {
   const path = resolve(cwd, ".supatype/environment.json")
   if (!existsSync(path)) return null
-  return JSON.parse(readFileSync(path, "utf8")) as LocalEnvironment
+  return readJsonFileOrThrow(path, isLocalEnvironment, "a local environment")
 }
 
 export function linkPath(cwd: string): string {
@@ -79,7 +128,7 @@ export function loadProjectLink(cwd: string): ProjectLink | null {
   migrateLegacyLinkFiles(cwd)
   const path = linkPath(cwd)
   if (!existsSync(path)) return null
-  return JSON.parse(readFileSync(path, "utf8")) as ProjectLink
+  return readJsonFileOrThrow(path, isProjectLink, "a project link")
 }
 
 export function saveProjectLink(cwd: string, link: ProjectLink): void {
@@ -123,10 +172,10 @@ export function migrateLegacyLinkFiles(cwd: string): void {
   let linked: LegacyLinkedFile | null = null
 
   if (hasCloud) {
-    cloud = JSON.parse(readFileSync(cloudPath, "utf8")) as LegacyCloudFile
+    cloud = readJsonFileOrThrow(cloudPath, isLegacyCloudFile, "a cloud link")
   }
   if (hasLinked) {
-    linked = JSON.parse(readFileSync(linkedPath, "utf8")) as LegacyLinkedFile
+    linked = readJsonFileOrThrow(linkedPath, isLegacyLinkedFile, "a linked project")
   }
 
   const projectRef = cloud?.projectSlug ?? linked?.ref

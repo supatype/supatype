@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { EngineError } from "../src/engine-client.js"
+import { errorMessage } from "../src/error-message.js"
 
 /**
  * A push that would drop data needs a person's say. `supatype dev` used to push every change with
@@ -87,7 +88,7 @@ describe("pushConsentingToDestructive()", () => {
       (e: unknown) => e,
     )
     expect(err).toBeInstanceOf(DestructiveChangeRefused)
-    const message = (err as Error).message
+    const message = errorMessage(err)
     expect(message).toContain("1 destructive operation(s) detected")
     expect(message).toContain("supatype push --yes")
     expect(message).toContain(DESTRUCTIVE_CHANGE_HINT)
@@ -100,7 +101,7 @@ describe("pushConsentingToDestructive()", () => {
       throw refusal()
     })
     const err = await pushConsentingToDestructive(push, policy, { interactive: () => false }).catch((e: unknown) => e)
-    const message = (err as Error).message
+    const message = errorMessage(err)
     expect(message).not.toContain("--force")
     expect(message).toContain("1 destructive operation(s) detected.")
   })
@@ -248,7 +249,7 @@ describe("the rename offer", () => {
       renameWriter: writer,
     }).catch((e: unknown) => e)
     expect(err).toBeInstanceOf(DestructiveChangeRefused)
-    const message = (err as Error).message
+    const message = errorMessage(err)
     expect(message).toContain("supatype rename member.name member.title")
     expect(message).toContain("supatype rename team teams")
     expect(writer.write).not.toHaveBeenCalled()

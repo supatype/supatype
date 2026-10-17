@@ -1,5 +1,8 @@
 /** Restore system relation targets (e.g. supatype:user) in engine-generated admin config. */
 
+import { isJsonObject } from "@supatype/shared"
+import { astModels, objectAt } from "./ast-read.js"
+
 function fieldNameToForeignKey(fieldName: string): string {
   return fieldName
     .replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2")
@@ -7,39 +10,43 @@ function fieldNameToForeignKey(fieldName: string): string {
     .toLowerCase() + "_id"
 }
 
+/** Each model's relations to a system target (`supatype:user`), by lowercased model name then foreign key. */
+function systemRelationTargets(ast: unknown): Map<string, Map<string, string>> {
+  const targets = new Map<string, Map<string, string>>()
+  for (const model of astModels(ast)) {
+    const name = model["name"]
+    if (typeof name !== "string") continue
+    for (const [fieldName, field] of Object.entries(objectAt(model, "fields") ?? {})) {
+      const target = isJsonObject(field) && field["kind"] === "relation" ? field["target"] : undefined
+      if (typeof target !== "string" || !target.includes(":")) continue
+      const forModel = targets.get(name.toLowerCase()) ?? new Map<string, string>()
+      targets.set(name.toLowerCase(), forModel)
+      forModel.set(fieldNameToForeignKey(fieldName), target)
+    }
+  }
+  return targets
+}
+
+/** Put the system target back on one admin-config relation field whose foreign key names one. */
+function restoreTarget(field: unknown, modelTargets: ReadonlyMap<string, string>): void {
+  if (!isJsonObject(field) || field["widget"] !== "relation") return
+  const options = field["options"]
+  if (!isJsonObject(options)) return
+  const explicitFk = typeof options["foreignKey"] === "string" ? options["foreignKey"] : ""
+  const fk = explicitFk || fieldNameToForeignKey(typeof field["name"] === "string" ? field["name"] : "")
+  const systemTarget = modelTargets.get(fk)
+  if (systemTarget) options["target"] = systemTarget
+}
+
 export function restoreSystemRelationTargets(admin: unknown, ast: unknown): void {
-  if (typeof admin !== "object" || admin === null || typeof ast !== "object" || ast === null) return
-  const astObj = ast as { models?: Array<{ name: string; fields?: Record<string, { kind: string; target?: string }> }> }
-  if (!astObj.models) return
-  const cfg = admin as {
-    models?: Array<{
-      tableName: string
-      fields: Array<{ name: string; widget: string; options?: Record<string, unknown> }>
-    }>
-  }
-  if (!Array.isArray(cfg.models)) return
-
-  const systemTargets = new Map<string, Map<string, string>>()
-  for (const model of astObj.models) {
-    if (!model.fields) continue
-    for (const [fieldName, field] of Object.entries(model.fields)) {
-      if (field.kind === "relation" && field.target?.includes(":")) {
-        const key = model.name.toLowerCase()
-        if (!systemTargets.has(key)) systemTargets.set(key, new Map())
-        systemTargets.get(key)!.set(fieldNameToForeignKey(fieldName), field.target)
-      }
-    }
-  }
-
-  for (const model of cfg.models) {
-    const modelTargets = systemTargets.get(model.tableName)
-    if (!modelTargets) continue
-    for (const field of model.fields) {
-      if (field.widget !== "relation" || !field.options) continue
-      const explicitFk = (field.options["foreignKey"] as string) ?? ""
-      const fk = explicitFk || fieldNameToForeignKey(field.name)
-      const systemTarget = modelTargets.get(fk)
-      if (systemTarget) field.options["target"] = systemTarget
-    }
+  const adminModels = isJsonObject(admin) ? admin["models"] : undefined
+  if (!Array.isArray(adminModels)) return
+  const systemTargets = systemRelationTargets(ast)
+  for (const model of adminModels) {
+    const tableName = isJsonObject(model) ? model["tableName"] : undefined
+    const modelTargets = typeof tableName === "string" ? systemTargets.get(tableName) : undefined
+    const fields = isJsonObject(model) ? model["fields"] : undefined
+    if (!modelTargets || !Array.isArray(fields)) continue
+    for (const field of fields) restoreTarget(field, modelTargets)
   }
 }

@@ -10,6 +10,8 @@ import {
   functionsTsConfigSource,
 } from "../src/functions-deno-types.js"
 import { generateFunctionsRouterSource } from "../src/functions-router-gen.js"
+import { isArrayOf, isShape, isString } from "@supatype/shared"
+import { parseJsonAs } from "./support/json.js"
 
 const require = createRequire(import.meta.url)
 
@@ -90,9 +92,7 @@ describe("ensureFunctionsDenoTypes", () => {
     const result = ensureFunctionsDenoTypes(tmpRoot, functionsDir)
 
     expect(result.rootExclude).toBe("updated")
-    const root = JSON.parse(readFileSync(join(tmpRoot, "tsconfig.json"), "utf8")) as {
-      exclude: string[]
-    }
+    const root = parseJsonAs(readFileSync(join(tmpRoot, "tsconfig.json"), "utf8"), isShape({ exclude: isArrayOf(isString) }))
     expect(root.exclude).toContain("functions")
     expect(root.exclude).toContain("node_modules")
   })

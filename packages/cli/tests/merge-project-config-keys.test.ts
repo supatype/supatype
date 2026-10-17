@@ -35,6 +35,10 @@ const LOCAL: Required<SupatypeProjectConfig> = {
   admin: { roles: ["admin"] },
 }
 
+/** Every key of the config, read off `LOCAL`, which has to set each one. */
+const isConfigKey = (key: string): key is keyof SupatypeProjectConfig => key in LOCAL
+const KEYS = Object.keys(LOCAL).filter(isConfigKey)
+
 const BASE: SupatypeProjectConfig = {
   project: { name: "base" },
   database: { provider: "docker" },
@@ -43,12 +47,12 @@ const BASE: SupatypeProjectConfig = {
 }
 
 describe("mergeProjectConfig() keeps every key", () => {
-  it.each(Object.keys(LOCAL) as Array<keyof SupatypeProjectConfig>)("keeps %s from the local config", (key) => {
+  it.each(KEYS)("keeps %s from the local config", (key) => {
     const merged = mergeProjectConfig(BASE, { [key]: LOCAL[key] })
     expect(merged[key]).toEqual(LOCAL[key])
   })
 
-  it.each(Object.keys(LOCAL) as Array<keyof SupatypeProjectConfig>)("keeps %s from the base config", (key) => {
+  it.each(KEYS)("keeps %s from the base config", (key) => {
     const merged = mergeProjectConfig({ ...BASE, [key]: LOCAL[key] }, {})
     expect(merged[key]).toEqual(LOCAL[key])
   })

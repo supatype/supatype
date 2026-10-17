@@ -1,4 +1,5 @@
 import { cliPackageVersion } from "./cli-package-version.js"
+import { isRecordOf, isShape, isString, isUnknown, optional, type Guard } from "@supatype/shared"
 
 export interface InitDependencyVersions {
   cli: string
@@ -9,6 +10,12 @@ type NpmRegistryPackage = {
   versions?: Record<string, unknown>
   "dist-tags"?: { latest?: string }
 }
+
+/** The part of an npm registry document read here. */
+const isNpmRegistryPackage: Guard<NpmRegistryPackage> = isShape({
+  versions: optional(isRecordOf(isUnknown)),
+  "dist-tags": optional(isShape({ latest: optional(isString) })),
+})
 
 /** Fallback when the registry is unreachable (offline / tests). */
 export function initDependencyVersionsFallback(): InitDependencyVersions {
@@ -21,7 +28,8 @@ async function fetchNpmPackage(name: string): Promise<NpmRegistryPackage | null>
   try {
     const resp = await fetch(url, { signal: AbortSignal.timeout(10_000) })
     if (!resp.ok) return null
-    return (await resp.json()) as NpmRegistryPackage
+    const meta = await resp.json()
+    return isNpmRegistryPackage(meta) ? meta : null
   } catch {
     return null
   }

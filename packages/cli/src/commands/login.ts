@@ -3,6 +3,7 @@
  * Self-host uses SERVICE_ROLE_KEY via `supatype link --url`, not this command.
  */
 import type { Command } from "commander"
+import { errorMessage } from "../error-message.js"
 import {
   clearCloudCredentials,
   cloudPasswordLogin,
@@ -82,7 +83,7 @@ export function registerLogin(program: Command): void {
           plain("Tip: link a project with: supatype link --project <slug>")
         }
       } catch (err) {
-        error((err as Error).message)
+        error(errorMessage(err))
         process.exit(1)
       }
     })

@@ -8,7 +8,10 @@
  */
 
 import pg from "pg"
+import { isJsonObject } from "@supatype/shared"
 import { apiRoleSql } from "./db-preflight.js"
+import { astModels, objectAt } from "./ast-read.js"
+import { queryRows, type UnknownRow } from "./db-rows.js"
 
 /** The roles PostgREST switches to per request, which the engine grants to. */
 const API_ROLES = ["anon", "authenticated", "service_role"] as const
@@ -20,14 +23,14 @@ export interface ByoGaps {
   missingAuthUsers: boolean
 }
 
-type QueryFn = (sql: string, params?: unknown[]) => Promise<Array<Record<string, unknown>>>
+type QueryFn = (sql: string, params?: unknown[]) => Promise<UnknownRow[]>
 
 /** True when a model relates to Supatype's own users, whose table is `auth.users`. */
 export function astRelatesToAuthUsers(ast: unknown): boolean {
-  const models = (ast as { models?: Array<{ fields?: Record<string, { kind?: string; target?: string }> }> } | null)?.models
-  if (!Array.isArray(models)) return false
-  return models.some((model) =>
-    Object.values(model.fields ?? {}).some((field) => field.kind === "relation" && field.target === "supatype:user"),
+  return astModels(ast).some((model) =>
+    Object.values(objectAt(model, "fields") ?? {}).some(
+      (field) => isJsonObject(field) && field["kind"] === "relation" && field["target"] === "supatype:user",
+    ),
   )
 }
 
@@ -75,8 +78,7 @@ export async function byoPreflight(databaseUrl: string, ast: unknown): Promise<s
   const client = new pg.Client({ connectionString: databaseUrl })
   await client.connect()
   try {
-    const q: QueryFn = async (sql, params = []) => (await client.query(sql, params)).rows as Array<Record<string, unknown>>
-    return byoGapLines(await findByoGaps(q, ast))
+    return byoGapLines(await findByoGaps((sql, params) => queryRows(client, sql, params), ast))
   } finally {
     await client.end().catch(() => undefined)
   }

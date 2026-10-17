@@ -3,6 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { SupatypeProjectConfig } from "../src/project-config.js"
+import { projectConfig } from "./support/project-config.js"
 
 /**
  * A2-N2: a project whose `overrides.engine` path is missing must say so. It used to fall back to
@@ -55,7 +56,7 @@ describe("engine binary resolution", () => {
   it("refuses a missing overrides.engine path instead of running a cached engine", async () => {
     await cacheAnEngine()
     const missing = join(cwd, "no-such-engine.exe")
-    state.config = { project: { name: "p" }, overrides: { engine: missing } } as SupatypeProjectConfig
+    state.config = projectConfig({ project: { name: "p" }, overrides: { engine: missing } })
     const { engineBinPath } = await import("../src/engine-client.js")
     await expect(engineBinPath()).rejects.toThrow(/overrides\] engine path does not exist/)
   })

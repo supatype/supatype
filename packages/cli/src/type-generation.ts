@@ -17,6 +17,7 @@ import { mkdirSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve, sep } from "node:path"
 import { generateClientAugmentation } from "./augmentation-generator.js"
 import { ensureEngine, engineRequest, type ComposeEngine } from "./engine-client.js"
+import { isGenerateAnswer } from "./engine-answers.js"
 import { generateProjectClient } from "./client-generator.js"
 
 /** The client a project imports, beside the generated types. */
@@ -134,7 +135,7 @@ async function generate(
   body: Record<string, unknown>,
 ): Promise<{ code?: string; message?: string }> {
   if (req.engine === undefined) await ensureEngine()
-  return engineRequest<{ code?: string; message?: string }>("/generate", body, req.engine)
+  return engineRequest("/generate", body, isGenerateAnswer, req.engine)
 }
 
 /**

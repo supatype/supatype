@@ -14,6 +14,7 @@
  * stack changes shape. `docker compose ps` cannot.
  */
 import { spawnSync } from "node:child_process"
+import { isJsonObject } from "@supatype/shared"
 import { existsSync } from "node:fs"
 import { loadConfig } from "./config.js"
 import { composeProjectName, selfHostComposePaths } from "./self-host-compose.js"
@@ -107,8 +108,8 @@ export function parseComposePs(stdout: string): ComposeService[] {
 
   const services: ComposeService[] = []
   for (const row of rows) {
-    if (typeof row !== "object" || row === null) continue
-    const record = row as Record<string, unknown>
+    if (!isJsonObject(row)) continue
+    const record = row
     const service = typeof record["Service"] === "string" ? record["Service"] : ""
     if (service === "") continue
     services.push({
@@ -131,8 +132,8 @@ function formatPorts(publishers: unknown): string {
   if (!Array.isArray(publishers)) return ""
   const published: string[] = []
   for (const entry of publishers) {
-    if (typeof entry !== "object" || entry === null) continue
-    const record = entry as Record<string, unknown>
+    if (!isJsonObject(entry)) continue
+    const record = entry
     const host = record["PublishedPort"]
     const target = record["TargetPort"]
     if (typeof host === "number" && host > 0 && typeof target === "number") {

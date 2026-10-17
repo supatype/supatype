@@ -78,7 +78,8 @@ export class SeedCollector {
       // whose shape changes with its contents is harder to read and to diff.
       this.push({ op: "sql", text, params: params === undefined ? [] : [...params] })
     }
-    return api as SeedDb
+    if (!isSeedDb(api)) throw new Error("The seed db was built without its $if and $sql")
+    return api
   }
 
   /** The document, with every label that was actually used written in. */
@@ -182,7 +183,7 @@ export class SeedCollector {
 
   // --- Values ---
 
-  private encodeRow(entry: ModelManifest, row: SeedData): SeedData {
+  private encodeRow(entry: ModelManifest, row: SeedRow): SeedData {
     const out: SeedData = {}
     for (const [key, value] of Object.entries(row)) {
       if (value === undefined) continue
@@ -201,7 +202,7 @@ export class SeedCollector {
     }
 
     if (value instanceof Date) return value.toISOString()
-    if (typeof value === "bigint") return (value as bigint).toString()
+    if (typeof value === "bigint") return value.toString()
 
     // The column's kind decides the encoding, and only the manifest knows it: a decimal
     // sent as a JSON number round-trips through a double and stops being the value the
@@ -224,14 +225,14 @@ export class SeedCollector {
    * value on a field that happens to share a relation's name is left alone.
    */
   private nested(target: string, value: SeedValue): SeedValue | undefined {
-    if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined
-    const shape = value as Record<string, unknown>
+    if (!isSeedRow(value)) return undefined
+    const shape = value
     const entry = this.byModel.get(target)
 
     if ("connect" in shape) {
       const where = shape["connect"]
-      if (entry === undefined || where === null || typeof where !== "object") return undefined
-      return { connect: this.encodeRow(entry, where as SeedData) }
+      if (entry === undefined || !isSeedRow(where)) return undefined
+      return { connect: this.encodeRow(entry, where) }
     }
     if ("create" in shape) {
       const rows = toRows(shape["create"])
@@ -250,10 +251,27 @@ export class SeedCollector {
   private encodeLoose(value: SeedValue): SeedValue {
     if (isPassThrough(value)) return value
     if (value instanceof Date) return value.toISOString()
-    if (typeof value === "bigint") return (value as bigint).toString()
+    if (typeof value === "bigint") return value.toString()
     if (isSeedArray(value)) return value.map((item) => this.encodeLoose(item))
     return value
   }
+}
+
+/** A row-shaped value: an object that is neither a list nor a `Date`. */
+type SeedRow = { readonly [key: string]: SeedValue | undefined }
+
+function isSeedRow(value: SeedValue | undefined): value is SeedRow {
+  return typeof value === "object" && value !== null && !Array.isArray(value) && !(value instanceof Date)
+}
+
+/**
+ * Where the runtime object meets the project's generated types. `RegisteredModels` is declared by
+ * the generated seed builder from the same manifest this object was built from, one accessor per
+ * entry, so the accessors match by construction; their types are erased and cannot be checked
+ * here. `$if` and `$sql` are.
+ */
+function isSeedDb(api: Record<string, unknown>): api is SeedDb {
+  return typeof api["$if"] === "function" && typeof api["$sql"] === "function"
 }
 
 /**
@@ -262,9 +280,9 @@ export class SeedCollector {
  * Normalised here rather than in the generated builder, so six more generators do not each
  * have to remember it.
  */
-function toRows(value: unknown): SeedData[] | undefined {
-  if (Array.isArray(value)) return value as SeedData[]
-  if (value !== null && typeof value === "object") return [value as SeedData]
+function toRows(value: SeedValue | undefined): SeedRow[] | undefined {
+  if (isSeedArray(value)) return value.filter(isSeedRow)
+  if (isSeedRow(value)) return [value]
   return undefined
 }
 
@@ -272,7 +290,7 @@ function toRows(value: unknown): SeedData[] | undefined {
  * `Array.isArray` narrows a readonly array type to `any[]`, which would let anything through as a
  * seed value. This narrows to what the union actually holds.
  */
-function isSeedArray(value: SeedValue): value is readonly SeedValue[] {
+function isSeedArray(value: SeedValue | undefined): value is readonly SeedValue[] {
   return Array.isArray(value)
 }
 
@@ -283,8 +301,8 @@ function isSeedArray(value: SeedValue): value is readonly SeedValue[] {
  * so encoding them again would wrap an operand in a decimal or walk into a proxy.
  */
 function isPassThrough(value: SeedValue): boolean {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return false
-  const shape = value as Record<string, unknown>
+  if (!isSeedRow(value)) return false
+  const shape = value
   return (
     "$ref" in shape ||
     "$numeric" in shape ||

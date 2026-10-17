@@ -1,5 +1,6 @@
 import type { DiffResult, Operation, ReconcileAction } from "./engine-client.js"
 import { findJsonLine } from "./engine-json-line.js"
+import { isArrayOf, isShape, isString, nullable, optional, type Guard } from "@supatype/shared"
 
 /** The engine's own advice to rerun it with its `--force` flag, with the "(destructive)" it may carry. */
 const ENGINE_FORCE_ADVICE = /\s*Use --force to proceed(?:\s*\([^)]*\))?\.?/gi
@@ -67,9 +68,9 @@ export function formatReconcileAction(action: ReconcileAction): PlannedChange | 
       }
     case "drop":
       return { label: `drop ${kind} ${at}`, risk: "cautious" }
-    case "keep":
-    case "forget":
-    case "released":
+    // `keep`, `forget` and `released` change nothing, and neither does an action this CLI does not
+    // know (`restate`, `rename`, `rebuild` ride on a change the operations already list).
+    default:
       return null
   }
 }
@@ -81,7 +82,8 @@ export function formatReconcileAction(action: ReconcileAction): PlannedChange | 
  */
 export function plannedChanges(diff: Pick<DiffResult, "operations" | "reconcile">): PlannedChange[] {
   const changes: PlannedChange[] = (diff.operations ?? []).map((op) => ({
-    label: op.warning !== undefined ? withoutEngineForceAdvice(op.warning) : formatOperation(op),
+    // `AlterColumn` sends `warning: null` when it has nothing to warn about.
+    label: typeof op.warning === "string" ? withoutEngineForceAdvice(op.warning) : formatOperation(op),
     risk: op.risk ?? "safe",
   }))
   for (const action of diff.reconcile ?? []) {
@@ -103,20 +105,17 @@ export function formatOperation(op: Operation): string {
   }
 
   const kind = typeof op.type === "string" ? op.type : typeof op.kind === "string" ? op.kind : "operation"
-  const raw = op as unknown as Record<string, unknown>
-  const table = raw["table"]
-  const column = raw["column"]
-  const index = raw["index"]
+  const { table, column, index } = op
   const sql = typeof op.sql === "string" ? op.sql.trim() : ""
 
   if (kind === "add_unique_constraint" || kind === "drop_unique_constraint") {
-    const constraint = typeof raw["constraint"] === "string" ? raw["constraint"] : null
+    const constraint = typeof op.constraint === "string" ? op.constraint : null
     if (typeof table === "string" && constraint) return `${kind} ${table}.${constraint}`
   }
 
   if (kind === "create_index" || kind === "drop_index" || kind === "add_index") {
-    const indexName = typeof index === "string" ? index : typeof raw["name"] === "string" ? raw["name"] : null
-    const fields = Array.isArray(raw["fields"]) ? raw["fields"].join(", ") : null
+    const indexName = typeof index === "string" ? index : typeof op.name === "string" ? op.name : null
+    const fields = Array.isArray(op.fields) ? op.fields.join(", ") : null
     if (indexName && fields) return `${kind} ${table}.${indexName} (${fields})`
     if (indexName) return `${kind} ${table}.${indexName}`
   }
@@ -264,9 +263,20 @@ export interface DriftedObject {
  * line the engine binary prints on stdout (or a server's JSON error body).
  */
 export function securityDriftRefusal(output: string): DriftedObject[] | null {
-  const line = findJsonLine(output, (value) => value["reason"] === SECURITY_DRIFT && Array.isArray(value["objects"]))
-  return line === undefined ? null : (line["objects"] as DriftedObject[])
+  const line = findJsonLine(output, (value) => value["reason"] === SECURITY_DRIFT && isDriftedObjects(value["objects"]))
+  const objects = line?.["objects"]
+  return isDriftedObjects(objects) ? objects : null
 }
+
+/** The objects a security-drift refusal names (schema-engine `ledger::drift::DriftedObject`). */
+export const isDriftedObjects: Guard<DriftedObject[]> = isArrayOf(
+  isShape({
+    key: isShape({ kind: isString, schema: optional(isString), parent: isString, name: isString }),
+    recorded: isString,
+    live: optional(nullable(isString)),
+    unchecked: optional(isString),
+  }),
+)
 
 /** Each object a refusal names, with what Supatype recorded beside what the database holds now. */
 export function formatDriftedObjects(objects: readonly DriftedObject[]): string[] {

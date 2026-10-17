@@ -4,9 +4,10 @@
  */
 
 import { getActiveDevSession } from "../dev-session.js"
-import { createClackApi, type ClackApi } from "./clack-api.js"
+import { isBoolean, isString, type Guard } from "@supatype/shared"
+import { createClackApi, isOptionOf, type ClackApi } from "./clack-api.js"
 import { isInteractive } from "./interactive.js"
-import { CLACK_CANCEL, isCancel } from "./runtime/cancel.js"
+import { CLACK_CANCEL, isCancel, promptAnswer } from "./runtime/cancel.js"
 import { enqueueDevPrompt } from "./runtime/dev-prompt-queue.js"
 import { runClackFlow as mountClackFlow } from "./runtime/run-clack-flow.js"
 import type { DevSelectOption } from "./runtime/dev-prompt-queue.js"
@@ -23,10 +24,11 @@ function inDevTui(): boolean {
 
 async function devOrFlow<T>(
   spec: Parameters<typeof enqueueDevPrompt>[0],
-  flowFn: (api: ClackApi) => Promise<T>,
+  accepts: Guard<T>,
+  flowFn: (api: ClackApi) => Promise<T | typeof CLACK_CANCEL>,
 ): Promise<T | typeof CLACK_CANCEL> {
   if (inDevTui()) {
-    return enqueueDevPrompt(spec) as Promise<T | typeof CLACK_CANCEL>
+    return promptAnswer(await enqueueDevPrompt(spec), accepts)
   }
   const api = getActiveFlowApi()
   if (api) {
@@ -85,11 +87,12 @@ export const p: ClackApi = {
         ...(options.placeholder !== undefined ? { placeholder: options.placeholder } : {}),
         ...(options.validate !== undefined ? { validate: options.validate } : {}),
       },
+      isString,
       (api) => api.text(options),
     )
   },
   async password(options) {
-    return devOrFlow({ kind: "password", message: options.message }, (api) => api.password(options))
+    return devOrFlow({ kind: "password", message: options.message }, isString, (api) => api.password(options))
   },
   async select<T extends string>(options: { message: string; options: DevSelectOption<T>[]; initialValue?: T }) {
     return devOrFlow(
@@ -97,8 +100,9 @@ export const p: ClackApi = {
         kind: "select",
         message: options.message,
         options: options.options,
-        ...(options.initialValue !== undefined ? { initialValue: options.initialValue as string | boolean } : {}),
+        ...(options.initialValue !== undefined ? { initialValue: options.initialValue } : {}),
       },
+      isOptionOf(options.options),
       (api) => api.select(options),
     )
   },
@@ -109,6 +113,7 @@ export const p: ClackApi = {
         message: options.message,
         initialValue: options.initialValue ?? false,
       },
+      isBoolean,
       (api) => api.confirm(options),
     )
   },

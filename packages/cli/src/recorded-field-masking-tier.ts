@@ -19,6 +19,7 @@ import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { composeDbPsql, type ComposeStack } from "./compose-db-psql.js"
+import { readJsonObjectFile } from "./json-file.js"
 import type { FieldMaskingTier } from "./field-masking-tier.js"
 import { postgrestSchemaEnv, type SupatypeProjectConfig } from "./project-config.js"
 
@@ -56,13 +57,9 @@ export function tierFromEngine(recorded: string): FieldMaskingTier | undefined {
 export function readRecordedTier(cwd: string): FieldMaskingTier | undefined {
   const path = recordedTierPath(cwd)
   if (!existsSync(path)) return undefined
-  try {
-    const tier = (JSON.parse(readFileSync(path, "utf8")) as { tier?: unknown } | null)?.tier
-    return isFieldMaskingTier(tier) ? tier : undefined
-  } catch {
-    // A file that does not parse says nothing about the database; the next push rewrites it.
-    return undefined
-  }
+  // A file that does not parse says nothing about the database; the next push rewrites it.
+  const tier = readJsonObjectFile(path)?.["tier"]
+  return isFieldMaskingTier(tier) ? tier : undefined
 }
 
 export function writeRecordedTier(cwd: string, tier: FieldMaskingTier): void {

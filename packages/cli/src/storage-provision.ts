@@ -6,20 +6,51 @@
  * Buckets already registered return 409 Conflict, which is treated as success.
  */
 
-import type { ExtractedSchemaAstV2 } from "./schema-ast-v2.js"
+import { isArrayOf, isBoolean, isNumber, isOneOf, isShape, isString, nullable, optional, type Guard } from "@supatype/shared"
 
 export type { ExtractedStorageBucketAst as SchemaStorageBucketAst } from "./schema-ast-v2.js"
+
+/**
+ * A declared bucket, as the extractor writes it or as the engine's `parse` prints it. The engine
+ * prints an unset `Option` as `null`.
+ */
+export interface ParsedStorageBucket {
+  id: string
+  public: boolean
+  accessMode?: "public" | "private" | "custom" | null
+  allowedMimeTypes?: string[] | null
+  fileSizeLimit?: number | null
+  s3BucketPolicy?: string | null
+}
+
+const isParsedStorageBucket: Guard<ParsedStorageBucket> = isShape({
+  id: isString,
+  public: isBoolean,
+  accessMode: optional(nullable(isOneOf(["public", "private", "custom"] as const))),
+  allowedMimeTypes: optional(nullable(isArrayOf(isString))),
+  fileSizeLimit: optional(nullable(isNumber)),
+  s3BucketPolicy: optional(nullable(isString)),
+})
+
+/** The buckets of a schema, as the engine's `parse` prints it. */
+export interface ParsedBuckets {
+  storageBuckets?: ParsedStorageBucket[] | null
+}
+
+export const isParsedBuckets: Guard<ParsedBuckets> = isShape({
+  storageBuckets: optional(nullable(isArrayOf(isParsedStorageBucket))),
+})
 
 export interface BucketSpec {
   id: string
   public: boolean
   allowed_mime_types?: string[] | null
   file_size_limit?: number | null
-  access_mode?: "public" | "private" | "custom"
+  access_mode?: "public" | "private" | "custom" | null
   s3_bucket_policy?: string | null
 }
 
-export function bucketSpecsFromAst(ast: Pick<ExtractedSchemaAstV2, "storageBuckets">): BucketSpec[] {
+export function bucketSpecsFromAst(ast: ParsedBuckets): BucketSpec[] {
   return (ast.storageBuckets ?? []).map((b) => ({
     id: b.id,
     public: b.public,
@@ -32,7 +63,7 @@ export function bucketSpecsFromAst(ast: Pick<ExtractedSchemaAstV2, "storageBucke
 }
 
 export async function provisionBucketsFromAst(
-  ast: Pick<ExtractedSchemaAstV2, "storageBuckets">,
+  ast: ParsedBuckets,
   storageApiUrl: string,
   serviceRoleKey: string,
 ): Promise<void> {

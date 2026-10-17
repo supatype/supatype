@@ -1,4 +1,5 @@
 import type { Command } from "commander"
+import { errorMessage } from "../error-message.js"
 import { existsSync, mkdirSync } from "node:fs"
 import { resolve } from "node:path"
 import { localKongBaseUrl } from "../local-gateway.js"
@@ -70,7 +71,7 @@ function addStaticApp(cwd: string, staticDir: string): void {
       `App URL: ${localKongBaseUrl()}/`,
     ])
   } catch (err) {
-    error((err as Error).message)
+    error(errorMessage(err))
     process.exit(1)
   }
 }
@@ -83,7 +84,7 @@ function addProxyApp(cwd: string, port: string, upstream?: string): void {
     info(`Forwarding to ${upstreamUrl}: app at ${localKongBaseUrl()}/`)
     nextSteps("Next:", ["supatype self-host compose render"])
   } catch (err) {
-    error((err as Error).message)
+    error(errorMessage(err))
     process.exit(1)
   }
 }
@@ -94,7 +95,7 @@ function removeApp(cwd: string): void {
     file("updated", configPath)
     info("App routing disabled (app.mode=none).")
   } catch (err) {
-    error((err as Error).message)
+    error(errorMessage(err))
     process.exit(1)
   }
 }

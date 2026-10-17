@@ -2,17 +2,15 @@ import { describe, expect, it } from "vitest"
 import { mkdirSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import type { QueryResult } from "pg"
 import { ensureFirstAdminWithQuery, STUDIO_ROLES } from "../src/commands/admin.js"
 
-function result(rows: Record<string, unknown>[]): QueryResult {
-  return {
-    rows,
-    rowCount: rows.length,
-    command: "SELECT",
-    oid: 0,
-    fields: [],
-  } as unknown as QueryResult
+/** What the stub answers a query with: rows are all `ensureFirstAdminWithQuery` reads. */
+interface Rows {
+  rows: Record<string, unknown>[]
+}
+
+function result(rows: Record<string, unknown>[]): Rows {
+  return { rows }
 }
 
 interface Recorded {
@@ -24,9 +22,9 @@ interface Recorded {
  * Answers the probes `ensureFirstAdminWithQuery` makes and records every
  * statement, so the assertions can inspect what would reach Postgres.
  */
-function stubDb(): { query: (sql: string, params?: unknown[]) => Promise<QueryResult>; log: Recorded[] } {
+function stubDb(): { query: (sql: string, params?: unknown[]) => Promise<Rows>; log: Recorded[] } {
   const log: Recorded[] = []
-  const query = async (sql: string, params: unknown[] = []): Promise<QueryResult> => {
+  const query = async (sql: string, params: unknown[] = []): Promise<Rows> => {
     log.push({ sql, params })
 
     if (sql.includes("information_schema.tables") && sql.includes("'auth'")) {

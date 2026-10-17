@@ -30,6 +30,7 @@ import { existsSync } from "node:fs"
 // it for a lazy import and every command that generates compose would have thrown at runtime, caught
 // by the tests that run the built binary rather than the source.
 import { loadSchemaAst } from "./config.js"
+import { astModels, isNonEmptyObject, objectAt } from "./ast-read.js"
 export { nativeMaskLibraryPresent } from "./postgres-ctl.js"
 import { postgresImageFor } from "./postgres-image.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
@@ -92,15 +93,9 @@ function imageCarriesMaskLibrary(image: string): boolean | undefined {
  * needs to know whether a `fields` map is present and non-empty.
  */
 export function schemaHasFieldRules(ast: unknown): boolean {
-  const models = (ast as { models?: unknown[] } | null)?.models
-  if (!Array.isArray(models)) return false
-  return models.some((model) => {
-    const access = (
-      model as { annotations?: { platform?: { access?: Record<string, unknown> } } } | null
-    )?.annotations?.platform?.access
-    const fields = access?.["fields"]
-    return typeof fields === "object" && fields !== null && Object.keys(fields).length > 0
-  })
+  return astModels(ast).some((model) =>
+    isNonEmptyObject(objectAt(model, "annotations", "platform", "access")?.["fields"]),
+  )
 }
 
 /** The tier this project's next push will use. */

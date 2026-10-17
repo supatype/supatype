@@ -16,12 +16,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { refreshFunctionsContext } from "../src/functions-context-refresh.js"
-import type { SupatypeProjectConfig } from "../src/project-config.js"
+import { projectConfig } from "./support/project-config.js"
 
-const config: SupatypeProjectConfig = {
-  project: { name: "ctx" },
-  database: { provider: "docker" },
-} as SupatypeProjectConfig
+const config = projectConfig({ project: { name: "ctx" }, database: { provider: "docker" } })
 
 let dir: string
 

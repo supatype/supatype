@@ -19,24 +19,31 @@ import { cachedBinaryPath, currentPlatform, newestCachedVersion } from "./binary
 import { ensureBinary } from "./ensure-binary.js"
 import { findJsonLine } from "./engine-json-line.js"
 import { auditFlags, auditWhenSupported } from "./push-audit.js"
-import { ENGINE_BUSY, ENGINE_BUSY_WORDING, engineBusySentence } from "@supatype/shared"
+import { ENGINE_BUSY, ENGINE_BUSY_WORDING, engineBusySentence, isUnknown, type Guard } from "@supatype/shared"
 
 // ---------------------------------------------------------------------------
 // Types (kept for backward compatibility with existing callers)
 // ---------------------------------------------------------------------------
 
+/**
+ * One differ operation. The engine tags each with `type` and sends the fields its variant has; an
+ * `AlterColumn` with nothing to warn about sends `warning: null`. `index`, `name` and `fields`
+ * differ in shape between engines and servers, so they are read with checks where they are read.
+ */
 export interface Operation {
   type?: string
   kind?: string
   description?: string
   risk?: "safe" | "warn" | "danger" | "cautious" | "destructive"
-  warning?: string
+  warning?: string | null
   sql?: string
   table?: string
   column?: string
   constraint?: string
   index_name?: string
-  index?: { fields?: string[]; name?: string; unique?: boolean }
+  index?: unknown
+  name?: unknown
+  fields?: unknown
 }
 
 /**
@@ -44,24 +51,20 @@ export interface Operation {
  * A kind that has moved onto the ledger is planned here rather than as an operation.
  */
 export interface ReconcileAction {
-  action:
-    | "create"
-    | "adopt"
-    | "conflict"
-    | "recreate"
-    | "replace"
-    | "drift"
-    | "keep"
-    | "drop"
-    | "forget"
-    | "released"
+  /**
+   * `create`, `adopt`, `conflict`, `recreate`, `replace`, `drift`, `keep`, `drop`, `forget`
+   * and `released` are the ones the CLI shows; the engine also sends `restate`, `rename` and
+   * `rebuild`, and may add more, so any string is accepted.
+   */
+  action: string
   key: { kind: string; schema: string; parent: string; name: string }
   /**
    * An action the parent statement already carries out (a constraint inline in `CREATE TABLE`, or
    * recreated with its table). Sent on `create`, `recreate`, `replace` and `drift`.
    */
   inline?: boolean
-  reason?: "stamped" | "structure_matches" | "deparses_equal" | "owned_schema" | "declared"
+  /** Why an `adopt` is ours: `stamped`, `structure_matches`, `deparses_equal`, `owned_schema`, `declared`, ... */
+  reason?: string
   /** A `drift` on a policy, grant, label or RLS attribute: putting it back changes who sees what. */
   security_relevant?: boolean
   recorded_def?: string
@@ -114,7 +117,6 @@ export interface DiffResult {
   /** Absent from engines older than the ledger. */
   reconcile?: ReconcileAction[]
   warnings?: string[]
-  summary?: string
   /** Drops and adds a person may have meant as renames. Absent from engines that guessed them. */
   renameCandidates?: RenameCandidate[]
 }
@@ -232,12 +234,20 @@ export async function engineHealth(): Promise<boolean> {
  *   /admin       → engine admin (admin-config JSON on stdout)
  *   /seed        → engine seed (result document JSON on stdout)
  */
-export async function engineRequest<T = unknown>(
+export async function engineRequest(endpoint: string, body: Record<string, unknown>): Promise<unknown>
+export async function engineRequest<T>(
   endpoint: string,
   body: Record<string, unknown>,
+  guard: Guard<T>,
   compose?: ComposeEngine,
-): Promise<T> {
-  if (compose !== undefined) return composeEngineRequest<T>(endpoint, body, compose)
+): Promise<T>
+export async function engineRequest(
+  endpoint: string,
+  body: Record<string, unknown>,
+  guard: Guard<unknown> = isUnknown,
+  compose?: ComposeEngine,
+): Promise<unknown> {
+  if (compose !== undefined) return composeEngineRequest(endpoint, body, guard, compose)
   const bin = await getEngineBin()
   // A schema with identity or generated columns goes only to an engine that reads them: one that
   // does not would push plain columns and say nothing. Imported here, as the gate imports this.
@@ -246,24 +256,22 @@ export async function engineRequest<T = unknown>(
     const needs = identityColumnsNeed(body["ast"])
     if (needs.length > 0) assertSupported(binaryCapabilities(bin), needs)
   }
+  return readEngineResult(endpoint, spawnEngineHere(bin, endpoint, body), guard)
+}
 
-  // A directory of this request's own, removed with everything in it whatever fails: a write,
-  // building the arguments, or the spawn itself.
+/**
+ * Run the binary for one request, in a directory of the request's own, removed with everything in
+ * it whatever fails: a write, building the arguments, or the spawn itself.
+ */
+function spawnEngineHere(bin: string, endpoint: string, body: Record<string, unknown>): SpawnSyncReturns<string> {
   const tmpDir = engineTempDir()
-  let result: SpawnSyncReturns<string>
   try {
     const files = writeRequestFiles(tmpDir, body)
     const args = endpointToArgs(endpoint, body, files)
-    result = spawnSync(bin, args, {
-      encoding: "utf8",
-      cwd: process.cwd(),
-      env: engineEnv(body),
-    })
+    return spawnSync(bin, args, { encoding: "utf8", cwd: process.cwd(), env: engineEnv(body) })
   } finally {
     try { rmSync(tmpDir, { recursive: true, force: true }) } catch { /* ignore */ }
   }
-
-  return readEngineResult<T>(endpoint, result)
 }
 
 /**
@@ -271,9 +279,10 @@ export async function engineRequest<T = unknown>(
  * for an engine that records it: the binary here, or the project's engine image with `compose`.
  * Every push the CLI runs an engine for goes through here, so each one says who it is from.
  */
-export async function enginePush<T = unknown>(
+export async function enginePush<T>(
   cwd: string,
   body: Record<string, unknown>,
+  guard: Guard<T>,
   compose?: ComposeEngine,
 ): Promise<T> {
   const capabilities = compose?.capabilities ?? (async () => {
@@ -281,7 +290,7 @@ export async function enginePush<T = unknown>(
     return binaryCapabilities(await getEngineBin())
   })
   const audit = await auditWhenSupported(cwd, capabilities)
-  return engineRequest<T>("/push", { ...body, ...audit }, compose)
+  return engineRequest("/push", { ...body, ...audit }, guard, compose)
 }
 
 /**
@@ -306,7 +315,12 @@ const DATABASE_FREE_ENDPOINTS = new Set(["/generate", "/admin", "/parse"])
  * under `.supatype`, which the engine service mounts at `/project`, and are removed afterwards; like
  * the host path, they never hold the database URL.
  */
-function composeEngineRequest<T>(endpoint: string, body: Record<string, unknown>, compose: ComposeEngine): T {
+function composeEngineRequest<T>(
+  endpoint: string,
+  body: Record<string, unknown>,
+  guard: Guard<T>,
+  compose: ComposeEngine,
+): T {
   const { cwd } = compose.target
   const supatypeDir = join(cwd, ".supatype")
   mkdirSync(supatypeDir, { recursive: true })
@@ -322,7 +336,7 @@ function composeEngineRequest<T>(endpoint: string, body: Record<string, unknown>
   } finally {
     rmSync(hostDir, { recursive: true, force: true })
   }
-  return readEngineResult<T>(endpoint, result)
+  return readEngineResult(endpoint, result, guard)
 }
 
 /** The request's files as the engine container sees them, under the project mount. */
@@ -348,7 +362,17 @@ function engineEnv(body: Record<string, unknown>): NodeJS.ProcessEnv {
 }
 
 /** Turn the engine's exit status and stdout into the request's answer, or throw its error. */
-function readEngineResult<T>(endpoint: string, result: SpawnSyncReturns<string>): T {
+function readEngineResult<T>(endpoint: string, result: SpawnSyncReturns<string>, guard: Guard<T>): T {
+  throwEngineFailure(endpoint, result)
+  const answer = engineAnswer(result.stdout ?? "")
+  if (!guard(answer)) {
+    throw new EngineError(`Engine ${endpoint} answered in a shape this CLI cannot read`, endpoint, result.status, result.stdout ?? "")
+  }
+  return answer
+}
+
+/** Throw the engine's error when it failed, unless the failure is itself the answer. */
+function throwEngineFailure(endpoint: string, result: SpawnSyncReturns<string>): void {
   // A failed seed is an answer, not a crash.
   //
   // `engine seed` exits 1 when the seed itself failed and prints the result document on
@@ -374,16 +398,16 @@ function readEngineResult<T>(endpoint: string, result: SpawnSyncReturns<string>)
     )
   }
 
-  if (!result.stdout?.trim()) {
-    // Some subcommands print nothing on success.
-    return {} as T
-  }
+}
 
+/** What the engine printed: its JSON, `{}` for nothing, or `{ message }` for text. */
+function engineAnswer(stdout: string): unknown {
+  // Some subcommands print nothing on success.
+  if (!stdout.trim()) return {}
   try {
-    return JSON.parse(result.stdout) as T
+    return JSON.parse(stdout)
   } catch {
-    // Non-JSON stdout: return as message.
-    return { message: result.stdout.trim() } as T
+    return { message: stdout.trim() }
   }
 }
 
@@ -497,6 +521,12 @@ function rebaselineKeys(keys: unknown): string[] {
   return repeated(keys, "--key")
 }
 
+/** A string the request body carries under `key`, or undefined when it carries none. */
+function stringField(body: Record<string, unknown>, key: string): string | undefined {
+  const value = body[key]
+  return typeof value === "string" ? value : undefined
+}
+
 /** The engine binary's arguments for an endpoint and its request body. Exported for its tests. */
 export function endpointToArgs(
   endpoint: string,
@@ -504,7 +534,7 @@ export function endpointToArgs(
   files: RequestFiles,
 ): string[] {
   const { reqFile } = files
-  const schema = (body["schema"] as string | undefined) ?? "public"
+  const schema = stringField(body, "schema") ?? "public"
   const force = body["force"] ? ["--force"] : []
   // Plan 3.5: put back access changed outside Supatype. The CLI sets it only after a person said
   // yes to the difference, or when `--overwrite-drift` was passed.
@@ -542,8 +572,8 @@ export function endpointToArgs(
       return ["parse", "--input", reqFile]
 
     case "/generate": {
-      const lang = (body["lang"] as string | undefined) ?? "typescript"
-      const artifact = (body["artifact"] as string | undefined) ?? "types"
+      const lang = stringField(body, "lang") ?? "typescript"
+      const artifact = stringField(body, "artifact") ?? "types"
       return ["generate", "--input", reqFile, "--lang", lang, "--artifact", artifact]
     }
 
@@ -614,11 +644,11 @@ export function endpointToArgs(
 
     default:
       if (endpoint === "/migrations" || endpoint.startsWith("/migrations")) {
-        const action = (body["action"] as string | undefined) ?? "list"
+        const action = stringField(body, "action") ?? "list"
         if (action === "rollback") {
           return ["rollback", "--schema", schema]
         }
-        const name = body["name"] as string | undefined
+        const name = stringField(body, "name")
         if (name) {
           return ["migrations", "--name", name]
         }

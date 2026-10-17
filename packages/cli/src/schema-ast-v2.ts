@@ -78,6 +78,11 @@ export const FIELD_KINDS = [
 
 export type FieldKind = (typeof FIELD_KINDS)[number]
 
+/** True for a kind this CLI knows, such as one read back off the wire. */
+export function isFieldKind(kind: string): kind is FieldKind {
+  return FIELD_KINDS.some((known) => known === kind)
+}
+
 export type DefaultAst =
   | { kind: "value"; value: string | number | boolean | null }
   | { kind: "now" }
@@ -308,16 +313,16 @@ const DEFAULT_PLATFORM_BY_KIND: Partial<Record<FieldKind, Partial<PlatformFieldA
 
 const COMPOSITE_KINDS = new Set(["timestamps", "publishable", "softDelete"])
 
-function hasKeys(obj: Record<string, unknown>): boolean {
+function hasKeys(obj: object): boolean {
   return Object.keys(obj).length > 0
 }
 
-function stripUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
-  const out: Record<string, unknown> = {}
-  for (const [k, v] of Object.entries(obj)) {
-    if (v !== undefined) out[k] = v
+function stripUndefined<T extends object>(obj: T): Partial<T> {
+  const out: Partial<T> = { ...obj }
+  for (const [k, v] of Object.entries(out)) {
+    if (v === undefined) Reflect.deleteProperty(out, k)
   }
-  return out as Partial<T>
+  return out
 }
 
 /**
@@ -328,7 +333,8 @@ function stripUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
  * lookup plus the fallback is what makes an unrecognised one safe.
  */
 export function defaultPgTypeForKind(kind: string): string {
-  return DEFAULT_DB_BY_KIND[kind as FieldKind]?.pgType ?? "TEXT"
+  const byKind: Partial<Record<string, Partial<DbFieldAnnotations>>> = DEFAULT_DB_BY_KIND
+  return byKind[kind]?.pgType ?? "TEXT"
 }
 
 /** Flat wire shape for fields nested inside `blocks` definitions (engine FieldAst serde). */
@@ -447,9 +453,9 @@ export function emitField(parsed: ParsedField): FieldAstV2 {
   if (kernel.generated !== undefined) wire.generated = kernel.generated
 
   const annotations: FieldAnnotations = {}
-  if (hasKeys(db as Record<string, unknown>)) annotations.db = db
-  if (hasKeys(platform as Record<string, unknown>)) annotations.platform = platform
-  if (hasKeys(annotations as Record<string, unknown>)) wire.annotations = annotations
+  if (hasKeys(db)) annotations.db = db
+  if (hasKeys(platform)) annotations.platform = platform
+  if (hasKeys(annotations)) wire.annotations = annotations
 
   return wire
 }

@@ -11,7 +11,9 @@
  */
 
 import { printPushWarnings, type EnginePushResult } from "../engine-push-output.js"
+import { errorMessage } from "../error-message.js"
 import type { DiffResult } from "../engine-client.js"
+import { isDiffResult, isEnginePushResult } from "../engine-answers.js"
 import type { DestructiveConsentDeps } from "../destructive-consent.js"
 import { reportDevPushFailure } from "../push-refusal.js"
 import type { Command } from "commander"
@@ -19,7 +21,10 @@ import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { isAbsolute, join, relative, resolve } from "node:path"
 import { loadConfig } from "../config.js"
-import type { ExtractedSchemaAstV2 } from "../schema-ast-v2.js"
+import type { ExtractedSchemaAstV2, FieldAstV2, ModelAstV2 } from "../schema-ast-v2.js"
+import { isParsedBuckets, type ParsedStorageBucket } from "../storage-provision.js"
+import { readJsonFile } from "../json-file.js"
+import { isArrayOf, isJsonObject } from "@supatype/shared"
 import {
   pgSchema,
   functionsPathCandidatesFromProject,
@@ -125,6 +130,8 @@ interface NativeDevPorts {
   realtime: number
 }
 
+const NATIVE_SERVICES = ["postgres", "server", "postgrest", "realtime"] as const satisfies readonly (keyof NativeDevPorts)[]
+
 const NATIVE_PORT_HINTS: Record<keyof NativeDevPorts, { holder: string; move: string }> = {
   postgres: {
     holder: "Another Postgres instance may be running.",
@@ -145,7 +152,8 @@ const NATIVE_PORT_HINTS: Record<keyof NativeDevPorts, { holder: string; move: st
 }
 
 async function assertNativeDevPortsFree(ports: NativeDevPorts): Promise<void> {
-  for (const [service, port] of Object.entries(ports) as [keyof NativeDevPorts, number][]) {
+  for (const service of NATIVE_SERVICES) {
+    const port = ports[service]
     if (!(await isPortInUse(port))) continue
     const { holder, move } = NATIVE_PORT_HINTS[service]
     fatalError(`Port ${port} is already in use.`, [holder, `Check: ${portCheckCommand(port)}`, move], {
@@ -452,7 +460,7 @@ export function registerDev(program: Command): void {
         } catch (err) {
           console.warn(
             `[supatype] ⚠  Found ${functionsDir} but could not provision Deno, edge functions will not run.\n` +
-              `  ${(err as Error).message}\n` +
+              `  ${errorMessage(err)}\n` +
               "  (Functions still appear in Studio; invocations need Deno.)",
           )
         }
@@ -603,7 +611,7 @@ export function registerDev(program: Command): void {
             postgrestRuntimeBinDir = await resolvePgBinDir(config)
           } catch (error) {
             console.warn(
-              `[supatype] ⚠  Could not resolve Postgres runtime DLL directory for PostgREST: ${(error as Error).message}\n` +
+              `[supatype] ⚠  Could not resolve Postgres runtime DLL directory for PostgREST: ${errorMessage(error)}\n` +
                 "  PostgREST may fail to start on Windows until Postgres binaries are available locally.",
             )
           }
@@ -787,22 +795,26 @@ async function pushNativeSchema(
     if (stale) [ast, stale] = [await schema.rebuild(), false]
     return { ast, database_url: target.dbURL, schema: target.pgSchema }
   }
-  const diff = async () => engineRequest<DiffResult>("/diff", await request())
+  const diff = async () => engineRequest("/diff", await request(), isDiffResult)
   const deps = rebuildingAfterRename(consentDepsFromDiff(cwd, diff), () => {
     stale = true
   })
   const once = async (overwrite: boolean): Promise<void> => {
     const result = await pushConsentingToDestructive(
       async (force) =>
-        enginePush<EnginePushResult>(cwd, {
-          ...(await request()),
-          force,
-          ...(overwrite && { overwrite_drift: true }),
-          ...(sources && {
-            schema_sources_gz_base64: sources.payload.dataBase64,
-            schema_sources_manifest: sources.payload.manifest,
-          }),
-        }),
+        enginePush(
+          cwd,
+          {
+            ...(await request()),
+            force,
+            ...(overwrite && { overwrite_drift: true }),
+            ...(sources && {
+              schema_sources_gz_base64: sources.payload.dataBase64,
+              schema_sources_manifest: sources.payload.manifest,
+            }),
+          },
+          isEnginePushResult,
+        ),
       DEV_DESTRUCTIVE_POLICY,
       deps,
     )
@@ -906,17 +918,8 @@ async function runSchemaPush(
     const parseResult = spawnSync(engineBin, ["parse", "-i", astPath], { cwd, stdio: "pipe", encoding: "utf8" })
     if (parseResult.status === 0 && parseResult.stdout) {
       try {
-        const resolvedAst = JSON.parse(parseResult.stdout) as {
-          storageBuckets?: Array<{
-            id: string
-            public: boolean
-            allowedMimeTypes?: string[]
-            fileSizeLimit?: number
-            accessMode?: string
-            s3BucketPolicy?: string | null
-          }>
-        }
-        if (resolvedAst.storageBuckets && resolvedAst.storageBuckets.length > 0) {
+        const resolvedAst: unknown = JSON.parse(parseResult.stdout)
+        if (isParsedBuckets(resolvedAst) && resolvedAst.storageBuckets && resolvedAst.storageBuckets.length > 0) {
           provisionStorageBuckets(resolvedAst.storageBuckets, storagePath)
         }
       } catch { /* ignore parse errors */ }
@@ -974,31 +977,21 @@ async function writeNativeTypes(
       console.log(`[supatype] ${message}`)
     }
   } catch (err) {
-    console.warn(`[supatype] Type generation failed: ${(err as Error).message}`)
+    console.warn(`[supatype] Type generation failed: ${errorMessage(err)}`)
   }
 }
 
 function provisionStorageBuckets(
-  declared: Array<{
-    id: string
-    public: boolean
-    allowedMimeTypes?: string[]
-    fileSizeLimit?: number
-    accessMode?: string
-    s3BucketPolicy?: string | null
-  }>,
+  declared: ParsedStorageBucket[],
   storagePath: string,
 ): void {
   const bucketsDir = join(storagePath, ".supatype")
   const bucketsFile = join(bucketsDir, "buckets.json")
   mkdirSync(bucketsDir, { recursive: true })
 
-  let existing: Array<Record<string, unknown>> = []
-  try {
-    existing = JSON.parse(readFileSync(bucketsFile, "utf8")) as Array<Record<string, unknown>>
-  } catch { /* file doesn't exist yet */ }
-
-  const existingIds = new Set(existing.map((b) => b["id"] as string))
+  // Absent until the first bucket, and anything that is not a list of buckets reads as none.
+  const existing = readJsonFile(bucketsFile, isArrayOf(isJsonObject)) ?? []
+  const existingIds = new Set(existing.map((b) => b["id"]))
   let added = 0
 
   for (const bucket of declared) {
@@ -1142,7 +1135,7 @@ async function resolvePostgrestBin(overridePath?: string): Promise<string | null
     resp = await fetch(url)
   } catch (e) {
     console.warn(
-      `[supatype] ⚠  Could not download PostgREST (${(e as Error).message}).\n` +
+      `[supatype] ⚠  Could not download PostgREST (${errorMessage(e)}).\n` +
       `  REST API (/rest/v1/) will be unavailable until the download succeeds.\n` +
       `  Re-run 'supatype dev' once network access to github.com:443 is restored.`,
     )
@@ -1236,13 +1229,10 @@ function repairWindowsPostgrestRuntime(cacheDir: string, archivePath: string, bi
 // AST adaptation: replace extension-dependent fields with JSONB fallbacks
 // ---------------------------------------------------------------------------
 
-interface AstField { kind: string; required?: boolean; [k: string]: unknown }
-interface AstModel { name: string; fields?: Record<string, AstField> }
-interface AstSchema { models?: AstModel[] }
 
 // Field kinds that require Postgres extensions not available in all builds.
 // Maps kind → { extension name, JSONB fallback AST }
-const EXTENSION_FIELDS: Record<string, { ext: string; fallback: AstField }> = {
+const EXTENSION_FIELDS: Record<string, { ext: string; fallback: FieldAstV2 }> = {
   geo:    { ext: "PostGIS",  fallback: { kind: "json", pgType: "JSONB" } },
   vector: { ext: "pgvector", fallback: { kind: "json", pgType: "JSONB" } },
 }
@@ -1252,25 +1242,27 @@ function adaptUnsupportedKinds(
   skipKinds: ReadonlySet<string>,
 ): { filtered: ExtractedSchemaAstV2; adapted: string[] } {
   const adapted: string[] = []
-  if (!ast || typeof ast !== "object") return { filtered: ast, adapted }
-  const schema = ast as AstSchema
-  if (!Array.isArray(schema.models)) return { filtered: ast, adapted }
+  const models = ast.models.map((model) => ({ ...model, fields: adaptFields(model, skipKinds, adapted) }))
+  return { filtered: { ...ast, models }, adapted }
+}
 
-  const models = schema.models.map((model) => {
-    const fields: Record<string, AstField> = {}
-    for (const [name, field] of Object.entries(model.fields ?? {})) {
-      const info = skipKinds.has(field.kind) ? EXTENSION_FIELDS[field.kind] : undefined
-      if (info) {
-        fields[name] = { ...info.fallback, required: field.required ?? false }
-        adapted.push(`${model.name}.${name} (${info.ext} → JSONB)`)
-      } else {
-        fields[name] = field
-      }
+/** `model`'s fields, each of a kind in `skipKinds` replaced by its JSONB fallback and named in `adapted`. */
+function adaptFields(
+  model: ModelAstV2,
+  skipKinds: ReadonlySet<string>,
+  adapted: string[],
+): Record<string, FieldAstV2> {
+  const fields: Record<string, FieldAstV2> = {}
+  for (const [name, field] of Object.entries(model.fields)) {
+    const info = skipKinds.has(field.kind) ? EXTENSION_FIELDS[field.kind] : undefined
+    if (info) {
+      fields[name] = { ...info.fallback, required: field["required"] ?? false }
+      adapted.push(`${model.name}.${name} (${info.ext} → JSONB)`)
+    } else {
+      fields[name] = field
     }
-    return { ...model, fields }
-  })
-
-  return { filtered: { ...schema, models } as ExtractedSchemaAstV2, adapted }
+  }
+  return fields
 }
 
 // ---------------------------------------------------------------------------

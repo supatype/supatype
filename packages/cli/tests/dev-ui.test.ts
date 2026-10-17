@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest"
+import { describe, expect, it, vi, beforeEach, afterEach, afterAll } from "vitest"
 import { mkdtempSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
@@ -16,6 +16,7 @@ import {
   SUPATYPE_ASCII_LOGO_WORDMARK,
 } from "../src/dev-logo.js"
 import { normalizeStackLogLine, taskColor } from "../src/dev-task-colors.js"
+import { recordExit } from "./support/process-exit.js"
 
 describe("filterDevSubprocessLine()", () => {
   it("filters npm script banners and vite network URLs for app", () => {
@@ -146,7 +147,9 @@ describe("dev-task-colors", () => {
 })
 
 describe("dev-shutdown", () => {
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => undefined) as typeof process.exit)
+  // Shutdown exits from async work, so the stand-in records the code and returns.
+  const { exit: exitSpy, restore: restoreExit } = recordExit()
+  afterAll(restoreExit)
   const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true)
 
   beforeEach(() => {

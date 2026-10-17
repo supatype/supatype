@@ -5,6 +5,17 @@ import {
   renderRelationships,
   type JunctionTable,
 } from "./augmentation-relationships.js"
+import {
+  isArrayOf,
+  isJsonObject,
+  isRecordOf,
+  isShape,
+  isString,
+  isUnknown,
+  optional,
+  type Guard,
+} from "@supatype/shared"
+import { objectAt } from "./ast-read.js"
 
 export interface AstModel {
   name?: string
@@ -15,8 +26,24 @@ export interface AstModel {
   }
 }
 
-interface AstShape {
-  models?: AstModel[]
+const isAstModel: Guard<AstModel> = isShape({
+  name: optional(isString),
+  tableName: optional(isString),
+  fields: isRecordOf(isJsonObject),
+  annotations: optional(
+    isShape({ db: optional(isShape({ tableName: optional(isString), indexes: optional(isArrayOf(isUnknown)) })) }),
+  ),
+})
+
+/**
+ * The AST's models, in the order the schema declares them. None without a models array; a model
+ * without its fields map is refused, since no type can be generated for it.
+ */
+export function astModelsOf(ast: unknown): AstModel[] {
+  const models = isJsonObject(ast) ? ast["models"] : undefined
+  if (!Array.isArray(models)) return []
+  if (!models.every(isAstModel)) throw new Error("The schema AST has a model with no fields map")
+  return models
 }
 
 /**
@@ -38,16 +65,13 @@ export function resolveTableName(model: AstModel): string {
 
 function fieldServerGenerated(meta: Record<string, unknown>): boolean {
   if (meta["serverGenerated"] === true) return true
-  const annotations = meta["annotations"]
-  if (typeof annotations !== "object" || annotations === null) return false
-  const db = (annotations as { db?: { serverGenerated?: unknown } }).db
-  return db?.serverGenerated === true
+  return objectAt(meta, "annotations", "db")?.["serverGenerated"] === true
 }
 
 export function generateClientAugmentation(ast: unknown): string {
   // In the order the schema declares them. The AST preserves that order, and it is the order
   // the author reads their own schema in.
-  const models = [...((ast as AstShape).models ?? [])]
+  const models = astModelsOf(ast)
   const junctions = junctionTablesOf({
     models,
     tableName: resolveTableName,
@@ -73,12 +97,32 @@ export function generateClientAugmentation(ast: unknown): string {
 function fieldKinds(models: AstModel[]): Set<string> {
   const kinds = new Set<string>()
   for (const model of models) {
-    for (const meta of Object.values(model.fields ?? {})) {
-      if (typeof meta["kind"] === "string") kinds.add(meta["kind"])
-    }
+    for (const meta of Object.values(model.fields)) addKinds(meta, kinds)
   }
   return kinds
 }
+
+/** A field's kind, and those of the fields its declared blocks carry, which name the same aliases. */
+function addKinds(meta: Record<string, unknown>, kinds: Set<string>): void {
+  if (typeof meta["kind"] === "string") kinds.add(meta["kind"])
+  for (const block of blockDefinitions(meta)) {
+    for (const nested of Object.values(objectAt(block, "fields") ?? {})) {
+      if (isJsonObject(nested)) addKinds(nested, kinds)
+    }
+  }
+}
+
+/** The JSON value type, as the engine's `database.ts` declares it. */
+const JSON_TYPE_LINES = [
+  "export type Json =",
+  "  | string",
+  "  | number",
+  "  | boolean",
+  "  | null",
+  "  | { [key: string]: Json | undefined }",
+  "  | Json[]",
+  "",
+]
 
 /** The aliases a column type may name, emitted only where the schema uses them. */
 function sharedTypeLines(kinds: Set<string>): string[] {
@@ -90,6 +134,7 @@ function sharedTypeLines(kinds: Set<string>): string[] {
   if (kinds.has("image") || kinds.has("file")) {
     lines.push("export type StorageReference = {", "  bucket: string", "  path: string", "}", "")
   }
+  if (kinds.has("json") || kinds.has("geo")) lines.push(...JSON_TYPE_LINES)
   return lines
 }
 
@@ -277,12 +322,18 @@ function toTsType(meta: Record<string, unknown>, prose = false): string {
         return "bigint"
       case "boolean":
         return "boolean"
+      // The engine's `database.ts` types each of these the same way (`ts_type_of`), so a row read
+      // through the typed client and one read through `Database` agree.
       case "json":
-      case "blocks":
       case "geo":
+        return "Json"
       case "vector":
-      case "relation":
+        return "number[]"
       case "array":
+        return `${arrayElementType(meta)}[]`
+      case "blocks":
+        return blocksType(meta)
+      case "relation":
         return "Record<string, unknown>"
       // What `storage.upload()` actually produces, plus the bucket it went to. Emitting
       // `Record<string, unknown>` here is why two example screens cast on the good path. A `url`
@@ -294,7 +345,7 @@ function toTsType(meta: Record<string, unknown>, prose = false): string {
       case "richText":
         return "RichText"
       case "enum": {
-        const values = Array.isArray(meta["values"]) ? meta["values"] as unknown[] : []
+        const values = Array.isArray(meta["values"]) ? meta["values"] : []
         const quoted = values
           .filter((v): v is string => typeof v === "string")
           .map((v) => JSON.stringify(v))
@@ -313,6 +364,48 @@ function toTsType(meta: Record<string, unknown>, prose = false): string {
   const written = prose && meta["kind"] === "richText" ? `${base} | string` : base
   const shaped = meta["localized"] === true ? `{ [locale: string]: ${written} }` : written
   return required ? shaped : `${shaped} | null`
+}
+
+/** An array column's element, from its Postgres element type, as the engine maps it. */
+function arrayElementType(meta: Record<string, unknown>): string {
+  const declared = objectAt(meta, "annotations", "db")?.["elementType"] ?? meta["elementType"]
+  const element = typeof declared === "string" ? declared.toLowerCase() : ""
+  if (NUMERIC_ELEMENT_TYPES.has(element)) return "number"
+  return element === "boolean" || element === "bool" ? "boolean" : "string"
+}
+
+const NUMERIC_ELEMENT_TYPES = new Set([
+  "integer", "int4", "int", "smallint", "int2", "bigint", "int8", "float",
+  "double precision", "float8", "real", "float4", "numeric",
+])
+
+/** The blocks a `blocks` field declares, each an object still to be read with checks. */
+function blockDefinitions(meta: Record<string, unknown>): Record<string, unknown>[] {
+  const blocks = meta["blocks"]
+  return Array.isArray(blocks) ? blocks.filter(isJsonObject) : []
+}
+
+/**
+ * A blocks column: each entry is `{ type: <block>, data: { <its fields> } }`. With no block declared
+ * the entry still has that shape and only its fields are unknown.
+ */
+function blocksType(meta: Record<string, unknown>): string {
+  const blocks = blockDefinitions(meta)
+  if (blocks.length === 0) return "{ type: string; data: { [key: string]: unknown } }[]"
+  return `(${blocks.map(blockVariant).join(" | ")})[]`
+}
+
+/** One block's entry type; a field it may leave out is optional rather than nullable, as the engine writes it. */
+function blockVariant(block: Record<string, unknown>): string {
+  const name = typeof block["name"] === "string" ? block["name"] : ""
+  const fields = Object.entries(objectAt(block, "fields") ?? {}).filter(
+    (entry): entry is [string, Record<string, unknown>] => isJsonObject(entry[1]) && entry[1]["kind"] !== "relation",
+  )
+  const data = fields.map(([key, field]) => {
+    const optional = field["required"] === true ? "" : "?"
+    return `${quoteKey(key)}${optional}: ${toTsType({ ...field, required: true })}`
+  })
+  return `{ type: ${JSON.stringify(name)}; data: ${data.length === 0 ? "{}" : `{ ${data.join("; ")} }`} }`
 }
 
 function quoteKey(key: string): string {

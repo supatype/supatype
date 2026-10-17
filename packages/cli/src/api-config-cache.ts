@@ -3,7 +3,7 @@
  *
  * The declaration is a **ceiling**, not a switch: the server reads `cache` on the manifest as what
  * *may* be cached and `cache_tables` as what *is*. Both are needed, and only one of them is written
- * by a push — which on a local stack means a developer who wrote `cache: { enabled: true }`, pushed,
+ * by a push. On a local stack that means a developer who wrote `cache: { enabled: true }`, pushed,
  * and called `.cache({ server: true })` gets a BYPASS and no explanation short of opening Studio.
  *
  * So a push turns on what the schema newly declares, and **never touches an entry that already
@@ -20,9 +20,11 @@
  * declaration behind it caches nothing. Removing it would be tidier and would also mean a push
  * silently editing entries it did not create.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { manifestCache, type ManifestCacheEntry } from "./model-cache.js"
+import { readJsonObjectFile } from "./json-file.js"
+import { isJsonObject } from "@supatype/shared"
 
 /** One table's entry in the runtime allowlist. The shape the server stores. */
 interface TableCacheConfig {
@@ -42,7 +44,7 @@ export interface CacheSeedResult {
 /**
  * Bring the local allowlist in line with new declarations, and report what is still in the way.
  *
- * Returns null when there is no file to seed — a cloud-only project, or a stack that has never
+ * Returns null when there is no file to seed: a cloud-only project, or a stack that has never
  * been started. A missing file is not an error here: the file is the local server's, and `dev`
  * creates it.
  */
@@ -53,15 +55,10 @@ export function seedApiConfigCache(cwd: string, ast: unknown): CacheSeedResult |
   const path = join(cwd, ".supatype", "api-config.json")
   if (!existsSync(path)) return null
 
-  let parsed: Record<string, unknown>
-  try {
-    parsed = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>
-  } catch {
-    // Malformed: the server reports this far more clearly than a push can, and rewriting it here
-    // would destroy whatever the author was in the middle of.
-    return null
-  }
-  if (typeof parsed !== "object" || parsed === null) return null
+  // Malformed: the server reports this far more clearly than a push can, and rewriting it here
+  // would destroy whatever the author was in the middle of.
+  const parsed = readJsonObjectFile(path)
+  if (parsed === undefined) return null
 
   const rest = asRecord(parsed["rest"])
   if (!rest) return null
@@ -85,7 +82,7 @@ export function seedApiConfigCache(cwd: string, ast: unknown): CacheSeedResult |
   return {
     seeded,
     // The project-wide TTL is deliberately not written. Zero is an operator's off switch, and a
-    // push that turned it on would be overriding a decision rather than filling in a blank — so it
+    // push that turned it on would be overriding a decision rather than filling in a blank, so it
     // is reported instead, where the person who can decide is reading.
     ttlIsOff: declaredTables.length > 0 && (typeof ttl !== "number" || ttl <= 0),
     declared: declaredTables,
@@ -135,12 +132,11 @@ function seedEntry(entry: ManifestCacheEntry): TableCacheConfig {
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return null
-  return value as Record<string, unknown>
+  return isJsonObject(value) ? value : null
 }
 
 /**
- * §13.4's note, in the words of the project that will read it — or null when there is nothing to
+ * §13.4's note, in the words of the project that will read it, or null when there is nothing to
  * say.
  *
  * A free project with `cache` in its schema has asked for the paid feature **in code**. That is
@@ -149,7 +145,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
  * fact about their project.
  *
  * Said once per push and never as an error. Declaring a cache on a tier that does not honour it is
- * a correct declaration, not a mistake — the tier decides what runs, not what a schema may say —
+ * a correct declaration, not a mistake (the tier decides what runs, not what a schema may say),
  * and a push that failed over it would be punishing someone for writing down their intent.
  */
 export function freeTierCacheNote(report: { tables?: string[]; honoured?: boolean } | undefined): string | null {
@@ -161,7 +157,7 @@ export function freeTierCacheNote(report: { tables?: string[]; honoured?: boolea
 
   return (
     `${listed(tables)} declare a cache in your schema. On the free tier these are served from ` +
-    `PostgREST on every request — the declaration is stored and takes effect on a paid plan.`
+    `PostgREST on every request; the declaration is stored and takes effect on a paid plan.`
   )
 }
 

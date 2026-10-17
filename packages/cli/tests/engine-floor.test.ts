@@ -14,6 +14,7 @@ import {
   seedUnsupportedByPinnedEngine,
 } from "../src/engine-floor.js"
 import type { ExtractedSchemaAstV2, FieldAstV2, ModelAstV2 } from "../src/schema-ast-v2.js"
+import { errorMessage } from "../src/error-message.js"
 
 function field(overrides: Partial<FieldAstV2> = {}): FieldAstV2 {
   return {
@@ -173,7 +174,7 @@ describe("the rich text trigger floor", () => {
       assertEngineSupportsSchema(WITH_RICH_TEXT, BEFORE_BOTH)
       expect.unreachable("a rich text column on an older engine has to be refused")
     } catch (err) {
-      const message = (err as Error).message
+      const message = errorMessage(err)
       expect(message).toContain("Post.body")
       expect(message).toContain("rich text columns")
       // The whole point of the refusal: what goes wrong is a read, not the push.
@@ -258,7 +259,7 @@ describe("the identity and generated column floor", () => {
       assertEngineSupportsSchema(GENERATED, "0.6.0")
       expect.unreachable("an identity column on an older engine has to be refused")
     } catch (err) {
-      const message = (err as Error).message
+      const message = errorMessage(err)
       expect(message).toContain("Post.id")
       expect(message).toContain("identity and generated columns")
       expect(message).toContain("every insert fails on")
