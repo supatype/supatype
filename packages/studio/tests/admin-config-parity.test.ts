@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest"
 import { MEASURES } from "../src/lib/validate-record.js"
 import { evaluate } from "../src/lib/evaluate-constraint.js"
 import type { AdminConfig } from "../src/config.js"
+import { normalizeAdminConfig } from "../src/lib/normalize-admin-config.js"
 
 /**
  * Studio against the engine's actual output, rather than against what Studio believes it emits.
@@ -28,7 +29,8 @@ import type { AdminConfig } from "../src/config.js"
 const CONFIG_PATH = fileURLToPath(new URL("./fixtures/admin-config.json", import.meta.url))
 
 function loadConfig(): AdminConfig {
-  return JSON.parse(readFileSync(CONFIG_PATH, "utf8")) as AdminConfig
+  // Through the same mapping Studio applies to the config it fetches, so this is what Studio sees.
+  return normalizeAdminConfig(JSON.parse(readFileSync(CONFIG_PATH, "utf8")))
 }
 
 /** Every `validation` key the engine put in the config, across every field of every model. */

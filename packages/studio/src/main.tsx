@@ -10,6 +10,7 @@ import { StudioAccessGate } from "./components/StudioAccessGate.js"
 import type { AdminConfig } from "./config.js"
 import "./globals.css"
 import { fetchStudioConfig } from "./lib/studio-config-fetch.js"
+import { isShape, isString, optional, type Guard } from "./lib/json.js"
 import { ConfigRefreshOnNavigate, useStudioConfig, type StudioConfigState } from "./hooks/useStudioConfig.js"
 
 /** Match Vite `base` / `import.meta.env.BASE_URL` so Router history URLs include the subpath when hosted under a prefix. */
@@ -22,9 +23,21 @@ function studioBasename(): string | undefined {
 const DEMO_SESSION_KEY = "supatype_studio_demo"
 
 type RuntimeConfig = { url?: string; anonKey?: string; serviceRoleKey?: string }
-const runtimeConfig: RuntimeConfig =
-  (typeof window !== "undefined" &&
-    (window as unknown as { __SUPATYPE_CLOUD__?: RuntimeConfig }).__SUPATYPE_CLOUD__) || {}
+
+const isRuntimeConfig: Guard<RuntimeConfig> = isShape({
+  url: optional(isString),
+  anonKey: optional(isString),
+  serviceRoleKey: optional(isString),
+})
+
+/** What the hosting page injected as `window.__SUPATYPE_CLOUD__`, or nothing when it injected none. */
+function injectedRuntimeConfig(): RuntimeConfig {
+  if (typeof window === "undefined" || !("__SUPATYPE_CLOUD__" in window)) return {}
+  const injected = window.__SUPATYPE_CLOUD__
+  return isRuntimeConfig(injected) ? injected : {}
+}
+
+const runtimeConfig = injectedRuntimeConfig()
 
 function resolveApiBase(): string {
   if (runtimeConfig.url) return runtimeConfig.url

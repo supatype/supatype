@@ -5,7 +5,8 @@ import { useAdminConfig } from "../hooks/useAdminConfig.js"
 import { FieldWidget } from "./FieldWidget.js"
 import { Slideover } from "../components/Slideover.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
-import { readJsonObject } from "../lib/json.js"
+import { bodyMessage, isJsonObject, readJsonObject } from "../lib/json.js"
+import { stringOption } from "./field-options.js"
 import type { WidgetProps } from "./FieldWidget.js"
 import type { SupatypeClient } from "@supatype/client"
 import {
@@ -66,9 +67,10 @@ async function postgrestQuery(
     const res = await fetch(url.toString(), { headers, credentials: "include" })
     if (!res.ok) {
       const err = await readJsonObject(res)
-      return { data: [], error: { message: String(err["message"] ?? `HTTP ${res.status}`) } }
+      return { data: [], error: { message: bodyMessage(err) ?? `HTTP ${res.status}` } }
     }
-    return { data: await res.json() as Record<string, unknown>[], error: null }
+    const rows = await res.json()
+    return { data: Array.isArray(rows) ? rows.filter(isJsonObject) : [], error: null }
   } catch (e) {
     return { data: [], error: { message: e instanceof Error ? e.message : "Network error" } }
   }
@@ -274,18 +276,18 @@ export function RelationWidget({ config, value, onChange, readOnly }: WidgetProp
   const searchRef = useRef<HTMLInputElement>(null)
   const pickerRef = useRef<HTMLDivElement>(null)
 
-  const rawTarget = (config.options?.["target"] as string) ?? ""
+  const rawTarget = stringOption(config, "target") ?? ""
   const isAuthUser = inferAuthUserRelation(rawTarget, config.name, config.label)
   const { table: target, schema: targetSchema } = resolveTarget(rawTarget, isAuthUser)
   const defaultDisplay = isAuthUser ? "email" : "name"
-  const displayField = (config.options?.["displayField"] as string) ?? defaultDisplay
+  const displayField = stringOption(config, "displayField") ?? defaultDisplay
   const isMulti = config.widget === "multirelation"
   const searchPlaceholder = isAuthUser
     ? "Search by email or name…"
     : `Search ${config.label.toLowerCase()}…`
 
   const selectedIds: string[] = isMulti
-    ? (Array.isArray(value) ? (value as string[]) : [])
+    ? (Array.isArray(value) ? value.map((id) => String(id)) : [])
     : (value ? [String(value)] : [])
 
   const mergeDisplay = useCallback((entries: Map<string, RelationDisplay> | Record<string, RelationDisplay>) => {
@@ -377,7 +379,8 @@ export function RelationWidget({ config, value, onChange, readOnly }: WidgetProp
   useEffect(() => {
     if (!pickerOpen) return
     const onDown = (e: MouseEvent) => {
-      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+      const clicked = e.target
+      if (pickerRef.current && !(clicked instanceof Node && pickerRef.current.contains(clicked))) {
         setPickerOpen(false)
         setSearchTerm("")
       }

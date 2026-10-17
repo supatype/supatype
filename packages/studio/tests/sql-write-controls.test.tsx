@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import React, { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { MemoryRouter } from "react-router-dom"
-import type { SupatypeClient } from "@supatype/client"
 import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { AdminConfigContext } from "../src/hooks/useAdminConfig.js"
 import { mockConfig } from "../src/fixtures/mockConfig.js"
@@ -15,6 +14,7 @@ import { TypesView } from "../src/views/database/TypesView.js"
 import { ViewsView } from "../src/views/database/ViewsView.js"
 import { PoliciesView as AuthPoliciesView } from "../src/views/auth/PoliciesView.js"
 import { StoragePoliciesView } from "../src/views/storage/PoliciesView.js"
+import { testClient } from "./support.js"
 
 /**
  * RQ4: every write Studio makes through the SQL editor's route (create or drop a table, view,
@@ -24,7 +24,7 @@ import { StoragePoliciesView } from "../src/views/storage/PoliciesView.js"
  */
 
 const PROXY = "http://localhost:8000/studio/proxy"
-const CLIENT = { url: PROXY, auth: { currentAccessToken: "token" } } as unknown as SupatypeClient
+const CLIENT = testClient({ url: PROXY, token: "token" })
 
 /** One row every view can render, whatever it asks for. */
 const ROW = {

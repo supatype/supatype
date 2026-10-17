@@ -7,6 +7,7 @@ import { Badge, Button, Card, CodeBlock } from "../../components/ui.js"
 import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 import { SlidePanel } from "../../components/SlidePanel.js"
+import { cellText, cellTextOrNull } from "../metadata-row.js"
 
 export function FunctionsView(): React.ReactElement {
   const proxy = useProjectProxy()
@@ -32,7 +33,7 @@ export function FunctionsView(): React.ReactElement {
       setSqlModal(false)
       refetch()
     } catch (e) {
-      setRunError((e as Error).message)
+      setRunError(e instanceof Error ? e.message : String(e))
     } finally {
       setRunBusy(false)
     }
@@ -70,11 +71,11 @@ export function FunctionsView(): React.ReactElement {
             <tbody>
               {fns?.map((row, i) => (
                 <tr key={i} className="border-b border-border last:border-0 hover:bg-muted/20 cursor-pointer" onClick={() => setSelected(row)}>
-                  <td className="px-4 py-3 font-mono text-sm text-foreground">{row["routine_name"] as string}</td>
-                  <td className="px-4 py-3 text-xs text-muted-foreground">{row["return_type"] as string}</td>
-                  <td className="px-4 py-3"><Badge variant="blue">{(row["language"] as string)?.toLowerCase()}</Badge></td>
+                  <td className="px-4 py-3 font-mono text-sm text-foreground">{cellText(row, "routine_name")}</td>
+                  <td className="px-4 py-3 text-xs text-muted-foreground">{cellText(row, "return_type")}</td>
+                  <td className="px-4 py-3"><Badge variant="blue">{cellTextOrNull(row, "language")?.toLowerCase()}</Badge></td>
                   <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
-                    {sqlWrites ? (<button type="button" className="text-xs text-destructive hover:underline" onClick={() => { setSqlText(`DROP FUNCTION ${schema}.${row["routine_name"] as string}();`); setSqlModal(true) }}>Drop</button>) : null}
+                    {sqlWrites ? (<button type="button" className="text-xs text-destructive hover:underline" onClick={() => { setSqlText(`DROP FUNCTION ${schema}.${cellText(row, "routine_name")}();`); setSqlModal(true) }}>Drop</button>) : null}
                   </td>
                 </tr>
               ))}
@@ -86,11 +87,11 @@ export function FunctionsView(): React.ReactElement {
       <SlidePanel
         open={selected !== null}
         onClose={() => setSelected(null)}
-        title={(selected?.["routine_name"] as string) ?? ""}
-        subtitle={selected ? `${(selected["language"] as string)?.toLowerCase()} · returns ${selected["return_type"] as string}` : undefined}
+        title={selected ? cellText(selected, "routine_name") : ""}
+        subtitle={selected ? `${cellTextOrNull(selected, "language")?.toLowerCase()} · returns ${cellText(selected, "return_type")}` : undefined}
         width="max-w-[540px]"
       >
-        {selected && <CodeBlock>{(selected["routine_definition"] as string) ?? "(no definition)"}</CodeBlock>}
+        {selected && <CodeBlock>{cellTextOrNull(selected, "routine_definition") ?? "(no definition)"}</CodeBlock>}
       </SlidePanel>
 
       {sqlModal && (

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { RealtimeServer } from "../src/server.js"
-import { ChannelManager } from "../src/channels.js"
+import { ChannelManager, type ClientSocket } from "../src/channels.js"
 import type { ServerMessage } from "../src/types.js"
 import {
   anonKey,
@@ -155,7 +155,7 @@ describe.each([true, false])("broadcast and presence (secureChannels %s)", (secu
 describe("channel members on a shared instance", () => {
   it("are counted within the sender's project only", () => {
     const channels = new ChannelManager()
-    const ws = { readyState: 1, send: () => {} } as unknown as Parameters<ChannelManager["addClient"]>[0]
+    const ws: ClientSocket = { readyState: 1, send: () => {} }
     const claims = { sub: "u", role: "authenticated" }
     const a = channels.addClient(ws, claims, "project-a")
     const b = channels.addClient(ws, claims, "project-b")

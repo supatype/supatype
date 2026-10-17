@@ -10,6 +10,7 @@ import {
 } from "../link.js"
 import { ensureSupatypeGitignore, warnIfLinkNotGitignored } from "../gitignore.js"
 import { targetFetch } from "../target-client.js"
+import { isArrayOf, isShape, isString } from "@supatype/shared"
 import { error, info, plain } from "../ui/messages.js"
 import { nextSteps } from "../ui/next-steps.js"
 import { isInteractive } from "../ui/interactive.js"
@@ -108,7 +109,7 @@ export function registerEnvs(program: Command): void {
         token: link.token,
         orgId: link.orgId,
       })
-      const envsList = await targetFetch<Array<{ name: string; apiUrl: string }>>(
+      const envsList = await targetFetch(
         link.cloudApiUrl,
         "/api/v1",
         {
@@ -117,6 +118,7 @@ export function registerEnvs(program: Command): void {
           token: link.token,
           orgId: link.orgId,
         },
+        isEnvironmentList,
       )
       const updated = createCloudLink({
         projectRef: link.projectRef,
@@ -130,6 +132,9 @@ export function registerEnvs(program: Command): void {
       info(`Environment "${bodyName}" created.`)
     })
 }
+
+/** A project's environments, as the link file records them. */
+const isEnvironmentList = isArrayOf(isShape({ name: isString, apiUrl: isString }))
 
 export function registerLinkOptions(linkCmd: Command): void {
   linkCmd
@@ -236,16 +241,17 @@ export async function runLinkAction(opts: {
     existing?.refreshToken
 
   if (project) {
-    const one = await targetFetch<{ slug: string; orgId: string }>(cloudApiUrl, "/api/v1", {
-      method: "GET",
-      path: `/projects/${project}`,
-      token,
-    })
+    const one = await targetFetch(
+      cloudApiUrl,
+      "/api/v1",
+      { method: "GET", path: `/projects/${project}`, token },
+      isShape({ slug: isString, orgId: isString }),
+    )
     let environments: Array<{ name: string; apiUrl: string }> = [
       { name: "production", apiUrl: cloudApiUrl },
     ]
     try {
-      const listed = await targetFetch<Array<{ name: string; apiUrl: string }>>(
+      const listed = await targetFetch(
         cloudApiUrl,
         "/api/v1",
         {
@@ -254,6 +260,7 @@ export async function runLinkAction(opts: {
           token,
           orgId: one.orgId,
         },
+        isEnvironmentList,
       )
       if (listed.length > 0) {
         environments = listed.map((e) => ({ name: e.name, apiUrl: e.apiUrl }))

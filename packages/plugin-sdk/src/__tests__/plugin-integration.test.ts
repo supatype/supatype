@@ -17,7 +17,6 @@ import {
   // Validation helpers
   checkPluginApiVersion,
   isPluginDefinition,
-  type AnyPluginDefinition,
   // Constants
   PLUGIN_API_VERSION,
   // Types
@@ -68,7 +67,7 @@ describe("field type plugin lifecycle", () => {
     const result = getFieldTypePlugin("phone")
     expect(result).toBeDefined()
     expect(result!.packageName).toBe("@example/phone-field")
-    expect((result!.definition as FieldTypeDefinition).name).toBe("phone")
+    expect(result!.definition.name).toBe("phone")
   })
 
   it("should validate values correctly", () => {
@@ -163,9 +162,21 @@ describe("provider plugin lifecycle", () => {
     clearPluginRegistry()
   })
 
-  interface TestEmailConfig {
+  // A type alias, not an interface: an interface has no index signature, so a provider configured
+  // by one is not a `ProviderDefinition<Record<string, unknown>>` and `registerPlugin` refuses it.
+  type TestEmailConfig = {
     apiKey: string
     fromAddress: string
+  }
+
+  /** An email provider: an object with a `send` method. */
+  const isEmailProvider = (instance: unknown): instance is EmailProvider =>
+    typeof instance === "object" && instance !== null && "send" in instance && typeof instance.send === "function"
+
+  /** What `create` made, failing the test when it is not an email provider. */
+  const emailProvider = (instance: unknown): EmailProvider => {
+    if (!isEmailProvider(instance)) throw new Error("create() did not return an email provider")
+    return instance
   }
 
   const makeEmailProvider = () =>
@@ -188,7 +199,7 @@ describe("provider plugin lifecycle", () => {
 
   it("should register and be retrievable via getProviderPlugin", () => {
     const email = makeEmailProvider()
-    registerPlugin("@example/email-provider", email as unknown as AnyPluginDefinition)
+    registerPlugin("@example/email-provider", email)
 
     // getProviderPlugin uses key "provider:category:name" but registerPlugin
     // stores under "provider:name": use getPluginsByType to verify registration
@@ -199,7 +210,7 @@ describe("provider plugin lifecycle", () => {
 
   it("should have the correct configSchema with required fields", () => {
     const email = makeEmailProvider()
-    const def = email as ProviderDefinition<TestEmailConfig>
+    const def: ProviderDefinition<TestEmailConfig> = email
 
     expect(def.configSchema.apiKey).toBeDefined()
     expect(def.configSchema.apiKey!.required).toBe(true)
@@ -210,17 +221,17 @@ describe("provider plugin lifecycle", () => {
 
   it("should create an instance with a send method", () => {
     const email = makeEmailProvider()
-    const def = email as ProviderDefinition<TestEmailConfig>
+    const def: ProviderDefinition<TestEmailConfig> = email
 
-    const instance = def.create({ apiKey: "test-key-123", fromAddress: "noreply@example.com" }) as EmailProvider
+    const instance = emailProvider(def.create({ apiKey: "test-key-123", fromAddress: "noreply@example.com" }))
     expect(typeof instance.send).toBe("function")
   })
 
   it("should produce a working provider instance", async () => {
     const email = makeEmailProvider()
-    const def = email as ProviderDefinition<TestEmailConfig>
+    const def: ProviderDefinition<TestEmailConfig> = email
 
-    const instance = def.create({ apiKey: "abc", fromAddress: "noreply@example.com" }) as EmailProvider
+    const instance = emailProvider(def.create({ apiKey: "abc", fromAddress: "noreply@example.com" }))
     const result = await instance.send({ to: "user@example.com", subject: "Test", text: "Hello" })
     expect(result.messageId).toMatch(/^msg_abc_/)
   })

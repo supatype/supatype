@@ -6,6 +6,8 @@
  * query string lands in access logs. This is the part of the protocol those readers share.
  */
 
+import { safeParseJson, type Guard } from "./json.js"
+
 /** One event: its name (`message` when the stream gave none) and its data lines, joined. */
 export interface SseEvent {
   event: string
@@ -36,13 +38,13 @@ export function parseSseEvents(buffered: string): { events: SseEvent[]; rest: st
   return { events, rest }
 }
 
-/** The data of an event as JSON, or null when it is not JSON: one bad line must not end a stream. */
-export function sseJson<T>(event: SseEvent): T | null {
-  try {
-    return JSON.parse(event.data) as T
-  } catch {
-    return null
-  }
+/**
+ * The data of an event as JSON the guard accepts, or null when it is not JSON or not that shape:
+ * one bad line must not end a stream.
+ */
+export function sseJson<T>(event: SseEvent, guard: Guard<T>): T | null {
+  const value = safeParseJson(event.data)
+  return guard(value) ? value : null
 }
 
 /**

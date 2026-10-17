@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest"
 import { spawnSync } from "node:child_process"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { isArrayOf, isShape, isString } from "@supatype/shared"
+import { parseJsonAs } from "./support/json.js"
 
 /**
  * What `npm publish` would put in the CLI's tarball.
@@ -13,7 +15,8 @@ import { fileURLToPath } from "node:url"
 
 const cliDir = join(dirname(fileURLToPath(import.meta.url)), "..")
 
-interface PackEntry { files: Array<{ path: string }> }
+/** One package in `npm pack --json`'s output, as far as this reads it. */
+const isPackEntry = isShape({ files: isArrayOf(isShape({ path: isString })) })
 
 function packedFiles(): string[] {
   // `shell` so Windows finds `npm.cmd`; the arguments are fixed.
@@ -23,8 +26,9 @@ function packedFiles(): string[] {
     shell: true,
   })
   if (result.status !== 0) throw new Error(`npm pack failed: ${result.stderr}`)
-  const [entry] = JSON.parse(result.stdout) as PackEntry[]
-  return entry!.files.map((file) => file.path.split("\\").join("/"))
+  const [entry] = parseJsonAs(result.stdout, isArrayOf(isPackEntry))
+  if (entry === undefined) throw new Error("npm pack listed no package")
+  return entry.files.map((file) => file.path.split("\\").join("/"))
 }
 
 describe("the published CLI package", () => {

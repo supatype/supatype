@@ -83,7 +83,10 @@ function PolicyShapeFields({ draft, tables, onChange }: FieldsProps): React.Reac
       </div>
       <div>
         <FieldLabel>Command</FieldLabel>
-        <Select aria-label="Command" className="w-full" value={draft.command} onChange={(e) => onChange({ command: e.target.value as PolicyCommand })}>
+        <Select aria-label="Command" className="w-full" value={draft.command} onChange={(e) => {
+          const command = COMMANDS.find((c) => c === e.target.value)
+          if (command) onChange({ command })
+        }}>
           {COMMANDS.map((c) => <option key={c} value={c}>{c}</option>)}
         </Select>
       </div>

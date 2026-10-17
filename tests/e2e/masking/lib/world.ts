@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { isRecord, stringAt } from "../../lib/json.js"
 import { call } from "./http.js"
 import { currentTier, literal, sql, stack } from "./stack.js"
 
@@ -38,11 +39,12 @@ const statePath = (): string => join(stateDir, `world-tier${currentTier()}.json`
 
 async function signIn(email: string): Promise<{ id: string; token: string }> {
   const r = await call("POST", "/auth/v1/token?grant_type=password", stack().anonKey, { email, password: PASSWORD })
-  const body = r.body as { access_token?: string; user?: { id?: string } } | null
-  if (r.status !== 200 || typeof body?.access_token !== "string" || typeof body.user?.id !== "string") {
+  const token = stringAt(r.body, "access_token")
+  const id = isRecord(r.body) ? stringAt(r.body["user"], "id") : undefined
+  if (r.status !== 200 || token === undefined || id === undefined) {
     throw new Error(`sign in ${email}: ${r.status} ${r.text.slice(0, 200)}`)
   }
-  return { id: body.user.id, token: body.access_token }
+  return { id, token }
 }
 
 async function createAccount(person: Person, run: string): Promise<Account> {
@@ -71,8 +73,22 @@ export async function createWorld(): Promise<World> {
 
 let loaded: World | undefined
 export function world(): World {
-  loaded ??= JSON.parse(readFileSync(statePath(), "utf8")) as World
+  loaded ??= readWorld(statePath())
   return loaded
+}
+
+/** The world global setup wrote, refused if the file is not one: a stale or hand-edited state file. */
+function readWorld(path: string): World {
+  const parsed = JSON.parse(readFileSync(path, "utf8"))
+  const { a, b, admin } = isRecord(parsed) ? parsed : {}
+  if (!isAccount(a) || !isAccount(b) || !isAccount(admin)) {
+    throw new Error(`${path} does not hold an account per person: run the global setup again`)
+  }
+  return { a, b, admin }
+}
+
+function isAccount(value: unknown): value is Account {
+  return (["id", "email", "password", "token"] as const).every((k) => stringAt(value, k) !== undefined)
 }
 
 export function tokenOf(caller: Caller): string {

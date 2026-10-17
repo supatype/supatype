@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import type { SpawnSyncReturns } from "node:child_process"
+import { isJsonObject, isUnknown } from "@supatype/shared"
 import type { ComposeEngineTarget, ComposeEngineSpawn } from "../src/compose-engine-run.js"
 
 /**
@@ -23,12 +24,16 @@ const runs: Run[] = []
 const answer: { stdout: string } = { stdout: "{}" }
 
 vi.mock("../src/compose-engine-run.js", () => ({
-  spawnComposeEngine: (target: ComposeEngineTarget, args: readonly string[], spawn: ComposeEngineSpawn = {}) => {
+  spawnComposeEngine: (
+    target: ComposeEngineTarget,
+    args: readonly string[],
+    spawn: ComposeEngineSpawn = {},
+  ): SpawnSyncReturns<string> => {
     const input = args[args.indexOf("--input") + 1]
     const hostPath =
       input !== undefined && input.startsWith("/project/") ? join(target.cwd, input.slice("/project/".length)) : undefined
     runs.push({ target, args, spawn, request: hostPath !== undefined ? readFileSync(hostPath, "utf8") : undefined })
-    return { status: 0, stdout: answer.stdout, stderr: "" } as SpawnSyncReturns<string>
+    return { pid: 0, output: [], status: 0, signal: null, stdout: answer.stdout, stderr: "" }
   },
 }))
 // The host binary must not be needed at all.
@@ -68,7 +73,7 @@ afterEach(() => rmSync(cwd, { recursive: true, force: true }))
 describe("engineRequest through the project's compose engine", () => {
   it("runs the subcommand in the engine image, reading the request from the project mount", async () => {
     answer.stdout = '{"status":"ok"}'
-    const result = await engineRequest("/adopt", { ast: { models: [] }, schema: "public", yes: true, keys: ["table:a"], database_url: "ignored" }, compose())
+    const result = await engineRequest("/adopt", { ast: { models: [] }, schema: "public", yes: true, keys: ["table:a"], database_url: "ignored" }, isJsonObject, compose())
     expect(result).toEqual({ status: "ok" })
     expect(runs).toHaveLength(1)
     const [run] = runs
@@ -83,13 +88,13 @@ describe("engineRequest through the project's compose engine", () => {
   })
 
   it("removes the request files when the run is over", async () => {
-    await engineRequest("/generate", { ast: { models: [] }, lang: "typescript" }, compose())
+    await engineRequest("/generate", { ast: { models: [] }, lang: "typescript" }, isUnknown, compose())
     const supatype = join(cwd, ".supatype")
     expect(existsSync(supatype) ? readdirSync(supatype).filter((n) => n.startsWith("engine-")) : []).toEqual([])
   })
 
   it("does not start the database for a run that needs none", async () => {
-    await engineRequest("/admin", { ast: { models: [] } }, compose())
+    await engineRequest("/admin", { ast: { models: [] } }, isUnknown, compose())
     expect(runs[0]!.spawn.runFlags).toContain("--no-deps")
   })
 })
@@ -112,6 +117,7 @@ describe("schema commands on a compose-engine target", () => {
   })
 
   it("runs doctor through the engine image", async () => {
+    answer.stdout = '{"missing":[],"staleManaged":[],"unmanagedDrift":[]}'
     await targetSchemaDoctor(target(), { models: [] })
     expect(runs.map((r) => r.args[0])).toEqual(["doctor"])
   })

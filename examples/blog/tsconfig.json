@@ -30,6 +30,7 @@
     }
   },
   "include": [
+    "../../ts-reset.d.ts",
     "next-env.d.ts",
     "supatype/generated/index.d.ts",
     "**/*.ts",

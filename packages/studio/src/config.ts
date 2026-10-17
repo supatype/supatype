@@ -23,34 +23,38 @@ import type { ModelConstraint } from "./lib/evaluate-constraint.js"
 export type { FieldValidation }
 export type { ModelConstraint }
 
-export type WidgetType =
-  | "text"
-  | "textarea"
-  | "number"
-  | "boolean"
-  | "date"
-  | "datetime"
-  | "select"
-  | "richtext"
-  | "image"
-  | "file"
-  | "relation"
-  | "multirelation"
-  | "json"
-  | "blocks"
-  | "publish"
-  | "slug"
-  | "derivedText"
-  | "email"
-  | "url"
-  | "uuid"
-  | "color"
-  | "xml"
+/** Every widget Studio renders, so a name read from the admin config can be checked against it. */
+export const WIDGET_TYPES = [
+  "text",
+  "textarea",
+  "number",
+  "boolean",
+  "date",
+  "datetime",
+  "select",
+  "richtext",
+  "image",
+  "file",
+  "relation",
+  "multirelation",
+  "json",
+  "blocks",
+  "publish",
+  "slug",
+  "derivedText",
+  "email",
+  "url",
+  "uuid",
+  "color",
+  "xml",
   /** `Code<Lang>`: `{ lang, source }` in JSONB, edited as source text. */
-  | "code"
+  "code",
   /** `Currency<Code>`: `{ amount, code }` in JSONB, amount in minor units. */
-  | "currency"
-  | "button"
+  "currency",
+  "button",
+] as const
+
+export type WidgetType = (typeof WIDGET_TYPES)[number]
 
 export interface FieldConfig {
   name: string
@@ -210,10 +214,24 @@ export interface AdminConfig {
   adminRoles?: string[]
 }
 
+/** Every kind of dashboard block, so a saved layout can be checked against it. */
+export const DASHBOARD_BLOCK_TYPES = [
+  "stats",
+  "recent",
+  "auth",
+  "storage",
+  "quick-actions",
+  "signups-chart",
+  "db-size",
+  "content-chart",
+  "chart",
+  "custom",
+] as const
+
 export interface DashboardBlock {
   /** Stable ID used to persist show/hide state. */
   id: string
-  type: "stats" | "recent" | "auth" | "storage" | "quick-actions" | "signups-chart" | "db-size" | "content-chart" | "chart" | "custom"
+  type: (typeof DASHBOARD_BLOCK_TYPES)[number]
   title: string
   visible: boolean
   model?: string

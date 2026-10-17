@@ -2,7 +2,8 @@ import { existsSync, readFileSync, realpathSync } from "node:fs"
 import { createHash } from "node:crypto"
 import { dirname, isAbsolute, relative, resolve } from "node:path"
 import ts from "typescript"
-import { isIdentityDependent, type AccessRuleNode } from "./cache-identity-scope.js"
+import { isJsonObject, isOneOf } from "@supatype/shared"
+import { isIdentityDependent } from "./cache-identity-scope.js"
 import {
   applyImportRename,
   createResolveContext,
@@ -18,13 +19,14 @@ import {
   emitModel,
   emitSchema,
   defaultPgTypeForKind,
+  isFieldKind,
   scalar,
   type BlockDefinitionAst,
   type ExtractedSchemaAstV2,
   type ExtractedStorageBucketAst,
+  type FieldAnnotations,
   type FieldAstV2,
   type KernelFieldFacts,
-  type FieldKind,
   type IdentityAst,
   type ParsedField,
 } from "./schema-ast-v2.js"
@@ -395,7 +397,7 @@ function unwrapModelFields(
 
 /** Parse `Default<T, V>` second type argument into a JSON-serializable literal. */
 function parseDefaultLiteral(
-  node: ts.TypeNode,
+  node: ts.Node,
   sourceFile: ts.SourceFile,
 ): string | number | boolean | null | undefined {
   if (ts.isLiteralTypeNode(node)) {
@@ -411,7 +413,7 @@ function parseDefaultLiteral(
   if (node.kind === ts.SyntaxKind.NullKeyword) return null
   // Negative numeric literals appear as PrefixUnaryExpression in some TS versions.
   if (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.MinusToken) {
-    const inner = parseDefaultLiteral(node.operand as unknown as ts.TypeNode, sourceFile)
+    const inner = parseDefaultLiteral(node.operand, sourceFile)
     if (typeof inner === "number") return -inner
   }
   return undefined
@@ -938,7 +940,7 @@ function shouldAutoLocalizeFieldKind(kind: unknown): boolean {
 function localizeFieldWire(field: FieldAstV2): FieldAstV2 {
   if (field.localized === true) return field
   if (!shouldAutoLocalizeFieldKind(field.kind)) return field
-  const annotations = (field.annotations ?? {}) as { db?: Record<string, unknown>; platform?: Record<string, unknown> }
+  const annotations: FieldAnnotations = field.annotations ?? {}
   return {
     ...field,
     localized: true,
@@ -978,13 +980,12 @@ function parseScalarType(
   }
 
   if (ts.isUnionTypeNode(typeNode)) {
-    const literals = typeNode.types.filter(ts.isLiteralTypeNode)
-    if (literals.length === typeNode.types.length && literals.every((lit) => ts.isStringLiteral(lit.literal))) {
-      return scalar("enum", {
-        kernel: {
-          values: literals.map((lit) => (lit.literal as ts.StringLiteral).text),
-        },
-      })
+    const strings = typeNode.types
+      .filter(ts.isLiteralTypeNode)
+      .map((lit) => lit.literal)
+      .filter(ts.isStringLiteral)
+    if (strings.length === typeNode.types.length) {
+      return scalar("enum", { kernel: { values: strings.map((lit) => lit.text) } })
     }
     const nonNull = typeNode.types.find((t) => t.kind !== ts.SyntaxKind.NullKeyword)
     if (nonNull) {
@@ -2015,8 +2016,7 @@ function assertCacheIsServable(
   model: string,
 ): void {
   if (cache.public === true) {
-    const read = access["read"] as AccessRuleNode | undefined
-    if (isIdentityDependent(read)) {
+    if (isIdentityDependent(access["read"])) {
       throw new Error(
         `Model "${model}": \`cache.public\` cannot be used with an \`access.read\` rule that ` +
           `varies by caller. A public cache entry is shared by everyone, so one caller's rows ` +
@@ -2163,9 +2163,9 @@ function assertConstraintIsEnforceable(node: unknown, model: string, index: numb
     for (const item of node) assertConstraintIsEnforceable(item, model, index)
     return
   }
-  if (typeof node !== "object" || node === null) return
+  if (!isJsonObject(node)) return
 
-  const record = node as Record<string, unknown>
+  const record = node
   for (const key of ["type", "kind"]) {
     const value = record[key]
     if (typeof value !== "string") continue
@@ -2199,9 +2199,9 @@ function resolveConstraintMeasures(
     for (const item of node) resolveConstraintMeasures(item, fields, model, index)
     return
   }
-  if (typeof node !== "object" || node === null) return
+  if (!isJsonObject(node)) return
 
-  const record = node as Record<string, unknown>
+  const record = node
   const kind = record["kind"]
   if (kind === "length" || kind === "itemCount") {
     const column = String(record["column"])
@@ -2213,9 +2213,9 @@ function resolveConstraintMeasures(
       )
     }
     const measure = kind === "length" ? "length" : "items"
-    const resolved = measureFormFor(field.kind as FieldKind, measure, {
-      jsonIsArray: field["jsonArray"] === true,
-    })
+    const resolved = isFieldKind(field.kind)
+      ? measureFormFor(field.kind, measure, { jsonIsArray: field["jsonArray"] === true })
+      : { instead: `a ${field.kind} field cannot be measured that way` }
     if (resolved.form === undefined) {
       throw new Error(
         `Model "${model}": constraint ${index + 1} uses ` +
@@ -2513,9 +2513,9 @@ function assertAccessRuleIsRenderable(node: unknown, model: string, operation: s
     for (const item of node) assertAccessRuleIsRenderable(item, model, operation)
     return
   }
-  if (typeof node !== "object" || node === null) return
+  if (!isJsonObject(node)) return
 
-  const record = node as Record<string, unknown>
+  const record = node
   // Operands are tagged `kind`, rules `type`, so both are checked: `Matches` is a rule.
   const tag = [record["kind"], record["type"]].find(
     (value) => typeof value === "string" && CONSTRAINT_ONLY_NODES.has(value),
@@ -2947,7 +2947,7 @@ function parseAccessRule(
         )
       }
       const column = stringLiteralArg(args[0], "Matches", "column")
-      const pattern = literalStringType(args[1] as ts.TypeNode)
+      const pattern = literalStringType(args[1])
       if (pattern === null) {
         throw new Error(
           '`Matches<>` needs a string literal pattern, as in `Matches<"sku", "^[A-Z]{3}$">`.',
@@ -3143,6 +3143,9 @@ const TIME_UNITS = [
 /** Granularities for `StartOf<>`. */
 const TRUNC_UNITS = ["day", "week", "month", "year"] as const
 
+const isTimeUnit = isOneOf(TIME_UNITS)
+const isTruncUnit = isOneOf(TRUNC_UNITS)
+
 /**
  * `After<Base, { days: 30, hours: 9 }>` / `Before<...>`: a point in time plus or minus a
  * multi-unit duration.
@@ -3192,7 +3195,7 @@ function parseOffsetOperand(
       throw new Error(`\`${ref}<>\` interval members must be \`unit: amount\` pairs.`)
     }
     const unit = member.name.getText(sourceFile).replace(/["']/g, "")
-    if (!TIME_UNITS.includes(unit as (typeof TIME_UNITS)[number])) {
+    if (!isTimeUnit(unit)) {
       throw new Error(
         `\`${unit}\` is not a unit of time. Use one of: ${TIME_UNITS.join(", ")} (plural).`,
       )
@@ -3287,7 +3290,7 @@ function parseDurationOperand(
   }
 
   const unit = stringLiteralArg(args[1], ref, "unit")
-  if (!TIME_UNITS.includes(unit as (typeof TIME_UNITS)[number])) {
+  if (!isTimeUnit(unit)) {
     throw new Error(
       `\`${ref}<${amount}, "${unit}">\` is not a valid unit. Use one of: ` +
         `${TIME_UNITS.join(", ")} (plural).`,
@@ -3388,7 +3391,7 @@ function parseAccessOperand(
         return { kind: "now" }
       case "StartOf": {
         const unit = stringLiteralArg(operandArgs[0], "StartOf", "unit")
-        if (!TRUNC_UNITS.includes(unit as (typeof TRUNC_UNITS)[number])) {
+        if (!isTruncUnit(unit)) {
           throw new Error(
             `\`StartOf<"${unit}">\` is not a valid granularity. Use one of: ` +
               `${TRUNC_UNITS.join(", ")}.`,

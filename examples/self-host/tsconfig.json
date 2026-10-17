@@ -10,5 +10,5 @@
     "noEmit": true,
     "types": []
   },
-  "include": ["schema", "types", "supatype.config.ts"]
+  "include": ["../../ts-reset.d.ts", "schema", "types", "supatype.config.ts"]
 }

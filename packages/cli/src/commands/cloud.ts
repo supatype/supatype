@@ -1,10 +1,12 @@
 import { withPublishing } from "../model-versioning.js"
 import type { Command } from "commander"
-import { readFileSync, writeFileSync, existsSync } from "node:fs"
+import { existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { loadCloudCredentials, persistCloudSession } from "../cloud-credentials.js"
 import { loadProjectLink, migrateLegacyLinkFiles } from "../link.js"
 import { targetFetch } from "../target-client.js"
+import { isArrayOf, isShape, isString, isUnknown, nullable, optional, type Guard } from "@supatype/shared"
+import { readJsonFile } from "../json-file.js"
 import { registerEnvs, registerLinkOptions, runLinkAction } from "./link-helpers.js"
 import { resolveTarget, targetSchemaPush, schemaPgSchema } from "../resolve-target.js"
 import { loadConfig, loadSchemaAst } from "../config.js"
@@ -28,15 +30,32 @@ interface CloudDomain {
   sslExpiresAt: string | null
 }
 
+const isCloudConfig: Guard<CloudConfig> = isShape({
+  apiUrl: isString,
+  token: isString,
+  projectSlug: optional(isString),
+  orgId: optional(isString),
+})
+
+const isCloudDomain: Guard<CloudDomain> = isShape({
+  id: isString,
+  domain: isString,
+  status: isString,
+  cnameTarget: isString,
+  sslExpiresAt: nullable(isString),
+})
+
+/** A project as `projects list` shows it. */
+const isListedProject = isShape({ name: isString, slug: isString, tier: isString, region: isString, status: isString })
+
 /** @deprecated Prefer loadProjectLink */
 export function loadCloudConfig(cwd: string): CloudConfig | null {
   migrateLegacyLinkFiles(cwd)
   const link = loadProjectLink(cwd)
   if (!link || link.kind !== "cloud") return null
   const legacyPath = resolve(cwd, ".supatype/cloud.json")
-  if (existsSync(legacyPath)) {
-    return JSON.parse(readFileSync(legacyPath, "utf8")) as CloudConfig
-  }
+  const legacy = existsSync(legacyPath) ? readJsonFile(legacyPath, isCloudConfig) : undefined
+  if (legacy !== undefined) return legacy
   return {
     apiUrl: link.cloudApiUrl ?? "https://api.supatype.com",
     token: link.token ?? loadCloudCredentials()?.accessToken ?? "",
@@ -48,13 +67,18 @@ export function loadCloudConfig(cwd: string): CloudConfig | null {
 function saveCloudConfig(cwd: string, config: CloudConfig): void {
   const dir = resolve(cwd, ".supatype")
   if (!existsSync(dir)) {
-    const { mkdirSync } = require("node:fs") as typeof import("node:fs")
     mkdirSync(dir, { recursive: true })
   }
   writeFileSync(resolve(cwd, ".supatype/cloud.json"), JSON.stringify(config, null, 2) + "\n", "utf8")
 }
 
-async function cloudFetch<T>(config: CloudConfig, method: string, path: string, body?: unknown): Promise<T> {
+async function cloudFetch<T>(
+  config: CloudConfig,
+  method: string,
+  path: string,
+  guard: Guard<T>,
+  body?: unknown,
+): Promise<T> {
   const cwd = process.cwd()
   const creds = loadCloudCredentials()
   const refreshToken = creds?.refreshToken ?? loadProjectLink(cwd)?.refreshToken
@@ -80,7 +104,7 @@ async function cloudFetch<T>(config: CloudConfig, method: string, path: string, 
           },
         }
       : {}),
-  })
+  }, guard)
 }
 
 export function isCloudLinked(cwd: string): boolean {
@@ -155,9 +179,7 @@ export function registerCloud(program: Command): void {
     .action(async () => {
       const config = getCloudConfigOrExit()
 
-      const projects = await cloudFetch<Array<{
-        name: string; slug: string; tier: string; region: string; status: string
-      }>>(config, "GET", "/projects")
+      const projects = await cloudFetch(config, "GET", "/projects", isArrayOf(isListedProject))
 
       if (projects.length === 0) {
         info("No projects. Create one with: supatype projects create <name>")
@@ -184,8 +206,9 @@ export function registerCloud(program: Command): void {
 
       info(`Creating project "${name}" (${opts.tier}, ${opts.region})...`)
 
-      const project = await cloudFetch<{ slug: string; name: string; status: string }>(
+      const project = await cloudFetch(
         config, "POST", "/projects",
+        isShape({ slug: isString, name: isString, status: isString }),
         { name, tier: opts.tier, region: opts.region },
       )
 
@@ -199,7 +222,7 @@ export function registerCloud(program: Command): void {
     .description("Pause a project")
     .action(async (slug: string) => {
       const config = getCloudConfigOrExit()
-      await cloudFetch(config, "POST", `/projects/${slug}/pause`)
+      await cloudFetch(config, "POST", `/projects/${slug}/pause`, isUnknown)
       info(`Project ${slug} paused.`)
     })
 
@@ -208,7 +231,7 @@ export function registerCloud(program: Command): void {
     .description("Resume a paused project")
     .action(async (slug: string) => {
       const config = getCloudConfigOrExit()
-      await cloudFetch(config, "POST", `/projects/${slug}/resume`)
+      await cloudFetch(config, "POST", `/projects/${slug}/resume`, isUnknown)
       info(`Project ${slug} resumed.`)
     })
 
@@ -226,7 +249,7 @@ export function registerCloud(program: Command): void {
         process.exit(1)
       }
 
-      const domains = await cloudFetch<CloudDomain[]>(config, "GET", `/projects/${config.projectSlug}/domains`)
+      const domains = await cloudFetch(config, "GET", `/projects/${config.projectSlug}/domains`, isArrayOf(isCloudDomain))
 
       if (domains.length === 0) {
         info("No custom domains configured.")
@@ -253,8 +276,9 @@ export function registerCloud(program: Command): void {
         process.exit(1)
       }
 
-      const result = await cloudFetch<CloudDomain & { instructions: string }>(
+      const result = await cloudFetch(
         config, "POST", `/projects/${config.projectSlug}/domains`,
+        isShape({ id: isString, domain: isString, instructions: isString }),
         { domain },
       )
 
@@ -273,7 +297,7 @@ export function registerCloud(program: Command): void {
         process.exit(1)
       }
 
-      await cloudFetch(config, "DELETE", `/projects/${config.projectSlug}/domains/${domainId}`)
+      await cloudFetch(config, "DELETE", `/projects/${config.projectSlug}/domains/${domainId}`, isUnknown)
       info("Domain removed.")
     })
 
@@ -287,8 +311,9 @@ export function registerCloud(program: Command): void {
         process.exit(1)
       }
 
-      const result = await cloudFetch<{ domain: string; status: string }>(
+      const result = await cloudFetch(
         config, "POST", `/projects/${config.projectSlug}/domains/${domainId}/verify`,
+        isShape({ domain: isString, status: isString }),
       )
 
       info(`Domain ${result.domain}: ${result.status}`)

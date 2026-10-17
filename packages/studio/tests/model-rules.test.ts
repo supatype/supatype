@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 import { describeConstraint } from "../src/lib/evaluate-constraint.js"
 import type { AdminConfig, FieldConfig } from "../src/config.js"
+import { normalizeAdminConfig } from "../src/lib/normalize-admin-config.js"
 
 /**
  * What the Rules tab has to render, read from the engine's real output.
@@ -18,7 +19,7 @@ const CONFIG_PATH = fileURLToPath(
 )
 
 const config = (): AdminConfig =>
-  JSON.parse(readFileSync(CONFIG_PATH, "utf8")) as AdminConfig
+  normalizeAdminConfig(JSON.parse(readFileSync(CONFIG_PATH, "utf8")))
 
 const probe = (): AdminConfig["models"][number] => {
   const model = config().models.find((m) => m.name === "boundsProbe")

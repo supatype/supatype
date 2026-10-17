@@ -50,9 +50,8 @@ type Use = NullableStr<FieldEmail>
     const useDecl = sourceFile.statements.find(
       (stmt): stmt is ts.TypeAliasDeclaration => ts.isTypeAliasDeclaration(stmt) && stmt.name.text === "Use",
     )
-    expect(useDecl).toBeDefined()
-    const fieldType = useDecl!.type as ts.TypeReferenceNode
-    const resolved = tryResolveTypeReference(fieldType, sourceFile, ctx, { fieldName: "email" })
+    if (useDecl === undefined || !ts.isTypeReferenceNode(useDecl.type)) throw new Error("no `type Use = Name<...>` in the source")
+    const resolved = tryResolveTypeReference(useDecl.type, sourceFile, ctx, { fieldName: "email" })
     expect(resolved).not.toBeNull()
     expect(resolved!.getText()).toContain("Optional")
   })

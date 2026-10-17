@@ -42,12 +42,14 @@ function exactFilters(url: URL): Omit<TapFilters, "kinds"> {
   return { channel: pick("channel"), schema: pick("schema"), table: pick("table"), event: pick("event") }
 }
 
+const isTapKind = (kind: string): kind is TapKind => TAP_KINDS.some((known) => known === kind)
+
 function parseKinds(raw: string | null): ReadonlySet<TapKind> {
   if (raw === null || raw.trim() === "") return new Set(TAP_KINDS)
   const kinds = raw.split(",").map((k) => k.trim())
-  const unknown = kinds.filter((k) => !(TAP_KINDS as readonly string[]).includes(k))
+  const unknown = kinds.filter((k) => !isTapKind(k))
   if (unknown.length > 0) throw new AdminError(400, "validation_error", `Unknown kinds: ${unknown.join(", ")}`)
-  return new Set(kinds as TapKind[])
+  return new Set(kinds.filter(isTapKind))
 }
 
 function parseRate(raw: string | null): number {
@@ -60,10 +62,11 @@ function parseRate(raw: string | null): number {
 }
 
 function parseView(raw: string | null): PayloadView {
-  if (raw === null || !(PAYLOAD_VIEWS as readonly string[]).includes(raw)) {
+  const view = PAYLOAD_VIEWS.find((known) => known === raw)
+  if (view === undefined) {
     throw new AdminError(400, "validation_error", `view must be one of ${PAYLOAD_VIEWS.join(", ")}`)
   }
-  return raw as PayloadView
+  return view
 }
 
 function parseStreamRequest(url: URL): StreamRequest {

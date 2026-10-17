@@ -14,6 +14,9 @@
 
 import { createHmac, timingSafeEqual } from "node:crypto"
 import { config } from "../env.js"
+import { isNumber, isShape, isString } from "../json.js"
+
+const isSignedUrlPayload = isShape({ b: isString, p: isString, exp: isNumber })
 
 export interface SignedUrlPayload {
   /** Bucket ID */
@@ -85,7 +88,9 @@ export function verifySignedToken(
   let payload: SignedUrlPayload
   try {
     const decoded = Buffer.from(payloadStr, "base64url").toString("utf8")
-    payload = JSON.parse(decoded) as SignedUrlPayload
+    const parsed = JSON.parse(decoded)
+    if (!isSignedUrlPayload(parsed)) return null
+    payload = parsed
   } catch {
     return null
   }

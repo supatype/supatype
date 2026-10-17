@@ -20,7 +20,9 @@
  * its own.
  */
 
-/** Seconds of slack before expiry at which the token is treated as spent. */
+import { readJsonObject } from "./json.js"
+
+/** Milliseconds of slack before expiry at which the token is treated as spent. */
 const REFRESH_SKEW_MS = 5_000
 
 /**
@@ -36,11 +38,6 @@ export class PreviewLinkError extends Error {
     super(message)
     this.name = "PreviewLinkError"
   }
-}
-
-interface ExchangeResponse {
-  token?: unknown
-  expiresAt?: unknown
 }
 
 /**
@@ -89,14 +86,15 @@ export class PreviewCredential {
 
     if (!response.ok) throw new PreviewLinkError()
 
-    const body = (await response.json().catch(() => ({}))) as ExchangeResponse
-    if (typeof body.token !== "string" || body.token === "") throw new PreviewLinkError()
+    const body = await readJsonObject(response)
+    const token = body["token"]
+    if (typeof token !== "string" || token === "") throw new PreviewLinkError()
 
-    const expiresAt = typeof body.expiresAt === "string" ? Date.parse(body.expiresAt) : NaN
-    this.#token = body.token
+    const expiresAt = typeof body["expiresAt"] === "string" ? Date.parse(body["expiresAt"]) : NaN
+    this.#token = token
     // An unparseable expiry means exchanging again next time rather than trusting a token for an
     // unknown length of time.
     this.#expiresAtMs = Number.isNaN(expiresAt) ? 0 : expiresAt
-    return body.token
+    return token
   }
 }

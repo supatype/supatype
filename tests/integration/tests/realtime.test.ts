@@ -7,6 +7,7 @@
 import { strict as assert } from "node:assert"
 import { test, describe, before } from "node:test"
 import type { RealtimePayload } from "@supatype/client"
+import { at, stringColumn } from "../lib/json.js"
 import {
   adminClient,
   anonClient,
@@ -30,8 +31,8 @@ describe("realtime (F15)", () => {
   test("realtime health via server proxy", async () => {
     const res = await fetch(`${BASE_URL}/realtime/v1/health`)
     assert.ok(res.ok, `realtime health failed: ${res.status}`)
-    const body = await res.json() as { status?: string }
-    assert.equal(body.status, "ok")
+    const body = await res.json()
+    assert.equal(at(body, "status"), "ok")
   })
 
   test("INSERT on post emits postgres_changes within latency budget", async () => {
@@ -60,7 +61,7 @@ describe("realtime (F15)", () => {
 
       assert.equal(events[0]?.eventType, "INSERT")
       assert.equal(events[0]?.table, "post")
-      assert.equal((events[0]?.new as { slug?: string } | null)?.slug, slug)
+      assert.equal(events[0]?.new?.["slug"], slug)
     } finally {
       unsubscribe()
       client.realtime.disconnect()
@@ -78,7 +79,7 @@ describe("realtime (F15)", () => {
       .from("post")
       .insert({ title: "Before", slug })
     assert.ifError(insertError)
-    const postId = (inserted as Array<{ id: string }>)[0]?.id
+    const postId = stringColumn(inserted, "id")[0]
     assert.ok(postId)
 
     // Filtered to this row: api.test.ts runs beside this file and updates posts of its own, and the
@@ -103,7 +104,7 @@ describe("realtime (F15)", () => {
 
       await waitForEvents(() => events.length, 1)
       assert.equal(events[0]?.eventType, "UPDATE")
-      assert.equal((events[0]?.new as { title?: string } | null)?.title, "After")
+      assert.equal(events[0]?.new?.["title"], "After")
     } finally {
       // An open socket keeps the test process alive, so a failed assertion must still close it.
       channel.unsubscribe()
@@ -122,7 +123,7 @@ describe("realtime (F15)", () => {
       .from("post")
       .insert({ title: "To delete", slug })
     assert.ifError(insertError)
-    const postId = (inserted as Array<{ id: string }>)[0]?.id
+    const postId = stringColumn(inserted, "id")[0]
     assert.ok(postId)
 
     // Filtered to this row, for the same reason as the UPDATE test: api.test.ts deletes posts too.
@@ -143,7 +144,7 @@ describe("realtime (F15)", () => {
 
       await waitForEvents(() => events.length, 1)
       assert.equal(events[0]?.eventType, "DELETE")
-      assert.equal((events[0]?.old as { id?: string } | null)?.id, postId)
+      assert.equal(events[0]?.old?.["id"], postId)
     } finally {
       channel.unsubscribe()
       client.realtime.disconnect()
@@ -188,7 +189,7 @@ describe("realtime (F15)", () => {
       assert.ifError(matchError)
 
       await waitForEvents(() => events.length, 1)
-      assert.equal((events[0]?.new as { slug?: string } | null)?.slug, matchSlug)
+      assert.equal(events[0]?.new?.["slug"], matchSlug)
     } finally {
       channel.unsubscribe()
       client.realtime.disconnect()
@@ -240,7 +241,7 @@ describe("realtime (F17 RLS)", () => {
         .from("subscription")
         .insert(newSubscriptionRow(userB.userId, String(Date.now())))
       assert.ifError(subBError)
-      created.push(...(subB as Array<{ id: string }>).map((row) => row.id))
+      created.push(...stringColumn(subB, "id"))
 
       await waitForQuiet(() => events.length, 2000)
 
@@ -248,11 +249,11 @@ describe("realtime (F17 RLS)", () => {
         .from("subscription")
         .insert(newSubscriptionRow(userA.userId, String(Date.now() + 1)))
       assert.ifError(subAError)
-      created.push(...(subA as Array<{ id: string }>).map((row) => row.id))
+      created.push(...stringColumn(subA, "id"))
 
       await waitForEvents(() => events.length, 1)
       assert.equal(events.length, 1)
-      assert.equal((events[0]?.new as { subscriber_id?: string } | null)?.subscriber_id, userA.userId)
+      assert.equal(events[0]?.new?.["subscriber_id"], userA.userId)
     } finally {
       channel.unsubscribe()
       realtimeA.disconnect()

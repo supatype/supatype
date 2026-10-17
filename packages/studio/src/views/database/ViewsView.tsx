@@ -7,6 +7,7 @@ import { Button, Card, CodeBlock } from "../../components/ui.js"
 import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 import { SlidePanel } from "../../components/SlidePanel.js"
+import { cellText, cellTextOrNull } from "../metadata-row.js"
 
 export function ViewsView(): React.ReactElement {
   const proxy = useProjectProxy()
@@ -32,7 +33,7 @@ export function ViewsView(): React.ReactElement {
       setSqlModal(null)
       refetch()
     } catch (e) {
-      setRunError((e as Error).message)
+      setRunError(e instanceof Error ? e.message : String(e))
     } finally {
       setRunBusy(false)
     }
@@ -68,13 +69,13 @@ export function ViewsView(): React.ReactElement {
             </thead>
             <tbody>
               {views?.map((row) => (
-                <tr key={row["view_name"] as string} className="border-b border-border last:border-0 hover:bg-muted/20 cursor-pointer" onClick={() => setSelected({ name: row["view_name"] as string, def: row["view_definition"] as string })}>
-                  <td className="px-4 py-3 font-mono text-sm text-foreground">{row["view_name"] as string}</td>
-                  <td className="px-4 py-3 text-xs text-muted-foreground truncate max-w-[400px]">{(row["view_definition"] as string)?.slice(0, 100)}…</td>
+                <tr key={cellText(row, "view_name")} className="border-b border-border last:border-0 hover:bg-muted/20 cursor-pointer" onClick={() => setSelected({ name: cellText(row, "view_name"), def: cellText(row, "view_definition") })}>
+                  <td className="px-4 py-3 font-mono text-sm text-foreground">{cellText(row, "view_name")}</td>
+                  <td className="px-4 py-3 text-xs text-muted-foreground truncate max-w-[400px]">{cellTextOrNull(row, "view_definition")?.slice(0, 100)}…</td>
                   <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                     <span className="flex items-center justify-end gap-3">
-                      {sqlWrites ? (<button type="button" className="text-xs text-primary hover:underline" onClick={() => { setSqlText(`CREATE OR REPLACE VIEW ${schema}.${row["view_name"] as string} AS\n${row["view_definition"] as string}`); setSqlModal({ mode: "create" }) }}>Edit</button>) : null}
-                      {sqlWrites ? (<button type="button" className="text-xs text-destructive hover:underline" onClick={() => { setSqlText(`DROP VIEW ${schema}.${row["view_name"] as string};`); setSqlModal({ mode: "drop", name: row["view_name"] as string }) }}>Drop</button>) : null}
+                      {sqlWrites ? (<button type="button" className="text-xs text-primary hover:underline" onClick={() => { setSqlText(`CREATE OR REPLACE VIEW ${schema}.${cellText(row, "view_name")} AS\n${cellText(row, "view_definition")}`); setSqlModal({ mode: "create" }) }}>Edit</button>) : null}
+                      {sqlWrites ? (<button type="button" className="text-xs text-destructive hover:underline" onClick={() => { setSqlText(`DROP VIEW ${schema}.${cellText(row, "view_name")};`); setSqlModal({ mode: "drop", name: cellText(row, "view_name") }) }}>Drop</button>) : null}
                     </span>
                   </td>
                 </tr>

@@ -1,12 +1,13 @@
 import { createClient } from "@supatype/client"
 
-const anonKey = import.meta.env.VITE_SUPATYPE_ANON_KEY as string | undefined
+// Vite types every env var as `any`; read it as what it may really be, a string or nothing.
+const anonKey: unknown = import.meta.env.VITE_SUPATYPE_ANON_KEY
 const postsEl = document.querySelector<HTMLUListElement>("#posts")!
 const statusEl = document.querySelector<HTMLSpanElement>("#cache-status")!
 const errorEl = document.querySelector<HTMLParagraphElement>("#error")!
 const reloadBtn = document.querySelector<HTMLButtonElement>("#reload")!
 
-if (!anonKey) {
+if (typeof anonKey !== "string" || anonKey === "") {
   errorEl.hidden = false
   errorEl.textContent = "Missing VITE_SUPATYPE_ANON_KEY, check tests/integration/.env"
 } else {

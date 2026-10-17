@@ -2,18 +2,14 @@ import React, { useEffect, useLayoutEffect, useRef } from "react"
 import type { WidgetProps } from "./FieldWidget.js"
 import { readScalarFromRecord } from "./read-record-scalar.js"
 import { applyComputedTemplate, fieldNamesInComputedTemplate } from "./preview-template.js"
+import { isJsonObject, isString } from "../lib/json.js"
 
-function isSerializedEditorRoot(v: unknown): v is { root: { children?: unknown[] } } {
-  if (typeof v !== "object" || v === null) return false
-  const obj = v as Record<string, unknown>
-  const root = obj.root
-  if (typeof root !== "object" || root === null) return false
-  return true
+function isSerializedEditorRoot(v: unknown): v is { root: object } {
+  return isJsonObject(v) && typeof v.root === "object" && v.root !== null
 }
 
-function collectLexicalText(node: unknown): string {
-  if (typeof node !== "object" || node === null) return ""
-  const n = node as Record<string, unknown>
+function collectLexicalText(n: unknown): string {
+  if (!isJsonObject(n)) return ""
   let out = typeof n.text === "string" ? n.text : ""
   const kids = n.children
   if (Array.isArray(kids)) {
@@ -32,12 +28,11 @@ function previewFromDraftField(
   if (raw === null || raw === undefined) return ""
   if (typeof raw === "string" || typeof raw === "number" || typeof raw === "bigint") return String(raw)
   if (raw instanceof Date && !Number.isNaN(raw.getTime())) return raw.toISOString()
-  if (typeof raw === "object" && !Array.isArray(raw)) {
+  if (isJsonObject(raw)) {
     // Lexical `SerializedEditorState` is `{ root: … }`, not `{ [locale]: … }`, detect before locale map.
     if (isSerializedEditorRoot(raw)) return collectLexicalText(raw.root).trim()
     if (currentLocale && defaultLocale) {
-      const picked = (raw as Record<string, unknown>)[currentLocale]
-        ?? (raw as Record<string, unknown>)[defaultLocale]
+      const picked = raw[currentLocale] ?? raw[defaultLocale]
       if (typeof picked === "string" || typeof picked === "number") return String(picked)
       if (isSerializedEditorRoot(picked)) return collectLexicalText(picked.root).trim()
     }
@@ -64,7 +59,7 @@ export function DerivedTextWidget({
 }: WidgetProps): React.ReactElement {
   const template = typeof config.options?.["template"] === "string" ? config.options["template"] : undefined
   const rawSources = config.options?.["sources"]
-  const sourcesList = Array.isArray(rawSources) ? (rawSources as string[]) : []
+  const sourcesList = Array.isArray(rawSources) ? rawSources.filter(isString) : []
   const multiline = config.options?.["multiline"] === true
 
   const sourceLabel = template

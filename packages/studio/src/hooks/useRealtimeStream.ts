@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react"
+import { bodyMessage, readJsonObject } from "../lib/json.js"
+import {
+  isStreamBroadcast,
+  isStreamChange,
+  isStreamPresence,
+  isStreamReady,
+  isStreamSampled,
+} from "../lib/realtime-guards.js"
 import { readSse, sseJson, type SseEvent } from "../lib/sse-reader.js"
 import type { ProjectFetch } from "./usePlatformApi.js"
-import type {
-  ChangeEvent,
-  StreamBroadcast,
-  StreamChange,
-  StreamPresence,
-  StreamReady,
-  StreamRow,
-} from "../views/realtime/types.js"
+import type { ChangeEvent, StreamReady, StreamRow } from "../views/realtime/types.js"
 
 /**
  * The Realtime Inspector's live stream: open, pause, clear, filter, and reconnect when the tab is
@@ -79,23 +80,23 @@ export function streamReducer(state: StreamState, action: StreamAction): StreamS
 export function actionFor(event: SseEvent): StreamAction | null {
   switch (event.event) {
     case "ready": {
-      const ready = sseJson<StreamReady>(event)
+      const ready = sseJson(event, isStreamReady)
       return ready ? { type: "ready", ready } : null
     }
     case "change": {
-      const change = sseJson<StreamChange>(event)
+      const change = sseJson(event, isStreamChange)
       return change ? { type: "row", row: { kind: "change", change } } : null
     }
     case "broadcast": {
-      const broadcast = sseJson<StreamBroadcast>(event)
+      const broadcast = sseJson(event, isStreamBroadcast)
       return broadcast ? { type: "row", row: { kind: "broadcast", broadcast } } : null
     }
     case "presence": {
-      const presence = sseJson<StreamPresence>(event)
+      const presence = sseJson(event, isStreamPresence)
       return presence ? { type: "row", row: { kind: "presence", presence } } : null
     }
     case "sampled": {
-      const sampled = sseJson<{ skipped: number; since: string }>(event)
+      const sampled = sseJson(event, isStreamSampled)
       return sampled ? { type: "row", row: { kind: "sampled", ...sampled, key: `sampled-${sampled.since}-${sampled.skipped}` } } : null
     }
     default:
@@ -116,11 +117,12 @@ export function streamQuery(filters: StreamFilters): string {
 
 /** Why a refused stream was refused, from the control plane's `{ error, message }` body. */
 async function refusal(res: Response): Promise<StreamAction> {
-  try {
-    const body = (await res.json()) as { error?: string; message?: string }
-    return { type: "failed", message: body.message ?? `The stream could not be opened (${res.status})`, code: body.error ?? null }
-  } catch {
-    return { type: "failed", message: `The stream could not be opened (${res.status})`, code: null }
+  const body = await readJsonObject(res)
+  const code = body["error"]
+  return {
+    type: "failed",
+    message: bodyMessage(body) ?? `The stream could not be opened (${res.status})`,
+    code: typeof code === "string" ? code : null,
   }
 }
 

@@ -8,7 +8,7 @@
 import { describe, it, expect, afterEach } from "vitest"
 import { applyRowChange, subscriptionViewOf, watchTable, type SubscriptionView } from "../src/table-subscription.js"
 import type { ChannelStatus, RealtimePayload } from "../src/realtime.js"
-import { simulateServerMessage } from "./helpers/mock-websocket.js"
+import { simulateServerMessage, subscribedChannels } from "./helpers/mock-websocket.js"
 import { createSocketSwapHarness, type SocketSwapHarness } from "./helpers/socket-swap.js"
 
 interface Row {
@@ -59,11 +59,10 @@ describe("watchTable", () => {
   afterEach(() => harness.restore())
 
   /** The channel each subscribe frame on the first socket named, in order. */
-  function subscribedChannels(): string[] {
-    return harness.sockets[0]!.send.mock.calls
-      .map(([raw]) => JSON.parse(String(raw)) as { type: string; channel: string })
-      .filter((frame) => frame.type === "subscribe")
-      .map((frame) => frame.channel)
+  function firstSocketChannels(): string[] {
+    const socket = harness.sockets[0]
+    if (socket === undefined) throw new Error("no socket has been opened")
+    return subscribedChannels(socket)
   }
 
   it("hands the binding each change's rows and each status", async () => {
@@ -78,7 +77,7 @@ describe("watchTable", () => {
     harness.ackJoins()
     simulateServerMessage(harness.sockets[0]!, {
       type: "change",
-      channel: subscribedChannels()[0],
+      channel: firstSocketChannels()[0],
       event: "INSERT",
       payload: { old: null, new: { id: 1, title: "a" } },
       timestamp: "2026-01-01T00:00:00Z",
@@ -96,7 +95,7 @@ describe("watchTable", () => {
     const second = watchTable<Row>(harness.realtime, "task", undefined, quiet)
     await harness.settle()
 
-    const [a, b] = subscribedChannels()
+    const [a, b] = firstSocketChannels()
     expect(a).toMatch(/^public:task:\d+$/)
     expect(b).toMatch(/^public:task:\d+$/)
     expect(a).not.toBe(b)

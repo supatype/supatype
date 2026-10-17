@@ -5,6 +5,7 @@
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { loadLocalEnvironment } from "./link.js"
+import { parsePackageJson } from "./package-json.js"
 import { composeStackHasContainers } from "./dev-session-lock.js"
 import { composeProjectName, runDockerCompose, type SelfHostComposePaths } from "./self-host-compose.js"
 import { confirm as uiConfirm } from "./ui/confirm.js"
@@ -59,8 +60,7 @@ function warnIfHardcodedComposeScripts(cwd: string, oldComposeProject: string): 
   const pkgPath = join(cwd, "package.json")
   if (!existsSync(pkgPath)) return
   try {
-    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { scripts?: Record<string, string> }
-    const scripts = Object.values(pkg.scripts ?? {}).join("\n")
+    const scripts = Object.values(parsePackageJson(readFileSync(pkgPath, "utf8")).scripts).join("\n")
     if (scripts.includes(`-p ${oldComposeProject}`)) {
       warn(
         `package.json scripts still reference compose project "${oldComposeProject}". ` +

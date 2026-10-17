@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { QueryBuilder } from "../src/query.js"
 import { DRAFT_SCHEMA } from "../src/types.js"
 import { createClient } from "../src/index.js"
+import { fetchCall, fetchCalls, fetchReturning, header, jsonResponse, requestUrl } from "./support/fetch-mock.js"
 
 // Reading a draft changes one thing about the request: which schema answers it. Same table name,
 // same row type, one header. These tests pin that the header is actually sent, because a silently
@@ -10,25 +11,11 @@ import { createClient } from "../src/index.js"
 const BASE = "http://localhost:18473"
 const HEADERS: Record<string, string> = { apikey: "anon-key" }
 
-function captureHeaders(): {
-  headers: () => Record<string, string>
-  fetch: ReturnType<typeof vi.fn>
-} {
-  const fetch = vi.fn().mockResolvedValue({
-    ok: true,
-    status: 200,
-    json: vi.fn().mockResolvedValue([]),
-    text: vi.fn().mockResolvedValue("[]"),
-    headers: { get: () => null },
-  })
+/** A fetch answering every request with no rows, and a reader for the first request's headers. */
+function captureHeaders(): { header: (name: string) => string | null } {
+  const fetch = fetchReturning([])
   vi.stubGlobal("fetch", fetch)
-  return {
-    fetch,
-    headers: () => {
-      const init = (fetch.mock.calls[0] as [string, { headers: Record<string, string> }])[1]
-      return init.headers
-    },
-  }
+  return { header: (name) => header(fetchCall(fetch).init, name) }
 }
 
 const SESSION_JWT =
@@ -44,20 +31,20 @@ describe("the draft profile", () => {
     await new QueryBuilder(BASE, "/rest/v1/posts", HEADERS, "id", undefined, undefined, {
       profile: DRAFT_SCHEMA,
     })
-    expect(captured.headers()["Accept-Profile"]).toBe("draft")
+    expect(captured.header("Accept-Profile")).toBe("draft")
   })
 
   it("is absent from an ordinary read, so published content is what a caller gets by default", async () => {
     const captured = captureHeaders()
     await new QueryBuilder(BASE, "/rest/v1/posts", HEADERS, "id")
-    expect(captured.headers()["Accept-Profile"]).toBeUndefined()
+    expect(captured.header("Accept-Profile")).toBeNull()
   })
 
   it("reaches the request through `from().draft().select()`", async () => {
     const captured = captureHeaders()
     const client = createClient({ url: BASE, anonKey: "anon-key" })
     await client.from("posts").draft().select("id, title")
-    expect(captured.headers()["Accept-Profile"]).toBe("draft")
+    expect(captured.header("Accept-Profile")).toBe("draft")
   })
 
   it("does not leak onto the next query from the same client", async () => {
@@ -67,12 +54,12 @@ describe("the draft profile", () => {
     const client = createClient({ url: BASE, anonKey: "anon-key" })
     const drafted = captureHeaders()
     await client.from("posts").draft().select("id")
-    expect(drafted.headers()["Accept-Profile"]).toBe("draft")
+    expect(drafted.header("Accept-Profile")).toBe("draft")
 
     vi.restoreAllMocks()
     const plain = captureHeaders()
     await client.from("posts").select("id")
-    expect(plain.headers()["Accept-Profile"]).toBeUndefined()
+    expect(plain.header("Accept-Profile")).toBeNull()
   })
 
   it("leaves the count header alone, since a draft read can still be counted", async () => {
@@ -81,8 +68,8 @@ describe("the draft profile", () => {
       profile: DRAFT_SCHEMA,
       count: "exact",
     })
-    expect(captured.headers()["Accept-Profile"]).toBe("draft")
-    expect(captured.headers()["Prefer"]).toBe("count=exact")
+    expect(captured.header("Accept-Profile")).toBe("draft")
+    expect(captured.header("Prefer")).toBe("count=exact")
   })
 })
 
@@ -96,15 +83,15 @@ describe("calling a function outside the default schema", () => {
     // mistake.
     const captured = captureHeaders()
     const client = createClient({ url: BASE, anonKey: "anon-key" })
-    await client.rpc("publish" as never, { model_table: "posts" } as never, { schema: "supatype" })
-    expect(captured.headers()["Content-Profile"]).toBe("supatype")
+    await client.rpc("publish", { model_table: "posts" }, { schema: "supatype" })
+    expect(captured.header("Content-Profile")).toBe("supatype")
   })
 
   it("sends none for a function in the default schema", async () => {
     const captured = captureHeaders()
     const client = createClient({ url: BASE, anonKey: "anon-key" })
-    await client.rpc("calculate_shipping" as never, {} as never)
-    expect(captured.headers()["Content-Profile"]).toBeUndefined()
+    await client.rpc("calculate_shipping", {})
+    expect(captured.header("Content-Profile")).toBeNull()
   })
 })
 
@@ -119,43 +106,32 @@ describe("a preview link as the client's credential", () => {
    * these tests care about is on the *second* request, not the first.
    */
   function previewFetch(exchange: { ok: boolean; token?: string; expiresAt?: string }): {
-    calls: () => Array<[string, { headers: Record<string, string> }]>
-    queryHeaders: () => Record<string, string>
+    queryHeaders: () => string[]
+    queryHeader: (name: string) => string | null
     exchanges: () => number
   } {
-    const fetch = vi.fn().mockImplementation((url: string) => {
-      if (url.endsWith("/preview-links/resolve")) {
-        return Promise.resolve({
-          ok: exchange.ok,
-          status: exchange.ok ? 200 : 404,
-          json: () =>
-            Promise.resolve(
-              exchange.ok
-                ? { token: exchange.token, expiresAt: exchange.expiresAt }
-                : { error: "gone" },
-            ),
-          headers: { get: () => null },
-        })
+    const isExchange = (url: string): boolean => url.endsWith("/preview-links/resolve")
+    const fetchMock = vi.fn<typeof fetch>((input) => {
+      if (isExchange(requestUrl(input))) {
+        const body = exchange.ok ? { token: exchange.token, expiresAt: exchange.expiresAt } : { error: "gone" }
+        return Promise.resolve(jsonResponse(body, exchange.ok ? 200 : 404))
       }
-      return Promise.resolve({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve([]),
-        text: () => Promise.resolve("[]"),
-        headers: { get: () => null },
-      })
+      return Promise.resolve(jsonResponse([]))
     })
-    vi.stubGlobal("fetch", fetch)
-    const calls = (): Array<[string, { headers: Record<string, string> }]> =>
-      fetch.mock.calls as Array<[string, { headers: Record<string, string> }]>
+    vi.stubGlobal("fetch", fetchMock)
+    const queryInit = (): RequestInit => {
+      const call = fetchCalls(fetchMock).find(({ url }) => !isExchange(url))
+      if (call === undefined) throw new Error("no query was made")
+      return call.init
+    }
     return {
-      calls,
-      exchanges: () => calls().filter(([url]) => url.endsWith("/preview-links/resolve")).length,
+      exchanges: () => fetchCalls(fetchMock).filter(({ url }) => isExchange(url)).length,
       queryHeaders: () => {
-        const call = calls().find(([url]) => !url.endsWith("/preview-links/resolve"))
-        if (call === undefined) throw new Error("no query was made")
-        return call[1].headers
+        const lines: string[] = []
+        new Headers(queryInit().headers).forEach((value, name) => lines.push(`${name}: ${value}`))
+        return lines
       },
+      queryHeader: (name) => header(queryInit(), name),
     }
   }
 
@@ -165,7 +141,7 @@ describe("a preview link as the client's credential", () => {
     const f = previewFetch({ ok: true, token: "exchanged.jwt", expiresAt: anHour() })
     const client = createClient({ url: BASE, anonKey: "anon-key", previewCode: "pl_abc.secret" })
     await client.from("posts").draft().select("id")
-    expect(f.queryHeaders()["Authorization"]).toBe("Bearer exchanged.jwt")
+    expect(f.queryHeader("Authorization")).toBe("Bearer exchanged.jwt")
   })
 
   it("never puts the code itself on the query", async () => {
@@ -181,7 +157,7 @@ describe("a preview link as the client's credential", () => {
     const f = previewFetch({ ok: true, token: "exchanged.jwt", expiresAt: anHour() })
     const client = createClient({ url: BASE, anonKey: "anon-key", previewCode: "pl_abc.secret" })
     await client.from("posts").draft().select("id")
-    expect(f.queryHeaders()["apikey"]).toBe("anon-key")
+    expect(f.queryHeader("apikey")).toBe("anon-key")
   })
 
   it("exchanges once for several queries in flight together", async () => {
@@ -235,13 +211,13 @@ describe("a preview link as the client's credential", () => {
     const captured = captureHeaders()
     const client = createClient({ url: BASE, anonKey: "anon-key" })
     await client.from("posts").select("id")
-    expect(captured.headers()["Authorization"]).toBe("Bearer anon-key")
+    expect(captured.header("Authorization")).toBe("Bearer anon-key")
   })
 })
 
 describe("what storage sends as its credential", () => {
-  // Storage was handed a plain headers object built when the client was constructed — before
-  // anybody has signed in. Every storage request therefore carried the anon key for the life of the
+  // Storage was handed a plain headers object built when the client was constructed, before
+  // anybody had signed in. Every storage request therefore carried the anon key for the life of the
   // page: an app's per-user storage policies saw `anon` rather than the caller, and through Studio's
   // proxy the request was refused outright, because an anon key carries no `sub` and the proxy
   // requires one. The symptom was "Token missing subject claim" on a page that lists buckets.
@@ -249,19 +225,18 @@ describe("what storage sends as its credential", () => {
   // Every other client on the object already resolved its headers per request. Storage was the one
   // that did not.
 
-  function captureHeaders(): { headers: () => Record<string, string> } {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: vi.fn().mockResolvedValue([]),
-      text: vi.fn().mockResolvedValue("[]"),
-      headers: { get: () => null },
-    })
+  /** A fetch that knows the signed-in user and has no buckets, and the bucket request's headers. */
+  function captureHeaders(): { header: (name: string) => string | null } {
+    const isUser = (url: string): boolean => url.endsWith("/auth/v1/user")
+    const fetchMock = vi.fn<typeof fetch>((input) =>
+      Promise.resolve(jsonResponse(isUser(requestUrl(input)) ? { id: "u1", role: "authenticated" } : [])),
+    )
     vi.stubGlobal("fetch", fetchMock)
     return {
-      headers: () => {
-        const call = fetchMock.mock.calls[0] as [string, { headers: Record<string, string> }]
-        return call[1].headers
+      header: (name) => {
+        const call = fetchCalls(fetchMock).find(({ url }) => !isUser(url))
+        if (call === undefined) throw new Error("storage made no request")
+        return header(call.init, name)
       },
     }
   }
@@ -271,22 +246,18 @@ describe("what storage sends as its credential", () => {
     const client = createClient({ url: BASE, anonKey: "anon-key" })
     // A session arriving after construction, which is the ordinary case: the client is built while
     // the page loads and the person signs in afterwards.
-    ;(client.auth as unknown as { currentSession: unknown }).currentSession = {
-      accessToken: SESSION_JWT,
-      refreshToken: "r",
-      expiresAt: Math.floor(Date.now() / 1000) + 3600,
-      user: { id: "u1" },
-    }
+    const { error } = await client.auth.setSession({ accessToken: SESSION_JWT, refreshToken: "r" })
+    expect(error).toBeNull()
 
     await client.storage.listBuckets()
-    expect(captured.headers()["Authorization"]).toBe(`Bearer ${SESSION_JWT}`)
+    expect(captured.header("Authorization")).toBe(`Bearer ${SESSION_JWT}`)
   })
 
   it("falls back to the anon key when nobody is signed in", async () => {
     const captured = captureHeaders()
     const client = createClient({ url: BASE, anonKey: "anon-key" })
     await client.storage.listBuckets()
-    expect(captured.headers()["Authorization"]).toBe("Bearer anon-key")
+    expect(captured.header("Authorization")).toBe("Bearer anon-key")
   })
 
   it("uses the service role when the caller holds one", async () => {
@@ -294,6 +265,6 @@ describe("what storage sends as its credential", () => {
     const captured = captureHeaders()
     const client = createClient({ url: BASE, anonKey: "anon-key", serviceRoleKey: "service.jwt" })
     await client.storage.listBuckets()
-    expect(captured.headers()["Authorization"]).toBe("Bearer service.jwt")
+    expect(captured.header("Authorization")).toBe("Bearer service.jwt")
   })
 })

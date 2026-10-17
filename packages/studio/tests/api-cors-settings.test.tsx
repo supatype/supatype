@@ -2,9 +2,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import React, { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
-import type { SupatypeClient } from "@supatype/client"
 import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { ApiCorsSettings } from "../src/views/ApiCorsSettings.js"
+import { isArrayOf, isShape, isString } from "../src/lib/json.js"
+import { elementOf, testClient } from "./support.js"
 
 /**
  * SHb: the browser origins a production server allows are a project setting. This page shows what
@@ -12,10 +13,7 @@ import { ApiCorsSettings } from "../src/views/ApiCorsSettings.js"
  * reset. The server is the authority: the page sends the whole list and shows what comes back.
  */
 
-const CLIENT = {
-  url: "http://localhost:8000/studio/proxy",
-  auth: { currentAccessToken: "token" },
-} as unknown as SupatypeClient
+const CLIENT = testClient({ url: "http://localhost:8000/studio/proxy", token: "token" })
 
 const DEFAULT = {
   origins: ["https://app.example.com", "https://admin.example.com"],
@@ -32,6 +30,15 @@ const DEFAULT = {
 }
 
 interface Call { url: string; method: string; body: unknown }
+
+const isOriginsBody = isShape({ origins: isArrayOf(isString) })
+
+/** The server's answer to a save: the list it was sent, now in force. */
+function savedAnswer(call: Call): unknown {
+  if (call.method !== "PUT") return DEFAULT
+  if (!isOriginsBody(call.body)) throw new Error(`the save sent no origins list: ${JSON.stringify(call.body)}`)
+  return { ...DEFAULT, source: "saved", saved: call.body.origins, origins: call.body.origins }
+}
 
 let root: Root | null = null
 let container: HTMLElement
@@ -63,7 +70,7 @@ function button(label: string): HTMLButtonElement | undefined {
 }
 
 beforeEach(() => {
-  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true
 })
 
 afterEach(() => {
@@ -83,10 +90,8 @@ describe("the Allowed origins page", () => {
   })
 
   it("adds an origin by saving the whole list", async () => {
-    await render({ manageDomains: true }, (call) =>
-      call.method === "PUT" ? { ...DEFAULT, source: "saved", saved: (call.body as { origins: string[] }).origins, origins: (call.body as { origins: string[] }).origins } : DEFAULT,
-    )
-    const input = container.querySelector("input") as HTMLInputElement
+    await render({ manageDomains: true }, savedAnswer)
+    const input = elementOf(container, "input", HTMLInputElement)
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!
       setter.call(input, "https://partner.example")

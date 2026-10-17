@@ -11,9 +11,22 @@ import { CacheHealthPanels } from "./CacheHealthPanels.js"
 import { useCacheHealth } from "../hooks/useCacheHealth.js"
 import { describeStaleness, reconcileNoteFor } from "../lib/cache-health.js"
 import type { ReconcileNote, RowCacheReconcile } from "../lib/cache-health.js"
-import { controlsFor, rowCacheLine } from "../lib/cache-declaration.js"
+import { controlsFor, isDeclaredCache, rowCacheLine } from "../lib/cache-declaration.js"
 import type { DeclaredCache } from "../lib/cache-declaration.js"
 import { cn } from "../lib/utils.js"
+import {
+  type Guard,
+  isArrayOf,
+  isBoolean,
+  isNumber,
+  isRecordOf,
+  isShape,
+  isString,
+  isUnknown,
+  nullable,
+  optional,
+  readJson,
+} from "../lib/json.js"
 
 /** One thing the schema's ceiling refused or reduced, as the admin API reports it. */
 export interface CacheAdjustment {
@@ -45,6 +58,54 @@ export interface RestCacheDetail extends RestCacheEntry {
   body_json?: unknown
 }
 
+const optionalText = optional(isString)
+
+const isRestCacheEntry: Guard<RestCacheEntry> = isShape({
+  key: isString,
+  table: optionalText,
+  scope: optionalText,
+  method: optionalText,
+  path: optionalText,
+  raw_query: optionalText,
+  ttl_seconds: isNumber,
+  size_bytes: isNumber,
+  cached_at: optionalText,
+})
+
+const isRestCacheDetail: Guard<RestCacheDetail> = (value: unknown): value is RestCacheDetail =>
+  isRestCacheEntry(value) &&
+  isShape({
+    status_code: isNumber,
+    content_type: optionalText,
+    body_preview: optionalText,
+    body_json: optional(isUnknown),
+  })(value)
+
+const isCacheListing = isShape({ entries: isArrayOf(isRestCacheEntry), cursor: isString })
+
+const isRestTableCacheConfig: Guard<RestTableCacheConfig> = isShape({ enabled: isBoolean, allow_public: isBoolean })
+
+/** GET /admin/v1/config/rest. `cache_tables` is null while no table has been configured. */
+const isRestConfig = isShape({
+  cache_max_ttl: optional(isNumber),
+  cache_tables: optional(nullable(isRecordOf(isRestTableCacheConfig))),
+  declared: optional(isDeclaredCache),
+})
+
+const isRowCacheReconcile: Guard<RowCacheReconcile> = isShape({
+  registered: optional(isArrayOf(isString)),
+  unregistered: optional(isArrayOf(isString)),
+  skipped: optional(isArrayOf(isShape({ table: isString, reason: isString }))),
+  unavailable: optional(isBoolean),
+  error: optionalText,
+})
+
+/** What a PATCH of the REST config reports beside the saved config. */
+const isRestConfigSaved = isShape({
+  row_cache: optional(isRowCacheReconcile),
+  adjusted: optional(isArrayOf(isShape({ table: isString, reason: isString }))),
+})
+
 function encodeCacheKey(key: string): string {
   const bytes = new TextEncoder().encode(key)
   let binary = ""
@@ -73,7 +134,7 @@ const LIST_POLL_MS = 10_000
 /**
  * What an empty listing means, which depends on whether caching is on.
  *
- * One sentence used to cover both, and it opened with "Enable caching in settings above" — advice
+ * One sentence used to cover both, and it opened with "Enable caching in settings above", advice
  * that is wrong for anyone who already has. Two things make this list empty on a table that is
  * correctly configured, and neither is a setting: nothing has asked for a cached response yet, and
  * entries leave when their TTL expires. An empty list is the normal resting state of a working
@@ -90,7 +151,7 @@ export function emptyCacheDescription(table: string | null | undefined, enabled:
   }
   return (
     `Caching is on for ${table}, and nothing is cached right now. The server caches a response ` +
-    `only when the client asks it to, with \`.cache({ server: true })\` — a plain GET is not ` +
+    `only when the client asks it to, with \`.cache({ server: true })\`; a plain GET is not ` +
     `cached. Entries also disappear when their TTL expires, so an empty list on a quiet table is ` +
     `normal rather than a fault.`
   )
@@ -122,7 +183,7 @@ export function RestCacheBrowser({
 
   // Only on the per-table screen, and only to read the staleness window. The
   // project-wide screen gets the panels instead, and the two never render
-  // together — so this does not double the polling, it moves it.
+  // together, so this does not double the polling: it moves it.
   const tableHealth = useCacheHealth(Boolean(showTableSettings && tableFilter))
 
   const listUrl = (() => {
@@ -135,7 +196,7 @@ export function RestCacheBrowser({
     () =>
       fetch(listUrl, { headers: studioAuthHeaders(client), credentials: "include" }).then(async (r) => {
         if (!r.ok) throw new Error(String(r.status))
-        return r.json() as Promise<{ entries: RestCacheEntry[]; cursor: string }>
+        return readJson(r, isCacheListing)
       }),
     [client, listUrl],
   )
@@ -143,7 +204,7 @@ export function RestCacheBrowser({
   // Cache entries expire on their own, so this list goes stale by sitting still.
   //
   // It was fetched once on mount and then left alone, next to health panels that poll every ten
-  // seconds — so half the screen was live and the half saying "nothing is cached" was frozen at
+  // seconds. Half the screen was live and the half saying "nothing is cached" was frozen at
   // whatever was true when the tab was opened. Opening the page before anything had been cached
   // left it reading "No cache entries" indefinitely, which is indistinguishable from a cache that
   // does not work, and the Refresh button is only obvious once you already suspect the list.
@@ -163,11 +224,7 @@ export function RestCacheBrowser({
       credentials: "include",
     })
     if (!r.ok) return
-    const json = (await r.json()) as {
-      cache_max_ttl?: number
-      cache_tables?: Record<string, RestTableCacheConfig>
-      declared?: DeclaredCache
-    }
+    const json = await readJson(r, isRestConfig)
     setCacheMaxTTL(json.cache_max_ttl ?? 0)
     setDeclared(json.declared ?? {})
     const tc = json.cache_tables?.[tableFilter]
@@ -175,7 +232,7 @@ export function RestCacheBrowser({
   }, [client, showTableSettings, tableFilter])
 
   React.useEffect(() => {
-    void loadSettings()
+    loadSettings().catch((e: unknown) => setActionError(e instanceof Error ? e.message : "Failed to load cache settings"))
   }, [loadSettings])
 
   async function openDetail(key: string) {
@@ -189,7 +246,7 @@ export function RestCacheBrowser({
         credentials: "include",
       })
       if (!r.ok) throw new Error(String(r.status))
-      setDetail((await r.json()) as RestCacheDetail)
+      setDetail(await readJson(r, isRestCacheDetail))
     } catch (e) {
       setDetailError(e instanceof Error ? e.message : "Failed to load entry")
     } finally {
@@ -243,12 +300,7 @@ export function RestCacheBrowser({
         credentials: "include",
       })
       if (!cfgRes.ok) throw new Error(String(cfgRes.status))
-      const current = (await cfgRes.json()) as {
-        schema: string
-        max_rows: number
-        cache_max_ttl?: number
-        cache_tables?: Record<string, RestTableCacheConfig>
-      }
+      const current = await readJson(cfgRes, isRestConfig)
       const cache_tables = { ...(current.cache_tables ?? {}) }
       cache_tables[tableFilter] = { ...tableCfg }
       const r = await fetch(`${client.url}/admin/v1/config/rest`, {
@@ -264,10 +316,8 @@ export function RestCacheBrowser({
       // The save succeeded; what the row cache made of it comes back in the
       // same body and is a note, never an error. The response cache is already
       // live either way.
-      const saved = (await r.json().catch(() => ({}))) as {
-        row_cache?: RowCacheReconcile
-        adjusted?: CacheAdjustment[]
-      }
+      const savedBody = await r.json().catch(() => null)
+      const saved = isRestConfigSaved(savedBody) ? savedBody : {}
       setRowCacheNote(reconcileNoteFor(tableFilter, saved.row_cache))
       setAdjustments((saved.adjusted ?? []).filter((a) => a.table === tableFilter || a.table === "*"))
       await loadSettings()
@@ -342,7 +392,7 @@ export function RestCacheBrowser({
 
       {/*
         Only on the project-wide screen. The per-model view is filtered to one table, and every
-        number these panels show is per keyspace or per database — an arena fill or a coherence
+        number these panels show is per keyspace or per database. An arena fill or a coherence
         state shown under a table's name reads as that table's, and is not.
       */}
       {!tableFilter && <CacheHealthPanels />}
@@ -364,7 +414,7 @@ export function RestCacheBrowser({
                 /*
                   Disabled rather than left to fail on save. The server narrows a request it does
                   not permit and reports the adjustment, so a tick here would survive exactly until
-                  the save came back and then untick itself — which teaches an operator that the
+                  the save came back and then untick itself, which teaches an operator that the
                   screen is broken rather than that their schema said no.
                 */
                 disabled={!controls.canEnable}
@@ -409,7 +459,7 @@ export function RestCacheBrowser({
             </Button>
             {/*
               One switch, two caches. A table with no primary key gets the response cache and not
-              the row cache, and this is the only place that difference is ever visible — silence
+              the row cache, and this is the only place that difference is ever visible. Silence
               would leave someone believing they had turned on something they had not.
 
               Nothing is said when the save did exactly what was asked: a confirmation on every
@@ -428,7 +478,7 @@ export function RestCacheBrowser({
             {/*
               What the save was refused, if anything. The server narrows before it stores, so this
               is the only account of the difference between what was asked for and what is now
-              true — and the controls above are disabled precisely so it stays empty.
+              true, and the controls above are disabled precisely so it stays empty.
             */}
             {adjustments.length > 0 && (
               <ul className="text-xs text-yellow-400 space-y-0.5">
@@ -443,7 +493,7 @@ export function RestCacheBrowser({
             {/*
               Mode B, which has no control here and is not going to get one (§13.3). The row cache
               is eventual with a bound rather than read-your-writes, and whether a table tolerates
-              that is a design-time invariant — so this says what is happening and where to change
+              that is a design-time invariant. So this says what is happening and where to change
               it. The staleness window is read live rather than hardcoded at 200ms: it grows to the
               invalidation cycle time once participating databases outnumber the worker pool, and a
               promise that understates itself is worse than none.

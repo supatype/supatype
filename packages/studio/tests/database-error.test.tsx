@@ -25,17 +25,23 @@ async function failureOf(res: Response): Promise<unknown> {
   )
 }
 
+/** The message of a failure that has to be an `Error`. */
+function messageOf(err: unknown): string {
+  if (!(err instanceof Error)) throw new Error(`expected an Error, got ${String(err)}`)
+  return err.message
+}
+
 describe("readSqlResponse()", () => {
   it("keeps the SQLSTATE the proxy sent beside its message", async () => {
     const err = await failureOf(answer(422, { error: "permission denied for table managed_objects", code: "42501" }))
     expect(err).toBeInstanceOf(Error)
-    expect((err as Error).message).toBe("permission denied for table managed_objects")
+    expect(messageOf(err)).toBe("permission denied for table managed_objects")
     expect(sqlstateOf(err)).toBe("42501")
   })
 
   it("reads the message from Cloud's shape, where `error` is a category", async () => {
     const err = await failureOf(answer(400, { error: "sql_error", message: 'relation "x" does not exist', code: "42P01" }))
-    expect((err as Error).message).toBe('relation "x" does not exist')
+    expect(messageOf(err)).toBe('relation "x" does not exist')
     expect(sqlstateOf(err)).toBe("42P01")
   })
 
@@ -73,7 +79,7 @@ describe("useApiQuery()", () => {
   }
 
   beforeEach(() => {
-    ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+    globalThis.IS_REACT_ACT_ENVIRONMENT = true
     seen = null
     container = document.createElement("div")
     root = createRoot(container)

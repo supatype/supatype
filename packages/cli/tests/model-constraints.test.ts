@@ -2,7 +2,9 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
+import { isArrayOf, isShape, isString, isUnknown, optional } from "@supatype/shared"
 import { extractSchemaAstFromTypes } from "../src/type-extractor.js"
+import { expectShape } from "./support/json.js"
 
 // Model-level constraints reuse the access-rule vocabulary deliberately: a constraint is an access
 // rule with a narrower operand set. That reuse is the point, and it is also the risk, because the
@@ -104,9 +106,9 @@ export type Page = Model<{
   constraints: [Any<[Eq<"status", Literal<"draft">>, NotNull<"published_at">]>]
 }>`)
 
-    const [rule] = constraintsOf(ast) as Array<{ type: string; rules: unknown[] }>
-    expect(rule?.type).toBe("any")
-    expect(rule?.rules).toHaveLength(2)
+    const rule = expectShape(constraintsOf(ast)[0], isShape({ type: isString, rules: isArrayOf(isUnknown) }))
+    expect(rule.type).toBe("any")
+    expect(rule.rules).toHaveLength(2)
   })
 })
 
@@ -287,7 +289,8 @@ export type Doc = Model<{ id: UUID; title: string }, {
   access: { read: Public }
   constraints: [Any<[Lte<Length<"title">, Literal<5>>, IsNull<"title">]>]
 }>`)
-    const [rule] = constraintsOf(ast) as Array<{ rules: Array<{ left?: { form?: string } }> }>
-    expect(rule?.rules[0]?.left?.form).toBe("chars")
+    const isMeasured = isShape({ left: optional(isShape({ form: optional(isString) })) })
+    const rule = expectShape(constraintsOf(ast)[0], isShape({ rules: isArrayOf(isMeasured) }))
+    expect(rule.rules[0]?.left?.form).toBe("chars")
   })
 })

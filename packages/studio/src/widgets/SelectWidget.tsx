@@ -1,12 +1,13 @@
 import React, { useEffect } from "react"
 import type { WidgetProps } from "./FieldWidget.js"
+import { stringListOption } from "./field-options.js"
 
 function isEmptySelectValue(value: unknown): boolean {
   return value === null || value === undefined || value === ""
 }
 
 export function SelectWidget({ config, value, onChange, readOnly }: WidgetProps): React.ReactElement {
-  const options = (config.options?.["values"] ?? []) as string[]
+  const options = stringListOption(config, "values")
   const empty = isEmptySelectValue(value)
   const defaultOption = config.required && options.length > 0 ? options[0]! : ""
   const selectValue = empty ? defaultOption : String(value)

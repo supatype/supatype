@@ -15,6 +15,7 @@ import {
 } from "node:fs"
 import { join, relative } from "node:path"
 import ts from "typescript"
+import { isJsonObject, parseJsonObject } from "@supatype/shared"
 
 const MARKER = "Supatype edge functions (IDE / tsserver)"
 
@@ -75,7 +76,7 @@ declare namespace Deno {
 
 /**
  * The slice of Node's async_hooks the functions router uses. Deno provides the module at runtime;
- * this tsconfig loads no Node types, so without it the import resolves to nothing.
+ * a functions tsconfig loads no Node types, so without it the import resolves to nothing.
  */
 declare module "node:async_hooks" {
   export class AsyncLocalStorage<T> {
@@ -244,26 +245,27 @@ function ensureRootTsconfigExcludesFunctions(
     return "manual"
   }
 
-  const cfg = parsed.config as { exclude?: unknown }
-  const exclude = Array.isArray(cfg.exclude) ? cfg.exclude.map(String) : []
+  const cfg: unknown = parsed.config
+  const declared = isJsonObject(cfg) ? cfg["exclude"] : undefined
+  const exclude = Array.isArray(declared) ? declared.map(String) : []
   if (exclude.some(isFunctionsExcludeEntry)) return "already"
 
-  try {
-    const asJson = JSON.parse(raw) as { exclude?: string[] }
-    asJson.exclude = [...(Array.isArray(asJson.exclude) ? asJson.exclude : []), "functions"]
-    writeFileSync(path, `${JSON.stringify(asJson, null, 2)}\n`, "utf8")
+  const asJson = parseJsonObject(raw)
+  if (asJson.ok) {
+    const prior = asJson.value["exclude"]
+    asJson.value["exclude"] = [...(Array.isArray(prior) ? prior : []), "functions"]
+    writeFileSync(path, `${JSON.stringify(asJson.value, null, 2)}\n`, "utf8")
     return "updated"
-  } catch {
-    // JSONC / trailing commas, try a conservative string splice into an existing exclude array.
-    if (/"exclude"\s*:\s*\[/.test(raw)) {
-      const next = raw.replace(/("exclude"\s*:\s*\[)/, `$1\n    "functions",`)
-      if (next !== raw) {
-        writeFileSync(path, next, "utf8")
-        return "updated"
-      }
-    }
-    return "manual"
   }
+  // JSONC / trailing commas, try a conservative string splice into an existing exclude array.
+  if (/"exclude"\s*:\s*\[/.test(raw)) {
+    const next = raw.replace(/("exclude"\s*:\s*\[)/, `$1\n    "functions",`)
+    if (next !== raw) {
+      writeFileSync(path, next, "utf8")
+      return "updated"
+    }
+  }
+  return "manual"
 }
 
 function isFunctionsExcludeEntry(entry: string): boolean {

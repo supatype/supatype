@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { WebSocket } from "ws"
-import { ChannelManager, parseClientParam } from "../src/channels.js"
+import { ChannelManager, parseClientParam, type ClientSocket } from "../src/channels.js"
 
 /**
  * What the inspector lists: channels as the sum of every connection's subscriptions, and
@@ -8,7 +7,7 @@ import { ChannelManager, parseClientParam } from "../src/channels.js"
  * filter values, or any claim but `sub` and `role`.
  */
 
-const fakeSocket = {} as WebSocket
+const fakeSocket: ClientSocket = { readyState: 1, send: () => {} }
 
 function registry(): { channels: ChannelManager; ids: string[] } {
   const channels = new ChannelManager()

@@ -11,6 +11,8 @@
  * type for them, and nothing in this repository had ever written one, which is exactly why three
  * different definitions of the shape had drifted apart without anyone noticing.
  */
+import { at, stringAt } from "../lib/json.js"
+
 const BASE = process.env["SUPATYPE_URL"] ?? "http://127.0.0.1:18473"
 const ANON = process.env["ANON_KEY"] ?? ""
 const SERVICE = process.env["SERVICE_ROLE_KEY"] ?? ""
@@ -58,11 +60,12 @@ async function signUp(): Promise<{ token: string; id: string }> {
     type: "application/json",
     body: JSON.stringify({ email, password: "Correct-Horse-7" }),
   })
-  const body = res.json as { access_token?: string; user?: { id?: string } }
-  if (typeof body?.access_token !== "string" || typeof body.user?.id !== "string") {
+  const token = stringAt(res.json, "access_token")
+  const id = stringAt(at(res.json, "user"), "id")
+  if (token === undefined || id === undefined) {
     throw new Error(`signup failed (${res.status}): ${res.text.slice(0, 160)}`)
   }
-  return { token: body.access_token, id: body.user.id }
+  return { token, id }
 }
 
 /** Upload through the storage API, the way an application does. */
@@ -176,7 +179,7 @@ async function privateBucket(): Promise<void> {
     type: "application/json",
     body: JSON.stringify({ expiresIn: 60 }),
   })
-  const url = (signed.json as { signedURL?: string } | null)?.signedURL
+  const url = stringAt(signed.json, "signedURL")
   check(typeof url === "string", "a signed URL is issued", `HTTP ${signed.status}`)
   if (typeof url === "string") {
     const viaSigned = await fetch(url.startsWith("http") ? url : `${BASE}/storage/v1${url}`)
@@ -244,17 +247,18 @@ async function assetColumn(): Promise<void> {
   check(created.status < 300, "a storage reference is accepted into an asset column", `HTTP ${created.status}: ${created.text.slice(0, 160)}`)
 
   const read = await send(`/rest/v1/author?id=eq.${user.id}&select=avatarUrl`)
-  const rows = (read.json as { avatarUrl?: { bucket?: string; path?: string } }[] | null) ?? []
-  const stored = rows[0]?.avatarUrl
+  const stored = Array.isArray(read.json) ? at(read.json[0], "avatarUrl") : undefined
+  const storedBucket = stringAt(stored, "bucket")
+  const storedPath = stringAt(stored, "path")
   check(
-    stored?.bucket === reference.bucket && stored?.path === reference.path,
+    storedBucket === reference.bucket && storedPath === reference.path,
     "and reads back as the same bucket and path",
     `got ${JSON.stringify(stored)}`,
   )
 
   // The whole point of storing a reference rather than a URL: the URL is derivable from it.
-  if (stored?.bucket !== undefined && stored.path !== undefined) {
-    const derived = `${BASE}/storage/v1/object/public/${stored.bucket}/${stored.path}`
+  if (storedBucket !== undefined && storedPath !== undefined) {
+    const derived = `${BASE}/storage/v1/object/public/${storedBucket}/${storedPath}`
     const fetched = await fetch(derived)
     check(fetched.status < 300, "and the URL derived from it serves the object", `HTTP ${fetched.status}`)
     check((await fetched.text()) === body, "with the bytes that were uploaded")

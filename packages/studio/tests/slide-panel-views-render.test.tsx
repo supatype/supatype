@@ -6,13 +6,13 @@ import { RestCacheBrowser } from "../src/views/RestCacheBrowser.js"
 import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { AdminConfigContext } from "../src/hooks/useAdminConfig.js"
 import type { AdminConfig } from "../src/config.js"
-import type { SupatypeClient } from "@supatype/client"
+import { testClient, testConfig } from "./support.js"
 
 /**
  * The first paint of a view that contains a `SlidePanel`.
  *
  * Every other view gets a cheap "does it render at all" test through
- * `renderToStaticMarkup` — a typecheck says a component is well typed, it does not say it runs.
+ * `renderToStaticMarkup`, because a typecheck says a component is well typed, not that it runs.
  * Views with a SlidePanel could not have one: `SlidePanel` calls `createPortal` in its render
  * body, and **react-dom/server refuses portals outright**, so the static renderer was never the
  * missing piece. What was missing is a DOM to mount into.
@@ -21,29 +21,31 @@ import type { SupatypeClient } from "@supatype/client"
  * tests rather than a workaround for them: effects run, so a hook reading a context that is not
  * there, or an unguarded `document` access in an effect, fails here and passes there.
  *
- * Twelve files import SlidePanel — every `database/` view, AuthManagement, LogsViewer,
+ * Twelve files import SlidePanel: every `database/` view, AuthManagement, LogsViewer,
  * ConnectModal. This covers one of them and unblocks the rest.
  */
 
-const client = { url: "http://localhost:8000/studio/proxy" } as unknown as SupatypeClient
+const client = testClient({ url: "http://localhost:8000/studio/proxy" })
 
-const config = {
-  projectName: "acme",
-  models: [],
-  tier: "pro",
-} as unknown as AdminConfig
+const config: AdminConfig = testConfig({ tier: "pro" })
 
 let container: HTMLDivElement
 let root: Root
 
 beforeEach(() => {
   // React refuses to run act() outside an environment that declares itself one.
-  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true
   // Effects run here, so the list fetch fires. Stubbed with an empty page rather than left to
-  // hit the network: an unstubbed fetch fails asynchronously, after the assertion has passed.
+  // hit the network: an unstubbed fetch fails asynchronously, after the assertion has passed. The
+  // health panels' routes answer 404, as a gateway without them would, rather than with the list's
+  // body, which is not their shape.
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () => new Response(JSON.stringify({ entries: [], cursor: "0" }), { status: 200 })),
+    vi.fn(async (url: string) =>
+      url.includes("/admin/v1/cache?")
+        ? Response.json({ entries: [], cursor: "0" })
+        : new Response(null, { status: 404 }),
+    ),
   )
   container = document.createElement("div")
   document.body.appendChild(container)
@@ -86,7 +88,7 @@ describe("a view that portals", () => {
     // screen, so this waits for the effect's promise to settle and asserts what replaced it.
     //
     // `await`, not `.then()`: the first version of this returned the chained promise, which React
-    // flushed internally — the assertion failed against an unmounted container, after the test had
+    // flushed internally, so the assertion failed against an unmounted container after the test had
     // already been recorded as passing. Vitest reported it as an unhandled error beside a green
     // test, which is the shape of a false positive worth remembering.
     render(<RestCacheBrowser />)

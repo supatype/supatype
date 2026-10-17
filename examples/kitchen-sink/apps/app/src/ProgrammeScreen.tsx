@@ -169,9 +169,8 @@ function formatTime(at: string): string {
 }
 
 /** `Duration` crosses the wire as `{ ms }` rather than a number, so it cannot be printed raw. */
-function formatDuration(value: unknown): string {
-  const ms = (value as { ms?: number } | null)?.ms
-  if (typeof ms !== "number" || ms <= 0) return ""
+function formatDuration({ ms }: Talk["length"]): string {
+  if (ms <= 0) return ""
   const minutes = Math.round(ms / 60_000)
   return minutes >= 60 ? `${Math.round((minutes / 60) * 10) / 10}h` : `${minutes} min`
 }

@@ -41,8 +41,8 @@ function typeText(checker: ts.TypeChecker, type: ts.Type, depth: number): string
   if (depth > MAX_DEPTH) return undefined
   if (type.flags & PRIMITIVE) return checker.typeToString(type)
   if (type.isUnion()) return unionText(checker, type, depth)
-  if (checker.isArrayType(type)) return arrayText(checker, type, depth)
-  if (checker.isTupleType(type)) return tupleText(checker, type, depth)
+  if (checker.isArrayType(type) && isTypeReference(type)) return arrayText(checker, type, depth)
+  if (checker.isTupleType(type) && isTypeReference(type)) return tupleText(checker, type, depth)
   if (type.flags & ts.TypeFlags.Object) return objectText(checker, type, depth)
   return undefined
 }
@@ -61,16 +61,21 @@ function unionText(checker: ts.TypeChecker, type: ts.UnionType, depth: number): 
   return [...(booleans.length === 2 ? ["boolean"] : []), ...parts].join(" | ")
 }
 
-function arrayText(checker: ts.TypeChecker, type: ts.Type, depth: number): string | undefined {
-  const element = checker.getTypeArguments(type as ts.TypeReference)[0]
+/** A generic instantiation (`T[]`, a tuple), whose type arguments the checker can list. */
+function isTypeReference(type: ts.Type): type is ts.TypeReference {
+  return "objectFlags" in type && typeof type.objectFlags === "number" && (type.objectFlags & ts.ObjectFlags.Reference) !== 0
+}
+
+function arrayText(checker: ts.TypeChecker, type: ts.TypeReference, depth: number): string | undefined {
+  const element = checker.getTypeArguments(type)[0]
   if (element === undefined) return undefined
   const text = typeText(checker, element, depth + 1)
   if (text === undefined) return undefined
   return element.isUnion() ? `(${text})[]` : `${text}[]`
 }
 
-function tupleText(checker: ts.TypeChecker, type: ts.Type, depth: number): string | undefined {
-  const parts = checker.getTypeArguments(type as ts.TypeReference).map((t) => typeText(checker, t, depth + 1))
+function tupleText(checker: ts.TypeChecker, type: ts.TypeReference, depth: number): string | undefined {
+  const parts = checker.getTypeArguments(type).map((t) => typeText(checker, t, depth + 1))
   if (parts.some((p) => p === undefined)) return undefined
   return `[${parts.join(", ")}]`
 }

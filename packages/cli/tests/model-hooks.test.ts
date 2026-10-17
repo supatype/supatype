@@ -14,6 +14,8 @@ import {
   writeHooksModule,
 } from "../src/model-hooks.js"
 import { extractSchemaAstFromTypes } from "../src/type-extractor.js"
+import { isJsonObject, isRecordOf } from "@supatype/shared"
+import { expectShape, parseJsonAs } from "./support/json.js"
 
 const dirs: string[] = []
 
@@ -21,7 +23,7 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
 })
 
-function project(schema: string): { dir: string; ast: unknown } {
+function project(schema: string): { dir: string; ast: ReturnType<typeof extractSchemaAstFromTypes> } {
   const dir = mkdtempSync(join(tmpdir(), "supatype-hooks-"))
   dirs.push(dir)
   const schemaPath = join(dir, "schema.ts")
@@ -53,8 +55,7 @@ export type Post = Model<{ id: UUID; title: string }, {
       { model: "Post", event: "beforeChange", function: "moderate-post" },
     ])
 
-    const models = (ast as { models: { annotations: { platform: { hooks?: Record<string, unknown> } } }[] }).models
-    expect(models[0]?.annotations.platform.hooks).toEqual({
+    expect(ast?.models[0]?.annotations.platform.hooks).toEqual({
       beforeChange: { function: "moderate-post" },
       afterChange: { function: "index-post", timeout: 5000, onUnavailable: "log" },
     })
@@ -66,8 +67,8 @@ import type { Model, UUID } from "@supatype/types"
 
 export type Post = Model<{ id: UUID }, { tableName: "posts" }>
 `)
-    const models = (ast as { models: { annotations: { platform: Record<string, unknown> } }[] }).models
-    expect(models[0]?.annotations.platform["hooks"]).toBeUndefined()
+    expect(ast?.models[0]).toBeDefined()
+    expect(ast?.models[0]?.annotations.platform.hooks).toBeUndefined()
     expect(declaredHooks(ast)).toEqual([])
   })
 
@@ -185,12 +186,10 @@ export type Post = Model<{ id: UUID }, {
     )
 
     expect(syncManifestHooks(dir, ast)).toBe(true)
-    const manifest = JSON.parse(
-      readFileSync(join(dir, ".supatype", "manifest.json"), "utf8"),
-    ) as Record<string, unknown>
+    const manifest = parseJsonAs(readFileSync(join(dir, ".supatype", "manifest.json"), "utf8"), isJsonObject)
     expect(manifest["schema"]).toBe("tenant_7")
     expect(manifest["functions_enabled"]).toBe(true)
-    expect(Object.keys(manifest["hooks"] as object)).toEqual(["posts"])
+    expect(Object.keys(expectShape(manifest["hooks"], isJsonObject))).toEqual(["posts"])
   })
 
   it("never creates a manifest from scratch", () => {
@@ -215,9 +214,7 @@ export type Post = Model<{ id: UUID }, { tableName: "posts" }>
     )
 
     expect(syncManifestHooks(dir, ast)).toBe(true)
-    const manifest = JSON.parse(
-      readFileSync(join(dir, ".supatype", "manifest.json"), "utf8"),
-    ) as Record<string, unknown>
+    const manifest = parseJsonAs(readFileSync(join(dir, ".supatype", "manifest.json"), "utf8"), isJsonObject)
     expect(manifest["hooks"]).toBeUndefined()
   })
 
@@ -244,11 +241,9 @@ export type Post = Model<{
     )
 
     expect(syncManifestHooks(dir, ast)).toBe(true)
-    const manifest = JSON.parse(
-      readFileSync(join(dir, ".supatype", "manifest.json"), "utf8"),
-    ) as Record<string, unknown>
-    const validators = manifest["validators"] as Record<string, Record<string, unknown>>
-    expect(validators?.["posts"]?.["items"]).toMatchObject({
+    const manifest = parseJsonAs(readFileSync(join(dir, ".supatype", "manifest.json"), "utf8"), isJsonObject)
+    const validators = expectShape(manifest["validators"], isRecordOf(isJsonObject))
+    expect(validators["posts"]?.["items"]).toMatchObject({
       function: "check-items",
       onUnavailable: "reject",
     })
@@ -271,9 +266,7 @@ export type Post = Model<{ id: UUID }, { tableName: "posts" }>
     )
 
     expect(syncManifestHooks(dir, ast)).toBe(true)
-    const manifest = JSON.parse(
-      readFileSync(join(dir, ".supatype", "manifest.json"), "utf8"),
-    ) as Record<string, unknown>
+    const manifest = parseJsonAs(readFileSync(join(dir, ".supatype", "manifest.json"), "utf8"), isJsonObject)
     expect(manifest["validators"]).toBeUndefined()
   })
 })
@@ -381,7 +374,7 @@ export type Post = Model<{ id: UUID }, { tableName: "posts" }>
 
 describe("a models array with something malformed in it", () => {
   /*
-   * `x?.y` guards `x.y` being nullish, not `x` itself being null — so every one of these read
+   * `x?.y` guards `x.y` being nullish, not `x` itself being null, so every one of these read
    * `model.annotations` off a null and threw a TypeError out of `supatype push`. Not reachable
    * from our own extractor, which never emits a null model; reachable from a hand-edited or
    * third-party AST, and the failure is a stack trace rather than the entry being skipped.

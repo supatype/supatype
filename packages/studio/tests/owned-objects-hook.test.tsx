@@ -2,8 +2,9 @@
 import React, { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import type { ProjectProxy } from "../src/hooks/useProjectProxy.js"
+import type { ProjectProxy, SqlResult } from "../src/hooks/useProjectProxy.js"
 import { ownedKey, useOwnedObjects, type OwnedObjects } from "../src/lib/owned-objects.js"
+import { testProxy } from "./support.js"
 
 /** useOwnedObjects: a ledger this role cannot read owns nothing; any other failure is reported, not hidden. */
 
@@ -17,7 +18,7 @@ function Probe({ proxy, schema = "public" }: { proxy: ProjectProxy; schema?: str
 }
 
 function proxyAnswering(answer: () => Promise<{ rows: Record<string, unknown>[] }>): ProjectProxy {
-  return { metadata: answer } as unknown as ProjectProxy
+  return testProxy({ metadata: async () => ({ rowCount: null, ...(await answer()) }) })
 }
 
 async function read(proxy: ProjectProxy): Promise<OwnedObjects> {
@@ -29,7 +30,7 @@ async function read(proxy: ProjectProxy): Promise<OwnedObjects> {
 }
 
 beforeEach(() => {
-  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true
   seen = null
   container = document.createElement("div")
   root = createRoot(container)
@@ -106,13 +107,13 @@ describe("useOwnedObjects()", () => {
   })
 
   it("never shows the previous schema's objects while the next schema's are loading", async () => {
-    let release: (rows: { rows: Record<string, unknown>[] }) => void = () => {}
+    let release: (result: SqlResult) => void = () => {}
     const proxy = proxyAnswering(async () => ({ rows: [] }))
     proxy.metadata = async (_name: string, params?: Record<string, unknown>) =>
       params?.["schema"] === "public"
         ? { rows: [{ kind: "index", parent: "posts", name: "i" }], rowCount: 1 }
-        : new Promise((resolve) => {
-            release = resolve as typeof release
+        : new Promise<SqlResult>((resolve) => {
+            release = resolve
           })
     expect([...(await read(proxy)).owned]).toEqual([ownedKey("index", "posts", "i")])
 
@@ -121,7 +122,7 @@ describe("useOwnedObjects()", () => {
     expect(seen!.owned.size).toBe(0)
 
     await act(async () => {
-      release({ rows: [{ kind: "index", parent: "invoices", name: "j" }] })
+      release({ rows: [{ kind: "index", parent: "invoices", name: "j" }], rowCount: 1 })
       await Promise.resolve()
     })
     expect([...seen!.owned]).toEqual([ownedKey("index", "invoices", "j")])

@@ -12,6 +12,6 @@
     "noEmit": true,
     "types": ["node", "vite/client"]
   },
-  "include": ["./**/*.ts"],
+  "include": ["../../ts-reset.d.ts", "./**/*.ts"],
   "exclude": ["functions", "supatype/generated", "node_modules"]
 }

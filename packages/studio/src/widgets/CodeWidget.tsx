@@ -46,7 +46,7 @@ export function CodeWidget({ config, value, onChange, readOnly }: WidgetProps): 
           onChange={(next) => {
             // `lang` is carried through unchanged: it comes from the schema, and dropping it here
             // would rewrite the row's shape on every keystroke.
-            onChange?.({ ...current, source: next } as never)
+            onChange?.({ ...current, source: next })
           }}
           readOnly={readOnly}
           extensions={extensions}

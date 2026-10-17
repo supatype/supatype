@@ -25,6 +25,7 @@ import {
   type Testable,
 } from "./kinds.js"
 import { fieldName } from "./generate-schema.js"
+import { at, isRecord, stringAt } from "../lib/json.js"
 import { rowColumns, type RowColumn } from "./row-type.js"
 import { createClient } from "@supatype/client"
 import { pathToFileURL } from "node:url"
@@ -99,6 +100,18 @@ interface ColumnRow {
   is_nullable: string
 }
 
+/** A row of the catalogue dump field-conformance.sh writes: four text columns of information_schema. */
+function isColumnRow(value: unknown): value is ColumnRow {
+  return (["column_name", "data_type", "udt_name", "is_nullable"] as const).every(
+    (k) => stringAt(value, k) !== undefined,
+  )
+}
+
+/** The pgType the AST declares for a field, or "" when it declares none. */
+function declaredPgType(fields: unknown, name: string): string {
+  return stringAt(at(at(at(fields, name), "annotations"), "db"), "pgType") ?? ""
+}
+
 async function main(): Promise<void> {
   const kinds = testableKinds()
   console.log(`\n==> ${kinds.length} declarable kinds, on a real database`)
@@ -108,9 +121,11 @@ async function main(): Promise<void> {
   // Read from the catalogue dump the runner takes through `docker exec`, rather than by connecting:
   // nothing guarantees Postgres is published to the host, and a harness that needs it to be fails
   // for a reason that has nothing to do with the thing under test.
-  const rows = JSON.parse(
-    readFileSync(process.env["CONFORMANCE_COLUMNS"]!, "utf8"),
-  ) as ColumnRow[]
+  const dumped = JSON.parse(readFileSync(process.env["CONFORMANCE_COLUMNS"]!, "utf8"))
+  if (!Array.isArray(dumped) || !dumped.every(isColumnRow)) {
+    throw new Error("CONFORMANCE_COLUMNS does not hold the catalogue rows field-conformance.sh dumps")
+  }
+  const rows = dumped
   const byName = new Map(rows.map((r) => [r.column_name, r]))
 
   console.log("\n==> 1. the column Postgres created")
@@ -131,15 +146,14 @@ async function main(): Promise<void> {
   // The contract consumers generate code from. `money` said TEXT for a NUMERIC column, so a parser
   // written from it rejected every value the column returns.
   console.log("\n==> 2. the AST publishes the type the column has")
-  const ast = JSON.parse(
-    readFileSync(join(PROJECT, ".supatype", "schema.ast.json"), "utf8"),
-  ) as { models: { name: string; fields: Record<string, { annotations?: { db?: { pgType?: string } } }> }[] }
-  const probe = ast.models.find((m) => m.name === "probeAll")
+  const ast = JSON.parse(readFileSync(join(PROJECT, ".supatype", "schema.ast.json"), "utf8"))
+  const models = at(ast, "models")
+  const probe = Array.isArray(models) ? models.find((m) => stringAt(m, "name") === "probeAll") : undefined
   for (const [kind] of kinds) {
     // A relation carries no pgType of its own: the column is a foreign key the engine derives, and
     // its type comes from the referenced primary key. Nothing to compare.
     if (kind === "relation") continue
-    const declared = probe?.fields[fieldName(kind)]?.annotations?.db?.pgType ?? ""
+    const declared = declaredPgType(at(probe, "fields"), fieldName(kind))
     const col = byName.get(columnOf(kind))
     if (!col || declared === "") {
       check(false, `${kind}: AST publishes a pgType`, `declared=${declared || "(none)"}`)
@@ -210,8 +224,8 @@ async function main(): Promise<void> {
 
     // Then through the real client, which is where the repair lives. Reading with `fetch` alone
     // tested PostgREST and never the thing we ship.
-    const parsed = JSON.parse(wire) as Record<string, unknown>[]
-    const [row] = parsed
+    const parsed = JSON.parse(wire)
+    const row = Array.isArray(parsed) && isRecord(parsed[0]) ? parsed[0] : undefined
     for (const [kind, spec] of writable) {
       // Non-exact kinds are graded on the parsed value, which is correct for them: a `text` or
       // `boolean` column loses nothing to `JSON.parse`.

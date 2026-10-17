@@ -7,7 +7,7 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["vite/client"]
   },
-  "include": ["src"],
+  "include": ["../../ts-reset.d.ts", "src"],
   "references": [
     { "path": "../client" }
   ]

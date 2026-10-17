@@ -17,6 +17,7 @@ import {
 import "@xyflow/react/dist/style.css"
 import dagre, { type EdgeLabel, type GraphLabel, type NodeLabel } from "@dagrejs/dagre"
 import { cn } from "../lib/utils.js"
+import { isJsonObject } from "../lib/json.js"
 import { Badge, Button, Card, Th, Td } from "../components/ui.js"
 import { useProjectProxy, type SchemaTable } from "../hooks/useProjectProxy.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
@@ -106,8 +107,11 @@ const FIELD_HEIGHT = 22
 const CROSS_REF_WIDTH = 160
 const CROSS_REF_HEIGHT = 28
 
-function getNodeHeight(fields: FieldMeta[]): number {
-  return NODE_HEADER + fields.length * FIELD_HEIGHT + 8
+/** A table node's height from its fields; 200 for a node that carries no table. */
+function tableNodeHeight(data: Record<string, unknown>): number {
+  const table = data["table"]
+  const fields = isJsonObject(table) ? table["fields"] : undefined
+  return Array.isArray(fields) ? NODE_HEADER + fields.length * FIELD_HEIGHT + 8 : 200
 }
 
 function applyDagreLayout(
@@ -123,11 +127,7 @@ function applyDagreLayout(
     const isCrossRef = node.type === "crossSchemaRef"
     g.setNode(node.id, {
       width: node.measured?.width ?? (isCrossRef ? CROSS_REF_WIDTH : NODE_WIDTH),
-      height: node.measured?.height ?? (isCrossRef
-        ? CROSS_REF_HEIGHT
-        : (node.data as { table?: { fields: FieldMeta[] } }).table
-          ? getNodeHeight((node.data as { table: { fields: FieldMeta[] } }).table.fields)
-          : 200),
+      height: node.measured?.height ?? (isCrossRef ? CROSS_REF_HEIGHT : tableNodeHeight(node.data)),
     })
   }
   for (const edge of edges) {
@@ -426,7 +426,8 @@ function SchemaSelector({
   useEffect(() => {
     if (!open) return
     const handler = (e: MouseEvent) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as globalThis.Node | null)) {
+      const inside = e.target instanceof globalThis.Node && wrapperRef.current?.contains(e.target) === true
+      if (wrapperRef.current && !inside) {
         setOpen(false)
         setSearch("")
       }

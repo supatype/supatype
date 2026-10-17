@@ -6,5 +6,5 @@
     "rootDir": "..",
     "types": ["node"]
   },
-  "include": ["./**/*.ts", "../src/**/*.ts"]
+  "include": ["../../../ts-reset.d.ts", "./**/*.ts", "../src/**/*.ts"]
 }

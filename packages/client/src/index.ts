@@ -10,6 +10,8 @@ import type { RealtimePayload } from "./realtime.js"
 import { subscribeToTable, type TableSubscribeOptions, type TableSubscription } from "./table-subscription.js"
 import { PostgrestError, transportFailure } from "./errors.js"
 import { createRetryFetch } from "./retry.js"
+import { isJsonObject, readJsonObject } from "./json.js"
+import { decodeJwtPayload } from "./jwt.js"
 import { warnIfServerlessDirectConnection } from "./fetch-with-retry.js"
 import type {
   AnyDatabase,
@@ -94,6 +96,7 @@ export {
   fieldKindsAreRegistered,
   forgetRegisteredFieldKinds,
   type FieldKindsDocument,
+  type UnrecognisedFieldKindsDocument,
 } from "./field-kinds-registry.js"
 export { fetchWithRetry, detectServerlessEnvironment, warnIfServerlessDirectConnection } from "./fetch-with-retry.js"
 export type { FetchOptions, ServerlessDetectionResult } from "./fetch-with-retry.js"
@@ -295,16 +298,39 @@ export interface GlobalClient<TRow extends Record<string, unknown> = Record<stri
 function jwtRole(token: string): string | null {
   const parts = token.split(".")
   if (parts.length !== 3) return null
-  try {
-    const payloadJson =
-      typeof atob === "function"
-        ? atob(parts[1] ?? "")
-        : Buffer.from(parts[1] ?? "", "base64").toString("utf-8")
-    const payload = JSON.parse(payloadJson) as Record<string, unknown>
-    return typeof payload["role"] === "string" ? payload["role"] : null
-  } catch {
-    return null
+  const role = decodeJwtPayload(parts[1] ?? "")?.["role"]
+  return typeof role === "string" ? role : null
+}
+
+/**
+ * The boundary between a function's answer and the return type the generated schema declares.
+ *
+ * A database or edge function may answer with any JSON value (an edge function with text, too), so
+ * the only thing to check is that there is a value. That it has the declared type is the generated
+ * schema's claim about the function, which nothing on the client can check.
+ */
+function isDeclaredReturn<T>(value: unknown): value is T {
+  return value !== undefined
+}
+
+/** What a GraphQL endpoint's JSON answer means: its data, and the first error it reports. */
+function graphqlResult(json: unknown, res: Response): { data: unknown; error: SupatypeError | null } {
+  if (!isJsonObject(json)) {
+    return { data: null, error: { message: `GraphQL endpoint returned JSON that is not an object (HTTP ${res.status})`, status: res.status } }
   }
+  const data = json["data"] ?? null
+  if (!res.ok) {
+    const message =
+      typeof json["message"] === "string" ? json["message"]
+      : typeof json["error"] === "string" ? json["error"]
+      : `GraphQL request failed (HTTP ${res.status})`
+    return { data, error: { message, status: res.status } }
+  }
+  const errors = json["errors"]
+  if (errors === undefined) return { data, error: null }
+  const first = Array.isArray(errors) ? errors[0] : undefined
+  const message = isJsonObject(first) && typeof first["message"] === "string" ? first["message"] : "GraphQL error"
+  return { data, error: { message } }
 }
 
 /**
@@ -444,7 +470,7 @@ class FunctionsClient {
       )
 
       if (!res.ok) {
-        const body = await res.json().catch(() => ({})) as Record<string, unknown>
+        const body = await readJsonObject(res)
         return {
           data: null,
           error: {
@@ -456,14 +482,9 @@ class FunctionsClient {
       }
 
       const contentType = res.headers.get("content-type") ?? ""
-      if (contentType.includes("application/json")) {
-        const data = await res.json() as EdgeFunctionReturns<TFn>
-        return { data, error: null }
-      }
-
-      // Return text for non-JSON responses
-      const text = await res.text()
-      return { data: text as unknown as EdgeFunctionReturns<TFn>, error: null }
+      // Text for a response that is not JSON.
+      const data = contentType.includes("application/json") ? await res.json() : await res.text()
+      return { data: isDeclaredReturn<EdgeFunctionReturns<TFn>>(data) ? data : null, error: null }
     } catch (e) {
       return { data: null, error: transportFailure(e) }
     }
@@ -659,7 +680,8 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
 
     global<TRow extends Record<string, unknown> = Record<string, unknown>>(name: string): GlobalClient<TRow> {
       const tableName = `_global_${name}`
-      type TDef = { Row: TRow; Insert: TRow; Update: Partial<TRow> }
+      // A global is one row that always exists, so a write to it names only the fields it changes.
+      type TDef = { Row: TRow; Insert: Partial<TRow>; Update: Partial<TRow> }
       return {
         async get(): Promise<{ data: TRow | null; error: SupatypeError | null }> {
           const tc = tableClient<TDef, Record<string, TDef>>(tableName)
@@ -668,8 +690,8 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
         },
         async update(data: Partial<TRow>): Promise<{ data: TRow | null; error: SupatypeError | null }> {
           const tc = tableClient<TDef>(tableName)
-          const result = await tc.upsert(data as TRow)
-          const row = Array.isArray(result.data) ? (result.data[0] as TRow | undefined) ?? null : null
+          const result = await tc.upsert(data)
+          const row = result.data?.[0] ?? null
           return { data: row, error: result.error }
         },
       }
@@ -705,24 +727,13 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
       } catch (e) {
         return { data: null, error: transportFailure(e) }
       }
-      let json: Record<string, unknown>
+      let json: unknown
       try {
-        json = await res.json() as Record<string, unknown>
+        json = await res.json()
       } catch {
         return { data: null, error: { message: `GraphQL endpoint returned a non-JSON response (HTTP ${res.status} ${res.statusText})` } }
       }
-      if (!res.ok) {
-        const message =
-          typeof json["message"] === "string" ? json["message"]
-          : typeof json["error"] === "string" ? json["error"]
-          : `GraphQL request failed (HTTP ${res.status})`
-        return { data: json["data"] ?? null, error: { message, status: res.status } }
-      }
-      if (json["errors"] !== undefined) {
-        const errors = json["errors"] as Array<{ message: string }>
-        return { data: json["data"] ?? null, error: { message: (errors[0]?.message ?? "GraphQL error") } }
-      }
-      return { data: json["data"] ?? null, error: null }
+      return graphqlResult(json, res)
     },
 
     async rpc<TFn extends FunctionNames<TDatabase>>(
@@ -760,7 +771,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
       }
 
       if (!res.ok) {
-        const body = await res.json().catch(() => ({})) as Record<string, unknown>
+        const body = await readJsonObject(res)
         const pgError = PostgrestError.fromResponse(
           {
             message: typeof body["message"] === "string" ? body["message"] : undefined,
@@ -784,8 +795,8 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
         return { data: null, error: null }
       }
 
-      const data = await res.json() as FunctionReturns<TDatabase, TFn>
-      return { data, error: null }
+      const data = await res.json()
+      return { data: isDeclaredReturn<FunctionReturns<TDatabase, TFn>>(data) ? data : null, error: null }
     },
   }
 }

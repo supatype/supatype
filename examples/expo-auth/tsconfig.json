@@ -5,6 +5,7 @@
     "exactOptionalPropertyTypes": true
   },
   "include": [
+    "../../ts-reset.d.ts",
     "**/*.ts",
     "**/*.tsx",
     "supatype/generated/**/*.d.ts"

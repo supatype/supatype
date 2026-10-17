@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest"
 import { AuthClient } from "../src/auth.js"
 import { createClient } from "../src/index.js"
 import type { AuthChangeEvent } from "../src/types.js"
+import { fetchCall, fetchReturning, jsonBody } from "./support/fetch-mock.js"
 
 /**
  * The OAuth return: the auth server sends the browser back with the session in the URL, as tokens in
@@ -85,9 +86,7 @@ describe("detectSessionInUrl", () => {
     const { replaceState, store } = stubBrowser("https://app.example/cb?next=%2Fhome&code=auth-code-1", {
       [VERIFIER_KEY]: "verifier-1",
     })
-    const fetch = vi.fn().mockResolvedValue(
-      jsonResponse({ access_token: accessToken(), refresh_token: "rt-2", expires_in: 3600, token_type: "bearer", user: RAW_USER }),
-    )
+    const fetch = fetchReturning({ access_token: accessToken(), refresh_token: "rt-2", expires_in: 3600, token_type: "bearer", user: RAW_USER })
     vi.stubGlobal("fetch", fetch)
 
     const client = new AuthClient(AUTH_URL, HEADERS)
@@ -95,9 +94,9 @@ describe("detectSessionInUrl", () => {
     const { error } = await client.initialize()
 
     expect(error).toBeNull()
-    const [url, init] = fetch.mock.calls[0] as [string, RequestInit]
+    const { url, init } = fetchCall(fetch)
     expect(url).toBe(`${AUTH_URL}/token?grant_type=pkce`)
-    expect(JSON.parse(init.body as string)).toEqual({ auth_code: "auth-code-1", code_verifier: "verifier-1" })
+    expect(jsonBody(init)).toEqual({ auth_code: "auth-code-1", code_verifier: "verifier-1" })
     expect(events).toEqual(["SIGNED_OUT", "SIGNED_IN"])
     expect(store.has(VERIFIER_KEY)).toBe(false)
     expect(replaceState).toHaveBeenCalledWith(null, "", "https://app.example/cb?next=%2Fhome")

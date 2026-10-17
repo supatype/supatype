@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { test, describe, before, after, beforeEach } from "node:test"
 import { CONTROL_PLANE_SECRET_HEADER } from "../src/auth.js"
 import { setAuditWriter, type AuditEntry } from "../src/audit.js"
-import { startServer, TEST_SECRET, request, type ControlPlaneServer } from "./helpers.js"
+import { jsonObject, startServer, TEST_SECRET, request, type ControlPlaneServer } from "./helpers.js"
 
 /**
  * The Realtime Inspector's self-host routes: the control plane authenticates the Studio user (the
@@ -98,7 +98,7 @@ describe("realtime inspector routes", () => {
 
   async function get(path: string, headers: Record<string, string>): Promise<{ status: number; json: Record<string, unknown> }> {
     const res = await fetch(`${baseUrl}${path}`, { headers })
-    return { status: res.status, json: (await res.json()) as Record<string, unknown> }
+    return { status: res.status, json: jsonObject(await res.json()) }
   }
 
   test("GET /project names the project this control plane serves", async () => {

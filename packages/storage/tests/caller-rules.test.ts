@@ -19,11 +19,19 @@
 import { spawnSync } from "node:child_process"
 import { createHmac, randomUUID } from "node:crypto"
 import { readFileSync } from "node:fs"
-import { connect, type AddressInfo } from "node:net"
+import { connect } from "node:net"
 import type { Server } from "node:http"
 import { join } from "node:path"
 import pg from "pg"
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
+import { isArrayOf, isShape, isString, type Guard } from "../src/json.js"
+
+/** A response's JSON body, failing the test when the guard refuses it. */
+async function bodyOf<T>(res: Response, guard: Guard<T>): Promise<T> {
+  const body = await res.json()
+  if (!guard(body)) throw new Error(`Unexpected body from ${res.url}: ${JSON.stringify(body)}`)
+  return body
+}
 
 const SECRET = "caller-rules-test-secret-at-least-32-chars"
 const FIXTURES = join(import.meta.dirname, "fixtures")
@@ -119,9 +127,11 @@ async function startService(databaseUrl: string): Promise<void> {
   const { createServer } = await import("../src/server.js")
   server = createServer()
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
-  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+  const address = server.address()
+  if (address === null || typeof address === "string") throw new Error("storage service has no TCP address")
+  base = `http://127.0.0.1:${address.port}`
   for (let attempt = 0; attempt < 60; attempt++) {
-    const health = (await (await fetch(`${base}/health`)).json()) as { status: string }
+    const health = await bodyOf(await fetch(`${base}/health`), isShape({ status: isString }))
     if (health.status === "ok") return
     await new Promise((r) => setTimeout(r, 250))
   }
@@ -192,7 +202,7 @@ async function list(token: string, bucket: string, prefix = ""): Promise<string[
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
     body: JSON.stringify({ prefix }),
   })
-  return ((await res.json()) as { name: string }[]).map((o) => o.name)
+  return (await bodyOf(res, isArrayOf(isShape({ name: isString })))).map((o) => o.name)
 }
 
 async function row(bucket: string, name: string): Promise<{ owner: string | null; version: string | null } | undefined> {
@@ -334,6 +344,19 @@ describe.skipIf(!dockerAvailable)("bucket rules, enforced by Postgres", () => {
 
     expect(await list(y.token, "vault")).not.toContain(name)
     expect(await list(x.token, "vault")).toContain(name)
+  })
+
+  // Refused before the handler reads them. A body that was not JSON used to be a 500.
+  it.each([
+    ["is not JSON", "{"],
+    ["names a prefix that is not text", JSON.stringify({ prefix: 5 })],
+  ])("answers 400 to a list request whose body %s", async (_label, body) => {
+    const res = await fetch(`${base}/object/list/avatars`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${user().token}`, "content-type": "application/json" },
+      body,
+    })
+    expect(res.status).toBe(400)
   })
 
   it("treats a prefix as text, not a LIKE pattern", async () => {
@@ -497,7 +520,7 @@ describe.skipIf(!dockerAvailable)("bucket rules, enforced by Postgres", () => {
       headers: { authorization: `Bearer ${x.token}`, "content-type": "application/json" },
       body: JSON.stringify({ expiresIn: 60 }),
     })
-    const url = ((await signed.json()) as { signedURL: string }).signedURL
+    const url = (await bodyOf(signed, isShape({ signedURL: isString }))).signedURL
     expect(url.startsWith("/object/sign/avatars/")).toBe(true)
     await upload(x.token, "avatars", name, "second", true)
     const served = await fetch(`${base}${url}`)

@@ -11,11 +11,10 @@ type Query = Parameters<typeof foreignTables>[0]
 /** A query function that answers the ledger probe with `ledger` and records every statement. */
 function fake(ledger: boolean, tables: string[]): { q: Query; seen: string[] } {
   const seen: string[] = []
-  const q = (async <T,>(sql: string): Promise<T[]> => {
+  const q: Query = async (sql) => {
     seen.push(sql)
-    const rows = sql.includes("to_regclass") ? [{ present: ledger }] : tables.map((relname) => ({ relname }))
-    return rows as unknown as T[]
-  }) as Query
+    return sql.includes("to_regclass") ? [{ present: ledger }] : tables.map((relname) => ({ relname }))
+  }
   return { q, seen }
 }
 

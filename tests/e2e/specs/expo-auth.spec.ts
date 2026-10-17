@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test"
+import { isRecord, stringAt } from "../lib/json.js"
 
 /**
  * The expo-auth example, run as its Expo web build and driven as a person drives it.
@@ -31,20 +32,16 @@ test.use({ launchOptions: { args: [`--host-resolver-rules=MAP ${STUB_HOST} 127.0
 
 const freshEmail = (label: string): string => `expo-${label}-${RUN}@example.com`
 
-interface MailpitSummary {
-  ID: string
-}
-
 /** The first link to the auth server's /verify endpoint in the newest message to `email`. */
 async function emailedLink(email: string): Promise<string> {
   const deadline = Date.now() + 30_000
   while (Date.now() < deadline) {
     const res = await fetch(`${MAILPIT}/api/v1/search?query=${encodeURIComponent(`to:${email}`)}`)
-    const found = (await res.json()) as { messages?: MailpitSummary[] }
-    const first = found.messages?.[0]
+    const found = await res.json()
+    const first = isRecord(found) && Array.isArray(found["messages"]) ? stringAt(found["messages"][0], "ID") : undefined
     if (first !== undefined) {
-      const full = (await (await fetch(`${MAILPIT}/api/v1/message/${first.ID}`)).json()) as { HTML?: string; Text?: string }
-      const body = `${full.HTML ?? ""}\n${full.Text ?? ""}`.replaceAll("&amp;", "&")
+      const full = await (await fetch(`${MAILPIT}/api/v1/message/${first}`)).json()
+      const body = `${stringAt(full, "HTML") ?? ""}\n${stringAt(full, "Text") ?? ""}`.replaceAll("&amp;", "&")
       const link = /https?:\/\/[^\s"'<>]+\/verify\?[^\s"'<>]+/.exec(body)?.[0]
       if (link !== undefined) return link
       throw new Error(`the message to ${email} has no /verify link`)
@@ -161,7 +158,7 @@ test.describe("expo-auth on web", () => {
     expect(authorize.searchParams.get("code_challenge") ?? "").toMatch(/^[A-Za-z0-9_-]{43}$/)
 
     await expectSignedInAs(page, STUB_EMAIL)
-    const calls = (await (await fetch(`${STUB}/calls`)).json()) as string[]
+    const calls = await (await fetch(`${STUB}/calls`)).json()
     expect(calls).toEqual(
       expect.arrayContaining(["GET /login/oauth/authorize", "POST /login/oauth/access_token", "GET /api/v3/user"]),
     )

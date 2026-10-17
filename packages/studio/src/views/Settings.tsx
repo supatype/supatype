@@ -5,6 +5,7 @@ import { useApiQuery } from "../hooks/useApiQuery.js"
 import { useProjectProxy } from "../hooks/useProjectProxy.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { cn } from "../lib/utils.js"
+import { type Guard, isBoolean, isJsonObject, isNumber, isShape, isString, optional, readJson, readJsonObject } from "../lib/json.js"
 import { Badge, Button, Card, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ApiCorsSettings } from "./ApiCorsSettings.js"
@@ -91,21 +92,24 @@ function GeneralSettings(): React.ReactElement {
 
 // ─── API Keys Tab ─────────────────────────────────────────────────────────────
 
+/** The anon key from the cloud host's runtime config, when a cloud host is serving Studio. */
+function runtimeAnonKey(): string | undefined {
+  if (typeof window === "undefined" || !("__SUPATYPE_CLOUD__" in window)) return undefined
+  const cloud = window.__SUPATYPE_CLOUD__
+  const key = isJsonObject(cloud) ? cloud["anonKey"] : undefined
+  return typeof key === "string" ? key : undefined
+}
+
 function ApiKeysSettings(): React.ReactElement {
   const [showKeys, setShowKeys] = useState(false)
   const [copied, setCopied] = useState<string | null>(null)
-
-  const runtime =
-    (typeof window !== "undefined"
-      ? (window as unknown as { __SUPATYPE_CLOUD__?: { anonKey?: string } }).__SUPATYPE_CLOUD__
-      : undefined) ?? {}
 
   // Only the anon key. It is publishable by design, safe in a browser bundle and
   // safe to show. The service role key is deliberately absent: anything that puts
   // it in the browser makes it readable by anyone who opens devtools, so it is
   // never shipped to Studio and therefore never displayable here.
   const anonKey =
-    runtime.anonKey ??
+    runtimeAnonKey() ??
     (typeof import.meta !== "undefined"
       ? (import.meta as ImportMeta & { env?: Record<string, string> }).env?.["VITE_SUPATYPE_ANON_KEY"]
       : undefined) ??
@@ -595,13 +599,36 @@ function settingText(value: unknown): string {
   return typeof value === "string" ? value : "-"
 }
 
+/** GET /admin/v1/database/credentials/status. */
+interface CredentialStatus {
+  mode: string
+  password_status: string
+  can_reveal: boolean
+  generation: number
+  message?: string
+}
+
+const isCredentialStatus: Guard<CredentialStatus> = isShape({
+  mode: isString,
+  password_status: isString,
+  can_reveal: isBoolean,
+  generation: isNumber,
+  message: optional(isString),
+})
+
+/** The credentials API's refusal, in its own words when it gave any. */
+function credentialError(body: Record<string, unknown>, fallback: string): string {
+  const error = body["error"]
+  return typeof error === "string" ? error : fallback
+}
+
 function DatabaseSettings({ client }: { client: ReturnType<typeof useStudioClient> }): React.ReactElement {
   const proxy = useProjectProxy()
   // Through the metadata catalogue (RQ3b), so a viewer sees the settings too.
   const { data: dbSettings } = useApiQuery(() => proxy.metadata("database_settings").then((r) => r.rows[0] ?? {}), [proxy])
   const maxConns = dbSettings === null ? null : settingText(dbSettings["max_connections"])
   const stmtTimeout = dbSettings === null ? null : settingText(dbSettings["statement_timeout"])
-  const [credStatus, setCredStatus] = useState<{ mode: string; password_status: string; can_reveal: boolean; generation: number; message?: string } | null>(null)
+  const [credStatus, setCredStatus] = useState<CredentialStatus | null>(null)
   const [credLoading, setCredLoading] = useState(false)
   const [credError, setCredError] = useState<string | null>(null)
   const [revealedPassword, setRevealedPassword] = useState<string | null>(null)
@@ -622,8 +649,7 @@ function DatabaseSettings({ client }: { client: ReturnType<typeof useStudioClien
         credentials: "include",
       })
       if (!res.ok) throw new Error(`status request failed (${res.status})`)
-      const data = await res.json() as { mode: string; password_status: string; can_reveal: boolean; generation: number; message?: string }
-      setCredStatus(data)
+      setCredStatus(await readJson(res, isCredentialStatus))
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to load credential status"
       setCredError(msg)
@@ -645,9 +671,10 @@ function DatabaseSettings({ client }: { client: ReturnType<typeof useStudioClien
         headers: authHeaders,
         credentials: "include",
       })
-      const data = await res.json() as { password?: string; error?: string }
-      if (!res.ok || !data.password) throw new Error(data.error ?? `first-view failed (${res.status})`)
-      setRevealedPassword(data.password)
+      const data = await readJsonObject(res)
+      const password = data["password"]
+      if (!res.ok || typeof password !== "string" || !password) throw new Error(credentialError(data, `first-view failed (${res.status})`))
+      setRevealedPassword(password)
       await loadCredentialStatus()
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to reveal password"
@@ -667,8 +694,7 @@ function DatabaseSettings({ client }: { client: ReturnType<typeof useStudioClien
         headers: authHeaders,
         credentials: "include",
       })
-      const data = await res.json() as { error?: string }
-      if (!res.ok) throw new Error(data.error ?? `rotate failed (${res.status})`)
+      if (!res.ok) throw new Error(credentialError(await readJsonObject(res), `rotate failed (${res.status})`))
       await loadCredentialStatus()
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to rotate password"

@@ -10,6 +10,7 @@
  * Usage: bash tests/integration/scripts/auth-flows-e2e.sh
  */
 import { createHmac } from "node:crypto"
+import { at, isRecord, isRecordArray, stringAt } from "../lib/json.js"
 
 const BASE = process.env.SUPATYPE_URL ?? "http://127.0.0.1:18473"
 const MAILPIT = process.env.MAILPIT_URL ?? "http://127.0.0.1:18025"
@@ -36,14 +37,14 @@ async function post(path: string, body: unknown, headers: Record<string, string>
   } catch {
     /* not json */
   }
-  return { status: res.status, body: parsed as Record<string, unknown> | null, text }
+  return { status: res.status, body: isRecord(parsed) ? parsed : null, text }
 }
 
 /** The payload half of a JWT, which is where the assurance level lives. */
 function claims(jwt: string): Record<string, unknown> {
-  const payload: unknown = JSON.parse(Buffer.from(jwt.split(".")[1] ?? "", "base64").toString("utf8"))
-  if (typeof payload !== "object" || payload === null) throw new Error("JWT payload is not an object")
-  return payload as Record<string, unknown>
+  const payload = JSON.parse(Buffer.from(jwt.split(".")[1] ?? "", "base64").toString("utf8"))
+  if (!isRecord(payload)) throw new Error("JWT payload is not an object")
+  return payload
 }
 
 /** RFC 6238 TOTP, so the code offered is one the server will compute too. */
@@ -93,8 +94,7 @@ async function mfa(): Promise<void> {
 
   const enrolled = await post("/auth/v1/factors", { factor_type: "totp", friendly_name: "e2e" }, asUser)
   const factorId = enrolled.body?.["id"]
-  const totpBlock = enrolled.body?.["totp"] as Record<string, unknown> | undefined
-  const secret = totpBlock?.["secret"]
+  const secret = at(enrolled.body?.["totp"], "secret")
   if (typeof factorId !== "string" || typeof secret !== "string") {
     bad(`enrol returned no factor and secret (${enrolled.status}): ${enrolled.text.slice(0, 200)}`)
     return
@@ -152,20 +152,16 @@ async function mfa(): Promise<void> {
 
 // ─── Password reset ──────────────────────────────────────────────────────────
 
-interface MailpitMessage {
-  ID: string
-}
-
 async function latestMessageTo(email: string): Promise<string> {
   for (let attempt = 0; attempt < 40; attempt++) {
     const res = await fetch(`${MAILPIT}/api/v1/search?query=${encodeURIComponent(`to:${email}`)}`)
     if (res.ok) {
-      const found = (await res.json()) as { messages?: MailpitMessage[] }
-      const first = found.messages?.[0]
+      const messages = at(await res.json(), "messages")
+      const first = Array.isArray(messages) ? stringAt(messages[0], "ID") : undefined
       if (first) {
-        const full = await fetch(`${MAILPIT}/api/v1/message/${first.ID}`)
-        const msg = (await full.json()) as { Text?: string; HTML?: string }
-        return `${msg.Text ?? ""}\n${msg.HTML ?? ""}`
+        const full = await fetch(`${MAILPIT}/api/v1/message/${first}`)
+        const msg = await full.json()
+        return `${stringAt(msg, "Text") ?? ""}\n${stringAt(msg, "HTML") ?? ""}`
       }
     }
     await new Promise((r) => setTimeout(r, 500))
@@ -191,7 +187,7 @@ async function passwordReset(): Promise<void> {
   try {
     body = await latestMessageTo(email)
   } catch (err) {
-    bad((err as Error).message)
+    bad(err instanceof Error ? err.message : String(err))
     return
   }
   // The link carries the *hash*, which is what the column on the row holds too,
@@ -251,7 +247,7 @@ async function get(path: string, token: string, key = ANON) {
   }
   return {
     status: res.status,
-    rows: Array.isArray(parsed) ? (parsed as Record<string, unknown>[]) : null,
+    rows: isRecordArray(parsed) ? parsed : null,
     text,
   }
 }
@@ -282,7 +278,7 @@ async function sessionsAndRls(): Promise<void> {
   for (const which of ["a", "b"]) {
     const email = `rls-${which}-${stamp}@example.test`
     const res = await post("/auth/v1/signup", { email, password: `Correct-Horse-${which}1` })
-    const id = (res.body?.["user"] as { id?: string } | undefined)?.id
+    const id = stringAt(res.body?.["user"], "id")
     const access = res.body?.["access_token"]
     const refresh = res.body?.["refresh_token"]
     if (typeof id !== "string" || typeof access !== "string" || typeof refresh !== "string") {
@@ -291,7 +287,11 @@ async function sessionsAndRls(): Promise<void> {
     }
     users.push({ id, access, refresh, email })
   }
-  const [a, b] = users as [(typeof users)[0], (typeof users)[0]]
+  const [a, b] = users
+  if (a === undefined || b === undefined) {
+    bad("the two sign-ups did not both return a session")
+    return
+  }
   if (a.id !== b.id) ok("two sign-ups produce two distinct users")
   else bad("both sign-ups share a user id")
 

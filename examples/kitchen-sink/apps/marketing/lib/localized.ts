@@ -16,13 +16,21 @@ type LocaleMap<T> = { [locale: string]: T }
  */
 export function localized<T>(value: LocaleMap<T> | T | null | undefined, locale: string): T | null {
   if (value === null || value === undefined) return null
-  if (typeof value !== "object") return value
+  if (!isLocaleMap(value)) return value
+  return value[locale] ?? null
+}
 
-  const record = value as Record<string, unknown>
-  // A column that is not localized still arrives as its own object (a lexical root, say), so the
-  // locale key missing is only meaningful when some locale key is present.
-  const looksLocalized = Object.keys(record).some((k) => /^[a-z]{2}(-[A-Z]{2})?$/.test(k))
-  if (!looksLocalized) return value as T
-
-  return (record[locale] as T | undefined) ?? null
+/**
+ * The boundary: whether a value is the locale map or the bare value itself.
+ *
+ * A column that is not localized still arrives as its own object (a lexical root, say), so this
+ * looks for a locale key rather than for an object. It checks the keys; the values are taken to be
+ * the `T` the generated row type says they are, which is the one thing it cannot check.
+ */
+function isLocaleMap<T>(value: LocaleMap<T> | T): value is LocaleMap<T> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    Object.keys(value).some((k) => /^[a-z]{2}(-[A-Z]{2})?$/.test(k))
+  )
 }

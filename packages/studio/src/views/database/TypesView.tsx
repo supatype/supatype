@@ -6,6 +6,7 @@ import { useApiQuery } from "../../hooks/useApiQuery.js"
 import { Badge, Button, Card } from "../../components/ui.js"
 import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
+import { cellText } from "../metadata-row.js"
 
 export function TypesView(): React.ReactElement {
   const proxy = useProjectProxy()
@@ -36,7 +37,7 @@ export function TypesView(): React.ReactElement {
       setNewEnumValues("")
       refetch()
     } catch (e) {
-      setRunError((e as Error).message)
+      setRunError(e instanceof Error ? e.message : String(e))
     } finally {
       setRunBusy(false)
     }
@@ -50,7 +51,7 @@ export function TypesView(): React.ReactElement {
       setDropModal(null)
       refetch()
     } catch (e) {
-      setRunError((e as Error).message)
+      setRunError(e instanceof Error ? e.message : String(e))
     } finally {
       setRunBusy(false)
     }
@@ -108,14 +109,14 @@ export function TypesView(): React.ReactElement {
             </thead>
             <tbody>
               {types?.map((row) => (
-                <tr key={row["typname"] as string} className="border-b border-border last:border-0">
-                  <td className="px-4 py-3 font-mono text-sm text-foreground">{row["typname"] as string}</td>
+                <tr key={cellText(row, "typname")} className="border-b border-border last:border-0">
+                  <td className="px-4 py-3 font-mono text-sm text-foreground">{cellText(row, "typname")}</td>
                   <td className="px-4 py-3">
                     <Badge variant={row["typtype"] === "e" ? "indigo" : "blue"}>{row["typtype"] === "e" ? "enum" : "composite"}</Badge>
                   </td>
-                  <td className="px-4 py-3 text-xs text-muted-foreground">{((row["enum_values"] as string[] | null) ?? []).join(", ") || "-"}</td>
+                  <td className="px-4 py-3 text-xs text-muted-foreground">{(Array.isArray(row["enum_values"]) ? row["enum_values"].join(", ") : "") || "-"}</td>
                   <td className="px-4 py-3 text-right">
-                    {sqlWrites ? (<button type="button" className="text-xs text-destructive hover:underline" onClick={() => setDropModal(row["typname"] as string)}>Drop</button>) : null}
+                    {sqlWrites ? (<button type="button" className="text-xs text-destructive hover:underline" onClick={() => setDropModal(cellText(row, "typname"))}>Drop</button>) : null}
                   </td>
                 </tr>
               ))}

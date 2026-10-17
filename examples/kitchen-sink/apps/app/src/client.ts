@@ -1,4 +1,14 @@
 import { createClient } from "../../../supatype/generated/client"
+
+/** The anon key Vite injects at build time. Read through here so a build without it says so. */
+function anonKey(): string {
+  const key: unknown = import.meta.env.VITE_SUPATYPE_ANON_KEY
+  if (typeof key !== "string" || key === "") {
+    throw new Error("VITE_SUPATYPE_ANON_KEY is not set: add it to .env before building the app")
+  }
+  return key
+}
+
 /**
  * One origin for the app and its API.
  *
@@ -8,5 +18,5 @@ import { createClient } from "../../../supatype/generated/client"
  */
 export const supatype = createClient({
   url: typeof window !== "undefined" ? window.location.origin : "http://localhost:54480",
-  anonKey: import.meta.env.VITE_SUPATYPE_ANON_KEY as string,
+  anonKey: anonKey(),
 })

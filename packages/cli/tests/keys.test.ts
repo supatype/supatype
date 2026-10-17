@@ -10,6 +10,8 @@ import { fileURLToPath } from "node:url"
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { isJsonObject, isNumber } from "@supatype/shared"
+import { expectShape, parseJsonAs } from "./support/json.js"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const CLI_BIN = resolve(__dirname, "../bin/supatype.js")
@@ -40,7 +42,7 @@ function runCli(
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function decodeJwtPart(part: string): Record<string, unknown> {
-  return JSON.parse(Buffer.from(part, "base64url").toString("utf8")) as Record<string, unknown>
+  return parseJsonAs(Buffer.from(part, "base64url").toString("utf8"), isJsonObject)
 }
 
 function parseJwt(token: string): { header: Record<string, unknown>; payload: Record<string, unknown> } {
@@ -97,7 +99,7 @@ describe("supatype keys (CLI subprocess)", () => {
     const line = stdout.split("\n").find((l) => l.startsWith("ANON_KEY="))!
     const token = line.replace("ANON_KEY=", "").trim()
     const { payload } = parseJwt(token)
-    const exp = payload["exp"] as number
+    const exp = expectShape(payload["exp"], isNumber)
     expect(exp).toBeGreaterThan(Math.floor(Date.now() / 1000))
   })
 
@@ -108,7 +110,7 @@ describe("supatype keys (CLI subprocess)", () => {
     const getExp = (stdout: string): number => {
       const line = stdout.split("\n").find((l) => l.startsWith("ANON_KEY="))!
       const token = line.replace("ANON_KEY=", "").trim()
-      return (parseJwt(token).payload["exp"]) as number
+      return expectShape(parseJwt(token).payload["exp"], isNumber)
     }
 
     expect(getExp(long.stdout)).toBeGreaterThan(getExp(short.stdout))
@@ -134,7 +136,7 @@ describe("supatype keys (CLI subprocess)", () => {
       writeFileSync(join(tmpDir, ".env"), `JWT_SECRET=${SECRET}\n`, "utf8")
       const { exitCode, stdout } = runCli(["keys"], {
         cwd: tmpDir,
-        env: { JWT_SECRET: undefined as unknown as string },
+        env: { JWT_SECRET: undefined },
       })
       expect(exitCode).toBe(0)
       expect(stdout).toContain("ANON_KEY=")
@@ -148,7 +150,7 @@ describe("supatype keys (CLI subprocess)", () => {
     try {
       const { exitCode, stderr } = runCli(["keys"], {
         cwd: tmpDir,
-        env: { JWT_SECRET: undefined as unknown as string },
+        env: { JWT_SECRET: undefined },
       })
       expect(exitCode).not.toBe(0)
       expect(stderr).toContain("JWT_SECRET")

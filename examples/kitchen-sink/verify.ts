@@ -29,8 +29,13 @@ function anonKey(): string {
   if (fromEnv) return fromEnv
   const env = readFileSync(resolve(import.meta.dirname, ".env"), "utf8")
   const match = env.match(/^ANON_KEY=(.*)$/m)
-  if (!match) throw new Error("no ANON_KEY in .env — run `supatype dev` first")
+  if (!match) throw new Error("no ANON_KEY in .env: run `supatype dev` first")
   return match[1]!.trim().replace(/^"|"$/g, "")
+}
+
+/** A JSON body whose keys can be read; anything else is checked as missing them. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
 const failures: string[] = []
@@ -235,7 +240,7 @@ async function main(): Promise<void> {
   console.log("\n==> a private bucket is private")
   // The public bucket above is reachable by URL alone. This one must not be: a public URL into
   // `ticket-files` is a 400 or 403 for everybody, and a signed URL is the only way in. Asserting
-  // the refusal matters more than asserting the success — a bucket that reads as public would pass
+  // the refusal matters more than asserting the success: a bucket that reads as public would pass
   // every happy-path test ever written against it.
   const tickets = anon.storage.from("ticket-files")
   const privatePath = `verify/${Date.now()}.pdf`
@@ -273,13 +278,14 @@ async function main(): Promise<void> {
   // what happened for as long as the compose generator omitted the variable entirely. A check that
   // only accepted `false` would have passed throughout.
   const wantDbUrl = process.env["EXPECT_FUNCTION_DB_URL"] === "1"
-  const pingBody = (await ping.json().catch(() => ({}))) as { hasDbUrl?: boolean }
+  const pingBody = await ping.json().catch(() => null)
+  const hasDbUrl = isRecord(pingBody) ? pingBody["hasDbUrl"] : undefined
   check(
-    pingBody.hasDbUrl === wantDbUrl,
+    hasDbUrl === wantDbUrl,
     wantDbUrl
       ? "the function was handed the database URL the project opted into"
       : "the function has no database URL, which is the default",
-    `hasDbUrl=${String(pingBody.hasDbUrl)}, expected ${String(wantDbUrl)}`,
+    `hasDbUrl=${String(hasDbUrl)}, expected ${String(wantDbUrl)}`,
   )
 
   // The gate, not the happy path: issue-ticket refuses an anon Bearer with a 401 rather than
@@ -305,9 +311,9 @@ async function main(): Promise<void> {
     },
     body: "{}",
   })
-  const issued = (await signedIssue.json()) as { reference?: string; error?: string }
+  const issued = await signedIssue.json()
   check(
-    signedIssue.status === 201 && typeof issued.reference === "string",
+    signedIssue.status === 201 && isRecord(issued) && typeof issued["reference"] === "string",
     "issue-ticket issues a ticket to a signed-in caller",
     `${signedIssue.status} ${JSON.stringify(issued)}`,
   )

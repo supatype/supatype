@@ -1,9 +1,7 @@
-import { useCallback, useMemo, useState } from "react"
-import { membershipBase } from "../lib/membership-url.js"
-import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
-import { studioGatewayHeaders } from "../lib/studio-gateway-headers.js"
+import { useCallback, useState } from "react"
+import { isJsonObject, isUnknown } from "../lib/json.js"
+import { membershipRequest } from "../lib/membership-request.js"
 import { useAdminClient } from "./useAdminClient.js"
-import { readJsonObject } from "../lib/json.js"
 
 /** What one link covers. */
 export type PreviewScope = "record" | "project"
@@ -62,44 +60,12 @@ export function usePreviewLinks(): UsePreviewLinksReturn {
   const [minting, setMinting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const base = useMemo(() => membershipBase(client.url), [client.url])
-
-  const request = useCallback(
-    async (
-      path: string,
-      init: { method: "GET" | "POST"; body?: Record<string, unknown> },
-    ): Promise<Record<string, unknown>> => {
-      const res = await fetch(`${base}${path}`, {
-        method: init.method,
-        credentials: "include",
-        headers: {
-          // Only where there is a body to describe. On a GET it says nothing, and it is not a
-          // CORS-safelisted value, so it is pure weight on a cross-origin deployment.
-          ...(init.body !== undefined && { "Content-Type": "application/json" }),
-          ...studioGatewayHeaders(),
-          ...studioAuthHeaders(client),
-        },
-        ...(init.body !== undefined && { body: JSON.stringify(init.body) }),
-      })
-      const json = await readJsonObject(res)
-      if (!res.ok) {
-        throw new Error(
-          (json["message"] as string | undefined) ??
-            (json["error"] as string | undefined) ??
-            `Request failed (${res.status})`,
-        )
-      }
-      return json
-    },
-    [base, client],
-  )
-
   const mint = useCallback<UsePreviewLinksReturn["mint"]>(
     async (options) => {
       setMinting(true)
       setError(null)
       try {
-        const body = await request("/preview-links", {
+        const body = await membershipRequest(client, "/preview-links", isJsonObject, {
           method: "POST",
           body: {
             scope: options.scope,
@@ -121,20 +87,19 @@ export function usePreviewLinks(): UsePreviewLinksReturn {
         setMinting(false)
       }
     },
-    [request],
+    [client],
   )
 
   const list = useCallback<UsePreviewLinksReturn["list"]>(
     async (model, recordId) => {
       try {
         const query = `?model=${encodeURIComponent(model)}&recordId=${encodeURIComponent(recordId)}`
-        const body = await request(`/preview-links${query}`, { method: "GET" })
-        const rows = Array.isArray(body["links"]) ? (body["links"] as Record<string, unknown>[]) : []
-        return rows.map((row) => ({
+        const body = await membershipRequest(client, `/preview-links${query}`, isJsonObject)
+        const links = body["links"]
+        const rows = Array.isArray(links) ? links.filter(isJsonObject) : []
+        return rows.map((row): PreviewLinkSummary => ({
           id: String(row["id"] ?? ""),
-          scope: (String(row["scope"] ?? "record") === "project"
-            ? "project"
-            : "record") as PreviewScope,
+          scope: row["scope"] === "project" ? "project" : "record",
           createdAt: String(row["createdAt"] ?? ""),
           expiresAt: String(row["expiresAt"] ?? ""),
         }))
@@ -144,33 +109,33 @@ export function usePreviewLinks(): UsePreviewLinksReturn {
         return []
       }
     },
-    [request],
+    [client],
   )
 
   const revoke = useCallback<UsePreviewLinksReturn["revoke"]>(
     async (id) => {
       setError(null)
       try {
-        await request(`/preview-links/${encodeURIComponent(id)}/revoke`, { method: "POST" })
+        await membershipRequest(client, `/preview-links/${encodeURIComponent(id)}/revoke`, isUnknown, { method: "POST" })
         return true
       } catch (err) {
         setError(err instanceof Error ? err.message : "Could not revoke that preview link")
         return false
       }
     },
-    [request],
+    [client],
   )
 
   const revokeAll = useCallback(async (): Promise<boolean> => {
     setError(null)
     try {
-      await request("/preview-links/revoke", { method: "POST", body: {} })
+      await membershipRequest(client, "/preview-links/revoke", isUnknown, { method: "POST", body: {} })
       return true
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not revoke preview links")
       return false
     }
-  }, [request])
+  }, [client])
 
   return { minting, error, mint, list, revoke, revokeAll }
 }

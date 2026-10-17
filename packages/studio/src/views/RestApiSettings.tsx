@@ -6,9 +6,26 @@ import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { Button, Card, CodeBlock, Input } from "../components/ui.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { cn } from "../lib/utils.js"
-import { declaredTables, projectTtlCeiling } from "../lib/cache-declaration.js"
+import { declaredTables, isDeclaredCache, projectTtlCeiling } from "../lib/cache-declaration.js"
 import type { DeclaredCache } from "../lib/cache-declaration.js"
-import { bodyMessage, readJsonObject } from "../lib/json.js"
+import {
+  bodyMessage,
+  isNumber,
+  isShape,
+  isString,
+  nullable,
+  optional,
+  readJson,
+  readJsonObject,
+} from "../lib/json.js"
+
+/** `GET /admin/v1/config/rest`. A key left out or null shows its default. */
+const isRestConfig = isShape({
+  schema: optional(nullable(isString)),
+  max_rows: optional(nullable(isNumber)),
+  cache_max_ttl: optional(nullable(isNumber)),
+  declared: optional(nullable(isDeclaredCache)),
+})
 
 const HTTP_METHODS = ["GET", "POST", "PATCH", "DELETE"] as const
 
@@ -39,8 +56,8 @@ export function RestApiSettings(): React.ReactElement {
       headers: studioAuthHeaders(client),
       credentials: "include",
     })
-      .then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.json() })
-      .then((d: { schema: string; max_rows: number; cache_max_ttl?: number; declared?: DeclaredCache }) => {
+      .then((r) => { if (!r.ok) throw new Error(String(r.status)); return readJson(r, isRestConfig) })
+      .then((d) => {
         if (cancelled) return
         setDeclared(d.declared ?? {})
         setSchema(d.schema ?? "public")

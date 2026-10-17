@@ -2,7 +2,9 @@ import type { Command } from "commander"
 import { existsSync, readFileSync } from "node:fs"
 import { resolve, relative } from "node:path"
 import ts from "typescript"
+import { isJsonObject } from "@supatype/shared"
 import { loadConfig } from "../config.js"
+import { parsePackageJson } from "../package-json.js"
 import { projectOutputPaths } from "../type-generation.js"
 import { error, plain } from "../ui/messages.js"
 
@@ -31,9 +33,9 @@ export function registerTypes(program: Command): void {
       } else {
         const tsconfigRaw = readFileSync(tsconfigPath, "utf8")
         const parsed = ts.parseConfigFileTextToJson(tsconfigPath, tsconfigRaw)
-        const cfg = (parsed.config ?? {}) as { include?: unknown; files?: unknown }
-        const include = Array.isArray(cfg.include) ? cfg.include.map(String) : []
-        const files = Array.isArray(cfg.files) ? cfg.files.map(String) : []
+        const cfg: Record<string, unknown> = isJsonObject(parsed.config) ? parsed.config : {}
+        const include = Array.isArray(cfg["include"]) ? cfg["include"].map(String) : []
+        const files = Array.isArray(cfg["files"]) ? cfg["files"].map(String) : []
         const relAug = toPosix(relative(cwd, augmentationPath))
         const coveredByFiles = files.includes(relAug)
         const coveredByInclude = include.some((entry) => {
@@ -52,13 +54,8 @@ export function registerTypes(program: Command): void {
 
       const packageJsonPath = resolve(cwd, "package.json")
       if (existsSync(packageJsonPath)) {
-        const pkg = JSON.parse(readFileSync(packageJsonPath, "utf8")) as {
-          dependencies?: Record<string, string>
-          devDependencies?: Record<string, string>
-        }
-        const hasClient =
-          (pkg.dependencies && "@supatype/client" in pkg.dependencies) ||
-          (pkg.devDependencies && "@supatype/client" in pkg.devDependencies)
+        const pkg = parsePackageJson(readFileSync(packageJsonPath, "utf8"))
+        const hasClient = "@supatype/client" in pkg.dependencies || "@supatype/client" in pkg.devDependencies
         if (!hasClient) {
           errors.push('package.json is missing "@supatype/client" dependency.')
         }

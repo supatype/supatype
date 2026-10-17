@@ -67,6 +67,11 @@ export interface UpsertOptions {
   remove?: readonly string[]
 }
 
+/** The older form of `upsertEnvFile`'s options: a list of keys, where options are an object. */
+function isKeyList(options: UpsertOptions | readonly string[]): options is readonly string[] {
+  return Array.isArray(options)
+}
+
 /**
  * Merge key/value updates into a project `.env`.
  *
@@ -80,9 +85,7 @@ export function upsertEnvFile(
   options: UpsertOptions | readonly string[] = {},
 ): void {
   // Historically the third argument was a plain list of keys to remove unconditionally.
-  const opts: UpsertOptions = Array.isArray(options)
-    ? { remove: options as readonly string[] }
-    : (options as UpsertOptions)
+  const opts: UpsertOptions = isKeyList(options) ? { remove: options } : options
   const removeManaged = new Set(opts.removeManaged ?? [])
   const removeAlways = new Set(opts.remove ?? [])
   const managed = new Set(opts.managed ?? [])

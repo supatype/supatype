@@ -1,5 +1,6 @@
 import type { FieldConfig } from "../config.js"
 import { itemCountOf, lengthOf } from "./measure-value.js"
+import { isArrayOf, isJsonObject, isShape, isString, type Guard } from "./json.js"
 import { escapeRegExp } from "./utils.js"
 
 /**
@@ -32,6 +33,31 @@ export interface ModelConstraint {
   rule: ConstraintNode
 }
 
+/** A JSON object whose `type` and `kind`, when present, are strings. */
+export function isConstraintNode(value: unknown): value is ConstraintNode {
+  if (!isJsonObject(value)) return false
+  const { type, kind } = value
+  return (type === undefined || isString(type)) && (kind === undefined || isString(kind))
+}
+
+export const isModelConstraint: Guard<ModelConstraint> = isShape({
+  name: isString,
+  columns: isArrayOf(isString),
+  rule: isConstraintNode,
+})
+
+/** The node under `key`, or an empty one, which every reader treats as "cannot say". */
+function nodeAt(node: ConstraintNode, key: string): ConstraintNode {
+  const child = node[key]
+  return isConstraintNode(child) ? child : {}
+}
+
+/** The nodes listed under `key`, skipping anything that is not one. */
+function nodesAt(node: ConstraintNode, key: string): ConstraintNode[] {
+  const children = node[key]
+  return Array.isArray(children) ? children.filter(isConstraintNode) : []
+}
+
 type Comparable = number | string | boolean
 
 /** A field's value in the form, resolved through the locale map for a translated field. */
@@ -44,8 +70,7 @@ function valueOf(
   const field = fields.find((f) => f.name === column)
   const raw = values[column]
   if (!field?.localized || locale === null) return raw
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return raw
-  return (raw as Record<string, unknown>)[locale]
+  return isJsonObject(raw) ? raw[locale] : raw
 }
 
 function operandValue(
@@ -128,14 +153,14 @@ export function evaluate(
 ): boolean | null {
   switch (rule["type"]) {
     case "compare": {
-      const left = operandValue(rule["left"] as ConstraintNode, fields, values, locale)
-      const right = operandValue(rule["right"] as ConstraintNode, fields, values, locale)
+      const left = operandValue(nodeAt(rule, "left"), fields, values, locale)
+      const right = operandValue(nodeAt(rule, "right"), fields, values, locale)
       if (left === null || right === null) return null
       return compare(String(rule["op"]), left, right)
     }
 
     case "nullCheck": {
-      const value = operandValue(rule["operand"] as ConstraintNode, fields, values, locale)
+      const value = operandValue(nodeAt(rule, "operand"), fields, values, locale)
       return rule["isNull"] === true ? value === null : value !== null
     }
 
@@ -153,7 +178,7 @@ export function evaluate(
 
     case "any":
     case "all": {
-      const rules = (rule["rules"] as ConstraintNode[]) ?? []
+      const rules = nodesAt(rule, "rules")
       const verdicts = rules.map((inner) => evaluate(inner, fields, values, locale))
       if (rule["type"] === "any") {
         if (verdicts.some((v) => v === true)) return true
@@ -164,7 +189,7 @@ export function evaluate(
     }
 
     case "not": {
-      const inner = evaluate(rule["rule"] as ConstraintNode, fields, values, locale)
+      const inner = evaluate(nodeAt(rule, "rule"), fields, values, locale)
       return inner === null ? null : !inner
     }
 
@@ -229,32 +254,32 @@ export function describeConstraint(
 ): string {
   switch (rule["type"]) {
     case "compare": {
-      const left = rule["left"] as ConstraintNode
-      const right = rule["right"] as ConstraintNode
+      const left = nodeAt(rule, "left")
+      const right = nodeAt(rule, "right")
       const measured = left["kind"] === "length" || left["kind"] === "itemCount"
       const words = measured ? NUMERIC_WORDS : COMPARISON_WORDS
       return `${describeOperand(left, fields)} ${words[String(rule["op"])] ?? "must satisfy"} ${describeOperand(right, fields)}`
     }
     case "nullCheck":
-      return `${describeOperand(rule["operand"] as ConstraintNode, fields)} ${
+      return `${describeOperand(nodeAt(rule, "operand"), fields)} ${
         rule["isNull"] === true ? "must be empty" : "must not be empty"
       }`
     case "matches":
       return `${labelFor(String(rule["column"]), fields)} must match ${String(rule["pattern"])}`
     case "all": {
-      const rules = (rule["rules"] as ConstraintNode[]) ?? []
+      const rules = nodesAt(rule, "rules")
       const failing = rules.find((inner) => evaluate(inner, fields, values, locale) === false)
       return failing
         ? describeConstraint(failing, fields, values, locale)
         : "every part of this rule must hold"
     }
     case "any": {
-      const rules = (rule["rules"] as ConstraintNode[]) ?? []
+      const rules = nodesAt(rule, "rules")
       const parts = rules.map((inner) => describeConstraint(inner, fields, values, locale))
       return `at least one of these must hold: ${parts.join("; ")}`
     }
     case "not":
-      return `not: ${describeConstraint(rule["rule"] as ConstraintNode, fields, values, locale)}`
+      return `not: ${describeConstraint(nodeAt(rule, "rule"), fields, values, locale)}`
     default:
       return "this rule must hold"
   }

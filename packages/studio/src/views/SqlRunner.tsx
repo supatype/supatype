@@ -6,6 +6,7 @@ import { sql as sqlLang, PostgreSQL } from "@codemirror/lang-sql"
 import { useStudioClient } from "../StudioCore.js"
 import { useProjectProxy } from "../hooks/useProjectProxy.js"
 import { cn } from "../lib/utils.js"
+import { isJsonObject, isNumber, isShape, isString, optional, safeParseJson } from "../lib/json.js"
 import { Badge, Button, Card, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
 import { ElevatedNotice } from "../components/ElevatedModeBanner.js"
 import { EmptyState } from "../components/EmptyState.js"
@@ -47,6 +48,39 @@ interface ExplainNode {
   "Actual Loops"?: number
   Plans?: ExplainNode[]
   [key: string]: unknown
+}
+
+const isExplainFields = isShape({
+  "Node Type": isString,
+  "Relation Name": optional(isString),
+  "Startup Cost": isNumber,
+  "Total Cost": isNumber,
+  "Plan Rows": isNumber,
+  "Plan Width": isNumber,
+  "Actual Startup Time": optional(isNumber),
+  "Actual Total Time": optional(isNumber),
+  "Actual Rows": optional(isNumber),
+  "Actual Loops": optional(isNumber),
+})
+
+function isExplainNode(value: unknown): value is ExplainNode {
+  if (!isJsonObject(value)) return false
+  const plans = value["Plans"]
+  return isExplainFields(value) && (plans === undefined || (Array.isArray(plans) && plans.every(isExplainNode)))
+}
+
+/**
+ * The plan in an EXPLAIN result's first row, or null when there is none to draw.
+ *
+ * Only `FORMAT JSON` gives a plan to draw. A plain EXPLAIN answers with lines of text, which
+ * are shown as the rows they are rather than parsed (and failing) as JSON.
+ */
+function explainPlanOf(row: Record<string, unknown> | undefined): ExplainNode | null {
+  const raw = row?.["QUERY PLAN"]
+  const parsed = typeof raw === "string" ? safeParseJson(raw) : raw
+  const first: unknown = Array.isArray(parsed) ? parsed[0] : undefined
+  const plan = Array.isArray(parsed) ? (isJsonObject(first) ? first["Plan"] : undefined) : parsed
+  return isExplainNode(plan) ? plan : null
 }
 
 // ─── Explain Plan Visualization ───────────────────────────────────────────────
@@ -363,12 +397,7 @@ function SqlEditorView(): React.ReactElement {
 
       let explainPlan: ExplainNode | null = null
       if (query.trim().toUpperCase().startsWith("EXPLAIN")) {
-        const planRow = rows[0] as Record<string, unknown> | undefined
-        if (planRow && "QUERY PLAN" in planRow) {
-          const raw = planRow["QUERY PLAN"]
-          const parsed: unknown = typeof raw === "string" ? JSON.parse(raw) : raw
-          explainPlan = Array.isArray(parsed) ? (parsed[0] as { Plan: ExplainNode }).Plan : parsed as ExplainNode
-        }
+        explainPlan = explainPlanOf(rows[0])
       }
 
       const tabId = `tab-${Date.now()}`

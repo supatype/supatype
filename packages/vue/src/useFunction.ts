@@ -1,6 +1,7 @@
-import { ref, type Ref } from "vue"
+import { ref, shallowRef, type Ref } from "vue"
 import type { AugmentedDatabase, AnyDatabase, SupatypeError } from "@supatype/client"
 import { useSupatype } from "./context.js"
+import { isCallerValue } from "./caller-types.js"
 
 export interface UseFunctionReturn<TResponse> {
   invoke: (body?: unknown) => Promise<{ data: TResponse | null; error: SupatypeError | null }>
@@ -32,7 +33,8 @@ export function useFunction<
   functionName: string,
 ): UseFunctionReturn<TResponse> {
   const client = useSupatype<TDatabase>()
-  const data = ref<TResponse | null>(null) as Ref<TResponse | null>
+  // Shallow: an answer is replaced whole, and `ref` would type it as `UnwrapRef<TResponse>`.
+  const data = shallowRef<TResponse | null>(null)
   const error = ref<SupatypeError | null>(null)
   const loading = ref(false)
 
@@ -40,14 +42,17 @@ export function useFunction<
     loading.value = true
     error.value = null
 
-    const result = await client.functions.invoke(functionName, {
-      ...(body !== undefined ? { body } : {}),
-    })
-
-    loading.value = false
-    data.value = result.data as TResponse | null
-    if (result.error) error.value = result.error
-    return result as { data: TResponse | null; error: SupatypeError | null }
+    try {
+      const result = await client.functions.invoke(functionName, {
+        ...(body !== undefined ? { body } : {}),
+      })
+      const answer = { data: isCallerValue<TResponse>(result.data) ? result.data : null, error: result.error }
+      data.value = answer.data
+      if (answer.error) error.value = answer.error
+      return answer
+    } finally {
+      loading.value = false
+    }
   }
 
   return { invoke, data, error, loading }

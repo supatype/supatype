@@ -1,7 +1,9 @@
 import React, { useState } from "react"
 import { Button, Card, Input, Textarea } from "../../components/ui.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
+import { parseJsonObject } from "../../lib/json.js"
 import { readInspectorJson, type InspectorFailure } from "../../hooks/useInspectorResource.js"
+import { isBroadcastSent } from "../../lib/realtime-guards.js"
 import type { InspectorTabProps } from "./InspectorTab.js"
 import { InspectorFailureView } from "./shared.js"
 import type { BroadcastRequest } from "./types.js"
@@ -20,14 +22,9 @@ type Outcome =
 
 /** The form's payload as an object, or why it is not one. */
 export function parsePayload(text: string): Record<string, unknown> | string {
-  try {
-    const value: unknown = JSON.parse(text)
-    return typeof value === "object" && value !== null && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : "The payload must be a JSON object."
-  } catch {
-    return "The payload is not valid JSON."
-  }
+  const parsed = parseJsonObject(text)
+  if (parsed.ok) return parsed.value
+  return parsed.error === "not-json" ? "The payload is not valid JSON." : "The payload must be a JSON object."
 }
 
 async function send(api: InspectorTabProps["api"], request: BroadcastRequest): Promise<Outcome> {
@@ -37,7 +34,7 @@ async function send(api: InspectorTabProps["api"], request: BroadcastRequest): P
     body: JSON.stringify(request),
   })
   if (res.status === 429) return { kind: "limited", retryAfter: res.headers.get("Retry-After") }
-  const answer = await readInspectorJson<{ recipients: number }>(res)
+  const answer = await readInspectorJson(res, isBroadcastSent)
   return "data" in answer ? { kind: "sent", recipients: answer.data.recipients } : { kind: "failed", failure: answer.failure }
 }
 

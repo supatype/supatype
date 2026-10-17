@@ -20,9 +20,12 @@ export interface ConnectionMeta {
   userAgent: string | null
 }
 
+/** What the server does with a client's socket once it is registered: check it is open, and send. */
+export type ClientSocket = Pick<WebSocket, "readyState" | "send">
+
 /** Represents a connected WebSocket client. */
 export interface ConnectedClient {
-  ws: WebSocket
+  ws: ClientSocket
   claims: JwtClaims | null
   subscriptions: Map<string, Subscription>
   presence: Map<string, PresenceEntry>
@@ -121,7 +124,7 @@ export class ChannelManager {
 
   /** Register a new WebSocket connection. Returns a connection ID. */
   addClient(
-    ws: WebSocket,
+    ws: ClientSocket,
     claims: JwtClaims | null,
     projectRef?: string | null,
     meta: ConnectionMeta = { client: null, userAgent: null },

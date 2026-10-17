@@ -1,9 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
-import { membershipBase } from "../lib/membership-url.js"
-import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
-import { studioGatewayHeaders } from "../lib/studio-gateway-headers.js"
+import { useCallback, useEffect, useState } from "react"
+import {
+  isArrayOf,
+  isBoolean,
+  isOneOf,
+  isShape,
+  isString,
+  nullable,
+  type Guard,
+} from "../lib/json.js"
+import { membershipRequest, type MembershipInit } from "../lib/membership-request.js"
 import { useAdminClient } from "./useAdminClient.js"
-import { readJsonObject } from "../lib/json.js"
 
 /** What the gateway enforces, and where each part comes from. */
 export interface CorsOrigins {
@@ -29,6 +35,22 @@ export interface CorsOrigins {
   editable: boolean
 }
 
+const isOriginList = isArrayOf(isString)
+
+const isCorsOrigins: Guard<CorsOrigins> = isShape({
+  origins: isOriginList,
+  source: isOneOf(["saved", "default"] as const),
+  default: isOriginList,
+  siteOrigin: isString,
+  configured: isOriginList,
+  platform: isOriginList,
+  saved: nullable(isOriginList),
+  updatedAt: nullable(isString),
+  mode: isString,
+  enforced: isBoolean,
+  editable: isBoolean,
+})
+
 export interface UseCorsOriginsReturn {
   data: CorsOrigins | null
   loading: boolean
@@ -46,31 +68,14 @@ export interface UseCorsOriginsReturn {
  */
 export function useCorsOrigins(): UseCorsOriginsReturn {
   const client = useAdminClient()
-  const base = useMemo(() => membershipBase(client.url), [client.url])
   const [data, setData] = useState<CorsOrigins | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [generation, setGeneration] = useState(0)
 
   const request = useCallback(
-    async (init?: RequestInit): Promise<CorsOrigins> => {
-      const res = await fetch(`${base}/cors-origins`, {
-        ...init,
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          ...studioGatewayHeaders(),
-          ...studioAuthHeaders(client),
-          ...init?.headers,
-        },
-      })
-      const json = await readJsonObject(res)
-      if (!res.ok) {
-        throw new Error((json["message"] as string | undefined) ?? `Request failed (${res.status})`)
-      }
-      return json as unknown as CorsOrigins
-    },
-    [base, client],
+    (init?: MembershipInit): Promise<CorsOrigins> => membershipRequest(client, "/cors-origins", isCorsOrigins, init),
+    [client],
   )
 
   useEffect(() => {
@@ -85,7 +90,7 @@ export function useCorsOrigins(): UseCorsOriginsReturn {
   }, [request, generation])
 
   const change = useCallback(
-    async (init: RequestInit): Promise<boolean> => {
+    async (init: MembershipInit): Promise<boolean> => {
       setError(null)
       try {
         setData(await request(init))
@@ -102,7 +107,7 @@ export function useCorsOrigins(): UseCorsOriginsReturn {
     data,
     loading,
     error,
-    save: (origins) => change({ method: "PUT", body: JSON.stringify({ origins }) }),
+    save: (origins) => change({ method: "PUT", body: { origins } }),
     reset: () => change({ method: "DELETE" }),
     refresh: () => setGeneration((g) => g + 1),
   }

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react"
 import { useAdminClient } from "../hooks/useAdminClient.js"
 import type { WidgetProps } from "./FieldWidget.js"
+import { stringOption } from "./field-options.js"
 import type { StorageObject } from "@supatype/client"
 import {
   parseStorageRef,
@@ -214,7 +215,7 @@ export function ImageWidget({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [fallbackPreviewUrl, setFallbackPreviewUrl] = useState<string | null>(null)
 
-  const bucket = (config.options?.["bucket"] as string) ?? "images"
+  const bucket = stringOption(config, "bucket") ?? "images"
   const localeValue = getLocalizedEditValue(value, config.localized, currentLocale)
   const storageRef = parseStorageRef(localeValue, bucket)
 

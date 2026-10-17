@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, existsSync } from "node
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { test, describe, before, after } from "node:test"
-import { request, startServer, type ControlPlaneServer } from "./helpers.js"
+import { dataString, request, startServer, type ControlPlaneServer } from "./helpers.js"
 
 const PROJECT = "test-project"
 
@@ -36,7 +36,7 @@ describe("deployments rollback", () => {
       files: [{ path: "index.html", content, encoding: "utf8" }],
     })
     assert.equal(created.status, 201)
-    const id = (created.json.data as { id: string }).id
+    const id = dataString(created.json, "id")
     const fin = await request(
       baseUrl,
       "POST",
@@ -55,13 +55,13 @@ describe("deployments rollback", () => {
 
     const rolled = await request(baseUrl, "POST", `/projects/${PROJECT}/deployments/rollback`)
     assert.equal(rolled.status, 200)
-    const version = (rolled.json.data as { version: string }).version
+    const version = dataString(rolled.json, "version")
     assert.equal(version, id1)
 
     assert.equal(readFileSync(staticFile, "utf8"), "<html>v1</html>")
 
     const current = await request(baseUrl, "GET", `/projects/${PROJECT}/deployments/current`)
-    assert.equal((current.json.data as { id: string }).id, id1)
+    assert.equal(dataString(current.json, "id"), id1)
 
     void id2
   })
@@ -80,7 +80,7 @@ describe("deployments rollback", () => {
       to: id1,
     })
     assert.equal(rolled.status, 200)
-    assert.equal((rolled.json.data as { version: string }).version, id1)
+    assert.equal(dataString(rolled.json, "version"), id1)
     assert.equal(readFileSync(join(subTmp, "dist", "index.html"), "utf8"), "<html>target</html>")
 
     void id2
@@ -118,13 +118,13 @@ describe("deployments rollback", () => {
         { path: "extra.txt", content: "keep", encoding: "utf8" },
       ],
     })
-    const id1 = (created1.json.data as { id: string }).id
+    const id1 = dataString(created1.json, "id")
     await request(baseUrl, "POST", `/projects/${PROJECT}/deployments/${id1}/finalize`)
 
     const created2 = await request(baseUrl, "POST", `/projects/${PROJECT}/deployments`, {
       files: [{ path: "index.html", content: "b", encoding: "utf8" }],
     })
-    const id2 = (created2.json.data as { id: string }).id
+    const id2 = dataString(created2.json, "id")
     await request(baseUrl, "POST", `/projects/${PROJECT}/deployments/${id2}/finalize`)
 
     assert.ok(!existsSync(join(subTmp, "dist", "extra.txt")))
@@ -178,9 +178,21 @@ describe("deployments refuse paths and refs outside the project", () => {
       files: [{ path: "assets/app.js", content: "x", encoding: "utf8" }],
     })
     assert.equal(res.status, 201)
-    const id = (res.json.data as { id: string }).id
+    const id = dataString(res.json, "id")
     assert.ok(existsSync(join(tmp, "proj", ".supatype", "deployments", id, "files", "assets", "app.js")))
   })
+
+  // Each used to throw from inside the handler (`.map` of a string, `Buffer.from` of undefined): a 500.
+  for (const files of ["index.html", [{ path: "index.html" }], [{ path: "index.html", content: 1 }]]) {
+    test(`a deploy body whose files are ${JSON.stringify(files)} is a 400, and nothing is recorded`, async () => {
+      const deployments = join(tmp, "proj", ".supatype", "deployments")
+      const before = existsSync(deployments) ? readdirSync(deployments) : []
+      const res = await request(baseUrl, "POST", `/projects/${PROJECT}/deployments`, { files })
+      assert.equal(res.status, 400)
+      assert.equal(res.json["error"], "validation_error")
+      assert.deepEqual(existsSync(deployments) ? readdirSync(deployments) : [], before)
+    })
+  }
 
   test("a rollback target that is not a deployment id is refused", async () => {
     const res = await request(baseUrl, "POST", `/projects/${PROJECT}/deployments/rollback`, {

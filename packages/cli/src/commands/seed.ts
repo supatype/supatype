@@ -17,6 +17,17 @@ import { join, relative, resolve, sep } from "node:path"
 import { isLinkedToCloudProject, pinnedVersion } from "../binary-cache.js"
 import { loadConfig, loadSchemaAst, type SupatypeConfig } from "../config.js"
 import { engineRequest, ensureEngine } from "../engine-client.js"
+import {
+  isArrayOf,
+  isBoolean,
+  isNumber,
+  isRecordOf,
+  isShape,
+  isString,
+  nullable,
+  optional,
+  type Guard,
+} from "@supatype/shared"
 import { seedUnsupportedByPinnedEngine } from "../engine-floor.js"
 import { pgSchema, projectRootFromConfig, schemaPathFromProject } from "../project-config.js"
 import { redact, resolveHostDatabaseUrl } from "../host-database.js"
@@ -216,7 +227,7 @@ async function apply(prepared: Prepared[], options: ApplyOptions): Promise<numbe
     )
   }
 
-  const result = await engineRequest<SeedResult>("/seed", {
+  const result = await engineRequest("/seed", {
     ast,
     ir_documents: prepared.map((one) => JSON.stringify({ ...one.document, file: one.file })),
     database_url: dsn,
@@ -224,7 +235,7 @@ async function apply(prepared: Prepared[], options: ApplyOptions): Promise<numbe
     atomic: opts.atomic,
     run_once: askedRunOnce.length > 0,
     ...(opts.environment !== undefined ? { environment: opts.environment } : {}),
-  })
+  }, isSeedResult)
 
   return report(result, prepared.length, dsn)
 }
@@ -254,6 +265,40 @@ interface SeedResult {
  * five leaves the first two committed, and a report that mentioned only the failure would
  * leave the reader to guess at the rest.
  */
+/** The engine's seed result document (schema-engine `seed_command`). */
+const isSeedResult: Guard<SeedResult> = isShape({
+  ok: isBoolean,
+  atomic: optional(isBoolean),
+  files: optional(
+    isArrayOf(
+      isShape({
+        file: isString,
+        status: isString,
+        written: optional(isRecordOf(isNumber)),
+        skippedGroups: optional(isArrayOf(isString)),
+      }),
+    ),
+  ),
+  error: optional(
+    isShape({
+      kind: isString,
+      message: optional(isString),
+      remedy: optional(nullable(isString)),
+      file: optional(isString),
+      path: optional(isString),
+    }),
+  ),
+})
+
+/** `seed --status`: the latest run of each file, and whether it has changed since. */
+const isSeedStatus = isShape({
+  files: optional(
+    isArrayOf(
+      isShape({ file: isString, appliedAt: isString, status: isString, durationMs: isNumber, drifted: isBoolean }),
+    ),
+  ),
+})
+
 function report(result: SeedResult, count: number, dsn: string): number {
   for (const file of result.files ?? []) {
     const rows = Object.entries(file.written ?? {})
@@ -287,17 +332,7 @@ function report(result: SeedResult, count: number, dsn: string): number {
 }
 
 async function reportStatus(dsn: string): Promise<number> {
-  interface StatusEntry {
-    file: string
-    appliedAt: string
-    status: string
-    durationMs: number
-    drifted: boolean
-  }
-  const result = await engineRequest<{ files?: StatusEntry[] }>("/seed", {
-    database_url: dsn,
-    status: true,
-  })
+  const result = await engineRequest("/seed", { database_url: dsn, status: true }, isSeedStatus)
 
   const files = result.files ?? []
   if (files.length === 0) {

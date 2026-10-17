@@ -15,6 +15,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { SupatypeProjectConfig } from "../src/project-config.js"
+import { projectConfig } from "./support/project-config.js"
 
 /**
  * The derived URL follows the stack's layout, which is read from Docker: these stand in a running
@@ -35,11 +36,7 @@ const { DsnNotFound, redact, resolveHostDatabaseUrl } = await import("../src/hos
 const SECRET = "postgres://user:s3cret@db.example.test:5432/app"
 
 function config(overrides: Partial<SupatypeProjectConfig> = {}): SupatypeProjectConfig {
-  return {
-    project: { name: "launch-test" },
-    database: { provider: "docker" },
-    ...overrides,
-  } as SupatypeProjectConfig
+  return projectConfig({ project: { name: "launch-test" }, database: { provider: "docker" }, ...overrides })
 }
 
 let cwd: string

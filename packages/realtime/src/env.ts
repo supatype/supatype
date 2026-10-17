@@ -13,6 +13,14 @@ export function parseLogLevel(raw: string | undefined): LogLevel {
   throw new Error(`REALTIME_LOG_LEVEL must be "debug" or "info", got "${raw}"`)
 }
 
+/** `SCHEMA_FILTER_MODE`: unset is `developer_only`, and anything but the two modes stops the service. */
+export function parseSchemaFilterMode(raw: string | undefined): "all" | "developer_only" {
+  const value = (raw ?? "").trim()
+  if (value === "" || value === "developer_only") return "developer_only"
+  if (value === "all") return "all"
+  throw new Error(`SCHEMA_FILTER_MODE must be "all" or "developer_only", got "${raw}"`)
+}
+
 /**
  * An optional whole-number setting: unset or empty is `null`, anything else must be a positive
  * integer. A typo stops the service rather than silently meaning "none".
@@ -102,7 +110,7 @@ export function loadEnv(): RealtimeEnv {
     multiTenant: process.env["MULTI_TENANT"] === "true",
     routingTableUrl: process.env["ROUTING_TABLE_URL"],
     routingTableRefreshMs: Number(process.env["ROUTING_TABLE_REFRESH_MS"] ?? "60000"),
-    schemaFilterMode: (process.env["SCHEMA_FILTER_MODE"] as "all" | "developer_only") ?? "developer_only",
+    schemaFilterMode: parseSchemaFilterMode(process.env["SCHEMA_FILTER_MODE"]),
     connectionLimits: {
       free: Number(process.env["FREE_CONNECTION_LIMIT"] ?? "50"),
       pro: Number(process.env["PRO_CONNECTION_LIMIT"] ?? "500"),

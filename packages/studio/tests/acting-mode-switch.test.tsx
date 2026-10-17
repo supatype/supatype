@@ -2,12 +2,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import React, { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
-import type { SupatypeClient } from "@supatype/client"
 import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { ElevatedModeBanner, ElevatedNoticeProvider, useShowsProjectRows } from "../src/components/ElevatedModeBanner.js"
 import { studioAuthHeaders } from "../src/lib/studio-auth-headers.js"
 import { proxyClientOptions } from "../src/components/StudioAccessGate.js"
 import { chosenActingMode } from "../src/lib/acting-mode.js"
+import { testClient } from "./support.js"
 
 /**
  * RX4: an owner or admin acts elevated by default and may switch to acting as themselves, so they
@@ -18,7 +18,7 @@ import { chosenActingMode } from "../src/lib/acting-mode.js"
  */
 
 const PROXY = "http://localhost:8000/studio/proxy"
-const CLIENT = { url: PROXY, auth: { currentAccessToken: "token" } } as unknown as SupatypeClient
+const CLIENT = testClient({ url: PROXY, token: "token" })
 
 let root: Root | null = null
 let container: HTMLElement
@@ -30,10 +30,19 @@ interface Verify {
   canElevate: boolean
 }
 
+/** The headers a request carried, which Studio always passes as a plain object. */
+function plainHeaders(init?: RequestInit): Record<string, string> {
+  const headers = init?.headers ?? {}
+  if (headers instanceof Headers || Array.isArray(headers)) {
+    throw new Error("expected the verify request's headers as a plain object")
+  }
+  return { ...headers }
+}
+
 function stubVerify(verify: Verify): void {
   verifyHeaders = []
   vi.stubGlobal("fetch", async (_url: string, init?: RequestInit) => {
-    verifyHeaders.push({ ...(init?.headers as Record<string, string>) })
+    verifyHeaders.push(plainHeaders(init))
     return Response.json({ permissions: {}, ...verify })
   })
 }

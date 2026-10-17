@@ -1,11 +1,10 @@
 import { createSignal } from "solid-js"
 import type { Accessor } from "solid-js"
-import type { AugmentedDatabase, AnyClient, AnyDatabase, MutationBuilder, SupatypeError } from "@supatype/client"
+import type { AugmentedDatabase, AnyClient, AnyDatabase, SupatypeError } from "@supatype/client"
 import { useSupatype } from "./context.js"
+import { runMutation, type MutationOperation } from "./mutation-request.js"
 
-type MutationRows = Record<string, unknown> | Record<string, unknown>[]
-
-export type MutationOperation = "insert" | "update" | "delete" | "upsert"
+export type { MutationOperation }
 
 export interface MutationOptions {
   filter?: Record<string, unknown> | undefined
@@ -40,23 +39,8 @@ export function createMutation<
     setError(null)
 
     try {
-      // Through the untyped client: the generated Insert and Update types do not survive a table
-      // name known only at run time, so `data` goes out as the caller wrote it and PostgREST is
-      // what checks it.
-      const tableClient = (client as AnyClient).from(table)
-      let pending: MutationBuilder<Record<string, unknown>>
-      if (operation === "insert") {
-        pending = tableClient.insert(data as MutationRows)
-      } else if (operation === "upsert") {
-        pending = tableClient.upsert(data as MutationRows)
-      } else {
-        pending =
-          operation === "update" ? tableClient.update(data as Record<string, unknown>) : tableClient.delete()
-        for (const [col, val] of Object.entries(options?.filter ?? {})) {
-          pending = pending.eq(col, val)
-        }
-      }
-      const result = (await pending) as { data: TRow[] | null; error: SupatypeError | null }
+      const outcome = await runMutation<TRow>(client as AnyClient, table, operation, data, options?.filter)
+      const result = { data: outcome.data, error: outcome.error }
 
       if (result.error) setError(result.error)
       return result

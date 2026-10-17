@@ -155,8 +155,10 @@ describe("generateClientAugmentation", () => {
 
     const out = generateClientAugmentation(ast)
     expect(out).toContain('price: { amount: string; code: "USD" }')
-    // A field with no declared shape still falls back, and optional fields still admit null.
-    expect(out).toContain("notes: Record<string, unknown> | null")
+    // A field with no declared shape falls back to any JSON, as the engine's `database.ts` types it,
+    // and optional fields still admit null.
+    expect(out).toContain("notes: Json | null")
+    expect(out).toContain("export type Json =")
   })
 })
 

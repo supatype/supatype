@@ -12,7 +12,8 @@ export interface DevSelectOption<T extends string = string> {
   hint?: string
 }
 
-export interface DevPromptRequest<T = unknown> {
+/** One queued prompt. Its answer is whatever the prompt view submits; the caller narrows it. */
+export interface DevPromptRequest {
   id: number
   kind: DevPromptKind
   message: string
@@ -22,7 +23,7 @@ export interface DevPromptRequest<T = unknown> {
   mask?: boolean
   options?: DevSelectOption[]
   validate?: (value: string) => string | undefined
-  resolve: (value: T | typeof CLACK_CANCEL) => void
+  resolve: (value: unknown) => void
 }
 
 let nextId = 0
@@ -43,14 +44,11 @@ export function getActiveDevPrompt(): DevPromptRequest | null {
   return active
 }
 
-export function enqueueDevPrompt<T>(spec: Omit<DevPromptRequest<T>, "id" | "resolve">): Promise<T | typeof CLACK_CANCEL> {
+/** Queue a prompt; resolves with what the view submits, or CLACK_CANCEL. Narrow it with promptAnswer. */
+export function enqueueDevPrompt(spec: Omit<DevPromptRequest, "id" | "resolve">): Promise<unknown> {
   return new Promise((resolve) => {
-    const request: DevPromptRequest<T> = {
-      ...spec,
-      id: nextId++,
-      resolve: resolve as DevPromptRequest["resolve"],
-    }
-    waiters.push(request as DevPromptRequest)
+    const request: DevPromptRequest = { ...spec, id: nextId++, resolve }
+    waiters.push(request)
     if (!active) {
       active = waiters.shift() ?? null
     }

@@ -17,7 +17,7 @@ const JPEG_BYTES = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x4
 interface Sent {
   url: string
   method: string | undefined
-  headers: Record<string, string>
+  headers: Headers
   body: BodyInit | null | undefined
 }
 
@@ -25,7 +25,7 @@ interface Sent {
 function recording(): { transport: RequestTransport; sent: Sent[] } {
   const sent: Sent[] = []
   const transport: RequestTransport = async (url, init) => {
-    sent.push({ url, method: init.method, headers: init.headers as Record<string, string>, body: init.body })
+    sent.push({ url, method: init.method, headers: new Headers(init.headers), body: init.body })
     return new Response(JSON.stringify({ Key: "speaker-headshots/avatars/a.jpg" }), { status: 200 })
   }
   return { transport, sent }
@@ -57,15 +57,15 @@ describe("BucketClient.upload with a browser File", () => {
     await bucket(transport).upload("avatars/a.jpg", new File([JPEG_BYTES], "a.jpg", { type: "image/jpeg" }), {
       upsert: true,
     })
-    expect(sent[0]!.headers["Content-Type"]).toBe("image/jpeg")
-    expect(sent[0]!.headers["x-upsert"]).toBe("true")
+    expect(sent[0]!.headers.get("Content-Type")).toBe("image/jpeg")
+    expect(sent[0]!.headers.get("x-upsert")).toBe("true")
   })
 
   it("sends a Blob's bytes too, typed by the caller", async () => {
     const { transport, sent } = recording()
     const blob = new Blob([JPEG_BYTES], { type: "image/jpeg" })
     await bucket(transport).upload("avatars/b.jpg", blob, { contentType: "image/jpeg" })
-    expect(sent[0]!.headers["Content-Type"]).toBe("image/jpeg")
+    expect(sent[0]!.headers.get("Content-Type")).toBe("image/jpeg")
     expect(new Uint8Array(await new Response(sent[0]!.body).arrayBuffer())).toEqual(JPEG_BYTES)
   })
 })

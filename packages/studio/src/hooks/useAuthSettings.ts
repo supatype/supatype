@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { isJsonObject } from "../lib/json.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { studioGatewayHeaders } from "../lib/studio-gateway-headers.js"
 import { useAdminClient } from "./useAdminClient.js"
@@ -27,10 +28,10 @@ function bool(value: unknown): boolean {
 
 /** Read defensively: an older server omits fields, and an absent flag is an off one. */
 export function normaliseAuthSettings(raw: unknown): AuthSettings {
-  const body = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {}
-  const externalRaw = typeof body["external"] === "object" && body["external"] !== null ? body["external"] : {}
+  const body = isJsonObject(raw) ? raw : {}
+  const externalRaw = isJsonObject(body["external"]) ? body["external"] : {}
   const external: Record<string, boolean> = {}
-  for (const [name, enabled] of Object.entries(externalRaw as Record<string, unknown>)) external[name] = bool(enabled)
+  for (const [name, enabled] of Object.entries(externalRaw)) external[name] = bool(enabled)
   return {
     external,
     disable_signup: bool(body["disable_signup"]),

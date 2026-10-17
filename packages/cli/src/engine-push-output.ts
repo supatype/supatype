@@ -4,6 +4,8 @@
 
 import { printDiffWarnings } from "./diff-output.js"
 import { findJsonLine } from "./engine-json-line.js"
+import { isEnginePushResult } from "./engine-answers.js"
+import type { Guard } from "@supatype/shared"
 
 /**
  * Print what a push warned about, less anything the diff before it already showed.
@@ -25,21 +27,33 @@ export interface EnginePushResult {
   operations?: number
   admin_refreshed?: boolean
   message?: string
+  /** The migration's name, when one was applied. */
+  name?: string
   /** The schema's warnings (a bucket rule left out, say), then any found once applied. */
   warnings?: string[]
+  /**
+   * What a control plane made of this schema's cache declaration. Absent from an engine push and
+   * from a control plane too old to send it, which is why every reader of it has to treat absence
+   * as "nothing to say" rather than as an empty declaration.
+   */
+  cache?: { tables?: string[]; honoured?: boolean }
 }
 
-/** Extract the engine JSON object from mixed docker compose stdout/stderr. */
-export function parseEngineJsonOutput<T>(output: string): T | null {
+/**
+ * The engine's answer in mixed docker compose stdout/stderr: the first line that is a JSON object
+ * `guard` accepts, else the whole output when it is one (pretty-printed). Null when there is none.
+ */
+export function parseEngineJsonOutput<T>(output: string, guard: Guard<T>): T | null {
   const trimmed = output.trim()
   if (!trimmed) return null
 
-  const line = findJsonLine(trimmed)
-  if (line !== undefined) return line as T
+  const line = findJsonLine(trimmed, guard)
+  if (line !== undefined && guard(line)) return line
 
   if (trimmed.startsWith("{")) {
     try {
-      return JSON.parse(trimmed) as T
+      const whole = JSON.parse(trimmed)
+      return guard(whole) ? whole : null
     } catch {
       return null
     }
@@ -49,7 +63,7 @@ export function parseEngineJsonOutput<T>(output: string): T | null {
 }
 
 export function parseEnginePushOutput(output: string): EnginePushResult | null {
-  return parseEngineJsonOutput<EnginePushResult>(output)
+  return parseEngineJsonOutput(output, isEnginePushResult)
 }
 
 /** Human-readable one-liner for successful push (matches `supatype push` tone). */

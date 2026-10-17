@@ -15,6 +15,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { RealtimeClient } from "../src/realtime.js"
 import {
   createMockWebSocketClass,
+  sentFrames,
   simulateServerMessage,
   type MockWebSocketInstance,
 } from "./helpers/mock-websocket.js"
@@ -22,26 +23,21 @@ import {
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 10))
 
 let instances: MockWebSocketInstance[]
-let originalWebSocket: typeof WebSocket
 
 beforeEach(() => {
   const mock = createMockWebSocketClass()
   instances = mock.instances
-  originalWebSocket = globalThis.WebSocket
-  globalThis.WebSocket = mock.MockWebSocket
+  vi.stubGlobal("WebSocket", mock.MockWebSocket)
 })
 
 afterEach(() => {
-  globalThis.WebSocket = originalWebSocket
+  vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
 
 /** Every subscribe frame the client put on the socket. */
 function subscribeFrames(): Array<Record<string, unknown>> {
-  return instances
-    .flatMap((i) => i.send.mock.calls.map((c) => c[0] as string))
-    .map((raw) => JSON.parse(raw) as Record<string, unknown>)
-    .filter((m) => m["type"] === "subscribe")
+  return instances.flatMap((i) => sentFrames(i)).filter((m) => m["type"] === "subscribe")
 }
 
 describe("the subscribe frame", () => {
@@ -129,9 +125,7 @@ describe("joining again after disconnect()", () => {
     await settle()
 
     expect(instances).toHaveLength(2)
-    const onNewSocket = instances[1]!.send.mock.calls
-      .map((c) => JSON.parse(c[0] as string) as Record<string, unknown>)
-      .filter((m) => m["type"] === "subscribe")
+    const onNewSocket = sentFrames(instances[1]!).filter((m) => m["type"] === "subscribe")
     expect(onNewSocket).toHaveLength(1)
   })
 })

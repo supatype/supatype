@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { RealtimeServer } from "../src/server.js"
 import { nextText } from "./fixtures/stream.js"
+import { expectObject } from "./fixtures/expect-json.js"
 import {
   connect,
   freePort,
@@ -33,7 +34,7 @@ async function post(
     body: typeof body === "string" ? body : JSON.stringify(body),
   })
   const text = await res.text()
-  return { status: res.status, headers: res.headers, body: text === "" ? null : (JSON.parse(text) as unknown) }
+  return { status: res.status, headers: res.headers, body: text === "" ? null : JSON.parse(text) }
 }
 
 describe("POST /admin/v1/broadcast", () => {
@@ -96,7 +97,7 @@ describe("POST /admin/v1/broadcast", () => {
     try {
       await post(adminPort, { channel: "room:solo", event: "hello", payload: { hello: "world" } }, "tester")
       await Promise.race([seen, new Promise((_, reject) => setTimeout(() => reject(new Error("no event")), 2000))])
-      const event = JSON.parse(raw.split("event: broadcast\ndata: ")[1]!.split("\n")[0]!) as Record<string, unknown>
+      const event = expectObject(JSON.parse(raw.split("event: broadcast\ndata: ")[1]!.split("\n")[0]!))
       expect(event).toMatchObject({ channel: "room:solo", event: "hello", origin: "studio", recipients: 1, payload: { hello: "world" } })
     } finally {
       controller.abort()

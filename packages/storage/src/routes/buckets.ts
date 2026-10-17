@@ -1,6 +1,7 @@
 import type { RequestContext } from "../server.js"
 import { sendJson, readJson } from "../server.js"
 import * as db from "../db.js"
+import { isArrayOf, isBoolean, isNumber, isOneOf, isShape, isString, nullable, optional } from "../json.js"
 import {
   ensureBucket as ensureS3Bucket,
   deleteBucket as deleteS3Bucket,
@@ -11,26 +12,29 @@ import {
 
 import type { BucketAccessMode } from "../db.js"
 
-interface CreateBucketBody {
-  id?: string
-  name: string
-  public?: boolean
-  file_size_limit?: number
-  allowed_mime_types?: string[]
-  access_mode?: BucketAccessMode
-  s3_bucket_policy?: string | null
-}
+const isAccessMode = isOneOf(["public", "private", "custom"] as const satisfies readonly BucketAccessMode[])
 
-interface UpdateBucketBody {
-  public?: boolean
-  file_size_limit?: number | null
-  allowed_mime_types?: string[] | null
-  access_mode?: BucketAccessMode
-  s3_bucket_policy?: string | null
-}
+/** `name` is checked by the handler, which answers a missing one by name. */
+const isCreateBucketBody = isShape({
+  id: optional(isString),
+  name: optional(isString),
+  public: optional(isBoolean),
+  file_size_limit: optional(isNumber),
+  allowed_mime_types: optional(isArrayOf(isString)),
+  access_mode: optional(isAccessMode),
+  s3_bucket_policy: optional(nullable(isString)),
+})
+
+const isUpdateBucketBody = isShape({
+  public: optional(isBoolean),
+  file_size_limit: optional(nullable(isNumber)),
+  allowed_mime_types: optional(nullable(isArrayOf(isString))),
+  access_mode: optional(isAccessMode),
+  s3_bucket_policy: optional(nullable(isString)),
+})
 
 export async function create(ctx: RequestContext): Promise<void> {
-  const body = await readJson<CreateBucketBody>(ctx.req)
+  const body = await readJson(ctx.req, isCreateBucketBody)
 
   if (!body.name) {
     sendJson(ctx.res, 400, { error: "name is required" })
@@ -81,7 +85,7 @@ export async function get(ctx: RequestContext): Promise<void> {
 }
 
 export async function update(ctx: RequestContext): Promise<void> {
-  const body = await readJson<UpdateBucketBody>(ctx.req)
+  const body = await readJson(ctx.req, isUpdateBucketBody)
   const id = ctx.params["id"]!
   const existing = await db.getBucket(id)
   if (body.public !== undefined || body.s3_bucket_policy !== undefined) {

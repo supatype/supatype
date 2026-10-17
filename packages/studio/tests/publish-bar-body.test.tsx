@@ -6,7 +6,7 @@ import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { LocaleContext } from "../src/hooks/useLocale.js"
 import type { LocaleState as UILocaleState } from "../src/hooks/useLocale.js"
 import type { LocaleState, PublishingState } from "../src/lib/publishing.js"
-import type { SupatypeClient } from "@supatype/client"
+import { testClient } from "./support.js"
 
 // The controls, rendered from state handed straight in.
 //
@@ -16,14 +16,9 @@ import type { SupatypeClient } from "@supatype/client"
 // and never-published each show a different set of controls, and which controls appear for which
 // state is the whole of what this component decides.
 
-const client = {
-  url: "http://localhost:8000/studio/proxy",
-  from: () => ({
-    select: () => ({ eq: () => ({ order: () => Promise.resolve({ data: [], error: null }) }) }),
-  }),
-} as unknown as SupatypeClient
+const client = testClient({ url: "http://localhost:8000/studio/proxy" })
 
-const locale = {
+const locale: UILocaleState = {
   currentLocale: "en",
   defaultLocale: "en",
   locales: [
@@ -31,7 +26,7 @@ const locale = {
     { code: "fr", label: "French" },
   ],
   setLocale: () => {},
-} as unknown as UILocaleState
+}
 
 const noActions = {
   publishAll: () => {},
@@ -44,7 +39,16 @@ const noActions = {
 function state(locales: Record<string, LocaleState>, scheduled: Record<string, string> = {}): PublishingState {
   return {
     versions: [],
-    newest: { scheduled_locales: scheduled } as unknown as PublishingState["newest"],
+    newest: {
+      id: "v1",
+      version: 1,
+      status: "draft",
+      created_at: "2026-09-05T09:00:00Z",
+      created_by: null,
+      data: {},
+      published_locales: {},
+      scheduled_locales: scheduled,
+    },
     hasPendingDraft: false,
     locales,
   }

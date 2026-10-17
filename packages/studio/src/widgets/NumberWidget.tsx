@@ -1,11 +1,12 @@
 import React from "react"
 import type { WidgetProps } from "./FieldWidget.js"
+import { stringOption } from "./field-options.js"
 
 export function NumberWidget({ config, value, onChange, readOnly }: WidgetProps): React.ReactElement {
   const min = config.validation?.min
   const max = config.validation?.max
   const isCurrency = Boolean(config.options?.["currency"])
-  const step = (config.options?.["step"] as string | undefined) ?? (isCurrency ? "0.01" : undefined)
+  const step = stringOption(config, "step") ?? (isCurrency ? "0.01" : undefined)
 
   const input = (
     <input

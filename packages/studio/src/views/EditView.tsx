@@ -101,7 +101,7 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
     const column = affordanceColumn(model.tableName, "delete")
     void (async () => {
       const result = await client
-        .from(model.tableName as never)
+        .from(model.tableName)
         .select(`${model.primaryKey},${column}`)
         .eq(model.primaryKey, recordId)
         .single()
@@ -212,8 +212,8 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
         }
 
         const result = await client
-          .from(model.tableName as never)
-          .update(updateValues as never)
+          .from(model.tableName)
+          .update(updateValues)
           .eq(model.primaryKey, recordId!)
 
         if (result.error) {
@@ -238,7 +238,7 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
 
     try {
       await client
-        .from(model.tableName as never)
+        .from(model.tableName)
         .delete()
         .eq(model.primaryKey, recordId)
 

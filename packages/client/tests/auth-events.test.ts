@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { AuthClient } from "../src/auth.js"
 import type { AuthChangeEvent } from "../src/types.js"
+import { fetchReturning } from "./support/fetch-mock.js"
 
 const AUTH_URL = "http://localhost:9999"
 const HEADERS = { apikey: "test-anon-key", "Content-Type": "application/json" }
@@ -23,15 +24,6 @@ const TOKEN_RESPONSE = {
   user: RAW_USER,
 }
 
-function jsonResponse(body: unknown, status = 200): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    json: vi.fn().mockResolvedValue(body),
-    headers: { get: () => null },
-  } as unknown as Response
-}
-
 function accessTokenWithExp(): string {
   const payload = Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 })).toString("base64url")
   return `eyJhbGciOiJub25lIn0.${payload}.sig`
@@ -50,7 +42,7 @@ function recordEvents(client: AuthClient): AuthChangeEvent[] {
 
 async function signedInClient(): Promise<AuthClient> {
   const client = new AuthClient(AUTH_URL, HEADERS)
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(TOKEN_RESPONSE)))
+  vi.stubGlobal("fetch", fetchReturning(TOKEN_RESPONSE))
   await client.signInWithPassword({ email: "old@example.com", password: "pw" })
   return client
 }
@@ -70,7 +62,7 @@ describe("USER_UPDATED", () => {
     })
     registered = true
 
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ ...RAW_USER, email: "new@example.com" })))
+    vi.stubGlobal("fetch", fetchReturning({ ...RAW_USER, email: "new@example.com" }))
     const { error } = await client.updateUser({ email: "new@example.com" })
 
     expect(error).toBeNull()
@@ -85,7 +77,7 @@ describe("USER_UPDATED", () => {
     const client = await signedInClient()
     const events = recordEvents(client)
 
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ msg: "weak password" }, 422)))
+    vi.stubGlobal("fetch", fetchReturning({ msg: "weak password" }, 422))
     const { error } = await client.updateUser({ password: "x" })
 
     expect(error?.status).toBe(422)
@@ -99,7 +91,7 @@ describe("PASSWORD_RECOVERY", () => {
   it("is emitted when a recovery link's tokens are read from the URL", async () => {
     const client = new AuthClient(AUTH_URL, HEADERS)
     const events = recordEvents(client)
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(RAW_USER)))
+    vi.stubGlobal("fetch", fetchReturning(RAW_USER))
 
     const { error } = await client.getSessionFromUrl(
       `https://app.example/reset#access_token=${accessTokenWithExp()}&refresh_token=rt-1&expires_in=3600&token_type=bearer&type=recovery`,
@@ -112,7 +104,7 @@ describe("PASSWORD_RECOVERY", () => {
   it("is not emitted for an ordinary sign-in link", async () => {
     const client = new AuthClient(AUTH_URL, HEADERS)
     const events = recordEvents(client)
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(RAW_USER)))
+    vi.stubGlobal("fetch", fetchReturning(RAW_USER))
 
     await client.getSessionFromUrl(
       `https://app.example/#access_token=${accessTokenWithExp()}&refresh_token=rt-1&type=magiclink`,
@@ -124,7 +116,7 @@ describe("PASSWORD_RECOVERY", () => {
   it("is emitted when a recovery OTP is verified", async () => {
     const client = new AuthClient(AUTH_URL, HEADERS)
     const events = recordEvents(client)
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(TOKEN_RESPONSE)))
+    vi.stubGlobal("fetch", fetchReturning(TOKEN_RESPONSE))
 
     const { error } = await client.verifyOtp({ type: "recovery", token: "123456", email: "old@example.com" })
 
@@ -135,7 +127,7 @@ describe("PASSWORD_RECOVERY", () => {
   it("is not emitted when a recovery OTP is refused", async () => {
     const client = new AuthClient(AUTH_URL, HEADERS)
     const events = recordEvents(client)
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ msg: "expired" }, 403)))
+    vi.stubGlobal("fetch", fetchReturning({ msg: "expired" }, 403))
 
     await client.verifyOtp({ type: "recovery", token: "123456", email: "old@example.com" })
 

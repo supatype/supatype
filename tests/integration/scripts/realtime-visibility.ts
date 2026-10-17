@@ -13,7 +13,8 @@
  * Env: SUPATYPE_KONG_PORT (or SUPATYPE_URL), ANON_KEY, SERVICE_ROLE_KEY.
  * Run: npx tsx scripts/realtime-visibility.ts (from tests/integration).
  */
-import { createClient } from "@supatype/client"
+import { createClient, type RealtimePayload } from "@supatype/client"
+import { isRecordArray } from "../lib/json.js"
 
 const BASE = process.env["SUPATYPE_URL"] ?? `http://127.0.0.1:${process.env["SUPATYPE_KONG_PORT"] ?? "18473"}`
 const ANON = process.env["ANON_KEY"] ?? ""
@@ -25,7 +26,7 @@ const RUN = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 type Row = Record<string, unknown>
-type Event = { eventType: string; new: Row | null; old: Row | null }
+type Event = RealtimePayload<Row>
 type Client = ReturnType<typeof createClient>
 
 let failures = 0
@@ -50,7 +51,9 @@ async function asService(method: string, path: string, body?: unknown): Promise<
   })
   const text = await res.text()
   if (res.status >= 300) throw new Error(`${method} ${path}: HTTP ${res.status} ${text.slice(0, 200)}`)
-  return text ? (JSON.parse(text) as Row[]) : []
+  const rows = text ? JSON.parse(text) : []
+  if (!isRecordArray(rows)) throw new Error(`${method} ${path}: expected the rows back, got ${text.slice(0, 200)}`)
+  return rows
 }
 
 async function insertOne(table: string, row: Row): Promise<Row> {
@@ -74,7 +77,7 @@ async function user(label: string): Promise<{ client: Client; id: string }> {
 /** Every event this client is sent on a table, from the moment it is SUBSCRIBED. */
 async function feed(client: Client, table: string, filter?: string): Promise<Event[]> {
   const events: Event[] = []
-  const sub = client.from(table).subscribe((p) => events.push(p as unknown as Event), {
+  const sub = client.from(table).subscribe((p) => events.push(p), {
     event: "*",
     ...(filter !== undefined && { filter }),
   })

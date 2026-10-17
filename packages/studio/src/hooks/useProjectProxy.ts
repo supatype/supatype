@@ -1,5 +1,6 @@
 import { useCallback, useMemo } from "react"
 import { DatabaseError, sqlstateInMessage, sqlstateOf } from "../lib/database-error.js"
+import { isJsonObject, isString } from "../lib/json.js"
 import { studioAuthHeaders, usesSessionProxy } from "../lib/studio-auth-headers.js"
 import { studioGatewayHeaders } from "../lib/studio-gateway-headers.js"
 import type { SupatypeClient } from "@supatype/client"
@@ -100,8 +101,10 @@ export interface StudioPolicyWrite {
   check?: string | null
 }
 
-/** What the SQL proxy answers: rows on success; on failure a message, and the SQLSTATE if passed on. */
-type SqlResponseBody = Partial<SqlResult> & { error?: string; message?: string; code?: unknown }
+/** `value` when it is a string, else null. */
+function text(value: unknown): string | null {
+  return typeof value === "string" ? value : null
+}
 
 /**
  * The rows of a SQL proxy answer, or the failure it reports as a `DatabaseError` carrying the
@@ -110,16 +113,19 @@ type SqlResponseBody = Partial<SqlResult> & { error?: string; message?: string; 
  * and the server ends it with `(SQLSTATE xxxxx)`, read when no `code` field says otherwise.
  */
 export async function readSqlResponse(res: Response): Promise<SqlResult> {
-  const json = (await res.json()) as SqlResponseBody
+  const body = await res.json()
+  const json = isJsonObject(body) ? body : {}
   if (!res.ok) {
-    const message = json.message ?? json.error ?? "SQL execution failed"
+    const message = text(json["message"]) ?? text(json["error"]) ?? "SQL execution failed"
     throw new DatabaseError(message, sqlstateOf(json) ?? sqlstateInMessage(message))
   }
-  const rows = Array.isArray(json.rows) ? json.rows : []
+  const rows = Array.isArray(json["rows"]) ? json["rows"].filter(isJsonObject) : []
+  const rowCount = json["rowCount"]
+  const schema = json["schema"]
   return {
     rows,
-    rowCount: json.rowCount ?? rows.length,
-    ...(json.schema !== undefined && { schema: json.schema }),
+    rowCount: typeof rowCount === "number" ? rowCount : rows.length,
+    ...(typeof schema === "string" && { schema }),
   }
 }
 
@@ -160,13 +166,13 @@ function truthy(value: unknown): boolean {
 /** One row of the introspect query as a column. */
 function columnFromRow(row: Record<string, unknown>): SchemaColumn {
   return {
-    name: row["column_name"] as string,
-    type: row["udt_name"] as string,
+    name: text(row["column_name"]) ?? "",
+    type: text(row["udt_name"]) ?? "",
     nullable: row["is_nullable"] === "YES",
     is_primary: truthy(row["is_primary"]),
     is_foreign_key: truthy(row["is_foreign_key"]),
-    references: (row["references_col"] as string | null) ?? null,
-    default_value: (row["column_default"] as string | null) ?? null,
+    references: text(row["references_col"]),
+    default_value: text(row["column_default"]),
     enum_values: null,
     is_unique: truthy(row["is_unique"]),
     is_indexed: truthy(row["is_primary"]),
@@ -177,10 +183,10 @@ function columnFromRow(row: Record<string, unknown>): SchemaColumn {
 export function tablesFromColumns(rows: Array<Record<string, unknown>>): SchemaTable[] {
   const tables = new Map<string, SchemaTable>()
   for (const row of rows) {
-    const name = row["table_name"] as string
+    const name = text(row["table_name"]) ?? ""
     let table = tables.get(name)
     if (!table) {
-      table = { name, schema: row["table_schema"] as string, row_count: Number(row["row_count"] ?? 0), columns: [] }
+      table = { name, schema: text(row["table_schema"]) ?? "", row_count: Number(row["row_count"] ?? 0), columns: [] }
       tables.set(name, table)
     }
     table.columns.push(columnFromRow(row))
@@ -230,7 +236,7 @@ export function useProjectProxy(): ProjectProxy {
   // Schemas that contain at least one base table (hides empty public/extensions/auth shells).
   const schemas = useCallback(async (): Promise<string[]> => {
     const result = await metadata("schemas")
-    return result.rows.map((r) => r["schema_name"] as string)
+    return result.rows.map((r) => r["schema_name"]).filter(isString)
   }, [metadata])
 
   const admin = useMemo(() => studioAdminWrites(client), [client])

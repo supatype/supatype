@@ -11,6 +11,8 @@ import { act, create, type ReactTestRenderer } from "react-test-renderer"
 import { createClient } from "@supatype/client"
 import { SupatypeProvider } from "@supatype/react"
 import { SignUpForm } from "../src/index.js"
+import { fire } from "./props.js"
+import { type } from "./helpers.js"
 
 const PENDING_USER = {
   id: "user-pending",
@@ -20,11 +22,6 @@ const PENDING_USER = {
   updated_at: "2024-01-01T00:00:00Z",
   app_metadata: { provider: "email" },
   user_metadata: {},
-}
-
-function type(renderer: ReactTestRenderer, id: string, value: string): void {
-  const input = renderer.root.find((node) => node.type === "input" && node.props["id"] === id)
-  act(() => { (input.props["onChange"] as (e: { target: { value: string } }) => void)({ target: { value } }) })
 }
 
 afterEach(() => {
@@ -45,7 +42,7 @@ describe("SignUpForm when the project requires email confirmation", () => {
     type(renderer!, "st-signup-password", "secret-pass")
 
     const form = renderer!.root.findByType("form")
-    await act(async () => { (form.props["onSubmit"] as (e: { preventDefault(): void }) => void)({ preventDefault: () => undefined }) })
+    await act(async () => { await fire(form, "onSubmit", { preventDefault: () => undefined }) })
 
     expect(onSuccess).toHaveBeenCalledWith(null)
     expect(renderer!.root.findByProps({ role: "status" }).children.join("")).toBe("Check your email to confirm your account.")

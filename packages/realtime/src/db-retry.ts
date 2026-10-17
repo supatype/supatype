@@ -42,9 +42,15 @@ const TRANSIENT_CODES = new Set([
 const FIRST_DELAY_MS = 500
 const MAX_DELAY_MS = 10_000
 
+/** The `code` an error carries (a Postgres SQLSTATE, a Node errno name), when it is a string. */
+export function errorCode(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null || !("code" in error)) return undefined
+  return typeof error.code === "string" ? error.code : undefined
+}
+
 export function isTransientConnectionError(error: unknown): boolean {
-  const code = (error as { code?: unknown } | null)?.code
-  if (typeof code === "string" && TRANSIENT_CODES.has(code)) return true
+  const code = errorCode(error)
+  if (code !== undefined && TRANSIENT_CODES.has(code)) return true
 
   // Some drivers surface a startup refusal only as a message. Narrow patterns only: matching
   // loosely here would turn a real misconfiguration into an infinite wait.

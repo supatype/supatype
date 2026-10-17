@@ -1,0 +1,11 @@
+{
+  // The development entry point, run with tsx from the repository root. It imports the CLI's source,
+  // which the package's own tsconfig compiles with `rootDir: "src"`, so it is typed here instead.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "rootDir": ".."
+  },
+  "include": ["../../../ts-reset.d.ts", "*.ts"]
+}

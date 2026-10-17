@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
 import { AdminError, readBodyLimited, sendData } from "./http.js"
 import { actorOf } from "./auth.js"
+import { isJsonObject } from "../json.js"
 
 /**
  * `POST /admin/v1/broadcast`: the Studio broadcast tester.
@@ -97,17 +98,17 @@ export function parseBroadcast(body: string): BroadcastInput {
   } catch {
     throw new AdminError(400, "validation_error", "The body must be JSON")
   }
-  const input = (typeof parsed === "object" && parsed !== null ? parsed : {}) as Record<string, unknown>
+  const input = isJsonObject(parsed) ? parsed : {}
   const channel = nameField(input["channel"], "channel", CHANNEL_MAX)
   const event = nameField(input["event"], "event", EVENT_MAX)
   const payload = input["payload"]
-  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+  if (!isJsonObject(payload)) {
     throw new AdminError(400, "validation_error", "payload must be a JSON object")
   }
   if (Buffer.byteLength(JSON.stringify(payload), "utf8") > PAYLOAD_LIMIT_BYTES) {
     throw new AdminError(413, "payload_too_large", `payload is over ${PAYLOAD_LIMIT_BYTES / 1024} KB`)
   }
-  return { channel, event, payload: payload as Record<string, unknown> }
+  return { channel, event, payload }
 }
 
 /** Answer one broadcast request; `send` fans it out and returns how many it reached. */

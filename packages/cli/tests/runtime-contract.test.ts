@@ -9,6 +9,8 @@ import { updateAppConfigInProject, updateServerConfigInProject } from "../src/ap
 import type { SupatypeProjectConfig } from "../src/project-config.js"
 import { DENO_RELEASE_PIN } from "../src/release-pins.js"
 import { CONTROL_PLANE_SECRET_ENV, seedMissingLocalSecrets } from "../src/local-secrets.js"
+import { isArrayOf, isJsonObject, isShape, isString } from "@supatype/shared"
+import { parseJsonAs } from "./support/json.js"
 
 /**
  * One service's block from a rendered compose file.
@@ -411,9 +413,7 @@ describe("runtime contract", () => {
       expect(compose).toContain("  functions-worker:")
       expect(compose).toContain("SUPATYPE_FUNCTIONS_WORKER_URL: http://functions-worker:8001")
 
-      const manifest = JSON.parse(
-        readFileSync(join(dir, ".supatype", "manifest.json"), "utf8"),
-      ) as Record<string, unknown>
+      const manifest = parseJsonAs(readFileSync(join(dir, ".supatype", "manifest.json"), "utf8"), isJsonObject)
       expect(manifest["functions_enabled"]).toBe(true)
       expect(manifest["functions_worker_url"]).toBe("http://functions-worker:8001")
     } finally {
@@ -435,9 +435,7 @@ describe("runtime contract", () => {
 
       writeSelfHostCompose(dir, baseConfig)
 
-      const manifest = JSON.parse(
-        readFileSync(join(dir, ".supatype", "manifest.json"), "utf8"),
-      ) as Record<string, unknown>
+      const manifest = parseJsonAs(readFileSync(join(dir, ".supatype", "manifest.json"), "utf8"), isJsonObject)
       expect(manifest["functions_enabled"]).toBe(true)
       expect(manifest["functions_worker_url"]).toBe("http://functions-worker:8001")
       // Values `push` put there survive: the schema is not "public" and must stay as found.
@@ -518,7 +516,7 @@ describe("runtime contract", () => {
     const compose = renderSelfHostCompose(baseConfig)
     const match = compose.match(/SUPATYPE_CLOUD_JSON: '([^']+)'/)
     expect(match).not.toBeNull()
-    const parsed = JSON.parse(match![1]!) as Record<string, unknown>
+    const parsed = parseJsonAs(match![1]!, isJsonObject)
     expect(parsed).toHaveProperty("url")
     expect(parsed).toHaveProperty("anonKey")
     expect(parsed).not.toHaveProperty("serviceRoleKey")
@@ -797,9 +795,9 @@ export default defineConfig({
 
       // Same credentials in both halves, checked rather than assumed: a mismatch here does not
       // fail at start, it fails at the first upload, which is a much worse place to find it.
-      const identities = JSON.parse(readFileSync(out.s3ConfigPath, "utf8")) as {
-        identities: { name: string; credentials: { accessKey: string; secretKey: string }[] }[]
-      }
+      const isCredential = isShape({ accessKey: isString, secretKey: isString })
+      const isS3Config = isShape({ identities: isArrayOf(isShape({ name: isString, credentials: isArrayOf(isCredential) })) })
+      const identities = parseJsonAs(readFileSync(out.s3ConfigPath, "utf8"), isS3Config)
       const credential = identities.identities[0]?.credentials[0]
       expect(compose).toContain(`S3_ACCESS_KEY: ${credential?.accessKey}`)
       expect(compose).toContain(`S3_SECRET_KEY: ${credential?.secretKey}`)

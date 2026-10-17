@@ -45,7 +45,7 @@ describe.skipIf(!databaseUrl)("DELETE of a row with NULL columns (TEST-1-N2)", (
   let admin: pg.Client
   let filter: RlsFilter
 
-  const alice = { sub: "alice", role: "authenticated" } as JwtClaims
+  const alice: JwtClaims = { sub: "alice", role: "authenticated" }
 
   /** Delete one row and return its DELETE exactly as the slot decodes it. */
   async function deleteThroughSlot(table: string, id: string): Promise<WalChange> {
@@ -90,7 +90,7 @@ describe.skipIf(!databaseUrl)("DELETE of a row with NULL columns (TEST-1-N2)", (
     await admin.query(`INSERT INTO public.rt_null_full (id, owner, title) VALUES ('rt_null_full-carol', 'carol', 'c')`)
     const change = await deleteThroughSlot("rt_null_full", "rt_null_full-carol")
     expect(Object.keys(change.oldRecord ?? {}).sort()).toEqual(["id", "owner", "title"])
-    const service = { role: "service_role" } as JwtClaims
+    const service: JwtClaims = { role: "service_role" }
     expect((await filter.visibleChange(service, change))?.oldRecord).toEqual({
       id: "rt_null_full-carol", owner: "carol", title: "c", body: null, secret: null,
     })

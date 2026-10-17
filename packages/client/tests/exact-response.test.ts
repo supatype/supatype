@@ -36,7 +36,7 @@ describe("parseRowsExactly", () => {
     const out = parseRowsExactly('[{"slug":"a","views":9007199254740993}]', "job_post")
 
     expect(out.ok).toBe(true)
-    expect(out.ok && (out.value as [{ views: bigint }])[0].views).toBe(9007199254740993n)
+    expect(out.ok && out.value).toEqual([{ slug: "a", views: 9007199254740993n }])
   })
 
   it("returns a numeric column as an exact string", () => {
@@ -44,7 +44,7 @@ describe("parseRowsExactly", () => {
     const out = parseRowsExactly('[{"equityPct":0.20}]', "job_post")
 
     expect(out.ok).toBe(true)
-    expect(out.ok && (out.value as [{ equityPct: string }])[0].equityPct).toBe("0.20")
+    expect(out.ok && out.value).toEqual([{ equityPct: "0.20" }])
   })
 
   it("leaves ordinary columns alone", () => {

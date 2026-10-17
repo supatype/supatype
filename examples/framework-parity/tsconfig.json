@@ -17,6 +17,7 @@
     ]
   },
   "include": [
+    "../../ts-reset.d.ts",
     "schema",
     "src/client.ts",
     "supatype.config.ts",

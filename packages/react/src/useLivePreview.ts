@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
+import { isCallerValue } from "./caller-types.js"
 
 export interface UseLivePreviewOptions<TData> {
   /** The initial/server data to display when not in preview mode. */
@@ -46,11 +47,12 @@ export function useLivePreview<TData>(
 
   useEffect(() => {
     const handler = (event: MessageEvent) => {
-      if (typeof event.data !== "object" || event.data === null) return
-      const msg = event.data as { type?: string; model?: string; data?: unknown }
-      if (msg.type !== "supatype:live-preview") return
-      if (opts.model && msg.model !== opts.model) return
-      setPreviewData(msg.data as TData)
+      const msg: unknown = event.data
+      if (typeof msg !== "object" || msg === null) return
+      if (!("type" in msg) || msg.type !== "supatype:live-preview") return
+      if (opts.model && (!("model" in msg) || msg.model !== opts.model)) return
+      const data = "data" in msg ? msg.data : undefined
+      if (isCallerValue<TData>(data)) setPreviewData(data)
     }
 
     window.addEventListener("message", handler)

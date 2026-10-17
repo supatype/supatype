@@ -1,6 +1,12 @@
 import type { FlowController } from "./flows/types.js"
 import type { DevSelectOption } from "./runtime/dev-prompt-queue.js"
-import { CLACK_CANCEL } from "./runtime/cancel.js"
+import { isBoolean, isString, type Guard } from "@supatype/shared"
+import { CLACK_CANCEL, promptAnswer } from "./runtime/cancel.js"
+
+/** An answer that is one of the select's own option values. */
+export function isOptionOf<T extends string>(options: readonly DevSelectOption<T>[]): Guard<T> {
+  return (value: unknown): value is T => options.some((option) => option.value === value)
+}
 
 export interface ClackTextOptions {
   message: string
@@ -65,34 +71,35 @@ export function createClackApi(controller: FlowController): ClackApi {
       process.exit(0)
     },
     async text(options) {
-      return controller.waitForPrompt<string>({
+      const answer = await controller.waitForPrompt({
         kind: "text",
         message: options.message,
         ...(options.defaultValue !== undefined ? { defaultValue: options.defaultValue } : {}),
         ...(options.placeholder !== undefined ? { placeholder: options.placeholder } : {}),
         ...(options.validate !== undefined ? { validate: options.validate } : {}),
       })
+      return promptAnswer(answer, isString)
     },
     async password(options) {
-      return controller.waitForPrompt<string>({
-        kind: "password",
-        message: options.message,
-      })
+      const answer = await controller.waitForPrompt({ kind: "password", message: options.message })
+      return promptAnswer(answer, isString)
     },
     async select<T extends string>(options: ClackSelectOptions<T>) {
-      return controller.waitForPrompt<T>({
+      const answer = await controller.waitForPrompt({
         kind: "select",
         message: options.message,
         options: options.options,
         ...(options.initialValue !== undefined ? { initialValue: options.initialValue } : {}),
       })
+      return promptAnswer(answer, isOptionOf(options.options))
     },
     async confirm(options) {
-      return controller.waitForPrompt<boolean>({
+      const answer = await controller.waitForPrompt({
         kind: "confirm",
         message: options.message,
         initialValue: options.initialValue ?? false,
       })
+      return promptAnswer(answer, isBoolean)
     },
     spinner() {
       return {

@@ -68,6 +68,14 @@ function declare(table: string, live: LiveColumn) {
   return applyColumnDeclaration(planned, entry, dir)
 }
 
+/** The reason a result gives for leaving the column alone; fails the test when it gives none. */
+function reasonOf(result: object): string {
+  if (!("reason" in result) || typeof result.reason !== "string") {
+    throw new Error(`expected a reason, got ${JSON.stringify(result)}`)
+  }
+  return result.reason
+}
+
 describe("fieldTypeForColumn()", () => {
   it("maps the types whose column a field declares exactly", () => {
     const text = (c: LiveColumn) => {
@@ -193,7 +201,7 @@ describe("what cannot be declared exactly", () => {
     )
     const result = plan("post", col("note", "text", { nullable: true }))
     expect(result).toMatchObject({ status: "manual", line: "note: Optional<string>", imports: ["Optional"] })
-    expect((result as { reason: string }).reason).toContain("already has a Optional")
+    expect(reasonOf(result)).toContain("already has a Optional")
     expect(readFileSync(entry, "utf8")).not.toContain("note")
 
     write(
@@ -212,7 +220,7 @@ describe("what cannot be declared exactly", () => {
     const twice = planned.after.replace(`import type {`, `import type { Optional } from "./elsewhere"\nimport type {`)
     const result = applyColumnDeclaration({ ...planned, after: twice }, entry, dir)
     expect(result.status).toBe("manual")
-    expect((result as { reason: string }).reason).toContain("Duplicate identifier 'Optional'")
+    expect(reasonOf(result)).toContain("Duplicate identifier 'Optional'")
     expect(readFileSync(entry, "utf8")).toBe(POST)
   })
 
@@ -482,7 +490,7 @@ describe("identity and generated columns", () => {
       { identityColumns: true },
     )
     expect(t).toHaveProperty("reason")
-    expect((t as { reason: string }).reason).toContain("generated column")
+    expect(reasonOf(t)).toContain("generated column")
   })
 
   it("does not declare one for an engine without identity_columns, and says to update it", () => {
@@ -492,7 +500,7 @@ describe("identity and generated columns", () => {
     ]) {
       const planned = plan("post", live, false)
       expect(planned).toMatchObject({ status: "manual" })
-      expect((planned as { reason: string }).reason).toContain(
+      expect(reasonOf(planned)).toContain(
         "this engine does not support identity and generated columns; update it, or declare the column by hand",
       )
     }

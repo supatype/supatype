@@ -7,7 +7,7 @@
     "lib": ["ES2022", "DOM"],
     "jsx": "react-jsx"
   },
-  "include": ["src"],
+  "include": ["../../ts-reset.d.ts", "src"],
   "references": [
     { "path": "../client" },
     { "path": "../common" }

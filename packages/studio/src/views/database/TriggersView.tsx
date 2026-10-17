@@ -7,6 +7,7 @@ import { Badge, Button, Card, CodeBlock } from "../../components/ui.js"
 import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 import { SlidePanel } from "../../components/SlidePanel.js"
+import { cellText } from "../metadata-row.js"
 
 export function TriggersView(): React.ReactElement {
   const proxy = useProjectProxy()
@@ -32,7 +33,7 @@ export function TriggersView(): React.ReactElement {
       setSqlModal(false)
       refetch()
     } catch (e) {
-      setRunError((e as Error).message)
+      setRunError(e instanceof Error ? e.message : String(e))
     } finally {
       setRunBusy(false)
     }
@@ -74,15 +75,15 @@ export function TriggersView(): React.ReactElement {
             <tbody>
               {triggers?.map((row, i) => (
                 <tr key={i} className="border-b border-border last:border-0 hover:bg-muted/20 cursor-pointer" onClick={() => setSelected(row)}>
-                  <td className="px-4 py-3 font-mono text-sm text-foreground">{row["trigger_name"] as string}</td>
-                  <td className="px-4 py-3 text-muted-foreground text-xs font-mono">{row["event_object_table"] as string}</td>
+                  <td className="px-4 py-3 font-mono text-sm text-foreground">{cellText(row, "trigger_name")}</td>
+                  <td className="px-4 py-3 text-muted-foreground text-xs font-mono">{cellText(row, "event_object_table")}</td>
                   <td className="px-4 py-3 flex gap-1">
-                    <Badge variant={timingVariant(row["action_timing"] as string)}>{row["action_timing"] as string}</Badge>
-                    <Badge variant={eventVariant(row["event_manipulation"] as string)}>{row["event_manipulation"] as string}</Badge>
+                    <Badge variant={timingVariant(cellText(row, "action_timing"))}>{cellText(row, "action_timing")}</Badge>
+                    <Badge variant={eventVariant(cellText(row, "event_manipulation"))}>{cellText(row, "event_manipulation")}</Badge>
                   </td>
-                  <td className="px-4 py-3 text-xs text-muted-foreground">{row["action_orientation"] as string}</td>
+                  <td className="px-4 py-3 text-xs text-muted-foreground">{cellText(row, "action_orientation")}</td>
                   <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
-                    {sqlWrites ? (<button type="button" className="text-xs text-destructive hover:underline" onClick={() => { setSqlText(`DROP TRIGGER ${row["trigger_name"] as string} ON ${schema}.${row["event_object_table"] as string};`); setSqlModal(true) }}>Drop</button>) : null}
+                    {sqlWrites ? (<button type="button" className="text-xs text-destructive hover:underline" onClick={() => { setSqlText(`DROP TRIGGER ${cellText(row, "trigger_name")} ON ${schema}.${cellText(row, "event_object_table")};`); setSqlModal(true) }}>Drop</button>) : null}
                   </td>
                 </tr>
               ))}
@@ -94,11 +95,11 @@ export function TriggersView(): React.ReactElement {
       <SlidePanel
         open={selected !== null}
         onClose={() => setSelected(null)}
-        title={(selected?.["trigger_name"] as string) ?? ""}
-        subtitle={selected ? `${selected["action_timing"] as string} ${selected["event_manipulation"] as string} on ${selected["event_object_table"] as string}` : undefined}
+        title={selected ? cellText(selected, "trigger_name") : ""}
+        subtitle={selected ? `${cellText(selected, "action_timing")} ${cellText(selected, "event_manipulation")} on ${cellText(selected, "event_object_table")}` : undefined}
         width="max-w-[540px]"
       >
-        {selected && <CodeBlock>{(selected["action_statement"] as string) ?? ""}</CodeBlock>}
+        {selected && <CodeBlock>{cellText(selected, "action_statement")}</CodeBlock>}
       </SlidePanel>
 
       {sqlModal && (

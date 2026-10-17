@@ -10,5 +10,5 @@
     "declaration": true,
     "types": ["node"]
   },
-  "include": ["src/**/*"]
+  "include": ["../../ts-reset.d.ts", "src/**/*"]
 }

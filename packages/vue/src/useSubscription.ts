@@ -1,4 +1,4 @@
-import { ref, onMounted, onUnmounted, type Ref } from "vue"
+import { ref, shallowRef, onMounted, onUnmounted, type Ref } from "vue"
 import type { AugmentedDatabase, AnyDatabase, SupatypeError, RealtimeEvent } from "@supatype/client"
 import { watchTable, type SubscriptionState, type TableWatchOptions } from "@supatype/client/bindings"
 import { useSupatype } from "./context.js"
@@ -41,7 +41,8 @@ export function useSubscription<
   options?: UseSubscriptionOptions | undefined,
 ): UseSubscriptionReturn<TRow> {
   const client = useSupatype<TDatabase>()
-  const data = ref<TRow[] | null>(null) as Ref<TRow[] | null>
+  // Shallow: each change replaces the rows whole, and `ref` would type them as `UnwrapRef<TRow>`.
+  const data = shallowRef<TRow[] | null>(null)
   const error = ref<SupatypeError | null>(null)
   const status = ref<SubscriptionState>("connecting")
 

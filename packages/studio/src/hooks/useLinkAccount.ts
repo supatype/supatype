@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react"
 import type { SupatypeClient } from "@supatype/client"
+import { readJsonObject } from "../lib/json.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { studioGatewayHeaders } from "../lib/studio-gateway-headers.js"
 import { membershipBase } from "../lib/membership-url.js"
@@ -9,13 +10,10 @@ export type LinkState = { status: "idle" | "working" } | { status: "error"; mess
 
 /** What an error answer says, from the shapes the project's auth and the control plane use. */
 async function errorMessage(res: Response, fallback: string): Promise<string> {
-  try {
-    const body = (await res.json()) as { message?: unknown; msg?: unknown; error_description?: unknown }
-    for (const value of [body.error_description, body.msg, body.message]) {
-      if (typeof value === "string" && value !== "") return value
-    }
-  } catch {
-    // Not JSON: the fallback says enough.
+  // A body that is not JSON reads as `{}`: the fallback says enough.
+  const body = await readJsonObject(res)
+  for (const value of [body["error_description"], body["msg"], body["message"]]) {
+    if (typeof value === "string" && value !== "") return value
   }
   return fallback
 }
@@ -29,9 +27,9 @@ async function signInToProject(client: SupatypeClient, email: string, password: 
     body: JSON.stringify({ email, password }),
   })
   if (!res.ok) throw new Error(await errorMessage(res, "That project login did not work"))
-  const body = (await res.json()) as { access_token?: unknown }
-  if (typeof body.access_token !== "string") throw new Error("The project's sign-in returned no token")
-  return body.access_token
+  const token = (await readJsonObject(res))["access_token"]
+  if (typeof token !== "string") throw new Error("The project's sign-in returned no token")
+  return token
 }
 
 /** Hand the sign-in's token to the control plane, which verifies it and stores the link. */

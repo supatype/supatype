@@ -10,8 +10,9 @@ import {
   schemaHasVersionedModels,
   versionedModels,
 } from "../src/model-versioning.js"
-import { apiSchemaList, draftVisibilityRoles, previewLimits } from "../src/project-config.js"
+import { apiSchemaList, draftVisibilityRoles, previewLimits, validateProjectConfig } from "../src/project-config.js"
 import type { SupatypeProjectConfig } from "../src/project-config.js"
+import { projectConfig } from "./support/project-config.js"
 
 // A versioned model is opt-in and changes three things that are decided before any database exists:
 // the exposed schema list gains `draft`, the engine emits a versions table and a draft view, and a
@@ -196,11 +197,7 @@ describe("resolveVersionsOptions", () => {
 })
 
 function project(overrides?: Partial<SupatypeProjectConfig>): SupatypeProjectConfig {
-  return {
-    projectName: "test",
-    database: { provider: "docker" },
-    ...overrides,
-  } as SupatypeProjectConfig
+  return projectConfig({ project: { name: "test" }, database: { provider: "docker" }, ...overrides })
 }
 
 describe("the exposed schema list with drafts", () => {
@@ -248,10 +245,12 @@ describe("draft visibility", () => {
 
   it("drops a role no deployment understands", () => {
     // A typo passed through to a policy would be a role nothing can hold, which reads as a working
-    // setting that grants nobody.
-    const cfg = project({
-      publishing: { draft_visibility: ["editor", "owner", "editor"] as never },
-    })
+    // setting that grants nobody. The typo arrives the way a config file's text does, through the
+    // loader's validation, since the config type itself does not admit it.
+    const cfg = validateProjectConfig(
+      { ...project(), publishing: { draft_visibility: ["editor", "owner", "editor"] } },
+      "supatype.config.ts",
+    )
     expect(draftVisibilityRoles(cfg)).toEqual(["editor"])
   })
 })

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type { DiffResult } from "../src/engine-client.js"
 
 // The linked and self-hosted push path reads a diff first and asks before it pushes. A person who
 // declines keeps the hand edits and the push exits 1, as the docker path does on the engine's
@@ -15,7 +16,7 @@ vi.mock("../src/ui/interactive.js", async (importOriginal) => ({
 
 const { consentToSecurityDrift } = await import("../src/commands/push.js")
 
-const drifted = {
+const drifted: Pick<DiffResult, "reconcile"> = {
   reconcile: [
     {
       action: "drift",
@@ -25,7 +26,7 @@ const drifted = {
       live_def: "USING (false)",
     },
   ],
-} as unknown as Parameters<typeof consentToSecurityDrift>[0]
+}
 
 beforeEach(() => {
   vi.spyOn(console, "log").mockImplementation(() => undefined)

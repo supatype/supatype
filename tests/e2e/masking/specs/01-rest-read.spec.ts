@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test"
-import { byPerson, expectedEmployees, expectedPayslips } from "../lib/expect-rows.js"
+import { byPerson, expectedEmployees, expectedPayslips, perPerson } from "../lib/expect-rows.js"
 import { rest, rows } from "../lib/http.js"
 import { CALLERS, seed, tokenOf } from "../lib/world.js"
 
@@ -37,10 +37,9 @@ for (const caller of ["a", "admin"] as const) {
   test(`${caller} embeds payslips in employees`, async () => {
     const r = await rest(tokenOf(caller), "GET", "employee?select=id,name,grade,salary,ssn,payslip(dept,amount,bank_account)")
     expect(r.status, r.text).toBe(200)
+    const employees = expectedEmployees(caller)
     const payslips = expectedPayslips(caller)
-    const want = Object.fromEntries(
-      Object.entries(expectedEmployees(caller)).map(([p, e]) => [p, { ...e, payslip: [payslips[p as keyof typeof payslips]] }]),
-    )
+    const want = perPerson((p) => ({ ...employees[p], payslip: [payslips[p]] }))
     expect(byPerson(rows(r), "id")).toEqual(want)
   })
 }

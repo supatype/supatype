@@ -10,9 +10,12 @@ import {
   parseClientParam,
   presenceKey,
   type ChannelAction,
+  type ClientSocket,
   type ConnectedClient,
 } from "./channels.js"
 import { ReplicationListener } from "./replication.js"
+import { parseClientMessage } from "./client-message.js"
+import { isArrayOf, isShape, isString, type FromShape } from "./json.js"
 import { RealtimeUnsupportedError } from "./capability.js"
 import { RlsFilter } from "./rls.js"
 import { filterIsMaskSafe } from "./field-mask.js"
@@ -60,12 +63,18 @@ function isInternalSchema(schema: string): boolean {
   )
 }
 
+const PROJECT_ROUTE = { ref: isString, jwtSecret: isString, tier: isString, status: isString } as const
+
 /** Cached routing table entry for multi-tenant mode. */
-interface ProjectRoute {
-  ref: string
-  jwtSecret: string
-  tier: string
-  status: string
+type ProjectRoute = FromShape<typeof PROJECT_ROUTE>
+
+/** What the control plane's routing table API answers with. */
+const isRoutingTable = isShape({ routes: isArrayOf(isShape(PROJECT_ROUTE)) })
+
+/** The `X-Supatype-Project` header, when it is sent once. */
+function projectHeader(req: IncomingMessage): string | undefined {
+  const header = req.headers["x-supatype-project"]
+  return typeof header === "string" ? header : undefined
 }
 
 export class RealtimeServer {
@@ -240,7 +249,7 @@ export class RealtimeServer {
     let projectRef: string | null = null
     if (this.env.multiTenant) {
       projectRef =
-        (req.headers["x-supatype-project"] as string | undefined) ??
+        projectHeader(req) ??
         new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`).searchParams.get("project") ??
         null
 
@@ -282,7 +291,8 @@ export class RealtimeServer {
     ws.on("message", (data) => {
       this.channels.noteMessage(clientId)
       try {
-        const msg = JSON.parse(String(data)) as ClientMessage
+        const msg = parseClientMessage(String(data))
+        if (msg === null) throw new Error("not a client message")
         this.handleMessage(clientId, msg)
       } catch {
         this.send(ws, { type: "system", status: "error", message: "invalid message format" })
@@ -637,13 +647,13 @@ export class RealtimeServer {
   }
 
   /** Send `msg`, returning the frame it sent, or null when the socket was not open. */
-  private send(ws: WebSocket, msg: ServerMessage): string | null {
+  private send(ws: ClientSocket, msg: ServerMessage): string | null {
     const frame = JSON.stringify(msg)
     return this.sendFrame(ws, frame) ? frame : null
   }
 
   /** Send an already-serialised frame, reporting whether the socket was open to take it. */
-  private sendFrame(ws: WebSocket, frame: string): boolean {
+  private sendFrame(ws: ClientSocket, frame: string): boolean {
     if (ws.readyState !== WebSocket.OPEN) return false
     ws.send(frame)
     return true
@@ -665,7 +675,11 @@ export class RealtimeServer {
         return
       }
 
-      const data = await res.json() as { routes: ProjectRoute[] }
+      const data = await res.json()
+      if (!isRoutingTable(data)) {
+        console.error("[realtime] routing table refresh failed: the answer is not a routing table")
+        return
+      }
       const newRoutes = new Map<string, ProjectRoute>()
       for (const route of data.routes) {
         newRoutes.set(route.ref, route)

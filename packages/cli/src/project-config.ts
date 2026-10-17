@@ -7,6 +7,8 @@ import type { ComponentVersions } from "./components.js"
 import { validateAuthProviders, type AuthProvidersConfig } from "./auth-providers.js"
 import { validateAuthEmail } from "./mailer-autoconfirm.js"
 import { STUDIO_ROLES, type StudioRole } from "./studio-roles.js"
+import { isJsonObject, isString } from "@supatype/shared"
+import { objectAt } from "./ast-read.js"
 
 // ---------------------------------------------------------------------------
 // Config schema (single canonical shape; loaded from supatype.config.ts)
@@ -463,27 +465,42 @@ export interface SupatypeProjectConfig {
 // ---------------------------------------------------------------------------
 
 type ConfigKey = keyof SupatypeProjectConfig
-type Section<K extends ConfigKey> = NonNullable<SupatypeProjectConfig[K]>
-type MergeFn<K extends ConfigKey> = (base: SupatypeProjectConfig[K], override: SupatypeProjectConfig[K]) => SupatypeProjectConfig[K]
+
+/** Part of a section: a local config sets the fields it changes, at any depth. */
+type DeepPartial<T> = T extends readonly unknown[] ? T : T extends object ? { [F in keyof T]?: DeepPartial<T[F]> } : T
+
+/** A local config (`supatype.local.config.ts`): any section, and within it any of its fields. */
+export type ProjectConfigOverride = { [K in ConfigKey]?: DeepPartial<SupatypeProjectConfig[K]> }
+
+/**
+ * One section merged. Sections are read here as the objects they are at runtime; the merged config
+ * is checked as a whole afterwards (`isProjectConfig`, then `validateProjectConfig` by the caller).
+ */
+type MergeFn = (base: unknown, override: unknown) => unknown
 
 /** A value the local config replaces whole (a string, a choice). */
-function replace<T>(base: T, override: T): T {
+function replace(base: unknown, override: unknown): unknown {
   return override ?? base
 }
 
+/** The value's own fields, or none when it is not an object. */
+function fieldsOf(value: unknown): Record<string, unknown> {
+  return isJsonObject(value) ? value : {}
+}
+
 /** A section merged a field at a time, the local config's fields winning. */
-function shallow<T extends object>(base: T | undefined, override: T | undefined): T {
-  return { ...base, ...override } as T
+function shallow(base: unknown, override: unknown): Record<string, unknown> {
+  return { ...fieldsOf(base), ...fieldsOf(override) }
 }
 
 /** A section merged a field at a time, with its `field` (itself a section) merged the same way. */
-function nested<T extends object, N extends keyof T>(field: N): (base: T | undefined, override: T | undefined) => T {
+function nested(field: string): MergeFn {
   return (base, override) => {
     const merged = shallow(base, override)
-    const b = base?.[field] as object | undefined
-    const o = override?.[field] as object | undefined
+    const b = fieldsOf(base)[field]
+    const o = fieldsOf(override)[field]
     if (b === undefined && o === undefined) return merged
-    return { ...merged, [field]: { ...b, ...o } }
+    return { ...merged, [field]: shallow(b, o) }
   }
 }
 
@@ -491,17 +508,16 @@ function nested<T extends object, N extends keyof T>(field: N): (base: T | undef
  * `auth` from the local config on top of the base, a provider at a time, so a local file can swap one
  * provider's client id for a development OAuth app without restating the others.
  */
-function mergeAuth(
-  base: SupatypeProjectConfig["auth"],
-  override: SupatypeProjectConfig["auth"],
-): SupatypeProjectConfig["auth"] {
-  const names = new Set([...Object.keys(base?.providers ?? {}), ...Object.keys(override?.providers ?? {})])
-  if (names.size === 0) return { ...base, ...override }
-  const providers: AuthProvidersConfig = {}
-  for (const name of names as Set<keyof AuthProvidersConfig>) {
-    providers[name] = { ...base?.providers?.[name], ...override?.providers?.[name] }
-  }
-  return { ...base, ...override, providers }
+function mergeAuth(base: unknown, override: unknown): unknown {
+  const baseProviders = fieldsOf(fieldsOf(base)["providers"])
+  const overrideProviders = fieldsOf(fieldsOf(override)["providers"])
+  const names = new Set([...Object.keys(baseProviders), ...Object.keys(overrideProviders)])
+  const merged = shallow(base, override)
+  if (names.size === 0) return merged
+  const providers = Object.fromEntries(
+    [...names].map((name) => [name, shallow(baseProviders[name], overrideProviders[name])]),
+  )
+  return { ...merged, providers }
 }
 
 /**
@@ -509,7 +525,7 @@ function mergeAuth(
  * `SupatypeProjectConfig` does not compile until it is given a rule here: the fixed list this
  * replaced dropped `cache`, `api` and `publishing` from a local config without a word.
  */
-const MERGE_RULES: { [K in ConfigKey]: MergeFn<K> } = {
+const MERGE_RULES: { [K in ConfigKey]: MergeFn } = {
   provider: replace,
   supatype: shallow,
   project: shallow,
@@ -520,54 +536,66 @@ const MERGE_RULES: { [K in ConfigKey]: MergeFn<K> } = {
   app: shallow,
   versions: shallow,
   overrides: shallow,
-  email: nested<Section<"email">, "smtp">("smtp"),
+  email: nested("smtp"),
   auth: mergeAuth,
   storage: shallow,
   schema: shallow,
-  publishing: nested<Section<"publishing">, "preview">("preview"),
+  publishing: nested("preview"),
   functions: shallow,
   output: shallow,
   build: shallow,
-  environments: nested<Section<"environments">, "branchDefaults">("branchDefaults"),
+  environments: nested("branchDefaults"),
   connection: replace,
   admin: shallow,
-}
-
-/** One top-level key of the merged config, by its rule. */
-function mergeKey<K extends ConfigKey>(
-  key: K,
-  base: SupatypeProjectConfig,
-  override: Partial<SupatypeProjectConfig>,
-): SupatypeProjectConfig[K] {
-  const rule: MergeFn<K> = MERGE_RULES[key]
-  return rule(base[key], override[key] as SupatypeProjectConfig[K])
 }
 
 /**
  * Merge each top-level section from `override` on top of `base`.
  * Within each section, override values win. New optional sections in override are added, and a key
  * with no rule (one a config sets that the type does not know) is kept, the override winning.
+ *
+ * `override` is a typed local config, or one as loaded from its file; the caller validates the
+ * result either way, since the merge can bring together settings each file was valid without.
  */
 export function mergeProjectConfig(
   base: SupatypeProjectConfig,
-  override: Partial<SupatypeProjectConfig>,
+  override: ProjectConfigOverride | Readonly<Record<string, unknown>>,
 ): SupatypeProjectConfig {
-  const merged: Record<string, unknown> = { ...base, ...override }
-  for (const key of Object.keys(MERGE_RULES) as ConfigKey[]) {
-    if (base[key] === undefined && override[key] === undefined) delete merged[key]
-    else merged[key] = mergeKey(key, base, override)
+  const baseFields: Record<string, unknown> = { ...base }
+  const overrideFields: Record<string, unknown> = { ...override }
+  const merged: Record<string, unknown> = { ...baseFields, ...overrideFields }
+  for (const [key, rule] of Object.entries(MERGE_RULES)) {
+    if (baseFields[key] === undefined && overrideFields[key] === undefined) delete merged[key]
+    else merged[key] = rule(baseFields[key], overrideFields[key])
   }
-  return merged as unknown as SupatypeProjectConfig
+  if (!isProjectConfig(merged)) throw new Error("The merged config lost a section the base config had")
+  return merged
+}
+
+/**
+ * Where a config object becomes a `SupatypeProjectConfig`, the one check this module cannot make in
+ * full. The sections every command reads (`project.name`, `database`, `server`, `app`) are checked
+ * here, and the validators below check the sections they own; the remaining fields are the config
+ * author's, typed by `defineConfig` against this same interface, and read where they are used.
+ */
+function isProjectConfig(value: unknown): value is SupatypeProjectConfig {
+  return (
+    isJsonObject(value) &&
+    typeof objectAt(value, "project")?.["name"] === "string" &&
+    Boolean(value["database"]) &&
+    Boolean(value["server"]) &&
+    Boolean(value["app"])
+  )
 }
 
 export function validateProjectConfig(raw: unknown, filename: string): SupatypeProjectConfig {
-  if (typeof raw !== "object" || raw === null) {
+  if (!isJsonObject(raw)) {
     throw new Error(`${filename}: expected a config object at the root`)
   }
 
-  const cfg = raw as Record<string, unknown>
+  const cfg = raw
 
-  if (!cfg["project"] || typeof (cfg["project"] as Record<string, unknown>)["name"] !== "string") {
+  if (typeof objectAt(cfg, "project")?.["name"] !== "string") {
     throw new Error(`${filename}: project.name is required`)
   }
   if (!cfg["database"]) {
@@ -587,7 +615,8 @@ export function validateProjectConfig(raw: unknown, filename: string): SupatypeP
   validateAuthEmail(cfg, filename)
   validateCorsOrigins(cfg, filename)
 
-  return raw as SupatypeProjectConfig
+  if (!isProjectConfig(cfg)) throw new Error(`${filename}: not a project config`)
+  return cfg
 }
 
 /**
@@ -612,8 +641,7 @@ export function isCorsOriginEntry(entry: string): boolean {
 
 /** `api.corsOrigins`: an array of origins or `*`, refused when the config is read. */
 function validateCorsOrigins(cfg: Record<string, unknown>, filename: string): void {
-  const api = cfg["api"] as Record<string, unknown> | undefined
-  const origins = api?.["corsOrigins"]
+  const origins = objectAt(cfg, "api")?.["corsOrigins"]
   if (origins === undefined) return
   const bad = Array.isArray(origins)
     ? origins.filter((o) => typeof o !== "string" || !isCorsOriginEntry(o.trim()))
@@ -641,11 +669,13 @@ const MAX_SCHEMA_NAME_BYTES = 63
  * generated from it; the engine refuses the same names at its own boundary.
  */
 function validateSchemaNames(cfg: Record<string, unknown>, filename: string): void {
-  const schema = cfg["schema"] as { pg_schema?: unknown; api_schemas?: unknown } | undefined
-  if (schema === undefined || schema === null) return
-  if (schema.pg_schema !== undefined) assertPlainSchemaName(schema.pg_schema, "schema.pg_schema", filename)
-  if (Array.isArray(schema.api_schemas)) {
-    for (const name of schema.api_schemas) assertPlainSchemaName(name, "schema.api_schemas", filename)
+  const schema = objectAt(cfg, "schema")
+  if (schema === undefined) return
+  const pgSchema = schema["pg_schema"]
+  const apiSchemas = schema["api_schemas"]
+  if (pgSchema !== undefined) assertPlainSchemaName(pgSchema, "schema.pg_schema", filename)
+  if (Array.isArray(apiSchemas)) {
+    for (const name of apiSchemas) assertPlainSchemaName(name, "schema.api_schemas", filename)
   }
 }
 
@@ -672,7 +702,7 @@ function assertPlainSchemaName(name: unknown, key: string, filename: string): vo
  * that will not start.
  */
 function validateCache(cfg: Record<string, unknown>, filename: string): void {
-  const cache = cfg["cache"] as Record<string, unknown> | undefined
+  const cache = objectAt(cfg, "cache")
   if (!cache) return
   const provider = cache["provider"]
   if (provider !== undefined && provider !== "valkey" && provider !== "pg_keyspace") {
@@ -680,8 +710,7 @@ function validateCache(cfg: Record<string, unknown>, filename: string): void {
       `${filename}: cache.provider must be "valkey" or "pg_keyspace" (got ${JSON.stringify(provider)})`,
     )
   }
-  const database = cfg["database"] as Record<string, unknown> | undefined
-  if (provider === "pg_keyspace" && database?.["external"]) {
+  if (provider === "pg_keyspace" && objectAt(cfg, "database")?.["external"]) {
     throw new Error(
       `${filename}: cache.provider = "pg_keyspace" needs the Postgres this stack starts: ` +
         `it is loaded with shared_preload_libraries, which is not something Supatype can set on ` +
@@ -697,7 +726,7 @@ function validateCache(cfg: Record<string, unknown>, filename: string): void {
     // pg_keyspace.durability_overrides, so a prefix containing either would be
     // read as two settings. Refused here rather than mangled into the command
     // line, where it would surface as a Postgres that will not start.
-    const bad = (prefixes as string[]).find((p) => p.includes(",") || p.includes("="))
+    const bad = prefixes.filter(isString).find((p) => p.includes(",") || p.includes("="))
     if (bad) {
       throw new Error(
         `${filename}: cache.durablePrefixes entry ${JSON.stringify(bad)} cannot contain "," or "=": ` +
@@ -715,15 +744,15 @@ function validateCache(cfg: Record<string, unknown>, filename: string): void {
  * services are reading, which looks like data loss and is not.
  */
 function validateExternalDatabase(cfg: Record<string, unknown>, filename: string): void {
-  const database = cfg["database"] as Record<string, unknown>
-  const external = database["external"]
+  const database = objectAt(cfg, "database")
+  const external = database?.["external"]
   if (external === undefined) return
 
-  if (typeof external !== "object" || external === null || Array.isArray(external)) {
+  if (!isJsonObject(external)) {
     throw new Error(`${filename}: database.external must be an object with a url`)
   }
 
-  const url = (external as Record<string, unknown>)["url"]
+  const url = external["url"]
   if (typeof url !== "string" || url.trim().length === 0) {
     throw new Error(
       `${filename}: database.external.url is required, the Postgres URL every service connects to.\n` +
@@ -738,12 +767,12 @@ function validateExternalDatabase(cfg: Record<string, unknown>, filename: string
     )
   }
 
-  const realtime = (external as Record<string, unknown>)["realtime"]
+  const realtime = external["realtime"]
   if (realtime !== undefined && typeof realtime !== "boolean") {
     throw new Error(`${filename}: database.external.realtime must be true or false`)
   }
 
-  if (database["provider"] !== undefined) {
+  if (database?.["provider"] !== undefined) {
     throw new Error(
       `${filename}: database.provider ("${String(database["provider"])}") and database.external ` +
         "cannot both be set, provider chooses a Postgres for Supatype to run, external says one " +
@@ -752,8 +781,7 @@ function validateExternalDatabase(cfg: Record<string, unknown>, filename: string
     )
   }
 
-  const server = cfg["server"] as Record<string, unknown> | undefined
-  if (server?.["mode"] === "managed") {
+  if (objectAt(cfg, "server")?.["mode"] === "managed") {
     throw new Error(
       `${filename}: database.external is not supported with server.mode "managed", on the cloud ` +
         "path the database is part of what is being provided.\n" +

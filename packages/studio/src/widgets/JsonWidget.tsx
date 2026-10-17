@@ -18,7 +18,7 @@ export function JsonWidget({ config, value, onChange, readOnly }: WidgetProps): 
         return
       }
       try {
-        const parsed = JSON.parse(text) as unknown
+        const parsed = JSON.parse(text)
         setParseError(null)
         onChange(parsed)
       } catch (e) {

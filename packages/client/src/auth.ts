@@ -11,6 +11,7 @@ import type {
   Session,
   SupatypeError,
   User,
+  UserIdentity,
 } from "./types.js"
 import {
   createCodeChallengeS256,
@@ -25,6 +26,18 @@ import {
   redirectParam,
   redirectParams,
 } from "./auth-redirect.js"
+import {
+  isJsonObject,
+  isNumber,
+  isOneOf,
+  isShape,
+  isString,
+  objectOrEmpty,
+  readJson,
+  readJsonObject,
+  type Guard,
+} from "./json.js"
+import { decodeJwtPayload } from "./jwt.js"
 
 export type AuthListener = (event: AuthChangeEvent, session: Session | null) => void
 
@@ -66,6 +79,55 @@ function authErrorFromBody(body: Record<string, unknown>, status: number): Supat
     text("msg") ?? text("message") ?? text("error_description") ?? text("error") ??
     `Auth request failed (HTTP ${status})`
   return { message, status, ...(code !== undefined && { code }) }
+}
+
+/** The assurance levels the client reports; the server's unused `aal3` reads as unknown. */
+const isAal = isOneOf(["aal1", "aal2"])
+/** One entry of the JWT's `amr` claim: how the session was authenticated, and when. */
+const isAmrEntry = isShape({ method: isString })
+/** The factor types and states supatype-auth defines (internal/auth/models/factor.go). */
+const isFactorType = isOneOf(["totp", "phone", "webauthn"])
+const isFactorStatus = isOneOf(["verified", "unverified"])
+
+/** The assurance level and the authentication methods an access token's claims carry. */
+function assuranceClaims(claims: Record<string, unknown>): {
+  currentLevel: "aal1" | "aal2" | null
+  methods: string[]
+} {
+  const aal = claims["aal"]
+  const amr = claims["amr"]
+  return {
+    currentLevel: isAal(aal) ? aal : null,
+    methods: Array.isArray(amr) ? amr.filter(isAmrEntry).map((entry) => entry.method) : [],
+  }
+}
+
+/** The value under `first` when the guard accepts it, else the one under `second`, else undefined. */
+function eitherKey<T>(
+  body: Record<string, unknown>,
+  first: string,
+  second: string,
+  guard: Guard<T>,
+): T | undefined {
+  const a = body[first]
+  if (guard(a)) return a
+  const b = body[second]
+  return guard(b) ? b : undefined
+}
+
+/** A stored user with its camelCase keys copied to the snake_case ones `_parseUser` reads. */
+function snakeCaseUser(user: Record<string, unknown>): Record<string, unknown> {
+  const aliases = [
+    ["app_metadata", "appMetadata"],
+    ["user_metadata", "userMetadata"],
+    ["created_at", "createdAt"],
+    ["updated_at", "updatedAt"],
+  ] as const
+  const normalized = { ...user }
+  for (const [snake, camel] of aliases) {
+    if (user[snake] === undefined && user[camel] !== undefined) normalized[snake] = user[camel]
+  }
+  return normalized
 }
 
 export class AuthClient {
@@ -218,13 +280,8 @@ export class AuthClient {
   private jwtExpMs(accessToken: string): number | null {
     const parts = accessToken.split(".")
     if (parts.length !== 3) return null
-    try {
-      const payload = JSON.parse(atob(parts[1]!)) as Record<string, unknown>
-      const exp = payload["exp"]
-      return typeof exp === "number" ? exp * 1000 : null
-    } catch {
-      return null
-    }
+    const exp = decodeJwtPayload(parts[1]!)?.["exp"]
+    return typeof exp === "number" ? exp * 1000 : null
   }
 
   private isAccessTokenExpired(session: Session, skewMs = 0): boolean {
@@ -278,12 +335,13 @@ export class AuthClient {
         ? Math.max(0, (session.expiresIn || 3600) * 1000 - 60_000)
         : Math.max(0, expiryMs - Date.now() - 60_000)
 
-    this.refreshTimer = setTimeout(() => {
+    const timer = setTimeout(() => {
       this.refreshTimer = null
       void this.ensureValidSession()
     }, delay)
-    // Avoid keeping a Node process alive for this timer (no-op in browsers).
-    ;(this.refreshTimer as unknown as { unref?: () => void }).unref?.()
+    this.refreshTimer = timer
+    // Avoid keeping a Node process alive for this timer. A browser's timer is a number: nothing to do.
+    if (typeof timer === "object" && "unref" in timer) timer.unref()
   }
 
   async signUp(credentials: {
@@ -404,8 +462,8 @@ export class AuthClient {
     try {
       const res = await this.send(`${this.url}/settings`, { headers: this.baseHeaders })
       if (!res.ok) return false
-      const body = await res.json() as { external?: Record<string, unknown> | undefined }
-      return body.external?.[provider.toLowerCase()] === false
+      const external = objectOrEmpty((await readJsonObject(res))["external"])
+      return external[provider.toLowerCase()] === false
     } catch {
       return false
     }
@@ -434,8 +492,7 @@ export class AuthClient {
         error: await this._parseError(res),
       }
     }
-    const raw = await res.json() as Record<string, unknown>
-    const user = this._parseUser(raw)
+    const user = await this._readUser(res)
     const session: Session = {
       accessToken: params.accessToken,
       refreshToken: params.refreshToken,
@@ -585,7 +642,7 @@ export class AuthClient {
       body: JSON.stringify(body),
     })
     if (res.ok) {
-      const json = await res.json().catch(() => ({})) as Record<string, unknown>
+      const json = await readJsonObject(res)
       return {
         data: {
           ...(json["message_id"] !== undefined && { messageId: String(json["message_id"]) }),
@@ -635,8 +692,7 @@ export class AuthClient {
     if (!res.ok) {
       return { data: { user: null }, error: await this._parseError(res) }
     }
-    const raw = await res.json() as Record<string, unknown>
-    return { data: { user: this._parseUser(raw) }, error: null }
+    return { data: { user: await this._readUser(res) }, error: null }
   }
 
   async refreshSession(): Promise<{
@@ -701,7 +757,7 @@ export class AuthClient {
     if (!res.ok) {
       return { data: { user: null }, error: await this._parseError(res) }
     }
-    const user = this._parseUser(await res.json() as Record<string, unknown>)
+    const user = await this._readUser(res)
     this.applyUpdatedUser(user)
     return { data: { user }, error: null }
   }
@@ -796,7 +852,7 @@ export class AuthClient {
       body: JSON.stringify(body),
     })
     if (res.ok) {
-      const json = await res.json().catch(() => ({})) as Record<string, unknown>
+      const json = await readJsonObject(res)
       return {
         data: {
           ...(json["message_id"] !== undefined && { messageId: String(json["message_id"]) }),
@@ -848,16 +904,17 @@ export class AuthClient {
         if (!res.ok) {
           return { data: null, error: await this._parseError(res) }
         }
-        const json = await res.json() as Record<string, unknown>
+        const json = await readJson(res, isJsonObject)
+        const totp = json["totp"]
         const data: AuthMFAEnrollResponse = {
           id: String(json["id"] ?? ""),
           type: String(json["type"] ?? ""),
           friendlyName: String(json["friendly_name"] ?? ""),
-          ...(json["totp"] !== undefined && {
+          ...(isJsonObject(totp) && {
             totp: {
-              qrCode: String((json["totp"] as Record<string, unknown>)["qr_code"] ?? ""),
-              secret: String((json["totp"] as Record<string, unknown>)["secret"] ?? ""),
-              uri: String((json["totp"] as Record<string, unknown>)["uri"] ?? ""),
+              qrCode: String(totp["qr_code"] ?? ""),
+              secret: String(totp["secret"] ?? ""),
+              uri: String(totp["uri"] ?? ""),
             },
           }),
           ...(json["phone"] !== undefined && { phone: String(json["phone"]) }),
@@ -895,7 +952,7 @@ export class AuthClient {
         if (!res.ok) {
           return { data: null, error: await this._parseError(res) }
         }
-        const json = await res.json() as Record<string, unknown>
+        const json = await readJson(res, isJsonObject)
         return {
           data: {
             id: String(json["id"] ?? ""),
@@ -996,7 +1053,7 @@ export class AuthClient {
         if (!res.ok) {
           return { data: null, error: await this._parseError(res) }
         }
-        const json = await res.json() as Record<string, unknown>
+        const json = await readJson(res, isJsonObject)
         return { data: { id: String(json["id"] ?? "") }, error: null }
       },
 
@@ -1043,26 +1100,18 @@ export class AuthClient {
         if (parts.length !== 3) {
           return { data: null, error: { message: "Invalid access token format" } }
         }
+        const payload = decodeJwtPayload(parts[1]!)
+        if (payload === null) {
+          return { data: null, error: { message: "Failed to decode access token" } }
+        }
+        const { currentLevel, methods } = assuranceClaims(payload)
         try {
-          const payload = JSON.parse(atob(parts[1]!)) as Record<string, unknown>
-          const currentLevel = (payload["aal"] as "aal1" | "aal2" | undefined) ?? null
-          const amr = (payload["amr"] as Array<{ method: string }> | undefined) ?? []
-          const methods = amr.map((entry) => entry.method)
-
           // Determine next level: if user has verified factors, next could be aal2
           const userResult = await this.getUser()
-          const factors = userResult.data?.user?.factors ?? []
+          const factors = userResult.data.user?.factors ?? []
           const hasVerifiedFactors = factors.some((f) => f.status === "verified")
           const nextLevel = hasVerifiedFactors ? "aal2" : "aal1"
-
-          return {
-            data: {
-              currentLevel,
-              nextLevel: nextLevel as "aal1" | "aal2",
-              currentAuthenticationMethods: methods,
-            },
-            error: null,
-          }
+          return { data: { currentLevel, nextLevel, currentAuthenticationMethods: methods }, error: null }
         } catch {
           return { data: null, error: { message: "Failed to decode access token" } }
         }
@@ -1165,19 +1214,8 @@ export class AuthClient {
   private decodeJwtExp(accessToken: string): number | null {
     const parts = accessToken.split(".")
     if (parts.length < 2) return null
-    try {
-      const payload = parts[1]!
-      const padded = payload + "=".repeat((4 - (payload.length % 4)) % 4)
-      const b64 = padded.replace(/-/g, "+").replace(/_/g, "/")
-      const json =
-        typeof atob === "function"
-          ? atob(b64)
-          : Buffer.from(b64, "base64").toString("utf8")
-      const claims = JSON.parse(json) as { exp?: unknown }
-      return typeof claims.exp === "number" ? claims.exp : null
-    } catch {
-      return null
-    }
+    const exp = decodeJwtPayload(parts[1]!)?.["exp"]
+    return typeof exp === "number" ? exp : null
   }
 
   private async readStorageItem(key: string): Promise<string | null> {
@@ -1231,70 +1269,27 @@ export class AuthClient {
 
   private parsePersistedSession(raw: string): Session | null {
     try {
-      const parsed = JSON.parse(raw) as unknown
-      return this.normalizePersistedSession(parsed)
+      return this.normalizePersistedSession(JSON.parse(raw))
     } catch {
       return null
     }
   }
 
+  /** A stored session, written by this client (camelCase) or by a server-side helper (snake_case). */
   private normalizePersistedSession(raw: unknown): Session | null {
-    if (typeof raw !== "object" || raw === null) return null
-    const r = raw as Record<string, unknown>
-    const accessToken =
-      typeof r["accessToken"] === "string"
-        ? r["accessToken"]
-        : typeof r["access_token"] === "string"
-          ? r["access_token"]
-          : null
-    if (accessToken === null) return null
-    const refreshToken =
-      typeof r["refreshToken"] === "string"
-        ? r["refreshToken"]
-        : typeof r["refresh_token"] === "string"
-          ? r["refresh_token"]
-          : ""
-    const tokenType =
-      typeof r["tokenType"] === "string"
-        ? r["tokenType"]
-        : typeof r["token_type"] === "string"
-          ? r["token_type"]
-          : "bearer"
-    const expiresIn =
-      typeof r["expiresIn"] === "number"
-        ? r["expiresIn"]
-        : typeof r["expires_in"] === "number"
-          ? r["expires_in"]
-          : 3600
-    const userRaw =
-      typeof r["user"] === "object" && r["user"] !== null
-        ? (r["user"] as Record<string, unknown>)
-        : null
-    if (userRaw === null) return null
-    const normalizedUserRaw: Record<string, unknown> = {
-      ...userRaw,
-      ...(userRaw["app_metadata"] === undefined &&
-        userRaw["appMetadata"] !== undefined && { app_metadata: userRaw["appMetadata"] }),
-      ...(userRaw["user_metadata"] === undefined &&
-        userRaw["userMetadata"] !== undefined && { user_metadata: userRaw["userMetadata"] }),
-      ...(userRaw["created_at"] === undefined &&
-        userRaw["createdAt"] !== undefined && { created_at: userRaw["createdAt"] }),
-      ...(userRaw["updated_at"] === undefined &&
-        userRaw["updatedAt"] !== undefined && { updated_at: userRaw["updatedAt"] }),
-    }
-    const session: Session = {
+    if (!isJsonObject(raw)) return null
+    const accessToken = eitherKey(raw, "accessToken", "access_token", isString)
+    const user = raw["user"]
+    if (accessToken === undefined || !isJsonObject(user)) return null
+    const expiresAt = eitherKey(raw, "expiresAt", "expires_at", isNumber)
+    return {
       accessToken,
-      refreshToken,
-      tokenType,
-      expiresIn,
-      user: this._parseUser(normalizedUserRaw),
-      ...(typeof r["expiresAt"] === "number"
-        ? { expiresAt: r["expiresAt"] }
-        : typeof r["expires_at"] === "number"
-          ? { expiresAt: r["expires_at"] }
-          : {}),
+      refreshToken: eitherKey(raw, "refreshToken", "refresh_token", isString) ?? "",
+      tokenType: eitherKey(raw, "tokenType", "token_type", isString) ?? "bearer",
+      expiresIn: eitherKey(raw, "expiresIn", "expires_in", isNumber) ?? 3600,
+      user: this._parseUser(snakeCaseUser(user)),
+      ...(expiresAt !== undefined && { expiresAt }),
     }
-    return session
   }
 
   private syncPersistedSession(session: Session | null): void {
@@ -1425,8 +1420,12 @@ export class AuthClient {
 
   /** Every refusal from the auth server goes through here, so none of them drops the code. */
   private async _parseError(res: Response): Promise<SupatypeError> {
-    const body = await res.json().catch(() => ({})) as Record<string, unknown>
-    return authErrorFromBody(body, res.status)
+    return authErrorFromBody(await readJsonObject(res), res.status)
+  }
+
+  /** The user a `/user` response describes. Throws on a body that is not a JSON object. */
+  private async _readUser(res: Response): Promise<User> {
+    return this._parseUser(await readJson(res, isJsonObject))
   }
 
   private async _parseAuthResponse(res: Response): Promise<{
@@ -1436,15 +1435,15 @@ export class AuthClient {
     if (!res.ok) {
       return { data: { session: null, user: null }, error: await this._parseError(res) }
     }
-    const json = await res.json() as Record<string, unknown>
+    const json = await readJson(res, isJsonObject)
     const accessToken = json["access_token"]
     // A sign-up still waiting for its email confirmation is answered with the bare user and no
     // tokens. That is not a session, so nothing is stored and no SIGNED_IN is emitted.
     if (typeof accessToken !== "string" || accessToken === "") {
-      const raw = (json["user"] ?? json) as Record<string, unknown>
-      return { data: { session: null, user: this._parseUser(raw) }, error: null }
+      const bareUser = json["user"]
+      return { data: { session: null, user: this._parseUser(isJsonObject(bareUser) ? bareUser : json) }, error: null }
     }
-    const user = this._parseUser((json["user"] ?? {}) as Record<string, unknown>)
+    const user = this._parseUser(objectOrEmpty(json["user"]))
     const session: Session = {
       accessToken,
       tokenType: String(json["token_type"] ?? "bearer"),
@@ -1464,34 +1463,43 @@ export class AuthClient {
       ...(raw["phone"] !== undefined && { phone: String(raw["phone"]) }),
       ...(raw["role"] !== undefined && { role: String(raw["role"]) }),
       ...(raw["is_anonymous"] !== undefined && { isAnonymous: Boolean(raw["is_anonymous"]) }),
-      appMetadata: (raw["app_metadata"] ?? {}) as Record<string, unknown>,
-      userMetadata: (raw["user_metadata"] ?? {}) as Record<string, unknown>,
+      appMetadata: objectOrEmpty(raw["app_metadata"]),
+      userMetadata: objectOrEmpty(raw["user_metadata"]),
       createdAt: String(raw["created_at"] ?? ""),
       updatedAt: String(raw["updated_at"] ?? ""),
     }
-    if (Array.isArray(raw["identities"])) {
-      user.identities = (raw["identities"] as Record<string, unknown>[]).map((i) => ({
-        id: String(i["id"] ?? ""),
-        userId: String(i["user_id"] ?? ""),
-        identityData: (i["identity_data"] ?? {}) as Record<string, unknown>,
-        identityId: String(i["identity_id"] ?? ""),
-        provider: String(i["provider"] ?? ""),
-        createdAt: String(i["created_at"] ?? ""),
-        updatedAt: String(i["updated_at"] ?? ""),
-        ...(i["last_sign_in_at"] !== undefined && { lastSignInAt: String(i["last_sign_in_at"]) }),
-      }))
-    }
-    if (Array.isArray(raw["factors"])) {
-      user.factors = (raw["factors"] as Record<string, unknown>[]).map((f) => ({
-        id: String(f["id"] ?? ""),
-        factorType: String(f["factor_type"] ?? "totp") as "totp" | "phone" | "webauthn",
-        status: String(f["status"] ?? "unverified") as "verified" | "unverified",
-        createdAt: String(f["created_at"] ?? ""),
-        updatedAt: String(f["updated_at"] ?? ""),
-        ...(f["friendly_name"] !== undefined && { friendlyName: String(f["friendly_name"]) }),
-        ...(f["phone"] !== undefined && { phone: String(f["phone"]) }),
-      }))
-    }
+    const identities = raw["identities"]
+    if (Array.isArray(identities)) user.identities = identities.filter(isJsonObject).map(parseIdentity)
+    const factors = raw["factors"]
+    if (Array.isArray(factors)) user.factors = factors.filter(isJsonObject).map(parseFactor)
     return user
+  }
+}
+
+function parseIdentity(i: Record<string, unknown>): UserIdentity {
+  return {
+    id: String(i["id"] ?? ""),
+    userId: String(i["user_id"] ?? ""),
+    identityData: objectOrEmpty(i["identity_data"]),
+    identityId: String(i["identity_id"] ?? ""),
+    provider: String(i["provider"] ?? ""),
+    createdAt: String(i["created_at"] ?? ""),
+    updatedAt: String(i["updated_at"] ?? ""),
+    ...(i["last_sign_in_at"] !== undefined && { lastSignInAt: String(i["last_sign_in_at"]) }),
+  }
+}
+
+/** A factor as the server lists it. A type or state it leaves out reads as `totp` / `unverified`. */
+function parseFactor(f: Record<string, unknown>): Factor {
+  const factorType = f["factor_type"]
+  const status = f["status"]
+  return {
+    id: String(f["id"] ?? ""),
+    factorType: isFactorType(factorType) ? factorType : "totp",
+    status: isFactorStatus(status) ? status : "unverified",
+    createdAt: String(f["created_at"] ?? ""),
+    updatedAt: String(f["updated_at"] ?? ""),
+    ...(f["friendly_name"] !== undefined && { friendlyName: String(f["friendly_name"]) }),
+    ...(f["phone"] !== undefined && { phone: String(f["phone"]) }),
   }
 }

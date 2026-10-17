@@ -6,6 +6,24 @@ import { afterEach, describe, expect, it } from "vitest"
 import { generateHooksModule } from "../src/hooks-generator.js"
 import { extractSchemaAstFromTypes } from "../src/type-extractor.js"
 
+/** What `tsc -p <dir>/tsconfig.json` printed: nothing when the project compiles. */
+function tscOutput(dir: string): string {
+  const tsc = join(__dirname, "..", "..", "..", "node_modules", "typescript", "bin", "tsc")
+  try {
+    execFileSync(process.execPath, [tsc, "-p", join(dir, "tsconfig.json")], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+    return ""
+  } catch (err) {
+    // A failed execFileSync carries the child's output on the error.
+    if (!(err instanceof Error)) throw err
+    const stdout = "stdout" in err && typeof err.stdout === "string" ? err.stdout : ""
+    const stderr = "stderr" in err && typeof err.stderr === "string" ? err.stderr : ""
+    return `${stdout}${stderr}`
+  }
+}
+
 const dirs: string[] = []
 
 afterEach(() => {
@@ -141,17 +159,7 @@ export const alsoPurge = hook(purge)
       "utf8",
     )
 
-    const tsc = join(__dirname, "..", "..", "..", "node_modules", "typescript", "bin", "tsc")
-    let output = ""
-    try {
-      execFileSync(process.execPath, [tsc, "-p", join(dir, "tsconfig.json")], {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-      })
-    } catch (err) {
-      const failure = err as { stdout?: string; stderr?: string }
-      output = `${failure.stdout ?? ""}${failure.stderr ?? ""}`
-    }
+    const output = tscOutput(dir)
     expect(output).toBe("")
   })
 
@@ -198,17 +206,7 @@ export default nope
       "utf8",
     )
 
-    const tsc = join(__dirname, "..", "..", "..", "node_modules", "typescript", "bin", "tsc")
-    let output = ""
-    try {
-      execFileSync(process.execPath, [tsc, "-p", join(dir, "tsconfig.json")], {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-      })
-    } catch (err) {
-      const failure = err as { stdout?: string; stderr?: string }
-      output = `${failure.stdout ?? ""}${failure.stderr ?? ""}`
-    }
+    const output = tscOutput(dir)
     expect(output).toContain("comments")
   })
 })
@@ -284,17 +282,7 @@ export default fieldValidator(checkItems)
       "utf8",
     )
 
-    const tsc = join(__dirname, "..", "..", "..", "node_modules", "typescript", "bin", "tsc")
-    let output = ""
-    try {
-      execFileSync(process.execPath, [tsc, "-p", join(dir, "tsconfig.json")], {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-      })
-    } catch (err) {
-      const failure = err as { stdout?: string; stderr?: string }
-      output = `${failure.stdout ?? ""}${failure.stderr ?? ""}`
-    }
+    const output = tscOutput(dir)
     expect(output, "the generated validator surface must compile").toBe("")
   })
 })

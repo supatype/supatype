@@ -3,6 +3,7 @@ import { Badge, Card, Td, Th } from "../../components/ui.js"
 import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 import { useInspectorResource } from "../../hooks/useInspectorResource.js"
+import { isChannelsData } from "../../lib/realtime-guards.js"
 import type { InspectorTabProps } from "./InspectorTab.js"
 import { InspectorFailureView, When } from "./shared.js"
 import type { ChannelSummary, ChannelsData } from "./types.js"
@@ -70,7 +71,7 @@ export function ChannelsTable({ data }: { data: ChannelsData }): React.ReactElem
 }
 
 export function Channels({ api }: InspectorTabProps): React.ReactElement {
-  const { data, failure, loading, refresh } = useInspectorResource<ChannelsData>(api.fetch, "realtime/channels", REFRESH_MS)
+  const { data, failure, loading, refresh } = useInspectorResource(api.fetch, "realtime/channels", REFRESH_MS, isChannelsData)
   if (failure && data === null) return <InspectorFailureView failure={failure} mode={api.mode} onRetry={refresh} />
   if (loading || data === null) return <p className="text-sm text-muted-foreground py-6">Loading channels…</p>
   return <ChannelsTable data={data} />

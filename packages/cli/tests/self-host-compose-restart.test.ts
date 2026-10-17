@@ -51,6 +51,7 @@ vi.mock("../src/self-host-compose.js", async (importOriginal) => {
 })
 
 import { registerSelfHost } from "../src/commands/self-host.js"
+import { exitThrows } from "./support/process-exit.js"
 
 /**
  * SA3: the way to pick up a changed `.env` for one service was to type a compose command by hand,
@@ -103,10 +104,10 @@ describe("self-host compose restart <service> (SA3)", () => {
 
   it("passes compose's failure on as the exit code", async () => {
     composeStatus = 3
-    const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never)
+    const exit = exitThrows()
     vi.spyOn(console, "error").mockImplementation(() => undefined)
 
-    await run("restart", "server")
+    await expect(run("restart", "server")).rejects.toThrow("exit 3")
 
     expect(exit).toHaveBeenCalledWith(3)
   })
