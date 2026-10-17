@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
+  createRecord,
   fetchRecordStates,
   publishableLocales,
   publishingState,
@@ -279,5 +280,60 @@ describe("partly published", () => {
     expect(liveLocales(state({ en: "live", fr: "absent" }), ["en", "fr"])).toEqual(["en"])
     expect(liveLocales(state({ en: "pending", fr: "absent" }), ["en", "fr"])).toEqual(["en"])
     expect(liveLocales(state({ en: "scheduled", fr: "absent" }), ["en", "fr"])).toEqual([])
+  })
+})
+
+describe("creating a record", () => {
+  // DR5: Studio inserted the live row with the whole form and drafted it after, so a record created
+  // with English and German titles put the German live the moment English was published. A model
+  // with drafts creates its record through `supatype.create_record`, which leaves every locale out of
+  // the live row until it is published.
+
+  interface Sent {
+    path: string
+    profile: string | null
+    body: unknown
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  /** A real client whose requests are recorded and answered as PostgREST would. */
+  function recordingClient(sent: Sent[]): ReturnType<typeof testClient> {
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname
+      const body: unknown = typeof init?.body === "string" ? JSON.parse(init.body) : null
+      sent.push({ path, profile: new Headers(init?.headers).get("Content-Profile"), body })
+      return path.endsWith("/rpc/create_record")
+        ? Response.json({ record_id: "new-id", version: 1 })
+        : Response.json([{ id: "row-id" }], { status: 201 })
+    })
+    return testClient({ url: "http://localhost:8000" })
+  }
+
+  const model = (drafts: boolean) =>
+    testModel({ versions: drafts ? versions({ localizedColumns: ["title"] }) : null })
+
+  const values = { title: { en: "Hello", de: "Hallo" } }
+
+  it("creates a drafts model's record as its first draft, never inserting the live row", async () => {
+    const sent: Sent[] = []
+    const created = await createRecord(recordingClient(sent), model(true), values)
+    expect(created).toEqual({ id: "new-id", error: null })
+    expect(sent).toEqual([
+      {
+        path: "/rest/v1/rpc/create_record",
+        profile: "supatype",
+        body: { model_table: "posts", data: values },
+      },
+    ])
+  })
+
+  it("inserts the row of a model without drafts", async () => {
+    const sent: Sent[] = []
+    const created = await createRecord(recordingClient(sent), model(false), values)
+    expect(created).toEqual({ id: "row-id", error: null })
+    expect(sent).toEqual([{ path: "/rest/v1/posts", profile: null, body: values }])
   })
 })

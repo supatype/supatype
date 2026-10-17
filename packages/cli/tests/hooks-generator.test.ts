@@ -39,13 +39,15 @@ function astFor(schema: string): unknown {
 }
 
 const HOOKED_SCHEMA = `
-import type { Model, Optional, RichText, Timestamp, UUID } from "@supatype/types"
+import type { Block, Blocks, Button, Model, Optional, RichText, Timestamp, UUID } from "@supatype/types"
 
 export type Post = Model<{
   id: UUID
   title: string
   body: RichText
   views: Optional<number>
+  cta: Optional<Button>
+  links: Optional<Blocks<Block<"link", { label: string; href: string }>>>
   created_at: Timestamp
 }, {
   tableName: "posts"

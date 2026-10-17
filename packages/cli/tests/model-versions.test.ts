@@ -97,6 +97,58 @@ export type Ledger = Model<{ id: UUID; note: string }, { versions: { drafts: fal
   })
 })
 
+describe("versions declared through a type alias", () => {
+  // DR6: the extractor read `versions` only as written syntax, so an alias reached the engine as no
+  // `versions` at all, and the push made no draft tables without a word.
+
+  it("resolves an alias for the versions value", () => {
+    const ast = extract(`
+type Drafts = { drafts: true; keep: 7 }
+export type Post = Model<{ id: UUID; title: string }, { versions: Drafts }>
+`)
+    expect(ast?.models[0]?.options["versions"]).toEqual({ drafts: true, keep: 7 })
+  })
+
+  it("resolves an alias for the whole options object", () => {
+    const ast = extract(`
+type PostOptions = {
+  tableName: "posts"
+  versions: { drafts: true; keep: 5 }
+  access: { read: Lte<"published_at", Now>; update: Role<"editor"> }
+}
+export type Post = Model<{ id: UUID; title: string; published_at: Optional<Timestamp> }, PostOptions>
+`)
+    const model = ast?.models[0]
+    expect(model?.options["versions"]).toEqual({ drafts: true, keep: 5 })
+    expect(model?.annotations.db.tableName).toBe("posts")
+    expect(model?.annotations.platform.access["update"]).toEqual({ type: "role", roles: ["editor"] })
+  })
+
+  it("resolves a generic alias joined with the model's own options", () => {
+    const ast = extract(`
+type Drafted<TWrite extends string> = {
+  versions: { drafts: true; keep: 3 }
+  access: { read: Lte<"published_at", Now>; update: Role<TWrite> }
+}
+export type Post = Model<{ id: UUID; title: string; published_at: Optional<Timestamp> }, Drafted<"editor"> & {
+  tableName: "posts"
+}>
+`)
+    const model = ast?.models[0]
+    expect(model?.options["versions"]).toEqual({ drafts: true, keep: 3 })
+    expect(model?.annotations.db.tableName).toBe("posts")
+  })
+
+  it("refuses options it cannot resolve rather than dropping them", () => {
+    expect(() =>
+      extract(`
+import type { ElsewhereOptions } from "./nowhere"
+export type Post = Model<{ id: UUID; title: string }, ElsewhereOptions>
+`),
+    ).toThrow(/Model "Post": could not resolve its options from `ElsewhereOptions`/)
+  })
+})
+
 describe("versions alongside per-column rules", () => {
   it("refuses the pair, naming the masked column", () => {
     // A snapshot is opaque JSONB, so the masking that rewrites references to a real column cannot

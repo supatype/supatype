@@ -271,6 +271,49 @@ export function createDraft(
   })
 }
 
+/** Why a write was refused, with the field it names when the server named one. */
+export interface RecordError {
+  message: string
+  field?: string | undefined
+}
+
+/** A record just created: its id, or why it was not. */
+export interface CreatedRecord {
+  id: string | null
+  error: RecordError | null
+}
+
+/**
+ * Create a record from the editor's values.
+ *
+ * A model with drafts creates it through `supatype.create_record`, which makes the live row holding
+ * no locale and saves the values as version 1, so nothing typed into the form reaches readers until
+ * it is published. Inserting the live row with the whole form, as Studio did, put every translation
+ * typed at creation live as soon as any one locale was published.
+ */
+export async function createRecord(
+  client: SupatypeClient,
+  model: ModelConfig,
+  values: Record<string, unknown>,
+): Promise<CreatedRecord> {
+  if (model.versions?.drafts === true) {
+    const params = { model_table: model.tableName, data: values }
+    const result = await client.rpc("create_record", params, { schema: RPC_SCHEMA })
+    if (result.error !== null) return { id: null, error: result.error }
+    return idOf(isJsonObject(result.data) ? result.data["record_id"] : undefined)
+  }
+  const result = await client.from(model.tableName).insert(values)
+  if (result.error !== null) return { id: null, error: result.error }
+  const row: unknown = Array.isArray(result.data) ? result.data[0] : undefined
+  return idOf(isJsonObject(row) ? row[model.primaryKey] : undefined)
+}
+
+function idOf(value: unknown): CreatedRecord {
+  return value === undefined || value === null
+    ? { id: null, error: { message: "No data returned" } }
+    : { id: String(value), error: null }
+}
+
 /**
  * Promote a version into the live row.
  *

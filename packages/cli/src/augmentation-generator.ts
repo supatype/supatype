@@ -94,22 +94,18 @@ export function generateClientAugmentation(ast: unknown): string {
   ].join("\n")
 }
 
+/**
+ * Every kind the schema uses, including the kinds of the fields its blocks declare: a block's
+ * fields are typed like columns, so a `Button` in a block needs the alias as much as a column does.
+ */
 function fieldKinds(models: AstModel[]): Set<string> {
   const kinds = new Set<string>()
-  for (const model of models) {
-    for (const meta of Object.values(model.fields)) addKinds(meta, kinds)
+  const visit = (meta: Record<string, unknown>): void => {
+    if (typeof meta["kind"] === "string") kinds.add(meta["kind"])
+    for (const block of recordsIn(meta["blocks"])) recordsIn(block["fields"]).forEach(visit)
   }
+  for (const model of models) Object.values(model.fields ?? {}).forEach(visit)
   return kinds
-}
-
-/** A field's kind, and those of the fields its declared blocks carry, which name the same aliases. */
-function addKinds(meta: Record<string, unknown>, kinds: Set<string>): void {
-  if (typeof meta["kind"] === "string") kinds.add(meta["kind"])
-  for (const block of blockDefinitions(meta)) {
-    for (const nested of Object.values(objectAt(block, "fields") ?? {})) {
-      if (isJsonObject(nested)) addKinds(nested, kinds)
-    }
-  }
 }
 
 /** The JSON value type, as the engine's `database.ts` declares it. */
@@ -124,6 +120,34 @@ const JSON_TYPE_LINES = [
   "",
 ]
 
+/** The objects in an array, or the object values of a map: the two ways the AST nests fields. */
+function recordsIn(value: unknown): Record<string, unknown>[] {
+  const items = Array.isArray(value) ? value : isJsonObject(value) ? Object.values(value) : []
+  return items.filter(isJsonObject)
+}
+
+/** A `Blocks` column: one `{ type, data }` entry per block, which is what Studio's editor stores. */
+function blocksTsType(meta: Record<string, unknown>): string {
+  const blocks = recordsIn(meta["blocks"])
+  if (blocks.length === 0) return "{ type: string; data: { [key: string]: unknown } }[]"
+  return `(${blocks.map(blockVariant).join(" | ")})[]`
+}
+
+/** One block's entry, its fields under `data` typed as the same fields would be on a column. */
+function blockVariant(block: Record<string, unknown>): string {
+  const name = typeof block["name"] === "string" ? block["name"] : ""
+  const declared = isJsonObject(block["fields"]) ? Object.entries(block["fields"]) : []
+  const fields = declared
+    .filter((entry): entry is [string, Record<string, unknown>] => isJsonObject(entry[1]))
+    .filter(([, field]) => field["kind"] !== "relation")
+    .map(([key, field]) => {
+      const optional = field["required"] === true ? "" : "?"
+      return `${quoteKey(key)}${optional}: ${toTsType({ ...field, required: true })}`
+    })
+  const data = fields.length === 0 ? "{}" : `{ ${fields.join("; ")} }`
+  return `{ type: ${JSON.stringify(name)}; data: ${data} }`
+}
+
 /** The aliases a column type may name, emitted only where the schema uses them. */
 function sharedTypeLines(kinds: Set<string>): string[] {
   const lines: string[] = []
@@ -135,6 +159,19 @@ function sharedTypeLines(kinds: Set<string>): string[] {
     lines.push("export type StorageReference = {", "  bucket: string", "  path: string", "}", "")
   }
   if (kinds.has("json") || kinds.has("geo")) lines.push(...JSON_TYPE_LINES)
+  // The engine's alias, spelled the same, so both generated files name one type.
+  if (kinds.has("button")) {
+    lines.push('export type ButtonTarget = "_self" | "_blank"', "")
+    lines.push(
+      "export type Button = {",
+      "  label: string",
+      "  href: string",
+      "  ariaLabel?: string",
+      "  target?: ButtonTarget",
+      "}",
+      "",
+    )
+  }
   return lines
 }
 
@@ -324,6 +361,10 @@ function toTsType(meta: Record<string, unknown>, prose = false): string {
         return "boolean"
       // The engine's `database.ts` types each of these the same way (`ts_type_of`), so a row read
       // through the typed client and one read through `Database` agree.
+      case "blocks":
+        return blocksTsType(meta)
+      case "button":
+        return "Button"
       case "json":
       case "geo":
         return "Json"
@@ -331,8 +372,6 @@ function toTsType(meta: Record<string, unknown>, prose = false): string {
         return "number[]"
       case "array":
         return `${arrayElementType(meta)}[]`
-      case "blocks":
-        return blocksType(meta)
       case "relation":
         return "Record<string, unknown>"
       // What `storage.upload()` actually produces, plus the bucket it went to. Emitting
@@ -378,35 +417,6 @@ const NUMERIC_ELEMENT_TYPES = new Set([
   "integer", "int4", "int", "smallint", "int2", "bigint", "int8", "float",
   "double precision", "float8", "real", "float4", "numeric",
 ])
-
-/** The blocks a `blocks` field declares, each an object still to be read with checks. */
-function blockDefinitions(meta: Record<string, unknown>): Record<string, unknown>[] {
-  const blocks = meta["blocks"]
-  return Array.isArray(blocks) ? blocks.filter(isJsonObject) : []
-}
-
-/**
- * A blocks column: each entry is `{ type: <block>, data: { <its fields> } }`. With no block declared
- * the entry still has that shape and only its fields are unknown.
- */
-function blocksType(meta: Record<string, unknown>): string {
-  const blocks = blockDefinitions(meta)
-  if (blocks.length === 0) return "{ type: string; data: { [key: string]: unknown } }[]"
-  return `(${blocks.map(blockVariant).join(" | ")})[]`
-}
-
-/** One block's entry type; a field it may leave out is optional rather than nullable, as the engine writes it. */
-function blockVariant(block: Record<string, unknown>): string {
-  const name = typeof block["name"] === "string" ? block["name"] : ""
-  const fields = Object.entries(objectAt(block, "fields") ?? {}).filter(
-    (entry): entry is [string, Record<string, unknown>] => isJsonObject(entry[1]) && entry[1]["kind"] !== "relation",
-  )
-  const data = fields.map(([key, field]) => {
-    const optional = field["required"] === true ? "" : "?"
-    return `${quoteKey(key)}${optional}: ${toTsType({ ...field, required: true })}`
-  })
-  return `{ type: ${JSON.stringify(name)}; data: ${data.length === 0 ? "{}" : `{ ${data.join("; ")} }`} }`
-}
 
 function quoteKey(key: string): string {
   return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) ? key : JSON.stringify(key)

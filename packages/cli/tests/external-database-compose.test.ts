@@ -213,7 +213,9 @@ describe("the draft schema in generated compose", () => {
   it("leaves it off when nothing is versioned", () => {
     const compose = renderSelfHostCompose(managed(), process.cwd(), { drafts: false })
     expect(compose).toContain('PGRST_DB_SCHEMA: "public, supatype, graphql_public, auth"')
-    expect(compose).not.toContain("draft")
+    // The schema's name as a word: the compose file carries absolute bind-mount paths, and a
+    // checkout in a directory such as `sup-drafts` failed a bare substring check.
+    expect(compose).not.toMatch(/\bdraft\b/)
   })
 })
 

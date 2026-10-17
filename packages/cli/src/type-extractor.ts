@@ -85,12 +85,13 @@ export function extractSchemaAstFromTypes(
       if (!ts.isTypeReferenceNode(stmt.type)) continue
       const modelTypeName = stmt.type.typeName.getText(sourceFile)
       if (modelTypeName !== "Model" && modelTypeName !== "LocalizedModel") continue
-      const [fieldsArg, metaArg] = stmt.type.typeArguments ?? []
+      const [fieldsArg, optionsArg] = stmt.type.typeArguments ?? []
       if (!fieldsArg) continue
       const fieldsLiteral = unwrapModelFields(fieldsArg, sourceFile, resolveCtx)
       if (!fieldsLiteral) continue
 
-      const metaHints = parseMetaLiteral(metaArg, sourceFile)
+      const metaArg = resolveModelOptions(optionsArg, sourceFile, resolveCtx, stmt.name.text)
+      const metaHints = parseMetaLiteral(metaArg, sourceFile, resolveCtx, stmt.name.text)
       const fieldContext: FieldParseContext = {
         autoLocalize: modelTypeName === "LocalizedModel" || metaHints.autoLocalize === true,
       }
@@ -1791,21 +1792,41 @@ type ParsedVersions = { drafts: boolean; keep: number }
 const DEFAULT_VERSIONS_KEPT = 20
 
 /**
- * `versions: true` or `versions: { drafts, keep }`.
+ * `versions: true` or `versions: { drafts, keep }`, written out or through a type alias.
  *
  * A malformed member is ignored rather than fatal, matching every other key here: the declaration is
  * a *type*, so TypeScript has already refused anything `ModelVersionsOptions` does not allow, and
- * this parser's job is reading what compiled rather than validating it a second time.
+ * this parser's job is reading what compiled rather than validating it a second time. A value it
+ * cannot resolve at all is refused: read as no `versions`, it made no draft tables and said nothing.
  */
-function parseVersions(typeNode: ts.TypeNode): ParsedVersions | undefined {
+function parseVersions(
+  declared: ts.TypeNode,
+  sourceFile: ts.SourceFile,
+  resolveCtx: ResolveContext,
+  modelName: string,
+): ParsedVersions | undefined {
+  const typeNode = ts.isTypeReferenceNode(declared)
+    ? (tryResolveTypeReference(declared, sourceFile, resolveCtx) ?? declared)
+    : declared
   if (isBooleanLiteralType(typeNode, true)) {
     return { drafts: true, keep: DEFAULT_VERSIONS_KEPT }
   }
   if (isBooleanLiteralType(typeNode, false)) return undefined
-  if (!ts.isTypeLiteralNode(typeNode)) return undefined
+  const literal = resolveAccessLiteral(typeNode, sourceFile, resolveCtx)
+  if (!literal) {
+    throw new Error(
+      `Model "${modelName}": could not resolve \`versions\` from \`${ownerText(declared, sourceFile)}\`.\n` +
+        "  versions must be `true`, or an object type such as `{ drafts: true; keep: 20 }`, written\n" +
+        "  out or as a type alias declared in the schema's files.",
+    )
+  }
+  return parsedVersionsMembers(literal)
+}
 
+/** The `drafts` and `keep` members of a resolved `versions` object. */
+function parsedVersionsMembers(literal: ts.TypeLiteralNode): ParsedVersions {
   const parsed: ParsedVersions = { drafts: true, keep: DEFAULT_VERSIONS_KEPT }
-  for (const member of typeNode.members) {
+  for (const member of literal.members) {
     if (!ts.isPropertySignature(member) || !member.type) continue
     const key = getPropertyName(member.name)
     if (key === "drafts") {
@@ -1825,6 +1846,29 @@ function parseVersions(typeNode: ts.TypeNode): ParsedVersions | undefined {
   return parsed
 }
 
+/**
+ * A model's options as one object type: written out, or a type alias for one (generic, or joined
+ * with `&` to options written out). Every option is read off what this returns, so an alias the
+ * extractor read as syntax lost them all: `versions`, `tableName` and `access` alike. Options it
+ * cannot resolve are refused, since dropping them would push the model with none of them.
+ */
+function resolveModelOptions(
+  optionsArg: ts.TypeNode | undefined,
+  sourceFile: ts.SourceFile,
+  resolveCtx: ResolveContext,
+  modelName: string,
+): ts.TypeLiteralNode | undefined {
+  if (!optionsArg) return undefined
+  const literal = resolveAccessLiteral(optionsArg, sourceFile, resolveCtx)
+  if (literal) return literal
+  throw new Error(
+    `Model "${modelName}": could not resolve its options from \`${ownerText(optionsArg, sourceFile)}\`.\n` +
+      "  The second argument of Model<> must be an object type, or a type alias for one declared in\n" +
+      "  the schema's files. Refusing to continue: unresolved options would push the model without\n" +
+      "  its table name, access rules or versions.",
+  )
+}
+
 interface MetaLiteral {
   tableName?: string
   label?: string
@@ -1840,6 +1884,8 @@ interface MetaLiteral {
 function parseMetaLiteral(
   metaArg: ts.TypeNode | undefined,
   sourceFile: ts.SourceFile,
+  resolveCtx: ResolveContext,
+  modelName: string,
 ): MetaLiteral {
   const result: MetaLiteral = {}
 
@@ -1865,7 +1911,7 @@ function parseMetaLiteral(
         .map(literalStringType)
         .filter((name): name is string => name !== null)
     } else if (key === "versions") {
-      const versions = parseVersions(member.type)
+      const versions = parseVersions(member.type, sourceFile, resolveCtx, modelName)
       if (versions !== undefined) result.versions = versions
     } else if (key === "tableName" || key === "label" || key === "labelPlural") {
       const text = literalStringType(member.type)
@@ -1908,7 +1954,7 @@ function parseModelMeta(
   searchFields: string[]
   cache: ParsedModelCache | undefined
 } {
-  const literal = parseMetaLiteral(metaArg, sourceFile)
+  const literal = parseMetaLiteral(metaArg, sourceFile, resolveCtx, modelName)
   const singleton = literal.singleton === true
   const tableName =
     literal.tableName ?? (singleton ? `_global_${toSnakeCase(modelName)}` : toSnakeCase(modelName))

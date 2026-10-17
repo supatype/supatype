@@ -23,7 +23,7 @@ import { useStudioCapability } from "../hooks/useStudioCapability.js"
 import { serializeRecordForApi } from "../lib/recordValues.js"
 import { describeViolations, validateRecord } from "../lib/validate-record.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
-import { createDraft, fetchRecordForEditing } from "../lib/publishing.js"
+import { createDraft, createRecord, fetchRecordForEditing } from "../lib/publishing.js"
 
 interface EditViewProps {
   model: ModelConfig
@@ -181,39 +181,16 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
     try {
       if (isCreate) {
         const { [model.primaryKey]: _pk, ...insertValues } = serializeRecordForApi(model, values)
-        const result = await client
-          .from(model.tableName)
-          .insert(insertValues)
-
-        if (result.error) {
-          setError(result.error.message)
-          noteFieldError(result.error)
-        } else if (result.data) {
-          const rows = result.data as Record<string, unknown>[]
-          const data = rows[0]
-          const newId = data ? String(data[model.primaryKey]) : undefined
-          if (!newId) { setError("No data returned"); setSaving(false); return }
-
-          // The first save creates the row and its first draft. Creating only the row left a
-          // versioned record with no version at all: its history was empty, and a preview link
-          // minted against it resolved correctly and found nothing, so the reader was told "no
-          // draft to preview" about a record that plainly had content. Only editing an existing
-          // record made a draft, so a record had to be saved twice before it could be previewed
-          // once.
-          if (model.versions?.drafts === true) {
-            const drafted = await createDraft(client, model, newId, insertValues)
-            if (drafted.error !== null) {
-              // The row exists either way, so navigate to it rather than stranding the author on a
-              // create form whose save did in fact write something.
-              setError(drafted.error)
-              setSaving(false)
-              onNavigate(`/models/${model.name}/${newId}`)
-              return
-            }
-          }
-
+        // On a model with drafts the first save creates the record as its first draft, in one
+        // call: the live row holds no locale until one is published, and the record has a
+        // version to preview from the start.
+        const created = await createRecord(client, model, insertValues)
+        if (created.error !== null) {
+          setError(created.error.message)
+          noteFieldError(created.error)
+        } else if (created.id !== null) {
           isDirty.current = false
-          onNavigate(`/models/${model.name}/${newId}`)
+          onNavigate(`/models/${model.name}/${created.id}`)
         }
       } else {
         const { [model.primaryKey]: _pk, ...updateValues } = serializeRecordForApi(model, values)
@@ -279,16 +256,13 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
     delete duplicateValues["updated_at"]
 
     try {
-      const result = await client
-        .from(model.tableName)
-        .insert(duplicateValues)
-
-      if (result.error) {
-        setError(result.error.message)
-      } else if (result.data) {
-        const rows = result.data as Record<string, unknown>[]
-        const data = rows[0]
-        if (data) onNavigate(`/models/${model.name}/${String(data[model.primaryKey])}`)
+      // A copy of a record with drafts is a new draft too: the form holds the draft's values, and
+      // inserting them as the live row put unpublished content live.
+      const created = await createRecord(client, model, duplicateValues)
+      if (created.error !== null) {
+        setError(created.error.message)
+      } else if (created.id !== null) {
+        onNavigate(`/models/${model.name}/${created.id}`)
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to duplicate")

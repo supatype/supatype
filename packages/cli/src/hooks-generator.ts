@@ -99,6 +99,14 @@ export type Json =
   | { [key: string]: Json | undefined }
   | Json[]
 
+/** A link and its text, as a \`Button\` field, or a button inside a block, stores it. */
+export type Button = {
+  readonly label: string
+  readonly href: string
+  readonly ariaLabel?: string
+  readonly target?: "_self" | "_blank"
+}
+
 export interface HookTables {
 ${tableEntries}
 }
