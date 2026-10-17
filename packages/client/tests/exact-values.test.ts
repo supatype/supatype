@@ -23,24 +23,21 @@ describe("quoteExactNumbers", () => {
   it("keeps a bigint past 2^53 that JSON.parse would round", () => {
     const body = '[{"views":9007199254740993}]'
     // The failure this exists to prevent, stated as an assertion.
-    const lossy: unknown = JSON.parse(body)
+    const lossy = JSON.parse(body)
     expect(lossy).toEqual([{ views: 9007199254740992 }])
 
-    const parsed = JSON.parse(quoteExactNumbers(body, fields)) as [{ views: string }]
-    expect(parsed[0].views).toBe("9007199254740993")
+    expect(JSON.parse(quoteExactNumbers(body, fields))).toEqual([{ views: "9007199254740993" }])
   })
 
   it("keeps a high-precision decimal", () => {
     const body = '[{"price":12345678901234567890.1234}]'
-    const parsed = JSON.parse(quoteExactNumbers(body, fields)) as [{ price: string }]
-    expect(parsed[0].price).toBe("12345678901234567890.1234")
+    expect(JSON.parse(quoteExactNumbers(body, fields))).toEqual([{ price: "12345678901234567890.1234" }])
   })
 
   it("keeps trailing zeros on a money amount", () => {
     // Not a value loss, but `19.0000` becoming `19` contradicts the declared `string` type.
     const body = '[{"balance":19.0000}]'
-    const parsed = JSON.parse(quoteExactNumbers(body, fields)) as [{ balance: string }]
-    expect(parsed[0].balance).toBe("19.0000")
+    expect(JSON.parse(quoteExactNumbers(body, fields))).toEqual([{ balance: "19.0000" }])
   })
 
   it("leaves columns that are not exact-value kinds alone", () => {
@@ -50,8 +47,7 @@ describe("quoteExactNumbers", () => {
 
   it("leaves null alone", () => {
     const body = '[{"views":null}]'
-    const parsed = JSON.parse(quoteExactNumbers(body, fields)) as [{ views: null }]
-    expect(parsed[0].views).toBeNull()
+    expect(JSON.parse(quoteExactNumbers(body, fields))).toEqual([{ views: null }])
   })
 
   it("leaves a value that is already a string alone", () => {
@@ -67,15 +63,12 @@ describe("quoteExactNumbers", () => {
 
   it("handles negative and exponent literals", () => {
     const body = '[{"views":-9007199254740993,"price":1.5e10}]'
-    const parsed = JSON.parse(quoteExactNumbers(body, fields)) as [{ views: string; price: string }]
-    expect(parsed[0].views).toBe("-9007199254740993")
-    expect(parsed[0].price).toBe("1.5e10")
+    expect(JSON.parse(quoteExactNumbers(body, fields))).toEqual([{ views: "-9007199254740993", price: "1.5e10" }])
   })
 
   it("handles a single-object response as well as an array", () => {
     const body = '{"views":9007199254740993}'
-    const parsed = JSON.parse(quoteExactNumbers(body, fields)) as { views: string }
-    expect(parsed.views).toBe("9007199254740993")
+    expect(JSON.parse(quoteExactNumbers(body, fields))).toEqual({ views: "9007199254740993" })
   })
 
   it("does not touch an embedded resource", () => {
@@ -96,29 +89,24 @@ describe("quoteExactNumbers", () => {
 describe("coerceExactKinds", () => {
   it("turns a bigint column into a native bigint", () => {
     const rows = [{ views: "9007199254740993", price: "19.0000" }]
-    const out = coerceExactKinds(rows, fields) as [{ views: bigint; price: string }]
-    expect(out[0].views).toBe(9007199254740993n)
-    expect(typeof out[0].views).toBe("bigint")
+    // `toEqual` compares with Object.is, so the string "9007199254740993" would not pass.
+    expect(coerceExactKinds(rows, fields)).toEqual([{ views: 9007199254740993n, price: "19.0000" }])
   })
 
   it("leaves numeric columns as exact strings", () => {
     // `@supatype/types` declares Decimal and Money as `string`. There is no native exact decimal.
     const rows = [{ price: "12345678901234567890.1234" }]
-    const out = coerceExactKinds(rows, fields) as [{ price: string }]
-    expect(out[0].price).toBe("12345678901234567890.1234")
+    expect(coerceExactKinds(rows, fields)).toEqual([{ price: "12345678901234567890.1234" }])
   })
 
   it("leaves null alone", () => {
-    const out = coerceExactKinds([{ views: null }], fields) as [{ views: null }]
-    expect(out[0].views).toBeNull()
+    expect(coerceExactKinds([{ views: null }], fields)).toEqual([{ views: null }])
   })
 
   it("round-trips the full path, wire bytes to native bigint", () => {
     const wire = '[{"views":9007199254740993,"balance":19.0000}]'
-    const rows = JSON.parse(quoteExactNumbers(wire, fields)) as unknown
-    const out = coerceExactKinds(rows, fields) as [{ views: bigint; balance: string }]
-    expect(out[0].views).toBe(9007199254740993n)
-    expect(out[0].balance).toBe("19.0000")
+    const rows = JSON.parse(quoteExactNumbers(wire, fields))
+    expect(coerceExactKinds(rows, fields)).toEqual([{ views: 9007199254740993n, balance: "19.0000" }])
   })
 })
 

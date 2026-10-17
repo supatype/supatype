@@ -1,6 +1,16 @@
 import type { SupatypeError } from "./types.js"
 import { transportFailure } from "./errors.js"
 import { plainFetch, type RequestTransport } from "./fetch-with-retry.js"
+import {
+  isArrayOf,
+  isBoolean,
+  isNumber,
+  isShape,
+  isString,
+  nullable,
+  readJson,
+  readJsonObject,
+} from "./json.js"
 
 export interface StorageObject {
   id: string
@@ -44,6 +54,57 @@ export interface StorageBucketMeta {
 
 /** Resolved fresh per request, so a session that arrives later is used. */
 export type AuthHeaders = () => Promise<Record<string, string>>
+
+/**
+ * A bucket as the storage service lists it (`SELECT *` on storage.buckets).
+ *
+ * `file_size_limit` is a Postgres bigint, which node-postgres sends as a string, so the limit
+ * arrived as `"1048576"` where `StorageBucketMeta` promises a number. It is read as a number here.
+ */
+const isBucketRows = isArrayOf(
+  isShape({
+    id: isString,
+    name: isString,
+    public: isBoolean,
+    file_size_limit: nullable((value: unknown): value is number | string => isNumber(value) || isString(value)),
+    allowed_mime_types: nullable(isArrayOf(isString)),
+    created_at: isString,
+    updated_at: isString,
+  }),
+)
+
+async function readBuckets(res: Response): Promise<StorageBucketMeta[]> {
+  const rows = await readJson(res, isBucketRows)
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    public: row.public,
+    file_size_limit: row.file_size_limit === null ? null : Number(row.file_size_limit),
+    allowed_mime_types: row.allowed_mime_types,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  }))
+}
+
+/**
+ * The boundary between the service's object rows and `StorageObject`.
+ *
+ * What is checked is what every answer shares: a list of objects, each with a string `name`. The
+ * rest is not checked because the service does not send it as declared: `remove` answers with only
+ * `name` and `bucket_id`, and `list` sends a missing `owner` or `metadata` as null rather than
+ * leaving it out (packages/storage/src/routes/objects.ts).
+ */
+function isStorageObjects(value: unknown): value is StorageObject[] {
+  return isNamedObjects(value)
+}
+
+const isNamedObjects = isArrayOf(isShape({ name: isString }))
+
+/** A refusal's reason: the body's `message`, else its `error`, else `fallback`. */
+async function storageRefusal(res: Response, fallback: string): Promise<string> {
+  const body = await readJsonObject(res)
+  return String(body["message"] ?? body["error"] ?? fallback)
+}
 
 export class StorageClient {
   private readonly url: string
@@ -95,12 +156,8 @@ export class StorageClient {
   async listBuckets(): Promise<{ data: StorageBucketMeta[] | null; error: SupatypeError | null }> {
     try {
       const res = await this.send(`${this.url}/bucket`, { headers: await this.headers() })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ message: "Error" })) as { message?: string }
-        return { data: null, error: { message: err.message ?? "Failed to list buckets" } }
-      }
-      const data = await res.json() as StorageBucketMeta[]
-      return { data, error: null }
+      if (!res.ok) return { data: null, error: { message: await storageRefusal(res, "Failed to list buckets") } }
+      return { data: await readBuckets(res), error: null }
     } catch (e) {
       return { data: null, error: transportFailure(e) }
     }
@@ -123,10 +180,7 @@ export class StorageClient {
         headers: { ...(await this.headers()), "Content-Type": "application/json" },
         body: JSON.stringify(body),
       })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ message: "Error" })) as { message?: string }
-        return { data: null, error: { message: err.message ?? "Failed to create bucket" } }
-      }
+      if (!res.ok) return { data: null, error: { message: await storageRefusal(res, "Failed to create bucket") } }
       return { data: { name }, error: null }
     } catch (e) {
       return { data: null, error: transportFailure(e) }
@@ -166,8 +220,7 @@ export class BucketClient {
       body: file,
     })
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ message: "Upload failed" })) as Record<string, unknown>
-      return { data: null, error: { message: String(err["message"] ?? err["error"] ?? "Upload failed"), status: res.status } }
+      return { data: null, error: { message: await storageRefusal(res, "Upload failed"), status: res.status } }
     }
     return { data: { path }, error: null }
   }
@@ -179,8 +232,7 @@ export class BucketClient {
     const url = this.buildObjectUrl("authenticated", path, options?.transform)
     const res = await this.send(url, { headers: await this.headers() })
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ message: "Download failed" })) as Record<string, unknown>
-      return { data: null, error: { message: String(err["message"] ?? err["error"] ?? "Download failed"), status: res.status } }
+      return { data: null, error: { message: await storageRefusal(res, "Download failed"), status: res.status } }
     }
     const blob = await res.blob()
     return { data: blob, error: null }
@@ -222,10 +274,9 @@ export class BucketClient {
       body: JSON.stringify({ expiresIn }),
     })
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ message: "Failed to create signed URL" })) as Record<string, unknown>
-      return { data: null, error: { message: String(err["message"] ?? err["error"] ?? "Failed to create signed URL"), status: res.status } }
+      return { data: null, error: { message: await storageRefusal(res, "Failed to create signed URL"), status: res.status } }
     }
-    const json = await res.json() as { signedURL: string }
+    const json = await readJson(res, isShape({ signedURL: isString }))
     return { data: { signedUrl: this.absoluteObjectUrl(json.signedURL) }, error: null }
   }
 
@@ -252,11 +303,9 @@ export class BucketClient {
       body: JSON.stringify({ prefixes: paths }),
     })
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ message: "Delete failed" })) as Record<string, unknown>
-      return { data: null, error: { message: String(err["message"] ?? err["error"] ?? "Delete failed"), status: res.status } }
+      return { data: null, error: { message: await storageRefusal(res, "Delete failed"), status: res.status } }
     }
-    const json = await res.json() as StorageObject[]
-    return { data: json, error: null }
+    return { data: await readJson(res, isStorageObjects), error: null }
   }
 
   async list(
@@ -276,11 +325,9 @@ export class BucketClient {
       body: JSON.stringify(body),
     })
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ message: "List failed" })) as Record<string, unknown>
-      return { data: null, error: { message: String(err["message"] ?? err["error"] ?? "List failed"), status: res.status } }
+      return { data: null, error: { message: await storageRefusal(res, "List failed"), status: res.status } }
     }
-    const json = await res.json() as StorageObject[]
-    return { data: json, error: null }
+    return { data: await readJson(res, isStorageObjects), error: null }
   }
 
   // ─── Internal ───────────────────────────────────────────────────────────────

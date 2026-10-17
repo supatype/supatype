@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { AuthClient } from "../src/auth.js"
+import type { AuthStorage } from "../src/types.js"
+import { fetchCall, fetchReturning, header, jsonBody, type FetchMock } from "./support/fetch-mock.js"
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -24,13 +26,8 @@ const TOKEN_RESPONSE = {
   user: RAW_USER,
 }
 
-function mockFetch(body: unknown, ok = true, status?: number): ReturnType<typeof vi.fn> {
-  return vi.fn().mockResolvedValue({
-    ok,
-    status: status ?? (ok ? 200 : 400),
-    json: vi.fn().mockResolvedValue(body),
-    headers: { get: () => null },
-  })
+function mockFetch(body: unknown, ok = true, status?: number): FetchMock {
+  return fetchReturning(body, status ?? (ok ? 200 : 400))
 }
 
 function freshClient(): AuthClient {
@@ -61,8 +58,7 @@ describe("AuthClient.signUp()", () => {
 
     await freshClient().signUp({ email: "a@b.com", password: "s", options: { data: { name: "Alice" } } })
 
-    const [, opts] = fetch.mock.calls[0] as [string, RequestInit]
-    const body = JSON.parse(opts.body as string) as Record<string, unknown>
+    const body = jsonBody(fetchCall(fetch).init)
     expect(body["data"]).toEqual({ name: "Alice" })
   })
 
@@ -160,8 +156,7 @@ describe("AuthClient.signInAnonymously()", () => {
       `${SUPATYPE_URL}/signup`,
       expect.objectContaining({ method: "POST" }),
     )
-    const [, opts] = fetch.mock.calls[0] as [string, RequestInit]
-    const body = JSON.parse(opts.body as string) as Record<string, unknown>
+    const body = jsonBody(fetchCall(fetch).init)
     expect(body["email"]).toBeUndefined()
     expect(body["password"]).toBeUndefined()
   })
@@ -174,8 +169,7 @@ describe("AuthClient.signInAnonymously()", () => {
       options: { data: { guest: true }, captchaToken: "captcha-123" },
     })
 
-    const [, opts] = fetch.mock.calls[0] as [string, RequestInit]
-    const body = JSON.parse(opts.body as string) as Record<string, unknown>
+    const body = jsonBody(fetchCall(fetch).init)
     expect(body["data"]).toEqual({ guest: true })
     expect(body["supatype_meta_security"]).toEqual({ captcha_token: "captcha-123" })
   })
@@ -213,7 +207,7 @@ describe("AuthClient.signInWithPassword()", () => {
 
     await freshClient().signInWithPassword({ email: "a@b.com", password: "pass" })
 
-    const [url] = fetch.mock.calls[0] as [string, unknown]
+    const { url } = fetchCall(fetch)
     expect(url).toBe(`${SUPATYPE_URL}/token?grant_type=password`)
   })
 
@@ -271,13 +265,13 @@ describe("AuthClient.signOut()", () => {
     vi.stubGlobal("fetch", mockFetch(TOKEN_RESPONSE))
     await client.signInWithPassword({ email: "a@b.com", password: "pass" })
 
-    const logoutFetch = vi.fn().mockResolvedValue({ ok: true, status: 204 })
+    const logoutFetch = fetchReturning(null, 204)
     vi.stubGlobal("fetch", logoutFetch)
     await client.signOut()
 
-    const [url, opts] = logoutFetch.mock.calls[0] as [string, RequestInit]
+    const { url, init } = fetchCall(logoutFetch)
     expect(url).toBe(`${SUPATYPE_URL}/logout`)
-    expect(opts.method).toBe("POST")
+    expect(init.method).toBe("POST")
   })
 
   it("clears session after sign out", async () => {
@@ -391,8 +385,7 @@ describe("AuthClient.getSession() / getUser()", () => {
 
     expect(error).toBeNull()
     expect(data.user?.id).toBe("user-1")
-    const [, opts] = userFetch.mock.calls[0] as [string, RequestInit]
-    expect((opts.headers as Record<string, string>)["Authorization"]).toContain("Bearer access-token-123")
+    expect(header(fetchCall(userFetch).init, "Authorization")).toContain("Bearer access-token-123")
   })
 })
 
@@ -458,7 +451,7 @@ describe("AuthClient custom storage", () => {
   it("persists session to custom storage on sign in", async () => {
     const storage = {
       getItem: vi.fn().mockResolvedValue(null),
-      setItem: vi.fn().mockResolvedValue(undefined),
+      setItem: vi.fn<AuthStorage["setItem"]>().mockResolvedValue(undefined),
       removeItem: vi.fn().mockResolvedValue(undefined),
     }
     const client = new AuthClient(SUPATYPE_URL, HEADERS, { storage })
@@ -468,9 +461,9 @@ describe("AuthClient custom storage", () => {
     await client.signInWithPassword({ email: "a@b.com", password: "pass" })
 
     expect(storage.setItem).toHaveBeenCalled()
-    const [key, value] = storage.setItem.mock.calls[0] as [string, string]
+    const [key, value] = storage.setItem.mock.calls[0] ?? []
     expect(key).toBe("supatype.auth.session")
-    const stored: unknown = JSON.parse(value)
+    const stored = JSON.parse(value ?? "null")
     expect(stored).toHaveProperty("accessToken", "access-token-123")
   })
 
@@ -560,8 +553,7 @@ describe("AuthClient OAuth session completion", () => {
       `${SUPATYPE_URL}/token?grant_type=pkce`,
       expect.objectContaining({ method: "POST" }),
     )
-    const [, opts] = fetch.mock.calls[0] as [string, RequestInit]
-    const body = JSON.parse(opts.body as string) as Record<string, unknown>
+    const body = jsonBody(fetchCall(fetch).init)
     expect(body["auth_code"]).toBe("auth-code-xyz")
     expect(typeof body["code_verifier"]).toBe("string")
     expect(storage.removeItem).toHaveBeenCalledWith("supatype.auth.session-code-verifier")
@@ -677,8 +669,8 @@ describe("AuthClient stale persisted session", () => {
 describe("email links carry the caller's redirect", () => {
   beforeEach(() => vi.restoreAllMocks())
 
-  function calledUrl(fetchSpy: ReturnType<typeof vi.fn>): URL {
-    return new URL(String(fetchSpy.mock.calls[0]?.[0]))
+  function calledUrl(fetchSpy: FetchMock): URL {
+    return new URL(fetchCall(fetchSpy).url)
   }
 
   it("signInWithOtp sends emailRedirectTo as the redirect_to query parameter", async () => {

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { AuthClient } from "../src/auth.js"
 import type { SupatypeError } from "../src/types.js"
+import { fetchReturning } from "./support/fetch-mock.js"
 
 const AUTH_URL = "http://localhost:9999"
 const HEADERS = { apikey: "test-anon-key", "Content-Type": "application/json" }
@@ -19,18 +20,9 @@ const API_ERROR = { code: 422, error_code: "weak_password", msg: "Password shoul
 /** The OAuth token endpoint's older shape: `error` is the code and `error_description` the message. */
 const OAUTH_ERROR = { error: "invalid_grant", error_description: "Invalid Refresh Token: Already Used" }
 
-function respond(body: unknown, status: number): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    json: vi.fn().mockResolvedValue(body),
-    headers: { get: () => null },
-  } as unknown as Response
-}
-
 async function signedIn(): Promise<AuthClient> {
   const client = new AuthClient(AUTH_URL, HEADERS)
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(respond(TOKEN_RESPONSE, 200)))
+  vi.stubGlobal("fetch", fetchReturning(TOKEN_RESPONSE, 200))
   await client.signInWithPassword({ email: "a@example.com", password: "pw" })
   return client
 }
@@ -57,7 +49,7 @@ describe("auth errors carry the server's error code", () => {
   for (const [name, call] of CALLS) {
     it(`${name}: error_code becomes code, msg becomes message`, async () => {
       const client = await signedIn()
-      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(respond(API_ERROR, 422)))
+      vi.stubGlobal("fetch", fetchReturning(API_ERROR, 422))
       const { error } = await call(client)
       expect(error).toEqual({ message: API_ERROR.msg, status: 422, code: "weak_password" })
     })
@@ -65,20 +57,15 @@ describe("auth errors carry the server's error code", () => {
 
   it("the OAuth shape's `error` is the code and `error_description` the message", async () => {
     const client = await signedIn()
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(respond(OAUTH_ERROR, 400)))
+    vi.stubGlobal("fetch", fetchReturning(OAUTH_ERROR, 400))
     const { error } = await client.refreshSession()
     expect(error).toEqual({ message: OAUTH_ERROR.error_description, status: 400, code: "invalid_grant" })
   })
 
   it("a body that is not JSON still gives a message and the status", async () => {
     const client = new AuthClient(AUTH_URL, HEADERS)
-    const notJson = {
-      ok: false,
-      status: 502,
-      json: vi.fn().mockRejectedValue(new SyntaxError("Unexpected token <")),
-      headers: { get: () => null },
-    } as unknown as Response
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(notJson))
+    const notJson = (): Promise<Response> => Promise.resolve(new Response("<html>Bad gateway</html>", { status: 502 }))
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(notJson))
     const { error } = await client.signInWithPassword({ email: "a@example.com", password: "x" })
     expect(error?.status).toBe(502)
     expect(error?.message).not.toBe("")

@@ -1,6 +1,11 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 import { RealtimeClient } from "../../src/realtime.js"
-import { createMockWebSocketClass, simulateServerMessage, type MockWebSocketInstance } from "./mock-websocket.js"
+import {
+  createMockWebSocketClass,
+  simulateServerMessage,
+  subscribedChannels,
+  type MockWebSocketInstance,
+} from "./mock-websocket.js"
 
 /**
  * A realtime client on a stand-in socket, with the sign-in that swaps that socket for a new one.
@@ -33,14 +38,6 @@ function newestOf(sockets: MockWebSocketInstance[]): MockWebSocketInstance {
   return socket
 }
 
-/** The channels a socket was asked to join, read back out of the frames sent on it. */
-function joinedChannels(socket: MockWebSocketInstance): string[] {
-  return socket.send.mock.calls
-    .map(([raw]) => JSON.parse(String(raw)) as { type: string; channel: string })
-    .filter((frame) => frame.type === "subscribe")
-    .map((frame) => frame.channel)
-}
-
 export function createSocketSwapHarness(): SocketSwapHarness {
   const mock = createMockWebSocketClass()
   vi.stubGlobal("WebSocket", mock.MockWebSocket)
@@ -55,7 +52,7 @@ export function createSocketSwapHarness(): SocketSwapHarness {
     sockets: mock.instances,
     settle,
     ackJoins: () => {
-      for (const channel of joinedChannels(newestOf(mock.instances))) reply("ok", `subscribed to ${channel}`)
+      for (const channel of subscribedChannels(newestOf(mock.instances))) reply("ok", `subscribed to ${channel}`)
     },
     refuseJoin: () => reply("error", "permission denied"),
     signIn: async () => {

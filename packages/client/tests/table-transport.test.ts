@@ -4,13 +4,7 @@ import { createClient } from "../src/index.js"
 const URL_BASE = "http://localhost:18473"
 
 function rowsResponse(rows: unknown[], status = 200): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    json: vi.fn().mockResolvedValue(rows),
-    text: vi.fn().mockResolvedValue(JSON.stringify(rows)),
-    headers: new Headers(),
-  } as unknown as Response
+  return new Response(JSON.stringify(rows), { status })
 }
 
 /** A fetch that never answers, and gives up only when its signal is aborted. */

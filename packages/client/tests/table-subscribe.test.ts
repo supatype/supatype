@@ -14,7 +14,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { createClient } from "../src/index.js"
 import type { RealtimePayload } from "../src/realtime.js"
 import {
+  channelOf,
   createMockWebSocketClass,
+  sentFrames,
   simulateServerMessage,
   type MockWebSocketInstance,
 } from "./helpers/mock-websocket.js"
@@ -39,14 +41,12 @@ function newClient(): ReturnType<typeof createClient> {
 }
 
 /** Every frame the client put on any socket, parsed. */
-function sentFrames(): Array<Record<string, unknown>> {
-  return instances
-    .flatMap((i) => i.send.mock.calls.map((c) => c[0] as string))
-    .map((raw) => JSON.parse(raw) as Record<string, unknown>)
+function allFrames(): Array<Record<string, unknown>> {
+  return instances.flatMap((i) => sentFrames(i))
 }
 
 function framesOfType(type: string): Array<Record<string, unknown>> {
-  return sentFrames().filter((m) => m["type"] === type)
+  return allFrames().filter((m) => m["type"] === type)
 }
 
 /** The only socket opened so far. A second one would mean a subscribe orphaned the first. */
@@ -90,7 +90,7 @@ describe("from(table).subscribe() alone", () => {
     expect(frame["schema"]).toBe("public")
     expect(frame["event"]).toBe("*")
 
-    simulateServerMessage(ws, changeOn(frame["channel"] as string, "INSERT", { id: 1 }))
+    simulateServerMessage(ws, changeOn(channelOf(frame), "INSERT", { id: 1 }))
     expect(seen).toHaveLength(1)
     expect(seen[0]!.eventType).toBe("INSERT")
     expect(seen[0]!.table).toBe("post")
@@ -113,7 +113,7 @@ describe("from(table).subscribe() alone", () => {
     expect(frame["filter"]).toEqual({ slug: "eq.hello" })
     expect(frame["event"]).toBe("INSERT")
 
-    const channel = frame["channel"] as string
+    const channel = channelOf(frame)
     simulateServerMessage(ws, changeOn(channel, "UPDATE", { id: 1 }))
     simulateServerMessage(ws, changeOn(channel, "INSERT", { id: 2 }))
     expect(seen.map((p) => p.new)).toEqual([{ id: 2 }])
@@ -157,7 +157,7 @@ describe("the status callback on the returned channel", () => {
     const ws = onlySocket()
     const frames = framesOfType("subscribe")
     expect(frames).toHaveLength(1)
-    simulateServerMessage(ws, ack(frames[0]!["channel"] as string))
+    simulateServerMessage(ws, ack(channelOf(frames[0])))
     expect(statuses).toEqual(["SUBSCRIBED"])
   })
 
@@ -169,7 +169,7 @@ describe("the status callback on the returned channel", () => {
     await settle()
 
     const ws = onlySocket()
-    simulateServerMessage(ws, ack(framesOfType("subscribe")[0]!["channel"] as string))
+    simulateServerMessage(ws, ack(channelOf(framesOfType("subscribe")[0])))
 
     const statuses: string[] = []
     sub.channel.subscribe((s) => statuses.push(s))
@@ -197,8 +197,8 @@ describe("two subscriptions to the same table on one client", () => {
     expect(frames[0]!["channel"]).not.toBe(frames[1]!["channel"])
 
     // The server addresses each change to the subscription it matched.
-    simulateServerMessage(ws, changeOn(frames[0]!["channel"] as string, "INSERT", { slug: "a" }))
-    simulateServerMessage(ws, changeOn(frames[1]!["channel"] as string, "INSERT", { slug: "b" }))
+    simulateServerMessage(ws, changeOn(channelOf(frames[0]), "INSERT", { slug: "a" }))
+    simulateServerMessage(ws, changeOn(channelOf(frames[1]), "INSERT", { slug: "b" }))
     expect(first).toEqual([{ slug: "a" }])
     expect(second).toEqual([{ slug: "b" }])
   })
@@ -219,7 +219,7 @@ describe("two subscriptions to the same table on one client", () => {
       { type: "unsubscribe", channel: frameA!["channel"] },
     ])
     expect(ws.close).not.toHaveBeenCalled()
-    simulateServerMessage(ws, changeOn(frameB!["channel"] as string, "INSERT", { id: 7 }))
+    simulateServerMessage(ws, changeOn(channelOf(frameB), "INSERT", { id: 7 }))
     expect(second).toEqual([{ id: 7 }])
   })
 
@@ -239,7 +239,7 @@ describe("two subscriptions to the same table on one client", () => {
     const ws = onlySocket()
     const frames = framesOfType("subscribe")
     expect(frames).toHaveLength(2)
-    const tableChannel = frames.find((f) => f["channel"] !== "public:post")!["channel"] as string
+    const tableChannel = channelOf(frames.find((f) => f["channel"] !== "public:post"))
 
     raw.unsubscribe()
     expect(ws.close).not.toHaveBeenCalled()

@@ -66,7 +66,7 @@ describe("registerFieldKinds", () => {
   })
 
   it("ignores a version it does not understand rather than guessing", () => {
-    registerFieldKinds({ version: 99, tables: { job_post: { views: "bigint" } } } as never)
+    registerFieldKinds({ version: 99, tables: { job_post: { views: "bigint" } } })
     expect(fieldKindsAreRegistered()).toBe(false)
   })
 
@@ -74,7 +74,7 @@ describe("registerFieldKinds", () => {
     registerFieldKinds({
       version: 1,
       tables: { job_post: { views: "bigint", weird: "quantum" } },
-    } as never)
+    })
     expect(registeredFieldsFor("job_post")).toEqual({ views: "bigint" })
   })
 })

@@ -7,6 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { AuthClient } from "../src/auth.js"
+import { fetchCall, fetchReturning, jsonBody, type FetchMock } from "./support/fetch-mock.js"
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -59,13 +60,8 @@ function makeTokenResponse(overrides?: Record<string, unknown>) {
   }
 }
 
-function mockFetch(body: unknown, ok = true, status?: number): ReturnType<typeof vi.fn> {
-  return vi.fn().mockResolvedValue({
-    ok,
-    status: status ?? (ok ? 200 : 400),
-    json: vi.fn().mockResolvedValue(body),
-    headers: { get: () => null },
-  })
+function mockFetch(body: unknown, ok = true, status?: number): FetchMock {
+  return fetchReturning(body, status ?? (ok ? 200 : 400))
 }
 
 function freshClient(): AuthClient {
@@ -110,11 +106,10 @@ describe("Task 89: MFA TOTP integration", () => {
       expect(data!.type).toBe("totp")
 
       // Verify POST was sent to /factors
-      const [url, opts] = enrollFetch.mock.calls[0] as [string, RequestInit]
+      const { url, init } = fetchCall(enrollFetch)
       expect(url).toBe(`${SUPATYPE_URL}/factors`)
-      expect(opts.method).toBe("POST")
-      const body = JSON.parse(opts.body as string) as Record<string, string>
-      expect(body["factor_type"]).toBe("totp")
+      expect(init.method).toBe("POST")
+      expect(jsonBody(init)["factor_type"]).toBe("totp")
     })
 
     it("returns QR code and secret for TOTP enrollment", async () => {
@@ -243,8 +238,8 @@ describe("Task 89: MFA TOTP integration", () => {
       expect(data.session).not.toBeNull()
       // Decode JWT to check AAL
       const parts = data.session!.accessToken.split(".")
-      const payload = JSON.parse(Buffer.from(parts[1]!, "base64url").toString()) as Record<string, string>
-      expect(payload["aal"]).toBe("aal1")
+      const payload = JSON.parse(Buffer.from(parts[1]!, "base64url").toString())
+      expect(payload).toHaveProperty("aal", "aal1")
     })
 
     it("second step: TOTP verification elevates to AAL2", async () => {
@@ -271,11 +266,9 @@ describe("Task 89: MFA TOTP integration", () => {
 
       expect(data.session).not.toBeNull()
       const parts = data.session!.accessToken.split(".")
-      const payload = JSON.parse(Buffer.from(parts[1]!, "base64url").toString()) as Record<string, unknown>
-      expect(payload["aal"]).toBe("aal2")
-      expect(payload["amr"]).toEqual(
-        expect.arrayContaining([{ method: "password" }, { method: "totp" }]),
-      )
+      const payload = JSON.parse(Buffer.from(parts[1]!, "base64url").toString())
+      expect(payload).toHaveProperty("aal", "aal2")
+      expect(payload).toHaveProperty("amr", expect.arrayContaining([{ method: "password" }, { method: "totp" }]))
     })
   })
 
@@ -336,9 +329,9 @@ describe("Task 89: MFA TOTP integration", () => {
       expect(data).not.toBeNull()
       expect(data!.id).toBe(FACTOR_ID)
 
-      const [url, opts] = unenrollFetch.mock.calls[0] as [string, RequestInit]
+      const { url, init } = fetchCall(unenrollFetch)
       expect(url).toBe(`${SUPATYPE_URL}/factors/${FACTOR_ID}`)
-      expect(opts.method).toBe("DELETE")
+      expect(init.method).toBe("DELETE")
     })
 
     it("after unenroll, listFactors returns empty", async () => {

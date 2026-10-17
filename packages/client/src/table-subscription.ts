@@ -1,5 +1,6 @@
 import type { ChannelStatus, RealtimeClient, RealtimeEvent, RealtimePayload } from "./realtime.js"
 import type { SupatypeError } from "./types.js"
+import { isJsonObject } from "./json.js"
 
 /**
  * A table's live rows, for `from(table).subscribe()` and for the Vue, Svelte and Solid bindings.
@@ -107,17 +108,23 @@ export function subscriptionViewOf(status: ChannelStatus): SubscriptionView {
 }
 
 function rowId(row: unknown): unknown {
-  return (row as Record<string, unknown> | null)?.["id"]
+  return isJsonObject(row) ? row["id"] : undefined
 }
 
-/** The rows after one change, matched on `id`. */
+/**
+ * The rows after one change, matched on `id`.
+ *
+ * An insert or update always carries the new row; one without it (which the service does not send)
+ * leaves the rows as they were rather than putting a null among them.
+ */
 export function applyRowChange<TRow>(rows: TRow[] | null, payload: RealtimePayload<TRow>): TRow[] {
   const current = rows ?? []
+  const next = payload.new
   switch (payload.eventType) {
     case "INSERT":
-      return [...current, payload.new as TRow]
+      return next === null ? current : [...current, next]
     case "UPDATE":
-      return current.map((row) => (rowId(row) === rowId(payload.new) ? (payload.new as TRow) : row))
+      return next === null ? current : current.map((row) => (rowId(row) === rowId(next) ? next : row))
     case "DELETE":
       return current.filter((row) => rowId(row) !== rowId(payload.old))
     default:

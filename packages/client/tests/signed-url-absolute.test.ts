@@ -13,6 +13,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { StorageClient } from "../src/storage.js"
+import { fetchReturning } from "./support/fetch-mock.js"
 
 const STORAGE_URL = "http://localhost:18473/storage/v1"
 const HEADERS = { apikey: "test-anon-key", Authorization: "Bearer test-token" }
@@ -23,11 +24,7 @@ function client(url = STORAGE_URL): StorageClient {
 }
 
 function respondWith(signedURL: string): void {
-  globalThis.fetch = vi.fn().mockResolvedValue({
-    ok: true,
-    status: 200,
-    json: () => Promise.resolve({ signedURL }),
-  }) as unknown as typeof fetch
+  vi.stubGlobal("fetch", fetchReturning({ signedURL }))
 }
 
 beforeEach(() => {

@@ -22,17 +22,15 @@ import {
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 10))
 
 let instances: MockWebSocketInstance[]
-let originalWebSocket: typeof WebSocket
 
 beforeEach(() => {
   const mock = createMockWebSocketClass()
   instances = mock.instances
-  originalWebSocket = globalThis.WebSocket
-  globalThis.WebSocket = mock.MockWebSocket
+  vi.stubGlobal("WebSocket", mock.MockWebSocket)
 })
 
 afterEach(() => {
-  globalThis.WebSocket = originalWebSocket
+  vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
 

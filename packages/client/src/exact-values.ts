@@ -15,6 +15,8 @@
  * module exists to remove.
  */
 
+import { isJsonObject } from "./json.js"
+
 /** The two shapes a column can need. `numeric` covers both `decimal` and `money`. */
 export type ExactKind = "bigint" | "numeric"
 
@@ -44,7 +46,7 @@ function forEachKeyedNumber(body: string, visit: (found: KeyedNumber) => void): 
   let pendingKey: string | null = null
 
   while (i < body.length) {
-    const ch = body[i] as string
+    const ch = body.charAt(i)
 
     if (ch === QUOTE) {
       const end = endOfString(body, i)
@@ -68,7 +70,7 @@ function forEachKeyedNumber(body: string, visit: (found: KeyedNumber) => void): 
 
     if (ch === ":") {
       i += 1
-      while (i < body.length && WHITESPACE.has(body[i] as string)) i += 1
+      while (i < body.length && WHITESPACE.has(body.charAt(i))) i += 1
       const key = pendingKey
       pendingKey = null
       if (key !== null) {
@@ -161,9 +163,14 @@ export function stringifyWithBigInts(value: unknown): string {
 }
 
 function coerceRow(row: unknown, fields: ExactFields): unknown {
-  if (row === null || typeof row !== "object" || Array.isArray(row)) return row
+  return isJsonObject(row) ? coerceRecordKinds(row, fields) : row
+}
 
-  const source = row as Record<string, unknown>
+/** One row with its bigint columns made native bigints: the same object when none needed it. */
+export function coerceRecordKinds(
+  source: Record<string, unknown>,
+  fields: ExactFields,
+): Record<string, unknown> {
   let copy: Record<string, unknown> | null = null
 
   for (const [name, kind] of Object.entries(fields)) {
@@ -174,7 +181,7 @@ function coerceRow(row: unknown, fields: ExactFields): unknown {
     copy[name] = BigInt(current)
   }
 
-  return copy ?? row
+  return copy ?? source
 }
 
 /** Whether parsing this literal as a double changes the value it names. */
@@ -221,7 +228,7 @@ function firstMeaningfulChar(body: string): string | undefined {
 
 function nextMeaningfulChar(body: string, from: number): string | undefined {
   for (let i = from; i < body.length; i += 1) {
-    const ch = body[i] as string
+    const ch = body.charAt(i)
     if (!WHITESPACE.has(ch)) return ch
   }
   return undefined
@@ -257,19 +264,19 @@ function endOfNumber(body: string, from: number): number {
   let i = from
   if (body[i] === "-") i += 1
   const digitsStart = i
-  while (i < body.length && isDigit(body[i] as string)) i += 1
+  while (i < body.length && isDigit(body.charAt(i))) i += 1
   if (i === digitsStart) return from
 
   if (body[i] === ".") {
     i += 1
-    while (i < body.length && isDigit(body[i] as string)) i += 1
+    while (i < body.length && isDigit(body.charAt(i))) i += 1
   }
 
   if (body[i] === "e" || body[i] === "E") {
     let j = i + 1
     if (body[j] === "+" || body[j] === "-") j += 1
     const expStart = j
-    while (j < body.length && isDigit(body[j] as string)) j += 1
+    while (j < body.length && isDigit(body.charAt(j))) j += 1
     if (j > expStart) i = j
   }
 

@@ -4,6 +4,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { createClient } from "../src/index.js"
+import { fetchCalls, header, jsonResponse, requestUrl } from "./support/fetch-mock.js"
 
 const BASE = "http://localhost:18473"
 const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiJ9.test"
@@ -67,29 +68,18 @@ describe("createClient data plane auth", () => {
     }
     store.set("supatype.auth.session", JSON.stringify(expiredSession))
 
-    const fetchSpy = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.includes("/auth/v1/token")) {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
-            access_token: freshAccess,
-            refresh_token: "rotated-refresh",
-            token_type: "bearer",
-            expires_in: 3600,
-            expires_at: Math.floor(Date.now() / 1000) + 3600,
-            user: RAW_USER,
-          }),
-          headers: { get: (): string | null => null },
-        }
+    const fetchSpy = vi.fn<typeof fetch>(async (input) => {
+      if (requestUrl(input).includes("/auth/v1/token")) {
+        return jsonResponse({
+          access_token: freshAccess,
+          refresh_token: "rotated-refresh",
+          token_type: "bearer",
+          expires_in: 3600,
+          expires_at: Math.floor(Date.now() / 1000) + 3600,
+          user: RAW_USER,
+        })
       }
-      return {
-        ok: true,
-        status: 200,
-        json: async () => [{ id: "1", title: "Hello" }],
-        text: async () => JSON.stringify([{ id: "1", title: "Hello" }]),
-        headers: { get: (): string | null => null },
-      }
+      return jsonResponse([{ id: "1", title: "Hello" }])
     })
     vi.stubGlobal("fetch", fetchSpy)
 
@@ -99,14 +89,12 @@ describe("createClient data plane auth", () => {
     expect(error).toBeNull()
     expect(data).toEqual([{ id: "1", title: "Hello" }])
 
-    const restCall = fetchSpy.mock.calls.find(([url]) =>
-      String(url).includes("/rest/v1/post"),
-    ) as [string, RequestInit] | undefined
+    const restCall = fetchCalls(fetchSpy).find(({ url }) => url.includes("/rest/v1/post"))
     expect(restCall).toBeDefined()
-    expect((restCall![1].headers as Record<string, string>)["Authorization"]).toBe(
+    expect(header(restCall?.init ?? {}, "Authorization")).toBe(
       `Bearer ${freshAccess}`,
     )
-    expect(fetchSpy.mock.calls.some(([url]) => String(url).includes(`${AUTH}/token`))).toBe(true)
+    expect(fetchCalls(fetchSpy).some(({ url }) => url.includes(`${AUTH}/token`))).toBe(true)
   })
 
   it("falls back to anon headers after refresh fails", async () => {
@@ -125,22 +113,11 @@ describe("createClient data plane auth", () => {
     }
     store.set("supatype.auth.session", JSON.stringify(expiredSession))
 
-    const fetchSpy = vi.fn(async (url: string) => {
-      if (url.includes("/auth/v1/token")) {
-        return {
-          ok: false,
-          status: 400,
-          json: async () => ({ error_description: "Invalid Refresh Token" }),
-          headers: { get: (): string | null => null },
-        }
+    const fetchSpy = vi.fn<typeof fetch>(async (input) => {
+      if (requestUrl(input).includes("/auth/v1/token")) {
+        return jsonResponse({ error_description: "Invalid Refresh Token" }, 400)
       }
-      return {
-        ok: true,
-        status: 200,
-        json: async () => [{ id: "1", title: "Anon ok" }],
-        text: async () => JSON.stringify([{ id: "1", title: "Anon ok" }]),
-        headers: { get: (): string | null => null },
-      }
+      return jsonResponse([{ id: "1", title: "Anon ok" }])
     })
     vi.stubGlobal("fetch", fetchSpy)
 
@@ -150,10 +127,8 @@ describe("createClient data plane auth", () => {
     expect(error).toBeNull()
     expect(data).toEqual([{ id: "1", title: "Anon ok" }])
 
-    const restCall = fetchSpy.mock.calls.find(([url]) =>
-      String(url).includes("/rest/v1/post"),
-    ) as [string, RequestInit] | undefined
-    expect((restCall![1].headers as Record<string, string>)["Authorization"]).toBe(
+    const restCall = fetchCalls(fetchSpy).find(({ url }) => url.includes("/rest/v1/post"))
+    expect(header(restCall?.init ?? {}, "Authorization")).toBe(
       `Bearer ${ANON_KEY}`,
     )
     expect(store.get("supatype.auth.session")).toBeUndefined()
