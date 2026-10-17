@@ -135,6 +135,21 @@ const SPONSORS = [
   ["The Local Coffee Co-op", "community", "#8a5a2b", "https://example.com/coffee", "Responsible for the only queue at this event."],
 ] as const
 
+/** The `id` of the first row a statement returned, or undefined when it returned none. */
+function firstId(result: { rows: unknown[] }): string | undefined {
+  const row = result.rows[0]
+  return typeof row === "object" && row !== null && "id" in row && typeof row.id === "string"
+    ? row.id
+    : undefined
+}
+
+/** The `id` an `INSERT ... RETURNING id` handed back, which it always should. */
+function insertedId(result: { rows: unknown[] }, what: string): string {
+  const id = firstId(result)
+  if (id === undefined) throw new Error(`inserting ${what} returned no id`)
+  return id
+}
+
 async function seed(): Promise<void> {
   console.log("Seeding kitchen-sink…")
 
@@ -171,22 +186,20 @@ async function seed(): Promise<void> {
     // `db` answers with a pg QueryResult, so the inserted row is in `.rows` rather than the result
     // itself. Spelled out because a seed that reads `result[0]` gets `undefined` and inserts a null
     // foreign key without complaining.
-    const existing = (await db`SELECT id FROM room WHERE name = ${name}`).rows[0] as
-      | { id: string }
-      | undefined
-    if (existing) {
-      rooms.set(name, existing.id)
+    const existing = firstId(await db`SELECT id FROM room WHERE name = ${name}`)
+    if (existing !== undefined) {
+      rooms.set(name, existing)
       continue
     }
-    const created = (await db`
+    const created = await db`
       INSERT INTO room (name, capacity) VALUES (${name}, ${capacity}) RETURNING id
-    `).rows[0] as { id: string }
-    rooms.set(name, created.id)
+    `
+    rooms.set(name, insertedId(created, `room ${name}`))
   }
 
   const speakers = new Map<string, string>()
   for (const person of SPEAKERS) {
-    const row = (await db`
+    const row = await db`
       INSERT INTO speaker (name, slug, bio, links, email, published_at)
       VALUES (
         ${person.name}, ${person.slug},
@@ -201,8 +214,8 @@ async function seed(): Promise<void> {
         email = EXCLUDED.email,
         published_at = EXCLUDED.published_at
       RETURNING id
-    `).rows[0] as { id: string }
-    speakers.set(person.slug, row.id)
+    `
+    speakers.set(person.slug, insertedId(row, `speaker ${person.slug}`))
   }
 
   for (const [slug, title, speakerSlug, roomName, day, hour, minutes, published] of TALKS) {

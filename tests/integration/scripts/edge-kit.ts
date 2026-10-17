@@ -10,6 +10,7 @@
  * Usage: bash tests/integration/scripts/edge-kit-e2e.sh (which starts the stack and sets the env).
  */
 import { createHmac, randomUUID } from "node:crypto"
+import { at, isRecord, stringAt } from "../lib/json.js"
 
 const BASE = process.env.SUPATYPE_URL ?? "http://127.0.0.1:18473"
 const ANON = process.env.ANON_KEY ?? ""
@@ -42,7 +43,8 @@ async function call(path: string, init: RequestInit = {}): Promise<Reply> {
   const text = await res.text()
   let body: Json | null = null
   try {
-    body = JSON.parse(text) as Json
+    const parsed = JSON.parse(text)
+    body = isRecord(parsed) ? parsed : null
   } catch {
     /* not JSON: the text is kept for the failure message */
   }
@@ -92,9 +94,9 @@ async function basicInvoke(): Promise<void> {
 
   const payload = { marker: randomUUID(), nested: { n: 7 } }
   const echo = await invoke("echo", ANON, JSON.stringify(payload))
-  const echoed = echo.body?.["body"] as Json | undefined
+  const echoed = echo.body?.["body"]
   check(
-    echo.status === 200 && echoed?.["marker"] === payload.marker && (echoed["nested"] as Json | undefined)?.["n"] === 7,
+    echo.status === 200 && at(echoed, "marker") === payload.marker && at(at(echoed, "nested"), "n") === 7,
     "echo returned the JSON body it was sent",
     `echo: ${describe(echo)}`,
   )
@@ -140,20 +142,21 @@ async function restWrite(): Promise<void> {
   console.log("\n==> write-note: a PostgREST write from Deno, with the service-role key the config grants")
   const text = `edge-kit-e2e ${randomUUID()}`
   const write = await invoke("write-note", ANON, JSON.stringify({ text }))
-  const note = write.body?.["note"] as Json | null | undefined
+  const note = write.body?.["note"]
+  const noteId = stringAt(note, "id")
   check(
-    write.status === 200 && note?.["body"] === text && typeof note["id"] === "string",
+    write.status === 200 && at(note, "body") === text && noteId !== undefined,
     "write-note inserted the row and returned it",
     `write-note: ${describe(write)}`,
   )
-  if (typeof note?.["id"] !== "string") return
+  if (noteId === undefined) return
 
   // Read back as a client, not as the function: the row exists, and the model's `read: Public`
   // rule is what lets the anon role see it.
-  const read = await call(`/rest/v1/note?id=eq.${note["id"]}&select=id,body`, { headers: headers(ANON) })
-  const rows = JSON.parse(read.text) as unknown
+  const read = await call(`/rest/v1/note?id=eq.${noteId}&select=id,body`, { headers: headers(ANON) })
+  const rows = JSON.parse(read.text)
   check(
-    read.status === 200 && Array.isArray(rows) && rows.length === 1 && (rows[0] as Json)["body"] === text,
+    read.status === 200 && Array.isArray(rows) && rows.length === 1 && at(rows[0], "body") === text,
     "the row landed, and an anon client reads it through the model's public read rule",
     `reading the note back: ${describe(read)}`,
   )
@@ -165,7 +168,7 @@ async function webhook(): Promise<void> {
   const good = createHmac("sha256", WEBHOOK_SECRET).update(raw).digest("hex")
   const signed = await invoke("webhook", ANON, raw, { "x-webhook-signature": good })
   check(
-    signed.status === 200 && (signed.body?.["received"] as Json | undefined)?.["event"] === "edge-kit.e2e",
+    signed.status === 200 && at(signed.body?.["received"], "event") === "edge-kit.e2e",
     "a valid signature is accepted and the payload is parsed",
     `valid signature: ${describe(signed)}`,
   )

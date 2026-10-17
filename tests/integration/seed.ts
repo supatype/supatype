@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { sql } from "@supatype/cli/seed"
+import { at } from "./lib/json.js"
 
 function loadEnvFile(cwd: string): void {
   const path = join(cwd, ".env")
@@ -31,7 +32,8 @@ async function seed(): Promise<void> {
   console.log("Seeding supatype-integration demo data...")
 
   const existing = await db`SELECT COUNT(*)::int AS count FROM post`
-  if ((existing.rows[0] as { count: number }).count > 0) {
+  const count = at(existing.rows[0], "count")
+  if (typeof count === "number" && count > 0) {
     console.log("Posts already present: skipping seed.")
     await db.end()
     return

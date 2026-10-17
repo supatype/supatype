@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test"
+import { isRecord, stringAt } from "../lib/json.js"
 
 /**
  * Signing in to the kitchen-sink app with GitHub, the whole way round.
@@ -22,24 +23,20 @@ const SERVICE_ROLE_KEY = process.env.SERVICE_ROLE_KEY ?? ""
 // it, so the browser resolves that name to this machine.
 test.use({ launchOptions: { args: [`--host-resolver-rules=MAP ${STUB_HOST} 127.0.0.1`] } })
 
-interface AdminIdentity {
-  provider: string
-}
-
-interface AdminUser {
-  id: string
-  email?: string
-  app_metadata?: { providers?: string[] } | null
-  identities?: AdminIdentity[] | null
-}
-
 /** A GET on the auth admin API as the service role. */
-async function adminGet<T>(baseURL: string, path: string): Promise<T> {
+async function adminGet(baseURL: string, path: string): Promise<unknown> {
   const res = await fetch(`${baseURL}/auth/v1/admin${path}`, {
     headers: { apikey: SERVICE_ROLE_KEY, Authorization: `Bearer ${SERVICE_ROLE_KEY}` },
   })
   expect(res.status, `GET /auth/v1/admin${path}`).toBe(200)
-  return (await res.json()) as T
+  return res.json()
+}
+
+/** The array at `key` of an admin API answer, or none when it is absent or null. */
+function arrayAt(value: unknown, key: string): unknown[] {
+  if (!isRecord(value)) return []
+  const found = value[key]
+  return Array.isArray(found) ? found : []
 }
 
 /**
@@ -50,12 +47,13 @@ async function adminGet<T>(baseURL: string, path: string): Promise<T> {
  * `identities` on the user read by id.
  */
 async function expectGitHubUser(baseURL: string, email: string): Promise<void> {
-  const { users } = await adminGet<{ users?: AdminUser[] }>(baseURL, "/users?per_page=1000")
-  const listed = users?.find((u) => u.email === email)
-  if (listed === undefined) throw new Error(`the admin API does not list ${email}`)
-  expect(listed.app_metadata?.providers ?? [], "the listed user's providers").toContain("github")
-  const user = await adminGet<AdminUser>(baseURL, `/users/${listed.id}`)
-  expect((user.identities ?? []).map((i) => i.provider), "the user's identities").toContain("github")
+  const users = arrayAt(await adminGet(baseURL, "/users?per_page=1000"), "users")
+  const listed = users.filter(isRecord).find((u) => u["email"] === email)
+  const id = stringAt(listed, "id")
+  if (listed === undefined || id === undefined) throw new Error(`the admin API does not list ${email}`)
+  expect(arrayAt(listed["app_metadata"], "providers"), "the listed user's providers").toContain("github")
+  const user = await adminGet(baseURL, `/users/${id}`)
+  expect(arrayAt(user, "identities").map((i) => stringAt(i, "provider")), "the user's identities").toContain("github")
 }
 
 /** Presses the button and waits for the document the round trip lands on. */
@@ -91,7 +89,7 @@ test.describe("the kitchen-sink app's GitHub sign-in", () => {
     await expect(page.getByText(STUB_EMAIL, { exact: true })).toBeVisible()
     await expect(page.getByText("Types all the way down")).toBeVisible()
 
-    const calls = (await (await fetch(`${STUB}/calls`)).json()) as string[]
+    const calls = await (await fetch(`${STUB}/calls`)).json()
     expect(calls).toEqual(
       expect.arrayContaining(["GET /login/oauth/authorize", "POST /login/oauth/access_token", "GET /api/v3/user"]),
     )
@@ -103,8 +101,10 @@ test.describe("the kitchen-sink app's GitHub sign-in", () => {
     // /settings reports it off, and /authorize answers as the server does for one, with a bare 400.
     await page.route("**/auth/v1/settings", async (route) => {
       const real = await route.fetch()
-      const settings = (await real.json()) as { external?: Record<string, boolean> }
-      await route.fulfill({ response: real, json: { ...settings, external: { ...settings.external, github: false } } })
+      const body: unknown = await real.json()
+      const settings = isRecord(body) ? body : {}
+      const external = isRecord(settings["external"]) ? settings["external"] : {}
+      await route.fulfill({ response: real, json: { ...settings, external: { ...external, github: false } } })
     })
     await page.route("**/auth/v1/authorize?**", (route) =>
       route.fulfill({

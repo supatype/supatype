@@ -4,14 +4,15 @@ import { headers } from "next/headers"
 import { RichText } from "@supatype/react"
 import { createClient } from "@/lib/supatype-server"
 import { localized } from "@/lib/localized"
-import type { TableRow } from "@supatype/client"
-type Talk = TableRow<"talk">
-type Speaker = TableRow<"speaker">
+import type { Database } from "../../../../../supatype/generated/database"
+
+// The rows this app reads, as the server client it reads them with types them.
+type Talk = Database["public"]["Tables"]["talk"]["Row"]
 
 async function talkBySlug(slug: string): Promise<Talk | null> {
   const supatype = await createClient()
   const { data } = await supatype.from("talk").select().eq("slug", slug).limit(1)
-  return (data as Talk[] | null)?.[0] ?? null
+  return data?.[0] ?? null
 }
 
 /**
@@ -37,7 +38,7 @@ export async function generateMetadata({
     .select()
     .eq("id", talk.speaker_id ?? "")
     .limit(1)
-  const speaker = (speakers as Speaker[] | null)?.[0]
+  const speaker = speakers?.[0]
 
   // A public bucket answers without a session, which is what a crawler fetching the og:image has.
   const image = supatype.storage.publicUrl(speaker?.headshot, {

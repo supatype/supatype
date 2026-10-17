@@ -34,6 +34,10 @@ const key = anonKey()
 const listener = createClient({ url: URL, anonKey: key })
 const sender = createClient({ url: URL, anonKey: key })
 
+function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
 function waitFor<T>(what: string, ms: number, register: (resolve: (v: T) => void) => void): Promise<T> {
   return new Promise<T>((res, rej) => {
     const timer = setTimeout(() => rej(new Error(`${what} did not arrive within ${ms}ms`)), ms)
@@ -82,7 +86,7 @@ async function main(): Promise<void> {
       const payload = await got
       console.log(`  ok   broadcast reached the other client: ${JSON.stringify(payload)}`)
     } catch (err) {
-      console.error(`  FAIL broadcast: ${(err as Error).message}`)
+      console.error(`  FAIL broadcast: ${errorText(err)}`)
       failures++
     }
     rx.unsubscribe()
@@ -116,7 +120,7 @@ async function main(): Promise<void> {
       const joins = await joined
       console.log(`  ok   presence join seen by the other client: ${JSON.stringify(joins)}`)
     } catch (err) {
-      console.error(`  FAIL presence: ${(err as Error).message}`)
+      console.error(`  FAIL presence: ${errorText(err)}`)
       failures++
     }
     tx.untrack()
