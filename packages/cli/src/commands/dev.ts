@@ -723,20 +723,17 @@ export function registerDev(program: Command): void {
         const schemaDir = resolve(cwd, schemaPath, "..")
         console.log(`[supatype] Watching ${schemaDir} for changes...`)
 
-        const { watch } = await import("node:fs")
-        // Debounce: Windows fs.watch fires multiple events per save.
-        // Wait 300 ms after the last event before pushing.
-        let debounceTimer: ReturnType<typeof setTimeout> | null = null
-        watch(schemaDir, { recursive: true }, (_eventType, filename) => {
-          if (!filename?.endsWith(".ts")) return
-          if (debounceTimer) clearTimeout(debounceTimer)
-          debounceTimer = setTimeout(() => {
-            debounceTimer = null
-            console.log(`\n[supatype] Change detected in ${filename}, checking schema...`)
+        const { watchDevSchema } = await import("../dev-schema-watch.js")
+        watchDevSchema({
+          dir: schemaDir,
+          changedSinceLastPush: async () =>
+            JSON.stringify((await buildNativeAst(cwd, schemaPath, config, skipFieldKinds)).ast) !== _lastReadAst,
+          push: (why) => {
+            console.log(`\n[supatype] ${why}, checking schema...`)
             runSchemaPush(cwd, engineBin, schemaPath, dbURL, manifestPath, adminConfigPath, localStoragePath, skipFieldKinds, config, overwriteDrift).catch(
               reportDevPushFailure,
             )
-          }, 300)
+          },
         })
       }
 
@@ -753,6 +750,9 @@ export function registerDev(program: Command): void {
 let _lastPushedAst: string | null = null
 // AST that failed on its last attempt, always retried even if content is unchanged.
 let _lastFailedAst: string | null = null
+// The schema the last push read, whether it applied or not: the watch catches up on a save made
+// after it, while the rest of dev was starting.
+let _lastReadAst: string | null = null
 
 /** Where a native dev push goes, and what it was asked to do beyond the schema. */
 interface NativePushTarget {
@@ -878,6 +878,35 @@ async function runSchemaPush(
   /** `dev --overwrite-drift`: put back access changed outside Supatype on every push. */
   overwriteDrift = false,
 ): Promise<void> {
+  const read = await readNativeSchema(cwd, schemaPath, config, skipFieldKinds)
+  const astJson = JSON.stringify(read)
+  _lastReadAst = astJson
+  // Skip only when this exact AST applied and nothing has failed since. Saving a failed schema
+  // again retries it, and putting a refused change back pushes the applied schema again, which is
+  // what marks the refusal superseded and clears Studio's notice. Said out loud, since a save that
+  // pushes nothing otherwise ends on "checking schema..." and looks like a hang.
+  if (astJson === _lastPushedAst && _lastFailedAst === null) {
+    console.log("[supatype] Schema unchanged since the last push, nothing to apply.")
+    return
+  }
+  const astPath = join(cwd, ".supatype", "schema.ast.json")
+  writeFileSync(astPath, astJson)
+  console.log("[supatype] Applying schema...")
+  const rebuild = async () => (await buildNativeAst(cwd, schemaPath, config, skipFieldKinds)).ast
+  const pgSchemaName = config ? pgSchema(config) : "public"
+  const ast = await applyNativeSchema(cwd, { ast: read, rebuild }, { dbURL, pgSchema: pgSchemaName, overwriteDrift })
+  writeFileSync(astPath, JSON.stringify(ast))
+  await writeNativeSchemaArtifacts({ cwd, engineBin, astPath, manifestPath, adminConfigPath, storagePath }, ast, config)
+  console.log("[supatype] Schema applied.")
+}
+
+/** The schema on disk as native dev pushes it, saying which fields were stood in for by JSONB. */
+async function readNativeSchema(
+  cwd: string,
+  schemaPath: string,
+  config: import("../project-config.js").SupatypeProjectConfig | undefined,
+  skipFieldKinds: ReadonlySet<string> | undefined,
+): Promise<ExtractedSchemaAstV2> {
   const built = await buildNativeAst(cwd, schemaPath, config, skipFieldKinds)
   if (built.adapted.length > 0) {
     console.warn(
@@ -885,80 +914,95 @@ async function runSchemaPush(
         built.adapted.map((s: string) => `    ${s}`).join("\n"),
     )
   }
-  let ast = built.ast
-  const astJson = JSON.stringify(ast)
+  return built.ast
+}
 
-  // Skip only when this exact AST applied and nothing has failed since. Saving a failed schema
-  // again retries it, and putting a refused change back pushes the applied schema again, which is
-  // what marks the refusal superseded and clears Studio's notice.
-  if (astJson === _lastPushedAst && _lastFailedAst === null) {
-    return
-  }
-
-  const astPath = join(cwd, ".supatype", "schema.ast.json")
-  writeFileSync(astPath, astJson)
-
-  // Push schema.
-  console.log("[supatype] Applying schema...")
+/**
+ * Push, remembering the outcome for the next save's skip. Returns what applied, which is the schema
+ * with any rename confirmed at the prompt declared on it.
+ */
+async function applyNativeSchema(
+  cwd: string,
+  schema: NativeSchema,
+  target: NativePushTarget,
+): Promise<ExtractedSchemaAstV2> {
   try {
-    const rebuild = async () => (await buildNativeAst(cwd, schemaPath, config, skipFieldKinds)).ast
-    const pgSchemaName = config ? pgSchema(config) : "public"
-    ast = (await pushNativeSchema(cwd, { ast, rebuild }, { dbURL, pgSchema: pgSchemaName, overwriteDrift })).ast
+    const { ast } = await pushNativeSchema(cwd, schema, target)
+    _lastPushedAst = JSON.stringify(ast)
+    _lastFailedAst = null
+    _lastReadAst = _lastPushedAst
+    return ast
   } catch (err) {
-    _lastFailedAst = astJson
+    _lastFailedAst = JSON.stringify(schema.ast)
     throw err
   }
-  // What applied, which is the schema with any rename confirmed at the prompt declared on it.
-  _lastPushedAst = JSON.stringify(ast)
-  _lastFailedAst = null
-  writeFileSync(astPath, _lastPushedAst)
+}
 
-  // Provision storage buckets declared in the schema.
-  if (storagePath) {
-    const parseResult = spawnSync(engineBin, ["parse", "-i", astPath], { cwd, stdio: "pipe", encoding: "utf8" })
-    if (parseResult.status === 0 && parseResult.stdout) {
-      try {
-        const resolvedAst: unknown = JSON.parse(parseResult.stdout)
-        if (isParsedBuckets(resolvedAst) && resolvedAst.storageBuckets && resolvedAst.storageBuckets.length > 0) {
-          provisionStorageBuckets(resolvedAst.storageBuckets, storagePath)
-        }
-      } catch { /* ignore parse errors */ }
-    }
-  }
+/** Where native dev writes what describes the applied schema. */
+interface NativeArtifactPaths {
+  cwd: string
+  engineBin: string
+  astPath: string
+  manifestPath: string
+  adminConfigPath?: string | undefined
+  storagePath?: string | undefined
+}
 
-  // Generate manifest.
-  const genResult = spawnSync(
-    engineBin,
-    ["generate", "-i", astPath, "-o", manifestPath],
-    { cwd, stdio: "pipe", encoding: "utf8" },
-  )
+/** The buckets, the server's manifest, Studio's admin config and the types, from the AST applied. */
+async function writeNativeSchemaArtifacts(
+  paths: NativeArtifactPaths,
+  ast: ExtractedSchemaAstV2,
+  config: import("../project-config.js").SupatypeProjectConfig | undefined,
+): Promise<void> {
+  const { cwd, engineBin, astPath } = paths
+  if (paths.storagePath) provisionDeclaredBuckets(engineBin, cwd, astPath, paths.storagePath)
+  const genResult = spawnSync(engineBin, ["generate", "-i", astPath, "-o", paths.manifestPath], {
+    cwd,
+    stdio: "pipe",
+    encoding: "utf8",
+  })
   if (genResult.status !== 0) {
     console.warn("[supatype] Manifest generation failed, server routing may be stale.")
   }
-
-  // Generate admin config (for Studio). Engine writes to stdout.
-  if (adminConfigPath) {
-    const adminResult = spawnSync(
-      engineBin,
-      ["admin", "-i", astPath],
-      { cwd, stdio: "pipe", encoding: "utf8" },
-    )
-    if (adminResult.status === 0 && adminResult.stdout) {
-      const { withAdminRoles } = await import("../studio-admin-roles.js")
-      let admin: unknown
-      try {
-        admin = JSON.parse(adminResult.stdout) as unknown
-      } catch {
-        admin = adminResult.stdout
-      }
-      restoreSystemRelationTargets(admin, ast)
-      const merged = config ? withAdminRoles(admin, config) : admin
-      writeFileSync(adminConfigPath, `${JSON.stringify(merged, null, 2)}\n`)
-    }
-  }
-
+  if (paths.adminConfigPath) await writeNativeAdminConfig(paths, paths.adminConfigPath, ast, config)
   await writeNativeTypes(cwd, ast, config)
-  console.log("[supatype] Schema applied.")
+}
+
+/** Create the storage buckets the schema declares, as the engine resolves them. */
+function provisionDeclaredBuckets(engineBin: string, cwd: string, astPath: string, storagePath: string): void {
+  const parseResult = spawnSync(engineBin, ["parse", "-i", astPath], { cwd, stdio: "pipe", encoding: "utf8" })
+  if (parseResult.status !== 0 || !parseResult.stdout) return
+  try {
+    const resolvedAst: unknown = JSON.parse(parseResult.stdout)
+    if (isParsedBuckets(resolvedAst) && resolvedAst.storageBuckets && resolvedAst.storageBuckets.length > 0) {
+      provisionStorageBuckets(resolvedAst.storageBuckets, storagePath)
+    }
+  } catch { /* ignore parse errors */ }
+}
+
+/** Studio's admin config, which the engine writes to stdout, with the project's roles merged in. */
+async function writeNativeAdminConfig(
+  paths: Pick<NativeArtifactPaths, "cwd" | "engineBin" | "astPath">,
+  adminConfigPath: string,
+  ast: ExtractedSchemaAstV2,
+  config: import("../project-config.js").SupatypeProjectConfig | undefined,
+): Promise<void> {
+  const adminResult = spawnSync(paths.engineBin, ["admin", "-i", paths.astPath], {
+    cwd: paths.cwd,
+    stdio: "pipe",
+    encoding: "utf8",
+  })
+  if (adminResult.status !== 0 || !adminResult.stdout) return
+  const { withAdminRoles } = await import("../studio-admin-roles.js")
+  let admin: unknown
+  try {
+    admin = JSON.parse(adminResult.stdout) as unknown
+  } catch {
+    admin = adminResult.stdout
+  }
+  restoreSystemRelationTargets(admin, ast)
+  const merged = config ? withAdminRoles(admin, config) : admin
+  writeFileSync(adminConfigPath, `${JSON.stringify(merged, null, 2)}\n`)
 }
 
 /**
