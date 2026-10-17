@@ -425,6 +425,20 @@ export function engineBusyMessage(stdout: string, stderr: string): string | unde
   return ENGINE_BUSY_WORDING.test(stderr) ? busySentence(stderr) : undefined
 }
 
+/**
+ * `err` with the sentence of the refusal the engine printed on its stdout (`{"status":"refused",
+ * "reason":..., "message":...}`) as its message and the refusal's reason, in place of the exit
+ * status and the whole of stderr. Any other error is returned as it was.
+ */
+export function asTheEngineRefused(err: unknown): unknown {
+  if (!(err instanceof EngineError)) return err
+  const line = findJsonLine(err.stdout, (value) => value["status"] === "refused" && typeof value["reason"] === "string")
+  const said = line?.["message"]
+  const reason = line?.["reason"]
+  if (typeof said !== "string" || said.trim() === "" || typeof reason !== "string") return err
+  return new EngineError(said.trim(), err.endpoint, err.exitCode, err.stdout, reason)
+}
+
 function busySentence(stderr: string): string {
   const sentence =
     engineBusySentence(stderr) ?? "another push, adopt, rebaseline or rollback is running on this database; try again. Nothing was applied."
