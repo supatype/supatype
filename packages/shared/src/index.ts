@@ -12,3 +12,23 @@ export {
   type CapabilitiesCache,
 } from "./capabilities-cache.js"
 export { FUNCTION_NAME, FUNCTION_NAME_RULE, isFunctionName } from "./function-name.js"
+export {
+  isArrayOf,
+  isBoolean,
+  isJsonObject,
+  isNumber,
+  isOneOf,
+  isRecordOf,
+  isShape,
+  isString,
+  isUnknown,
+  nullable,
+  optional,
+  parseJsonObject,
+  readJson,
+  type FromShape,
+  type Guard,
+  type JsonResponse,
+  type Optional,
+  type ParsedJsonObject,
+} from "./json.js"

@@ -30,6 +30,7 @@
     "esModuleInterop": true
   },
   "include": [
+    "../../../../ts-reset.d.ts",
     "next-env.d.ts",
     "**/*.ts",
     "**/*.tsx",

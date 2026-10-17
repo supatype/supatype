@@ -7,5 +7,5 @@
     "jsx": "react-jsx",
     "lib": ["ES2022", "DOM"]
   },
-  "include": ["src"]
+  "include": ["../../ts-reset.d.ts", "src"]
 }

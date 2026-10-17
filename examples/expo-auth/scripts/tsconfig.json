@@ -12,6 +12,7 @@
     "resolveJsonModule": true
   },
   "include": [
+    "../../../ts-reset.d.ts",
     "./**/*.mts",
     "./**/*.ts",
     "../supatype/generated/**/*.d.ts"

@@ -10,10 +10,11 @@
  * they will try again. Every refusal here comes with the sentence that names the line of schema
  * that would change it.
  *
- * `declared` absent is "nothing is permitted", not "no constraint" — the same direction the server
+ * `declared` absent is "nothing is permitted", not "no constraint": the same direction the server
  * takes for a manifest written before the field existed. An old server omits the key entirely, and
  * reading that as permission would show a project a set of controls its own server would refuse.
  */
+import { isBoolean, isNumber, isRecordOf, isShape, optional, type Guard } from "./json.js"
 
 /** What the schema permits for one table, as `GET /admin/v1/config/rest` reports it. */
 export interface TableDeclaration {
@@ -24,6 +25,16 @@ export interface TableDeclaration {
 }
 
 export type DeclaredCache = Record<string, TableDeclaration>
+
+/** A `declared` map as the server sends it: each table's flags and cap, every one optional. */
+export const isDeclaredCache: Guard<DeclaredCache> = isRecordOf(
+  isShape({
+    enabled: optional(isBoolean),
+    maxTtl: optional(isNumber),
+    public: optional(isBoolean),
+    rows: optional(isBoolean),
+  }),
+)
 
 /** What Studio may offer for one table, and what to say wherever it may not. */
 export interface TableControls {
@@ -43,7 +54,7 @@ const ENABLE_SNIPPET = "cache: { enabled: true }"
 /**
  * What Studio may offer for one table.
  *
- * Deliberately not "is this table cached" — that is the runtime allowlist, which lives beside this
+ * Deliberately not "is this table cached": that is the runtime allowlist, which lives beside this
  * and is what the checkboxes hold. This answers the prior question of which checkboxes may be
  * moved at all.
  */
@@ -73,7 +84,7 @@ export function controlsFor(declared: DeclaredCache | undefined, table: string):
       reason: {
         enable:
           `Your schema sets \`cache: { enabled: false }\` on ${table}. That is an opt-out a ` +
-          `runtime edit cannot override — change it in the model and push.`,
+          `runtime edit cannot override. Change it in the model and push.`,
       },
     }
   }
@@ -96,8 +107,8 @@ export function controlsFor(declared: DeclaredCache | undefined, table: string):
 /**
  * A declared cap, or null.
  *
- * Zero is not a cap of zero seconds — which would be a declaration that permits caching and then
- * forbids every entry — it is the absence of one. The server's `Permitted.MaxTTL` reads it the
+ * Zero is not a cap of zero seconds (which would be a declaration that permits caching and then
+ * forbids every entry); it is the absence of one. The server's `Permitted.MaxTTL` reads it the
  * same way, and a screen that showed "capped at 0s" would be describing a state that cannot exist.
  */
 function ttlCeilingOf(entry: TableDeclaration): number | null {
@@ -112,7 +123,7 @@ function ttlCeilingOf(entry: TableDeclaration): number | null {
  *
  * The highest and not the lowest, mirroring the server: `cache_max_ttl` is one number for the
  * whole project, so taking the lowest would let one model with a five-second cap drag every other
- * table down to five seconds — narrowing nobody asked for. The per-table cap is applied per table,
+ * table down to five seconds, a narrowing nobody asked for. The per-table cap is applied per table,
  * on the read path, where the table being served is known.
  */
 export function projectTtlCeiling(declared: DeclaredCache | undefined): number | null {
@@ -167,7 +178,7 @@ export function rowCacheLine(
    *
    * Absent status and failed status are different answers and were rendered as the same one. The
    * row-cache endpoint answered 502 for a while on every database where the feature was actually
-   * on, and the panel reported that as "the row cache is not running" — the exact words it uses
+   * on, and the panel reported that as "the row cache is not running": the exact words it uses
    * for a database where it is off, on the one database where it was working.
    */
   readError?: string | null,
@@ -177,13 +188,13 @@ export function rowCacheLine(
       tone: "neutral",
       text:
         `Primary-key reads for ${table} come from the heap. In-memory row caching is a schema ` +
-        `decision rather than a switch — add \`cache: { rows: true }\` to the model and push — ` +
+        `decision rather than a switch (add \`cache: { rows: true }\` to the model and push), ` +
         `because a cached row read can return the previous row for a moment after someone else ` +
         `writes it, and only the model's author knows whether that is acceptable.`,
     }
   }
 
-  // Declared, so the rest is about whether it is actually happening — which is not the same
+  // Declared, so the rest is about whether it is actually happening, which is not the same
   // question, and a screen that answered only the first would report a stalled cache as a working
   // one on the strength of a line of schema.
   if (!live && readError) {
@@ -192,7 +203,7 @@ export function rowCacheLine(
       text:
         `Your schema declares \`cache: { rows: true }\` for ${table}, but this screen could not ` +
         `read the row cache's status: ${readError}. That is a fault in the status endpoint, not a ` +
-        `statement about the cache — it may well be running. Check the server logs rather than ` +
+        `statement about the cache, which may well be running. Check the server logs rather than ` +
         `the schema.`,
     }
   }
@@ -202,13 +213,13 @@ export function rowCacheLine(
       tone: "warn",
       text:
         `Your schema declares \`cache: { rows: true }\` for ${table}, but the row cache is not ` +
-        `running on this database — these reads come from the heap. On Cloud it runs on paid ` +
+        `running on this database, so these reads come from the heap. On Cloud it runs on paid ` +
         `plans; self-host needs pg_keyspace with \`rowcache_decode\` and \`rowcache_readthrough\` on.`,
     }
   }
   // Running, but nothing registered. The registration follows an affirmative write to the
-  // allowlist rather than a startup reconcile — a reconcile at startup would read an empty
-  // allowlist on a fresh pod and unregister everything — so a push that adds `rows: true` leaves
+  // allowlist rather than a startup reconcile (a reconcile at startup would read an empty
+  // allowlist on a fresh pod and unregister everything), so a push that adds `rows: true` leaves
   // the table declared and not yet registered. That is a specific thing to do, and "serving" and
   // "off" are both the wrong thing to say about it.
   if (live.state === "idle") {
@@ -216,7 +227,7 @@ export function rowCacheLine(
       tone: "neutral",
       text:
         `Your schema declares \`cache: { rows: true }\` for ${table}. The row cache is running ` +
-        `but has no tables registered yet — saving the cache settings above registers it. ` +
+        `but has no tables registered yet: saving the cache settings above registers it. ` +
         staleness(live.stale_after_ms),
     }
   }

@@ -6,5 +6,5 @@
     "rootDir": "..",
     "types": ["vite/client", "node"]
   },
-  "include": ["./**/*.ts", "./**/*.tsx", "../src/**/*.ts", "../src/**/*.tsx"]
+  "include": ["../../../ts-reset.d.ts", "./**/*.ts", "./**/*.tsx", "../src/**/*.ts", "../src/**/*.tsx"]
 }

@@ -6,6 +6,7 @@
     "rootDir": "../.."
   },
   "include": [
+    "../../../ts-reset.d.ts",
     "./**/*.ts",
     "../src/**/*.ts",
     "../../studio/src/lib/normalize-admin-config.ts",

@@ -25,5 +25,5 @@
   "compilerOptions": {
     "noEmit": true
   },
-  "include": ["../src", "."]
+  "include": ["../../../ts-reset.d.ts", "../src", "."]
 }

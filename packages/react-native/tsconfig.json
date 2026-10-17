@@ -7,7 +7,7 @@
     "lib": ["ES2022"],
     "types": ["node"]
   },
-  "include": ["src"],
+  "include": ["../../ts-reset.d.ts", "src"],
   "references": [
     { "path": "../client" }
   ]
