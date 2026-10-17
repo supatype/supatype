@@ -1,5 +1,6 @@
 import type { ChangeEvent } from "./types.js"
 import type { LogLevel } from "./env.js"
+import { errorCode } from "./db-retry.js"
 
 /**
  * One line per change a subscriber did not receive, and why: always when realtime could not decide,
@@ -49,9 +50,5 @@ export function logDrop(drop: DroppedChange, severity: DropSeverity, level: LogL
  * without it.
  */
 export function sqlState(err: unknown): string {
-  if (typeof err === "object" && err !== null && "code" in err) {
-    const code = (err as { code: unknown }).code
-    if (typeof code === "string") return code
-  }
-  return "unknown"
+  return errorCode(err) ?? "unknown"
 }

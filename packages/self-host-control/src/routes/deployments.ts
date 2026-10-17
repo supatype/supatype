@@ -9,23 +9,36 @@ import {
 } from "node:fs"
 import { dirname, isAbsolute, join, relative, resolve } from "node:path"
 import { randomUUID } from "node:crypto"
-import { badRequest, HttpError, route, sendJson } from "../http.js"
+import { isArrayOf, isBoolean, isShape, isString, isUnknown, optional, type FromShape } from "@supatype/shared"
+import { badRequest, bodyOf, HttpError, route, sendJson } from "../http.js"
 import type { RouteHandler } from "../http.js"
 import { assertProject, projectRoot } from "../project.js"
 
-interface DeploymentMeta {
-  id: string
-  status: string
-  preview?: boolean
-  createdAt?: string
-  finalizedAt?: string
-}
+const DEPLOYMENT_META = {
+  id: isString,
+  status: isString,
+  preview: optional(isBoolean),
+  createdAt: optional(isString),
+  finalizedAt: optional(isString),
+} as const
+
+/** What `writeMeta` writes to a deployment's meta.json. */
+type DeploymentMeta = FromShape<typeof DEPLOYMENT_META>
+
+const isDeploymentMeta = isShape(DEPLOYMENT_META)
+
+/** One file of a deployment: its path is checked by `fileInside`, which says what is wrong with it. */
+const isDeploymentFile = isShape({ path: isUnknown, content: isString, encoding: optional(isString) })
 
 interface DeploymentFile {
-  path: string
+  path: unknown
   content: string
   encoding?: string
 }
+
+const isDeployBody = isShape({ files: optional(isArrayOf(isDeploymentFile)), preview: optional(isBoolean) })
+
+const isRollbackBody = isShape({ to: optional(isUnknown) })
 
 /** What `randomUUID().slice(0, 8)` produces, so an id can only ever name a directory of its own. */
 const DEPLOYMENT_ID = /^[0-9a-f]{8}$/
@@ -72,10 +85,12 @@ function staticRoot(): string {
   return process.env["SUPATYPE_STATIC_ROOT"] ?? join(projectRoot(), "dist")
 }
 
+/** The deployment's meta.json, or null when there is none or it is not one `writeMeta` wrote. */
 function readMeta(id: string): DeploymentMeta | null {
   const metaPath = join(deploymentsDir(), id, "meta.json")
   if (!existsSync(metaPath)) return null
-  return JSON.parse(readFileSync(metaPath, "utf8")) as DeploymentMeta
+  const meta = JSON.parse(readFileSync(metaPath, "utf8"))
+  return isDeploymentMeta(meta) ? meta : null
 }
 
 function writeMeta(id: string, meta: DeploymentMeta): void {
@@ -168,7 +183,7 @@ export function registerDeploymentRoutes(
 ): void {
   route(routes, "POST", "/projects/:ref/deployments", async (ctx) => {
     assertProject(ctx.params["ref"]!)
-    const body = ctx.body as { files?: DeploymentFile[]; preview?: boolean }
+    const body = bodyOf(ctx.body, isDeployBody)
     const id = randomUUID().slice(0, 8)
     const dest = join(deploymentsDir(), id, "files")
     writeDeploymentFiles(dest, body.files ?? [])
@@ -185,7 +200,7 @@ export function registerDeploymentRoutes(
 
   route(routes, "POST", "/projects/:ref/deployments/rollback", async (ctx) => {
     assertProject(ctx.params["ref"]!)
-    const previous = rollbackTarget((ctx.body as { to?: unknown }).to)
+    const previous = rollbackTarget(bodyOf(ctx.body, isRollbackBody).to)
     makeLive(previous.id, previous)
     sendJson(ctx.res, 200, {
       data: {

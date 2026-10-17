@@ -16,8 +16,8 @@ import { A, ADMIN, B, RECORDED_TIER_SQL, admin, bob, change, userA, userB } from
  */
 const databaseUrl = process.env["TIER2_DATABASE_URL"]
 
-const anon = { role: "anon" } as JwtClaims
-const service = { role: "service_role" } as JwtClaims
+const anon: JwtClaims = { role: "anon" }
+const service: JwtClaims = { role: "service_role" }
 
 const bobsPayslip = { ref: "0e0e0e0e-0000-4000-8000-00000000000e", owner_id: B, month: "2026-09", amount: 7500 }
 

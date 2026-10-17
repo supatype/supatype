@@ -3,6 +3,24 @@ import jwt from "jsonwebtoken"
 import { WebSocket } from "ws"
 import type { RealtimeEnv } from "../../src/env.js"
 import type { ServerMessage } from "../../src/types.js"
+import { isJsonObject, isOneOf } from "../../src/json.js"
+
+const isServerMessageType = isOneOf(["change", "presence", "broadcast", "system"] as const)
+
+/**
+ * A frame from the server under test. A boundary: the server serialises every frame from a
+ * `ServerMessage`, so what is checked is that it is an object whose `type` is one of theirs. The
+ * fields each type carries are what the tests themselves assert on.
+ */
+function isServerMessage(value: unknown): value is ServerMessage {
+  return isJsonObject(value) && isServerMessageType(value["type"])
+}
+
+function serverMessage(frame: string): ServerMessage {
+  const value = JSON.parse(frame)
+  if (!isServerMessage(value)) throw new Error(`Not a server message: ${frame}`)
+  return value
+}
 
 /**
  * What the suites that run the real server over real sockets share: a free port, an environment, a
@@ -78,7 +96,7 @@ export async function connect(port: number, token?: string, query = ""): Promise
   const frames: ServerMessage[] = []
   const waiters: Array<{ match: (m: ServerMessage) => boolean; resolve: (m: ServerMessage) => void }> = []
   ws.on("message", (data) => {
-    const msg = JSON.parse(String(data)) as ServerMessage
+    const msg = serverMessage(String(data))
     frames.push(msg)
     for (const w of [...waiters]) {
       if (w.match(msg)) {

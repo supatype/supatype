@@ -1,5 +1,6 @@
 import type { ServerResponse } from "node:http"
-import { route, sendJson } from "../http.js"
+import { isBoolean, isShape, isString, isUnknown, optional } from "@supatype/shared"
+import { bodyOf, route, sendJson } from "../http.js"
 import type { RouteHandler } from "../http.js"
 import { assertProject } from "../project.js"
 import { PUSH_IDENTITY } from "../push-identity.js"
@@ -17,6 +18,42 @@ import {
   runEnginePush,
   runEngineRollback,
 } from "../engine-runner.js"
+
+/** A body that names only a schema. */
+const isSchemaBody = isShape({ schema: optional(isString) })
+
+const isDiffBody = isShape({ ast: optional(isUnknown), schema: optional(isString) })
+
+const isPushBody = isShape({
+  ast: optional(isUnknown),
+  force: optional(isBoolean),
+  schema: optional(isString),
+  schemaSources: optional(isShape({ manifest: optional(isUnknown), dataBase64: optional(isString) })),
+  overwrite_drift: optional(isUnknown),
+  /** The spelling a CLI from before the capabilities check sent. */
+  overwriteDrift: optional(isUnknown),
+  /** Where the push comes from (a host, a CI run): context, kept as the client sent it. */
+  pushed_from: optional(isUnknown),
+})
+
+const isDoctorBody = isShape({
+  ast: optional(isUnknown),
+  no_cache: optional(isBoolean),
+  schema: optional(isString),
+  rebaseline: optional(isUnknown),
+  accept_access_drift: optional(isUnknown),
+  keys: optional(isUnknown),
+})
+
+const isAdoptBody = isShape({
+  ast: optional(isUnknown),
+  schema: optional(isString),
+  yes: optional(isBoolean),
+  no_cache: optional(isBoolean),
+  keys: optional(isUnknown),
+  release: optional(isUnknown),
+  reclaim: optional(isUnknown),
+})
 
 /** A list of strings in a request body, or undefined when it is absent or not one. */
 function stringList(value: unknown): string[] | undefined {
@@ -52,7 +89,7 @@ export function registerSchemaRoutes(
 ): void {
   route(routes, "POST", "/projects/:ref/schema/diff", async (ctx) => {
     assertProject(ctx.params["ref"]!)
-    const body = ctx.body as { ast?: unknown; schema?: string }
+    const body = bodyOf(ctx.body, isDiffBody)
     const db = databaseUrlFromEnv()
     const data = await runEngineDiff(db, body.ast, body.schema ?? "public")
     sendJson(ctx.res, 200, { data })
@@ -66,17 +103,7 @@ export function registerSchemaRoutes(
 
   route(routes, "POST", "/projects/:ref/schema/push", async (ctx) => {
     assertProject(ctx.params["ref"]!)
-    const body = ctx.body as {
-      ast?: unknown
-      force?: boolean
-      schema?: string
-      schemaSources?: { manifest?: unknown; dataBase64?: string }
-      overwrite_drift?: boolean
-      /** The spelling a CLI from before the capabilities check sent. */
-      overwriteDrift?: boolean
-      /** Where the push comes from (a host, a CI run): context, kept as the client sent it. */
-      pushed_from?: unknown
-    }
+    const body = bodyOf(ctx.body, isPushBody)
     const db = databaseUrlFromEnv()
     await answering(ctx.res, () =>
       runEnginePush(db, body.ast, {
@@ -98,7 +125,7 @@ export function registerSchemaRoutes(
 
   route(routes, "POST", "/projects/:ref/schema/rollback", async (ctx) => {
     assertProject(ctx.params["ref"]!)
-    const body = ctx.body as { schema?: string }
+    const body = bodyOf(ctx.body, isSchemaBody)
     const db = databaseUrlFromEnv()
     // Nothing to undo (`no_applied_migration`, `no_rollback_sql`) is a 409 naming which.
     await answering(ctx.res, () => runEngineRollback(db, body.schema ?? "public"))
@@ -126,14 +153,7 @@ export function registerSchemaRoutes(
 
   route(routes, "POST", "/projects/:ref/schema/doctor", async (ctx) => {
     assertProject(ctx.params["ref"]!)
-    const body = ctx.body as {
-      ast?: unknown
-      no_cache?: boolean
-      schema?: string
-      rebaseline?: boolean
-      accept_access_drift?: boolean
-      keys?: unknown
-    }
+    const body = bodyOf(ctx.body, isDoctorBody)
     const keys = stringList(body.keys)
     // Over HTTP `keys: []` means "the preview showed nothing", which the binary cannot be told: no
     // `--key` at all is "record whatever drift there is". Refused rather than sent unkeyed.
@@ -158,7 +178,7 @@ export function registerSchemaRoutes(
 
   route(routes, "POST", "/projects/:ref/schema/introspect", async (ctx) => {
     assertProject(ctx.params["ref"]!)
-    const body = ctx.body as { schema?: string }
+    const body = bodyOf(ctx.body, isSchemaBody)
     const db = databaseUrlFromEnv()
     const data = await runEngineIntrospect(db, body.schema ?? "public")
     sendJson(ctx.res, 200, { data })
@@ -166,16 +186,7 @@ export function registerSchemaRoutes(
 
   route(routes, "POST", "/projects/:ref/schema/adopt", async (ctx) => {
     assertProject(ctx.params["ref"]!)
-    const body = ctx.body as {
-      ast?: unknown
-      names?: string[]
-      schema?: string
-      yes?: boolean
-      no_cache?: boolean
-      keys?: unknown
-      release?: unknown
-      reclaim?: unknown
-    }
+    const body = bodyOf(ctx.body, isAdoptBody)
     if (!body.ast) {
       sendJson(ctx.res, 400, { error: "validation_error", message: "ast required" })
       return

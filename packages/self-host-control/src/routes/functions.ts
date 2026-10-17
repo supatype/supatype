@@ -1,8 +1,8 @@
 import { mkdirSync, readdirSync, writeFileSync, existsSync, readFileSync, rmSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { spawnSync } from "node:child_process"
-import { FUNCTION_NAME_RULE, isFunctionName } from "@supatype/shared"
-import { badRequest, route, sendJson } from "../http.js"
+import { FUNCTION_NAME_RULE, isFunctionName, isJsonObject, isRecordOf, isShape, isString, isUnknown, optional } from "@supatype/shared"
+import { badRequest, bodyOf, route, sendJson } from "../http.js"
 import type { RouteHandler } from "../http.js"
 import { assertProject, projectRoot } from "../project.js"
 
@@ -54,14 +54,15 @@ function functionDir(name: string): string {
 
 /** The functions a deploy body names, every one checked before anything is written. */
 function deployedFunctions(body: unknown): Array<DeployedFunction & { dir: string }> {
-  const list: unknown = (body as { functions?: unknown }).functions
+  const list = bodyOf(body, isShape({ functions: optional(isUnknown) })).functions
   if (list === undefined) return []
   if (!Array.isArray(list)) throw badRequest("functions must be an array")
-  return (list as unknown[]).map((entry) => {
-    const fn = (entry ?? {}) as { name?: unknown; source?: unknown }
-    const name = checkedName(fn.name)
-    if (typeof fn.source !== "string") throw badRequest(`Function ${name} has no source`)
-    return { name, source: fn.source, dir: functionDir(name) }
+  return list.map((entry) => {
+    const fn = isJsonObject(entry) ? entry : {}
+    const name = checkedName(fn["name"])
+    const source = fn["source"]
+    if (typeof source !== "string") throw badRequest(`Function ${name} has no source`)
+    return { name, source, dir: functionDir(name) }
   })
 }
 
@@ -69,11 +70,17 @@ function envPath(): string {
   return join(projectRoot(), ".supatype", "function-env.json")
 }
 
+const isFunctionEnv = isRecordOf(isString)
+
+/** The env file `POST /functions/env` writes: refused, rather than overwritten, when it is not one. */
 function readFunctionEnv(): Record<string, string> {
-  return existsSync(envPath())
-    ? JSON.parse(readFileSync(envPath(), "utf8")) as Record<string, string>
-    : {}
+  if (!existsSync(envPath())) return {}
+  const env = JSON.parse(readFileSync(envPath(), "utf8"))
+  if (!isFunctionEnv(env)) throw new Error(`${envPath()} is not a map of names to string values`)
+  return env
 }
+
+const isEnvBody = isShape({ key: optional(isString), value: optional(isString) })
 
 export function registerFunctionRoutes(
   routes: Array<{ method: string; pattern: RegExp; handler: RouteHandler }>,
@@ -118,7 +125,7 @@ export function registerFunctionRoutes(
 
   route(routes, "POST", "/projects/:ref/functions/env", async (ctx) => {
     assertProject(ctx.params["ref"]!)
-    const body = ctx.body as { key?: string; value?: string }
+    const body = bodyOf(ctx.body, isEnvBody)
     if (!body.key) {
       sendJson(ctx.res, 400, { error: "validation_error", message: "key required" })
       return

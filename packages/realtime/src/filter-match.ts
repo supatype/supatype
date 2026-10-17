@@ -11,7 +11,9 @@ import type { WalChange } from "./types.js"
  * the column's type. A filter that cannot be evaluated is not a reason to deliver.
  */
 
-export type FilterOp = "eq" | "neq" | "gt" | "gte" | "lt" | "lte"
+const FILTER_OPS = ["eq", "neq", "gt", "gte", "lt", "lte"] as const
+
+export type FilterOp = (typeof FILTER_OPS)[number]
 
 interface Condition {
   op: FilterOp
@@ -46,8 +48,9 @@ export function compareKindOf(columnType: string | undefined): CompareKind {
 
 function parseCondition(condition: string): Condition | null {
   const match = /^(eq|neq|gt|gte|lt|lte)\.(.+)$/s.exec(condition)
-  if (!match) return null
-  return { op: match[1] as FilterOp, value: match[2]! }
+  const op = FILTER_OPS.find((known) => known === match?.[1])
+  if (!match || op === undefined) return null
+  return { op, value: match[2]! }
 }
 
 // ─── Per-kind ordering ───────────────────────────────────────────────────────
@@ -94,7 +97,7 @@ export function compareDecimals(actual: unknown, expected: string): Order | null
   if (!a || !b) return null
   if (a.negative !== b.negative) return a.negative ? -1 : 1
   const magnitude = compareMagnitudes(a, b)
-  return a.negative ? (-magnitude as Order) : magnitude
+  return a.negative ? sign(-magnitude) : magnitude
 }
 
 const TRUE_WORDS = new Set(["true", "t", "yes", "y", "on", "1"])

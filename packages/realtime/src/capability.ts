@@ -20,6 +20,8 @@
  * ```
  */
 
+import { errorCode } from "./db-retry.js"
+
 /**
  * Thrown when the database cannot support realtime.
  *
@@ -59,8 +61,8 @@ const UNSUPPORTED_BY_CODE: Record<string, UnsupportedReason> = {
  * genuine bug behind a capability message.
  */
 export function unsupportedRealtimeReason(error: unknown): UnsupportedReason | undefined {
-  const code = (error as { code?: unknown } | null)?.code
-  if (typeof code === "string" && code in UNSUPPORTED_BY_CODE) {
+  const code = errorCode(error)
+  if (code !== undefined && code in UNSUPPORTED_BY_CODE) {
     return UNSUPPORTED_BY_CODE[code]
   }
 

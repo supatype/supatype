@@ -1,12 +1,21 @@
-import jwt from "jsonwebtoken"
+import jwt, { type JwtPayload } from "jsonwebtoken"
 
 export interface JwtClaims {
-  sub: string
-  role: string
-  aud?: string | undefined
+  /** Absent from a key that names no user, such as the anon and service-role keys. */
+  sub?: string | undefined
+  /** Absent from a token that names none: every reader falls back to `authenticated`. */
+  role?: string | undefined
+  aud?: string | string[] | undefined
   exp?: number | undefined
   iat?: number | undefined
   [key: string]: unknown
+}
+
+/** A verified payload's claims, or null when `role` is there and is not a string. */
+function claimsOf(payload: JwtPayload): JwtClaims | null {
+  const role: unknown = payload["role"]
+  if (role !== undefined && typeof role !== "string") return null
+  return { ...payload, role }
 }
 
 /**
@@ -16,7 +25,7 @@ export function verifyToken(token: string, secret: string): JwtClaims | null {
   try {
     const decoded = jwt.verify(token, secret)
     if (typeof decoded === "string") return null
-    return decoded as JwtClaims
+    return claimsOf(decoded)
   } catch {
     return null
   }

@@ -173,6 +173,21 @@ function entrypointImportUrl(entrypoint: string): string {
   return new URL(normalized, import.meta.url).href
 }
 
+/**
+ * A function's exported handler. A boundary: what can be checked is that it is a function; what it
+ * takes and returns is the function author's contract with the worker, which only calling it tests.
+ */
+function isHandler(value: unknown): value is Handler {
+  return typeof value === "function"
+}
+
+/** The module's `default` export, else its `handler` export. */
+function exportedHandler(mod: unknown): unknown {
+  if (typeof mod !== "object" || mod === null) return undefined
+  const fallback = "handler" in mod ? mod.handler : undefined
+  return ("default" in mod ? mod.default : undefined) ?? fallback
+}
+
 async function loadHandlers(routes: DiscoveredRoute[]): Promise<Record<string, Handler>> {
   const handlers: Record<string, Handler> = {}
 
@@ -187,12 +202,11 @@ async function loadHandlers(routes: DiscoveredRoute[]): Promise<Record<string, H
     }
     // A module loaded by URL is typed `any`; read its exports as unknown until checked.
     const mod: unknown = await import(entrypointImportUrl(route.entrypoint))
-    const exported = typeof mod === "object" && mod !== null ? (mod as Record<string, unknown>) : {}
-    const handler = exported["default"] ?? exported["handler"]
-    if (typeof handler !== "function") {
+    const handler = exportedHandler(mod)
+    if (!isHandler(handler)) {
       throw new Error(`Function "${route.name}" has no default export handler`)
     }
-    handlers[route.name] = handler as Handler
+    handlers[route.name] = handler
   }
 
   return handlers
@@ -294,7 +308,7 @@ function installHookDepthPropagation(): void {
     const url = input instanceof Request ? input.url : String(input)
     if (!url.startsWith(stack)) return original(input, init)
 
-    const request = new Request(input as Request, init)
+    const request = new Request(input, init)
     request.headers.set(HOOK_DEPTH_HEADER, depth)
     return original(request)
   }

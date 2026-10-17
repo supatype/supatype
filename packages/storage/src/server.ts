@@ -5,6 +5,7 @@ import { withDatabaseRetry } from "./db-retry.js"
 import * as bucketRoutes from "./routes/buckets.js"
 import * as objectRoutes from "./routes/objects.js"
 import { getDefaultCorsHeaders } from "./middleware/cors.js"
+import type { Guard } from "./json.js"
 
 export interface RequestContext {
   req: IncomingMessage
@@ -165,6 +166,10 @@ export function createServer() {
       }
       await matched.handler({ req, res, jwt, params: matched.params, url })
     } catch (err) {
+      if (err instanceof InvalidBody) {
+        if (!res.headersSent) sendJson(res, 400, { error: err.message })
+        return
+      }
       console.error("Unhandled error:", err)
       if (!res.headersSent) {
         sendJson(res, 500, { error: "Internal server error" })
@@ -183,14 +188,31 @@ export function sendJson(res: ServerResponse, status: number, body: unknown): vo
 export async function readBody(req: IncomingMessage): Promise<Buffer> {
   const chunks: Buffer[] = []
   for await (const chunk of req) {
-    chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : (chunk as Buffer))
+    const piece: unknown = chunk
+    chunks.push(Buffer.isBuffer(piece) ? piece : Buffer.from(String(piece)))
   }
   return Buffer.concat(chunks)
 }
 
-export async function readJson<T = unknown>(req: IncomingMessage): Promise<T> {
-  const buf = await readBody(req)
-  return JSON.parse(buf.toString("utf8")) as T
+/** A request body this service cannot read: answered with a 400 that says why. */
+export class InvalidBody extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "InvalidBody"
+  }
+}
+
+/** The request's JSON body when the guard accepts it; an `InvalidBody` when it is not JSON or not that. */
+export async function readJson<T>(req: IncomingMessage, guard: Guard<T>): Promise<T> {
+  const text = (await readBody(req)).toString("utf8")
+  let body: unknown
+  try {
+    body = JSON.parse(text)
+  } catch {
+    throw new InvalidBody("The request body must be JSON")
+  }
+  if (!guard(body)) throw new InvalidBody("The request body does not have the fields this route reads, with their types")
+  return body
 }
 
 // CORS headers are now managed by middleware/cors.ts

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 import pg from "pg"
 import { RlsFilter } from "../src/rls.js"
 import type { WalChange } from "../src/types.js"
+import type { JwtClaims } from "../src/auth.js"
 
 /**
  * Field masking against a real database.
@@ -31,7 +32,7 @@ describe.skipIf(!databaseUrl)("RlsFilter field masking", () => {
     ...over,
   })
 
-  const claimsFor = (sub: string) => ({ sub, role: "authenticated" }) as never
+  const claimsFor = (sub: string): JwtClaims => ({ sub, role: "authenticated" })
 
   beforeAll(async () => {
     admin = new pg.Client({ connectionString: databaseUrl })
@@ -115,7 +116,7 @@ describe.skipIf(!databaseUrl)("RlsFilter field masking", () => {
 
   it("exempts service_role, matching the extension", async () => {
     const visible = await filter.visibleChange(
-      { sub: "nobody", role: "service_role" } as never,
+      { sub: "nobody", role: "service_role" },
       change(),
     )
     expect(visible?.newRecord?.["salary"]).toBe(100)

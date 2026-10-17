@@ -4,6 +4,8 @@ import { RlsFilter, type DeliveryVerdict } from "../src/rls.js"
 import { Tap, TapSession, type StreamSink, type TapItem } from "../src/admin/tap.js"
 import type { JwtClaims } from "../src/auth.js"
 import type { WalChange } from "../src/types.js"
+import { isNumber, isShape } from "../src/json.js"
+import { expectJson } from "./fixtures/expect-json.js"
 import { connect, freePort, subscribe, testEnv, userToken, type Peer } from "./fixtures/socket.js"
 
 /**
@@ -99,7 +101,7 @@ describe("a session's sampling and filters", () => {
 
     await until(() => events(out.chunks, "sampled").length > 0, 2500)
     expect(events(out.chunks, "change").length).toBeLessThanOrEqual(10)
-    const sampled = JSON.parse(events(out.chunks, "sampled")[0]!.split("data: ")[1]!) as { skipped: number }
+    const sampled = expectJson(JSON.parse(events(out.chunks, "sampled")[0]!.split("data: ")[1]!), isShape({ skipped: isNumber }))
     expect(sampled.skipped).toBeGreaterThanOrEqual(40)
   })
 

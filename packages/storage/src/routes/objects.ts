@@ -10,6 +10,7 @@ import { checkReadAccess } from "../middleware/access-control.js"
 import type { JwtPayload } from "../auth.js"
 import { createSignedToken, verifySignedToken } from "../middleware/signed-urls.js"
 import { applyCorsHeaders } from "../middleware/cors.js"
+import { isNumber, isShape, isString, isUnknown, optional } from "../json.js"
 
 // ─── MIME type inference ─────────────────────────────────────────────────────────
 
@@ -296,7 +297,7 @@ export async function createSignedUrl(ctx: RequestContext): Promise<void> {
   const bucketId = ctx.params["bucket"]!
   const objectPath = ctx.params["wildcard"]!
 
-  const body = await readJson<{ expiresIn?: number }>(ctx.req)
+  const body = await readJson(ctx.req, isShape({ expiresIn: optional(isNumber) }))
   const expiresIn = body.expiresIn ?? config.defaultSignedUrlExpiry
 
   if (expiresIn < 1 || expiresIn > config.maxSignedUrlExpiry) {
@@ -338,7 +339,7 @@ export async function createSignedUrl(ctx: RequestContext): Promise<void> {
 
 export async function removeObjects(ctx: RequestContext): Promise<void> {
   const bucketId = ctx.params["bucket"]!
-  const body = await readJson<{ prefixes: string[] }>(ctx.req)
+  const { prefixes } = await readJson(ctx.req, isShape({ prefixes: optional(isUnknown) }))
   const bucket = await db.getBucket(bucketId)
   if (!bucket) {
     sendJson(ctx.res, 404, { error: "Bucket not found" })
@@ -347,7 +348,7 @@ export async function removeObjects(ctx: RequestContext): Promise<void> {
 
   const jwt = callerOf(ctx)
 
-  if (!Array.isArray(body.prefixes) || body.prefixes.length === 0) {
+  if (!Array.isArray(prefixes) || !prefixes.every(isString) || prefixes.length === 0) {
     sendJson(ctx.res, 400, { error: "prefixes array is required" })
     return
   }
@@ -355,7 +356,7 @@ export async function removeObjects(ctx: RequestContext): Promise<void> {
   // The rows first, as the caller, so the bucket's `delete` rule decides; then the bytes, for only
   // the objects Postgres deleted. The response lists those and no others, so an object the caller
   // may not delete is left in place and simply absent from the answer.
-  const deleted = await refusingWhenUngranted(ctx, () => db.deleteObjectsAs(jwt, bucketId, body.prefixes))
+  const deleted = await refusingWhenUngranted(ctx, () => db.deleteObjectsAs(jwt, bucketId, prefixes))
   if (deleted === undefined) return
   await discard(bucketId, deleted)
 
@@ -366,7 +367,10 @@ export async function removeObjects(ctx: RequestContext): Promise<void> {
 
 export async function listObjects(ctx: RequestContext): Promise<void> {
   const bucketId = ctx.params["bucket"]!
-  const body = await readJson<{ prefix?: string; limit?: number; offset?: number }>(ctx.req)
+  const body = await readJson(
+    ctx.req,
+    isShape({ prefix: optional(isString), limit: optional(isNumber), offset: optional(isNumber) }),
+  )
   const bucket = await db.getBucket(bucketId)
   if (!bucket) {
     sendJson(ctx.res, 404, { error: "Bucket not found" })

@@ -6,6 +6,19 @@ function env(key: string, fallback?: string): string {
   throw new Error(`Missing required environment variable: ${key}`)
 }
 
+const PROJECT_TIERS = ["free", "pro", "team", "enterprise"] as const
+
+/**
+ * `PROJECT_TIER`, refused at start when it is not a tier. A misspelt one used to be read as a tier
+ * with no limits: no entry in the per-tier tables, so no quota at all.
+ */
+function projectTier(): (typeof PROJECT_TIERS)[number] {
+  const raw = env("PROJECT_TIER", "free")
+  const tier = PROJECT_TIERS.find((known) => known === raw)
+  if (tier === undefined) throw new Error(`PROJECT_TIER must be one of ${PROJECT_TIERS.join(", ")}, got "${raw}"`)
+  return tier
+}
+
 export const config = {
   /** Postgres connection string for the storage metadata tables. */
   databaseUrl: env(
@@ -53,7 +66,7 @@ export const config = {
   transformCacheTtl: parseInt(env("TRANSFORM_CACHE_TTL", "3600"), 10),
 
   /** Project tier: injected at deploy time for per-file and quota enforcement. */
-  projectTier: env("PROJECT_TIER", "free") as "free" | "pro" | "team" | "enterprise",
+  projectTier: projectTier(),
 
   /** Per-file upload limit for the current tier (bytes). Overrides maxUploadSize when set. -1 = unlimited. */
   tierMaxUploadSize: parseInt(env("TIER_MAX_UPLOAD_SIZE", String(50 * 1024 * 1024)), 10),
