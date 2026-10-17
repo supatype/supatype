@@ -8,10 +8,17 @@ import { useApiQuery } from "../hooks/useApiQuery.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { isJsonObject, safeParseJson } from "../lib/json.js"
+import {
+  MIGRATION_STATUSES,
+  MIGRATION_STATUS_VARIANT,
+  migrationOutcome,
+  migrationStatusLabel,
+  type MigrationOutcome,
+} from "../lib/migration-outcome.js"
+import { RefusalHints, RefusalOperations, withoutForceAdvice } from "../components/PushRefusalDetails.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type MigrationStatus = "applied" | "rolled_back"
 
 /** What the change summary reads from a migration's schema snapshot: names and Postgres types. */
 interface AstField {
@@ -76,11 +83,13 @@ interface Migration extends MigrationAuthor {
   has_sql: boolean
   sql_up: string | null
   renames: AppliedRename[]
+  /** Applied, failed, refused or rolled back, and why when it did not apply. */
+  outcome: MigrationOutcome
 }
 
-const statusVariant: Record<MigrationStatus, "green" | "yellow"> = {
-  applied: "green",
-  rolled_back: "yellow",
+/** Whether a migration's push applied a schema: a failed or refused one applied nothing. */
+function appliedSchema(m: Migration): boolean {
+  return m.outcome.status !== "failed" && m.outcome.status !== "refused"
 }
 
 function textOrNull(value: unknown): string | null {
@@ -175,6 +184,7 @@ function mapMigrationRow(row: Record<string, unknown>): Migration {
     sql_up: legacySql,
     ...mapAuthor(row),
     renames: mapRenames(row["renames"]),
+    outcome: migrationOutcome(row),
   }
 }
 
@@ -190,24 +200,48 @@ export function migrationsQuery(audited: boolean): "migrations" | "migrations_le
   return audited ? "migrations" : "migrations_legacy"
 }
 
-/** Candidates for display: DDL rows, initial baseline, not legacy admin_refresh noise. */
+/**
+ * Candidates for display: DDL rows, initial baseline, and every push that failed or was refused,
+ * not legacy admin_refresh noise. A refused push records its statements apart from `sql_up`.
+ */
 function isTrackedMigration(m: Migration): boolean {
   if (m.name.startsWith("admin_refresh_")) return false
-  if (m.has_sql) return true
+  if (m.has_sql || !appliedSchema(m)) return true
   return m.name.startsWith("initial_")
 }
 
-/** Only show migrations where the schema actually changed vs the previous visible row. */
-function buildVisibleMigrations(tracked: Migration[]): Migration[] {
-  const visible: Migration[] = []
+/**
+ * Each tracked migration with what it changed from the schema before it: the snapshot of the last
+ * push before it that applied one. A failed or refused push applied nothing and records no
+ * snapshot, so it changes nothing and is not what the push after it is compared with.
+ */
+function changesByMigration(tracked: Migration[]): Map<number, ModelChange[]> {
+  const changes = new Map<number, ModelChange[]>()
+  let previous: AstSnapshot | null = null
   for (const m of tracked) {
-    const prev = visible.length > 0 ? visible[visible.length - 1]!.schema_snapshot : null
-    const changes = diffSnapshots(prev, m.schema_snapshot)
-    if (visible.length === 0 || isInitialBaseline(m) || changes.length > 0) {
-      visible.push(m)
+    if (!appliedSchema(m)) {
+      changes.set(m.id, [])
+      continue
     }
+    changes.set(m.id, diffSnapshots(previous, m.schema_snapshot))
+    if (m.schema_snapshot !== null) previous = m.schema_snapshot
   }
-  return visible
+  return changes
+}
+
+/**
+ * Only show migrations where the schema actually changed vs the previous applied one, and every
+ * push that failed or was refused: those are what the history is read for.
+ */
+function buildVisibleMigrations(tracked: Migration[]): Migration[] {
+  const changes = changesByMigration(tracked)
+  let shownApplied = false
+  return tracked.filter((m) => {
+    if (!appliedSchema(m)) return true
+    const shown = !shownApplied || isInitialBaseline(m) || (changes.get(m.id)?.length ?? 0) > 0
+    shownApplied ||= shown
+    return shown
+  })
 }
 
 function useMigrationSql(
@@ -445,6 +479,32 @@ function SqlBlock({ sql }: { sql: string }): React.ReactElement {
   )
 }
 
+// ─── Outcome of a push that did not apply ─────────────────────────────────────
+
+/** "Nothing was applied", and the rest of what the history says about it. */
+function nothingApplied(outcome: MigrationOutcome): string {
+  const when = outcome.status === "refused" ? "Refused before it began" : "Failed while it applied"
+  return `${when}. Nothing was applied${outcome.superseded ? "; a later push has applied since." : "."}`
+}
+
+/**
+ * Why a push failed or was refused, and for a refused one what it would have dropped, how to apply
+ * it and the statements it would have run. Nothing for a push that applied.
+ */
+function OutcomeDetails({ outcome }: { outcome: MigrationOutcome }): React.ReactElement | null {
+  if (outcome.status !== "failed" && outcome.status !== "refused") return null
+  const refusal = outcome.refusal
+  return (
+    <div className="space-y-2 mb-3 text-xs">
+      <p className="text-muted-foreground">{nothingApplied(outcome)}</p>
+      {outcome.error !== null && <p className="font-mono text-red-400">{withoutForceAdvice(outcome.error)}</p>}
+      {refusal !== null && <RefusalOperations operations={refusal.operations} />}
+      {refusal !== null && <RefusalHints hints={refusal.hints} />}
+      {refusal !== null && refusal.sql !== null && <SqlBlock sql={refusal.sql} />}
+    </div>
+  )
+}
+
 // ─── Inline expanded row ──────────────────────────────────────────────────────
 
 function ExpandedRow({ proxy, migration, changes, colSpan }: {
@@ -467,6 +527,7 @@ function ExpandedRow({ proxy, migration, changes, colSpan }: {
   return (
     <tr className="bg-accent/20 border-b border-border">
       <td colSpan={colSpan} className="px-4 py-3">
+        <OutcomeDetails outcome={migration.outcome} />
         {baseline && (
           <p className="text-xs text-muted-foreground mb-3">
             First push recorded the schema baseline. No database DDL was required.
@@ -528,7 +589,7 @@ function SlideOutPanel({ proxy, migration, changes, onClose }: {
   )
   const hasSql = migration.has_sql
   const [tab, setTab] = useState<"changes" | "sql">(hasSql ? "sql" : "changes")
-  const status: MigrationStatus = migration.rolled_back ? "rolled_back" : "applied"
+  const status = migration.outcome.status
   const baseline = isInitialBaseline(migration)
   return (
     <>
@@ -545,7 +606,7 @@ function SlideOutPanel({ proxy, migration, changes, onClose }: {
               <p className="text-[0.65rem] text-muted-foreground font-mono mt-0.5">{migration.name}</p>
             )}
             <div className="flex items-center gap-2 mt-1.5">
-              <Badge variant={statusVariant[status]}>{status.replace("_", " ")}</Badge>
+              <Badge variant={MIGRATION_STATUS_VARIANT[status]}>{migrationStatusLabel(status)}</Badge>
               {baseline && <Badge variant="yellow">baseline</Badge>}
               <span className="text-xs text-muted-foreground font-mono">{migration.engine_version}</span>
             </div>
@@ -576,6 +637,11 @@ function SlideOutPanel({ proxy, migration, changes, onClose }: {
           </div>
           <AuditDetails migration={migration} />
         </div>
+        {!appliedSchema(migration) ? (
+          <div className="px-5 pt-3 border-b border-border/40 flex-shrink-0">
+            <OutcomeDetails outcome={migration.outcome} />
+          </div>
+        ) : null}
 
         {/* Tabs */}
         <div className="flex gap-4 px-5 pt-3 border-b border-border/40 flex-shrink-0">
@@ -643,15 +709,7 @@ export function MigrationHistory(): React.ReactElement {
   const hiddenCount = migrations.length - visibleMigrations.length
   const displayMigrations = useMemo(() => [...visibleMigrations].reverse(), [visibleMigrations])
 
-  const diffs = useMemo(() => {
-    const map = new Map<number, ModelChange[]>()
-    for (let i = 0; i < visibleMigrations.length; i++) {
-      const curr = visibleMigrations[i]!
-      const prev = i > 0 ? visibleMigrations[i - 1]!.schema_snapshot : null
-      map.set(curr.id, diffSnapshots(prev, curr.schema_snapshot))
-    }
-    return map
-  }, [visibleMigrations])
+  const diffs = useMemo(() => changesByMigration(trackedMigrations), [trackedMigrations])
 
   // A link to one migration (from Schema objects): shown on its own, already expanded.
   const [params, setParams] = useSearchParams()
@@ -676,7 +734,7 @@ export function MigrationHistory(): React.ReactElement {
     // repeat sync this screen otherwise hides.
     if (linkedId !== null) return trackedMigrations.filter((m) => m.id === linkedId)
     return displayMigrations.filter((m) => {
-      const status: MigrationStatus = m.rolled_back ? "rolled_back" : "applied"
+      const status = m.outcome.status
       if (search && !m.name.toLowerCase().includes(search.toLowerCase()) && !String(m.id).includes(search)) return false
       if (filterStatus !== "all" && status !== filterStatus) return false
       if (dateFrom && new Date(m.applied_at) < new Date(dateFrom)) return false
@@ -745,8 +803,11 @@ export function MigrationHistory(): React.ReactElement {
         />
         <Select className="w-[140px]" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
           <option value="all">All status</option>
-          <option value="applied">Applied</option>
-          <option value="rolled_back">Rolled back</option>
+          {MIGRATION_STATUSES.map((status) => (
+            <option key={status} value={status}>
+              {migrationStatusLabel(status).replace(/^./, (first) => first.toUpperCase())}
+            </option>
+          ))}
         </Select>
         <div className="flex items-center gap-1">
           <label className="text-xs text-muted-foreground">From:</label>
@@ -776,7 +837,7 @@ export function MigrationHistory(): React.ReactElement {
           </thead>
           <tbody>
             {filtered.map((m) => {
-              const status: MigrationStatus = m.rolled_back ? "rolled_back" : "applied"
+              const status = m.outcome.status
               const changes = diffs.get(m.id) ?? []
               const isExpanded = expandedId === m.id
               return (
@@ -798,7 +859,7 @@ export function MigrationHistory(): React.ReactElement {
                         <Badge variant="yellow" className="ml-2 text-[0.6rem]">baseline</Badge>
                       )}
                     </Td>
-                    <Td><Badge variant={statusVariant[status]}>{status.replace("_", " ")}</Badge></Td>
+                    <Td><Badge variant={MIGRATION_STATUS_VARIANT[status]}>{migrationStatusLabel(status)}</Badge></Td>
                     <Td><ChangeSummaryPills changes={changes} hasSnapshot={m.schema_snapshot !== null} /></Td>
                     <Td className="text-xs text-muted-foreground">{new Date(m.applied_at).toLocaleString()}</Td>
                     <Td className="text-xs"><AuthorCell migration={m} /></Td>
