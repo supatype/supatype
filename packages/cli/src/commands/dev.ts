@@ -888,10 +888,10 @@ async function runSchemaPush(
   let ast = built.ast
   const astJson = JSON.stringify(ast)
 
-  // Skip only when the last push of this exact AST succeeded.
-  // If it previously failed we always retry so the user can trigger a re-run
-  // by simply saving the file again without needing to make a content change.
-  if (astJson === _lastPushedAst && astJson !== _lastFailedAst) {
+  // Skip only when this exact AST applied and nothing has failed since. Saving a failed schema
+  // again retries it, and putting a refused change back pushes the applied schema again, which is
+  // what marks the refusal superseded and clears Studio's notice.
+  if (astJson === _lastPushedAst && _lastFailedAst === null) {
     return
   }
 
