@@ -2,10 +2,12 @@
 //
 // Deliberately narrow. No preset is spread in, so nothing but the rules below is on.
 // `no-explicit-any` stops `any` being written; the five `no-unsafe-*` rules stop it arriving from a
-// library (an untyped package, a loosely typed callback) and flowing on unchecked. `res.json()` and
-// `JSON.parse` return `unknown` here (ts-reset.d.ts).
+// library (an untyped package, a loosely typed callback) and flowing on unchecked; and
+// `no-unsafe-type-assertion` stops a cast narrowing a value to a type nobody checked, which is how
+// `unknown` would otherwise be laundered back into one. `res.json()` and `JSON.parse` return `unknown`
+// here (ts-reset.d.ts), so what they read is narrowed by a guard instead.
 //
-// The five need type information, so the parser runs with the TypeScript project service, which
+// These rules need type information, so the parser runs with the TypeScript project service, which
 // gives each file the nearest tsconfig.json that includes it. Every TypeScript file in the repository
 // is in one: a package's own, or the root tsconfig.json for the config files beside a package's build
 // config. Implicit `any` is the compiler's job: every tsconfig here sets `strict`.
@@ -33,6 +35,7 @@ const anyRules = {
   "@typescript-eslint/no-unsafe-call": "error",
   "@typescript-eslint/no-unsafe-member-access": "error",
   "@typescript-eslint/no-unsafe-return": "error",
+  "@typescript-eslint/no-unsafe-type-assertion": "error",
 };
 
 /** The parser for a framework's own file type, with TypeScript parsing its script blocks. */
