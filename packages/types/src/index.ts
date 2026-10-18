@@ -244,11 +244,17 @@ export type LocaleConfig<
 export type Localized<T> = Modifier<"Localized", Record<string, T>>
 /** Opt out of {@link LocalizedModel} auto-localization for a copy-like field. */
 export type NotLocalized<T> = Modifier<"NotLocalized", T>
+/**
+ * One kind of entry in a {@link Blocks} field: `TName` is stored under `type` and the fields under
+ * `data`, `{ "type": "hero", "data": { "heading": { "en": "Hi" } } }`, which is what Studio's block
+ * editor writes. The fields read as a model's row does, so `Localized<string>` is the locale map and
+ * `Optional<T>` may be absent or null.
+ */
 export type Block<
   TName extends string = string,
   TFields extends Record<string, unknown> = Record<string, unknown>,
   TMeta extends { label?: string; icon?: string } = {},
-> = Primitive<`Block:${TName}`, { type: TName; meta?: TMeta } & TFields>
+> = Primitive<`Block:${TName}`, { type: TName; data: SpreadOptionalModelFields<TFields>; meta?: TMeta }>
 export type Blocks<TBlock extends Block = Block> = Primitive<"Blocks", TBlock[]>
 
 /**

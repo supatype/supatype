@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react"
 import type { AnyClient, AnyDatabase, AugmentedDatabase, SupatypeError, QueryCacheOptions } from "@supatype/client"
 import { onIdentityChange } from "@supatype/client"
 import { useSupatype } from "./context.js"
-import { isRowsOf } from "./caller-types.js"
+import { isRowsOf } from "@supatype/client/bindings"
 
 export interface UseQueryOptions {
   /** PostgREST select expression (default: '*') */

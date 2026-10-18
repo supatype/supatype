@@ -3,7 +3,7 @@ import { writable, type Readable } from "svelte/store"
 import type { AugmentedDatabase, AnyClient, AnyDatabase, SupatypeError } from "@supatype/client"
 import { onIdentityChange } from "@supatype/client"
 import { getSupatypeClient } from "./context.js"
-import { isRowsOf } from "./caller-types.js"
+import { isRowsOf } from "@supatype/client/bindings"
 
 export interface QueryOptions {
   columns?: string | undefined

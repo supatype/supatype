@@ -9,6 +9,23 @@ export type StorageReference = {
   path: string
 }
 
+export type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: Json | undefined }
+  | Json[]
+
+export type ButtonTarget = "_self" | "_blank"
+
+export type Button = {
+  label: string
+  href: string
+  ariaLabel?: string
+  target?: ButtonTarget
+}
+
 declare module "@supatype/client" {
   interface SupatypeModels {
     page: {
@@ -17,7 +34,7 @@ declare module "@supatype/client" {
         title: { [locale: string]: string }
         slug: string
         summary: string | null
-        body: Record<string, unknown>
+        body: ({ type: "hero"; data: { heading: { [locale: string]: string }; subheading?: { [locale: string]: string }; cta?: Button } } | { type: "prose"; data: { body: { [locale: string]: RichText } } } | { type: "speakerGrid"; data: { heading?: { [locale: string]: string }; limit: number } })[]
         published_at: string | null
         created_at: string
         updated_at: string
@@ -27,7 +44,7 @@ declare module "@supatype/client" {
         title: { [locale: string]: string }
         slug?: string
         summary?: string | null
-        body: Record<string, unknown>
+        body: ({ type: "hero"; data: { heading: { [locale: string]: string }; subheading?: { [locale: string]: string }; cta?: Button } } | { type: "prose"; data: { body: { [locale: string]: RichText } } } | { type: "speakerGrid"; data: { heading?: { [locale: string]: string }; limit: number } })[]
         published_at?: string | null
         created_at?: string
         updated_at?: string
@@ -37,7 +54,7 @@ declare module "@supatype/client" {
         title?: { [locale: string]: string }
         slug?: string
         summary?: string | null
-        body?: Record<string, unknown>
+        body?: ({ type: "hero"; data: { heading: { [locale: string]: string }; subheading?: { [locale: string]: string }; cta?: Button } } | { type: "prose"; data: { body: { [locale: string]: RichText } } } | { type: "speakerGrid"; data: { heading?: { [locale: string]: string }; limit: number } })[]
         published_at?: string | null
         created_at?: string
         updated_at?: string
@@ -88,7 +105,7 @@ declare module "@supatype/client" {
         id: string
         name: string
         capacity: number
-        location: Record<string, unknown> | null
+        location: Json | null
         created_at: string
         updated_at: string
       }
@@ -96,7 +113,7 @@ declare module "@supatype/client" {
         id?: string
         name: string
         capacity: number
-        location?: Record<string, unknown> | null
+        location?: Json | null
         created_at?: string
         updated_at?: string
       }
@@ -104,7 +121,7 @@ declare module "@supatype/client" {
         id?: string
         name?: string
         capacity?: number
-        location?: Record<string, unknown> | null
+        location?: Json | null
         created_at?: string
         updated_at?: string
       }
@@ -122,7 +139,7 @@ declare module "@supatype/client" {
         starts_at: string
         ends_at: string
         length: { ms: number }
-        embedding: Record<string, unknown> | null
+        embedding: number[] | null
         published_at: string | null
         created_at: string
         updated_at: string
@@ -138,7 +155,7 @@ declare module "@supatype/client" {
         starts_at: string
         ends_at: string
         length: { ms: number }
-        embedding?: Record<string, unknown> | null
+        embedding?: number[] | null
         published_at?: string | null
         created_at?: string
         updated_at?: string
@@ -154,7 +171,7 @@ declare module "@supatype/client" {
         starts_at?: string
         ends_at?: string
         length?: { ms: number }
-        embedding?: Record<string, unknown> | null
+        embedding?: number[] | null
         published_at?: string | null
         created_at?: string
         updated_at?: string
@@ -328,7 +345,7 @@ declare module "@supatype/client" {
         id: string
         conferenceName: string
         tagline: { [locale: string]: string } | null
-        venue: Record<string, unknown> | null
+        venue: Json | null
         supportEmail: string
         created_at: string
         updated_at: string
@@ -337,7 +354,7 @@ declare module "@supatype/client" {
         id?: string
         conferenceName: string
         tagline?: { [locale: string]: string } | null
-        venue?: Record<string, unknown> | null
+        venue?: Json | null
         supportEmail: string
         created_at?: string
         updated_at?: string
@@ -346,7 +363,7 @@ declare module "@supatype/client" {
         id?: string
         conferenceName?: string
         tagline?: { [locale: string]: string } | null
-        venue?: Record<string, unknown> | null
+        venue?: Json | null
         supportEmail?: string
         created_at?: string
         updated_at?: string

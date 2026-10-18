@@ -1,4 +1,7 @@
 import React from "react"
+import { RichText } from "@supatype/react"
+import type { TableRow } from "@supatype/client"
+import { localized } from "@/lib/localized"
 
 /**
  * The block vocabulary, rendered.
@@ -7,72 +10,65 @@ import React from "react"
  * arranges, not a rich-text column with pasted HTML in it. The payoff is here: each block has a
  * known shape, so rendering is a switch rather than sanitising someone's markup.
  *
- * The rows arrive as `Json[]`, because a block list is JSONB in Postgres. Narrowing happens once,
- * at this boundary, so the components below take real types.
+ * Each entry is `{ type, data }`, the block's fields under `data`, which is what Studio's editor
+ * writes and what the generated row type says. The text fields are localized, so they hold every
+ * language at once and the page picks one.
  */
-type Block = Record<string, unknown>
+type PageBlocks = TableRow<"page">["body"]
+type PageBlock = PageBlocks[number]
+type DataOf<T extends PageBlock["type"]> = Extract<PageBlock, { type: T }>["data"]
+type BlockProps<T extends PageBlock["type"]> = { data: DataOf<T>; locale: string }
 
-function isBlock(value: unknown): value is Block {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-}
-
-export function Blocks({ blocks }: { blocks: unknown }): React.ReactElement | null {
-  if (!Array.isArray(blocks)) return null
+export function Blocks({ blocks, locale }: { blocks: PageBlocks; locale: string }): React.ReactElement {
   return (
     <>
       {blocks.map((block, index) => (
-        <BlockView key={index} block={block} />
+        <BlockView key={index} block={block} locale={locale} />
       ))}
     </>
   )
 }
 
-function BlockView({ block }: { block: unknown }): React.ReactElement {
-  if (isBlock(block)) {
-    switch (block["type"]) {
-      case "hero":
-        return <Hero block={block} />
-      case "prose":
-        return <Prose block={block} />
-      case "speakerGrid":
-        return <SpeakerGrid block={block} />
-    }
+function BlockView({ block, locale }: { block: PageBlock; locale: string }): React.ReactElement {
+  // A page seeded before blocks kept their fields under `data` stores them beside `type`. Said
+  // plainly rather than rendered as an empty section; UPGRADING.md has the SQL that moves them.
+  if (typeof block.data !== "object" || block.data === null) {
+    return <p className="ks-error">This {block.type} block has no data. Re-seed the page or save it again in Studio.</p>
   }
-  // A block the schema does not declare cannot reach the database, so this is unreachable
-  // through Studio. It exists because a hand-written seed can still do it, and a silently
-  // dropped section is worse than a visible one.
-  return <p className="ks-error">Unknown block type: {String(isBlock(block) ? block["type"] : block)}</p>
+  switch (block.type) {
+    case "hero":
+      return <Hero data={block.data} locale={locale} />
+    case "prose":
+      return <Prose data={block.data} locale={locale} />
+    case "speakerGrid":
+      return <SpeakerGrid data={block.data} locale={locale} />
+    // Unreachable through Studio, which offers only the declared blocks. A hand-written seed can
+    // still store another, and a section that vanishes silently is worse than one that says why.
+    default:
+      return <p className="ks-error">Unknown block type</p>
+  }
 }
 
-function text(value: unknown): string | null {
-  return typeof value === "string" && value.trim() !== "" ? value : null
-}
-
-function Hero({ block }: { block: Block }): React.ReactElement {
-  const cta = isBlock(block["cta"]) ? block["cta"] : null
-  const href = text(cta?.["href"])
+function Hero({ data, locale }: BlockProps<"hero">): React.ReactElement {
+  const subheading = localized(data.subheading, locale)
   return (
     <section className="ks-hero">
-      <h2>{text(block["heading"]) ?? "Untitled"}</h2>
-      {text(block["subheading"]) !== null && <p className="ks-lede">{text(block["subheading"])}</p>}
-      {href !== null && <a className="ks-cta" href={href}>{text(cta?.["label"]) ?? "Read more"}</a>}
+      <h2>{localized(data.heading, locale) ?? "Untitled"}</h2>
+      {subheading !== null && <p className="ks-lede">{subheading}</p>}
+      {data.cta !== undefined && <a className="ks-cta" href={data.cta.href}>{data.cta.label}</a>}
     </section>
   )
 }
 
-function Prose({ block }: { block: Block }): React.ReactElement {
-  const body = block["body"]
-  // Lexical state renders through @supatype/react's RichText in the app; here the plain-text
-  // fallback is enough to show the block arriving, and keeps this file free of a client boundary.
-  return <div className="ks-prose">{typeof body === "string" ? body : JSON.stringify(body)}</div>
+function Prose({ data, locale }: BlockProps<"prose">): React.ReactElement {
+  return <RichText content={localized(data.body, locale)} className="ks-prose" />
 }
 
-function SpeakerGrid({ block }: { block: Block }): React.ReactElement {
-  const limit = typeof block["limit"] === "number" ? block["limit"] : 6
+function SpeakerGrid({ data, locale }: BlockProps<"speakerGrid">): React.ReactElement {
   return (
     <section className="ks-grid">
-      <h3>{text(block["heading"]) ?? "Speakers"}</h3>
-      <p className="ks-muted">Showing up to {limit}, bounded by `Between&lt;Int, 3, 24&gt;` in the schema.</p>
+      <h3>{localized(data.heading, locale) ?? "Speakers"}</h3>
+      <p className="ks-muted">Showing up to {data.limit}, bounded by `Between&lt;Int, 3, 24&gt;` in the schema.</p>
     </section>
   )
 }

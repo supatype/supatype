@@ -1,7 +1,7 @@
 import { writable, type Readable } from "svelte/store"
 import type { AugmentedDatabase, AnyDatabase, SupatypeError } from "@supatype/client"
 import { getSupatypeClient } from "./context.js"
-import { isCallerValue } from "./caller-types.js"
+import { isCallerValue } from "@supatype/client/bindings"
 
 export interface FunctionStore<TResponse> {
   invoke: (body?: unknown) => Promise<{ data: TResponse | null; error: SupatypeError | null }>
