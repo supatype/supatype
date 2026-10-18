@@ -24,6 +24,8 @@
  * client that knows nothing about its schema.
  */
 import { generateClientAugmentation } from "./augmentation-generator.js"
+import { astModels, objectAt } from "./ast-read.js"
+import { resolveVersionsOptions } from "./model-versioning.js"
 
 /** The kinds whose values no binary float holds, keyed by the schema kind that produces them. */
 const EXACT_KIND_BY_FIELD_KIND: Readonly<Record<string, "bigint" | "numeric">> = {
@@ -34,14 +36,6 @@ const EXACT_KIND_BY_FIELD_KIND: Readonly<Record<string, "bigint" | "numeric">> =
 }
 
 const FORMAT_VERSION = 1
-
-type AstShape = {
-  models?: Array<{
-    name?: string
-    annotations?: Record<string, unknown>
-    fields?: Record<string, Record<string, unknown>>
-  }>
-}
 
 /** The full contents of `supatype/client.ts`. */
 export function generateProjectClient(ast: unknown): string {
@@ -61,13 +55,18 @@ export function generateProjectClient(ast: unknown): string {
     "// import is the whole setup. Importing `@supatype/client` directly gets a client that knows",
     "// nothing about this project.",
     "",
-    'import { registerFieldKinds } from "@supatype/client"',
+    'import { registerDraftModels, registerFieldKinds } from "@supatype/client"',
     "",
     augmentationBody(augmentation),
     "",
     "// Columns holding values a JSON parser would round: bigInt, decimal and money. Registered at",
     "// import time, so reading one returns what the database holds rather than the nearest double.",
     `registerFieldKinds(${JSON.stringify(fieldKindsDocument(safe), null, 2)})`,
+    "",
+    "// Models that keep drafts. An insert into one goes through `supatype.create_record`, which creates",
+    "// the record as its first draft: a plain insert asking for the row back is refused by a read rule",
+    "// that hides unpublished records.",
+    `registerDraftModels(${JSON.stringify(draftModelsDocument(safe), null, 2)})`,
     "",
     'export * from "@supatype/client"',
     "",
@@ -91,11 +90,11 @@ function augmentationBody(augmentation: string): string {
 function fieldKindsDocument(ast: unknown): { version: number; tables: Record<string, unknown> } {
   const tables: Record<string, Record<string, string>> = {}
 
-  for (const model of readModels(ast)) {
+  for (const model of astModels(ast)) {
     const exact: Record<string, string> = {}
-    for (const [column, meta] of Object.entries(model.fields ?? {})) {
-      const kind = typeof meta["kind"] === "string" ? meta["kind"] : ""
-      const exactKind = EXACT_KIND_BY_FIELD_KIND[kind]
+    for (const [column, meta] of Object.entries(objectAt(model, "fields") ?? {})) {
+      const kind = objectAt(meta)?.["kind"]
+      const exactKind = typeof kind === "string" ? EXACT_KIND_BY_FIELD_KIND[kind] : undefined
       if (exactKind !== undefined) exact[column] = exactKind
     }
     if (Object.keys(exact).length > 0) {
@@ -106,17 +105,25 @@ function fieldKindsDocument(ast: unknown): { version: number; tables: Record<str
   return { version: FORMAT_VERSION, tables }
 }
 
-function resolveTableName(model: { name?: string; annotations?: Record<string, unknown> }): string {
-  const db = model.annotations?.["db"]
-  if (db !== null && typeof db === "object") {
-    const named = (db as { tableName?: unknown }).tableName
-    if (typeof named === "string" && named !== "") return named
+/** Every model that keeps drafts, by table, with the key its new records are read back through. */
+function draftModelsDocument(ast: unknown): { version: number; tables: Record<string, { primaryKey: string }> } {
+  const tables: Record<string, { primaryKey: string }> = {}
+  for (const model of astModels(ast)) {
+    if (resolveVersionsOptions(objectAt(model, "options")?.["versions"])?.drafts !== true) continue
+    tables[resolveTableName(model)] = { primaryKey: primaryKeyColumn(objectAt(model, "fields")) }
   }
-  return model.name ?? ""
+  return { version: FORMAT_VERSION, tables }
 }
 
-function readModels(ast: unknown): NonNullable<AstShape["models"]> {
-  if (ast === null || typeof ast !== "object") return []
-  const models = (ast as AstShape).models
-  return Array.isArray(models) ? models : []
+/** The field marked as the key, else `id`, which is what the engine keys a model by when none is. */
+function primaryKeyColumn(fields: Record<string, unknown> | undefined): string {
+  const keyed = Object.entries(fields ?? {}).find(([, meta]) => objectAt(meta)?.["primaryKey"] === true)
+  return keyed?.[0] ?? "id"
+}
+
+/** The table a model is stored in: its declared `tableName`, else its name. */
+function resolveTableName(model: Record<string, unknown>): string {
+  const named = objectAt(model, "annotations", "db")?.["tableName"]
+  if (typeof named === "string" && named !== "") return named
+  return typeof model["name"] === "string" ? model["name"] : ""
 }
