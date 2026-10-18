@@ -515,6 +515,7 @@ export function registerDev(program: Command): void {
           adminConfigPath,
           postgrestPort,
           pgBinDir,
+          databaseUrl: dbURL,
         }),
         SUPATYPE_DENO_FUNCTIONS_DIR: denoFunctionsDir,
         ...(denoFunctionsDir !== "" ? { SUPATYPE_SHARED_ENV_FILE: resolve(denoFunctionsDir, ".env.local") } : {}),

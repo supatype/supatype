@@ -1,5 +1,6 @@
 import React, { useState } from "react"
 import { useApiQuery } from "../hooks/useApiQuery.js"
+import { useCopyToClipboard } from "../hooks/useCopyToClipboard.js"
 import { Badge, Button, Card } from "../components/ui.js"
 import { cn } from "../lib/utils.js"
 import { type Guard, isArrayOf, isNumber, isShape, isString, optional, readJson } from "../lib/json.js"
@@ -76,19 +77,12 @@ function SkeletonCard(): React.ReactElement {
 // ─── Copy button ──────────────────────────────────────────────────────────────
 
 function CopyButton({ text }: { text: string }): React.ReactElement {
-  const [copied, setCopied] = useState(false)
-
-  const handleCopy = () => {
-    void navigator.clipboard.writeText(text).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    })
-  }
+  const { copied, copy } = useCopyToClipboard()
 
   return (
     <button
       type="button"
-      onClick={handleCopy}
+      onClick={() => copy(text)}
       className="shrink-0 p-1 rounded hover:bg-accent transition-colors text-muted-foreground hover:text-foreground"
       title="Copy to clipboard"
     >

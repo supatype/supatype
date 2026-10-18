@@ -1,7 +1,9 @@
-import React, { useState, useCallback } from "react"
+import React, { useState } from "react"
 import { cn } from "../lib/utils.js"
 import { SlidePanel } from "./SlidePanel.js"
 import { Badge, Select } from "./ui.js"
+import { useCopyToClipboard } from "../hooks/useCopyToClipboard.js"
+import { ConnectionStringPanel } from "./database/ConnectionStringPanel.js"
 
 type Tab = "sdk" | "direct" | "mcp"
 type Framework = "nextjs" | "react" | "vue" | "svelte" | "solid" | "vanilla"
@@ -42,17 +44,11 @@ function CheckIcon() {
 }
 
 function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
-  const [copied, setCopied] = useState(false)
-  const copy = useCallback(() => {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    }).catch(() => undefined)
-  }, [text])
+  const { copied, copy } = useCopyToClipboard()
   return (
     <button
       type="button"
-      onClick={copy}
+      onClick={() => copy(text)}
       className="flex items-center gap-1.5 px-2 py-1 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0"
       aria-label="Copy to clipboard"
     >
@@ -588,22 +584,21 @@ function SdkContent({ framework, setFramework, variant, setVariant }: SdkContent
   )
 }
 
+/**
+ * The Direct tab. Its string used to be a template with `[YOUR-HOST]`, port 5432 and the `postgres`
+ * login and database, none of which a self-host or docker dev stack has; it now shows what the
+ * server says this project's database is reached at, from the same panel as Settings.
+ */
 function DirectContent() {
-  const conn = `postgresql://postgres:[YOUR-PASSWORD]@[YOUR-HOST]:5432/postgres`
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
         Connect directly to Postgres, useful for migrations, scripts, or any tool that takes a connection string.
       </p>
-      <Step n={1} title="Connection string">
-        <CodeBlock code={conn} filename="connection string" />
-      </Step>
-      <Step n={2} title="Connect with psql" last>
-        <CodeBlock code={`psql '${conn}'`} filename="terminal" />
-      </Step>
+      <ConnectionStringPanel withPsql />
       <div className="rounded-lg border border-border bg-secondary/20 px-3 py-2.5 text-xs text-muted-foreground">
-        Find your host and credential flow in <span className="text-foreground font-medium">Settings → Database</span>.
-        In managed cloud, the password is shown once and then hidden until rotation.
+        Replace [YOUR-PASSWORD] with the database password from{" "}
+        <span className="text-foreground font-medium">Settings → Database</span>.
         For app integrations, the <span className="text-primary font-medium">SDK</span> tab gives you type-safe queries with no SQL.
       </div>
     </div>
