@@ -8,7 +8,7 @@
 // import is the whole setup. Importing `@supatype/client` directly gets a client that knows
 // nothing about this project.
 
-import { registerFieldKinds } from "@supatype/client"
+import { registerDraftModels, registerFieldKinds } from "@supatype/client"
 
 import type { SerializedEditorState } from "@supatype/types/lexical"
 
@@ -390,6 +390,24 @@ registerFieldKinds({
   "tables": {
     "ticket": {
       "vatRate": "numeric"
+    }
+  }
+})
+
+// Models that keep drafts. An insert into one goes through `supatype.create_record`, or
+// `supatype.create_records` for several rows, which create each record as its first draft: a plain
+// insert asking for the row back is refused by a read rule that hides unpublished records.
+registerDraftModels({
+  "version": 1,
+  "tables": {
+    "page": {
+      "primaryKey": "id"
+    },
+    "speaker": {
+      "primaryKey": "id"
+    },
+    "talk": {
+      "primaryKey": "id"
     }
   }
 })

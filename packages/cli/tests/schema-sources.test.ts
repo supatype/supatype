@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync } from "node:fs"
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync, symlinkSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { collectSchemaSourcePaths } from "../src/type-extractor.js"
@@ -55,6 +55,20 @@ describe("schema-sources", () => {
       "schema/shared/locale.ts",
     ])
     expect(graph.entryPoint).toBe("schema/index.ts")
+  })
+
+  // macOS hands out temp dirs as /var/... while their real path is /private/var/..., and any
+  // project opened through a symlinked directory has the same split. The entry is resolved to its
+  // real path, so the root must be too, or every file looks like it is outside the project.
+  it("accepts a project root reached through a symlink", () => {
+    const real = join(tmp, "real-project")
+    const link = join(tmp, "linked-project")
+    mkdirSync(real)
+    symlinkSync(real, link, "junction")
+    writeMultiFileSchema(real)
+    const graph = collectSchemaSourcePaths(join(link, "schema", "index.ts"), link)
+    expect(graph.entryPoint).toBe("schema/index.ts")
+    expect(graph.files.map((f) => f.relativePath)).toContain("schema/models/album.ts")
   })
 
   it("roundtrips tar+gzip bytes", () => {

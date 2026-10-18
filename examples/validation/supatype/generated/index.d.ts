@@ -4,6 +4,14 @@ import type { SerializedEditorState } from "@supatype/types/lexical"
 
 export type RichText = SerializedEditorState
 
+export type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: Json | undefined }
+  | Json[]
+
 declare module "@supatype/client" {
   interface SupatypeModels {
     product: {
@@ -12,9 +20,9 @@ declare module "@supatype/client" {
         name: string
         slug: string | null
         description: RichText | null
-        tags: Record<string, unknown> | null
+        tags: string[] | null
         setupItems: { label: string; minutes: number }[] | null
-        notes: Record<string, unknown> | null
+        notes: ({ type: "note"; data: { text: string } })[] | null
         rating: number | null
         availableFrom: string | null
         availableUntil: string | null
@@ -27,9 +35,9 @@ declare module "@supatype/client" {
         name: string
         slug?: string | null
         description?: RichText | string | null
-        tags?: Record<string, unknown> | null
+        tags?: string[] | null
         setupItems?: { label: string; minutes: number }[] | null
-        notes?: Record<string, unknown> | null
+        notes?: ({ type: "note"; data: { text: string } })[] | null
         rating?: number | null
         availableFrom?: string | null
         availableUntil?: string | null
@@ -42,9 +50,9 @@ declare module "@supatype/client" {
         name?: string
         slug?: string | null
         description?: RichText | string | null
-        tags?: Record<string, unknown> | null
+        tags?: string[] | null
         setupItems?: { label: string; minutes: number }[] | null
-        notes?: Record<string, unknown> | null
+        notes?: ({ type: "note"; data: { text: string } })[] | null
         rating?: number | null
         availableFrom?: string | null
         availableUntil?: string | null
