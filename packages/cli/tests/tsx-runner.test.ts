@@ -64,7 +64,9 @@ describe("tsx-runner", () => {
       )
       expect(result.exitCode).toBe(0)
       const where = dirname(result.stdout)
-      expect(where.startsWith(tmpdir())).toBe(true)
+      // The module URL carries the real path: on macOS tmpdir() is /var/..., which links to
+      // /private/var/..., so the comparison is made between real paths.
+      expect(where.startsWith(realpathSync(tmpdir()))).toBe(true)
       expect(where).not.toBe(realpathSync(CLI_SRC))
       // Removed with the snippet.
       expect(existsSync(where)).toBe(false)
