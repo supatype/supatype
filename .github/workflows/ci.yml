@@ -242,6 +242,19 @@ jobs:
       - name: Build self-host-control package
         run: pnpm --filter "@supatype/self-host-control..." build
 
+      # The engine the control plane copies, with its licence and notices, is the pinned one
+      # (scripts/engine-pin.sh): the release image when .github/schema-engine-commit is an engine
+      # release, otherwise a build of the pinned commit. Not :latest, which can predate both files.
+      - name: Resolve the pinned engine image
+        id: engine
+        env:
+          OWNER: ${{ github.repository_owner }}
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          image="$(bash scripts/engine-pin.sh image)"
+          echo "image=$image" >>"$GITHUB_OUTPUT"
+
       - name: Build docker image, control-plane
         uses: docker/build-push-action@v5
         with:
@@ -249,4 +262,4 @@ jobs:
           file: packages/self-host-control/Dockerfile
           push: false
           build-args: |
-            ENGINE_IMAGE=supatype/schema-engine:latest
+            ENGINE_IMAGE=${{ steps.engine.outputs.image }}

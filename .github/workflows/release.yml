@@ -55,22 +55,54 @@ jobs:
           done
           exit "$fail"
 
+  # ── Engine pin ──────────────────────────────────────────────────────────────
+  #
+  # The engine this release ships and trains against is the commit in .github/schema-engine-commit,
+  # never whatever supatype/schema-engine:latest is on the day. It must be an engine release: a tag
+  # in the engine repository names it, and that release's Docker Hub image was built from it
+  # (scripts/engine-pin.sh checks the image's revision label). The control-plane image copies its
+  # engine, licence and notices from that image, by digest. A pin that is not a release stops the
+  # tag here, before anything publishes; the release PR moves it with `engine-pin.sh set`.
+  engine-pin:
+    needs: gate
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.pin.outputs.sha }}
+      image: ${{ steps.pin.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve the pinned engine release
+        id: pin
+        env:
+          OWNER: ${{ github.repository_owner }}
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          image="$(bash scripts/engine-pin.sh image --release-only)"
+          sha="$(tr -d '[:space:]' < .github/schema-engine-commit)"
+          echo "sha=$sha" >>"$GITHUB_OUTPUT"
+          echo "image=$image" >>"$GITHUB_OUTPUT"
+          echo "### Engine: schema-engine@$sha, $image" >>"$GITHUB_STEP_SUMMARY"
+
   # ── Release train ───────────────────────────────────────────────────────────
   #
-  # Every artifact built from this commit and from the other repositories' default branches, and
-  # every e2e and regression suite run against those builds (release-train.yml). A tag publishes
-  # nothing unless it is green. The other repositories' commits can be pinned through the
-  # workflow's inputs when a release pairs this tag with specific ones.
+  # Every artifact built from this commit, the pinned engine release and the other repositories'
+  # default branches, and every e2e and regression suite run against those builds
+  # (release-train.yml). The engine is the pinned one, so the train tests the engine this release
+  # ships. A tag publishes nothing unless it is green. Without PRIVATE_REPO_TOKEN the train leaves
+  # out the cloud image, which no self-host suite runs, and is still green.
   train:
-    needs: gate
+    needs: [gate, engine-pin]
     uses: ./.github/workflows/release-train.yml
     with:
       supatype_sha: ${{ github.sha }}
+      schema_engine_sha: ${{ needs.engine-pin.outputs.sha }}
     secrets: inherit
 
   # ── Extract version from tag ────────────────────────────────────────────────
   prepare:
-    needs: [gate, train]
+    needs: [gate, engine-pin, train]
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -348,7 +380,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
 
   docker-control-plane:
-    needs: [prepare, docker-latest-policy]
+    needs: [prepare, docker-latest-policy, engine-pin]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -380,8 +412,9 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable=${{ needs.docker-latest-policy.outputs.docker_push_latest == 'true' }}
 
-      # schema-engine is a separate repo with independent versioning, so the
-      # engine image tag is NOT the monorepo version, always use :latest.
+      # schema-engine is versioned on its own, so the engine image tag is not the monorepo version.
+      # It is the pinned engine release, by digest (the engine-pin job), not :latest: :latest is
+      # whatever the engine last published, which can predate the licence files this image copies.
       - uses: docker/build-push-action@v5
         with:
           context: .
@@ -390,7 +423,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            ENGINE_IMAGE=supatype/schema-engine:latest
+            ENGINE_IMAGE=${{ needs.engine-pin.outputs.image }}
 
   # ── GitHub Release ──────────────────────────────────────────────────────────
   github-release:
