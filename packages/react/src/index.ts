@@ -15,6 +15,7 @@ export type { UseSubscriptionOptions, UseSubscriptionResult, SubscriptionStatus 
 
 export { useLivePreview } from "./useLivePreview.js"
 export type { UseLivePreviewOptions, UseLivePreviewResult } from "./useLivePreview.js"
+export type { StudioOrigins } from "./live-preview-message.js"
 
 export { useFunction } from "./useFunction.js"
 export type { UseFunctionResult } from "./useFunction.js"

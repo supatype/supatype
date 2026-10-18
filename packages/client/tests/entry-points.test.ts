@@ -21,6 +21,9 @@ const BINDING_EXPORTS = [
   "isRowsOf",
   "isCallerValue",
   "runMutation",
+  "livePreviewMessage",
+  "previewMessageOf",
+  "originOf",
 ]
 
 describe("entry points", () => {
