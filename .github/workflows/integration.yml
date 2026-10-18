@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       schema_engine_sha:
-        description: supatype-schema-engine commit for the ownership job (the pin in .github/schema-engine-commit when empty)
+        description: schema-engine commit for the ownership job (the pin in .github/schema-engine-commit when empty)
         required: false
         type: string
 
@@ -136,7 +136,8 @@ jobs:
     name: self-host compose (images)
     if: github.event_name != 'schedule'
     runs-on: ubuntu-22.04
-    timeout-minutes: 20
+    # 45, not 20: until the pin is an engine release the engine is built from source here.
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4
@@ -167,10 +168,18 @@ jobs:
       - name: Build TypeScript packages
         run: pnpm build
 
+      # The engine the control plane copies, with its licence and notices, is the pinned one
+      # (scripts/engine-pin.sh): the release image when .github/schema-engine-commit is an engine
+      # release, otherwise a build of the pinned commit. Not :latest, which can predate both files.
       - name: Build control-plane image for compose smoke
+        env:
+          OWNER: ${{ github.repository_owner }}
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN || github.token }}
         run: |
+          set -euo pipefail
+          engine="$(bash scripts/engine-pin.sh image)"
           docker build \
-            --build-arg ENGINE_IMAGE=supatype/schema-engine:latest \
+            --build-arg ENGINE_IMAGE="$engine" \
             -t supatype/control-plane:ci \
             -f packages/self-host-control/Dockerfile \
             .
@@ -333,8 +342,8 @@ jobs:
     # like storage-backend. The engine is not whatever the CLI resolves (the latest release, which
     # can predate the commands): it is built from the engine commit pinned in
     # .github/schema-engine-commit, the way the release train builds it, and the script fails when
-    # no check could run. The engine repository is private, so this needs PRIVATE_REPO_TOKEN, and
-    # fails without it (a fork's pull request) rather than passing having checked nothing.
+    # no check could run. The engine is fetched with PRIVATE_REPO_TOKEN while its repository is
+    # private and with github.token once it is public; a fetch that fails fails the job.
     if: github.event_name != 'schedule'
     runs-on: ubuntu-22.04
     timeout-minutes: 45
@@ -367,22 +376,21 @@ jobs:
             exit 1
           fi
           echo "sha=$sha" >>"$GITHUB_OUTPUT"
-          echo "### ownership-e2e engine: supatype-schema-engine@$sha" >>"$GITHUB_STEP_SUMMARY"
+          echo "### ownership-e2e engine: schema-engine@$sha" >>"$GITHUB_STEP_SUMMARY"
 
       # The release train's own checkout and build: the engine image built from that commit, and
       # the binary extracted from it, so this job and the train test the same build of an engine.
+      # PRIVATE_REPO_TOKEN while the engine repository is private; github.token once it is public,
+      # so a fork's pull request runs this too. checkout.sh fails with the reason if neither can
+      # fetch the commit, rather than this job passing having checked nothing.
       - name: Build the engine at that commit
         env:
           OWNER: ${{ github.repository_owner }}
-          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN || github.token }}
           SHA_supatype_schema_engine: ${{ steps.engine.outputs.sha }}
           SRC: ${{ runner.temp }}/engine-src
         run: |
           set -euo pipefail
-          if [ -z "$GH_TOKEN" ]; then
-            echo "::error::PRIVATE_REPO_TOKEN is not available, so the private engine cannot be built and no ownership check can run."
-            exit 1
-          fi
           bash scripts/release-train/checkout.sh "$SRC" supatype-schema-engine
           bash scripts/release-train/build.sh --src "$SRC" engine
           echo "OWNERSHIP_ENGINE_BIN=$SRC/.train-out/supatype-engine-linux-amd64" >>"$GITHUB_ENV"
