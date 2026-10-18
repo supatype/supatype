@@ -308,6 +308,33 @@ export async function createRecord(
   return idOf(isJsonObject(row) ? row[model.primaryKey] : undefined)
 }
 
+/** The columns a copy never takes from its original, whatever the model. */
+const NEVER_COPIED = ["created_at", "updated_at"]
+
+/**
+ * The column the engine treats as a drafts model's publish date: `publish` sets it and withdrawing
+ * the last locale clears it, so a read rule comparing it sees an unpublished record as hidden.
+ */
+const PUBLISHED_AT = "published_at"
+
+/**
+ * The values a duplicate of a record is created from: the original's, less what belongs to the
+ * original alone.
+ *
+ * On a model with drafts that includes `published_at`. A copy is a new, unpublished record, and a
+ * copied publish date made the live row readable under a rule like `published_at <= now()` before
+ * anyone published it. The rest of a record's publishing state (which version is live or scheduled,
+ * per locale) lives on its version rows, which a copy does not take: it starts at version 1.
+ */
+export function duplicateValues(
+  model: ModelConfig,
+  values: Record<string, unknown>,
+): Record<string, unknown> {
+  const dropped = new Set([model.primaryKey, ...NEVER_COPIED])
+  if (model.versions?.drafts === true) dropped.add(PUBLISHED_AT)
+  return Object.fromEntries(Object.entries(values).filter(([column]) => !dropped.has(column)))
+}
+
 function idOf(value: unknown): CreatedRecord {
   return value === undefined || value === null
     ? { id: null, error: { message: "No data returned" } }

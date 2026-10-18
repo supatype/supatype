@@ -23,7 +23,12 @@ import { useStudioCapability } from "../hooks/useStudioCapability.js"
 import { serializeRecordForApi } from "../lib/recordValues.js"
 import { describeViolations, validateRecord } from "../lib/validate-record.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
-import { createDraft, createRecord, fetchRecordForEditing } from "../lib/publishing.js"
+import {
+  createDraft,
+  createRecord,
+  duplicateValues,
+  fetchRecordForEditing,
+} from "../lib/publishing.js"
 
 interface EditViewProps {
   model: ModelConfig
@@ -250,15 +255,11 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
 
   const handleDuplicate = async () => {
     if (!recordId) return
-    const duplicateValues = serializeRecordForApi(model, { ...values })
-    delete duplicateValues[model.primaryKey]
-    delete duplicateValues["created_at"]
-    delete duplicateValues["updated_at"]
-
     try {
       // A copy of a record with drafts is a new draft too: the form holds the draft's values, and
       // inserting them as the live row put unpublished content live.
-      const created = await createRecord(client, model, duplicateValues)
+      const copy = duplicateValues(model, serializeRecordForApi(model, values))
+      const created = await createRecord(client, model, copy)
       if (created.error !== null) {
         setError(created.error.message)
       } else if (created.id !== null) {
