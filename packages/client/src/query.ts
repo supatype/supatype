@@ -1,6 +1,7 @@
 import type { QueryCache, QueryCacheOptions, CacheStatus } from "./query-cache.js"
 import { buildCacheKey, defaultQueryCache } from "./query-cache.js"
 import type { MaskedField, QueryResult, SelectQueryOptions, SupatypeError, TableDef } from "./types.js"
+import { DRAFT_SCHEMA, PUBLISHING_SCHEMA } from "./types.js"
 import type { SelectRow } from "./select-types.js"
 import { parseRowsExactly, tableFromPath } from "./exact-response.js"
 import { stringifyWithBigInts } from "./exact-values.js"
@@ -89,6 +90,7 @@ function refusal(err: Record<string, unknown>, status: number): SupatypeError {
     // A field validator's refusal names the column it refused. Kept whole rather than folded into
     // the message, so a form can mark the input.
     ...(typeof err["field"] === "string" && { field: err["field"] }),
+    ...(typeof err["hint"] === "string" && err["hint"] !== "" && { hint: err["hint"] }),
   }
 }
 
@@ -440,6 +442,27 @@ export class QueryBuilder<TRow> extends FilterBuilder implements PromiseLike<Que
 type HttpMethod = "POST" | "PATCH" | "DELETE"
 
 /**
+ * An insert sent through `supatype.create_record` rather than as a plain `POST`: the table, which
+ * keeps drafts, and the key its new record is read back by.
+ *
+ * Why at all: a new record on a drafts model is unpublished, and when the model's read rule hides
+ * unpublished rows Postgres refuses an insert that asks for the row back, since it checks the
+ * returned row against that rule before anything has made it visible to its author.
+ * `create_record` inserts without reading back and writes version 1, after which the author sees it.
+ */
+export interface DraftCreate {
+  readonly table: string
+  readonly primaryKey: string
+}
+
+/** How a write is made beyond its method and body. */
+export interface MutationOptions {
+  upsert?: boolean | undefined
+  /** Create the one record through `create_record`, for an insert on a drafts model. */
+  createThrough?: DraftCreate | undefined
+}
+
+/**
  * The rows a write hands back for `select(columns)`.
  *
  * Read from the string, as `TableClient.select` does, when the builder knows the tables it was
@@ -459,6 +482,7 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
   private readonly extraHeaders: Record<string, string>
   private readonly method: HttpMethod
   private readonly body: unknown
+  private readonly createThrough: DraftCreate | undefined
 
   constructor(
     baseUrl: string,
@@ -466,7 +490,7 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
     headers: Record<string, string> | HeadersProvider,
     method: HttpMethod,
     body?: unknown,
-    opts?: { upsert?: boolean | undefined } | undefined,
+    opts?: MutationOptions | undefined,
     onUnauthorized?: (() => Promise<void>) | undefined,
     transport: RequestTransport = plainFetch,
   ) {
@@ -479,6 +503,7 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
     this.extraHeaders = {}
     this.method = method
     this.body = body
+    this.createThrough = opts?.createThrough
 
     if (opts?.upsert === true) this.prefer("resolution=merge-duplicates")
     // Return inserted/updated rows
@@ -553,6 +578,7 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
   }
 
   private async _execute(fetchHeaders: Record<string, string> = {}): Promise<QueryResult<TRow[]>> {
+    if (this.createThrough !== undefined) return this.createDraftRecord(this.createThrough)
     const qs = this.params.toString()
     const url = `${this.baseUrl}${this.path}${qs ? `?${qs}` : ""}`
     const resolveRequestHeaders = async (): Promise<Record<string, string>> => ({
@@ -583,6 +609,50 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
     // The returned representation of what was just written, so it needs the same care as a read.
     const result = readRows<TRow>(await res.text(), this.path, res.status, null)
     return result.data === null ? result : { ...result, count: result.data.length }
+  }
+
+  /**
+   * Create the record as its first draft, then read it back as an insert returns it.
+   *
+   * Read from the draft view, which has the table's row type: the live row of a new record holds no
+   * locale yet, so reading the table would hand back empty translations for what was just written.
+   * The select string applies as it would to the insert's own answer.
+   */
+  private async createDraftRecord(target: DraftCreate): Promise<QueryResult<TRow[]>> {
+    const created = await this.callCreateRecord(target.table)
+    if (typeof created !== "string") return { data: null, error: created, count: null }
+    const readBack = new QueryBuilder<TRow>(
+      this.baseUrl,
+      this.path,
+      this.getHeaders,
+      this.params.get("select") ?? undefined,
+      defaultQueryCache,
+      this.onUnauthorized,
+      { profile: DRAFT_SCHEMA },
+      this.send,
+    ).eq(target.primaryKey, created)
+    const result = await readBack
+    return result.data === null ? result : { ...result, count: result.data.length }
+  }
+
+  /** `supatype.create_record` for the one row this insert carries: the new key, or why not. */
+  private async callCreateRecord(table: string): Promise<string | SupatypeError> {
+    const url = `${this.baseUrl}/rest/v1/rpc/create_record`
+    const data = Array.isArray(this.body) ? this.body[0] : this.body
+    const init = { method: "POST", body: stringifyWithBigInts({ model_table: table, data }) }
+    const resolveRequestHeaders = async (): Promise<Record<string, string>> => ({
+      ...(await this.getHeaders()),
+      "Content-Profile": PUBLISHING_SCHEMA,
+    })
+    let res: Response
+    try {
+      res = await fetchWithOptional401Retry(this.send, url, init, resolveRequestHeaders, this.onUnauthorized)
+    } catch (e) {
+      return transportFailure(e)
+    }
+    if (!res.ok) return readRefusal(res, "[supatype:mutation] create_record failed", async () => ({ url, table }))
+    const recordId = (await readJsonObject(res))["record_id"]
+    return typeof recordId === "string" ? recordId : { message: "create_record answered without a record id", status: res.status }
   }
 }
 

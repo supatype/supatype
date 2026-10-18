@@ -19,6 +19,11 @@
  * Arriving by import means the bundler carries them, tsconfig cannot lose them, nothing is
  * fetched, and a project that has not generated has no file to import, so the build fails.
  */
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { dirname, join, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
+import ts from "typescript"
 import { describe, expect, it } from "vitest"
 import { generateProjectClient } from "../src/client-generator.js"
 
@@ -82,9 +87,9 @@ describe("generateProjectClient", () => {
     expect(out).toContain('"tables": {}')
   })
 
-  it("imports the registration function from the package", () => {
+  it("imports the registration functions from the package", () => {
     expect(generateProjectClient(ast)).toContain(
-      'import { registerFieldKinds } from "@supatype/client"',
+      'import { registerDraftModels, registerFieldKinds } from "@supatype/client"',
     )
   })
 
@@ -99,5 +104,96 @@ describe("generateProjectClient", () => {
   it("survives an ast it does not recognise", () => {
     expect(() => generateProjectClient({})).not.toThrow()
     expect(() => generateProjectClient(null)).not.toThrow()
+  })
+})
+
+/** Models keeping drafts, history only, and nothing, as the extractor writes `versions`. */
+const versionedAst = {
+  models: [
+    {
+      name: "Post",
+      annotations: { db: { tableName: "posts" } },
+      options: { versions: { drafts: true, keep: 20 } },
+      fields: { id: { kind: "uuid", required: true, primaryKey: true }, title: { kind: "text" } },
+    },
+    {
+      name: "Page",
+      options: { versions: true },
+      fields: { slug: { kind: "text", required: true, primaryKey: true } },
+    },
+    {
+      name: "Ledger",
+      annotations: { db: { tableName: "ledger" } },
+      options: { versions: { drafts: false } },
+      fields: { id: { kind: "uuid", required: true, primaryKey: true } },
+    },
+    { name: "Tag", annotations: { db: { tableName: "tags" } }, fields: { id: { kind: "uuid" } } },
+  ],
+}
+
+/** The document the generated file passes to `registerDraftModels`, parsed back. */
+function registeredDraftModels(source: string): unknown {
+  const match = /registerDraftModels\((\{[\s\S]*?\n\})\)/.exec(source)
+  return match?.[1] === undefined ? undefined : JSON.parse(match[1])
+}
+
+describe("generateProjectClient: models that keep drafts", () => {
+  it("registers each one by table, with the key its new records are read back through", () => {
+    expect(registeredDraftModels(generateProjectClient(versionedAst))).toEqual({
+      version: 1,
+      tables: { posts: { primaryKey: "id" }, Page: { primaryKey: "slug" } },
+    })
+  })
+
+  it("leaves out a model that keeps history without drafts, whose inserts are ordinary", () => {
+    const tables = JSON.stringify(registeredDraftModels(generateProjectClient(versionedAst)))
+    expect(tables).not.toContain("ledger")
+    expect(tables).not.toContain("tags")
+  })
+
+  it("keys a model that marks no key by id, as the engine does", () => {
+    const unkeyed = { models: [{ name: "Note", options: { versions: true }, fields: { body: { kind: "text" } } }] }
+    expect(registeredDraftModels(generateProjectClient(unkeyed))).toEqual({
+      version: 1,
+      tables: { Note: { primaryKey: "id" } },
+    })
+  })
+
+  it("still registers, empty, for a schema with no drafts", () => {
+    expect(registeredDraftModels(generateProjectClient(plainAst))).toEqual({ version: 1, tables: {} })
+  })
+})
+
+const CLIENT_SOURCE = resolve(dirname(fileURLToPath(import.meta.url)), "../../client/src/index.ts")
+
+/** Compile a generated `client.ts` against the real client source; returns its diagnostics. */
+function compileGeneratedClient(source: string): string[] {
+  const dir = mkdtempSync(join(tmpdir(), "supatype-project-client-"))
+  try {
+    const file = join(dir, "client.ts")
+    writeFileSync(file, source)
+    const program = ts.createProgram([file], {
+      strict: true,
+      exactOptionalPropertyTypes: true,
+      noEmit: true,
+      skipLibCheck: true,
+      target: ts.ScriptTarget.ES2022,
+      lib: ["lib.es2022.d.ts", "lib.dom.d.ts"],
+      module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.Bundler,
+      paths: { "@supatype/client": [CLIENT_SOURCE] },
+    })
+    return ts
+      .getPreEmitDiagnostics(program)
+      .filter((d) => d.file !== undefined && resolve(d.file.fileName) === resolve(file))
+      .map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
+describe("the generated client, as TypeScript reads it", () => {
+  it("compiles against the client it registers its drafts models with", () => {
+    expect(compileGeneratedClient(generateProjectClient(versionedAst))).toEqual([])
   })
 })

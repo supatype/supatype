@@ -1,7 +1,14 @@
 import { AuthClient } from "./auth.js"
 import { onIdentityChange } from "./identity.js"
 import { PreviewCredential } from "./preview.js"
-import { QueryBuilder, MutationBuilder, fetchWithOptional401Retry, type HeadersProvider } from "./query.js"
+import {
+  QueryBuilder,
+  MutationBuilder,
+  fetchWithOptional401Retry,
+  type DraftCreate,
+  type HeadersProvider,
+} from "./query.js"
+import { registeredDraftModel } from "./draft-models-registry.js"
 import type { FetchOptions, RequestTransport } from "./fetch-with-retry.js"
 import { defaultQueryCache, type QueryCache } from "./query-cache.js"
 import { StorageClient } from "./storage.js"
@@ -58,7 +65,7 @@ export {
   createCodeChallengeS256,
   PKCE_METHOD_S256,
 } from "./pkce.js"
-export { DRAFT_SCHEMA } from "./types.js"
+export { DRAFT_SCHEMA, PUBLISHING_SCHEMA } from "./types.js"
 export type { SelectRow, SelectError, TableRelationship } from "./select-types.js"
 
 /**
@@ -98,6 +105,15 @@ export {
   type FieldKindsDocument,
   type UnrecognisedFieldKindsDocument,
 } from "./field-kinds-registry.js"
+// Also called by the generated file: which tables keep drafts, so `insert` creates their records
+// through `supatype.create_record`.
+export {
+  registerDraftModels,
+  forgetRegisteredDraftModels,
+  type DraftModel,
+  type DraftModelsDocument,
+  type UnrecognisedDraftModelsDocument,
+} from "./draft-models-registry.js"
 export { fetchWithRetry, detectServerlessEnvironment, warnIfServerlessDirectConnection } from "./fetch-with-retry.js"
 export type { FetchOptions, ServerlessDetectionResult } from "./fetch-with-retry.js"
 export { createRetryFetch } from "./retry.js"
@@ -215,6 +231,19 @@ class TableClient<
     )
   }
 
+  /**
+   * Insert one row or several.
+   *
+   * **On a model that keeps drafts**, one record is created through `supatype.create_record`, as
+   * Studio creates it: the record starts as its first draft, and comes back read from the draft view
+   * in the shape a plain insert returns. A plain insert asking for the row back is refused there by a
+   * read rule that hides unpublished records, because Postgres checks the returned row against it
+   * before anything has made the new row visible to its author. The generated `supatype/client.ts`
+   * says which models keep drafts; a client without it inserts as before.
+   *
+   * Several rows at once are still one plain insert: `create_record` makes one record per call, and
+   * a call per row would no longer be all or nothing.
+   */
   insert(
     data: TDef["Insert"] | TDef["Insert"][],
   ): MutationBuilder<TDef["Row"], TTables, TName> {
@@ -224,12 +253,27 @@ class TableClient<
       this.getHeaders,
       "POST",
       data,
-      undefined,
+      { createThrough: this.draftCreate(data) },
       this.onUnauthorized,
       this.send,
     )
   }
 
+  /** Where an insert of `data` is created through `create_record`: one record, on a drafts model. */
+  private draftCreate(data: TDef["Insert"] | TDef["Insert"][]): DraftCreate | undefined {
+    const model = registeredDraftModel(this.table)
+    if (model === undefined) return undefined
+    if (Array.isArray(data) && data.length !== 1) return undefined
+    return { table: this.table, primaryKey: model.primaryKey }
+  }
+
+  /**
+   * Insert, or update the row a key or unique column already names.
+   *
+   * Never sent through `create_record`, on a drafts model or not: it cannot say what happens on a
+   * conflict, and an upsert that met an existing record would make a second one rather than update
+   * it. On a drafts model whose read rule hides unpublished records, create through `insert`.
+   */
   upsert(
     data: TDef["Insert"] | TDef["Insert"][],
   ): MutationBuilder<TDef["Row"], TTables, TName> {
@@ -787,6 +831,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
             message: pgError.message,
             status: pgError.statusCode,
             code: pgError.code,
+            ...(pgError.hint !== null && pgError.hint !== "" && { hint: pgError.hint }),
           },
         }
       }
