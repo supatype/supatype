@@ -12,6 +12,15 @@ export type Json =
 
 export type RichText = SerializedEditorState
 
+export type ButtonTarget = "_self" | "_blank"
+
+export type Button = {
+  label: string
+  href: string
+  ariaLabel?: string
+  target?: ButtonTarget
+}
+
 export type LocalizedValue<T> = { [locale: string]: T }
 
 export type StorageReference = {
@@ -28,7 +37,7 @@ export type Database = {
           title: LocalizedValue<string>
           slug: string
           summary: string | null
-          body: Json[]
+          body: ({ type: "hero"; data: { heading: LocalizedValue<string>; subheading?: LocalizedValue<string>; cta?: Button } } | { type: "prose"; data: { body: LocalizedValue<RichText> } } | { type: "speakerGrid"; data: { heading?: LocalizedValue<string>; limit: number } })[]
           published_at: string | null
           created_at: string
           updated_at: string
@@ -38,7 +47,7 @@ export type Database = {
           title: LocalizedValue<string>
           slug?: string
           summary?: string | null
-          body: Json[]
+          body: ({ type: "hero"; data: { heading: LocalizedValue<string>; subheading?: LocalizedValue<string>; cta?: Button } } | { type: "prose"; data: { body: LocalizedValue<RichText> } } | { type: "speakerGrid"; data: { heading?: LocalizedValue<string>; limit: number } })[]
           published_at?: string | null
           created_at?: string
           updated_at?: string
@@ -48,7 +57,7 @@ export type Database = {
           title?: LocalizedValue<string>
           slug?: string
           summary?: string | null
-          body?: Json[]
+          body?: ({ type: "hero"; data: { heading: LocalizedValue<string>; subheading?: LocalizedValue<string>; cta?: Button } } | { type: "prose"; data: { body: LocalizedValue<RichText> } } | { type: "speakerGrid"; data: { heading?: LocalizedValue<string>; limit: number } })[]
           published_at?: string | null
           created_at?: string
           updated_at?: string
@@ -379,3 +388,4 @@ export type Database = {
     }
   }
 }
+

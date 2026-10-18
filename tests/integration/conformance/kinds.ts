@@ -217,15 +217,17 @@ export const KIND_SPECS: Record<FieldKind, KindSpec> = {
   array: t("Optional<string[]>", [], "ARRAY", ["a", "b"]),
   json: t("Optional<JSON<{ a: number }>>", ["JSON"], "jsonb", { a: 1 }, { rowType: "{ a: number }" }),
   // One block declared, and a sample in the shape Studio's block editor writes: the block's
-  // fields under `data`, never beside `type`.
+  // fields under `data`, never beside `type`. `weights` is an array inside a block, which the CLI
+  // once sent without its element type: the engine refused the schema and the CLI typed it
+  // `string[]`.
   blocks: t(
-    "Optional<Blocks<Block<\"link\", { label: string; href: string }>>>",
-    ["Blocks", "Block"],
+    "Optional<Blocks<Block<\"link\", { label: string; href: string; weights: Int[] }>>>",
+    ["Blocks", "Block", "Int"],
     "jsonb",
-    [{ type: "link", data: { label: "Go", href: "/x" } }],
+    [{ type: "link", data: { label: "Go", href: "/x", weights: [1, 2] } }],
     {
-      expect: sameShape([{ type: "link", data: { label: "Go", href: "/x" } }]),
-      rowType: "({ type: \"link\"; data: { label: string; href: string } })[]",
+      expect: sameShape([{ type: "link", data: { label: "Go", href: "/x", weights: [1, 2] } }]),
+      rowType: "({ type: \"link\"; data: { label: string; href: string; weights: number[] } })[]",
     },
   ),
   button: t("Optional<Button>", ["Button"], "jsonb", { label: "Go", href: "/x" }, {

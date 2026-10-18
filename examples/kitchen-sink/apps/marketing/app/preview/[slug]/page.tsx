@@ -1,4 +1,5 @@
 import React from "react"
+import { headers } from "next/headers"
 import { createClient } from "../../../../../supatype/generated/client"
 import { LivePage } from "./live-page"
 
@@ -60,5 +61,7 @@ export default async function PreviewPage({
   const page = data?.[0] ?? null
   if (page === null) return <p className="ks-muted">No draft to preview.</p>
 
-  return <LivePage initial={page} apiUrl={url} />
+  // Chosen by the locale middleware, as on the published page, so a draft reads in the same language.
+  const locale = (await headers()).get("x-locale") ?? "en"
+  return <LivePage initial={page} apiUrl={url} locale={locale} />
 }

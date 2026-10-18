@@ -1537,28 +1537,57 @@ function parseBlocksTypeDefinitions(
   resolveCtx: ResolveContext,
 ): BlockDefinitionAst[] {
   if (!blocksArg) return []
-  const parts = ts.isUnionTypeNode(blocksArg) ? blocksArg.types : [blocksArg]
-  const out: BlockDefinitionAst[] = []
-  for (const part of parts) {
-    if (ts.isTypeReferenceNode(part) && ts.isIdentifier(part.typeName)) {
-      if (part.typeName.text === "Block") {
-        const inline = parseInlineBlockDefinition(
-          part,
-          sourceFile,
-          blockAliases,
-          bucketAliases,
-          bucketsById,
-          context,
-          resolveCtx,
-        )
-        if (inline) out.push(inline)
-        continue
-      }
-      const aliased = blockAliases.get(part.typeName.text)
-      if (aliased) out.push(aliased)
-    }
+  return blockMembers(blocksArg, sourceFile, resolveCtx, new Set()).flatMap(({ ref, name, file }) => {
+    const block =
+      name === "Block"
+        ? parseInlineBlockDefinition(ref, file, blockAliases, bucketAliases, bucketsById, context, resolveCtx)
+        : blockAliases.get(name)
+    return block ? [block] : []
+  })
+}
+
+type BlockMember = { ref: ts.TypeReferenceNode; name: string; file: ts.SourceFile }
+
+/**
+ * The block types a `Blocks<...>` argument names: `Block<...>` written in place, or an alias of one,
+ * followed through aliases that name a union of them (`type PageBlock = HeroBlock | ProseBlock`).
+ * Anything else is refused: it used to be dropped, so `Blocks<PageBlock>` declared no blocks at all
+ * and Studio offered nothing to add.
+ */
+function blockMembers(
+  node: ts.TypeNode,
+  file: ts.SourceFile,
+  resolveCtx: ResolveContext,
+  seen: Set<string>,
+): BlockMember[] {
+  if (ts.isParenthesizedTypeNode(node)) return blockMembers(node.type, file, resolveCtx, seen)
+  if (ts.isUnionTypeNode(node)) return node.types.flatMap((t) => blockMembers(t, file, resolveCtx, seen))
+  if (!ts.isTypeReferenceNode(node) || !ts.isIdentifier(node.typeName)) throw notABlock(node.getText(file))
+  const name = node.typeName.text
+  const alias = resolveCtx.aliasRegistry.get(name)
+  if (name === "Block" || (alias !== undefined && referenceName(alias.body) === "Block")) {
+    return [{ ref: node, name, file }]
   }
-  return out
+  if (alias === undefined || seen.has(name) || !namesBlocks(alias.body)) throw notABlock(name)
+  seen.add(name)
+  return blockMembers(alias.body, alias.sourceFile, resolveCtx, seen)
+}
+
+/** The plain name a type reference uses, `HeroBlock` in `HeroBlock` or `Block` in `Block<...>`. */
+function referenceName(node: ts.TypeNode): string | null {
+  return ts.isTypeReferenceNode(node) && ts.isIdentifier(node.typeName) ? node.typeName.text : null
+}
+
+/** Whether an alias body can name blocks: a union, a reference, or either in parentheses. */
+function namesBlocks(node: ts.TypeNode): boolean {
+  return ts.isUnionTypeNode(node) || ts.isParenthesizedTypeNode(node) || referenceName(node) !== null
+}
+
+function notABlock(name: string): Error {
+  return new Error(
+    `Blocks<...> takes Block<...> types, or aliases of them; "${name}" is not a Block. ` +
+      `Declare it as Block<"name", { ...fields }>.`,
+  )
 }
 
 function parseInlineBlockDefinition(

@@ -152,6 +152,26 @@ in `access` is an error.
 
 Import from `@supatype/types`. Use `Optional<T>` for nullable fields.
 
+## Blocks
+
+`Blocks<T>` is a JSONB array of sections an editor arranges in Studio, from the closed set of
+`Block<"name", { ...fields }, { label?, icon? }>` types in `T`. Name a union with an alias when
+several fields share it:
+
+```typescript
+export type HeroBlock = Block<"hero", { heading: Localized<string>; cta: Optional<Button> }>
+export type ProseBlock = Block<"prose", { body: Localized<RichText> }>
+export type PageBlock = HeroBlock | ProseBlock
+
+export type Page = Model<{ id: UUID; body: Blocks<PageBlock> }>
+```
+
+Each entry is stored as `{ "type": "hero", "data": { "heading": { "en": "Hi" } } }`: the block's
+name under `type`, its fields under `data`, read the way the same fields read on a model (a
+`Localized` field is the locale map). Seeds and code that write blocks must use that shape, and a
+renderer switches on `entry.type` and reads `entry.data`. Fields inside a block are not columns, so
+no trigger normalises them: write rich text as Lexical state, not a plain string.
+
 ## Indexes, PostGIS and pgvector
 
 `Indexed<T>` is a single-field B-tree. Anything else goes in the model's `indexes`:
