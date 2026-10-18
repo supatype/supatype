@@ -265,6 +265,45 @@ as bullets, quotes, line breaks and autolinks vanished, and handing them the sav
   `listType: "ordered" | "unordered"`, text `format` as an object) are gone: no editor saves
   them. A node type the renderer does not know renders its text rather than nothing.
 
+## Blocks keep their fields under `data`
+
+A `Blocks` entry is `{ "type": "hero", "data": { "heading": { "en": "Hi" } } }`: the block's name
+under `type` and its fields under `data`. That is what Studio's block editor has always stored and
+what both generated files say, but `Block` in `@supatype/types` described the fields beside `type`
+(`{ type: "hero"; heading: ... }`). Code typed from it, and seeds written to match it, disagreed
+with every page saved in Studio: a renderer reading `entry.heading` found nothing and showed its
+fallback.
+
+- **`Block<"hero", { heading: Localized<string> }>`** is now `{ type: "hero"; data: { heading:
+  Record<string, string> }; meta? }`. The fields under `data` read the way a model's row reads them:
+  a `Localized` field is the locale map, an `Optional` one may be absent or null.
+- **Renderers** switch on `entry.type` and read `entry.data`. The generated `TableRow<"page">["body"]`
+  is the union of the declared blocks, so a switch on `type` narrows `data` to that block's fields.
+- **Seeds** write `{ type, data }`. A field inside a block is not a column, so no trigger turns a
+  plain string into rich text there: write Lexical state.
+- **`Blocks<PageBlock>`** with `type PageBlock = HeroBlock | ProseBlock` now declares those blocks.
+  It used to declare none, so Studio offered no block to add; push once to give Studio the list.
+- **An array inside a block** (`counts: Int[]`) is accepted by the engine and typed by element. A
+  schema with one used to be refused.
+
+Rows written in the flat shape are not moved for you. To move them, for a column `body` on `page`:
+
+```sql
+UPDATE page SET body = (
+  SELECT jsonb_agg(CASE WHEN e ? 'data' THEN e
+                        ELSE jsonb_build_object('type', e->'type', 'data', e - 'type') END
+                   ORDER BY ord)
+  FROM jsonb_array_elements(body) WITH ORDINALITY AS t(e, ord))
+WHERE jsonb_typeof(body) = 'array' AND jsonb_array_length(body) > 0;
+```
+
+**Changing a `JSON` field to `Blocks`** converts what the column holds: each object in an array
+becomes its own entry of the field's first block, a lone object becomes one entry, `[]` stays `[]`,
+and entries already shaped `{ type, data }` are kept. It used to put the whole array in one entry
+under `data.value`, and turn `[]` into one empty block. A value that is not an object (a string, a
+number, or an array holding one) has no fields to put under `data`, so the push is refused, naming
+the column, and no row changes: change or remove those values, then push again.
+
 ## Extensions move to the extensions schema
 
 A push now creates the extensions a schema needs (`postgis` for `Geo` and `GeoPoint`, `vector` for

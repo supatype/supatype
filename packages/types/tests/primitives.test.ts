@@ -7,6 +7,7 @@ import type {
   EditorReadOnly,
   HasMany,
   JSON,
+  Localized,
   Model,
   Optional,
   Owner,
@@ -77,6 +78,19 @@ describe("@supatype/types primitives", () => {
 
   it("supports block unions for block-based content fields", () => {
     expectTypeOf<LandingPage["content"]>().toExtend<readonly (Hero | RichTextSection)[]>()
+  })
+
+  it("types a block entry as Studio stores it, its fields under `data`", () => {
+    type Entry = LandingPage["content"][number]
+    expectTypeOf<{ type: "hero"; data: { heading: string } }>().toExtend<Entry>()
+    expectTypeOf<{ type: "hero"; heading: string }>().not.toExtend<Entry>()
+  })
+
+  it("reads a block's declared fields as their stored values", () => {
+    type Intro = Block<"intro", { title: Localized<string>; note: Optional<string> }>
+    type Data = Model<{ id: UUID; sections: Blocks<Intro> }>["sections"][number]["data"]
+    expectTypeOf<Data["title"]>().toEqualTypeOf<Record<string, string>>()
+    expectTypeOf<Data["note"]>().toEqualTypeOf<string | null | undefined>()
   })
 
   it("preserves model metadata markers for extractor discovery", () => {

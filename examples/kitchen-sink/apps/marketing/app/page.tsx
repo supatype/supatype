@@ -42,7 +42,7 @@ export default async function HomePage(): Promise<React.ReactElement> {
     <article>
       <h1>{localized(page.title, locale) ?? ""}</h1>
       {page.summary !== null && <p className="ks-lede">{page.summary}</p>}
-      <Blocks blocks={page.body} />
+      <Blocks blocks={page.body} locale={locale} />
     </article>
   )
 }

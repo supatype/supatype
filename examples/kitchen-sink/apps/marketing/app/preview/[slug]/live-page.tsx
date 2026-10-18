@@ -3,6 +3,7 @@
 import React from "react"
 import { useLivePreview } from "@supatype/react"
 import { Blocks } from "../../blocks"
+import { localized } from "@/lib/localized"
 import type { TableRow } from "@supatype/client"
 type Page = TableRow<"page">
 
@@ -11,24 +12,24 @@ type Page = TableRow<"page">
  *
  * `initialData` is what the server read. When this page is open in Studio's preview pane with Live
  * Preview on, the editor posts its form state here on every keystroke and `data` becomes that
- * instead — nothing has been saved, and there is nothing in the database to read.
+ * instead. Nothing has been saved, and there is nothing in the database to read.
  *
  * `model` matters: without it, any model's preview stream would land here, so editing a Talk would
  * repaint this page with a Talk's fields.
  */
-export function LivePage({ initial }: { initial: Page }): React.ReactElement {
+export function LivePage({ initial, locale }: { initial: Page; locale: string }): React.ReactElement {
   const { data, isPreview } = useLivePreview<Page>({ initialData: initial, model: "page" })
 
   return (
     <article>
       <div className={isPreview ? "ks-banner ks-banner--live" : "ks-banner"}>
         {isPreview
-          ? "Live — these are unsaved keystrokes from the Studio tab, not the database."
-          : "Draft — this is the saved draft, not what readers see."}
+          ? "Live: these are unsaved keystrokes from the Studio tab, not the database."
+          : "Draft: this is the saved draft, not what readers see."}
       </div>
-      <h1>{typeof data.title === "string" ? data.title : "Untitled"}</h1>
+      <h1>{localized(data.title, locale) ?? "Untitled"}</h1>
       {data.summary !== null && <p className="ks-lede">{data.summary}</p>}
-      <Blocks blocks={data.body} />
+      <Blocks blocks={data.body} locale={locale} />
     </article>
   )
 }
