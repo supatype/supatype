@@ -11,20 +11,24 @@ type Page = TableRow<"page">
  *
  * `initialData` is what the server read. When this page is open in Studio's preview pane with Live
  * Preview on, the editor posts its form state here on every keystroke and `data` becomes that
- * instead — nothing has been saved, and there is nothing in the database to read.
+ * instead. Nothing has been saved, and there is nothing in the database to read.
  *
  * `model` matters: without it, any model's preview stream would land here, so editing a Talk would
  * repaint this page with a Talk's fields.
+ *
+ * `studioOrigin` matters too. This page has no `<SupatypeProvider>` to take the API URL from, and
+ * Studio is served at `/studio/` on that URL. Without it, the hook trusts no sender and every
+ * keystroke is ignored, rather than letting any page that frames this one repaint it.
  */
-export function LivePage({ initial }: { initial: Page }): React.ReactElement {
-  const { data, isPreview } = useLivePreview<Page>({ initialData: initial, model: "page" })
+export function LivePage({ initial, apiUrl }: { initial: Page; apiUrl: string }): React.ReactElement {
+  const { data, isPreview } = useLivePreview<Page>({ initialData: initial, model: "page", studioOrigin: apiUrl })
 
   return (
     <article>
       <div className={isPreview ? "ks-banner ks-banner--live" : "ks-banner"}>
         {isPreview
-          ? "Live — these are unsaved keystrokes from the Studio tab, not the database."
-          : "Draft — this is the saved draft, not what readers see."}
+          ? "Live: these are unsaved keystrokes from the Studio tab, not the database."
+          : "Draft: this is the saved draft, not what readers see."}
       </div>
       <h1>{typeof data.title === "string" ? data.title : "Untitled"}</h1>
       {data.summary !== null && <p className="ks-lede">{data.summary}</p>}

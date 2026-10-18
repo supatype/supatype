@@ -3,7 +3,7 @@
 import { useState, useCallback } from "react"
 import type { AnyClient, AnyDatabase, AugmentedDatabase, SupatypeError } from "@supatype/client"
 import { useSupatype } from "./context.js"
-import { runMutation, type MutationOperation, type MutationOutcome } from "./mutation-request.js"
+import { runMutation, type MutationOperation, type MutationOutcome } from "@supatype/client/bindings"
 
 export type { MutationOperation }
 

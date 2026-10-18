@@ -1,4 +1,6 @@
-import type { AnyClient, MutationBuilder, SupatypeError } from "@supatype/client"
+import type { AnyClient } from "./index.js"
+import type { MutationBuilder } from "./query.js"
+import type { SupatypeError } from "./types.js"
 import { isRowsOf } from "./caller-types.js"
 
 export type MutationOperation = "insert" | "update" | "delete" | "upsert"

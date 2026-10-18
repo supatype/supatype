@@ -1,12 +1,14 @@
-import type { AnyClient, AnyDatabase, SupatypeClient } from "@supatype/client"
+import type { AnyClient, SupatypeClient } from "./index.js"
+import type { AnyDatabase } from "./types.js"
 
 /**
- * Where a hook takes its caller at their word.
+ * Where a framework binding takes its caller at their word.
  *
  * The database, row and response types a caller names (`useSupatype<Db>()`, `useQuery<Db, "posts",
- * Post>`, `useFunction<Order>`) describe what the server sends, and nothing in the browser can check
- * them against it. These are the only places this package turns a value into such a type, each
- * checking what can be checked, so a cast is never scattered through the hooks.
+ * Post>`, `createFunction<Order>`) describe what the server sends, and nothing in the browser can
+ * check them against it. These are the only places the bindings turn a value into such a type, each
+ * checking what can be checked, so a cast is never scattered through the hooks, composables, stores
+ * and primitives.
  */
 
 /** The client in context, as the caller's database. Boundary: the database type is the caller's. */

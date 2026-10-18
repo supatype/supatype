@@ -1,7 +1,7 @@
 import { ref, shallowRef, type Ref } from "vue"
 import type { AugmentedDatabase, AnyDatabase, SupatypeError } from "@supatype/client"
 import { useSupatype } from "./context.js"
-import { isCallerValue } from "./caller-types.js"
+import { isCallerValue } from "@supatype/client/bindings"
 
 export interface UseFunctionReturn<TResponse> {
   invoke: (body?: unknown) => Promise<{ data: TResponse | null; error: SupatypeError | null }>

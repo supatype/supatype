@@ -27,6 +27,12 @@ export interface BucketRow {
   updated_at: string
 }
 
+/**
+ * A `storage.objects` row as node-postgres reads it: timestamps arrive as `Date`.
+ *
+ * No `path_tokens`. The service's own bootstrap adds that column but the engine's does not, so a row
+ * has it only when the service created the table, and nothing here reads it.
+ */
 export interface ObjectRow {
   id: string
   bucket_id: string
@@ -35,11 +41,21 @@ export interface ObjectRow {
   metadata: Record<string, unknown> | null
   /** Which stored copy of the bytes is live; null for an object written before versions. */
   version: string | null
-  path_tokens: string[]
-  created_at: string
-  updated_at: string
-  last_accessed_at: string
+  created_at: Date
+  updated_at: Date
+  last_accessed_at: Date
 }
+
+/** An object as a list answers it: every column but `version`, which names an internal S3 key. */
+export type ListedObjectRow = Omit<ObjectRow, "version">
+
+/**
+ * The columns of `ObjectRow` and `ListedObjectRow`, named rather than `*`, so a row has the same
+ * fields whichever bootstrap created the table (the service's adds `path_tokens`; the engine's
+ * does not).
+ */
+const LISTED_OBJECT_COLUMNS = "id, bucket_id, name, owner, metadata, created_at, updated_at, last_accessed_at"
+const OBJECT_COLUMNS = `${LISTED_OBJECT_COLUMNS}, version`
 
 // ─── Schema bootstrap ───────────────────────────────────────────────────────────
 
@@ -230,7 +246,7 @@ export async function emptyBucket(
  */
 export async function getObject(bucketId: string, name: string): Promise<ObjectRow | null> {
   const res = await pool.query<ObjectRow>(
-    `SELECT * FROM storage.objects WHERE bucket_id = $1 AND name = $2`,
+    `SELECT ${OBJECT_COLUMNS} FROM storage.objects WHERE bucket_id = $1 AND name = $2`,
     [bucketId, name],
   )
   return res.rows[0] ?? null
@@ -510,17 +526,19 @@ export async function deleteObjectsAs(jwt: JwtPayload, bucketId: string, names: 
 /**
  * List a bucket as the caller: only the objects their read rule allows.
  *
- * `starts_with` rather than `LIKE`, which read `%` and `_` in a prefix as wildcards.
+ * `starts_with` rather than `LIKE`, which read `%` and `_` in a prefix as wildcards. The columns are
+ * named rather than `*`, so the answer is the same whichever bootstrap created the table.
  */
 export async function listObjectRowsAs(
   jwt: JwtPayload,
   bucketId: string,
   prefix: string,
   page: { limit: number; offset: number },
-): Promise<ObjectRow[]> {
+): Promise<ListedObjectRow[]> {
   return asCaller(jwt, ["SELECT"], async (client) => {
-    const res = await client.query<ObjectRow>(
-      `SELECT * FROM storage.objects
+    const res = await client.query<ListedObjectRow>(
+      `SELECT ${LISTED_OBJECT_COLUMNS}
+         FROM storage.objects
         WHERE bucket_id = $1 AND starts_with(name, $2)
         ORDER BY name
         LIMIT $3 OFFSET $4`,

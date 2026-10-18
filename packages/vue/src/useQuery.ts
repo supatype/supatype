@@ -2,7 +2,7 @@ import { ref, shallowRef, onMounted, onUnmounted, watch, type Ref } from "vue"
 import type { AugmentedDatabase, AnyClient, AnyDatabase, SupatypeError } from "@supatype/client"
 import { onIdentityChange } from "@supatype/client"
 import { useSupatype } from "./context.js"
-import { isRowsOf } from "./caller-types.js"
+import { isRowsOf } from "@supatype/client/bindings"
 
 export interface UseQueryOptions {
   columns?: string | undefined

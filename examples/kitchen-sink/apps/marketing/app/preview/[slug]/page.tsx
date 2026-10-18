@@ -1,15 +1,12 @@
 import React from "react"
 import { createClient } from "../../../../../supatype/generated/client"
 import { LivePage } from "./live-page"
-import type { TableRow } from "@supatype/client"
-
-type Page = TableRow<"page">
 
 const url = process.env["NEXT_PUBLIC_SUPATYPE_URL"] ?? "http://localhost:18473"
 const anonKey = process.env["NEXT_PUBLIC_SUPATYPE_ANON_KEY"] ?? ""
 
 /**
- * A page as it will read once published — both senses of "preview", together.
+ * A page as it will read once published: both senses of "preview", together.
  *
  * Two different things get that name, and this example needs both because they answer different
  * questions:
@@ -21,7 +18,7 @@ const anonKey = process.env["NEXT_PUBLIC_SUPATYPE_ANON_KEY"] ?? ""
  *
  * The code is the whole credential: it is exchanged for a short-lived token carrying a claim that
  * names this one record and no subject, so the database's own policy still decides. No service-role
- * key, and deliberately not the visitor's session — whoever opened the link may be signed in as
+ * key, and deliberately not the visitor's session, because whoever opened the link may be signed in as
  * someone with no access to the draft, and using that identity would show them "not found".
  */
 export default async function PreviewPage({
@@ -51,7 +48,7 @@ export default async function PreviewPage({
 
   if (error !== null) {
     // An expired or revoked link. Said plainly rather than as "not found", which would send the
-    // reader off to ask why the page had been deleted — while still not confirming a draft exists.
+    // reader off to ask why the page had been deleted, while still not confirming a draft exists.
     return (
       <section>
         <h1>This preview link is no longer valid</h1>
@@ -60,8 +57,8 @@ export default async function PreviewPage({
     )
   }
 
-  const page = (data as Page[] | null)?.[0] ?? null
+  const page = data?.[0] ?? null
   if (page === null) return <p className="ks-muted">No draft to preview.</p>
 
-  return <LivePage initial={page} />
+  return <LivePage initial={page} apiUrl={url} />
 }
