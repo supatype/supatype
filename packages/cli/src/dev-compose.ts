@@ -30,6 +30,7 @@ import { anonKeyEnvUpdates } from "./commands/keys.js"
 import { devApiKeys } from "./dev-api-keys.js"
 import { astRelatesToAuthUsers } from "./byo-preflight.js"
 import { ensureDevDbPort, ensureKongPort } from "./dev-ports.js"
+import { applyForThisRun, splitShellPortUpdates } from "./shell-ports.js"
 import { handleComposeProjectRename } from "./compose-rename.js"
 import { devSessionLockFor, recoverStaleDevSession, writeDevSessionLock } from "./dev-session-lock.js"
 import { endDevSession, startDevSession } from "./dev-session.js"
@@ -406,7 +407,10 @@ export function upsertDevComposeEnv(
   // write is removed: an operator's own GOTRUE_ variable is theirs, and the server's error names it
   // and its replacement precisely enough to fix by hand.
   const retiredKeys = ["GOTRUE_MAILER_AUTOCONFIRM"]
-  upsertEnvFile(cwd, updates, {
+  // A port the shell gave for this run is the run's, not the project's (DR9).
+  const { persist, runOnly } = splitShellPortUpdates(updates)
+  applyForThisRun(runOnly)
+  upsertEnvFile(cwd, persist, {
     removeManaged: removeImageKeys,
     managed: [...managedImageKeys, MAILER_AUTOCONFIRM_ENV],
     // A local image left in `.env` after the project stopped asking for one would keep pointing

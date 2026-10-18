@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   createRecord,
+  duplicateValues,
   fetchRecordStates,
   publishableLocales,
   publishingState,
@@ -335,5 +336,34 @@ describe("creating a record", () => {
     const created = await createRecord(recordingClient(sent), model(false), values)
     expect(created).toEqual({ id: "row-id", error: null })
     expect(sent).toEqual([{ path: "/rest/v1/posts", profile: null, body: values }])
+  })
+})
+
+describe("duplicating a record", () => {
+  // DR7: Duplicate copied `published_at`, so a copy of a published record was born with a publish
+  // date. On a model whose read rule compares it, every column that is not localized was readable
+  // before anyone published the copy.
+
+  const original = {
+    id: "original-id",
+    title: { en: "Hello" },
+    slug: "hello",
+    published_at: "2026-09-05T09:00:00Z",
+    created_at: "2026-09-01T09:00:00Z",
+    updated_at: "2026-09-05T09:00:00Z",
+  }
+
+  it("leaves a drafts model's copy unpublished", () => {
+    const model = testModel({ versions: versions() })
+    expect(duplicateValues(model, original)).toEqual({ title: { en: "Hello" }, slug: "hello" })
+  })
+
+  it("keeps a published_at that is only a column on a model without drafts", () => {
+    // Without drafts nothing publishes a record, so the column is data like any other.
+    expect(duplicateValues(testModel(), original)).toEqual({
+      title: { en: "Hello" },
+      slug: "hello",
+      published_at: "2026-09-05T09:00:00Z",
+    })
   })
 })
