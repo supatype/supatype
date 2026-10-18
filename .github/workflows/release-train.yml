@@ -1,12 +1,15 @@
 # The release train (Pre-Launch-Fix-Plan section 10 item 2; X04, C17).
 #
 # Builds every artifact from one commit per repository, tags it `:train`, and runs every e2e and
-# regression suite against exactly those builds:
-#   engine binary and image  supatype-schema-engine
-#   server image             supatype-auth
-#   postgres image           supatype-postgres
-#   Studio, storage, realtime, functions-worker and control-plane images, and the CLI   supatype
-#   cloud control-plane image, with its engine built from the same engine commit         supatype-cloud
+# regression suite against exactly those builds (repository, then the directory it is checked out
+# into, which keeps the repository's old name; scripts/release-train/lib.sh says why):
+#   engine binary and image  schema-engine  supatype-schema-engine/
+#   server image             server         supatype-auth/
+#   postgres image           postgres       supatype-postgres/
+#   Studio, storage, realtime, functions-worker and control-plane images, and the CLI
+#                            supatype       supatype/
+#   cloud control-plane image, with its engine built from the same engine commit
+#                            cloud          supatype-cloud/
 #
 # Nothing a suite runs may come from a registry in place of a build: run-suite.sh fails a suite
 # that started a published Supatype image, or whose pushes were recorded by an engine other than
@@ -25,8 +28,11 @@
 #       secrets: inherit
 #
 # Secrets (all optional; what each is for):
-#   PRIVATE_REPO_TOKEN   read access to the five repositories. supatype-schema-engine is private,
-#                        so without it the engine checkout fails. Same name cloud's image workflow uses.
+#   PRIVATE_REPO_TOKEN   read access to the private repositories (cloud, and schema-engine until it
+#                        is public). Same name cloud's image workflow uses. Without it the train
+#                        skips the cloud repository and the cloud image, and says so ("Cloud
+#                        skipped"): no self-host suite runs the cloud image (suites.sh), so a
+#                        self-host release does not need it. The other checkouts use github.token.
 #   DOCKERHUB_USERNAME, DOCKERHUB_TOKEN   pull base images as the account, not anonymously.
 #   MINISIGN_PUBLIC_KEY  the release key, for any component binary a suite downloads. Without it
 #                        the key committed in scripts/install.sh is used.
@@ -36,7 +42,7 @@ on:
   workflow_dispatch:
     inputs:
       schema_engine_sha:
-        description: supatype-schema-engine commit (default branch head when empty)
+        description: schema-engine commit (default branch head when empty)
         required: false
         type: string
       supatype_sha:
@@ -44,15 +50,15 @@ on:
         required: false
         type: string
       supatype_auth_sha:
-        description: supatype-auth commit (default branch head when empty)
+        description: server commit (default branch head when empty)
         required: false
         type: string
       supatype_cloud_sha:
-        description: supatype-cloud commit (default branch head when empty)
+        description: cloud commit (default branch head when empty)
         required: false
         type: string
       supatype_postgres_sha:
-        description: supatype-postgres commit (default branch head when empty)
+        description: postgres commit (default branch head when empty)
         required: false
         type: string
       harness_ref:
@@ -92,6 +98,7 @@ jobs:
       supatype_cloud: ${{ steps.sha.outputs.supatype_cloud }}
       supatype_postgres: ${{ steps.sha.outputs.supatype_postgres }}
       harness: ${{ steps.sha.outputs.harness }}
+      skip_cloud: ${{ steps.sha.outputs.skip_cloud }}
       suites: ${{ steps.suites.outputs.suites }}
     steps:
       - name: Resolve each repository's commit
@@ -106,28 +113,56 @@ jobs:
           RUN_SHA: ${{ github.sha }}
           RUN_REPO: ${{ github.repository }}
           IN_HARNESS: ${{ inputs.harness_ref }}
+          HAS_PRIVATE_REPO_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN != '' }}
         run: |
           set -euo pipefail
           # A short SHA or a branch name is expanded to the full commit, so the summary and every
-          # job name exactly one commit.
+          # job name exactly one commit. Each answer is assigned before it is written, so a
+          # repository or commit that does not resolve stops the job here: `echo "x=$(full ...)"`
+          # would have written gh's 404 body as the commit and failed later, somewhere unrelated.
+          # These are GitHub names; the checkout directories keep the old ones (lib.sh).
           full() {
-            local repo="$1" ref="$2"
-            if [ -z "$ref" ]; then ref="$(gh api "repos/$OWNER/$repo" --jq .default_branch)"; fi
-            gh api "repos/$OWNER/$repo/commits/$ref" --jq .sha
+            local repo="$1" ref="$2" sha
+            if [ -z "$ref" ]; then
+              ref="$(gh api "repos/$OWNER/$repo" --jq .default_branch)" || return 1
+            fi
+            sha="$(gh api "repos/$OWNER/$repo/commits/$ref" --jq .sha)" || return 1
+            if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::$OWNER/$repo did not resolve '$ref' to a commit." >&2
+              return 1
+            fi
+            echo "$sha"
           }
           supatype_default=""
           if [ "$RUN_REPO" = "$OWNER/supatype" ]; then supatype_default="$RUN_SHA"; fi
+          # The cloud repository is private and only the cloud image comes from it, which no
+          # self-host suite runs. Without the token it is left out of the train, not failed.
+          if [ "$HAS_PRIVATE_REPO_TOKEN" = true ]; then
+            skip_cloud=0
+            echo "::notice::Cloud included"
+          else
+            skip_cloud=1
+            echo "::notice::Cloud skipped: PRIVATE_REPO_TOKEN not set"
+          fi
+          schema_engine="$(full schema-engine "$IN_ENGINE")"
+          supatype="$(full supatype "${IN_SUPATYPE:-$supatype_default}")"
+          supatype_auth="$(full server "$IN_AUTH")"
+          supatype_cloud=""
+          if [ "$skip_cloud" = 0 ]; then supatype_cloud="$(full cloud "$IN_CLOUD")"; fi
+          supatype_postgres="$(full postgres "$IN_POSTGRES")"
+          # The scripts that run the train: this commit when the train runs in supatype itself,
+          # otherwise supatype at harness_ref (its default branch when empty).
+          if [ -n "$IN_HARNESS" ]; then harness="$(full supatype "$IN_HARNESS")"
+          elif [ "$RUN_REPO" = "$OWNER/supatype" ]; then harness="$RUN_SHA"
+          else harness="$(full supatype "")"; fi
           {
-            echo "schema_engine=$(full supatype-schema-engine "$IN_ENGINE")"
-            echo "supatype=$(full supatype "${IN_SUPATYPE:-$supatype_default}")"
-            echo "supatype_auth=$(full supatype-auth "$IN_AUTH")"
-            echo "supatype_cloud=$(full supatype-cloud "$IN_CLOUD")"
-            echo "supatype_postgres=$(full supatype-postgres "$IN_POSTGRES")"
-            # The scripts that run the train: this commit when the train runs in supatype itself,
-            # otherwise supatype at harness_ref (its default branch when empty).
-            if [ -n "$IN_HARNESS" ]; then echo "harness=$(full supatype "$IN_HARNESS")";
-            elif [ "$RUN_REPO" = "$OWNER/supatype" ]; then echo "harness=$RUN_SHA";
-            else echo "harness=$(full supatype "")"; fi
+            echo "schema_engine=$schema_engine"
+            echo "supatype=$supatype"
+            echo "supatype_auth=$supatype_auth"
+            echo "supatype_cloud=${supatype_cloud:-skipped}"
+            echo "supatype_postgres=$supatype_postgres"
+            echo "harness=$harness"
+            echo "skip_cloud=$skip_cloud"
           } | tee -a "$GITHUB_OUTPUT"
           {
             echo "### Release train commits"
@@ -172,6 +207,8 @@ jobs:
           - component: monorepo
             builds: studio storage realtime functions-worker
             repos: supatype
+    env:
+      TRAIN_SKIP_CLOUD: ${{ needs.resolve.outputs.skip_cloud }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -179,30 +216,43 @@ jobs:
           ref: ${{ needs.resolve.outputs.harness }}
           path: harness
 
+      # The resolve job decided whether cloud is in this run; the matrix lists it regardless.
+      - name: Leave out what this run skips
+        env:
+          MATRIX_REPOS: ${{ matrix.repos }}
+          MATRIX_BUILDS: ${{ matrix.builds }}
+        run: |
+          set -euo pipefail
+          source harness/scripts/release-train/lib.sh
+          read -ra repos <<<"$MATRIX_REPOS"
+          read -ra builds <<<"$MATRIX_BUILDS"
+          echo "WANT_REPOS=$(train_drop_skipped "${repos[@]}")" >>"$GITHUB_ENV"
+          echo "WANT_BUILDS=$(train_drop_skipped "${builds[@]}")" >>"$GITHUB_ENV"
+
       - name: Check out the candidate commits
         env:
           GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN || github.token }}
-          REPOS: ${{ matrix.repos }}
           SHA_supatype_schema_engine: ${{ needs.resolve.outputs.schema_engine }}
           SHA_supatype: ${{ needs.resolve.outputs.supatype }}
           SHA_supatype_auth: ${{ needs.resolve.outputs.supatype_auth }}
           SHA_supatype_cloud: ${{ needs.resolve.outputs.supatype_cloud }}
           SHA_supatype_postgres: ${{ needs.resolve.outputs.supatype_postgres }}
         run: |
-          read -ra wanted <<<"$REPOS"
+          read -ra wanted <<<"$WANT_REPOS"
           bash harness/scripts/release-train/checkout.sh src "${wanted[@]}"
 
       - name: Build
-        run: bash harness/scripts/release-train/build.sh --src src ${{ matrix.builds }}
+        run: |
+          read -ra wanted <<<"$WANT_BUILDS"
+          bash harness/scripts/release-train/build.sh --src src "${wanted[@]}"
 
       - name: Save the images
-        env:
-          BUILDS: ${{ matrix.builds }}
         run: |
           set -euo pipefail
           source harness/scripts/release-train/lib.sh
+          read -ra wanted <<<"$WANT_BUILDS"
           images=()
-          for c in $BUILDS; do images+=("$(train_image "$c")"); done
+          for c in "${wanted[@]}"; do images+=("$(train_image "$c")"); done
           mkdir -p out
           docker save "${images[@]}" | zstd -T0 -3 -o "out/images-${{ matrix.component }}.tar.zst"
           if [ -f src/.train-out/supatype-engine-linux-amd64 ]; then cp src/.train-out/supatype-engine-linux-amd64 out/; fi
@@ -226,6 +276,8 @@ jobs:
         suite: ${{ fromJSON(needs.resolve.outputs.suites) }}
     env:
       SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
+      # prepare.sh checks every train image is loaded; a skipped cloud image is not one of them.
+      TRAIN_SKIP_CLOUD: ${{ needs.resolve.outputs.skip_cloud }}
     steps:
       - uses: actions/checkout@v4
         with:
