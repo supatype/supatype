@@ -360,7 +360,7 @@ jobs:
           node-version: 22
 
       - name: Build self-host-control
-        run: pnpm install --frozen-lockfile && pnpm --filter @supatype/self-host-control build
+        run: pnpm install --frozen-lockfile && pnpm --filter "@supatype/self-host-control..." build
 
       - uses: docker/login-action@v3
         with:

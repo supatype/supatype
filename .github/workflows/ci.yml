@@ -240,7 +240,7 @@ jobs:
           push: false
 
       - name: Build self-host-control package
-        run: pnpm --filter @supatype/self-host-control build
+        run: pnpm --filter "@supatype/self-host-control..." build
 
       - name: Build docker image, control-plane
         uses: docker/build-push-action@v5
