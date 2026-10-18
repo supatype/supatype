@@ -9,7 +9,26 @@ TRAIN_TAG="${TRAIN_TAG:-train}"
 
 # The five repositories, as directory names under the source root. CI checks each one out at the
 # SHA it was given; the local script makes a detached worktree per repository.
+#
+# The directory names are the repositories' old names and stay that way on purpose: cloud's
+# Dockerfile builds from the parent of `supatype-cloud/` and copies paths under it, the integration
+# scripts look for `../supatype-schema-engine` and its siblings, and every local train is started
+# with `--worktree supatype-schema-engine=<path>@<sha>` and the like. Only the GitHub name changed,
+# so CI maps each directory to its repository with train_github_repo.
 TRAIN_REPOS=(supatype-schema-engine supatype supatype-auth supatype-cloud supatype-postgres)
+
+# The GitHub repository (under the owner) a train directory is fetched from. The old names 404 with
+# no redirect, so CI must never build a URL from the directory name itself.
+train_github_repo() {
+  case "$1" in
+    supatype-schema-engine) echo schema-engine ;;
+    supatype) echo supatype ;;
+    supatype-auth) echo server ;;
+    supatype-cloud) echo cloud ;;
+    supatype-postgres) echo postgres ;;
+    *) echo "unknown train repository: $1" >&2; return 1 ;;
+  esac
+}
 
 # Images the stack runs, by the SUPATYPE_*_IMAGE variable the CLI's compose file reads.
 train_image() {
@@ -27,7 +46,23 @@ train_image() {
   esac
 }
 
-TRAIN_COMPONENTS=(engine server postgres studio storage realtime functions-worker control-plane cloud)
+# TRAIN_SKIP_CLOUD=1 leaves the cloud repository and the cloud image out. CI sets it when it has no
+# PRIVATE_REPO_TOKEN to read the private cloud repository with; no self-host suite runs the cloud
+# image (suites.sh), so nothing downstream needs it. Unset, as in the local train, cloud is built.
+train_skips_cloud() { [[ "${TRAIN_SKIP_CLOUD:-0}" == 1 ]]; }
+
+TRAIN_COMPONENTS=(engine server postgres studio storage realtime functions-worker control-plane)
+train_skips_cloud || TRAIN_COMPONENTS+=(cloud)
+
+# Prints the words given, less the cloud repository and the cloud image when cloud is skipped.
+train_drop_skipped() {
+  local w out=()
+  for w in "$@"; do
+    if train_skips_cloud && [[ "$w" == cloud || "$w" == supatype-cloud ]]; then continue; fi
+    out+=("$w")
+  done
+  echo "${out[*]}"
+}
 
 # Exports the image variables every suite reads, so a stack started by any suite runs the train's
 # images and nothing pulled from a registry.
