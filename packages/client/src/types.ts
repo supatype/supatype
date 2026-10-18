@@ -142,7 +142,7 @@ export interface SupatypeError {
   /**
    * What the server suggests doing instead, when it said. PostgREST passes a Postgres `HINT`
    * through, and the gateway adds one to an insert into a drafts model that is refused for asking
-   * for its row back, naming `supatype.create_record`.
+   * for its row back, naming `supatype.create_record` and `supatype.create_records`.
    */
   hint?: string | undefined
 }

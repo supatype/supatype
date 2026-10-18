@@ -91,4 +91,28 @@ describe.skipIf(restUrl === undefined || jwtSecret === undefined)("an API editor
     expect(drafted.data).toEqual([{ title }])
     expect(publicly).toMatchObject({ data: [], error: null })
   })
+
+  it("creates several records in one insert and returns them in the order sent", async () => {
+    const stamp = Date.now()
+    const titles = [`Batch first ${stamp}`, `Batch second ${stamp}`]
+    const { data, error } = await editor()
+      .from("posts")
+      .insert(titles.map((title) => ({ title, body: { en: title } })))
+      .select("title, body")
+
+    expect(error).toBeNull()
+    expect(data).toEqual(titles.map((title) => ({ title, body: { en: title } })))
+  })
+
+  it("creates none of them when one is refused", async () => {
+    const first = `Refused batch ${Date.now()}`
+    const { data, error } = await editor()
+      .from("posts")
+      .insert([{ title: first }, { title: null }])
+
+    expect(data).toBeNull()
+    expect(error).toMatchObject({ code: "23502" })
+    const drafted = await editor().from("posts").draft().select("title").eq("title", first)
+    expect(drafted).toMatchObject({ data: [], error: null })
+  })
 })

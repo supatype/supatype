@@ -31,6 +31,31 @@ function draftsServer(): FetchMock {
   })
 }
 
+const ID_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+const ID_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+
+/** Postgres's refusal of a record with no title, as PostgREST passes it on. */
+const NOT_NULL = { code: "23502", details: null, hint: null, message: 'null value in column "title" violates not-null constraint' }
+
+/**
+ * Answers `create_records` with two new records, and the draft view with their rows in the other
+ * order, as a database is free to: the client must put them back in the order they were sent.
+ */
+function batchServer(): FetchMock {
+  return mockFetch((input) => {
+    const url = requestUrl(input)
+    if (url.endsWith("/rest/v1/rpc/create_records")) {
+      return Promise.resolve(jsonResponse([{ ...CREATED, record_id: ID_A }, { ...CREATED, record_id: ID_B }]))
+    }
+    return Promise.resolve(
+      jsonResponse([
+        { title: "B", __supatype_created_key: ID_B },
+        { title: "A", __supatype_created_key: ID_A },
+      ]),
+    )
+  })
+}
+
 function serve(fetch: FetchMock): FetchMock {
   vi.stubGlobal("fetch", fetch)
   return fetch
@@ -62,7 +87,7 @@ describe("insert on a model that keeps drafts", () => {
     const readBack = fetchCalls(fetch)[1]
     const url = new URL(readBack?.url ?? "")
     expect(url.pathname).toBe("/rest/v1/posts")
-    expect(url.searchParams.get("id")).toBe(`eq.${ID}`)
+    expect(url.searchParams.get("id")).toBe(`in.(${ID})`)
     expect(url.searchParams.get("select")).toBe("id, title")
     expect(header(readBack?.init ?? {}, "Accept-Profile")).toBe("draft")
   })
@@ -98,16 +123,50 @@ describe("insert on a model that keeps drafts", () => {
     expect(fetchCalls(fetch)).toHaveLength(1)
   })
 
-  it("keeps several rows as one plain insert, which stays all or nothing", async () => {
-    const fetch = serve(mockFetch(() => Promise.resolve(jsonResponse([ROW, ROW], 201))))
+  it("creates several rows in one supatype.create_records call, which is all or nothing", async () => {
+    const fetch = serve(batchServer())
     await client().from("posts").insert([{ title: "A" }, { title: "B" }])
-    expect(fetchCalls(fetch).map((call) => call.url)).toEqual([`${BASE}/rest/v1/posts`])
+    const [create] = fetchCalls(fetch)
+    expect(create?.url).toBe(`${BASE}/rest/v1/rpc/create_records`)
+    expect(header(create?.init ?? {}, "Content-Profile")).toBe("supatype")
+    expect(jsonBody(create?.init ?? {})).toEqual({ model_table: "posts", data: [{ title: "A" }, { title: "B" }] })
   })
 
-  it("hands the caller the gateway's hint when a plain insert is refused", async () => {
+  it("reads several rows back by their keys, with the insert's select and a key to order them by", async () => {
+    const fetch = serve(batchServer())
+    await client().from("posts").insert([{ title: "A" }, { title: "B" }]).select("title")
+    const url = new URL(fetchCalls(fetch)[1]?.url ?? "")
+    expect(url.searchParams.get("id")).toBe(`in.(${ID_A},${ID_B})`)
+    expect(url.searchParams.get("select")).toBe("title,__supatype_created_key:id")
+  })
+
+  it("returns several rows in the order they were sent, as the select asked for them", async () => {
+    serve(batchServer())
+    const { data, error, count } = await client().from("posts").insert([{ title: "A" }, { title: "B" }]).select("title")
+    expect(error).toBeNull()
+    expect(data).toEqual([{ title: "A" }, { title: "B" }])
+    expect(count).toBe(2)
+  })
+
+  it("passes create_records' refusal through and reads nothing back", async () => {
+    const fetch = serve(mockFetch(() => Promise.resolve(jsonResponse(NOT_NULL, 400))))
+    const { data, error } = await client().from("posts").insert([{ title: "A" }, { title: null }])
+    expect(data).toBeNull()
+    expect(error).toMatchObject({ code: "23502", status: 400 })
+    expect(fetchCalls(fetch)).toHaveLength(1)
+  })
+
+  it("leaves an empty insert a plain write, which creates nothing", async () => {
+    const fetch = serve(mockFetch(() => Promise.resolve(jsonResponse([], 201))))
+    const { data } = await client().from("posts").insert([])
+    expect(fetchCalls(fetch).map((call) => call.url)).toEqual([`${BASE}/rest/v1/posts`])
+    expect(data).toEqual([])
+  })
+
+  it("hands the caller the gateway's hint when a plain write is refused", async () => {
     const hint = "This model keeps drafts: create records with supatype.create_record."
     serve(mockFetch(() => Promise.resolve(jsonResponse({ ...REFUSED, hint }, 403))))
-    const { error } = await client().from("posts").insert([{ title: "A" }, { title: "B" }])
+    const { error } = await client().from("posts").upsert({ title: "A" })
     expect(error).toMatchObject({ code: "42501", status: 403, hint })
   })
 

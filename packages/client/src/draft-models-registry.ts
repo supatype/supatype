@@ -3,7 +3,8 @@
  *
  * `supatype push` writes `supatype/client.ts`, which calls {@link registerDraftModels} at import
  * time, as it calls `registerFieldKinds`. The client reads it to send `insert` on such a table
- * through `supatype.create_record` rather than a plain `POST`.
+ * through `supatype.create_record`, or `supatype.create_records` for several rows, rather than a
+ * plain `POST`.
  *
  * # Why an insert needs to know
  *
