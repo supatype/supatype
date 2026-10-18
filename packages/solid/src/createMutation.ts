@@ -2,7 +2,7 @@ import { createSignal } from "solid-js"
 import type { Accessor } from "solid-js"
 import type { AugmentedDatabase, AnyClient, AnyDatabase, SupatypeError } from "@supatype/client"
 import { useSupatype } from "./context.js"
-import { runMutation, type MutationOperation } from "./mutation-request.js"
+import { runMutation, type MutationOperation } from "@supatype/client/bindings"
 
 export type { MutationOperation }
 

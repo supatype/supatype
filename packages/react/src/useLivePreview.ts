@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { isCallerValue } from "./caller-types.js"
+import { isCallerValue } from "@supatype/client/bindings"
 
 export interface UseLivePreviewOptions<TData> {
   /** The initial/server data to display when not in preview mode. */

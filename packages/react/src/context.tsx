@@ -2,7 +2,7 @@
 
 import React from "react"
 import type { AnyClient, SupatypeClient, AnyDatabase, AugmentedDatabase } from "@supatype/client"
-import { isClientFor } from "./caller-types.js"
+import { isClientFor } from "@supatype/client/bindings"
 
 /** Typed at `AnyClient`, narrowed on read. See `AnyClient` for why it is neither generic nor `any`. */
 export const SupatypeContext = React.createContext<AnyClient | null>(null)

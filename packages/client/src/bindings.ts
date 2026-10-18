@@ -1,5 +1,5 @@
 /**
- * `@supatype/client/bindings`: what the Vue, Svelte and Solid bindings share.
+ * `@supatype/client/bindings`: what the React, Vue, Svelte and Solid bindings share.
  *
  * Kept off the main entry on purpose. These are the bindings' building blocks, not API an app is
  * meant to call, and everything on the main entry is a promise to every app. An app subscribes
@@ -15,3 +15,6 @@ export type {
   TableSubscription,
 } from "./table-subscription.js"
 export { startOAuthRedirect } from "./auth-redirect.js"
+export { isClientFor, isRowsOf, isCallerValue } from "./caller-types.js"
+export { runMutation } from "./mutation-request.js"
+export type { MutationOperation, MutationOutcome } from "./mutation-request.js"
