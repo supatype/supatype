@@ -9,6 +9,14 @@ export type StorageReference = {
   path: string
 }
 
+export type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: Json | undefined }
+  | Json[]
+
 declare module "@supatype/client" {
   interface SupatypeModels {
     author: {
@@ -39,6 +47,7 @@ declare module "@supatype/client" {
         websiteUrl?: string | null
         role?: "user" | "editor" | "admin"
       }
+      Relationships: []
     }
     user_profile: {
       Row: {
@@ -74,6 +83,14 @@ declare module "@supatype/client" {
         birthDate?: string | null
         lastSeenAt?: string | null
       }
+      Relationships: [
+        {
+          columns: ["author_id"]
+          isOneToOne: false
+          referencedRelation: "author"
+          referencedColumns: ["id"]
+        },
+      ]
     }
     category: {
       Row: {
@@ -103,6 +120,7 @@ declare module "@supatype/client" {
         isActive?: boolean
         externalId?: string
       }
+      Relationships: []
     }
     tag: {
       Row: {
@@ -120,6 +138,7 @@ declare module "@supatype/client" {
         name?: string
         color?: unknown | null
       }
+      Relationships: []
     }
     post: {
       Row: {
@@ -135,8 +154,8 @@ declare module "@supatype/client" {
         viewCount: number
         rating: number | null
         searchVector: unknown | null
-        embedding: Record<string, unknown> | null
-        metadata: Record<string, unknown> | null
+        embedding: number[] | null
+        metadata: { seo?: { metaTitle?: string; metaDesc?: string }; ogImage?: string } | null
       }
       Insert: {
         id?: string
@@ -151,8 +170,8 @@ declare module "@supatype/client" {
         viewCount?: number
         rating?: number | null
         searchVector?: unknown | null
-        embedding?: Record<string, unknown> | null
-        metadata?: Record<string, unknown> | null
+        embedding?: number[] | null
+        metadata?: { seo?: { metaTitle?: string; metaDesc?: string }; ogImage?: string } | null
       }
       Update: {
         id?: string
@@ -167,9 +186,23 @@ declare module "@supatype/client" {
         viewCount?: number
         rating?: number | null
         searchVector?: unknown | null
-        embedding?: Record<string, unknown> | null
-        metadata?: Record<string, unknown> | null
+        embedding?: number[] | null
+        metadata?: { seo?: { metaTitle?: string; metaDesc?: string }; ogImage?: string } | null
       }
+      Relationships: [
+        {
+          columns: ["author_id"]
+          isOneToOne: false
+          referencedRelation: "author"
+          referencedColumns: ["id"]
+        },
+        {
+          columns: ["category_id"]
+          isOneToOne: false
+          referencedRelation: "category"
+          referencedColumns: ["id"]
+        },
+      ]
     }
     comment: {
       Row: {
@@ -196,15 +229,35 @@ declare module "@supatype/client" {
         user_id?: string | null
         upvotes?: number
       }
+      Relationships: [
+        {
+          columns: ["post_id"]
+          isOneToOne: false
+          referencedRelation: "post"
+          referencedColumns: ["id"]
+        },
+        {
+          columns: ["author_id"]
+          isOneToOne: false
+          referencedRelation: "author"
+          referencedColumns: ["id"]
+        },
+        {
+          columns: ["user_id"]
+          isOneToOne: false
+          referencedRelation: "author"
+          referencedColumns: ["id"]
+        },
+      ]
     }
     bounds_probe: {
       Row: {
         id: string
         headline: string | null
         body: RichText | null
-        tags: Record<string, unknown> | null
-        refs: Record<string, unknown> | null
-        sections: Record<string, unknown> | null
+        tags: string[] | null
+        refs: { id: string }[] | null
+        sections: ({ type: "note"; data: { text: string } })[] | null
         rating: number | null
         observedOn: string | null
         windowOpens: string | null
@@ -215,9 +268,9 @@ declare module "@supatype/client" {
         id?: string
         headline?: string | null
         body?: RichText | string | null
-        tags?: Record<string, unknown> | null
-        refs?: Record<string, unknown> | null
-        sections?: Record<string, unknown> | null
+        tags?: string[] | null
+        refs?: { id: string }[] | null
+        sections?: ({ type: "note"; data: { text: string } })[] | null
         rating?: number | null
         observedOn?: string | null
         windowOpens?: string | null
@@ -228,15 +281,16 @@ declare module "@supatype/client" {
         id?: string
         headline?: string | null
         body?: RichText | string | null
-        tags?: Record<string, unknown> | null
-        refs?: Record<string, unknown> | null
-        sections?: Record<string, unknown> | null
+        tags?: string[] | null
+        refs?: { id: string }[] | null
+        sections?: ({ type: "note"; data: { text: string } })[] | null
         rating?: number | null
         observedOn?: string | null
         windowOpens?: string | null
         windowCloses?: string | null
         reference?: string | null
       }
+      Relationships: []
     }
     event: {
       Row: {
@@ -248,9 +302,9 @@ declare module "@supatype/client" {
         eventDate: string | null
         createdTs: string | null
         duration: { ms: number } | null
-        location: Record<string, unknown> | null
-        coverageArea: Record<string, unknown> | null
-        route: Record<string, unknown> | null
+        location: Json | null
+        coverageArea: Json | null
+        route: Json | null
         organizer_id: string | null
         maxAttendees: number | null
         isPublic: boolean
@@ -266,9 +320,9 @@ declare module "@supatype/client" {
         eventDate?: string | null
         createdTs?: string | null
         duration?: { ms: number } | null
-        location?: Record<string, unknown> | null
-        coverageArea?: Record<string, unknown> | null
-        route?: Record<string, unknown> | null
+        location?: Json | null
+        coverageArea?: Json | null
+        route?: Json | null
         organizer_id?: string | null
         maxAttendees?: number | null
         isPublic?: boolean
@@ -284,15 +338,23 @@ declare module "@supatype/client" {
         eventDate?: string | null
         createdTs?: string | null
         duration?: { ms: number } | null
-        location?: Record<string, unknown> | null
-        coverageArea?: Record<string, unknown> | null
-        route?: Record<string, unknown> | null
+        location?: Json | null
+        coverageArea?: Json | null
+        route?: Json | null
         organizer_id?: string | null
         maxAttendees?: number | null
         isPublic?: boolean
         created_at?: string
         updated_at?: string
       }
+      Relationships: [
+        {
+          columns: ["organizer_id"]
+          isOneToOne: false
+          referencedRelation: "author"
+          referencedColumns: ["id"]
+        },
+      ]
     }
     network_log: {
       Row: {
@@ -340,6 +402,7 @@ declare module "@supatype/client" {
         created_at?: string
         updated_at?: string
       }
+      Relationships: []
     }
     product: {
       Row: {
@@ -353,12 +416,12 @@ declare module "@supatype/client" {
         totalSold: bigint
         minOrder: number
         status: "active" | "inactive" | "discontinued"
-        featureTags: Record<string, unknown> | null
+        featureTags: string[] | null
         manualFile: StorageReference | null
         primaryImage: StorageReference
-        embedding: Record<string, unknown> | null
-        specs: Record<string, unknown> | null
-        content: Record<string, unknown> | null
+        embedding: number[] | null
+        specs: { [key: string]: boolean | string | number } | null
+        content: ({ type: "hero"; data: { heading: string; subheading?: string; backgroundImage?: StorageReference; ctaLabel?: string; ctaUrl?: string } } | { type: "rich_text"; data: { content: RichText } } | { type: "callout"; data: { level: "info" | "warning" | "error" | "success"; message: string; icon?: string } } | { type: "image_gallery"; data: { caption?: string; columns: number; showCaptions: boolean } })[] | null
       }
       Insert: {
         id?: string
@@ -371,12 +434,12 @@ declare module "@supatype/client" {
         totalSold?: bigint
         minOrder?: number
         status?: "active" | "inactive" | "discontinued"
-        featureTags?: Record<string, unknown> | null
+        featureTags?: string[] | null
         manualFile?: StorageReference | null
         primaryImage: StorageReference
-        embedding?: Record<string, unknown> | null
-        specs?: Record<string, unknown> | null
-        content?: Record<string, unknown> | null
+        embedding?: number[] | null
+        specs?: { [key: string]: boolean | string | number } | null
+        content?: ({ type: "hero"; data: { heading: string; subheading?: string; backgroundImage?: StorageReference; ctaLabel?: string; ctaUrl?: string } } | { type: "rich_text"; data: { content: RichText } } | { type: "callout"; data: { level: "info" | "warning" | "error" | "success"; message: string; icon?: string } } | { type: "image_gallery"; data: { caption?: string; columns: number; showCaptions: boolean } })[] | null
       }
       Update: {
         id?: string
@@ -389,13 +452,14 @@ declare module "@supatype/client" {
         totalSold?: bigint
         minOrder?: number
         status?: "active" | "inactive" | "discontinued"
-        featureTags?: Record<string, unknown> | null
+        featureTags?: string[] | null
         manualFile?: StorageReference | null
         primaryImage?: StorageReference
-        embedding?: Record<string, unknown> | null
-        specs?: Record<string, unknown> | null
-        content?: Record<string, unknown> | null
+        embedding?: number[] | null
+        specs?: { [key: string]: boolean | string | number } | null
+        content?: ({ type: "hero"; data: { heading: string; subheading?: string; backgroundImage?: StorageReference; ctaLabel?: string; ctaUrl?: string } } | { type: "rich_text"; data: { content: RichText } } | { type: "callout"; data: { level: "info" | "warning" | "error" | "success"; message: string; icon?: string } } | { type: "image_gallery"; data: { caption?: string; columns: number; showCaptions: boolean } })[] | null
       }
+      Relationships: []
     }
     subscription: {
       Row: {
@@ -411,7 +475,7 @@ declare module "@supatype/client" {
         quantity: number
         unitAmount: string
         currency: string
-        metadata: Record<string, unknown> | null
+        metadata: { [key: string]: string } | null
         created_at: string
         updated_at: string
       }
@@ -428,7 +492,7 @@ declare module "@supatype/client" {
         quantity?: number
         unitAmount: string
         currency?: string
-        metadata?: Record<string, unknown> | null
+        metadata?: { [key: string]: string } | null
         created_at?: string
         updated_at?: string
       }
@@ -445,36 +509,80 @@ declare module "@supatype/client" {
         quantity?: number
         unitAmount?: string
         currency?: string
-        metadata?: Record<string, unknown> | null
+        metadata?: { [key: string]: string } | null
         created_at?: string
         updated_at?: string
       }
+      Relationships: [
+        {
+          columns: ["subscriber_id"]
+          isOneToOne: false
+          referencedRelation: "author"
+          referencedColumns: ["id"]
+        },
+      ]
     }
     page: {
       Row: {
         id: string
         title: string
         slug: string
-        content: Record<string, unknown> | null
+        content: ({ type: "hero"; data: { heading: string; subheading?: string; backgroundImage?: StorageReference; ctaLabel?: string; ctaUrl?: string } } | { type: "rich_text"; data: { content: RichText } } | { type: "callout"; data: { level: "info" | "warning" | "error" | "success"; message: string; icon?: string } } | { type: "image_gallery"; data: { caption?: string; columns: number; showCaptions: boolean } })[] | null
         author_id: string | null
-        metadata: Record<string, unknown> | null
+        metadata: { seo?: { title?: string; description?: string }; noIndex?: boolean } | null
       }
       Insert: {
         id?: string
         title: string
         slug?: string
-        content?: Record<string, unknown> | null
+        content?: ({ type: "hero"; data: { heading: string; subheading?: string; backgroundImage?: StorageReference; ctaLabel?: string; ctaUrl?: string } } | { type: "rich_text"; data: { content: RichText } } | { type: "callout"; data: { level: "info" | "warning" | "error" | "success"; message: string; icon?: string } } | { type: "image_gallery"; data: { caption?: string; columns: number; showCaptions: boolean } })[] | null
         author_id?: string | null
-        metadata?: Record<string, unknown> | null
+        metadata?: { seo?: { title?: string; description?: string }; noIndex?: boolean } | null
       }
       Update: {
         id?: string
         title?: string
         slug?: string
-        content?: Record<string, unknown> | null
+        content?: ({ type: "hero"; data: { heading: string; subheading?: string; backgroundImage?: StorageReference; ctaLabel?: string; ctaUrl?: string } } | { type: "rich_text"; data: { content: RichText } } | { type: "callout"; data: { level: "info" | "warning" | "error" | "success"; message: string; icon?: string } } | { type: "image_gallery"; data: { caption?: string; columns: number; showCaptions: boolean } })[] | null
         author_id?: string | null
-        metadata?: Record<string, unknown> | null
+        metadata?: { seo?: { title?: string; description?: string }; noIndex?: boolean } | null
       }
+      Relationships: [
+        {
+          columns: ["author_id"]
+          isOneToOne: false
+          referencedRelation: "author"
+          referencedColumns: ["id"]
+        },
+      ]
+    }
+    post_tag: {
+      Row: {
+        tag_id: string
+        post_id: string
+      }
+      Insert: {
+        tag_id: string
+        post_id: string
+      }
+      Update: {
+        tag_id?: string
+        post_id?: string
+      }
+      Relationships: [
+        {
+          columns: ["tag_id"]
+          isOneToOne: false
+          referencedRelation: "tag"
+          referencedColumns: ["id"]
+        },
+        {
+          columns: ["post_id"]
+          isOneToOne: false
+          referencedRelation: "post"
+          referencedColumns: ["id"]
+        },
+      ]
     }
   }
 }

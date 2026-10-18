@@ -99,7 +99,14 @@ export type Database = {
           updated_at?: string
           deleted_at?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "author"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       category: {
         Row: {
@@ -170,7 +177,7 @@ export type Database = {
           rating: number | null
           searchVector: string | null
           embedding: number[] /* dim 1536 */ | null
-          metadata: Json | null
+          metadata: { seo?: { metaTitle?: string; metaDesc?: string }; ogImage?: string } | null
           created_at: string
           updated_at: string
         }
@@ -188,7 +195,7 @@ export type Database = {
           rating?: number | null
           searchVector?: string | null
           embedding?: number[] /* dim 1536 */ | null
-          metadata?: Json | null
+          metadata?: { seo?: { metaTitle?: string; metaDesc?: string }; ogImage?: string } | null
           created_at?: string
           updated_at?: string
         }
@@ -206,11 +213,24 @@ export type Database = {
           rating?: number | null
           searchVector?: string | null
           embedding?: number[] /* dim 1536 */ | null
-          metadata?: Json | null
+          metadata?: { seo?: { metaTitle?: string; metaDesc?: string }; ogImage?: string } | null
           created_at?: string
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "author"
+            referencedColumns: ["id"]
+          },
+          {
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "category"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       comment: {
         Row: {
@@ -246,7 +266,26 @@ export type Database = {
           updated_at?: string
           deleted_at?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            columns: ["post_id"]
+            isOneToOne: false
+            referencedRelation: "post"
+            referencedColumns: ["id"]
+          },
+          {
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "author"
+            referencedColumns: ["id"]
+          },
+          {
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "author"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       bounds_probe: {
         Row: {
@@ -254,7 +293,7 @@ export type Database = {
           headline: string | null
           body: RichText | null
           tags: string[] | null
-          refs: Json | null
+          refs: { id: string }[] | null
           sections: ({ type: "note"; data: { text: string } })[] | null
           rating: number | null
           observedOn: string | null
@@ -267,7 +306,7 @@ export type Database = {
           headline?: string | null
           body?: RichText | string | null
           tags?: string[] | null
-          refs?: Json | null
+          refs?: { id: string }[] | null
           sections?: ({ type: "note"; data: { text: string } })[] | null
           rating?: number | null
           observedOn?: string | null
@@ -280,7 +319,7 @@ export type Database = {
           headline?: string | null
           body?: RichText | string | null
           tags?: string[] | null
-          refs?: Json | null
+          refs?: { id: string }[] | null
           sections?: ({ type: "note"; data: { text: string } })[] | null
           rating?: number | null
           observedOn?: string | null
@@ -299,7 +338,7 @@ export type Database = {
           endsAt: string | null
           eventDate: string | null
           createdTs: string | null
-          duration: Json | null
+          duration: { ms: number } | null
           location: Json | null
           coverageArea: Json | null
           route: Json | null
@@ -317,7 +356,7 @@ export type Database = {
           endsAt?: string | null
           eventDate?: string | null
           createdTs?: string | null
-          duration?: Json | null
+          duration?: { ms: number } | null
           location?: Json | null
           coverageArea?: Json | null
           route?: Json | null
@@ -335,7 +374,7 @@ export type Database = {
           endsAt?: string | null
           eventDate?: string | null
           createdTs?: string | null
-          duration?: Json | null
+          duration?: { ms: number } | null
           location?: Json | null
           coverageArea?: Json | null
           route?: Json | null
@@ -345,7 +384,14 @@ export type Database = {
           created_at?: string
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            columns: ["organizer_id"]
+            isOneToOne: false
+            referencedRelation: "author"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       network_log: {
         Row: {
@@ -411,7 +457,7 @@ export type Database = {
           manualFile: StorageReference | null
           primaryImage: StorageReference
           embedding: number[] /* dim 1536 */ | null
-          specs: Json | null
+          specs: { [key: string]: boolean | string | number } | null
           content: ({ type: "hero"; data: { heading: string; subheading?: string; backgroundImage?: StorageReference; ctaLabel?: string; ctaUrl?: string } } | { type: "rich_text"; data: { content: RichText } } | { type: "callout"; data: { level: "info" | "warning" | "error" | "success"; message: string; icon?: string } } | { type: "image_gallery"; data: { caption?: string; columns: number; showCaptions: boolean } })[] | null
           created_at: string
           updated_at: string
@@ -431,7 +477,7 @@ export type Database = {
           manualFile?: StorageReference | null
           primaryImage: StorageReference
           embedding?: number[] /* dim 1536 */ | null
-          specs?: Json | null
+          specs?: { [key: string]: boolean | string | number } | null
           content?: ({ type: "hero"; data: { heading: string; subheading?: string; backgroundImage?: StorageReference; ctaLabel?: string; ctaUrl?: string } } | { type: "rich_text"; data: { content: RichText } } | { type: "callout"; data: { level: "info" | "warning" | "error" | "success"; message: string; icon?: string } } | { type: "image_gallery"; data: { caption?: string; columns: number; showCaptions: boolean } })[] | null
           created_at?: string
           updated_at?: string
@@ -451,7 +497,7 @@ export type Database = {
           manualFile?: StorageReference | null
           primaryImage?: StorageReference
           embedding?: number[] /* dim 1536 */ | null
-          specs?: Json | null
+          specs?: { [key: string]: boolean | string | number } | null
           content?: ({ type: "hero"; data: { heading: string; subheading?: string; backgroundImage?: StorageReference; ctaLabel?: string; ctaUrl?: string } } | { type: "rich_text"; data: { content: RichText } } | { type: "callout"; data: { level: "info" | "warning" | "error" | "success"; message: string; icon?: string } } | { type: "image_gallery"; data: { caption?: string; columns: number; showCaptions: boolean } })[] | null
           created_at?: string
           updated_at?: string
@@ -472,7 +518,7 @@ export type Database = {
           quantity: number
           unitAmount: string
           currency: string
-          metadata: Json | null
+          metadata: { [key: string]: string } | null
           created_at: string
           updated_at: string
         }
@@ -489,7 +535,7 @@ export type Database = {
           quantity?: number
           unitAmount: string
           currency?: string
-          metadata?: Json | null
+          metadata?: { [key: string]: string } | null
           created_at?: string
           updated_at?: string
         }
@@ -506,11 +552,18 @@ export type Database = {
           quantity?: number
           unitAmount?: string
           currency?: string
-          metadata?: Json | null
+          metadata?: { [key: string]: string } | null
           created_at?: string
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            columns: ["subscriber_id"]
+            isOneToOne: false
+            referencedRelation: "author"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       page: {
         Row: {
@@ -519,7 +572,7 @@ export type Database = {
           slug: string
           content: ({ type: "hero"; data: { heading: string; subheading?: string; backgroundImage?: StorageReference; ctaLabel?: string; ctaUrl?: string } } | { type: "rich_text"; data: { content: RichText } } | { type: "callout"; data: { level: "info" | "warning" | "error" | "success"; message: string; icon?: string } } | { type: "image_gallery"; data: { caption?: string; columns: number; showCaptions: boolean } })[] | null
           author_id: string | null
-          metadata: Json | null
+          metadata: { seo?: { title?: string; description?: string }; noIndex?: boolean } | null
           created_at: string
           updated_at: string
         }
@@ -529,7 +582,7 @@ export type Database = {
           slug?: string
           content?: ({ type: "hero"; data: { heading: string; subheading?: string; backgroundImage?: StorageReference; ctaLabel?: string; ctaUrl?: string } } | { type: "rich_text"; data: { content: RichText } } | { type: "callout"; data: { level: "info" | "warning" | "error" | "success"; message: string; icon?: string } } | { type: "image_gallery"; data: { caption?: string; columns: number; showCaptions: boolean } })[] | null
           author_id?: string | null
-          metadata?: Json | null
+          metadata?: { seo?: { title?: string; description?: string }; noIndex?: boolean } | null
           created_at?: string
           updated_at?: string
         }
@@ -539,11 +592,46 @@ export type Database = {
           slug?: string
           content?: ({ type: "hero"; data: { heading: string; subheading?: string; backgroundImage?: StorageReference; ctaLabel?: string; ctaUrl?: string } } | { type: "rich_text"; data: { content: RichText } } | { type: "callout"; data: { level: "info" | "warning" | "error" | "success"; message: string; icon?: string } } | { type: "image_gallery"; data: { caption?: string; columns: number; showCaptions: boolean } })[] | null
           author_id?: string | null
-          metadata?: Json | null
+          metadata?: { seo?: { title?: string; description?: string }; noIndex?: boolean } | null
           created_at?: string
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "author"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      post_tag: {
+        Row: {
+          tag_id: string
+          post_id: string
+        }
+        Insert: {
+          tag_id: string
+          post_id: string
+        }
+        Update: {
+          tag_id?: string
+          post_id?: string
+        }
+        Relationships: [
+          {
+            columns: ["tag_id"]
+            isOneToOne: false
+            referencedRelation: "tag"
+            referencedColumns: ["id"]
+          },
+          {
+            columns: ["post_id"]
+            isOneToOne: false
+            referencedRelation: "post"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {
