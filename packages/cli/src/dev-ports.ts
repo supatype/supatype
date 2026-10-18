@@ -394,6 +394,14 @@ export async function ensureDevDbPort(cwd: string, opts: EnsureDevDbPortOptions 
   if (opts.composeProject !== undefined && portHeldByComposeProject(persisted, opts.composeProject)) {
     return persisted
   }
+  // A port from the shell is not ours to move, for the reason `ensureKongPort` gives: compose binds
+  // the shell's value ahead of `.env`, so a new port written there would be ignored (DR9).
+  if ((process.env["SUPATYPE_DEV_DB_PORT"]?.trim() ?? "") !== "") {
+    throw new Error(
+      `Port ${persisted} is in use, and SUPATYPE_DEV_DB_PORT=${persisted} is set in your shell. ` +
+        "Unset it to use the port in .env, set it to a free port, or stop the service using this one.",
+    )
+  }
   if (opts.mayMove !== true) {
     throw new Error(
       `Port ${persisted} (SUPATYPE_DEV_DB_PORT) is in use by something other than this project's ` +
