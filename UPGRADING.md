@@ -295,12 +295,13 @@ the column, and no row changes: change or remove those values, then push again.
 
 ### Moving rows saved in the old shape
 
-Rows written in the flat shape (`{ "type": "hero", "heading": "Hi" }`) are not moved for you.
-**Move them before anyone opens those records in Studio.** Studio reads a block's fields from
-`data` only, so a flat entry opens with every field empty. Editing it and saving gives the entry a
-`data` that holds only what was typed and leaves the old text beside it, where no renderer reads
-it, and the script below skips any entry that already has `data`. To list the entries that went
-through that, and move their text by hand:
+`supatype push` moves rows written in the flat shape (`{ "type": "hero", "heading": "Hi" }`) for
+you, and so does `supatype dev`, which pushes. **Push before anyone opens those records in
+Studio.** Studio reads a block's fields from `data` only, so a flat entry opens with every field
+empty. Editing it and saving gives the entry a `data` that holds only what was typed and leaves
+the old text beside it, where no renderer reads it, and neither the push nor the script below
+touches an entry that already has `data`. To list the entries that went through that, and move
+their text by hand:
 
 ```sql
 SELECT p.id, e FROM page p, jsonb_array_elements(p.body) AS e
@@ -318,7 +319,36 @@ also have the shape a model's row gives them. Each field of a block is one of th
   editor saves and the renderer reads. A plain string becomes one paragraph holding that text. A
   `Localized<RichText>` field is both: `{ "en": { "root": { ... } } }`.
 
-For a block entry `e` (one element of the column's array) and a field `<field>`, each case reads:
+#### What the push does
+
+For each `Blocks` column the schema declares, in the live table and in every snapshot of a model
+with `versions`, the push finds the entries that are objects with no `data` and name a block the
+column declares, and rewrites each as `{ type, data, meta? }` by the three cases above, using the
+schema's block definitions and its `defaultLocale`. A `Localized` value is kept when it is already
+a locale map (an object keyed only by the schema's locales), and a `Localized<Blocks>` column has
+each locale's array moved. It runs in the push's own transaction, after the push's other changes.
+
+- **`supatype diff` shows what is pending**, as a warning such as `Will convert 6 block entries in
+  page.body (2 version rows) to the 0.7.0 shape { type, data }.` The push then reports `Converted 6
+  block entries in page.body (2 version rows)`, and the migration history records the statements
+  and that line beside them.
+- **A second push changes nothing.** An entry that already has `data` is kept, a row with nothing
+  to move is not rewritten, and a push with nothing to move is up to date. Finding out costs one
+  read-only query per `Blocks` column.
+- **Nothing it cannot read is changed.** An entry that is not an object, one naming a block the
+  schema no longer declares, and one with `data` and fields beside it are left as they are, and
+  the push warns with how many there are in which column rather than failing.
+- **A column this push creates, renames, retypes or drops** is moved by the next push.
+- **The live row is updated like any other write**, so `updated_at` moves and a
+  `versions: { drafts: false }` model records one snapshot per row, already in the new shape. The
+  snapshots are updated with the snapshot table's guard trigger off for that one statement, and it
+  is on again before the push commits. `supatype rollback` does not move entries back.
+
+#### Moving them by hand
+
+The script below makes the same move without a push: for a database you cannot push to, or to move
+the rows before you upgrade. For a block entry `e` (one element of the column's array) and a field
+`<field>`, each case reads:
 
 ```sql
 -- A plain field: the whole entry minus its name and meta (put a meta back beside data).
