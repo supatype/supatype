@@ -361,6 +361,9 @@ export function emitBlockNestedField(field: FieldAstV2): FieldAstV2 {
   if (field.geoType !== undefined) wire.geoType = field.geoType
   if (field.srid !== undefined) wire.srid = field.srid
   if (field.dimensions !== undefined) wire.dimensions = field.dimensions
+  // The engine requires it on an array, and types the array by it: without it a block holding
+  // `Int[]` failed to parse, and the CLI typed it `string[]`.
+  if (db.elementType !== undefined) wire.elementType = db.elementType
   if (field.check !== undefined) wire.check = field.check
   if (field.validation !== undefined) wire.validation = field.validation
   if (field.precision !== undefined) wire.precision = field.precision
