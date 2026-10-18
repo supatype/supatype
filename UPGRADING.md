@@ -286,23 +286,180 @@ fallback.
 - **An array inside a block** (`counts: Int[]`) is accepted by the engine and typed by element. A
   schema with one used to be refused.
 
-Rows written in the flat shape are not moved for you. To move them, for a column `body` on `page`:
-
-```sql
-UPDATE page SET body = (
-  SELECT jsonb_agg(CASE WHEN e ? 'data' THEN e
-                        ELSE jsonb_build_object('type', e->'type', 'data', e - 'type') END
-                   ORDER BY ord)
-  FROM jsonb_array_elements(body) WITH ORDINALITY AS t(e, ord))
-WHERE jsonb_typeof(body) = 'array' AND jsonb_array_length(body) > 0;
-```
-
 **Changing a `JSON` field to `Blocks`** converts what the column holds: each object in an array
 becomes its own entry of the field's first block, a lone object becomes one entry, `[]` stays `[]`,
 and entries already shaped `{ type, data }` are kept. It used to put the whole array in one entry
 under `data.value`, and turn `[]` into one empty block. A value that is not an object (a string, a
 number, or an array holding one) has no fields to put under `data`, so the push is refused, naming
 the column, and no row changes: change or remove those values, then push again.
+
+### Moving rows saved in the old shape
+
+Rows written in the flat shape (`{ "type": "hero", "heading": "Hi" }`) are not moved for you.
+**Move them before anyone opens those records in Studio.** Studio reads a block's fields from
+`data` only, so a flat entry opens with every field empty. Editing it and saving gives the entry a
+`data` that holds only what was typed and leaves the old text beside it, where no renderer reads
+it, and the script below skips any entry that already has `data`. To list the entries that went
+through that, and move their text by hand:
+
+```sql
+SELECT p.id, e FROM page p, jsonb_array_elements(p.body) AS e
+ WHERE e ? 'data' AND e - 'type' - 'data' - 'meta' <> '{}';
+```
+
+Putting the fields under `data` is not enough on its own, because the fields under `data` must
+also have the shape a model's row gives them. Each field of a block is one of three cases:
+
+- **A plain field** (`string`, `Int`, `Boolean`, an object such as a button) moves under `data`
+  unchanged. `meta` stays beside `type` and `data`.
+- **A `Localized` field** becomes a locale map. A flat row holds one value, so put it under the
+  project's `defaultLocale` (the second argument of `LocaleConfig`): `"Hi"` becomes `{ "en": "Hi" }`.
+- **A `RichText` field** becomes Lexical editor state, `{ "root": { ... } }`, which is what Studio's
+  editor saves and the renderer reads. A plain string becomes one paragraph holding that text. A
+  `Localized<RichText>` field is both: `{ "en": { "root": { ... } } }`.
+
+For a block entry `e` (one element of the column's array) and a field `<field>`, each case reads:
+
+```sql
+-- A plain field: the whole entry minus its name and meta (put a meta back beside data).
+jsonb_build_object('type', e->'type', 'data', e - 'type' - 'meta')
+
+-- A Localized field: a plain value under the default locale. A map, or null, is kept.
+CASE WHEN jsonb_typeof(e->'<field>') = 'string'
+     THEN jsonb_build_object('<defaultLocale>', e->'<field>') ELSE e->'<field>' END
+
+-- A RichText field: a plain string as one paragraph of Lexical state.
+jsonb_build_object('root', jsonb_build_object(
+  'type', 'root', 'version', 1, 'direction', NULL, 'format', '', 'indent', 0,
+  'children', jsonb_build_array(jsonb_build_object(
+    'type', 'paragraph', 'version', 1, 'direction', NULL, 'format', '', 'indent', 0,
+    'children', jsonb_build_array(jsonb_build_object(
+      'type', 'text', 'version', 1, 'text', e->>'<field>', 'format', 0, 'detail', 0,
+      'mode', 'normal', 'style', ''))))))
+```
+
+**On a model with `versions`, move the snapshots too.** Each row of `<table>_versions` holds a
+whole copy of the record in its `data` column, the Blocks column included. Studio edits a draft
+from the newest snapshot, `publish` copies a snapshot into the live row, and `restore_version`
+turns an old one into a new draft, so a snapshot left flat puts the flat shape back the next time
+any of them runs. Every snapshot needs the same move, not only the newest. The snapshot table's
+guard trigger keeps a version's `data` from changing: an `UPDATE` reports success and changes
+nothing, so the script turns that table's triggers off for its one statement and back on before
+it commits. On a `versions: { drafts: false }` model the `UPDATE` of the table also records one new
+snapshot per row it changes, already in the new shape.
+
+Run it in `psql` as the database superuser, which bypasses the model table's row level security
+and may turn the triggers off. On a native stack, `supatype pg psql` and then `\i move-blocks.sql`.
+On the Docker stack, with `.env`'s `POSTGRES_PASSWORD` and `POSTGRES_DB`:
+
+```sh
+docker exec -i -e PGPASSWORD="$POSTGRES_PASSWORD" supatype-<project>-db-1 \
+  psql -v ON_ERROR_STOP=1 -U supatype_admin -d "$POSTGRES_DB" < move-blocks.sql
+```
+
+The `ALTER TABLE` locks the snapshot table until `COMMIT`, so run it while nobody is editing.
+
+The whole script, for kitchen-sink's `Page`, whose `body` is `Blocks<HeroBlock | ProseBlock |
+SpeakerGridBlock>` with `heading` and `subheading` localized strings and `body` a
+`Localized<RichText>`. For your own schema, change the locale, the `WHEN` lines (one per block
+that has a `Localized` or `RichText` field) and the table and column names in the two `UPDATE`s;
+drop the second `UPDATE` and its `ALTER TABLE` lines on a model without `versions`. It runs
+in one transaction and can be run again: an entry that already has `data` is kept as it is.
+
+```sql
+BEGIN;
+
+-- The project's defaultLocale (LocaleConfig<[...], "en">).
+CREATE FUNCTION pg_temp.locale() RETURNS text LANGUAGE sql AS $$ SELECT 'en' $$;
+
+-- Localized<string>: a plain string becomes { "<locale>": text }. A locale map, or null, is kept.
+CREATE FUNCTION pg_temp.localized(v jsonb) RETURNS jsonb LANGUAGE sql AS $$
+  SELECT CASE WHEN jsonb_typeof(v) = 'string'
+              THEN jsonb_build_object(pg_temp.locale(), v) ELSE v END
+$$;
+
+-- RichText: a plain string becomes one paragraph of Lexical state. Editor state, or null, is kept.
+CREATE FUNCTION pg_temp.rich(v jsonb) RETURNS jsonb LANGUAGE sql AS $$
+  SELECT CASE WHEN jsonb_typeof(v) <> 'string' THEN v ELSE jsonb_build_object('root', jsonb_build_object(
+    'type', 'root', 'version', 1, 'direction', NULL, 'format', '', 'indent', 0,
+    'children', jsonb_build_array(jsonb_build_object(
+      'type', 'paragraph', 'version', 1, 'direction', NULL, 'format', '', 'indent', 0,
+      'children', jsonb_build_array(jsonb_build_object(
+        'type', 'text', 'version', 1, 'text', v #>> '{}', 'format', 0, 'detail', 0,
+        'mode', 'normal', 'style', '')))))) END
+$$;
+
+-- Localized<RichText>: a string or editor state goes under the locale, and each value of a locale
+-- map becomes editor state.
+CREATE FUNCTION pg_temp.localized_rich(v jsonb) RETURNS jsonb LANGUAGE sql AS $$
+  SELECT CASE
+    WHEN jsonb_typeof(v) = 'string' OR (jsonb_typeof(v) = 'object' AND v ? 'root')
+      THEN jsonb_build_object(pg_temp.locale(), pg_temp.rich(v))
+    WHEN jsonb_typeof(v) = 'object'
+      THEN (SELECT jsonb_object_agg(l, pg_temp.rich(t)) FROM jsonb_each(v) AS m(l, t))
+    ELSE v END
+$$;
+
+-- A block's fields, each converted by the list it is named in. A field in no list is kept as it is.
+CREATE FUNCTION pg_temp.fields(d jsonb, localized text[], rich text[], localized_rich text[])
+  RETURNS jsonb LANGUAGE sql AS $$
+  SELECT COALESCE(jsonb_object_agg(k, CASE
+    WHEN k = ANY (localized) THEN pg_temp.localized(v)
+    WHEN k = ANY (rich) THEN pg_temp.rich(v)
+    WHEN k = ANY (localized_rich) THEN pg_temp.localized_rich(v)
+    ELSE v END), '{}')
+  FROM jsonb_each(d) AS f(k, v)
+$$;
+
+-- One entry as { type, data, meta? }. An entry that already has `data` is kept as it is.
+CREATE FUNCTION pg_temp.block(e jsonb) RETURNS jsonb LANGUAGE sql AS $$
+  SELECT CASE WHEN jsonb_typeof(e) <> 'object' OR e ? 'data' THEN e ELSE
+    jsonb_build_object('type', e->'type', 'data', CASE e->>'type'
+      -- One WHEN per block that has a Localized or RichText field:
+      --   its Localized fields, its RichText fields, its Localized<RichText> fields.
+      WHEN 'hero'        THEN pg_temp.fields(e - 'type' - 'meta', '{heading,subheading}', '{}', '{}')
+      WHEN 'prose'       THEN pg_temp.fields(e - 'type' - 'meta', '{}', '{}', '{body}')
+      WHEN 'speakerGrid' THEN pg_temp.fields(e - 'type' - 'meta', '{heading}', '{}', '{}')
+      ELSE e - 'type' - 'meta' END)
+    || CASE WHEN e ? 'meta' THEN jsonb_build_object('meta', e->'meta') ELSE '{}' END
+  END
+$$;
+
+-- A Blocks value: each entry of the array moved, or each locale's array on a Localized<Blocks>.
+CREATE FUNCTION pg_temp.blocks(b jsonb) RETURNS jsonb LANGUAGE sql AS $$
+  SELECT CASE jsonb_typeof(b)
+    WHEN 'array' THEN (SELECT COALESCE(jsonb_agg(pg_temp.block(e) ORDER BY n), '[]')
+                         FROM jsonb_array_elements(b) WITH ORDINALITY AS t(e, n))
+    WHEN 'object' THEN (SELECT jsonb_object_agg(l, pg_temp.blocks(a)) FROM jsonb_each(b) AS m(l, a))
+    ELSE b END
+$$;
+
+UPDATE page SET body = pg_temp.blocks(body)
+ WHERE body IS DISTINCT FROM pg_temp.blocks(body);
+
+-- Only for a model with `versions`: every snapshot that holds the column. The guard trigger keeps
+-- a version's data from changing, so it is off for this statement and back on before COMMIT.
+ALTER TABLE page_versions DISABLE TRIGGER USER;
+UPDATE page_versions SET data = jsonb_set(data, '{body}', pg_temp.blocks(data->'body'))
+ WHERE data ? 'body' AND data->'body' IS DISTINCT FROM pg_temp.blocks(data->'body');
+ALTER TABLE page_versions ENABLE TRIGGER USER;
+
+COMMIT;
+```
+
+A `prose` entry stored as `{ "type": "prose", "body": "Two days of talks." }` comes out as:
+
+```json
+{ "type": "prose", "data": { "body": { "en": { "root": {
+  "type": "root", "version": 1, "direction": null, "format": "", "indent": 0,
+  "children": [{ "type": "paragraph", "version": 1, "direction": null, "format": "", "indent": 0,
+    "children": [{ "type": "text", "version": 1, "text": "Two days of talks.", "format": 0,
+      "detail": 0, "mode": "normal", "style": "" }] }] } } } } }
+```
+
+and `{ "type": "hero", "heading": "Kitchen Sink Conference" }` as
+`{ "type": "hero", "data": { "heading": { "en": "Kitchen Sink Conference" } } }`, the shapes
+`examples/kitchen-sink/seed.ts` writes.
 
 ## Extensions move to the extensions schema
 

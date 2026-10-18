@@ -15,8 +15,12 @@ Highlights: identity and generated columns; `AutoIncrement` as an identity by de
   what both generated files already said. It was `{ type: "hero"; heading: string }`, a shape no
   editor writes, so code typed from it read every field as missing on a page saved in Studio.
   `data` reads like a model's row: `Localized<string>` is the locale map and `Optional<T>` may be
-  absent or null. Read `entry.data.heading` where you read `entry.heading`; see `UPGRADING.md` for
-  rows seeded in the old shape.
+  absent or null. Read `entry.data.heading` where you read `entry.heading`. Rows stored in the old
+  shape need more than a move under `data`: a `Localized` field becomes a locale map in the
+  project's default locale and a `RichText` field becomes Lexical editor state, in the model's
+  `<table>_versions` snapshots too. `UPGRADING.md` has the SQL. Run it before those records are
+  saved in Studio, which shows a flat entry's fields empty and leaves its text where nothing reads
+  it.
 
 ### Features
 
