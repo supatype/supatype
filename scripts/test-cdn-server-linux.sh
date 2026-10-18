@@ -103,7 +103,7 @@ if [[ "$MAGIC" != "7f454c46" ]]; then
     fi
     die "CDN object is a static library archive (.a), not a Linux ELF binary.
   Integration/CLI cannot execute this (shell reports 'Syntax error').
-  Fix: supatype-auth server-release.yml must upload 'go build -o ...' executables, not -buildmode=c-archive.
+  Fix: supatype/server server-release.yml must upload 'go build -o ...' executables, not -buildmode=c-archive.
   Re-tag and re-publish server v${VERSION} after fixing the workflow."
   fi
   die "Not ELF (magic=${MAGIC}). $(describe_magic "$MAGIC")"
