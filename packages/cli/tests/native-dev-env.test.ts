@@ -50,6 +50,7 @@ const coreInput = (pgBinDir: string | null): NativeServerCoreInput => ({
   adminConfigPath: "/p/.supatype/admin-config.json",
   postgrestPort: "3001",
   pgBinDir,
+  databaseUrl: "postgres://postgres:s3cret@127.0.0.1:5433/acme?sslmode=disable",
 })
 
 describe("supatype-server's outer environment on the native path", () => {
@@ -71,12 +72,21 @@ describe("supatype-server's outer environment on the native path", () => {
       SUPATYPE_MANIFEST_PATH: "/p/.supatype/manifest.json",
       SUPATYPE_ADMIN_CONFIG_PATH: "/p/.supatype/admin-config.json",
       SUPATYPE_POSTGREST_URL: "http://127.0.0.1:3001",
+      SUPATYPE_DB_PUBLIC_URL: "postgres://postgres@127.0.0.1:5433/acme?sslmode=disable",
     })
   })
 
   it("omits the cache address when there is none", () => {
     const env = nativeServerCoreEnv({ ...coreInput(binDir), valkeyAddr: "" })
     expect(env).not.toHaveProperty("SUPATYPE_VALKEY_ADDR")
+  })
+
+  it("tells the server where Studio connects from, and never with the password", () => {
+    // Studio's connection strings come from this. They used to be built from the API URL, which
+    // named the gateway's port and a login and database this project does not have.
+    const env = nativeServerCoreEnv(coreInput(binDir))
+    expect(env["SUPATYPE_DB_PUBLIC_URL"]).toBe("postgres://postgres@127.0.0.1:5433/acme?sslmode=disable")
+    expect(JSON.stringify(env)).not.toContain("s3cret")
   })
 })
 

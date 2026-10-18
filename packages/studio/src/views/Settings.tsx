@@ -8,6 +8,7 @@ import { cn } from "../lib/utils.js"
 import { type Guard, isBoolean, isJsonObject, isNumber, isShape, isString, optional, readJson, readJsonObject } from "../lib/json.js"
 import { Badge, Button, Card, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
+import { ConnectionStringPanel } from "../components/database/ConnectionStringPanel.js"
 import { ApiCorsSettings } from "./ApiCorsSettings.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -45,7 +46,6 @@ function GeneralSettings(): React.ReactElement {
   const adminConfig = useAdminConfig()
   const [projectName, setProjectName] = useState(adminConfig.branding?.appName ?? "")
   const [siteUrl, setSiteUrl] = useState("")
-  const [dbUrl] = useState(client.url.replace(/\/rest\/v1\/?$/, ""))
   const [apiUrl] = useState(client.url)
   const [region] = useState("")
   const [saved, setSaved] = useState(false)
@@ -67,10 +67,6 @@ function GeneralSettings(): React.ReactElement {
           <label className="block text-[0.8rem] text-muted-foreground mb-1">Site URL</label>
           <Input value={siteUrl} onChange={(e) => setSiteUrl(e.target.value)} />
           <p className="text-xs text-zinc-600 mt-1">Used for email templates and OAuth redirect URLs.</p>
-        </div>
-        <div>
-          <label className="block text-[0.8rem] text-muted-foreground mb-1">Database URL</label>
-          <Input className="text-muted-foreground" value={dbUrl} readOnly />
         </div>
         <div>
           <label className="block text-[0.8rem] text-muted-foreground mb-1">API URL</label>
@@ -634,10 +630,6 @@ function DatabaseSettings({ client }: { client: ReturnType<typeof useStudioClien
   const [revealedPassword, setRevealedPassword] = useState<string | null>(null)
   const [credActionLoading, setCredActionLoading] = useState(false)
 
-  const dbUrl = client.url.replace(/\/rest\/v1\/?$/, "")
-  const connStr = dbUrl ? `postgres://postgres:[password]@${new URL(dbUrl).host}/postgres` : "-"
-  const poolStr = dbUrl ? `postgres://postgres:[password]@${new URL(dbUrl).host}:5432/postgres?pgbouncer=true` : "-"
-
   const authHeaders = studioAuthHeaders(client)
 
   const loadCredentialStatus = useCallback(async () => {
@@ -707,10 +699,9 @@ function DatabaseSettings({ client }: { client: ReturnType<typeof useStudioClien
   return (
     <Card className="p-4 space-y-4 max-w-[600px]">
       <h3>Database</h3>
+      <ConnectionStringPanel password={revealedPassword} />
       <div className="space-y-3">
         {[
-          { label: "Connection String", value: connStr },
-          { label: "Pooler Connection String (PgBouncer)", value: poolStr },
           { label: "Max Connections", value: maxConns ?? "…" },
           { label: "Statement Timeout", value: stmtTimeout ?? "…" },
         ].map(({ label, value }) => (

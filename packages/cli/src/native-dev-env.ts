@@ -8,6 +8,7 @@
  */
 
 import { fieldMaskingTierFromProject } from "./field-masking-tier.js"
+import { splitPassword } from "./host-database.js"
 import { projectHasVersionedModels } from "./model-versioning.js"
 import { nativeRolesSql } from "./native-roles-sql.js"
 import { nativeGraphqlServerEnv, nativeMaskLibraryPresent } from "./postgres-ctl.js"
@@ -23,9 +24,14 @@ export interface NativeServerCoreInput {
   adminConfigPath: string
   postgrestPort: string
   pgBinDir: string | null
+  /** The project database on this machine, which is where the native server reaches it too. */
+  databaseUrl: string
 }
 
-/** supatype-server's outer layer: mode, cache, manifest paths, PostgREST and GraphQL. */
+/**
+ * supatype-server's outer layer: mode, cache, manifest paths, PostgREST and GraphQL, and the
+ * database as this machine reaches it, without its password, for Studio's connection strings.
+ */
 export function nativeServerCoreEnv(input: NativeServerCoreInput): Record<string, string> {
   return {
     SUPATYPE_MODE: input.mode,
@@ -34,6 +40,7 @@ export function nativeServerCoreEnv(input: NativeServerCoreInput): Record<string
     SUPATYPE_MANIFEST_PATH: input.manifestPath,
     SUPATYPE_ADMIN_CONFIG_PATH: input.adminConfigPath,
     SUPATYPE_POSTGREST_URL: `http://127.0.0.1:${input.postgrestPort}`,
+    SUPATYPE_DB_PUBLIC_URL: splitPassword(input.databaseUrl).dsn,
     // A clear 501 on /graphql/v1 rather than "function not found" from PostgREST.
     ...nativeGraphqlServerEnv(input.pgBinDir),
   }

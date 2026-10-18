@@ -19,7 +19,7 @@ import { keyspaceInPostgres } from "./cache-provider.js"
 import { postgresImageFor } from "./postgres-image.js"
 import { STUDIO_DEV_PORT } from "./studio-dev-server.js"
 import { readEnvFile, readEnvValue } from "./env-file.js"
-import { composeDbPublish } from "./db-port.js"
+import { composeDbPublish, DB_PUBLIC_HOST_ENV } from "./db-port.js"
 import { upKeepingKongCurrent } from "./compose-kong.js"
 import { composeAuthProviderEnv } from "./auth-providers.js"
 import {
@@ -334,6 +334,48 @@ function ownerDatabaseUrl(config: SupatypeProjectConfig, scheme = "postgresql"):
     "\${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is missing from .env}" +
     "@db:5432/\${POSTGRES_DB:-supatype}"
   )
+}
+
+/**
+ * The database as the operator's machine reaches it, with no password: what Studio's connection
+ * strings are built from (the server's `SUPATYPE_DB_PUBLIC_URL`).
+ *
+ * Studio used to derive the string from the API URL, which named the gateway's port, the
+ * `postgres` login and the `postgres` database whatever the stack really ran. The port here is the
+ * same `${envKey:-default}` expression the `db` service's `ports:` block binds, so the two cannot
+ * name different ports. A dev stack binds loopback only; a self-host stack binds every interface,
+ * so its host is the configured domain unless `.env` names another. An external database is the
+ * operator's URL as given, and the server drops its password.
+ */
+function dbPublicUrlForCompose(config: SupatypeProjectConfig, devLocal: boolean): string {
+  if (usesExternalDatabase(config)) return ownerDatabaseUrl(config)
+  const { envKey, defaultPort } = composeDbPublish(devLocal)
+  const domain = config.server.domain?.trim() || "127.0.0.1"
+  const host = devLocal ? "127.0.0.1" : `\${${DB_PUBLIC_HOST_ENV}:-${domain}}`
+  return (
+    `postgresql://\${POSTGRES_USER:-supatype_admin}@${host}:\${${envKey}:-${defaultPort}}` +
+    "/${POSTGRES_DB:-supatype}"
+  )
+}
+
+/**
+ * The server's database connection details for Studio: where the database is reached from the
+ * host, a pooler when the operator declares one, and the password the credentials routes reveal.
+ *
+ * The password was missing, so in a docker dev stack Studio's "View Password" answered the
+ * server's fallback, `postgres`, rather than the password the stack was created with. An external
+ * database's password lives in its URL and is not passed separately.
+ */
+function serverDbConnectEnv(config: SupatypeProjectConfig, devLocal: boolean): string {
+  const lines = [
+    `      SUPATYPE_DB_PUBLIC_URL: "${dbPublicUrlForCompose(config, devLocal)}"`,
+    "      SUPATYPE_DB_POOLER_URL: ${SUPATYPE_DB_POOLER_URL:-}",
+    "      SUPATYPE_ALLOW_SECRET_READBACK: ${SUPATYPE_ALLOW_SECRET_READBACK:-false}",
+  ]
+  if (!usesExternalDatabase(config)) {
+    lines.push("      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is missing from .env}")
+  }
+  return lines.join("\n")
 }
 
 /**
@@ -979,6 +1021,7 @@ ${mounts.projectState}
       # The SQL editor's own login, not a superuser. The owner URL above stays: the server falls
       # back to it and uses it for role membership.
       SUPATYPE_SQL_EDITOR_DATABASE_URL: "${sqlEditorUrl}"
+${serverDbConnectEnv(config, devLocal)}
       SUPATYPE_DENO_FUNCTIONS_DIR: /project/functions
       SUPATYPE_FUNCTIONS_WORKER_URL: http://functions-worker:8001
 ${realtimeServerEnv}
