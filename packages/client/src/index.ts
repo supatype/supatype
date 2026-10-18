@@ -235,14 +235,12 @@ class TableClient<
    * Insert one row or several.
    *
    * **On a model that keeps drafts**, one record is created through `supatype.create_record`, as
-   * Studio creates it: the record starts as its first draft, and comes back read from the draft view
-   * in the shape a plain insert returns. A plain insert asking for the row back is refused there by a
+   * Studio creates it, and several through `supatype.create_records`, all or none in one call: each
+   * record starts as its first draft, and the rows come back read from the draft view in the shape
+   * and order a plain insert returns. A plain insert asking for the row back is refused there by a
    * read rule that hides unpublished records, because Postgres checks the returned row against it
    * before anything has made the new row visible to its author. The generated `supatype/client.ts`
    * says which models keep drafts; a client without it inserts as before.
-   *
-   * Several rows at once are still one plain insert: `create_record` makes one record per call, and
-   * a call per row would no longer be all or nothing.
    */
   insert(
     data: TDef["Insert"] | TDef["Insert"][],
@@ -259,11 +257,12 @@ class TableClient<
     )
   }
 
-  /** Where an insert of `data` is created through `create_record`: one record, on a drafts model. */
+  /** Where an insert of `data` is created through the publishing functions: any rows, on a drafts model. */
   private draftCreate(data: TDef["Insert"] | TDef["Insert"][]): DraftCreate | undefined {
     const model = registeredDraftModel(this.table)
     if (model === undefined) return undefined
-    if (Array.isArray(data) && data.length !== 1) return undefined
+    // Nothing to create: the plain insert answers an empty array with no rows, as it always has.
+    if (Array.isArray(data) && data.length === 0) return undefined
     return { table: this.table, primaryKey: model.primaryKey }
   }
 

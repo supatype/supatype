@@ -2,6 +2,7 @@ import type { QueryCache, QueryCacheOptions, CacheStatus } from "./query-cache.j
 import { buildCacheKey, defaultQueryCache } from "./query-cache.js"
 import type { MaskedField, QueryResult, SelectQueryOptions, SupatypeError, TableDef } from "./types.js"
 import { DRAFT_SCHEMA, PUBLISHING_SCHEMA } from "./types.js"
+import { createCall, createdKeys, inCreatedOrder, readBackColumns } from "./draft-create.js"
 import type { SelectRow } from "./select-types.js"
 import { parseRowsExactly, tableFromPath } from "./exact-response.js"
 import { stringifyWithBigInts } from "./exact-values.js"
@@ -442,8 +443,9 @@ export class QueryBuilder<TRow> extends FilterBuilder implements PromiseLike<Que
 type HttpMethod = "POST" | "PATCH" | "DELETE"
 
 /**
- * An insert sent through `supatype.create_record` rather than as a plain `POST`: the table, which
- * keeps drafts, and the key its new record is read back by.
+ * An insert sent through `supatype.create_record` (one row) or `supatype.create_records` (several,
+ * all or none) rather than as a plain `POST`: the table, which keeps drafts, and the key its new
+ * records are read back by.
  *
  * Why at all: a new record on a drafts model is unpublished, and when the model's read rule hides
  * unpublished rows Postgres refuses an insert that asks for the row back, since it checks the
@@ -458,7 +460,7 @@ export interface DraftCreate {
 /** How a write is made beyond its method and body. */
 export interface MutationOptions {
   upsert?: boolean | undefined
-  /** Create the one record through `create_record`, for an insert on a drafts model. */
+  /** Create the records through `create_record` or `create_records`, for an insert on a drafts model. */
   createThrough?: DraftCreate | undefined
 }
 
@@ -578,7 +580,7 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
   }
 
   private async _execute(fetchHeaders: Record<string, string> = {}): Promise<QueryResult<TRow[]>> {
-    if (this.createThrough !== undefined) return this.createDraftRecord(this.createThrough)
+    if (this.createThrough !== undefined) return this.createDraftRecords(this.createThrough)
     const qs = this.params.toString()
     const url = `${this.baseUrl}${this.path}${qs ? `?${qs}` : ""}`
     const resolveRequestHeaders = async (): Promise<Record<string, string>> => ({
@@ -612,33 +614,36 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
   }
 
   /**
-   * Create the record as its first draft, then read it back as an insert returns it.
+   * Create the records as their first drafts, then read them back as an insert returns them.
    *
    * Read from the draft view, which has the table's row type: the live row of a new record holds no
    * locale yet, so reading the table would hand back empty translations for what was just written.
-   * The select string applies as it would to the insert's own answer.
+   * The select string applies as it would to the insert's own answer, and several rows come back in
+   * the order they were sent.
    */
-  private async createDraftRecord(target: DraftCreate): Promise<QueryResult<TRow[]>> {
-    const created = await this.callCreateRecord(target.table)
-    if (typeof created !== "string") return { data: null, error: created, count: null }
-    const readBack = new QueryBuilder<TRow>(
+  private async createDraftRecords(target: DraftCreate): Promise<QueryResult<TRow[]>> {
+    const keys = await this.callCreate(target.table)
+    if (!Array.isArray(keys)) return { data: null, error: keys, count: null }
+    const select = readBackColumns(this.params.get("select"), target.primaryKey, keys.length)
+    const result = await new QueryBuilder<Record<string, unknown>>(
       this.baseUrl,
       this.path,
       this.getHeaders,
-      this.params.get("select") ?? undefined,
+      select,
       defaultQueryCache,
       this.onUnauthorized,
       { profile: DRAFT_SCHEMA },
       this.send,
-    ).eq(target.primaryKey, created)
-    const result = await readBack
-    return result.data === null ? result : { ...result, count: result.data.length }
+    ).in(target.primaryKey, keys)
+    if (result.data === null) return { ...result, data: null }
+    const rows = callerRows<TRow>(inCreatedOrder(result.data, keys)) ?? []
+    return { ...result, data: rows, count: rows.length }
   }
 
-  /** `supatype.create_record` for the one row this insert carries: the new key, or why not. */
-  private async callCreateRecord(table: string): Promise<string | SupatypeError> {
-    const url = `${this.baseUrl}/rest/v1/rpc/create_record`
-    const data = Array.isArray(this.body) ? this.body[0] : this.body
+  /** `create_record` for one row, `create_records` for several: the new keys in order, or why not. */
+  private async callCreate(table: string): Promise<string[] | SupatypeError> {
+    const { fn, data } = createCall(this.body)
+    const url = `${this.baseUrl}/rest/v1/rpc/${fn}`
     const init = { method: "POST", body: stringifyWithBigInts({ model_table: table, data }) }
     const resolveRequestHeaders = async (): Promise<Record<string, string>> => ({
       ...(await this.getHeaders()),
@@ -650,9 +655,9 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
     } catch (e) {
       return transportFailure(e)
     }
-    if (!res.ok) return readRefusal(res, "[supatype:mutation] create_record failed", async () => ({ url, table }))
-    const recordId = (await readJsonObject(res))["record_id"]
-    return typeof recordId === "string" ? recordId : { message: "create_record answered without a record id", status: res.status }
+    if (!res.ok) return readRefusal(res, `[supatype:mutation] ${fn} failed`, async () => ({ url, table }))
+    const answer: unknown = await res.json().catch(() => null)
+    return createdKeys(answer) ?? { message: `${fn} answered without the new record ids`, status: res.status }
   }
 }
 
