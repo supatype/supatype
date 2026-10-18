@@ -6,6 +6,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { StorageClient } from "../src/storage.js"
+import { UNOWNED } from "./support/storage-object.js"
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -152,8 +153,8 @@ describe("Task 93: Storage quota integration", () => {
   describe("Quota on other storage operations", () => {
     it("list works normally even when quota is exceeded", async () => {
       vi.stubGlobal("fetch", mockFetchResponse(200, [
-        { id: "1", name: "file1.txt", bucket_id: "bucket", created_at: "", updated_at: "", last_accessed_at: "" },
-        { id: "2", name: "file2.txt", bucket_id: "bucket", created_at: "", updated_at: "", last_accessed_at: "" },
+        { ...UNOWNED, id: "1", name: "file1.txt" },
+        { ...UNOWNED, id: "2", name: "file2.txt" },
       ]))
 
       const client = freshClient()
