@@ -9,7 +9,7 @@ import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { cn } from "../lib/utils.js"
 import { isJsonObject } from "../lib/json.js"
-import { resolveStorageObjectPath } from "../lib/storage-ref.js"
+import { browserSignedUrl, resolveStorageObjectPath, storagePublicUrl } from "../lib/storage-ref.js"
 import { Button, Card, Input, Select, Th, Td } from "../components/ui.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -94,23 +94,6 @@ function isPreviewable(type: string): boolean {
   return type.startsWith("image/") || type === "application/pdf"
 }
 
-function normalizeStoragePublicUrl(
-  client: SupatypeClient,
-  rawUrl: string,
-): string {
-  if (!rawUrl) return rawUrl
-  try {
-    const parsed = new URL(rawUrl)
-    const apiOrigin = new URL(client.url).origin
-    if (apiOrigin && parsed.origin !== apiOrigin && parsed.pathname.startsWith("/storage/v1/")) {
-      return `${apiOrigin}${parsed.pathname}${parsed.search}`
-    }
-    return rawUrl
-  } catch {
-    return rawUrl
-  }
-}
-
 function storageObjectPath(prefix: string[], name: string): string {
   return resolveStorageObjectPath(prefix.join("/"), name)
 }
@@ -136,9 +119,7 @@ function StorageImageThumbnail({
   const filePath = useMemo(() => storageObjectPath(pathPrefix, fileName), [pathPrefix, fileName])
 
   const publicUrl = useMemo(() => {
-    if (!bucketPublic) return null
-    const raw = client.storage.from(bucketName).getPublicUrl(filePath).data.publicUrl
-    return normalizeStoragePublicUrl(client, raw)
+    return bucketPublic ? storagePublicUrl(client, { bucket: bucketName, path: filePath }) : null
   }, [bucketPublic, bucketName, filePath, client])
 
   const [signedUrl, setSignedUrl] = useState<string | null>(null)
@@ -150,9 +131,8 @@ function StorageImageThumbnail({
     }
     let cancelled = false
     void (async () => {
-      const { data, error } = await client.storage.from(bucketName).createSignedUrl(filePath, 3600)
-      if (cancelled || error || !data?.signedUrl) return
-      setSignedUrl(normalizeStoragePublicUrl(client, data.signedUrl))
+      const { url } = await browserSignedUrl(client, { bucket: bucketName, path: filePath }, 3600)
+      if (!cancelled) setSignedUrl(url)
     })()
     return () => { cancelled = true }
   }, [bucketPublic, bucketName, filePath, client])
@@ -219,18 +199,15 @@ function FilePreview({
 
   const publicUrl = useMemo(() => {
     if (!bucket.public || file.is_folder) return null
-    return normalizeStoragePublicUrl(
-      client,
-      client.storage.from(bucket.name).getPublicUrl(filePath).data.publicUrl as string,
-    )
+    return storagePublicUrl(client, { bucket: bucket.name, path: filePath })
   }, [bucket, file, filePath, client])
   const previewUrl = publicUrl ?? signedUrl
 
   const generateSignedUrl = async () => {
     setSignedUrlError(null)
-    const { data, error } = await client.storage.from(bucket.name).createSignedUrl(filePath, 3600)
-    if (error) { setSignedUrlError(error.message); return }
-    setSignedUrl(data?.signedUrl ?? null)
+    const { url, error } = await browserSignedUrl(client, { bucket: bucket.name, path: filePath }, 3600)
+    if (error !== null) { setSignedUrlError(error); return }
+    setSignedUrl(url)
   }
 
   return (
@@ -616,17 +593,14 @@ export function StorageBrowser(): React.ReactElement {
     const filePath = getFilePath(file)
     let url: string | null = null
     if (currentBucket?.public) {
-      url = normalizeStoragePublicUrl(
-        client,
-        client.storage.from(selectedBucket).getPublicUrl(filePath).data.publicUrl as string,
-      )
+      url = storagePublicUrl(client, { bucket: selectedBucket, path: filePath })
     } else {
-      const { data, error } = await client.storage.from(selectedBucket).createSignedUrl(filePath, 60)
-      if (error) {
-        setFilesError(error.message)
+      const signed = await browserSignedUrl(client, { bucket: selectedBucket, path: filePath }, 60)
+      if (signed.error !== null) {
+        setFilesError(signed.error)
         return
       }
-      url = data?.signedUrl ?? null
+      url = signed.url
     }
     if (url) {
       window.open(url, "_blank", "noopener,noreferrer")
