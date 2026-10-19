@@ -9,6 +9,8 @@ import { cn } from "../lib/utils.js"
 import { isJsonObject } from "../lib/json.js"
 import { Badge, Button, Card, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
+import { browseTotal, countModeFor, totalLabel } from "../lib/browse-paging.js"
+import type { QueryBuilder } from "@supatype/client"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -73,6 +75,27 @@ function isImageUrl(value: unknown): boolean {
 
 function isJsonValue(value: unknown): boolean {
   return typeof value === "object" && value !== null
+}
+
+/** `query` narrowed by the browser's column filters. */
+function withFilters<T>(query: QueryBuilder<T>, filters: readonly ColumnFilter[]): QueryBuilder<T> {
+  let q = query
+  for (const f of filters) {
+    switch (f.operator) {
+      case "eq": q = q.eq(f.column, f.value); break
+      case "neq": q = q.neq(f.column, f.value); break
+      case "gt": q = q.gt(f.column, f.value); break
+      case "gte": q = q.gte(f.column, f.value); break
+      case "lt": q = q.lt(f.column, f.value); break
+      case "lte": q = q.lte(f.column, f.value); break
+      case "like": q = q.like(f.column, `%${f.value}%`); break
+      case "ilike": q = q.ilike(f.column, `%${f.value}%`); break
+      case "is_null": q = q.is(f.column, null); break
+      case "is_not_null": q = q.not(f.column, "is", null); break
+      case "in": q = q.in(f.column, f.value.split(",").map((s) => s.trim())); break
+    }
+  }
+  return q
 }
 
 // ─── JSON Tree Component ──────────────────────────────────────────────────────
@@ -471,46 +494,22 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
   // Primary key column name
   const pkColumn = columns.find((c) => c.is_primary)?.name ?? "id"
 
-  // Fetch rows from server with sorting, filtering, and pagination
+  // Fetch rows from server with sorting, filtering, and pagination. The count comes back with the
+  // page, exact or estimated by the table's size: see `browse-paging.ts`.
+  const countMode = countModeFor(currentTable?.row_count ?? -1)
   const fetchRows = useCallback(async () => {
     if (!selectedTable) return
     setLoading(true)
     setRowsError(null)
     try {
       const from = page * pageSize
-      const to = from + pageSize - 1
-
-      let query = client.from(selectedTable).select("*")
-
-      for (const f of filters) {
-        switch (f.operator) {
-          case "eq": query = query.eq(f.column, f.value); break
-          case "neq": query = query.neq(f.column, f.value); break
-          case "gt": query = query.gt(f.column, f.value); break
-          case "gte": query = query.gte(f.column, f.value); break
-          case "lt": query = query.lt(f.column, f.value); break
-          case "lte": query = query.lte(f.column, f.value); break
-          case "like": query = query.like(f.column, `%${f.value}%`); break
-          case "ilike": query = query.ilike(f.column, `%${f.value}%`); break
-          case "is_null": query = query.is(f.column, null); break
-          case "is_not_null": query = query.not(f.column, "is", null); break
-          case "in": query = query.in(f.column, f.value.split(",").map((s) => s.trim())); break
-        }
-      }
-
-      for (const s of sorts) {
-        query = query.order(s.column, { ascending: s.ascending })
-      }
-
-      query = query.range(from, to)
-
-      const { data, error } = await query
-
+      let query = withFilters(client.from(selectedTable).select("*", { count: countMode }), filters)
+      for (const s of sorts) query = query.order(s.column, { ascending: s.ascending })
+      const { data, error, count } = await query.range(from, from + pageSize - 1)
       if (error) {
         setRowsError(error.message)
         return
       }
-
       // The client types the body as rows without checking it; a proxy error page or an object
       // here used to crash the table on `rows.map`.
       const body: unknown = data ?? []
@@ -519,17 +518,13 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
         return
       }
       setRows(body)
-      if (body.length < pageSize) {
-        setTotalCount(from + body.length)
-      } else if (filters.length === 0) {
-        setTotalCount(currentTable?.row_count ?? 0)
-      }
+      setTotalCount(browseTotal({ count, mode: countMode, from, rows: body.length }, pageSize))
     } catch (err) {
       setRowsError(err instanceof Error ? err.message : "Failed to fetch rows")
     } finally {
       setLoading(false)
     }
-  }, [client, selectedTable, page, pageSize, sorts, filters, currentTable?.row_count])
+  }, [client, selectedTable, page, pageSize, sorts, filters, countMode])
 
   useEffect(() => {
     void fetchRows()
@@ -974,7 +969,7 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
           <Button size="sm" onClick={() => setPage(0)} disabled={page === 0}>First</Button>
           <Button size="sm" onClick={() => setPage(Math.max(0, page - 1))} disabled={page === 0}>Prev</Button>
           <span className="text-[0.8rem] text-muted-foreground">
-            Page {page + 1} of {totalPages} ({totalCount} rows)
+            Page {page + 1} of {totalPages} ({totalLabel(totalCount, countMode)})
           </span>
           <Button size="sm" onClick={() => setPage(Math.min(totalPages - 1, page + 1))} disabled={page >= totalPages - 1}>Next</Button>
           <Button size="sm" onClick={() => setPage(totalPages - 1)} disabled={page >= totalPages - 1}>Last</Button>
