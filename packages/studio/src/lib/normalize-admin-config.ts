@@ -262,11 +262,27 @@ function normalizeNavigation(raw: unknown, models: ModelConfig[], globals: Globa
   return [{ label: "Content", items }]
 }
 
+const LANGUAGE_NAMES = new Intl.DisplayNames(["en"], { type: "language", fallback: "none" })
+
+/**
+ * What Studio calls a locale: its language's name in English ("en" is "English", "pt-BR" is
+ * "Brazilian Portuguese"), so the top bar's switcher and "Publish in English" read the same. A code
+ * with no known name, or one that is not a language tag at all, is shown as written.
+ */
+function localeLabel(code: string): string {
+  try {
+    return LANGUAGE_NAMES.of(code) ?? code
+  } catch {
+    // Not a well-formed language tag.
+    return code
+  }
+}
+
 function normalizeLocale(raw: unknown): LocaleConfigAdmin | undefined {
   if (!isJsonObject(raw)) return undefined
   const locales = raw["locales"]
   return {
-    locales: (isStringArray(locales) ? locales : ["en"]).map((code) => ({ code, label: code.toUpperCase() })),
+    locales: (isStringArray(locales) ? locales : ["en"]).map((code) => ({ code, label: localeLabel(code) })),
     defaultLocale: String(raw["defaultLocale"] ?? "en"),
   }
 }

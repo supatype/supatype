@@ -76,8 +76,7 @@ function StudioAccessGateInner({
   // holds, rotating the live client's credential behind its back, for the life of the tab.
   const userId = session?.user.id ?? null
   const proxyClient = useMemo(
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on identity, seeded with
-    // whatever session is current at the moment the identity changes.
+    // Keyed on identity, seeded with whatever session is current at the moment the identity changes.
     () => (session === null ? null : createClient(proxyClientOptions(apiBaseUrl, anonKey, session))),
     [apiBaseUrl, anonKey, userId],
   )

@@ -184,6 +184,19 @@ export function Dialog({
   )
 }
 
+/**
+ * The answers to an `alertdialog`: Cancel, and the destructive act named by `label`. Either one
+ * closes the question; the act runs after it closes.
+ */
+export function DestructiveAnswers({ label, act, onClose }: { label: string; act: () => void; onClose: () => void }): React.ReactElement {
+  return (
+    <>
+      <Button onClick={onClose}>Cancel</Button>
+      <Button variant="destructive" onClick={() => { onClose(); act() }}>{label}</Button>
+    </>
+  )
+}
+
 /* ─── Input ─── */
 
 /**
