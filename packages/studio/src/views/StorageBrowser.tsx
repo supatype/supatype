@@ -335,10 +335,16 @@ function CreateFolderDialog({
   onConfirm,
   onCancel,
 }: {
-  onConfirm: (name: string) => void
+  /** Resolves to why the folder was not made, shown in the dialog rather than behind it; null when it was. */
+  onConfirm: (name: string) => Promise<string | null>
   onCancel: () => void
 }): React.ReactElement {
   const [name, setName] = useState("")
+  const [error, setError] = useState<string | null>(null)
+  const create = (): void => {
+    if (!name.trim()) return
+    void onConfirm(name.trim()).then(setError, (e: unknown) => { setError(e instanceof Error ? e.message : String(e)) })
+  }
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <Card className="p-6 max-w-[400px] w-full">
@@ -348,11 +354,12 @@ function CreateFolderDialog({
           onChange={(e) => setName(e.target.value)}
           placeholder="Folder name..."
           autoFocus
-          onKeyDown={(e) => { if (e.key === "Enter" && name.trim()) onConfirm(name.trim()) }}
+          onKeyDown={(e) => { if (e.key === "Enter") create() }}
         />
+        {error !== null ? <div className="mt-3"><ErrorBanner message={error} /></div> : null}
         <div className="flex gap-2 justify-end mt-4">
           <Button onClick={onCancel}>Cancel</Button>
-          <Button variant="primary" onClick={() => { if (name.trim()) onConfirm(name.trim()) }}>Create</Button>
+          <Button variant="primary" onClick={create}>Create</Button>
         </div>
       </Card>
     </div>
@@ -573,15 +580,13 @@ export function StorageBrowser(): React.ReactElement {
     void fetchFiles()
   }
 
-  const handleCreateFolder = async (name: string) => {
+  const handleCreateFolder = async (name: string): Promise<string | null> => {
     const filePath = [...path, name, ".emptyFolderPlaceholder"].join("/")
     const { error } = await client.storage.from(selectedBucket).upload(filePath, new Blob([""]))
-    if (error) {
-      setFilesError(error.message)
-      return
-    }
+    if (error) return error.message
     setShowCreateFolder(false)
     void fetchFiles()
+    return null
   }
 
   const getFilePath = useCallback((file: StorageFile): string => {

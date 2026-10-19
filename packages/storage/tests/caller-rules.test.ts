@@ -780,3 +780,41 @@ describe.skipIf(!dockerAvailable)("serving what was stored", () => {
     expect((await fetch(`${base}/object/vault/${name}`)).status).toBe(401)
   })
 })
+
+// ─── Folders ──────────────────────────────────────────────────────────────────
+
+/** An upload as Studio's "New Folder" sends it: a Blob with no type, so `application/octet-stream`. */
+async function uploadUntyped(token: string, bucket: string, name: string, body: string): Promise<Response> {
+  return fetch(`${base}/object/${bucket}/${encodedPath(name)}`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/octet-stream" },
+    body,
+  })
+}
+
+describe.skipIf(!dockerAvailable)("a new folder in a bucket that limits file types", () => {
+  // A bucket limited to images refused the empty placeholder that holds a new folder open, with
+  // 415 for `application/octet-stream`, so no folder could be made in it.
+  beforeAll(async () => {
+    if (!dockerAvailable) return
+    await admin.query(
+      `INSERT INTO storage.buckets (id, name, public, allowed_mime_types, access_mode)
+       VALUES ('pictures', 'pictures', false, ARRAY['image/png'], 'private') ON CONFLICT (id) DO NOTHING`,
+    )
+  })
+
+  it("accepts the folder's empty placeholder, and lists the folder", async () => {
+    const folder = `mt-${randomUUID()}`
+    const res = await uploadUntyped(SERVICE, "pictures", `${folder}/.emptyFolderPlaceholder`, "")
+    expect(res.status).toBe(200)
+    expect(await list(SERVICE, "pictures", "", folder)).toEqual([folder])
+  })
+
+  it("still refuses a placeholder that carries content, and any other file of a type the bucket refuses", async () => {
+    const folder = `mt-${randomUUID()}`
+    expect((await uploadUntyped(SERVICE, "pictures", `${folder}/.emptyFolderPlaceholder`, "x")).status).toBe(415)
+    expect((await uploadUntyped(SERVICE, "pictures", `${folder}/empty.bin`, "")).status).toBe(415)
+    expect((await upload(SERVICE, "pictures", `${folder}/notes.txt`, "x")).status).toBe(415)
+    expect(await row("pictures", `${folder}/.emptyFolderPlaceholder`)).toBeUndefined()
+  })
+})
