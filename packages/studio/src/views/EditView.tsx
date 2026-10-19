@@ -21,6 +21,7 @@ import {
 } from "../hooks/useStudioFieldAccess.js"
 import { useStudioCapability } from "../hooks/useStudioCapability.js"
 import { getLocalizedFieldValue } from "../lib/localized-field.js"
+import { localTimestamp } from "../lib/local-datetime.js"
 import { isJsonObject } from "../lib/json.js"
 import { useRecordPersist } from "../hooks/useRecordPersist.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
@@ -86,7 +87,9 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
           f.options?.["studioTimestampDefault"] === "now"
         ) {
           if (next === prev) next = { ...prev }
-          next[f.name] = new Date().toISOString()
+          // With the offset, as the date-time widget saves: a column without a zone keeps the
+          // editor's wall time rather than UTC's.
+          next[f.name] = localTimestamp(new Date())
         }
       }
       return next
