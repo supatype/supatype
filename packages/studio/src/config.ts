@@ -52,6 +52,10 @@ export const WIDGET_TYPES = [
   /** `Currency<Code>`: `{ amount, code }` in JSONB, amount in minor units. */
   "currency",
   "button",
+  /** `Duration`: `{ ms }` in JSONB, edited as text such as `1h 30m`. */
+  "duration",
+  /** `GeoPoint`: `geography(Point, 4326)`, read as hex EWKB, edited as latitude and longitude. */
+  "geopoint",
 ] as const
 
 export type WidgetType = (typeof WIDGET_TYPES)[number]

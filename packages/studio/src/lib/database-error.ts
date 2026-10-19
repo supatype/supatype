@@ -13,9 +13,17 @@ export const SQLSTATE = {
   insufficientPrivilege: "42501",
   invalidSchemaName: "3F000",
   undefinedTable: "42P01",
+  notNullViolation: "23502",
+  uniqueViolation: "23505",
 } as const
 
 const SQLSTATE_SHAPE = /^[0-9A-Z]{5}$/
+
+/** A Postgres column name as an error names it: bare, or double-quoted with `""` for a quote. */
+export function unquoteColumn(raw: string): string {
+  const name = raw.trim()
+  return name.startsWith('"') && name.endsWith('"') ? name.slice(1, -1).replace(/""/g, '"') : name
+}
 
 /** A failed SQL call: its message, and its SQLSTATE when the proxy passed one on. */
 export interface DatabaseFailure {
