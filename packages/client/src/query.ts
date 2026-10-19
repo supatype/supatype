@@ -277,7 +277,11 @@ export class QueryBuilder<TRow> extends FilterBuilder implements PromiseLike<Que
   ): this {
     const dir = opts?.ascending === false ? "desc" : "asc"
     const nulls = opts?.nullsFirst === true ? "nullsfirst" : "nullslast"
-    this.params.append("order", `${column}.${dir}.${nulls}`)
+    // One parameter, comma-separated: PostgREST reads only the first `order`, so appending a second
+    // dropped every column after the first without an error.
+    const term = `${column}.${dir}.${nulls}`
+    const prior = this.params.get("order")
+    this.params.set("order", prior === null ? term : `${prior},${term}`)
     return this
   }
 

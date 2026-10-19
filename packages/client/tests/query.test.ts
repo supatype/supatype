@@ -119,6 +119,17 @@ describe("QueryBuilder: URL construction", () => {
     expect(url()).toContain("nullsfirst")
   })
 
+  // PostgREST reads only the first `order` parameter, so a second one sent separately was dropped
+  // without an error and the rows came back ordered by the first column alone.
+  it(".order() twice sends one comma-separated order parameter", async () => {
+    const { url } = captureUrl()
+    await new QueryBuilder<Post>(BASE, PATH, HEADERS)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+    const params = new URL(url()).searchParams
+    expect(params.getAll("order")).toEqual(["created_at.desc.nullslast,id.desc.nullslast"])
+  })
+
   it(".limit() sets limit param", async () => {
     const { url } = captureUrl()
     await new QueryBuilder<Post>(BASE, PATH, HEADERS).limit(20)
