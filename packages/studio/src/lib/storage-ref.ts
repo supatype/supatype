@@ -57,16 +57,54 @@ export function resolveStorageObjectPath(prefix: string, name: string): string {
   return `${pathStr}/${name}`
 }
 
-export function storagePublicUrl(client: SupatypeClient, ref: StorageRef): string {
-  const raw = client.storage.from(ref.bucket).getPublicUrl(ref.path).data.publicUrl
+/** Studio's session proxy. It holds the service key, so it answers only requests carrying the Studio session. */
+const SESSION_PROXY = "/studio/proxy"
+const STORAGE_API = "/storage/v1/"
+
+function parsedUrl(value: string): URL | null {
   try {
-    const parsed = new URL(raw)
-    const apiOrigin = typeof client.url === "string" ? new URL(client.url).origin : null
-    if (apiOrigin && parsed.origin !== apiOrigin && parsed.pathname.startsWith("/storage/v1/")) {
-      return `${apiOrigin}${parsed.pathname}${parsed.search}`
-    }
-    return raw
+    return new URL(value)
   } catch {
-    return raw
+    return null
   }
+}
+
+/** The gateway a browser reaches on its own: the client's URL without Studio's session proxy. */
+function gatewayBase(clientUrl: string): string {
+  const base = clientUrl.replace(/\/+$/, "")
+  return base.endsWith(SESSION_PROXY) ? base.slice(0, -SESSION_PROXY.length) : base
+}
+
+/**
+ * A storage URL a browser loads with no headers of its own: an `<img>`, a link, a new tab.
+ *
+ * `getPublicUrl` and `createSignedUrl` build on the client's URL, which in Studio is the session
+ * proxy, and an `<img>` cannot send the Studio session: every thumbnail answered 401. A public
+ * bucket or a signed token is its own credential, so those reads go to the gateway's
+ * `/storage/v1/` route instead. A URL a storage server built for another origin (its internal
+ * host) is moved to the gateway too. Anything else is returned as it came.
+ */
+export function browserStorageUrl(clientUrl: string, rawUrl: string): string {
+  const base = clientUrl.replace(/\/+$/, "")
+  const gateway = gatewayBase(base)
+  if (rawUrl.startsWith(`${base}${STORAGE_API}`)) return `${gateway}${rawUrl.slice(base.length)}`
+  const parsed = parsedUrl(rawUrl)
+  if (parsed === null || !parsed.pathname.startsWith(STORAGE_API)) return rawUrl
+  if (parsed.origin === parsedUrl(gateway)?.origin) return rawUrl
+  return `${gateway}${parsed.pathname}${parsed.search}`
+}
+
+export function storagePublicUrl(client: SupatypeClient, ref: StorageRef): string {
+  return browserStorageUrl(client.url, client.storage.from(ref.bucket).getPublicUrl(ref.path).data.publicUrl)
+}
+
+/** A signed URL to one object that a browser loads on its own, or why the server would not sign one. */
+export async function browserSignedUrl(
+  client: SupatypeClient,
+  ref: StorageRef,
+  expiresIn: number,
+): Promise<{ url: string | null; error: string | null }> {
+  const { data, error } = await client.storage.from(ref.bucket).createSignedUrl(ref.path, expiresIn)
+  if (error !== null) return { url: null, error: error.message }
+  return { url: data === null ? null : browserStorageUrl(client.url, data.signedUrl), error: null }
 }
