@@ -24,6 +24,7 @@ const proxy = {
 vi.mock("../src/hooks/useProjectProxy.js", () => ({ useProjectProxy: () => proxy }))
 
 import { SchemaPushNotice } from "../src/components/SchemaPushNotice.js"
+import { PENDING_PUSH_POLL_MS } from "../src/hooks/usePendingSchemaPush.js"
 
 const REFUSED = {
   id: 7,
@@ -93,6 +94,35 @@ describe("a refused push", () => {
     const open = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "View in Migration History")
     await act(async () => open?.click())
     expect(where()).toBe("/database/migrations?migration=7")
+  })
+})
+
+describe("a push that fixes the schema", () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it("clears the notice within seconds, with no navigation", async () => {
+    // It was asked again only on navigation, so it stayed up for as long as nobody clicked.
+    vi.useFakeTimers()
+    status.row = REFUSED
+    await render()
+    expect(container.textContent).toContain("Schema push refused")
+    status.row = { ...REFUSED, superseded_at: "2026-10-17 12:05:00+00" }
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PENDING_PUSH_POLL_MS)
+    })
+    expect(container.textContent).toBe("/models")
+  })
+
+  it("stops asking once nothing is pending", async () => {
+    vi.useFakeTimers()
+    await render()
+    const asked = proxy.metadata.mock.calls.length
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PENDING_PUSH_POLL_MS * 3)
+    })
+    expect(proxy.metadata.mock.calls.length).toBe(asked)
   })
 })
 
