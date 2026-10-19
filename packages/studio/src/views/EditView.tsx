@@ -24,6 +24,7 @@ import { getLocalizedFieldValue } from "../lib/localized-field.js"
 import { localTimestamp } from "../lib/local-datetime.js"
 import { isJsonObject } from "../lib/json.js"
 import { useRecordPersist } from "../hooks/useRecordPersist.js"
+import { useBooleanStartValues } from "../hooks/useBooleanStartValues.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
 import { fetchRecordForEditing } from "../lib/publishing.js"
 import { duplicateRecord, type RecordDraft } from "../lib/duplicate-record.js"
@@ -64,6 +65,7 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
   const createTimestampDefaultsApplied = useRef(false)
 
   const isCreate = recordId === undefined
+  useBooleanStartValues(model, isCreate, setValues)
   const fieldAccess = useStudioFieldAccess()
   const capability = useStudioCapability()
   // null = not asked or not answerable. Only ever set from the database's own answer.
