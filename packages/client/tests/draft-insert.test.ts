@@ -170,6 +170,17 @@ describe("insert on a model that keeps drafts", () => {
     expect(error).toMatchObject({ code: "42501", status: 403, hint })
   })
 
+  it("hands the caller the detail line naming a unique violation's columns, on a write and a call", async () => {
+    // Studio's Duplicate learns which copied value collided from this line; it was dropped.
+    const details = "Key (slug)=(intro) already exists."
+    const UNIQUE = { code: "23505", details, hint: null, message: 'duplicate key value violates unique constraint "posts_slug_key"' }
+    serve(mockFetch(() => Promise.resolve(jsonResponse(UNIQUE, 409))))
+    const write = await client().from("posts").upsert({ title: "A" })
+    const call = await client().rpc("create_record", { model_table: "posts", data: {} })
+    expect(write.error).toMatchObject({ code: "23505", details })
+    expect(call.error).toMatchObject({ code: "23505", details })
+  })
+
   it("leaves upsert a plain write, since create_record cannot say what a conflict does", async () => {
     const fetch = serve(mockFetch(() => Promise.resolve(jsonResponse([ROW], 201))))
     await client().from("posts").upsert({ id: ID, title: "Mine" })

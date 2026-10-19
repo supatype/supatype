@@ -92,6 +92,7 @@ function refusal(err: Record<string, unknown>, status: number): SupatypeError {
     // the message, so a form can mark the input.
     ...(typeof err["field"] === "string" && { field: err["field"] }),
     ...(typeof err["hint"] === "string" && err["hint"] !== "" && { hint: err["hint"] }),
+    ...(typeof err["details"] === "string" && err["details"] !== "" && { details: err["details"] }),
   }
 }
 

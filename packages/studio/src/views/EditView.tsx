@@ -20,24 +20,24 @@ import {
   useStudioFieldAccess,
 } from "../hooks/useStudioFieldAccess.js"
 import { useStudioCapability } from "../hooks/useStudioCapability.js"
-import { serializeRecordForApi } from "../lib/recordValues.js"
 import { getLocalizedFieldValue } from "../lib/localized-field.js"
+import { localTimestamp } from "../lib/local-datetime.js"
 import { isJsonObject } from "../lib/json.js"
 import { useRecordPersist } from "../hooks/useRecordPersist.js"
+import { useBooleanStartValues } from "../hooks/useBooleanStartValues.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
-import {
-  createRecord,
-  duplicateValues,
-  fetchRecordForEditing,
-} from "../lib/publishing.js"
+import { fetchRecordForEditing } from "../lib/publishing.js"
+import { duplicateRecord, type RecordDraft } from "../lib/duplicate-record.js"
 
 interface EditViewProps {
   model: ModelConfig
   recordId?: string
-  onNavigate: (path: string) => void
+  /** A create form's starting values and field messages, such as a copy Duplicate could not save. */
+  draft?: RecordDraft | undefined
+  onNavigate: (path: string, draft?: RecordDraft) => void
 }
 
-export function EditView({ model, recordId, onNavigate }: EditViewProps): React.ReactElement {
+export function EditView({ model, recordId, draft, onNavigate }: EditViewProps): React.ReactElement {
   // Rows here are read with the service role, so the elevated-access notice applies
   // to this view. See `useShowsProjectRows`.
   useShowsProjectRows()
@@ -45,12 +45,12 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
   const client = useAdminClient()
   const config = useAdminConfig()
   const { currentLocale, defaultLocale } = useLocale()
-  const [values, setValues] = useState<Record<string, unknown>>({})
+  const [values, setValues] = useState<Record<string, unknown>>(draft?.values ?? {})
   const [loading, setLoading] = useState(!!recordId)
   const [error, setError] = useState<string | null>(null)
   // Keyed by column. Both sources land here: a bound or constraint Studio checked itself, and a
   // field validator's refusal from the server, which names the column it refused.
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>(draft?.fieldErrors ?? {})
   const [previewOpen, setPreviewOpen] = useState(false)
   // Bumped on every successful save, so the publish bar re-reads the history it summarises. A
   // saved draft changes what that bar should say, and nothing else tells it.
@@ -65,6 +65,7 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
   const createTimestampDefaultsApplied = useRef(false)
 
   const isCreate = recordId === undefined
+  useBooleanStartValues(model, isCreate, setValues)
   const fieldAccess = useStudioFieldAccess()
   const capability = useStudioCapability()
   // null = not asked or not answerable. Only ever set from the database's own answer.
@@ -88,7 +89,9 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
           f.options?.["studioTimestampDefault"] === "now"
         ) {
           if (next === prev) next = { ...prev }
-          next[f.name] = new Date().toISOString()
+          // With the offset, as the date-time widget saves: a column without a zone keeps the
+          // editor's wall time rather than UTC's.
+          next[f.name] = localTimestamp(new Date())
         }
       }
       return next
@@ -207,13 +210,10 @@ export function EditView({ model, recordId, onNavigate }: EditViewProps): React.
     try {
       // A copy of a record with drafts is a new draft too: the form holds the draft's values, and
       // inserting them as the live row put unpublished content live.
-      const copy = duplicateValues(model, serializeRecordForApi(model, values))
-      const created = await createRecord(client, model, copy)
-      if (created.error !== null) {
-        setError(created.error.message)
-      } else if (created.id !== null) {
-        onNavigate(`/models/${model.name}/${created.id}`)
-      }
+      const outcome = await duplicateRecord(client, model, values)
+      if (outcome.kind === "created") onNavigate(`/models/${model.name}/${outcome.id}`)
+      else if (outcome.kind === "needsInput") onNavigate(`/models/${model.name}/create`, outcome.draft)
+      else setError(outcome.message)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to duplicate")
     }
