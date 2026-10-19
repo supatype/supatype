@@ -9,7 +9,10 @@ import type { DashboardBlock, ModelConfig } from "../config.js"
 import { DASHBOARD_VIEW_LIMITS } from "../config.js"
 import { JumpToSearch } from "../components/JumpToSearch.js"
 import { studioRestHeaders } from "../lib/studio-auth-headers.js"
-import { type Guard, isArrayOf, isNumber, isShape, isString, isUnknown, readJson } from "../lib/json.js"
+import { type Guard, isArrayOf, isJsonObject, isNumber, isShape, isString, isUnknown, readJson } from "../lib/json.js"
+import { Link } from "react-router-dom"
+import { useLocale } from "../hooks/useLocale.js"
+import { recordLabel } from "../lib/localized-field.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
 import { authUserListPath, userListTotal } from "../lib/auth-user-search.js"
 
@@ -321,9 +324,10 @@ function StatsBlock({ block }: { block: DashboardBlock }): React.ReactElement {
 
 // ─── Recent block ─────────────────────────────────────────────────────────────
 
-function RecentBlock({ block }: { block: DashboardBlock }): React.ReactElement {
+export function RecentBlock({ block }: { block: DashboardBlock }): React.ReactElement {
   const client = useAdminClient()
   const config = useAdminConfig()
+  const { currentLocale, defaultLocale } = useLocale()
   const [items, setItems] = useState<Record<string, unknown>[]>([])
 
   const modelConfig = config.models.find((m) => m.tableName === block.model)
@@ -338,7 +342,8 @@ function RecentBlock({ block }: { block: DashboardBlock }): React.ReactElement {
           .select()
           .order("created_at", { ascending: false })
           .limit(5)
-        if (result.data) setItems(result.data as Record<string, unknown>[])
+        const rows: unknown = result.data
+        if (Array.isArray(rows)) setItems(rows.filter(isJsonObject))
       } catch {
         setItems([])
       }
@@ -350,12 +355,14 @@ function RecentBlock({ block }: { block: DashboardBlock }): React.ReactElement {
       <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">{block.title}</h3>
       <ul className="space-y-1">
         {items.map((item, i) => {
-          const label = String(item["name"] ?? item["title"] ?? item["id"] ?? `Item ${i + 1}`)
+          // A localized title is a JSON object; `String()` of it read "[object Object]".
+          const label = recordLabel(item, modelConfig, currentLocale, defaultLocale) ?? String(item["id"] ?? `Item ${i + 1}`)
           const href = modelConfig ? `/models/${modelConfig.name}/${String(item[modelConfig.primaryKey])}` : undefined
           return (
             <li key={i} className="py-1.5 border-b border-border last:border-0 text-sm text-foreground">
               {href ? (
-                <a href={href} className="hover:text-primary transition-colors truncate block">{label}</a>
+                // A router link: a plain href left out Studio's base path and opened the app instead.
+                <Link to={href} className="hover:text-primary transition-colors truncate block">{label}</Link>
               ) : (
                 <span className="truncate block">{label}</span>
               )}
@@ -365,9 +372,9 @@ function RecentBlock({ block }: { block: DashboardBlock }): React.ReactElement {
         {items.length === 0 && (
           <li className="text-sm text-muted-foreground">
             {modelConfig ? (
-              <a href={`/${modelConfig.name}/new`} className="hover:text-primary transition-colors">
+              <Link to={`/models/${modelConfig.name}/create`} className="hover:text-primary transition-colors">
                 Create your first {modelConfig.label} →
-              </a>
+              </Link>
             ) : "No items yet"}
           </li>
         )}
@@ -472,22 +479,22 @@ function QuickActionsBlock(): React.ReactElement {
       <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">Quick Actions</h3>
       <div className="flex flex-wrap gap-2">
         {config.globals.map((g) => (
-          <a
+          <Link
             key={g.name}
-            href={`/models/globals/${g.name}`}
+            to={`/models/globals/${g.name}`}
             className="text-xs px-2.5 py-1 rounded-md border border-border hover:bg-muted transition-colors text-foreground"
           >
             {g.label}
-          </a>
+          </Link>
         ))}
         {config.models.slice(0, 4).map((m) => (
-          <a
+          <Link
             key={m.name}
-            href={`/models/${m.name}/create`}
+            to={`/models/${m.name}/create`}
             className="text-xs px-2.5 py-1 rounded-md border border-border hover:bg-muted transition-colors text-foreground"
           >
             + {m.label}
-          </a>
+          </Link>
         ))}
       </div>
     </div>

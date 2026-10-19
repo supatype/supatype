@@ -1,4 +1,28 @@
+import type { ModelConfig } from "../config.js"
 import { isJsonObject } from "./json.js"
+
+/** The columns a record is called by, in the order a link to it looks for one. */
+const NAME_COLUMNS = ["name", "title", "email", "label"]
+
+/**
+ * What a record is called where it is linked to (Dashboard's recent list, Jump to): its first
+ * naming column with text in it, in `currentLocale` falling back to `defaultLocale` for a localized
+ * one. Null when none has text. `String()` of a localized title read `[object Object]`.
+ */
+export function recordLabel(
+  row: Record<string, unknown>,
+  model: Pick<ModelConfig, "fields"> | undefined,
+  currentLocale: string,
+  defaultLocale: string,
+): string | null {
+  for (const column of NAME_COLUMNS) {
+    const localized = model?.fields.some((f) => f.name === column && f.localized) === true
+    const value = getLocalizedFieldValue(row[column], localized, currentLocale, defaultLocale)
+    if (typeof value === "string" && value.trim() !== "") return value
+    if (typeof value === "number") return String(value)
+  }
+  return null
+}
 
 /** Resolve a localized column or sub-field for display (falls back to default locale). */
 export function getLocalizedFieldValue(
