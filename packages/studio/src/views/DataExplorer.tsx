@@ -210,6 +210,32 @@ function ColumnFilterRow({
   )
 }
 
+/** A typed value as its column takes it: JSON parsed for a JSON column, `NULL` as null. */
+function typedValue(col: ColumnInfo, text: string): unknown {
+  if (text === "NULL") return null
+  if (col.type !== "jsonb" && col.type !== "json") return text
+  try {
+    return JSON.parse(text)
+  } catch {
+    return text
+  }
+}
+
+/**
+ * The row an insert sends: only the fields something was typed in. An untouched field is left out,
+ * so the column's default applies, or null where it has none. It sent "" for every untouched field,
+ * which a timestamp with a default refused (400) and which overrode a nullable column's default
+ * with null. Typing `NULL` sends null, as in the table's cell editor.
+ */
+function insertValues(columns: readonly ColumnInfo[], values: Record<string, string>): Record<string, unknown> {
+  const record: Record<string, unknown> = {}
+  for (const col of columns) {
+    const text = values[col.name] ?? ""
+    if (text !== "") record[col.name] = typedValue(col, text)
+  }
+  return record
+}
+
 // ─── New Record Form ──────────────────────────────────────────────────────────
 
 function NewRecordForm({
@@ -242,22 +268,7 @@ function NewRecordForm({
       setErrors(newErrors)
       return
     }
-    const record: Record<string, unknown> = {}
-    for (const col of editableColumns) {
-      const val = values[col.name]
-      if (val === "" && col.nullable) {
-        record[col.name] = null
-      } else if (col.type === "jsonb" || col.type === "json") {
-        try {
-          record[col.name] = JSON.parse(val ?? "")
-        } catch {
-          record[col.name] = val
-        }
-      } else {
-        record[col.name] = val
-      }
-    }
-    onSave(record)
+    onSave(insertValues(editableColumns, values))
   }
 
   return (
