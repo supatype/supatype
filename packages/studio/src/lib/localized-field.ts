@@ -1,6 +1,11 @@
 import type { ModelConfig } from "../config.js"
 import { isJsonObject } from "./json.js"
 
+/** The project's locale codes, the default first. */
+export function defaultFirstLocales(defaultLocale: string, locales: ReadonlyArray<{ code: string }>): string[] {
+  return [defaultLocale, ...locales.map((l) => l.code).filter((code) => code !== defaultLocale)]
+}
+
 /** The columns a record is called by, in the order a link to it looks for one. */
 const NAME_COLUMNS = ["name", "title", "email", "label"]
 
