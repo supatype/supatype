@@ -831,6 +831,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
             status: pgError.statusCode,
             code: pgError.code,
             ...(pgError.hint !== null && pgError.hint !== "" && { hint: pgError.hint }),
+            ...(pgError.details !== null && pgError.details !== "" && { details: pgError.details }),
           },
         }
       }

@@ -25,6 +25,7 @@ import { SchemaPushNotice } from "./components/SchemaPushNotice.js"
 export const useStudioClient = useAdminClient
 
 import { globalConfigAsModel } from "./lib/global-model-config.js"
+import { isRecordDraft, type RecordDraft } from "./lib/duplicate-record.js"
 import { Dashboard } from "./views/Dashboard.js"
 import { ListView } from "./views/ListView.js"
 import { EditView } from "./views/EditView.js"
@@ -226,22 +227,30 @@ function CollectionListRoute(): React.ReactElement {
   return <ListView model={model} onNavigate={(p) => navigate(p)} />
 }
 
+/** Navigates for an edit form, carrying a create form's starting values in the history entry. */
+function useEditNavigate(): (path: string, draft?: RecordDraft) => void {
+  const navigate = useNavigate()
+  return (path, draft) => navigate(path, draft === undefined ? undefined : { state: draft })
+}
+
 function CollectionCreateRoute(): React.ReactElement {
   const config = useAdminConfig()
   const { model: modelName } = useParams()
-  const navigate = useNavigate()
+  // History state is whatever the entry holds, so it is checked before it seeds the form.
+  const state: unknown = useLocation().state
+  const onNavigate = useEditNavigate()
   const model = config.models.find((m) => m.name === modelName)
   if (!model) return <PageError>Model &quot;{modelName}&quot; not found</PageError>
-  return <EditView model={model} onNavigate={(p) => navigate(p)} />
+  return <EditView model={model} draft={isRecordDraft(state) ? state : undefined} onNavigate={onNavigate} />
 }
 
 function CollectionEditRoute(): React.ReactElement {
   const config = useAdminConfig()
   const { model: modelName, recordId } = useParams()
-  const navigate = useNavigate()
+  const onNavigate = useEditNavigate()
   const model = config.models.find((m) => m.name === modelName)
   if (!model || !recordId) return <PageError>Model &quot;{modelName}&quot; not found</PageError>
-  return <EditView model={model} recordId={recordId} onNavigate={(p) => navigate(p)} />
+  return <EditView model={model} recordId={recordId} onNavigate={onNavigate} />
 }
 
 function CollectionSchemaRoute(): React.ReactElement {

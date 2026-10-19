@@ -460,6 +460,10 @@ export function snapshotLiveRow(
 export interface RecordError {
   message: string
   field?: string | undefined
+  /** The SQLSTATE, when the server sent one. */
+  code?: string | undefined
+  /** Postgres's detail line, which names the columns of a unique violation. */
+  details?: string | undefined
 }
 
 /** A record just created: its id, or why it was not. */
