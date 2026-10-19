@@ -9,11 +9,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu.js"
-import type { PanelModel } from "../lib/publish-panel.js"
+import type { LanguageMenu, PanelModel } from "../lib/publish-panel.js"
 import type { PanelActions } from "./PublishBar.js"
 
-/** Which question the menu has open, if any. */
-export type PublishDialog = "schedule" | "discard" | "unpublish" | null
+/**
+ * Which question the menu has open, if any. `unpublish` withdraws the whole record (every language
+ * of a localized one); `unpublish-language` withdraws only the language on screen.
+ */
+export type PublishDialog = "schedule" | "discard" | "unpublish" | "unpublish-language" | null
 
 interface SplitProps {
   panel: PanelModel
@@ -27,8 +30,9 @@ interface SplitProps {
 /**
  * Publish, with the rarer acts in a menu beside it.
  *
- * The main button says what it will do. Schedule, Discard and Unpublish share the menu, with
- * Unpublish last behind a separator because it is the one that takes something off the live site.
+ * The main button says what it will do, and on a localized model publishes only the language on
+ * screen. Publishing every language, Schedule and Discard share the menu, with the unpublish acts
+ * last behind a separator because they take something off the live site.
  */
 export function PublishSplitButton({ panel, title, busy, actions, initialDialog = null }: SplitProps): React.ReactElement {
   const [dialog, setDialog] = useState<PublishDialog>(initialDialog)
@@ -46,30 +50,26 @@ export function PublishSplitButton({ panel, title, busy, actions, initialDialog 
           className="flex-1 min-w-0 justify-center disabled:opacity-100 disabled:text-muted-foreground"
           disabled={busy || panel.primary.disabled}
           title={panel.primary.disabled ? (panel.note ?? undefined) : undefined}
-          onClick={() => { actions.publish() }}
+          onClick={() => { actions.publish(panel.primary.locales ?? undefined) }}
         >
           <span className="truncate">{panel.primary.label}</span>
         </Button>
-        <PublishMenu panel={panel} tone={tone} busy={busy} onOpen={setDialog} onCancelSchedule={actions.cancelSchedule} />
+        <PublishMenu panel={panel} tone={tone} busy={busy} onOpen={setDialog} actions={actions} />
       </ButtonGroup>
       {dialog !== null && <PublishQuestion dialog={dialog} panel={panel} title={title} actions={actions} onClose={close} />}
     </>
   )
 }
 
-function PublishMenu({
-  panel,
-  tone,
-  busy,
-  onOpen,
-  onCancelSchedule,
-}: {
+interface MenuProps {
   panel: PanelModel
   tone: "primary" | "secondary"
   busy: boolean
   onOpen: (dialog: PublishDialog) => void
-  onCancelSchedule: () => void
-}): React.ReactElement {
+  actions: PanelActions
+}
+
+function PublishMenu({ panel, tone, busy, onOpen, actions }: MenuProps): React.ReactElement {
   const { menu } = panel
   return (
     <DropdownMenu>
@@ -79,19 +79,41 @@ function PublishMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
+        {menu.languages !== null && (
+          <DropdownMenuItem disabled={!menu.languages.canPublishAll} onSelect={() => { actions.publish() }}>
+            Publish all languages
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem disabled={!menu.canSchedule && !menu.scheduled} onSelect={() => { onOpen("schedule") }}>
           {menu.scheduled ? "Change schedule..." : "Schedule publish..."}
         </DropdownMenuItem>
-        {menu.scheduled && <DropdownMenuItem onSelect={onCancelSchedule}>Cancel schedule</DropdownMenuItem>}
+        {menu.scheduled && <DropdownMenuItem onSelect={actions.cancelSchedule}>Cancel schedule</DropdownMenuItem>}
         <DropdownMenuItem disabled={!menu.canDiscard} onSelect={() => { onOpen("discard") }}>
           Discard changes
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem disabled={!menu.canUnpublish} className="text-destructive" onSelect={() => { onOpen("unpublish") }}>
-          Unpublish
-        </DropdownMenuItem>
+        <UnpublishItems menu={menu} onOpen={onOpen} />
       </DropdownMenuContent>
     </DropdownMenu>
+  )
+}
+
+/** "Unpublish" for a record that publishes as a whole; the language on screen, then all, for a localized one. */
+function UnpublishItems({ menu, onOpen }: { menu: PanelModel["menu"]; onOpen: (dialog: PublishDialog) => void }): React.ReactElement {
+  const { languages } = menu
+  const all = (
+    <DropdownMenuItem disabled={!menu.canUnpublish} className="text-destructive" onSelect={() => { onOpen("unpublish") }}>
+      {languages === null ? "Unpublish" : "Unpublish all languages"}
+    </DropdownMenuItem>
+  )
+  if (languages === null) return all
+  return (
+    <>
+      <DropdownMenuItem disabled={!languages.canUnpublishOne} className="text-destructive" onSelect={() => { onOpen("unpublish-language") }}>
+        {`Unpublish in ${languages.language.label}`}
+      </DropdownMenuItem>
+      {all}
+    </>
   )
 }
 
@@ -106,7 +128,7 @@ interface QuestionProps {
 function PublishQuestion({ dialog, ...props }: QuestionProps & { dialog: Exclude<PublishDialog, null> }): React.ReactElement {
   if (dialog === "schedule") return <ScheduleQuestion {...props} />
   if (dialog === "discard") return <DiscardQuestion {...props} />
-  return <UnpublishQuestion {...props} />
+  return <UnpublishQuestion {...props} scope={dialog} />
 }
 
 function ScheduleQuestion({ panel, actions, onClose }: QuestionProps): React.ReactElement {
@@ -142,10 +164,39 @@ function DiscardQuestion({ title, actions, onClose }: QuestionProps): React.Reac
   )
 }
 
-function UnpublishQuestion({ title, actions, onClose }: QuestionProps): React.ReactElement {
+/** What an unpublish asks, what its answer says, and which locales it withdraws: undefined for every one. */
+interface UnpublishWords {
+  question: string
+  body: string
+  answer: string
+  locales: string[] | undefined
+}
+
+const KEPT = "Your content is kept as a draft."
+
+function unpublishWords(scope: "unpublish" | "unpublish-language", languages: LanguageMenu | null, title: string): UnpublishWords {
+  if (languages === null) {
+    return { question: `Unpublish "${title}"?`, body: `It comes off the live site. ${KEPT}`, answer: "Unpublish", locales: undefined }
+  }
+  if (scope === "unpublish") {
+    const body = `It comes off the live site in every language. ${KEPT}`
+    return { question: `Unpublish "${title}" in all languages?`, body, answer: "Unpublish all languages", locales: undefined }
+  }
+  const { code, label } = languages.language
+  return {
+    question: `Unpublish "${title}" in ${label}?`,
+    body: `${label} comes off the live site. Other languages stay as they are. ${KEPT}`,
+    answer: `Unpublish in ${label}`,
+    locales: [code],
+  }
+}
+
+function UnpublishQuestion({ scope, panel, title, actions, onClose }: QuestionProps & { scope: "unpublish" | "unpublish-language" }): React.ReactElement {
+  const words = unpublishWords(scope, panel.menu.languages, title)
+  const act = (): void => { actions.unpublish(words.locales) }
   return (
-    <Dialog role="alertdialog" title={`Unpublish "${title}"?`} actions={<Answers label="Unpublish" act={actions.unpublish} onClose={onClose} />}>
-      <p>It comes off the live site. Your content is kept as a draft.</p>
+    <Dialog role="alertdialog" title={words.question} actions={<Answers label={words.answer} act={act} onClose={onClose} />}>
+      <p>{words.body}</p>
     </Dialog>
   )
 }

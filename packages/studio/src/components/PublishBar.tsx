@@ -4,7 +4,7 @@ import { IconHistory } from "./icons.js"
 import { PublishSplitButton } from "./PublishMenu.js"
 import { SharePreview } from "./SharePreview.js"
 import { useAdminClient } from "../hooks/useAdminClient.js"
-import { useLocale } from "../hooks/useLocale.js"
+import { useLocale, type LocaleState as LocaleContextValue } from "../hooks/useLocale.js"
 import { usePublishActions, type PublishActions, type RecordEditor } from "../hooks/usePublishActions.js"
 import { formatTimestamp } from "../lib/utils.js"
 import { describePanel, type PanelModel, type RecordStatus } from "../lib/publish-panel.js"
@@ -76,23 +76,16 @@ function usePublishingState(model: ModelConfig, recordId: string | undefined, co
  * differ, which is the only time the badge cannot say it alone.
  */
 export function PublishBar({ record, editor, seesDrafts, onNavigate }: PublishBarProps): React.ReactElement | null {
-  const { locales: projectLocales } = useLocale()
-  const codes = projectLocales.map((l) => l.code).join(",")
+  const locale = useLocale()
+  const codes = locale.locales.map((l) => l.code).join(",")
   const { model, recordId } = record
   const state = usePublishingState(model, recordId, codes, editor.savedAt)
   const actions = usePublishActions({ model, recordId, state }, editor)
 
   if (model.versions === null || !model.versions.drafts || !seesDrafts) return null
 
-  const locales = localesFor(model, codes)
-  const wholeRecord = locales.length === 1 && locales[0] === WHOLE_RECORD
-  const creating = recordId === undefined
-  const panel = describePanel({ locales, wholeRecord, state, dirty: editor.dirty, creating })
-  const labelOf = (code: string): string => projectLocales.find((l) => l.code === code)?.label ?? code
   const view: PanelView = {
-    panel,
-    title: record.title,
-    locales: locales.map((code) => ({ code, label: labelOf(code), state: state?.locales[code] ?? "absent" })),
+    ...panelOf({ record, editor, state, locale }, localesFor(model, codes)),
     busy: actions.busy || editor.saving,
     saving: editor.saving,
     error: actions.error,
@@ -106,6 +99,44 @@ export function PublishBar({ record, editor, seesDrafts, onNavigate }: PublishBa
       {recordId !== undefined && <PublishLinks record={{ ...record, recordId }} onHistory={toHistory} />}
     </>
   )
+}
+
+/**
+ * What the panel calls a language: the project's label, unless that label is only the code (a config
+ * that lists codes is labelled "EN", "FR"), in which case its name, so the button reads "Publish in
+ * English". A code with no known name keeps its label.
+ */
+function languageName(code: string, label: string): string {
+  if (label.toLowerCase() !== code.toLowerCase()) return label
+  try {
+    return new Intl.DisplayNames(["en"], { type: "language", fallback: "none" }).of(code) ?? label
+  } catch {
+    // Not a well-formed language tag.
+    return label
+  }
+}
+
+interface PanelSource {
+  record: PublishingRecord
+  editor: RecordEditor
+  state: PublishingState | null
+  locale: LocaleContextValue
+}
+
+/**
+ * The panel and its language rows, from the record and the language the editor is showing: on a
+ * localized model the main button publishes that one language and names it.
+ */
+function panelOf({ record, editor, state, locale }: PanelSource, locales: string[]): Pick<PanelView, "panel" | "title" | "locales"> {
+  const wholeRecord = locales.length === 1 && locales[0] === WHOLE_RECORD
+  const labelOf = (code: string): string => languageName(code, locale.locales.find((l) => l.code === code)?.label ?? code)
+  const editing = wholeRecord ? null : { code: locale.currentLocale, label: labelOf(locale.currentLocale) }
+  const creating = record.recordId === undefined
+  return {
+    panel: describePanel({ locales, wholeRecord, state, dirty: editor.dirty, creating, editing }),
+    title: record.title,
+    locales: locales.map((code) => ({ code, label: labelOf(code), state: state?.locales[code] ?? "absent" })),
+  }
 }
 
 /** What the panel shows, already derived. */
@@ -203,7 +234,7 @@ function LocaleRows({ view, onPublish }: { view: PanelView; onPublish: (code: st
             {stateLabels[state].short}
           </Badge>
           <span className="flex-1" />
-          {view.panel.rowPublish && state !== "live" && (
+          {view.panel.rowPublish.includes(code) && (
             <Button size="xs" variant="ghost" disabled={view.busy} onClick={() => { onPublish(code) }}>
               Publish {code}
             </Button>

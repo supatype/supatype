@@ -122,13 +122,19 @@ function editor(over: Partial<RecordEditor> = {}): RecordEditor {
   }
 }
 
-async function show(served: Served, ed: RecordEditor = editor()): Promise<void> {
+/** The model on screen and the project's languages around it. */
+interface Scope {
+  model: ModelConfig
+  locale: LocaleState
+}
+
+async function show(served: Served, ed: RecordEditor = editor(), scope: Scope = { model: MODEL, locale: LOCALE }): Promise<void> {
   serve(served)
   await act(async () =>
     root.render(
       <AdminClientContext.Provider value={CLIENT}>
-        <LocaleContext.Provider value={LOCALE}>
-          <PublishBar record={{ model: MODEL, recordId: "r1", title: "A post" }} editor={ed} seesDrafts onNavigate={() => {}} />
+        <LocaleContext.Provider value={scope.locale}>
+          <PublishBar record={{ model: scope.model, recordId: "r1", title: "A post" }} editor={ed} seesDrafts onNavigate={() => {}} />
         </LocaleContext.Provider>
       </AdminClientContext.Provider>,
     ),
@@ -152,14 +158,19 @@ async function click(label: string): Promise<void> {
   await settle()
 }
 
-/** Opens the menu on the Publish button and chooses `label`. */
-async function choose(label: string): Promise<void> {
+/** Opens the menu on the Publish button and lists what it offers. */
+async function openMenu(): Promise<Element[]> {
   const trigger = button("More publishing actions")
   await act(async () => {
     trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
   })
   await settle()
-  const item = [...document.body.querySelectorAll('[role="menuitem"]')].find((el) => (el.textContent ?? "").trim() === label)
+  return [...document.body.querySelectorAll('[role="menuitem"]')]
+}
+
+/** Opens the menu on the Publish button and chooses `label`. */
+async function choose(label: string): Promise<void> {
+  const item = (await openMenu()).find((el) => (el.textContent ?? "").trim() === label)
   if (!(item instanceof HTMLElement)) throw new Error(`no menu item "${label}"`)
   await act(async () => {
     item.click()
@@ -238,10 +249,103 @@ describe("the menu", () => {
     expect(onChanged).toHaveBeenCalledWith("r1", true)
   })
 
+  it("keeps the single Unpublish on a model that publishes as a whole", async () => {
+    await show({ versions: [live(1)], row: { id: "r1" } })
+    const offered = (await openMenu()).map((el) => (el.textContent ?? "").trim())
+    expect(offered).toContain("Unpublish")
+    expect(offered.some((label) => label.includes("languages") || label.includes(" in "))).toBe(false)
+  })
+
   it("cancels a schedule without publishing", async () => {
     await show({ versions: [versionRow(1, { scheduled_locales: { "*": DUE_AT } })], row: { id: "r1" } })
     await choose("Cancel schedule")
     expect(fns()).toEqual(["unschedule_publish"])
+  })
+})
+
+describe("a localized record", () => {
+  const LOCALIZED: Scope = {
+    model: { ...MODEL, versions: { drafts: true, keep: 20, versionsTable: "posts_versions", localizedColumns: ["title"] } },
+    locale: { ...LOCALE, locales: [{ code: "en", label: "English" }, { code: "fr", label: "French" }] },
+  }
+  const both = (n: number): Record<string, unknown> =>
+    versionRow(n, { status: "published", published_locales: { en: LIVE_AT, fr: LIVE_AT } })
+  const items = async (): Promise<string[]> => (await openMenu()).map((el) => (el.textContent ?? "").trim())
+
+  it("publishes only the language on screen from the main button", async () => {
+    await show({ versions: [versionRow(1)], row: { id: "r1" } }, editor(), LOCALIZED)
+    await click("Publish in English")
+    expect(fns()).toEqual(["publish"])
+    expect(rpcs[0]?.body["locales"]).toEqual(["en"])
+  })
+
+  it("follows the language the editor is showing", async () => {
+    const french: Scope = { ...LOCALIZED, locale: { ...LOCALIZED.locale, currentLocale: "fr" } }
+    await show({ versions: [versionRow(2), both(1)], row: { id: "r1" } }, editor(), french)
+    await click("Publish changes in French")
+    expect(rpcs[0]?.body["locales"]).toEqual(["fr"])
+  })
+
+  it("names the language even when the project gives only its code", async () => {
+    // A project's config lists codes; Studio labels them "EN" and "FR", which a button should not read as.
+    const coded: Scope = { ...LOCALIZED, locale: { ...LOCALIZED.locale, locales: [{ code: "en", label: "EN" }, { code: "fr", label: "FR" }] } }
+    await show({ versions: [versionRow(1)], row: { id: "r1" } }, editor(), coded)
+    await click("Publish in English")
+    expect(await items()).toContain("Unpublish in English")
+  })
+
+  it("keeps a label the project chose for a code no language name exists for", async () => {
+    const custom: Scope = { ...LOCALIZED, locale: { ...LOCALIZED.locale, currentLocale: "xx-internal", locales: [{ code: "en", label: "EN" }, { code: "xx-internal", label: "Internal" }] } }
+    await show({ versions: [versionRow(1)], row: { id: "r1" } }, editor(), custom)
+    expect(button("Publish in Internal").disabled).toBe(false)
+  })
+
+  it("publishes every language from the menu", async () => {
+    await show({ versions: [versionRow(1)], row: { id: "r1" } }, editor(), LOCALIZED)
+    await choose("Publish all languages")
+    expect(fns()).toEqual(["publish"])
+    expect(rpcs[0]?.body).not.toHaveProperty("locales")
+  })
+
+  it("lists the per-language acts in place of the single Unpublish", async () => {
+    await show({ versions: [both(1)], row: { id: "r1" } }, editor(), LOCALIZED)
+    const offered = await items()
+    expect(offered).toEqual(expect.arrayContaining(["Publish all languages", "Unpublish in English", "Unpublish all languages"]))
+    expect(offered).not.toContain("Unpublish")
+  })
+
+  it("asks before unpublishing the language on screen, then withdraws only it", async () => {
+    await show({ versions: [both(1)], row: { id: "r1" } }, editor(), LOCALIZED)
+    await choose("Unpublish in English")
+    expect(document.body.textContent).toContain('Unpublish "A post" in English?')
+    expect(fns()).toEqual([])
+    await click("Unpublish in English")
+    expect(fns()).toEqual(["unpublish"])
+    expect(rpcs[0]?.body["locales"]).toEqual(["en"])
+  })
+
+  it("asks before unpublishing every language, then withdraws them all", async () => {
+    await show({ versions: [both(1)], row: { id: "r1" } }, editor(), LOCALIZED)
+    await choose("Unpublish all languages")
+    expect(document.body.textContent).toContain('Unpublish "A post" in all languages?')
+    expect(fns()).toEqual([])
+    await click("Unpublish all languages")
+    expect(fns()).toEqual(["unpublish"])
+    expect(rpcs[0]?.body).not.toHaveProperty("locales")
+  })
+
+  it("does nothing when the one-language question is cancelled", async () => {
+    await show({ versions: [both(1)], row: { id: "r1" } }, editor(), LOCALIZED)
+    await choose("Unpublish in English")
+    await click("Cancel")
+    expect(fns()).toEqual([])
+  })
+
+  it("records a history-less record's live row before publishing one language of it", async () => {
+    await show({ versions: [], row: { id: "r1", title: { en: "Seeded" }, published_at: null } }, editor(), LOCALIZED)
+    await click("Publish in English")
+    expect(fns()).toEqual(["create_draft", "publish"])
+    expect(rpcs[1]?.body["locales"]).toEqual(["en"])
   })
 })
 
