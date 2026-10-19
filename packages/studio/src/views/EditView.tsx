@@ -6,7 +6,7 @@ import { useLocale } from "../hooks/useLocale.js"
 import { LivePreviewPane } from "../components/LivePreviewPane.js"
 import { PublishBar } from "../components/PublishBar.js"
 import { Slideover } from "../components/Slideover.js"
-import { Button } from "../components/ui.js"
+import { Button, DestructiveAnswers, Dialog } from "../components/ui.js"
 import { previewUrlFor } from "../lib/preview-url.js"
 import { appOrigin } from "../lib/membership-url.js"
 import type { ModelConfig } from "../config.js"
@@ -70,6 +70,7 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
   const capability = useStudioCapability()
   // null = not asked or not answerable. Only ever set from the database's own answer.
   const [recordDeletable, setRecordDeletable] = useState<boolean | null>(null)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   useEffect(() => {
     if (recordId !== undefined) {
@@ -188,18 +189,15 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
     if (id !== null) onChanged(id, false)
   }
 
+  // Asked first, in the same words as Unpublish. A refused delete reports its error and stays on
+  // the record: the client resolves a refusal rather than throwing it, so leaving for the list on
+  // any answer read as a delete that had worked.
   const handleDelete = async () => {
     if (!recordId) return
-    const confirmed = typeof window !== "undefined" && window.confirm(`Delete this ${model.label}?`)
-    if (!confirmed) return
-
     try {
-      await client
-        .from(model.tableName)
-        .delete()
-        .eq(model.primaryKey, recordId)
-
-      onNavigate(`/models/${model.name}`)
+      const { error: refused } = await client.from(model.tableName).delete().eq(model.primaryKey, recordId)
+      if (refused) setError(refused.message)
+      else onNavigate(`/models/${model.name}`)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete")
     }
@@ -254,13 +252,14 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
   // absence, and when the two asked the question separately the pane embedded a preview page whose
   // advice was to use a control that was not on the screen.
   const awaitingFirstSave = isCreate || recordId === undefined
+  const title = recordTitle(model, values, currentLocale, defaultLocale)
   const publishing =
     model.versions?.drafts === true && capability.seesDrafts ? (
       <PublishBar
         record={{
           model,
           recordId,
-          title: recordTitle(model, values, currentLocale, defaultLocale),
+          title,
           ...(previewUrl !== "" && { previewUrl }),
         }}
         editor={{ dirty, saving, savedAt, onSave: () => { void handleSave() }, persist: persistAndMark, onChanged }}
@@ -279,6 +278,10 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
       )}
 
       {error && <div className="st-error" role="alert">{error}</div>}
+
+      {confirmingDelete && (
+        <DeleteQuestion title={title} act={() => { void handleDelete() }} onClose={() => { setConfirmingDelete(false) }} />
+      )}
 
       <EditFormLayout
         {...(publishing !== undefined && { publishing })}
@@ -301,7 +304,7 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
           // the per-record affordance answers where it is not.
           ...(isOperationOffered(fieldAccess, model.tableName, "delete") &&
             recordDeletable !== false && {
-              onDelete: () => { void handleDelete() },
+              onDelete: () => { setConfirmingDelete(true) },
             }),
         })}
         previewAction={
@@ -334,6 +337,15 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
         </Slideover>
       )}
     </div>
+  )
+}
+
+/** The question Delete asks, naming the record as Unpublish does. */
+function DeleteQuestion({ title, act, onClose }: { title: string; act: () => void; onClose: () => void }): React.ReactElement {
+  return (
+    <Dialog role="alertdialog" title={`Delete "${title}"?`} actions={<DestructiveAnswers label="Delete" act={act} onClose={onClose} />}>
+      <p>It is deleted for good. This cannot be undone.</p>
+    </Dialog>
   )
 }
 
