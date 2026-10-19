@@ -9,7 +9,7 @@ import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { cn } from "../lib/utils.js"
 import { isJsonObject } from "../lib/json.js"
-import { resolveStorageObjectPath } from "../lib/storage-ref.js"
+import { browserSignedUrl, resolveStorageObjectPath, storagePublicUrl } from "../lib/storage-ref.js"
 import { Button, Card, Input, Select, Th, Td } from "../components/ui.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -94,23 +94,6 @@ function isPreviewable(type: string): boolean {
   return type.startsWith("image/") || type === "application/pdf"
 }
 
-function normalizeStoragePublicUrl(
-  client: SupatypeClient,
-  rawUrl: string,
-): string {
-  if (!rawUrl) return rawUrl
-  try {
-    const parsed = new URL(rawUrl)
-    const apiOrigin = new URL(client.url).origin
-    if (apiOrigin && parsed.origin !== apiOrigin && parsed.pathname.startsWith("/storage/v1/")) {
-      return `${apiOrigin}${parsed.pathname}${parsed.search}`
-    }
-    return rawUrl
-  } catch {
-    return rawUrl
-  }
-}
-
 function storageObjectPath(prefix: string[], name: string): string {
   return resolveStorageObjectPath(prefix.join("/"), name)
 }
@@ -136,9 +119,7 @@ function StorageImageThumbnail({
   const filePath = useMemo(() => storageObjectPath(pathPrefix, fileName), [pathPrefix, fileName])
 
   const publicUrl = useMemo(() => {
-    if (!bucketPublic) return null
-    const raw = client.storage.from(bucketName).getPublicUrl(filePath).data.publicUrl
-    return normalizeStoragePublicUrl(client, raw)
+    return bucketPublic ? storagePublicUrl(client, { bucket: bucketName, path: filePath }) : null
   }, [bucketPublic, bucketName, filePath, client])
 
   const [signedUrl, setSignedUrl] = useState<string | null>(null)
@@ -150,9 +131,8 @@ function StorageImageThumbnail({
     }
     let cancelled = false
     void (async () => {
-      const { data, error } = await client.storage.from(bucketName).createSignedUrl(filePath, 3600)
-      if (cancelled || error || !data?.signedUrl) return
-      setSignedUrl(normalizeStoragePublicUrl(client, data.signedUrl))
+      const { url } = await browserSignedUrl(client, { bucket: bucketName, path: filePath }, 3600)
+      if (!cancelled) setSignedUrl(url)
     })()
     return () => { cancelled = true }
   }, [bucketPublic, bucketName, filePath, client])
@@ -219,18 +199,15 @@ function FilePreview({
 
   const publicUrl = useMemo(() => {
     if (!bucket.public || file.is_folder) return null
-    return normalizeStoragePublicUrl(
-      client,
-      client.storage.from(bucket.name).getPublicUrl(filePath).data.publicUrl as string,
-    )
+    return storagePublicUrl(client, { bucket: bucket.name, path: filePath })
   }, [bucket, file, filePath, client])
   const previewUrl = publicUrl ?? signedUrl
 
   const generateSignedUrl = async () => {
     setSignedUrlError(null)
-    const { data, error } = await client.storage.from(bucket.name).createSignedUrl(filePath, 3600)
-    if (error) { setSignedUrlError(error.message); return }
-    setSignedUrl(data?.signedUrl ?? null)
+    const { url, error } = await browserSignedUrl(client, { bucket: bucket.name, path: filePath }, 3600)
+    if (error !== null) { setSignedUrlError(error); return }
+    setSignedUrl(url)
   }
 
   return (
@@ -358,10 +335,16 @@ function CreateFolderDialog({
   onConfirm,
   onCancel,
 }: {
-  onConfirm: (name: string) => void
+  /** Resolves to why the folder was not made, shown in the dialog rather than behind it; null when it was. */
+  onConfirm: (name: string) => Promise<string | null>
   onCancel: () => void
 }): React.ReactElement {
   const [name, setName] = useState("")
+  const [error, setError] = useState<string | null>(null)
+  const create = (): void => {
+    if (!name.trim()) return
+    void onConfirm(name.trim()).then(setError, (e: unknown) => { setError(e instanceof Error ? e.message : String(e)) })
+  }
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <Card className="p-6 max-w-[400px] w-full">
@@ -371,11 +354,12 @@ function CreateFolderDialog({
           onChange={(e) => setName(e.target.value)}
           placeholder="Folder name..."
           autoFocus
-          onKeyDown={(e) => { if (e.key === "Enter" && name.trim()) onConfirm(name.trim()) }}
+          onKeyDown={(e) => { if (e.key === "Enter") create() }}
         />
+        {error !== null ? <div className="mt-3"><ErrorBanner message={error} /></div> : null}
         <div className="flex gap-2 justify-end mt-4">
           <Button onClick={onCancel}>Cancel</Button>
-          <Button variant="primary" onClick={() => { if (name.trim()) onConfirm(name.trim()) }}>Create</Button>
+          <Button variant="primary" onClick={create}>Create</Button>
         </div>
       </Card>
     </div>
@@ -596,15 +580,13 @@ export function StorageBrowser(): React.ReactElement {
     void fetchFiles()
   }
 
-  const handleCreateFolder = async (name: string) => {
+  const handleCreateFolder = async (name: string): Promise<string | null> => {
     const filePath = [...path, name, ".emptyFolderPlaceholder"].join("/")
     const { error } = await client.storage.from(selectedBucket).upload(filePath, new Blob([""]))
-    if (error) {
-      setFilesError(error.message)
-      return
-    }
+    if (error) return error.message
     setShowCreateFolder(false)
     void fetchFiles()
+    return null
   }
 
   const getFilePath = useCallback((file: StorageFile): string => {
@@ -616,17 +598,14 @@ export function StorageBrowser(): React.ReactElement {
     const filePath = getFilePath(file)
     let url: string | null = null
     if (currentBucket?.public) {
-      url = normalizeStoragePublicUrl(
-        client,
-        client.storage.from(selectedBucket).getPublicUrl(filePath).data.publicUrl as string,
-      )
+      url = storagePublicUrl(client, { bucket: selectedBucket, path: filePath })
     } else {
-      const { data, error } = await client.storage.from(selectedBucket).createSignedUrl(filePath, 60)
-      if (error) {
-        setFilesError(error.message)
+      const signed = await browserSignedUrl(client, { bucket: selectedBucket, path: filePath }, 60)
+      if (signed.error !== null) {
+        setFilesError(signed.error)
         return
       }
-      url = data?.signedUrl ?? null
+      url = signed.url
     }
     if (url) {
       window.open(url, "_blank", "noopener,noreferrer")

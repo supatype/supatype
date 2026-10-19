@@ -5,7 +5,7 @@ import * as db from "../db.js"
 import * as s3 from "../s3.js"
 import { parseTransformParams, transformImage, UnrenderableImageError } from "../transform.js"
 import { config } from "../env.js"
-import { validateFileSize, validateContentType, validateStorageQuota } from "../middleware/storage-limits.js"
+import { uploadRefusal } from "../middleware/storage-limits.js"
 import { checkReadAccess } from "../middleware/access-control.js"
 import type { JwtPayload } from "../auth.js"
 import { createSignedToken, verifySignedToken } from "../middleware/signed-urls.js"
@@ -46,44 +46,34 @@ export async function upload(ctx: RequestContext): Promise<void> {
     return
   }
 
-  // Apply bucket-specific CORS headers
   applyCorsHeaders(ctx.res, bucket)
-
   const jwt = callerOf(ctx)
 
-  // ── Content-Type validation (task 43) ───────────────────────────────────────
   const contentType = inferMime(objectPath, ctx.req.headers["content-type"] ?? "")
-  const typeError = validateContentType(bucket, contentType)
-  if (typeError) {
-    sendJson(ctx.res, typeError.status, typeError.body)
-    return
-  }
-
   const body = await readBody(ctx.req)
-
-  // ── File size validation (task 41) ──────────────────────────────────────────
-  const sizeError = validateFileSize(bucket, body.length)
-  if (sizeError) {
-    sendJson(ctx.res, sizeError.status, sizeError.body)
+  // Type, size and quota, read once the body is in, since a folder's empty placeholder is exempt from the type rule.
+  const refusal = await uploadRefusal(bucket, { objectPath, contentType, bodyLength: body.length })
+  if (refusal) {
+    sendJson(ctx.res, refusal.status, refusal.body)
     return
   }
 
-  // ── Storage quota check (task 42) ───────────────────────────────────────────
-  const quotaError = await validateStorageQuota(body.length)
-  if (quotaError) {
-    sendJson(ctx.res, quotaError.status, quotaError.body)
-    return
-  }
+  const write: db.ObjectWrite = { bucketId, name: objectPath, metadata: { mimetype: contentType, size: body.length } }
+  await writeObject(ctx, jwt, write, { body, contentType })
+}
 
+/**
+ * Write an upload the bucket's limits accept. The bucket's `create` rule decides a new object and
+ * its `update` rule an overwrite, both by the database, before any bytes are stored.
+ */
+async function writeObject(
+  ctx: RequestContext,
+  jwt: JwtPayload,
+  write: db.ObjectWrite,
+  bytes: { body: Buffer; contentType: string },
+): Promise<void> {
+  const { bucketId, name: objectPath } = write
   const upsert = ctx.req.headers["x-upsert"] === "true"
-
-  // The bucket's `create` rule decides a new object and its `update` rule an overwrite, both by
-  // the database, before any bytes are stored.
-  const write: db.ObjectWrite = {
-    bucketId,
-    name: objectPath,
-    metadata: { mimetype: contentType, size: body.length },
-  }
   // What the write would be if it were made now: only "written" goes on to store any bytes.
   const wouldBe = await refusingWhenUngranted(ctx, () => db.checkUploadAs(jwt, write, upsert))
   if (wouldBe === undefined) return
@@ -92,7 +82,7 @@ export async function upload(ctx: RequestContext): Promise<void> {
     return
   }
 
-  const committed = await storeAndCommit(ctx, jwt, write, upsert, { body, contentType })
+  const committed = await storeAndCommit(ctx, jwt, write, upsert, bytes)
   if (committed !== undefined) sendWriteOutcome(ctx, jwt, committed.outcome, { bucketId, objectPath, upsert })
 }
 

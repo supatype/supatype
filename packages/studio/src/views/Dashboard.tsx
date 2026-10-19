@@ -15,6 +15,7 @@ import { useLocale } from "../hooks/useLocale.js"
 import { recordLabel } from "../lib/localized-field.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
 import { authUserListPath, userListTotal } from "../lib/auth-user-search.js"
+import { firstModelWithCreatedAt, hasCreatedAt } from "../lib/model-created-at.js"
 
 // ─── Response bodies ──────────────────────────────────────────────────────────
 
@@ -280,36 +281,38 @@ function BlockContent({ block }: { block: DashboardBlock }): React.ReactElement 
 
 // ─── Stats block ──────────────────────────────────────────────────────────────
 
+/** How many rows a PostgREST HEAD request counts, from its Content-Range; no rows are sent. */
+async function headCount(url: string, headers: Record<string, string>): Promise<number> {
+  const res = await fetch(url, { method: "HEAD", headers })
+  return parseInt(res.headers.get("content-range")?.split("/")[1] ?? "0", 10)
+}
+
 function StatsBlock({ block }: { block: DashboardBlock }): React.ReactElement {
   const client = useAdminClient()
+  const config = useAdminConfig()
   const [count, setCount] = useState<number | null>(null)
   const [trend, setTrend] = useState<number | null>(null)
+  // The week's count reads created_at, which only some models have.
+  const dated = hasCreatedAt(config.models, block.model)
 
   useEffect(() => {
     if (!block.model) return
     void (async () => {
       try {
-        // Count via PostgREST head request (no data transferred)
         const url = `${client.url}/rest/v1/${block.model}?select=id`
         const headers = studioRestHeaders(client, { Prefer: "count=exact" })
-
-        const [totalRes, weekRes] = await Promise.all([
-          fetch(url, { method: "HEAD", headers }),
-          fetch(
-            `${url}&created_at=gte.${new Date(Date.now() - 7 * 86_400_000).toISOString()}`,
-            { method: "HEAD", headers },
-          ),
+        const weekAgo = new Date(Date.now() - 7 * 86_400_000).toISOString()
+        const [total, week] = await Promise.all([
+          headCount(url, headers),
+          dated ? headCount(`${url}&created_at=gte.${weekAgo}`, headers) : Promise.resolve(null),
         ])
-
-        const total = parseInt(totalRes.headers.get("content-range")?.split("/")[1] ?? "0", 10)
-        const week = parseInt(weekRes.headers.get("content-range")?.split("/")[1] ?? "0", 10)
         setCount(total)
         setTrend(week)
       } catch {
         setCount(0)
       }
     })()
-  }, [client, block.model])
+  }, [client, block.model, dated])
 
   return (
     <div className="p-5">
@@ -331,24 +334,23 @@ export function RecentBlock({ block }: { block: DashboardBlock }): React.ReactEl
   const [items, setItems] = useState<Record<string, unknown>[]>([])
 
   const modelConfig = config.models.find((m) => m.tableName === block.model)
+  const dated = hasCreatedAt(config.models, block.model)
 
   useEffect(() => {
     const model = block.model
     if (!model) return
     void (async () => {
       try {
-        const result = await client
-          .from(model)
-          .select()
-          .order("created_at", { ascending: false })
-          .limit(5)
+        const query = client.from(model).select()
+        // Newest first where the model records when a row was made; asking for created_at elsewhere answers 400.
+        const result = await (dated ? query.order("created_at", { ascending: false }) : query).limit(5)
         const rows: unknown = result.data
         if (Array.isArray(rows)) setItems(rows.filter(isJsonObject))
       } catch {
         setItems([])
       }
     })()
-  }, [client, block.model])
+  }, [client, block.model, dated])
 
   return (
     <div className="p-5">
@@ -599,10 +601,12 @@ function ContentChartBlock({ block }: { block: DashboardBlock }): React.ReactEle
   const config = useAdminConfig()
   const [data, setData] = useState<DailyRow[]>([])
 
-  const model = block.model ?? config.models[0]?.tableName
+  // Rows per day by created_at, so only a model that has one: a stored layout may name one that does not.
+  const model = block.model ?? firstModelWithCreatedAt(config.models)?.tableName
+  const charted = hasCreatedAt(config.models, model)
 
   useEffect(() => {
-    if (!model) return
+    if (!model || !charted) return
     void (async () => {
       try {
         const res = await fetch(
@@ -620,7 +624,7 @@ function ContentChartBlock({ block }: { block: DashboardBlock }): React.ReactEle
         if (res.ok) setData(await readJson(res, isDailyRows))
       } catch { /* leave empty */ }
     })()
-  }, [client, model])
+  }, [client, model, charted])
 
   return (
     <div className="p-5">
@@ -676,13 +680,14 @@ function formatBytes(bytes: number): string {
 }
 
 function generateDefaultBlocks(models: ModelConfig[]): DashboardBlock[] {
+  const charted = firstModelWithCreatedAt(models)
   const blocks: DashboardBlock[] = [
     { id: "block-quick-actions",   type: "quick-actions",  title: "Quick Actions",             visible: true },
     { id: "block-auth-users",      type: "auth",           title: "Total Users",               visible: true },
     { id: "block-storage",         type: "storage",        title: "Storage",                   visible: true },
     { id: "block-signups-chart",   type: "signups-chart",  title: "New Signups",               visible: true },
     { id: "block-db-size",         type: "db-size",        title: "Database Size",             visible: true },
-    ...(models[0] ? [{ id: `block-content-chart-${models[0].tableName}`, type: "content-chart" as const, title: `${models[0].labelPlural} Created`, visible: true, model: models[0].tableName }] : []),
+    ...(charted ? [{ id: `block-content-chart-${charted.tableName}`, type: "content-chart" as const, title: `${charted.labelPlural} Created`, visible: true, model: charted.tableName }] : []),
   ]
   for (const m of models.slice(0, 3)) {
     blocks.push({ id: `block-stats-${m.tableName}`,  type: "stats",  title: `Total ${m.labelPlural}`,  visible: true, model: m.tableName })
