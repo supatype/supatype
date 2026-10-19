@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { bodyMessage, readJsonObject, type Guard } from "../lib/json.js"
 import type { ProjectFetch } from "./usePlatformApi.js"
+import { useInterval } from "./useTabActivity.js"
 
 /**
  * One of the Realtime Inspector's JSON resources (channels, connections), refreshed on an interval
@@ -84,15 +85,11 @@ export function useInspectorResource<T>(
 
   useEffect(() => {
     refresh()
-    if (intervalMs === null) return
-    const timer = setInterval(() => {
-      if (typeof document === "undefined" || document.visibilityState !== "hidden") refresh()
-    }, intervalMs)
     return () => {
-      clearInterval(timer)
       latest.current++
     }
-  }, [refresh, intervalMs])
+  }, [refresh])
+  useInterval(refresh, intervalMs)
 
   return { data, failure, loading, refresh }
 }

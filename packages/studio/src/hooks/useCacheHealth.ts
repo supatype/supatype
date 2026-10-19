@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import type { SupatypeClient } from "@supatype/client"
 import { useStudioClient } from "../StudioCore.js"
+import { useInterval } from "./useTabActivity.js"
 import {
   isArrayOf,
   isBoolean,
@@ -133,45 +134,45 @@ export function useCacheHealth(enabled = true): CacheHealth {
   const lastKeyspace = useRef<Sample | null>(null)
   const lastRowCache = useRef<Sample | null>(null)
 
+  // Bumped when the client changes or the panels unmount, so an answer to an older request is dropped.
+  const epoch = useRef(0)
+
+  const tick = useCallback(async (): Promise<void> => {
+    const mine = epoch.current
+    const live = (): boolean => mine === epoch.current
+    try {
+      const [ks, rc] = await Promise.all([
+        readStats(client, "cache/keyspace", isKeyspaceStats),
+        readStats(client, "cache/rowcache", isRowCacheStatus),
+      ])
+      if (!live()) return
+      const at = Date.now()
+      if (ks) {
+        setRecent(hitRateOver(lastKeyspace.current, { hits: ks.hits_total, misses: ks.misses_total, at }))
+        lastKeyspace.current = { hits: ks.hits_total, misses: ks.misses_total, at }
+      }
+      if (rc) {
+        setRowCacheRecent(hitRateOver(lastRowCache.current, { hits: rc.hits_total, misses: rc.misses_total, at }))
+        lastRowCache.current = { hits: rc.hits_total, misses: rc.misses_total, at }
+      }
+      setKeyspace(ks)
+      setRowCache(rc)
+      setError(null)
+    } catch (e) {
+      if (live()) setError(e instanceof Error ? e.message : "Failed to read cache statistics")
+    } finally {
+      if (live()) setLoading(false)
+    }
+  }, [client])
+
   useEffect(() => {
     if (!enabled) return
-    let live = true
-
-    const tick = async (): Promise<void> => {
-      try {
-        const [ks, rc] = await Promise.all([
-          readStats(client, "cache/keyspace", isKeyspaceStats),
-          readStats(client, "cache/rowcache", isRowCacheStatus),
-        ])
-        if (!live) return
-        const at = Date.now()
-        if (ks) {
-          setRecent(hitRateOver(lastKeyspace.current, { hits: ks.hits_total, misses: ks.misses_total, at }))
-          lastKeyspace.current = { hits: ks.hits_total, misses: ks.misses_total, at }
-        }
-        if (rc) {
-          setRowCacheRecent(
-            hitRateOver(lastRowCache.current, { hits: rc.hits_total, misses: rc.misses_total, at }),
-          )
-          lastRowCache.current = { hits: rc.hits_total, misses: rc.misses_total, at }
-        }
-        setKeyspace(ks)
-        setRowCache(rc)
-        setError(null)
-      } catch (e) {
-        if (live) setError(e instanceof Error ? e.message : "Failed to read cache statistics")
-      } finally {
-        if (live) setLoading(false)
-      }
-    }
-
     void tick()
-    const id = setInterval(() => void tick(), POLL_MS)
     return () => {
-      live = false
-      clearInterval(id)
+      epoch.current++
     }
-  }, [client, enabled])
+  }, [tick, enabled])
+  useInterval(() => void tick(), enabled ? POLL_MS : null)
 
   return { keyspace, rowCache, recent, rowCacheRecent, loading, error }
 }

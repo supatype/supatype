@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useCallback, useRef } from "react"
+import React, { useState, useEffect, useCallback } from "react"
 import { useStudioClient } from "../StudioCore.js"
 import { useNavigate, useParams } from "react-router-dom"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import { Badge, Button, Card, Input, Th, Td } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { useFunctionLogTail } from "../hooks/useFunctionLogTail.js"
+import { useInterval } from "../hooks/useTabActivity.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { cn } from "../lib/utils.js"
 import {
@@ -285,13 +286,7 @@ function LogsTab({
   )
 
   // Auto-refresh every 10s
-  const refetchRef = useRef(refetch)
-  refetchRef.current = refetch
-  useEffect(() => {
-    if (!autoRefresh || tailing) return
-    const id = setInterval(() => refetchRef.current(), 10_000)
-    return () => clearInterval(id)
-  }, [autoRefresh, tailing])
+  useInterval(refetch, autoRefresh && !tailing ? 10_000 : null)
 
   const logs: LogEntry[] = tailing ? tail.lines : data ?? []
 

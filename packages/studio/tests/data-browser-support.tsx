@@ -5,6 +5,7 @@ import { vi } from "vitest"
 import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { AdminConfigContext } from "../src/hooks/useAdminConfig.js"
 import { DataExplorer } from "../src/views/DataExplorer.js"
+import type { AdminConfig } from "../src/config.js"
 import { testClient, testConfig } from "./support.js"
 
 /**
@@ -30,10 +31,22 @@ const COLUMNS = [
   column("note", "text", { is_nullable: "YES", column_default: "'none'::text" }),
 ]
 
+/** `message` with no primary key: what a table created outside the schema can look like. */
+export const KEYLESS_COLUMNS = COLUMNS.map((c) => ({ ...c, is_primary: false }))
+
 export interface Browser {
   container: HTMLElement
   inserts: unknown[]
+  /** Every row read the browser sent, in order. */
+  reads: URL[]
   unmount: () => void
+}
+
+export interface BrowserOptions {
+  /** The admin config the browser sees; none of its models by default. */
+  config?: AdminConfig
+  /** The introspected columns of `message`. */
+  columns?: Record<string, unknown>[]
 }
 
 function restAnswer(init: RequestInit | undefined, inserts: unknown[]): Response {
@@ -48,27 +61,35 @@ function restAnswer(init: RequestInit | undefined, inserts: unknown[]): Response
   return Response.json(page, { headers: { "Content-Range": `${from}-${from + page.length - 1}/${total}` } })
 }
 
-async function settle(): Promise<void> {
+export async function settle(): Promise<void> {
   for (let i = 0; i < 4; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
 }
 
-/** The data browser on `message`, rendered and settled. */
-export async function renderBrowser(): Promise<Browser> {
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true
-  const inserts: unknown[] = []
+function stubProject(columns: Record<string, unknown>[], inserts: unknown[], reads: URL[]): void {
   vi.stubGlobal("fetch", async (raw: string, init?: RequestInit) => {
     const url = new URL(raw)
-    if (url.pathname.endsWith("/metadata/introspect")) return Response.json({ rows: COLUMNS, rowCount: COLUMNS.length })
-    if (url.pathname.includes("/rest/v1/")) return restAnswer(init, inserts)
+    if (url.pathname.endsWith("/metadata/introspect")) return Response.json({ rows: columns, rowCount: columns.length })
+    if (url.pathname.includes("/rest/v1/")) {
+      if (init?.method === undefined || init.method === "GET") reads.push(url)
+      return restAnswer(init, inserts)
+    }
     return Response.json({ rows: [], rowCount: 0 })
   })
+}
+
+/** The data browser on `message`, rendered and settled. */
+export async function renderBrowser(options: BrowserOptions = {}): Promise<Browser> {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true
+  const inserts: unknown[] = []
+  const reads: URL[] = []
+  stubProject(options.columns ?? COLUMNS, inserts, reads)
   const container = document.createElement("div")
   document.body.appendChild(container)
   const root: Root = createRoot(container)
   await act(async () => {
     root.render(
       <MemoryRouter>
-        <AdminConfigContext.Provider value={testConfig()}>
+        <AdminConfigContext.Provider value={options.config ?? testConfig()}>
           <AdminClientContext.Provider value={testClient({ url: PROXY, token: "t" })}>
             <DataExplorer initialTable="message" />
           </AdminClientContext.Provider>
@@ -77,7 +98,7 @@ export async function renderBrowser(): Promise<Browser> {
     )
   })
   await settle()
-  return { container, inserts, unmount: () => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals() } }
+  return { container, inserts, reads, unmount: () => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals() } }
 }
 
 /** The button reading exactly `text`. */

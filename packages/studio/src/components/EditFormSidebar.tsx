@@ -1,6 +1,10 @@
 import React from "react"
 import type { FieldConfig } from "../config.js"
 import { EditFormFieldList } from "./EditFormFieldList.js"
+import { Button } from "./ui.js"
+
+/** The sidebar's actions stack, each as wide as the sidebar. */
+const FULL_WIDTH = "w-full justify-center"
 
 export interface EditFormSidebarProps {
   /**
@@ -68,24 +72,19 @@ export function EditFormSidebar({
 
       <div className="st-edit-sidebar-actions">
         {publishing === undefined && (
-          <button
-            type="button"
-            className="st-btn st-btn-primary"
-            onClick={onSave}
-            disabled={saving}
-          >
+          <Button type="button" variant="primary" size="md" className={FULL_WIDTH} onClick={onSave} disabled={saving}>
             {saving ? "Saving..." : "Save"}
-          </button>
+          </Button>
         )}
         {!isCreate && onDuplicate && (
-          <button type="button" className="st-btn" onClick={onDuplicate}>
+          <Button type="button" size="md" className={FULL_WIDTH} onClick={onDuplicate}>
             Duplicate
-          </button>
+          </Button>
         )}
         {!isCreate && onDelete && (
-          <button type="button" className="st-btn st-btn-danger" onClick={onDelete}>
+          <Button type="button" variant="destructive" size="md" className={FULL_WIDTH} onClick={onDelete}>
             Delete
-          </button>
+          </Button>
         )}
       </div>
     </aside>

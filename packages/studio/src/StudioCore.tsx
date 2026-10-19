@@ -224,7 +224,9 @@ function CollectionListRoute(): React.ReactElement {
   const navigate = useNavigate()
   const model = config.models.find((m) => m.name === modelName)
   if (!model) return <PageError>Model &quot;{modelName}&quot; not found</PageError>
-  return <ListView model={model} onNavigate={(p) => navigate(p)} />
+  // Keyed by model: one list's search, sort and page are not another's, and a sort on a column the
+  // next model lacks is an error from PostgREST.
+  return <ListView key={model.name} model={model} onNavigate={(p) => navigate(p)} />
 }
 
 /** Navigates for an edit form, carrying a create form's starting values in the history entry. */
@@ -274,7 +276,7 @@ function CollectionDataRoute(): React.ReactElement {
   const { model: modelName } = useParams()
   const model = config.models.find((m) => m.name === modelName)
   if (!model) return <PageError>Model &quot;{modelName}&quot; not found</PageError>
-  return <DataExplorer initialTable={model.tableName} />
+  return <DataExplorer key={model.tableName} initialTable={model.tableName} />
 }
 
 function CollectionApiRoute(): React.ReactElement {
@@ -366,7 +368,7 @@ function GlobalDataRoute(): React.ReactElement {
   const { name } = useParams()
   const globalConfig = config.globals.find((g) => g.name === name)
   if (!globalConfig) return <PageError>Global &quot;{name}&quot; not found</PageError>
-  return <DataExplorer initialTable={globalConfig.tableName} />
+  return <DataExplorer key={globalConfig.tableName} initialTable={globalConfig.tableName} />
 }
 
 function GlobalApiRoute(): React.ReactElement {

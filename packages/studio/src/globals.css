@@ -106,7 +106,6 @@
 .st-edit-sidebar-title { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: hsl(var(--muted-foreground)); }
 .st-edit-sidebar-section { display: flex; flex-direction: column; gap: 0.75rem; border-bottom: 1px solid hsl(var(--border)); padding-bottom: 0.5rem; }
 .st-edit-sidebar-actions { display: flex; flex-direction: column; gap: 0.5rem; }
-.st-edit-sidebar-actions .st-btn { width: 100%; justify-content: center; }
 @media (max-width: 1024px) {
   .st-edit-layout { grid-template-columns: 1fr; }
   .st-edit-sidebar { position: static; }

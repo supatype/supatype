@@ -4,6 +4,7 @@ import type { StudioConfigErrorKind } from "../components/StudioConfigError.js"
 import type { AdminConfig } from "../config.js"
 import { normalizeAdminConfig } from "../lib/normalize-admin-config.js"
 import type { StudioConfigFetch } from "../lib/studio-config-fetch.js"
+import { useOnReturn } from "./useTabActivity.js"
 
 export type StudioConfigState =
   | { phase: "loading" }
@@ -117,17 +118,7 @@ export function useStudioConfig(
       })
   }, [load, minRefreshIntervalMs])
 
-  useEffect(() => {
-    const onVisible = (): void => {
-      if (document.visibilityState === "visible") refresh()
-    }
-    window.addEventListener("focus", refresh)
-    document.addEventListener("visibilitychange", onVisible)
-    return () => {
-      window.removeEventListener("focus", refresh)
-      document.removeEventListener("visibilitychange", onVisible)
-    }
-  }, [refresh])
+  useOnReturn(refresh)
 
   const retry = useCallback(() => setGeneration((g) => g + 1), [])
   return { state, retry, refresh }

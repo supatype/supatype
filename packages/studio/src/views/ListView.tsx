@@ -12,7 +12,8 @@ import {
   type CellAccess,
 } from "../hooks/useStudioFieldAccess.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
-import { Badge } from "../components/ui.js"
+import { Badge, Button, DestructiveAnswers, Dialog } from "../components/ui.js"
+import type { SupatypeClient } from "@supatype/client"
 import { anyFieldContains, searchColumns } from "../lib/postgrest-search.js"
 import { formatFieldValue } from "../lib/field-display.js"
 import {
@@ -22,15 +23,13 @@ import {
   type RecordState,
 } from "../lib/publishing.js"
 import { stateLabels } from "../components/PublishBar.js"
+import { RefreshControls } from "../components/RefreshControls.js"
+import { useListFreshness } from "../hooks/useListFreshness.js"
+import { listOrder, modelKeyColumns, withOrder, type ListOrder } from "../lib/list-order.js"
 
 interface ListViewProps {
   model: ModelConfig
   onNavigate: (path: string) => void
-}
-
-interface SortState {
-  field: string
-  direction: "asc" | "desc"
 }
 
 export function ListView({ model, onNavigate }: ListViewProps): React.ReactElement {
@@ -45,9 +44,12 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState("")
-  const [sort, setSort] = useState<SortState | null>(null)
+  const [sort, setSort] = useState<ListOrder | null>(null)
   const [page, setPage] = useState(0)
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  // Its own state, not `error`: the refetch after a delete clears that one before it starts.
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const pageSize = 25
   // What the search box matches on: a localized field by its value in each locale, and no field
   // `ilike` cannot read, which failed the whole search.
@@ -70,10 +72,9 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
         query = query.or(anyFieldContains(searchable, search))
       }
 
-      if (sort) {
-        query = query.order(sort.field, { ascending: sort.direction === "asc" })
-      }
-
+      // Never unordered: the user's column or the model's default, then the key, so a page asked for
+      // twice holds the same rows. See `listOrder`.
+      query = withOrder(query, listOrder(sort ? [sort] : [], model.defaultSort, modelKeyColumns(model)))
       query = query.range(page * pageSize, (page + 1) * pageSize - 1)
 
       const result = await query
@@ -87,9 +88,11 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
     } finally {
       setLoading(false)
     }
-  }, [client, model.tableName, searchable, search, sort, page])
+  }, [client, model, searchable, search, sort, page])
 
-  useEffect(() => { void fetchData() }, [fetchData])
+  const freshness = useListFreshness(fetchData, { viewKey: `list.${model.name}` })
+  // The column the rows are in order of, whether the user chose it or the model did.
+  const shownSort = sort ?? model.defaultSort ?? null
 
   const columns = model.listColumns
     .map((name) => model.fields.find((f) => f.name === name))
@@ -97,12 +100,10 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
 
   const toggleSort = (fieldName: string) => {
     setSort((prev) => {
-      if (prev?.field === fieldName) {
-        return prev.direction === "asc"
-          ? { field: fieldName, direction: "desc" }
-          : null
+      if (prev?.column === fieldName) {
+        return prev.ascending ? { column: fieldName, ascending: false } : null
       }
-      return { field: fieldName, direction: "asc" }
+      return { column: fieldName, ascending: true }
     })
   }
 
@@ -147,13 +148,14 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
     }
   }
 
+  // A refused row stays selected and the reason is shown: the client returns the error rather than
+  // throwing, and ignoring it made a delete a policy or foreign key refused look like it worked.
   const handleBulkDelete = async () => {
     if (selected.size === 0) return
-    for (const id of selected) {
-      await client.from(model.tableName).delete().eq(model.primaryKey, id)
-    }
-    setSelected(new Set())
-    void fetchData()
+    const refused = await deleteRows(client, model, selected)
+    setSelected(new Set(refused.keys()))
+    setDeleteError(refusalMessage(refused, selected.size))
+    freshness.refresh()
   }
 
   return (
@@ -186,19 +188,31 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
           />
         )}
 
+        <RefreshControls freshness={freshness} busy={loading} />
+
         {selected.size > 0 && (
           <div className="st-bulk-actions">
             <span>{selected.size} selected</span>
             {isOperationOffered(fieldAccess, model.tableName, "delete") && (
-              <button type="button" className="st-btn st-btn-danger" onClick={() => { void handleBulkDelete() }}>
+              <Button type="button" variant="destructive" onClick={() => { setConfirmingDelete(true) }}>
                 Delete selected
-              </button>
+              </Button>
             )}
           </div>
         )}
       </div>
 
       {error && <div className="st-error" role="alert">{error}</div>}
+      {deleteError && <div className="st-error" role="alert">{deleteError}</div>}
+      {confirmingDelete && (
+        <Dialog
+          role="alertdialog"
+          title={`Delete ${selected.size} ${selected.size === 1 ? model.label : model.labelPlural}?`}
+          actions={<DestructiveAnswers label="Delete" act={() => { void handleBulkDelete() }} onClose={() => { setConfirmingDelete(false) }} />}
+        >
+          <p>They are deleted for good. This cannot be undone.</p>
+        </Dialog>
+      )}
 
       <div className="st-table-wrapper">
         <table className="st-table">
@@ -220,9 +234,9 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
                   style={col.listWidth ? { width: col.listWidth } : undefined}
                 >
                   {col.label}
-                  {sort?.field === col.name && (
+                  {shownSort?.column === col.name && (
                     <span className="st-sort-indicator">
-                      {sort.direction === "asc" ? " \u2191" : " \u2193"}
+                      {shownSort.ascending ? " \u2191" : " \u2193"}
                     </span>
                   )}
                 </th>
@@ -230,7 +244,9 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
             </tr>
           </thead>
           <tbody>
-            {loading ? (
+            {/* Only while there is nothing to show: a refresh keeps the rows on screen until the new
+                ones arrive, rather than blanking the table every few seconds. */}
+            {loading && rows.length === 0 ? (
               <tr>
                 <td colSpan={columns.length + 1} className="st-table-loading">
                   Loading...
@@ -322,6 +338,27 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
       </div>
     </div>
   )
+}
+
+/** Deletes each row by its key, and answers with the keys the server refused and why. */
+async function deleteRows(
+  client: SupatypeClient,
+  model: ModelConfig,
+  ids: ReadonlySet<string>,
+): Promise<Map<string, string>> {
+  const refused = new Map<string, string>()
+  for (const id of ids) {
+    const { error } = await client.from(model.tableName).delete().eq(model.primaryKey, id)
+    if (error) refused.set(id, error.message)
+  }
+  return refused
+}
+
+/** What to tell the user about a delete, or null when every row went. */
+function refusalMessage(refused: ReadonlyMap<string, string>, asked: number): string | null {
+  const [first] = refused.values()
+  if (first === undefined) return null
+  return `${refused.size} of ${asked} could not be deleted: ${first}`
 }
 
 function CellRenderer({
