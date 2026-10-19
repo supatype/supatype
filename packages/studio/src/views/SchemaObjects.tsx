@@ -16,6 +16,7 @@ import { Badge, Card, Checkbox, Input, Pager, Select, Td, Th, type BadgeVariant 
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
+import { useDebouncedValue } from "../hooks/useDebouncedValue.js"
 import { useProjectProxy } from "../hooks/useProjectProxy.js"
 import type { MetadataName, MetadataParams } from "../hooks/useProjectProxy.js"
 import { isMissingLedger } from "../lib/owned-objects.js"
@@ -161,16 +162,6 @@ export async function fetchObjectPage(proxy: LedgerReader, query: ObjectQuery): 
   if (last >= query.page) return page
   const again = await ledgerPage(proxy, { ...query, page: last })
   return toPage(again.rows, kinds, last)
-}
-
-/** `value`, once it has stopped changing for `ms`. */
-function useDebouncedValue<T>(value: T, ms: number): T {
-  const [settled, setSettled] = useState(value)
-  useEffect(() => {
-    const timer = setTimeout(() => setSettled(value), ms)
-    return () => clearTimeout(timer)
-  }, [value, ms])
-  return settled
 }
 
 /** `posts.posts_title_idx`, or `posts` for a table-level object. */

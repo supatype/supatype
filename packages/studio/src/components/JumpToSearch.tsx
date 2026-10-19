@@ -3,23 +3,10 @@ import { useNavigate } from "react-router-dom"
 import { useAdminClient } from "../hooks/useAdminClient.js"
 import { useAdminConfig } from "../hooks/useAdminConfig.js"
 import type { ModelConfig } from "../config.js"
-import type { SupatypeClient } from "@supatype/client"
-import { isJsonObject } from "../lib/json.js"
-import { authUsersIn } from "../lib/relation-auth-users.js"
-import { studioRestHeaders } from "../lib/studio-auth-headers.js"
 import { SQL_EDITOR_HREF, sqlEditorOffered } from "../lib/sql-editor-access.js"
 import { useStudioCapability } from "../hooks/useStudioCapability.js"
 import { IconX } from "./icons.js"
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-type SearchItem = {
-  label: string
-  description?: string
-  href: string
-  category: string
-  kind: "route" | "record"
-}
+import { JUMP_PAGE_SIZE, liveRows, useLiveSearch, type SearchItem } from "./jump-live-search.js"
 
 // ─── Static route index ───────────────────────────────────────────────────────
 
@@ -85,85 +72,65 @@ export function jumpTargetsFor(
   return sqlEditorOffered(capability) ? items : items.filter((item) => item.href !== SQL_EDITOR_HREF)
 }
 
-// ─── Live data search ─────────────────────────────────────────────────────────
-
-function sanitiseQuery(q: string): string {
-  return q.replace(/[(),]/g, "")
-}
-
-async function searchLiveData(
-  client: SupatypeClient,
-  models: ModelConfig[],
-  rawQuery: string,
-  signal: AbortSignal,
-): Promise<SearchItem[]> {
-  const query = sanitiseQuery(rawQuery)
-  if (!query) return []
-
-  const headers = studioRestHeaders(client)
-  const q = query.toLowerCase()
-  const results: SearchItem[] = []
-
-  await Promise.allSettled([
-    // Auth users: search by email and display name
-    (async () => {
-      const res = await fetch(`${client.url}/auth/v1/admin/users?per_page=200`, { headers, signal })
-      if (!res.ok) return
-      const users = authUsersIn(await res.json())
-      let count = 0
-      for (const u of users) {
-        const email = (u.email ?? "").toLowerCase()
-        const name = String(u.user_metadata?.["name"] ?? u.user_metadata?.["full_name"] ?? "").toLowerCase()
-        if (email.includes(q) || name.includes(q)) {
-          const displayName = String(u.user_metadata?.["name"] ?? u.user_metadata?.["full_name"] ?? "")
-          results.push({
-            label: u.email ?? u.id,
-            ...(displayName && { description: displayName }),
-            href: "/authentication/users",
-            category: "Users",
-            kind: "record",
-          })
-          if (++count >= 5) break
-        }
-      }
-    })(),
-
-    // Model records: use each model's configured search fields
-    ...models.slice(0, 5).map(async (model) => {
-      const fields = model.searchFields.length > 0
-        ? model.searchFields
-        : ["name", "title", "email"]
-      const orFilter = fields.map((f) => `${f}.ilike.*${query}*`).join(",")
-      const res = await fetch(
-        `${client.url}/rest/v1/${model.tableName}?or=(${orFilter})&select=*&limit=5`,
-        { headers, signal },
-      )
-      if (!res.ok) return
-      const body = await res.json()
-      const rows = Array.isArray(body) ? body.filter(isJsonObject) : []
-      for (const row of rows) {
-        const label = String(
-          row["name"] ?? row["title"] ?? row["email"] ?? row["label"] ?? row[model.primaryKey] ?? "Record",
-        )
-        results.push({
-          label,
-          description: model.label,
-          href: `/models/${model.name}/${String(row[model.primaryKey])}`,
-          category: model.label,
-          kind: "record",
-        })
-      }
-    }),
-  ])
-
-  return results
-}
-
 // ─── Component ────────────────────────────────────────────────────────────────
 
 interface JumpToSearchProps {
   /** Compact variant for the header, smaller padding, narrower placeholder */
   compact?: boolean
+}
+
+/** The static routes whose label, description or category holds `query`. */
+function matchRoutes(routeItems: SearchItem[], query: string): SearchItem[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return []
+  return routeItems.filter(
+    (item) =>
+      item.label.toLowerCase().includes(q) ||
+      item.description?.toLowerCase().includes(q) ||
+      item.category.toLowerCase().includes(q),
+  )
+}
+
+/** The first `shown` page links, then a "More pages" row while there are more. They stopped at five. */
+function routeRows(matches: SearchItem[], shown: number): SearchItem[] {
+  if (matches.length <= shown) return matches
+  const more: SearchItem = { label: `More pages (${matches.length - shown} more)`, href: "", category: "Pages", kind: "more", group: PAGES_GROUP }
+  return [...matches.slice(0, shown), more]
+}
+
+const PAGES_GROUP = "pages"
+
+interface JumpResultsProps {
+  results: SearchItem[]
+  activeIndex: number
+  onHover: (index: number) => void
+  onChoose: (item: SearchItem) => void
+}
+
+/** The dropdown's rows, with a rule above the first live result. */
+function JumpResults({ results, activeIndex, onHover, onChoose }: JumpResultsProps): React.ReactElement {
+  const firstLiveIndex = results.findIndex((r) => r.kind === "record" || (r.kind === "more" && r.group !== PAGES_GROUP))
+  return (
+    <div className="absolute top-full left-0 right-0 mt-1 z-50 rounded-lg border border-border bg-popover shadow-lg max-h-[70vh] overflow-y-auto">
+      {results.map((item, i) => (
+        <React.Fragment key={`${item.kind}-${item.group ?? ""}-${item.href}-${i}`}>
+          {i === firstLiveIndex && firstLiveIndex > 0 && <div className="border-t border-border mx-3" />}
+          <button
+            className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${i === activeIndex ? "bg-muted" : "hover:bg-muted/60"}`}
+            onMouseEnter={() => onHover(i)}
+            // A "More" row keeps the input focused, so the dropdown stays open for what it loads.
+            onMouseDown={(e) => { if (item.kind === "more") e.preventDefault(); onChoose(item) }}
+          >
+            <div className="min-w-0 flex-1">
+              <span className={item.kind === "more" ? "text-sm text-muted-foreground" : "text-sm font-medium text-foreground"}>{item.label}</span>
+              {item.description && <span className="ml-2 text-xs text-muted-foreground truncate">{item.description}</span>}
+            </div>
+            <span className="text-xs text-muted-foreground/60 shrink-0 font-mono">{item.category}</span>
+          </button>
+        </React.Fragment>
+      ))}
+    </div>
+  )
 }
 
 export function JumpToSearch({ compact = false }: JumpToSearchProps): React.ReactElement {
@@ -174,88 +141,58 @@ export function JumpToSearch({ compact = false }: JumpToSearchProps): React.Reac
   const [query, setQuery] = useState("")
   const [open, setOpen] = useState(false)
   const [activeIndex, setActiveIndex] = useState(0)
-  const [liveResults, setLiveResults] = useState<SearchItem[]>([])
-  const [searching, setSearching] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const live = useLiveSearch(client, config.models, query)
 
   const routeItems = useMemo(
     () => jumpTargetsFor(capability, config.models, config.globals),
     [capability, config.models, config.globals],
   )
-
-  const routeMatches = useMemo((): SearchItem[] => {
-    if (!query.trim()) return []
-    const q = query.toLowerCase()
-    return routeItems.filter(
-      (item) =>
-        item.label.toLowerCase().includes(q) ||
-        item.description?.toLowerCase().includes(q) ||
-        item.category.toLowerCase().includes(q),
-    ).slice(0, 5)
-  }, [query, routeItems])
-
-  // Debounced live data search
-  useEffect(() => {
-    if (query.trim().length < 2) {
-      setLiveResults([])
-      setSearching(false)
-      return
-    }
-
-    setSearching(true)
-    const controller = new AbortController()
-
-    const timer = setTimeout(() => {
-      void searchLiveData(client, config.models, query.trim(), controller.signal)
-        .then((items) => { if (!controller.signal.aborted) setLiveResults(items) })
-        .catch(() => { /* aborted or network error */ })
-        .finally(() => { if (!controller.signal.aborted) setSearching(false) })
-    }, 300)
-
-    return () => {
-      clearTimeout(timer)
-      controller.abort()
-      setSearching(false)
-    }
-  }, [query, client, config.models])
-
+  const [routesShown, setRoutesShown] = useState(JUMP_PAGE_SIZE)
   const results = useMemo(
-    () => [...routeMatches, ...liveResults],
-    [routeMatches, liveResults],
+    () => [...routeRows(matchRoutes(routeItems, query), routesShown), ...liveRows(live.groups)],
+    [routeItems, query, routesShown, live.groups],
   )
 
-  useEffect(() => { setActiveIndex(0) }, [results])
+  useEffect(() => {
+    setActiveIndex(0)
+    setRoutesShown(JUMP_PAGE_SIZE)
+  }, [query])
 
-  const goTo = useCallback((href: string) => {
-    navigate(href)
+  const close = useCallback(() => {
     setQuery("")
     setOpen(false)
-    setLiveResults([])
     inputRef.current?.blur()
-  }, [navigate])
+  }, [])
+
+  const choose = useCallback((item: SearchItem) => {
+    if (item.kind === "more") {
+      if (item.group === PAGES_GROUP) setRoutesShown((n) => n + JUMP_PAGE_SIZE)
+      else if (item.group !== undefined) live.loadMore(item.group)
+      return
+    }
+    navigate(item.href)
+    close()
+  }, [live, navigate, close])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "ArrowDown")    { e.preventDefault(); setActiveIndex((i) => Math.min(i + 1, results.length - 1)) }
     else if (e.key === "ArrowUp") { e.preventDefault(); setActiveIndex((i) => Math.max(i - 1, 0)) }
-    else if (e.key === "Enter")   { const item = results[activeIndex]; if (item) goTo(item.href) }
-    else if (e.key === "Escape")  { setQuery(""); setOpen(false); setLiveResults([]); inputRef.current?.blur() }
-  }, [activeIndex, results, goTo])
+    else if (e.key === "Enter")   { const item = results[activeIndex]; if (item) choose(item) }
+    else if (e.key === "Escape")  close()
+  }, [activeIndex, results, choose, close])
 
   const inputPadding = compact ? "py-1.5" : "py-2.5"
   const placeholder = compact ? "Jump to…" : "Jump to…  (pages, users, records…)"
 
   const showDropdown = open && query.trim().length >= 1
-  const hasResults = results.length > 0
-  const noResults = !searching && query.trim().length >= 2 && results.length === 0
-
-  // Index of first "record" result, used to draw a separator
-  const firstRecordIndex = results.findIndex((r) => r.kind === "record")
+  const noResults = !live.searching && query.trim().length >= 2 && results.length === 0
 
   return (
     <div className="relative w-full">
       <div className="relative">
         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none">
-          {searching ? <SpinnerIcon /> : <SearchIcon />}
+          {live.searching ? <SpinnerIcon /> : <SearchIcon />}
         </span>
         <input
           ref={inputRef}
@@ -271,36 +208,15 @@ export function JumpToSearch({ compact = false }: JumpToSearchProps): React.Reac
         {query && (
           <button
             className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-            onMouseDown={(e) => { e.preventDefault(); setQuery(""); setOpen(false); setLiveResults([]) }}
+            onMouseDown={(e) => { e.preventDefault(); setQuery(""); setOpen(false) }}
           >
             <IconX />
           </button>
         )}
       </div>
 
-      {showDropdown && hasResults && (
-        <div className="absolute top-full left-0 right-0 mt-1 z-50 rounded-lg border border-border bg-popover shadow-lg overflow-hidden">
-          {results.map((item, i) => (
-            <React.Fragment key={`${item.href}-${i}`}>
-              {i === firstRecordIndex && firstRecordIndex > 0 && (
-                <div className="border-t border-border mx-3" />
-              )}
-              <button
-                className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${i === activeIndex ? "bg-muted" : "hover:bg-muted/60"}`}
-                onMouseEnter={() => setActiveIndex(i)}
-                onMouseDown={() => goTo(item.href)}
-              >
-                <div className="min-w-0 flex-1">
-                  <span className="text-sm font-medium text-foreground">{item.label}</span>
-                  {item.description && (
-                    <span className="ml-2 text-xs text-muted-foreground truncate">{item.description}</span>
-                  )}
-                </div>
-                <span className="text-xs text-muted-foreground/60 shrink-0 font-mono">{item.category}</span>
-              </button>
-            </React.Fragment>
-          ))}
-        </div>
+      {showDropdown && results.length > 0 && (
+        <JumpResults results={results} activeIndex={activeIndex} onHover={setActiveIndex} onChoose={choose} />
       )}
 
       {showDropdown && noResults && (

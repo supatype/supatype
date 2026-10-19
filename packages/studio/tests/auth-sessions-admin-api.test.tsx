@@ -21,6 +21,9 @@ const CLIENT = testClient({ url: PROXY, token: "token" })
 const USER = { id: "11111111-1111-1111-1111-111111111111", email: "ada@example.com", created_at: "2026-10-01T10:00:00Z", app_metadata: {}, user_metadata: {}, identities: [] }
 const SESSION = { id: "22222222-2222-2222-2222-222222222222", user_id: USER.id, ip: "203.0.113.7", user_agent: "test-agent", created_at: "2026-10-01T10:00:00Z", updated_at: "2026-10-01T11:00:00Z", not_after: null }
 
+/** Another user's session, which every-session endpoint returns and the user's own does not. */
+const OTHER_SESSION = { ...SESSION, id: "33333333-3333-3333-3333-333333333333", user_id: "44444444-4444-4444-4444-444444444444", ip: "198.51.100.9" }
+
 let root: Root | null = null
 let container: HTMLElement
 let calls: Array<{ url: string; method: string }> = []
@@ -31,8 +34,9 @@ function stubFetch(): void {
   vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
     calls.push({ url, method: init?.method ?? "GET" })
     if (url.endsWith("/sql")) return Response.json({ error: "forbidden", message: "Your role cannot use the SQL editor" }, { status: 403 })
+    if (url.endsWith(`/auth/v1/admin/users/${USER.id}/sessions`)) return Response.json({ sessions: [SESSION] })
     if (url.includes("/auth/v1/admin/users")) return Response.json({ users: [USER], aud: "authenticated" })
-    if (url.endsWith("/auth/v1/admin/sessions")) return Response.json({ sessions: [SESSION] })
+    if (url.endsWith("/auth/v1/admin/sessions")) return Response.json({ sessions: [SESSION, OTHER_SESSION] })
     if (url.includes("/auth/v1/admin/sessions/")) return Response.json({})
     return Response.json({ rows: [], members: [], roles: [] })
   })
@@ -73,10 +77,13 @@ afterEach(() => {
 })
 
 describe("the Users view's sessions", () => {
-  it("lists them through the auth admin API, never the SQL editor's route", async () => {
+  // Only the open user's sessions, asked for by user. It used to read every active session in the
+  // project and filter them in the browser, which grows with every signed-in user.
+  it("lists the open user's sessions through the auth admin API, never the SQL editor's route", async () => {
     await openUser()
     expect(calls.filter((c) => c.url.endsWith("/sql"))).toEqual([])
-    expect(calls).toContainEqual({ url: `${PROXY}/auth/v1/admin/sessions`, method: "GET" })
+    expect(calls).toContainEqual({ url: `${PROXY}/auth/v1/admin/users/${USER.id}/sessions`, method: "GET" })
+    expect(calls.filter((c) => c.url.endsWith("/auth/v1/admin/sessions"))).toEqual([])
     // The user panel renders into a portal, outside the view's container.
     expect(document.body.textContent).toContain("203.0.113.7")
   })

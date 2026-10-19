@@ -12,6 +12,7 @@ import {
 } from "../hooks/useStudioFieldAccess.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
 import { Badge } from "../components/ui.js"
+import { anyFieldContains } from "../lib/postgrest-search.js"
 import {
   fetchRecordStates,
   publishableLocales,
@@ -53,8 +54,9 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
     try {
       let query = client.from(model.tableName).select()
 
+      // Every search field, on the server: it searched only the first.
       if (search && model.searchFields.length > 0) {
-        query = query.ilike(model.searchFields[0]!, `%${search}%`)
+        query = query.or(anyFieldContains(model.searchFields, search))
       }
 
       if (sort) {

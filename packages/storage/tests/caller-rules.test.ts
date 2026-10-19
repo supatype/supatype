@@ -176,8 +176,13 @@ function user(): User {
   return { id, token: sign({ sub: id, role: "authenticated" }) }
 }
 
+/** An object path as a URL path: each segment percent-encoded, as a client sends it. */
+function encodedPath(name: string): string {
+  return name.split("/").map(encodeURIComponent).join("/")
+}
+
 async function upload(token: string, bucket: string, name: string, body: string, upsert = false): Promise<Response> {
-  return fetch(`${base}/object/${bucket}/${name}`, {
+  return fetch(`${base}/object/${bucket}/${encodedPath(name)}`, {
     method: "POST",
     headers: {
       authorization: `Bearer ${token}`,
@@ -196,13 +201,20 @@ async function remove(token: string, bucket: string, names: string[]): Promise<R
   })
 }
 
-async function list(token: string, bucket: string, prefix = ""): Promise<string[]> {
+/** A list request's answer: the entries and the X-Total-Count header. */
+async function listing(token: string, bucket: string, body: Record<string, unknown>): Promise<{ entries: Record<string, unknown>[]; total: string | null }> {
   const res = await fetch(`${base}/object/list/${bucket}`, {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-    body: JSON.stringify({ prefix }),
+    body: JSON.stringify(body),
   })
-  return (await bodyOf(res, isArrayOf(isShape({ name: isString })))).map((o) => o.name)
+  return { entries: await bodyOf(res, isArrayOf(isJsonObject)), total: res.headers.get("x-total-count") }
+}
+
+/** The names a folder lists. Searched by `search` when given, so a test sees its own objects past the first page. */
+async function list(token: string, bucket: string, prefix = "", search?: string): Promise<string[]> {
+  const { entries } = await listing(token, bucket, { prefix, ...(search !== undefined && { search }), limit: 1000 })
+  return entries.map((e) => String(e["name"]))
 }
 
 async function row(bucket: string, name: string): Promise<{ owner: string | null; version: string | null } | undefined> {
@@ -228,11 +240,11 @@ function unique(prefix: string): string {
   return `${prefix}-${randomUUID()}.txt`
 }
 
-/** The list-entry contract: one real entry, and the fields that may be null instead. */
+/** The list-entry contract: one real file entry, the fields that may be null in it, and a folder entry. */
 const LIST_ENTRY = (() => {
   const raw: unknown = JSON.parse(readFileSync(join(FIXTURES, "list-entry.json"), "utf8"))
-  const guard = isShape({ entry: isJsonObject, nullable: isArrayOf(isString) })
-  if (!guard(raw)) throw new Error("fixtures/list-entry.json is not { entry, nullable }")
+  const guard = isShape({ entry: isJsonObject, folder: isJsonObject, nullable: isArrayOf(isString) })
+  if (!guard(raw)) throw new Error("fixtures/list-entry.json is not { entry, folder, nullable }")
   return raw
 })()
 
@@ -380,12 +392,7 @@ describe.skipIf(!dockerAvailable)("bucket rules, enforced by Postgres", () => {
     const x = user()
     const name = unique("shape")
     await upload(x.token, "avatars", name, "four")
-    const res = await fetch(`${base}/object/list/avatars`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${x.token}`, "content-type": "application/json" },
-      body: JSON.stringify({ prefix: name }),
-    })
-    const [entry] = await bodyOf(res, isArrayOf(isJsonObject))
+    const { entries: [entry] } = await listing(x.token, "avatars", { search: name })
     expect(contractMismatches(entry ?? {})).toEqual([])
     expect(entry).toMatchObject({ bucket_id: "avatars", name, owner: x.id, size: 4, mimetype: "text/plain" })
   })
@@ -407,6 +414,66 @@ describe.skipIf(!dockerAvailable)("bucket rules, enforced by Postgres", () => {
       method: "POST",
       headers: { authorization: `Bearer ${user().token}`, "content-type": "application/json" },
       body,
+    })
+    expect(res.status).toBe(400)
+  })
+
+  // A list answers one folder's direct children, as Studio's file views show them: a folder entry
+  // for each subfolder, then the files, named relative to the folder. It used to answer every
+  // object whose name started with the prefix, full names and all, so a folder view listed the
+  // whole tree beneath it and a prefix matched names that merely began the same way.
+  it("lists a folder's subfolders and files, named relative to it", async () => {
+    const x = user()
+    const dir = `dir-${randomUUID()}`
+    await upload(x.token, "avatars", `${dir}/a.txt`, "a")
+    await upload(x.token, "avatars", `${dir}/sub/b.txt`, "b")
+    await upload(x.token, "avatars", `${dir}x/c.txt`, "c")
+    const { entries } = await listing(x.token, "avatars", { prefix: dir })
+    expect(entries.map((e) => e["name"])).toEqual(["sub", "a.txt"])
+    expect(entries[0]).toEqual({ ...LIST_ENTRY.folder, bucket_id: "avatars", name: "sub" })
+    expect(contractMismatches(entries[1] ?? {})).toEqual([])
+    expect(await list(x.token, "avatars", `/${dir}/sub/`)).toEqual(["b.txt"])
+    expect(await list(x.token, "avatars", "", dir)).toEqual([dir, `${dir}x`])
+  })
+
+  it("searches a folder's entries by name, ignoring case and reading % and _ literally", async () => {
+    const x = user()
+    const dir = `find-${randomUUID()}`
+    for (const name of ["Report_A.txt", "reportXA.txt", "100% done.txt", "1000 done.txt", "Reports/x.txt"]) {
+      await upload(x.token, "avatars", `${dir}/${name}`, "x")
+    }
+    expect(await list(x.token, "avatars", dir, "report_a")).toEqual(["Report_A.txt"])
+    expect(await list(x.token, "avatars", dir, "100%")).toEqual(["100% done.txt"])
+    expect(await list(x.token, "avatars", dir, "REPORTS")).toEqual(["Reports"])
+  })
+
+  it("pages a folder with limit and offset, and counts every match in X-Total-Count", async () => {
+    const x = user()
+    const dir = `page-${randomUUID()}`
+    for (const name of ["a.txt", "b.txt", "c.txt", "z/d.txt"]) await upload(x.token, "avatars", `${dir}/${name}`, "x")
+    const first = await listing(x.token, "avatars", { prefix: dir, limit: 2 })
+    expect(first.entries.map((e) => e["name"])).toEqual(["z", "a.txt"])
+    expect(first.total).toBe("4")
+    const second = await listing(x.token, "avatars", { prefix: dir, limit: 2, offset: 2 })
+    expect(second.entries.map((e) => e["name"])).toEqual(["b.txt", "c.txt"])
+    expect(second.total).toBe("4")
+    expect((await listing(x.token, "avatars", { prefix: dir, search: "B" })).total).toBe("1")
+  })
+
+  // The path was decoded twice, by the router and again by the upload, so a name holding "%" threw
+  // on the second decode and the request never answered.
+  it("stores a name holding % and spaces as it was sent", async () => {
+    const x = user()
+    const name = `pct-${randomUUID()}/100% done.txt`
+    expect((await upload(x.token, "avatars", name, "x")).status).toBe(200)
+    expect(await row("avatars", name)).toBeDefined()
+  })
+
+  it("answers 400 to a path whose percent-encoding is malformed", async () => {
+    const res = await fetch(`${base}/object/avatars/bad-%E0%A4%A.txt`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${user().token}`, "content-type": "text/plain" },
+      body: "x",
     })
     expect(res.status).toBe(400)
   })

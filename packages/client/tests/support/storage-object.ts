@@ -19,5 +19,19 @@ export const LISTED = {
   mimetype: "text/plain",
 }
 
+/** A subfolder as a list answers it: the `folder` entry of the same contract file. */
+export const FOLDER = {
+  id: null,
+  bucket_id: "avatars",
+  name: "photos",
+  owner: null,
+  metadata: null,
+  created_at: null,
+  updated_at: null,
+  last_accessed_at: null,
+  size: null,
+  mimetype: null,
+}
+
 /** The same entry with every nullable field null, as for an object stored with no owner or metadata. */
 export const UNOWNED = { ...LISTED, owner: null, metadata: null, size: null, mimetype: null }
