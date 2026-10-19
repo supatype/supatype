@@ -14,6 +14,7 @@ import {
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
 import { Badge } from "../components/ui.js"
 import { anyFieldContains, searchColumns } from "../lib/postgrest-search.js"
+import { formatFieldValue } from "../lib/field-display.js"
 import {
   fetchRecordStates,
   publishableLocales,
@@ -340,6 +341,10 @@ function CellRenderer({
   if (resolved === null || resolved === undefined) {
     return <span className="st-cell-null">-</span>
   }
+
+  // A duration or a point, in the same words its edit widget uses.
+  const readable = formatFieldValue(field, resolved)
+  if (readable !== null) return <span className="st-cell-text">{readable}</span>
 
   switch (field.widget) {
     case "boolean":

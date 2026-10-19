@@ -49,8 +49,9 @@ function widgetToApiType(widget: WidgetType): string {
     case "boolean": case "publish": return "boolean"
     case "datetime": return "string (ISO 8601)"
     case "date": return "string (date)"
-    case "json": case "blocks": return "object"
+    case "json": case "blocks": case "duration": return "object"
     case "relation": case "multirelation": return "uuid"
+    case "geopoint": return "string (EWKT or hex EWKB)"
     default: return "string"
   }
 }
