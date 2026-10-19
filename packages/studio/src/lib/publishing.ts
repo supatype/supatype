@@ -9,6 +9,7 @@ import {
   isString,
   isUnknown,
   nullable,
+  sameJson,
   type Guard,
 } from "./json.js"
 
@@ -70,8 +71,13 @@ const isStateRow = isShape({
   scheduled_locales: nullable(isLocaleTimes),
 })
 
-/** The part of a version that says where it is published, which is all the per-locale derivation reads. */
-type VersionPublication = Pick<RecordVersion, "version" | "published_locales" | "scheduled_locales">
+/**
+ * The part of a version the per-locale derivation reads: where it is published, and its content
+ * when the caller selected it. Without content a newer version always counts as a change.
+ */
+type VersionPublication = Pick<RecordVersion, "version" | "published_locales" | "scheduled_locales"> & {
+  data?: Record<string, unknown> | undefined
+}
 
 /** What a record's history says about one locale. */
 export type LocaleState = "live" | "pending" | "scheduled" | "absent"
@@ -84,6 +90,16 @@ export interface PublishingState {
   hasPendingDraft: boolean
   /** Per locale: what the world currently sees, and whether an edit is waiting. */
   locales: Record<string, LocaleState>
+  /** Per live locale: when what the world reads in it went live. */
+  liveAt: Record<string, string>
+  /** Per scheduled locale: when it is due to go live. */
+  scheduledAt: Record<string, string>
+  /**
+   * The version "Discard changes" returns the record to: the one version every live locale reads,
+   * when an edit is waiting on top of it. Null when nothing is waiting, or when languages are live
+   * from different versions and there is no single published state to return to.
+   */
+  discardTo: number | null
 }
 
 /**
@@ -142,12 +158,56 @@ export function publishingState(
   locales: string[],
 ): PublishingState {
   const newest = versions[0] ?? null
+  const states = localeStates(versions, locales)
   return {
     versions,
     newest,
     hasPendingDraft: newest !== null && Object.keys(newest.published_locales).length === 0,
-    locales: localeStates(versions, locales),
+    locales: states,
+    liveAt: liveTimes(versions, locales),
+    scheduledAt: pick(newest?.scheduled_locales ?? {}, locales.filter((l) => states[l] === "scheduled")),
+    discardTo: discardTarget(versions, locales, states),
   }
+}
+
+/** The entries of `times` for `keys`, leaving out the keys it has no entry for. */
+function pick(times: Record<string, string>, keys: string[]): Record<string, string> {
+  return Object.fromEntries(keys.flatMap((k) => (times[k] === undefined ? [] : [[k, times[k]]])))
+}
+
+/** When each locale's live version went live for it. */
+function liveTimes(versions: readonly RecordVersion[], locales: string[]): Record<string, string> {
+  const times: Record<string, string> = {}
+  for (const locale of locales) {
+    const at = versions.find((v) => locale in v.published_locales)?.published_locales[locale]
+    if (at !== undefined) times[locale] = at
+  }
+  return times
+}
+
+/** The single version every live locale reads, when an edit is waiting on top of it. */
+function discardTarget(
+  versions: readonly RecordVersion[],
+  locales: string[],
+  states: Record<string, LocaleState>,
+): number | null {
+  if (!locales.some((l) => states[l] === "pending" || states[l] === "scheduled")) return null
+  const live = new Set(
+    locales.flatMap((l) => versions.find((v) => l in v.published_locales)?.version ?? []),
+  )
+  const [only] = live
+  return live.size === 1 && only !== undefined ? only : null
+}
+
+/**
+ * True when `newer` says exactly what `live` says, so publishing it would change nothing.
+ *
+ * A save with no edits and "Discard changes" (which restores the live version as a new draft) both
+ * leave such a version on top. Counting it as an edit waiting offered to publish nothing and kept a
+ * discarded record marked as changed. Unknown content counts as different.
+ */
+function sameContent(newer: VersionPublication, live: VersionPublication): boolean {
+  return newer.data !== undefined && live.data !== undefined && sameJson(newer.data, live.data)
 }
 
 /** Each locale's state, from a history ordered newest first. */
@@ -161,7 +221,7 @@ function localeStates(versions: readonly VersionPublication[], locales: string[]
       states[locale] = newest !== null && locale in newest.scheduled_locales ? "scheduled" : "absent"
       continue
     }
-    if (newest !== null && newest.version > liveVersion.version) {
+    if (newest !== null && newest.version > liveVersion.version && !sameContent(newest, liveVersion)) {
       states[locale] = locale in newest.scheduled_locales ? "scheduled" : "pending"
       continue
     }
@@ -237,11 +297,28 @@ export async function fetchPublishingState(
   if (versions.length > 0 || model.versions === null) return publishingState(versions, locales)
   const row = await fetchLiveRow(client, model, recordId)
   if (row === null) return publishingState([], locales)
+  return liveRowState(row, model.versions, locales)
+}
+
+/** A record with no history, as its live row stands: its `published_at` is when, if anything. */
+export function liveRowState(
+  row: Record<string, unknown>,
+  versions: ModelVersionsConfig,
+  locales: string[],
+  now: number = Date.now(),
+): PublishingState {
+  const states = liveRowLocaleStates(row, versions, locales, now)
+  const at = row[PUBLISHED_AT]
+  const timesFor = (state: LocaleState): Record<string, string> =>
+    isString(at) ? Object.fromEntries(locales.filter((l) => states[l] === state).map((l) => [l, at])) : {}
   return {
     versions: [],
     newest: null,
     hasPendingDraft: false,
-    locales: liveRowLocaleStates(row, model.versions, locales),
+    locales: states,
+    liveAt: timesFor("live"),
+    scheduledAt: timesFor("scheduled"),
+    discardTo: null,
   }
 }
 
@@ -361,6 +438,22 @@ export function createDraft(
     record_id: recordId,
     data,
   })
+}
+
+/**
+ * Record the live row as it stands as the record's first version.
+ *
+ * For a record with no history (a seed, an API insert, a save before 0.7.0). `publish` and
+ * `schedule_publish` need a version to work from, and `unpublish` on a localized model removes the
+ * locale's keys from the live row, which for such a record is the only copy of its content. An
+ * empty draft merges onto the live row, so this writes exactly what is there.
+ */
+export function snapshotLiveRow(
+  client: SupatypeClient,
+  model: ModelConfig,
+  recordId: string,
+): Promise<{ error: string | null }> {
+  return createDraft(client, model, recordId, {})
 }
 
 /** Why a write was refused, with the field it names when the server named one. */
@@ -586,6 +679,7 @@ export async function fetchRecordStates(
   const ids = records.map((r) => String(r[model.primaryKey]))
   const history = await fetchHistories(client, versions.versionsTable, ids)
   if (history === null) return new Map()
+  await attachContent(client, versions.versionsTable, history)
 
   const states = new Map<string, RecordState>()
   for (const record of records) {
@@ -600,6 +694,46 @@ export async function fetchRecordStates(
     states.set(id, publishingSummary({ locales: perLocale }, locales))
   }
   return states
+}
+
+const isContentRow = isShape({ record_id: isUnknown, version: isNumber, data: isJsonObject })
+
+/** The versions whose content decides whether an edit is waiting: the newest, and each live one. */
+function contentVersions(list: readonly VersionPublication[]): VersionPublication[] {
+  const [newest, ...older] = list
+  if (newest === undefined) return []
+  const live = older.filter((v) => Object.keys(v.published_locales).length > 0)
+  return live.length === 0 ? [] : [newest, ...live]
+}
+
+/**
+ * Fill in the content of the versions that decide whether a record has an edit waiting, so the list
+ * agrees with the editor about a version that repeats the live one. Only for records with a newer
+ * version on top of a live one, and only those versions: the content of every version on screen is
+ * the whole table.
+ */
+async function attachContent(
+  client: SupatypeClient,
+  versionsTable: string,
+  history: Map<string, VersionPublication[]>,
+): Promise<void> {
+  const wanted = new Map<string, VersionPublication>()
+  for (const [id, list] of history) {
+    for (const v of contentVersions(list)) wanted.set(`${id}:${String(v.version)}`, v)
+  }
+  if (wanted.size === 0) return
+  const ids = [...new Set([...wanted.keys()].map((key) => key.slice(0, key.lastIndexOf(":"))))]
+  const numbers = [...new Set([...wanted.values()].map((v) => v.version))]
+  const result = await client
+    .from(versionsTable)
+    .select("record_id, version, data")
+    .in("record_id", ids)
+    .in("version", numbers)
+  if (result.error !== null || result.data === null) return
+  for (const row of result.data.filter(isContentRow)) {
+    const target = wanted.get(`${String(row.record_id)}:${String(row.version)}`)
+    if (target !== undefined) target.data = row.data
+  }
 }
 
 /** Each record's version rows, newest first, or null when the history could not be read. */

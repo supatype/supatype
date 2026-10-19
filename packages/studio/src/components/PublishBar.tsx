@@ -1,499 +1,263 @@
-import React, { useCallback, useEffect, useState } from "react"
+import React, { useEffect, useState } from "react"
 import { Badge, Button, type BadgeVariant } from "./ui.js"
-import { IconChevronRight, IconClock, IconEyeOff, IconHistory, IconUpload } from "./icons.js"
-import { ScheduleControl } from "./ScheduleControl.js"
+import { IconHistory } from "./icons.js"
+import { PublishSplitButton } from "./PublishMenu.js"
 import { SharePreview } from "./SharePreview.js"
 import { useAdminClient } from "../hooks/useAdminClient.js"
 import { useLocale } from "../hooks/useLocale.js"
+import { usePublishActions, type PublishActions, type RecordEditor } from "../hooks/usePublishActions.js"
 import { formatTimestamp } from "../lib/utils.js"
+import { describePanel, type PanelModel, type RecordStatus } from "../lib/publish-panel.js"
 import type { ModelConfig } from "../config.js"
 import {
   fetchPublishingState,
-  publish,
   publishableLocales,
-  liveLocales,
-  publishingSummary,
-  schedulePublish,
-  unpublish,
-  unschedulePublish,
   WHOLE_RECORD,
   type LocaleState,
   type RecordState,
   type PublishingState,
 } from "../lib/publishing.js"
 
-interface PublishBarProps {
+/** The record a publish panel is about. */
+export interface PublishingRecord {
   model: ModelConfig
-  recordId: string
-  /** Changes when the record is saved, so the bar re-reads what it summarises. */
-  savedAt: number
+  /** Undefined while the record is being created: the first save or publish creates it. */
+  recordId: string | undefined
+  /** What the record is called, for the questions the panel asks about it. */
+  title: string
   /** Where this record renders, when the project has said. */
   previewUrl?: string | undefined
+}
+
+interface PublishBarProps {
+  record: PublishingRecord
+  editor: RecordEditor
   /**
    * Whether this caller sees other people's unpublished work.
    *
-   * Passed in rather than read here, for the reason every other capability in Studio is: the view
-   * resolves it once and hands it down, so a component can be rendered and reasoned about without
-   * a network round trip deciding whether it exists.
-   *
-   * It has to be asked at all because row level security cannot answer it. Studio's data plane goes
-   * through the proxy with the service role, which bypasses policies, so the draft-visibility
-   * setting that compiles into them binds the API and not this. The server answers from the same
-   * stored setting, so one source of truth reaches both.
+   * Passed in rather than read here: the view resolves it once and hands it down. It has to be
+   * asked at all because row level security cannot answer it. Studio's data plane goes through the
+   * proxy with the service role, which bypasses policies, so the draft-visibility setting that
+   * compiles into them binds the API and not this.
    */
   seesDrafts: boolean
   onNavigate: (path: string) => void
 }
 
-/**
- * What the world currently sees, and the controls to change it.
- *
- * **A record no longer has one publish state.** It has one per locale, because publishing merges a
- * locale's keys into the live row and leaves the rest untouched, so an unpublished translation is
- * genuinely absent from what the world reads rather than hidden behind a rule. A single
- * "Published / Draft" badge cannot say that, and a bar that pretended it could would be lying about
- * the thing an editor most needs to know.
- *
- * A model with no localized field publishes as a whole and renders as one row rather than as a
- * degenerate list: the machinery is the same underneath, and the interface should not make someone
- * with no translations read a locale column.
- *
- * # Why it collapses, and why the summary is in the header
- *
- * This sits in a 280px sidebar above the record's own metadata. Spelled out, a two-language record
- * took most of the column: a row per locale, each with two worded buttons and a "Schedule instead"
- * beneath. Most visits to a record are not about publishing it.
- *
- * So the header carries the answer and the body carries the controls. Collapsed, it still says
- * whether anything is waiting, which is the question somebody who is not here to publish would have
- * been scanning for anyway.
- */
-export function PublishBar({
-  model,
-  recordId,
-  savedAt,
-  previewUrl,
-  seesDrafts,
-  onNavigate,
-}: PublishBarProps): React.ReactElement | null {
+/** The locales a model publishes under, from the project's locale codes joined with commas. */
+function localesFor(model: ModelConfig, codes: string): string[] {
+  if (model.versions === null) return [WHOLE_RECORD]
+  return publishableLocales(model.versions, codes === "" ? [] : codes.split(","))
+}
+
+/** The record's publishing state, re-read whenever the record is saved or acted on. */
+function usePublishingState(model: ModelConfig, recordId: string | undefined, codes: string, savedAt: number): PublishingState | null {
   const client = useAdminClient()
-  const { locales: projectLocales } = useLocale()
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [state, setState] = useState<PublishingState | null>(null)
-  const [open, setOpen] = useState<boolean | null>(null)
-
-  const localeCodes = projectLocales.map((l) => l.code).join(",")
-
-  const reload = useCallback(async () => {
-    const locales =
-      model.versions === null
-        ? [WHOLE_RECORD]
-        : publishableLocales(model.versions, localeCodes === "" ? [] : localeCodes.split(","))
-    setState(await fetchPublishingState(client, model, recordId, locales))
-  }, [client, model, recordId, localeCodes, savedAt])
-
   useEffect(() => {
-    void reload()
-  }, [reload])
+    if (recordId === undefined) return
+    let cancelled = false
+    void fetchPublishingState(client, model, recordId, localesFor(model, codes)).then((next) => {
+      if (!cancelled) setState(next)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [client, model, recordId, codes, savedAt])
+  return state
+}
 
-  if (model.versions === null || !model.versions.drafts) return null
-  // A project can narrow who sees drafts, and Studio's data plane goes through the proxy with the
-  // service role, so no policy stops this component reading them. The server answers from the same
-  // stored setting the policies compile in, and this is where that answer binds.
-  if (!seesDrafts) return null
+/**
+ * The record's publishing: its status at the top of the sidebar, Save draft beside Publish, and the
+ * rarer acts (schedule, discard, unpublish) in the menu on the Publish button.
+ *
+ * A record has one state per locale underneath, because publishing merges a locale's keys into the
+ * live row. One status badge stands for them all; language rows appear only when the languages
+ * differ, which is the only time the badge cannot say it alone.
+ */
+export function PublishBar({ record, editor, seesDrafts, onNavigate }: PublishBarProps): React.ReactElement | null {
+  const { locales: projectLocales } = useLocale()
+  const codes = projectLocales.map((l) => l.code).join(",")
+  const { model, recordId } = record
+  const state = usePublishingState(model, recordId, codes, editor.savedAt)
+  const actions = usePublishActions({ model, recordId, state }, editor)
 
-  const locales = publishableLocales(
-    model.versions,
-    localeCodes === "" ? [] : localeCodes.split(","),
-  )
+  if (model.versions === null || !model.versions.drafts || !seesDrafts) return null
+
+  const locales = localesFor(model, codes)
   const wholeRecord = locales.length === 1 && locales[0] === WHOLE_RECORD
-  const unpublished = locales.filter((l) => state?.locales[l] !== "live")
-
-  // Opens itself when there is something to decide and stays shut when there is not, until somebody
-  // says otherwise. `null` is "nobody has said", which is why this is not just a boolean: once a
-  // person opens or closes it, their choice outlives the next publish.
-  //
-  // It waits for `state` before deciding. Judging from the first paint, where nothing has loaded
-  // and every locale therefore reads as unpublished, opened the section on every record and then
-  // shut it again under the reader when a fully published one answered.
-  const expanded = open ?? (state !== null && unpublished.length > 0)
-  const headline = stateLabels[publishingSummary(state, locales)]
-  const detail = summaryDetail(state, locales, wholeRecord)
-
-  const run = async (act: () => Promise<{ error: string | null }>) => {
-    setBusy(true)
-    setError(null)
-    const result = await act()
-    if (result.error !== null) setError(result.error)
-    else await reload()
-    setBusy(false)
+  const creating = recordId === undefined
+  const panel = describePanel({ locales, wholeRecord, state, dirty: editor.dirty, creating })
+  const labelOf = (code: string): string => projectLocales.find((l) => l.code === code)?.label ?? code
+  const view: PanelView = {
+    panel,
+    title: record.title,
+    locales: locales.map((code) => ({ code, label: labelOf(code), state: state?.locales[code] ?? "absent" })),
+    busy: actions.busy || editor.saving,
+    saving: editor.saving,
+    error: actions.error,
   }
-
+  const toHistory = (): void => {
+    if (recordId !== undefined) onNavigate(`/models/${model.name}/${recordId}/versions`)
+  }
   return (
-    <div className="st-edit-sidebar-section">
-      <div className="flex items-center gap-1">
-        {/* A span, not the heading element: a button may only contain phrasing content, and the
-            disclosure is the whole row rather than a control tucked beside a title. */}
-        <button
-          type="button"
-          className="flex flex-1 items-center gap-1.5 text-left"
-          aria-expanded={expanded}
-          onClick={() => {
-            setOpen(!expanded)
-          }}
-        >
-          <span
-            className={`text-muted-foreground transition-transform ${expanded ? "rotate-90" : ""}`}
-          >
-            <IconChevronRight size={12} />
-          </span>
-          <span className="st-edit-sidebar-title">Publishing</span>
-          {/* The summary is what makes collapsing safe: shut, this row still answers the question. */}
-          <Badge variant={headline.variant} title={headline.title}>
-            {headline.long}
-          </Badge>
-          {/* The badge raises the question; this answers it. With two or three languages the
-              specifics fit, and "live in some, never in others" is not something a single word can
-              say without hiding which. */}
-          {detail !== null && (
-            <span className="text-[11px] text-muted-foreground truncate">{detail}</span>
-          )}
-        </button>
-        <IconAction
-          icon={<IconHistory />}
-          verb="Version"
-          target="history"
-          busy={false}
-          onClick={() => {
-            onNavigate(`/models/${model.name}/${recordId}/versions`)
-          }}
-        />
-      </div>
+    <>
+      <PublishPanel view={view} actions={{ ...actions, saveDraft: editor.onSave, viewChanges: toHistory }} />
+      {recordId !== undefined && <PublishLinks record={{ ...record, recordId }} onHistory={toHistory} />}
+    </>
+  )
+}
 
-      {expanded && (
-        <PublishBarBody
-          record={{
-            modelName: model.name,
-            modelTable: model.tableName,
-            recordId,
-            ...(previewUrl !== undefined && { previewUrl }),
-          }}
-          view={{ locales, wholeRecord, state, busy, error }}
-          actions={{
-            publishAll: () => {
-              void run(() => publish(client, model, recordId))
-            },
-            publish: (locale) => {
-              void run(() => publish(client, model, recordId, { locales: [locale] }))
-            },
-            unpublish: (locale) => {
-              void run(() => unpublish(client, model, recordId, [locale]))
-            },
-            schedule: (locale, at) => {
-              void run(() => schedulePublish(client, model, recordId, at, { locales: [locale] }))
-            },
-            cancelSchedule: (locale) => {
-              void run(() => unschedulePublish(client, model, recordId, { locales: [locale] }))
-            },
-          }}
-        />
+/** What the panel shows, already derived. */
+export interface PanelView {
+  panel: PanelModel
+  title: string
+  locales: Array<{ code: string; label: string; state: LocaleState }>
+  /** Something is being written: every control waits. */
+  busy: boolean
+  /** The form itself is saving, which Save draft says. */
+  saving: boolean
+  error: string | null
+}
+
+/** What the panel can do, with the plumbing bound. */
+export interface PanelActions extends Omit<PublishActions, "busy" | "error"> {
+  saveDraft: () => void
+  viewChanges: () => void
+}
+
+/**
+ * The panel, from state handed in.
+ *
+ * Split from `PublishBar` so what is on screen is a function of its props: the suites render it
+ * in every state without a server behind it.
+ */
+export function PublishPanel({ view, actions }: { view: PanelView; actions: PanelActions }): React.ReactElement {
+  const { panel } = view
+  return (
+    <section className="st-edit-sidebar-section" aria-label="Publishing">
+      <StatusLine panel={panel} />
+      {panel.localeRows && <LocaleRows view={view} onPublish={(code) => { actions.publish([code]) }} />}
+      {/* Wraps rather than clips: in the 280px sidebar Publish takes its own row under Save draft, and
+          on a wider layout the two sit side by side. */}
+      <div className="flex flex-wrap items-stretch gap-2">
+        <Button size="sm" className="grow justify-center" disabled={view.busy} onClick={actions.saveDraft}>
+          {view.saving ? "Saving..." : "Save draft"}
+        </Button>
+        <PublishSplitButton panel={panel} title={view.title} busy={view.busy} actions={actions} />
+      </div>
+      {view.error !== null && <div className="text-xs text-destructive" role="alert">{view.error}</div>}
+      {panel.note !== null && (
+        <p className="text-xs text-muted-foreground">
+          {panel.note}
+          {panel.viewChanges && (
+            <Button variant="ghost" size="xs" className="ml-1 inline-flex" onClick={actions.viewChanges}>
+              View changes
+            </Button>
+          )}
+        </p>
+      )}
+    </section>
+  )
+}
+
+/** The status badge at the top of the panel, one per record. */
+export const statusLabels: Record<RecordStatus, { label: string; variant: BadgeVariant }> = {
+  draft: { label: "Draft", variant: "indigo" },
+  published: { label: "Published", variant: "green" },
+  scheduled: { label: "Scheduled", variant: "blue" },
+  partial: { label: "Partly published", variant: "yellow" },
+}
+
+/** "Status [Published] [Changed]", and when it went or goes live. */
+function StatusLine({ panel }: { panel: PanelModel }): React.ReactElement {
+  const status = statusLabels[panel.status]
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center gap-1.5">
+        <span className="st-edit-sidebar-title">Status</span>
+        <Badge variant={status.variant}>{status.label}</Badge>
+        {panel.changed && (
+          <Badge variant="yellow" title="Edited since it was published">
+            Changed
+          </Badge>
+        )}
+      </div>
+      {panel.since !== null && (
+        <div className="text-xs text-muted-foreground">
+          {panel.since.label} {formatTimestamp(panel.since.at)}
+        </div>
       )}
     </div>
   )
 }
 
-/** The record this section is about, and where it renders. */
-export interface PublishingRecord {
-  /** The model's name, which is the key `admin.livePreview` is written under. */
-  modelName: string
-  modelTable: string
-  recordId: string
-  /** Where this record renders, when the project has said. */
-  previewUrl?: string | undefined
-}
-
-/** What is currently true, as the controls need to know it. */
-export interface PublishingView {
-  locales: string[]
-  /** A model with no localized field publishes as a whole and shows one row, not a locale column. */
-  wholeRecord: boolean
-  state: PublishingState | null
-  busy: boolean
-  error: string | null
-}
-
-/** What can be done, with the plumbing already bound. */
-export interface PublishingActions {
-  publishAll: () => void
-  publish: (locale: string) => void
-  unpublish: (locale: string) => void
-  schedule: (locale: string, at: Date) => void
-  cancelSchedule: (locale: string) => void
-}
-
-/**
- * The controls, once the section is open.
- *
- * Split from `PublishBar` so that what is on screen is a function of what is passed in. The bar
- * itself fetches, holds the disclosure and binds the client; this renders. That is also the only
- * way the states below get tested: the suite renders static markup deliberately, so no effect ever
- * runs and a component that learns its state from one can only ever be seen empty.
- */
-export function PublishBarBody({
-  record,
-  view,
-  actions,
-}: {
-  record: PublishingRecord
-  view: PublishingView
-  actions: PublishingActions
-}): React.ReactElement {
-  const pending = view.locales.filter((l) => view.state?.locales[l] !== "live")
-
+/** One row per language, shown only when the languages are in different states. */
+function LocaleRows({ view, onPublish }: { view: PanelView; onPublish: (code: string) => void }): React.ReactElement {
   return (
-    <>
-      <Button
-        className="w-full justify-center"
-        size="sm"
-        disabled={view.busy || pending.length === 0}
-        onClick={actions.publishAll}
-      >
-        {view.wholeRecord ? "Publish" : `Publish ${String(pending.length)} pending`}
+    <div className="space-y-0.5">
+      {view.locales.map(({ code, label, state }) => (
+        <div key={code} className="flex items-center gap-1.5 py-0.5">
+          <span className="text-xs w-16 truncate" title={label}>{label}</span>
+          <Badge variant={stateLabels[state].variant} title={stateLabels[state].title}>
+            {stateLabels[state].short}
+          </Badge>
+          <span className="flex-1" />
+          {view.panel.rowPublish && state !== "live" && (
+            <Button size="xs" variant="ghost" disabled={view.busy} onClick={() => { onPublish(code) }}>
+              Publish {code}
+            </Button>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** Version history and the share link, below the publishing controls. */
+function PublishLinks({
+  record,
+  onHistory,
+}: {
+  record: PublishingRecord & { recordId: string }
+  onHistory: () => void
+}): React.ReactElement {
+  return (
+    <div className="st-edit-sidebar-section">
+      <Button variant="ghost" size="sm" aria-label="Version history" onClick={onHistory}>
+        <IconHistory />
+        History
       </Button>
-
-      {view.error !== null && <div className="text-xs text-destructive">{view.error}</div>}
-
-      <div className="space-y-0.5">
-        {view.locales.map((locale) => (
-          <LocaleRow
-            key={locale}
-            label={view.wholeRecord ? "This record" : locale}
-            state={view.state?.locales[locale] ?? "absent"}
-            scheduledFor={view.state?.newest?.scheduled_locales[locale] ?? null}
-            busy={view.busy}
-            onPublish={() => {
-              actions.publish(locale)
-            }}
-            onUnpublish={() => {
-              actions.unpublish(locale)
-            }}
-            onSchedule={(at) => {
-              actions.schedule(locale, at)
-            }}
-            onCancelSchedule={() => {
-              actions.cancelSchedule(locale)
-            }}
-          />
-        ))}
-      </div>
-
-      <div className="pt-1 border-t border-border">
-        <SharePreview
-          modelName={record.modelName}
-          modelTable={record.modelTable}
-          recordId={record.recordId}
-          previewUrl={record.previewUrl}
-        />
-      </div>
-    </>
+      <SharePreview
+        modelName={record.model.name}
+        modelTable={record.model.tableName}
+        recordId={record.recordId}
+        previewUrl={record.previewUrl}
+      />
+    </div>
   )
 }
 
 /**
- * Which languages the world can read, said plainly beside the badge.
+ * The one vocabulary for a record's or a locale's state, shared by the list, the panel's language
+ * rows and the panel's own badge.
  *
- * Only where it adds something: a model with no localized field has one state and no languages to
- * distinguish, and a record that is uniformly live or uniformly unpublished is fully described by
- * its badge already.
- */
-function summaryDetail(
-  state: PublishingState | null,
-  locales: string[],
-  wholeRecord: boolean,
-): string | null {
-  if (wholeRecord) return null
-  const live = liveLocales(state, locales)
-  if (live.length === 0 || live.length === locales.length) return null
-  const notLive = locales.filter((l) => !live.includes(l))
-  return `${live.join(", ")} live · ${notLive.join(", ")} not`
-}
-
-/**
- * The one vocabulary, for a locale and for a whole record.
- *
- * Both spellings live here together because the list, the collapsed header and the row underneath
- * it sit within two clicks of each other. They came from separate tables once and used "Draft" for
- * two different things: a record with an unpublished edit in the list, and a locale that had never
- * been published at all in the editor. A post whose English was being read by the public was
- * labelled the same as one nobody had ever seen.
+ * "Draft" means never published and nothing else; a published record with an edit waiting is
+ * "Changed". The list used "Draft" for the second once, so a post the public was reading was
+ * labelled like one nobody had seen.
  */
 export const stateLabels: Record<
   RecordState,
   { short: string; long: string; variant: BadgeVariant; title: string }
 > = {
-  live: {
-    short: "Live",
-    long: "Live",
-    variant: "green",
-    title: "Published and visible to readers",
-  },
-  pending: {
-    short: "Edit",
-    long: "Edit waiting",
-    variant: "yellow",
-    title: "Published, with a newer edit not yet live",
-  },
+  live: { short: "Published", long: "Published", variant: "green", title: "Published and visible to readers" },
+  pending: { short: "Changed", long: "Changed", variant: "yellow", title: "Published, with a newer edit not yet live" },
   partial: {
     short: "Partly",
     long: "Partly published",
     variant: "yellow",
     title: "Live in some languages and never published in others",
   },
-  scheduled: {
-    short: "Timed",
-    long: "Scheduled",
-    variant: "blue",
-    title: "Waiting for its scheduled time",
-  },
-  absent: {
-    short: "Draft",
-    long: "Not published",
-    variant: "indigo",
-    title: "Not published",
-  },
-}
-
-/**
- * One glyph, one verb, one handler.
- *
- * The row's three actions differ only in those three things, and writing them out separately meant
- * three call sites each had to remember the tooltip and the label. Making that structural is the
- * point: the icons are here to fit the column, which is a layout decision, and it must not become
- * the only way to know what a control does.
- */
-function IconAction({
-  icon,
-  verb,
-  target,
-  busy,
-  detail,
-  onClick,
-}: {
-  icon: React.ReactNode
-  verb: string
-  target: string
-  busy: boolean
-  /** Extra tooltip text, when there is a fact worth stating beyond the verb. */
-  detail?: string | undefined
-  onClick: () => void
-}): React.ReactElement {
-  const label = `${verb} ${target}`
-  return (
-    <Button
-      size="icon"
-      variant="ghost"
-      disabled={busy}
-      title={detail === undefined ? label : `${label} (${detail})`}
-      aria-label={detail === undefined ? label : `${label}, ${detail}`}
-      onClick={onClick}
-    >
-      {icon}
-    </Button>
-  )
-}
-
-/**
- * One locale, on one line: what it is, and what can be done to it.
- *
- * Actions are glyphs because words for them do not fit beside a locale and a badge in a 280px
- * column, and wrapping them put every language on three lines.
- */
-function LocaleRow({
-  label,
-  state,
-  scheduledFor,
-  busy,
-  onPublish,
-  onUnpublish,
-  onSchedule,
-  onCancelSchedule,
-}: {
-  label: string
-  state: LocaleState
-  scheduledFor: string | null
-  busy: boolean
-  onPublish: () => void
-  onUnpublish: () => void
-  onSchedule: (at: Date) => void
-  onCancelSchedule: () => void
-}): React.ReactElement {
-  const badge = stateLabels[state]
-  const [scheduling, setScheduling] = useState(false)
-
-  // A locale already showing the newest version has nothing waiting, so there is nothing to publish
-  // and nothing to put a time on: offering a date would promise to publish something twice.
-  const canPublish = state !== "live"
-  const canUnpublish = state !== "absent"
-  // A time already set is shown whether or not the picker was asked for. It is a fact about the
-  // record, not a control somebody opened.
-  const showPicker = canPublish && (scheduling || scheduledFor !== null)
-
-  return (
-    <div className="py-0.5">
-      <div className="flex items-center gap-1.5">
-        <span className="text-xs truncate" title={label}>
-          {label}
-        </span>
-        <Badge variant={badge.variant} title={badge.title}>
-          {badge.short}
-        </Badge>
-        <span className="flex-1" />
-        {canPublish && (
-          <>
-            <IconAction
-              icon={<IconUpload />}
-              verb="Publish"
-              target={label}
-              busy={busy}
-              onClick={onPublish}
-            />
-            <IconAction
-              icon={<IconClock size={14} />}
-              verb="Schedule"
-              target={label}
-              busy={busy}
-              {...(scheduledFor !== null && { detail: `set for ${formatTimestamp(scheduledFor)}` })}
-              onClick={() => {
-                setScheduling(!showPicker)
-              }}
-            />
-          </>
-        )}
-        {canUnpublish && (
-          <IconAction
-            icon={<IconEyeOff />}
-            verb="Unpublish"
-            target={label}
-            busy={busy}
-            onClick={onUnpublish}
-          />
-        )}
-      </div>
-
-      {showPicker && (
-        <div className="pl-1 pt-1">
-          <ScheduleControl
-            scheduledFor={scheduledFor}
-            busy={busy}
-            onSchedule={(at) => {
-              setScheduling(false)
-              onSchedule(at)
-            }}
-            onCancel={onCancelSchedule}
-          />
-        </div>
-      )}
-    </div>
-  )
+  scheduled: { short: "Scheduled", long: "Scheduled", variant: "blue", title: "Waiting for its scheduled time" },
+  absent: { short: "Draft", long: "Draft", variant: "indigo", title: "Not published" },
 }

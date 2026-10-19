@@ -14,7 +14,7 @@ import { testClient, testField, testModel } from "./support.js"
  * as its live row stands rather than as never published.
  *
  * Kitchen-sink's seeded talks were live under `published_at <= now()` with no version row, and
- * the editor called them "Not published" while the list gave them no badge at all, which reads as
+ * the editor called them "Not published" (now "Draft") while the list gave them no badge at all, which reads as
  * live for a draft too.
  */
 
@@ -82,15 +82,23 @@ async function show(node: React.ReactElement): Promise<string> {
 }
 
 function bar(recordId: string): React.ReactElement {
-  return <PublishBar model={MODEL} recordId={recordId} savedAt={0} seesDrafts onNavigate={() => {}} />
+  const editor = {
+    dirty: false,
+    saving: false,
+    savedAt: 0,
+    onSave: () => {},
+    persist: () => Promise.resolve(recordId),
+    onChanged: () => {},
+  }
+  return <PublishBar record={{ model: MODEL, recordId, title: "A post" }} editor={editor} seesDrafts onNavigate={() => {}} />
 }
 
 describe("the publish bar of a record with no history", () => {
   it("says live when its published row holds every language", async () => {
     serve([LIVE])
     const text = await show(bar("live"))
-    expect(text).toContain("Live")
-    expect(text).not.toContain("Not published")
+    expect(text).toContain("Published")
+    expect(text).not.toContain("Draft")
   })
 
   it("says partly published when its published row holds one language of two", async () => {
@@ -98,9 +106,9 @@ describe("the publish bar of a record with no history", () => {
     expect(await show(bar("partial"))).toContain("Partly published")
   })
 
-  it("says not published when its row has no publish date", async () => {
+  it("says draft when its row has no publish date", async () => {
     serve([DRAFT])
-    expect(await show(bar("draft"))).toContain("Not published")
+    expect(await show(bar("draft"))).toContain("Draft")
   })
 })
 
@@ -116,6 +124,6 @@ describe("the list's state of records with no history", () => {
     // Live needs no badge, as for a record with history.
     expect(badgeOf("Everywhere")).toBe("")
     expect(badgeOf("English only")).toBe("Partly published")
-    expect(badgeOf("Unseen")).toBe("Not published")
+    expect(badgeOf("Unseen")).toBe("Draft")
   })
 })

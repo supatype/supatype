@@ -113,6 +113,21 @@ export function parseJsonObject(text: string): ParsedJsonObject {
   return isJsonObject(value) ? { ok: true, value } : { ok: false, error: "not-object" }
 }
 
+/**
+ * True when two JSON values say the same thing: the same scalars, the same items in the same order,
+ * and the same keys with the same values in any order.
+ */
+export function sameJson(a: unknown, b: unknown): boolean {
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((item, i) => sameJson(item, b[i]))
+  }
+  if (isJsonObject(a) && isJsonObject(b)) {
+    const keys = Object.keys(a)
+    return keys.length === Object.keys(b).length && keys.every((key) => key in b && sameJson(a[key], b[key]))
+  }
+  return a === b
+}
+
 /** A response's body as an object, or `{}` when it is not JSON or not an object. For error bodies. */
 export async function readJsonObject(res: Response): Promise<Record<string, unknown>> {
   const body = await res.json().catch(() => null)
