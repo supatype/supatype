@@ -12,7 +12,8 @@ import {
   type CellAccess,
 } from "../hooks/useStudioFieldAccess.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
-import { Badge } from "../components/ui.js"
+import { Badge, Button, DestructiveAnswers, Dialog } from "../components/ui.js"
+import type { SupatypeClient } from "@supatype/client"
 import { anyFieldContains, searchColumns } from "../lib/postgrest-search.js"
 import { formatFieldValue } from "../lib/field-display.js"
 import {
@@ -46,6 +47,9 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
   const [sort, setSort] = useState<ListOrder | null>(null)
   const [page, setPage] = useState(0)
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  // Its own state, not `error`: the refetch after a delete clears that one before it starts.
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const pageSize = 25
   // What the search box matches on: a localized field by its value in each locale, and no field
   // `ilike` cannot read, which failed the whole search.
@@ -144,12 +148,13 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
     }
   }
 
+  // A refused row stays selected and the reason is shown: the client returns the error rather than
+  // throwing, and ignoring it made a delete a policy or foreign key refused look like it worked.
   const handleBulkDelete = async () => {
     if (selected.size === 0) return
-    for (const id of selected) {
-      await client.from(model.tableName).delete().eq(model.primaryKey, id)
-    }
-    setSelected(new Set())
+    const refused = await deleteRows(client, model, selected)
+    setSelected(new Set(refused.keys()))
+    setDeleteError(refusalMessage(refused, selected.size))
     freshness.refresh()
   }
 
@@ -189,15 +194,25 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
           <div className="st-bulk-actions">
             <span>{selected.size} selected</span>
             {isOperationOffered(fieldAccess, model.tableName, "delete") && (
-              <button type="button" className="st-btn st-btn-danger" onClick={() => { void handleBulkDelete() }}>
+              <Button type="button" variant="destructive" onClick={() => { setConfirmingDelete(true) }}>
                 Delete selected
-              </button>
+              </Button>
             )}
           </div>
         )}
       </div>
 
       {error && <div className="st-error" role="alert">{error}</div>}
+      {deleteError && <div className="st-error" role="alert">{deleteError}</div>}
+      {confirmingDelete && (
+        <Dialog
+          role="alertdialog"
+          title={`Delete ${selected.size} ${selected.size === 1 ? model.label : model.labelPlural}?`}
+          actions={<DestructiveAnswers label="Delete" act={() => { void handleBulkDelete() }} onClose={() => { setConfirmingDelete(false) }} />}
+        >
+          <p>They are deleted for good. This cannot be undone.</p>
+        </Dialog>
+      )}
 
       <div className="st-table-wrapper">
         <table className="st-table">
@@ -323,6 +338,27 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
       </div>
     </div>
   )
+}
+
+/** Deletes each row by its key, and answers with the keys the server refused and why. */
+async function deleteRows(
+  client: SupatypeClient,
+  model: ModelConfig,
+  ids: ReadonlySet<string>,
+): Promise<Map<string, string>> {
+  const refused = new Map<string, string>()
+  for (const id of ids) {
+    const { error } = await client.from(model.tableName).delete().eq(model.primaryKey, id)
+    if (error) refused.set(id, error.message)
+  }
+  return refused
+}
+
+/** What to tell the user about a delete, or null when every row went. */
+function refusalMessage(refused: ReadonlyMap<string, string>, asked: number): string | null {
+  const [first] = refused.values()
+  if (first === undefined) return null
+  return `${refused.size} of ${asked} could not be deleted: ${first}`
 }
 
 function CellRenderer({
