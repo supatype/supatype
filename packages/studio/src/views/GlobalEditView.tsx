@@ -5,46 +5,45 @@ import { useAdminClient } from "../hooks/useAdminClient.js"
 import { useLocale } from "../hooks/useLocale.js"
 import type { GlobalConfig } from "../config.js"
 import { splitEditFields } from "../lib/edit-field-layout.js"
-import { describeViolations, validateRecord } from "../lib/validate-record.js"
+import { isJsonObject } from "../lib/json.js"
+import { passesChecks, reportRefusal, type RefusalReport } from "../lib/write-error.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
 
 interface GlobalEditViewProps {
   global: GlobalConfig
 }
 
-export function GlobalEditView({ global: globalConfig }: GlobalEditViewProps): React.ReactElement {
-  // Rows here are read with the service role, so the elevated-access notice applies
-  // to this view. See `useShowsProjectRows`.
-  useShowsProjectRows()
+/** What went wrong: the banner's line, and the message under each input it is about. */
+interface Problems extends RefusalReport {
+  error: string | null
+  fieldErrors: Record<string, string>
+}
 
+function useProblems(): Problems {
+  const [error, setError] = useState<string | null>(null)
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+  return { error, fieldErrors, setError, setFieldErrors }
+}
+
+/** The global's one row. No row yet (406 from `.single()`) is an empty form, not an error. */
+function useGlobalRow(
+  globalConfig: GlobalConfig,
+  setError: (message: string | null) => void,
+): { values: Record<string, unknown>; setValues: React.Dispatch<React.SetStateAction<Record<string, unknown>>>; loading: boolean } {
   const client = useAdminClient()
-  const { currentLocale, defaultLocale } = useLocale()
   const [values, setValues] = useState<Record<string, unknown>>({})
   const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const primaryKey = "id"
-  const timestamps = globalConfig.fields.some((f) => f.name === "created_at")
 
   useEffect(() => {
     void (async () => {
       setLoading(true)
       try {
-        const result = await client
-          .from(globalConfig.tableName)
-          .select()
-          .limit(1)
-          .single()
-
+        const result = await client.from(globalConfig.tableName).select().limit(1).single()
         if (result.error) {
-          if (result.error.status === 406) {
-            setValues({})
-          } else {
-            setError(result.error.message)
-          }
-        } else if (result.data) {
-          setValues(result.data as Record<string, unknown>)
+          if (result.error.status === 406) setValues({})
+          else setError(result.error.message)
+        } else if (isJsonObject(result.data)) {
+          setValues(result.data)
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load")
@@ -52,66 +51,79 @@ export function GlobalEditView({ global: globalConfig }: GlobalEditViewProps): R
         setLoading(false)
       }
     })()
-  }, [client, globalConfig.tableName])
+  }, [client, globalConfig.tableName, setError])
 
-  const handleChange = useCallback((fieldName: string, value: unknown) => {
-    setValues((prev) => ({ ...prev, [fieldName]: value }))
-  }, [])
+  return { values, setValues, loading }
+}
 
-  const handleSave = async () => {
-    const violations = validateRecord(globalConfig.fields, values)
-    if (violations.length > 0) {
-      setError(describeViolations(violations))
-      return
-    }
+/**
+ * Saving the row. A refusal goes under the input it is about where the server's answer allows,
+ * the same as the record editor, rather than as the server's raw text in the banner.
+ */
+function useGlobalSave(
+  globalConfig: GlobalConfig,
+  values: Record<string, unknown>,
+  problems: Problems,
+): { saving: boolean; save: () => Promise<void> } {
+  const client = useAdminClient()
+  const [saving, setSaving] = useState(false)
 
+  const save = async (): Promise<void> => {
+    if (!passesChecks(problems, globalConfig.fields, values)) return
     setSaving(true)
-    setError(null)
+    problems.setError(null)
+    problems.setFieldErrors({})
     try {
-      const result = await client
-        .from(globalConfig.tableName)
-        .upsert(values)
-
-      if (result.error) {
-        setError(result.error.message)
-      }
+      const result = await client.from(globalConfig.tableName).upsert(values)
+      if (result.error) reportRefusal(problems, result.error, globalConfig.fields, values)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save")
+      problems.setError(err instanceof Error ? err.message : "Failed to save")
     } finally {
       setSaving(false)
     }
   }
+  return { saving, save }
+}
 
-  const { mainFields, metaFields } = splitEditFields(globalConfig.fields, {
-    primaryKey,
-    isCreate: false,
-    timestamps,
-  })
+export function GlobalEditView({ global: globalConfig }: GlobalEditViewProps): React.ReactElement {
+  // Rows here are read with the service role, so the elevated-access notice applies
+  // to this view. See `useShowsProjectRows`.
+  useShowsProjectRows()
 
-  if (loading) {
-    return <div className="st-global-edit st-edit-loading">Loading...</div>
-  }
+  const { currentLocale, defaultLocale } = useLocale()
+  const problems = useProblems()
+  const { values, setValues, loading } = useGlobalRow(globalConfig, problems.setError)
+  const { saving, save } = useGlobalSave(globalConfig, values, problems)
+  const handleChange = useCallback((fieldName: string, value: unknown) => {
+    setValues((prev) => ({ ...prev, [fieldName]: value }))
+  }, [setValues])
+
+  if (loading) return <div className="st-global-edit st-edit-loading">Loading...</div>
 
   return (
     <div className="st-global-edit">
       <Header title={globalConfig.label} />
-
-      {error && <div className="st-error" role="alert">{error}</div>}
-
+      {problems.error && <div className="st-error" role="alert">{problems.error}</div>}
       <EditFormLayout
-        mainFields={mainFields}
-        metaFields={metaFields}
+        {...splitEditFields(globalConfig.fields, { primaryKey: PRIMARY_KEY, isCreate: false, timestamps: hasTimestamps(globalConfig) })}
         values={values}
         onChange={handleChange}
-        primaryKey={primaryKey}
+        primaryKey={PRIMARY_KEY}
         currentLocale={currentLocale}
         defaultLocale={defaultLocale}
         recordSyncKey="global"
         slugFollowSource={false}
         saving={saving}
-        onSave={() => { void handleSave() }}
+        onSave={() => { void save() }}
         isCreate={false}
+        fieldErrors={problems.fieldErrors}
       />
     </div>
   )
+}
+
+const PRIMARY_KEY = "id"
+
+function hasTimestamps(globalConfig: GlobalConfig): boolean {
+  return globalConfig.fields.some((f) => f.name === "created_at")
 }

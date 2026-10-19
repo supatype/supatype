@@ -3,14 +3,8 @@ import type { SupatypeClient } from "@supatype/client"
 import type { ModelConfig } from "../config.js"
 import { useAdminClient } from "./useAdminClient.js"
 import { serializeRecordForApi } from "../lib/recordValues.js"
-import { describeViolations, validateRecord } from "../lib/validate-record.js"
+import { passesChecks, reportRefusal, type RefusalReport } from "../lib/write-error.js"
 import { createDraft, createRecord, type RecordError } from "../lib/publishing.js"
-
-/** Where a refused save is reported: the banner, and the input the refusal names. */
-export interface SaveReport {
-  setError: (message: string | null) => void
-  setFieldErrors: (errors: Record<string, string>) => void
-}
 
 /** A write's outcome: the record's id, or why it was refused. */
 type Written = { id: string; error: null } | { id: null; error: RecordError }
@@ -48,23 +42,6 @@ async function write(
   return result.error === null ? { id: recordId, error: null } : { id: null, error: result.error }
 }
 
-/** The form's own checks, reported where each belongs; true when the form passes them. */
-function passesChecks(model: ModelConfig, values: Record<string, unknown>, report: SaveReport): boolean {
-  const violations = validateRecord(model.fields, values, model.constraints ?? [])
-  if (violations.length === 0) return true
-  report.setError(describeViolations(violations))
-  // A violation attributed to one field goes on that input; a cross-field rule has no single input
-  // to blame and stays in the banner alone.
-  report.setFieldErrors(
-    Object.fromEntries(
-      violations
-        .filter((v) => model.fields.some((f) => f.name === v.field))
-        .map((v) => [v.field, v.locale ? `(${v.locale}) ${v.message}` : v.message]),
-    ),
-  )
-  return false
-}
-
 /**
  * Saving the form, as one call that answers with the record's id.
  *
@@ -75,23 +52,19 @@ export function useRecordPersist(
   model: ModelConfig,
   recordId: string | undefined,
   values: Record<string, unknown>,
-  report: SaveReport,
+  report: RefusalReport,
 ): { saving: boolean; persist: () => Promise<string | null> } {
   const client = useAdminClient()
   const [saving, setSaving] = useState(false)
 
   const persist = async (): Promise<string | null> => {
-    if (!passesChecks(model, values, report)) return null
+    if (!passesChecks(report, model.fields, values, model.constraints ?? [])) return null
     setSaving(true)
     report.setError(null)
     report.setFieldErrors({})
     try {
       const written = await write(client, model, recordId, values)
-      if (written.error !== null) {
-        report.setError(written.error.message)
-        // The server names the column when a field validator refuses; that message goes on its input.
-        if (written.error.field !== undefined) report.setFieldErrors({ [written.error.field]: written.error.message })
-      }
+      if (written.error !== null) reportRefusal(report, written.error, model.fields, values)
       return written.id
     } catch (err) {
       report.setError(err instanceof Error ? err.message : "Failed to save")

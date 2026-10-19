@@ -19,6 +19,9 @@ import { CurrencyWidget } from "./CurrencyWidget.js"
 import { SlugWidget } from "./SlugWidget.js"
 import { DerivedTextWidget } from "./DerivedTextWidget.js"
 import { ButtonWidget } from "./ButtonWidget.js"
+import { DurationWidget } from "./DurationWidget.js"
+import { GeoPointWidget } from "./GeoPointWidget.js"
+import { widgetFor } from "../lib/widget-input.js"
 
 export interface WidgetProps {
   config: FieldConfig
@@ -102,7 +105,8 @@ function TranslationIcon(): React.ReactElement {
 }
 
 export function FieldWidget(props: WidgetProps): React.ReactElement {
-  const config = normalizeDerivedPreviewFieldConfig(props.config)
+  const derived = normalizeDerivedPreviewFieldConfig(props.config)
+  const config = { ...derived, widget: widgetFor(derived, props.value) }
   const next = { ...props, config }
   const variant = props.variant ?? "default"
 
@@ -178,6 +182,10 @@ function WidgetRenderer(props: WidgetProps): React.ReactElement {
       return <CurrencyWidget {...props} />
     case "button":
       return <ButtonWidget {...props} />
+    case "duration":
+      return <DurationWidget {...props} />
+    case "geopoint":
+      return <GeoPointWidget {...props} />
     default:
       return <TextWidget {...props} />
   }

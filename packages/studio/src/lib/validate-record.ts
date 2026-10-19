@@ -1,6 +1,7 @@
 import type { FieldConfig, FieldValidation } from "../config.js"
 import { isJsonObject } from "./json.js"
 import { lengthOf } from "./measure-value.js"
+import { widgetInputMessage } from "./widget-input.js"
 import {
   describeConstraint,
   evaluate,
@@ -114,8 +115,11 @@ function boundsMessage(rules: FieldValidation, value: unknown): string | null {
  *
  * Postgres enforces the same bounds as a `CHECK`, so this changes no outcome, only which message the
  * editor sees: "Headline must be 120 characters or fewer" in place of a constraint-violation string
- * naming a generated constraint. Every rule here is one the database also holds, which is why a pass
+ * naming a generated constraint. Every bound here is one the database also holds, which is why a pass
  * cannot green-light a write the server would refuse.
+ *
+ * Input a widget could not read (a duration typed as `abc`, a latitude of 95) is refused here as
+ * well. Those are not database rules, see `widget-input.ts`, but they stop a save the same way.
  */
 export function validateRecord(
   fields: readonly FieldConfig[],
@@ -125,11 +129,11 @@ export function validateRecord(
   const violations: FieldViolation[] = []
 
   for (const field of fields) {
-    const rules = field.validation
-    if (!rules || field.readOnly) continue
+    if (field.readOnly) continue
+    const rules = field.validation ?? {}
 
     for (const [locale, value] of valuesToCheck(values[field.name], field.localized)) {
-      const message = boundsMessage(rules, value)
+      const message = widgetInputMessage(field, value) ?? boundsMessage(rules, value)
       if (message !== null) {
         violations.push({
           field: field.name,
@@ -208,4 +212,21 @@ export function describeViolations(violations: readonly FieldViolation[]): strin
   return violations
     .map((v) => (v.locale ? `${v.label} (${v.locale}) ${v.message}` : `${v.label} ${v.message}`))
     .join("; ")
+}
+
+/**
+ * Each violation's message, keyed by the input it goes under.
+ *
+ * A cross-field rule has no single input to blame and stays in the banner alone, so a violation
+ * whose `field` is not one of `fields` is left out.
+ */
+export function violationFieldErrors(
+  fields: readonly FieldConfig[],
+  violations: readonly FieldViolation[],
+): Record<string, string> {
+  return Object.fromEntries(
+    violations
+      .filter((v) => fields.some((f) => f.name === v.field))
+      .map((v) => [v.field, v.locale ? `(${v.locale}) ${v.message}` : v.message]),
+  )
 }
