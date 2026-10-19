@@ -21,15 +21,13 @@ import {
   type RecordState,
 } from "../lib/publishing.js"
 import { stateLabels } from "../components/PublishBar.js"
+import { RefreshControls } from "../components/RefreshControls.js"
+import { useListFreshness } from "../hooks/useListFreshness.js"
+import { listOrder, modelKeyColumns, withOrder, type ListOrder } from "../lib/list-order.js"
 
 interface ListViewProps {
   model: ModelConfig
   onNavigate: (path: string) => void
-}
-
-interface SortState {
-  field: string
-  direction: "asc" | "desc"
 }
 
 export function ListView({ model, onNavigate }: ListViewProps): React.ReactElement {
@@ -44,7 +42,7 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState("")
-  const [sort, setSort] = useState<SortState | null>(null)
+  const [sort, setSort] = useState<ListOrder | null>(null)
   const [page, setPage] = useState(0)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const pageSize = 25
@@ -69,10 +67,9 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
         query = query.or(anyFieldContains(searchable, search))
       }
 
-      if (sort) {
-        query = query.order(sort.field, { ascending: sort.direction === "asc" })
-      }
-
+      // Never unordered: the user's column or the model's default, then the key, so a page asked for
+      // twice holds the same rows. See `listOrder`.
+      query = withOrder(query, listOrder(sort ? [sort] : [], model.defaultSort, modelKeyColumns(model)))
       query = query.range(page * pageSize, (page + 1) * pageSize - 1)
 
       const result = await query
@@ -86,9 +83,11 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
     } finally {
       setLoading(false)
     }
-  }, [client, model.tableName, searchable, search, sort, page])
+  }, [client, model, searchable, search, sort, page])
 
-  useEffect(() => { void fetchData() }, [fetchData])
+  const freshness = useListFreshness(fetchData, { viewKey: `list.${model.name}` })
+  // The column the rows are in order of, whether the user chose it or the model did.
+  const shownSort = sort ?? model.defaultSort ?? null
 
   const columns = model.listColumns
     .map((name) => model.fields.find((f) => f.name === name))
@@ -96,12 +95,10 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
 
   const toggleSort = (fieldName: string) => {
     setSort((prev) => {
-      if (prev?.field === fieldName) {
-        return prev.direction === "asc"
-          ? { field: fieldName, direction: "desc" }
-          : null
+      if (prev?.column === fieldName) {
+        return prev.ascending ? { column: fieldName, ascending: false } : null
       }
-      return { field: fieldName, direction: "asc" }
+      return { column: fieldName, ascending: true }
     })
   }
 
@@ -152,7 +149,7 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
       await client.from(model.tableName).delete().eq(model.primaryKey, id)
     }
     setSelected(new Set())
-    void fetchData()
+    freshness.refresh()
   }
 
   return (
@@ -184,6 +181,8 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
             onChange={(e) => { setSearch(e.target.value); setPage(0) }}
           />
         )}
+
+        <RefreshControls freshness={freshness} busy={loading} />
 
         {selected.size > 0 && (
           <div className="st-bulk-actions">
@@ -219,9 +218,9 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
                   style={col.listWidth ? { width: col.listWidth } : undefined}
                 >
                   {col.label}
-                  {sort?.field === col.name && (
+                  {shownSort?.column === col.name && (
                     <span className="st-sort-indicator">
-                      {sort.direction === "asc" ? " \u2191" : " \u2193"}
+                      {shownSort.ascending ? " \u2191" : " \u2193"}
                     </span>
                   )}
                 </th>
@@ -229,7 +228,9 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
             </tr>
           </thead>
           <tbody>
-            {loading ? (
+            {/* Only while there is nothing to show: a refresh keeps the rows on screen until the new
+                ones arrive, rather than blanking the table every few seconds. */}
+            {loading && rows.length === 0 ? (
               <tr>
                 <td colSpan={columns.length + 1} className="st-table-loading">
                   Loading...

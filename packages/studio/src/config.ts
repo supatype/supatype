@@ -17,6 +17,7 @@ export const DASHBOARD_VIEW_LIMITS: Record<Tier, number> = {
 
 import type { FieldValidation } from "@supatype/types"
 import type { ModelConstraint } from "./lib/evaluate-constraint.js"
+import type { ListOrder } from "./lib/list-order.js"
 
 // Declared once, in `@supatype/types`, beside the modifiers that compile into it. Re-exported
 // because widgets import it from here alongside `FieldConfig`.
@@ -102,8 +103,15 @@ export interface ModelConfig {
   tableName: string
   /** API path for CRUD. */
   apiPath: string
-  /** Primary key field name. */
+  /** Primary key field name. The first key column where the key is composite. */
   primaryKey: string
+  /**
+   * Every primary key column, in declaration order, as the engine sends it. Absent from an engine
+   * that predates it; `modelKeyColumns` reads that as `[primaryKey]`.
+   */
+  primaryKeyColumns?: string[]
+  /** The order a list starts in until the user sorts it, as the engine decided it. */
+  defaultSort?: ListOrder
   /** Field configurations for edit view. */
   fields: FieldConfig[]
   /** List view column order (field names). */

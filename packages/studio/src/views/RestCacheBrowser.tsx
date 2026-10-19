@@ -3,6 +3,7 @@ import { useStudioClient } from "../StudioCore.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import { useServerRestCacheOffered } from "../hooks/useServerRestCacheOffered.js"
+import { useInterval } from "../hooks/useTabActivity.js"
 import { Button, Card } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
@@ -236,11 +237,7 @@ export function RestCacheBrowser({
   //
   // Paused while a row is selected: refetching under an open detail pane is how a selection
   // changes out from under someone mid-read.
-  useEffect(() => {
-    if (selectedKey !== null) return
-    const id = setInterval(() => refetch(), LIST_POLL_MS)
-    return () => clearInterval(id)
-  }, [refetch, selectedKey])
+  useInterval(refetch, selectedKey === null ? LIST_POLL_MS : null)
 
   const loadSettings = useCallback(async () => {
     if (!showTableSettings || !tableFilter) return

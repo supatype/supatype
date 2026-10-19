@@ -1,0 +1,62 @@
+import React, { act } from "react"
+import { createRoot, type Root } from "react-dom/client"
+import { MemoryRouter } from "react-router-dom"
+import { vi } from "vitest"
+import type { ModelConfig } from "../src/config.js"
+import { AdminClientContext } from "../src/hooks/useAdminClient.js"
+import { AdminConfigContext } from "../src/hooks/useAdminConfig.js"
+import { LocaleContext } from "../src/hooks/useLocale.js"
+import { ListView } from "../src/views/ListView.js"
+import { settle } from "./data-browser-support.js"
+import { testClient, testConfig } from "./support.js"
+
+/** A model's list, rendered against a REST stub that records every row read it is sent. */
+export interface ListHarness {
+  container: HTMLElement
+  /** Every read of the model's table, in order. */
+  reads: URL[]
+  unmount: () => void
+}
+
+const PROXY = "http://localhost:8000/studio/proxy"
+
+/** The `order` parameter of the latest read, or null when it sent none. */
+export function lastOrder(reads: readonly URL[]): string | null {
+  return reads.at(-1)?.searchParams.get("order") ?? null
+}
+
+export async function renderList(model: ModelConfig): Promise<ListHarness> {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true
+  const reads: URL[] = []
+  vi.stubGlobal("fetch", async (raw: string) => {
+    const url = new URL(raw)
+    if (url.pathname.endsWith(`/rest/v1/${model.tableName}`)) reads.push(url)
+    return Response.json([])
+  })
+  const container = document.createElement("div")
+  document.body.appendChild(container)
+  const root: Root = createRoot(container)
+  await act(async () => {
+    root.render(
+      <MemoryRouter>
+        <AdminConfigContext.Provider value={testConfig({ models: [model] })}>
+          <AdminClientContext.Provider value={testClient({ url: PROXY, token: "token" })}>
+            <LocaleContext.Provider value={{ currentLocale: "en", setLocale: () => undefined, locales: [], defaultLocale: "en" }}>
+              <ListView model={model} onNavigate={() => undefined} />
+            </LocaleContext.Provider>
+          </AdminClientContext.Provider>
+        </AdminConfigContext.Provider>
+      </MemoryRouter>,
+    )
+  })
+  await settle()
+  return { container, reads, unmount: () => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals() } }
+}
+
+/** The column header reading `label`, clicked. */
+export async function clickHeader(container: HTMLElement, label: string): Promise<void> {
+  const header = Array.from(container.querySelectorAll("th")).find((th) => th.textContent?.startsWith(label))
+  if (!header) throw new Error(`no "${label}" column header`)
+  await act(async () => header.click())
+  await settle()
+}
