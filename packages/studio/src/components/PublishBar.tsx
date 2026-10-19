@@ -8,10 +8,9 @@ import { useLocale } from "../hooks/useLocale.js"
 import { formatTimestamp } from "../lib/utils.js"
 import type { ModelConfig } from "../config.js"
 import {
-  fetchVersions,
+  fetchPublishingState,
   publish,
   publishableLocales,
-  publishingState,
   liveLocales,
   publishingSummary,
   schedulePublish,
@@ -87,12 +86,11 @@ export function PublishBar({
   const localeCodes = projectLocales.map((l) => l.code).join(",")
 
   const reload = useCallback(async () => {
-    const versions = await fetchVersions(client, model, recordId)
     const locales =
       model.versions === null
         ? [WHOLE_RECORD]
         : publishableLocales(model.versions, localeCodes === "" ? [] : localeCodes.split(","))
-    setState(publishingState(versions, locales))
+    setState(await fetchPublishingState(client, model, recordId, locales))
   }, [client, model, recordId, localeCodes, savedAt])
 
   useEffect(() => {

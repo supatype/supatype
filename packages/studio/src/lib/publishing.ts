@@ -170,6 +170,98 @@ function localeStates(versions: readonly VersionPublication[], locales: string[]
   return states
 }
 
+/** True when `value` says something in a locale: not absent, null, empty text or an empty value. */
+function hasContent(value: unknown): boolean {
+  if (value === undefined || value === null || value === "") return false
+  if (Array.isArray(value)) return value.length > 0
+  if (isJsonObject(value)) return Object.keys(value).length > 0
+  return true
+}
+
+/**
+ * When the live row went or goes live: its `published_at`, or now when the model has no such
+ * column, since nothing in the row withholds it. `null` for a row nothing has published.
+ */
+function liveSince(row: Record<string, unknown>, now: number): number | null {
+  if (!(PUBLISHED_AT in row)) return now
+  const at = row[PUBLISHED_AT]
+  if (!isString(at)) return null
+  const time = Date.parse(at)
+  return Number.isNaN(time) ? null : time
+}
+
+/**
+ * Each locale's state read from the live row, for a record with no version rows.
+ *
+ * Rows a seed wrote, rows inserted through the API and rows saved before 0.7.0 have no history,
+ * and reading them from history alone called a record the public is reading "Not published". The
+ * row says what the read rule shows instead: `published_at` at or before now is live, later is
+ * scheduled, and null is a draft. On a localized model only the locales the row holds content in
+ * are live, because publishing a locale is what writes its keys and unpublishing removes them. The
+ * engine writes version 1 for such a record by the same rule, so the two agree once it has.
+ */
+export function liveRowLocaleStates(
+  row: Record<string, unknown>,
+  versions: ModelVersionsConfig,
+  locales: string[],
+  now: number = Date.now(),
+): Record<string, LocaleState> {
+  const at = liveSince(row, now)
+  const state: LocaleState = at === null ? "absent" : at <= now ? "live" : "scheduled"
+  const states: Record<string, LocaleState> = {}
+  for (const locale of locales) {
+    const held =
+      locale === WHOLE_RECORD ||
+      versions.localizedColumns.some((column) => {
+        const value = row[column]
+        return isJsonObject(value) && hasContent(value[locale])
+      })
+    states[locale] = held ? state : "absent"
+  }
+  return states
+}
+
+/**
+ * A record's publishing state: from its history, or from its live row when it has none.
+ *
+ * The live row is read only for a record with no version rows, which the editor then shows as the
+ * row stands rather than as never published.
+ */
+export async function fetchPublishingState(
+  client: SupatypeClient,
+  model: ModelConfig,
+  recordId: string,
+  locales: string[],
+): Promise<PublishingState> {
+  const versions = await fetchVersions(client, model, recordId)
+  if (versions.length > 0 || model.versions === null) return publishingState(versions, locales)
+  const row = await fetchLiveRow(client, model, recordId)
+  if (row === null) return publishingState([], locales)
+  return {
+    versions: [],
+    newest: null,
+    hasPendingDraft: false,
+    locales: liveRowLocaleStates(row, model.versions, locales),
+  }
+}
+
+/** The record's live row, or null when it cannot be read. */
+async function fetchLiveRow(
+  client: SupatypeClient,
+  model: ModelConfig,
+  recordId: string,
+): Promise<Record<string, unknown> | null> {
+  const result = await client
+    .from(model.tableName)
+    .select()
+    .eq(model.primaryKey, recordId)
+    .maybeSingle()
+  if (result.error !== null) return null
+  // A proxy may drop `Accept: object+json` and answer with a one-row array.
+  const raw: unknown = Array.isArray(result.data) ? result.data[0] : result.data
+  return isJsonObject(raw) ? raw : null
+}
+
 /** Read the pending draft's values, which is what an editor opens. */
 export async function fetchDraft(
   client: SupatypeClient,
@@ -478,23 +570,51 @@ export async function fetchRecordForEditing(
  * The query already selected `published_locales` and threw it away. This keeps it, so the list can
  * tell "never published" from "published, with an edit waiting" from "live in one language and
  * never published in another".
+ *
+ * Takes the rows on screen rather than their keys: a record with no version rows is read from its
+ * live row, as the editor reads it, rather than left without a state.
  */
 export async function fetchRecordStates(
   client: SupatypeClient,
   model: ModelConfig,
-  recordIds: string[],
+  records: Record<string, unknown>[],
   locales: string[],
 ): Promise<Map<string, RecordState>> {
   const versions = model.versions
-  if (versions === null || !versions.drafts || recordIds.length === 0) return new Map()
+  if (versions === null || !versions.drafts || records.length === 0) return new Map()
 
+  const ids = records.map((r) => String(r[model.primaryKey]))
+  const history = await fetchHistories(client, versions.versionsTable, ids)
+  if (history === null) return new Map()
+
+  const states = new Map<string, RecordState>()
+  for (const record of records) {
+    const id = String(record[model.primaryKey])
+    const list = history.get(id)
+    // Reuses the per-locale derivation rather than repeating it, so a list badge and the editor's
+    // own badge cannot disagree about the same record.
+    const perLocale =
+      list === undefined
+        ? liveRowLocaleStates(record, versions, locales)
+        : localeStates(list, locales)
+    states.set(id, publishingSummary({ locales: perLocale }, locales))
+  }
+  return states
+}
+
+/** Each record's version rows, newest first, or null when the history could not be read. */
+async function fetchHistories(
+  client: SupatypeClient,
+  versionsTable: string,
+  recordIds: string[],
+): Promise<Map<string, VersionPublication[]> | null> {
   const result = await client
-    .from(versions.versionsTable)
+    .from(versionsTable)
     .select("record_id, version, published_locales, scheduled_locales")
     .in("record_id", recordIds)
     .order("version", { ascending: false })
 
-  if (result.error !== null || result.data === null) return new Map()
+  if (result.error !== null || result.data === null) return null
 
   const rows = new Map<string, VersionPublication[]>()
   for (const raw of result.data.filter(isStateRow)) {
@@ -507,12 +627,5 @@ export async function fetchRecordStates(
     })
     rows.set(id, list)
   }
-
-  const states = new Map<string, RecordState>()
-  for (const [id, list] of rows) {
-    // Reuses the per-locale derivation rather than repeating it, so a list badge and the editor's
-    // own badge cannot disagree about the same record.
-    states.set(id, publishingSummary({ locales: localeStates(list, locales) }, locales))
-  }
-  return states
+  return rows
 }

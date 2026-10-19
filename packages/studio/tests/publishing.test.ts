@@ -3,6 +3,7 @@ import {
   createRecord,
   duplicateValues,
   fetchRecordStates,
+  liveRowLocaleStates,
   publishableLocales,
   publishingState,
   liveLocales,
@@ -159,10 +160,50 @@ describe("what a list says each record is", () => {
 
   const LIVE = "2026-09-05T09:00:00Z"
 
-  async function stateOf(rows: unknown[], locales = ["en", "fr"]): Promise<string | undefined> {
-    const states = await fetchRecordStates(clientReturning(rows), model, ["a"], locales)
+  /** Record `a`'s state, its version query answered with `rows` and its live row being `live`. */
+  async function stateOf(
+    rows: unknown[],
+    locales = ["en", "fr"],
+    live: Record<string, unknown> = {},
+  ): Promise<string | undefined> {
+    const states = await fetchRecordStates(clientReturning(rows), model, [{ ...live, id: "a" }], locales)
     return states.get("a")
   }
+
+  // Seeded rows, rows inserted through the API and rows saved before 0.7.0 have no version rows.
+  // The list said nothing about them, which reads as live for a draft, and the editor called the
+  // live ones "Not published". Their live row says what the read rule shows.
+  const PAST = "2026-01-01T00:00:00Z"
+  const FUTURE = "2999-01-01T00:00:00Z"
+
+  it("reads a record with no history as live in the locales its published row holds", async () => {
+    expect(await stateOf([], ["en", "fr"], { published_at: PAST, body: { en: "Hello", fr: "Salut" } })).toBe(
+      "live",
+    )
+    expect(await stateOf([], ["en", "fr"], { published_at: PAST, body: { en: "Hello", fr: null } })).toBe(
+      "partial",
+    )
+  })
+
+  it("reads a record with no history and a future publish date as scheduled", async () => {
+    expect(await stateOf([], ["en", "fr"], { published_at: FUTURE, body: { en: "Soon", fr: "Bientôt" } })).toBe(
+      "scheduled",
+    )
+  })
+
+  it("reads a record with no history and no publish date as never published", async () => {
+    expect(await stateOf([], ["en", "fr"], { published_at: null, body: { en: "Not yet" } })).toBe("absent")
+  })
+
+  it("prefers the history over the live row when there is one", async () => {
+    expect(
+      await stateOf(
+        [{ record_id: "a", version: 1, published_locales: {}, scheduled_locales: {} }],
+        ["en", "fr"],
+        { published_at: PAST, body: { en: "Hello", fr: "Salut" } },
+      ),
+    ).toBe("absent")
+  })
 
   it("calls a record with an unpublished edit published, because it is", async () => {
     // This is the case that made the old badge wrong. The record's English is live and being read;
@@ -210,6 +251,36 @@ describe("what a list says each record is", () => {
     const client = testClient({ url: "http://localhost:8000" })
     expect((await fetchRecordStates(client, model, [], ["en"])).size).toBe(0)
     expect(sent).not.toHaveBeenCalled()
+  })
+})
+
+describe("what a live row says when there is no history", () => {
+  const NOW = Date.parse("2026-10-19T12:00:00Z")
+  const whole = versions()
+  const localized = versions({ localizedColumns: ["abstract"] })
+
+  it("is live, scheduled or a draft by its publish date", () => {
+    const at = (published_at: string | null) =>
+      liveRowLocaleStates({ published_at }, whole, [WHOLE_RECORD], NOW)[WHOLE_RECORD]
+    expect(at("2026-10-15T15:49:15Z")).toBe("live")
+    expect(at("2026-10-20T00:00:00Z")).toBe("scheduled")
+    expect(at(null)).toBe("absent")
+  })
+
+  it("is live on a model with no publish date, since nothing in the row withholds it", () => {
+    expect(liveRowLocaleStates({ title: "Always on" }, whole, [WHOLE_RECORD], NOW)).toEqual({
+      [WHOLE_RECORD]: "live",
+    })
+  })
+
+  it("counts only the locales the row holds content in", () => {
+    const row = { published_at: "2026-10-15T15:49:15Z", abstract: { en: "Talk", fr: "", de: {} } }
+    expect(liveRowLocaleStates(row, localized, ["en", "fr", "de", "es"], NOW)).toEqual({
+      en: "live",
+      fr: "absent",
+      de: "absent",
+      es: "absent",
+    })
   })
 })
 
