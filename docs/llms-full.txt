@@ -67,7 +67,7 @@ Supatype lets developers define backend data models as TypeScript `Model<>` type
 
 - Client SDKs, types, framework bindings, auth UI and plugins: MIT.
 - CLI, Studio, storage, realtime, functions worker and the self-host control plane: Apache 2.0.
-- Schema engine: source-available under the Business Source License 1.1 (SPDX `BUSL-1.1`), Licensor Supatype Ltd. Production use is allowed, including commercial apps, self-hosting and agencies hosting client apps. Not allowed without a commercial licence: offering Supatype or the engine to others as a hosted or managed service (paid or free), or selling a product whose primary value is the engine. Each version becomes Apache 2.0 four years after its release. `supatype-engine licence` prints the terms; commercial licences: licensing@supatype.com.
+- Schema engine: source-available under the Business Source License 1.1 (SPDX `BUSL-1.1`), Licensor Supatype Ltd. Source: https://github.com/supatype/schema-engine. Production use is allowed, including commercial apps, self-hosting and agencies hosting client apps. Not allowed without a commercial licence: offering Supatype or the engine to others as a hosted or managed service (paid or free), or selling a product whose primary value is the engine. Each version becomes Apache 2.0 four years after its release. `supatype-engine licence` prints the terms; commercial licences: licensing@supatype.com.
 - Each package's `LICENSE` file and `license` field are authoritative.
 - Supatype is pre-1.0 and in active development; APIs and config may change between releases.
 

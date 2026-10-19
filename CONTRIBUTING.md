@@ -22,7 +22,7 @@ In plain words:
 
 If you contribute for an employer, your employer may need to sign a corporate agreement as well.
 Ask at [licensing@supatype.com](mailto:licensing@supatype.com). The
-[licensing page](https://www.supatype.com/licensing) explains what each licence allows.
+[licensing page](https://www.supatype.com/licensing.html) explains what each licence allows.
 
 ## Licences in this repository
 

@@ -118,10 +118,12 @@ Licensing is per package, and each package directory has its own `LICENSE` file:
 - **MIT:** the libraries you install in your app: `client`, `types`, the framework bindings (`react`, `react-native`, `vue`, `svelte`, `solid`), `ssr`, the auth UI packages, the plugin packages, `ui` and `common`.
 - **Apache 2.0:** the CLI and services (`cli`, `studio`, `storage`, `realtime`, `functions-worker`, `self-host-control`) and the rest of this repository ([LICENSE](LICENSE)).
 
-The schema engine the CLI downloads is not in this repository. It is source-available under the
-Business Source License 1.1: you can run it in production for your own applications, self-hosted
-or for clients, but not offer it to others as a hosted service or sell a product whose primary
-value is the engine, and each version becomes Apache 2.0 four years after its release.
+The schema engine the CLI downloads is not in this repository: its source is at
+[github.com/supatype/schema-engine](https://github.com/supatype/schema-engine). It is
+source-available under the Business Source License 1.1: you can run it in production for your own
+applications, self-hosted or for clients, but not offer it to others as a hosted service or sell a
+product whose primary value is the engine, and each version becomes Apache 2.0 four years after its
+release.
 `supatype-engine licence` prints the terms. See the [licensing page](https://www.supatype.com/licensing.html) and [NOTICE](NOTICE).
 
 Contributions need a signed [Contributor License Agreement](CLA.md); see

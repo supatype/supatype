@@ -14,7 +14,8 @@ directory.
   self-host-control) and the remainder of this repository.
 
 The schema engine that the CLI downloads, and that the self-host-control image includes, is not
-part of this repository. It is licensed by Supatype Ltd under the Business Source License 1.1
-(BUSL-1.1), and each version becomes available under the Apache License 2.0 on its Change Date.
+part of this repository; its source is at https://github.com/supatype/schema-engine. It is
+licensed by Supatype Ltd under the Business Source License 1.1 (BUSL-1.1), and each version
+becomes available under the Apache License 2.0 on its Change Date.
 The engine carries its own LICENSE; `supatype-engine licence` prints it. See
 https://www.supatype.com/licensing.html.
