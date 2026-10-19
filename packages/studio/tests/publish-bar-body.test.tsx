@@ -65,8 +65,8 @@ function language(code: string): { code: string; label: string } {
 }
 
 function panelModel({ state, locales = [WHOLE_RECORD], dirty = false, creating = false, editing = "en" }: Case): PanelModel {
-  const wholeRecord = locales.length === 1 && locales[0] === WHOLE_RECORD
-  return describePanel({ locales, wholeRecord, state, dirty, creating, editing: wholeRecord ? null : language(editing) })
+  // As PublishBar does: a language goes in only when it is one of the record's own.
+  return describePanel({ locales, state, dirty, creating, editing: locales.includes(editing) ? language(editing) : null })
 }
 
 function panel(input: Case): string {
@@ -94,6 +94,17 @@ function primary(html: string): { label: string; disabled: boolean } {
   const match = /<button[^>]*class="[^"]*flex-1 min-w-0[^"]*"[^>]*><span[^>]*>([^<]*)<\/span><\/button>/.exec(html)
   if (match === null) throw new Error("no primary button")
   return { label: match[1] ?? "", disabled: match[0].includes('disabled=""') }
+}
+
+/** The tooltip on the panel's primary button, which explains why it is greyed out. */
+function primaryTitle(html: string): string | null {
+  const open = /<button[^>]*class="[^"]*flex-1 min-w-0[^"]*"[^>]*>/.exec(html)?.[0] ?? ""
+  return / title="([^"]*)"/.exec(open)?.[1] ?? null
+}
+
+/** The labels of the Publish buttons on the language rows. The main button wraps its label in a span. */
+function rowPublishes(html: string): string[] {
+  return [...html.matchAll(/<button[^>]*>(Publish[^<]*)<\/button>/g)].map((m) => m[1] ?? "")
 }
 
 describe("the publish panel's states", () => {
@@ -243,22 +254,50 @@ describe("publishing one language", () => {
     const state = publishingState([published(1, ["en"])], EN_FR)
     const html = panel({ state, locales: EN_FR })
     expect(primary(html)).toEqual({ label: "Publish in English", disabled: true })
-    expect(html).toContain(">Publish fr<")
-    expect(html).not.toContain(">Publish en<")
+    expect(rowPublishes(html)).toEqual(["Publish in French"])
   })
 
   it("does not offer the language on screen a second time on its row", () => {
     const state = publishingState([published(1, ["en"])], ["en", "fr", "de"])
     const html = panel({ state, locales: ["en", "fr", "de"], editing: "fr" })
     expect(primary(html).label).toBe("Publish in French")
-    expect(html).not.toContain(">Publish fr<")
-    expect(html).toContain(">Publish de<")
+    expect(rowPublishes(html)).toEqual(["Publish in German"])
+  })
+
+  it("says what the language on screen is doing, not what another language is", () => {
+    // English is live as version 2; French is live as version 1, so version 2 waits for it.
+    const state = publishingState([published(2, ["en"]), published(1, ["fr"])], EN_FR)
+    const english = panel({ state, locales: EN_FR })
+    expect(english).toContain(">Published<")
+    // French's row says Changed; the flag beside the status badge is about English.
+    expect(english).not.toContain("Edited since it was published")
+    expect(primary(english)).toEqual({ label: "Publish in English", disabled: true })
+    expect(english).toContain("Live, no changes to publish.")
+    expect(primaryTitle(english)).toBe("Live, no changes to publish.")
+    const french = panel({ state, locales: EN_FR, editing: "fr" })
+    expect(french).toContain("Edited since it was published")
+    expect(primary(french)).toEqual({ label: "Publish changes in French", disabled: false })
+    expect(french).toContain("The live site still shows the published version.")
+  })
+
+  it("still offers every language from the menu while the one on screen has nothing waiting", () => {
+    const state = publishingState([published(2, ["en"]), published(1, ["fr"])], EN_FR)
+    const { menu } = panelModel({ state, locales: EN_FR })
+    expect(menu.canPublishAll).toBe(true)
+    expect(menu.canUnpublishAll).toBe(true)
+    expect(menu.canUnpublishOne).toBe(true)
+  })
+
+  it("publishes every language as plain Publish when the language on screen is not one of the record's", () => {
+    const model = panelModel({ state: publishingState([version(1)], EN_FR), locales: EN_FR, editing: "de" })
+    expect(model.primary.label).toBe("Publish")
+    expect(model.language).toBeNull()
   })
 
   it("publishes only the language on screen from the main button", () => {
     const state = publishingState([version(1)], EN_FR)
-    expect(panelModel({ state, locales: EN_FR, editing: "fr" }).primary.locales).toEqual(["fr"])
-    expect(panelModel({ state: publishingState([version(1)], [WHOLE_RECORD]) }).primary.locales).toBeNull()
+    expect(panelModel({ state, locales: EN_FR, editing: "fr" }).language?.code).toBe("fr")
+    expect(panelModel({ state: publishingState([version(1)], [WHOLE_RECORD]) }).language).toBeNull()
   })
 
   it("leaves a model that publishes as a whole saying Publish", () => {
@@ -329,8 +368,8 @@ describe("what the menu offers", () => {
   })
 
   it("offers unpublish only while the world reads something", () => {
-    expect(menu(publishingState([published(1)], [WHOLE_RECORD])).canUnpublish).toBe(true)
-    expect(menu(publishingState([version(1)], [WHOLE_RECORD])).canUnpublish).toBe(false)
+    expect(menu(publishingState([published(1)], [WHOLE_RECORD])).canUnpublishAll).toBe(true)
+    expect(menu(publishingState([version(1)], [WHOLE_RECORD])).canUnpublishAll).toBe(false)
   })
 
   it("changes and cancels a schedule rather than setting a second one", () => {
@@ -339,20 +378,22 @@ describe("what the menu offers", () => {
   })
 
   it("has no per-language items on a model that publishes as a whole", () => {
-    expect(menu(publishingState([published(1)], [WHOLE_RECORD])).languages).toBeNull()
+    const state = publishingState([published(1)], [WHOLE_RECORD])
+    expect(panelModel({ state }).language).toBeNull()
+    expect(menu(state).canUnpublishOne).toBe(false)
   })
 
-  it("offers Publish all languages while any language has something to publish", () => {
+  it("offers Publish all languages and Schedule while any language has something to publish", () => {
     const EN_FR = ["en", "fr"]
-    expect(menu(publishingState([published(1, ["en"])], EN_FR), EN_FR).languages?.canPublishAll).toBe(true)
-    expect(menu(publishingState([published(1, EN_FR)], EN_FR), EN_FR).languages?.canPublishAll).toBe(false)
+    expect(menu(publishingState([published(1, ["en"])], EN_FR), EN_FR).canPublishAll).toBe(true)
+    expect(menu(publishingState([published(1, EN_FR)], EN_FR), EN_FR).canPublishAll).toBe(false)
   })
 
   it("offers Unpublish in a language only while that language is live", () => {
     const enOnly = publishingState([published(1, ["en"])], ["en", "fr"])
-    expect(menu(enOnly, ["en", "fr"], "en").languages?.canUnpublishOne).toBe(true)
-    expect(menu(enOnly, ["en", "fr"], "fr").languages?.canUnpublishOne).toBe(false)
+    expect(menu(enOnly, ["en", "fr"], "en").canUnpublishOne).toBe(true)
+    expect(menu(enOnly, ["en", "fr"], "fr").canUnpublishOne).toBe(false)
     // Unpublish all languages still works from French: English is live.
-    expect(menu(enOnly, ["en", "fr"], "fr").canUnpublish).toBe(true)
+    expect(menu(enOnly, ["en", "fr"], "fr").canUnpublishAll).toBe(true)
   })
 })

@@ -85,7 +85,7 @@ export function PublishBar({ record, editor, seesDrafts, onNavigate }: PublishBa
   if (model.versions === null || !model.versions.drafts || !seesDrafts) return null
 
   const view: PanelView = {
-    ...panelOf({ record, editor, state, locale }, localesFor(model, codes)),
+    ...panelOf({ title: record.title, creating: recordId === undefined, dirty: editor.dirty, state, locale }, localesFor(model, codes)),
     busy: actions.busy || editor.saving,
     saving: editor.saving,
     error: actions.error,
@@ -101,40 +101,27 @@ export function PublishBar({ record, editor, seesDrafts, onNavigate }: PublishBa
   )
 }
 
-/**
- * What the panel calls a language: the project's label, unless that label is only the code (a config
- * that lists codes is labelled "EN", "FR"), in which case its name, so the button reads "Publish in
- * English". A code with no known name keeps its label.
- */
-function languageName(code: string, label: string): string {
-  if (label.toLowerCase() !== code.toLowerCase()) return label
-  try {
-    return new Intl.DisplayNames(["en"], { type: "language", fallback: "none" }).of(code) ?? label
-  } catch {
-    // Not a well-formed language tag.
-    return label
-  }
-}
-
 interface PanelSource {
-  record: PublishingRecord
-  editor: RecordEditor
+  title: string
+  creating: boolean
+  dirty: boolean
   state: PublishingState | null
-  locale: LocaleContextValue
+  /** The project's languages, and the one the editor is showing. */
+  locale: Pick<LocaleContextValue, "locales" | "currentLocale">
 }
 
 /**
  * The panel and its language rows, from the record and the language the editor is showing: on a
- * localized model the main button publishes that one language and names it.
+ * localized model the main button publishes that one language and names it. A language the record
+ * does not publish under is not passed on, so the main button publishes every language instead.
  */
-function panelOf({ record, editor, state, locale }: PanelSource, locales: string[]): Pick<PanelView, "panel" | "title" | "locales"> {
-  const wholeRecord = locales.length === 1 && locales[0] === WHOLE_RECORD
-  const labelOf = (code: string): string => languageName(code, locale.locales.find((l) => l.code === code)?.label ?? code)
-  const editing = wholeRecord ? null : { code: locale.currentLocale, label: labelOf(locale.currentLocale) }
-  const creating = record.recordId === undefined
+function panelOf({ title, creating, dirty, state, locale }: PanelSource, locales: string[]): Pick<PanelView, "panel" | "title" | "locales"> {
+  const labelOf = (code: string): string => locale.locales.find((l) => l.code === code)?.label ?? code
+  const current = locale.currentLocale
+  const editing = locales.includes(current) ? { code: current, label: labelOf(current) } : null
   return {
-    panel: describePanel({ locales, wholeRecord, state, dirty: editor.dirty, creating, editing }),
-    title: record.title,
+    panel: describePanel({ locales, state, dirty, creating, editing }),
+    title,
     locales: locales.map((code) => ({ code, label: labelOf(code), state: state?.locales[code] ?? "absent" })),
   }
 }
@@ -236,7 +223,7 @@ function LocaleRows({ view, onPublish }: { view: PanelView; onPublish: (code: st
           <span className="flex-1" />
           {view.panel.rowPublish.includes(code) && (
             <Button size="xs" variant="ghost" disabled={view.busy} onClick={() => { onPublish(code) }}>
-              Publish {code}
+              {`Publish in ${label}`}
             </Button>
           )}
         </div>

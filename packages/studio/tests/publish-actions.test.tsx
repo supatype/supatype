@@ -286,12 +286,12 @@ describe("a localized record", () => {
     expect(rpcs[0]?.body["locales"]).toEqual(["fr"])
   })
 
-  it("names the language even when the project gives only its code", async () => {
-    // A project's config lists codes; Studio labels them "EN" and "FR", which a button should not read as.
-    const coded: Scope = { ...LOCALIZED, locale: { ...LOCALIZED.locale, locales: [{ code: "en", label: "EN" }, { code: "fr", label: "FR" }] } }
-    await show({ versions: [versionRow(1)], row: { id: "r1" } }, editor(), coded)
-    await click("Publish in English")
-    expect(await items()).toContain("Unpublish in English")
+  it("publishes every language as plain Publish when the language on screen is not one of the record's", async () => {
+    const german: Scope = { ...LOCALIZED, locale: { ...LOCALIZED.locale, currentLocale: "de" } }
+    await show({ versions: [versionRow(1)], row: { id: "r1" } }, editor(), german)
+    await click("Publish")
+    expect(fns()).toEqual(["publish"])
+    expect(rpcs[0]?.body).not.toHaveProperty("locales")
   })
 
   it("keeps a label the project chose for a code no language name exists for", async () => {
