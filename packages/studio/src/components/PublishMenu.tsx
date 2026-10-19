@@ -1,5 +1,5 @@
 import React, { useState } from "react"
-import { Button, ButtonGroup, Dialog } from "./ui.js"
+import { Button, ButtonGroup, DestructiveAnswers, Dialog } from "./ui.js"
 import { IconChevronRight } from "./icons.js"
 import { ScheduleControl } from "./ScheduleControl.js"
 import {
@@ -149,19 +149,9 @@ function ScheduleQuestion({ panel, actions, onClose }: QuestionProps): React.Rea
   )
 }
 
-/** Cancel, and the destructive answer that runs `act`. */
-function Answers({ label, act, onClose }: { label: string; act: () => void; onClose: () => void }): React.ReactElement {
-  return (
-    <>
-      <Button onClick={onClose}>Cancel</Button>
-      <Button variant="destructive" onClick={() => { onClose(); act() }}>{label}</Button>
-    </>
-  )
-}
-
 function DiscardQuestion({ title, actions, onClose }: QuestionProps): React.ReactElement {
   return (
-    <Dialog role="alertdialog" title={`Discard changes to "${title}"?`} actions={<Answers label="Discard changes" act={actions.discard} onClose={onClose} />}>
+    <Dialog role="alertdialog" title={`Discard changes to "${title}"?`} actions={<DestructiveAnswers label="Discard changes" act={actions.discard} onClose={onClose} />}>
       <p>The draft goes back to the published version.</p>
       <p>Unsaved edits are lost. Saved ones stay in the version history.</p>
     </Dialog>
@@ -196,7 +186,7 @@ function unpublishWords(scope: UnpublishScope, language: Language | null, title:
 function UnpublishQuestion({ scope, panel, title, actions, onClose }: QuestionProps & { scope: UnpublishScope }): React.ReactElement {
   const words = unpublishWords(scope, panel.language, title)
   const act = (): void => { actions.unpublish(words.locales) }
-  const answers = <Answers label={unpublishLabel(scope, panel.language)} act={act} onClose={onClose} />
+  const answers = <DestructiveAnswers label={unpublishLabel(scope, panel.language)} act={act} onClose={onClose} />
   return (
     <Dialog role="alertdialog" title={words.question} actions={answers}>
       <p>{words.body}</p>

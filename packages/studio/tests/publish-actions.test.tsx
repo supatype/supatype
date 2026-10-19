@@ -43,9 +43,13 @@ interface Rpc {
 interface Served {
   versions: Array<Record<string, unknown>>
   row: Record<string, unknown>
+  /** The message a DELETE is refused with. Deletes succeed when unset. */
+  deleteRefusal?: string
 }
 
 let rpcs: Rpc[] = []
+/** The URL of every DELETE sent, in order. */
+let deletes: string[] = []
 let container: HTMLDivElement
 let root: Root
 
@@ -82,6 +86,11 @@ function serve(served: Served): void {
       rpcs.push({ fn: rpc[1] ?? "", body: isJsonObject(body) ? body : {} })
       return Response.json({})
     }
+    if (init?.method === "DELETE") {
+      deletes.push(url)
+      const refusal = served.deleteRefusal
+      return refusal === undefined ? Response.json([]) : Response.json({ message: refusal }, { status: 403 })
+    }
     if (url.includes("/posts_versions")) return Response.json(served.versions)
     if (url.includes("/posts")) return Response.json([served.row])
     return Response.json([])
@@ -91,6 +100,7 @@ function serve(served: Served): void {
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true
   rpcs = []
+  deletes = []
   container = document.createElement("div")
   document.body.appendChild(container)
   root = createRoot(container)
@@ -378,5 +388,60 @@ describe("the edit view", () => {
     expect(text).not.toContain("Save draft")
     expect(text).not.toContain("Status")
     expect([...container.querySelectorAll("button")].some((b) => b.textContent === "Save")).toBe(true)
+  })
+
+  /** The edit view on record r1, with what it navigates to. */
+  async function editing(served: Served): Promise<string[]> {
+    const went: string[] = []
+    serve(served)
+    await act(async () =>
+      root.render(
+        <AdminConfigContext.Provider value={testConfig({ models: [MODEL] })}>
+          <AdminClientContext.Provider value={CLIENT}>
+            <LocaleContext.Provider value={LOCALE}>
+              <EditView model={MODEL} recordId="r1" onNavigate={(path) => { went.push(path) }} />
+            </LocaleContext.Provider>
+          </AdminClientContext.Provider>
+        </AdminConfigContext.Provider>,
+      ),
+    )
+    await settle()
+    return went
+  }
+
+  const dialogText = (): string => document.body.querySelector('[role="alertdialog"]')?.textContent ?? ""
+
+  it("asks before deleting, naming the record, and deletes only once answered", async () => {
+    const went = await editing({ versions: [live(1)], row: { id: "r1", title: "A post" } })
+    await click("Delete")
+    expect(dialogText()).toContain('Delete "A post"?')
+    expect(dialogText()).toContain("It is deleted for good. This cannot be undone.")
+    expect(deletes).toEqual([])
+    const answer = [...document.body.querySelectorAll('[role="alertdialog"] button')].find((b) => b.textContent === "Delete")
+    if (!(answer instanceof HTMLElement)) throw new Error("no Delete answer")
+    await act(async () => { answer.click() })
+    await settle()
+    expect(deletes).toHaveLength(1)
+    expect(went).toEqual(["/models/post"])
+  })
+
+  it("does nothing when the delete question is cancelled", async () => {
+    const went = await editing({ versions: [live(1)], row: { id: "r1", title: "A post" } })
+    await click("Delete")
+    await click("Cancel")
+    expect(deletes).toEqual([])
+    expect(went).toEqual([])
+    expect(dialogText()).toBe("")
+  })
+
+  it("stays on the record and says why when the delete is refused", async () => {
+    const went = await editing({ versions: [live(1)], row: { id: "r1", title: "A post" }, deleteRefusal: "permission denied for table posts" })
+    await click("Delete")
+    const answer = [...document.body.querySelectorAll('[role="alertdialog"] button')].find((b) => b.textContent === "Delete")
+    if (!(answer instanceof HTMLElement)) throw new Error("no Delete answer")
+    await act(async () => { answer.click() })
+    await settle()
+    expect(went).toEqual([])
+    expect(document.body.querySelector('[role="alert"]')?.textContent).toContain("permission denied for table posts")
   })
 })
