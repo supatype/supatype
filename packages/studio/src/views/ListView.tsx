@@ -3,6 +3,7 @@ import { Header } from "../components/Header.js"
 import { useAdminClient } from "../hooks/useAdminClient.js"
 import { useLocale } from "../hooks/useLocale.js"
 import { getLocalizedFieldValue } from "../lib/localized-field.js"
+import { isJsonObject } from "../lib/json.js"
 import type { ModelConfig, FieldConfig } from "../config.js"
 import {
   cellAccess,
@@ -69,7 +70,7 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
       if (result.error) {
         setError(result.error.message)
       } else {
-        setRows((result.data ?? []) as Record<string, unknown>[])
+        setRows((result.data ?? []).filter(isJsonObject))
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load data")
@@ -106,11 +107,10 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      const ids = rows.map((r) => String(r[model.primaryKey]))
       const codes = localeCodes === "" ? [] : localeCodes.split(",")
       const publishable =
         model.versions === null ? [WHOLE_RECORD] : publishableLocales(model.versions, codes)
-      const states = await fetchRecordStates(client, model, ids, publishable)
+      const states = await fetchRecordStates(client, model, rows, publishable)
       if (!cancelled) setRecordStates(states)
     })()
     return () => {

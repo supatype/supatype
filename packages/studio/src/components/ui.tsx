@@ -98,6 +98,45 @@ export function Button({
   )
 }
 
+/* ─── Button group ─── */
+
+/**
+ * Buttons joined into one control, such as an action and the menu of its alternatives.
+ *
+ * The group owns the joins so its buttons do not: they stretch to one height, the corners where
+ * two meet are square, and a 1px divider separates them. Give every button the same variant and
+ * size; the one that takes the spare width gets `flex-1 min-w-0`.
+ *
+ * `split` is the action-and-caret shape: the last button is a fixed 2rem caret, and the first is
+ * inset on the left by the caret's width, so its label centres on the whole control. Stacked under
+ * a full-width button, the two labels then share one centre line; without the inset the action's
+ * label sat left of it by half the caret.
+ */
+export function ButtonGroup({
+  className,
+  children,
+  split = false,
+  ...props
+}: {
+  className?: string
+  children: React.ReactNode
+  split?: boolean
+} & Omit<React.HTMLAttributes<HTMLDivElement>, "className">): React.ReactElement {
+  return (
+    <div
+      role="group"
+      className={cn(
+        "flex min-w-0 items-stretch [&>*]:rounded-none [&>*:first-child]:rounded-l-md [&>*:last-child]:rounded-r-md [&>*+*]:border-l-primary-foreground/30",
+        split && "[&>*:last-child]:w-8 [&>*:last-child]:shrink-0 [&>*:last-child]:justify-center [&>*:last-child]:px-0 [&>*:first-child]:pl-11",
+        className,
+      )}
+      {...props}
+    >
+      {children}
+    </div>
+  )
+}
+
 /* ─── Card ─── */
 
 export function Card({
@@ -111,6 +150,36 @@ export function Card({
   return (
     <div className={cn("rounded-lg border border-border bg-card", className)} {...props}>
       {children}
+    </div>
+  )
+}
+
+/* ─── Dialog ─── */
+
+/**
+ * A modal question over the page: a title, what it means, and the buttons that answer it.
+ *
+ * The overlay and the card are the ones the database views each wrote out by hand. `role` is
+ * `alertdialog` when the question guards something that cannot be taken back.
+ */
+export function Dialog({
+  title,
+  children,
+  actions,
+  role = "dialog",
+}: {
+  title: string
+  children: React.ReactNode
+  actions: React.ReactNode
+  role?: "dialog" | "alertdialog"
+}): React.ReactElement {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <Card role={role} aria-modal="true" aria-label={title} className="p-6 w-full max-w-md space-y-4 shadow-xl">
+        <h2 className="text-base font-semibold text-foreground">{title}</h2>
+        <div className="space-y-2 text-sm text-muted-foreground">{children}</div>
+        <div className="flex justify-end gap-2">{actions}</div>
+      </Card>
     </div>
   )
 }

@@ -6,12 +6,12 @@ export interface EditFormSidebarProps {
   /**
    * Publishing controls, when the view has them.
    *
-   * A slot rather than a rendered section: what goes here decides for itself whether it has
-   * anything to say, and supplies its own heading, so a model that keeps no versions leaves no
-   * empty titled block behind.
+   * A slot rather than a rendered section: what goes here supplies its own heading, so a model that
+   * keeps no versions leaves no empty titled block behind. When given it holds the form's save too
+   * ("Save draft", beside Publish), and the plain Save below is left out so there are not two.
    */
   publishing?: React.ReactNode
-  /** Opens the preview slide-over, above the publishing controls it previews the result of. */
+  /** Opens the preview slide-over, below the publishing status it previews the result of. */
   previewAction?: React.ReactNode
   metaFields: FieldConfig[]
   values: Record<string, unknown>
@@ -45,10 +45,10 @@ export function EditFormSidebar({
 }: EditFormSidebarProps): React.ReactElement {
   return (
     <aside className="st-edit-sidebar" aria-label="Record metadata">
+      {publishing}
       {previewAction !== undefined && (
         <div className="st-edit-sidebar-section">{previewAction}</div>
       )}
-      {publishing}
       {metaFields.length > 0 && (
         <div className="st-edit-sidebar-section">
           <h3 className="st-edit-sidebar-title">Record info</h3>
@@ -67,14 +67,16 @@ export function EditFormSidebar({
       )}
 
       <div className="st-edit-sidebar-actions">
-        <button
-          type="button"
-          className="st-btn st-btn-primary"
-          onClick={onSave}
-          disabled={saving}
-        >
-          {saving ? "Saving..." : "Save"}
-        </button>
+        {publishing === undefined && (
+          <button
+            type="button"
+            className="st-btn st-btn-primary"
+            onClick={onSave}
+            disabled={saving}
+          >
+            {saving ? "Saving..." : "Save"}
+          </button>
+        )}
         {!isCreate && onDuplicate && (
           <button type="button" className="st-btn" onClick={onDuplicate}>
             Duplicate
