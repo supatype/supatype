@@ -16,7 +16,7 @@ import {
 
 /**
  * An object as `list()` answers it, field for field (packages/storage/src/routes/objects.ts,
- * `listedObject`). A null is sent as null, never left out.
+ * `listedObject`), named relative to the folder listed. A null is sent as null, never left out.
  */
 export interface StorageObject {
   id: string
@@ -32,6 +32,35 @@ export interface StorageObject {
   size: number | null
   /** The content type it was stored with, from its metadata; null when the metadata records none. */
   mimetype: string | null
+}
+
+/**
+ * A subfolder as `list()` answers it: only its bucket and its name, relative to the folder listed.
+ * It has no row of its own, so every other field is null.
+ */
+export interface StorageFolder {
+  id: null
+  bucket_id: string
+  name: string
+  owner: null
+  metadata: null
+  created_at: null
+  updated_at: null
+  last_accessed_at: null
+  size: null
+  mimetype: null
+}
+
+/** What `list()` answers: a folder's subfolders, then its objects. */
+export type StorageListEntry = StorageObject | StorageFolder
+
+/** What to list besides the folder: a page, and a search of the entries' names. */
+export interface ListOptions {
+  /** Entries per page; the server's default is 100. */
+  limit?: number | undefined
+  offset?: number | undefined
+  /** Matched case-insensitively against each entry's name; every character is literal. */
+  search?: string | undefined
 }
 
 /** What `remove()` answers for each object it removed: one the caller may not delete is absent. */
@@ -103,21 +132,46 @@ async function readBuckets(res: Response): Promise<StorageBucketMeta[]> {
   }))
 }
 
-/** The boundary between a `list` answer and `StorageObject`: every declared field, checked. */
-const isStorageObjects: Guard<StorageObject[]> = isArrayOf(
-  isShape({
-    id: isString,
-    bucket_id: isString,
-    name: isString,
-    owner: nullable(isString),
-    metadata: nullable(isJsonObject),
-    created_at: isString,
-    updated_at: isString,
-    last_accessed_at: isString,
-    size: nullable(isNumber),
-    mimetype: nullable(isString),
-  }),
+const isNull = (value: unknown): value is null => value === null
+
+/** A subfolder entry: null in every field but its bucket and name. */
+const isStorageFolder: Guard<StorageFolder> = isShape({
+  id: isNull,
+  bucket_id: isString,
+  name: isString,
+  owner: isNull,
+  metadata: isNull,
+  created_at: isNull,
+  updated_at: isNull,
+  last_accessed_at: isNull,
+  size: isNull,
+  mimetype: isNull,
+})
+
+/** An object entry: every declared field, checked. */
+const isStorageObject: Guard<StorageObject> = isShape({
+  id: isString,
+  bucket_id: isString,
+  name: isString,
+  owner: nullable(isString),
+  metadata: nullable(isJsonObject),
+  created_at: isString,
+  updated_at: isString,
+  last_accessed_at: isString,
+  size: nullable(isNumber),
+  mimetype: nullable(isString),
+})
+
+/** The boundary between a `list` answer and `StorageListEntry`: every declared field, checked. */
+const isStorageEntries: Guard<StorageListEntry[]> = isArrayOf(
+  (value: unknown): value is StorageListEntry => isStorageFolder(value) || isStorageObject(value),
 )
+
+/** A total count header as a number, or null when it is absent or not a count. */
+function countHeader(res: Response): number | null {
+  const count = res.headers.get("X-Total-Count")
+  return count !== null && /^\d+$/.test(count) ? Number(count) : null
+}
 
 /** The boundary between a `remove` answer and `RemovedObject`. */
 const isRemovedObjects: Guard<RemovedObject[]> = isArrayOf(isShape({ name: isString, bucket_id: isString }))
@@ -330,12 +384,18 @@ export class BucketClient {
     return { data: await readJson(res, isRemovedObjects), error: null }
   }
 
+  /**
+   * The folder `prefix` names ("" or none for the bucket root): its subfolders, then its objects, each
+   * named relative to it. `count` is how many entries match in all, before `limit` and `offset`,
+   * or null from a server that does not send it.
+   */
   async list(
     prefix?: string | undefined,
-    options?: { limit?: number | undefined; offset?: number | undefined } | undefined,
-  ): Promise<{ data: StorageObject[] | null; error: SupatypeError | null }> {
+    options?: ListOptions | undefined,
+  ): Promise<{ data: StorageListEntry[] | null; count: number | null; error: SupatypeError | null }> {
     const body: Record<string, unknown> = {
       ...(prefix !== undefined && { prefix }),
+      ...(options?.search !== undefined && { search: options.search }),
       ...(options?.limit !== undefined && { limit: options.limit }),
       ...(options?.offset !== undefined && { offset: options.offset }),
     }
@@ -347,9 +407,9 @@ export class BucketClient {
       body: JSON.stringify(body),
     })
     if (!res.ok) {
-      return { data: null, error: { message: await storageRefusal(res, "List failed"), status: res.status } }
+      return { data: null, count: null, error: { message: await storageRefusal(res, "List failed"), status: res.status } }
     }
-    return { data: await readJson(res, isStorageObjects), error: null }
+    return { data: await readJson(res, isStorageEntries), count: countHeader(res), error: null }
   }
 
   // ─── Internal ───────────────────────────────────────────────────────────────

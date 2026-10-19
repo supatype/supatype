@@ -1,8 +1,10 @@
-import React, { useState, useRef, useEffect, useCallback } from "react"
+import React, { useState, useRef, useEffect } from "react"
 import { useAdminClient } from "../hooks/useAdminClient.js"
+import { listedOfTotal, useStorageList } from "../hooks/useStorageList.js"
+import { useDebouncedValue } from "../hooks/useDebouncedValue.js"
 import type { WidgetProps } from "./FieldWidget.js"
 import { stringOption } from "./field-options.js"
-import type { StorageObject } from "@supatype/client"
+import type { StorageListEntry } from "@supatype/client"
 import {
   parseStorageRef,
   resolveStorageObjectPath,
@@ -21,11 +23,11 @@ function isImageFileName(name: string): boolean {
   return IMAGE_EXTS.has(ext)
 }
 
-function isFolder(obj: StorageObject): boolean {
+function isFolder(obj: StorageListEntry): boolean {
   return obj.id === null && obj.metadata == null
 }
 
-function isImageFile(obj: StorageObject): boolean {
+function isImageFile(obj: StorageListEntry): boolean {
   return !isFolder(obj) && isImageFileName(obj.name)
 }
 
@@ -40,24 +42,15 @@ function BucketPickerModal({
 }): React.ReactElement {
   const client = useAdminClient()
   const [prefix, setPrefix] = useState("")
-  const [items, setItems] = useState<StorageObject[]>([])
-  const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
-
-  const load = useCallback(async (p: string) => {
-    setLoading(true)
-    try {
-      const result = await client.storage.from(bucket).list(p, { limit: 200 })
-      setItems(
-        (result.data ?? []).filter((f) => f.name !== ".emptyFolderPlaceholder"),
-      )
-    } finally {
-      setLoading(false)
-    }
-  }, [client, bucket])
-
-  useEffect(() => { void load(prefix) }, [load, prefix])
+  // Searched by the storage server, a page at a time with more on request: it read a fixed 200 and
+  // hid the rest of a bigger folder.
+  const [search, setSearch] = useState("")
+  const settledSearch = useDebouncedValue(search.trim(), 300)
+  const listing = useStorageList(client, { bucket, prefix, search: settledSearch })
+  const loading = listing.loading
+  const items = listing.items.filter((f) => f.name !== ".emptyFolderPlaceholder")
 
   const handleUpload = async (file: File) => {
     setUploading(true)
@@ -137,6 +130,14 @@ function BucketPickerModal({
           />
         </div>
 
+        <input
+          type="search"
+          className="st-input st-input-sm"
+          placeholder="Search this folder..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+
         <div className="st-bucket-picker-body">
           {loading ? (
             <div className="st-bucket-picker-empty">Loading…</div>
@@ -192,6 +193,16 @@ function BucketPickerModal({
               )}
             </>
           )}
+          {!loading ? (
+            <div className="st-bucket-picker-section-label">
+              {listedOfTotal(listing)}
+              {listing.more ? (
+                <button type="button" className="st-btn st-btn-sm" onClick={listing.loadMore} disabled={listing.loadingMore}>
+                  Load more
+                </button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

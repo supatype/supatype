@@ -1,7 +1,8 @@
 import React, { useState } from "react"
 import { useApiQuery } from "../hooks/useApiQuery.js"
+import { useDebouncedValue } from "../hooks/useDebouncedValue.js"
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard.js"
-import { Badge, Button, Card } from "../components/ui.js"
+import { Badge, Button, Card, Pager } from "../components/ui.js"
 import { cn } from "../lib/utils.js"
 import { type Guard, isArrayOf, isNumber, isShape, isString, optional, readJson } from "../lib/json.js"
 
@@ -32,7 +33,19 @@ const isNpmPackage: Guard<NpmPackage> = isShape({
   downloads: optional(isShape({ weekly: isNumber })),
 })
 
-const isNpmSearch = isShape({ objects: isArrayOf(isShape({ package: isNpmPackage })) })
+const isNpmSearch = isShape({ objects: isArrayOf(isShape({ package: isNpmPackage })), total: isNumber })
+
+/** Results per page; npm's search allows up to 250. */
+const PLUGINS_PAGE_SIZE = 50
+const SEARCH_DEBOUNCE_MS = 300
+
+/** One page of npm's search for `text` (zero based `page`), and how many results there are in all. */
+async function searchPlugins(text: string, page: number): Promise<{ objects: NpmSearchResult[]; total: number }> {
+  const params = new URLSearchParams({ text, size: String(PLUGINS_PAGE_SIZE), from: String(page * PLUGINS_PAGE_SIZE) })
+  const res = await fetch(`https://registry.npmjs.org/-/v1/search?${params.toString()}`)
+  if (!res.ok) throw new Error("Failed to fetch plugins from npm registry")
+  return readJson(res, isNpmSearch)
+}
 
 const PLUGIN_KINDS = ["field", "composite", "provider", "widget"] as const
 const CATEGORIES = ["all", ...PLUGIN_KINDS] as const
@@ -166,18 +179,14 @@ export function PluginsMarketplace(): React.ReactElement {
     ? `keywords:supatype-plugin${search ? ` ${search}` : ""}`
     : `keywords:supatype-plugin keywords:${CATEGORY_KEYWORDS[category]}${search ? ` ${search}` : ""}`
 
-  const { data, loading, error, refetch } = useApiQuery<NpmSearchResult[]>(
-    async () => {
-      const url = `https://registry.npmjs.org/-/v1/search?text=${encodeURIComponent(searchQuery)}&size=50`
-      const res = await fetch(url)
-      if (!res.ok) throw new Error("Failed to fetch plugins from npm registry")
-      const json = await readJson(res, isNpmSearch)
-      return json.objects
-    },
-    [searchQuery],
-  )
+  // Searched once typing pauses, and a page at a time: it showed npm's first 50 and stopped.
+  const text = useDebouncedValue(searchQuery, SEARCH_DEBOUNCE_MS)
+  const [paging, setPaging] = useState({ text, page: 0 })
+  // A new search starts from its first page.
+  const page = paging.text === text ? paging.page : 0
+  const { data, loading, error, refetch } = useApiQuery(() => searchPlugins(text, page), [text, page])
 
-  const packages = data ?? []
+  const packages = data?.objects ?? []
 
   return (
     <div>
@@ -254,6 +263,10 @@ export function PluginsMarketplace(): React.ReactElement {
             ))
         }
       </div>
+
+      {data !== null && data.total > PLUGINS_PAGE_SIZE && (
+        <Pager at={{ page, pageSize: PLUGINS_PAGE_SIZE, total: data.total }} onPage={(p) => setPaging({ text, page: p })} busy={loading} />
+      )}
 
       {!loading && !error && packages.length === 0 && (
         <div className="flex flex-col items-center justify-center py-16 text-center">

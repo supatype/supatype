@@ -49,7 +49,20 @@ function truncateQuery(query: string, maxLength = 200): string {
   return `${normalized.slice(0, maxLength)}...`
 }
 
-function buildSlowQuerySQL(minDurationMs: number, limit: number): string {
+/** The pg_stat_statements column each sortable field ranks by. */
+const ORDER_COLUMN: Record<SortField, string> = {
+  totalTimeMs: "total_exec_time",
+  meanTimeMs: "mean_exec_time",
+  maxTimeMs: "max_exec_time",
+  calls: "calls",
+  rows: "rows",
+}
+
+/**
+ * The top `limit` statements by the sorted column, ranked by the database. Ranking by total time
+ * and re-sorting those in the browser left out a query with a high mean but a low total.
+ */
+function buildSlowQuerySQL(minDurationMs: number, limit: number, order: { field: SortField; direction: SortDirection }): string {
   return `
     SELECT
       queryid::text AS query_id,
@@ -63,7 +76,7 @@ function buildSlowQuerySQL(minDurationMs: number, limit: number): string {
     FROM pg_stat_statements
     WHERE mean_exec_time >= ${minDurationMs}
       AND query NOT LIKE '%pg_stat_statements%'
-    ORDER BY total_exec_time DESC
+    ORDER BY ${ORDER_COLUMN[order.field]} ${order.direction === "desc" ? "DESC" : "ASC"}
     LIMIT ${limit}
   `.trim()
 }
@@ -85,7 +98,7 @@ export function SlowQueryLog({
 
   const fetchSlowQueries = useCallback(async () => {
     try {
-      const sql = buildSlowQuerySQL(minDurationMs, limit)
+      const sql = buildSlowQuerySQL(minDurationMs, limit, { field: sortField, direction: sortDirection })
       const data = await onRunQuery(sql)
 
       setQueries(
@@ -106,7 +119,7 @@ export function SlowQueryLog({
     } finally {
       setLoading(false)
     }
-  }, [onRunQuery, minDurationMs, limit])
+  }, [onRunQuery, minDurationMs, limit, sortField, sortDirection])
 
   useEffect(() => {
     void fetchSlowQueries()

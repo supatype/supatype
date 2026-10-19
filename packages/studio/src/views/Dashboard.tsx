@@ -4,21 +4,19 @@ import { ChartContainer, ChartTooltip, ChartTooltipContent } from "../components
 import { useAdminClient } from "../hooks/useAdminClient.js"
 import { useAdminConfig } from "../hooks/useAdminConfig.js"
 import { useDashboardViews } from "../hooks/useDashboardViews.js"
+import type { SupatypeClient } from "@supatype/client"
 import type { DashboardBlock, ModelConfig } from "../config.js"
 import { DASHBOARD_VIEW_LIMITS } from "../config.js"
 import { JumpToSearch } from "../components/JumpToSearch.js"
 import { studioRestHeaders } from "../lib/studio-auth-headers.js"
-import { type Guard, isArrayOf, isNumber, isShape, isString, isUnknown, nullable, optional, readJson } from "../lib/json.js"
+import { type Guard, isArrayOf, isNumber, isShape, isString, isUnknown, readJson } from "../lib/json.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
+import { authUserListPath, userListTotal } from "../lib/auth-user-search.js"
 
 // ─── Response bodies ──────────────────────────────────────────────────────────
 
-/** The auth admin user list: a count when the server gives one, else the page of users. */
-const isUserCountBody = isShape({ total: optional(nullable(isNumber)), users: optional(isUnknown) })
-
-function userCount(body: { total?: number | null; users?: unknown }): number {
-  return body.total ?? (Array.isArray(body.users) ? body.users.length : 0)
-}
+/** The auth admin user list; only its length is read, the count comes from X-Total-Count. */
+const isUserListBody = isShape({ users: isArrayOf(isUnknown) })
 
 /** `storage_stats()`: `RETURNS TABLE(file_count BIGINT, total_bytes BIGINT)`, both never null. */
 const isStorageStats = isArrayOf(isShape({ file_count: isNumber, total_bytes: isNumber }))
@@ -380,32 +378,34 @@ function RecentBlock({ block }: { block: DashboardBlock }): React.ReactElement {
 
 // ─── Auth block ───────────────────────────────────────────────────────────────
 
-function AuthBlock(): React.ReactElement {
+/**
+ * How many users the project has: the server's X-Total-Count for a one-row page. Counting the rows
+ * of a page capped the figure at the page size.
+ */
+async function fetchUserTotal(client: SupatypeClient): Promise<number | null> {
+  const at = { filter: "", page: 0, perPage: 1 }
+  const res = await fetch(`${client.url}/auth/v1/admin${authUserListPath(at)}`, { headers: studioRestHeaders(client) })
+  if (!res.ok) return null
+  return userListTotal(res, at, (await readJson(res, isUserListBody)).users.length)
+}
+
+/** Sign-ups over the last seven days, from the same function the sign-ups chart reads. */
+async function fetchSignupsThisWeek(client: SupatypeClient): Promise<number | null> {
+  const res = await fetch(`${client.url}/rest/v1/rpc/daily_signups?days=7`, {
+    headers: studioRestHeaders(client, { "Accept-Profile": "supatype" }),
+  })
+  if (!res.ok) return null
+  return (await readJson(res, isDailyRows)).reduce((sum, row) => sum + row.count, 0)
+}
+
+export function AuthBlock(): React.ReactElement {
   const client = useAdminClient()
   const [total, setTotal] = useState<number | null>(null)
   const [newThisWeek, setNewThisWeek] = useState<number | null>(null)
 
   useEffect(() => {
-    void (async () => {
-      try {
-        const headers = studioRestHeaders(client, { Prefer: "count=exact" })
-        const weekAgo = new Date(Date.now() - 7 * 86_400_000).toISOString()
-
-        const [totalRes, weekRes] = await Promise.all([
-          fetch(`${client.url}/auth/v1/admin/users`, { headers }),
-          fetch(`${client.url}/auth/v1/admin/users?created_after=${weekAgo}`, { headers }),
-        ])
-
-        if (totalRes.ok) {
-          setTotal(userCount(await readJson(totalRes, isUserCountBody)))
-        }
-        if (weekRes.ok) {
-          setNewThisWeek(userCount(await readJson(weekRes, isUserCountBody)))
-        }
-      } catch {
-        setTotal(0)
-      }
-    })()
+    void fetchUserTotal(client).then((n) => setTotal(n ?? 0), () => setTotal(0))
+    void fetchSignupsThisWeek(client).then(setNewThisWeek, () => setNewThisWeek(null))
   }, [client])
 
   return (

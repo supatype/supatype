@@ -3,6 +3,8 @@ import { useLocation, useNavigate, useParams, useSearchParams } from "react-rout
 import type { SupatypeClient } from "@supatype/client"
 import { useStudioClient } from "../StudioCore.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
+import { listedOfTotal, useStorageList } from "../hooks/useStorageList.js"
+import { useDebouncedValue } from "../hooks/useDebouncedValue.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { cn } from "../lib/utils.js"
@@ -63,6 +65,8 @@ function formatBytes(bytes: number): string {
   const i = Math.floor(Math.log(bytes) / Math.log(k))
   return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`
 }
+
+const SEARCH_DEBOUNCE_MS = 300
 
 function decodeStorageName(name: string): string {
   return name
@@ -427,34 +431,26 @@ export function StorageBrowser(): React.ReactElement {
     }
   }, [buckets, params.bucket, searchParams, syncStorageUrl])
 
-  // Files state
-  const [files, setFiles] = useState<StorageFile[]>([])
-  const [filesLoading, setFilesLoading] = useState(false)
-  const [filesError, setFilesError] = useState<string | null>(null)
+  // Search, sent to the storage server once typing pauses, so it covers the whole folder.
+  const [search, setSearch] = useState("")
+  const settledSearch = useDebouncedValue(search.trim(), SEARCH_DEBOUNCE_MS)
 
-  const fetchFiles = useCallback(async () => {
-    if (!selectedBucket) return
-    setFilesLoading(true)
+  // Files, a page at a time with more on request: the server answers 100 when asked for no limit,
+  // and reading only that page hid the rest of a bigger folder.
+  const listing = useStorageList(client, { bucket: selectedBucket === "" ? null : selectedBucket, prefix: path.join("/"), search: settledSearch })
+  const files = useMemo(() => mapStorageFiles(listing.items), [listing.items])
+  const filesLoading = listing.loading
+  // A failed action's message, shown where a failed read would be.
+  const [actionError, setFilesError] = useState<string | null>(null)
+  const filesError = actionError ?? listing.error
+  const { reload } = listing
+  const fetchFiles = useCallback(() => {
     setFilesError(null)
-    try {
-      const pathStr = path.join("/")
-      const { data, error } = await client.storage.from(selectedBucket).list(pathStr || undefined)
-      if (error) throw new Error(error.message)
-      setFiles(mapStorageFiles(data ?? []))
-    } catch (err: unknown) {
-      setFilesError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setFilesLoading(false)
-    }
-  }, [selectedBucket, path, client])
-
-  useEffect(() => { void fetchFiles() }, [fetchFiles])
+    reload()
+  }, [reload])
 
   // View mode
   const [viewMode, setViewMode] = useState<"list" | "grid">("list")
-
-  // Search
-  const [search, setSearch] = useState("")
 
   // Selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -494,19 +490,8 @@ export function StorageBrowser(): React.ReactElement {
   const currentBucket = (buckets ?? []).find((b) => b.name === selectedBucket)
   const breadcrumb = selectedBucket ? [selectedBucket, ...path] : []
 
-  // Filtered files
-  const filteredFiles = useMemo(() => {
-    let result = files
-    if (search) {
-      const needle = search.toLowerCase()
-      result = result.filter((f) => {
-        const raw = f.name.toLowerCase()
-        const decoded = decodeStorageName(f.name).toLowerCase()
-        return raw.includes(needle) || decoded.includes(needle)
-      })
-    }
-    return result
-  }, [files, search])
+  // Searched by the server: it used to filter only the files loaded, in the browser.
+  const filteredFiles = files
 
   // Navigation
   const navigateToFolder = (folderName: string) => {
@@ -964,6 +949,12 @@ export function StorageBrowser(): React.ReactElement {
               ) : null}
             </div>
           )}
+          {selectedBucket && !filesLoading && !filesError ? (
+            <div className="flex items-center justify-end gap-2 mt-2">
+              <span className="text-xs text-muted-foreground">{listedOfTotal(listing)}</span>
+              {listing.more ? <Button size="sm" onClick={listing.loadMore} disabled={listing.loadingMore}>Load more</Button> : null}
+            </div>
+          ) : null}
         </div>
 
         {/* File details panel */}

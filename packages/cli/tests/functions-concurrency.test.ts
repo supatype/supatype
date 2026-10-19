@@ -4,7 +4,7 @@ import { generateFunctionsRouterSource } from "../src/functions-router-gen.js"
 // The router the CLI generates for `supatype dev` used to serialise every invocation.
 //
 // Per-invocation configuration was delivered by mutating `Deno.env`, which is process-global, so
-// two concurrent calls would read each other's values — including a service-role key granted to one
+// two concurrent calls would read each other's values, including a service-role key granted to one
 // route and not the other. The defence was a lock held across the whole handler, which meant one
 // invocation at a time: a function waiting two seconds on a third-party API blocked every other
 // function for two seconds.
@@ -59,6 +59,19 @@ describe("the generated functions router", () => {
       expect(ROUTER).toContain(field)
     }
     expect(ROUTER).toContain("JSON.stringify(line)")
+  })
+
+  // The access line and the uncaught-error line are written after the invocation's async context
+  // has ended, so they named no function, and a function's own log (which the server now filters
+  // by `function`) left out its requests and its crashes.
+  it("names the function on the access line and the error line written after an invocation", () => {
+    const after = ROUTER.slice(ROUTER.indexOf("const start = performance.now()"))
+    const extras = [...after.matchAll(/emit\("(?:info|error)", [^{]*\{([^}]*)\}/g)].map((m) => m[1] ?? "")
+    expect(extras).toHaveLength(2)
+    for (const extra of extras) {
+      expect(extra).toContain("function: fnName")
+      expect(extra).toContain("request_id: context.executionId")
+    }
   })
 
   it("emits source that is valid to embed, with no stray template escapes", () => {

@@ -37,7 +37,8 @@ function inferMime(path: string, headerValue: string): string {
 
 export async function upload(ctx: RequestContext): Promise<void> {
   const bucketId = ctx.params["bucket"]!
-  const objectPath = decodeURIComponent(ctx.params["wildcard"]!)
+  // Already decoded by the router. Decoding it again threw on a name holding "%".
+  const objectPath = ctx.params["wildcard"]!
 
   const bucket = await db.getBucket(bucketId)
   if (!bucket) {
@@ -365,39 +366,50 @@ export async function removeObjects(ctx: RequestContext): Promise<void> {
 
 // ─── List objects ───────────────────────────────────────────────────────────────
 
+const isListRequest = isShape({
+  prefix: optional(isString),
+  limit: optional(isNumber),
+  offset: optional(isNumber),
+  search: optional(isString),
+})
+
+/** The folder a list prefix names: "" for the bucket root, else its path ending in "/". */
+export function folderOf(prefix: string): string {
+  const path = prefix.replace(/^\/+|\/+$/g, "")
+  return path === "" ? "" : `${path}/`
+}
+
+/**
+ * A folder's direct children: its subfolders, then its objects, named relative to it, optionally
+ * searched by name, a page at a time, with how many match in X-Total-Count. It used to answer every
+ * object whose name began with the prefix, so a folder view listed the whole tree beneath it.
+ */
 export async function listObjects(ctx: RequestContext): Promise<void> {
   const bucketId = ctx.params["bucket"]!
-  const body = await readJson(
-    ctx.req,
-    isShape({ prefix: optional(isString), limit: optional(isNumber), offset: optional(isNumber) }),
-  )
+  const body = await readJson(ctx.req, isListRequest)
   const bucket = await db.getBucket(bucketId)
   if (!bucket) {
     sendJson(ctx.res, 404, { error: "Bucket not found" })
     return
   }
-
-  const jwt = callerOf(ctx)
+  const query = { folder: folderOf(body.prefix ?? ""), search: body.search ?? "", limit: body.limit ?? 100, offset: body.offset ?? 0 }
 
   // As the caller, so the list holds only what their read rule allows. It used to run on the
   // service's connection after a check that asked about the prefix as if it were an object, found
   // none, and allowed the call, so any signed-in user listed every name in a private bucket.
-  const rows = await refusingWhenUngranted(ctx, () =>
-    db.listObjectRowsAs(jwt, bucketId, body.prefix ?? "", {
-      limit: body.limit ?? 100,
-      offset: body.offset ?? 0,
-    }),
-  )
-  if (rows === undefined) return
+  const listed = await refusingWhenUngranted(ctx, () => db.listFolderAs(callerOf(ctx), bucketId, query))
+  if (listed === undefined) return
 
-  sendJson(ctx.res, 200, rows.map(listedObject))
+  ctx.res.setHeader("X-Total-Count", String(listed.total))
+  sendJson(ctx.res, 200, listed.entries.map(listedObject))
 }
 
 /**
  * One list entry, as `StorageObject` in @supatype/client declares it: the row, with the size and
- * content type its metadata records lifted out, or null where the metadata does not hold them.
+ * content type its metadata records lifted out, or null where the metadata does not hold them (a
+ * folder holds none).
  */
-function listedObject(row: db.ListedObjectRow): db.ListedObjectRow & { size: number | null; mimetype: string | null } {
+function listedObject(row: db.FolderEntryRow): db.FolderEntryRow & { size: number | null; mimetype: string | null } {
   const size = row.metadata?.["size"]
   const mimetype = row.metadata?.["mimetype"]
   return { ...row, size: isNumber(size) ? size : null, mimetype: isString(mimetype) ? mimetype : null }

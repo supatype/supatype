@@ -1,6 +1,7 @@
 import type { SupatypeClient } from "@supatype/client"
 import { isJsonObject, isShape, isString, nullable, optional, type Guard } from "./json.js"
 import { studioAuthHeaders } from "./studio-auth-headers.js"
+import { authUserListPath, USER_ID_PATTERN, userListTotal, userSearchTerm } from "./auth-user-search.js"
 
 export const SYSTEM_AUTH_USER = "supatype:user"
 
@@ -68,40 +69,51 @@ export function authUserInitials(summary: AuthUserSummary): string {
   return "?"
 }
 
-async function authAdminFetch(client: SupatypeClient, path: string): Promise<Response> {
+async function authAdminFetch(client: SupatypeClient, path: string, signal?: AbortSignal): Promise<Response> {
   return fetch(`${client.url}/auth/v1/admin${path}`, {
     headers: { ...studioAuthHeaders(client), "Content-Type": "application/json" },
     credentials: "include",
+    ...(signal !== undefined && { signal }),
   })
 }
 
-export async function fetchAuthUsers(
+/** One page of users matching a search, and how many match in all. */
+export interface AuthUserMatches {
+  users: AuthUserSummary[]
+  total: number
+}
+
+const NO_MATCHES: AuthUserMatches = { users: [], total: 0 }
+
+/**
+ * The users matching `term`, searched by the auth server a page at a time (zero based `page`), so
+ * every user can be found. An ID is looked up directly, since the server's filter does not search
+ * IDs. A refused request reads as no matches, as a picker has nowhere better to say so.
+ */
+export async function searchAuthUsers(
   client: SupatypeClient,
   term: string,
-  limit = 30,
-): Promise<AuthUserSummary[]> {
-  const res = await authAdminFetch(client, "/users?page=1&per_page=200")
-  if (!res.ok) return []
-  const users = authUsersIn(await res.json())
-  const q = term.trim().toLowerCase()
-  const results: AuthUserSummary[] = []
-  for (const raw of users) {
-    const summary = authUserSummary(raw)
-    if (!q) {
-      results.push(summary)
-    } else if (summary.email.toLowerCase().includes(q) || summary.name.toLowerCase().includes(q)) {
-      results.push(summary)
-    }
-    if (results.length >= limit) break
+  at: { page: number; perPage: number },
+  signal?: AbortSignal,
+): Promise<AuthUserMatches> {
+  const filter = userSearchTerm(term)
+  if (USER_ID_PATTERN.test(filter)) {
+    const user = at.page === 0 ? await fetchAuthUserById(client, filter, signal) : null
+    return user ? { users: [user], total: 1 } : NO_MATCHES
   }
-  return results
+  const search = { filter, ...at }
+  const res = await authAdminFetch(client, authUserListPath(search), signal)
+  if (!res.ok) return NO_MATCHES
+  const users = authUsersIn(await res.json()).map(authUserSummary)
+  return { users, total: userListTotal(res, search, users.length) }
 }
 
 export async function fetchAuthUserById(
   client: SupatypeClient,
   id: string,
+  signal?: AbortSignal,
 ): Promise<AuthUserSummary | null> {
-  const res = await authAdminFetch(client, `/users/${encodeURIComponent(id)}`)
+  const res = await authAdminFetch(client, `/users/${encodeURIComponent(id)}`, signal)
   if (!res.ok) return null
   const user = await res.json()
   return isAuthUser(user) ? authUserSummary(user) : null

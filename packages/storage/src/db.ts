@@ -524,27 +524,64 @@ export async function deleteObjectsAs(jwt: JwtPayload, bucketId: string, names: 
 }
 
 /**
- * List a bucket as the caller: only the objects their read rule allows.
+ * One entry of a folder listing: an object in the folder, or a subfolder, which has no row of its
+ * own and so is null in every column but its bucket and name. The name is relative to the folder.
+ */
+export type FolderEntryRow = { [K in keyof ListedObjectRow]: K extends "bucket_id" | "name" ? string : ListedObjectRow[K] | null }
+
+/** What to list: a folder ("" for the bucket root, else ending in "/"), a search, and a page. */
+export interface FolderQuery {
+  folder: string
+  /** Matched case-insensitively against each entry's name, every character literal; "" for all. */
+  search: string
+  limit: number
+  offset: number
+}
+
+/** `text` as a LIKE pattern that matches only itself, for `ESCAPE '\'`. */
+export function likeLiteral(text: string): string {
+  return text.replace(/[\\%_]/g, (c) => `\\${c}`)
+}
+
+/**
+ * A folder's direct children as the caller may read them: one entry per subfolder holding a
+ * readable object, then the objects in the folder, folders first, each by name in byte order.
  *
  * `starts_with` rather than `LIKE`, which read `%` and `_` in a prefix as wildcards. The columns are
- * named rather than `*`, so the answer is the same whichever bootstrap created the table.
+ * named rather than `*`, so the answer is the same whichever bootstrap created the table. $1 bucket,
+ * $2 folder, $3 search pattern.
  */
-export async function listObjectRowsAs(
+const FOLDER_ENTRIES = `
+  WITH scoped AS (
+    SELECT ${LISTED_OBJECT_COLUMNS}, substr(name, char_length($2) + 1) AS rest
+      FROM storage.objects
+     WHERE bucket_id = $1 AND starts_with(name, $2) AND char_length(name) > char_length($2)
+  ), entries AS (
+    SELECT DISTINCT NULL::uuid AS id, $1 AS bucket_id, split_part(rest, '/', 1) AS name, NULL::uuid AS owner,
+           NULL::jsonb AS metadata, NULL::timestamptz AS created_at, NULL::timestamptz AS updated_at,
+           NULL::timestamptz AS last_accessed_at, 0 AS kind
+      FROM scoped WHERE strpos(rest, '/') > 0
+    UNION ALL
+    SELECT id, bucket_id, rest AS name, owner, metadata, created_at, updated_at, last_accessed_at, 1 AS kind
+      FROM scoped WHERE strpos(rest, '/') = 0
+  )
+  SELECT * FROM entries WHERE name ILIKE '%' || $3 || '%' ESCAPE '\\'`
+
+/** A folder listing as the caller, and how many entries match it in all. */
+export async function listFolderAs(
   jwt: JwtPayload,
   bucketId: string,
-  prefix: string,
-  page: { limit: number; offset: number },
-): Promise<ListedObjectRow[]> {
+  query: FolderQuery,
+): Promise<{ entries: FolderEntryRow[]; total: number }> {
+  const params = [bucketId, query.folder, likeLiteral(query.search)]
   return asCaller(jwt, ["SELECT"], async (client) => {
-    const res = await client.query<ListedObjectRow>(
-      `SELECT ${LISTED_OBJECT_COLUMNS}
-         FROM storage.objects
-        WHERE bucket_id = $1 AND starts_with(name, $2)
-        ORDER BY name
-        LIMIT $3 OFFSET $4`,
-      [bucketId, prefix, page.limit, page.offset],
+    const page = await client.query<FolderEntryRow & { kind: number }>(
+      `${FOLDER_ENTRIES} ORDER BY kind, name COLLATE "C" LIMIT $4 OFFSET $5`,
+      [...params, query.limit, query.offset],
     )
-    return res.rows
+    const count = await client.query<{ total: string }>(`SELECT count(*) AS total FROM (${FOLDER_ENTRIES}) AS matching`, params)
+    const entries = page.rows.map(({ kind: _kind, ...entry }) => entry)
+    return { entries, total: Number(count.rows[0]?.total ?? 0) }
   })
 }
 
