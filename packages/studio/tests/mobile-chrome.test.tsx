@@ -65,3 +65,48 @@ describe("the section panel toggle", () => {
     expect(byLabel("Toggle section navigation")).not.toBeNull()
   })
 })
+
+/** The phone-width primary menu: the second Sidebar, the one that is a fixed overlay. */
+function primaryDrawer(): HTMLElement | null {
+  const drawers = [...document.querySelectorAll<HTMLElement>('[aria-label="Studio navigation"]')]
+  return drawers.find((el) => el.className.includes("fixed")) ?? null
+}
+
+/** The section panel while it is a phone-width overlay rather than docked. */
+function sectionOverlay(): HTMLElement | null {
+  return [...document.querySelectorAll<HTMLElement>("div")].find((el) => el.className.includes("w-[200px]") && el.className.includes("fixed")) ?? null
+}
+
+describe("the phone-width menus", () => {
+  it("opening the primary menu over an open section panel closes the panel, so the menu is reachable", async () => {
+    await studioAt("/media-storage")
+    await click("Toggle section navigation")
+    expect(sectionOverlay()).not.toBeNull()
+    await click("Toggle sidebar")
+    expect(primaryDrawer()).not.toBeNull()
+    expect(sectionOverlay()).toBeNull()
+  })
+
+  it("opening the section panel closes the primary menu", async () => {
+    await studioAt("/media-storage")
+    await click("Toggle sidebar")
+    await click("Toggle section navigation")
+    expect(primaryDrawer()).toBeNull()
+    expect(sectionOverlay()).not.toBeNull()
+  })
+
+  it("choosing an item in the section panel closes it, rather than leaving it over the page it opened", async () => {
+    await studioAt("/database/overview")
+    await click("Toggle section navigation")
+    const tables = [...sectionOverlay()!.querySelectorAll("button")].find((b) => b.textContent === "Tables")
+    await act(async () => tables!.click())
+    expect(sectionOverlay()).toBeNull()
+  })
+
+  it("Escape closes whichever is open", async () => {
+    await studioAt("/media-storage")
+    await click("Toggle section navigation")
+    await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })))
+    expect(sectionOverlay()).toBeNull()
+  })
+})
