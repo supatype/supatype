@@ -3,6 +3,7 @@ import { useApiQuery } from "../hooks/useApiQuery.js"
 import { useDebouncedValue } from "../hooks/useDebouncedValue.js"
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard.js"
 import { Badge, Button, Card, Pager } from "../components/ui.js"
+import { IconCheck, IconCopy } from "../components/icons.js"
 import { cn } from "../lib/utils.js"
 import { type Guard, isArrayOf, isNumber, isShape, isString, optional, readJson } from "../lib/json.js"
 
@@ -99,16 +100,7 @@ function CopyButton({ text }: { text: string }): React.ReactElement {
       className="shrink-0 p-1 rounded hover:bg-accent transition-colors text-muted-foreground hover:text-foreground"
       title="Copy to clipboard"
     >
-      {copied ? (
-        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-green-400">
-          <polyline points="20 6 9 17 4 12" />
-        </svg>
-      ) : (
-        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-        </svg>
-      )}
+      {copied ? <span className="text-green-400"><IconCheck size={13} /></span> : <IconCopy size={13} />}
     </button>
   )
 }

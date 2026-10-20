@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from "react"
 import { useStudioClient } from "../StudioCore.js"
 import { useNavigate, useParams } from "react-router-dom"
 import { useApiQuery } from "../hooks/useApiQuery.js"
-import { Badge, Button, Card, Input, Th, Td } from "../components/ui.js"
+import { Badge, Button, Card, ConfirmButton, Input, Th, Td, type DestructiveQuestion } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { useFunctionLogTail } from "../hooks/useFunctionLogTail.js"
 import { useInterval } from "../hooks/useTabActivity.js"
@@ -406,6 +406,15 @@ function LogsTab({
 
 // ─── Env Vars tab ─────────────────────────────────────────────────────────────
 
+/** Studio never shows a variable's value, so a deleted one cannot be recovered from here. */
+function deleteVariableQuestion(key: string): DestructiveQuestion {
+  return {
+    title: `Delete ${key}?`,
+    detail: <p>The variable and its value are deleted, and cannot be recovered from here.</p>,
+    answer: "Delete variable",
+  }
+}
+
 function EnvVarsTab({
   functionName,
   adminFetch,
@@ -589,13 +598,14 @@ function EnvVarsTab({
                       <Td className="font-mono text-xs">{key}</Td>
                       <Td className="text-xs text-muted-foreground font-mono">••••••••</Td>
                       <Td>
-                        <Button
+                        <ConfirmButton
                           size="xs"
                           variant="destructive"
-                          onClick={() => void handleDelete(key)}
+                          ask={deleteVariableQuestion(key)}
+                          act={() => void handleDelete(key)}
                         >
                           Delete
-                        </Button>
+                        </ConfirmButton>
                       </Td>
                     </tr>
                   ))}

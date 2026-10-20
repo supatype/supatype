@@ -9,6 +9,7 @@ import { mockConfig } from "../src/fixtures/mockConfig.js"
 import { ExtensionsView } from "../src/views/database/ExtensionsView.js"
 import { PoliciesView as AuthPoliciesView } from "../src/views/auth/PoliciesView.js"
 import { StoragePoliciesView } from "../src/views/storage/PoliciesView.js"
+import { asking } from "./dialog-support.js"
 import { metadataBody, testClient } from "./support.js"
 
 /**
@@ -121,7 +122,9 @@ function writes(): Call[] {
 
 beforeEach(() => {
   calls = []
-  vi.stubGlobal("confirm", () => true)
+  // Any browser confirm() is a failure: a question is asked in Studio's own dialog, which a test
+  // answers by clicking, so a stray confirm() would have to be answered here to pass.
+  vi.stubGlobal("confirm", () => { throw new Error("window.confirm was called") })
 })
 
 afterEach(() => {
@@ -138,9 +141,12 @@ describe("Extensions write through /studio-admin/extensions", () => {
     expect(writes()).toEqual([{ path: "/studio-admin/extensions", body: { name: "hstore", enable: true } }])
   })
 
-  it("disables an installed extension", async () => {
+  it("asks, then disables an installed extension", async () => {
     await render(<ExtensionsView />, catalogue("public", "t"))
     await click("Disable")
+    expect(asking()).toContain("Disable pgcrypto?")
+    expect(writes()).toEqual([])
+    await click("Disable extension")
     expect(writes()).toEqual([{ path: "/studio-admin/extensions", body: { name: "pgcrypto", enable: false } }])
   })
 })
@@ -157,9 +163,12 @@ describe.each(POLICY_VIEWS)("%s write through /studio-admin", (_label, view, sch
     expect(writes()).toEqual([{ path: "/studio-admin/rls", body: { schema, table, enable: false } }])
   })
 
-  it("drops a policy through /studio-admin/policies", async () => {
+  it("asks, then drops a policy through /studio-admin/policies", async () => {
     await render(view(), catalogue(schema, table))
     await click("Drop")
+    expect(asking()).toContain(`Drop policy owner_read on ${schema}.${table}?`)
+    expect(writes()).toEqual([])
+    await click("Drop policy")
     expect(writes()).toEqual([{ path: "/studio-admin/policies", body: { schema, table, op: "drop", name: "owner_read" } }])
   })
 
@@ -185,6 +194,29 @@ describe.each(POLICY_VIEWS)("%s write through /studio-admin", (_label, view, sch
 })
 
 describe("Auth policies on a schema the admin routes do not cover", () => {
+  it("drafts the drop as SQL, and asks before running it", async () => {
+    await render(<AuthPoliciesView />, catalogue("public", "todos"))
+    await click("Drop")
+    expect(document.body.querySelector("textarea")?.value).toBe("DROP POLICY owner_read ON public.todos;")
+    await click("Run SQL")
+    expect(asking()).toContain("Run this SQL on public?")
+    expect(writes()).toEqual([])
+    await click("Run on public")
+    expect(writes()).toEqual([{ path: "/sql", body: { query: "DROP POLICY owner_read ON public.todos;", schema: "public" } }])
+  })
+
+  it("runs nothing when the question is cancelled", async () => {
+    await render(<AuthPoliciesView />, catalogue("public", "todos"))
+    await click("Drop")
+    await click("Run SQL")
+    const cancel = [...document.body.querySelectorAll('[role="alertdialog"] button')].find((b) => b.textContent === "Cancel")
+    if (!(cancel instanceof HTMLButtonElement)) throw new Error("no Cancel in the question")
+    await act(async () => { cancel.click() })
+    await settle()
+    expect(asking()).toBeNull()
+    expect(writes()).toEqual([])
+  })
+
   it("still switches RLS through the SQL editor's route", async () => {
     await render(<AuthPoliciesView />, catalogue("public", "todos"))
     await disableRls()

@@ -1,6 +1,7 @@
 import React, { useCallback, useState } from "react"
 import { Badge, Card, Pager, Td, Th } from "../../components/ui.js"
 import { EmptyState } from "../../components/EmptyState.js"
+import { UuidCell } from "../../components/UuidCell.js"
 import { useInspectorResource } from "../../hooks/useInspectorResource.js"
 import { isConnectionsData } from "../../lib/realtime-guards.js"
 import type { InspectorTabProps } from "./InspectorTab.js"
@@ -28,7 +29,7 @@ function ClientRow({ connection }: { connection: ConnectionSummary }): React.Rea
   const client = connection.client
   return (
     <tr className="border-b border-border hover:bg-accent/50">
-      <Td className="font-mono text-xs">{connection.userId ?? <span className="text-muted-foreground">not signed in</span>}</Td>
+      <Td className="font-mono text-xs">{connection.userId !== null ? <UuidCell value={connection.userId} /> : <span className="text-muted-foreground">not signed in</span>}</Td>
       <Td>{connection.role !== null ? <Badge variant="outline">{connection.role}</Badge> : null}</Td>
       <Td className="text-xs text-muted-foreground"><When at={connection.connectedAt} /></Td>
       <Td className="text-xs text-muted-foreground"><When at={connection.lastMessageAt} /></Td>

@@ -4,7 +4,7 @@ import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import { useServerRestCacheOffered } from "../hooks/useServerRestCacheOffered.js"
 import { useInterval } from "../hooks/useTabActivity.js"
-import { Button, Card } from "../components/ui.js"
+import { Button, Card, ConfirmButton, type DestructiveQuestion } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { SlidePanel } from "../components/SlidePanel.js"
@@ -181,6 +181,15 @@ function useCursorPages(scope: string): CursorPages {
   return { cursor: cursors[cursors.length - 1] ?? "0", page: cursors.length - 1, next, previous }
 }
 
+/** A flush empties the cache at once, for one table or for all of them. */
+function flushQuestion(table: string | undefined): DestructiveQuestion {
+  return {
+    title: table ? `Flush every cache entry for ${table}?` : "Flush every REST cache entry?",
+    detail: <p>Every entry is deleted, and reads go to the database until the cache fills again.</p>,
+    answer: "Flush cache",
+  }
+}
+
 export function RestCacheBrowser({
   tableFilter,
   title = "REST Cache",
@@ -294,9 +303,6 @@ export function RestCacheBrowser({
   }
 
   async function flushTable() {
-    if (!window.confirm(tableFilter ? `Flush all cache entries for ${tableFilter}?` : "Flush all REST cache entries?")) {
-      return
-    }
     setActionError(null)
     try {
       const params = tableFilter ? `?table=${encodeURIComponent(tableFilter)}` : ""
@@ -405,7 +411,7 @@ export function RestCacheBrowser({
         </div>
         <div className="flex gap-2 shrink-0">
           <Button size="xs" variant="secondary" onClick={() => refetch()}>Refresh</Button>
-          <Button size="xs" variant="secondary" onClick={() => void flushTable()}>Flush</Button>
+          <ConfirmButton size="xs" variant="secondary" ask={flushQuestion(tableFilter)} act={() => void flushTable()}>Flush</ConfirmButton>
         </div>
       </div>
 

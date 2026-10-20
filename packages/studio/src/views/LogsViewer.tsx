@@ -3,6 +3,7 @@ import { cn } from "../lib/utils.js"
 import { Card, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { SlidePanel } from "../components/SlidePanel.js"
+import { UuidCell } from "../components/UuidCell.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -270,7 +271,7 @@ export function LogsViewer(): React.ReactElement {
                       {formatBytes(l.response_size)}
                     </Td>
                     <Td className="text-xs text-muted-foreground">
-                      {l.user_id ?? <span className="italic">anon</span>}
+                      {l.user_id !== null ? <UuidCell value={l.user_id} /> : <span className="italic">anon</span>}
                     </Td>
                     <Td className="text-xs text-zinc-600 font-mono">{l.ip}</Td>
                   </tr>

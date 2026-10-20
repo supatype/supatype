@@ -31,7 +31,7 @@ import {
   readJson,
   readJsonObject,
 } from "../lib/json.js"
-import { Badge, Button, Card, Checkbox, CodeBlock, DestructiveAnswers, Dialog, Input, Pager, Select, Th, Td } from "../components/ui.js"
+import { Badge, Button, Card, Checkbox, CodeBlock, ConfirmButton, Input, Pager, Select, Th, Td, type DestructiveQuestion } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { SlidePanel } from "../components/SlidePanel.js"
@@ -403,9 +403,9 @@ function UserDetail({
                     <Td className="font-mono text-xs">{s.ip || "-"}</Td>
                     <Td className="text-xs text-muted-foreground">{new Date(s.updated_at).toLocaleString()}</Td>
                     <Td>
-                      <Button size="xs" variant="destructive" onClick={() => onRevokeSession(s.id)}>
+                      <ConfirmButton size="xs" variant="destructive" ask={REVOKE_QUESTION} act={() => onRevokeSession(s.id)}>
                         Revoke
-                      </Button>
+                      </ConfirmButton>
                     </Td>
                   </tr>
                 ))}
@@ -422,9 +422,7 @@ function UserDetail({
       <div data-user-actions="" className="flex gap-2 flex-wrap">
         <Button onClick={onEdit}>Edit User</Button>
         {!user.confirmed && onConfirmEmail ? <Button onClick={onConfirmEmail}>Confirm email</Button> : null}
-        <Button onClick={onToggleDisable}>
-          {user.disabled ? "Enable User" : "Disable User"}
-        </Button>
+        <UserBanToggle user={user} toggle={onToggleDisable} />
         {/* No Impersonate action until Studio can run its own editors as the user (IMP1). */}
         <DeleteUserAction email={user.email} onDelete={onDelete} />
       </div>
@@ -442,22 +440,39 @@ function RefusalNotice({ message }: { message: string }): React.ReactElement {
 }
 
 /**
- * Delete User, asked first with the shared Dialog as every other delete in Studio is. It used to
- * ask with its own inline "Confirm Delete". A refusal, such as the last Studio admin's, is shown
- * by the drawer, which stays open.
+ * Delete User, which asks first. A refusal, such as the last Studio admin's, is shown by the
+ * drawer, which stays open.
  */
 function DeleteUserAction({ email, onDelete }: { email: string; onDelete: () => void }): React.ReactElement {
-  const [asking, setAsking] = useState(false)
-  return (
-    <>
-      <Button variant="destructive" onClick={() => setAsking(true)}>Delete User</Button>
-      {asking ? (
-        <Dialog role="alertdialog" title={`Delete "${email}"?`} actions={<DestructiveAnswers label="Delete" act={onDelete} onClose={() => setAsking(false)} />}>
-          <p>The account is deleted for good. This cannot be undone.</p>
-        </Dialog>
-      ) : null}
-    </>
-  )
+  const ask = { title: `Delete "${email}"?`, detail: <p>The account is deleted for good. This cannot be undone.</p>, answer: "Delete" }
+  return <ConfirmButton variant="destructive" ask={ask} act={onDelete}>Delete User</ConfirmButton>
+}
+
+/** Revoking a session signs out the device that holds it. */
+const REVOKE_QUESTION: DestructiveQuestion = {
+  title: "Revoke this session?",
+  detail: <p>The device signed in with this session is signed out, and has to sign in again.</p>,
+  answer: "Revoke session",
+}
+
+/**
+ * Enable or Disable a user, in the drawer and on the list's rows (`compact`). Enabling only lets
+ * someone back in, so it happens on the click; disabling locks them out, so it asks first.
+ */
+function UserBanToggle({ user, toggle, compact = false }: {
+  user: { email: string; disabled: boolean }
+  toggle: () => void
+  compact?: boolean
+}): React.ReactElement {
+  const size = compact ? "xs" : "sm"
+  const noun = compact ? "" : " User"
+  if (user.disabled) return <Button size={size} onClick={toggle}>Enable{noun}</Button>
+  const ask = {
+    title: `Disable ${user.email}?`,
+    detail: <p>They cannot sign in until the account is enabled again.</p>,
+    answer: "Disable user",
+  }
+  return <ConfirmButton size={size} ask={ask} act={toggle}>Disable{noun}</ConfirmButton>
 }
 
 // ─── Invite User Form ─────────────────────────────────────────────────────────
@@ -1063,9 +1078,7 @@ export function AuthManagement(): React.ReactElement {
                 <Td className="text-xs text-muted-foreground">{new Date(u.created_at).toLocaleDateString()}</Td>
                 <Td>
                   <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-                    <Button size="xs" onClick={() => runAction(() => handleToggleDisable(u.id))}>
-                      {u.disabled ? "Enable" : "Disable"}
-                    </Button>
+                    <UserBanToggle compact user={u} toggle={() => runAction(() => handleToggleDisable(u.id))} />
                     <Button size="xs" onClick={() => openUser(u)} title="View details">
                       View
                     </Button>

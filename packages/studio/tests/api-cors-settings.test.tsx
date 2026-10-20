@@ -107,9 +107,13 @@ describe("the Allowed origins page", () => {
     expect(button("Reset to default")).toBeDefined()
   })
 
-  it("resets with a DELETE", async () => {
+  it("asks, then resets with a DELETE", async () => {
     await render({ manageDomains: true }, (call) => (call.method === "DELETE" ? DEFAULT : { ...DEFAULT, source: "saved", saved: DEFAULT.origins }))
     await act(async () => { button("Reset to default")!.click() })
+    for (let i = 0; i < 3; i++) await act(async () => {})
+    expect(container.querySelector('[role="alertdialog"]')?.textContent).toContain("Reset allowed origins to the default?")
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false)
+    await act(async () => { button("Reset origins")?.click() })
     for (let i = 0; i < 3; i++) await act(async () => {})
     expect(calls.some((c) => c.method === "DELETE")).toBe(true)
     expect(button("Reset to default")).toBeUndefined()
@@ -156,6 +160,11 @@ describe("the site URL on the Allowed origins page (SHc)", () => {
     const saved = { ...DEFAULT, source: "saved", saved: ["https://partner.example"], origins: ["https://app.example.com", "https://partner.example"] }
     await render({ manageDomains: true }, () => saved)
     await act(async () => { button("Remove")!.click() })
+    for (let i = 0; i < 3; i++) await act(async () => {})
+    // A browser app on that origin stops working the moment it goes, so the click only asks.
+    expect(container.querySelector('[role="alertdialog"]')?.textContent).toContain("Stop allowing https://partner.example?")
+    expect(calls.some((c) => c.method === "PUT")).toBe(false)
+    await act(async () => { button("Remove origin")?.click() })
     for (let i = 0; i < 3; i++) await act(async () => {})
     expect(calls.find((c) => c.method === "PUT")?.body).toEqual({ origins: [] })
   })

@@ -7,7 +7,7 @@ import { ErrorBanner } from "../components/ErrorBanner.js"
 import { SlidePanel } from "../components/SlidePanel.js"
 import { cn } from "../lib/utils.js"
 import { isJsonObject } from "../lib/json.js"
-import { Badge, Button, Card, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
+import { Badge, Button, Card, CodeBlock, ConfirmButton, Input, Select, Th, Td, type DestructiveQuestion } from "../components/ui.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
 import { browseTotal, countModeFor, totalLabel } from "../lib/browse-paging.js"
 import { listOrder, tableKeyColumns, withOrder, type ListOrder } from "../lib/list-order.js"
@@ -18,6 +18,7 @@ import type { QueryBuilder } from "@supatype/client"
 import type { FieldConfig } from "../config.js"
 import { explainRefusal, fieldErrorOf, type Explained, type RefusalInput } from "../lib/database-refusal.js"
 import { useRefusal } from "../hooks/useRefusal.js"
+import { UuidCell } from "../components/UuidCell.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -372,6 +373,15 @@ function DeleteConfirmation({
   )
 }
 
+/** A row's Del asks first: the delete goes straight to the table, with no draft to restore. */
+function deleteRowQuestion(table: string): DestructiveQuestion {
+  return {
+    title: `Delete this record from ${table}?`,
+    detail: <p>The row is deleted from the table for good. This cannot be undone.</p>,
+    answer: "Delete record",
+  }
+}
+
 // ─── Cell Renderer ────────────────────────────────────────────────────────────
 
 function CellValue({
@@ -402,32 +412,29 @@ function CellValue({
     )
   }
 
-  // Foreign key relation link
   if (column.is_foreign_key && column.references && typeof value === "string") {
-    const [refTable] = column.references.split(".")
-    return (
-      <button
-        className="text-primary hover:underline text-[0.8rem] font-mono"
-        onClick={() => onRelationClick?.(refTable!, String(value))}
-        title={`View in ${refTable}`}
-      >
-        {String(value).slice(0, 8)}...
-      </button>
-    )
+    return <RelationCell id={value} references={column.references} onRelationClick={onRelationClick} />
   }
+  return <PlainCell value={value} column={column} />
+}
 
-  // Enum dropdown display
-  if (column.enum_values) {
-    const colorMap: Record<string, "green" | "yellow" | "red"> = {
-      draft: "yellow",
-      published: "green",
-      archived: "red",
-    }
-    const variant = colorMap[String(value)] ?? "blue"
-    return <Badge variant={variant}>{String(value)}</Badge>
-  }
+/** A foreign key: a link to the row it names in the table it references. */
+function RelationCell({ id, references, onRelationClick }: {
+  id: string
+  references: string
+  onRelationClick: ((table: string, id: string) => void) | undefined
+}): React.ReactElement {
+  const refTable = references.split(".")[0] ?? references
+  const link = { title: `View in ${refTable}`, open: () => onRelationClick?.(refTable, id) }
+  return <span className="text-[0.8rem]"><UuidCell value={id} link={link} /></span>
+}
 
-  // JSON tree
+/** Badge colours for the publishing states an enum column commonly holds; any other value is blue. */
+const ENUM_VARIANTS: Record<string, "green" | "yellow" | "red"> = { draft: "yellow", published: "green", archived: "red" }
+
+/** A value that is neither an image nor a foreign key, as its column's type reads. */
+function PlainCell({ value, column }: { value: unknown; column: ColumnInfo }): React.ReactElement {
+  if (column.enum_values) return <Badge variant={ENUM_VARIANTS[String(value)] ?? "blue"}>{String(value)}</Badge>
   if (isJsonValue(value)) {
     return (
       <div className="font-mono text-[0.7rem]">
@@ -435,13 +442,10 @@ function CellValue({
       </div>
     )
   }
-
-  // Date formatting
   if (column.type === "timestamptz" || column.type === "timestamp") {
     return <span className="text-[0.8rem] text-muted-foreground">{new Date(String(value)).toLocaleString()}</span>
   }
-
-  return <span className="text-[0.8rem]">{String(value)}</span>
+  return <span className="text-[0.8rem]"><UuidCell value={String(value)} /></span>
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
@@ -462,6 +466,8 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
   // Table list state
   const [tableSearch, setTableSearch] = useState("")
   const [selectedTable, setSelectedTable] = useState<string>(initialTable ?? "")
+  // One question for every row's Del: it names the table, not the row.
+  const deleteRowAsk = useMemo(() => deleteRowQuestion(selectedTable), [selectedTable])
 
   // Row data state
   const [rows, setRows] = useState<Record<string, unknown>[]>([])
@@ -982,14 +988,15 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
                           >
                             View
                           </Button>
-                          <Button
+                          <ConfirmButton
                             size="xs"
                             variant="destructive"
-                            onClick={() => handleDeleteRow(rowId)}
+                            ask={deleteRowAsk}
+                            act={() => { void handleDeleteRow(rowId) }}
                             title="Delete record"
                           >
                             Del
-                          </Button>
+                          </ConfirmButton>
                         </div>
                       </Td>
                     </tr>

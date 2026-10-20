@@ -1,6 +1,7 @@
-import React, { useState } from "react"
-import { Badge, Button, Card, DestructiveAnswers, Dialog, Td, Th } from "../ui.js"
+import React from "react"
+import { Badge, Button, Card, ConfirmButton, Dialog, Td, Th } from "../ui.js"
 import { EmptyState } from "../EmptyState.js"
+import { DROP_LOOK, DropPolicyButton } from "./DropPolicyButton.js"
 import { cellText } from "../../views/metadata-row.js"
 import type { PolicyCatalogue } from "../../hooks/usePolicyCatalogue.js"
 
@@ -24,6 +25,11 @@ export interface PolicyTableData {
 export interface PolicyTableActions {
   toggleRls: (enable: boolean) => void
   drop: (policyName: string) => void
+  /**
+   * Where a drop acts at once, so Drop asks first and names the policy it drops. Null when a drop
+   * only drafts the statement for review: running the draft is what asks.
+   */
+  dropsAt: { schema: string; table: string } | null
 }
 
 /** Who a policy lets through, read from its expression, in a word or two. */
@@ -78,14 +84,14 @@ export function PolicyTableCard({ table, actions }: { table: PolicyTableData; ac
           </tr>
         </thead>
         <tbody>
-          {table.policies.map((p, index) => <PolicyRow key={`${cellText(p, "policyname")}-${index}`} policy={p} drop={actions?.drop ?? null} />)}
+          {table.policies.map((p, index) => <PolicyRow key={`${cellText(p, "policyname")}-${index}`} policy={p} actions={actions} />)}
         </tbody>
       </table>
     </Card>
   )
 }
 
-function PolicyRow({ policy, drop }: { policy: Row; drop: ((policyName: string) => void) | null }): React.ReactElement {
+function PolicyRow({ policy, actions }: { policy: Row; actions: PolicyTableActions | null }): React.ReactElement {
   const name = cellText(policy, "policyname")
   const withCheck = cellText(policy, "with_check")
   const permissive = cellText(policy, "permissive")
@@ -104,10 +110,17 @@ function PolicyRow({ policy, drop }: { policy: Row; drop: ((policyName: string) 
       </Td>
       <Td className="text-xs text-muted-foreground">{describeAppliesTo(policy)}</Td>
       <Td className="text-right">
-        {drop ? <Button size="xs" variant="ghost" className="text-destructive" onClick={() => { drop(name) }}>Drop</Button> : null}
+        {actions ? <DropControl name={name} actions={actions} /> : null}
       </Td>
     </tr>
   )
+}
+
+/** Drop on one policy: asks first where it drops at once, and opens the draft where it only drafts. */
+function DropControl({ name, actions }: { name: string; actions: PolicyTableActions }): React.ReactElement {
+  const drop = (): void => { actions.drop(name) }
+  if (actions.dropsAt) return <DropPolicyButton policy={{ ...actions.dropsAt, name }} drop={drop} />
+  return <Button {...DROP_LOOK} onClick={drop}>Drop</Button>
 }
 
 /**
@@ -115,20 +128,15 @@ function PolicyRow({ policy, drop }: { policy: Row; drop: ((policyName: string) 
  * click; turning it off opens every row to every role the table is granted to, so it asks first.
  */
 function RlsToggle({ table, enabled, toggle }: { table: string; enabled: boolean; toggle: (enable: boolean) => void }): React.ReactElement {
-  const [asking, setAsking] = useState(false)
   if (!enabled) {
     return <Button size="xs" variant="primary" className="shrink-0 whitespace-nowrap" onClick={() => { toggle(true) }}>Enable RLS</Button>
   }
-  return (
-    <>
-      <Button size="xs" variant="destructive" className="shrink-0 whitespace-nowrap" onClick={() => { setAsking(true) }}>Disable RLS</Button>
-      {asking ? (
-        <Dialog role="alertdialog" title={`Disable RLS on ${table}?`} actions={<DestructiveAnswers label="Disable RLS" act={() => { toggle(false) }} onClose={() => { setAsking(false) }} />}>
-          <p>Without row level security its policies stop applying, and every role granted access to this table can read and change every row.</p>
-        </Dialog>
-      ) : null}
-    </>
-  )
+  const ask = {
+    title: `Disable RLS on ${table}?`,
+    detail: <p>Without row level security its policies stop applying, and every role granted access to this table can read and change every row.</p>,
+    answer: "Disable RLS",
+  }
+  return <ConfirmButton size="xs" variant="destructive" className="shrink-0 whitespace-nowrap" ask={ask} act={() => { toggle(false) }}>Disable RLS</ConfirmButton>
 }
 
 /** How a view lists its tables: the heading each gets, and what a writer may do to each. */
