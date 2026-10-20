@@ -118,7 +118,7 @@ function StudioNav({ config, extensions, mobileNav }: StudioNavProps): React.Rea
       {mobileNav.open === "primary" && (
         <>
           <div className="fixed inset-0 bg-black/40 z-40 md:hidden" onClick={mobileNav.close} aria-hidden="true" />
-          <Sidebar {...sidebarProps} className="fixed top-14 left-0 h-[calc(100vh-56px)] z-50 md:hidden" />
+          <Sidebar {...sidebarProps} drawer className="fixed top-14 left-0 h-[calc(100vh-56px)] z-50 md:hidden" />
         </>
       )}
       <SecondaryPanel open={mobileNav.open === "section"} onClose={mobileNav.close} />

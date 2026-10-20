@@ -103,6 +103,21 @@ describe("the phone-width menus", () => {
     expect(sectionOverlay()).toBeNull()
   })
 
+  it("the primary menu names every entry beside its icon, since a touch screen has no hover", async () => {
+    await studioAt("/")
+    await click("Toggle sidebar")
+    const text = primaryDrawer()!.textContent ?? ""
+    for (const label of ["Dashboard", "Models", "Database", "Media & Storage", "Authentication", "Settings"]) {
+      expect(text).toContain(label)
+    }
+  })
+
+  it("the docked rail stays icons only until hovered", async () => {
+    await studioAt("/")
+    const rail = document.querySelector<HTMLElement>('[aria-label="Studio navigation"]')!
+    expect(rail.textContent).toBe("")
+  })
+
   it("Escape closes whichever is open", async () => {
     await studioAt("/media-storage")
     await click("Toggle section navigation")
