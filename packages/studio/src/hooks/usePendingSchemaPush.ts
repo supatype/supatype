@@ -1,8 +1,8 @@
-import { useEffect } from "react"
 import { useLocation } from "react-router-dom"
 import { pendingSchemaPush, type PendingSchemaPush } from "../lib/migration-outcome.js"
 import { useApiQuery } from "./useApiQuery.js"
 import { useProjectProxy } from "./useProjectProxy.js"
+import { useInterval, useOnReturn } from "./useTabActivity.js"
 
 /**
  * How often the status is asked again while a refusal is on screen. A fixing push applies a few
@@ -11,13 +11,21 @@ import { useProjectProxy } from "./useProjectProxy.js"
 export const PENDING_PUSH_POLL_MS = 5_000
 
 /**
+ * How often it is asked while nothing is pending, so a push refused while a screen is open shows
+ * up on it without a click. Slow, since a refusal is rare and Studio is often left open all day.
+ */
+export const PENDING_PUSH_IDLE_POLL_MS = 30_000
+
+/**
  * The newest push, while it was refused or failed and no push has applied since; null otherwise.
  *
  * Read through the metadata catalogue Migration History reads through, and asked again on every
- * navigation and, while a refusal is showing, every few seconds: it used to be asked only on
- * navigation, so a push that fixed the schema left the notice up until the next click. Null when
- * the history cannot be read: a server from before the query, a role without schema view, or no
- * history yet. None of those is a refused push.
+ * navigation, when the tab comes back, and on a timer that skips a hidden tab: every few seconds
+ * while a refusal is showing, so a fixing push clears it, and every half minute otherwise, so a new
+ * refusal appears on the screen in front of you. It used to be asked only on navigation, so the
+ * notice neither appeared nor cleared until the next click. Null when the history cannot be read:
+ * a server from before the query, a role without schema view, or no history yet. None of those is
+ * a refused push.
  */
 export function usePendingSchemaPush(): PendingSchemaPush | null {
   const proxy = useProjectProxy()
@@ -31,11 +39,7 @@ export function usePendingSchemaPush(): PendingSchemaPush | null {
     }
   }, [proxy, pathname])
   const pending = data ?? null
-  const showing = pending !== null
-  useEffect(() => {
-    if (!showing) return
-    const id = setInterval(() => refetch(), PENDING_PUSH_POLL_MS)
-    return () => clearInterval(id)
-  }, [showing, refetch])
+  useInterval(refetch, pending !== null ? PENDING_PUSH_POLL_MS : PENDING_PUSH_IDLE_POLL_MS)
+  useOnReturn(refetch)
   return pending
 }

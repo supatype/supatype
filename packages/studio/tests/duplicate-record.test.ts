@@ -8,6 +8,10 @@ import { testClient, testField, testModel } from "./support.js"
  * Speaker, Page in kitchen-sink) it answered 409 `talk_slug_key` and made no copy. A collided slug
  * now moves to the next free `-copy` value; any other collided unique value is left for the editor
  * to fill in on the create form.
+ *
+ * The free slug is picked before the first insert (final15): inserting the copied slug first always
+ * collided, so every Duplicate logged a 409 in the browser console before the retry made the copy.
+ * The retry stays for a slug taken between the look and the insert.
  */
 
 const URL_BASE = "http://localhost:8000"
@@ -31,6 +35,8 @@ function conflict(column: string, value: string): Response {
 interface Store {
   inserts: Record<string, unknown>[]
   likes: string[]
+  /** Slugs taken after the look-up answered, as by another editor duplicating at the same time. */
+  takenLater?: string[]
 }
 
 /** A table holding `existing` rows, refusing any insert that repeats one of their unique values. */
@@ -43,7 +49,8 @@ function stubTable(existing: Record<string, string>[], store: Store): void {
       store.inserts.push(sent)
       for (const column of ["slug", "code"]) {
         const value = sent[column]
-        if (value !== undefined && existing.some((r) => r[column] === value)) return conflict(column, String(value))
+        const takenLater = column === "slug" && store.takenLater?.includes(String(value)) === true
+        if (value !== undefined && (takenLater || existing.some((r) => r[column] === value))) return conflict(column, String(value))
       }
       return Response.json([{ id: "copy-id", ...sent }], { status: 201 })
     }
@@ -59,12 +66,20 @@ afterEach(() => {
 })
 
 describe("Duplicate", () => {
-  it("gives a copy of a record with a unique slug the next free -copy slug", async () => {
+  it("gives a copy of a record with a unique slug the next free -copy slug, in one insert", async () => {
     const store: Store = { inserts: [], likes: [] }
     stubTable([{ slug: "rls-in-anger" }, { slug: "rls-in-anger-copy" }], store)
     const outcome = await duplicateRecord(testClient({ url: URL_BASE }), MODEL, { id: "t1", title: "RLS in anger", slug: "rls-in-anger" })
     expect(outcome).toEqual({ kind: "created", id: "copy-id" })
-    expect(store.inserts.map((r) => r["slug"])).toEqual(["rls-in-anger", "rls-in-anger-copy-2"])
+    expect(store.inserts.map((r) => r["slug"])).toEqual(["rls-in-anger-copy-2"])
+  })
+
+  it("moves past a slug taken between the look and the insert", async () => {
+    const store: Store = { inserts: [], likes: [], takenLater: ["rls-in-anger-copy"] }
+    stubTable([{ slug: "rls-in-anger" }], store)
+    const outcome = await duplicateRecord(testClient({ url: URL_BASE }), MODEL, { id: "t1", title: "RLS in anger", slug: "rls-in-anger" })
+    expect(outcome).toEqual({ kind: "created", id: "copy-id" })
+    expect(store.inserts.map((r) => r["slug"])).toEqual(["rls-in-anger-copy", "rls-in-anger-copy-2"])
   })
 
   it("opens the create form with any other collided unique field cleared and marked", async () => {

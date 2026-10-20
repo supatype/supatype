@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from "react"
+import React, { useState, useCallback, useEffect, useRef } from "react"
 import { useSearchParams } from "react-router-dom"
 import { useStudioClient } from "../StudioCore.js"
 import { useApiQuery, type ApiQueryResult } from "../hooks/useApiQuery.js"
@@ -31,7 +31,7 @@ import {
   readJson,
   readJsonObject,
 } from "../lib/json.js"
-import { Badge, Button, Card, Checkbox, CodeBlock, Input, Pager, Select, Th, Td } from "../components/ui.js"
+import { Badge, Button, Card, Checkbox, CodeBlock, DestructiveAnswers, Dialog, Input, Pager, Select, Th, Td } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { SlidePanel } from "../components/SlidePanel.js"
@@ -270,6 +270,11 @@ interface UserDetailActions {
   onRevokeSession: (sessionId: string) => void
   /** Undefined when the viewer may not administer users, so the action is not offered. */
   onConfirmEmail: (() => void) | undefined
+  /**
+   * Why the last action was refused, said right above the action buttons: a drawer listing many
+   * sessions is scrolled to its bottom to reach them, out of sight of its top.
+   */
+  refusal: string | null
 }
 
 function UserDetail({
@@ -281,8 +286,7 @@ function UserDetail({
   sessions: AuthSession[]
   actions: UserDetailActions
 }): React.ReactElement {
-  const { onToggleDisable, onEdit, onDelete, onRevokeSession, onConfirmEmail } = actions
-  const [confirmDelete, setConfirmDelete] = useState(false)
+  const { onToggleDisable, onEdit, onDelete, onRevokeSession, onConfirmEmail, refusal } = actions
   const userSessions = sessions.filter((s) => s.user_id === user.id)
 
   return (
@@ -414,24 +418,45 @@ function UserDetail({
       </div>
 
       {/* Actions */}
-      <div className="flex gap-2 flex-wrap">
+      {refusal !== null ? <RefusalNotice message={refusal} /> : null}
+      <div data-user-actions="" className="flex gap-2 flex-wrap">
         <Button onClick={onEdit}>Edit User</Button>
         {!user.confirmed && onConfirmEmail ? <Button onClick={onConfirmEmail}>Confirm email</Button> : null}
         <Button onClick={onToggleDisable}>
           {user.disabled ? "Enable User" : "Disable User"}
         </Button>
         {/* No Impersonate action until Studio can run its own editors as the user (IMP1). */}
-        {!confirmDelete ? (
-          <Button variant="destructive" onClick={() => setConfirmDelete(true)}>Delete User</Button>
-        ) : (
-          <div className="flex gap-2 items-center">
-            <span className="text-red-400 text-xs">This is irreversible.</span>
-            <Button variant="destructive" onClick={onDelete}>Confirm Delete</Button>
-            <Button onClick={() => setConfirmDelete(false)}>Cancel</Button>
-          </div>
-        )}
+        <DeleteUserAction email={user.email} onDelete={onDelete} />
       </div>
     </div>
+  )
+}
+
+/** A refused action's reason, brought into view: it can appear below the drawer's visible part. */
+function RefusalNotice({ message }: { message: string }): React.ReactElement {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    ref.current?.scrollIntoView?.({ block: "nearest" })
+  }, [message])
+  return <div ref={ref}><ErrorBanner message={message} /></div>
+}
+
+/**
+ * Delete User, asked first with the shared Dialog as every other delete in Studio is. It used to
+ * ask with its own inline "Confirm Delete". A refusal, such as the last Studio admin's, is shown
+ * by the drawer, which stays open.
+ */
+function DeleteUserAction({ email, onDelete }: { email: string; onDelete: () => void }): React.ReactElement {
+  const [asking, setAsking] = useState(false)
+  return (
+    <>
+      <Button variant="destructive" onClick={() => setAsking(true)}>Delete User</Button>
+      {asking ? (
+        <Dialog role="alertdialog" title={`Delete "${email}"?`} actions={<DestructiveAnswers label="Delete" act={onDelete} onClose={() => setAsking(false)} />}>
+          <p>The account is deleted for good. This cannot be undone.</p>
+        </Dialog>
+      ) : null}
+    </>
   )
 }
 
@@ -903,13 +928,15 @@ export function AuthManagement(): React.ReactElement {
   }
 
   const panelOpen = selectedUser !== null || editingUser !== null || showCreateForm || showInviteForm
-  // Shown inside the panel while it is open, since it covers the page.
+  // Shown inside the panel while it is open, since it covers the page. A user's detail says it
+  // above its own actions instead.
   const actionBanner = actionError ? <div className="mb-4"><ErrorBanner message={actionError} /></div> : null
+  const showingDetail = !editingUser && !showCreateForm && !showInviteForm
   const panelTitle = editingUser ? "Edit User"
     : showCreateForm ? "Create User"
     : showInviteForm ? "Invite User"
     : selectedUser?.email ?? ""
-  const panelSubtitle = !editingUser && !showCreateForm && !showInviteForm
+  const panelSubtitle = showingDetail
     ? selectedUser?.id
     : undefined
 
@@ -1076,8 +1103,8 @@ export function AuthManagement(): React.ReactElement {
         subtitle={panelSubtitle}
         width="max-w-[560px]"
       >
-        {actionBanner}
-        {selectedUser && !editingUser && !showCreateForm && !showInviteForm && (
+        {showingDetail ? null : actionBanner}
+        {selectedUser && showingDetail && (
           <UserDetail
             user={selectedUser}
             sessions={sessions}
@@ -1090,6 +1117,7 @@ export function AuthManagement(): React.ReactElement {
               onConfirmEmail: studioAccess.canManageMembers
                 ? () => runAction(() => handleConfirmEmail(selectedUser.id))
                 : undefined,
+              refusal: actionError,
             }}
           />
         )}

@@ -10,7 +10,8 @@ import { ErrorBanner } from "../components/ErrorBanner.js"
 import { cn } from "../lib/utils.js"
 import { isJsonObject } from "../lib/json.js"
 import { browserSignedUrl, resolveStorageObjectPath, storagePublicUrl } from "../lib/storage-ref.js"
-import { Button, Card, Input, Select, Th, Td } from "../components/ui.js"
+import { Button, Card, DestructiveAnswers, Dialog, Input, Select, Th, Td } from "../components/ui.js"
+import { deleteSelection } from "../lib/storage-delete.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -59,7 +60,7 @@ interface UploadProgress {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatBytes(bytes: number): string {
-  if (bytes === 0) return "\u2014"
+  if (bytes === 0) return "-"
   const k = 1024
   const sizes = ["B", "KB", "MB", "GB", "TB"]
   const i = Math.floor(Math.log(bytes) / Math.log(k))
@@ -130,10 +131,10 @@ function StorageImageThumbnail({
       return
     }
     let cancelled = false
-    void (async () => {
-      const { url } = await browserSignedUrl(client, { bucket: bucketName, path: filePath }, 3600)
-      if (!cancelled) setSignedUrl(url)
-    })()
+    // A request that fails outright shows the placeholder, like a refused one; it was unhandled.
+    void browserSignedUrl(client, { bucket: bucketName, path: filePath }, 3600)
+      .then(({ url }) => url, () => null)
+      .then((url) => { if (!cancelled) setSignedUrl(url) })
     return () => { cancelled = true }
   }, [bucketPublic, bucketName, filePath, client])
 
@@ -563,21 +564,16 @@ export function StorageBrowser(): React.ReactElement {
     setPendingDeleteIds(ids)
   }
 
-  const handleDelete = async () => {
-    if (!pendingDeleteIds) return
-    const toDelete = files.filter((f) => pendingDeleteIds.has(f.id))
-    const pathStr = path.join("/")
-    const filePaths = toDelete.map((f) => pathStr ? `${pathStr}/${f.name}` : f.name)
-    const { error } = await client.storage.from(selectedBucket).remove(filePaths)
-    if (error) {
-      setFilesError(error.message)
-      setPendingDeleteIds(null)
-      return
-    }
+  // A folder goes with every object under it; what the server keeps is said, not passed over.
+  const handleDelete = async (ids: Set<string>) => {
+    const selection = files.filter((f) => ids.has(f.id)).map((f) => ({ name: f.name, isFolder: f.is_folder }))
+    const api = client.storage.from(selectedBucket)
+    const outcome = await deleteSelection(api, path.join("/"), selection)
+      .catch((err: unknown) => (err instanceof Error ? err.message : String(err)))
     setSelectedIds(new Set())
     setSelectedFile(null)
-    setPendingDeleteIds(null)
-    void fetchFiles()
+    fetchFiles()
+    if (outcome !== null) setFilesError(outcome)
   }
 
   const handleCreateFolder = async (name: string): Promise<string | null> => {
@@ -832,8 +828,8 @@ export function StorageBrowser(): React.ReactElement {
                         )}
                       </Td>
                       <Td className="text-xs text-muted-foreground">{formatBytes(f.size)}</Td>
-                      <Td className="text-xs text-muted-foreground">{f.is_folder ? "\u2014" : f.type}</Td>
-                      <Td className="text-xs text-muted-foreground">{f.owner_id ?? "\u2014"}</Td>
+                      <Td className="text-xs text-muted-foreground">{f.is_folder ? "-" : f.type}</Td>
+                      <Td className="text-xs text-muted-foreground">{f.owner_id ?? "-"}</Td>
                       <Td className="text-xs text-muted-foreground">{new Date(f.updated_at).toLocaleDateString()}</Td>
                       <Td>
                         {!f.is_folder ? (
@@ -1001,18 +997,13 @@ export function StorageBrowser(): React.ReactElement {
 
       {/* Delete confirmation */}
       {pendingDeleteIds ? (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <Card className="p-6 max-w-[400px]">
-            <h3 className="text-red-400 m-0 mb-2">Delete Files</h3>
-            <p className="text-sm text-muted-foreground mb-4">
-              Delete {pendingDeleteIds.size} {pendingDeleteIds.size === 1 ? "item" : "items"}? This cannot be undone.
-            </p>
-            <div className="flex gap-2 justify-end">
-              <Button onClick={() => setPendingDeleteIds(null)}>Cancel</Button>
-              <Button variant="destructive" onClick={() => { void handleDelete() }}>Delete</Button>
-            </div>
-          </Card>
-        </div>
+        <Dialog
+          role="alertdialog"
+          title={`Delete ${pendingDeleteIds.size} ${pendingDeleteIds.size === 1 ? "item" : "items"}?`}
+          actions={<DestructiveAnswers label="Delete" act={() => { void handleDelete(pendingDeleteIds) }} onClose={() => setPendingDeleteIds(null)} />}
+        >
+          <p>A folder is deleted with everything in it. This cannot be undone.</p>
+        </Dialog>
       ) : null}
     </>
   )

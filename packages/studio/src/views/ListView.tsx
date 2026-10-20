@@ -210,7 +210,7 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
           title={`Delete ${selected.size} ${selected.size === 1 ? model.label : model.labelPlural}?`}
           actions={<DestructiveAnswers label="Delete" act={() => { void handleBulkDelete() }} onClose={() => { setConfirmingDelete(false) }} />}
         >
-          <p>They are deleted for good. This cannot be undone.</p>
+          <p>{selected.size === 1 ? "It is" : "They are"} deleted for good. This cannot be undone.</p>
         </Dialog>
       )}
 

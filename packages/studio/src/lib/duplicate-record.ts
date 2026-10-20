@@ -15,9 +15,11 @@ import { SQLSTATE, unquoteColumn } from "./database-error.js"
  * violation, which covers a column-level `Unique<T>`, a declared unique index, and one added by hand
  * alike, and it costs nothing on a model with none.
  *
- * A slug that collides is given the next free `-copy` value, as an editor would. Any other unique
- * value has no copy that means the same thing, so the copy opens in the create form with that field
- * cleared and marked, for the editor to fill in.
+ * A slug is given the next free `-copy` value before the first insert, as an editor would: copied
+ * as it was, it always collided, and every Duplicate logged a 409 in the browser console before the
+ * retry made the copy. The retry stays for a slug taken between that look and the insert. Any other
+ * unique value has no copy that means the same thing, so the copy opens in the create form with
+ * that field cleared and marked, for the editor to fill in.
  */
 
 /** A form to open in place of a created record: the copied values, and the fields to fill in. */
@@ -72,6 +74,11 @@ function isSlugColumn(model: ModelConfig, column: string): boolean {
   return model.fields.some((f) => f.name === column && f.widget === "slug")
 }
 
+/** The slug columns `copy` holds text in, which the copy moves to a free `-copy` value up front. */
+function slugColumns(model: ModelConfig, copy: Record<string, unknown>): string[] {
+  return model.fields.filter((f) => f.widget === "slug" && isString(copy[f.name]) && copy[f.name] !== "").map((f) => f.name)
+}
+
 /**
  * `copy` with each collided slug moved to its next free `-copy` value, or null when a collided
  * column is not a slug (or holds no text), which only the editor can choose a value for.
@@ -112,7 +119,8 @@ export async function duplicateRecord(
   model: ModelConfig,
   formValues: Record<string, unknown>,
 ): Promise<DuplicateOutcome> {
-  let copy = duplicateValues(model, serializeRecordForApi(model, formValues))
+  const copied = duplicateValues(model, serializeRecordForApi(model, formValues))
+  let copy = (await withFreshSlugs(client, model, copied, slugColumns(model, copied))) ?? copied
   let columns: string[] = []
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     const created = await createRecord(client, model, copy)
