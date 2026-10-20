@@ -111,7 +111,7 @@ function button(text: string): HTMLButtonElement {
 
 /** Ticks the row named `name` and deletes the selection through the confirmation. */
 async function deleteRow(name: string): Promise<void> {
-  const row = Array.from(container.querySelectorAll("tr")).find((tr) => tr.querySelector("td button")?.textContent === `[dir] ${name}`)
+  const row = Array.from(container.querySelectorAll("tr")).find((tr) => tr.querySelector("td button")?.textContent === name)
   const tick = row?.querySelector<HTMLInputElement>("input[type=checkbox]")
   if (!tick) throw new Error(`no row for ${name}`)
   await act(async () => tick.click())

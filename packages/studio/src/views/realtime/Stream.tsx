@@ -1,4 +1,5 @@
-import React, { useState } from "react"
+import React, { memo, useMemo, useState } from "react"
+import { useFollowLatest } from "../../hooks/useFollowLatest.js"
 import { Badge, Button, Card, CodeBlock, Input, Select } from "../../components/ui.js"
 import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
@@ -119,7 +120,8 @@ function RowSummary({ row }: { row: StreamRow }): React.ReactElement {
   }
 }
 
-function StreamRowCard({ row }: { row: StreamRow }): React.ReactElement {
+/** Memoised: a row never changes once it has arrived, so a new event redraws only itself. */
+const StreamRowCard = memo(function StreamRowCard({ row }: { row: StreamRow }): React.ReactElement {
   const [open, setOpen] = useState(false)
   const expandable = row.kind === "change" || row.kind === "broadcast"
   return (
@@ -131,16 +133,32 @@ function StreamRowCard({ row }: { row: StreamRow }): React.ReactElement {
       {open && row.kind === "broadcast" && <BroadcastDetail broadcast={row.broadcast} />}
     </Card>
   )
-}
+})
 
-/** The stream as it stands: its view, its state, and its rows. */
+/**
+ * The stream as it stands, oldest at the top and newest at the bottom of its own scroll area,
+ * which follows each new event until the reader scrolls up (`useFollowLatest`).
+ *
+ * The rows were drawn newest first down the page, so an arriving event pushed the page under
+ * whoever was reading it, and one part way down never saw it arrive.
+ */
 export function StreamRows({ state }: { state: StreamState }): React.ReactElement {
+  const keys = useMemo(() => state.rows.map(rowKey), [state.rows])
+  const oldestFirst = useMemo(() => [...state.rows].reverse(), [state.rows])
+  const tail = useFollowLatest(keys)
   if (state.rows.length === 0) {
     return <EmptyState title="Waiting for events" description="Changes, broadcasts and presence events appear here as realtime sends them. Nothing is stored: the stream starts when you open it." />
   }
   return (
-    <div className="space-y-2">
-      {state.rows.map((row) => <StreamRowCard key={rowKey(row)} row={row} />)}
+    <div className="relative">
+      <div ref={tail.scrollerRef} data-stream-scroller="" onScroll={tail.onScroll} className="max-h-[70vh] overflow-y-auto space-y-2">
+        {oldestFirst.map((row) => <StreamRowCard key={rowKey(row)} row={row} />)}
+      </div>
+      {tail.following ? null : (
+        <Button variant="primary" size="xs" className="absolute bottom-3 left-1/2 -translate-x-1/2 shadow-lg" onClick={tail.jumpToLatest}>
+          {tail.unseen > 0 ? `Jump to latest (${tail.unseen} new)` : "Jump to latest"}
+        </Button>
+      )}
     </div>
   )
 }
