@@ -4,6 +4,7 @@ import React, { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { MemoryRouter } from "react-router-dom"
 import { StudioCore } from "../src/StudioCore.js"
+import type { AdminConfig } from "../src/config.js"
 import { testClient, testConfig, testModel } from "./support.js"
 
 /**
@@ -18,7 +19,7 @@ const CLIENT = testClient({ url: "http://localhost:8000/studio/proxy", token: "t
 let root: Root | null = null
 let container: HTMLElement
 
-async function studioAt(path: string): Promise<void> {
+async function studioAt(path: string, config: AdminConfig = CONFIG): Promise<void> {
   vi.stubGlobal("fetch", async () => new Promise<Response>(() => {}))
   container = document.createElement("div")
   document.body.appendChild(container)
@@ -26,7 +27,7 @@ async function studioAt(path: string): Promise<void> {
   await act(async () =>
     root!.render(
       <MemoryRouter initialEntries={[path]}>
-        <StudioCore config={CONFIG} client={CLIENT} />
+        <StudioCore config={config} client={CLIENT} />
       </MemoryRouter>,
     ),
   )
@@ -165,5 +166,43 @@ describe("search at phone width", () => {
     const row = [...searchSheet()!.querySelectorAll("button")].find((b) => b.textContent?.startsWith("Users"))!
     await act(async () => row.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })))
     expect(searchSheet()).toBeNull()
+  })
+})
+
+/** The classes on `el`, so a test can say what shows below `sm` and what from `sm` up. */
+function classes(el: Element | null): string[] {
+  return (el?.getAttribute("class") ?? "").split(" ")
+}
+
+describe("the header at phone width", () => {
+  it("collapses Connect, Feedback and the docs into one overflow menu shown only below sm", async () => {
+    await studioAt("/models/page")
+    expect(classes(byLabel("More"))).toContain("sm:hidden")
+    expect(classes(byLabel("Documentation"))).toContain("hidden")
+    const feedback = [...document.querySelectorAll("header a")].find((a) => a.textContent === "Feedback")!
+    expect(classes(feedback)).toContain("hidden")
+  })
+
+  it("the overflow menu reaches Connect, Feedback and the docs", async () => {
+    await studioAt("/models/page")
+    const more = byLabel("More")!
+    await act(async () => { more.focus(); more.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })) })
+    const items = [...document.querySelectorAll('[role="menuitem"]')].map((el) => el.textContent)
+    expect(items).toEqual(["Connect", "Feedback", "Documentation"])
+  })
+
+  it("drops Studio's name and branch below sm, and keeps the account menu", async () => {
+    await studioAt("/models/page")
+    const studio = [...document.querySelectorAll("header span")].find((s) => s.textContent === "Studio")!
+    expect(classes(studio)).toContain("hidden")
+    expect(byLabel("Account menu")).not.toBeNull()
+  })
+
+  it("builds the locale picker on the shared Select, with its label shown only from sm up", async () => {
+    const locale = { defaultLocale: "en", locales: [{ code: "en", label: "English" }, { code: "fr", label: "French" }] }
+    await studioAt("/models/page", { ...CONFIG, locale })
+    const select = document.querySelector("header select")!
+    expect(select.getAttribute("data-ui")).toBe("select")
+    expect(classes(document.querySelector('header label[for="st-locale-select"]'))).toContain("sr-only")
   })
 })
