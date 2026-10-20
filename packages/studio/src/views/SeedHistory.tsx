@@ -253,12 +253,15 @@ export function SeedHistoryView({
     return <ErrorBanner message={error} onRetry={onRefresh} />
   }
 
+  // Says what the ledger holds, not what the database holds. A seed script that writes through
+  // `sql()`, or runs on import, puts its rows in the database without a run being recorded, so
+  // "no seeds have run" was false for every project seeded that way (kitchen-sink's `pnpm seed`).
   const rows = error !== null ? [] : (runs ?? [])
   if (rows.length === 0) {
     return (
       <EmptyState
-        title="No seeds have run here"
-        description="Run `supatype seed` to apply your seed data. Every run is recorded here with what it wrote."
+        title="No recorded seed runs"
+        description="`supatype seed` records each run of a default-exported seed function here, with what it wrote. A script that writes through `sql()` or runs on import is not recorded, so its rows can be in the database with nothing listed here."
         action={onRefresh}
         actionLabel="Refresh"
       />
