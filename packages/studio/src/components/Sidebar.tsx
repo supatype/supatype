@@ -71,6 +71,8 @@ interface SidebarProps {
    * rail reveals them on hover, and a touch screen has no hover, so the drawer was icons only.
    */
   drawer?: boolean | undefined
+  /** The drawer's id, which the burger names in `aria-controls`. */
+  id?: string | undefined
   /** @deprecated No longer used */
   collapsed?: boolean | undefined
   /** @deprecated No longer used */
@@ -187,7 +189,7 @@ function ExtraSections({ sections, path, ctx }: { sections: SidebarSection[] | u
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
 
-export function Sidebar({ extraSections, hiddenItems, className, drawer = false }: SidebarProps): React.ReactElement {
+export function Sidebar({ extraSections, hiddenItems, className, drawer = false, id }: SidebarProps): React.ReactElement {
   const navigate = useNavigate()
   const path = useLocation().pathname
   const [hovered, setHovered] = useState(false)
@@ -197,6 +199,7 @@ export function Sidebar({ extraSections, hiddenItems, className, drawer = false 
   return (
     // Reserve 52px in the layout, panel floats over content when expanded
     <aside
+      id={id}
       className={cn("relative shrink-0 h-full", drawer ? "w-[220px]" : "w-[52px]", className)}
       role="navigation"
       aria-label="Studio navigation"
