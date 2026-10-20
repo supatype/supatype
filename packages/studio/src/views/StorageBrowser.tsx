@@ -99,7 +99,7 @@ function entryKind(file: StorageFile): EntryKind {
 }
 
 /** An entry's icon, named in a tooltip so the meaning does not rest on reading the picture. */
-function EntryIcon({ file, size }: { file: StorageFile; size: number }): React.ReactElement {
+function EntryIcon({ file, size = 16 }: { file: StorageFile; size?: number }): React.ReactElement {
   const { label, Glyph } = entryKind(file)
   return (
     <span role="img" aria-label={label} title={label} className="inline-flex shrink-0 text-muted-foreground">
@@ -820,7 +820,7 @@ export function StorageBrowser(): React.ReactElement {
                             className="font-medium text-primary hover:underline flex items-center gap-1.5"
                             onClick={() => navigateToFolder(f.name)}
                           >
-                            <EntryIcon file={f} size={16} />
+                            <EntryIcon file={f} />
                             {decodeStorageName(f.name)}
                           </button>
                         ) : (
@@ -839,7 +839,7 @@ export function StorageBrowser(): React.ReactElement {
                                 sizeClassName="h-9 w-9"
                               />
                             ) : (
-                              <EntryIcon file={f} size={16} />
+                              <EntryIcon file={f} />
                             )}
                             <span className="truncate">{decodeStorageName(f.name)}</span>
                           </button>
