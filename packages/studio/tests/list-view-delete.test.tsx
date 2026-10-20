@@ -30,7 +30,9 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-async function renderRefusingList(): Promise<void> {
+const FIRST = { id: "p1", title: "First post" }
+
+async function renderRefusingList(rows: Array<{ id: string; title: string }> = [FIRST]): Promise<void> {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true
   deletes = []
   vi.stubGlobal("fetch", async (raw: string, init?: RequestInit) => {
@@ -38,7 +40,7 @@ async function renderRefusingList(): Promise<void> {
       deletes.push(new URL(raw))
       return Response.json({ code: "23503", message: REFUSAL, details: null, hint: null }, { status: 409 })
     }
-    return Response.json([{ id: "p1", title: "First post" }])
+    return Response.json(rows)
   })
   container = document.createElement("div")
   document.body.appendChild(container)
@@ -72,6 +74,25 @@ describe("deleting selected rows from a list", () => {
     await selectFirstRowAndAskToDelete()
     expect(container.querySelector("[role='alertdialog']")?.textContent).toContain("Delete 1")
     expect(deletes).toHaveLength(0)
+  })
+
+  it("speaks of one row in the singular and of several in the plural (final15)", async () => {
+    // One row read "Delete 1 Talk? They are deleted for good."
+    await renderRefusingList()
+    await selectFirstRowAndAskToDelete()
+    const one = container.querySelector("[role='alertdialog']")?.textContent ?? ""
+    expect(one).toContain("Delete 1 Post?")
+    expect(one).toContain("It is deleted for good.")
+    act(() => root?.unmount())
+    container.remove()
+    await renderRefusingList([FIRST, { id: "p2", title: "Second post" }])
+    const all = container.querySelector<HTMLInputElement>("input[aria-label='Select all']")
+    if (!all) throw new Error("no select-all checkbox")
+    await act(async () => all.click())
+    await act(async () => button(container, "Delete selected").click())
+    const two = container.querySelector("[role='alertdialog']")?.textContent ?? ""
+    expect(two).toContain("Delete 2 Posts?")
+    expect(two).toContain("They are deleted for good.")
   })
 
   it("shows a refused delete and keeps the row selected", async () => {
