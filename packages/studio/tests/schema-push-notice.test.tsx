@@ -24,7 +24,12 @@ const proxy = {
 vi.mock("../src/hooks/useProjectProxy.js", () => ({ useProjectProxy: () => proxy }))
 
 import { SchemaPushNotice } from "../src/components/SchemaPushNotice.js"
-import { PENDING_PUSH_POLL_MS } from "../src/hooks/usePendingSchemaPush.js"
+import { PENDING_PUSH_IDLE_POLL_MS, PENDING_PUSH_POLL_MS } from "../src/hooks/usePendingSchemaPush.js"
+
+/** What `document.visibilityState` reports, as a tab sent to the background or brought back. */
+function setVisibility(state: DocumentVisibilityState): void {
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state })
+}
 
 const REFUSED = {
   id: 7,
@@ -115,12 +120,51 @@ describe("a push that fixes the schema", () => {
     expect(container.textContent).toBe("/models")
   })
 
-  it("stops asking once nothing is pending", async () => {
+  it("slows to the idle pace once nothing is pending", async () => {
     vi.useFakeTimers()
     await render()
     const asked = proxy.metadata.mock.calls.length
     await act(async () => {
       await vi.advanceTimersByTimeAsync(PENDING_PUSH_POLL_MS * 3)
+    })
+    expect(proxy.metadata.mock.calls.length).toBe(asked)
+  })
+})
+
+describe("a push refused while the screen is open", () => {
+  afterEach(() => {
+    vi.useRealTimers()
+    setVisibility("visible")
+  })
+
+  it("appears within the idle pace, with no navigation", async () => {
+    // It was asked only on navigation, so a refusal stayed unsaid on the screen in front of you.
+    vi.useFakeTimers()
+    await render()
+    status.row = REFUSED
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PENDING_PUSH_IDLE_POLL_MS)
+    })
+    expect(container.textContent).toContain("Schema push refused")
+  })
+
+  it("appears as soon as the tab is back", async () => {
+    await render()
+    status.row = REFUSED
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"))
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    expect(container.textContent).toContain("Schema push refused")
+  })
+
+  it("is not asked for while the tab is in the background", async () => {
+    vi.useFakeTimers()
+    await render()
+    setVisibility("hidden")
+    const asked = proxy.metadata.mock.calls.length
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PENDING_PUSH_IDLE_POLL_MS * 2)
     })
     expect(proxy.metadata.mock.calls.length).toBe(asked)
   })
