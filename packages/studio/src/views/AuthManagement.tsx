@@ -31,7 +31,7 @@ import {
   readJson,
   readJsonObject,
 } from "../lib/json.js"
-import { Badge, Button, Card, Checkbox, CodeBlock, Input, Pager, Select, Th, Td } from "../components/ui.js"
+import { Badge, Button, Card, Checkbox, CodeBlock, DestructiveAnswers, Dialog, Input, Pager, Select, Th, Td } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { SlidePanel } from "../components/SlidePanel.js"
@@ -282,7 +282,6 @@ function UserDetail({
   actions: UserDetailActions
 }): React.ReactElement {
   const { onToggleDisable, onEdit, onDelete, onRevokeSession, onConfirmEmail } = actions
-  const [confirmDelete, setConfirmDelete] = useState(false)
   const userSessions = sessions.filter((s) => s.user_id === user.id)
 
   return (
@@ -421,17 +420,28 @@ function UserDetail({
           {user.disabled ? "Enable User" : "Disable User"}
         </Button>
         {/* No Impersonate action until Studio can run its own editors as the user (IMP1). */}
-        {!confirmDelete ? (
-          <Button variant="destructive" onClick={() => setConfirmDelete(true)}>Delete User</Button>
-        ) : (
-          <div className="flex gap-2 items-center">
-            <span className="text-red-400 text-xs">This is irreversible.</span>
-            <Button variant="destructive" onClick={onDelete}>Confirm Delete</Button>
-            <Button onClick={() => setConfirmDelete(false)}>Cancel</Button>
-          </div>
-        )}
+        <DeleteUserAction email={user.email} onDelete={onDelete} />
       </div>
     </div>
+  )
+}
+
+/**
+ * Delete User, asked first with the shared Dialog as every other delete in Studio is. It used to
+ * ask with its own inline "Confirm Delete". A refusal, such as the last Studio admin's, is shown
+ * by the drawer, which stays open.
+ */
+function DeleteUserAction({ email, onDelete }: { email: string; onDelete: () => void }): React.ReactElement {
+  const [asking, setAsking] = useState(false)
+  return (
+    <>
+      <Button variant="destructive" onClick={() => setAsking(true)}>Delete User</Button>
+      {asking ? (
+        <Dialog role="alertdialog" title={`Delete "${email}"?`} actions={<DestructiveAnswers label="Delete" act={onDelete} onClose={() => setAsking(false)} />}>
+          <p>The account is deleted for good. This cannot be undone.</p>
+        </Dialog>
+      ) : null}
+    </>
   )
 }
 
