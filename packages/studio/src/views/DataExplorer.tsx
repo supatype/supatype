@@ -7,7 +7,7 @@ import { ErrorBanner } from "../components/ErrorBanner.js"
 import { SlidePanel } from "../components/SlidePanel.js"
 import { cn } from "../lib/utils.js"
 import { isJsonObject } from "../lib/json.js"
-import { Badge, Button, Card, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
+import { Badge, Button, Card, CodeBlock, ConfirmButton, Input, Select, Th, Td, type DestructiveQuestion } from "../components/ui.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
 import { browseTotal, countModeFor, totalLabel } from "../lib/browse-paging.js"
 import { listOrder, tableKeyColumns, withOrder, type ListOrder } from "../lib/list-order.js"
@@ -373,6 +373,15 @@ function DeleteConfirmation({
   )
 }
 
+/** A row's Del asks first: the delete goes straight to the table, with no draft to restore. */
+function deleteRowQuestion(table: string): DestructiveQuestion {
+  return {
+    title: `Delete this record from ${table}?`,
+    detail: <p>The row is deleted from the table for good. This cannot be undone.</p>,
+    answer: "Delete record",
+  }
+}
+
 // ─── Cell Renderer ────────────────────────────────────────────────────────────
 
 function CellValue({
@@ -457,6 +466,8 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
   // Table list state
   const [tableSearch, setTableSearch] = useState("")
   const [selectedTable, setSelectedTable] = useState<string>(initialTable ?? "")
+  // One question for every row's Del: it names the table, not the row.
+  const deleteRowAsk = useMemo(() => deleteRowQuestion(selectedTable), [selectedTable])
 
   // Row data state
   const [rows, setRows] = useState<Record<string, unknown>[]>([])
@@ -977,14 +988,15 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
                           >
                             View
                           </Button>
-                          <Button
+                          <ConfirmButton
                             size="xs"
                             variant="destructive"
-                            onClick={() => handleDeleteRow(rowId)}
+                            ask={deleteRowAsk}
+                            act={() => { void handleDeleteRow(rowId) }}
                             title="Delete record"
                           >
                             Del
-                          </Button>
+                          </ConfirmButton>
                         </div>
                       </Td>
                     </tr>

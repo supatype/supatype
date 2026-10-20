@@ -5,6 +5,7 @@ import { usePolicyWrites } from "../../hooks/usePolicyWrites.js"
 import { useSqlEditorOffered } from "../../hooks/useSqlEditorOffered.js"
 import { useApiQuery } from "../../hooks/useApiQuery.js"
 import { PolicyCreatePanel, type PolicyTarget } from "../../components/database/PolicyCreatePanel.js"
+import { DropPolicyButton } from "../../components/database/DropPolicyButton.js"
 import { Badge, Button, Card } from "../../components/ui.js"
 import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
@@ -119,6 +120,7 @@ export function StoragePoliciesView(): React.ReactElement {
                       const withCheck = cellTextOrNull(p, "with_check")
                       const exprLabel = withCheck ? "WITH CHECK" : "USING"
                       const expr = withCheck ?? qual ?? "(none)"
+                      const name = cellText(p, "policyname")
                       return (
                       <tr key={cellText(p, "policyname")} className="border-b border-border last:border-0">
                         <td className="px-4 py-2.5 font-mono text-xs text-foreground">{cellText(p, "policyname")}</td>
@@ -131,7 +133,12 @@ export function StoragePoliciesView(): React.ReactElement {
                           </div>
                         </td>
                         <td className="px-4 py-2.5 text-right">
-                          {sqlWrites ? (<button type="button" className="text-xs text-destructive hover:underline" onClick={() => { void writes.dropPolicy("storage", tableName, cellText(p, "policyname")) }}>Drop</button>) : null}
+                          {sqlWrites ? (
+                            <DropPolicyButton
+                              policy={{ schema: "storage", table: tableName, name }}
+                              drop={() => { void writes.dropPolicy("storage", tableName, name) }}
+                            />
+                          ) : null}
                         </td>
                       </tr>
                     )})}

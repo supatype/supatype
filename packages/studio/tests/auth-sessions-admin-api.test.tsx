@@ -7,6 +7,7 @@ import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { AdminConfigContext } from "../src/hooks/useAdminConfig.js"
 import { mockConfig } from "../src/fixtures/mockConfig.js"
 import { AuthManagement } from "../src/views/AuthManagement.js"
+import { asking, press } from "./dialog-support.js"
 import { testClient } from "./support.js"
 
 /**
@@ -88,13 +89,25 @@ describe("the Users view's sessions", () => {
     expect(document.body.textContent).toContain("203.0.113.7")
   })
 
-  it("revokes one through the auth admin API", async () => {
+  it("asks, then revokes one through the auth admin API", async () => {
     await openUser()
-    const revoke = Array.from(document.body.querySelectorAll("button")).find((b) => b.textContent === "Revoke")
-    expect(revoke, "a Revoke button for the session").toBeDefined()
-    await act(async () => revoke!.click())
-    await settle()
+    await press("Revoke")
+    // Revoking signs the device out at once, so the click only asks.
+    expect(asking()).toContain("Revoke this session?")
+    expect(calls.filter((c) => c.method === "DELETE")).toEqual([])
+    await press("Revoke session")
     expect(calls).toContainEqual({ url: `${PROXY}/auth/v1/admin/sessions/${SESSION.id}`, method: "DELETE" })
     expect(calls.filter((c) => c.url.endsWith("/sql"))).toEqual([])
+  })
+})
+
+describe("disabling a user", () => {
+  it.each([["the user panel", "Disable User"], ["the users list", "Disable"]])("from %s asks first", async (_where, label) => {
+    await openUser()
+    await press(label)
+    expect(asking()).toContain("Disable ada@example.com?")
+    expect(calls.filter((c) => c.method === "PUT")).toEqual([])
+    await press("Disable user")
+    expect(calls).toContainEqual({ url: `${PROXY}/auth/v1/admin/users/${USER.id}`, method: "PUT" })
   })
 })

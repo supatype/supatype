@@ -2,9 +2,18 @@ import React, { useState } from "react"
 import { useProjectProxy } from "../../hooks/useProjectProxy.js"
 import { useSqlEditorOffered } from "../../hooks/useSqlEditorOffered.js"
 import { useApiQuery } from "../../hooks/useApiQuery.js"
-import { Badge, Button, Card, Input } from "../../components/ui.js"
+import { Badge, Button, Card, ConfirmButton, Input, type DestructiveQuestion } from "../../components/ui.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 import { cellText, cellTextOrNull } from "../metadata-row.js"
+
+/** Disabling drops the extension, and with it every function, type and operator it installed. */
+function disableQuestion(name: string): DestructiveQuestion {
+  return {
+    title: `Disable ${name}?`,
+    detail: <p>The extension is dropped, with the functions, types and operators it installed.</p>,
+    answer: "Disable extension",
+  }
+}
 
 export function ExtensionsView(): React.ReactElement {
   const proxy = useProjectProxy()
@@ -71,14 +80,15 @@ export function ExtensionsView(): React.ReactElement {
                     <td className="px-4 py-3 text-xs text-muted-foreground">{cellTextOrNull(row, "description") ?? "-"}</td>
                     <td className="px-4 py-3 text-right">
                       {sqlWrites ? (
-                        <Button
+                        <ConfirmButton
                           variant="destructive"
                           size="xs"
                           disabled={busy === cellText(row, "extname")}
-                          onClick={() => { void toggleExtension(cellText(row, "extname"), false) }}
+                          ask={disableQuestion(cellText(row, "extname"))}
+                          act={() => { void toggleExtension(cellText(row, "extname"), false) }}
                         >
                           Disable
-                        </Button>
+                        </ConfirmButton>
                       ) : null}
                     </td>
                   </tr>

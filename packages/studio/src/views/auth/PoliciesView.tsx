@@ -2,6 +2,8 @@ import React, { useCallback, useMemo, useState } from "react"
 import { isStudioAdminSchema, useProjectProxy } from "../../hooks/useProjectProxy.js"
 import { usePolicyWrites } from "../../hooks/usePolicyWrites.js"
 import { PolicyCreatePanel, type PolicyTarget } from "../../components/database/PolicyCreatePanel.js"
+import { DROP_LOOK, DropPolicyButton } from "../../components/database/DropPolicyButton.js"
+import { SqlDraftDialog, useSqlDraft } from "../../components/database/SqlDraftDialog.js"
 import { useSqlEditorOffered } from "../../hooks/useSqlEditorOffered.js"
 import { useSchemaPicker } from "../../hooks/useSchemaPicker.js"
 import { useApiQuery } from "../../hooks/useApiQuery.js"
@@ -68,11 +70,7 @@ export function PoliciesView(): React.ReactElement {
   const sqlWrites = useSqlEditorOffered()
   const { schemas, schema, setSchema } = useSchemaPicker()
   const schemaSql = useMemo(() => safeSchemaName(schema), [schema])
-  const [createModal, setCreateModal] = useState(false)
   const [manualPolicyWarningOpen, setManualPolicyWarningOpen] = useState(false)
-  const [sqlText, setSqlText] = useState("")
-  const [runError, setRunError] = useState<string | null>(null)
-  const [runBusy, setRunBusy] = useState(false)
   const [createTarget, setCreateTarget] = useState<PolicyTarget | null>(null)
 
   // Reads go through the metadata catalogue (RQ3b), so a viewer sees the policies too.
@@ -86,16 +84,18 @@ export function PoliciesView(): React.ReactElement {
   )
   const refresh = useCallback(() => { refetch(); refetchRls() }, [refetch, refetchRls])
   const writes = usePolicyWrites(refresh)
+  // A drop or a new policy on any other schema is SQL the user reviews, and confirms, before it runs.
+  const draft = useSqlDraft(schemaSql, refresh)
   // The SQL editor's login cannot alter auth or storage tables, so those writes go through
   // `/studio-admin` (SQ2); any other schema keeps the SQL editor's route.
   const adminSchema = isStudioAdminSchema(schemaSql) ? schemaSql : null
 
   const policyRows = useMemo(() => normalizePolicyRows(policies), [policies])
 
-  const rlsMap = useMemo(() => {
-    const rows = Array.isArray(rlsStatus) ? rlsStatus : []
-    return new Map(rows.map((r) => [rowText(r as Record<string, unknown>, "tablename"), (r as Record<string, unknown>)["rls_enabled"] === true || (r as Record<string, unknown>)["rls_enabled"] === "t"]))
-  }, [rlsStatus])
+  const rlsMap = useMemo(
+    () => new Map(normalizePolicyRows(rlsStatus).map((r) => [rowText(r, "tablename"), r["rls_enabled"] === true || r["rls_enabled"] === "t"])),
+    [rlsStatus],
+  )
 
   const grouped = useMemo(() => {
     const m = new Map<string, Record<string, unknown>[]>()
@@ -110,32 +110,15 @@ export function PoliciesView(): React.ReactElement {
   /** Every table the view has seen in this schema, with or without a policy yet. */
   const knownTables = useMemo(() => [...new Set([...rlsMap.keys(), ...grouped.keys()])].filter((t) => t !== "").sort(), [rlsMap, grouped])
 
-  async function runSql() {
-    setRunBusy(true)
-    setRunError(null)
-    try {
-      await proxy.sql(sqlText, schemaSql)
-      setCreateModal(false)
-      refetch()
-    } catch (e) {
-      setRunError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setRunBusy(false)
-    }
-  }
-
   function toggleRls(table: string, enable: boolean): Promise<void> {
     if (adminSchema) return writes.toggleRls(adminSchema, table, enable)
     return writes.run(() => proxy.sql(`ALTER TABLE ${schemaSql}.${table} ${enable ? "ENABLE" : "DISABLE"} ROW LEVEL SECURITY;`, schemaSql))
   }
 
-  function dropPolicy(table: string, name: string): void {
-    if (adminSchema) {
-      void writes.dropPolicy(adminSchema, table, name)
-      return
-    }
-    setSqlText(`DROP POLICY ${name} ON ${schemaSql}.${table};`)
-    setCreateModal(true)
+  /** Drop on an auth table asks, then drops; on any other schema it drafts the statement instead. */
+  function dropButton(table: string, name: string): React.ReactElement {
+    if (adminSchema) return <DropPolicyButton policy={{ schema: adminSchema, table, name }} drop={() => { void writes.dropPolicy(adminSchema, table, name) }} />
+    return <Button {...DROP_LOOK} onClick={() => { draft.setText(`DROP POLICY ${name} ON ${schemaSql}.${table};`) }}>Drop</Button>
   }
 
   function openCreate(): void {
@@ -144,8 +127,7 @@ export function PoliciesView(): React.ReactElement {
       setCreateTarget({ schema: adminSchema, tables: knownTables })
       return
     }
-    setSqlText(`CREATE POLICY my_policy ON ${schemaSql}.my_table\n  AS PERMISSIVE\n  FOR ALL\n  TO authenticated\n  USING (true)\n  WITH CHECK (true);`)
-    setCreateModal(true)
+    draft.setText(`CREATE POLICY my_policy ON ${schemaSql}.my_table\n  AS PERMISSIVE\n  FOR ALL\n  TO authenticated\n  USING (true)\n  WITH CHECK (true);`)
   }
 
   return (
@@ -231,7 +213,7 @@ export function PoliciesView(): React.ReactElement {
                         </td>
                         <td className="px-4 py-2.5 text-xs text-muted-foreground">{describeAppliesTo(p)}</td>
                         <td className="px-4 py-2.5 text-right">
-                          {sqlWrites ? (<button type="button" className="text-xs text-destructive hover:underline" onClick={() => { dropPolicy(tableName, pname) }}>Drop</button>) : null}
+                          {sqlWrites ? dropButton(tableName, pname) : null}
                         </td>
                       </tr>
                     )})}
@@ -243,19 +225,7 @@ export function PoliciesView(): React.ReactElement {
         </div>
       )}
 
-      {createModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-card border border-border rounded-lg p-6 w-full max-w-lg space-y-4 shadow-xl">
-            <h2 className="text-base font-semibold text-foreground">SQL</h2>
-            <textarea className="w-full font-mono text-sm px-3 py-2 rounded-md border border-border bg-background text-foreground focus:outline-none min-h-[140px] resize-y" value={sqlText} onChange={(e) => setSqlText(e.target.value)} />
-            {runError && <p className="text-xs text-destructive">{runError}</p>}
-            <div className="flex justify-end gap-2">
-              <Button onClick={() => { setCreateModal(false); setRunError(null) }}>Cancel</Button>
-              <Button variant="primary" disabled={runBusy} onClick={() => { void runSql() }}>{runBusy ? "Running…" : "Run SQL"}</Button>
-            </div>
-          </div>
-        </div>
-      )}
+      <SqlDraftDialog draft={draft} />
 
       <PolicyCreatePanel
         target={createTarget}

@@ -91,6 +91,10 @@ describe("a template with a saved edit", () => {
   it("resets to the default with DELETE, and shows the template the server says is now in force", async () => {
     await render((call) => Response.json(call.method === "DELETE" ? DEFAULT : SAVED))
     await click("Reset to default")
+    // The saved edit is gone for good once reset, so the click only asks.
+    expect(container.querySelector('[role="alertdialog"]')?.textContent).toContain("Reset this template to the default?")
+    expect(calls.map((c) => c.method)).toEqual(["GET"])
+    await click("Reset template")
     expect(calls.map((c) => c.method)).toEqual(["GET", "DELETE"])
     expect(calls[1]!.url).toBe("http://localhost:8000/studio/proxy/auth/v1/admin/template/confirmation")
     expect(fieldValues()).toEqual({ subject: DEFAULT.subject, content: DEFAULT.content })
