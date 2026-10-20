@@ -66,7 +66,7 @@ function language(code: string): { code: string; label: string } {
 
 function panelModel({ state, locales = [WHOLE_RECORD], dirty = false, creating = false, editing = "en" }: Case): PanelModel {
   // As PublishBar does: a language goes in only when it is one of the record's own.
-  return describePanel({ locales, state, dirty, creating, editing: locales.includes(editing) ? language(editing) : null })
+  return describePanel({ locales, state, dirty, creating, editing: locales.includes(editing) ? language(editing) : null, labels: NAMES })
 }
 
 function panel(input: Case): string {
@@ -272,12 +272,24 @@ describe("publishing one language", () => {
     // French's row says Changed; the flag beside the status badge is about English.
     expect(english).not.toContain("Edited since it was published")
     expect(primary(english)).toEqual({ label: "Publish in English", disabled: true })
-    expect(english).toContain("Live, no changes to publish.")
-    expect(primaryTitle(english)).toBe("Live, no changes to publish.")
+    expect(english).toContain("Live in English, no changes to publish. Still to publish: French.")
+    expect(primaryTitle(english)).toBe("Live in English, no changes to publish. Still to publish: French.")
     const french = panel({ state, locales: EN_FR, editing: "fr" })
     expect(french).toContain("Edited since it was published")
     expect(primary(french)).toEqual({ label: "Publish changes in French", disabled: false })
-    expect(french).toContain("The live site still shows the published version.")
+    expect(french).toContain("The live site still shows the published version in French.")
+  })
+
+  it("names the language on screen in its note, and the ones still to publish (final15)", () => {
+    // Partly published, English live and French a draft: the note read "Live, no changes to
+    // publish." as if nothing were left anywhere.
+    const partly = publishingState([published(1, ["en"])], ["en", "fr", "de"])
+    expect(panelModel({ state: partly, locales: ["en", "fr", "de"] }).note).toBe(
+      "Live in English, no changes to publish. Still to publish: French, German.",
+    )
+    expect(panelModel({ state: partly, locales: ["en", "fr", "de"], editing: "fr" }).note).toBe("Not on the live site in French yet.")
+    const everywhere = publishingState([published(1, EN_FR)], EN_FR)
+    expect(panelModel({ state: everywhere, locales: EN_FR }).note).toBe("Live in English, no changes to publish.")
   })
 
   it("still offers every language from the menu while the one on screen has nothing waiting", () => {
