@@ -10,6 +10,7 @@ import { cn } from "../lib/utils.js"
 import { isJsonObject, isShape, isString, type Guard } from "../lib/json.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { Button, NAV_RAIL } from "./ui.js"
+import { IconList } from "./icons.js"
 import { useInspectorAvailability, type InspectorAvailability } from "../hooks/useInspectorAvailability.js"
 import { useStudioCapability } from "../hooks/useStudioCapability.js"
 import { SQL_EDITOR_HREF, sqlEditorOffered } from "../lib/sql-editor-access.js"
@@ -226,6 +227,31 @@ function getSectionId(path: string): string | null {
   if (path.startsWith("/edge-functions")) return "functions"
   if (path === "/realtime" || path.startsWith("/realtime/")) return "realtime"
   return null
+}
+
+/**
+ * Whether `path` belongs to a section with its own item list. Only then is there a panel for the
+ * phone-width toggle to open: the toggle used to show on every route, so on the dashboard or
+ * Webhooks it opened nothing.
+ */
+export function hasSectionNav(path: string): boolean {
+  return getSectionId(path) !== null
+}
+
+/** The phone-width button that opens this panel. Render it only where {@link hasSectionNav}. */
+export function SectionPanelToggle({ open, onToggle }: { open: boolean; onToggle: () => void }): React.ReactElement {
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={onToggle}
+      aria-expanded={open}
+      aria-label="Toggle section navigation"
+      className="md:hidden mr-1 h-8 w-8"
+    >
+      <IconList size={16} />
+    </Button>
+  )
 }
 
 function buildSettingsSection(): SectionDef {

@@ -10,9 +10,8 @@ import { CloudUrlContext } from "./hooks/useCloudUrl.js"
 import { PlatformCtx } from "./hooks/usePlatform.js"
 import { Sidebar, getPageBreadcrumbs, hiddenNavItems } from "./components/Sidebar.js"
 import { useStudioCapability } from "./hooks/useStudioCapability.js"
-import { SecondaryPanel } from "./components/SecondaryPanel.js"
+import { SecondaryPanel, SectionPanelToggle, hasSectionNav } from "./components/SecondaryPanel.js"
 import { TertiaryNav } from "./components/TertiaryNav.js"
-import { IconList } from "./components/icons.js"
 import { TopBar } from "./components/TopBar.js"
 import {
   ElevatedModeBanner,
@@ -164,17 +163,9 @@ function StudioLayout({ extensions, demoMode }: StudioLayoutProps): React.ReactE
         <div className="flex flex-col flex-1 overflow-hidden">
           {/* Tier 3: horizontal tertiary nav (sub-items within a section item) */}
           <TertiaryNav
-            leading={
-              <button
-                type="button"
-                onClick={() => setSectionPanelOpen((v) => !v)}
-                aria-expanded={sectionPanelOpen}
-                aria-label="Toggle section navigation"
-                className="md:hidden mr-1 h-8 w-8 shrink-0 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent"
-              >
-                <IconList size={16} />
-              </button>
-            }
+            leading={hasSectionNav(location.pathname)
+              ? <SectionPanelToggle open={sectionPanelOpen} onToggle={() => setSectionPanelOpen((v) => !v)} />
+              : undefined}
           />
           <main
             id="studio-main"
