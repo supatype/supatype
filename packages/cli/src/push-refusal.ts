@@ -199,6 +199,19 @@ export interface RefusalContext {
   retry?: string
   /** What applies a destructive change on purpose. Default: the command with `--yes`. */
   applyDestructive?: string
+  /** What puts access changed outside Supatype back. Default: the command with `--overwrite-drift`. */
+  overwriteDrift?: readonly string[]
+}
+
+/**
+ * How a `dev` session explains a refusal: a save pushes again, and `push` resolves what dev never
+ * does for itself, from another terminal while dev keeps running.
+ */
+export const DEV_REFUSAL_CONTEXT: RefusalContext = {
+  command: "supatype dev",
+  retry: "save the schema again",
+  applyDestructive: "supatype push --yes",
+  overwriteDrift: ["supatype dev --overwrite-drift", "supatype push --overwrite-drift"],
 }
 
 /** What to say about `refusal`, in the terms of whoever pushed. */
@@ -217,7 +230,7 @@ export function explainRefusal(refusal: PushRefusal, context: RefusalContext): R
         hints: [`To drop it on purpose, run \`${context.applyDestructive ?? `${command} --yes`}\`.`],
       }
     case "security-drift":
-      return explainSecurityDrift(refusal.objects, command)
+      return explainSecurityDrift(refusal.objects, context.overwriteDrift ?? [`${command} --overwrite-drift`])
     case "engine-busy":
       return {
         headline: "Another push is running on this database (or an adopt, rebaseline or rollback), so nothing was applied.",
@@ -241,13 +254,13 @@ function explainDriftChanged(refusal: Extract<PushRefusal, { kind: "drift-change
   }
 }
 
-function explainSecurityDrift(objects: readonly DriftedObject[], command: string): RefusalExplanation {
+function explainSecurityDrift(objects: readonly DriftedObject[], overwrite: readonly string[]): RefusalExplanation {
   const count = objects.length > 0 ? `${objects.length} object(s)` : "Objects"
   return {
     headline: `${count} that decide who may read or write were changed outside Supatype, so nothing was applied.`,
     hints: [
       ...(objects.length > 0 ? [formatDriftedObjects(objects).join("\n")] : []),
-      `Run \`${command} --overwrite-drift\` to put Supatype's definitions back, or ` +
+      `Run ${overwrite.map((c) => `\`${c}\``).join(" or ")} to put Supatype's definitions back, or ` +
         "`supatype doctor --rebaseline --accept-access-drift` to keep the changes as Supatype's.",
     ],
   }
@@ -291,7 +304,7 @@ export function reportDevPushFailure(err: unknown): void {
     console.error("[supatype] Schema push failed:", err instanceof Error ? err.message : String(err))
     return
   }
-  const { headline, hints } = explainRefusal(refusal, { command: "supatype dev", retry: "save the schema again" })
+  const { headline, hints } = explainRefusal(refusal, DEV_REFUSAL_CONTEXT)
   console.error(`[supatype] ${headline}`)
   for (const hint of hints) console.error(hint.replace(/^/gm, "  "))
 }

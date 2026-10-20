@@ -100,7 +100,7 @@ import { provisionBucketsFromAst } from "./storage-provision.js"
 import type { ExtractedSchemaAstV2 } from "./schema-ast-v2.js"
 import { ensureFirstAdminUserForProject } from "./commands/admin.js"
 import { publishDevReady } from "./dev-ready-panel.js"
-import { exitInitialPushFailed, pushInitialSchema, type InitialPushOutcome, type InitialPushSteps } from "./dev-initial-push.js"
+import { pushInitialSchema, settleInitialPush, type InitialPushOutcome, type InitialPushSteps } from "./dev-initial-push.js"
 import { offerAdoption, targetAdoptionSteps, type AdoptionSteps } from "./adopt-walkthrough.js"
 import { resetDevDatabase } from "./dev-db-reset.js"
 import {
@@ -1513,7 +1513,7 @@ async function applyInitialSchema(
   project: string,
   brand: DockerBrandOptions,
   opts: ComposePushOptions = {},
-): Promise<void> {
+): Promise<boolean> {
   const steps: InitialPushSteps = {
     push: () => runDevSchemaPush(cwd, config, paths, schemaPath, project, opts),
     recoverDatabase: () => startComposeDatabase(config, paths, cwd, project, brand, undefined, endDevSession),
@@ -1521,17 +1521,9 @@ async function applyInitialSchema(
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
   }
   const outcome = await adoptingOnRefusal(await pushInitialSchema(steps), steps, cwd, config)
-  if (outcome.kind === "applied") return
-  if (outcome.kind === "declined" || (outcome.kind === "refused" && outcome.refusal?.kind === "destructive")) {
-    // Nothing was applied, so the database still matches the last schema it took. The stack can
-    // come up on it, and the next save is pushed (and refused or asked about) like any other.
-    console.warn(`[supatype] Initial schema push not applied:\n${outcome.message}`)
-    console.warn("[supatype] dev is running on the schema the database already has, and still watching.")
-    return
-  }
-  // Before the message, so it reaches the real terminal rather than a TUI that is going away.
-  endDevSession()
-  exitInitialPushFailed(outcome, brand)
+  // Ending the session before an exit, so its message reaches the real terminal rather than a TUI
+  // that is going away.
+  return settleInitialPush(outcome, { brand, beforeExit: endDevSession })
 }
 
 /**
@@ -1658,7 +1650,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   const schemaPath = schemaPathFromProject(config, cwd)
   // `dev --overwrite-drift`, already checked against this engine before the session began.
   const pushOptions: ComposePushOptions = { overwriteDrift: opts.overwriteDrift === true }
-  await applyInitialSchema(cwd, config, paths, schemaPath, project, devBrand, pushOptions)
+  const schemaApplied = await applyInitialSchema(cwd, config, paths, schemaPath, project, devBrand, pushOptions)
   // Before the stack starts, so PostgREST comes up on the tier the push actually produced.
   followRecordedTier(cwd, config, { recreate: false })
 
@@ -1748,8 +1740,12 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
     devSessionLockFor(config, { composeProject: project, composePath: paths.composePath, kongPort }),
   )
 
-  const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
-  await provisionDockerStorageBuckets(ast, kongPort, serviceRoleKey)
+  // Only for a schema the database took, as a save does: a refused one may not even load, and its
+  // buckets belong to fields that do not exist yet. The save that applies it provisions them.
+  if (schemaApplied) {
+    const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
+    await provisionDockerStorageBuckets(ast, kongPort, serviceRoleKey)
+  }
 
   const pidDir = join(homedir(), ".supatype", "projects", config.project.name, "pid")
   mkdirSync(pidDir, { recursive: true })

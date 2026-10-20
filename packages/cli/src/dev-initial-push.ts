@@ -9,15 +9,28 @@
  * only thing a reset changed was that there was no longer anything to refuse.
  *
  * So a failure is classified before anything else happens. A database that is not reachable yet is
- * retried, and the retry never removes anything. A change that would drop data and was not agreed
- * to leaves the database as it was, so `dev` says why and carries on watching. Every other refusal
- * (an image Docker could not pull, access changed outside Supatype, another push holding the
- * engine) is read as `push-refusal.ts` reads it on every path, and `dev` stops saying what to do.
- * Anything else is the engine's answer, and `dev` stops with it. Resetting the database is
- * `supatype dev --reset-db`, which is asked for, confirmed, and removes only Postgres's volume.
+ * retried, and the retry never removes anything. Any answer from the engine (a change that would
+ * drop data, access changed outside Supatype, tables it does not manage, another push holding it,
+ * or a schema it could not apply) leaves the database as it was, and the engine records the
+ * refusal for Studio to show. So `dev` brings the stack up on the schema the database already has,
+ * says what refused the push and what resolves it, and keeps watching: the save that fixes it is
+ * pushed like any other. It used to stop instead, which took the whole stack down over a hand edit
+ * to one policy.
+ *
+ * `dev` still stops when there is nothing to run on: Postgres never answered, or Docker could not
+ * pull the image the engine runs in, so the engine never ran, recorded nothing, and no save can
+ * change that. Resetting the database is `supatype dev --reset-db`, which is asked for, confirmed,
+ * and removes only Postgres's volume.
  */
-import { classifyPushRefusal, DevPushDeclined, engineOutputOf, explainRefusal, type PushRefusal } from "./push-refusal.js"
-import { DEV_DESTRUCTIVE_POLICY } from "./destructive-consent.js"
+import {
+  classifyPushRefusal,
+  DEV_REFUSAL_CONTEXT,
+  DevPushDeclined,
+  engineOutputOf,
+  explainRefusal,
+  type PushRefusal,
+  type RefusalExplanation,
+} from "./push-refusal.js"
 import { fatalError } from "./ui/fatal.js"
 import type { DockerBrandOptions } from "./docker-runtime.js"
 
@@ -26,9 +39,8 @@ import type { DockerBrandOptions } from "./docker-runtime.js"
  *
  * A refusal is its own outcome rather than a thrown error so a caller can act on it: the
  * unmanaged-tables case is the one an adopt walkthrough will pick up. `refusal` is what refused
- * it, or null for any other answer from the engine. A destructive refusal is a change that would
- * drop data and was not agreed to: the database still matches the last schema, so dev carries on.
- * So does a push declined in a terminal (access changed outside Supatype, kept on a no).
+ * it, or null for any other answer from the engine. `declined` is a push a person said no to in a
+ * terminal (access changed outside Supatype, kept).
  */
 export type InitialPushOutcome =
   | { kind: "applied" }
@@ -105,8 +117,8 @@ export async function pushInitialSchema(
     message = failure.message
     if (failure.declined) return { kind: "declined", message }
     const refused = { kind: "refused" as const, refusal: failure.refusal, message }
-    // Not a failure to diagnose: the person was told what would be lost and the database is as it was.
-    if (failure.refusal?.kind === "destructive") return refused
+    // Not a failure to diagnose from the database's logs: it is explained once dev settles it.
+    if (failure.refusal !== null) return refused
     console.error(`[supatype] Initial schema push failed (attempt ${attempt}/${maxAttempts}):`, message)
     steps.dumpLogs(`schema push attempt ${attempt}/${maxAttempts}`)
 
@@ -119,30 +131,62 @@ export async function pushInitialSchema(
   return { kind: "exhausted", attempts: maxAttempts, message }
 }
 
-/** dev never drops data itself: `push` is where that is done on purpose. */
-const DEV_REFUSAL_CONTEXT = { command: "supatype dev", applyDestructive: DEV_DESTRUCTIVE_POLICY.apply }
-
 /** Every refusal ends with this, because the old loop taught people a failure meant data loss. */
 const DATABASE_KEPT = "Your local database was left as it was."
 
-/** End `dev` with what the engine said, and what to do about it. */
-export function exitInitialPushFailed(failure: InitialPushFailure, brand?: DockerBrandOptions): never {
-  const opts = { ...(brand !== undefined && { brand }) }
-  if (failure.kind === "declined") fatalError(failure.message, [DATABASE_KEPT], opts)
+/**
+ * What dev does once its first push has ended. True when the push applied; false when it was not
+ * applied and dev carries on, having said why and what resolves it. Ends dev (after `beforeExit`)
+ * when there is nothing to run on.
+ */
+export function settleInitialPush(
+  outcome: InitialPushOutcome,
+  opts: { brand?: DockerBrandOptions; beforeExit: () => void },
+): boolean {
+  if (outcome.kind === "applied") return true
+  const stop = stopReason(outcome)
+  if (stop === null) {
+    for (const line of notAppliedLines(explainNotApplied(outcome))) console.warn(line)
+    return false
+  }
+  opts.beforeExit()
+  fatalError(stop.headline, [...stop.hints, DATABASE_KEPT], { ...(opts.brand !== undefined && { brand: opts.brand }) })
+}
+
+/**
+ * Why dev cannot come up, or null when it can. Postgres never answering leaves nothing to run on.
+ * An image Docker could not pull means the engine never ran: it recorded nothing for Studio to
+ * show, and no save in this session changes the registry, so dev stops and says to run it again.
+ */
+function stopReason(failure: InitialPushFailure): RefusalExplanation | null {
   if (failure.kind === "exhausted") {
-    fatalError(
-      `Initial schema push failed after ${failure.attempts} attempts: ${failure.message}`,
-      ["Postgres did not become reachable. Check logs: supatype self-host compose logs db", DATABASE_KEPT],
-      opts,
-    )
+    return {
+      headline: `Initial schema push failed after ${failure.attempts} attempts: ${failure.message}`,
+      hints: ["Postgres did not become reachable. Check logs: supatype self-host compose logs db"],
+    }
   }
-  if (failure.refusal !== null) {
-    const { headline, hints } = explainRefusal(failure.refusal, DEV_REFUSAL_CONTEXT)
-    fatalError(headline, [...hints, DATABASE_KEPT], opts)
+  if (failure.kind === "refused" && failure.refusal?.kind === "image-pull") {
+    return explainRefusal(failure.refusal, { command: "supatype dev" })
   }
-  fatalError(
-    "The engine refused the schema push.",
-    [failure.message, "Fix the schema and run `supatype dev` again.", DATABASE_KEPT],
-    opts,
-  )
+  return null
+}
+
+/**
+ * What refused a first push dev carries on from. A destructive refusal and a no already carry
+ * their own advice (`supatype push --yes`, the rebaseline), and an answer the CLI cannot name is
+ * the engine's own words.
+ */
+function explainNotApplied(failure: InitialPushFailure): RefusalExplanation {
+  if (failure.kind !== "refused") return { headline: failure.message, hints: [] }
+  if (failure.refusal === null) return { headline: failure.message, hints: ["Save the schema to push it again."] }
+  if (failure.refusal.kind === "destructive") return { headline: failure.message, hints: [] }
+  return explainRefusal(failure.refusal, DEV_REFUSAL_CONTEXT)
+}
+
+function notAppliedLines({ headline, hints }: RefusalExplanation): string[] {
+  return [
+    `[supatype] Initial schema push not applied: ${headline}`,
+    ...hints.map((hint) => hint.replace(/^/gm, "  ")),
+    `[supatype] ${DATABASE_KEPT} dev is running on the schema the database already has, and still watching.`,
+  ]
 }
