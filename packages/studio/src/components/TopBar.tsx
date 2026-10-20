@@ -7,7 +7,7 @@ import { LocaleSwitcher } from "./LocaleSwitcher.js"
 import { SupatypeIcon } from "./SupatypeLogo.js"
 import { Badge } from "./ui.js"
 import { ConnectModal } from "./ConnectModal.js"
-import { JumpToSearch } from "./JumpToSearch.js"
+import { JumpToSearch, JumpToSearchSheet } from "./JumpToSearch.js"
 import { UserAccountMenu } from "./UserAccountMenu.js"
 
 const FEEDBACK_URL = "https://github.com/supatype/supatype/issues/new/choose"
@@ -141,14 +141,16 @@ export function TopBar({ config, leftItems, extraItems, demoMode, onToggleSideba
         </Badge>
       )}
 
-      {/* Centre: jump-to search (hidden on dashboard where it lives inline) */}
+      {/* Centre: jump-to search (hidden on dashboard where it lives inline). Below `md` it is a
+          button opening a full-width sheet: inline, it was squeezed too narrow to read. */}
       <div className="flex-1 flex items-center justify-center px-4">
         {location.pathname !== "/" && (
-          <div className="w-full max-w-md">
+          <div className="hidden md:block w-full max-w-md">
             <JumpToSearch compact />
           </div>
         )}
       </div>
+      {location.pathname !== "/" && <JumpToSearchSheet className="md:hidden" />}
 
       {/* Right: extra items from extension */}
       {extraItems?.map((Item, i) => (

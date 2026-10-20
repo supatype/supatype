@@ -125,3 +125,45 @@ describe("the phone-width menus", () => {
     expect(sectionOverlay()).toBeNull()
   })
 })
+
+async function typeInto(input: HTMLInputElement, value: string): Promise<void> {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!
+  await act(async () => {
+    setter.call(input, value)
+    input.dispatchEvent(new Event("input", { bubbles: true }))
+  })
+}
+
+function searchSheet(): HTMLElement | null {
+  return document.querySelector<HTMLElement>('[role="dialog"][aria-modal="true"]')
+}
+
+describe("search at phone width", () => {
+  it("the header offers the inline box only from md up, and a search button below it", async () => {
+    await studioAt("/models/page")
+    const inline = document.querySelector<HTMLInputElement>("header input[placeholder='Jump to…']")!
+    expect(inline.closest(".hidden.md\\:block")).not.toBeNull()
+    expect(byLabel("Search")!.className).toContain("md:hidden")
+  })
+
+  it("the button opens a full-width sheet whose results lie in its flow at full width", async () => {
+    await studioAt("/models/page")
+    await click("Search")
+    const sheet = searchSheet()!
+    expect(sheet.className).toContain("max-w-full")
+    const input = sheet.querySelector<HTMLInputElement>("input")!
+    expect(document.activeElement).toBe(input)
+    await typeInto(input, "Users")
+    const row = [...sheet.querySelectorAll("button")].find((b) => b.textContent?.startsWith("Users"))!
+    expect(row.parentElement!.className).not.toContain("absolute")
+  })
+
+  it("choosing a result closes the sheet", async () => {
+    await studioAt("/models/page")
+    await click("Search")
+    await typeInto(searchSheet()!.querySelector<HTMLInputElement>("input")!, "Users")
+    const row = [...searchSheet()!.querySelectorAll("button")].find((b) => b.textContent?.startsWith("Users"))!
+    await act(async () => row.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })))
+    expect(searchSheet()).toBeNull()
+  })
+})
