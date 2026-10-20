@@ -4,6 +4,9 @@ import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { studioGatewayHeaders } from "../lib/studio-gateway-headers.js"
 import { useAdminClient } from "./useAdminClient.js"
 
+/** Sign-in methods the server reports in `external` that are not OAuth providers in `auth.providers`. */
+export const NOT_OAUTH: ReadonlySet<string> = new Set(["email", "phone", "anonymous_users"])
+
 /** What the auth server's public `GET /auth/v1/settings` reports: its effective configuration. */
 export interface AuthSettings {
   /** Provider name to whether it is enabled, as the server spells it (`github`, `anonymous_users`). */

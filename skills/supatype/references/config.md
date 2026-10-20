@@ -74,6 +74,7 @@ export default { server: { mode: "dev" } }
 | `versions.*` | Optional pin for engine, server, postgres, deno. **Omit for Docker `:latest`** |
 | `connection` | Override database URL (else `DATABASE_URL` env) |
 | `auth.providers` | OAuth providers (`github`, `google`, ...): `clientId`, `secret: env("NAME")`, optional `redirectUri`, `url`. See [OAuth providers](#oauth-providers) |
+| `studio.auth.providers` | The OAuth providers Studio's sign-in offers, e.g. `["keycloak"]`. Unset offers every enabled provider. A Studio role is still required. See [Studio sign-in](#studio-sign-in-with-the-projects-providers) |
 | `auth.email.enableConfirmations` | `true` makes a new email sign-up confirm its address before it can sign in. Off when unset: dev auto-confirms. Written as `SUPATYPE_MAILER_AUTOCONFIRM` for docker dev, native dev and the self-host compose file; a value you put in `.env` yourself wins. See [Email confirmation](#email-confirmation) |
 | `api.corsOrigins` | Browser origins allowed to call the API besides `SITE_URL`, e.g. `["https://admin.example.com"]`. `"*"` allows every origin and is never a default. `SUPATYPE_CORS_ALLOW_ORIGINS` in `.env` adds to it; a list saved in Studio (Settings, CORS tab) replaces both until reset (the site URL is always allowed). Dev mode allows every origin |
 
@@ -206,6 +207,29 @@ GOOGLE_SECRET=...
   since it supplies that default.
 - `supatype.local.config.ts` merges per provider, so it can swap in a development OAuth app's
   `clientId` without restating the rest.
+
+### Studio sign-in with the project's providers
+
+Studio's sign-in page offers every OAuth provider the auth server has enabled ("Continue with
+Keycloak", "Continue with GitHub") alongside email and password. Nothing extra is registered with
+the provider: Studio uses the same `/auth/v1/callback`, and the server sends the browser back to
+`<public API URL>/studio/` by itself, whatever `SITE_URL` is (no `SUPATYPE_URI_ALLOW_LIST` entry).
+
+**Signing in is not access.** Studio still needs a Studio role (see Studio roles in
+[self-host](self-host.md#studio-roles)). Somebody who signs in with a provider and has no role sees
+"Access denied" until an admin grants one; nobody gets a role automatically. An existing admin who
+signs in with a provider that returns the same verified email keeps their user and their role.
+
+To offer only some providers on Studio's page:
+
+```typescript
+studio: { auth: { providers: ["keycloak"] } }
+```
+
+Names are the ones `auth.providers` takes (or `custom:<identifier>`); an unknown name is rejected.
+A named provider the server has off is not offered. The list reaches Studio in the Studio
+container's `SUPATYPE_CLOUD_JSON`, so a Studio served by `overrides.studio` offers every enabled
+provider.
 
 ## Email confirmation
 

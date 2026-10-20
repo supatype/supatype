@@ -1,6 +1,6 @@
 import React from "react"
 import { Badge, Card, Td, Th } from "../../components/ui.js"
-import type { AuthSettings } from "../../hooks/useAuthSettings.js"
+import { NOT_OAUTH, type AuthSettings } from "../../hooks/useAuthSettings.js"
 
 /**
  * The read-only table both auth settings pages draw, and the rows they draw in it, so the
@@ -17,9 +17,6 @@ export interface SettingRow {
   /** The supatype.config.ts key that renders `envVar`, when there is one. */
   configKey?: string
 }
-
-/** Sign-in methods the server reports in `external` that are not OAuth providers in `auth.providers`. */
-const NOT_OAUTH = new Set(["email", "phone", "anonymous_users"])
 
 export function enabled(on: boolean): string {
   return on ? "Enabled" : "Disabled"

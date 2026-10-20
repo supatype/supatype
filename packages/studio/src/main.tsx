@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-import React, { useCallback, useEffect, useMemo, useState } from "react"
+import React, { useCallback, useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
 import { BrowserRouter } from "react-router-dom"
 import { StudioCore } from "./StudioCore.js"
@@ -10,7 +10,7 @@ import { StudioAccessGate } from "./components/StudioAccessGate.js"
 import type { AdminConfig } from "./config.js"
 import "./globals.css"
 import { fetchStudioConfig } from "./lib/studio-config-fetch.js"
-import { isShape, isString, optional, type Guard } from "./lib/json.js"
+import { injectedRuntimeConfig } from "./lib/runtime-config.js"
 import { ConfigRefreshOnNavigate, useStudioConfig, type StudioConfigState } from "./hooks/useStudioConfig.js"
 
 /** Match Vite `base` / `import.meta.env.BASE_URL` so Router history URLs include the subpath when hosted under a prefix. */
@@ -21,21 +21,6 @@ function studioBasename(): string | undefined {
 }
 
 const DEMO_SESSION_KEY = "supatype_studio_demo"
-
-type RuntimeConfig = { url?: string; anonKey?: string; serviceRoleKey?: string }
-
-const isRuntimeConfig: Guard<RuntimeConfig> = isShape({
-  url: optional(isString),
-  anonKey: optional(isString),
-  serviceRoleKey: optional(isString),
-})
-
-/** What the hosting page injected as `window.__SUPATYPE_CLOUD__`, or nothing when it injected none. */
-function injectedRuntimeConfig(): RuntimeConfig {
-  if (typeof window === "undefined" || !("__SUPATYPE_CLOUD__" in window)) return {}
-  const injected = window.__SUPATYPE_CLOUD__
-  return isRuntimeConfig(injected) ? injected : {}
-}
 
 const runtimeConfig = injectedRuntimeConfig()
 
@@ -143,6 +128,19 @@ function StudioShell({ client, apiBaseUrl, demoMode, onEnterDemo }: StudioShellP
   )
 }
 
+let authClientSingleton: SupatypeClient | null = null
+
+/**
+ * The one auth client for the page. Built once, not in a `useMemo`: a client finishes the OAuth
+ * sign-in the URL carries when it is constructed, and StrictMode runs a memo twice in development,
+ * so two clients raced to redeem the one PKCE code and the loser wrote a signed-out session over
+ * the winner's.
+ */
+function studioAuthClient(apiBaseUrl: string, anonKey: string): SupatypeClient {
+  authClientSingleton ??= createClient({ url: apiBaseUrl, anonKey, auth: { storageKey: "supatype.auth.session" } })
+  return authClientSingleton
+}
+
 function App(): React.ReactElement {
   const apiBaseUrl = resolveApiBase()
   const anonKey = resolveAnonKey()
@@ -150,15 +148,7 @@ function App(): React.ReactElement {
 
   useEffect(warnIfBrowserServiceRoleKey, [])
 
-  const authClient = useMemo(
-    () =>
-      createClient({
-        url: apiBaseUrl,
-        anonKey,
-        auth: { storageKey: "supatype.auth.session" },
-      }),
-    [apiBaseUrl, anonKey],
-  )
+  const authClient = studioAuthClient(apiBaseUrl, anonKey)
 
   const enterDemo = () => setDemoMode(true)
 

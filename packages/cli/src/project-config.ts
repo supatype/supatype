@@ -6,6 +6,7 @@ import { DEV_DB_PORT_ENV } from "./db-port.js"
 import type { ComponentVersions } from "./components.js"
 import { validateAuthProviders, type AuthProvidersConfig } from "./auth-providers.js"
 import { validateAuthEmail } from "./mailer-autoconfirm.js"
+import { validateStudioAuth, type StudioConfig } from "./studio-auth-config.js"
 import { STUDIO_ROLES, type StudioRole } from "./studio-roles.js"
 import { isJsonObject, isString } from "@supatype/shared"
 import { objectAt } from "./ast-read.js"
@@ -458,6 +459,15 @@ export interface SupatypeProjectConfig {
      */
     livePreview?: Record<string, { url?: string; urlPattern?: string }>
   }
+  /**
+   * Studio's sign-in. Studio offers every OAuth provider the project has enabled; name some to
+   * offer only those. Access still needs a Studio role, however somebody signs in:
+   *
+   * ```ts
+   * studio: { auth: { providers: ["keycloak"] } }
+   * ```
+   */
+  studio?: StudioConfig
 }
 
 // ---------------------------------------------------------------------------
@@ -547,6 +557,7 @@ const MERGE_RULES: { [K in ConfigKey]: MergeFn } = {
   environments: nested("branchDefaults"),
   connection: replace,
   admin: shallow,
+  studio: nested("auth"),
 }
 
 /**
@@ -614,6 +625,7 @@ export function validateProjectConfig(raw: unknown, filename: string): SupatypeP
   validateAuthProviders(cfg, filename)
   validateAuthEmail(cfg, filename)
   validateCorsOrigins(cfg, filename)
+  validateStudioAuth(cfg, filename)
 
   if (!isProjectConfig(cfg)) throw new Error(`${filename}: not a project config`)
   return cfg
