@@ -443,6 +443,22 @@ export class RealtimeServer {
 
     this.channels.subscribe(clientId, subscription)
     this.send(client.ws, { type: "system", status: "ok", message: `subscribed to ${msg.channel}` })
+    this.sendPresenceState(client, msg.channel)
+  }
+
+  /**
+   * Tell a client that just joined `channel` who is already tracked there.
+   *
+   * Presence used to be announced only as it changed, so a member learned of everyone who joined
+   * after it and of nobody who was there first: three people in a lobby read "3 here", "2 here"
+   * and "1 here". The members already present arrive as joins, the same frame every later change
+   * uses, which is what Supabase's `presence_state` does for its newcomers. Sent after the join is
+   * accepted, so the client already holds the channel the frame names.
+   */
+  private sendPresenceState(client: ConnectedClient, channel: string): void {
+    const joins = this.channels.getPresence(channel, client.projectRef)
+    if (joins.length === 0) return
+    this.send(client.ws, { type: "presence", channel, joins, leaves: [] })
   }
 
   private handleDisconnect(clientId: string): void {
