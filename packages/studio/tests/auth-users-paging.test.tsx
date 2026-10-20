@@ -7,7 +7,7 @@ import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { AdminConfigContext } from "../src/hooks/useAdminConfig.js"
 import { mockConfig } from "../src/fixtures/mockConfig.js"
 import { AuthManagement } from "../src/views/AuthManagement.js"
-import { testClient } from "./support.js"
+import { advance, testClient, useVirtualTimeouts } from "./support.js"
 
 /**
  * The Users list reads one page of the auth admin API at a time and searches on the server. It used
@@ -67,15 +67,8 @@ function stubFetch(): void {
   })
 }
 
-async function settle(ms = 0): Promise<void> {
-  for (let i = 0; i < 3; i++) {
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, ms))
-    })
-  }
-}
-
 async function renderUsers(): Promise<void> {
+  useVirtualTimeouts()
   stubFetch()
   container = document.createElement("div")
   document.body.appendChild(container)
@@ -91,7 +84,7 @@ async function renderUsers(): Promise<void> {
       </MemoryRouter>,
     )
   })
-  await settle()
+  await advance()
 }
 
 function searchBox(): HTMLInputElement {
@@ -106,8 +99,8 @@ async function search(value: string): Promise<void> {
     setter?.call(searchBox(), value)
     searchBox().dispatchEvent(new Event("input", { bubbles: true }))
   })
-  // Past the search box's debounce, then let the request land.
-  await settle(150)
+  // Past the search box's 300ms debounce on the virtual clock, then let the request land.
+  await advance(150)
 }
 
 function rowEmails(): string[] {
@@ -126,7 +119,7 @@ async function choose(value: string): Promise<void> {
     select.value = value
     select.dispatchEvent(new Event("change", { bubbles: true }))
   })
-  await settle()
+  await advance()
 }
 
 /** The role, status and provider parameters of the last list request. */
@@ -140,6 +133,7 @@ afterEach(() => {
   root = null
   container?.remove()
   vi.unstubAllGlobals()
+  vi.useRealTimers()
 })
 
 describe("the Users list", () => {
@@ -170,7 +164,7 @@ describe("the Users list", () => {
     await renderUsers()
     expect(container.textContent).toContain("Page 1 of 2 (62)")
     await act(async () => button("Next")?.click())
-    await settle()
+    await advance()
     expect(userCalls.at(-1)?.searchParams.get("page")).toBe("2")
     expect(rowEmails()).toHaveLength(12)
     expect(rowEmails()).toContain(LATE.email)
