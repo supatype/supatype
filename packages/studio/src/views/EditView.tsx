@@ -28,6 +28,9 @@ import { useBooleanStartValues } from "../hooks/useBooleanStartValues.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
 import { fetchRecordForEditing } from "../lib/publishing.js"
 import { duplicateRecord, type RecordDraft } from "../lib/duplicate-record.js"
+import { reportRefusal } from "../lib/write-error.js"
+import { useRefusal } from "../hooks/useRefusal.js"
+import { ErrorBanner } from "../components/ErrorBanner.js"
 
 interface EditViewProps {
   model: ModelConfig
@@ -47,10 +50,10 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
   const { currentLocale, defaultLocale } = useLocale()
   const [values, setValues] = useState<Record<string, unknown>>(draft?.values ?? {})
   const [loading, setLoading] = useState(!!recordId)
-  const [error, setError] = useState<string | null>(null)
-  // Keyed by column. Both sources land here: a bound or constraint Studio checked itself, and a
-  // field validator's refusal from the server, which names the column it refused.
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>(draft?.fieldErrors ?? {})
+  // Field errors are keyed by column. Both sources land there: a bound or constraint Studio checked
+  // itself, and the server's refusal, which names the column it refused where it can.
+  const refusal = useRefusal(draft?.fieldErrors ?? {})
+  const { error, setError, fieldErrors } = refusal
   const [previewOpen, setPreviewOpen] = useState(false)
   // Bumped on every successful save, so the publish bar re-reads the history it summarises. A
   // saved draft changes what that bar should say, and nothing else tells it.
@@ -156,7 +159,7 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
     })()
   }, [client, model, recordId, formNonce])
 
-  const { saving, persist } = useRecordPersist(model, recordId, values, { setError, setFieldErrors })
+  const { saving, persist } = useRecordPersist(model, recordId, values, refusal)
 
   const handleChange = useCallback((fieldName: string, value: unknown) => {
     setDirty(true)
@@ -196,7 +199,7 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
     if (!recordId) return
     try {
       const { error: refused } = await client.from(model.tableName).delete().eq(model.primaryKey, recordId)
-      if (refused) setError(refused.message)
+      if (refused) reportRefusal(refusal, refused, model.fields, values)
       else onNavigate(`/models/${model.name}`)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete")
@@ -277,7 +280,7 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
         </div>
       )}
 
-      {error && <div className="st-error" role="alert">{error}</div>}
+      {error && <ErrorBanner message={error} details={refusal.details} />}
 
       {confirmingDelete && (
         <DeleteQuestion title={title} act={() => { void handleDelete() }} onClose={() => { setConfirmingDelete(false) }} />

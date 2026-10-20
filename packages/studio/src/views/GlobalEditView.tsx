@@ -6,23 +6,13 @@ import { useLocale } from "../hooks/useLocale.js"
 import type { GlobalConfig } from "../config.js"
 import { splitEditFields } from "../lib/edit-field-layout.js"
 import { isJsonObject } from "../lib/json.js"
-import { passesChecks, reportRefusal, type RefusalReport } from "../lib/write-error.js"
+import { clearRefusal, passesChecks, reportRefusal } from "../lib/write-error.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
+import { ErrorBanner } from "../components/ErrorBanner.js"
+import { useRefusal, type Refusal } from "../hooks/useRefusal.js"
 
 interface GlobalEditViewProps {
   global: GlobalConfig
-}
-
-/** What went wrong: the banner's line, and the message under each input it is about. */
-interface Problems extends RefusalReport {
-  error: string | null
-  fieldErrors: Record<string, string>
-}
-
-function useProblems(): Problems {
-  const [error, setError] = useState<string | null>(null)
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
-  return { error, fieldErrors, setError, setFieldErrors }
 }
 
 /** The global's one row. No row yet (406 from `.single()`) is an empty form, not an error. */
@@ -63,7 +53,7 @@ function useGlobalRow(
 function useGlobalSave(
   globalConfig: GlobalConfig,
   values: Record<string, unknown>,
-  problems: Problems,
+  problems: Refusal,
 ): { saving: boolean; save: () => Promise<void> } {
   const client = useAdminClient()
   const [saving, setSaving] = useState(false)
@@ -71,8 +61,7 @@ function useGlobalSave(
   const save = async (): Promise<void> => {
     if (!passesChecks(problems, globalConfig.fields, values)) return
     setSaving(true)
-    problems.setError(null)
-    problems.setFieldErrors({})
+    clearRefusal(problems)
     try {
       const result = await client.from(globalConfig.tableName).upsert(values)
       if (result.error) reportRefusal(problems, result.error, globalConfig.fields, values)
@@ -91,7 +80,7 @@ export function GlobalEditView({ global: globalConfig }: GlobalEditViewProps): R
   useShowsProjectRows()
 
   const { currentLocale, defaultLocale } = useLocale()
-  const problems = useProblems()
+  const problems = useRefusal()
   const { values, setValues, loading } = useGlobalRow(globalConfig, problems.setError)
   const { saving, save } = useGlobalSave(globalConfig, values, problems)
   const handleChange = useCallback((fieldName: string, value: unknown) => {
@@ -103,7 +92,7 @@ export function GlobalEditView({ global: globalConfig }: GlobalEditViewProps): R
   return (
     <div className="st-global-edit">
       <Header title={globalConfig.label} />
-      {problems.error && <div className="st-error" role="alert">{problems.error}</div>}
+      {problems.error && <ErrorBanner message={problems.error} details={problems.details} />}
       <EditFormLayout
         {...splitEditFields(globalConfig.fields, { primaryKey: PRIMARY_KEY, isCreate: false, timestamps: hasTimestamps(globalConfig) })}
         values={values}

@@ -3,7 +3,7 @@ import type { SupatypeClient } from "@supatype/client"
 import type { ModelConfig } from "../config.js"
 import { useAdminClient } from "./useAdminClient.js"
 import { serializeRecordForApi } from "../lib/recordValues.js"
-import { passesChecks, reportRefusal, type RefusalReport } from "../lib/write-error.js"
+import { clearRefusal, passesChecks, reportRefusal, type RefusalReport } from "../lib/write-error.js"
 import { createDraft, createRecord, type RecordError } from "../lib/publishing.js"
 
 /** A write's outcome: the record's id, or why it was refused. */
@@ -60,8 +60,7 @@ export function useRecordPersist(
   const persist = async (): Promise<string | null> => {
     if (!passesChecks(report, model.fields, values, model.constraints ?? [])) return null
     setSaving(true)
-    report.setError(null)
-    report.setFieldErrors({})
+    clearRefusal(report)
     try {
       const written = await write(client, model, recordId, values)
       if (written.error !== null) reportRefusal(report, written.error, model.fields, values)

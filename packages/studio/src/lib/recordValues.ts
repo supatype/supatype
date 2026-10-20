@@ -1,5 +1,6 @@
 import type { FieldConfig, ModelConfig } from "../config.js"
 import { isJsonObject } from "./json.js"
+import { slugifyInput } from "./slugify.js"
 
 /**
  * A blank text value is absent, not empty.
@@ -28,17 +29,31 @@ function keepsBlank(field: FieldConfig | undefined): boolean {
   return field?.widget === "json" || field?.widget === "code"
 }
 
-/** Map Studio relation field names to PostgREST FK column names before insert/update. */
-export function serializeRecordForApi(
-  model: ModelConfig,
-  values: Record<string, unknown>,
-): Record<string, unknown> {
-  const byName = new Map(model.fields.map((f) => [f.name, f]))
-  const out: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(values)) {
-    out[key] = keepsBlank(byName.get(key)) ? value : blankToNull(value)
-  }
+/** The text a slug is made from: the source's own, or its first filled translation. */
+function sourceText(value: unknown): string {
+  if (typeof value === "string") return value
+  if (!isJsonObject(value)) return ""
+  return Object.values(value).find((v): v is string => typeof v === "string" && v.trim() !== "") ?? ""
+}
 
+/**
+ * A blank slug in the write, made from its source field the way the engine's trigger would.
+ *
+ * The trigger fills an empty slug only on INSERT. An UPDATE, and a publish, which copies a draft
+ * into the live row with an UPDATE, leaves it NULL, and the column is NOT NULL. So a slug cleared in
+ * the editor failed the save with raw SQL. A write that does not carry the slug is left without one.
+ */
+function fillBlankSlugs(model: ModelConfig, out: Record<string, unknown>): void {
+  for (const field of model.fields) {
+    if (field.widget !== "slug" || !(field.name in out) || out[field.name] !== null) continue
+    const from = field.options?.["from"]
+    const made = typeof from === "string" ? slugifyInput(sourceText(out[from])) : ""
+    if (made !== "") out[field.name] = made
+  }
+}
+
+/** Move each belongs-to relation's value to the foreign-key column PostgREST writes. */
+function relationsToForeignKeys(model: ModelConfig, out: Record<string, unknown>): void {
   for (const field of model.fields) {
     if (field.widget !== "relation") continue
     if (field.options?.["cardinality"] !== "belongsTo") continue
@@ -53,6 +68,19 @@ export function serializeRecordForApi(
     out[fk] = out[field.name]
     delete out[field.name]
   }
+}
 
+/** Map Studio relation field names to PostgREST FK column names before insert/update. */
+export function serializeRecordForApi(
+  model: ModelConfig,
+  values: Record<string, unknown>,
+): Record<string, unknown> {
+  const byName = new Map(model.fields.map((f) => [f.name, f]))
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(values)) {
+    out[key] = keepsBlank(byName.get(key)) ? value : blankToNull(value)
+  }
+  fillBlankSlugs(model, out)
+  relationsToForeignKeys(model, out)
   return out
 }

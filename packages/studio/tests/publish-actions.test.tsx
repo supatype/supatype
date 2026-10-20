@@ -45,6 +45,8 @@ interface Served {
   row: Record<string, unknown>
   /** The message a DELETE is refused with. Deletes succeed when unset. */
   deleteRefusal?: string
+  /** An RPC refused with this error body (a 400); every other RPC succeeds. */
+  rpcRefusal?: { fn: string; body: Record<string, unknown> }
 }
 
 let rpcs: Rpc[] = []
@@ -84,7 +86,8 @@ function serve(served: Served): void {
     if (rpc !== null) {
       const body = typeof init?.body === "string" ? safeParseJson(init.body) : null
       rpcs.push({ fn: rpc[1] ?? "", body: isJsonObject(body) ? body : {} })
-      return Response.json({})
+      const refused = served.rpcRefusal
+      return refused !== undefined && refused.fn === rpc[1] ? Response.json(refused.body, { status: 400 }) : Response.json({})
     }
     if (init?.method === "DELETE") {
       deletes.push(url)
@@ -442,6 +445,21 @@ describe("the edit view", () => {
     await act(async () => { answer.click() })
     await settle()
     expect(went).toEqual([])
-    expect(document.body.querySelector('[role="alert"]')?.textContent).toContain("permission denied for table posts")
+    expect(document.body.querySelector('[data-ui="error-banner-message"]')?.textContent).toBe("You do not have permission to make this change.")
+    expect(document.body.querySelector('[data-ui="error-banner"] details')?.textContent).toContain("permission denied for table posts")
+  })
+})
+
+/**
+ * Publishing copies the draft into the live row, where the table's NOT NULL holds. A draft saved
+ * with a required field empty is refused there, and the panel showed Postgres's sentence for it.
+ */
+describe("a publish the database refuses", () => {
+  it("says which field is missing, in words", async () => {
+    const notNull = { code: "23502", message: 'null value in column "title" of relation "posts" violates not-null constraint' }
+    await show({ versions: [versionRow(2), live(1)], row: { id: "r1" }, rpcRefusal: { fn: "publish", body: notNull } })
+    await click("Publish changes")
+    const alert = document.body.querySelector('[aria-label="Publishing"] [role="alert"]')?.textContent
+    expect(alert).toBe("title is required")
   })
 })
