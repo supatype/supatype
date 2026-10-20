@@ -8,7 +8,7 @@ import { AdminConfigContext } from "../src/hooks/useAdminConfig.js"
 import { StorageBrowser } from "../src/views/StorageBrowser.js"
 import { MediaLibrary } from "../src/views/MediaLibrary.js"
 import { ImageWidget } from "../src/widgets/ImageWidget.js"
-import { testClient, testConfig, testField } from "./support.js"
+import { advance, testClient, testConfig, testField, useVirtualTimeouts } from "./support.js"
 
 /**
  * Studio's file views read a folder a page at a time and load more on request. They read one page
@@ -57,12 +57,14 @@ async function answer(url: string, init?: RequestInit): Promise<Response> {
   return Response.json([])
 }
 
+/** Lets the requests in flight answer and render. */
 async function settle(): Promise<void> {
-  for (let i = 0; i < 4; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+  await advance(0, 4)
 }
 
 async function mount(ui: React.ReactElement, at: string): Promise<void> {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true
+  useVirtualTimeouts()
   offsets = []
   searches = []
   vi.stubGlobal("fetch", (url: string, init?: RequestInit) => answer(url, init))
@@ -106,7 +108,7 @@ async function search(text: string): Promise<void> {
     setter?.call(input, text)
     input.dispatchEvent(new Event("input", { bubbles: true }))
   })
-  await act(async () => { await new Promise((r) => setTimeout(r, 400)) })
+  await advance(400, 1)
   await settle()
 }
 
@@ -115,6 +117,7 @@ afterEach(() => {
   root = null
   container?.remove()
   vi.unstubAllGlobals()
+  vi.useRealTimers()
 })
 
 function images(): number {

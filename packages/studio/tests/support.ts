@@ -1,3 +1,5 @@
+import { act } from "react"
+import { vi } from "vitest"
 import { createClient, type Session, type SupatypeClient } from "@supatype/client"
 import type { AdminConfig, FieldConfig, ModelConfig } from "../src/config.js"
 import type { ProjectProxy } from "../src/hooks/useProjectProxy.js"
@@ -114,4 +116,22 @@ export function elementOf<T extends Element>(
     throw new Error(`expected ${type.name} at "${selector}", found ${el === null ? "nothing" : el.tagName}`)
   }
   return el
+}
+
+/**
+ * Puts setTimeout on a virtual clock for the rest of the test, so a search box's debounce is passed
+ * by moving the clock rather than by sleeping through it. Under a loaded suite a sleep still costs
+ * its full wall time on top of the rendering, and that is what pushed the paging tests past their
+ * timeout. Undo it with `vi.useRealTimers()` in `afterEach`.
+ */
+export function useVirtualTimeouts(): void {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+}
+
+/**
+ * Moves the virtual clock on by `ms`, `turns` times, each inside act, so a debounce that fires,
+ * the request it starts and the render that answer causes all land before the test looks.
+ */
+export async function advance(ms = 0, turns = 3): Promise<void> {
+  for (let i = 0; i < turns; i++) await act(async () => { await vi.advanceTimersByTimeAsync(ms) })
 }
