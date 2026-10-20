@@ -758,16 +758,16 @@ function IntegrationsSettings(): React.ReactElement {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
       {[
-        { name: "GitHub", desc: "Connect GitHub to enable CI/CD deployments and preview environments.", phase: "Phase 25" },
-        { name: "Vercel", desc: "Sync preview deployments with Vercel for automatic branch previews.", phase: "Phase 25" },
-      ].map(({ name, desc, phase }) => (
+        { name: "GitHub", desc: "Connect GitHub to enable CI/CD deployments and preview environments." },
+        { name: "Vercel", desc: "Sync preview deployments with Vercel for automatic branch previews." },
+      ].map(({ name, desc }) => (
         <Card key={name} className="p-4 space-y-2">
           <div className="flex items-center justify-between">
             <h3 className="font-medium text-foreground">{name}</h3>
-            <Badge variant="yellow">{phase}</Badge>
+            <Badge variant="yellow">Coming soon</Badge>
           </div>
           <p className="text-sm text-muted-foreground">{desc}</p>
-          <Button disabled>Coming Soon</Button>
+          <Button disabled>Connect</Button>
         </Card>
       ))}
     </div>

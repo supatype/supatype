@@ -15,6 +15,9 @@ import { AdminConfigContext } from "../hooks/useAdminConfig.js"
 import { useListFreshness } from "../hooks/useListFreshness.js"
 import { RefreshControls } from "../components/RefreshControls.js"
 import type { QueryBuilder } from "@supatype/client"
+import type { FieldConfig } from "../config.js"
+import { explainRefusal, fieldErrorOf, type Explained, type RefusalInput } from "../lib/database-refusal.js"
+import { useRefusal } from "../hooks/useRefusal.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -237,6 +240,11 @@ function insertValues(columns: readonly ColumnInfo[], values: Record<string, str
   return record
 }
 
+/** A table's columns as the fields a refusal is placed on, each labelled by its own name. */
+function columnFields(columns: readonly ColumnInfo[]): FieldConfig[] {
+  return columns.map((c) => ({ name: c.name, label: c.name, widget: "text", required: !c.nullable, localized: false }))
+}
+
 // ─── New Record Form ──────────────────────────────────────────────────────────
 
 function NewRecordForm({
@@ -245,7 +253,8 @@ function NewRecordForm({
   onCancel,
 }: {
   table: TableInfo
-  onSave: (record: Record<string, unknown>) => void
+  /** Insert the row: null when it went in, or the refusal, placed under its column when it names one. */
+  onSave: (record: Record<string, unknown>) => Promise<Explained | null>
   onCancel: () => void
 }): React.ReactElement {
   const editableColumns = table.columns.filter((c) => !c.default_value || !c.is_primary)
@@ -258,7 +267,7 @@ function NewRecordForm({
   })
   const [errors, setErrors] = useState<Record<string, string>>({})
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const newErrors: Record<string, string> = {}
     for (const col of editableColumns) {
       if (!col.nullable && !col.default_value && !values[col.name]?.trim()) {
@@ -269,7 +278,8 @@ function NewRecordForm({
       setErrors(newErrors)
       return
     }
-    onSave(insertValues(editableColumns, values))
+    const refused = await onSave(insertValues(editableColumns, values))
+    setErrors(fieldErrorOf(refused))
   }
 
   return (
@@ -328,7 +338,7 @@ function NewRecordForm({
         ))}
       </div>
       <div className="mt-4">
-        <Button variant="primary" onClick={handleSave}>Insert Row</Button>
+        <Button variant="primary" onClick={() => { void handleSave() }}>Insert Row</Button>
       </div>
     </Card>
   )
@@ -457,7 +467,9 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
   const [rows, setRows] = useState<Record<string, unknown>[]>([])
   const [totalCount, setTotalCount] = useState(0)
   const [loading, setLoading] = useState(false)
-  const [rowsError, setRowsError] = useState<string | null>(null)
+  // A read's failure, or a write's refusal in plain words with the server's text as details.
+  const rowsProblem = useRefusal()
+  const { error: rowsError, setError: setRowsError } = rowsProblem
 
   // Pagination
   const [page, setPage] = useState(0)
@@ -497,6 +509,14 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
   // Current table info
   const currentTable = useMemo(() => (tables ?? []).find((t) => t.name === selectedTable), [tables, selectedTable])
   const columns = currentTable?.columns ?? []
+
+  /** Report a refused write in plain words, placed on the column it names; the explanation, for a form. */
+  const refuse = (error: RefusalInput, values: Record<string, unknown>): Explained => {
+    const explained = explainRefusal(error, columnFields(columns), values)
+    setRowsError(explained.banner)
+    rowsProblem.setDetails(explained.details)
+    return explained
+  }
 
   // Filtered tables
   const filteredTables = tableSearch
@@ -592,7 +612,7 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
       .update({ [editingCell.col]: newValue })
       .eq(pkColumn, row[pkColumn])
     if (error) {
-      setRowsError(error.message)
+      refuse(error, { [editingCell.col]: newValue })
     } else {
       setRows((prev) =>
         prev.map((r) =>
@@ -628,7 +648,7 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
       .delete()
       .in(pkColumn, ids)
     if (error) {
-      setRowsError(error.message)
+      refuse(error, {})
     } else {
       setSelectedIds(new Set())
       freshness.refresh()
@@ -644,7 +664,7 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
       .delete()
       .eq(pkColumn, id)
     if (error) {
-      setRowsError(error.message)
+      refuse(error, {})
     } else {
       freshness.refresh()
       refetchTables()
@@ -652,17 +672,15 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
   }
 
   // New record
-  const handleNewRecord = async (record: Record<string, unknown>) => {
+  const handleNewRecord = async (record: Record<string, unknown>): Promise<Explained | null> => {
     const { error } = await client
       .from(selectedTable)
       .insert(record)
-    if (error) {
-      setRowsError(error.message)
-    } else {
-      setShowNewRecord(false)
-      freshness.refresh()
-      refetchTables()
-    }
+    if (error) return refuse(error, record)
+    setShowNewRecord(false)
+    freshness.refresh()
+    refetchTables()
+    return null
   }
 
   // Relation navigation
@@ -854,7 +872,7 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
         {/* Row-level errors */}
         {rowsError ? (
           <div className="mb-3">
-            <ErrorBanner message={rowsError} onRetry={freshness.refresh} />
+            <ErrorBanner message={rowsError} details={rowsProblem.details} onRetry={freshness.refresh} />
           </div>
         ) : null}
 

@@ -18,11 +18,21 @@ export function usesSessionProxy(client: { url: string }): boolean {
  */
 export function studioAuthHeaders(client: SupatypeClient): Record<string, string> {
   const mode = actingModeHeaders(client.url)
-  const token = client.auth.currentAccessToken
-  if (token !== null && token.length > 0) {
+  const token = signedInToken(client)
+  if (token !== "") {
     return { Authorization: `Bearer ${token}`, apikey: token, ...mode }
   }
   return mode
+}
+
+/**
+ * The signed-in Studio user's access token, or "" when nobody is signed in.
+ *
+ * What every request builder (the REST explorer, a model's API page, Invoke) starts from, so the
+ * first request goes out as the person at the keyboard rather than anonymous.
+ */
+export function signedInToken(client: SupatypeClient): string {
+  return client.auth.currentAccessToken ?? ""
 }
 
 /** PostgREST / Kong fetch headers (auth + optional profile headers). */

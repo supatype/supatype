@@ -97,7 +97,12 @@ async function save(): Promise<void> {
 }
 
 function banner(): string | null {
-  return container.querySelector(".st-error")?.textContent ?? null
+  return container.querySelector('[data-ui="error-banner-message"]')?.textContent ?? null
+}
+
+/** The server's own text behind the banner's details toggle. */
+function details(): string | null {
+  return container.querySelector('[data-ui="error-banner"] details')?.textContent ?? null
 }
 
 function fieldError(name: string): string | null {
@@ -138,11 +143,20 @@ describe("saving Site settings", () => {
     expect(banner()).toBe("Venue needs a valid point: latitude must be between -90 and 90")
   })
 
-  it("leaves a refusal it cannot place in the banner as the server worded it", async () => {
+  it("says a refusal it cannot place in plain words, with the server's text as details", async () => {
     stubFetch({ status: 403, body: { code: "42501", message: "permission denied for table _global_site_settings" } })
     await open()
     await save()
-    expect(banner()).toBe("permission denied for table _global_site_settings")
+    expect(banner()).toBe("You do not have permission to make this change.")
+    expect(details()).toContain("permission denied for table _global_site_settings")
     expect(fieldError("venue")).toBeNull()
+  })
+
+  it("never shows raw SQL for a refusal it has no words for", async () => {
+    stubFetch({ status: 500, body: { code: "40001", message: "could not serialize access due to concurrent update" } })
+    await open()
+    await save()
+    expect(banner()).toBe("The database refused this change.")
+    expect(details()).toContain("could not serialize access")
   })
 })
