@@ -61,7 +61,6 @@ export function CodeMirrorEditor({
   useEffect(() => { onBlurRef.current = onBlur }, [onBlur])
 
   // Mount once: editor owns its own state
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!containerRef.current) return
 

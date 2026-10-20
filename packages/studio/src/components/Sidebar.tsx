@@ -66,92 +66,144 @@ interface SidebarProps {
   /** Nav item ids this user may not use (see {@link hiddenNavItems}). */
   hiddenItems?: ReadonlySet<string> | undefined
   className?: string | undefined
+  /**
+   * The phone-width menu the burger opens. Its labels always show beside the icons: the docked
+   * rail reveals them on hover, and a touch screen has no hover, so the drawer was icons only.
+   */
+  drawer?: boolean | undefined
   /** @deprecated No longer used */
   collapsed?: boolean | undefined
   /** @deprecated No longer used */
   onCollapsedChange?: ((collapsed: boolean) => void) | undefined
 }
 
+function isNavActive(item: NavItemDef, path: string): boolean {
+  switch (item.id) {
+    case "dashboard":
+      return path === "/" || path === ""
+    case "models":
+      return path === "/models" || path.startsWith("/models/")
+    case "database":
+      return path.startsWith("/database")
+    case "auth":
+      return path.startsWith("/authentication")
+    case "observability":
+      return path.startsWith("/observability")
+    case "ai":
+      return path.startsWith("/ai")
+    default:
+      if (item.href === "/") return path === "/" || path === ""
+      return path === item.href || path.startsWith(`${item.href}/`)
+  }
+}
+
+function isSettingsActive(path: string): boolean {
+  return path === "/settings" || path.startsWith("/settings/") || path.startsWith("/api")
+}
+
+/** What every item in one sidebar shares: whether labels show, and how to go somewhere. */
+interface ItemContext {
+  expanded: boolean
+  onNavigate: (href: string) => void
+}
+
+interface SidebarItemProps extends ItemContext {
+  icon: React.ReactNode
+  label: string
+  href: string
+  active: boolean
+  /** The left border that marks the active entry. Settings, pinned apart from the list, has none. */
+  marker?: boolean
+}
+
+function SidebarItem({ icon, label, href, active, expanded, onNavigate, marker = true }: SidebarItemProps): React.ReactElement {
+  return (
+    <div className="px-1">
+      <button
+        type="button"
+        title={!expanded ? label : undefined}
+        onClick={() => onNavigate(href)}
+        aria-current={active ? "page" : undefined}
+        className={cn(
+          "flex items-center w-full rounded-md transition-colors",
+          "hover:bg-accent hover:text-accent-foreground",
+          expanded ? "gap-2.5 px-2 py-1.5" : "justify-center p-2",
+          active ? "bg-accent text-foreground" : "text-muted-foreground",
+          marker && "border-l-2",
+          marker && (active ? "border-l-primary" : "border-l-transparent"),
+        )}
+      >
+        <span className={cn("shrink-0", active ? "opacity-100" : "opacity-60")}>{icon}</span>
+        {expanded && (
+          <>
+            <span className="flex-1 text-left text-[13px] truncate">{label}</span>
+            <span className="shrink-0 opacity-30"><IconChevronRight /></span>
+          </>
+        )}
+      </button>
+    </div>
+  )
+}
+
+function navItem(entry: NavItemDef, path: string, ctx: ItemContext): React.ReactElement {
+  return (
+    <SidebarItem key={entry.id} {...ctx} icon={<Icon name={entry.icon} size={16} />} label={entry.label} href={entry.href} active={isNavActive(entry, path)} />
+  )
+}
+
+function BuiltInEntries({ hiddenItems, path, ctx }: { hiddenItems: ReadonlySet<string> | undefined; path: string; ctx: ItemContext }): React.ReactElement {
+  return (
+    <>
+      {PRIMARY_NAV_ENTRIES.map((entry) => navItem(entry, path, ctx))}
+      {SECONDARY_NAV_ENTRIES.map((entry, i) => {
+        if (entry === "separator") return <div key={`sep-${i}`} className="my-1 mx-3 border-t border-border/50" />
+        if (hiddenItems?.has(entry.id) === true) return null
+        return navItem(entry, path, ctx)
+      })}
+    </>
+  )
+}
+
+function ExtraSections({ sections, path, ctx }: { sections: SidebarSection[] | undefined; path: string; ctx: ItemContext }): React.ReactElement | null {
+  if (!sections || sections.length === 0) return null
+  return (
+    <>
+      <div className="my-1 mx-3 border-t border-border/50" />
+      {sections.map((section) => (
+        <div key={section.title}>
+          {ctx.expanded && (
+            <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
+              {section.title}
+            </div>
+          )}
+          {section.items.map((item) => (
+            <SidebarItem key={item.href} {...ctx} icon={<Icon name={item.icon} size={16} />} label={item.label} href={item.href} active={path === item.href || path.startsWith(`${item.href}/`)} />
+          ))}
+        </div>
+      ))}
+    </>
+  )
+}
+
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
 
-export function Sidebar({ config, extraSections, hiddenItems, className }: SidebarProps): React.ReactElement {
+export function Sidebar({ extraSections, hiddenItems, className, drawer = false }: SidebarProps): React.ReactElement {
   const navigate = useNavigate()
-  const location = useLocation()
-  const path = location.pathname
-  const [expanded, setExpanded] = useState(false)
-
-  function isActive(item: NavItemDef): boolean {
-    switch (item.id) {
-      case "dashboard":
-        return path === "/" || path === ""
-      case "models":
-        return path === "/models" || path.startsWith("/models/")
-      case "database":
-        return path.startsWith("/database")
-      case "auth":
-        return path.startsWith("/authentication")
-      case "observability":
-        return path.startsWith("/observability")
-      case "ai":
-        return path.startsWith("/ai")
-      default:
-        if (item.href === "/") return path === "/" || path === ""
-        return path === item.href || path.startsWith(`${item.href}/`)
-    }
-  }
-
-  const settingsActive =
-    path === "/settings" ||
-    path.startsWith("/settings/") ||
-    path.startsWith("/api")
-
-  function NavItem({ icon, label, href, active }: {
-    icon: string | undefined
-    label: string
-    href: string
-    active: boolean
-  }): React.ReactElement {
-    return (
-      <div className="px-1">
-        <button
-          type="button"
-          title={!expanded ? label : undefined}
-          onClick={() => { navigate(href); setExpanded(false) }}
-          aria-current={active ? "page" : undefined}
-          className={cn(
-            "flex items-center w-full rounded-md transition-colors border-l-2",
-            "hover:bg-accent hover:text-accent-foreground",
-            expanded ? "gap-2.5 px-2 py-1.5" : "justify-center p-2",
-            active
-              ? "bg-accent text-foreground border-l-primary"
-              : "text-muted-foreground border-l-transparent",
-          )}
-        >
-          <span className={cn("shrink-0", active ? "opacity-100" : "opacity-60")}>
-            <Icon name={icon} size={16} />
-          </span>
-          {expanded && (
-            <>
-              <span className="flex-1 text-left text-[13px] truncate">{label}</span>
-              <span className="shrink-0 opacity-30"><IconChevronRight /></span>
-            </>
-          )}
-        </button>
-      </div>
-    )
-  }
+  const path = useLocation().pathname
+  const [hovered, setHovered] = useState(false)
+  const expanded = drawer || hovered
+  const ctx: ItemContext = { expanded, onNavigate: (href) => { navigate(href); setHovered(false) } }
 
   return (
     // Reserve 52px in the layout, panel floats over content when expanded
     <aside
-      className={cn("relative shrink-0 w-[52px] h-full", className)}
+      className={cn("relative shrink-0 h-full", drawer ? "w-[220px]" : "w-[52px]", className)}
       role="navigation"
       aria-label="Studio navigation"
     >
-      {/* Floating panel: always 52px, expands to 220px on hover, overlays content */}
+      {/* Floating panel: 52px, expanding to 220px on hover over the content; always 220px as a drawer */}
       <div
-        onMouseEnter={() => setExpanded(true)}
-        onMouseLeave={() => setExpanded(false)}
+        {...(!drawer && { onMouseEnter: () => setHovered(true), onMouseLeave: () => setHovered(false) })}
         className={cn(
           "absolute top-0 left-0 h-full flex flex-col bg-background border-r border-border/80 z-50",
           "transition-[width] duration-200 ease-in-out overflow-hidden",
@@ -159,84 +211,12 @@ export function Sidebar({ config, extraSections, hiddenItems, className }: Sideb
         )}
       >
         <div className="flex-1 overflow-y-auto py-2" style={{ scrollbarWidth: "none" }}>
-          {PRIMARY_NAV_ENTRIES.map((entry) => (
-            <NavItem
-              key={entry.id}
-              icon={entry.icon}
-              label={entry.label}
-              href={entry.href}
-              active={isActive(entry)}
-            />
-          ))}
-          {SECONDARY_NAV_ENTRIES.map((entry, i) => {
-            if (entry === "separator") {
-              return <div key={`sep-${i}`} className="my-1 mx-3 border-t border-border/50" />
-            }
-            if (hiddenItems?.has(entry.id) === true) return null
-            return (
-              <NavItem
-                key={entry.id}
-                icon={entry.icon}
-                label={entry.label}
-                href={entry.href}
-                active={isActive(entry)}
-              />
-            )
-          })}
-
-          {extraSections && extraSections.length > 0 && (
-            <>
-              <div className="my-1 mx-3 border-t border-border/50" />
-              {extraSections.map((section) => (
-                <div key={section.title}>
-                  {expanded && (
-                    <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
-                      {section.title}
-                    </div>
-                  )}
-                  {section.items.map((item) => (
-                    <NavItem
-                      key={item.href}
-                      icon={item.icon}
-                      label={item.label}
-                      href={item.href}
-                      active={path === item.href || path.startsWith(`${item.href}/`)}
-                    />
-                  ))}
-                </div>
-              ))}
-            </>
-          )}
+          <BuiltInEntries hiddenItems={hiddenItems} path={path} ctx={ctx} />
+          <ExtraSections sections={extraSections} path={path} ctx={ctx} />
         </div>
-
         {/* Pinned: Settings */}
-        <div className="border-t border-border shrink-0">
-          <div className="px-1 py-2">
-            <button
-              type="button"
-              title={!expanded ? "Settings" : undefined}
-              onClick={() => { navigate("/settings"); setExpanded(false) }}
-              aria-current={settingsActive ? "page" : undefined}
-              className={cn(
-                "flex items-center w-full rounded-md transition-colors",
-                "hover:bg-accent hover:text-accent-foreground",
-                expanded ? "gap-2.5 px-2 py-1.5" : "justify-center p-2",
-                settingsActive
-                  ? "bg-accent text-foreground"
-                  : "text-muted-foreground",
-              )}
-            >
-              <span className={cn("shrink-0", settingsActive ? "opacity-100" : "opacity-60")}>
-                <IconSettings size={16} />
-              </span>
-              {expanded && (
-                <>
-                  <span className="flex-1 text-left text-[13px] truncate">Settings</span>
-                  <span className="shrink-0 opacity-30"><IconChevronRight /></span>
-                </>
-              )}
-            </button>
-          </div>
+        <div className="border-t border-border shrink-0 py-2">
+          <SidebarItem {...ctx} icon={<IconSettings size={16} />} label="Settings" href="/settings" active={isSettingsActive(path)} marker={false} />
         </div>
       </div>
     </aside>

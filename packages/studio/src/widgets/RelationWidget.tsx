@@ -227,7 +227,6 @@ function ModelRelationPreview({ target, recordId }: { target: string; recordId: 
         setError(e instanceof Error ? e.message : "Failed to load")
       })
       .finally(() => setLoading(false))
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [target, recordId])
 
   if (loading) return <div className="st-slideover-loading">Loading…</div>
@@ -418,7 +417,6 @@ export function RelationWidget({ config, value, onChange, readOnly }: WidgetProp
         })
       }
     })()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedKey, target, targetSchema, displayField, isAuthUser])
 
   useEffect(() => {

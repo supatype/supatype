@@ -1,18 +1,19 @@
 "use client"
 
-import React, { useState, useEffect, useMemo } from "react"
+import React, { useEffect, useMemo } from "react"
 import { Routes, Route, Navigate, Outlet, useNavigate, useLocation, useParams } from "react-router-dom"
-import type { StudioCoreProps } from "./types.js"
+import type { StudioCoreProps, StudioExtension } from "./types.js"
+import type { AdminConfig } from "./config.js"
 import { AdminConfigContext, useAdminConfig } from "./hooks/useAdminConfig.js"
+import { useMobileNav, type MobileNav } from "./hooks/useMobileNav.js"
 import { AdminClientContext, useAdminClient } from "./hooks/useAdminClient.js"
 import { LocaleContext, useLocaleState } from "./hooks/useLocale.js"
 import { CloudUrlContext } from "./hooks/useCloudUrl.js"
 import { PlatformCtx } from "./hooks/usePlatform.js"
 import { Sidebar, getPageBreadcrumbs, hiddenNavItems } from "./components/Sidebar.js"
 import { useStudioCapability } from "./hooks/useStudioCapability.js"
-import { SecondaryPanel } from "./components/SecondaryPanel.js"
+import { SecondaryPanel, SectionPanelToggle, hasSectionNav } from "./components/SecondaryPanel.js"
 import { TertiaryNav } from "./components/TertiaryNav.js"
-import { IconList } from "./components/icons.js"
 import { TopBar } from "./components/TopBar.js"
 import {
   ElevatedModeBanner,
@@ -81,32 +82,81 @@ import { StoragePoliciesView } from "./views/storage/PoliciesView.js"
 // ─── Studio Layout ─────────────────────────────────────────────────────────────
 
 interface StudioLayoutProps {
-  extensions?: import("./types.js").StudioExtension | undefined
+  extensions?: StudioExtension | undefined
   demoMode?: boolean | undefined
 }
 
-function StudioLayout({ extensions, demoMode }: StudioLayoutProps): React.ReactElement {
-  const location = useLocation()
-  const configCtx = React.useContext(AdminConfigContext)
+/** Keeps the browser tab's title on the current page's breadcrumbs. */
+function useDocumentTitle(config: AdminConfig | null, pathname: string): void {
+  useEffect(() => {
+    if (!config) return
+    const crumbs = getPageBreadcrumbs(pathname, config)
+    const appName = config.branding?.appName ?? "Supatype Studio"
+    document.title = [...crumbs, appName].join(" | ")
+  }, [pathname, config])
+}
+
+interface StudioNavProps {
+  config: AdminConfig
+  extensions: StudioExtension | undefined
+  mobileNav: MobileNav
+}
+
+/**
+ * Tiers 1 and 2: the primary icon sidebar and the section's own panel.
+ *
+ * From `md` up both are docked. Below it each is an overlay at the same place, and
+ * {@link useMobileNav} keeps at most one of them open.
+ */
+function StudioNav({ config, extensions, mobileNav }: StudioNavProps): React.ReactElement {
   const capability = useStudioCapability()
   const hiddenNav = useMemo(() => hiddenNavItems(capability), [capability])
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-  // Tier 2 is docked from `md` up; below that it is an overlay this owns, because the
-  // toggle lives in the tier-3 rail and the panel is a sibling of it.
-  const [sectionPanelOpen, setSectionPanelOpen] = useState(false)
+  const sidebarProps = { config, extraSections: extensions?.sidebarSections, hiddenItems: hiddenNav }
+  return (
+    <>
+      <Sidebar {...sidebarProps} className="hidden md:flex" />
+      {mobileNav.open === "primary" && (
+        <>
+          <div className="fixed inset-0 bg-black/40 z-40 md:hidden" onClick={mobileNav.close} aria-hidden="true" />
+          <Sidebar {...sidebarProps} drawer className="fixed top-14 left-0 h-[calc(100vh-56px)] z-50 md:hidden" />
+        </>
+      )}
+      <SecondaryPanel open={mobileNav.open === "section"} onClose={mobileNav.close} />
+    </>
+  )
+}
 
-  // Close mobile sidebar on navigation
-  useEffect(() => {
-    setSidebarOpen(false)
-  }, [location.pathname])
+/** The page itself, under the notices that describe it. */
+function StudioMain(): React.ReactElement {
+  return (
+    <main
+      id="studio-main"
+      className="flex-1 overflow-y-auto p-6 bg-[hsl(var(--canvas))]"
+    >
+      {/* Reading past RLS is legitimate but must never be silent: an empty table
+          should never leave you guessing whether it means "no rows" or "no rows
+          you can see". Inside the content column, not above the chrome, because
+          it describes what is on this page and full-width it displaced the nav.
+          Renders only while a view showing project rows is mounted, see
+          `useShowsProjectRows`. */}
+      <ElevatedModeBanner />
+      {/* Unlike the notices beside it, mounted for every view: a refused or failed schema
+          push is a claim about the whole project's schema, true on every screen while it
+          shows, and it clears itself once a push applies. */}
+      <SchemaPushNotice />
+      {/* On Cloud, a member with no linked project login is refused project rows;
+          this says why where they would be, and links the login. */}
+      <LinkAccountPrompt />
+      <Outlet />
+    </main>
+  )
+}
 
-  // Sync document.title with current route
-  useEffect(() => {
-    if (!configCtx) return
-    const crumbs = getPageBreadcrumbs(location.pathname, configCtx)
-    const appName = configCtx.branding?.appName ?? "Supatype Studio"
-    document.title = [...crumbs, appName].join(" | ")
-  }, [location.pathname, configCtx])
+function StudioLayout({ extensions, demoMode }: StudioLayoutProps): React.ReactElement {
+  const { pathname } = useLocation()
+  const configCtx = React.useContext(AdminConfigContext)
+  const mobileNav = useMobileNav()
+  useDocumentTitle(configCtx, pathname)
 
   if (!configCtx) {
     return (
@@ -119,83 +169,23 @@ function StudioLayout({ extensions, demoMode }: StudioLayoutProps): React.ReactE
   return (
     <ElevatedNoticeProvider>
     <div className="flex flex-col h-screen bg-background overflow-hidden">
-      {/* Full-width top bar */}
       <TopBar
         config={configCtx}
         leftItems={extensions?.topBarLeftItems}
         extraItems={extensions?.topBarItems}
         demoMode={demoMode}
-        onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+        onToggleSidebar={() => mobileNav.toggle("primary")}
       />
-
-      {/* 3-tier nav: primary icon sidebar + secondary panel + content */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Tier 1: icon-only sidebar (hover-expands as overlay) */}
-        <Sidebar
-          config={configCtx}
-          extraSections={extensions?.sidebarSections}
-          hiddenItems={hiddenNav}
-          className="hidden md:flex"
-        />
-
-        {/* Mobile sidebar overlay */}
-        {sidebarOpen && (
-          <>
-            <div
-              className="fixed inset-0 bg-black/40 z-40 md:hidden"
-              onClick={() => setSidebarOpen(false)}
-            />
-            <Sidebar
-              config={configCtx}
-              extraSections={extensions?.sidebarSections}
-              hiddenItems={hiddenNav}
-              className="fixed top-14 left-0 h-[calc(100vh-56px)] z-50 md:hidden"
-            />
-          </>
-        )}
-
-        {/* Tier 2: vertical secondary panel (section-specific items) */}
-        <SecondaryPanel
-          open={sectionPanelOpen}
-          onClose={() => setSectionPanelOpen(false)}
-        />
-
-        {/* Tier 3 + content column */}
+        <StudioNav config={configCtx} extensions={extensions} mobileNav={mobileNav} />
+        {/* Tier 3, the section item's own tabs, over the content */}
         <div className="flex flex-col flex-1 overflow-hidden">
-          {/* Tier 3: horizontal tertiary nav (sub-items within a section item) */}
           <TertiaryNav
-            leading={
-              <button
-                type="button"
-                onClick={() => setSectionPanelOpen((v) => !v)}
-                aria-expanded={sectionPanelOpen}
-                aria-label="Toggle section navigation"
-                className="md:hidden mr-1 h-8 w-8 shrink-0 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent"
-              >
-                <IconList size={16} />
-              </button>
-            }
+            leading={hasSectionNav(pathname)
+              ? <SectionPanelToggle open={mobileNav.open === "section"} onToggle={() => mobileNav.toggle("section")} />
+              : undefined}
           />
-          <main
-            id="studio-main"
-            className="flex-1 overflow-y-auto p-6 bg-[hsl(var(--canvas))]"
-          >
-            {/* Reading past RLS is legitimate but must never be silent: an empty table
-                should never leave you guessing whether it means "no rows" or "no rows
-                you can see". Inside the content column, not above the chrome, because
-                it describes what is on this page and full-width it displaced the nav.
-                Renders only while a view showing project rows is mounted, see
-                `useShowsProjectRows`. */}
-            <ElevatedModeBanner />
-            {/* Unlike the notices beside it, mounted for every view: a refused or failed schema
-                push is a claim about the whole project's schema, true on every screen while it
-                shows, and it clears itself once a push applies. */}
-            <SchemaPushNotice />
-            {/* On Cloud, a member with no linked project login is refused project rows;
-                this says why where they would be, and links the login. */}
-            <LinkAccountPrompt />
-            <Outlet />
-          </main>
+          <StudioMain />
         </div>
       </div>
     </div>
