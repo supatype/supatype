@@ -25,13 +25,14 @@ export function lastOrder(reads: readonly URL[]): string | null {
   return reads.at(-1)?.searchParams.get("order") ?? null
 }
 
-export async function renderList(model: ModelConfig): Promise<ListHarness> {
+/** `model`'s list, whose every read answers with `rows`: none by default. */
+export async function renderList(model: ModelConfig, rows: Array<Record<string, unknown>> = []): Promise<ListHarness> {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true
   const reads: URL[] = []
   vi.stubGlobal("fetch", async (raw: string) => {
     const url = new URL(raw)
     if (url.pathname.endsWith(`/rest/v1/${model.tableName}`)) reads.push(url)
-    return Response.json([])
+    return Response.json(rows)
   })
   const container = document.createElement("div")
   document.body.appendChild(container)

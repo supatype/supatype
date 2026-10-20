@@ -18,6 +18,7 @@ import type { QueryBuilder } from "@supatype/client"
 import type { FieldConfig } from "../config.js"
 import { explainRefusal, fieldErrorOf, type Explained, type RefusalInput } from "../lib/database-refusal.js"
 import { useRefusal } from "../hooks/useRefusal.js"
+import { UuidCell } from "../components/UuidCell.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -402,32 +403,29 @@ function CellValue({
     )
   }
 
-  // Foreign key relation link
   if (column.is_foreign_key && column.references && typeof value === "string") {
-    const [refTable] = column.references.split(".")
-    return (
-      <button
-        className="text-primary hover:underline text-[0.8rem] font-mono"
-        onClick={() => onRelationClick?.(refTable!, String(value))}
-        title={`View in ${refTable}`}
-      >
-        {String(value).slice(0, 8)}...
-      </button>
-    )
+    return <RelationCell id={value} references={column.references} onRelationClick={onRelationClick} />
   }
+  return <PlainCell value={value} column={column} />
+}
 
-  // Enum dropdown display
-  if (column.enum_values) {
-    const colorMap: Record<string, "green" | "yellow" | "red"> = {
-      draft: "yellow",
-      published: "green",
-      archived: "red",
-    }
-    const variant = colorMap[String(value)] ?? "blue"
-    return <Badge variant={variant}>{String(value)}</Badge>
-  }
+/** A foreign key: a link to the row it names in the table it references. */
+function RelationCell({ id, references, onRelationClick }: {
+  id: string
+  references: string
+  onRelationClick: ((table: string, id: string) => void) | undefined
+}): React.ReactElement {
+  const refTable = references.split(".")[0] ?? references
+  const link = { title: `View in ${refTable}`, open: () => onRelationClick?.(refTable, id) }
+  return <span className="text-[0.8rem]"><UuidCell value={id} link={link} /></span>
+}
 
-  // JSON tree
+/** Badge colours for the publishing states an enum column commonly holds; any other value is blue. */
+const ENUM_VARIANTS: Record<string, "green" | "yellow" | "red"> = { draft: "yellow", published: "green", archived: "red" }
+
+/** A value that is neither an image nor a foreign key, as its column's type reads. */
+function PlainCell({ value, column }: { value: unknown; column: ColumnInfo }): React.ReactElement {
+  if (column.enum_values) return <Badge variant={ENUM_VARIANTS[String(value)] ?? "blue"}>{String(value)}</Badge>
   if (isJsonValue(value)) {
     return (
       <div className="font-mono text-[0.7rem]">
@@ -435,13 +433,10 @@ function CellValue({
       </div>
     )
   }
-
-  // Date formatting
   if (column.type === "timestamptz" || column.type === "timestamp") {
     return <span className="text-[0.8rem] text-muted-foreground">{new Date(String(value)).toLocaleString()}</span>
   }
-
-  return <span className="text-[0.8rem]">{String(value)}</span>
+  return <span className="text-[0.8rem]"><UuidCell value={String(value)} /></span>
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────

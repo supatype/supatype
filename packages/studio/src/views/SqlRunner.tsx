@@ -12,6 +12,7 @@ import { ElevatedNotice } from "../components/ElevatedModeBanner.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { useStudioCapability } from "../hooks/useStudioCapability.js"
 import { sqlEditorOffered } from "../lib/sql-editor-access.js"
+import { UuidCell } from "../components/UuidCell.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -607,7 +608,7 @@ function SqlEditorView(): React.ReactElement {
                                       {JSON.stringify(row[col])}
                                     </code>
                                   ) : (
-                                    String(row[col])
+                                    <UuidCell value={String(row[col])} />
                                   )}
                                 </Td>
                               ))}

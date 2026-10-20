@@ -4,6 +4,7 @@ import { SlidePanel } from "./SlidePanel.js"
 import { Badge, Select } from "./ui.js"
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard.js"
 import { ConnectionStringPanel } from "./database/ConnectionStringPanel.js"
+import { IconCheck, IconCopy } from "./icons.js"
 
 type Tab = "sdk" | "direct" | "mcp"
 type Framework = "nextjs" | "react" | "vue" | "svelte" | "solid" | "vanilla"
@@ -25,24 +26,6 @@ interface ConnectModalProps {
   onClose: () => void
 }
 
-// ── Icons ─────────────────────────────────────────────────────────────────────
-
-function CopyIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect width="14" height="14" x="8" y="8" rx="2" ry="2" /><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
-    </svg>
-  )
-}
-
-function CheckIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="20 6 9 17 4 12" />
-    </svg>
-  )
-}
-
 function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
   const { copied, copy } = useCopyToClipboard()
   return (
@@ -52,7 +35,7 @@ function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) 
       className="flex items-center gap-1.5 px-2 py-1 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0"
       aria-label="Copy to clipboard"
     >
-      {copied ? <CheckIcon /> : <CopyIcon />}
+      {copied ? <IconCheck /> : <IconCopy />}
       {copied ? "Copied!" : label}
     </button>
   )
