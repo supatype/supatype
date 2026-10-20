@@ -427,6 +427,11 @@ export class AuthClient {
       /** Default: `implicit` (web-compatible). Pass `pkce` for mobile / RN. */
       flowType?: AuthFlowType | undefined
       scopes?: string | undefined
+      /**
+       * Extra `/authorize` query parameters, as supabase-js takes them. The flow's own (`provider`,
+       * `redirect_to`, `scopes`, the PKCE challenge) are set after these and cannot be replaced.
+       */
+      queryParams?: Record<string, string> | undefined
     } | undefined
   }): Promise<{
     data: { url: string; provider: string }
@@ -440,6 +445,9 @@ export class AuthClient {
     }
     await this.writeFlowItem(PROVIDER_SUFFIX, opts.provider)
     const url = this.endpoint("/authorize", opts.options?.redirectTo)
+    for (const [key, value] of Object.entries(opts.options?.queryParams ?? {})) {
+      if (!url.searchParams.has(key)) url.searchParams.set(key, value)
+    }
     url.searchParams.set("provider", opts.provider)
     if (opts.options?.scopes !== undefined) {
       url.searchParams.set("scopes", opts.options.scopes)

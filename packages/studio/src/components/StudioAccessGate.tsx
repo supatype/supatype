@@ -5,9 +5,11 @@ import { createClient } from "@supatype/client"
 import React, { useMemo } from "react"
 import { StudioAuthClientContext } from "../hooks/useAdminClient.js"
 import { actingModeHeaders } from "../lib/acting-mode.js"
-import { useStudioAccess } from "../hooks/useStudioAccess.js"
+import { useStudioAccess, type UseStudioAccessReturn } from "../hooks/useStudioAccess.js"
 import { useStudioAuth } from "../hooks/useStudioAuth.js"
+import { useStudioOAuthSignIn } from "../hooks/useStudioOAuthSignIn.js"
 import { StudioLogin } from "../views/StudioLogin.js"
+import { Button } from "./ui.js"
 
 /** Both clients read and write the one session, under this key. */
 const STUDIO_SESSION_KEY = "supatype.auth.session"
@@ -81,66 +83,61 @@ function StudioAccessGateInner({
     [apiBaseUrl, anonKey, userId],
   )
 
-  if (phase === "loading") {
-    return (
-      <div className="flex items-center justify-center h-screen bg-background">
-        <div className="text-muted-foreground text-sm">Checking access…</div>
-      </div>
-    )
-  }
-
-  if (phase === "login") {
-    return (
-      <StudioLogin
-        apiBaseUrl={apiBaseUrl}
-        onSubmit={async (email, password) => {
-          const { error } = await signIn(email, password)
-          return { error: error?.message ?? null }
-        }}
-      />
-    )
-  }
-
-  if (phase === "forbidden") {
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-background px-6 py-12 text-center">
-        <div className="max-w-md space-y-4">
-          <h1 className="text-lg font-semibold text-foreground">Access denied</h1>
-          <p className="text-sm text-muted-foreground">
-            {forbiddenMessage ?? "You don't have permission to access the admin panel."}
-          </p>
-          <div className="flex flex-col gap-2 sm:flex-row sm:justify-center">
-            <button
-              type="button"
-              onClick={() => void signOut()}
-              className="inline-flex h-9 items-center justify-center rounded-md border border-input bg-background px-4 text-sm"
-            >
-              Sign out
-            </button>
-            <button
-              type="button"
-              onClick={retryVerify}
-              className="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground"
-            >
-              Retry
-            </button>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
+  if (phase === "login") return <StudioSignInPage connection={{ apiBaseUrl, anonKey, authClient }} signIn={signIn} />
+  if (phase === "forbidden") return <AccessDenied message={forbiddenMessage} signOut={signOut} retry={retryVerify} />
   // Ready, but the session has not reached this component yet. One more paint of the same waiting
   // state, rather than a client built with nobody in it.
-  if (proxyClient === null) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-background">
-        <div className="text-muted-foreground text-sm">Checking access…</div>
-      </div>
-    )
-  }
-
+  if (phase === "loading" || proxyClient === null) return <CheckingAccess />
   return children(proxyClient)
+}
+
+function CheckingAccess(): React.ReactElement {
+  return (
+    <div className="flex items-center justify-center h-screen bg-background">
+      <div className="text-muted-foreground text-sm">Checking access…</div>
+    </div>
+  )
+}
+
+type GateConnection = Pick<StudioAccessGateProps, "apiBaseUrl" | "anonKey" | "authClient">
+
+/** The sign-in page: email and password, and the project's OAuth providers. */
+function StudioSignInPage({ connection, signIn }: { connection: GateConnection; signIn: UseStudioAccessReturn["signIn"] }): React.ReactElement {
+  const oauth = useStudioOAuthSignIn(connection.apiBaseUrl, connection.anonKey, connection.authClient)
+  return (
+    <StudioLogin
+      apiBaseUrl={connection.apiBaseUrl}
+      signIn={{
+        providers: oauth.providers,
+        initialError: oauth.redirectError,
+        withProvider: oauth.signInWithProvider,
+        withPassword: async (email, password) => {
+          const { error } = await signIn(email, password)
+          return { error: error?.message ?? null }
+        },
+      }}
+    />
+  )
+}
+
+/** Signed in, with no Studio role: however they signed in, a role is what lets them in. */
+function AccessDenied({ message, signOut, retry }: { message: string | null; signOut(): Promise<void>; retry(): void }): React.ReactElement {
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center bg-background px-6 py-12 text-center">
+      <div className="max-w-md space-y-4">
+        <h1 className="text-lg font-semibold text-foreground">Access denied</h1>
+        <p className="text-sm text-muted-foreground">{message ?? "You don't have permission to access the admin panel."}</p>
+        <div className="flex flex-col gap-2 sm:flex-row sm:justify-center">
+          <Button type="button" size="md" className="justify-center" onClick={() => void signOut()}>
+            Sign out
+          </Button>
+          <Button type="button" variant="primary" size="md" className="justify-center" onClick={retry}>
+            Retry
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export function StudioAccessGate(props: StudioAccessGateProps): React.ReactElement {

@@ -255,6 +255,24 @@ describe("AuthClient.signInWithOAuth()", () => {
 
     expect(data.url).toContain("redirect_to=")
   })
+
+  it("adds queryParams to /authorize without letting them replace the flow's own", async () => {
+    vi.stubGlobal("fetch", vi.fn())
+
+    const { data } = await freshClient().signInWithOAuth({
+      provider: "keycloak",
+      options: {
+        flowType: "pkce",
+        queryParams: { studio: "1", provider: "github", code_challenge: "forged" },
+      },
+    })
+
+    const query = new URL(data.url).searchParams
+    expect(query.get("studio")).toBe("1")
+    expect(query.getAll("provider")).toEqual(["keycloak"])
+    expect(query.getAll("code_challenge")).toHaveLength(1)
+    expect(query.get("code_challenge")).not.toBe("forged")
+  })
 })
 
 describe("AuthClient.signOut()", () => {
