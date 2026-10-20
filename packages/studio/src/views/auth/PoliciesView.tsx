@@ -2,13 +2,17 @@ import React, { useCallback, useMemo, useState } from "react"
 import { isStudioAdminSchema, useProjectProxy } from "../../hooks/useProjectProxy.js"
 import { usePolicyWrites } from "../../hooks/usePolicyWrites.js"
 import { PolicyCreatePanel, type PolicyTarget } from "../../components/database/PolicyCreatePanel.js"
+import { ManualPolicyWarning, PolicyTableCard, rlsIsOn, type PolicyTableActions } from "../../components/database/PolicyTable.js"
 import { useSqlEditorOffered } from "../../hooks/useSqlEditorOffered.js"
 import { useSchemaPicker } from "../../hooks/useSchemaPicker.js"
 import { useApiQuery } from "../../hooks/useApiQuery.js"
-import { Badge, Button, Card } from "../../components/ui.js"
+import { Button, Dialog, Select, Textarea } from "../../components/ui.js"
 import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 import { isJsonObject } from "../../lib/json.js"
+import { cellText } from "../metadata-row.js"
+
+type Row = Record<string, unknown>
 
 /** Match server-side identifier rules so schema hints stay safe in SQL text. */
 function safeSchemaName(schema: string): string {
@@ -17,272 +21,154 @@ function safeSchemaName(schema: string): string {
   return schema.toLowerCase()
 }
 
-function rowText(row: Record<string, unknown>, ...keys: string[]): string {
-  for (const k of keys) {
-    const v = row[k]
-    if (v !== undefined && v !== null) return String(v)
-  }
-  for (const [k, v] of Object.entries(row)) {
-    for (const want of keys) {
-      if (k.toLowerCase() === want.toLowerCase() && v !== undefined && v !== null) return String(v)
-    }
-  }
-  return ""
-}
-
-function normalizePolicyRows(raw: unknown): Record<string, unknown>[] {
+function jsonRows(raw: unknown): Row[] {
   return Array.isArray(raw) ? raw.filter(isJsonObject) : []
 }
 
-function describeAppliesTo(row: Record<string, unknown>): string {
-  const cmd = rowText(row, "cmd").toUpperCase()
-  const withCheck = rowText(row, "with_check")
-  const qual = rowText(row, "qual")
-  const expr = (withCheck || qual || "").trim()
-  const low = expr.toLowerCase()
-
-  if (expr === "" || low === "true") return "Public"
-  if (low === "false") return "No one"
-  if (low.includes("auth.uid() is not null")) return "Logged in"
-
-  const ownerMatch = expr.match(/auth\.uid\(\)\s*=\s*([a-zA-Z_][a-zA-Z0-9_]*)/)
-  if (ownerMatch) return `Owner (${ownerMatch[1]})`
-
-  const roleSingleMatch = expr.match(/auth\.role\(\)\s*=\s*'([^']+)'/)
-  if (roleSingleMatch) return `Role: ${roleSingleMatch[1]}`
-
-  const roleAnyMatch = expr.match(/auth\.role\(\)\s*=\s*ANY\(ARRAY\[(.+)\]\)/i)
-  if (roleAnyMatch) {
-    const roleList = roleAnyMatch[1] ?? ""
-    const roles = Array.from(roleList.matchAll(/'([^']+)'/g)).map((m) => m[1]).filter((r): r is string => typeof r === "string")
-    if (roles.length > 0) return `Roles: ${roles.join(", ")}`
+/** Policies by the table they guard, in the order the catalogue listed them. */
+function groupByTable(policies: Row[]): Map<string, Row[]> {
+  const grouped = new Map<string, Row[]>()
+  for (const p of policies) {
+    const table = cellText(p, "tablename") || "(unknown)"
+    grouped.set(table, [...(grouped.get(table) ?? []), p])
   }
+  return grouped
+}
 
-  if (cmd === "INSERT" && withCheck) return "Custom (insert check)"
-  return "Custom"
+const POLICY_TEMPLATE = (schema: string): string =>
+  `CREATE POLICY my_policy ON ${schema}.my_table\n  AS PERMISSIVE\n  FOR ALL\n  TO authenticated\n  USING (true)\n  WITH CHECK (true);`
+
+/** The schema's policies and row security, read through the metadata catalogue (RQ3b). */
+function usePolicyCatalogue(schemaSql: string) {
+  const proxy = useProjectProxy()
+  const policies = useApiQuery(() => proxy.metadata("policies", { schema: schemaSql }).then((r) => r.rows), [proxy, schemaSql])
+  const rls = useApiQuery(() => proxy.metadata("rls_status", { schema: schemaSql }).then((r) => r.rows), [proxy, schemaSql])
+  const { refetch } = policies
+  const refetchRls = rls.refetch
+  const refresh = useCallback(() => { refetch(); refetchRls() }, [refetch, refetchRls])
+  const grouped = useMemo(() => groupByTable(jsonRows(policies.data)), [policies.data])
+  const rlsMap = useMemo(() => new Map(jsonRows(rls.data).map((r) => [cellText(r, "tablename"), rlsIsOn(r)])), [rls.data])
+  return { grouped, rlsMap, loading: policies.loading, error: policies.error, refresh }
+}
+
+/** The SQL a write on a schema outside `/studio-admin` runs, shown for the user to edit and run. */
+function useSqlDraft(schemaSql: string, onRan: () => void) {
+  const proxy = useProjectProxy()
+  const [text, setText] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const close = (): void => { setText(null); setError(null) }
+  const run = async (): Promise<void> => {
+    setBusy(true)
+    setError(null)
+    try {
+      await proxy.sql(text ?? "", schemaSql)
+      close()
+      onRan()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return { text, setText, error, busy, close, run }
+}
+
+type SqlDraft = ReturnType<typeof useSqlDraft>
+
+function SqlDraftDialog({ draft }: { draft: SqlDraft }): React.ReactElement | null {
+  if (draft.text === null) return null
+  return (
+    <Dialog
+      title="SQL"
+      actions={<><Button onClick={draft.close}>Cancel</Button><Button variant="primary" disabled={draft.busy} onClick={() => { void draft.run() }}>{draft.busy ? "Running…" : "Run SQL"}</Button></>}
+    >
+      <Textarea aria-label="SQL" className="min-h-[140px] resize-y" value={draft.text} onChange={(e) => { draft.setText(e.target.value) }} />
+      {draft.error ? <p className="text-xs text-destructive">{draft.error}</p> : null}
+    </Dialog>
+  )
+}
+
+type Catalogue = ReturnType<typeof usePolicyCatalogue>
+
+/** Every table the view has seen in this schema, with or without a policy yet. */
+function knownTables(catalogue: Catalogue): string[] {
+  return [...new Set([...catalogue.rlsMap.keys(), ...catalogue.grouped.keys()])].filter((t) => t !== "").sort()
+}
+
+/**
+ * The writes the view offers, on whichever route the schema takes. The SQL editor's login cannot
+ * alter auth or storage tables, so those go through `/studio-admin` (SQ2); any other schema keeps
+ * the SQL editor's route, and a drop or a new policy there is SQL the user reviews before it runs.
+ */
+function usePolicyEditing(schemaSql: string, catalogue: Catalogue) {
+  const proxy = useProjectProxy()
+  const writes = usePolicyWrites(catalogue.refresh)
+  const draft = useSqlDraft(schemaSql, catalogue.refresh)
+  const [createTarget, setCreateTarget] = useState<PolicyTarget | null>(null)
+  const adminSchema = isStudioAdminSchema(schemaSql) ? schemaSql : null
+  const actionsFor = (table: string): PolicyTableActions => ({
+    toggleRls: (enable) => {
+      if (adminSchema) void writes.toggleRls(adminSchema, table, enable)
+      else void writes.run(() => proxy.sql(`ALTER TABLE ${schemaSql}.${table} ${enable ? "ENABLE" : "DISABLE"} ROW LEVEL SECURITY;`, schemaSql))
+    },
+    drop: (name) => {
+      if (adminSchema) void writes.dropPolicy(adminSchema, table, name)
+      else draft.setText(`DROP POLICY ${name} ON ${schemaSql}.${table};`)
+    },
+  })
+  const create = (): void => {
+    if (adminSchema) setCreateTarget({ schema: adminSchema, tables: knownTables(catalogue) })
+    else draft.setText(POLICY_TEMPLATE(schemaSql))
+  }
+  return { writeError: writes.writeError, draft, createTarget, setCreateTarget, actionsFor, create }
+}
+
+function PolicyTables({ catalogue, schemaSql, actionsFor }: { catalogue: Catalogue; schemaSql: string; actionsFor: ((table: string) => PolicyTableActions) | null }): React.ReactElement {
+  if (catalogue.loading) {
+    return <div className="space-y-2">{[1, 2, 3].map((i) => <div key={i} className="h-10 rounded-md bg-muted animate-pulse" />)}</div>
+  }
+  if (catalogue.grouped.size === 0) {
+    return <EmptyState title="No policies" description={`No RLS policies found in schema "${schemaSql}".`} />
+  }
+  return (
+    <div className="space-y-4">
+      {[...catalogue.grouped.entries()].map(([name, policies]) => (
+        <PolicyTableCard
+          key={name}
+          table={{ name, label: name, rlsEnabled: catalogue.rlsMap.get(name) ?? false, policies }}
+          actions={actionsFor ? actionsFor(name) : null}
+        />
+      ))}
+    </div>
+  )
 }
 
 export function PoliciesView(): React.ReactElement {
-  const proxy = useProjectProxy()
   // Writes are open to the SQL editor's roles only, on whichever route they take (RQ4, SQ2).
   const sqlWrites = useSqlEditorOffered()
   const { schemas, schema, setSchema } = useSchemaPicker()
   const schemaSql = useMemo(() => safeSchemaName(schema), [schema])
-  const [createModal, setCreateModal] = useState(false)
-  const [manualPolicyWarningOpen, setManualPolicyWarningOpen] = useState(false)
-  const [sqlText, setSqlText] = useState("")
-  const [runError, setRunError] = useState<string | null>(null)
-  const [runBusy, setRunBusy] = useState(false)
-  const [createTarget, setCreateTarget] = useState<PolicyTarget | null>(null)
-
-  // Reads go through the metadata catalogue (RQ3b), so a viewer sees the policies too.
-  const { data: policies, loading, error, refetch } = useApiQuery(
-    () => proxy.metadata("policies", { schema: schemaSql }).then((r) => r.rows),
-    [proxy, schemaSql],
-  )
-  const { data: rlsStatus, refetch: refetchRls } = useApiQuery(
-    () => proxy.metadata("rls_status", { schema: schemaSql }).then((r) => r.rows),
-    [proxy, schemaSql],
-  )
-  const refresh = useCallback(() => { refetch(); refetchRls() }, [refetch, refetchRls])
-  const writes = usePolicyWrites(refresh)
-  // The SQL editor's login cannot alter auth or storage tables, so those writes go through
-  // `/studio-admin` (SQ2); any other schema keeps the SQL editor's route.
-  const adminSchema = isStudioAdminSchema(schemaSql) ? schemaSql : null
-
-  const policyRows = useMemo(() => normalizePolicyRows(policies), [policies])
-
-  const rlsMap = useMemo(() => {
-    const rows = Array.isArray(rlsStatus) ? rlsStatus : []
-    return new Map(rows.map((r) => [rowText(r as Record<string, unknown>, "tablename"), (r as Record<string, unknown>)["rls_enabled"] === true || (r as Record<string, unknown>)["rls_enabled"] === "t"]))
-  }, [rlsStatus])
-
-  const grouped = useMemo(() => {
-    const m = new Map<string, Record<string, unknown>[]>()
-    for (const p of policyRows) {
-      const t = rowText(p, "tablename") || "(unknown)"
-      if (!m.has(t)) m.set(t, [])
-      m.get(t)!.push(p)
-    }
-    return m
-  }, [policyRows])
-
-  /** Every table the view has seen in this schema, with or without a policy yet. */
-  const knownTables = useMemo(() => [...new Set([...rlsMap.keys(), ...grouped.keys()])].filter((t) => t !== "").sort(), [rlsMap, grouped])
-
-  async function runSql() {
-    setRunBusy(true)
-    setRunError(null)
-    try {
-      await proxy.sql(sqlText, schemaSql)
-      setCreateModal(false)
-      refetch()
-    } catch (e) {
-      setRunError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setRunBusy(false)
-    }
-  }
-
-  function toggleRls(table: string, enable: boolean): Promise<void> {
-    if (adminSchema) return writes.toggleRls(adminSchema, table, enable)
-    return writes.run(() => proxy.sql(`ALTER TABLE ${schemaSql}.${table} ${enable ? "ENABLE" : "DISABLE"} ROW LEVEL SECURITY;`, schemaSql))
-  }
-
-  function dropPolicy(table: string, name: string): void {
-    if (adminSchema) {
-      void writes.dropPolicy(adminSchema, table, name)
-      return
-    }
-    setSqlText(`DROP POLICY ${name} ON ${schemaSql}.${table};`)
-    setCreateModal(true)
-  }
-
-  function openCreate(): void {
-    setManualPolicyWarningOpen(false)
-    if (adminSchema) {
-      setCreateTarget({ schema: adminSchema, tables: knownTables })
-      return
-    }
-    setSqlText(`CREATE POLICY my_policy ON ${schemaSql}.my_table\n  AS PERMISSIVE\n  FOR ALL\n  TO authenticated\n  USING (true)\n  WITH CHECK (true);`)
-    setCreateModal(true)
-  }
-
+  const catalogue = usePolicyCatalogue(schemaSql)
+  const editing = usePolicyEditing(schemaSql, catalogue)
+  const [warningOpen, setWarningOpen] = useState(false)
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <h1 className="text-xl font-semibold text-foreground">Policies</h1>
-          <select value={schema} onChange={(e) => setSchema(e.target.value)} className="px-2 py-1 text-sm rounded-md border border-border bg-background text-foreground focus:outline-none">
+          <Select aria-label="Schema" value={schema} onChange={(e) => { setSchema(e.target.value) }}>
             {(schemas.length > 0 ? schemas : [schema]).map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
+          </Select>
         </div>
-        {sqlWrites ? (
-          <Button variant="primary" onClick={() => { setManualPolicyWarningOpen(true) }}>
-            Create policy
-          </Button>
-        ) : null}
+        {sqlWrites ? <Button variant="primary" onClick={() => { setWarningOpen(true) }}>Create policy</Button> : null}
       </div>
-
-      {error && <ErrorBanner message={error} />}
-      {writes.writeError && <ErrorBanner message={writes.writeError} />}
-
-      {loading ? (
-        <div className="space-y-2">{[1, 2, 3].map((i) => <div key={i} className="h-10 rounded-md bg-muted animate-pulse" />)}</div>
-      ) : policyRows.length === 0 ? (
-        <EmptyState title="No policies" description={`No RLS policies found in schema "${schemaSql}".`} />
-      ) : (
-        <div className="space-y-4">
-          {Array.from(grouped.entries()).map(([tableName, tablePolicies]) => {
-            const rlsEnabled = rlsMap.get(tableName) ?? false
-            return (
-              <Card key={tableName}>
-                <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-muted/40">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-sm font-medium text-foreground">{tableName}</span>
-                    <Badge variant={rlsEnabled ? "green" : "red"}>{rlsEnabled ? "RLS on" : "RLS off"}</Badge>
-                  </div>
-                  {sqlWrites ? (
-                    <Button
-                      size="xs"
-                      variant={rlsEnabled ? "destructive" : "primary"}
-                      onClick={() => { void toggleRls(tableName, !rlsEnabled) }}
-                    >
-                      {rlsEnabled ? "Disable RLS" : "Enable RLS"}
-                    </Button>
-                  ) : null}
-                </div>
-                <table className="w-full text-sm table-fixed">
-                  <colgroup>
-                    <col className="w-[18%]" />
-                    <col className="w-[10%]" />
-                    <col className="w-[14%]" />
-                    <col className="w-[36%]" />
-                    <col className="w-[12%]" />
-                    <col className="w-[10%]" />
-                  </colgroup>
-                  <thead>
-                    <tr className="border-b border-border">
-                      <th className="text-left px-4 py-2 text-xs font-medium text-muted-foreground">Policy</th>
-                      <th className="text-left px-4 py-2 text-xs font-medium text-muted-foreground">Command</th>
-                      <th className="text-left px-4 py-2 text-xs font-medium text-muted-foreground">Permissive</th>
-                      <th className="text-left px-4 py-2 text-xs font-medium text-muted-foreground">Expression</th>
-                      <th className="text-left px-4 py-2 text-xs font-medium text-muted-foreground">Applies to</th>
-                      <th className="px-4 py-2" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {tablePolicies?.map((p, rowIdx) => {
-                      const pname = rowText(p, "policyname")
-                      const withCheck = rowText(p, "with_check")
-                      const qual = rowText(p, "qual")
-                      const exprLabel = withCheck ? "WITH CHECK" : "USING"
-                      const expr = withCheck || qual || "(none)"
-                      return (
-                      <tr key={`${pname || "policy"}-${rowIdx}`} className="border-b border-border last:border-0">
-                        <td className="px-4 py-2.5 font-mono text-xs text-foreground">{pname || "-"}</td>
-                        <td className="px-4 py-2.5"><Badge variant="blue">{rowText(p, "cmd") || "-"}</Badge></td>
-                        <td className="px-4 py-2.5"><Badge variant={rowText(p, "permissive") === "PERMISSIVE" ? "green" : "yellow"}>{rowText(p, "permissive") || "-"}</Badge></td>
-                        <td className="px-4 py-2.5">
-                          <div className="inline-flex items-center gap-2">
-                            <Badge variant="blue">{exprLabel}</Badge>
-                            <code className="text-xs text-foreground truncate max-w-full inline-block align-middle">{expr}</code>
-                          </div>
-                        </td>
-                        <td className="px-4 py-2.5 text-xs text-muted-foreground">{describeAppliesTo(p)}</td>
-                        <td className="px-4 py-2.5 text-right">
-                          {sqlWrites ? (<button type="button" className="text-xs text-destructive hover:underline" onClick={() => { dropPolicy(tableName, pname) }}>Drop</button>) : null}
-                        </td>
-                      </tr>
-                    )})}
-                  </tbody>
-                </table>
-              </Card>
-            )
-          })}
-        </div>
-      )}
-
-      {createModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-card border border-border rounded-lg p-6 w-full max-w-lg space-y-4 shadow-xl">
-            <h2 className="text-base font-semibold text-foreground">SQL</h2>
-            <textarea className="w-full font-mono text-sm px-3 py-2 rounded-md border border-border bg-background text-foreground focus:outline-none min-h-[140px] resize-y" value={sqlText} onChange={(e) => setSqlText(e.target.value)} />
-            {runError && <p className="text-xs text-destructive">{runError}</p>}
-            <div className="flex justify-end gap-2">
-              <Button onClick={() => { setCreateModal(false); setRunError(null) }}>Cancel</Button>
-              <Button variant="primary" disabled={runBusy} onClick={() => { void runSql() }}>{runBusy ? "Running…" : "Run SQL"}</Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <PolicyCreatePanel
-        target={createTarget}
-        onClose={(created) => { setCreateTarget(null); if (created) refresh() }}
-      />
-
-      {manualPolicyWarningOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-card border border-border rounded-lg p-6 w-full max-w-xl space-y-4 shadow-xl">
-            <h2 className="text-base font-semibold text-foreground">Manual policy warning</h2>
-            <p className="text-sm text-muted-foreground">
-              It is strongly recommended to define row-level security policies in your schema so migrations
-              remain reproducible and reviewable.
-            </p>
-            <p className="text-sm text-muted-foreground">
-              If you create policies manually in Studio, you do so at your own risk. Manual policies may
-              interact with generated policies in unexpected ways.
-            </p>
-            <div className="flex justify-end gap-2">
-              <Button onClick={() => setManualPolicyWarningOpen(false)}>Cancel</Button>
-              <Button variant="primary" onClick={openCreate}>
-                I understand, continue
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      {catalogue.error && <ErrorBanner message={catalogue.error} />}
+      {editing.writeError && <ErrorBanner message={editing.writeError} />}
+      <PolicyTables catalogue={catalogue} schemaSql={schemaSql} actionsFor={sqlWrites ? editing.actionsFor : null} />
+      <SqlDraftDialog draft={editing.draft} />
+      <PolicyCreatePanel target={editing.createTarget} onClose={(created) => { editing.setCreateTarget(null); if (created) catalogue.refresh() }} />
+      {warningOpen ? <ManualPolicyWarning subject="row-level security policies" onCancel={() => { setWarningOpen(false) }} onContinue={() => { setWarningOpen(false); editing.create() }} /> : null}
     </div>
   )
 }

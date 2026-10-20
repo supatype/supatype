@@ -83,11 +83,19 @@ async function render(view: React.ReactElement, rows: Catalogue): Promise<void> 
   await settle()
 }
 
-async function click(label: string): Promise<void> {
-  const button = [...document.body.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim() === label)
+async function click(label: string, scope: ParentNode = document.body): Promise<void> {
+  const button = [...scope.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim() === label)
   if (!button) throw new Error(`no button "${label}"`)
   await act(async () => { button.click() })
   await settle()
+}
+
+/** Disables RLS and answers yes to the question that follows. */
+async function disableRls(): Promise<void> {
+  await click("Disable RLS")
+  const asking = document.body.querySelector("[role=alertdialog]")
+  if (!asking) throw new Error("Disable RLS did not ask")
+  await click("Disable RLS", asking)
 }
 
 /** Types into the control labelled `label`, as a person would. */
@@ -145,7 +153,7 @@ const POLICY_VIEWS: Array<[string, () => React.ReactElement, "auth" | "storage",
 describe.each(POLICY_VIEWS)("%s write through /studio-admin", (_label, view, schema, table) => {
   it("switches RLS through /studio-admin/rls", async () => {
     await render(view(), catalogue(schema, table))
-    await click("Disable RLS")
+    await disableRls()
     expect(writes()).toEqual([{ path: "/studio-admin/rls", body: { schema, table, enable: false } }])
   })
 
@@ -179,7 +187,7 @@ describe.each(POLICY_VIEWS)("%s write through /studio-admin", (_label, view, sch
 describe("Auth policies on a schema the admin routes do not cover", () => {
   it("still switches RLS through the SQL editor's route", async () => {
     await render(<AuthPoliciesView />, catalogue("public", "todos"))
-    await click("Disable RLS")
+    await disableRls()
     expect(writes().map((c) => c.path)).toEqual(["/sql"])
   })
 })
