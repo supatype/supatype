@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from "react"
+import React, { useState, useCallback, useEffect, useRef } from "react"
 import { useSearchParams } from "react-router-dom"
 import { useStudioClient } from "../StudioCore.js"
 import { useApiQuery, type ApiQueryResult } from "../hooks/useApiQuery.js"
@@ -270,6 +270,11 @@ interface UserDetailActions {
   onRevokeSession: (sessionId: string) => void
   /** Undefined when the viewer may not administer users, so the action is not offered. */
   onConfirmEmail: (() => void) | undefined
+  /**
+   * Why the last action was refused, said right above the action buttons: a drawer listing many
+   * sessions is scrolled to its bottom to reach them, out of sight of its top.
+   */
+  refusal: string | null
 }
 
 function UserDetail({
@@ -281,7 +286,7 @@ function UserDetail({
   sessions: AuthSession[]
   actions: UserDetailActions
 }): React.ReactElement {
-  const { onToggleDisable, onEdit, onDelete, onRevokeSession, onConfirmEmail } = actions
+  const { onToggleDisable, onEdit, onDelete, onRevokeSession, onConfirmEmail, refusal } = actions
   const userSessions = sessions.filter((s) => s.user_id === user.id)
 
   return (
@@ -413,7 +418,8 @@ function UserDetail({
       </div>
 
       {/* Actions */}
-      <div className="flex gap-2 flex-wrap">
+      {refusal !== null ? <RefusalNotice message={refusal} /> : null}
+      <div data-user-actions="" className="flex gap-2 flex-wrap">
         <Button onClick={onEdit}>Edit User</Button>
         {!user.confirmed && onConfirmEmail ? <Button onClick={onConfirmEmail}>Confirm email</Button> : null}
         <Button onClick={onToggleDisable}>
@@ -424,6 +430,15 @@ function UserDetail({
       </div>
     </div>
   )
+}
+
+/** A refused action's reason, brought into view: it can appear below the drawer's visible part. */
+function RefusalNotice({ message }: { message: string }): React.ReactElement {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    ref.current?.scrollIntoView?.({ block: "nearest" })
+  }, [message])
+  return <div ref={ref}><ErrorBanner message={message} /></div>
 }
 
 /**
@@ -913,13 +928,15 @@ export function AuthManagement(): React.ReactElement {
   }
 
   const panelOpen = selectedUser !== null || editingUser !== null || showCreateForm || showInviteForm
-  // Shown inside the panel while it is open, since it covers the page.
+  // Shown inside the panel while it is open, since it covers the page. A user's detail says it
+  // above its own actions instead.
   const actionBanner = actionError ? <div className="mb-4"><ErrorBanner message={actionError} /></div> : null
+  const showingDetail = !editingUser && !showCreateForm && !showInviteForm
   const panelTitle = editingUser ? "Edit User"
     : showCreateForm ? "Create User"
     : showInviteForm ? "Invite User"
     : selectedUser?.email ?? ""
-  const panelSubtitle = !editingUser && !showCreateForm && !showInviteForm
+  const panelSubtitle = showingDetail
     ? selectedUser?.id
     : undefined
 
@@ -1086,8 +1103,8 @@ export function AuthManagement(): React.ReactElement {
         subtitle={panelSubtitle}
         width="max-w-[560px]"
       >
-        {actionBanner}
-        {selectedUser && !editingUser && !showCreateForm && !showInviteForm && (
+        {showingDetail ? null : actionBanner}
+        {selectedUser && showingDetail && (
           <UserDetail
             user={selectedUser}
             sessions={sessions}
@@ -1100,6 +1117,7 @@ export function AuthManagement(): React.ReactElement {
               onConfirmEmail: studioAccess.canManageMembers
                 ? () => runAction(() => handleConfirmEmail(selectedUser.id))
                 : undefined,
+              refusal: actionError,
             }}
           />
         )}

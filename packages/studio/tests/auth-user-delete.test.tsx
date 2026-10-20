@@ -114,4 +114,14 @@ describe("deleting a user from the drawer", () => {
     expect(deletes).toHaveLength(1)
     expect(drawer().textContent).toContain(LAST_ADMIN)
   })
+
+  it("says the refusal right above the actions, where the button was pressed", async () => {
+    // Live on kitchen-sink the drawer lists every session, so a refusal at its top was scrolled out
+    // of sight of the Delete User button at its bottom.
+    await openAda(true)
+    await deleteAda("Delete")
+    const actions = button(drawer(), "Delete User").closest("[data-user-actions]")
+    expect(actions?.previousElementSibling?.textContent).toContain(LAST_ADMIN)
+    expect(drawer().textContent?.split(LAST_ADMIN)).toHaveLength(2)
+  })
 })
