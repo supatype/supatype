@@ -293,12 +293,26 @@ export class RealtimeClient {
     this.forgetJoins()
   }
 
-  /** Every join belonged to the socket that just went away; the next one has to make its own. */
+  /**
+   * Every join belonged to the socket that just went away; the next one has to make its own.
+   *
+   * So did everything that socket said about presence. The next join is told who is there all
+   * over again, so the members known now leave first: a page counting joins minus leaves would
+   * otherwise count each of them twice.
+   */
   private forgetJoins(): void {
     for (const state of this.channels.values()) {
       state.subscribed = false
       state.joinSent = false
+      this.forgetMembers(state)
     }
+  }
+
+  private forgetMembers(state: ChannelState): void {
+    if (state.members.length === 0) return
+    const leaves = state.members
+    state.members = []
+    for (const listener of state.presenceListeners) listener({ joins: [], leaves })
   }
 
   channel<TRow = Record<string, unknown>>(name: string): ChannelSubscription<TRow> {
@@ -423,6 +437,7 @@ export class RealtimeClient {
         statusCallback: null,
         subscribed: false,
         joinSent: false,
+        members: [],
       }
       this.channels.set(name, state)
     }
@@ -613,6 +628,7 @@ export class RealtimeClient {
     const state = this.channels.get(msg.channel)
     if (!state) return
 
+    state.members = withoutLeaves([...state.members, ...msg.joins], msg.leaves)
     for (const listener of state.presenceListeners) {
       listener({ joins: msg.joins, leaves: msg.leaves })
     }
@@ -703,4 +719,16 @@ interface ChannelState {
    * used to send a second frame.
    */
   joinSent: boolean
+  /** Who the current socket has said is tracked on this channel, one entry per tracking socket. */
+  members: PresenceEntry[]
+}
+
+/** `members` with one entry removed per leave: a user on two tabs is two entries and leaves twice. */
+function withoutLeaves(members: PresenceEntry[], leaves: PresenceEntry[]): PresenceEntry[] {
+  const kept = [...members]
+  for (const leave of leaves) {
+    const at = kept.findIndex((member) => member.user_id === leave.user_id)
+    if (at !== -1) kept.splice(at, 1)
+  }
+  return kept
 }
