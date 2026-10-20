@@ -128,8 +128,17 @@ describe.each(VIEWS)("%s", (_label, view, table) => {
     await render(view(), catalogue(table, true))
     const code = [...container.querySelectorAll("code")].find((c) => c.textContent === LONG_EXPRESSION)
     expect(code?.className).toContain("whitespace-pre-wrap")
-    expect(code?.className).toContain("break-all")
+    // At a space where there is one, and inside a word only where there is not.
+    expect(code?.className).toContain("break-words")
+    expect(code?.className).not.toContain("break-all")
     expect(container.querySelector("table")?.className).toContain("table-fixed")
+  })
+
+  it("keeps a long policy name on one line, whole in its tooltip", async () => {
+    await render(view(), catalogue(table, true))
+    const name = [...container.querySelectorAll("td")].find((td) => td.textContent === "owner_read")
+    expect(name?.className).toContain("truncate")
+    expect(name?.getAttribute("title")).toBe("owner_read")
   })
 })
 

@@ -1,6 +1,8 @@
 import React, { useState } from "react"
 import { Badge, Button, Card, DestructiveAnswers, Dialog, Td, Th } from "../ui.js"
+import { EmptyState } from "../EmptyState.js"
 import { cellText } from "../../views/metadata-row.js"
+import type { PolicyCatalogue } from "../../hooks/usePolicyCatalogue.js"
 
 /**
  * One table's row security and its policies, as the Authentication and Storage policy views show
@@ -10,9 +12,8 @@ import { cellText } from "../../views/metadata-row.js"
 
 type Row = Record<string, unknown>
 
-/** A table as the catalogue describes it: its name, whether row security is on, and its policies. */
+/** A table as the catalogue describes it: its heading, whether row security is on, and its policies. */
 export interface PolicyTableData {
-  name: string
   /** How the heading names the table, such as `storage.objects`. */
   label: string
   rlsEnabled: boolean
@@ -23,12 +24,6 @@ export interface PolicyTableData {
 export interface PolicyTableActions {
   toggleRls: (enable: boolean) => void
   drop: (policyName: string) => void
-}
-
-/** Whether the catalogue's `rls_enabled` says on, which arrives as a boolean or as Postgres's `t`. */
-export function rlsIsOn(row: Row): boolean {
-  const value = row["rls_enabled"]
-  return value === true || value === "t"
 }
 
 /** Who a policy lets through, read from its expression, in a word or two. */
@@ -96,15 +91,15 @@ function PolicyRow({ policy, drop }: { policy: Row; drop: ((policyName: string) 
   const permissive = cellText(policy, "permissive")
   return (
     <tr className="border-b border-border last:border-0 align-top">
-      <Td className="font-mono text-xs text-foreground break-all">{name || "-"}</Td>
+      <Td className="font-mono text-xs text-foreground truncate" title={name}>{name || "-"}</Td>
       <Td><Badge variant="blue">{cellText(policy, "cmd") || "-"}</Badge></Td>
       <Td><Badge variant={permissive === "PERMISSIVE" ? "green" : "yellow"}>{permissive || "-"}</Badge></Td>
       <Td>
         <div className="flex items-start gap-2 min-w-0">
           <Badge variant="blue">{withCheck ? "WITH CHECK" : "USING"}</Badge>
-          {/* Wrapped, and broken anywhere: a policy expression is one long token as often as not, and
-              a cell that cannot break it pushes the whole page sideways. */}
-          <code className="min-w-0 text-xs text-foreground whitespace-pre-wrap break-all">{withCheck || cellText(policy, "qual") || "(none)"}</code>
+          {/* Wrapped at a space where there is one and inside a word where there is not: a cell that
+              cannot break a long expression pushes the whole page sideways. */}
+          <code className="min-w-0 text-xs text-foreground whitespace-pre-wrap break-words">{withCheck || cellText(policy, "qual") || "(none)"}</code>
         </div>
       </Td>
       <Td className="text-xs text-muted-foreground">{describeAppliesTo(policy)}</Td>
@@ -133,6 +128,32 @@ function RlsToggle({ table, enabled, toggle }: { table: string; enabled: boolean
         </Dialog>
       ) : null}
     </>
+  )
+}
+
+/** How a view lists its tables: the heading each gets, and what a writer may do to each. */
+export interface PolicyListOptions {
+  label: (table: string) => string
+  actionsFor: ((table: string) => PolicyTableActions) | null
+  empty: { title: string; description: string }
+}
+
+/** Every table in the catalogue as a {@link PolicyTableCard}, with its loading and empty states. */
+export function PolicyTableList({ catalogue, options }: { catalogue: PolicyCatalogue; options: PolicyListOptions }): React.ReactElement {
+  if (catalogue.loading) {
+    return <div className="space-y-2">{[1, 2, 3].map((i) => <div key={i} className="h-10 rounded-md bg-muted animate-pulse" />)}</div>
+  }
+  if (catalogue.grouped.size === 0) return <EmptyState title={options.empty.title} description={options.empty.description} />
+  return (
+    <div className="space-y-4">
+      {[...catalogue.grouped.entries()].map(([name, policies]) => (
+        <PolicyTableCard
+          key={name}
+          table={{ label: options.label(name), rlsEnabled: catalogue.rlsMap.get(name) ?? false, policies }}
+          actions={options.actionsFor ? options.actionsFor(name) : null}
+        />
+      ))}
+    </div>
   )
 }
 
