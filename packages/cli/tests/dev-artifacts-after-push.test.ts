@@ -18,8 +18,18 @@ import { projectConfig } from "./support/project-config.js"
 
 const REFUSAL = "3 destructive operation(s) detected. Nothing was applied. Use --force to apply."
 
-/** What each engine does with the next push: apply it, or refuse it as destructive. */
-const engine = vi.hoisted(() => ({ refuseUnforced: false, refuseAll: false, pushes: 0 }))
+/** The engine's refusal of a push over a policy someone removed by hand: its JSON line, then stderr. */
+const SECURITY_DRIFT_REFUSAL = [
+  JSON.stringify({
+    status: "refused",
+    reason: "security_drift",
+    objects: [{ key: { kind: "policy", schema: "public", parent: "attendee", name: "attendee_update" }, recorded: "USING (true)", live: null }],
+  }),
+  "Error: 1 object(s) that decide who may read or write were changed outside Supatype; pass --overwrite-drift to put Supatype's definitions back.",
+].join("\n")
+
+/** What each engine does with the next push: apply it, or refuse it with `refusal`. */
+const engine = vi.hoisted(() => ({ refuseUnforced: false, refuseAll: false, pushes: 0, refusal: "" }))
 
 /** The schema the next push reads, so a test can change it and put it back. */
 const schema = vi.hoisted((): { ast: { version: number; models: string[] } } => ({ ast: { version: 2, models: [] } }))
@@ -39,7 +49,7 @@ vi.mock("../src/compose-engine-run.js", async (importOriginal) => ({
     engine.pushes += 1
     const refused = engine.refuseAll || (engine.refuseUnforced && !args.includes("--force"))
     return refused
-      ? { status: 1, stdout: "", stderr: REFUSAL, pid: 0, output: [], signal: null }
+      ? { status: 1, stdout: "", stderr: engine.refusal, pid: 0, output: [], signal: null }
       : { status: 0, stdout: "", stderr: "", pid: 0, output: [], signal: null }
   },
 }))
@@ -109,10 +119,26 @@ async function loadPush(over: Partial<SupatypeProjectConfig>) {
   const { runComposeSchemaPush, schemaChangedSinceLastPush } = await import("../src/dev-compose.js")
   const { pushConsentingToDestructive, DEV_DESTRUCTIVE_POLICY } = await import("../src/destructive-consent.js")
   const { selfHostComposePaths } = await import("../src/self-host-compose.js")
+  const { devPushConsentingToDrift } = await import("../src/drift-consent.js")
+  const { pushInitialSchema, settleInitialPush } = await import("../src/dev-initial-push.js")
   const config = projectConfig(over)
-  const once = (force: boolean) =>
-    runComposeSchemaPush(cwd, config, selfHostComposePaths(cwd), "schema/index.ts", "demo", { force, audit: [] })
+  const once = (force: boolean, overwriteDrift = false) =>
+    runComposeSchemaPush(cwd, config, selfHostComposePaths(cwd), "schema/index.ts", "demo", {
+      force,
+      overwriteDrift,
+      audit: [],
+    })
+  /** A save in a `dev` session, as dev pushes it: asked about drift and data loss, off a terminal. */
+  const devSave = () =>
+    devPushConsentingToDrift((overwrite) => pushConsentingToDestructive((force) => once(force, overwrite), DEV_DESTRUCTIVE_POLICY), false)
+  const noop = async () => undefined
   return {
+    /** `supatype dev` starting: its first push, then whether dev carries on (false) or applied (true). */
+    devStart: async () =>
+      settleInitialPush(await pushInitialSchema({ push: devSave, recoverDatabase: noop, dumpLogs: () => undefined, sleep: noop }), {
+        beforeExit: () => undefined,
+      }),
+    devSave,
     /** `supatype push --yes`: unforced first, then forced on the engine's refusal. */
     pushYes: () => pushConsentingToDestructive(once, { yes: true, apply: "supatype push --yes" }),
     /** One push of a `dev` session, off a terminal: a destructive change is refused. */
@@ -128,6 +154,7 @@ beforeEach(() => {
   engine.refuseUnforced = false
   engine.refuseAll = false
   engine.pushes = 0
+  engine.refusal = REFUSAL
   schema.ast = { version: 2, models: [] }
   engineRequest.mockReset()
   engineRequest.mockImplementation(async (endpoint) =>
@@ -137,7 +164,7 @@ beforeEach(() => {
   enginePush.mockImplementation(async (_cwd, body) => {
     engine.pushes += 1
     const refused = engine.refuseAll || (engine.refuseUnforced && body["force"] !== true)
-    if (refused) throw new Error(REFUSAL)
+    if (refused) throw new Error(engine.refusal)
     return { status: "applied" }
   })
   vi.spyOn(console, "log").mockImplementation(() => undefined)
@@ -225,6 +252,25 @@ describe.each([
     engine.refuseAll = true
     await expect(devPush()).rejects.toThrow(/Nothing was applied/)
     expect(changedSinceLastPush()).toBe(false)
+  })
+
+  it("keeps dev running on a first push refused for security drift, and applies the save that follows", async () => {
+    engine.refusal = SECURITY_DRIFT_REFUSAL
+    engine.refuseAll = true
+    vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const exit = vi.spyOn(process, "exit").mockImplementation((code) => {
+      throw new Error(`exit ${String(code)}`)
+    })
+    const { devStart, devSave } = await loadPush(over)
+    expect(await devStart()).toBe(false)
+    expect(exit).not.toHaveBeenCalled()
+    expect(read(ADMIN)).toBe("APPLIED-ADMIN")
+    // The drift was put back from another terminal (`supatype push --overwrite-drift`), then saved.
+    engine.refuseAll = false
+    const beforeSave = engine.pushes
+    await devSave()
+    expect(engine.pushes).toBe(beforeSave + 1)
+    expect(JSON.parse(read(ADMIN))).toMatchObject({ pushed: true })
   })
 
   it("writes them once when the first push applies", async () => {
