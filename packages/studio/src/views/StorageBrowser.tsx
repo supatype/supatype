@@ -12,6 +12,7 @@ import { isJsonObject } from "../lib/json.js"
 import { browserSignedUrl, resolveStorageObjectPath, storagePublicUrl } from "../lib/storage-ref.js"
 import { Button, Card, DestructiveAnswers, Dialog, Input, Select, Th, Td } from "../components/ui.js"
 import { deleteSelection } from "../lib/storage-delete.js"
+import { IconFile, IconFileText, IconFilm, IconFolder, IconImage, IconMusic } from "../components/icons.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -82,13 +83,29 @@ function decodeStorageName(name: string): string {
     .join("/")
 }
 
-function fileIconText(file: StorageFile): string {
-  if (file.is_folder) return "folder"
-  if (file.type.startsWith("image/")) return "image"
-  if (file.type === "application/pdf") return "pdf"
-  if (file.type.startsWith("video/")) return "video"
-  if (file.type.startsWith("audio/")) return "audio"
-  return "file"
+interface EntryKind {
+  label: string
+  Glyph: (props: { size?: number }) => React.ReactElement
+}
+
+/** What a bucket entry is, as the shared icon for it and the word its tooltip says. */
+function entryKind(file: StorageFile): EntryKind {
+  if (file.is_folder) return { label: "Folder", Glyph: IconFolder }
+  if (file.type.startsWith("image/")) return { label: "Image", Glyph: IconImage }
+  if (file.type === "application/pdf") return { label: "PDF", Glyph: IconFileText }
+  if (file.type.startsWith("video/")) return { label: "Video", Glyph: IconFilm }
+  if (file.type.startsWith("audio/")) return { label: "Audio", Glyph: IconMusic }
+  return { label: "File", Glyph: IconFile }
+}
+
+/** An entry's icon, named in a tooltip so the meaning does not rest on reading the picture. */
+function EntryIcon({ file, size }: { file: StorageFile; size: number }): React.ReactElement {
+  const { label, Glyph } = entryKind(file)
+  return (
+    <span role="img" aria-label={label} title={label} className="inline-flex shrink-0 text-muted-foreground">
+      <Glyph size={size} />
+    </span>
+  )
 }
 
 function isPreviewable(type: string): boolean {
@@ -803,7 +820,8 @@ export function StorageBrowser(): React.ReactElement {
                             className="font-medium text-primary hover:underline flex items-center gap-1.5"
                             onClick={() => navigateToFolder(f.name)}
                           >
-                            <span className="text-muted-foreground">[dir]</span> {decodeStorageName(f.name)}
+                            <EntryIcon file={f} size={16} />
+                            {decodeStorageName(f.name)}
                           </button>
                         ) : (
                           <button
@@ -821,7 +839,7 @@ export function StorageBrowser(): React.ReactElement {
                                 sizeClassName="h-9 w-9"
                               />
                             ) : (
-                              <span className="text-muted-foreground text-xs shrink-0">[{fileIconText(f)}]</span>
+                              <EntryIcon file={f} size={16} />
                             )}
                             <span className="truncate">{decodeStorageName(f.name)}</span>
                           </button>
@@ -888,7 +906,9 @@ export function StorageBrowser(): React.ReactElement {
                     onClick={(e) => e.stopPropagation()}
                   />
                   {f.is_folder ? (
-                    <div className="text-3xl text-muted-foreground mb-1">[dir]</div>
+                    <div className="mb-1">
+                      <EntryIcon file={f} size={40} />
+                    </div>
                   ) : f.type.startsWith("image/") && currentBucket ? (
                     <div className="mb-1 h-20 w-full max-w-[120px] flex items-center justify-center">
                       <StorageImageThumbnail
@@ -903,7 +923,7 @@ export function StorageBrowser(): React.ReactElement {
                     </div>
                   ) : (
                     <div className="w-16 h-16 bg-accent rounded flex items-center justify-center mb-1">
-                      <span className="text-xs text-muted-foreground">{fileIconText(f).toUpperCase()}</span>
+                      <EntryIcon file={f} size={28} />
                     </div>
                   )}
                   <span className="text-xs text-center truncate w-full">{decodeStorageName(f.name)}</span>
