@@ -9,7 +9,7 @@ import { Slideover } from "../components/Slideover.js"
 import { Button, DestructiveAnswers, Dialog } from "../components/ui.js"
 import { previewUrlFor } from "../lib/preview-url.js"
 import { appOrigin } from "../lib/membership-url.js"
-import type { ModelConfig } from "../config.js"
+import type { FieldConfig, ModelConfig } from "../config.js"
 import { useAdminConfig } from "../hooks/useAdminConfig.js"
 import { splitEditFields } from "../lib/edit-field-layout.js"
 import { applyFieldAccess } from "../lib/field-access-layout.js"
@@ -30,6 +30,7 @@ import { fetchRecordForEditing } from "../lib/publishing.js"
 import { duplicateRecord, type RecordDraft } from "../lib/duplicate-record.js"
 import { reportRefusal } from "../lib/write-error.js"
 import { useRefusal } from "../hooks/useRefusal.js"
+import { emptyRequiredFields } from "../lib/incomplete-draft.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 
 interface EditViewProps {
@@ -74,6 +75,8 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
   // null = not asked or not answerable. Only ever set from the database's own answer.
   const [recordDeletable, setRecordDeletable] = useState<boolean | null>(null)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  // The required fields a draft being saved leaves empty, while the editor is asked about them.
+  const [incomplete, setIncomplete] = useState<FieldConfig[] | null>(null)
 
   useEffect(() => {
     if (recordId !== undefined) {
@@ -187,9 +190,17 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
     return id
   }
 
-  const handleSave = async () => {
+  const saveNow = async () => {
     const id = await persistAndMark()
     if (id !== null) onChanged(id, false)
+  }
+
+  // A draft may leave a required field empty, but it cannot be published until it is filled, so
+  // the editor is asked before such a draft is saved. Without drafts the database refuses the save.
+  const handleSave = async () => {
+    const missing = model.versions?.drafts === true ? emptyRequiredFields(model, values) : []
+    if (missing.length > 0) setIncomplete(missing)
+    else await saveNow()
   }
 
   // Asked first, in the same words as Unpublish. A refused delete reports its error and stays on
@@ -282,6 +293,10 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
 
       {error && <ErrorBanner message={error} details={refusal.details} />}
 
+      {incomplete !== null && (
+        <IncompleteDraftQuestion fields={incomplete} act={() => { void saveNow() }} onClose={() => { setIncomplete(null) }} />
+      )}
+
       {confirmingDelete && (
         <DeleteQuestion title={title} act={() => { void handleDelete() }} onClose={() => { setConfirmingDelete(false) }} />
       )}
@@ -348,6 +363,18 @@ function DeleteQuestion({ title, act, onClose }: { title: string; act: () => voi
   return (
     <Dialog role="alertdialog" title={`Delete "${title}"?`} actions={<DestructiveAnswers label="Delete" act={act} onClose={onClose} />}>
       <p>It is deleted for good. This cannot be undone.</p>
+    </Dialog>
+  )
+}
+
+/** The question Save draft asks when the draft leaves required fields empty, naming them. */
+function IncompleteDraftQuestion({ fields, act, onClose }: { fields: FieldConfig[]; act: () => void; onClose: () => void }): React.ReactElement {
+  const names = fields.map((f) => f.label).join(", ")
+  const one = fields.length === 1
+  return (
+    <Dialog title="Save an incomplete draft?" actions={<DestructiveAnswers label="Save incomplete draft" act={act} onClose={onClose} />}>
+      <p>{one ? `${names} is required and empty.` : `These required fields are empty: ${names}.`}</p>
+      <p>The draft saves, but it cannot be published until {one ? "it is" : "they are"} filled in.</p>
     </Dialog>
   )
 }

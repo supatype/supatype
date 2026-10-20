@@ -1,5 +1,6 @@
 import type { FieldConfig } from "../config.js"
 import { SQLSTATE, sqlstateInMessage, unquoteColumn } from "./database-error.js"
+import { foreignKeyColumn } from "./recordValues.js"
 import { escapeRegExp } from "./utils.js"
 import { widgetFor } from "./widget-input.js"
 
@@ -51,14 +52,7 @@ const FALLBACK = "The database refused this change."
 
 function fieldNamed(fields: readonly FieldConfig[], column: string | undefined): FieldConfig | undefined {
   if (column === undefined) return undefined
-  return fields.find((f) => f.name === column) ?? fields.find((f) => foreignKeyOf(f) === column)
-}
-
-/** The column a belongs-to relation writes, as `serializeRecordForApi` maps it. */
-function foreignKeyOf(field: FieldConfig): string | undefined {
-  if (field.widget !== "relation" || field.options?.["cardinality"] !== "belongsTo") return undefined
-  const fk = field.options["foreignKey"]
-  return typeof fk === "string" && fk !== "" ? fk : `${field.name}_id`
+  return fields.find((f) => f.name === column) ?? fields.find((f) => foreignKeyColumn(f) === column)
 }
 
 /** The columns a detail line's `Key (a, b)=(...)` names. */

@@ -52,19 +52,18 @@ function fillBlankSlugs(model: ModelConfig, out: Record<string, unknown>): void 
   }
 }
 
+/** The column a belongs-to relation is written to; undefined for any other field. */
+export function foreignKeyColumn(field: FieldConfig): string | undefined {
+  if (field.widget !== "relation" || field.options?.["cardinality"] !== "belongsTo") return undefined
+  const fk = field.options["foreignKey"]
+  return typeof fk === "string" && fk !== "" ? fk : `${field.name}_id`
+}
+
 /** Move each belongs-to relation's value to the foreign-key column PostgREST writes. */
 function relationsToForeignKeys(model: ModelConfig, out: Record<string, unknown>): void {
   for (const field of model.fields) {
-    if (field.widget !== "relation") continue
-    if (field.options?.["cardinality"] !== "belongsTo") continue
-
-    const fk =
-      (typeof field.options?.["foreignKey"] === "string" && field.options["foreignKey"]) ||
-      `${field.name}_id`
-
-    if (field.name === fk) continue
-    if (!(field.name in out)) continue
-
+    const fk = foreignKeyColumn(field)
+    if (fk === undefined || field.name === fk || !(field.name in out)) continue
     out[fk] = out[field.name]
     delete out[field.name]
   }
