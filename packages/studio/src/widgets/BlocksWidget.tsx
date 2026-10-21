@@ -9,6 +9,8 @@ import {
 import { isJsonObject } from "../lib/json.js"
 import { mapEngineFields } from "../lib/normalize-admin-config.js"
 import { FieldWidget as FieldWidgetComponent } from "./FieldWidget.js"
+import { Icon, IconArrowDown, IconArrowUp, IconCopy, IconSquare, IconTrash, hasIcon } from "../components/icons.js"
+import { Button } from "../components/ui.js"
 
 interface BlockEntry {
   type: string
@@ -172,68 +174,28 @@ export function BlocksWidget({
           .join(", ")
       : null
 
+  const count =
+    itemBound === null ? null : `${blocks.length} block${blocks.length === 1 ? "" : "s"} (${itemBound})`
+
   return (
     <div className="st-blocks-widget">
-      {itemBound !== null && (
-        <span className="st-char-count">
-          {blocks.length} block{blocks.length === 1 ? "" : "s"} ({itemBound})
-        </span>
-      )}
+      {readOnly && count !== null && <BlockCount text={count} />}
       {blocks.map((block, index) => {
         const blockType = blockTypes.find((bt) => bt.name === block.type)
         const isExpanded = expandedIndex === index
 
         return (
           <div key={`${block.type}-${index}`} className="st-block-card">
-            <div
-              className="st-block-header"
-              onClick={() => { setExpandedIndex(isExpanded ? null : index) }}
-            >
-              <span className="st-block-type">
-                {blockType?.icon && <span className="st-block-icon">{blockType.icon}</span>}
-                {blockType?.label ?? block.type}
-              </span>
-              <div className="st-block-actions" onClick={(e) => { e.stopPropagation() }}>
-                {!readOnly && (
-                  <>
-                    <button
-                      type="button"
-                      className="st-btn-icon"
-                      onClick={() => { moveBlock(index, -1) }}
-                      disabled={index === 0}
-                      title="Move up"
-                    >
-                      &uarr;
-                    </button>
-                    <button
-                      type="button"
-                      className="st-btn-icon"
-                      onClick={() => { moveBlock(index, 1) }}
-                      disabled={index === blocks.length - 1}
-                      title="Move down"
-                    >
-                      &darr;
-                    </button>
-                    <button
-                      type="button"
-                      className="st-btn-icon"
-                      onClick={() => { duplicateBlock(index) }}
-                      title="Duplicate"
-                    >
-                      D
-                    </button>
-                    <button
-                      type="button"
-                      className="st-btn-icon st-btn-icon--danger"
-                      onClick={() => { removeBlock(index) }}
-                      title="Delete"
-                    >
-                      X
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
+            <BlockHeader
+              kind={{ label: blockType?.label ?? block.type, ...(blockType?.icon !== undefined && { icon: blockType.icon }) }}
+              position={{ index, count: blocks.length }}
+              onToggle={() => { setExpandedIndex(isExpanded ? null : index) }}
+              actions={readOnly ? null : {
+                move: (direction) => { moveBlock(index, direction) },
+                duplicate: () => { duplicateBlock(index) },
+                remove: () => { removeBlock(index) },
+              }}
+            />
 
             {isExpanded && blockType && (
               <div className="st-block-body">
@@ -265,7 +227,7 @@ export function BlocksWidget({
       })}
 
       {!readOnly && (
-        <div className="st-block-add">
+        <div className="st-block-add flex items-center justify-between gap-2">
           {showPicker ? (
             <div className="st-block-picker">
               <span className="st-block-picker-label">Add block:</span>
@@ -276,7 +238,7 @@ export function BlocksWidget({
                   className="st-btn st-btn-sm"
                   onClick={() => { addBlock(bt.name) }}
                 >
-                  {bt.icon && <span>{bt.icon} </span>}
+                  <BlockIcon name={bt.icon} size={14} />
                   {bt.label}
                 </button>
               ))}
@@ -297,8 +259,67 @@ export function BlocksWidget({
               + Add block
             </button>
           )}
+          {count !== null && <BlockCount text={count} />}
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * A block type's icon. One the schema names but Studio does not have draws a plain square, never
+ * the name as text; a type with no icon draws nothing.
+ */
+function BlockIcon({ name, size }: { name: string | undefined; size: number }): React.ReactElement | null {
+  if (name === undefined) return null
+  return hasIcon(name) ? <Icon name={name} size={size} /> : <IconSquare size={size} />
+}
+
+/** How many blocks there are against the field's bounds, on its own line rather than floated. */
+function BlockCount({ text }: { text: string }): React.ReactElement {
+  return <span className="shrink-0 text-[0.7rem] text-muted-foreground">{text}</span>
+}
+
+interface BlockActions {
+  move: (direction: -1 | 1) => void
+  duplicate: () => void
+  remove: () => void
+}
+
+/** A block's row: its type's icon and label, then icon buttons named for a screen reader. */
+function BlockHeader({ kind, position, onToggle, actions }: {
+  kind: { label: string; icon?: string }
+  position: { index: number; count: number }
+  onToggle: () => void
+  actions: BlockActions | null
+}): React.ReactElement {
+  const { label, icon } = kind
+  return (
+    <div data-block-header className="st-block-header" onClick={onToggle}>
+      <span data-block-type className="st-block-type inline-flex items-center gap-2">
+        <BlockIcon name={icon} size={16} />
+        {label}
+      </span>
+      {actions !== null && (
+        <div className="st-block-actions flex items-center gap-0.5" onClick={(e) => { e.stopPropagation() }}>
+          <BlockButton name={`Move ${label} up`} onClick={() => { actions.move(-1) }} disabled={position.index === 0}><IconArrowUp /></BlockButton>
+          <BlockButton name={`Move ${label} down`} onClick={() => { actions.move(1) }} disabled={position.index === position.count - 1}><IconArrowDown /></BlockButton>
+          <BlockButton name={`Duplicate ${label}`} onClick={actions.duplicate}><IconCopy size={14} /></BlockButton>
+          <BlockButton name={`Delete ${label}`} onClick={actions.remove} danger><IconTrash /></BlockButton>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function BlockButton({ name, children, danger = false, ...props }: {
+  name: string
+  children: React.ReactNode
+  danger?: boolean
+} & Pick<React.ButtonHTMLAttributes<HTMLButtonElement>, "onClick" | "disabled">): React.ReactElement {
+  return (
+    <Button type="button" variant="ghost" size="icon" aria-label={name} title={name} {...(danger && { className: "hover:text-destructive" })} {...props}>
+      {children}
+    </Button>
   )
 }
