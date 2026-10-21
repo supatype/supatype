@@ -9,7 +9,7 @@
 
 import React from "react"
 import { Navigate, useParams } from "react-router-dom"
-import { EmptyState } from "../components/EmptyState.js"
+import { RoleDenied } from "../components/RoleGate.js"
 import { useInspectorAvailability } from "../hooks/useInspectorAvailability.js"
 import { ComingSoon } from "./ComingSoon.js"
 import { Broadcast } from "./realtime/Broadcast.js"
@@ -45,12 +45,8 @@ export function RealtimeInspector({ demoMode = false }: { demoMode?: boolean }):
 
   if (availability === "checking") return <p className="p-6 text-sm text-muted-foreground">Loading…</p>
   if (availability === "forbidden") {
-    return (
-      <EmptyState
-        title="The Realtime Inspector is not available to your role"
-        description="Studio admins and developers can inspect realtime. Ask an admin for access."
-      />
-    )
+    // The route's gate answers for a role the server reported; this is the control plane refusing.
+    return <RoleDenied role={null} needs="realtimeInspect" activity="use the Realtime Inspector" />
   }
   if (availability === "coming-soon" || api.state !== "ready") {
     return <ComingSoon title="Realtime Inspector" description={REALTIME_COMING_SOON} />

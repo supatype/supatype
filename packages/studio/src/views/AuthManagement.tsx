@@ -35,6 +35,8 @@ import {
 import { Badge, Button, Card, Checkbox, CodeBlock, ConfirmButton, Input, Pager, Select, Th, Td, type DestructiveQuestion } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
+import { useRoleRefusalText } from "../components/RoleGate.js"
+import { unlessRoleRefused } from "../lib/role-refusal.js"
 import { SlidePanel } from "../components/SlidePanel.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
 
@@ -755,6 +757,8 @@ export function AuthManagement(): React.ReactElement {
     autoConfirmDefault: authSettings?.mailer_autoconfirm ?? null,
   }
 
+  // A 403 here is the Studio proxy refusing the role, said as the route's gate says it.
+  const refused = useRoleRefusalText()
   /** One call to the auth server through Studio's proxy, which adds the service role key. */
   const authRequest = useCallback<AuthRequest>((path, options) => fetch(`${client.url}/auth/v1${path}`, {
     ...options,
@@ -764,7 +768,7 @@ export function AuthManagement(): React.ReactElement {
       ...options?.headers,
     },
     credentials: "include",
-  }), [client])
+  }).then((res) => unlessRoleRefused(res, refused)), [client, refused])
   const authAdminRequest = useCallback<AuthRequest>(
     (path, options) => authRequest(`/admin${path}`, options),
     [authRequest],

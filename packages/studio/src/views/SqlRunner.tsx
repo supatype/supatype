@@ -9,7 +9,7 @@ import { cn } from "../lib/utils.js"
 import { isJsonObject, isNumber, isShape, isString, optional, safeParseJson } from "../lib/json.js"
 import { Badge, Button, Card, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
 import { ElevatedNotice } from "../components/ElevatedModeBanner.js"
-import { EmptyState } from "../components/EmptyState.js"
+import { RoleDenied } from "../components/RoleGate.js"
 import { useStudioCapability } from "../hooks/useStudioCapability.js"
 import { sqlEditorOffered } from "../lib/sql-editor-access.js"
 import { UuidCell } from "../components/UuidCell.js"
@@ -315,12 +315,7 @@ function exportJson(rows: Record<string, unknown>[]): void {
 export function SqlRunner(): React.ReactElement {
   const capability = useStudioCapability()
   if (!sqlEditorOffered(capability)) {
-    return (
-      <EmptyState
-        title="The SQL editor is not available to your role"
-        description="It runs with full access to the database, so it is for owners, admins and developers."
-      />
-    )
+    return <RoleDenied role={capability.role} needs="sqlEditor" activity="use the SQL editor" />
   }
   // Its own notice, not the acting-mode banner: the editor is elevated whatever mode the caller's
   // data requests act in, so the banner would say "acting as yourself" over rows that are not.

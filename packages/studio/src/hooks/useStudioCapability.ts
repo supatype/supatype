@@ -40,6 +40,11 @@ export interface StudioCapability {
    * on self-host the caller already is a project user.
    */
   identityLink: { linked: boolean; email: string | null } | null
+  /**
+   * Whether the verify route has answered, or failed to. A screen gated on a permission waits for
+   * this rather than rendering controls the answer may withdraw a moment later.
+   */
+  settled: boolean
 }
 
 const UNRESOLVED: StudioCapability = {
@@ -51,7 +56,11 @@ const UNRESOLVED: StudioCapability = {
   seesDrafts: false,
   permissions: {},
   identityLink: null,
+  settled: false,
 }
+
+/** The verify route gave no answer: nothing is withdrawn, and the server still refuses. */
+const SETTLED_UNKNOWN: StudioCapability = { ...UNRESOLVED, settled: true }
 
 /** The server's `identityLink`, or null when it sent none or sent something else. */
 function readIdentityLink(raw: unknown): StudioCapability["identityLink"] {
@@ -77,6 +86,7 @@ function capabilityFrom(json: Record<string, unknown>): StudioCapability {
     seesDrafts: seesDrafts === true,
     permissions,
     identityLink: readIdentityLink(json["identityLink"]),
+    settled: true,
   }
 }
 
@@ -102,11 +112,11 @@ export function useStudioCapability(): StudioCapability {
           credentials: "include",
           headers: { ...studioGatewayHeaders(), ...studioAuthHeaders(client) },
         })
-        if (!res.ok) return
-        const json = await res.json()
-        if (cancelled || !isJsonObject(json)) return
-        setCapability(capabilityFrom(json))
+        const json: unknown = res.ok ? await res.json() : null
+        if (cancelled) return
+        setCapability(isJsonObject(json) ? capabilityFrom(json) : SETTLED_UNKNOWN)
       } catch {
+        if (!cancelled) setCapability(SETTLED_UNKNOWN)
         // Leave it unresolved: the UI then offers nothing, and the server refuses
         // anything attempted anyway. Failing open here would show controls that
         // cannot work.

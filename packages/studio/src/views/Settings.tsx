@@ -10,8 +10,8 @@ import { Badge, Button, Card, CodeBlock, ConfirmButton, Input, Select, Th, Td, t
 import { EmptyState } from "../components/EmptyState.js"
 import { ConnectionStringPanel } from "../components/database/ConnectionStringPanel.js"
 import { ApiCorsSettings } from "./ApiCorsSettings.js"
-import { useStudioCapability } from "../hooks/useStudioCapability.js"
-import { projectKeysOffered } from "../lib/capability-offers.js"
+import { RoleGate, useRoleRefusalText, type RoleRequirement } from "../components/RoleGate.js"
+import { proxyFailure, unlessRoleRefused } from "../lib/role-refusal.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -627,83 +627,143 @@ const ROTATE_QUESTION: DestructiveQuestion = {
   answer: "Rotate password",
 }
 
-function DatabaseSettings({ client }: { client: ReturnType<typeof useStudioClient> }): React.ReactElement {
+type StudioClient = ReturnType<typeof useStudioClient>
+
+/** One call to the credentials API, as Studio's session; a 403 is the proxy refusing the role. */
+async function credentialsFetch(client: StudioClient, path: string, refused: string, method = "GET"): Promise<Response> {
+  const res = await fetch(`${client.url}/admin/v1/database/credentials/${path}`, {
+    method,
+    headers: studioAuthHeaders(client),
+    credentials: "include",
+  })
+  return unlessRoleRefused(res, refused)
+}
+
+/** Reveals the password the first time it is asked for; the server refuses it after that. */
+async function firstViewPassword(client: StudioClient, refused: string): Promise<string> {
+  const res = await credentialsFetch(client, "first-view", refused, "POST")
+  const data = await readJsonObject(res)
+  const password = data["password"]
+  if (!res.ok || typeof password !== "string" || !password) throw new Error(credentialError(data, `first-view failed (${res.status})`))
+  return password
+}
+
+async function rotatePassword(client: StudioClient, refused: string): Promise<void> {
+  const res = await credentialsFetch(client, "rotate", refused, "POST")
+  if (!res.ok) throw new Error(credentialError(await readJsonObject(res), `rotate failed (${res.status})`))
+}
+
+interface Credentials {
+  status: CredentialStatus | null
+  loading: boolean
+  busy: boolean
+  error: string | null
+  reload: () => Promise<void>
+  /** Runs one credential action, then reads the status again; a failure is shown, not thrown. */
+  run: (action: () => Promise<void>, fallback: string) => Promise<void>
+}
+
+const errorText = (err: unknown, fallback: string): string => (err instanceof Error ? err.message : fallback)
+
+async function credentialStatus(client: StudioClient, refused: string): Promise<CredentialStatus> {
+  const res = await credentialsFetch(client, "status", refused)
+  if (!res.ok) throw await proxyFailure(res, refused)
+  return readJson(res, isCredentialStatus)
+}
+
+/** Where one piece of work reports that it is running, and what went wrong. */
+interface Attempt {
+  setPending: (pending: boolean) => void
+  setError: (error: string | null) => void
+}
+
+/** Runs `work`, pending while it does; a failure is shown through `setError`, not thrown. */
+async function attempt({ setPending, setError }: Attempt, work: () => Promise<void>, fallback: string): Promise<void> {
+  setPending(true)
+  setError(null)
+  try {
+    await work()
+  } catch (err) {
+    setError(errorText(err, fallback))
+  } finally {
+    setPending(false)
+  }
+}
+
+function useCredentials(client: StudioClient, refused: string): Credentials {
+  const [status, setStatus] = useState<CredentialStatus | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const reload = useCallback(
+    () => attempt({ setPending: setLoading, setError }, async () => setStatus(await credentialStatus(client, refused)), "Failed to load credential status"),
+    [client, refused],
+  )
+  useEffect(() => { void reload() }, [reload])
+
+  const run = useCallback(
+    (action: () => Promise<void>, fallback: string) => attempt({ setPending: setBusy, setError }, async () => { await action(); await reload() }, fallback),
+    [reload],
+  )
+  return { status, loading, busy, error, reload, run }
+}
+
+function CredentialStatusLines({ creds }: { creds: Credentials }): React.ReactElement {
+  if (creds.loading) return <p className="text-xs text-muted-foreground">Loading credential status...</p>
+  if (!creds.status) return <p className="text-xs text-muted-foreground">No credential status available.</p>
+  return (
+    <div className="space-y-1 text-xs text-muted-foreground">
+      <p>Mode: <span className="text-foreground">{creds.status.mode}</span></p>
+      <p>Status: <span className="text-foreground">{creds.status.password_status}</span></p>
+      <p>Generation: <span className="text-foreground">{creds.status.generation}</span></p>
+      {creds.status.message ? <p>{creds.status.message}</p> : null}
+    </div>
+  )
+}
+
+interface DatabaseCredentialsProps {
+  client: StudioClient
+  /** The password once revealed, for the connection strings above; null again after a rotation. */
+  onPassword: (password: string | null) => void
+}
+
+/** The database password's status, its one-time reveal and its rotation: project administration. */
+function DatabaseCredentials({ client, onPassword }: DatabaseCredentialsProps): React.ReactElement {
+  const refused = useRoleRefusalText()
+  const creds = useCredentials(client, refused)
+  const [revealed, setRevealed] = useState<string | null>(null)
+  const show = (password: string | null) => { setRevealed(password); onPassword(password) }
+  const reveal = () => creds.run(async () => show(await firstViewPassword(client, refused)), "Failed to reveal password")
+  const rotate = () => creds.run(async () => { show(null); await rotatePassword(client, refused) }, "Failed to rotate password")
+  return (
+    <div className="rounded-md border border-border p-3 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm font-medium text-foreground">Credentials</p>
+        <Button size="xs" onClick={() => void creds.reload()} disabled={creds.loading || creds.busy}>Refresh</Button>
+      </div>
+      <CredentialStatusLines creds={creds} />
+      <div className="flex gap-2">
+        <Button size="xs" variant="primary" onClick={() => void reveal()} disabled={creds.busy || !creds.status?.can_reveal}>
+          View Password
+        </Button>
+        <ConfirmButton size="xs" ask={ROTATE_QUESTION} act={() => void rotate()} disabled={creds.busy}>
+          Rotate Password
+        </ConfirmButton>
+      </div>
+      {revealed ? <CodeBlock className="text-xs">{revealed}</CodeBlock> : null}
+      {creds.error ? <p className="text-xs text-red-400">{creds.error}</p> : null}
+    </div>
+  )
+}
+
+function DatabaseSettings({ client }: { client: StudioClient }): React.ReactElement {
   const proxy = useProjectProxy()
   // Through the metadata catalogue (RQ3b), so a viewer sees the settings too.
   const { data: dbSettings } = useApiQuery(() => proxy.metadata("database_settings").then((r) => r.rows[0] ?? {}), [proxy])
   const maxConns = dbSettings === null ? null : settingText(dbSettings["max_connections"])
   const stmtTimeout = dbSettings === null ? null : settingText(dbSettings["statement_timeout"])
-  const [credStatus, setCredStatus] = useState<CredentialStatus | null>(null)
-  const [credLoading, setCredLoading] = useState(false)
-  const [credError, setCredError] = useState<string | null>(null)
   const [revealedPassword, setRevealedPassword] = useState<string | null>(null)
-  const [credActionLoading, setCredActionLoading] = useState(false)
-
-  const authHeaders = studioAuthHeaders(client)
-
-  const loadCredentialStatus = useCallback(async () => {
-    setCredLoading(true)
-    setCredError(null)
-    try {
-      const res = await fetch(`${client.url}/admin/v1/database/credentials/status`, {
-        headers: authHeaders,
-        credentials: "include",
-      })
-      if (!res.ok) throw new Error(`status request failed (${res.status})`)
-      setCredStatus(await readJson(res, isCredentialStatus))
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to load credential status"
-      setCredError(msg)
-    } finally {
-      setCredLoading(false)
-    }
-  }, [client])
-
-  useEffect(() => {
-    void loadCredentialStatus()
-  }, [loadCredentialStatus])
-
-  const handleFirstView = useCallback(async () => {
-    setCredActionLoading(true)
-    setCredError(null)
-    try {
-      const res = await fetch(`${client.url}/admin/v1/database/credentials/first-view`, {
-        method: "POST",
-        headers: authHeaders,
-        credentials: "include",
-      })
-      const data = await readJsonObject(res)
-      const password = data["password"]
-      if (!res.ok || typeof password !== "string" || !password) throw new Error(credentialError(data, `first-view failed (${res.status})`))
-      setRevealedPassword(password)
-      await loadCredentialStatus()
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to reveal password"
-      setCredError(msg)
-    } finally {
-      setCredActionLoading(false)
-    }
-  }, [client, loadCredentialStatus])
-
-  const handleRotate = useCallback(async () => {
-    setCredActionLoading(true)
-    setCredError(null)
-    setRevealedPassword(null)
-    try {
-      const res = await fetch(`${client.url}/admin/v1/database/credentials/rotate`, {
-        method: "POST",
-        headers: authHeaders,
-        credentials: "include",
-      })
-      if (!res.ok) throw new Error(credentialError(await readJsonObject(res), `rotate failed (${res.status})`))
-      await loadCredentialStatus()
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to rotate password"
-      setCredError(msg)
-    } finally {
-      setCredActionLoading(false)
-    }
-  }, [client, loadCredentialStatus])
 
   return (
     <Card className="p-4 space-y-4 max-w-[600px]">
@@ -720,43 +780,9 @@ function DatabaseSettings({ client }: { client: ReturnType<typeof useStudioClien
           </div>
         ))}
       </div>
-      <div className="rounded-md border border-border p-3 space-y-2">
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-sm font-medium text-foreground">Credentials</p>
-          <Button size="xs" onClick={() => void loadCredentialStatus()} disabled={credLoading || credActionLoading}>
-            Refresh
-          </Button>
-        </div>
-        {credLoading ? (
-          <p className="text-xs text-muted-foreground">Loading credential status...</p>
-        ) : credStatus ? (
-          <div className="space-y-1 text-xs text-muted-foreground">
-            <p>Mode: <span className="text-foreground">{credStatus.mode}</span></p>
-            <p>Status: <span className="text-foreground">{credStatus.password_status}</span></p>
-            <p>Generation: <span className="text-foreground">{credStatus.generation}</span></p>
-            {credStatus.message ? <p>{credStatus.message}</p> : null}
-          </div>
-        ) : (
-          <p className="text-xs text-muted-foreground">No credential status available.</p>
-        )}
-        <div className="flex gap-2">
-          <Button
-            size="xs"
-            variant="primary"
-            onClick={() => void handleFirstView()}
-            disabled={credActionLoading || !credStatus?.can_reveal}
-          >
-            View Password
-          </Button>
-          <ConfirmButton size="xs" ask={ROTATE_QUESTION} act={() => void handleRotate()} disabled={credActionLoading}>
-            Rotate Password
-          </ConfirmButton>
-        </div>
-        {revealedPassword ? (
-          <CodeBlock className="text-xs">{revealedPassword}</CodeBlock>
-        ) : null}
-        {credError ? <p className="text-xs text-red-400">{credError}</p> : null}
-      </div>
+      <RoleGate needs="administer" activity="manage the database credentials">
+        <DatabaseCredentials client={client} onPassword={setRevealedPassword} />
+      </RoleGate>
     </Card>
   )
 }
@@ -789,48 +815,60 @@ export interface SettingsProps {
   demoMode?: boolean | undefined
 }
 
-export function Settings({ demoMode = false }: SettingsProps): React.ReactElement {
-  const client = useStudioClient()
-  const [activeTab, setActiveTab] = useState<SettingsTab>("general")
-  // The project's keys are for admins and developers.
-  const showKeys = projectKeysOffered(useStudioCapability())
+interface SettingsTabDef extends RoleRequirement {
+  key: SettingsTab
+  label: string
+}
 
-  const tabs: Array<{ key: SettingsTab; label: string }> = [
-    { key: "general", label: "General" },
-    ...(showKeys ? [{ key: "keys" as const, label: "API Keys" }] : []),
-    { key: "env", label: "Environment" },
-    { key: "cors", label: "CORS" },
-    { key: "database", label: "Database" },
-    { key: "integrations", label: "Integrations" },
-    { key: "danger", label: "Danger Zone" },
-  ]
+/** Every tab, with what it needs from the shared role matrix; a role without it is told why. */
+const SETTINGS_TABS: SettingsTabDef[] = [
+  { key: "general", label: "General", needs: "administer", activity: "change the project settings" },
+  { key: "keys", label: "API Keys", needs: "manageKeys", activity: "see the project's API keys" },
+  { key: "env", label: "Environment", needs: "administer", activity: "manage environment variables" },
+  { key: "cors", label: "CORS", needs: "manageDomains", activity: "manage allowed origins" },
+  { key: "database", label: "Database", needs: "schemaView", activity: "view the database settings" },
+  { key: "integrations", label: "Integrations", needs: "administer", activity: "manage integrations" },
+  { key: "danger", label: "Danger Zone", needs: "administer", activity: "reset or delete the project" },
+]
+
+function SettingsTabBody({ tab, demoMode }: { tab: SettingsTab; demoMode: boolean }): React.ReactElement {
+  const client = useStudioClient()
+  switch (tab) {
+    case "general": return <GeneralSettings />
+    case "keys": return <ApiKeysSettings />
+    case "env": return <EnvSettings />
+    case "cors": return <CorsSettings demoMode={demoMode} />
+    case "database": return <DatabaseSettings client={client} />
+    case "integrations": return <IntegrationsSettings />
+    case "danger": return <DangerZone />
+  }
+}
+
+export function Settings({ demoMode = false }: SettingsProps): React.ReactElement {
+  const [activeTab, setActiveTab] = useState<SettingsTab>("general")
+  const tab = SETTINGS_TABS.find((t) => t.key === activeTab) ?? SETTINGS_TABS[0]!
 
   return (
     <>
       <div className="flex border-b border-border mb-4 overflow-x-auto">
-        {tabs.map((tab) => (
+        {SETTINGS_TABS.map((t) => (
           <button
-            key={tab.key}
+            key={t.key}
             className={cn(
               "px-4 py-2 text-sm border-b-2 transition-colors whitespace-nowrap",
-              activeTab === tab.key
-                ? tab.key === "danger" ? "text-red-400 border-red-400" : "text-primary border-primary"
+              activeTab === t.key
+                ? t.key === "danger" ? "text-red-400 border-red-400" : "text-primary border-primary"
                 : "text-muted-foreground border-transparent hover:text-foreground"
             )}
-            onClick={() => setActiveTab(tab.key)}
+            onClick={() => setActiveTab(t.key)}
           >
-            {tab.label}
+            {t.label}
           </button>
         ))}
       </div>
-
-      {activeTab === "general" ? <GeneralSettings /> : null}
-      {activeTab === "keys" && showKeys ? <ApiKeysSettings /> : null}
-      {activeTab === "env" ? <EnvSettings /> : null}
-      {activeTab === "cors" ? <CorsSettings demoMode={demoMode} /> : null}
-      {activeTab === "database" ? <DatabaseSettings client={client} /> : null}
-      {activeTab === "integrations" ? <IntegrationsSettings /> : null}
-      {activeTab === "danger" ? <DangerZone /> : null}
+      <RoleGate needs={tab.needs} activity={tab.activity}>
+        <SettingsTabBody tab={activeTab} demoMode={demoMode} />
+      </RoleGate>
     </>
   )
 }

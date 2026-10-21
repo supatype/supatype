@@ -3,7 +3,9 @@ import { useAdminConfig } from "../hooks/useAdminConfig.js"
 import { useStudioClient } from "../StudioCore.js"
 import { Button, CodeBlock } from "../components/ui.js"
 import { cn } from "../lib/utils.js"
-import { buildGraphqlListQuery, formatGraphqlClientResult } from "../lib/graphql-query.js"
+import { buildGraphqlListQuery, graphqlEndpoint, runGraphql } from "../lib/graphql-query.js"
+import { useSendAs } from "../hooks/useSendAs.js"
+import { SendAsField } from "../components/SendAsField.js"
 
 const PLACEHOLDER_QUERY = buildGraphqlListQuery("posts", ["id", "title", "created_at"])
 
@@ -16,6 +18,7 @@ const AUTH_TABLES = [
 export function GraphQLExplorer(): React.ReactElement {
   const config = useAdminConfig()
   const client = useStudioClient()
+  const sendAs = useSendAs()
 
   const [query, setQuery] = useState(
     config.models[0]
@@ -34,8 +37,7 @@ export function GraphQLExplorer(): React.ReactElement {
     setError("")
     setResult("")
     try {
-      const res = await client.graphql(query, {})
-      const formatted = formatGraphqlClientResult(res)
+      const formatted = await runGraphql(graphqlEndpoint(client.url), query, sendAs.headers())
       setResult(formatted.result)
       setError(formatted.error)
     } catch (e) {
@@ -45,7 +47,7 @@ export function GraphQLExplorer(): React.ReactElement {
     }
   }
 
-  const endpoint = `${client.url.replace(/\/+$/, "")}/graphql/v1`
+  const endpoint = graphqlEndpoint(client.url)
 
   return (
     <div className="flex gap-4 h-full min-h-0" style={{ height: "calc(100vh - 120px)" }}>
@@ -97,6 +99,7 @@ export function GraphQLExplorer(): React.ReactElement {
             {loading ? "Running…" : "Run"}
           </Button>
         </div>
+        <SendAsField sendAs={sendAs} />
 
         <div className="flex gap-3 flex-1 min-h-0">
           {/* Query editor */}

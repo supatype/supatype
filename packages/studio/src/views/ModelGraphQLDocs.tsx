@@ -5,10 +5,13 @@ import { useStudioClient } from "../StudioCore.js"
 import { cn } from "../lib/utils.js"
 import {
   buildGraphqlListQuery,
-  formatGraphqlClientResult,
   graphqlCollectionField,
+  graphqlEndpoint,
   graphqlEntityName,
+  runGraphql,
 } from "../lib/graphql-query.js"
+import { useSendAs } from "../hooks/useSendAs.js"
+import { SendAsField } from "../components/SendAsField.js"
 
 function buildOperations(model: ModelConfig) {
   const collection = graphqlCollectionField(model.tableName)
@@ -101,6 +104,7 @@ interface Props {
 
 export function ModelGraphQLDocs({ model }: Props): React.ReactElement {
   const client = useStudioClient()
+  const sendAs = useSendAs()
   const operations = buildOperations(model)
   const [selectedOp, setSelectedOp] = useState(0)
   const [query, setQuery] = useState(operations[0]?.query ?? "")
@@ -120,8 +124,7 @@ export function ModelGraphQLDocs({ model }: Props): React.ReactElement {
     setError("")
     setResult("")
     try {
-      const res = await client.graphql(query, {})
-      const formatted = formatGraphqlClientResult(res)
+      const formatted = await runGraphql(graphqlEndpoint(client.url), query, sendAs.headers())
       setResult(formatted.result)
       setError(formatted.error)
     } catch (e) {
@@ -168,6 +171,7 @@ export function ModelGraphQLDocs({ model }: Props): React.ReactElement {
             {loading ? "Running…" : "Run"}
           </Button>
         </div>
+        <SendAsField sendAs={sendAs} />
         <div className="flex gap-3 flex-1 min-h-0">
           <div className="flex-1 flex flex-col min-h-0">
             <div className="text-xs text-muted-foreground mb-1">Query</div>
