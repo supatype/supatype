@@ -1,5 +1,4 @@
-import { act } from "react"
-import { settle } from "./data-browser-support.js"
+import { act, button, settle } from "./support.js"
 
 /**
  * Helpers for the questions Studio asks before a destructive act, shared by the suites that check
@@ -11,10 +10,12 @@ export function asking(): string | null {
   return document.body.querySelector('[role="alertdialog"]')?.textContent ?? null
 }
 
-/** Clicks the button reading exactly `label`, anywhere on the page, and lets the page settle. */
-export async function press(label: string): Promise<void> {
-  const found = Array.from(document.body.querySelectorAll("button")).find((b) => b.textContent?.trim() === label)
-  if (!found) throw new Error(`no "${label}" button`)
-  await act(async () => found.click())
+/**
+ * Clicks the button whose text, or failing that whose aria-label, reads exactly `label`, inside
+ * `scope` (the whole page by default), and lets the page settle. Throws when there is none.
+ */
+export async function press(label: string, scope: ParentNode = document.body): Promise<void> {
+  const found = button(scope, label)
+  await act(() => found.click())
   await settle()
 }

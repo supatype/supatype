@@ -1,14 +1,12 @@
 // @vitest-environment jsdom
-import React, { act } from "react"
-import { createRoot, type Root } from "react-dom/client"
+import React from "react"
 import { MemoryRouter } from "react-router-dom"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { AdminConfigContext } from "../src/hooks/useAdminConfig.js"
 import { LocaleContext } from "../src/hooks/useLocale.js"
 import { ListView } from "../src/views/ListView.js"
-import { button, settle } from "./data-browser-support.js"
-import { testClient, testConfig, testField, testModel } from "./support.js"
+import { act, button, isolateEachTest, mount, settle, testClient, testConfig, testField, testModel, unmount, type Mounted } from "./support.js"
 
 /**
  * Deleting selected rows ignored the `{ error }` the client returns instead of throwing, so a delete
@@ -19,22 +17,17 @@ import { testClient, testConfig, testField, testModel } from "./support.js"
 const MODEL = testModel({ fields: [testField({ name: "title", label: "Title" })], listColumns: ["title"] })
 const REFUSAL = "update or delete on table \"posts\" violates foreign key constraint"
 
-let root: Root | null = null
-let container: HTMLElement
-let deletes: URL[] = []
+/** The list on screen and every DELETE it has sent. */
+interface RefusingList extends Mounted {
+  deletes: URL[]
+}
 
-afterEach(() => {
-  act(() => root?.unmount())
-  root = null
-  container?.remove()
-  vi.unstubAllGlobals()
-})
+isolateEachTest()
 
 const FIRST = { id: "p1", title: "First post" }
 
-async function renderRefusingList(rows: Array<{ id: string; title: string }> = [FIRST]): Promise<void> {
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true
-  deletes = []
+async function renderRefusingList(rows: Array<{ id: string; title: string }> = [FIRST]): Promise<RefusingList> {
+  const deletes: URL[] = []
   vi.stubGlobal("fetch", async (raw: string, init?: RequestInit) => {
     if (init?.method === "DELETE") {
       deletes.push(new URL(raw))
@@ -42,26 +35,22 @@ async function renderRefusingList(rows: Array<{ id: string; title: string }> = [
     }
     return Response.json(rows)
   })
-  container = document.createElement("div")
-  document.body.appendChild(container)
-  root = createRoot(container)
-  await act(async () => {
-    root!.render(
-      <MemoryRouter>
-        <AdminConfigContext.Provider value={testConfig({ models: [MODEL] })}>
-          <AdminClientContext.Provider value={testClient({ url: "http://localhost:8000/studio/proxy", token: "t" })}>
-            <LocaleContext.Provider value={{ currentLocale: "en", setLocale: () => undefined, locales: [], defaultLocale: "en" }}>
-              <ListView model={MODEL} onNavigate={() => undefined} />
-            </LocaleContext.Provider>
-          </AdminClientContext.Provider>
-        </AdminConfigContext.Provider>
-      </MemoryRouter>,
-    )
-  })
+  const view = await mount(
+    <MemoryRouter>
+      <AdminConfigContext.Provider value={testConfig({ models: [MODEL] })}>
+        <AdminClientContext.Provider value={testClient({ url: "http://localhost:8000/studio/proxy", token: "t" })}>
+          <LocaleContext.Provider value={{ currentLocale: "en", setLocale: () => undefined, locales: [], defaultLocale: "en" }}>
+            <ListView model={MODEL} onNavigate={() => undefined} />
+          </LocaleContext.Provider>
+        </AdminClientContext.Provider>
+      </AdminConfigContext.Provider>
+    </MemoryRouter>,
+  )
   await settle()
+  return { ...view, deletes }
 }
 
-async function selectFirstRowAndAskToDelete(): Promise<void> {
+async function selectFirstRowAndAskToDelete(container: HTMLElement): Promise<void> {
   const box = container.querySelector<HTMLInputElement>("input[aria-label='Select row p1']")
   if (!box) throw new Error("no row checkbox")
   await act(async () => box.click())
@@ -70,22 +59,21 @@ async function selectFirstRowAndAskToDelete(): Promise<void> {
 
 describe("deleting selected rows from a list", () => {
   it("asks before deleting anything", async () => {
-    await renderRefusingList()
-    await selectFirstRowAndAskToDelete()
-    expect(container.querySelector("[role='alertdialog']")?.textContent).toContain("Delete 1")
-    expect(deletes).toHaveLength(0)
+    const list = await renderRefusingList()
+    await selectFirstRowAndAskToDelete(list.container)
+    expect(list.container.querySelector("[role='alertdialog']")?.textContent).toContain("Delete 1")
+    expect(list.deletes).toHaveLength(0)
   })
 
   it("speaks of one row in the singular and of several in the plural (final15)", async () => {
     // One row read "Delete 1 Talk? They are deleted for good."
-    await renderRefusingList()
-    await selectFirstRowAndAskToDelete()
-    const one = container.querySelector("[role='alertdialog']")?.textContent ?? ""
+    const single = await renderRefusingList()
+    await selectFirstRowAndAskToDelete(single.container)
+    const one = single.container.querySelector("[role='alertdialog']")?.textContent ?? ""
     expect(one).toContain("Delete 1 Post?")
     expect(one).toContain("It is deleted for good.")
-    act(() => root?.unmount())
-    container.remove()
-    await renderRefusingList([FIRST, { id: "p2", title: "Second post" }])
+    unmount(single)
+    const { container } = await renderRefusingList([FIRST, { id: "p2", title: "Second post" }])
     const all = container.querySelector<HTMLInputElement>("input[aria-label='Select all']")
     if (!all) throw new Error("no select-all checkbox")
     await act(async () => all.click())
@@ -96,8 +84,8 @@ describe("deleting selected rows from a list", () => {
   })
 
   it("shows a refused delete and keeps the row selected", async () => {
-    await renderRefusingList()
-    await selectFirstRowAndAskToDelete()
+    const { container, deletes } = await renderRefusingList()
+    await selectFirstRowAndAskToDelete(container)
     const dialog = container.querySelector<HTMLElement>("[role='alertdialog']")
     if (!dialog) throw new Error("no confirmation")
     await act(async () => button(dialog, "Delete").click())
