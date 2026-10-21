@@ -6,6 +6,8 @@ import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { Button, Card, CodeBlock, Input } from "../components/ui.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { cn } from "../lib/utils.js"
+import { useRoleRefusalText } from "../components/RoleGate.js"
+import { proxyFailure } from "../lib/role-refusal.js"
 import { declaredTables, isDeclaredCache, projectTtlCeiling } from "../lib/cache-declaration.js"
 import type { DeclaredCache } from "../lib/cache-declaration.js"
 import {
@@ -32,6 +34,7 @@ const HTTP_METHODS = ["GET", "POST", "PATCH", "DELETE"] as const
 export function RestApiSettings(): React.ReactElement {
   const config = useAdminConfig()
   const client = useStudioClient()
+  const refused = useRoleRefusalText()
   const serverCacheOffered = useServerRestCacheOffered()
 
   const apiBase = `${client.url.replace(/\/+$/, "")}/rest/v1`
@@ -56,7 +59,7 @@ export function RestApiSettings(): React.ReactElement {
       headers: studioAuthHeaders(client),
       credentials: "include",
     })
-      .then((r) => { if (!r.ok) throw new Error(String(r.status)); return readJson(r, isRestConfig) })
+      .then(async (r) => { if (!r.ok) throw await proxyFailure(r, refused); return readJson(r, isRestConfig) })
       .then((d) => {
         if (cancelled) return
         setDeclared(d.declared ?? {})
@@ -72,7 +75,7 @@ export function RestApiSettings(): React.ReactElement {
       .catch((e: Error) => { if (!cancelled) setLoadError(e.message ?? "Failed to load") })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [client, retryCount])
+  }, [client, refused, retryCount])
 
   const ttlCeiling = projectTtlCeiling(declared)
   const cacheDeclaring = declaredTables(declared)

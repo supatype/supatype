@@ -26,6 +26,11 @@ export function userAdministrationOffered(capability: OfferedCapability): boolea
   return offers(capability, "manageUsers")
 }
 
+/** Changing content (rows and files): every role but the viewer, who reads. */
+export function contentWriteOffered(capability: OfferedCapability): boolean {
+  return offers(capability, "write")
+}
+
 /** The project's API keys: admins and developers. */
 export function projectKeysOffered(capability: OfferedCapability): boolean {
   return offers(capability, "manageKeys")

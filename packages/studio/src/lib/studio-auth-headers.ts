@@ -1,6 +1,4 @@
 import type { SupatypeClient } from "@supatype/client"
-import { actingModeHeaders } from "./acting-mode.js"
-
 /** True when Studio routes API calls through a session-aware proxy. */
 export function usesSessionProxy(client: { url: string }): boolean {
   const base = client.url.replace(/\/$/, "")
@@ -13,16 +11,12 @@ export function usesSessionProxy(client: { url: string }): boolean {
  * Always the signed-in user's token, never a service role key. The key lives on
  * the server behind `/studio/proxy`, which resolves the caller's Studio
  * membership, applies their role's permissions, decides the acting identity and
- * records elevated access. A key sent from here would bypass all four. The acting
- * mode an owner or admin chose goes with them (`acting-mode.ts`).
+ * records elevated access. A key sent from here would bypass all four. No acting
+ * mode goes with them, so the server's default for the caller's role applies (`acting-mode.ts`).
  */
 export function studioAuthHeaders(client: SupatypeClient): Record<string, string> {
-  const mode = actingModeHeaders(client.url)
   const token = signedInToken(client)
-  if (token !== "") {
-    return { Authorization: `Bearer ${token}`, apikey: token, ...mode }
-  }
-  return mode
+  return token === "" ? {} : { Authorization: `Bearer ${token}`, apikey: token }
 }
 
 /**

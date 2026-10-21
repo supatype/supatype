@@ -8,6 +8,8 @@ import { Button, Card, ConfirmButton, type DestructiveQuestion } from "../compon
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { SlidePanel } from "../components/SlidePanel.js"
+import { useRoleRefusalText } from "../components/RoleGate.js"
+import { proxyFailure, unlessRoleRefused } from "../lib/role-refusal.js"
 import { CacheHealthPanels } from "./CacheHealthPanels.js"
 import { useCacheHealth } from "../hooks/useCacheHealth.js"
 import { describeStaleness, reconcileNoteFor } from "../lib/cache-health.js"
@@ -198,6 +200,7 @@ export function RestCacheBrowser({
 }: RestCacheBrowserProps): React.ReactElement {
   const client = useStudioClient()
   const serverCacheOffered = useServerRestCacheOffered()
+  const refused = useRoleRefusalText()
   // Paged rather than appended: the list refreshes on a timer, and only the page on screen can.
   const pages = useCursorPages(tableFilter ?? "")
   const cursor = pages.cursor
@@ -230,10 +233,10 @@ export function RestCacheBrowser({
   const { data, loading, error, refetch } = useApiQuery(
     () =>
       fetch(listUrl, { headers: studioAuthHeaders(client), credentials: "include" }).then(async (r) => {
-        if (!r.ok) throw new Error(String(r.status))
+        if (!r.ok) throw await proxyFailure(r, refused)
         return readJson(r, isCacheListing)
       }),
-    [client, listUrl],
+    [client, listUrl, refused],
   )
 
   // Cache entries expire on their own, so this list goes stale by sitting still.
@@ -254,13 +257,13 @@ export function RestCacheBrowser({
       headers: studioAuthHeaders(client),
       credentials: "include",
     })
-    if (!r.ok) return
+    if (!(await unlessRoleRefused(r, refused)).ok) return
     const json = await readJson(r, isRestConfig)
     setCacheMaxTTL(json.cache_max_ttl ?? 0)
     setDeclared(json.declared ?? {})
     const tc = json.cache_tables?.[tableFilter]
     setTableCfg(tc ?? { enabled: false, allow_public: false })
-  }, [client, showTableSettings, tableFilter])
+  }, [client, refused, showTableSettings, tableFilter])
 
   React.useEffect(() => {
     loadSettings().catch((e: unknown) => setActionError(e instanceof Error ? e.message : "Failed to load cache settings"))
@@ -276,7 +279,7 @@ export function RestCacheBrowser({
         headers: studioAuthHeaders(client),
         credentials: "include",
       })
-      if (!r.ok) throw new Error(String(r.status))
+      if (!r.ok) throw await proxyFailure(r, refused)
       setDetail(await readJson(r, isRestCacheDetail))
     } catch (e) {
       setDetailError(e instanceof Error ? e.message : "Failed to load entry")
@@ -293,7 +296,7 @@ export function RestCacheBrowser({
         headers: studioAuthHeaders(client),
         credentials: "include",
       })
-      if (!r.ok) throw new Error(String(r.status))
+      if (!r.ok) throw await proxyFailure(r, refused)
       setSelectedKey(null)
       setDetail(null)
       refetch()
@@ -311,7 +314,7 @@ export function RestCacheBrowser({
         headers: studioAuthHeaders(client),
         credentials: "include",
       })
-      if (!r.ok) throw new Error(String(r.status))
+      if (!r.ok) throw await proxyFailure(r, refused)
       refetch()
     } catch (e) {
       setActionError(e instanceof Error ? e.message : "Flush failed")
@@ -327,7 +330,7 @@ export function RestCacheBrowser({
         headers: studioAuthHeaders(client),
         credentials: "include",
       })
-      if (!cfgRes.ok) throw new Error(String(cfgRes.status))
+      if (!cfgRes.ok) throw await proxyFailure(cfgRes, refused)
       const current = await readJson(cfgRes, isRestConfig)
       const cache_tables = { ...(current.cache_tables ?? {}) }
       cache_tables[tableFilter] = { ...tableCfg }
@@ -340,7 +343,7 @@ export function RestCacheBrowser({
           cache_max_ttl: cacheMaxTTL > 0 ? cacheMaxTTL : current.cache_max_ttl,
         }),
       })
-      if (!r.ok) throw new Error(String(r.status))
+      if (!r.ok) throw await proxyFailure(r, refused)
       // The save succeeded; what the row cache made of it comes back in the
       // same body and is a note, never an error. The response cache is already
       // live either way.
@@ -416,7 +419,7 @@ export function RestCacheBrowser({
       </div>
 
       {error && <ErrorBanner message={error} />}
-      {actionError && <ErrorBanner message={actionError} />}
+      {actionError && actionError !== error && <ErrorBanner message={actionError} />}
 
       {/*
         Only on the project-wide screen. The per-model view is filtered to one table, and every

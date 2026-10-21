@@ -17,6 +17,8 @@ import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
 import { ConfirmButton } from "../components/ui.js"
 import { authUserListPath, userListTotal } from "../lib/auth-user-search.js"
 import { firstModelWithCreatedAt, hasCreatedAt } from "../lib/model-created-at.js"
+import { RoleGate } from "../components/RoleGate.js"
+import { useContentWriteOffered } from "../hooks/useContentWriteOffered.js"
 
 // ─── Response bodies ──────────────────────────────────────────────────────────
 
@@ -267,7 +269,7 @@ function BlockContent({ block }: { block: DashboardBlock }): React.ReactElement 
   switch (block.type) {
     case "stats":          return <StatsBlock block={block} />
     case "recent":         return <RecentBlock block={block} />
-    case "auth":           return <AuthBlock />
+    case "auth":           return <RoleGate needs="manageUsers" activity="see the project's users"><AuthBlock /></RoleGate>
     case "storage":        return <StorageBlock />
     case "quick-actions":  return <QuickActionsBlock />
     case "signups-chart":  return <SignupsChartBlock />
@@ -479,6 +481,8 @@ function StorageBlock(): React.ReactElement {
 
 function QuickActionsBlock(): React.ReactElement {
   const config = useAdminConfig()
+  // Creating a record is a change; a viewer is offered the globals to read and nothing to create.
+  const creatable = useContentWriteOffered() ? config.models.slice(0, 4) : []
 
   return (
     <div className="p-5">
@@ -493,7 +497,7 @@ function QuickActionsBlock(): React.ReactElement {
             {g.label}
           </Link>
         ))}
-        {config.models.slice(0, 4).map((m) => (
+        {creatable.map((m) => (
           <Link
             key={m.name}
             to={`/models/${m.name}/create`}

@@ -3,8 +3,8 @@ import type { ModelConfig, FieldConfig } from "../config.js"
 import { Button, Card, CodeBlock, Input } from "../components/ui.js"
 import { useStudioClient } from "../StudioCore.js"
 import { cn } from "../lib/utils.js"
-import { signedInToken } from "../lib/studio-auth-headers.js"
-import { BearerTokenField } from "../components/BearerTokenField.js"
+import { useSendAs } from "../hooks/useSendAs.js"
+import { SendAsField } from "../components/SendAsField.js"
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -156,13 +156,12 @@ const METHOD_BG: Record<Method, string> = {
 }
 
 function TryItPanel({ ep, baseUrl, onClose }: { ep: Endpoint; baseUrl: string; onClose: () => void }) {
-  const signedIn = signedInToken(useStudioClient())
+  const sendAs = useSendAs()
   const [paramValues, setParamValues] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {}
     for (const p of ep.params) init[p.name] = p.example ?? ""
     return init
   })
-  const [authToken, setAuthToken] = useState(signedIn)
   const [requestBody, setRequestBody] = useState(ep.requestBody ?? "")
   const [response, setResponse] = useState<TryItResponse | null>(null)
   const [loading, setLoading] = useState(false)
@@ -180,8 +179,7 @@ function TryItPanel({ ep, baseUrl, onClose }: { ep: Endpoint; baseUrl: string; o
       const qs = queryParts.length > 0 ? "?" + queryParts.join("&") : ""
       const url = `${baseUrl}${ep.path}${qs}`
 
-      const headers: Record<string, string> = { "Content-Type": "application/json" }
-      if (authToken) headers["Authorization"] = `Bearer ${authToken}`
+      const headers: Record<string, string> = { "Content-Type": "application/json", ...sendAs.headers() }
       for (const p of ep.params.filter((p) => p.location === "header")) {
         const v = paramValues[p.name]
         if (v) headers[p.name] = v
@@ -226,7 +224,7 @@ function TryItPanel({ ep, baseUrl, onClose }: { ep: Endpoint; baseUrl: string; o
         <Button size="xs" onClick={onClose}>Close</Button>
       </div>
 
-      <BearerTokenField value={authToken} onChange={setAuthToken} signedIn={signedIn} />
+      <SendAsField sendAs={sendAs} />
 
       {queryParams.length > 0 && (
         <div className="mb-3">

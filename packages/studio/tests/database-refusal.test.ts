@@ -89,6 +89,22 @@ describe("explainRefusal", () => {
     expect(out.details).toBe("permission denied for table speaker")
   })
 
+  it("says a refusal from the Studio role is the Studio role's, with the server's words under details", () => {
+    const out = explain({ message: 'Studio role "viewer" cannot perform this request' })
+    expect(out).toMatchObject({ field: null, banner: "This change isn't allowed by your Studio role." })
+    expect(out.details).toBe('Studio role "viewer" cannot perform this request')
+  })
+
+  it("says a row rule refused the change, not the policy's raw text", () => {
+    const out = explain({ code: "42501", message: 'new row violates row-level security policy for table "speaker"' })
+    expect(out).toMatchObject({ field: null, banner: "This change isn't allowed by the project's row rules." })
+  })
+
+  it("puts a column the caller may not change on its field, as its field rule", () => {
+    const out = explain({ code: "42501", message: 'permission denied for column "email" of relation "speaker"' })
+    expect(out).toMatchObject({ field: "email", message: "can't be changed: its field rule doesn't allow it" })
+  })
+
   it("keeps a field validator's own words on its field", () => {
     const out = explain({ message: "must be a company address", field: "email" })
     expect(out).toEqual({ field: "email", message: "must be a company address", banner: "must be a company address", details: null })

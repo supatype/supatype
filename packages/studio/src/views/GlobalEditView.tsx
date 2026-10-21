@@ -10,6 +10,7 @@ import { clearRefusal, passesChecks, reportRefusal } from "../lib/write-error.js
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { useRefusal, type Refusal } from "../hooks/useRefusal.js"
+import { useContentWriteOffered } from "../hooks/useContentWriteOffered.js"
 
 interface GlobalEditViewProps {
   global: GlobalConfig
@@ -86,6 +87,9 @@ export function GlobalEditView({ global: globalConfig }: GlobalEditViewProps): R
   const handleChange = useCallback((fieldName: string, value: unknown) => {
     setValues((prev) => ({ ...prev, [fieldName]: value }))
   }, [setValues])
+  // A viewer reads the global: every input is read only and no Save is offered.
+  const canWrite = useContentWriteOffered()
+  const fields = canWrite ? globalConfig.fields : globalConfig.fields.map((f) => ({ ...f, readOnly: true }))
 
   if (loading) return <div className="st-global-edit st-edit-loading">Loading...</div>
 
@@ -94,7 +98,7 @@ export function GlobalEditView({ global: globalConfig }: GlobalEditViewProps): R
       <Header title={globalConfig.label} />
       {problems.error && <ErrorBanner message={problems.error} details={problems.details} />}
       <EditFormLayout
-        {...splitEditFields(globalConfig.fields, { primaryKey: PRIMARY_KEY, isCreate: false, timestamps: hasTimestamps(globalConfig) })}
+        {...splitEditFields(fields, { primaryKey: PRIMARY_KEY, isCreate: false, timestamps: hasTimestamps(globalConfig) })}
         values={values}
         onChange={handleChange}
         primaryKey={PRIMARY_KEY}
@@ -103,7 +107,7 @@ export function GlobalEditView({ global: globalConfig }: GlobalEditViewProps): R
         recordSyncKey="global"
         slugFollowSource={false}
         saving={saving}
-        onSave={() => { void save() }}
+        {...(canWrite && { onSave: () => { void save() } })}
         isCreate={false}
         fieldErrors={problems.fieldErrors}
       />

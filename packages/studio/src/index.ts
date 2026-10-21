@@ -104,5 +104,5 @@ export type { CompositeField, CompositeFieldGroupProps } from "./plugins/Composi
 // Utilities
 export { cn } from "./lib/utils.js"
 export { normalizeAdminConfig } from "./lib/normalize-admin-config.js"
-// The acting mode an owner or admin chose, for a host that builds its own Studio client (RX4)
+// The header that asks a Studio request to act in a mode, for a host that builds its own requests (RX4)
 export { actingModeHeaders, ACTING_MODE_HEADER } from "./lib/acting-mode.js"

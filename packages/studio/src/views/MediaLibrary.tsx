@@ -7,6 +7,7 @@ import type { StorageListEntry } from "@supatype/client"
 import { storagePublicUrl } from "../lib/storage-ref.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
 import { ConfirmButton } from "../components/ui.js"
+import { useContentWriteOffered } from "../hooks/useContentWriteOffered.js"
 
 type ViewMode = "grid" | "list"
 
@@ -32,6 +33,8 @@ export function MediaLibrary(): React.ReactElement {
   useShowsProjectRows()
 
   const client = useAdminClient()
+  // A viewer browses the library; uploading and deleting are changes.
+  const canWrite = useContentWriteOffered()
   const [buckets, setBuckets] = useState<Array<{ id: string; name: string; public: boolean }>>([])
   const [currentBucket, setCurrentBucket] = useState<string | null>(null)
   const [prefix, setPrefix] = useState("")
@@ -116,7 +119,7 @@ export function MediaLibrary(): React.ReactElement {
             >
               {viewMode === "grid" ? "List" : "Grid"}
             </button>
-            {currentBucket && (
+            {currentBucket && canWrite && (
               <button
                 type="button"
                 className="st-btn st-btn-primary"
@@ -200,7 +203,7 @@ export function MediaLibrary(): React.ReactElement {
               <div className="st-media-name" title={file.name}>
                 {file.name.split("/").pop()}
               </div>
-              <DeleteFileButton path={file.name} onDelete={() => { void handleDelete(file.name) }} />
+              {canWrite && <DeleteFileButton path={file.name} onDelete={() => { void handleDelete(file.name) }} />}
             </div>
           ))}
         </div>
@@ -221,7 +224,7 @@ export function MediaLibrary(): React.ReactElement {
                 <td>{String(file.metadata?.["mimetype"] ?? "-")}</td>
                 <td>{file.updated_at ? new Date(file.updated_at).toLocaleDateString() : "-"}</td>
                 <td>
-                  <DeleteFileButton path={file.name} onDelete={() => { void handleDelete(file.name) }} />
+                  {canWrite && <DeleteFileButton path={file.name} onDelete={() => { void handleDelete(file.name) }} />}
                 </td>
               </tr>
             ))}

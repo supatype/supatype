@@ -21,6 +21,8 @@ import {
 } from "./components/ElevatedModeBanner.js"
 import { LinkAccountPrompt } from "./components/LinkAccountPrompt.js"
 import { SchemaPushNotice } from "./components/SchemaPushNotice.js"
+import { RoleGate, type RoleRequirement } from "./components/RoleGate.js"
+import { forgetStoredActingModes } from "./lib/acting-mode.js"
 
 // Re-export for dev tool views that import useStudioClient
 export const useStudioClient = useAdminClient
@@ -197,6 +199,25 @@ function StudioLayout({ extensions, demoMode }: StudioLayoutProps): React.ReactE
 }
 
 // ─── Route Wrappers ────────────────────────────────────────────────────────────
+
+/**
+ * What each gated screen needs, from the shared role matrix. A screen states its requirement where
+ * its route mounts it, so a screen added later is gated by nothing it has not asked for.
+ */
+const RESPONSE_CACHE: RoleRequirement = { needs: "administer", activity: "manage the response cache" }
+const SCHEMA: RoleRequirement = { needs: "schemaView", activity: "view the schema" }
+const DATABASE_SCHEMA: RoleRequirement = { needs: "schemaView", activity: "view the database schema" }
+const ACCESS_POLICIES: RoleRequirement = { needs: "schemaView", activity: "view access policies" }
+const PROJECT_USERS: RoleRequirement = { needs: "manageUsers", activity: "manage the project's users" }
+const API_SETTINGS: RoleRequirement = { needs: "administer", activity: "change the API settings" }
+const FUNCTIONS: RoleRequirement = { needs: "administer", activity: "manage functions" }
+const REALTIME: RoleRequirement = { needs: "realtimeInspect", activity: "use the Realtime Inspector" }
+const LOGS: RoleRequirement = { needs: "viewLogs", activity: "view logs" }
+
+/** `element`, for a role that holds what `requirement` needs. */
+function gated(requirement: RoleRequirement, element: React.ReactElement): React.ReactElement {
+  return <RoleGate {...requirement}>{element}</RoleGate>
+}
 
 function ModelsOverview(): React.ReactElement {
   const config = useAdminConfig()
@@ -384,6 +405,8 @@ function GlobalGraphQLRoute(): React.ReactElement {
 
 export function StudioCore({ config, client, extensions, demoMode, cloudUrl, platformUrl, projectRef }: StudioCoreProps): React.ReactElement {
   const localeState = useLocaleState(config)
+  // A mode an earlier Studio remembered is no longer read; forgetting it once keeps no stale choice.
+  useEffect(() => forgetStoredActingModes(), [])
 
   let content = (
     <CloudUrlContext.Provider value={cloudUrl}>
@@ -398,19 +421,19 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
               <Route path="media" element={<MediaLibrary />} />
               <Route path="models" element={<ModelsOverview />} />
               <Route path="models/globals" element={<GlobalsIndexRoute />} />
-              <Route path="models/globals/:name/schema" element={<GlobalSchemaRoute />} />
+              <Route path="models/globals/:name/schema" element={gated(SCHEMA, <GlobalSchemaRoute />)} />
               <Route path="models/globals/:name/data" element={<GlobalDataRoute />} />
               <Route path="models/globals/:name/api" element={<GlobalApiRoute />} />
               <Route path="models/globals/:name/graphql" element={<GlobalGraphQLRoute />} />
-              <Route path="models/globals/:name/cache" element={<GlobalCacheRoute />} />
+              <Route path="models/globals/:name/cache" element={gated(RESPONSE_CACHE, <GlobalCacheRoute />)} />
               <Route path="models/globals/:name" element={<GlobalRoute />} />
               <Route path="models/:model" element={<CollectionListRoute />} />
-              <Route path="models/:model/schema"  element={<CollectionSchemaRoute />} />
-              <Route path="models/:model/rules"   element={<CollectionRulesRoute />} />
+              <Route path="models/:model/schema"  element={gated(SCHEMA, <CollectionSchemaRoute />)} />
+              <Route path="models/:model/rules"   element={gated(SCHEMA, <CollectionRulesRoute />)} />
               <Route path="models/:model/data"    element={<CollectionDataRoute />} />
               <Route path="models/:model/api"     element={<CollectionApiRoute />} />
               <Route path="models/:model/graphql" element={<CollectionGraphQLRoute />} />
-              <Route path="models/:model/cache" element={<CollectionCacheRoute />} />
+              <Route path="models/:model/cache" element={gated(RESPONSE_CACHE, <CollectionCacheRoute />)} />
               <Route path="models/:model/create"  element={<CollectionCreateRoute />} />
               <Route path="models/:model/:recordId/versions" element={<CollectionVersionsRoute />} />
               <Route path="models/:model/:recordId" element={<CollectionEditRoute />} />
@@ -420,20 +443,20 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
               {/* Developer tools: Database */}
               <Route path="database">
                 <Route index element={<Navigate to="overview" replace />} />
-                <Route path="overview"    element={<SchemaView />} />
-                <Route path="tables"      element={<TablesView />} />
-                <Route path="views"       element={<ViewsView />} />
-                <Route path="functions"   element={<FunctionsView />} />
-                <Route path="triggers"    element={<TriggersView />} />
-                <Route path="indexes"     element={<IndexesView />} />
-                <Route path="constraints" element={<ConstraintsView />} />
-                <Route path="types"       element={<TypesView />} />
-                <Route path="roles"       element={<RolesView />} />
-                <Route path="extensions"  element={<ExtensionsView />} />
+                <Route path="overview"    element={gated(DATABASE_SCHEMA, <SchemaView />)} />
+                <Route path="tables"      element={gated(DATABASE_SCHEMA, <TablesView />)} />
+                <Route path="views"       element={gated(DATABASE_SCHEMA, <ViewsView />)} />
+                <Route path="functions"   element={gated(DATABASE_SCHEMA, <FunctionsView />)} />
+                <Route path="triggers"    element={gated(DATABASE_SCHEMA, <TriggersView />)} />
+                <Route path="indexes"     element={gated(DATABASE_SCHEMA, <IndexesView />)} />
+                <Route path="constraints" element={gated(DATABASE_SCHEMA, <ConstraintsView />)} />
+                <Route path="types"       element={gated(DATABASE_SCHEMA, <TypesView />)} />
+                <Route path="roles"       element={gated(DATABASE_SCHEMA, <RolesView />)} />
+                <Route path="extensions"  element={gated(DATABASE_SCHEMA, <ExtensionsView />)} />
                 <Route path="sql"         element={<SqlRunner />} />
-                <Route path="migrations"  element={<MigrationHistory />} />
-                <Route path="objects"     element={<SchemaObjects />} />
-                <Route path="seeds"       element={<SeedHistory />} />
+                <Route path="migrations"  element={gated(DATABASE_SCHEMA, <MigrationHistory />)} />
+                <Route path="objects"     element={gated(DATABASE_SCHEMA, <SchemaObjects />)} />
+                <Route path="seeds"       element={gated(DATABASE_SCHEMA, <SeedHistory />)} />
                 <Route path="wrappers"    element={<ComingSoon title="Database Wrappers" description="Connect to external data sources (Postgres FDW, S3, BigQuery, Stripe). Coming soon." />} />
                 <Route path="replication" element={<ComingSoon title="Read Replicas" description="Cross-region read replicas, publication management, replication slot monitoring. Coming soon." />} />
                 <Route path="warehouse"   element={<ComingSoon title="Analytical Warehouse" description="Columnar OLAP engine for analytics queries without impacting OLTP. Coming soon." />} />
@@ -445,16 +468,16 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
               <Route path="media-storage" element={<Navigate to="/media-storage/default/files" replace />} />
               <Route path="media-storage/:bucket" element={<Navigate to="files" replace />} />
               <Route path="media-storage/:bucket/files" element={<StorageBrowser />} />
-              <Route path="media-storage/:bucket/policies" element={<StoragePoliciesView />} />
+              <Route path="media-storage/:bucket/policies" element={gated(ACCESS_POLICIES, <StoragePoliciesView />)} />
               <Route path="media-storage/policies" element={<Navigate to="/media-storage/default/policies" replace />} />
 
               {/* Authentication */}
               <Route path="authentication" element={<Navigate to="/authentication/users" replace />} />
-              <Route path="authentication/users"           element={<UsersView />} />
-              <Route path="authentication/policies"        element={<PoliciesView />} />
-              <Route path="authentication/providers"       element={<ProvidersView />} />
-              <Route path="authentication/configuration"   element={<ConfigurationView />} />
-              <Route path="authentication/email-templates" element={<EmailTemplatesView />} />
+              <Route path="authentication/users"           element={gated(PROJECT_USERS, <UsersView />)} />
+              <Route path="authentication/policies"        element={gated(ACCESS_POLICIES, <PoliciesView />)} />
+              <Route path="authentication/providers"       element={gated(PROJECT_USERS, <ProvidersView />)} />
+              <Route path="authentication/configuration"   element={gated(PROJECT_USERS, <ConfigurationView />)} />
+              <Route path="authentication/email-templates" element={gated(PROJECT_USERS, <EmailTemplatesView />)} />
               <Route path="authentication/hooks"    element={<ComingSoon title="Auth Hooks" description="Configure pre/post hooks for auth events. Coming soon." />} />
               <Route path="authentication/sso"      element={<ComingSoon title="SSO & OAuth Clients" description="SAML 2.0, OIDC, and OAuth2 client management. Coming soon." />} />
               <Route path="authentication/security" element={<ComingSoon title="Attack Protection" description="CAPTCHA, IP blocking, leaked password detection, rate limits. Coming soon." />} />
@@ -463,7 +486,7 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
               <Route path="observability">
                 <Route index element={<Navigate to="logs" replace />} />
                 <Route path="logs" element={<Navigate to="api" replace />} />
-                <Route path="logs/api"       element={<LogsViewer />} />
+                <Route path="logs/api"       element={gated(LOGS, <LogsViewer />)} />
                 <Route path="logs/auth"      element={<ComingSoon title="Auth Logs" description="Auth event logging is coming soon." />} />
                 <Route path="logs/storage"   element={<ComingSoon title="Storage Logs" description="Storage access logging is coming soon." />} />
                 {/* Shipped: the tail lives on the function itself, beside invoke and env, because a
@@ -491,15 +514,15 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
 
               {/* Platform features */}
               <Route path="email"          element={<ComingSoon title="Email" description="Configure transactional email providers, templates, and delivery settings." />} />
-              <Route path="edge-functions" element={<EdgeFunctions />} />
-              <Route path="edge-functions/:functionSlug" element={<EdgeFunctions />} />
-              <Route path="edge-functions/:functionSlug/:tab" element={<EdgeFunctions />} />
+              <Route path="edge-functions" element={gated(FUNCTIONS, <EdgeFunctions />)} />
+              <Route path="edge-functions/:functionSlug" element={gated(FUNCTIONS, <EdgeFunctions />)} />
+              <Route path="edge-functions/:functionSlug/:tab" element={gated(FUNCTIONS, <EdgeFunctions />)} />
               {/* The Inspector where this deployment's control plane serves it, "coming soon" where it
                   does not (Phase-08 Appendix A). Settings and metrics are a later release. */}
-              <Route path="realtime"          element={<RealtimeInspector demoMode={demoMode ?? false} />} />
+              <Route path="realtime"          element={gated(REALTIME, <RealtimeInspector demoMode={demoMode ?? false} />)} />
               <Route path="realtime/settings" element={<ComingSoon title="Realtime Settings" description="Realtime settings are coming in a later release." />} />
               <Route path="realtime/metrics"  element={<ComingSoon title="Realtime Metrics" description="Connection, throughput and latency charts are coming in a later release." />} />
-              <Route path="realtime/:tab"     element={<RealtimeInspector demoMode={demoMode ?? false} />} />
+              <Route path="realtime/:tab"     element={gated(REALTIME, <RealtimeInspector demoMode={demoMode ?? false} />)} />
               <Route path="plugins"        element={<PluginsMarketplace />} />
               <Route path="webhooks"       element={<ComingSoon title="Webhooks" description="Schema-driven webhooks that fire on record create/update/delete. Configure endpoints, retry policies, and delivery history. Coming soon." />} />
               <Route path="jobs"           element={<ComingSoon title="Scheduled Jobs" description="Cron-scheduled SQL jobs and edge function invocations. View execution history and trigger manually. Coming soon." />} />
@@ -527,10 +550,10 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
               {/* API section */}
               <Route path="api" element={<Navigate to="/api/rest" replace />} />
               <Route path="api/rest" element={<ApiDocs />} />
-              <Route path="api/rest/settings" element={<RestApiSettings />} />
-              <Route path="api/rest/cache" element={<RestCacheBrowser title="REST API Cache" />} />
+              <Route path="api/rest/settings" element={gated(API_SETTINGS, <RestApiSettings />)} />
+              <Route path="api/rest/cache" element={gated(RESPONSE_CACHE, <RestCacheBrowser title="REST API Cache" />)} />
               <Route path="api/graphql" element={<GraphQLExplorer />} />
-              <Route path="api/graphql/settings" element={<GraphQLSettings />} />
+              <Route path="api/graphql/settings" element={gated(API_SETTINGS, <GraphQLSettings />)} />
 
               {/* Legacy / redirect paths */}
               <Route path="schema"             element={<Navigate to="/database/overview"   replace />} />

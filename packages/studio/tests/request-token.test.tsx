@@ -59,9 +59,21 @@ async function click(pattern: RegExp): Promise<void> {
   for (let i = 0; i < 4; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
 }
 
-function tokenInput(): HTMLInputElement {
-  const label = [...container.querySelectorAll("label")].find((l) => l.textContent === "Authorization Bearer Token")
-  const input = label === undefined ? null : container.querySelector(`#${label.htmlFor}`)
+/** The send-as choice the panel starts on. */
+function sendAs(): HTMLSelectElement {
+  const select = container.querySelector('select[aria-label="Send as"]')
+  if (!(select instanceof HTMLSelectElement)) throw new Error("no send-as choice")
+  return select
+}
+
+/** The token input "A token I paste" opens, which starts as the signed-in user's own. */
+async function pastedTokenInput(): Promise<HTMLInputElement> {
+  const select = sendAs()
+  await act(async () => {
+    select.value = "token"
+    select.dispatchEvent(new Event("change", { bubbles: true }))
+  })
+  const input = container.querySelector('input[aria-label="Bearer token"]')
   if (!(input instanceof HTMLInputElement)) throw new Error("no token input")
   return input
 }
@@ -70,7 +82,7 @@ describe("a request builder's token", () => {
   it("starts as the signed-in user's on a model's API page, and is sent", async () => {
     await render(<ModelApiDocs model={MODEL} />)
     await click(/^Try It$/)
-    expect(tokenInput().value).toBe(TOKEN)
+    expect(sendAs().value).toBe("me")
     await click(/^Send GET Request$/)
     expect(sent.at(-1)?.get("Authorization")).toBe(`Bearer ${TOKEN}`)
   })
@@ -81,11 +93,12 @@ describe("a request builder's token", () => {
     if (!(expand instanceof HTMLElement)) throw new Error("no endpoint")
     await act(async () => { expand.click() })
     await click(/^Try It$/)
-    expect(tokenInput().value).toBe(TOKEN)
+    expect(sendAs().value).toBe("me")
+    expect((await pastedTokenInput()).value).toBe(TOKEN)
   })
 
   it("invokes an edge function as the signed-in user unless told otherwise", async () => {
-    await render(<InvokeTab functionName="hello" clientUrl="http://localhost:8000" client={CLIENT} />)
+    await render(<InvokeTab functionName="hello" clientUrl="http://localhost:8000" />)
     await click(/^Invoke$/)
     expect(sent.at(-1)?.get("Authorization")).toBe(`Bearer ${TOKEN}`)
   })
