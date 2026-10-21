@@ -10,6 +10,8 @@ import { Badge, Button, Card, CodeBlock, ConfirmButton, Input, Select, Th, Td, t
 import { EmptyState } from "../components/EmptyState.js"
 import { ConnectionStringPanel } from "../components/database/ConnectionStringPanel.js"
 import { ApiCorsSettings } from "./ApiCorsSettings.js"
+import { useStudioCapability } from "../hooks/useStudioCapability.js"
+import { projectKeysOffered } from "../lib/capability-offers.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -790,10 +792,12 @@ export interface SettingsProps {
 export function Settings({ demoMode = false }: SettingsProps): React.ReactElement {
   const client = useStudioClient()
   const [activeTab, setActiveTab] = useState<SettingsTab>("general")
+  // The project's keys are for admins and developers.
+  const showKeys = projectKeysOffered(useStudioCapability())
 
   const tabs: Array<{ key: SettingsTab; label: string }> = [
     { key: "general", label: "General" },
-    { key: "keys", label: "API Keys" },
+    ...(showKeys ? [{ key: "keys" as const, label: "API Keys" }] : []),
     { key: "env", label: "Environment" },
     { key: "cors", label: "CORS" },
     { key: "database", label: "Database" },
@@ -821,7 +825,7 @@ export function Settings({ demoMode = false }: SettingsProps): React.ReactElemen
       </div>
 
       {activeTab === "general" ? <GeneralSettings /> : null}
-      {activeTab === "keys" ? <ApiKeysSettings /> : null}
+      {activeTab === "keys" && showKeys ? <ApiKeysSettings /> : null}
       {activeTab === "env" ? <EnvSettings /> : null}
       {activeTab === "cors" ? <CorsSettings demoMode={demoMode} /> : null}
       {activeTab === "database" ? <DatabaseSettings client={client} /> : null}

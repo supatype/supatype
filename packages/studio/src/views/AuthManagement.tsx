@@ -14,6 +14,7 @@ import {
 } from "../lib/auth-user-search.js"
 import { useStudioMembers } from "../hooks/useStudioMembers.js"
 import { useStudioCapability } from "../hooks/useStudioCapability.js"
+import { userAdministrationOffered } from "../lib/capability-offers.js"
 import { useAuthSettings } from "../hooks/useAuthSettings.js"
 import { StudioAccessCell } from "../components/StudioAccessCell.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
@@ -1126,8 +1127,8 @@ export function AuthManagement(): React.ReactElement {
               onEdit: () => setEditingUser(selectedUser),
               onDelete: () => runAction(() => handleDeleteUser(selectedUser.id)),
               onRevokeSession: (id) => runAction(() => handleRevokeSession(id)),
-              // Both hosts gate the whole auth admin API on `manageMembers`.
-              onConfirmEmail: studioAccess.canManageMembers
+              // Both hosts gate the whole auth admin API on `manageUsers`.
+              onConfirmEmail: userAdministrationOffered(studioAccess)
                 ? () => runAction(() => handleConfirmEmail(selectedUser.id))
                 : undefined,
               refusal: actionError,

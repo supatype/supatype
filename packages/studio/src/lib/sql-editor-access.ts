@@ -1,3 +1,5 @@
+import { offers, type OfferedCapability } from "./capability-offers.js"
+
 /**
  * Whether Studio offers the SQL editor (RX1).
  *
@@ -7,8 +9,8 @@
  * nav, only what the server has said is hidden: before the capability resolves, and on a host that
  * does not report it, the editor stays, and the server still refuses what it should.
  */
-export function sqlEditorOffered(capability: { role: string | null; permissions: Record<string, boolean> }): boolean {
-  return capability.role === null || capability.permissions["sqlEditor"] === true
+export function sqlEditorOffered(capability: OfferedCapability): boolean {
+  return offers(capability, "sqlEditor")
 }
 
 /** Where the SQL editor lives in Studio. */

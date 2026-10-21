@@ -19,7 +19,25 @@ interface StudioAccessCellProps {
  * and tables and are theirs to manage; the two are shown apart on purpose, because
  * conflating them is how granting an app role could hand out admin UI access.
  */
-export function StudioAccessCell({
+export function StudioAccessCell(props: StudioAccessCellProps): React.ReactElement {
+  const { userId, members } = props
+  const changedOutside = members.members.some((m) => m.userId === userId && m.changedOutsideStudio)
+  if (!changedOutside) return <StudioAccessControl {...props} />
+
+  return (
+    <div className="flex items-center gap-2">
+      <StudioAccessControl {...props} />
+      <Badge
+        variant="yellow"
+        title="This grant was last changed in the database directly, not through Studio. The project's Studio audit trail records who did it."
+      >
+        changed outside Studio
+      </Badge>
+    </div>
+  )
+}
+
+function StudioAccessControl({
   userId,
   members,
   currentUserId,

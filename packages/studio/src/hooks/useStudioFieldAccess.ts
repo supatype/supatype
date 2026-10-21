@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { actingModeOf, type ActingMode } from "../lib/acting-mode.js"
 import { isJsonObject } from "../lib/json.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { studioGatewayHeaders } from "../lib/studio-gateway-headers.js"
@@ -33,8 +34,12 @@ export type FieldAccessMap = Record<string, Record<string, FieldAccess> | undefi
  * `elevated` means the server swaps in the service role, which `supatype_mask` exempts, so
  * every restricted column comes back in the clear. The restrictions are then *descriptive*
  * rather than applied, and the interface must say so rather than pretend otherwise.
+ *
+ * `studio` keeps the caller's own identity, so every field rule applies to them as in `self`.
+ * Only the row rules differ, and the server's session answer already says what the Studio role
+ * may do with rows, so the verdicts below are read the same way in both.
  */
-export type ActingMode = "self" | "elevated"
+export type { ActingMode }
 
 /** `table -> operation -> verdict`, for `read` / `create` / `update` / `delete`. */
 export type TableAccessMap = Record<string, Record<string, FieldVerdict> | undefined>
@@ -88,7 +93,7 @@ export function useStudioFieldAccess(): StudioFieldAccess {
         if (cancelled || !isJsonObject(json)) return
         setState({
           resolved: true,
-          mode: json["mode"] === "elevated" ? "elevated" : "self",
+          mode: actingModeOf(json["mode"]) ?? "self",
           fields: normaliseFieldAccess(json["fields"]),
           tables: normaliseTableAccess(json["access"]),
         })

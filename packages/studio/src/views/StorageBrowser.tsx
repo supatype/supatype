@@ -14,6 +14,8 @@ import { Button, Card, DestructiveAnswers, Dialog, Input, Select, Th, Td } from 
 import { deleteSelection } from "../lib/storage-delete.js"
 import { IconFile, IconFileText, IconFilm, IconFolder, IconImage, IconMusic } from "../components/icons.js"
 import { UuidCell } from "../components/UuidCell.js"
+import { useStudioCapability } from "../hooks/useStudioCapability.js"
+import { bucketManagementOffered } from "../lib/capability-offers.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -464,6 +466,12 @@ export function StorageBrowser(): React.ReactElement {
   const [isDragOver, setIsDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // Bucket management is for admins and developers; editors and viewers work with the files in them.
+  const canManageBuckets = bucketManagementOffered(useStudioCapability())
+  const createBucketAction = canManageBuckets
+    ? { action: () => setShowCreateBucketWarning(true), actionLabel: "Create Bucket" }
+    : {}
+
   // Dialogs
   const [showCreateBucket, setShowCreateBucket] = useState(false)
   const [showCreateBucketWarning, setShowCreateBucketWarning] = useState(false)
@@ -473,9 +481,9 @@ export function StorageBrowser(): React.ReactElement {
   useEffect(() => {
     const navState: unknown = location.state
     if (!isJsonObject(navState) || navState["openCreateBucket"] !== true) return
-    setShowCreateBucketWarning(true)
+    if (canManageBuckets) setShowCreateBucketWarning(true)
     navigate(`${location.pathname}${location.search}`, { replace: true, state: {} })
-  }, [location.pathname, location.search, location.state, navigate])
+  }, [canManageBuckets, location.pathname, location.search, location.state, navigate])
 
   const handleCreateBucket = async (name: string, isPublic: boolean) => {
     const { error } = await client.storage.createBucket(name, { public: isPublic })
@@ -747,16 +755,16 @@ export function StorageBrowser(): React.ReactElement {
           ) : !buckets || buckets.length === 0 ? (
             <EmptyState
               title="No buckets yet"
-              description="Create your first storage bucket to start uploading files."
-              action={() => setShowCreateBucketWarning(true)}
-              actionLabel="Create Bucket"
+              description={canManageBuckets
+                ? "Create your first storage bucket to start uploading files."
+                : "An admin or developer creates buckets; their files appear here."}
+              {...createBucketAction}
             />
           ) : !selectedBucket ? (
             <EmptyState
               title="No bucket selected"
               description="Select a bucket from the secondary navigation."
-              action={() => setShowCreateBucketWarning(true)}
-              actionLabel="Create Bucket"
+              {...createBucketAction}
             />
           ) : filesLoading ? (
             <div className="flex items-center justify-center py-12">
