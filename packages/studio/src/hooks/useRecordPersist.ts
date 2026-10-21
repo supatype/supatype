@@ -9,9 +9,13 @@ import { createDraft, createRecord, type RecordError } from "../lib/publishing.j
 /** A write's outcome: the record's id, or why it was refused. */
 type Written = { id: string; error: null } | { id: null; error: RecordError }
 
-/** The form's values as the API takes them, less the primary key, which no write may set. */
-function payload(model: ModelConfig, values: Record<string, unknown>): Record<string, unknown> {
+/**
+ * The form's values as the API takes them, less the primary key, which no write may set, and less
+ * the columns this caller may not send for this record (see `lockedColumns`).
+ */
+function payload(model: ModelConfig, values: Record<string, unknown>, omit: readonly string[]): Record<string, unknown> {
   const { [model.primaryKey]: _pk, ...rest } = serializeRecordForApi(model, values)
+  for (const column of omit) delete rest[column]
   return rest
 }
 
@@ -26,8 +30,9 @@ async function write(
   model: ModelConfig,
   recordId: string | undefined,
   values: Record<string, unknown>,
+  omit: readonly string[],
 ): Promise<Written> {
-  const body = payload(model, values)
+  const body = payload(model, values, omit)
   if (recordId === undefined) {
     const created = await createRecord(client, model, body)
     return created.error === null && created.id !== null
@@ -47,22 +52,28 @@ async function write(
  *
  * One call rather than a handler per button because three things save: the form's Save, the
  * panel's Save draft, and Publish, which saves unsaved edits before it publishes them.
+ *
+ * `locked` names the columns the save leaves alone: they are neither sent nor checked, since the
+ * caller can neither see nor change them, and a withheld required column would otherwise read as
+ * empty and stop every save.
  */
 export function useRecordPersist(
   model: ModelConfig,
   recordId: string | undefined,
   values: Record<string, unknown>,
   report: RefusalReport,
+  locked: readonly string[] = [],
 ): { saving: boolean; persist: () => Promise<string | null> } {
   const client = useAdminClient()
   const [saving, setSaving] = useState(false)
 
   const persist = async (): Promise<string | null> => {
-    if (!passesChecks(report, model.fields, values, model.constraints ?? [])) return null
+    const checked = model.fields.filter((f) => !locked.includes(f.name))
+    if (!passesChecks(report, checked, values, model.constraints ?? [])) return null
     setSaving(true)
     clearRefusal(report)
     try {
-      const written = await write(client, model, recordId, values)
+      const written = await write(client, model, recordId, values, locked)
       if (written.error !== null) reportRefusal(report, written.error, model.fields, values)
       return written.id
     } catch (err) {

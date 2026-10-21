@@ -87,6 +87,11 @@ export interface FieldConfig {
   hidden?: boolean
   /** Admin override: make this field read-only in the edit form. */
   readOnly?: boolean
+  /**
+   * Set by Studio, never by the config: a field access rule withholds this column's value from the
+   * caller on the record being edited, so the form shows the padlock instead of an input.
+   */
+  withheld?: boolean
 }
 
 export interface BlockTypeConfig {
