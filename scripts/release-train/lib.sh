@@ -83,6 +83,20 @@ export_train_images() {
 train_log() { printf '[train %s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 train_die() { printf '[train] ERROR: %s\n' "$*" >&2; exit 1; }
 
+# Run a noisy step with its output kept out of the train log. When it fails, print the end of
+# that output before stopping, so the log says why and not only that it stopped.
+train_quiet() {
+  local name="$1" log
+  shift
+  log="$(mktemp)"
+  if ! "$@" >"$log" 2>&1; then
+    tail -n 40 "$log" >&2
+    rm -f "$log"
+    train_die "$name failed (its last 40 lines are above)"
+  fi
+  rm -f "$log"
+}
+
 # Git Bash on Windows rewrites any argument that starts with / into a Windows path, which breaks
 # container-side paths. docker_nc turns that off for one docker call; host_path gives that call a
 # host path docker.exe understands. Both are no-ops on Linux and macOS.
