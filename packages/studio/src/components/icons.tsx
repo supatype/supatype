@@ -101,6 +101,17 @@ export function IconMusic({ size = 16 }: { size?: number }): React.ReactElement 
   return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
 }
 
+export function IconMegaphone({ size = 16 }: { size?: number }): React.ReactElement {
+  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg>
+}
+export function IconType({ size = 16 }: { size?: number }): React.ReactElement {
+  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
+}
+/** What a block or nav entry draws when its schema names an icon this module does not have. */
+export function IconSquare({ size = 16 }: { size?: number }): React.ReactElement {
+  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/></svg>
+}
+
 // ─── Icon lookup ──────────────────────────────────────────────────────────────
 
 const ICON_MAP: Record<string, (props: { size?: number }) => React.ReactElement> = {
@@ -126,6 +137,14 @@ const ICON_MAP: Record<string, (props: { size?: number }) => React.ReactElement>
   branch: IconGitBranch,
   link: IconLink,
   bot: IconBot,
+  megaphone: IconMegaphone,
+  text: IconType,
+  type: IconType,
+}
+
+/** Whether {@link Icon} draws anything for `name`. */
+export function hasIcon(name: string | undefined): boolean {
+  return name !== undefined && name in ICON_MAP
 }
 
 export function Icon({ name, size = 16 }: { name: string | undefined; size?: number }): React.ReactElement | null {
@@ -149,6 +168,15 @@ export function IconEyeOff({ size = 14 }: { size?: number }): React.ReactElement
 }
 export function IconX({ size = 14 }: { size?: number }): React.ReactElement {
   return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+}
+export function IconArrowUp({ size = 14 }: { size?: number }): React.ReactElement {
+  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+}
+export function IconArrowDown({ size = 14 }: { size?: number }): React.ReactElement {
+  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg>
+}
+export function IconTrash({ size = 14 }: { size?: number }): React.ReactElement {
+  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
 }
 export function IconHistory({ size = 14 }: { size?: number }): React.ReactElement {
   return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><polyline points="12 7 12 12 15 14"/></svg>
