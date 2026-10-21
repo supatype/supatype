@@ -36,7 +36,7 @@ interface Call { url: string; method: string; body: unknown }
 interface Scenario {
   /** What `GET /auth/v1/settings` reports for `mailer_autoconfirm`. */
   autoconfirm: boolean
-  /** Whether the caller's Studio role carries `manageMembers`, which gates the auth admin API. */
+  /** Whether the caller's Studio role carries `manageUsers`, which gates the auth admin API. */
   manageUsers: boolean
   /** The user whose detail panel opens, if any. */
   open?: RawUser
@@ -69,7 +69,7 @@ function pending(server: Server): RawUser {
 
 function answer(url: string, method: string, s: Scenario, server: Server): Response {
   if (url.endsWith("/studio/auth/verify")) {
-    return Response.json({ sub: "admin-id", role: s.manageUsers ? "admin" : "editor", mode: "self", permissions: { manageMembers: s.manageUsers } })
+    return Response.json({ sub: "admin-id", role: s.manageUsers ? "admin" : "editor", mode: "self", permissions: { manageUsers: s.manageUsers } })
   }
   if (url.endsWith("/auth/v1/settings")) return Response.json({ mailer_autoconfirm: s.autoconfirm })
   if (url.endsWith("/auth/v1/admin/sessions")) return Response.json({ sessions: [] })

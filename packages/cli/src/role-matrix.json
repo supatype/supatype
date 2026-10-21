@@ -1,10 +1,16 @@
 {
-  "version": 2,
+  "version": 3,
   "roles": ["owner", "admin", "developer", "editor", "billing", "viewer"],
   "selfHostRoles": ["admin", "developer", "editor", "viewer"],
   "notes": {
+    "read": "Content rows and files, read as Studio: the app's row rules do not apply, its field rules do (owner decision 2026-10-21).",
+    "write": "Content rows and files, changed as Studio, including uploading, replacing and deleting objects: the app's row rules do not apply, its field rules do. Every such request is recorded.",
     "sqlEditor": "The SQL editor runs as the project's owning role, so row level security does not apply to it: whoever holds sqlEditor can read and change every row (owner decision RX1).",
-    "elevatedSql": "Acting as the service role for data requests (the elevated mode), which only these roles may switch to."
+    "elevatedSql": "Acting as the service role for data requests (the elevated mode), which only these roles may switch to. It is their default; editors and viewers act as Studio.",
+    "manageUsers": "The project's own users, through its auth admin API.",
+    "manageBuckets": "Creating, changing and deleting storage buckets. Listing them is read.",
+    "manageMembers": "Granting and revoking Studio roles: the one thing an admin holds over a developer.",
+    "administer": "Project administration through the service role: the admin API, the control plane, function administration, and any route no other permission names, so a route added later starts here."
   },
   "permissions": {
     "read": ["owner", "admin", "developer", "editor", "viewer"],
@@ -13,12 +19,15 @@
     "pushSchema": ["owner", "admin", "developer"],
     "deploy": ["owner", "admin", "developer"],
     "sqlEditor": ["owner", "admin", "developer"],
-    "elevatedSql": ["owner", "admin"],
+    "elevatedSql": ["owner", "admin", "developer"],
     "realtimeInspect": ["owner", "admin", "developer"],
     "viewLogs": ["owner", "admin", "developer", "viewer"],
-    "manageKeys": ["owner", "admin"],
-    "manageDomains": ["owner", "admin"],
+    "manageKeys": ["owner", "admin", "developer"],
+    "manageDomains": ["owner", "admin", "developer"],
+    "manageUsers": ["owner", "admin", "developer"],
+    "manageBuckets": ["owner", "admin", "developer"],
     "manageMembers": ["owner", "admin"],
+    "administer": ["owner", "admin", "developer"],
     "billing": ["owner", "admin", "billing"],
     "ownOrg": ["owner"],
     "orgSettings": ["owner", "admin"],

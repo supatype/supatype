@@ -11,7 +11,7 @@ import { projectConfig } from "./support/project-config.js"
  * The shared role document. supatype-server embeds the same file and the control plane carries it,
  * and each pins this hash, so what a role may do changes in all three hosts or fails in one.
  */
-const ROLE_MATRIX_SHA256 = "db2e046d93ac5142cbf5a1920d9715f5f4537ddce8394059dffeceeb4e2ead0b"
+const ROLE_MATRIX_SHA256 = "ca7e760ce5a24160f34b43bc52660d1d07b8c7a700402d2b32f2b4d908767a58"
 
 const raw = readFileSync(new URL("../src/role-matrix.json", import.meta.url), "utf8")
 const document = parseJsonAs(raw, isShape({ selfHostRoles: isArrayOf(isString) }))

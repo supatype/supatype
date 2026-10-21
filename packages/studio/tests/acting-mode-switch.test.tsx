@@ -6,19 +6,20 @@ import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { ElevatedModeBanner, ElevatedNoticeProvider, useShowsProjectRows } from "../src/components/ElevatedModeBanner.js"
 import { studioAuthHeaders } from "../src/lib/studio-auth-headers.js"
 import { proxyClientOptions } from "../src/components/StudioAccessGate.js"
-import { chosenActingMode } from "../src/lib/acting-mode.js"
+import { chosenActingMode, type ActingMode } from "../src/lib/acting-mode.js"
 import { testClient } from "./support.js"
 
 /**
- * RX4: an owner or admin acts elevated by default and may switch to acting as themselves, so they
- * can see a project as its own access rules show it to them. Studio shows the switch only to a role
- * that may elevate, says which mode is in force, and sends the chosen mode on every request
- * (`X-Supatype-Acting-Mode`). A developer, editor or viewer always acts as themselves and is offered
- * nothing to switch.
+ * RX4 and the owner's decision of 2026-10-21: everyone acts as Studio by default, so their Studio
+ * role decides what they may do with rows and the app's field rules still apply. Anyone who reads
+ * content may switch to acting as themselves, to see the project as its own access rules show it to
+ * them, and back; a role that may elevate may also switch to elevated access. Studio says which
+ * mode is in force and sends the chosen mode on every request (`X-Supatype-Acting-Mode`).
  */
 
 const PROXY = "http://localhost:8000/studio/proxy"
 const CLIENT = testClient({ url: PROXY, token: "token" })
+const READS = { read: true }
 
 let root: Root | null = null
 let container: HTMLElement
@@ -26,8 +27,9 @@ let verifyHeaders: Array<Record<string, string>> = []
 
 interface Verify {
   role: string
-  mode: "self" | "elevated"
+  mode: ActingMode
   canElevate: boolean
+  permissions: Record<string, boolean>
 }
 
 /** The headers a request carried, which Studio always passes as a plain object. */
@@ -43,7 +45,7 @@ function stubVerify(verify: Verify): void {
   verifyHeaders = []
   vi.stubGlobal("fetch", async (_url: string, init?: RequestInit) => {
     verifyHeaders.push(plainHeaders(init))
-    return Response.json({ permissions: {}, ...verify })
+    return Response.json(verify)
   })
 }
 
@@ -86,25 +88,48 @@ afterEach(() => {
 })
 
 describe("the acting-mode switch", () => {
-  it("tells an elevated admin so, and offers to act as themselves", async () => {
-    await render({ role: "admin", mode: "elevated", canElevate: true })
+  it("tells an elevated admin so, and offers to act as themselves or as Studio", async () => {
+    await render({ role: "admin", mode: "elevated", canElevate: true, permissions: READS })
     expect(container.textContent).toContain("Elevated access")
     expect(button("Act as myself")).toBeDefined()
+    expect(button("Edit as Studio")).toBeDefined()
   })
 
-  it("tells an admin acting as themselves so, and offers elevated access back", async () => {
-    await render({ role: "admin", mode: "self", canElevate: true })
+  it("tells an admin acting as themselves so, and offers Studio and elevated access back", async () => {
+    await render({ role: "admin", mode: "self", canElevate: true, permissions: READS })
     expect(container.textContent).toContain("Acting as yourself")
     expect(button("Use elevated access")).toBeDefined()
+    expect(button("Edit as Studio")).toBeDefined()
   })
 
-  it("offers a developer nothing to switch", async () => {
-    await render({ role: "developer", mode: "self", canElevate: false })
+  // Owner decision 2026-10-21: an editor edits as Studio, so the app's row rules do not stop them,
+  // and is told that the field rules still apply. They may preview the app's rules as themselves,
+  // and are never offered elevated access.
+  it("tells an editor they edit as Studio, and offers only acting as themselves", async () => {
+    await render({ role: "editor", mode: "studio", canElevate: false, permissions: READS })
+    expect(container.textContent).toContain("Editing as Studio")
+    expect(container.textContent).toContain("masked fields stay masked")
+    expect(button("Act as myself")).toBeDefined()
+    expect(button("Use elevated access")).toBeUndefined()
+  })
+
+  it("offers an editor acting as themselves the way back to Studio, which forgets the choice", async () => {
+    window.localStorage.setItem(`supatype.studio.actingMode:${PROXY}`, "self")
+    const onSwitched = await render({ role: "editor", mode: "self", canElevate: false, permissions: READS })
+    expect(container.textContent).toContain("Acting as yourself")
+    await act(async () => button("Edit as Studio")!.click())
+    expect(onSwitched).toHaveBeenCalledOnce()
+    expect(chosenActingMode(PROXY)).toBeNull()
+    expect(button("Use elevated access")).toBeUndefined()
+  })
+
+  it("says nothing to a role that reads no content", async () => {
+    await render({ role: "billing", mode: "self", canElevate: false, permissions: {} })
     expect(container.textContent).toBe("")
   })
 
   it("remembers the choice, and sends it on every request from then on", async () => {
-    const onSwitched = await render({ role: "admin", mode: "elevated", canElevate: true })
+    const onSwitched = await render({ role: "admin", mode: "elevated", canElevate: true, permissions: READS })
     await act(async () => button("Act as myself")!.click())
 
     expect(onSwitched).toHaveBeenCalledOnce()
@@ -116,7 +141,7 @@ describe("the acting-mode switch", () => {
 
   it("asks verify for the chosen mode, so the mode shown is the mode in force", async () => {
     window.localStorage.setItem(`supatype.studio.actingMode:${PROXY}`, "self")
-    await render({ role: "admin", mode: "self", canElevate: true })
+    await render({ role: "admin", mode: "self", canElevate: true, permissions: READS })
     expect(verifyHeaders[0]?.["X-Supatype-Acting-Mode"]).toBe("self")
   })
 })
