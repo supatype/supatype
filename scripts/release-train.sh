@@ -107,7 +107,7 @@ load_images() {
 
 run_in_runner() {
   runner bash -c "
-    export TRAIN_ISOLATED=1 TRAIN_TAG=$TRAIN_TAG TRAIN_SUPATYPE_DIR=/work/supatype TRAIN_ENGINE_DIR=/work/supatype-schema-engine
+    export TRAIN_ISOLATED=1 TRAIN_TAG=$TRAIN_TAG TRAIN_NETWORK_CONCURRENCY=${TRAIN_NETWORK_CONCURRENCY:-16} TRAIN_SUPATYPE_DIR=/work/supatype TRAIN_ENGINE_DIR=/work/supatype-schema-engine
     export TRAIN_ENGINE_BIN=/work/engine/supatype-engine-linux-amd64 TRAIN_HARNESS_DIR=/work/harness
     export SUPATYPE_RELEASE_PUBLIC_KEY=\"\$(grep -o 'RW[A-Za-z0-9+/=]\{40,\}' /work/supatype/scripts/install.sh | head -1)\"
     cd /work/harness
