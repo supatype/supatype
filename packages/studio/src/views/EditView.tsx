@@ -12,17 +12,12 @@ import { appOrigin } from "../lib/membership-url.js"
 import type { FieldConfig, ModelConfig } from "../config.js"
 import { useAdminConfig } from "../hooks/useAdminConfig.js"
 import { splitEditFields } from "../lib/edit-field-layout.js"
-import { applyFieldAccess } from "../lib/field-access-layout.js"
-import {
-  affordanceColumn,
-  isOperationOffered,
-  needsPerRecordCheck,
-  useStudioFieldAccess,
-} from "../hooks/useStudioFieldAccess.js"
+import { applyFieldAccess, lockedColumns } from "../lib/field-access-layout.js"
+import { isOperationOffered, useStudioFieldAccess } from "../hooks/useStudioFieldAccess.js"
+import { useRecordAccess } from "../hooks/useRecordAccess.js"
 import { useStudioCapability } from "../hooks/useStudioCapability.js"
 import { getLocalizedFieldValue } from "../lib/localized-field.js"
 import { localTimestamp } from "../lib/local-datetime.js"
-import { isJsonObject } from "../lib/json.js"
 import { useRecordPersist } from "../hooks/useRecordPersist.js"
 import { useBooleanStartValues } from "../hooks/useBooleanStartValues.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
@@ -72,8 +67,9 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
   useBooleanStartValues(model, isCreate, setValues)
   const fieldAccess = useStudioFieldAccess()
   const capability = useStudioCapability()
-  // null = not asked or not answerable. Only ever set from the database's own answer.
-  const [recordDeletable, setRecordDeletable] = useState<boolean | null>(null)
+  // What this record lets the caller do where the table-level verdict is `row`: delete it, and read
+  // or write each column whose field rule reads the row.
+  const recordAccess = useRecordAccess(model, recordId, fieldAccess)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   // The required fields a draft being saved leaves empty, while the editor is asked about them.
   const [incomplete, setIncomplete] = useState<FieldConfig[] | null>(null)
@@ -105,39 +101,6 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
     })
   }, [recordId, model.fields, model.primaryKey])
 
-  // Per-record delete affordance, asked only when the table-level verdict is `row`.
-  //
-  // Deliberately its own query rather than extra columns on the record load: the affordance is
-  // not a column of the record, and `serializeRecordForApi` spreads whatever is in `values`
-  // straight into the PATCH body, so a computed column merged in there would be sent back as
-  // an unknown column and fail every save.
-  useEffect(() => {
-    if (recordId === undefined) return
-    if (!needsPerRecordCheck(fieldAccess, model.tableName, "delete")) {
-      setRecordDeletable(null)
-      return
-    }
-
-    let cancelled = false
-    const column = affordanceColumn(model.tableName, "delete")
-    void (async () => {
-      const result = await client
-        .from(model.tableName)
-        .select(`${model.primaryKey},${column}`)
-        .eq(model.primaryKey, recordId)
-        .single()
-      if (cancelled) return
-      const row: unknown = result.data
-      // Fails open: an error or a missing answer leaves the control offered, and the database
-      // refuses the delete if it should.
-      setRecordDeletable(result.error !== null || !isJsonObject(row) ? null : row[column] === true)
-    })()
-
-    return () => {
-      cancelled = true
-    }
-  }, [client, fieldAccess, model.tableName, model.primaryKey, recordId])
-
   useEffect(() => {
     if (!recordId) return
     if (!quietReload.current) setLoading(true)
@@ -162,7 +125,8 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
     })()
   }, [client, model, recordId, formNonce])
 
-  const { saving, persist } = useRecordPersist(model, recordId, values, refusal)
+  const locked = isCreate ? [] : lockedColumns(fieldAccess, model.tableName, recordAccess.fields)
+  const { saving, persist } = useRecordPersist(model, recordId, values, refusal, locked)
 
   const handleChange = useCallback((fieldName: string, value: unknown) => {
     setDirty(true)
@@ -238,11 +202,12 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
   }
   const { mainFields, metaFields } = splitEditFields(model.fields, splitCtx)
 
-  // Per-column access, applied to the field lists rather than inside the widgets: a column
-  // this caller cannot write becomes a disabled input, and one no caller can supply is left
-  // out of a create form instead of rendered as an input nobody can satisfy.
-  const accessibleMainFields = applyFieldAccess(mainFields, fieldAccess, model.tableName, isCreate)
-  const accessibleMetaFields = applyFieldAccess(metaFields, fieldAccess, model.tableName, isCreate)
+  // Per-column access, applied to the field lists rather than inside the widgets: a column this
+  // record withholds shows the padlock, one the caller cannot write on it becomes a disabled input,
+  // and one no caller can supply is left out of a create form instead of rendered as an input
+  // nobody can satisfy.
+  const accessibleMainFields = applyFieldAccess(mainFields, fieldAccess, model.tableName, isCreate, recordAccess.fields)
+  const accessibleMetaFields = applyFieldAccess(metaFields, fieldAccess, model.tableName, isCreate, recordAccess.fields)
 
   const livePreviewConfig = config.livePreview?.[model.name]
   // Where this record renders, or "" when the project named no address for it. Computed once and
@@ -321,7 +286,7 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
           // Two layers: the table-level verdict withdraws the control where it is settled, and
           // the per-record affordance answers where it is not.
           ...(isOperationOffered(fieldAccess, model.tableName, "delete") &&
-            recordDeletable !== false && {
+            recordAccess.deletable !== false && {
               onDelete: () => { setConfirmingDelete(true) },
             }),
         })}

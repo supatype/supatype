@@ -1,17 +1,19 @@
 import type { FieldConfig } from "../config.js"
 import {
+  isFieldAllowedOnRecord,
   isFieldCreatable,
-  isFieldWritable,
+  type RecordFieldAccess,
   type StudioFieldAccess,
 } from "../hooks/useStudioFieldAccess.js"
 
 /**
  * Apply this caller's per-column access to a form's field list.
  *
- * Done as a transform of the field list rather than inside the widgets, because the two
- * behaviours it needs already exist there: `EditFormFieldList` honours `readOnly`, and a field
- * that is absent from the list is simply not rendered. So a column becomes a disabled input or
- * disappears without any component knowing about access rules.
+ * Done as a transform of the field list rather than inside the widgets, because the behaviours it
+ * needs already exist there: `EditFormFieldList` honours `readOnly`, `FieldWidget` shows `withheld`
+ * as the padlock the list shows, and a field that is absent from the list is simply not rendered.
+ * So a column becomes a disabled input, a padlock, or disappears without any component knowing
+ * about access rules.
  *
  * **A column no caller can supply is dropped from a create form**, not disabled. Rendering it
  * would be an input that cannot be satisfied, and for a required column, a form that can
@@ -19,32 +21,59 @@ import {
  * the rule. `create` is a distinct verdict precisely because of this case: an ownership write
  * rule is satisfiable on update by the owner and satisfiable on insert by nobody.
  *
- * **A readable-but-unwritable column is disabled, not hidden.** Its value is real and worth
- * showing; what the caller cannot do is change it.
+ * **On an existing record, `record` answers the per-row verdicts.** A column the caller cannot
+ * read on this record is withheld: its value came back as null, and an empty input would claim
+ * the record has none. A readable-but-unwritable column is disabled, not hidden: its value is real
+ * and worth showing; what the caller cannot do is change it.
  *
- * Fails open. With no answer from the server the list is returned untouched, so the interface
- * behaves exactly as it did before and the database still refuses what it should.
+ * Fails open. With no answer from the server the list is returned untouched, and a per-row verdict
+ * the record has not answered behaves as allowed, so the database still refuses what it should.
  */
 export function applyFieldAccess(
   fields: FieldConfig[],
   access: StudioFieldAccess,
   table: string,
   isCreate: boolean,
+  record: RecordFieldAccess = {},
 ): FieldConfig[] {
   if (!access.resolved) return fields
   if (access.fields[table] === undefined) return fields
+  if (isCreate) return fields.filter((field) => isFieldCreatable(access, table, field.name))
+  return fields.map((field) => onRecord(field, access, table, record))
+}
 
-  const result: FieldConfig[] = []
-  for (const field of fields) {
-    if (isCreate && !isFieldCreatable(access, table, field.name)) continue
-
-    if (!isCreate && !isFieldWritable(access, table, field.name)) {
-      result.push({ ...field, readOnly: true })
-      continue
-    }
-
-    result.push(field)
+/** One field of an existing record's form, as this caller may use it on that record. */
+function onRecord(
+  field: FieldConfig,
+  access: StudioFieldAccess,
+  table: string,
+  record: RecordFieldAccess,
+): FieldConfig {
+  if (!isFieldAllowedOnRecord(access, table, field.name, "read", record)) {
+    return { ...field, readOnly: true, withheld: true }
   }
+  if (!isFieldAllowedOnRecord(access, table, field.name, "write", record)) {
+    return { ...field, readOnly: true }
+  }
+  return field
+}
 
-  return result
+/**
+ * The columns a save of this record must leave out of its body.
+ *
+ * Every column the caller cannot write on it, and every column it withholds from them: that value
+ * reached the form as null, so sending it would blank a value the caller never saw, even where the
+ * rule lets them write it. Leaving a column out keeps what the record holds, on an update and on a
+ * draft alike, since a draft merges onto the live row.
+ */
+export function lockedColumns(
+  access: StudioFieldAccess,
+  table: string,
+  record: RecordFieldAccess,
+): string[] {
+  return Object.keys(access.fields[table] ?? {}).filter(
+    (column) =>
+      !isFieldAllowedOnRecord(access, table, column, "read", record) ||
+      !isFieldAllowedOnRecord(access, table, column, "write", record),
+  )
 }

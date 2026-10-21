@@ -22,6 +22,7 @@ import { ButtonWidget } from "./ButtonWidget.js"
 import { DurationWidget } from "./DurationWidget.js"
 import { GeoPointWidget } from "./GeoPointWidget.js"
 import { widgetFor } from "../lib/widget-input.js"
+import { WithheldValue } from "../components/WithheldValue.js"
 
 export interface WidgetProps {
   config: FieldConfig
@@ -124,7 +125,7 @@ export function FieldWidget(props: WidgetProps): React.ReactElement {
         )}
       </label>
       <div className="st-field-input">
-        <WidgetRenderer {...next} />
+        {config.withheld === true ? <WithheldValue access="hidden" /> : <WidgetRenderer {...next} />}
       </div>
       {props.error !== undefined && (
         <p className="st-field-error" role="alert" id={`field-${config.name}-error`}>

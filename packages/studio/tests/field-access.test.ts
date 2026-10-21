@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   affordanceColumn,
   cellAccess,
+  fieldAffordanceColumn,
   isFieldCreatable,
   isFieldRestricted,
   isFieldWritable,
@@ -9,10 +10,11 @@ import {
   needsPerRecordCheck,
   normaliseFieldAccess,
   normaliseTableAccess,
+  perRecordFieldChecks,
   type StudioFieldAccess,
   type TableAccessMap,
 } from "../src/hooks/useStudioFieldAccess.js"
-import { applyFieldAccess } from "../src/lib/field-access-layout.js"
+import { applyFieldAccess, lockedColumns } from "../src/lib/field-access-layout.js"
 import type { FieldConfig } from "../src/config.js"
 import { testField } from "./support.js"
 
@@ -267,5 +269,105 @@ describe("applyFieldAccess", () => {
       false,
     )
     expect(original[0]?.readOnly).toBeUndefined()
+  })
+})
+
+// A per-row field rule settles nothing for the table: `attendee.phone` readable and writable by its
+// owner only. The edit form treated `row` as allowed and offered an empty, editable Phone on someone
+// else's record. The record's own answers, from the engine's `can_read_` / `can_write_` functions,
+// now decide it.
+describe("applyFieldAccess on one record", () => {
+  const fields = [field("name"), field("phone"), field("email")]
+  const perRow = access({
+    attendee: {
+      phone: { read: "row", write: "row", create: "allow" },
+      email: { read: "allow", write: "row", create: "allow" },
+    },
+  })
+  const notOwner = { phone: { read: false, write: false }, email: { write: false } }
+  const byName = (list: FieldConfig[], name: string): FieldConfig | undefined => list.find((f) => f.name === name)
+
+  it("withholds a column this record will not let the caller read, and locks it", () => {
+    const phone = byName(applyFieldAccess(fields, perRow, "attendee", false, notOwner), "phone")
+    expect(phone?.withheld).toBe(true)
+    expect(phone?.readOnly).toBe(true)
+  })
+
+  it("disables a column the caller can read but not write on this record", () => {
+    const email = byName(applyFieldAccess(fields, perRow, "attendee", false, notOwner), "email")
+    expect(email?.withheld).toBeUndefined()
+    expect(email?.readOnly).toBe(true)
+  })
+
+  it("leaves a column this record allows as it was", () => {
+    const owner = { phone: { read: true, write: true }, email: { write: true } }
+    const result = applyFieldAccess(fields, perRow, "attendee", false, owner)
+    expect(byName(result, "phone")).toEqual(field("phone"))
+    expect(byName(result, "email")).toEqual(field("email"))
+  })
+
+  it("withholds a column whose read is denied for the whole table", () => {
+    const denied = access({ attendee: { phone: { read: "deny", write: "deny", create: "deny" } } })
+    expect(byName(applyFieldAccess(fields, denied, "attendee", false), "phone")?.withheld).toBe(true)
+  })
+
+  // No answer (an older engine, a failed request) behaves as before: the database still refuses.
+  it("fails open when the record has not answered", () => {
+    const result = applyFieldAccess(fields, perRow, "attendee", false, {})
+    expect(byName(result, "phone")).toEqual(field("phone"))
+  })
+
+  it("changes nothing for an elevated caller, whatever the record says", () => {
+    const elevated = { ...perRow, mode: "elevated" as const }
+    expect(applyFieldAccess(fields, elevated, "attendee", false, notOwner)).toEqual(fields)
+  })
+})
+
+describe("lockedColumns", () => {
+  const perRow = access({
+    attendee: {
+      phone: { read: "row", write: "allow", create: "allow" },
+      email: { read: "allow", write: "row", create: "allow" },
+      notes: { read: "allow", write: "deny", create: "deny" },
+    },
+  })
+
+  // A withheld column reached the form as null, so sending it would blank the value the caller
+  // could not see, even where the rule lets them write it.
+  it("names every column the save must not send for this record", () => {
+    const locked = lockedColumns(perRow, "attendee", { phone: { read: false }, email: { write: false } })
+    expect(locked.sort()).toEqual(["email", "notes", "phone"])
+  })
+
+  it("names none for an elevated caller", () => {
+    expect(lockedColumns({ ...perRow, mode: "elevated" }, "attendee", { phone: { read: false } })).toEqual([])
+  })
+})
+
+describe("perRecordFieldChecks", () => {
+  it("asks only for the verdicts that depend on the row", () => {
+    const perRow = access({
+      attendee: {
+        phone: { read: "row", write: "row", create: "allow" },
+        email: { read: "allow", write: "row", create: "deny" },
+        name: { read: "deny", write: "allow", create: "allow" },
+      },
+    })
+    expect(perRecordFieldChecks(perRow, "attendee")).toEqual([
+      { column: "phone", operation: "read" },
+      { column: "phone", operation: "write" },
+      { column: "email", operation: "write" },
+    ])
+  })
+
+  it("asks nothing when elevated or unresolved", () => {
+    const perRow = { attendee: { phone: { read: "row", write: "row", create: "allow" } } } as const
+    expect(perRecordFieldChecks(access(perRow, { mode: "elevated" }), "attendee")).toEqual([])
+    expect(perRecordFieldChecks(UNRESOLVED, "attendee")).toEqual([])
+  })
+
+  it("names the engine's per-row field functions", () => {
+    expect(fieldAffordanceColumn("attendee", "phone", "read")).toBe("can_read_attendee__phone")
+    expect(fieldAffordanceColumn("attendee", "phone", "write")).toBe("can_write_attendee__phone")
   })
 })
