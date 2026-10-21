@@ -18,6 +18,7 @@ import { anyFieldContains, searchColumns } from "../lib/postgrest-search.js"
 import { formatFieldValue } from "../lib/field-display.js"
 import { isUuid } from "../lib/uuid.js"
 import { UuidCell } from "../components/UuidCell.js"
+import { WithheldValue } from "../components/WithheldValue.js"
 import {
   fetchRecordStates,
   publishableLocales,
@@ -449,31 +450,9 @@ function AccessAwareCell({
   access: CellAccess
   children: React.ReactNode
 }): React.ReactElement {
-  if (access === "hidden") {
-    return (
-      <span
-        className="st-cell-masked"
-        title="Hidden by a field access rule"
-        aria-label="Hidden by a field access rule"
-      >
-        &#128274;
-      </span>
-    )
-  }
-
-  if (access === "unknown") {
-    // Restricted, empty, and per-row: this record either withholds the value or has none, and
-    // nothing available here can tell which. Say that rather than pick one.
-    return (
-      <span
-        className="st-cell-masked st-cell-masked-unknown"
-        title="Hidden by a field access rule, or empty, this column is restricted per record"
-        aria-label="Hidden by a field access rule, or empty"
-      >
-        &#128274;?
-      </span>
-    )
-  }
+  // `unknown` is restricted, empty, and per-row: this record either withholds the value or has
+  // none, and nothing available here can tell which. Say that rather than pick one.
+  if (access === "hidden" || access === "unknown") return <WithheldValue access={access} />
 
   if (access === "revealed") {
     return (

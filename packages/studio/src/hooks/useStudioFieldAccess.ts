@@ -204,8 +204,65 @@ export function isFieldWritable(
   table: string,
   column: string,
 ): boolean {
+  return isFieldAllowedOnRecord(access, table, column, "write", {})
+}
+
+/** The two field operations a rule can decide per record. */
+export type FieldOperation = "read" | "write"
+
+const FIELD_OPERATIONS: readonly FieldOperation[] = ["read", "write"]
+
+/**
+ * One record's own answers to its per-row field rules, `column -> operation -> allowed`, from the
+ * engine's per-row field functions. A column or operation missing from it has not been answered.
+ */
+export type RecordFieldAccess = Record<string, Partial<Record<FieldOperation, boolean>> | undefined>
+
+/**
+ * Whether the caller may read or write a column on one record.
+ *
+ * A settled verdict decides on its own. A `row` verdict takes the record's answer, and with no
+ * answer it fails open as everything here does: the database still refuses what it should.
+ */
+export function isFieldAllowedOnRecord(
+  access: StudioFieldAccess,
+  table: string,
+  column: string,
+  operation: FieldOperation,
+  record: RecordFieldAccess,
+): boolean {
   if (!access.resolved || access.mode === "elevated") return true
-  return access.fields[table]?.[column]?.write !== "deny"
+  const verdict = access.fields[table]?.[column]?.[operation]
+  if (verdict === "deny") return false
+  return verdict !== "row" || record[column]?.[operation] !== false
+}
+
+/**
+ * The field verdicts on a table that only a record can answer, so Studio asks the record for them.
+ *
+ * Empty when elevated or unresolved, for the same reasons as {@link needsPerRecordCheck}.
+ */
+export function perRecordFieldChecks(
+  access: StudioFieldAccess,
+  table: string,
+): { column: string; operation: FieldOperation }[] {
+  if (!access.resolved || access.mode === "elevated") return []
+  const checks: { column: string; operation: FieldOperation }[] = []
+  for (const [column, verdicts] of Object.entries(access.fields[table] ?? {})) {
+    for (const operation of FIELD_OPERATIONS) {
+      if (verdicts[operation] === "row") checks.push({ column, operation })
+    }
+  }
+  return checks
+}
+
+/**
+ * The engine's per-row field function for one column, which PostgREST exposes as a computed
+ * column beside {@link affordanceColumn}'s. Emitted only for a column whose rule reads the row, so
+ * it is requested only for a `row` verdict.
+ */
+export function fieldAffordanceColumn(table: string, column: string, operation: FieldOperation): string {
+  return `can_${operation}_${table}__${column}`
 }
 
 /**
