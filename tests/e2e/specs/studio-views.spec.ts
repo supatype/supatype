@@ -103,11 +103,14 @@ test.describe("Studio views", () => {
       await expect(page.getByText(new RegExp(`^${model}$`)).first()).toBeVisible()
     }
 
-    // The selected model's own grid, with its columns rather than any table.
+    // The selected model's own grid, with its columns rather than any table. A list shows the
+    // primary key first and then the model's first two displayable fields, so `author` lists
+    // Id, Email and Username, and `role` is on the record rather than in the list.
     const grid = page.locator("table").first()
     await expect(grid).toBeVisible()
+    await expect(grid.locator("th").first()).toHaveText(/^idb/i)
     await expect(grid).toContainText(/email/i)
-    await expect(grid).toContainText(/role/i)
+    await expect(grid).toContainText(/username/i)
     await expect(page.getByRole("button", { name: /create author/i }).first()).toBeVisible()
 
     for (const tab of ["Schema", "Data", "API", "GraphQL"]) {

@@ -43,6 +43,12 @@ test("creating a post leaves a first draft", async ({ page }) => {
   // A model with drafts saves through "Save draft"; the plain "Save" belongs to models without them.
   await page.getByRole("button", { name: /^save draft$/i }).click()
 
+  // `author` is required and left empty, so Studio asks before saving an incomplete draft.
+  // Answering it is part of the real save path for a first draft that is not finished yet.
+  const question = page.getByRole("dialog", { name: "Save an incomplete draft?" })
+  await expect(question).toBeVisible({ timeout: 15_000 })
+  await question.getByRole("button", { name: /^save incomplete draft$/i }).click()
+
   // The form navigates to the record once the row exists, which is the signal that the save
   // finished rather than that the button was pressed.
   await page.waitForURL(/\/studio\/models\/post\/[0-9a-f-]{36}$/, { timeout: 30_000 })
