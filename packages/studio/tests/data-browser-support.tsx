@@ -1,12 +1,11 @@
 import React, { act } from "react"
-import { createRoot, type Root } from "react-dom/client"
 import { MemoryRouter } from "react-router-dom"
 import { vi } from "vitest"
 import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { AdminConfigContext } from "../src/hooks/useAdminConfig.js"
 import { DataExplorer } from "../src/views/DataExplorer.js"
 import type { AdminConfig } from "../src/config.js"
-import { testClient, testConfig } from "./support.js"
+import { mount, settle, testClient, testConfig, unmount } from "./support.js"
 
 /**
  * Database > Tables > Browse data on realtime's `message` table: 30 rows that Postgres last
@@ -67,10 +66,6 @@ function restAnswer(init: RequestInit | undefined, inserts: unknown[], options: 
   return Response.json(page, { headers: { "Content-Range": `${from}-${from + page.length - 1}/${total}` } })
 }
 
-export async function settle(): Promise<void> {
-  for (let i = 0; i < 4; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
-}
-
 function stubProject(options: BrowserOptions, inserts: unknown[], reads: URL[]): void {
   const columns = options.columns ?? COLUMNS
   vi.stubGlobal("fetch", async (raw: string, init?: RequestInit) => {
@@ -84,28 +79,25 @@ function stubProject(options: BrowserOptions, inserts: unknown[], reads: URL[]):
   })
 }
 
-/** The data browser on `message`, rendered and settled. */
+/**
+ * The data browser on `message`, rendered and settled. Settling runs on the virtual clock, so the
+ * file calls `isolateEachTest()`, which also unmounts it after the test.
+ */
 export async function renderBrowser(options: BrowserOptions = {}): Promise<Browser> {
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true
   const inserts: unknown[] = []
   const reads: URL[] = []
   stubProject(options, inserts, reads)
-  const container = document.createElement("div")
-  document.body.appendChild(container)
-  const root: Root = createRoot(container)
-  await act(async () => {
-    root.render(
-      <MemoryRouter>
-        <AdminConfigContext.Provider value={options.config ?? testConfig()}>
-          <AdminClientContext.Provider value={testClient({ url: PROXY, token: "t" })}>
-            <DataExplorer initialTable="message" />
-          </AdminClientContext.Provider>
-        </AdminConfigContext.Provider>
-      </MemoryRouter>,
-    )
-  })
+  const view = await mount(
+    <MemoryRouter>
+      <AdminConfigContext.Provider value={options.config ?? testConfig()}>
+        <AdminClientContext.Provider value={testClient({ url: PROXY, token: "t" })}>
+          <DataExplorer initialTable="message" />
+        </AdminClientContext.Provider>
+      </AdminConfigContext.Provider>
+    </MemoryRouter>,
+  )
   await settle()
-  return { container, inserts, reads, unmount: () => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals() } }
+  return { container: view.container, inserts, reads, unmount: () => { unmount(view); vi.unstubAllGlobals() } }
 }
 
 /** The button reading exactly `text`. */

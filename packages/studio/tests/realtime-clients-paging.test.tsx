@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest"
+import { describe, expect, it } from "vitest"
 import React, { act } from "react"
-import { createRoot, type Root } from "react-dom/client"
 import { Clients } from "../src/views/realtime/Clients.js"
 import type { InspectorApi } from "../src/views/realtime/InspectorTab.js"
+import { advance, isolateEachTest, mount } from "./support.js"
 
 /**
  * The Clients tab pages through every connection with realtime's cursor. It read the first 100
@@ -24,9 +24,7 @@ const CONNECTIONS = Array.from({ length: 150 }, (_, i) => ({
   userAgent: null,
 }))
 
-let root: Root | null = null
-let container: HTMLElement
-let paths: string[] = []
+isolateEachTest()
 
 function answer(path: string): Response {
   const url = new URL(path, "http://x/")
@@ -38,44 +36,33 @@ function answer(path: string): Response {
   return Response.json({ data: { total: CONNECTIONS.length, limit: null, tier: null, connections: page, next } })
 }
 
-const api: InspectorApi = {
-  mode: "self-host",
-  fetch: async (path: string) => {
-    paths.push(path)
-    return answer(path)
-  },
+/** An inspector API that answers like realtime's and records every path it is asked for. */
+function recordingApi(paths: string[]): InspectorApi {
+  return {
+    mode: "self-host",
+    fetch: async (path: string) => {
+      paths.push(path)
+      return answer(path)
+    },
+  }
 }
 
-async function settle(): Promise<void> {
-  for (let i = 0; i < 3; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
-}
-
-function users(): string[] {
+function users(container: HTMLElement): string[] {
   return Array.from(container.querySelectorAll("tbody tr td:first-child")).map((td) => td.textContent ?? "")
 }
 
-afterEach(() => {
-  act(() => root?.unmount())
-  root = null
-  container?.remove()
-})
-
 describe("the Clients tab", () => {
   it("pages to the connections after the first 100", async () => {
-    globalThis.IS_REACT_ACT_ENVIRONMENT = true
-    paths = []
-    container = document.createElement("div")
-    document.body.appendChild(container)
-    root = createRoot(container)
-    await act(async () => root!.render(<Clients api={api} />))
-    await settle()
-    expect(users()).toHaveLength(100)
+    const paths: string[] = []
+    const { container } = await mount(<Clients api={recordingApi(paths)} />)
+    await advance()
+    expect(users(container)).toHaveLength(100)
     expect(container.textContent).toContain("Page 1 of 2 (150)")
     const next = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Next")
     await act(async () => next?.click())
-    await settle()
+    await advance()
     expect(paths.at(-1)).toContain("after=100")
-    expect(users()).toHaveLength(50)
-    expect(users()).toContain("user-150")
+    expect(users(container)).toHaveLength(50)
+    expect(users(container)).toContain("user-150")
   })
 })

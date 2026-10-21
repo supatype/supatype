@@ -1,14 +1,13 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import React, { act } from "react"
-import { createRoot, type Root } from "react-dom/client"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { AdminConfigContext } from "../src/hooks/useAdminConfig.js"
 import { StorageBrowser } from "../src/views/StorageBrowser.js"
 import { MediaLibrary } from "../src/views/MediaLibrary.js"
 import { ImageWidget } from "../src/widgets/ImageWidget.js"
-import { advance, testClient, testConfig, testField, useVirtualTimeouts } from "./support.js"
+import { advance, isolateEachTest, mount, settle, testClient, testConfig, testField } from "./support.js"
 
 /**
  * Studio's file views read a folder a page at a time and load more on request. They read one page
@@ -35,7 +34,7 @@ const OBJECTS = Array.from({ length: 150 }, (_, i) => ({
 const IMAGES = Array.from({ length: 250 }, (_, i) => ({ ...OBJECTS[0]!, id: `i${i + 1}`, bucket_id: "images", name: `img-${String(i + 1).padStart(3, "0")}.png` }))
 const BUCKET = { id: "docs", name: "docs", public: false, file_size_limit: null, allowed_mime_types: null, created_at: "2026-10-19T10:00:00Z", updated_at: "2026-10-19T10:00:00Z" }
 
-let root: Root | null = null
+/** The current test's view, which `show` mounts afresh for each test. */
 let container: HTMLElement
 let offsets: number[] = []
 let searches: string[] = []
@@ -57,34 +56,23 @@ async function answer(url: string, init?: RequestInit): Promise<Response> {
   return Response.json([])
 }
 
-/** Lets the requests in flight answer and render. */
-async function settle(): Promise<void> {
-  await advance(0, 4)
-}
-
-async function mount(ui: React.ReactElement, at: string): Promise<void> {
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true
-  useVirtualTimeouts()
+async function show(ui: React.ReactElement, at: string): Promise<void> {
   offsets = []
   searches = []
   vi.stubGlobal("fetch", (url: string, init?: RequestInit) => answer(url, init))
-  container = document.createElement("div")
-  document.body.appendChild(container)
-  root = createRoot(container)
-  await act(async () => {
-    root!.render(
-      <MemoryRouter initialEntries={[at]}>
-        <AdminConfigContext.Provider value={testConfig()}>
-          <AdminClientContext.Provider value={CLIENT}>
-            <Routes>
-              <Route path="/media-storage/:bucket/files" element={ui} />
-              <Route path="/media" element={ui} />
-            </Routes>
-          </AdminClientContext.Provider>
-        </AdminConfigContext.Provider>
-      </MemoryRouter>,
-    )
-  })
+  const view = await mount(
+    <MemoryRouter initialEntries={[at]}>
+      <AdminConfigContext.Provider value={testConfig()}>
+        <AdminClientContext.Provider value={CLIENT}>
+          <Routes>
+            <Route path="/media-storage/:bucket/files" element={ui} />
+            <Route path="/media" element={ui} />
+          </Routes>
+        </AdminClientContext.Provider>
+      </AdminConfigContext.Provider>
+    </MemoryRouter>,
+  )
+  container = view.container
   await settle()
 }
 
@@ -112,13 +100,7 @@ async function search(text: string): Promise<void> {
   await settle()
 }
 
-afterEach(() => {
-  act(() => root?.unmount())
-  root = null
-  container?.remove()
-  vi.unstubAllGlobals()
-  vi.useRealTimers()
-})
+isolateEachTest()
 
 function images(): number {
   return new Set(Array.from(document.body.querySelectorAll("img")).map((i) => i.getAttribute("alt") ?? "").filter((a) => a.startsWith("img-"))).size
@@ -128,7 +110,7 @@ function images(): number {
 // many match. It filtered only the loaded page in the browser.
 describe("searching a folder", () => {
   it("asks the server in the storage browser and shows the total", async () => {
-    await mount(<StorageBrowser />, "/media-storage/docs/files")
+    await show(<StorageBrowser />, "/media-storage/docs/files")
     expect(container.textContent).toContain("100 of 150")
     await search("FILE-14")
     expect(searches.at(-1)).toBe("FILE-14")
@@ -137,7 +119,7 @@ describe("searching a folder", () => {
   })
 
   it("asks the server in the media library and shows the total", async () => {
-    await mount(<MediaLibrary />, "/media")
+    await show(<MediaLibrary />, "/media")
     const select = container.querySelector<HTMLSelectElement>("select")
     await act(async () => {
       if (select) select.value = "docs"
@@ -152,7 +134,7 @@ describe("searching a folder", () => {
 
   it("asks the server in the image picker and shows the total", async () => {
     const field = testField({ name: "cover", widget: "image", options: { bucket: "images" } })
-    await mount(<ImageWidget config={field} value={null} onChange={() => undefined} readOnly={false} />, "/media")
+    await show(<ImageWidget config={field} value={null} onChange={() => undefined} readOnly={false} />, "/media")
     await act(async () => Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Select from bucket")?.click())
     await settle()
     expect(document.body.textContent).toContain("100 of 250")
@@ -165,7 +147,7 @@ describe("searching a folder", () => {
 describe("a folder with more files than one page", () => {
   it("lists the rest in the image picker on request", async () => {
     const field = testField({ name: "cover", widget: "image", options: { bucket: "images" } })
-    await mount(<ImageWidget config={field} value={null} onChange={() => undefined} readOnly={false} />, "/media")
+    await show(<ImageWidget config={field} value={null} onChange={() => undefined} readOnly={false} />, "/media")
     const open = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Select from bucket")
     await act(async () => open?.click())
     await settle()
@@ -180,7 +162,7 @@ describe("a folder with more files than one page", () => {
   })
 
   it("lists the rest in the storage browser on request", async () => {
-    await mount(<StorageBrowser />, "/media-storage/docs/files")
+    await show(<StorageBrowser />, "/media-storage/docs/files")
     expect(shown()).toBe(100)
     await loadMore()
     expect(offsets.at(-1)).toBe(100)
@@ -188,7 +170,7 @@ describe("a folder with more files than one page", () => {
   })
 
   it("lists the rest in the media library on request", async () => {
-    await mount(<MediaLibrary />, "/media")
+    await show(<MediaLibrary />, "/media")
     const select = container.querySelector<HTMLSelectElement>("select")
     if (select) {
       await act(async () => {

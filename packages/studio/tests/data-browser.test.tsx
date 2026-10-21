@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest"
+import { describe, expect, it } from "vitest"
 import { browseTotal, countModeFor } from "../src/lib/browse-paging.js"
-import { button, renderBrowser, type Browser } from "./data-browser-support.js"
+import { button, renderBrowser } from "./data-browser-support.js"
+import { isolateEachTest } from "./support.js"
 
 /**
  * The data browser paged over the planner's estimate of a table's size, so realtime's `message`
@@ -9,16 +10,11 @@ import { button, renderBrowser, type Browser } from "./data-browser-support.js"
  * out of reach.
  */
 
-let browser: Browser | null = null
-
-afterEach(() => {
-  browser?.unmount()
-  browser = null
-})
+isolateEachTest()
 
 describe("paging the data browser", () => {
   it("pages over the table's real row count, not the planner's estimate", async () => {
-    browser = await renderBrowser()
+    const browser = await renderBrowser()
     expect(browser.container.textContent).toContain("Page 1 of 2 (30 rows)")
     expect(button(browser.container, "Next").disabled).toBe(false)
   })

@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import React, { act } from "react"
-import { createRoot, type Root } from "react-dom/client"
 import { MemoryRouter } from "react-router-dom"
 import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { AdminConfigContext } from "../src/hooks/useAdminConfig.js"
@@ -10,7 +9,7 @@ import { ExtensionsView } from "../src/views/database/ExtensionsView.js"
 import { PoliciesView as AuthPoliciesView } from "../src/views/auth/PoliciesView.js"
 import { StoragePoliciesView } from "../src/views/storage/PoliciesView.js"
 import { asking } from "./dialog-support.js"
-import { metadataBody, testClient } from "./support.js"
+import { isolateEachTest, metadataBody, mount, settle, testClient } from "./support.js"
 
 /**
  * SQ2: the SQL editor's login is not a superuser, so Studio's extension, RLS and auth/storage
@@ -38,8 +37,6 @@ function catalogue(schema: string, table: string): Catalogue {
   }
 }
 
-let root: Root | null = null
-let container: HTMLElement
 let calls: Call[] = []
 
 function stubFetch(rows: Catalogue): void {
@@ -59,28 +56,15 @@ function stubFetch(rows: Catalogue): void {
   })
 }
 
-async function settle(): Promise<void> {
-  for (let i = 0; i < 4; i++) {
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0))
-    })
-  }
-}
-
 async function render(view: React.ReactElement, rows: Catalogue): Promise<void> {
   stubFetch(rows)
-  container = document.createElement("div")
-  document.body.appendChild(container)
-  root = createRoot(container)
-  await act(async () => {
-    root!.render(
-      <MemoryRouter>
-        <AdminConfigContext.Provider value={mockConfig}>
-          <AdminClientContext.Provider value={CLIENT}>{view}</AdminClientContext.Provider>
-        </AdminConfigContext.Provider>
-      </MemoryRouter>,
-    )
-  })
+  await mount(
+    <MemoryRouter>
+      <AdminConfigContext.Provider value={mockConfig}>
+        <AdminClientContext.Provider value={CLIENT}>{view}</AdminClientContext.Provider>
+      </AdminConfigContext.Provider>
+    </MemoryRouter>,
+  )
   await settle()
 }
 
@@ -127,12 +111,7 @@ beforeEach(() => {
   vi.stubGlobal("confirm", () => { throw new Error("window.confirm was called") })
 })
 
-afterEach(() => {
-  act(() => root?.unmount())
-  root = null
-  container?.remove()
-  vi.unstubAllGlobals()
-})
+isolateEachTest()
 
 describe("Extensions write through /studio-admin/extensions", () => {
   it("enables an available extension", async () => {

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest"
-import { button, insertBody, renderBrowser, type Browser } from "./data-browser-support.js"
+import { describe, expect, it } from "vitest"
+import { button, insertBody, renderBrowser } from "./data-browser-support.js"
+import { isolateEachTest } from "./support.js"
 
 /**
  * The data browser's Insert Row sent "" for every field left empty. On realtime's `message` that
@@ -8,16 +9,11 @@ import { button, insertBody, renderBrowser, type Browser } from "./data-browser-
  * and on a nullable column with a default it sent null, which overrode the default.
  */
 
-let browser: Browser | null = null
-
-afterEach(() => {
-  browser?.unmount()
-  browser = null
-})
+isolateEachTest()
 
 describe("inserting a row", () => {
   it("leaves untouched fields out, so their defaults apply", async () => {
-    browser = await renderBrowser()
+    const browser = await renderBrowser()
     await insertBody(browser.container, "mt15 test row")
     expect(browser.inserts).toEqual([{ body: "mt15 test row" }])
   })
@@ -38,7 +34,7 @@ describe("an insert the database refuses", () => {
   }
 
   it("says which column clashed, under its input, without the raw SQL in the banner", async () => {
-    browser = await renderBrowser({ insertRefusal: UNIQUE })
+    const browser = await renderBrowser({ insertRefusal: UNIQUE })
     await insertBody(browser.container, "mt17 taken")
     const banner = browser.container.querySelector('[data-ui="error-banner-message"]')?.textContent
     expect(banner).toBe("body is already used by another record")

@@ -1,11 +1,10 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import React, { act } from "react"
-import { createRoot, type Root } from "react-dom/client"
 import { MemoryRouter } from "react-router-dom"
 import { StudioCore } from "../src/StudioCore.js"
 import type { AdminConfig } from "../src/config.js"
-import { testClient, testConfig, testModel } from "./support.js"
+import { advance, isolateEachTest, mount, testClient, testConfig, testModel } from "./support.js"
 
 /**
  * Studio's chrome at phone width: the burger's primary menu, the section panel and its toggle,
@@ -16,22 +15,14 @@ import { testClient, testConfig, testModel } from "./support.js"
 const CONFIG = testConfig({ models: [testModel({ name: "page", label: "Page", labelPlural: "Pages" })] })
 const CLIENT = testClient({ url: "http://localhost:8000/studio/proxy", token: "token" })
 
-let root: Root | null = null
-let container: HTMLElement
-
 async function studioAt(path: string, config: AdminConfig = CONFIG): Promise<void> {
   vi.stubGlobal("fetch", async () => new Promise<Response>(() => {}))
-  container = document.createElement("div")
-  document.body.appendChild(container)
-  root = createRoot(container)
-  await act(async () =>
-    root!.render(
-      <MemoryRouter initialEntries={[path]}>
-        <StudioCore config={config} client={CLIENT} />
-      </MemoryRouter>,
-    ),
+  await mount(
+    <MemoryRouter initialEntries={[path]}>
+      <StudioCore config={config} client={CLIENT} />
+    </MemoryRouter>,
   )
-  for (let i = 0; i < 5; i++) await act(async () => {})
+  await advance(0, 5)
 }
 
 function byLabel(label: string): HTMLElement | null {
@@ -44,16 +35,7 @@ async function click(label: string): Promise<void> {
   await act(async () => el.click())
 }
 
-beforeEach(() => {
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true
-})
-
-afterEach(() => {
-  if (root) act(() => root!.unmount())
-  root = null
-  container.remove()
-  vi.unstubAllGlobals()
-})
+isolateEachTest()
 
 describe("the section panel toggle", () => {
   it.each(["/", "/webhooks", "/email"])("is absent on %s, which has no section panel to open", async (path) => {

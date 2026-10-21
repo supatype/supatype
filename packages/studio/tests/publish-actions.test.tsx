@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import React, { act } from "react"
-import { createRoot, type Root } from "react-dom/client"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PublishBar } from "../src/components/PublishBar.js"
 import { EditView } from "../src/views/EditView.js"
 import { AdminClientContext } from "../src/hooks/useAdminClient.js"
@@ -10,7 +9,7 @@ import { LocaleContext, type LocaleState } from "../src/hooks/useLocale.js"
 import type { RecordEditor } from "../src/hooks/usePublishActions.js"
 import type { ModelConfig } from "../src/config.js"
 import { isJsonObject, safeParseJson } from "../src/lib/json.js"
-import { testClient, testConfig, testField, testModel } from "./support.js"
+import { advance, isolateEachTest, mount, testClient, testConfig, testField, testModel } from "./support.js"
 
 /**
  * What each control in the publish panel asks the engine to do, read off the RPCs it sends.
@@ -52,8 +51,8 @@ interface Served {
 let rpcs: Rpc[] = []
 /** The URL of every DELETE sent, in order. */
 let deletes: string[] = []
-let container: HTMLDivElement
-let root: Root
+/** The current test's view, which `render` mounts afresh for each test. */
+let container: HTMLElement
 
 function versionRow(n: number, over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -100,27 +99,21 @@ function serve(served: Served): void {
   })
 }
 
+isolateEachTest()
+
 beforeEach(() => {
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true
   rpcs = []
   deletes = []
-  container = document.createElement("div")
-  document.body.appendChild(container)
-  root = createRoot(container)
-})
-
-afterEach(() => {
-  act(() => root.unmount())
-  container.remove()
-  vi.unstubAllGlobals()
 })
 
 async function settle(): Promise<void> {
-  for (let i = 0; i < 6; i++) {
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0))
-    })
-  }
+  await advance(0, 6)
+}
+
+/** Mounts `ui` as this test's view and lets it settle. */
+async function render(ui: React.ReactElement): Promise<void> {
+  container = (await mount(ui)).container
+  await settle()
 }
 
 function editor(over: Partial<RecordEditor> = {}): RecordEditor {
@@ -143,16 +136,13 @@ interface Scope {
 
 async function show(served: Served, ed: RecordEditor = editor(), scope: Scope = { model: MODEL, locale: LOCALE }): Promise<void> {
   serve(served)
-  await act(async () =>
-    root.render(
-      <AdminClientContext.Provider value={CLIENT}>
-        <LocaleContext.Provider value={scope.locale}>
-          <PublishBar record={{ model: scope.model, recordId: "r1", title: "A post" }} editor={ed} seesDrafts onNavigate={() => {}} />
-        </LocaleContext.Provider>
-      </AdminClientContext.Provider>,
-    ),
+  await render(
+    <AdminClientContext.Provider value={CLIENT}>
+      <LocaleContext.Provider value={scope.locale}>
+        <PublishBar record={{ model: scope.model, recordId: "r1", title: "A post" }} editor={ed} seesDrafts onNavigate={() => {}} />
+      </LocaleContext.Provider>
+    </AdminClientContext.Provider>,
   )
-  await settle()
 }
 
 function button(label: string): HTMLButtonElement {
@@ -365,18 +355,15 @@ describe("a localized record", () => {
 describe("the edit view", () => {
   async function view(model: ModelConfig): Promise<string> {
     serve({ versions: [live(1)], row: { id: "r1", title: "A post" } })
-    await act(async () =>
-      root.render(
-        <AdminConfigContext.Provider value={testConfig({ models: [model] })}>
-          <AdminClientContext.Provider value={CLIENT}>
-            <LocaleContext.Provider value={LOCALE}>
-              <EditView model={model} recordId="r1" onNavigate={() => {}} />
-            </LocaleContext.Provider>
-          </AdminClientContext.Provider>
-        </AdminConfigContext.Provider>,
-      ),
+    await render(
+      <AdminConfigContext.Provider value={testConfig({ models: [model] })}>
+        <AdminClientContext.Provider value={CLIENT}>
+          <LocaleContext.Provider value={LOCALE}>
+            <EditView model={model} recordId="r1" onNavigate={() => {}} />
+          </LocaleContext.Provider>
+        </AdminClientContext.Provider>
+      </AdminConfigContext.Provider>,
     )
-    await settle()
     return container.textContent ?? ""
   }
 
@@ -397,18 +384,15 @@ describe("the edit view", () => {
   async function editing(served: Served): Promise<string[]> {
     const went: string[] = []
     serve(served)
-    await act(async () =>
-      root.render(
-        <AdminConfigContext.Provider value={testConfig({ models: [MODEL] })}>
-          <AdminClientContext.Provider value={CLIENT}>
-            <LocaleContext.Provider value={LOCALE}>
-              <EditView model={MODEL} recordId="r1" onNavigate={(path) => { went.push(path) }} />
-            </LocaleContext.Provider>
-          </AdminClientContext.Provider>
-        </AdminConfigContext.Provider>,
-      ),
+    await render(
+      <AdminConfigContext.Provider value={testConfig({ models: [MODEL] })}>
+        <AdminClientContext.Provider value={CLIENT}>
+          <LocaleContext.Provider value={LOCALE}>
+            <EditView model={MODEL} recordId="r1" onNavigate={(path) => { went.push(path) }} />
+          </LocaleContext.Provider>
+        </AdminClientContext.Provider>
+      </AdminConfigContext.Provider>,
     )
-    await settle()
     return went
   }
 

@@ -1,5 +1,5 @@
 import { act } from "react"
-import { settle } from "./data-browser-support.js"
+import { settle } from "./support.js"
 
 /**
  * Helpers for the questions Studio asks before a destructive act, shared by the suites that check

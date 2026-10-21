@@ -1,14 +1,13 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest"
-import React, { act } from "react"
-import { createRoot, type Root } from "react-dom/client"
+import { describe, expect, it, vi } from "vitest"
+import React from "react"
 import { MemoryRouter } from "react-router-dom"
 import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { AdminConfigContext } from "../src/hooks/useAdminConfig.js"
 import { mockConfig } from "../src/fixtures/mockConfig.js"
 import { AuthManagement } from "../src/views/AuthManagement.js"
 import { asking, press } from "./dialog-support.js"
-import { testClient } from "./support.js"
+import { isolateEachTest, mount, settle, testClient } from "./support.js"
 
 /**
  * The Users view lists active sessions and revokes one through the project's auth admin API, the
@@ -25,12 +24,9 @@ const SESSION = { id: "22222222-2222-2222-2222-222222222222", user_id: USER.id, 
 /** Another user's session, which every-session endpoint returns and the user's own does not. */
 const OTHER_SESSION = { ...SESSION, id: "33333333-3333-3333-3333-333333333333", user_id: "44444444-4444-4444-4444-444444444444", ip: "198.51.100.9" }
 
-let root: Root | null = null
-let container: HTMLElement
 let calls: Array<{ url: string; method: string }> = []
 
 function stubFetch(): void {
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true
   calls = []
   vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
     calls.push({ url, method: init?.method ?? "GET" })
@@ -43,39 +39,21 @@ function stubFetch(): void {
   })
 }
 
-async function settle(): Promise<void> {
-  for (let i = 0; i < 3; i++) {
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0))
-    })
-  }
-}
-
 async function openUser(): Promise<void> {
   stubFetch()
-  container = document.createElement("div")
-  document.body.appendChild(container)
-  root = createRoot(container)
-  await act(async () => {
-    root!.render(
-      <MemoryRouter initialEntries={[`/auth/users?user=${USER.id}`]}>
-        <AdminConfigContext.Provider value={mockConfig}>
-          <AdminClientContext.Provider value={CLIENT}>
-            <AuthManagement />
-          </AdminClientContext.Provider>
-        </AdminConfigContext.Provider>
-      </MemoryRouter>,
-    )
-  })
+  await mount(
+    <MemoryRouter initialEntries={[`/auth/users?user=${USER.id}`]}>
+      <AdminConfigContext.Provider value={mockConfig}>
+        <AdminClientContext.Provider value={CLIENT}>
+          <AuthManagement />
+        </AdminClientContext.Provider>
+      </AdminConfigContext.Provider>
+    </MemoryRouter>,
+  )
   await settle()
 }
 
-afterEach(() => {
-  act(() => root?.unmount())
-  root = null
-  container?.remove()
-  vi.unstubAllGlobals()
-})
+isolateEachTest()
 
 describe("the Users view's sessions", () => {
   // Only the open user's sessions, asked for by user. It used to read every active session in the

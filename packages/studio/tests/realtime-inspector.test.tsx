@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import React, { act } from "react"
-import { createRoot, type Root } from "react-dom/client"
 import { MemoryRouter } from "react-router-dom"
 import { renderToStaticMarkup } from "react-dom/server"
 import { StudioCore } from "../src/StudioCore.js"
@@ -14,7 +13,7 @@ import { Broadcast } from "../src/views/realtime/Broadcast.js"
 import { Stream } from "../src/views/realtime/Stream.js"
 import { INITIAL_STREAM } from "../src/hooks/useRealtimeStream.js"
 import type { InspectorApi } from "../src/views/realtime/InspectorTab.js"
-import { testClient, testConfig } from "./support.js"
+import { advance, isolateEachTest, mount, testClient, testConfig } from "./support.js"
 
 /**
  * ST-3: the Realtime Inspector, built from the shared Studio components, shown only where this
@@ -53,30 +52,23 @@ function backend(b: Backend): (url: string) => Promise<Response> {
   }
 }
 
-let root: Root | null = null
+/** The current test's view, which `studioAt` mounts afresh for each test. */
 let container: HTMLElement
-
-async function settle(): Promise<void> {
-  for (let i = 0; i < 5; i++) await act(async () => {})
-}
 
 async function studioAt(path: string, platform: PlatformContext, b: Backend): Promise<string> {
   vi.stubGlobal("fetch", backend(b))
-  container = document.createElement("div")
-  root = createRoot(container)
-  await act(async () =>
-    root!.render(
-      <MemoryRouter initialEntries={[path]}>
-        <StudioCore
-          config={CONFIG}
-          client={CLIENT}
-          {...(platform.platformUrl !== undefined && { platformUrl: platform.platformUrl })}
-          {...(platform.projectRef !== undefined && { projectRef: platform.projectRef })}
-        />
-      </MemoryRouter>,
-    ),
+  const view = await mount(
+    <MemoryRouter initialEntries={[path]}>
+      <StudioCore
+        config={CONFIG}
+        client={CLIENT}
+        {...(platform.platformUrl !== undefined && { platformUrl: platform.platformUrl })}
+        {...(platform.projectRef !== undefined && { projectRef: platform.projectRef })}
+      />
+    </MemoryRouter>,
   )
-  await settle()
+  container = view.container
+  await advance(0, 5)
   return container.innerHTML
 }
 
@@ -85,15 +77,7 @@ function main(): string {
   return container.querySelector("main")?.innerHTML ?? ""
 }
 
-beforeEach(() => {
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true
-})
-
-afterEach(() => {
-  if (root) act(() => root!.unmount())
-  root = null
-  vi.unstubAllGlobals()
-})
+isolateEachTest()
 
 describe.each([
   ["self-host", SELF_HOST],
@@ -141,8 +125,6 @@ describe("roles", () => {
 describe("the stream", () => {
   it("shows a redacted column as redacted, never as null", async () => {
     vi.stubGlobal("fetch", async () => new Promise<Response>(() => {}))
-    container = document.createElement("div")
-    root = createRoot(container)
     const state = {
       ...INITIAL_STREAM,
       rows: [{
@@ -154,7 +136,7 @@ describe("the stream", () => {
         },
       }],
     }
-    await act(async () => root!.render(<StreamRows state={state} />))
+    const { container } = await mount(<StreamRows state={state} />)
     await act(async () => container.querySelector("button")!.click())
     expect(container.textContent).toContain('"salary": redacted')
     expect(container.textContent).not.toContain('"salary": null')
@@ -183,9 +165,7 @@ describe("controls", () => {
   it("builds every form control from the shared primitives", async () => {
     vi.stubGlobal("fetch", async () => new Promise<Response>(() => {}))
     const api: InspectorApi = { mode: "self-host", fetch: () => new Promise<Response>(() => {}) }
-    container = document.createElement("div")
-    root = createRoot(container)
-    await act(async () => root!.render(<><Stream api={api} /><Broadcast api={api} /></>))
+    const { container } = await mount(<><Stream api={api} /><Broadcast api={api} /></>)
     const controls = [...container.querySelectorAll("select, textarea, input")]
     expect(controls.length).toBeGreaterThanOrEqual(7)
     for (const control of controls) expect(control.getAttribute("data-ui")).not.toBeNull()

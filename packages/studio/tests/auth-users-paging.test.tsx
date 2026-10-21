@@ -1,13 +1,12 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import React, { act } from "react"
-import { createRoot, type Root } from "react-dom/client"
 import { MemoryRouter } from "react-router-dom"
 import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { AdminConfigContext } from "../src/hooks/useAdminConfig.js"
 import { mockConfig } from "../src/fixtures/mockConfig.js"
 import { AuthManagement } from "../src/views/AuthManagement.js"
-import { advance, testClient, useVirtualTimeouts } from "./support.js"
+import { advance, isolateEachTest, mount, testClient } from "./support.js"
 
 /**
  * The Users list reads one page of the auth admin API at a time and searches on the server. It used
@@ -31,7 +30,7 @@ const USERS = Array.from({ length: 62 }, (_, i) => ({
 }))
 const LATE = USERS[59]!
 
-let root: Root | null = null
+/** The current test's view, which `renderUsers` mounts afresh for each test. */
 let container: HTMLElement
 let userCalls: URL[] = []
 
@@ -49,7 +48,6 @@ function userPage(url: URL): Response {
 }
 
 function stubFetch(): void {
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true
   userCalls = []
   vi.stubGlobal("fetch", async (raw: string) => {
     const url = new URL(raw)
@@ -68,22 +66,17 @@ function stubFetch(): void {
 }
 
 async function renderUsers(): Promise<void> {
-  useVirtualTimeouts()
   stubFetch()
-  container = document.createElement("div")
-  document.body.appendChild(container)
-  root = createRoot(container)
-  await act(async () => {
-    root!.render(
-      <MemoryRouter initialEntries={["/auth/users"]}>
-        <AdminConfigContext.Provider value={mockConfig}>
-          <AdminClientContext.Provider value={CLIENT}>
-            <AuthManagement />
-          </AdminClientContext.Provider>
-        </AdminConfigContext.Provider>
-      </MemoryRouter>,
-    )
-  })
+  const view = await mount(
+    <MemoryRouter initialEntries={["/auth/users"]}>
+      <AdminConfigContext.Provider value={mockConfig}>
+        <AdminClientContext.Provider value={CLIENT}>
+          <AuthManagement />
+        </AdminClientContext.Provider>
+      </AdminConfigContext.Provider>
+    </MemoryRouter>,
+  )
+  container = view.container
   await advance()
 }
 
@@ -128,13 +121,7 @@ function lastFilters(): Record<string, string | null> {
   return Object.fromEntries(["role", "banned", "confirmed", "provider", "page"].map((k) => [k, last?.searchParams.get(k) ?? null]))
 }
 
-afterEach(() => {
-  act(() => root?.unmount())
-  root = null
-  container?.remove()
-  vi.unstubAllGlobals()
-  vi.useRealTimers()
-})
+isolateEachTest()
 
 describe("the Users list", () => {
   it("sends the search text to the server as `filter`", async () => {
