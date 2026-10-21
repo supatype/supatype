@@ -1,6 +1,6 @@
-import React, { act, type ReactElement } from "react"
+import React, { act as reactAct, type ReactElement } from "react"
 import { createRoot, type Root } from "react-dom/client"
-import { afterEach, beforeEach, vi } from "vitest"
+import { afterEach, beforeEach, expect, vi } from "vitest"
 import { createClient, type Session, type SupatypeClient } from "@supatype/client"
 import type { AdminConfig, FieldConfig, ModelConfig } from "../src/config.js"
 import type { ProjectProxy } from "../src/hooks/useProjectProxy.js"
@@ -119,19 +119,25 @@ export function elementOf<T extends Element>(
   return el
 }
 
+/**
+ * The button in `scope` whose text, or failing that whose aria-label, reads exactly `text`, or
+ * undefined when there is none.
+ */
+export function findButton(scope: ParentNode, text: string): HTMLButtonElement | undefined {
+  return Array.from(scope.querySelectorAll("button")).find(
+    (b) => b.textContent?.trim() === text || b.getAttribute("aria-label") === text,
+  )
+}
+
+/** The button `findButton` finds; throws naming it when there is none. */
+export function button(scope: ParentNode, text: string): HTMLButtonElement {
+  const found = findButton(scope, text)
+  if (!found) throw new Error(`no "${text}" button`)
+  return found
+}
+
 /** A timer vitest can put on its virtual clock. */
 type VirtualTimer = NonNullable<NonNullable<Parameters<typeof vi.useFakeTimers>[0]>["toFake"]>[number]
-
-/**
- * Puts setTimeout, and any `extra` timers, on a virtual clock for the rest of the test, so a
- * debounce or a settle is passed by moving the clock rather than by sleeping through it. A real
- * `setTimeout(0)` waits for the next timer tick, about 15ms on Windows and longer on a loaded
- * machine, and a test that settles a few dozen times spends that on top of its rendering. Undo it
- * with `vi.useRealTimers()` in `afterEach`, or let `isolateEachTest` do both.
- */
-export function useVirtualTimeouts(...extra: VirtualTimer[]): void {
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", ...extra] })
-}
 
 /**
  * Bumped as each test starts and again as it ends, so work a test started can tell that the test
@@ -139,19 +145,34 @@ export function useVirtualTimeouts(...extra: VirtualTimer[]): void {
  */
 let phase = 0
 
-/** Runs `work` inside act, then stops the test that started it if that test has since ended. */
-async function actFor(started: number, work: () => Promise<void>): Promise<void> {
-  await act(work)
-  if (phase !== started) throw new Error("a test that timed out ran on after it ended")
+/** The name of the test that is running, or that last ran, for errors raised after it ended. */
+let currentTest = "a test"
+
+/** How long the end of a test waits for an act it left open, well inside vitest's 10s hook timeout. */
+const ACT_CLOSE_DEADLINE_MS = 8000
+
+/**
+ * React's act, guarded: once the act is done, a test that has since ended (it timed out and
+ * vitest moved on) stops here instead of clicking and asserting on the next test's page. Test
+ * files that call `isolateEachTest()` import this rather than React's own.
+ */
+export async function act(work: () => unknown): Promise<void> {
+  const started = phase
+  await reactAct(async () => { await work() })
+  if (phase !== started) throw new Error(`"${currentTest}" ran on after it ended`)
 }
 
 /**
- * Whether an act scope is open. React keeps no public way to ask, so this reads the act queue its
- * internals hold from the start of the outermost act to the end of its flush.
+ * Whether an act scope is open in `react`. React keeps no public way to ask, so this reads the act
+ * queue its internals hold from the start of the outermost act to the end of its flush. It throws
+ * when those internals are missing, so a React upgrade that moves them fails here, loudly, instead
+ * of quietly turning the wait in `isolateEachTest` into a no-op.
  */
-function actScopeOpen(): boolean {
-  const internals: unknown = Reflect.get(React, "__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE")
-  if (typeof internals !== "object" || internals === null) return false
+export function actScopeOpenIn(react: object): boolean {
+  const internals: unknown = Reflect.get(react, "__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE")
+  if (typeof internals !== "object" || internals === null || !("actQueue" in internals)) {
+    throw new Error("React's internals hold no act queue: isolateEachTest cannot tell whether an act is open")
+  }
   const queue: unknown = Reflect.get(internals, "actQueue")
   return queue !== null && queue !== undefined
 }
@@ -161,9 +182,16 @@ function actScopeOpen(): boolean {
  * A timed-out test's act, still open when the next test opened its own, closed out of order and
  * left the count one too high, after which React flushed no render in that file again and every
  * later test failed. Waiting here, before the next test starts, keeps the two from overlapping.
+ * An act still open after `withinMs` throws, naming the test that left it open.
  */
-async function actScopesClosed(): Promise<void> {
-  while (actScopeOpen()) await new Promise((resolve) => setImmediate(resolve))
+export async function actScopesClosed(react: object = React, withinMs = ACT_CLOSE_DEADLINE_MS): Promise<void> {
+  const deadline = performance.now() + withinMs
+  while (actScopeOpenIn(react)) {
+    if (performance.now() > deadline) {
+      throw new Error(`"${currentTest}" left an act open that did not close within ${withinMs}ms`)
+    }
+    await new Promise((resolve) => setImmediate(resolve))
+  }
 }
 
 /**
@@ -171,13 +199,15 @@ async function actScopesClosed(): Promise<void> {
  * the request it starts and the render that answer causes all land before the test looks.
  */
 export async function advance(ms = 0, turns = 3): Promise<void> {
-  const started = phase
-  for (let i = 0; i < turns; i++) await actFor(started, async () => { await vi.advanceTimersByTimeAsync(ms) })
+  if (!vi.isFakeTimers()) {
+    throw new Error("advance and settle run on the virtual clock: call isolateEachTest() at the top of this test file")
+  }
+  for (let i = 0; i < turns; i++) await act(async () => { await vi.advanceTimersByTimeAsync(ms) })
 }
 
 /** Lets the requests in flight answer and the renders they cause land, on the virtual clock. */
-export async function settle(): Promise<void> {
-  await advance(0, 4)
+export async function settle(turns = 4): Promise<void> {
+  await advance(0, turns)
 }
 
 /** A view a test mounted: its own container on document.body and the root rendering into it. */
@@ -191,7 +221,7 @@ const mounted: Mounted[] = []
 /**
  * Renders `ui` into a new container on document.body, through a root of its own. A root shared
  * through the file's module scope let a test that timed out render into, and assert against, the
- * next test's view. `unmountAll` takes these down.
+ * next test's view. `isolateEachTest` unmounts these after each test.
  */
 export async function mount(ui: ReactElement): Promise<Mounted> {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true
@@ -199,36 +229,40 @@ export async function mount(ui: ReactElement): Promise<Mounted> {
   document.body.appendChild(container)
   const view = { container, root: createRoot(container) }
   mounted.push(view)
-  await actFor(phase, async () => { view.root.render(ui) })
+  await act(() => { view.root.render(ui) })
   return view
 }
 
-/** Unmounts `view` and removes its container; unmounting it again does nothing. */
+/** Unmounts `view` and removes its container, for a test that is done with it before it ends. */
 export function unmount(view: Mounted): void {
-  act(() => view.root.unmount())
+  // By root, since a harness spreads the view into an object of its own.
+  const at = mounted.findIndex((m) => m.root === view.root)
+  if (at >= 0) mounted.splice(at, 1)
+  reactAct(() => view.root.unmount())
   view.container.remove()
-}
-
-/** Unmounts every view `mount` rendered and removes its container. */
-export function unmountAll(): void {
-  for (const view of mounted.splice(0)) unmount(view)
 }
 
 /**
  * Runs each of the file's tests on the virtual clock (setTimeout plus any `extra` timers) and,
  * after each, waits for any act it left open to close, unmounts what it mounted, and restores
- * the globals it stubbed and the real clock.
+ * the globals it stubbed and the real clock. On the virtual clock a debounce or a settle is
+ * passed by moving the clock, not by sleeping: a real `setTimeout(0)` waits for the next timer
+ * tick, about 15ms on Windows and longer on a loaded machine.
  */
 export function isolateEachTest(...extra: VirtualTimer[]): void {
   beforeEach(() => {
     phase++
-    useVirtualTimeouts(...extra)
+    currentTest = expect.getState().currentTestName ?? "a test"
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", ...extra] })
   })
   afterEach(async () => {
     phase++
-    await actScopesClosed()
-    unmountAll()
-    vi.unstubAllGlobals()
-    vi.useRealTimers()
+    try {
+      await actScopesClosed()
+    } finally {
+      for (const view of [...mounted]) unmount(view)
+      vi.unstubAllGlobals()
+      vi.useRealTimers()
+    }
   })
 }

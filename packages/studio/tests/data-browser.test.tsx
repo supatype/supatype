@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest"
 import { browseTotal, countModeFor } from "../src/lib/browse-paging.js"
-import { button, renderBrowser } from "./data-browser-support.js"
-import { isolateEachTest } from "./support.js"
+import { renderBrowser } from "./data-browser-support.js"
+import { button, isolateEachTest } from "./support.js"
 
 /**
  * The data browser paged over the planner's estimate of a table's size, so realtime's `message`

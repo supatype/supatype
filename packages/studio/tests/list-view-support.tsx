@@ -1,4 +1,4 @@
-import React, { act } from "react"
+import React from "react"
 import { MemoryRouter } from "react-router-dom"
 import { vi } from "vitest"
 import type { ModelConfig } from "../src/config.js"
@@ -6,14 +6,12 @@ import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { AdminConfigContext } from "../src/hooks/useAdminConfig.js"
 import { LocaleContext } from "../src/hooks/useLocale.js"
 import { ListView } from "../src/views/ListView.js"
-import { mount, settle, testClient, testConfig, unmount } from "./support.js"
+import { act, mount, settle, testClient, testConfig, type Mounted } from "./support.js"
 
 /** A model's list, rendered against a REST stub that records every row read it is sent. */
-export interface ListHarness {
-  container: HTMLElement
+export interface ListHarness extends Mounted {
   /** Every read of the model's table, in order. */
   reads: URL[]
-  unmount: () => void
 }
 
 const PROXY = "http://localhost:8000/studio/proxy"
@@ -46,7 +44,7 @@ export async function renderList(model: ModelConfig, rows: Array<Record<string, 
     </MemoryRouter>,
   )
   await settle()
-  return { container: view.container, reads, unmount: () => { unmount(view); vi.unstubAllGlobals() } }
+  return { ...view, reads }
 }
 
 /** The column header reading `label`, clicked. */

@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest"
-import React, { act } from "react"
+import React from "react"
 import { PluginsMarketplace } from "../src/views/PluginsMarketplace.js"
-import { isolateEachTest, mount, settle } from "./support.js"
+import { act, button, isolateEachTest, mount, settle } from "./support.js"
 
 /**
  * The plugins marketplace pages through npm's search results. It showed the first 50 and stopped,
@@ -29,8 +29,7 @@ describe("the plugins marketplace", () => {
     const { container } = await mount(<PluginsMarketplace />)
     await settle()
     expect(container.textContent).toContain("Page 1 of 3 (120)")
-    const next = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Next")
-    await act(async () => next?.click())
+    await act(() => button(container, "Next").click())
     await settle()
     expect(froms.at(-1)).toBe("50")
     expect(container.textContent).toContain("supatype-plugin-51")

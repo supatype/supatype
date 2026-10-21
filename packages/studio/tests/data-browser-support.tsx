@@ -1,11 +1,11 @@
-import React, { act } from "react"
+import React from "react"
 import { MemoryRouter } from "react-router-dom"
 import { vi } from "vitest"
 import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { AdminConfigContext } from "../src/hooks/useAdminConfig.js"
 import { DataExplorer } from "../src/views/DataExplorer.js"
 import type { AdminConfig } from "../src/config.js"
-import { mount, settle, testClient, testConfig, unmount } from "./support.js"
+import { act, button, mount, settle, testClient, testConfig, type Mounted } from "./support.js"
 
 /**
  * Database > Tables > Browse data on realtime's `message` table: 30 rows that Postgres last
@@ -33,12 +33,10 @@ const COLUMNS = [
 /** `message` with no primary key: what a table created outside the schema can look like. */
 export const KEYLESS_COLUMNS = COLUMNS.map((c) => ({ ...c, is_primary: false }))
 
-export interface Browser {
-  container: HTMLElement
+export interface Browser extends Mounted {
   inserts: unknown[]
   /** Every row read the browser sent, in order. */
   reads: URL[]
-  unmount: () => void
 }
 
 export interface BrowserOptions {
@@ -97,14 +95,7 @@ export async function renderBrowser(options: BrowserOptions = {}): Promise<Brows
     </MemoryRouter>,
   )
   await settle()
-  return { container: view.container, inserts, reads, unmount: () => { unmount(view); vi.unstubAllGlobals() } }
-}
-
-/** The button reading exactly `text`. */
-export function button(container: HTMLElement, text: string): HTMLButtonElement {
-  const found = Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.trim() === text)
-  if (!found) throw new Error(`no "${text}" button`)
-  return found
+  return { ...view, inserts, reads }
 }
 
 /** Open Insert Row, type `body` into the body field only, and insert. */

@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest"
-import React, { act } from "react"
+import React from "react"
 import { MemoryRouter } from "react-router-dom"
 import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { AdminConfigContext } from "../src/hooks/useAdminConfig.js"
 import { mockConfig } from "../src/fixtures/mockConfig.js"
 import { AuthManagement } from "../src/views/AuthManagement.js"
-import { advance, isolateEachTest, mount, testClient } from "./support.js"
+import { act, advance, button, isolateEachTest, mount, testClient } from "./support.js"
 
 /**
  * The Users list reads one page of the auth admin API at a time and searches on the server. It used
@@ -30,9 +30,11 @@ const USERS = Array.from({ length: 62 }, (_, i) => ({
 }))
 const LATE = USERS[59]!
 
-/** The current test's view, which `renderUsers` mounts afresh for each test. */
-let container: HTMLElement
-let userCalls: URL[] = []
+/** The Users list on screen, and every list request it has sent. */
+interface UsersList {
+  container: HTMLElement
+  calls: URL[]
+}
 
 /** The first three users, banned: what the server answers to `banned=true`. */
 const BANNED = USERS.slice(0, 3).map((u) => ({ ...u, banned_until: "2126-01-01T00:00:00Z" }))
@@ -47,12 +49,11 @@ function userPage(url: URL): Response {
   return Response.json({ users, aud: "authenticated" }, { headers: { "X-Total-Count": String(matching.length) } })
 }
 
-function stubFetch(): void {
-  userCalls = []
+function stubFetch(calls: URL[]): void {
   vi.stubGlobal("fetch", async (raw: string) => {
     const url = new URL(raw)
     if (url.pathname.endsWith("/auth/v1/admin/users")) {
-      userCalls.push(url)
+      calls.push(url)
       return userPage(url)
     }
     const byId = /\/auth\/v1\/admin\/users\/([^/]+)$/.exec(url.pathname)
@@ -65,9 +66,10 @@ function stubFetch(): void {
   })
 }
 
-async function renderUsers(): Promise<void> {
-  stubFetch()
-  const view = await mount(
+async function renderUsers(): Promise<UsersList> {
+  const calls: URL[] = []
+  stubFetch(calls)
+  const { container } = await mount(
     <MemoryRouter initialEntries={["/auth/users"]}>
       <AdminConfigContext.Provider value={mockConfig}>
         <AdminClientContext.Provider value={CLIENT}>
@@ -76,36 +78,32 @@ async function renderUsers(): Promise<void> {
       </AdminConfigContext.Provider>
     </MemoryRouter>,
   )
-  container = view.container
   await advance()
+  return { container, calls }
 }
 
-function searchBox(): HTMLInputElement {
+function searchBox(container: HTMLElement): HTMLInputElement {
   const input = container.querySelector<HTMLInputElement>("input[placeholder^='Search']")
   if (!input) throw new Error("no search box rendered")
   return input
 }
 
-async function search(value: string): Promise<void> {
+async function search(container: HTMLElement, value: string): Promise<void> {
   const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set
-  await act(async () => {
-    setter?.call(searchBox(), value)
-    searchBox().dispatchEvent(new Event("input", { bubbles: true }))
+  await act(() => {
+    setter?.call(searchBox(container), value)
+    searchBox(container).dispatchEvent(new Event("input", { bubbles: true }))
   })
   // Past the search box's 300ms debounce on the virtual clock, then let the request land.
   await advance(150)
 }
 
-function rowEmails(): string[] {
+function rowEmails(container: HTMLElement): string[] {
   return Array.from(container.querySelectorAll("tbody tr td:first-child")).map((td) => td.textContent ?? "")
 }
 
-function button(label: string): HTMLButtonElement | undefined {
-  return Array.from(container.querySelectorAll("button")).find((b) => b.textContent === label)
-}
-
 /** Picks `value` in the select that offers it. */
-async function choose(value: string): Promise<void> {
+async function choose(container: HTMLElement, value: string): Promise<void> {
   const select = Array.from(container.querySelectorAll("select")).find((s) => Array.from(s.options).some((o) => o.value === value))
   if (!select) throw new Error(`no select offering ${value}`)
   await act(async () => {
@@ -116,8 +114,8 @@ async function choose(value: string): Promise<void> {
 }
 
 /** The role, status and provider parameters of the last list request. */
-function lastFilters(): Record<string, string | null> {
-  const last = userCalls.at(-1)
+function lastFilters(calls: readonly URL[]): Record<string, string | null> {
+  const last = calls.at(-1)
   return Object.fromEntries(["role", "banned", "confirmed", "provider", "page"].map((k) => [k, last?.searchParams.get(k) ?? null]))
 }
 
@@ -125,63 +123,63 @@ isolateEachTest()
 
 describe("the Users list", () => {
   it("sends the search text to the server as `filter`", async () => {
-    await renderUsers()
-    await search("user60@")
-    const last = userCalls.at(-1)
+    const { container, calls } = await renderUsers()
+    await search(container, "user60@")
+    const last = calls.at(-1)
     expect(last?.searchParams.get("filter")).toBe("user60@")
     expect(last?.searchParams.get("page")).toBe("1")
   })
 
   it("finds a user beyond the first 50", async () => {
-    await renderUsers()
-    expect(rowEmails()).not.toContain(LATE.email)
-    await search(LATE.email)
-    expect(rowEmails()).toEqual([LATE.email])
+    const { container } = await renderUsers()
+    expect(rowEmails(container)).not.toContain(LATE.email)
+    await search(container, LATE.email)
+    expect(rowEmails(container)).toEqual([LATE.email])
   })
 
   it("returns to the full list when the search is cleared", async () => {
-    await renderUsers()
-    await search("user60@")
-    await search("")
-    expect(userCalls.at(-1)?.searchParams.has("filter")).toBe(false)
-    expect(rowEmails()).toHaveLength(50)
+    const { container, calls } = await renderUsers()
+    await search(container, "user60@")
+    await search(container, "")
+    expect(calls.at(-1)?.searchParams.has("filter")).toBe(false)
+    expect(rowEmails(container)).toHaveLength(50)
   })
 
   it("pages to the users after the first 50", async () => {
-    await renderUsers()
+    const { container, calls } = await renderUsers()
     expect(container.textContent).toContain("Page 1 of 2 (62)")
-    await act(async () => button("Next")?.click())
+    await act(() => button(container, "Next").click())
     await advance()
-    expect(userCalls.at(-1)?.searchParams.get("page")).toBe("2")
-    expect(rowEmails()).toHaveLength(12)
-    expect(rowEmails()).toContain(LATE.email)
+    expect(calls.at(-1)?.searchParams.get("page")).toBe("2")
+    expect(rowEmails(container)).toHaveLength(12)
+    expect(rowEmails(container)).toContain(LATE.email)
     expect(container.textContent).toContain("Page 2 of 2 (62)")
   })
 
   // The role, status and provider filters used to apply only to the page on screen.
   it("filters by status on the server, across every user", async () => {
-    await renderUsers()
-    await choose("disabled")
-    expect(lastFilters()).toMatchObject({ banned: "true", confirmed: null, page: "1" })
-    expect(rowEmails()).toHaveLength(3)
+    const { container, calls } = await renderUsers()
+    await choose(container, "disabled")
+    expect(lastFilters(calls)).toMatchObject({ banned: "true", confirmed: null, page: "1" })
+    expect(rowEmails(container)).toHaveLength(3)
     expect(container.textContent).toContain("Users 1-3 of 3")
-    await choose("active")
-    expect(lastFilters()).toMatchObject({ banned: "false", confirmed: "true" })
-    await choose("unconfirmed")
-    expect(lastFilters()).toMatchObject({ banned: null, confirmed: "false" })
+    await choose(container, "active")
+    expect(lastFilters(calls)).toMatchObject({ banned: "false", confirmed: "true" })
+    await choose(container, "unconfirmed")
+    expect(lastFilters(calls)).toMatchObject({ banned: null, confirmed: "false" })
   })
 
   it("filters by role and provider on the server", async () => {
-    await renderUsers()
-    await choose("authenticated")
-    expect(lastFilters()).toMatchObject({ role: "authenticated" })
-    await choose("github")
-    expect(lastFilters()).toMatchObject({ role: "authenticated", provider: "github" })
+    const { container, calls } = await renderUsers()
+    await choose(container, "authenticated")
+    expect(lastFilters(calls)).toMatchObject({ role: "authenticated" })
+    await choose(container, "github")
+    expect(lastFilters(calls)).toMatchObject({ role: "authenticated", provider: "github" })
   })
 
   it("finds a user by ID, which the server's filter does not search", async () => {
-    await renderUsers()
-    await search(LATE.id)
-    expect(rowEmails()).toEqual([LATE.email])
+    const { container } = await renderUsers()
+    await search(container, LATE.id)
+    expect(rowEmails(container)).toEqual([LATE.email])
   })
 })

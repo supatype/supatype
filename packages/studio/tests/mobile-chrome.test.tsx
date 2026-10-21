@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest"
-import React, { act } from "react"
+import React from "react"
 import { MemoryRouter } from "react-router-dom"
 import { StudioCore } from "../src/StudioCore.js"
 import type { AdminConfig } from "../src/config.js"
-import { advance, isolateEachTest, mount, testClient, testConfig, testModel } from "./support.js"
+import { act, button, isolateEachTest, mount, settle, testClient, testConfig, testModel } from "./support.js"
 
 /**
  * Studio's chrome at phone width: the burger's primary menu, the section panel and its toggle,
@@ -22,7 +22,7 @@ async function studioAt(path: string, config: AdminConfig = CONFIG): Promise<voi
       <StudioCore config={config} client={CLIENT} />
     </MemoryRouter>,
   )
-  await advance(0, 5)
+  await settle()
 }
 
 function byLabel(label: string): HTMLElement | null {
@@ -81,8 +81,9 @@ describe("the phone-width menus", () => {
   it("choosing an item in the section panel closes it, rather than leaving it over the page it opened", async () => {
     await studioAt("/database/overview")
     await click("Toggle section navigation")
-    const tables = [...sectionOverlay()!.querySelectorAll("button")].find((b) => b.textContent === "Tables")
-    await act(async () => tables!.click())
+    const overlay = sectionOverlay()
+    if (overlay === null) throw new Error("the section panel did not open")
+    await act(() => button(overlay, "Tables").click())
     expect(sectionOverlay()).toBeNull()
   })
 

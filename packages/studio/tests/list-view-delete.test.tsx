@@ -1,13 +1,12 @@
 // @vitest-environment jsdom
-import React, { act } from "react"
+import React from "react"
 import { MemoryRouter } from "react-router-dom"
 import { describe, expect, it, vi } from "vitest"
 import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { AdminConfigContext } from "../src/hooks/useAdminConfig.js"
 import { LocaleContext } from "../src/hooks/useLocale.js"
 import { ListView } from "../src/views/ListView.js"
-import { button } from "./data-browser-support.js"
-import { isolateEachTest, mount, settle, testClient, testConfig, testField, testModel, unmount, type Mounted } from "./support.js"
+import { act, button, isolateEachTest, mount, settle, testClient, testConfig, testField, testModel, unmount, type Mounted } from "./support.js"
 
 /**
  * Deleting selected rows ignored the `{ error }` the client returns instead of throwing, so a delete

@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
-import { act } from "react"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { button, renderBrowser } from "./data-browser-support.js"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { renderBrowser } from "./data-browser-support.js"
 import { renderList } from "./list-view-support.js"
-import { isolateEachTest, settle, testModel } from "./support.js"
+import { act, advance, button, isolateEachTest, settle, testModel, unmount } from "./support.js"
 
 /**
  * Lists fetched once when their filter, sort or page changed and never again, so a row added
@@ -37,7 +36,7 @@ async function chooseAutoRefresh(container: HTMLElement, ms: string): Promise<vo
 }
 
 async function pass(ms: number): Promise<void> {
-  await act(async () => { vi.advanceTimersByTime(ms) })
+  await advance(ms, 1)
   await settle()
 }
 
@@ -97,12 +96,12 @@ describe("auto-refresh", () => {
   it("is remembered for each list", async () => {
     const first = await renderList(testModel())
     await chooseAutoRefresh(first.container, "30000")
-    first.unmount()
+    unmount(first)
     const again = await renderList(testModel())
     const select = again.container.querySelector<HTMLSelectElement>("select[aria-label='Auto-refresh']")
     expect(select?.value).toBe("30000")
     const other = testModel({ name: "page", tableName: "page" })
-    again.unmount()
+    unmount(again)
     const otherList = await renderList(other)
     expect(otherList.container.querySelector<HTMLSelectElement>("select[aria-label='Auto-refresh']")?.value).toBe("off")
   })

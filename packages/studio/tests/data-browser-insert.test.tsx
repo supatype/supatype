@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest"
-import { button, insertBody, renderBrowser } from "./data-browser-support.js"
-import { isolateEachTest } from "./support.js"
+import { insertBody, renderBrowser } from "./data-browser-support.js"
+import { button, isolateEachTest } from "./support.js"
 
 /**
  * The data browser's Insert Row sent "" for every field left empty. On realtime's `message` that

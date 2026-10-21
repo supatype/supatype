@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest"
-import React, { act } from "react"
+import React from "react"
 import { Clients } from "../src/views/realtime/Clients.js"
 import type { InspectorApi } from "../src/views/realtime/InspectorTab.js"
-import { advance, isolateEachTest, mount } from "./support.js"
+import { act, advance, button, isolateEachTest, mount } from "./support.js"
 
 /**
  * The Clients tab pages through every connection with realtime's cursor. It read the first 100
@@ -58,8 +58,7 @@ describe("the Clients tab", () => {
     await advance()
     expect(users(container)).toHaveLength(100)
     expect(container.textContent).toContain("Page 1 of 2 (150)")
-    const next = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Next")
-    await act(async () => next?.click())
+    await act(() => button(container, "Next").click())
     await advance()
     expect(paths.at(-1)).toContain("after=100")
     expect(users(container)).toHaveLength(50)

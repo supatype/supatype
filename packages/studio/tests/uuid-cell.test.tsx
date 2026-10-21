@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
-import React, { act } from "react"
+import React from "react"
 import { describe, expect, it, vi } from "vitest"
 import { UuidCell } from "../src/components/UuidCell.js"
 import { isUuid, shortUuid } from "../src/lib/uuid.js"
 import { renderBrowser } from "./data-browser-support.js"
 import { renderList } from "./list-view-support.js"
-import { isolateEachTest, mount, settle, testField, testModel } from "./support.js"
+import { act, isolateEachTest, mount, settle, testField, testModel } from "./support.js"
 
 /**
  * A UUID in a table cell is 36 characters of noise that pushes every other column off the screen.

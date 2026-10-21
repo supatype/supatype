@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import React, { act } from "react"
+import React from "react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { describe, expect, it, vi } from "vitest"
 import { AdminClientContext } from "../src/hooks/useAdminClient.js"
@@ -13,7 +13,7 @@ import { RestCacheBrowser } from "../src/views/RestCacheBrowser.js"
 import { Settings } from "../src/views/Settings.js"
 import { renderBrowser } from "./data-browser-support.js"
 import { asking, press } from "./dialog-support.js"
-import { isolateEachTest, mount, settle, testClient, testConfig } from "./support.js"
+import { act, isolateEachTest, mount, settle, testClient, testConfig, type Mounted } from "./support.js"
 
 /**
  * Every Studio action that destroys something it cannot put back asks first, in Studio's own
@@ -30,8 +30,7 @@ interface Call { url: string; method: string }
 type Answer = (url: string, method: string) => Response
 
 /** The view on screen and every request it has sent. */
-interface Shown {
-  container: HTMLElement
+interface Shown extends Mounted {
   calls: Call[]
 }
 
@@ -47,9 +46,9 @@ async function show(ui: React.ReactElement, answer: Answer, at = "/"): Promise<S
     calls.push({ url: decodeURIComponent(url), method })
     return answer(url, method)
   })
-  const { container } = await mount(<Providers at={at}>{ui}</Providers>)
+  const view = await mount(<Providers at={at}>{ui}</Providers>)
   await settle()
-  return { container, calls }
+  return { ...view, calls }
 }
 
 function Providers({ at, children }: { at: string; children: React.ReactElement }): React.ReactElement {

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import React, { act } from "react"
+import React from "react"
 import { MemoryRouter } from "react-router-dom"
 import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { AdminConfigContext } from "../src/hooks/useAdminConfig.js"
@@ -8,8 +8,8 @@ import { mockConfig } from "../src/fixtures/mockConfig.js"
 import { ExtensionsView } from "../src/views/database/ExtensionsView.js"
 import { PoliciesView as AuthPoliciesView } from "../src/views/auth/PoliciesView.js"
 import { StoragePoliciesView } from "../src/views/storage/PoliciesView.js"
-import { asking } from "./dialog-support.js"
-import { isolateEachTest, metadataBody, mount, settle, testClient } from "./support.js"
+import { asking, press } from "./dialog-support.js"
+import { act, elementOf, isolateEachTest, metadataBody, mount, settle, testClient } from "./support.js"
 
 /**
  * SQ2: the SQL editor's login is not a superuser, so Studio's extension, RLS and auth/storage
@@ -68,19 +68,10 @@ async function render(view: React.ReactElement, rows: Catalogue): Promise<void> 
   await settle()
 }
 
-async function click(label: string, scope: ParentNode = document.body): Promise<void> {
-  const button = [...scope.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim() === label)
-  if (!button) throw new Error(`no button "${label}"`)
-  await act(async () => { button.click() })
-  await settle()
-}
-
 /** Disables RLS and answers yes to the question that follows. */
 async function disableRls(): Promise<void> {
-  await click("Disable RLS")
-  const asking = document.body.querySelector("[role=alertdialog]")
-  if (!asking) throw new Error("Disable RLS did not ask")
-  await click("Disable RLS", asking)
+  await press("Disable RLS")
+  await press("Disable RLS", elementOf(document.body, "[role=alertdialog]", HTMLElement))
 }
 
 /** Types into the control labelled `label`, as a person would. */
@@ -116,16 +107,16 @@ isolateEachTest()
 describe("Extensions write through /studio-admin/extensions", () => {
   it("enables an available extension", async () => {
     await render(<ExtensionsView />, catalogue("public", "t"))
-    await click("Enable")
+    await press("Enable")
     expect(writes()).toEqual([{ path: "/studio-admin/extensions", body: { name: "hstore", enable: true } }])
   })
 
   it("asks, then disables an installed extension", async () => {
     await render(<ExtensionsView />, catalogue("public", "t"))
-    await click("Disable")
+    await press("Disable")
     expect(asking()).toContain("Disable pgcrypto?")
     expect(writes()).toEqual([])
-    await click("Disable extension")
+    await press("Disable extension")
     expect(writes()).toEqual([{ path: "/studio-admin/extensions", body: { name: "pgcrypto", enable: false } }])
   })
 })
@@ -144,24 +135,24 @@ describe.each(POLICY_VIEWS)("%s write through /studio-admin", (_label, view, sch
 
   it("asks, then drops a policy through /studio-admin/policies", async () => {
     await render(view(), catalogue(schema, table))
-    await click("Drop")
+    await press("Drop")
     expect(asking()).toContain(`Drop policy owner_read on ${schema}.${table}?`)
     expect(writes()).toEqual([])
-    await click("Drop policy")
+    await press("Drop policy")
     expect(writes()).toEqual([{ path: "/studio-admin/policies", body: { schema, table, op: "drop", name: "owner_read" } }])
   })
 
   it("creates a policy from the structured form", async () => {
     await render(view(), catalogue(schema, table))
-    await click("Create policy")
-    await click("I understand, continue")
+    await press("Create policy")
+    await press("I understand, continue")
     await fill("Table", table)
     await fill("Policy name", "self_update")
     await fill("Command", "UPDATE")
     await fill("Roles", "authenticated, service_role")
     await fill("USING", "auth.uid() = id")
     await fill("WITH CHECK", "auth.uid() = id")
-    await click("Save policy")
+    await press("Save policy")
     expect(writes()).toEqual([{
       path: "/studio-admin/policies",
       body: {
@@ -175,23 +166,20 @@ describe.each(POLICY_VIEWS)("%s write through /studio-admin", (_label, view, sch
 describe("Auth policies on a schema the admin routes do not cover", () => {
   it("drafts the drop as SQL, and asks before running it", async () => {
     await render(<AuthPoliciesView />, catalogue("public", "todos"))
-    await click("Drop")
+    await press("Drop")
     expect(document.body.querySelector("textarea")?.value).toBe("DROP POLICY owner_read ON public.todos;")
-    await click("Run SQL")
+    await press("Run SQL")
     expect(asking()).toContain("Run this SQL on public?")
     expect(writes()).toEqual([])
-    await click("Run on public")
+    await press("Run on public")
     expect(writes()).toEqual([{ path: "/sql", body: { query: "DROP POLICY owner_read ON public.todos;", schema: "public" } }])
   })
 
   it("runs nothing when the question is cancelled", async () => {
     await render(<AuthPoliciesView />, catalogue("public", "todos"))
-    await click("Drop")
-    await click("Run SQL")
-    const cancel = [...document.body.querySelectorAll('[role="alertdialog"] button')].find((b) => b.textContent === "Cancel")
-    if (!(cancel instanceof HTMLButtonElement)) throw new Error("no Cancel in the question")
-    await act(async () => { cancel.click() })
-    await settle()
+    await press("Drop")
+    await press("Run SQL")
+    await press("Cancel", elementOf(document.body, '[role="alertdialog"]', HTMLElement))
     expect(asking()).toBeNull()
     expect(writes()).toEqual([])
   })
