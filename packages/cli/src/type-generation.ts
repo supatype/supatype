@@ -93,6 +93,16 @@ export function projectOutputPaths(output?: ProjectOutput): { typesPath: string;
   }
 }
 
+/**
+ * The import specifier, from the project root, of the client written beside `outputPath`: what the
+ * client's own header tells an app to import. It named "./supatype/client", a file that was never
+ * written.
+ */
+export function projectClientImportPath(outputPath: string): string {
+  const dir = dirname(outputPath.replace(/\\/g, "/"))
+  return dir === "." ? "./client" : `./${dir}/client`
+}
+
 /** Writes what was asked for and returns one message per file, for the caller to report. */
 export async function writeGeneratedTypes(req: GenerateTypesRequest): Promise<string[]> {
   const written: string[] = []
@@ -173,7 +183,7 @@ export function writeAstDerivedOutputs(req: GenerateTypesRequest): string[] {
     const relative = join(dirname(clientDir), PROJECT_CLIENT_FILENAME)
     const outPath = resolve(req.cwd, relative)
     mkdirSync(dirname(outPath), { recursive: true })
-    writeFileSync(outPath, generateProjectClient(req.ast), "utf8")
+    writeFileSync(outPath, generateProjectClient(req.ast, projectClientImportPath(clientDir)), "utf8")
     written.push(`Client written to ${toPosix(relative)}`)
   }
 

@@ -3,7 +3,7 @@
  *
  * One file, written by `supatype push`, that an app imports once:
  *
- *     import { createClient } from "./supatype/client"
+ *     import { createClient } from "./supatype/generated/client"
  *
  * It carries three things that used to arrive by three routes, two of which could fail without
  * saying so.
@@ -37,8 +37,11 @@ const EXACT_KIND_BY_FIELD_KIND: Readonly<Record<string, "bigint" | "numeric">> =
 
 const FORMAT_VERSION = 1
 
-/** The full contents of `supatype/client.ts`. */
-export function generateProjectClient(ast: unknown): string {
+/**
+ * The full contents of the project's `client.ts`. `importPath` is the specifier, from the project
+ * root, its header tells an app to import, so it must name where the file is written.
+ */
+export function generateProjectClient(ast: unknown, importPath = "./supatype/generated/client"): string {
   // Normalised first: `push` should not die on a malformed AST while writing a file, and the
   // augmentation generator indexes `.models` without checking.
   const safe = ast !== null && typeof ast === "object" ? ast : { models: [] }
@@ -49,7 +52,7 @@ export function generateProjectClient(ast: unknown): string {
     "//",
     "// Import the client from here rather than from `@supatype/client`:",
     "//",
-    '//     import { createClient } from "./supatype/client"',
+    `//     import { createClient } from "${importPath}"`,
     "//",
     "// This file carries your schema's types and the columns that need exact handling, so one",
     "// import is the whole setup. Importing `@supatype/client` directly gets a client that knows",
