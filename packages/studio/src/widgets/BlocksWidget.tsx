@@ -318,7 +318,7 @@ function BlockButton({ name, children, danger = false, ...props }: {
   danger?: boolean
 } & Pick<React.ButtonHTMLAttributes<HTMLButtonElement>, "onClick" | "disabled">): React.ReactElement {
   return (
-    <Button type="button" variant="ghost" size="icon" aria-label={name} title={name} {...(danger && { className: "hover:text-destructive" })} {...props}>
+    <Button type="button" variant="ghost" size="icon" aria-label={name} title={name} {...(danger && { className: "hover:text-destructive-text" })} {...props}>
       {children}
     </Button>
   )

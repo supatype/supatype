@@ -63,7 +63,7 @@ export function SqlDraftDialog({ draft }: { draft: SqlDraft }): React.ReactEleme
   return (
     <Dialog title="SQL" actions={actions}>
       <Textarea aria-label="SQL" className="min-h-[140px] resize-y" value={draft.text} onChange={(e) => { draft.setText(e.target.value) }} />
-      {draft.error ? <p className="text-xs text-destructive">{draft.error}</p> : null}
+      {draft.error ? <p className="text-xs text-destructive-text">{draft.error}</p> : null}
     </Dialog>
   )
 }

@@ -119,7 +119,7 @@ export function StudioLogin({ apiBaseUrl, signIn }: StudioLoginProps): React.Rea
         <PasswordForm state={state} withPassword={signIn.withPassword} />
         <ProviderButtons state={state} signIn={signIn} />
         {error !== null && (
-          <p className="text-sm text-destructive" role="alert">
+          <p className="text-sm text-destructive-text" role="alert">
             {error}
           </p>
         )}

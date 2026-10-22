@@ -605,5 +605,5 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
 }
 
 function PageError({ children }: { children: React.ReactNode }): React.ReactElement {
-  return <div className="p-3 text-destructive bg-destructive/10 rounded-md text-sm">{children}</div>
+  return <div className="p-3 text-destructive-text bg-destructive/10 rounded-md text-sm">{children}</div>
 }

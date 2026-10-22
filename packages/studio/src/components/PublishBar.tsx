@@ -166,7 +166,7 @@ export function PublishPanel({ view, actions }: { view: PanelView; actions: Pane
         </Button>
         <PublishSplitButton panel={panel} title={view.title} busy={view.busy} actions={actions} />
       </div>
-      {view.error !== null && <div className="text-xs text-destructive" role="alert">{view.error}</div>}
+      {view.error !== null && <div className="text-xs text-destructive-text" role="alert">{view.error}</div>}
       {panel.note !== null && (
         <p className="text-xs text-muted-foreground">
           {panel.note}

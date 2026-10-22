@@ -131,7 +131,7 @@ export function TablesView(): React.ReactElement {
                   <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                     <span className="flex items-center justify-end gap-3">
                       <button type="button" className="text-xs text-primary hover:underline" onClick={() => navigate(browseDataPath(cellText(row, "table_name")))}>Browse data</button>
-                      {sqlWrites ? (<button type="button" className="text-xs text-destructive hover:underline" onClick={() => { setSqlText(`DROP TABLE ${schema}.${cellText(row, "table_name")};`); setSqlModal({ mode: "drop", table: cellText(row, "table_name") }) }}>Drop</button>) : null}
+                      {sqlWrites ? (<button type="button" className="text-xs text-destructive-text hover:underline" onClick={() => { setSqlText(`DROP TABLE ${schema}.${cellText(row, "table_name")};`); setSqlModal({ mode: "drop", table: cellText(row, "table_name") }) }}>Drop</button>) : null}
                     </span>
                   </td>
                 </tr>
@@ -183,7 +183,7 @@ export function TablesView(): React.ReactElement {
               value={sqlText}
               onChange={(e) => setSqlText(e.target.value)}
             />
-            {runError && <p className="text-xs text-destructive">{runError}</p>}
+            {runError && <p className="text-xs text-destructive-text">{runError}</p>}
             <div className="flex justify-end gap-2">
               <Button onClick={() => { setSqlModal(null); setRunError(null) }}>Cancel</Button>
               <Button variant={sqlModal.mode === "drop" ? "destructive" : "primary"} disabled={runBusy} onClick={() => { void runSql() }}>

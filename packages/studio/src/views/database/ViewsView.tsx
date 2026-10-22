@@ -75,7 +75,7 @@ export function ViewsView(): React.ReactElement {
                   <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                     <span className="flex items-center justify-end gap-3">
                       {sqlWrites ? (<button type="button" className="text-xs text-primary hover:underline" onClick={() => { setSqlText(`CREATE OR REPLACE VIEW ${schema}.${cellText(row, "view_name")} AS\n${cellText(row, "view_definition")}`); setSqlModal({ mode: "create" }) }}>Edit</button>) : null}
-                      {sqlWrites ? (<button type="button" className="text-xs text-destructive hover:underline" onClick={() => { setSqlText(`DROP VIEW ${schema}.${cellText(row, "view_name")};`); setSqlModal({ mode: "drop", name: cellText(row, "view_name") }) }}>Drop</button>) : null}
+                      {sqlWrites ? (<button type="button" className="text-xs text-destructive-text hover:underline" onClick={() => { setSqlText(`DROP VIEW ${schema}.${cellText(row, "view_name")};`); setSqlModal({ mode: "drop", name: cellText(row, "view_name") }) }}>Drop</button>) : null}
                     </span>
                   </td>
                 </tr>
@@ -100,7 +100,7 @@ export function ViewsView(): React.ReactElement {
           <div className="bg-card border border-border rounded-lg p-6 w-full max-w-lg space-y-4 shadow-xl">
             <h2 className="text-base font-semibold text-foreground">{sqlModal.mode === "drop" ? `Drop view ${sqlModal.name}` : "Create / replace view"}</h2>
             <textarea className="w-full font-mono text-sm px-3 py-2 rounded-md border border-border bg-background text-foreground focus:outline-none min-h-[120px] resize-y" value={sqlText} onChange={(e) => setSqlText(e.target.value)} />
-            {runError && <p className="text-xs text-destructive">{runError}</p>}
+            {runError && <p className="text-xs text-destructive-text">{runError}</p>}
             <div className="flex justify-end gap-2">
               <Button onClick={() => { setSqlModal(null); setRunError(null) }}>Cancel</Button>
               <Button variant={sqlModal.mode === "drop" ? "destructive" : "primary"} disabled={runBusy} onClick={() => { void runSql() }}>{runBusy ? "Running…" : "Run SQL"}</Button>

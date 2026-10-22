@@ -123,7 +123,7 @@ export function GraphQLExplorer(): React.ReactElement {
               )}
             >
               {error ? (
-                <span className="text-destructive">{error}</span>
+                <span className="text-destructive-text">{error}</span>
               ) : result ? (
                 result
               ) : (
