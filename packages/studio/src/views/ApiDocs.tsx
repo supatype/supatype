@@ -4,6 +4,7 @@ import { AdminConfigContext } from "../hooks/useAdminConfig.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { cn } from "../lib/utils.js"
 import { appOrigin } from "../lib/membership-url.js"
+import { exampleRecord } from "../lib/api-examples.js"
 import { useSendAs } from "../hooks/useSendAs.js"
 import { SendAsField } from "../components/SendAsField.js"
 import { Badge, Button, Card, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
@@ -76,18 +77,6 @@ function exampleForField(f: FieldConfig): string {
   }
 }
 
-function exampleValueForField(f: FieldConfig): unknown {
-  switch (f.widget) {
-    case "uuid": case "relation": case "multirelation": return "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-    case "number": return 1
-    case "boolean": case "publish": return true
-    case "datetime": return "2026-01-15T10:30:00Z"
-    case "date": return "2026-01-15"
-    case "json": case "blocks": return {}
-    default: return `example_${f.name}`
-  }
-}
-
 function buildEndpointsFromModels(models?: ModelConfig[]): ApiEndpoint[] {
   const endpoints: ApiEndpoint[] = []
 
@@ -106,14 +95,9 @@ function buildEndpointsFromModels(models?: ModelConfig[]): ApiEndpoint[] {
       (f) => f.name !== pkName && !AUTO.has(f.name),
     )
 
-    const bodyExample = (fields: FieldConfig[]) => {
-      const obj: Record<string, unknown> = {}
-      for (const f of fields) obj[f.name] = exampleValueForField(f)
-      return JSON.stringify(obj, null, 2)
-    }
+    const bodyExample = (fields: FieldConfig[]) => JSON.stringify(exampleRecord(fields), null, 2)
     const responseExample = (single = false) => {
-      const obj: Record<string, unknown> = {}
-      for (const f of model.fields) obj[f.name] = exampleValueForField(f)
+      const obj = exampleRecord(model.fields)
       return single ? JSON.stringify(obj, null, 2) : JSON.stringify([obj], null, 2)
     }
 
