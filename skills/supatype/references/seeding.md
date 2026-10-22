@@ -57,7 +57,8 @@ writes. That file is gitignored and rebuilt by the `prepare` script on install, 
 **Reach for `upsert`.** Seeds get re-run, and a natural key means the row identifies itself
 rather than needing an id pasted in. `where` accepts only columns that identify one row: a
 primary key, a `Unique<>` column, or a composite index marked `unique: true`. That restriction
-is what lets an upsert compile to a correct `ON CONFLICT` target instead of a guess.
+is what lets an upsert compile to a correct `ON CONFLICT` target instead of a guess. Rows nested
+in an upsert are re-run safe too: see [Children of an upsert](#children-of-an-upsert).
 
 If a model has no unique column, its `Where` type is `never` and it cannot be upserted. Give it
 a natural key in the schema.
@@ -73,6 +74,18 @@ a natural key in the schema.
 A nested write fills the child's foreign key for you. `connect` names an existing row by any
 unique key: by the referenced column it is used directly, and by another unique key the engine
 resolves it inside the same statement rather than in a round trip per row.
+
+### Children of an upsert
+
+Rows nested in an upsert through `create` or `createMany` are written only when no child under
+the same parent already has the same values. That keeps a re-run seed from piling up copies:
+
+- Running the seed again adds nothing.
+- A child whose values changed is added beside the old one. The old one is not removed.
+- Two identical children in the same call are written once.
+- Values the database computes (`expr.now()`, relative dates), fields left out and `$default`
+  are not compared, so a child that differs only in those still counts as the same child.
+- A child that matches is not updated. To change one, upsert it on its own model by a unique key.
 
 Many-to-many relations have no nested write. Their rows live in a junction table; write those
 as their own operation.

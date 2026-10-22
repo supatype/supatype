@@ -378,6 +378,12 @@ export interface ModelApi<TCreate, TWhere, TRef> {
    *
    * The primary operation for a seed, because seeds get re-run and idempotency is the thing
    * every hand-written one gets wrong.
+   *
+   * Rows nested in `data` through `create` or `createMany` are written only when no child under
+   * the same parent already has the same values: a re-run adds nothing, a changed child is added
+   * beside the old one, and two identical children are written once. Values the database
+   * computes (`expr.now()`, relative dates), fields left out and `$default` are not compared, and
+   * a child that matches is not updated.
    */
   upsert(args: { where: TWhere; data: TCreate; id?: string }): TRef
 }
