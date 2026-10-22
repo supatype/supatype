@@ -27,6 +27,8 @@ import { composeRenderOptions } from "../compose-render-mode.js"
 import { warnProjectAuthProviderSecrets } from "../auth-providers.js"
 import { file, error, info, plain, warn } from "../ui/messages.js"
 import { nextSteps } from "../ui/next-steps.js"
+import { confirm } from "../ui/confirm.js"
+import { isInteractive } from "../ui/interactive.js"
 import { withSpinner } from "../ui/progress.js"
 
 export function registerSelfHost(program: Command): void {
@@ -83,13 +85,10 @@ export function registerSelfHost(program: Command): void {
 
   composeCmd
     .command("down")
-    .description("Stop compose services")
-    .action(() => {
-      const status = renderAndRunCompose(["down"])
-      if (status !== 0) {
-        exitComposeFailed(status, "Could not stop the self-host Compose stack.", SELF_HOST_BRAND)
-      }
-    })
+    .description("Stop compose services (volumes are kept unless --volumes)")
+    .option("--volumes", "Also remove the stack's volumes: the database and stored files")
+    .option("-y, --yes", "Remove the volumes without asking")
+    .action(composeDown)
 
   // Recreated rather than `docker compose restart`, which keeps the container as it was created:
   // a changed .env or config would not reach it, and that is what a restart is usually for.
@@ -401,6 +400,40 @@ const SELF_HOST_BRAND = { intro: "Self-host deployment" }
  * Render the compose file from the current config, then run `args` against this project's stack.
  * Rendered first every time, so the file never names a stale host path or a config that changed.
  */
+/**
+ * `self-host compose down`. The volumes hold the database and every stored file, so removing them
+ * is asked for by name and confirmed; a plain `down` says they were kept, since starting over used
+ * to mean finding them with `docker volume ls`.
+ */
+async function composeDown(opts: { volumes?: boolean; yes?: boolean }): Promise<void> {
+  if (opts.volumes === true && opts.yes !== true && !(await confirmVolumeRemoval())) {
+    plain("Nothing stopped and nothing removed.")
+    return
+  }
+  const status = renderAndRunCompose(opts.volumes === true ? ["down", "--volumes"] : ["down"])
+  if (status !== 0) {
+    exitComposeFailed(status, "Could not stop the self-host Compose stack.", SELF_HOST_BRAND)
+  }
+  info(
+    opts.volumes === true
+      ? "Stopped the stack and removed its volumes: the database and stored files are gone."
+      : "Stopped the stack. Its volumes (the database and stored files) were kept; " +
+          "`supatype self-host compose down --volumes` removes them.",
+  )
+}
+
+/** Asked, never assumed: without a terminal to ask on, `--yes` is the only way through. */
+async function confirmVolumeRemoval(): Promise<boolean> {
+  if (!isInteractive()) {
+    error("Removing the volumes deletes the database and stored files. Pass --yes to confirm.")
+    process.exitCode = 1
+    return false
+  }
+  return confirm("Remove the volumes too? This deletes the database and every stored file.", {
+    default: false,
+  })
+}
+
 function renderAndRunCompose(args: string[]): number {
   const cwd = process.cwd()
   const config = loadConfig(cwd)

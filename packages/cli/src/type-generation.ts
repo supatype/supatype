@@ -93,6 +93,16 @@ export function projectOutputPaths(output?: ProjectOutput): { typesPath: string;
   }
 }
 
+/**
+ * The import specifier, from the project root, of the client written beside `outputPath`: what the
+ * client's own header tells an app to import. It named "./supatype/client", a file that was never
+ * written.
+ */
+export function projectClientImportPath(outputPath: string): string {
+  const dir = dirname(outputPath.replace(/\\/g, "/"))
+  return dir === "." ? "./client" : `./${dir}/client`
+}
+
 /** Writes what was asked for and returns one message per file, for the caller to report. */
 export async function writeGeneratedTypes(req: GenerateTypesRequest): Promise<string[]> {
   const written: string[] = []
@@ -111,22 +121,32 @@ export async function writeGeneratedTypes(req: GenerateTypesRequest): Promise<st
     written.push(`Types written to ${req.typesPath}`)
   }
 
-  const seedPath = seedBuilderPath(req)
-  if (seedPath !== undefined) {
-    const result = await generate(req, { ast: req.ast, lang: "typescript", artifact: "seed" })
-    const code = result.code ?? result.message
-    if (code === undefined) {
-      throw new Error("Engine returned no output for the seed builder.")
-    }
-    const outPath = resolve(req.cwd, seedPath)
-    mkdirSync(dirname(outPath), { recursive: true })
-    writeFileSync(outPath, code, "utf8")
-    written.push(`Seed builder written to ${toPosix(seedPath)}`)
-  }
+  const seed = await writeSeedBuilder(req)
+  if (seed !== undefined) written.push(seed)
 
   written.push(...writeAstDerivedOutputs(req))
 
   return written
+}
+
+/**
+ * The typed seed builder, beside the client, from the engine. Shared by `generate`, `push` and
+ * `dev`: it was written by the first two only, so a project worked on through `dev` kept a builder
+ * describing the schema as `init` left it. Returns the message to report, or undefined when the
+ * project has no output path to put it beside.
+ */
+export async function writeSeedBuilder(req: GenerateTypesRequest): Promise<string | undefined> {
+  const seedPath = seedBuilderPath(req)
+  if (seedPath === undefined) return undefined
+  const result = await generate(req, { ast: req.ast, lang: "typescript", artifact: "seed" })
+  const code = result.code ?? result.message
+  if (code === undefined) {
+    throw new Error("Engine returned no output for the seed builder.")
+  }
+  const outPath = resolve(req.cwd, seedPath)
+  mkdirSync(dirname(outPath), { recursive: true })
+  writeFileSync(outPath, code, "utf8")
+  return `Seed builder written to ${toPosix(seedPath)}`
 }
 
 /** One `/generate` run, in the project's engine image when it has one, else the host binary. */
@@ -173,7 +193,7 @@ export function writeAstDerivedOutputs(req: GenerateTypesRequest): string[] {
     const relative = join(dirname(clientDir), PROJECT_CLIENT_FILENAME)
     const outPath = resolve(req.cwd, relative)
     mkdirSync(dirname(outPath), { recursive: true })
-    writeFileSync(outPath, generateProjectClient(req.ast), "utf8")
+    writeFileSync(outPath, generateProjectClient(req.ast, projectClientImportPath(clientDir)), "utf8")
     written.push(`Client written to ${toPosix(relative)}`)
   }
 

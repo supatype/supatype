@@ -82,13 +82,28 @@ interface JunctionContext {
   tsOf: (meta: FieldMeta) => string
 }
 
-function junctionFor(model: AstModel, meta: FieldMeta, ctx: JunctionContext): JunctionTable {
+/** A junction's name and its two models in column order, as the engine resolves them. */
+function junctionEnds(model: AstModel, meta: FieldMeta, ctx: JunctionContext): { name: string; ends: string[] } {
   const target = String(meta["target"])
-  const name =
-    typeof meta["through"] === "string"
-      ? meta["through"]
-      : [ctx.tableName(model), target].sort().join("_")
-  const sides = [model.name ?? "", target].map((side) => ({
+  if (typeof meta["through"] === "string") return { name: meta["through"], ends: [model.name ?? "", target] }
+  // Both tables, sorted (ties by model name), as the engine names it: `post_tag` from either side
+  // and either declaration order. It was one side's table plus the other side's model name, which
+  // named `Post_tag` and `Tag_post`, tables the database no longer has.
+  const self = { table: ctx.tableName(model), name: model.name ?? "" }
+  const other = { table: targetTable(target, ctx.models, ctx.tableName), name: target }
+  const selfFirst = self.table === other.table ? compare(self.name, other.name) <= 0 : compare(self.table, other.table) < 0
+  const [a, b] = selfFirst ? [self, other] : [other, self]
+  return { name: `${a.table}_${b.table}`, ends: [a.name, b.name] }
+}
+
+/** Byte order, as the engine's Rust `sort` compares strings, not the locale's. */
+function compare(x: string, y: string): number {
+  return x < y ? -1 : x > y ? 1 : 0
+}
+
+function junctionFor(model: AstModel, meta: FieldMeta, ctx: JunctionContext): JunctionTable {
+  const { name, ends } = junctionEnds(model, meta, ctx)
+  const sides = ends.map((side) => ({
     column: `${toSnakeCase(side)}_id`,
     key: primaryKeyOf(side, ctx.models, ctx.tsOf),
     table: targetTable(side, ctx.models, ctx.tableName),
