@@ -3,6 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { SupatypeProjectConfig } from "../src/project-config.js"
+import { isJsonObject } from "@supatype/shared"
 import { projectConfig } from "./support/project-config.js"
 
 /**
@@ -106,9 +107,12 @@ function read(path: string): string {
  * only: the seed builder is the same endpoint with `artifact: "seed"`, and has tests of its own.
  */
 function generated(endpoint: "/admin" | "/generate"): number {
-  const isSeed = (body: unknown) =>
-    typeof body === "object" && body !== null && (body as Record<string, unknown>)["artifact"] === "seed"
-  return engineRequest.mock.calls.filter(([called, body]) => called === endpoint && !isSeed(body)).length
+  return engineRequest.mock.calls.filter(([called, body]) => called === endpoint && artifactOf(body) !== "seed").length
+}
+
+/** The `artifact` a `/generate` request asked for, if any. */
+function artifactOf(body: unknown): unknown {
+  return isJsonObject(body) ? body["artifact"] : undefined
 }
 
 const HOST_ENGINE: Partial<SupatypeProjectConfig> = {
@@ -297,8 +301,7 @@ describe.each([
   it("is regenerated beside the client when the push applies", async () => {
     engineRequest.mockImplementation(async (endpoint, body) => {
       if (endpoint !== "/generate") return { models: [], pushed: true }
-      const artifact = (body as Record<string, unknown>)["artifact"]
-      return { code: artifact === "seed" ? "export const seedBuilder = 1\n" : "export type Pushed = 1\n" }
+      return { code: artifactOf(body) === "seed" ? "export const seedBuilder = 1\n" : "export type Pushed = 1\n" }
     })
     const { devPush } = await loadPush(over)
     await devPush()

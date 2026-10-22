@@ -8,10 +8,16 @@ import { projectConfig } from "./support/project-config.js"
  * a schema the compose engine had just pushed. One project, two engines. Seed now takes the engine
  * push takes, whenever it seeds the project's own stack database.
  */
-const composeEngine = vi.hoisted(() => ({ target: { cwd: "", project: "p", composePath: "", engineImage: "img" } }))
+const composeEngine = vi.hoisted(
+  (): ComposeEngine => ({
+    target: { cwd: "", project: "p", composePath: "", engineImage: "img" },
+    databaseUrl: "postgresql://db/app",
+    capabilities: () => Promise.reject(new Error("not asked in this test")),
+  }),
+)
 
 vi.mock("../src/dev-compose.js", () => ({
-  projectComposeEngine: async () => composeEngine as unknown as ComposeEngine,
+  projectComposeEngine: async () => composeEngine,
 }))
 
 import { seedEngine } from "../src/commands/seed.js"
