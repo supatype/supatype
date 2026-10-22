@@ -2,6 +2,7 @@ import React, { useState, useCallback, useRef, useEffect } from "react"
 import { EditorView, basicSetup } from "codemirror"
 import { EditorState, Compartment } from "@codemirror/state"
 import { keymap } from "@codemirror/view"
+import { closeCompletion } from "@codemirror/autocomplete"
 import { sql as sqlLang, PostgreSQL } from "@codemirror/lang-sql"
 import { useStudioClient } from "../StudioCore.js"
 import { useProjectProxy } from "../hooks/useProjectProxy.js"
@@ -193,6 +194,13 @@ const studioSqlTheme = EditorView.theme({
 
 // ─── SQL Editor ───────────────────────────────────────────────────────────────
 
+/** Mod-Enter: close the autocomplete list, which otherwise stays open over the editor, then run. */
+export function runAndCloseCompletion(view: EditorView, run: () => void): boolean {
+  closeCompletion(view)
+  run()
+  return true
+}
+
 function SqlEditor({
   value,
   onChange,
@@ -227,7 +235,7 @@ function SqlEditor({
           ),
           keymap.of([{
             key: "Mod-Enter",
-            run: () => { onRunRef.current(); return true },
+            run: (view) => runAndCloseCompletion(view, onRunRef.current),
           }]),
           EditorView.updateListener.of((update) => {
             if (update.docChanged) onChangeRef.current(update.state.doc.toString())
