@@ -12,6 +12,7 @@ import {
 import { resolve, join, relative, isAbsolute } from "node:path"
 import { spawnSync, execSync } from "node:child_process"
 import { localKongBaseUrl } from "../local-gateway.js"
+import { resolveProjectApiUrl } from "../resolve-api-url.js"
 import { loadConfig, rethrowIfConfigBroken } from "../config.js"
 import { ensureBinary } from "../ensure-binary.js"
 import {
@@ -740,8 +741,11 @@ async function invoke(
   let url: string
   const headers: Record<string, string> = { "Content-Type": "application/json" }
 
+  // The project's own gateway, as every other command that calls the API finds it. A fixed
+  // localhost:54321 reached whatever else on the machine listened there.
+  const localUrl = `${resolveProjectApiUrl(cwd)}/functions/v1/${name}`
   if (opts.local) {
-    url = `http://localhost:54321/functions/v1/${name}`
+    url = localUrl
   } else {
     const { getLinkedProject, getCloudToken } = await loadCloudHelpers()
     const linked = getLinkedProject(cwd)
@@ -752,8 +756,7 @@ async function invoke(
         headers["Authorization"] = `Bearer ${token}`
       }
     } else {
-      // Default to local
-      url = `http://localhost:54321/functions/v1/${name}`
+      url = localUrl
     }
   }
 
