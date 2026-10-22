@@ -24,6 +24,7 @@ import { readPid } from "../process-manager.js"
 import { localStorageEnv } from "../local-storage.js"
 import { composeProjectName, exitComposeFailed, runDockerCompose, writeSelfHostCompose } from "../self-host-compose.js"
 import { composeRenderOptions } from "../compose-render-mode.js"
+import { databaseUrlSyncMessage, syncDatabaseUrlPort } from "../db-port.js"
 import { warnProjectAuthProviderSecrets } from "../auth-providers.js"
 import { file, error, info, plain, warn } from "../ui/messages.js"
 import { nextSteps } from "../ui/next-steps.js"
@@ -74,8 +75,13 @@ export function registerSelfHost(program: Command): void {
       }
       // Before the spinner, so the warning is not drawn over.
       warnProjectAuthProviderSecrets(cwd, config)
+      const renderOptions = composeRenderOptions(cwd, config.project.name)
+      // As a push does: a stack started here and never pushed kept whatever DATABASE_URL .env had,
+      // which after a `supatype dev` was the dev database, so seed and admin reached that one.
+      const dbPort = syncDatabaseUrlPort(cwd, renderOptions.devLocal)
+      if (dbPort !== null) console.log(`[supatype] ${databaseUrlSyncMessage(dbPort)}`)
       const status = await withSpinner("Starting self-host Compose stack", async () => {
-        const out = writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name))
+        const out = writeSelfHostCompose(cwd, config, renderOptions)
         return runDockerCompose(out.composePath, args, cwd, project, { brand: SELF_HOST_BRAND })
       })
       if (status !== 0) {
