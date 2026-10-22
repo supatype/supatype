@@ -8,6 +8,7 @@ import { SelectWidget } from "./SelectWidget.js"
 import { ImageWidget } from "./ImageWidget.js"
 import { FileWidget } from "./FileWidget.js"
 import { RelationWidget } from "./RelationWidget.js"
+import { HasManyWidget, isHasMany } from "./HasManyWidget.js"
 import { RichTextWidget } from "./RichTextWidget.js"
 import { JsonWidget } from "./JsonWidget.js"
 import { BlocksWidget } from "./BlocksWidget.js"
@@ -163,8 +164,9 @@ function WidgetRenderer(props: WidgetProps): React.ReactElement {
     case "file":
       return <FileWidget {...props} />
     case "relation":
-    case "multirelation":
       return <RelationWidget {...props} />
+    case "multirelation":
+      return isHasMany(props.config) ? <HasManyWidget {...props} /> : <RelationWidget {...props} />
     case "richtext":
       return <RichTextWidget {...props} />
     case "json":
