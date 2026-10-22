@@ -93,26 +93,42 @@ export function PolicyTableCard({ table, actions }: { table: PolicyTableData; ac
 
 function PolicyRow({ policy, actions }: { policy: Row; actions: PolicyTableActions | null }): React.ReactElement {
   const name = cellText(policy, "policyname")
-  const withCheck = cellText(policy, "with_check")
   const permissive = cellText(policy, "permissive")
   return (
     <tr className="border-b border-border last:border-0 align-top">
       <Td className="font-mono text-xs text-foreground truncate" title={name}>{name || "-"}</Td>
       <Td><Badge variant="blue">{cellText(policy, "cmd") || "-"}</Badge></Td>
       <Td><Badge variant={permissive === "PERMISSIVE" ? "green" : "yellow"}>{permissive || "-"}</Badge></Td>
-      <Td>
-        <div className="flex items-start gap-2 min-w-0">
-          <Badge variant="blue">{withCheck ? "WITH CHECK" : "USING"}</Badge>
-          {/* Wrapped at a space where there is one and inside a word where there is not: a cell that
-              cannot break a long expression pushes the whole page sideways. */}
-          <code className="min-w-0 text-xs text-foreground whitespace-pre-wrap break-words">{withCheck || cellText(policy, "qual") || "(none)"}</code>
-        </div>
-      </Td>
+      <Td><PolicyExpressions policy={policy} /></Td>
       <Td className="text-xs text-muted-foreground">{describeAppliesTo(policy)}</Td>
       <Td className="text-right">
         {actions ? <DropControl name={name} actions={actions} /> : null}
       </Td>
     </tr>
+  )
+}
+
+/**
+ * Every clause a policy has, each labelled: an UPDATE policy can carry both USING (which rows may be
+ * changed) and WITH CHECK (what they may become), and showing one hid the other.
+ */
+function PolicyExpressions({ policy }: { policy: Row }): React.ReactElement {
+  const clauses = [
+    { label: "USING", expr: cellText(policy, "qual") },
+    { label: "WITH CHECK", expr: cellText(policy, "with_check") },
+  ].filter((c) => c.expr !== "")
+  if (clauses.length === 0) return <code className="text-xs text-muted-foreground">(none)</code>
+  return (
+    <div className="flex flex-col gap-1.5 min-w-0">
+      {clauses.map((c) => (
+        <div key={c.label} className="flex items-start gap-2 min-w-0">
+          <Badge variant="blue">{c.label}</Badge>
+          {/* Wrapped at a space where there is one and inside a word where there is not: a cell that
+              cannot break a long expression pushes the whole page sideways. */}
+          <code className="min-w-0 text-xs text-foreground whitespace-pre-wrap break-words">{c.expr}</code>
+        </div>
+      ))}
+    </div>
   )
 }
 
