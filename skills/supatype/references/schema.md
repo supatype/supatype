@@ -41,6 +41,32 @@ Define `access` per operation: `read`, `create`, `update`, `delete`.
 
 Owner rules are checked when the schema is read. The owner must be `"id"`, a relation whose key is on this model, or a `UUID` / `SupatypeAuthUserId` field. Owning through a relation is followed one relation deep, and the related model must be a user model (keyed by `SupatypeAuthUserId`) or have an Owner rule of its own; anything else is an error. A plain `UUID` owner works but warns: declare it `SupatypeAuthUserId` if it holds an auth user id.
 
+### Owner columns and deleting a user
+
+A `SupatypeAuthUserId` field has **no foreign key** to `auth.users` by default: it holds the id, and deleting the user leaves the row as it was. A field opts in to a key, per field, with `onDelete`:
+
+```typescript
+export type Comment = Model<{
+  id: UUID
+  body: string
+  user_id: SupatypeAuthUserId<{ onDelete: "cascade" }>
+  editor_id: Optional<SupatypeAuthUserId<{ onDelete: "setNull" }>>
+}, {
+  access: { read: Public, create: Owner<"user_id">, update: Owner<"user_id">, delete: Owner<"user_id"> }
+}>
+```
+
+| `onDelete` | Deleting the user | Trade-off |
+|------------|-------------------|-----------|
+| `"cascade"` | Deletes the rows with the user | Removes content others rely on too, such as their comments in someone else's thread |
+| `"restrict"` | Is refused while the user still owns rows | Deleting the user in Studio fails until their rows are deleted or handed to another user |
+| `"setNull"` | Keeps the rows, with the field set to NULL | `Optional` fields only (a required one is a schema error). Under owner rules an ownerless row matches nobody, so only the service role can edit or delete it |
+
+The push adds `FOREIGN KEY (col) REFERENCES auth.users (id) ON DELETE ...` and keeps it in step with the schema: adding, changing or removing `onDelete` adds, replaces or drops the key on the next push. It refuses, before applying anything, when:
+
+- `auth.users` does not exist (a project that brings its own auth, or keeps its schema apart): start Supatype's auth server against the database once, or leave `onDelete` off.
+- existing rows name a user that does not exist. The message says how many rows and gives the `DELETE` that removes them; or point them at an existing user, or set the field to NULL if it is `Optional`.
+
 ## Relations
 
 ```typescript
