@@ -736,6 +736,11 @@ export function registerDev(program: Command): void {
             )
           },
         })
+        // Deno reloads the router on change, but only lists the functions found at start.
+        if (functionsDir !== undefined && denoServeScriptAbs !== "") {
+          const { watchNativeFunctions } = await import("../native-functions-watch.js")
+          watchNativeFunctions(cwd, functionsDir, functionRoutes.map((route) => route.name))
+        }
       }
 
       // Block until killed.
