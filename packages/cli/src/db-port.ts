@@ -134,6 +134,11 @@ export function syncDatabaseUrlPort(cwd: string, devLocal: boolean): DbPortSync 
   return { from: current, to: wanted, envKey: composeDbPublish(devLocal).envKey }
 }
 
+/** True when `url` is a connection string to a database on this machine. */
+export function isLocalDatabaseUrl(url: string): boolean {
+  return localDatabaseUrl(url) !== null
+}
+
 /** `DATABASE_URL` parsed, when it names this machine; null when it is unset, malformed or remote. */
 function localDatabaseUrl(value: string | undefined): URL | null {
   const raw = (value ?? "").trim()

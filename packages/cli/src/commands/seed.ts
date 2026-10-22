@@ -16,7 +16,8 @@ import { existsSync, readdirSync } from "node:fs"
 import { join, relative, resolve, sep } from "node:path"
 import { isLinkedToCloudProject, pinnedVersion } from "../binary-cache.js"
 import { loadConfig, loadSchemaAst, type SupatypeConfig } from "../config.js"
-import { engineRequest, ensureEngine } from "../engine-client.js"
+import { engineRequest, ensureEngine, type ComposeEngine } from "../engine-client.js"
+import { isLocalDatabaseUrl } from "../db-port.js"
 import {
   isArrayOf,
   isBoolean,
@@ -120,8 +121,9 @@ export async function runSeed(file: string | undefined, opts: SeedFlags): Promis
     return 2
   }
 
-  await ensureEngine()
-  if (opts.status) return await reportStatus(dsn)
+  const engine = await seedEngine(cwd, config, opts.connection, dsn)
+  if (engine === undefined) await ensureEngine()
+  if (opts.status) return await reportStatus(dsn, engine)
 
   const paths = seedPaths(file, cwd, config)
   const missing = paths.filter((p) => !existsSync(p))
@@ -170,7 +172,28 @@ export async function runSeed(file: string | undefined, opts: SeedFlags): Promis
     return 0
   }
 
-  return await apply(prepared, { cwd, config, dsn, opts })
+  return await apply(prepared, { cwd, config, dsn, opts, engine })
+}
+
+/**
+ * The engine a seed runs: the project's compose engine image when it seeds the project's own stack
+ * database, as push does, otherwise the host binary (undefined). Seed used to run the host binary
+ * always, so a stale cached one refused a schema the compose engine had just pushed.
+ *
+ * Only for the stack's own database: the compose engine reaches it inside the stack network, so a
+ * `--connection` or a database on another machine stays with the host binary, which connects to
+ * the URL it was given.
+ */
+export async function seedEngine(
+  cwd: string,
+  config: SupatypeConfig,
+  connection: string | undefined,
+  dsn: string,
+): Promise<ComposeEngine | undefined> {
+  if (connection !== undefined && connection.trim() !== "") return undefined
+  if (!isLocalDatabaseUrl(dsn)) return undefined
+  const { projectComposeEngine } = await import("../dev-compose.js")
+  return projectComposeEngine(cwd, config)
 }
 
 // --- Discovery ---
@@ -208,10 +231,12 @@ interface ApplyOptions {
   config: SupatypeConfig
   dsn: string
   opts: SeedFlags
+  /** The compose engine to run in, or undefined for the host binary ({@link seedEngine}). */
+  engine: ComposeEngine | undefined
 }
 
 async function apply(prepared: Prepared[], options: ApplyOptions): Promise<number> {
-  const { cwd, config, dsn, opts } = options
+  const { cwd, config, dsn, opts, engine } = options
   const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
 
   // The engine takes one `--run-once` for the run, so a file asking for it decides for all
@@ -235,7 +260,7 @@ async function apply(prepared: Prepared[], options: ApplyOptions): Promise<numbe
     atomic: opts.atomic,
     run_once: askedRunOnce.length > 0,
     ...(opts.environment !== undefined ? { environment: opts.environment } : {}),
-  }, isSeedResult)
+  }, isSeedResult, engine)
 
   return report(result, prepared.length, dsn)
 }
@@ -331,8 +356,8 @@ function report(result: SeedResult, count: number, dsn: string): number {
   return failure.kind === "connection" || failure.kind === "document" ? 2 : 1
 }
 
-async function reportStatus(dsn: string): Promise<number> {
-  const result = await engineRequest("/seed", { database_url: dsn, status: true }, isSeedStatus)
+async function reportStatus(dsn: string, engine: ComposeEngine | undefined): Promise<number> {
+  const result = await engineRequest("/seed", { database_url: dsn, status: true }, isSeedStatus, engine)
 
   const files = result.files ?? []
   if (files.length === 0) {
