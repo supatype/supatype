@@ -20,6 +20,9 @@ import { explainRefusal, fieldErrorOf, type Explained, type RefusalInput } from 
 import { useRefusal } from "../hooks/useRefusal.js"
 import { UuidCell } from "../components/UuidCell.js"
 import { useContentWriteOffered } from "../hooks/useContentWriteOffered.js"
+import { useCellSave } from "../hooks/useCellSave.js"
+import { DraftMarked, DraftSavedNotice, SaveChoiceDialog, type SaveChoice } from "../components/database/SaveChoiceDialog.js"
+import { insertRow } from "../lib/data-browser-insert.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -227,6 +230,11 @@ function typedValue(col: ColumnInfo, text: string): unknown {
   }
 }
 
+/** A value as its cell editor starts with it: JSON as JSON text, so it saves back as it was. */
+function editText(value: unknown): string {
+  return isJsonValue(value) ? JSON.stringify(value) : String(value ?? "")
+}
+
 /**
  * The row an insert sends: only the fields something was typed in. An untouched field is left out,
  * so the column's default applies, or null where it has none. It sent "" for every untouched field,
@@ -249,16 +257,27 @@ function columnFields(columns: readonly ColumnInfo[]): FieldConfig[] {
 
 // ─── New Record Form ──────────────────────────────────────────────────────────
 
+/** What the new record form does with what was typed. */
+interface NewRecordActions {
+  /**
+   * Insert the row, saved as `choice` on a model with drafts: null when it went in, or the
+   * refusal, placed under its column when it names one.
+   */
+  save: (record: Record<string, unknown>, choice: SaveChoice | undefined) => Promise<Explained | null>
+  cancel: () => void
+}
+
 function NewRecordForm({
   table,
-  onSave,
-  onCancel,
+  drafts,
+  actions,
 }: {
   table: TableInfo
-  /** Insert the row: null when it went in, or the refusal, placed under its column when it names one. */
-  onSave: (record: Record<string, unknown>) => Promise<Explained | null>
-  onCancel: () => void
+  /** The table's model keeps drafts, so Insert Row asks whether to publish the new record. */
+  drafts: boolean
+  actions: NewRecordActions
 }): React.ReactElement {
+  const { save: onSave, cancel: onCancel } = actions
   const editableColumns = table.columns.filter((c) => !c.default_value || !c.is_primary)
   const [values, setValues] = useState<Record<string, string>>(() => {
     const initial: Record<string, string> = {}
@@ -268,6 +287,13 @@ function NewRecordForm({
     return initial
   })
   const [errors, setErrors] = useState<Record<string, string>>({})
+  // The checked row, held while a drafts model asks how to save it.
+  const [choosing, setChoosing] = useState<Record<string, unknown> | null>(null)
+
+  const submit = async (record: Record<string, unknown>, choice?: SaveChoice) => {
+    setChoosing(null)
+    setErrors(fieldErrorOf(await onSave(record, choice)))
+  }
 
   const handleSave = async () => {
     const newErrors: Record<string, string> = {}
@@ -280,8 +306,13 @@ function NewRecordForm({
       setErrors(newErrors)
       return
     }
-    const refused = await onSave(insertValues(editableColumns, values))
-    setErrors(fieldErrorOf(refused))
+    const record = insertValues(editableColumns, values)
+    if (drafts) setChoosing(record)
+    else await submit(record)
+  }
+  const answer = (choice: SaveChoice | null): void => {
+    if (choice === null) setChoosing(null)
+    else if (choosing !== null) void submit(choosing, choice)
   }
 
   return (
@@ -342,6 +373,7 @@ function NewRecordForm({
       <div className="mt-4">
         <Button variant="primary" onClick={() => { void handleSave() }}>Insert Row</Button>
       </div>
+      {choosing !== null ? <SaveChoiceDialog subject={{ kind: "record", table: table.name }} answer={answer} /> : null}
     </Card>
   )
 }
@@ -540,7 +572,8 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
   const countMode = countModeFor(currentTable?.row_count ?? -1)
   // The model this table belongs to, for the order its list starts in. None for a table no model
   // describes, which starts in key order.
-  const defaultSort = useContext(AdminConfigContext)?.models.find((m) => m.tableName === selectedTable)?.defaultSort
+  const tableModel = useContext(AdminConfigContext)?.models.find((m) => m.tableName === selectedTable)
+  const defaultSort = tableModel?.defaultSort
   // Joined, so the table list reloading after a write does not count as a new key and refetch.
   const keyNames = tableKeyColumns(currentTable?.columns ?? []).join(",")
   const tableKnown = currentTable !== undefined
@@ -574,10 +607,20 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
     }
   }, [client, selectedTable, tableKnown, page, pageSize, sorts, filters, countMode, defaultSort, keyNames])
 
-  // Held while a cell is being edited or a row typed in: a refetch would replace the rows under it.
+  // A closure over `freshness`, declared below because its pause waits on this save's question.
+  const refreshRows = (): void => { freshness.refresh() }
+  // What the last write saved as a draft did, said above the table; cleared on a publish or table switch.
+  const [draftNotice, setDraftNotice] = useState<string | null>(null)
+  useEffect(() => { setDraftNotice(null) }, [selectedTable])
+  const cellSave = useCellSave({
+    client, table: selectedTable, model: tableModel, pkColumn, refuse, setRows, refresh: refreshRows, noteDraft: setDraftNotice,
+  })
+
+  // Held while a cell is being edited, its save asked about, or a row typed in: a refetch would
+  // replace the rows under it.
   const freshness = useListFreshness(fetchRows, {
     viewKey: `data.${selectedTable}`,
-    paused: editingCell !== null || showNewRecord,
+    paused: editingCell !== null || cellSave.pending !== null || showNewRecord,
   })
 
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
@@ -608,28 +651,17 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
     const row = rows[rowIdx]
     if (!row || !canWrite) return
     setEditingCell({ rowIdx, col })
-    setEditValue(String(row[col] ?? ""))
+    setEditValue(editText(row[col]))
   }
 
+  // Closes the editor first: on a drafts model the save waits on the question it asks.
   const handleCellSave = async () => {
     if (!editingCell) return
     const row = rows[editingCell.rowIdx]
-    if (!row) { setEditingCell(null); return }
-    const newValue = editValue === "NULL" ? null : editValue
-    const { error } = await client
-      .from(selectedTable)
-      .update({ [editingCell.col]: newValue })
-      .eq(pkColumn, row[pkColumn])
-    if (error) {
-      refuse(error, { [editingCell.col]: newValue })
-    } else {
-      setRows((prev) =>
-        prev.map((r) =>
-          r[pkColumn] === row[pkColumn] ? { ...r, [editingCell.col]: newValue } : r
-        )
-      )
-    }
+    const column = columns.find((c) => c.name === editingCell.col)
     setEditingCell(null)
+    if (!row || !column) return
+    await cellSave.save({ rowId: String(row[pkColumn]), column: column.name, value: typedValue(column, editValue) })
   }
 
   // Bulk selection
@@ -681,12 +713,15 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
   }
 
   // New record
-  const handleNewRecord = async (record: Record<string, unknown>): Promise<Explained | null> => {
-    const { error } = await client
-      .from(selectedTable)
-      .insert(record)
-    if (error) return refuse(error, record)
+  // A record created but not published still closes the form: sending it again would make a second.
+  const handleNewRecord = async (record: Record<string, unknown>, choice: SaveChoice | undefined): Promise<Explained | null> => {
+    const outcome = await insertRow(client, { table: selectedTable, model: tableModel }, record, choice)
+    const refused = outcome.error === null ? null : refuse(outcome.error, record)
+    if (!outcome.created) return refused
     setShowNewRecord(false)
+    if (outcome.drafted && outcome.error === null) {
+      setDraftNotice("The new record is saved as a draft. It is not live until it is published.")
+    }
     freshness.refresh()
     refetchTables()
     return null
@@ -874,8 +909,8 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
           <div className="mb-4">
             <NewRecordForm
               table={currentTable}
-              onSave={handleNewRecord}
-              onCancel={() => setShowNewRecord(false)}
+              drafts={tableModel?.versions?.drafts === true}
+              actions={{ save: handleNewRecord, cancel: () => setShowNewRecord(false) }}
             />
           </div>
         ) : null}
@@ -885,6 +920,11 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
           <div className="mb-3">
             <ErrorBanner message={rowsError} details={rowsProblem.details} onRetry={freshness.refresh} />
           </div>
+        ) : null}
+
+        {draftNotice !== null ? <DraftSavedNotice message={draftNotice} onDismiss={() => setDraftNotice(null)} /> : null}
+        {cellSave.pending !== null ? (
+          <SaveChoiceDialog subject={{ kind: "cell", column: cellSave.pending.column }} answer={cellSave.answer} />
         ) : null}
 
         {/* Data display. The spinner only while there is nothing to show: a refresh keeps the rows
@@ -976,11 +1016,13 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
                               />
                             )
                           ) : (
-                            <CellValue
-                              value={row[col.name]}
-                              column={col}
-                              onRelationClick={handleRelationClick}
-                            />
+                            <DraftMarked pending={cellSave.hasDraft(rowId, col.name)}>
+                              <CellValue
+                                value={row[col.name]}
+                                column={col}
+                                onRelationClick={handleRelationClick}
+                              />
+                            </DraftMarked>
                           )}
                         </Td>
                       ))}
