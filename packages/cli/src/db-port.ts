@@ -48,6 +48,17 @@ export const DB_PUBLIC_HOST_ENV = "SUPATYPE_DB_PUBLIC_HOST"
 /** What compose binds when neither variable is set, and what `init` writes into the URL. */
 export const DEFAULT_DB_PORT = 5432
 
+/**
+ * The `.env` key naming the address a self-host stack publishes Postgres, the API server and
+ * SeaweedFS on. Unset, they bind 127.0.0.1: the database is reached from the host, the other two
+ * through Kong, and publishing them on every interface exposed all three on any server with no
+ * firewall in front of it. `0.0.0.0` exposes them on every interface.
+ */
+export const PUBLISH_ADDRESS_ENV = "SUPATYPE_PUBLISH_ADDRESS"
+
+/** The host side prefix of a self-host port mapping, as compose interpolates it. */
+export const SELF_HOST_BIND = "${SUPATYPE_PUBLISH_ADDRESS:-127.0.0.1}:"
+
 /** Where a dev stack publishes Postgres when `SUPATYPE_DEV_DB_PORT` is not set. */
 export const COMPOSE_DEV_DB_PORT = 54329
 
@@ -57,8 +68,8 @@ export interface ComposeDbPublish {
   envKey: typeof DEV_DB_PORT_ENV | typeof DB_PORT_ENV
   /** The port compose binds when that variable is not set. */
   defaultPort: number
-  /** Prefix of the host side of the mapping: loopback only in dev, every interface otherwise. */
-  bindAddress: "127.0.0.1:" | ""
+  /** Prefix of the host side of the mapping: loopback in dev, {@link SELF_HOST_BIND} otherwise. */
+  bindAddress: "127.0.0.1:" | typeof SELF_HOST_BIND
 }
 
 /**
@@ -70,7 +81,7 @@ export interface ComposeDbPublish {
 export function composeDbPublish(devLocal: boolean): ComposeDbPublish {
   return devLocal
     ? { envKey: DEV_DB_PORT_ENV, defaultPort: COMPOSE_DEV_DB_PORT, bindAddress: "127.0.0.1:" }
-    : { envKey: DB_PORT_ENV, defaultPort: DEFAULT_DB_PORT, bindAddress: "" }
+    : { envKey: DB_PORT_ENV, defaultPort: DEFAULT_DB_PORT, bindAddress: SELF_HOST_BIND }
 }
 
 /** Hosts whose port is ours to correct. Anything else is somebody else's database. */

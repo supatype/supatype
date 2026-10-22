@@ -1274,12 +1274,23 @@ SUPATYPE_ADMIN_PASSWORD=${opts.adminPassword}`,
     )
   }
 
-  sections.push(
-    `# Self-host compose uses the same DATABASE_URL when Postgres is published on localhost:5432`,
-  )
+  sections.push(SELF_HOST_PORTS_ENV_SECTION)
 
   return sections.join("\n\n") + "\n"
 }
+
+/**
+ * The host ports `supatype self-host compose` publishes, with their defaults. Commented out so the
+ * defaults apply; the first anyone heard of these used to be a clash on 5432.
+ */
+const SELF_HOST_PORTS_ENV_SECTION = `# Self-host stack ports (supatype self-host compose). Kong, at SUPATYPE_KONG_PORT, is the way in.
+# Postgres, the API server and SeaweedFS bind 127.0.0.1 only. To reach them from other machines,
+# set SUPATYPE_PUBLISH_ADDRESS=0.0.0.0 (put a firewall in front of the server first).
+# A self-host push points DATABASE_URL at SUPATYPE_DB_PORT.
+# SUPATYPE_PUBLISH_ADDRESS=127.0.0.1
+# SUPATYPE_DB_PORT=5432
+# SUPATYPE_SERVER_PORT=9999
+# SUPATYPE_SEAWEEDFS_PORT=8333`
 
 function emailEnvSection(email: ScaffoldOptions["email"], projectName: string): string {
   switch (email) {

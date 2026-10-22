@@ -19,7 +19,7 @@ import { keyspaceInPostgres } from "./cache-provider.js"
 import { postgresImageFor } from "./postgres-image.js"
 import { STUDIO_DEV_PORT } from "./studio-dev-server.js"
 import { readEnvFile, readEnvValue } from "./env-file.js"
-import { composeDbPublish, DB_PUBLIC_HOST_ENV } from "./db-port.js"
+import { composeDbPublish, DB_PUBLIC_HOST_ENV, SELF_HOST_BIND } from "./db-port.js"
 import { upKeepingKongCurrent } from "./compose-kong.js"
 import { composeAuthProviderEnv } from "./auth-providers.js"
 import {
@@ -344,8 +344,9 @@ function ownerDatabaseUrl(config: SupatypeProjectConfig, scheme = "postgresql"):
  * Studio used to derive the string from the API URL, which named the gateway's port, the
  * `postgres` login and the `postgres` database whatever the stack really ran. The port here is the
  * same `${envKey:-default}` expression the `db` service's `ports:` block binds, so the two cannot
- * name different ports. A dev stack binds loopback only; a self-host stack binds every interface,
- * so its host is the configured domain unless `.env` names another. An external database is the
+ * name different ports. A dev stack binds loopback only; a self-host stack binds loopback unless
+ * `SUPATYPE_PUBLISH_ADDRESS` exposes it, and its host is the configured domain unless `.env` names
+ * another, which is where an operator who exposes it reaches it. An external database is the
  * operator's URL as given, and the server drops its password.
  */
 function dbPublicUrlForCompose(config: SupatypeProjectConfig, devLocal: boolean): string {
@@ -605,18 +606,19 @@ ${studioService}
   // the stack would not come up, naming no port. Two projects side by side is the normal case
   // here (this repository ships eight examples), so a literal is the wrong default.
   //
-  // Defaults are the previous literals, so a project with none of these set behaves exactly as
-  // before. Allocating them per project the way the Kong port is allocated is the follow-up; this
+  // Defaults are the previous literals. The bind address is loopback unless
+  // SUPATYPE_PUBLISH_ADDRESS says otherwise (fresh-user test C8): neither service needs to be
+  // reached from off the machine, Kong is the way in. Allocating them per project the way the Kong port is allocated is the follow-up; this
   // makes a second stack possible rather than automatic.
   const serverPorts = devLocal
     ? ""
     : `    ports:
-      - "\${SUPATYPE_SERVER_PORT:-9999}:9999"
+      - "${SELF_HOST_BIND}\${SUPATYPE_SERVER_PORT:-9999}:9999"
 `
   const seaweedPorts = devLocal
     ? ""
     : `    ports:
-      - "\${SUPATYPE_SEAWEEDFS_PORT:-8333}:8333"
+      - "${SELF_HOST_BIND}\${SUPATYPE_SEAWEEDFS_PORT:-8333}:8333"
 `
   // One source for the credentials: the server is configured with them and the storage service is
   // handed them, and a mismatch does not fail at start, it fails at the first upload.

@@ -36,7 +36,7 @@ function serverEnv(compose: string, key: string): string | undefined {
 
 /** The host side of the `db` service's port mapping, without its bind address. */
 function dbPublishedPort(compose: string): string | undefined {
-  return /- "(?:127\.0\.0\.1:)?(\$\{SUPATYPE_(?:DEV_)?DB_PORT:-\d+\}):5432"/.exec(compose)?.[1]
+  return /- "(?:127\.0\.0\.1:|\$\{SUPATYPE_PUBLISH_ADDRESS:-127\.0\.0\.1\}:)?(\$\{SUPATYPE_(?:DEV_)?DB_PORT:-\d+\}):5432"/.exec(compose)?.[1]
 }
 
 describe("the database's host-side address, for Studio", () => {
@@ -56,7 +56,7 @@ describe("the database's host-side address, for Studio", () => {
     expect(serverEnv(compose, "SUPATYPE_DB_PUBLIC_URL")).toContain(`:${dbPublishedPort(compose)}/`)
   })
 
-  it("defaults to the configured domain, since a self-host stack publishes on every interface", () => {
+  it("defaults to the configured domain, where an operator who exposes the database reaches it", () => {
     const compose = renderSelfHostCompose(project({ server: { mode: "standalone", domain: "api.example.com" } }))
     expect(serverEnv(compose, "SUPATYPE_DB_PUBLIC_URL")).toContain("@${SUPATYPE_DB_PUBLIC_HOST:-api.example.com}:")
   })
