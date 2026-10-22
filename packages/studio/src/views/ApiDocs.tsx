@@ -3,6 +3,7 @@ import { useStudioClient } from "../StudioCore.js"
 import { AdminConfigContext } from "../hooks/useAdminConfig.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { cn } from "../lib/utils.js"
+import { appOrigin } from "../lib/membership-url.js"
 import { useSendAs } from "../hooks/useSendAs.js"
 import { SendAsField } from "../components/SendAsField.js"
 import { Badge, Button, Card, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
@@ -478,7 +479,16 @@ function TryItPanel({
 
 // ─── Auth Section ─────────────────────────────────────────────────────────────
 
-function AuthSection(): React.ReactElement {
+/**
+ * The URL the curl examples call: the project's gateway and one of its own tables. Cloud's gateway is
+ * not something Studio's client URL says, so there it is a placeholder named for what to put in.
+ */
+export function exampleRestUrl(clientUrl: string, models: readonly ModelConfig[] = []): string {
+  const gateway = appOrigin(clientUrl) ?? "YOUR_PROJECT_URL"
+  return `${gateway}/rest/v1/${models[0]?.tableName ?? "your_table"}`
+}
+
+export function AuthSection({ url }: { url: string }): React.ReactElement {
   return (
     <Card className="p-4 mb-4">
       <h3 className="m-0 mb-3">Authentication</h3>
@@ -494,7 +504,7 @@ function AuthSection(): React.ReactElement {
           </p>
           <CodeBlock className="text-xs">
 {`curl -X GET \\
-  'https://your-project.supatype.dev/rest/v1/posts' \\
+  '${url}' \\
   -H 'apikey: YOUR_ANON_KEY' \\
   -H 'Authorization: Bearer YOUR_ANON_KEY'`}
           </CodeBlock>
@@ -507,7 +517,7 @@ function AuthSection(): React.ReactElement {
           </p>
           <CodeBlock className="text-xs">
 {`curl -X GET \\
-  'https://your-project.supatype.dev/rest/v1/posts' \\
+  '${url}' \\
   -H 'apikey: YOUR_ANON_KEY' \\
   -H 'Authorization: Bearer USER_ACCESS_TOKEN'`}
           </CodeBlock>
@@ -520,7 +530,7 @@ function AuthSection(): React.ReactElement {
           </p>
           <CodeBlock className="text-xs">
 {`curl -X GET \\
-  'https://your-project.supatype.dev/rest/v1/posts' \\
+  '${url}' \\
   -H 'apikey: YOUR_SERVICE_ROLE_KEY' \\
   -H 'Authorization: Bearer YOUR_SERVICE_ROLE_KEY'`}
           </CodeBlock>
@@ -571,7 +581,7 @@ export function ApiDocs(): React.ReactElement {
   return (
     <>
       {/* Auth section */}
-      <AuthSection />
+      <AuthSection url={exampleRestUrl(client.url, config?.models)} />
 
       {!config ? (
         <div className="text-center py-12 text-muted-foreground text-sm">Loading API endpoints…</div>
