@@ -85,7 +85,7 @@ export function PublishBar({ record, editor, seesDrafts, onNavigate }: PublishBa
   if (model.versions === null || !model.versions.drafts || !seesDrafts) return null
 
   const view: PanelView = {
-    ...panelOf({ title: record.title, creating: recordId === undefined, dirty: editor.dirty, state, locale }, localesFor(model, codes)),
+    ...panelOf({ title: record.title, creating: recordId === undefined, dirty: editor.dirty, savedDraft: editor.draftSaved === true, state, locale }, localesFor(model, codes)),
     busy: actions.busy || editor.saving,
     saving: editor.saving,
     error: actions.error,
@@ -105,6 +105,7 @@ interface PanelSource {
   title: string
   creating: boolean
   dirty: boolean
+  savedDraft: boolean
   state: PublishingState | null
   /** The project's languages, and the one the editor is showing. */
   locale: Pick<LocaleContextValue, "locales" | "currentLocale">
@@ -115,13 +116,13 @@ interface PanelSource {
  * localized model the main button publishes that one language and names it. A language the record
  * does not publish under is not passed on, so the main button publishes every language instead.
  */
-function panelOf({ title, creating, dirty, state, locale }: PanelSource, locales: string[]): Pick<PanelView, "panel" | "title" | "locales"> {
+function panelOf({ title, creating, dirty, savedDraft, state, locale }: PanelSource, locales: string[]): Pick<PanelView, "panel" | "title" | "locales"> {
   const labelOf = (code: string): string => locale.locales.find((l) => l.code === code)?.label ?? code
   const current = locale.currentLocale
   const editing = locales.includes(current) ? { code: current, label: labelOf(current) } : null
   const labels = Object.fromEntries(locales.map((code) => [code, labelOf(code)]))
   return {
-    panel: describePanel({ locales, state, dirty, creating, editing, labels }),
+    panel: describePanel({ locales, state, dirty, savedDraft, creating, editing, labels }),
     title,
     locales: locales.map((code) => ({ code, label: labelOf(code), state: state?.locales[code] ?? "absent" })),
   }

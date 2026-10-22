@@ -57,6 +57,9 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
   // The form holds edits nobody has saved. State rather than a ref: the publish panel says
   // "Changed" and offers to publish them.
   const [dirty, setDirty] = useState(false)
+  // A draft was saved here and nothing has published or discarded it since. The panel trusts this
+  // over its history read, which a Studio role may not be able to read its own save back from.
+  const [draftSaved, setDraftSaved] = useState(false)
   // Bumped when an act changed the record's values under the form (Discard changes), so it re-reads
   // them without the loading screen a first open shows.
   const [formNonce, setFormNonce] = useState(0)
@@ -143,6 +146,7 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
       return
     }
     setSavedAt(Date.now())
+    setDraftSaved(false)
     if (!reloadForm) return
     quietReload.current = true
     setFormNonce((n) => n + 1)
@@ -156,7 +160,9 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
 
   const saveNow = async () => {
     const id = await persistAndMark()
-    if (id !== null) onChanged(id, false)
+    if (id === null) return
+    onChanged(id, false)
+    setDraftSaved(true)
   }
 
   // A draft may leave a required field empty, but it cannot be published until it is filled, so
@@ -241,7 +247,7 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
           title,
           ...(previewUrl !== "" && { previewUrl }),
         }}
-        editor={{ dirty, saving, savedAt, onSave: () => { void handleSave() }, persist: persistAndMark, onChanged }}
+        editor={{ dirty, saving, savedAt, draftSaved, onSave: () => { void handleSave() }, persist: persistAndMark, onChanged }}
         seesDrafts={capability.seesDrafts}
         onNavigate={onNavigate}
       />
