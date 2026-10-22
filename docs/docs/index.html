@@ -97,10 +97,8 @@
             <div>
               <h3>Create a project</h3>
               <pre class="code"><span class="p">$</span> mkdir my-app &amp;&amp; cd my-app
-<span class="p">$</span> supatype init
-<span class="p">$</span> npm install
-<span class="p">$</span> supatype keys</pre>
-              <p><code>supatype init</code> writes <code>package.json</code>, <code>supatype.config.ts</code>, a starter schema and <code>public/</code>. Add the keys it prints to <code>.env</code> if they are not there already.</p>
+<span class="p">$</span> supatype init</pre>
+              <p><code>supatype init</code> writes <code>package.json</code>, <code>supatype.config.ts</code>, a starter schema and <code>public/</code>, installs dependencies with your package manager and writes the API keys to <code>.env</code>. Run <code>npm install</code> or <code>supatype keys</code> yourself only if you passed <code>--no-install</code> or <code>--no-keys</code>.</p>
             </div>
           </div>
 
@@ -204,6 +202,18 @@
                 saved list is kept in the database and replaces the default until it is reset. The site URL
                 stays allowed whatever is saved.
                 <code>*</code> allows every origin, and only when you write it.
+              </div>
+              <div class="note">
+                <span class="label">PORTS</span>
+                Only the gateway is published on every interface, at <code>SUPATYPE_KONG_PORT</code>.
+                Postgres (<code>SUPATYPE_DB_PORT</code>, default 5432), the API server
+                (<code>SUPATYPE_SERVER_PORT</code>, default 9999) and SeaweedFS
+                (<code>SUPATYPE_SEAWEEDFS_PORT</code>, default 8333) bind <code>127.0.0.1</code>, so they
+                are reachable from the server itself and nowhere else. To reach them from other
+                machines, set <code>SUPATYPE_PUBLISH_ADDRESS=0.0.0.0</code> (or one interface's address)
+                in <code>.env</code> and run <code>supatype self-host compose up -d</code>; put a firewall
+                in front first. <code>supatype init</code> lists these variables, commented out, in
+                <code>.env</code>.
               </div>
               <p>
                 Images come from Docker Hub at <code>:latest</code>: <code>supatype/postgres:17-latest</code>,
