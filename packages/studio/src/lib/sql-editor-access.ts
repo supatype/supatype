@@ -3,7 +3,8 @@ import { offers, type OfferedCapability } from "./capability-offers.js"
 /**
  * Whether Studio offers the SQL editor (RX1).
  *
- * The editor runs as the project's owning role, so row level security does not apply to it, and it
+ * The editor runs as supatype_sql_editor, which holds the owning role's rights, so row level
+ * security does not apply to it, and it
  * is for owners, admins and developers (`sqlEditor` in the shared role matrix). Editors, billing
  * members and viewers are not offered it: the server refuses their queries. As with the rest of the
  * nav, only what the server has said is hidden: before the capability resolves, and on a host that
