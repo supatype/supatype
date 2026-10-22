@@ -1878,6 +1878,24 @@ async function runComposeEngineGenerator(
 }
 
 /**
+ * The in-compose engine as {@link engineRequest} takes it, for generating only. No database URL:
+ * `/generate` reads the AST alone and runs without starting the database.
+ */
+async function composeGeneratorEngine(
+  paths: SelfHostComposePaths,
+  cwd: string,
+  composeProject: string,
+  config: SupatypeProjectConfig,
+): Promise<ComposeEngine> {
+  const engineImage = await schemaEngineImageForPush(config, cwd)
+  return {
+    target: { cwd, project: composeProject, composePath: paths.composePath, engineImage },
+    databaseUrl: "",
+    capabilities: () => dockerEngineCapabilities(cwd, config),
+  }
+}
+
+/**
  * Write `admin-config.json` and the generated types using the in-compose engine.
  *
  * The fallback for a host engine that could not be fetched. Without it, a `supatype dev` that
@@ -1906,6 +1924,7 @@ export async function generateViaComposeEngine(
   // could not be fetched, and these need no engine at all, so there is no reason for a project on
   // this path to end up with fewer generated files than one on the other.
   writeDevAstOutputs(cwd, ast, config, " (in-compose engine).")
+  await writeDevSeedBuilder(cwd, config, ast, await composeGeneratorEngine(paths, cwd, composeProject, config))
 
   const adminOut = await runComposeEngineGenerator(paths, cwd, composeProject, config, ["admin"])
   if (!adminOut) return false
