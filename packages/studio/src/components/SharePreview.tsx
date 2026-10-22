@@ -112,7 +112,7 @@ export function SharePreview({
         </Button>
       </div>
 
-      {error !== null && <div className="text-xs text-destructive">{error}</div>}
+      {error !== null && <div className="text-xs text-destructive-text">{error}</div>}
 
       {link !== null && (
         <div className="space-y-1">

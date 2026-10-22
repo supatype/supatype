@@ -113,7 +113,7 @@ function unpublishLabel(scope: UnpublishScope, language: Language | null): strin
 function UnpublishItems({ panel, onOpen }: { panel: PanelModel; onOpen: (dialog: PublishDialog) => void }): React.ReactElement {
   const { menu, language } = panel
   const item = (scope: UnpublishScope, enabled: boolean): React.ReactElement => (
-    <DropdownMenuItem key={scope} disabled={!enabled} className="text-destructive" onSelect={() => { onOpen(scope) }}>
+    <DropdownMenuItem key={scope} disabled={!enabled} className="text-destructive-text" onSelect={() => { onOpen(scope) }}>
       {unpublishLabel(scope, language)}
     </DropdownMenuItem>
   )

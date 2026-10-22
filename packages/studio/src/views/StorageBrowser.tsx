@@ -302,7 +302,7 @@ function FilePreview({
           ) : (
             <>
               <Button size="xs" onClick={() => void generateSignedUrl()}>Generate Signed URL (1h)</Button>
-              {signedUrlError ? <p className="text-xs text-destructive mt-1">{signedUrlError}</p> : null}
+              {signedUrlError ? <p className="text-xs text-destructive-text mt-1">{signedUrlError}</p> : null}
             </>
           )}
         </div>

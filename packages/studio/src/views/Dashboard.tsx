@@ -124,7 +124,7 @@ export function Dashboard(): React.ReactElement {
             <ConfirmButton
               size="xs"
               variant="ghost"
-              className="hover:text-destructive"
+              className="hover:text-destructive-text"
               ask={{ title: `Delete the ${activeView.name} view?`, detail: <p>The saved layout is deleted. This cannot be undone.</p>, answer: "Delete view" }}
               act={() => void deleteView(activeView.id)}
             >

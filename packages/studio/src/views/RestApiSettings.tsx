@@ -148,7 +148,7 @@ export function RestApiSettings(): React.ReactElement {
           <h2 className="text-sm font-semibold">Connection</h2>
           <div className="flex items-center gap-2">
             {saveError ? (
-              <span className="text-xs text-destructive">{saveError}</span>
+              <span className="text-xs text-destructive-text">{saveError}</span>
             ) : null}
             <Button size="xs" variant="primary" onClick={() => void handleSave()} disabled={!isDirty || isSaving}>
               {isSaving ? "Saving…" : savedOk ? "Saved!" : "Save"}

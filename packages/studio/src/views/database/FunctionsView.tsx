@@ -75,7 +75,7 @@ export function FunctionsView(): React.ReactElement {
                   <td className="px-4 py-3 text-xs text-muted-foreground">{cellText(row, "return_type")}</td>
                   <td className="px-4 py-3"><Badge variant="blue">{cellTextOrNull(row, "language")?.toLowerCase()}</Badge></td>
                   <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
-                    {sqlWrites ? (<button type="button" className="text-xs text-destructive hover:underline" onClick={() => { setSqlText(`DROP FUNCTION ${schema}.${cellText(row, "routine_name")}();`); setSqlModal(true) }}>Drop</button>) : null}
+                    {sqlWrites ? (<button type="button" className="text-xs text-destructive-text hover:underline" onClick={() => { setSqlText(`DROP FUNCTION ${schema}.${cellText(row, "routine_name")}();`); setSqlModal(true) }}>Drop</button>) : null}
                   </td>
                 </tr>
               ))}
@@ -99,7 +99,7 @@ export function FunctionsView(): React.ReactElement {
           <div className="bg-card border border-border rounded-lg p-6 w-full max-w-lg space-y-4 shadow-xl">
             <h2 className="text-base font-semibold text-foreground">SQL</h2>
             <textarea className="w-full font-mono text-sm px-3 py-2 rounded-md border border-border bg-background text-foreground focus:outline-none min-h-[160px] resize-y" value={sqlText} onChange={(e) => setSqlText(e.target.value)} />
-            {runError && <p className="text-xs text-destructive">{runError}</p>}
+            {runError && <p className="text-xs text-destructive-text">{runError}</p>}
             <div className="flex justify-end gap-2">
               <Button onClick={() => { setSqlModal(false); setRunError(null) }}>Cancel</Button>
               <Button variant="primary" disabled={runBusy} onClick={() => { void runSql() }}>{runBusy ? "Running…" : "Run SQL"}</Button>

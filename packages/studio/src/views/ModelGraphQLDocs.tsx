@@ -191,7 +191,7 @@ export function ModelGraphQLDocs({ model }: Props): React.ReactElement {
               )}
             >
               {error ? (
-                <span className="text-destructive">{error}</span>
+                <span className="text-destructive-text">{error}</span>
               ) : result ? (
                 result
               ) : (
