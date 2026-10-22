@@ -25,7 +25,7 @@ import {
   type SupatypeProjectConfig,
 } from "./project-config.js"
 import { syncManifestHooks, writeHooksModule } from "./model-hooks.js"
-import { syncRowCacheEnv } from "./model-cache.js"
+import { rowCacheChangeNote, syncRowCacheEnv } from "./model-cache.js"
 import { anonKeyEnvUpdates } from "./commands/keys.js"
 import { devApiKeys } from "./dev-api-keys.js"
 import { astRelatesToAuthUsers } from "./byo-preflight.js"
@@ -716,7 +716,7 @@ function writeAstDerivedArtifacts(cwd: string, config: SupatypeProjectConfig, as
   // rather than needing a second `supatype dev`.
   const rowCache = syncRowCacheEnv(cwd, ast)
   if (rowCache !== null) {
-    console.log(`[supatype] Row cache switched ${rowCache} in .env (pg_keyspace Mode B).`)
+    console.log(`[supatype] ${rowCacheChangeNote(rowCache)}`)
   }
 
   syncDatabaseUrlToStack(cwd, config)

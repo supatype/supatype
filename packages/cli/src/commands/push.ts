@@ -9,7 +9,7 @@ import {
   validateModelValidators,
   writeHooksModule,
 } from "../model-hooks.js"
-import { syncRowCacheEnv } from "../model-cache.js"
+import { rowCacheChangeNote, syncRowCacheEnv } from "../model-cache.js"
 import { adapterEntry, readHookUpload } from "../hook-upload.js"
 import { checkServiceRoleRoutes, serviceRoleProblemLines } from "../service-role-check.js"
 import { fatalError } from "../ui/fatal.js"
@@ -506,7 +506,7 @@ async function generateTypesLocal(ast: unknown, config: SupatypeProjectConfig, o
   const rowCache = ownDatabase ? syncRowCacheEnv(cwd, ast) : null
   if (rowCache !== null) {
     info(
-      `Row cache switched ${rowCache} in .env. Recreate the database container for it to take ` +
+      `${rowCacheChangeNote(rowCache)} Recreate the database container for it to take ` +
         "effect: the image writes pg_keyspace.conf at start, so a running Postgres keeps the " +
         "setting it booted with.",
     )
