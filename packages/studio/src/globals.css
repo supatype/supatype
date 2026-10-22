@@ -22,6 +22,9 @@
     --accent-foreground: 0 0% 98%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
+    /* Red for text on the page itself. --destructive is a fill, too dark to read as text here; a
+       light theme sets a darker red. */
+    --destructive-text: 0 91% 71%;
     --border: 240 3.7% 15.9%;
     --input: 240 3.7% 15.9%;
     --ring: 263 70% 50%;
