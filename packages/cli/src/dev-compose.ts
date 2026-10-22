@@ -39,7 +39,7 @@ import { cacheSeedingNotes } from "./api-config-cache.js"
 import { refreshFunctionsContext } from "./functions-context-refresh.js"
 import { restartComposeFunctionsWorker, watchFunctionSources } from "./dev-functions-watch.js"
 import { watchDevSchema } from "./dev-schema-watch.js"
-import { DB_PORT_ENV, syncDatabaseUrlPort } from "./db-port.js"
+import { syncDatabaseUrlPort } from "./db-port.js"
 import { degraded } from "./strict.js"
 import { DEV_DESTRUCTIVE_POLICY, consentDepsFromDiff, pushConsentingToDestructive } from "./destructive-consent.js"
 import { auditFlags, auditWhenSupported } from "./push-audit.js"
@@ -719,16 +719,7 @@ function writeAstDerivedArtifacts(cwd: string, config: SupatypeProjectConfig, as
     console.log(`[supatype] Row cache switched ${rowCache} in .env (pg_keyspace Mode B).`)
   }
 
-  // SUPATYPE_DB_PORT moves what compose binds; DATABASE_URL is what seeds and psql use. Nothing
-  // reconciled them, so a project moved off 5432 to avoid a clash came up perfectly and then
-  // failed on `npm run seed` with ECONNREFUSED against a port nothing was listening on.
-  const dbPort = syncDatabaseUrlPort(cwd)
-  if (dbPort !== null) {
-    console.log(
-      `[supatype] DATABASE_URL port ${dbPort.from} -> ${dbPort.to} in .env, ` +
-        `to match ${DB_PORT_ENV}.`,
-    )
-  }
+  syncDatabaseUrlToStack(cwd, config)
 
   // The declaration is a ceiling and the allowlist is what is actually on, and only `push` ever
   // seeded the allowlist. So a stack brought up with `supatype dev` alone had every model's
@@ -736,6 +727,23 @@ function writeAstDerivedArtifacts(cwd: string, config: SupatypeProjectConfig, as
   // and the only way to find out why was to open Studio and tick a box the schema had already
   // justified.
   for (const note of cacheSeedingNotes(cwd, ast)) console.log(`[supatype] ${note}`)
+}
+
+/**
+ * Point `DATABASE_URL` at the port the stack being worked on publishes Postgres on.
+ *
+ * The port variable moves what compose binds; DATABASE_URL is what seeds and psql use. Nothing
+ * reconciled them, so a project moved off 5432 to avoid a clash came up perfectly and then failed
+ * on `npm run seed` with ECONNREFUSED against a port nothing was listening on. The layout is the
+ * stack's own (dev while a dev session holds it, otherwise self-host), so a self-host push in a
+ * project that once ran dev keeps the self-host port, and the message names the variable it read.
+ */
+function syncDatabaseUrlToStack(cwd: string, config: SupatypeProjectConfig): void {
+  const dbPort = syncDatabaseUrlPort(cwd, composeRenderMode(cwd, config.project.name) === "dev")
+  if (dbPort === null) return
+  console.log(
+    `[supatype] DATABASE_URL port ${dbPort.from} -> ${dbPort.to} in .env, to match ${dbPort.envKey}.`,
+  )
 }
 
 /**
