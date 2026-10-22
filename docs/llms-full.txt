@@ -15,7 +15,7 @@ Supatype lets developers define backend data models as TypeScript `Model<>` type
 - Auth (email and password, magic links, OAuth providers, MFA)
 - Storage buckets from `Bucket<>` types, with accept lists, size limits, access rules, image transforms and time-limited signed URLs
 - Realtime change subscriptions, presence and broadcast; each event, deletes included, reaches only subscribers allowed to read that row
-- Studio: a schema-generated admin and CMS (lists, forms, rich text, blocks, media library, drafts, versions, live preview, SQL runner, migration history). Six roles: owner, admin, developer, editor, billing and viewer, each acting under the project's own access rules unless an owner or admin acts elevated
+- Studio: a schema-generated admin and CMS (lists, forms, rich text, blocks, media library, drafts, versions, live preview, SQL runner, migration history). Four roles on self-host: admin, developer, editor and viewer (Cloud adds owner and billing), each acting under the project's own access rules unless an owner or admin acts elevated
 
 "Zero drift" means: change a field once and every layer follows; rename a field and the TypeScript build fails instead of production.
 

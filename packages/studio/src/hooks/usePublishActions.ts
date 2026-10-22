@@ -20,6 +20,8 @@ export interface RecordEditor {
   saving: boolean
   /** Changes when the record is saved, so the panel re-reads what it summarises. */
   savedAt: number
+  /** A draft was saved from this form and no publishing act has followed it. */
+  draftSaved?: boolean
   /** The plain "Save draft": what the form's own save button does. */
   onSave: () => void
   /** Save the form as a draft, creating the record when it is new: its id, or null when refused. */

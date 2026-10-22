@@ -108,3 +108,65 @@ function answersOf(row: Record<string, unknown>, checks: RecordCheck[]): RecordA
   }
   return answer
 }
+
+/** Each listed record's answers to its per-row read rules, by primary key. */
+export type RowsFieldAccess = ReadonlyMap<string, RecordFieldAccess>
+
+const NO_ROWS: RowsFieldAccess = new Map()
+
+/**
+ * Ask a page of records which per-row read rules let this caller see the value, so a list can tell
+ * a withheld value from an empty one the way the edit form does for one record.
+ *
+ * Its own query over the page's keys rather than extra columns on the list read, so a failure here
+ * costs only the padlocks, not the list. Fails open like {@link useRecordAccess}.
+ */
+export function useRowsFieldAccess(
+  model: ModelConfig,
+  rows: readonly Record<string, unknown>[],
+  access: StudioFieldAccess,
+): RowsFieldAccess {
+  const client = useAdminClient()
+  const [answer, setAnswer] = useState<RowsFieldAccess>(NO_ROWS)
+
+  useEffect(() => {
+    const checks = recordChecks(access, model.tableName).filter((c) => c.kind === "field" && c.operation === "read")
+    const ids = rows.map((row) => String(row[model.primaryKey]))
+    if (checks.length === 0 || ids.length === 0) {
+      setAnswer(NO_ROWS)
+      return
+    }
+    let cancelled = false
+    void askRows(client, model, ids, checks).then((asked) => {
+      if (!cancelled) setAnswer(asked)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [client, access, model, rows])
+
+  return answer
+}
+
+async function askRows(
+  client: SupatypeClient,
+  model: ModelConfig,
+  ids: string[],
+  checks: RecordCheck[],
+): Promise<RowsFieldAccess> {
+  try {
+    const result = await client
+      .from(model.tableName)
+      .select([model.primaryKey, ...checks.map((c) => c.affordance)].join(","))
+      .in(model.primaryKey, ids)
+    const rows: unknown = result.data
+    if (result.error !== null || !Array.isArray(rows)) return NO_ROWS
+    const out = new Map<string, RecordFieldAccess>()
+    for (const row of rows) {
+      if (isJsonObject(row)) out.set(String(row[model.primaryKey]), answersOf(row, checks).fields)
+    }
+    return out
+  } catch {
+    return NO_ROWS
+  }
+}

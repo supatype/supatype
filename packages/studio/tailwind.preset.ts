@@ -31,6 +31,8 @@ const studioPreset: Config = {
         destructive: {
           DEFAULT: "hsl(var(--destructive))",
           foreground: "hsl(var(--destructive-foreground))",
+          // Text on the page. Falls back to the dark theme's value for a host that has not set it.
+          text: "hsl(var(--destructive-text, 0 91% 71%))",
         },
         muted: {
           DEFAULT: "hsl(var(--muted))",

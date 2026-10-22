@@ -179,6 +179,7 @@ export function cellAccess(
   table: string,
   column: string,
   value: unknown,
+  record: RecordFieldAccess = {},
 ): CellAccess {
   if (!isFieldRestricted(access, table, column)) return "plain"
 
@@ -188,7 +189,11 @@ export function cellAccess(
 
   if (value !== null && value !== undefined) return "revealed"
 
-  return access.fields[table]?.[column]?.read === "deny" ? "hidden" : "unknown"
+  if (access.fields[table]?.[column]?.read === "deny") return "hidden"
+  // A per-row rule the record itself answered is settled for that record, as on the edit form.
+  const answered = record[column]?.read
+  if (answered === undefined) return "unknown"
+  return answered ? "plain" : "hidden"
 }
 
 /**

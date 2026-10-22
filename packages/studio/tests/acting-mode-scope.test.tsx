@@ -169,7 +169,8 @@ describe("the request builders keep a send-as choice", () => {
     await act(() => button(page, "Run").click())
     await settle()
     const query = sent.find((r) => r.url.endsWith("/graphql/v1"))
-    expect(query?.headers.has("Authorization")).toBe(false)
+    expect(query?.headers.get("Authorization")).toBe(`Bearer ${TOKEN}`)
+    expect(query?.headers.get(ACTING)).toBe("anon")
   })
 
   it("a function's Invoke sends as the choice", async () => {
@@ -179,5 +180,37 @@ describe("the request builders keep a send-as choice", () => {
     await act(() => button(page, "Invoke").click())
     await settle()
     expect(sent.at(-1)?.headers.get(ACTING)).toBe("elevated")
+  })
+})
+
+/**
+ * Anonymous is a mode the server acts on: Studio sends its session, so the proxy knows who asks, and
+ * asks for `anon`, so the proxy forwards the project's anon key in its place. It used to send no
+ * token at all, which the proxy refused before an anonymous request ever reached the project.
+ */
+describe("sending a built request as Anonymous", () => {
+  async function expectAnon(page: HTMLElement, run: string, url: (r: { url: string }) => boolean): Promise<void> {
+    await choose(sendAs(page), "anon")
+    await act(() => button(page, run).click())
+    await settle()
+    const request = sent.filter(url).at(-1)
+    expect(request?.headers.get("Authorization")).toBe(`Bearer ${TOKEN}`)
+    expect(request?.headers.get(ACTING)).toBe("anon")
+  }
+
+  it("from a model's Try it", async () => {
+    const page = await panel("editor", <ModelApiDocs model={MODEL} />)
+    await act(() => button(page, "Try It").click())
+    await expectAnon(page, "Send GET Request", (r) => r.url.includes("/rest/v1/pages"))
+  })
+
+  it("from a model's GraphQL tab", async () => {
+    const page = await panel("viewer", <ModelGraphQLDocs model={MODEL} />)
+    await expectAnon(page, "Run", (r) => r.url.endsWith("/graphql/v1"))
+  })
+
+  it("from a function's Invoke", async () => {
+    const page = await panel("developer", <InvokeTab functionName="hello" clientUrl={BASE} />)
+    await expectAnon(page, "Invoke", (r) => r.url.includes("/functions/v1/hello"))
   })
 })

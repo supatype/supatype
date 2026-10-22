@@ -479,10 +479,11 @@ function StorageBlock(): React.ReactElement {
 
 // ─── Quick actions block ──────────────────────────────────────────────────────
 
-function QuickActionsBlock(): React.ReactElement {
+export function QuickActionsBlock(): React.ReactElement {
   const config = useAdminConfig()
   // Creating a record is a change; a viewer is offered the globals to read and nothing to create.
-  const creatable = useContentWriteOffered() ? config.models.slice(0, 4) : []
+  // Every model: stopping at the first four left the rest (a fifth model, Comment) out with no way to tell.
+  const creatable = useContentWriteOffered() ? config.models : []
 
   return (
     <div className="p-5">

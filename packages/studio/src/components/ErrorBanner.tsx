@@ -22,18 +22,18 @@ export function ErrorBanner({ message, details, onRetry }: ErrorBannerProps): Re
           strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"
-          className="text-destructive shrink-0"
+          className="text-destructive-text shrink-0"
         >
           <circle cx="12" cy="12" r="10" />
           <line x1="12" y1="8" x2="12" y2="12" />
           <line x1="12" y1="16" x2="12.01" y2="16" />
         </svg>
-        <span data-ui="error-banner-message" className="text-sm text-destructive flex-1">{message}</span>
+        <span data-ui="error-banner-message" className="text-sm text-destructive-text flex-1">{message}</span>
         {onRetry ? (
           <button
             type="button"
             onClick={onRetry}
-            className="px-2.5 py-1 text-xs font-medium rounded-md border border-destructive/30 text-destructive hover:bg-destructive/10 transition-colors shrink-0"
+            className="px-2.5 py-1 text-xs font-medium rounded-md border border-destructive/30 text-destructive-text hover:bg-destructive/10 transition-colors shrink-0"
           >
             Retry
           </button>

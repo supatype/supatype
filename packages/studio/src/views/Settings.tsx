@@ -39,7 +39,7 @@ interface AuthProviderConfig {
   scopes: string
 }
 
-type SettingsTab = "general" | "keys" | "env" | "cors" | "database" | "integrations" | "danger"
+type SettingsTab = "general" | "keys" | "env" | "cors" | "database" | "integrations"
 
 // ─── General Settings Tab ─────────────────────────────────────────────────────
 
@@ -500,96 +500,6 @@ function AuthSettings(): React.ReactElement {
   )
 }
 
-// ─── Danger Zone Tab ──────────────────────────────────────────────────────────
-
-function DangerZone(): React.ReactElement {
-  const [confirmReset, setConfirmReset] = useState(false)
-  const [confirmDelete, setConfirmDelete] = useState(false)
-  const [resetConfirmText, setResetConfirmText] = useState("")
-  const [deleteConfirmText, setDeleteConfirmText] = useState("")
-
-  return (
-    <div className="rounded-lg border border-destructive bg-card p-4">
-      <h3 className="text-red-400">Danger Zone</h3>
-      <p className="text-[0.8rem] text-muted-foreground mb-6">
-        These actions are irreversible. Proceed with extreme caution.
-      </p>
-
-      <div className="flex flex-col gap-5">
-        {/* Reset Database */}
-        <div className="flex justify-between items-center p-4 border border-border rounded-md">
-          <div>
-            <div className="font-medium mb-1">Reset Database</div>
-            <div className="text-xs text-muted-foreground">
-              Drop all tables and re-apply all migrations from scratch.
-              All data will be permanently lost.
-            </div>
-          </div>
-          {!confirmReset ? (
-            <Button variant="destructive" onClick={() => setConfirmReset(true)}>Reset</Button>
-          ) : (
-            <div className="flex flex-col gap-2 items-end ml-4">
-              <div>
-                <label className="block text-[0.7rem] text-red-400 mb-1">Type "RESET" to confirm:</label>
-                <Input
-                  className="w-[200px]"
-                  value={resetConfirmText}
-                  onChange={(e) => setResetConfirmText(e.target.value)}
-                  placeholder="RESET"
-                />
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  variant="destructive"
-                  disabled={resetConfirmText !== "RESET"}
-                >
-                  Confirm Reset
-                </Button>
-                <Button onClick={() => { setConfirmReset(false); setResetConfirmText("") }}>Cancel</Button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Delete Project */}
-        <div className="flex justify-between items-center p-4 border border-border rounded-md">
-          <div>
-            <div className="font-medium mb-1">Delete Project</div>
-            <div className="text-xs text-muted-foreground">
-              Permanently delete this project, its database, storage files, and all associated data.
-              This cannot be undone.
-            </div>
-          </div>
-          {!confirmDelete ? (
-            <Button variant="destructive" onClick={() => setConfirmDelete(true)}>Delete</Button>
-          ) : (
-            <div className="flex flex-col gap-2 items-end ml-4">
-              <div>
-                <label className="block text-[0.7rem] text-red-400 mb-1">Type "DELETE my-project" to confirm:</label>
-                <Input
-                  className="w-[250px]"
-                  value={deleteConfirmText}
-                  onChange={(e) => setDeleteConfirmText(e.target.value)}
-                  placeholder="DELETE my-project"
-                />
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  variant="destructive"
-                  disabled={deleteConfirmText !== "DELETE my-project"}
-                >
-                  Confirm Delete
-                </Button>
-                <Button onClick={() => { setConfirmDelete(false); setDeleteConfirmText("") }}>Cancel</Button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
 // ─── Database Settings Tab ────────────────────────────────────────────────────
 
 /** A server setting as shown, or a dash when the server did not report it. */
@@ -828,7 +738,6 @@ const SETTINGS_TABS: SettingsTabDef[] = [
   { key: "cors", label: "CORS", needs: "manageDomains", activity: "manage allowed origins" },
   { key: "database", label: "Database", needs: "schemaView", activity: "view the database settings" },
   { key: "integrations", label: "Integrations", needs: "administer", activity: "manage integrations" },
-  { key: "danger", label: "Danger Zone", needs: "administer", activity: "reset or delete the project" },
 ]
 
 function SettingsTabBody({ tab, demoMode }: { tab: SettingsTab; demoMode: boolean }): React.ReactElement {
@@ -840,7 +749,6 @@ function SettingsTabBody({ tab, demoMode }: { tab: SettingsTab; demoMode: boolea
     case "cors": return <CorsSettings demoMode={demoMode} />
     case "database": return <DatabaseSettings client={client} />
     case "integrations": return <IntegrationsSettings />
-    case "danger": return <DangerZone />
   }
 }
 
@@ -857,7 +765,7 @@ export function Settings({ demoMode = false }: SettingsProps): React.ReactElemen
             className={cn(
               "px-4 py-2 text-sm border-b-2 transition-colors whitespace-nowrap",
               activeTab === t.key
-                ? t.key === "danger" ? "text-red-400 border-red-400" : "text-primary border-primary"
+                ? "text-primary border-primary"
                 : "text-muted-foreground border-transparent hover:text-foreground"
             )}
             onClick={() => setActiveTab(t.key)}
