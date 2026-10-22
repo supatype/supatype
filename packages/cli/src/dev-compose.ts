@@ -2,7 +2,7 @@
  * `supatype dev` when `provider: docker`, full self-host Compose stack (Kong gateway).
  */
 
-import { projectOutputPaths, writeAstDerivedOutputs } from "./type-generation.js"
+import { projectOutputPaths, writeAstDerivedOutputs, writeSeedBuilder } from "./type-generation.js"
 import { errorMessage } from "./error-message.js"
 import { withPublishing } from "./model-versioning.js"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
@@ -812,6 +812,7 @@ async function writeEngineArtifacts(
   }
 
   writeDevAstOutputs(cwd, ast, config, "")
+  await writeDevSeedBuilder(cwd, config, ast, engine)
 
   try {
     const admin = withAdminRoles(await engineRequest("/admin", { ast }, isAnyAnswer, engine), config)
@@ -852,6 +853,25 @@ function writeDevAstOutputs(cwd: string, ast: unknown, config: SupatypeProjectCo
     }
   } catch (err) {
     console.warn(`[supatype] Generated output failed: ${errorMessage(err)}`)
+  }
+}
+
+/**
+ * The seed builder, from the same engine as the types. Only `generate` wrote it, though the config
+ * says dev and push regenerate every output, so after dev's first push it still described the
+ * starter models and a seed for anything added since did not typecheck.
+ */
+async function writeDevSeedBuilder(
+  cwd: string,
+  config: SupatypeProjectConfig,
+  ast: unknown,
+  engine: ComposeEngine | undefined,
+): Promise<void> {
+  try {
+    const message = await writeSeedBuilder({ cwd, ast, engine, ...projectOutputPaths(config.output) })
+    if (message !== undefined) console.log(`[supatype] ${message}`)
+  } catch (err) {
+    console.warn(`[supatype] Seed builder generation failed: ${errorMessage(err)}`)
   }
 }
 

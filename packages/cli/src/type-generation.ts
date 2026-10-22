@@ -121,22 +121,32 @@ export async function writeGeneratedTypes(req: GenerateTypesRequest): Promise<st
     written.push(`Types written to ${req.typesPath}`)
   }
 
-  const seedPath = seedBuilderPath(req)
-  if (seedPath !== undefined) {
-    const result = await generate(req, { ast: req.ast, lang: "typescript", artifact: "seed" })
-    const code = result.code ?? result.message
-    if (code === undefined) {
-      throw new Error("Engine returned no output for the seed builder.")
-    }
-    const outPath = resolve(req.cwd, seedPath)
-    mkdirSync(dirname(outPath), { recursive: true })
-    writeFileSync(outPath, code, "utf8")
-    written.push(`Seed builder written to ${toPosix(seedPath)}`)
-  }
+  const seed = await writeSeedBuilder(req)
+  if (seed !== undefined) written.push(seed)
 
   written.push(...writeAstDerivedOutputs(req))
 
   return written
+}
+
+/**
+ * The typed seed builder, beside the client, from the engine. Shared by `generate`, `push` and
+ * `dev`: it was written by the first two only, so a project worked on through `dev` kept a builder
+ * describing the schema as `init` left it. Returns the message to report, or undefined when the
+ * project has no output path to put it beside.
+ */
+export async function writeSeedBuilder(req: GenerateTypesRequest): Promise<string | undefined> {
+  const seedPath = seedBuilderPath(req)
+  if (seedPath === undefined) return undefined
+  const result = await generate(req, { ast: req.ast, lang: "typescript", artifact: "seed" })
+  const code = result.code ?? result.message
+  if (code === undefined) {
+    throw new Error("Engine returned no output for the seed builder.")
+  }
+  const outPath = resolve(req.cwd, seedPath)
+  mkdirSync(dirname(outPath), { recursive: true })
+  writeFileSync(outPath, code, "utf8")
+  return `Seed builder written to ${toPosix(seedPath)}`
 }
 
 /** One `/generate` run, in the project's engine image when it has one, else the host binary. */
