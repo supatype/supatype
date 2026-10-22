@@ -3,7 +3,7 @@
  * Parsers build {@link ParsedField}; only `emitField` / `emitModel` / `emitSchema` produce JSON.
  */
 
-import type { FieldValidation } from "@supatype/types"
+import type { AuthUserOnDelete, FieldValidation } from "@supatype/types"
 import type { RenameJournalEntry } from "./rename-journal.js"
 
 // Re-exported so consumers of these AST types need no second import for the one field that is
@@ -101,6 +101,11 @@ export interface DbFieldAnnotations {
    * other UUID, and needs to: a model keyed by one is a user's own (O1).
    */
   authUserId?: true
+  /**
+   * `SupatypeAuthUserId<{ onDelete }>`: the field opts in to a foreign key to `auth.users`, and this
+   * is what deleting the user does to the row. Absent, the engine adds no key.
+   */
+  authUserOnDelete?: AuthUserOnDelete
 }
 
 export interface PlatformFieldAnnotations {
