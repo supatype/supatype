@@ -94,6 +94,7 @@ declare module "@supatype/client" {
         created_at?: string
         updated_at?: string
       }
+      Drafts: true
       Relationships: [
         {
           columns: ["auth_user_id"]

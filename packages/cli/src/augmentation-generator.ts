@@ -16,6 +16,7 @@ import {
   type Guard,
 } from "@supatype/shared"
 import { objectAt } from "./ast-read.js"
+import { keepsDrafts } from "./model-versioning.js"
 
 export interface AstModel {
   name?: string
@@ -181,6 +182,8 @@ function modelLines(model: AstModel, models: AstModel[]): string[] {
     `      Row: ${indent(generateRowType(model.fields), 6)}`,
     `      Insert: ${indent(generateInsertType(model.fields), 6)}`,
     `      Update: ${indent(generateUpdateType(model.fields), 6)}`,
+    // Where `update` saves drafts and takes `{ publish: true }`.
+    ...(keepsDrafts(model) ? ["      Drafts: true"] : []),
     `      ${renderRelationships(relationshipsOf(model, models, resolveTableName), 6)}`,
     "    }",
   ]

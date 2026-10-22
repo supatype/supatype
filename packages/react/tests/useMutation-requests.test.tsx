@@ -7,9 +7,9 @@
  */
 
 import React from "react"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, create } from "react-test-renderer"
-import { createClient, type AnyDatabase } from "@supatype/client"
+import { createClient, forgetRegisteredDraftModels, registerDraftModels, type AnyDatabase } from "@supatype/client"
 import { SupatypeProvider } from "../src/context.js"
 import { useMutation, type MutationOperation, type UseMutationResult } from "../src/useMutation.js"
 import { useQuery, type UseQueryOptions } from "../src/useQuery.js"
@@ -145,5 +145,44 @@ describe("useQuery requests", () => {
     const sent = await queryOnce({ draft: true })
     expect(sent[0]!.path).toBe("/rest/v1/posts?select=*")
     expect(sent[0]!.profile).toBe("draft")
+  })
+})
+
+describe("useMutation update on a model that keeps drafts", () => {
+  const ID = "7b1f115e-418d-4e92-91d0-f199ebd06e5e"
+
+  /** Answers as the database does: the matched keys, `save_drafts`' answer, then the draft rows. */
+  function stubDraftsServer(): SentRequest[] {
+    const sent = stubFetch()
+    const answers = [[{ id: ID }], [{ record_id: ID, version: 2, status: "draft" }], [{ id: ID, title: "b" }]]
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url)
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : null
+      sent.push({ method: init?.method ?? "GET", path: decodeURIComponent(url.pathname + url.search), body, profile: new Headers(init?.headers).get("Accept-Profile"), range: null })
+      return new Response(JSON.stringify(answers[sent.length - 1] ?? []), { status: 200, headers: { "Content-Type": "application/json" } })
+    })
+    return sent
+  }
+
+  beforeEach(() => registerDraftModels({ version: 1, tables: { posts: { primaryKey: "id" } } }))
+  afterEach(() => forgetRegisteredDraftModels())
+
+  it("saves a draft of each matched record and returns the drafts, leaving the live row alone", async () => {
+    const sent = stubDraftsServer()
+    const result = await mutateOnce("update", { title: "b" }, { filter: { id: ID } })
+    expect(sent.map((r) => `${r.method} ${r.path}`)).toEqual([
+      `GET /rest/v1/posts?id=eq.${ID}&select=id`,
+      "POST /rest/v1/rpc/save_drafts",
+      `GET /rest/v1/posts?id=in.(${ID})`,
+    ])
+    expect(sent[1]!.body).toEqual({ model_table: "posts", record_ids: [ID], data: { title: "b" }, publish: false })
+    expect(sent[2]!.profile).toBe("draft")
+    expect(result).toEqual({ data: [{ id: ID, title: "b" }], error: null, count: 1 })
+  })
+
+  it("publishes in the same call when asked", async () => {
+    const sent = stubDraftsServer()
+    await mutateOnce("update", { title: "b" }, { filter: { id: ID }, publish: true })
+    expect(sent[1]!.body).toEqual({ model_table: "posts", record_ids: [ID], data: { title: "b" }, publish: true })
   })
 })

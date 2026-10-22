@@ -466,3 +466,26 @@ describe("blocks columns", () => {
     expect(out).toContain("export type Button = {")
   })
 })
+
+describe("models that keep drafts", () => {
+  const model = (name: string, versions: unknown) => ({
+    name,
+    fields: { title: { kind: "text", required: true } },
+    options: versions === undefined ? {} : { versions },
+    annotations: { db: { tableName: name.toLowerCase(), indexes: [] } },
+  })
+  const out = generateClientAugmentation({
+    models: [model("Post", { drafts: true }), model("Ledger", { drafts: false }), model("Tag", undefined), model("Page", true)],
+  })
+  const block = (table: string) => out.slice(out.indexOf(`${table}: {`), out.indexOf("Relationships", out.indexOf(`${table}: {`)))
+
+  it("marks a drafts model, which is where update takes { publish: true }", () => {
+    expect(block("post")).toContain("Drafts: true")
+    expect(block("page")).toContain("Drafts: true")
+  })
+
+  it("leaves the mark off a model that keeps history only, or none", () => {
+    expect(block("ledger")).not.toContain("Drafts")
+    expect(block("tag")).not.toContain("Drafts")
+  })
+})

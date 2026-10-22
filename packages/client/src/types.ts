@@ -246,7 +246,32 @@ export interface TableDef {
    * every table; a hand-written definition without them can still select its own columns.
    */
   Relationships?: readonly TableRelationship[] | undefined
+  /**
+   * `true` on a model that keeps drafts, where `update` saves a new draft of each record and
+   * `{ publish: true }` publishes it in the same call. Generated; absent on every other table. A
+   * hand-written definition that leaves it unsaid is offered the option, and the client refuses it
+   * at run time on a table it does not know keeps drafts.
+   */
+  Drafts?: boolean | undefined
 }
+
+/** What `update` takes beyond the changes, on a model that keeps drafts. */
+export interface DraftUpdateOptions {
+  /**
+   * Publish each new draft in the same call, so the live rows change and the history records the
+   * version that went live. Without it the live rows stay as they are until a version is published.
+   */
+  publish?: boolean | undefined
+}
+
+/**
+ * The options `update` takes on `TDef`: {@link DraftUpdateOptions} on a model that keeps drafts, or
+ * one whose definition does not say; nothing on a generated table that keeps none.
+ */
+export type UpdateOptions<TDef extends TableDef> =
+  TDef extends { Drafts: true } ? DraftUpdateOptions
+  : "Drafts" extends keyof TDef ? (TDef["Drafts"] extends false | undefined ? never : DraftUpdateOptions)
+  : never
 
 /**
  * Module augmentation anchors used by generated `supatype` types output.

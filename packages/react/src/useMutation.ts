@@ -10,6 +10,11 @@ export type { MutationOperation }
 export interface MutationOptions {
   /** Simple equality filters for update/delete operations */
   filter?: Record<string, unknown> | undefined
+  /**
+   * For an update on a model that keeps drafts: publish the drafts it saves in the same call. Without
+   * it the update saves a new draft of each record and the live rows stay as they are.
+   */
+  publish?: boolean | undefined
 }
 
 export interface UseMutationResult<TRow> {
@@ -28,6 +33,9 @@ export interface UseMutationResult<TRow> {
  * ```tsx
  * const { mutate: createPost, loading } = useMutation('posts', 'insert')
  * await createPost({ title: 'Hello', status: 'draft' })
+ *
+ * const { mutate: editPost } = useMutation('posts', 'update')
+ * await editPost({ title: 'Hello again' }, { filter: { id: postId }, publish: true })
  *
  * const { mutate: deletePost } = useMutation('posts', 'delete')
  * await deletePost(undefined, { filter: { id: postId } })
@@ -53,7 +61,10 @@ export function useMutation<
       setLoading(true)
       setError(null)
       try {
-        const result = await runMutation<TRow>(client as AnyClient, table, operation, data, options?.filter)
+        const publish = options?.publish
+        const result = await runMutation<TRow>(client as AnyClient, table, operation, data, options?.filter, {
+          ...(publish !== undefined && { publish }),
+        })
         if (result.error !== null) setError(result.error)
         return result
       } finally {
