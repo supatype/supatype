@@ -56,6 +56,15 @@ export function resolveVersionsOptions(raw: unknown): VersionsOptions | undefine
   return { drafts: drafts !== false, keep }
 }
 
+/**
+ * Whether `model` keeps drafts: it declares `versions` without `drafts: false`. Where the client
+ * routes an insert or an update through the publishing functions, and where `update` takes
+ * `{ publish: true }`.
+ */
+export function keepsDrafts(model: unknown): boolean {
+  return resolveVersionsOptions(objectAt(model, "options")?.["versions"])?.drafts === true
+}
+
 /** Every model in the schema that declares `versions`, in declaration order. */
 export function versionedModels(ast: unknown): VersionedModel[] {
   const out: VersionedModel[] = []

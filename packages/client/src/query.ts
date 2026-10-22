@@ -462,11 +462,26 @@ export interface DraftCreate {
   readonly primaryKey: string
 }
 
+/**
+ * An update sent through `supatype.save_drafts` rather than as a plain `PATCH`: the table, which
+ * keeps drafts, its key, and whether to publish the new drafts in the same call.
+ *
+ * Why at all: on a drafts model the live row changes only by publishing, and the database refuses
+ * a direct update of it from the API roles.
+ */
+export interface DraftEdit extends DraftCreate {
+  readonly publish: boolean
+}
+
 /** How a write is made beyond its method and body. */
 export interface MutationOptions {
   upsert?: boolean | undefined
   /** Create the records through `create_record` or `create_records`, for an insert on a drafts model. */
   createThrough?: DraftCreate | undefined
+  /** Save a draft of each matched record through `save_drafts`, for an update on a drafts model. */
+  editThrough?: DraftEdit | undefined
+  /** Send nothing and answer with this: the write asks for something its table cannot do. */
+  refusal?: SupatypeError | undefined
 }
 
 /**
@@ -490,6 +505,8 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
   private readonly method: HttpMethod
   private readonly body: unknown
   private readonly createThrough: DraftCreate | undefined
+  private readonly editThrough: DraftEdit | undefined
+  private readonly refusal: SupatypeError | undefined
 
   constructor(
     baseUrl: string,
@@ -511,6 +528,8 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
     this.method = method
     this.body = body
     this.createThrough = opts?.createThrough
+    this.editThrough = opts?.editThrough
+    this.refusal = opts?.refusal
 
     if (opts?.upsert === true) this.prefer("resolution=merge-duplicates")
     // Return inserted/updated rows
@@ -585,7 +604,9 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
   }
 
   private async _execute(fetchHeaders: Record<string, string> = {}): Promise<QueryResult<TRow[]>> {
+    if (this.refusal !== undefined) return { data: null, error: this.refusal, count: null }
     if (this.createThrough !== undefined) return this.createDraftRecords(this.createThrough)
+    if (this.editThrough !== undefined) return this.saveDraftRecords(this.editThrough)
     const qs = this.params.toString()
     const url = `${this.baseUrl}${this.path}${qs ? `?${qs}` : ""}`
     const resolveRequestHeaders = async (): Promise<Record<string, string>> => ({
@@ -627,8 +648,49 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
    * the order they were sent.
    */
   private async createDraftRecords(target: DraftCreate): Promise<QueryResult<TRow[]>> {
-    const keys = await this.callCreate(target.table)
+    const { fn, data } = createCall(this.body)
+    const keys = await this.callPublishing(fn, { model_table: target.table, data })
     if (!Array.isArray(keys)) return { data: null, error: keys, count: null }
+    return this.readDrafts(target, keys)
+  }
+
+  /**
+   * Save a draft of each record the filters match, publishing it too when asked, then read the
+   * drafts back as an update returns its rows. The live rows are left to publishing.
+   *
+   * The records are the ones the caller reads in the table under the update's filters, as a `PATCH`
+   * would match them, and `save_drafts` saves all of them or none.
+   */
+  private async saveDraftRecords(target: DraftEdit): Promise<QueryResult<TRow[]>> {
+    const matched = await this.matchedKeys(target.primaryKey)
+    if (!Array.isArray(matched)) return { data: null, error: matched, count: null }
+    // A `PATCH` that matches nothing answers no rows, and so does this, having saved nothing.
+    if (matched.length === 0) return { data: [], error: null, count: 0 }
+    const body = { model_table: target.table, record_ids: matched, data: this.body, publish: target.publish }
+    const keys = await this.callPublishing("save_drafts", body)
+    if (!Array.isArray(keys)) return { data: null, error: keys, count: null }
+    return this.readDrafts(target, keys)
+  }
+
+  /** The keys of the rows this write's filters match, read from the table as the caller. */
+  private async matchedKeys(primaryKey: string): Promise<string[] | SupatypeError> {
+    const params = new URLSearchParams(this.params)
+    params.set("select", primaryKey)
+    const url = `${this.baseUrl}${this.path}?${params.toString()}`
+    let res: Response
+    try {
+      res = await fetchWithOptional401Retry(this.send, url, { method: "GET" }, this.getHeaders, this.onUnauthorized)
+    } catch (e) {
+      return transportFailure(e)
+    }
+    if (!res.ok) return readRefusal(res, "[supatype:mutation] reading the records to draft failed", async () => ({ url }))
+    const rows = readRows<Record<string, unknown>>(await res.text(), this.path, res.status, null)
+    if (rows.data === null) return rows.error ?? notRows(res.status)
+    return rows.data.map((row) => String(row[primaryKey]))
+  }
+
+  /** `keys`' newest drafts, from the draft view, with this write's select and in the order given. */
+  private async readDrafts(target: DraftCreate, keys: string[]): Promise<QueryResult<TRow[]>> {
     const select = readBackColumns(this.params.get("select"), target.primaryKey, keys.length)
     const result = await new QueryBuilder<Record<string, unknown>>(
       this.baseUrl,
@@ -645,11 +707,10 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
     return { ...result, data: rows, count: rows.length }
   }
 
-  /** `create_record` for one row, `create_records` for several: the new keys in order, or why not. */
-  private async callCreate(table: string): Promise<string[] | SupatypeError> {
-    const { fn, data } = createCall(this.body)
+  /** Call the publishing function `fn` with `body`: the record keys it answers with, in order, or why not. */
+  private async callPublishing(fn: string, body: Record<string, unknown>): Promise<string[] | SupatypeError> {
     const url = `${this.baseUrl}/rest/v1/rpc/${fn}`
-    const init = { method: "POST", body: stringifyWithBigInts({ model_table: table, data }) }
+    const init = { method: "POST", body: stringifyWithBigInts(body) }
     const resolveRequestHeaders = async (): Promise<Record<string, string>> => ({
       ...(await this.getHeaders()),
       "Content-Profile": PUBLISHING_SCHEMA,
@@ -660,9 +721,10 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
     } catch (e) {
       return transportFailure(e)
     }
+    const table = body["model_table"]
     if (!res.ok) return readRefusal(res, `[supatype:mutation] ${fn} failed`, async () => ({ url, table }))
     const answer: unknown = await res.json().catch(() => null)
-    return createdKeys(answer) ?? { message: `${fn} answered without the new record ids`, status: res.status }
+    return createdKeys(answer) ?? { message: `${fn} answered without the record ids`, status: res.status }
   }
 }
 

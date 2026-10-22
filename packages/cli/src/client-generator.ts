@@ -25,7 +25,7 @@
  */
 import { generateClientAugmentation } from "./augmentation-generator.js"
 import { astModels, objectAt } from "./ast-read.js"
-import { resolveVersionsOptions } from "./model-versioning.js"
+import { keepsDrafts } from "./model-versioning.js"
 
 /** The kinds whose values no binary float holds, keyed by the schema kind that produces them. */
 const EXACT_KIND_BY_FIELD_KIND: Readonly<Record<string, "bigint" | "numeric">> = {
@@ -112,7 +112,7 @@ function fieldKindsDocument(ast: unknown): { version: number; tables: Record<str
 function draftModelsDocument(ast: unknown): { version: number; tables: Record<string, { primaryKey: string }> } {
   const tables: Record<string, { primaryKey: string }> = {}
   for (const model of astModels(ast)) {
-    if (resolveVersionsOptions(objectAt(model, "options")?.["versions"])?.drafts !== true) continue
+    if (!keepsDrafts(model)) continue
     tables[resolveTableName(model)] = { primaryKey: primaryKeyColumn(objectAt(model, "fields")) }
   }
   return { version: FORMAT_VERSION, tables }

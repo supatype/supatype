@@ -31,7 +31,9 @@ import type {
   RpcOptions,
   SelectQueryOptions,
   TableDef,
+  UpdateOptions,
 } from "./types.js"
+import type { MutationOptions } from "./query.js"
 import type { SelectRow } from "./select-types.js"
 import { DRAFT_SCHEMA } from "./types.js"
 
@@ -59,6 +61,8 @@ export type {
   SupatypeBuckets,
   SupatypeFunctions,
   AugmentedDatabase,
+  DraftUpdateOptions,
+  UpdateOptions,
 } from "./types.js"
 export {
   generateCodeVerifier,
@@ -148,8 +152,8 @@ class TableClient<
    * The schema this table's reads come from, set by `draft()`.
    *
    * Mutable, and safe to be: `from()` builds a fresh client per call, so nothing is shared between
-   * two queries. Reads only; a draft view is not writable and a write is an ordinary update that
-   * records a new version.
+   * two queries. Reads only: a draft view is not writable, and `update` on a model with drafts
+   * saves a new version through the publishing functions instead.
    */
   private profile: string | undefined
 
@@ -186,9 +190,10 @@ class TableClient<
    * **Read-only, and permission is not the read rule.** A draft is visible to the record's creator
    * and to the project's elevated Studio roles, or to a caller holding a signed preview link. A
    * caller who may read published content is not thereby entitled to read what has not been
-   * published. Write with the ordinary `update`, which records a new draft version. Publish by
-   * calling the generated `publish` database function in the `supatype` schema; there is no client
-   * method for it:
+   * published. Write with the ordinary `update`, which on a model with drafts saves a new draft of
+   * each record it matches and leaves the live rows alone; pass `{ publish: true }` to publish in the
+   * same call. A saved draft is published later by the generated `publish` database function in the
+   * `supatype` schema:
    * `rpc("publish", { model_table: "posts", record_id: id }, { schema: "supatype" })`.
    */
   draft(): this {
@@ -288,17 +293,40 @@ class TableClient<
     )
   }
 
-  update(data: TDef["Update"]): MutationBuilder<TDef["Row"], TTables, TName> {
+  /**
+   * Change the rows the filters match.
+   *
+   * **On a model that keeps drafts** the live rows do not change: each matched record gets a new
+   * draft through `supatype.save_drafts`, merged onto its newest version as Studio saves one, all or
+   * none in one call, and the drafts come back read from the draft view. Pass `{ publish: true }` to
+   * publish them in the same call, so the history records the version that went live. The generated
+   * `supatype/client.ts` says which models keep drafts; elsewhere this is a plain `PATCH`, and
+   * `{ publish: true }` is refused, since there is nothing to publish.
+   */
+  update(
+    data: TDef["Update"],
+    options?: UpdateOptions<TDef>,
+  ): MutationBuilder<TDef["Row"], TTables, TName> {
     return new MutationBuilder<TDef["Row"], TTables, TName>(
       this.baseUrl,
       this.path,
       this.getHeaders,
       "PATCH",
       data,
-      undefined,
+      this.draftEdit(options),
       this.onUnauthorized,
       this.send,
     )
+  }
+
+  /** How an update is made: as drafts on a drafts model, else a plain `PATCH`, or refused. */
+  private draftEdit(options: unknown): MutationOptions | undefined {
+    const publish = isJsonObject(options) && options["publish"] === true
+    const model = registeredDraftModel(this.table)
+    if (model !== undefined) return { editThrough: { table: this.table, primaryKey: model.primaryKey, publish } }
+    if (!publish) return undefined
+    const message = `{ publish: true } applies to a model that keeps drafts, and "${this.table}" is not one this client knows of. Import the client from the generated supatype/client.ts, which says which models keep drafts.`
+    return { refusal: { message } }
   }
 
   delete(): MutationBuilder<TDef["Row"], TTables, TName> {

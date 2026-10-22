@@ -62,6 +62,7 @@ export type Database = {
           created_at?: string
           updated_at?: string
         }
+        Drafts: true
         Relationships: []
       }
       speaker: {
@@ -101,6 +102,7 @@ export type Database = {
           created_at?: string
           updated_at?: string
         }
+        Drafts: true
         Relationships: []
       }
       room: {
@@ -179,6 +181,7 @@ export type Database = {
           created_at?: string
           updated_at?: string
         }
+        Drafts: true
         Relationships: [
           {
             columns: ["speaker_id"]
