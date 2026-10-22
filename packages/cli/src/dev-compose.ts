@@ -39,7 +39,7 @@ import { cacheSeedingNotes } from "./api-config-cache.js"
 import { refreshFunctionsContext } from "./functions-context-refresh.js"
 import { restartComposeFunctionsWorker, watchFunctionSources } from "./dev-functions-watch.js"
 import { watchDevSchema } from "./dev-schema-watch.js"
-import { syncDatabaseUrlPort } from "./db-port.js"
+import { databaseUrlSyncMessage, syncDatabaseUrlPort } from "./db-port.js"
 import { degraded } from "./strict.js"
 import { DEV_DESTRUCTIVE_POLICY, consentDepsFromDiff, pushConsentingToDestructive } from "./destructive-consent.js"
 import { auditFlags, auditWhenSupported } from "./push-audit.js"
@@ -741,9 +741,7 @@ function writeAstDerivedArtifacts(cwd: string, config: SupatypeProjectConfig, as
 function syncDatabaseUrlToStack(cwd: string, config: SupatypeProjectConfig): void {
   const dbPort = syncDatabaseUrlPort(cwd, composeRenderMode(cwd, config.project.name) === "dev")
   if (dbPort === null) return
-  console.log(
-    `[supatype] DATABASE_URL port ${dbPort.from} -> ${dbPort.to} in .env, to match ${dbPort.envKey}.`,
-  )
+  console.log(`[supatype] ${databaseUrlSyncMessage(dbPort)}`)
 }
 
 /**
