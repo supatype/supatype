@@ -441,6 +441,20 @@ export function createDraft(
 }
 
 /**
+ * Save `data` as a new draft of each record, merged onto its newest version, all or none. With
+ * `publish` the drafts are published in the same transaction; without it the live rows do not move.
+ */
+export async function saveDrafts(
+  client: SupatypeClient,
+  model: ModelConfig,
+  edit: { recordIds: string[]; data: Record<string, unknown>; publish: boolean },
+): Promise<{ error: RecordError | null }> {
+  const params = { model_table: model.tableName, record_ids: edit.recordIds, data: edit.data, publish: edit.publish }
+  const result = await client.rpc("save_drafts", params, { schema: RPC_SCHEMA })
+  return { error: result.error }
+}
+
+/**
  * Record the live row as it stands as the record's first version.
  *
  * For a record with no history (a seed, an API insert, a save before 0.7.0). `publish` and
