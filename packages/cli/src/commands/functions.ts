@@ -157,7 +157,6 @@ function scaffoldFunction(cwd: string, name: string): void {
   mkdirSync(fnDir, { recursive: true })
 
   const indexContent = `// ${name}, Supatype Edge Function
-// Docs: https://supatype.com/docs/edge-functions
 
 import type { FunctionContext } from "../_shared/context.ts"
 

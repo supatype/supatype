@@ -1411,7 +1411,6 @@ export default async function seed(ctx: SeedContext) {
 
 function helloFunctionTemplate(): string {
   return `// hello: Supatype Edge Function
-// Docs: https://supatype.com/docs/edge-functions
 
 import type { FunctionContext } from "../_shared/context.ts"
 
