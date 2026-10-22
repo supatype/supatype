@@ -7,7 +7,8 @@ import { actingModeHeaders } from "./acting-mode.js"
  *
  * - `me`: the signed-in Studio user's own token, acting as themselves, so the app's own rules apply
  *   to them as they would in the app.
- * - `anon`: no token at all.
+ * - `anon`: as an anonymous client. The request carries the user's own token, so the proxy knows who
+ *   asks, and asks it to act as `anon`, which it does by forwarding the project's anon key instead.
  * - `service`: the service role, full access, for a role that may have it (admins and developers).
  *   The key never reaches the browser: the request carries the user's own token and asks the
  *   Studio proxy to act as the service role, which it does only for a role that holds it.
@@ -39,6 +40,6 @@ export function sendAsHeaders(choice: SendAs, signedIn: string, pasted: string):
     case "me": return { ...bearer(signedIn), ...actingModeHeaders("self") }
     case "service": return { ...bearer(signedIn), ...actingModeHeaders("elevated") }
     case "token": return bearer(pasted.trim())
-    case "anon": return {}
+    case "anon": return { ...bearer(signedIn), ...actingModeHeaders("anon") }
   }
 }

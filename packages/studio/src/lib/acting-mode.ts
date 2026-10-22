@@ -8,7 +8,8 @@
  * (`send-as.ts`) and never remembered (owner decision 2026-10-21).
  */
 
-export type ActingMode = "self" | "studio" | "elevated"
+/** `anon` is asked for only by a built request sent as Anonymous: the proxy forwards the anon key. */
+export type ActingMode = "self" | "studio" | "elevated" | "anon"
 
 export const ACTING_MODE_HEADER = "X-Supatype-Acting-Mode"
 
@@ -17,7 +18,7 @@ const STORED_PREFIX = "supatype.studio.actingMode:"
 
 /** `raw` as an acting mode, or null when it names none. */
 export function actingModeOf(raw: unknown): ActingMode | null {
-  return raw === "self" || raw === "studio" || raw === "elevated" ? raw : null
+  return raw === "self" || raw === "studio" || raw === "elevated" || raw === "anon" ? raw : null
 }
 
 /** The header asking for `mode`. */
