@@ -99,7 +99,7 @@ import { restoreSystemRelationTargets } from "./restore-system-relation-targets.
 import { provisionBucketsFromAst } from "./storage-provision.js"
 import type { ExtractedSchemaAstV2 } from "./schema-ast-v2.js"
 import { ensureFirstAdminUserForProject } from "./commands/admin.js"
-import { publishDevReady } from "./dev-ready-panel.js"
+import { demoDataHint, publishDevReady } from "./dev-ready-panel.js"
 import { pushInitialSchema, settleInitialPush, type InitialPushOutcome, type InitialPushSteps } from "./dev-initial-push.js"
 import { offerAdoption, targetAdoptionSteps, type AdoptionSteps } from "./adopt-walkthrough.js"
 import { resetDevDatabase } from "./dev-db-reset.js"
@@ -1794,9 +1794,8 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   links.push({ label: "Studio", url: studioUrlAt(`http://localhost:${kongPort}`) })
 
   const hints: string[] = []
-  if (existsSync(join(cwd, "seed.ts"))) {
-    hints.push("Demo data: pnpm seed")
-  }
+  const demoData = demoDataHint(cwd)
+  if (demoData !== undefined) hints.push(demoData)
 
   publishDevReady({
     title: `Services running (Docker · ${project})`,
