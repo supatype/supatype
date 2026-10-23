@@ -90,6 +90,26 @@ the same parent already has the same values. That keeps a re-run seed from pilin
 Many-to-many relations have no nested write. Their rows live in a junction table; write those
 as their own operation.
 
+### Rows that need an auth user
+
+A seed cannot create auth users. It writes your models, and `auth.users` is not one of them. A
+field typed `SupatypeAuthUserId` (an owner column such as `comment.user_id`) holds a foreign key to
+`auth.users`, so a seed row can only name a user who already exists; a made-up id is refused with
+`constraint ..._user_id_fkey was violated`.
+
+1. Create the users first: sign them up through the auth API (`client.auth.signUp(...)`, which is
+   `POST /auth/v1/signup`), or run `supatype admin create-user --email ... --role viewer`, which
+   also makes them Studio members with that role.
+2. Read their ids with `supatype admin list-users`.
+3. Use those ids in the seed, keyed by something stable, so a re-run finds the same rows:
+
+```ts
+const ADA = "3f1c..." // from `supatype admin list-users`
+db.author.upsert({ where: { user_id: ADA }, data: { user_id: ADA, name: "Ada" } })
+```
+
+The ids differ in every environment, so keep them in one place at the top of the file.
+
 ## Values the database computes
 
 ```ts
