@@ -110,7 +110,7 @@ describe("compileBounds: refusals name the alternative", () => {
     ["score", "integer", { maxLength: 3 }, /MaxLength is not supported on a integer field/],
     ["title", "text", { min: 1 }, /Between is not supported on a text field/],
     ["status", "enum", { maxLength: 5 }, /union already constrains the permitted values/],
-    ["cover", "image", { maxLength: 5 }, /fileSizeLimit and allowedMimeTypes/],
+    ["cover", "image", { maxLength: 5 }, /maxSize and accept options/],
     ["embedding", "vector", { max: 1 }, /dimension is already fixed by the type/],
     ["author", "relation", { maxLength: 5 }, /bound the column on the model this relation points at/],
     ["flag", "boolean", { min: 0 }, /a boolean has two values/],
