@@ -46,6 +46,16 @@ export function adminAccountChangeOffered(capability: OfferedCapability, targetS
   return targetStudioRole !== "admin" || capability.role === null || capability.role === "admin"
 }
 
+/**
+ * Disabling or deleting the account `userId`, which Studio offers on anyone's account but the
+ * caller's own. The Studio roles page promises nobody can remove their own access, and a caller who
+ * disables themselves is signed out with nothing on screen to undo it. Before the caller is known
+ * the control stays, as every other offer does.
+ */
+export function accountRemovalOffered(callerId: string | null, userId: string): boolean {
+  return callerId !== userId
+}
+
 /** What a non-admin is told on an admin's account, in the server's own words for the refusal. */
 export const ADMIN_ACCOUNT_LOCKED = "Only a Studio admin can change another admin's account."
 

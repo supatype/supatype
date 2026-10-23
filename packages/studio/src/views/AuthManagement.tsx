@@ -14,7 +14,7 @@ import {
 } from "../lib/auth-user-search.js"
 import { useStudioMembers } from "../hooks/useStudioMembers.js"
 import { useStudioCapability } from "../hooks/useStudioCapability.js"
-import { userAdministrationOffered, adminAccountChangeOffered, ADMIN_ACCOUNT_LOCKED } from "../lib/capability-offers.js"
+import { userAdministrationOffered, adminAccountChangeOffered, accountRemovalOffered, ADMIN_ACCOUNT_LOCKED } from "../lib/capability-offers.js"
 import { authRefusalText } from "../lib/auth-refusal.js"
 import { useAuthSettings } from "../hooks/useAuthSettings.js"
 import { StudioAccessCell } from "../components/StudioAccessCell.js"
@@ -282,11 +282,11 @@ interface UserDetailActions {
   refusal: string | null
 }
 
-/** What may be done to one user's account from the drawer. */
+/** What may be done to one user's account from the drawer. Disable and Delete are null on the caller's own. */
 interface UserAccountActions {
-  onToggleDisable: () => void
+  onToggleDisable: (() => void) | null
   onEdit: () => void
-  onDelete: () => void
+  onDelete: (() => void) | null
   onRevokeSession: (sessionId: string) => void
 }
 
@@ -438,9 +438,9 @@ function UserDetail({
         <div data-user-actions="" className="flex gap-2 flex-wrap">
           <Button onClick={account.onEdit}>Edit User</Button>
           {!user.confirmed && onConfirmEmail ? <Button onClick={onConfirmEmail}>Confirm email</Button> : null}
-          <UserBanToggle user={user} toggle={account.onToggleDisable} />
+          {account.onToggleDisable !== null ? <UserBanToggle user={user} toggle={account.onToggleDisable} /> : null}
           {/* No Impersonate action until Studio can run its own editors as the user (IMP1). */}
-          <DeleteUserAction email={user.email} onDelete={account.onDelete} />
+          {account.onDelete !== null ? <DeleteUserAction email={user.email} onDelete={account.onDelete} /> : null}
         </div>
       ) : (
         <p className="text-xs text-muted-foreground">{ADMIN_ACCOUNT_LOCKED}</p>
@@ -836,6 +836,9 @@ export function AuthManagement(): React.ReactElement {
   // Whether the caller may change this user's account: not an admin's, unless the caller is one.
   const accountOffered = (userId: string): boolean =>
     adminAccountChangeOffered(studioAccess, studioMembers.roleFor(userId))
+  // Whether the caller may disable or delete this account: one they may change, and not their own.
+  const removalOffered = (userId: string): boolean =>
+    accountOffered(userId) && accountRemovalOffered(studioAccess.userId, userId)
   const createOptions: CreateUserOptions = {
     studioRoles: grantableStudioRoles,
     autoConfirmDefault: authSettings?.mailer_autoconfirm ?? null,
@@ -1110,7 +1113,7 @@ export function AuthManagement(): React.ReactElement {
                 access={{ members: studioMembers, currentUserId: studioAccess.userId, canManage: studioAccess.canManageMembers }}
                 actions={{
                   open: () => openUser(u),
-                  toggle: accountOffered(u.id) ? () => runAction(() => handleToggleDisable(u.id)) : null,
+                  toggle: removalOffered(u.id) ? () => runAction(() => handleToggleDisable(u.id)) : null,
                 }}
               />
             ))}
@@ -1151,9 +1154,9 @@ export function AuthManagement(): React.ReactElement {
             sessions={sessions}
             actions={{
               account: accountOffered(selectedUser.id) ? {
-                onToggleDisable: () => runAction(() => handleToggleDisable(selectedUser.id)),
+                onToggleDisable: removalOffered(selectedUser.id) ? () => runAction(() => handleToggleDisable(selectedUser.id)) : null,
                 onEdit: () => setEditingUser(selectedUser),
-                onDelete: () => runAction(() => handleDeleteUser(selectedUser.id)),
+                onDelete: removalOffered(selectedUser.id) ? () => runAction(() => handleDeleteUser(selectedUser.id)) : null,
                 onRevokeSession: (id) => runAction(() => handleRevokeSession(id)),
               } : null,
               // Both hosts gate the whole auth admin API on `manageUsers`.
