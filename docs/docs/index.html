@@ -132,8 +132,9 @@
               </p>
               <p>
                 The gateway serves REST at <code>/rest/v1/</code>, auth at <code>/auth/v1/</code>,
-                storage and realtime. With Docker it listens on <code>http://localhost:18473</code>
-                (init picks a free port per project and writes it to <code>.env</code>); with Native
+                storage and realtime. With Docker it listens on <code>http://localhost:&lt;gateway-port&gt;</code>:
+                init picks a free port per project and writes the URL to <code>.env</code> as
+                <code>API_EXTERNAL_URL</code> (the port alone is <code>SUPATYPE_KONG_PORT</code>). With Native
                 it listens on <code>http://localhost:54321</code>.
               </p>
             </div>
@@ -192,7 +193,8 @@
 <span class="p">$</span> supatype self-host compose up -d
 <span class="p">$</span> supatype push</pre>
               <p>
-                The gateway listens on <code>http://&lt;your-host&gt;:18473</code> with Studio at
+                The gateway listens on <code>http://&lt;your-host&gt;:&lt;gateway-port&gt;</code>, the port in
+                <code>SUPATYPE_KONG_PORT</code> in <code>.env</code> (18473 when it is unset), with Studio at
                 <code>/studio/</code>. Put a reverse proxy in front for HTTPS.
               </p>
               <div class="note">

@@ -100,10 +100,10 @@
               <pre class="code">import { createClient } from "../supatype/generated/client"
 
 export const supatype = createClient({
-  url: "http://localhost:18473",
-  anonKey: "your-anon-key",
+  url: "http://localhost:&lt;gateway-port&gt;", // API_EXTERNAL_URL in your project's .env
+  anonKey: "&lt;anon-key&gt;",
 })</pre>
-              <p>Use your gateway URL and anon key. <code>supatype keys</code> writes them to <code>.env</code> as <code>VITE_SUPATYPE_URL</code> and <code>VITE_SUPATYPE_ANON_KEY</code>, with <code>PUBLIC_</code> and <code>EXPO_PUBLIC_</code> copies for other frameworks.</p>
+              <p>Use your own project's gateway URL, not a port copied from an example: <code>supatype init</code> picks a free gateway port for each project. Your project's <code>.env</code> holds the full URL as <code>API_EXTERNAL_URL</code>, and the port alone as <code>SUPATYPE_KONG_PORT</code>. <code>supatype keys</code> writes them to <code>.env</code> as <code>VITE_SUPATYPE_URL</code> and <code>VITE_SUPATYPE_ANON_KEY</code>, with <code>PUBLIC_</code> and <code>EXPO_PUBLIC_</code> copies for other frameworks.</p>
               <p>The session is saved and restored by default. Pass <code>auth: { persistSession: false }</code> to keep it in memory only.</p>
             </div>
           </div>
