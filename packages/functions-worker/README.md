@@ -18,13 +18,16 @@ Local `supatype dev` does **not** use this image; the CLI starts an in-process D
 | `SUPATYPE_FUNCTIONS_ROOT` | yes | Directory of function sources (e.g. `/project/functions`) |
 | `PORT` | no | Listen port (default `8001`) |
 | `SUPATYPE_FUNCTION_NAME` | no | Single-function mode |
-| `SUPATYPE_URL` | no | **In-compose:** `http://kong:8000` (Docker DNS). Do not inject the public/host gateway URL, `localhost` inside the container cannot reach Kong on the host. Use for server-side `fetch` / `createClient`. |
+| `SUPATYPE_URL` | no | **In-compose:** `http://kong:8000` (Docker DNS). Do not inject the public/host gateway URL, `localhost` inside the container cannot reach Kong on the host. Use for server-side `fetch` / `createClient`. Handed to every function as `ctx.url`. |
 | `SUPATYPE_INTERNAL_URL` | no | Same as `SUPATYPE_URL` in Compose (`http://kong:8000`) |
+| `SUPATYPE_PUBLIC_URL` | no | The project's public address, the gateway URL a browser or an app uses. Handed to every function as `ctx.publicUrl`, for links you give to people. Compose sets it from `API_EXTERNAL_URL`, the address the server is told is its own. Unset, `ctx.publicUrl` falls back to `ctx.url` and the worker logs one warning at start |
 | `SUPATYPE_ANON_KEY`, `SUPATYPE_SERVICE_ROLE_KEY` | no | Injected per invocation when set |
 | `SITE_URL` | no | Public site URL for browser-facing links (not the same as `SUPATYPE_URL`) |
 | `SUPATYPE_DB_URL` | no | Handed to every function as `ctx.dbUrl`. Off by default; Compose sets it from the project's `SUPATYPE_FUNCTIONS_DB_URL`. See [Direct database access](#direct-database-access-ctxdburl) |
 
 Per-function env files: `{root}/.env.{name}.local`; shared: `{root}/.env.local`.
+
+Tests: `deno task test` starts this worker as the image does and reads a function's context back over HTTP.
 
 ## Direct database access (`ctx.dbUrl`)
 

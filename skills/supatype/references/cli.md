@@ -86,6 +86,8 @@ Auth flag: `--token` (cloud = platform PAT; self-host = `SERVICE_ROLE_KEY`). `--
 | `supatype plugins` | Plugin scaffolding |
 | `supatype types` | Type utilities |
 
+A handler is `(req, ctx)`, with `ctx` typed by `functions/_shared/context.ts` (rewritten by `init`, `functions new`, `push` and `dev`). `ctx.url` is for calling the API from inside the function (under Docker, `http://kong:8000`, which no browser can open); `ctx.publicUrl` is the project's public address, for links you give to people. The scaffolded function returns `publicUrl`.
+
 Example: [`examples/edge-kit`](https://github.com/supatype/supatype/tree/main/examples/edge-kit) in the Supatype repository: a Vite UI that invokes sample functions.
 
 ## Ops and maintenance

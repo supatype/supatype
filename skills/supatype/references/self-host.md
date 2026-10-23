@@ -29,6 +29,15 @@ supatype status        # local services or linked target summary
 
 Use `--direct` on schema commands to bypass the control plane and invoke the local engine subprocess directly.
 
+## Functions: `ctx.url` and `ctx.publicUrl`
+
+Every function is handed two addresses. `ctx.url` is for calling the API from inside the function:
+compose sets it to `http://kong:8000`, a name only the stack's own network resolves. `ctx.publicUrl`
+is the project's public address, for links you give to people (an email, a redirect, a URL in a
+response): compose sets it from `API_EXTERNAL_URL`, the same value the server is told is its own,
+so set that in `.env` to your domain (`supatype dev` writes the gateway's localhost address). A
+worker started without `SUPATYPE_PUBLIC_URL` falls back to `ctx.url` and logs one warning at start.
+
 ## Functions: direct database access (`ctx.dbUrl`)
 
 Functions receive a raw Postgres connection URL as `ctx.dbUrl` only when the operator sets

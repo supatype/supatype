@@ -42,6 +42,33 @@ declare namespace Deno {
     options: { port: number; hostname?: string; onListen?: (params: { hostname: string; port: number }) => void },
     handler: (req: Request) => Response | Promise<Response>,
   ): void
+
+  // What tests/ uses to start the worker as a child process and give it a functions directory.
+  function test(name: string, fn: () => void | Promise<void>): void
+  function execPath(): string
+  function makeTempDir(options?: { prefix?: string }): Promise<string>
+  function mkdir(path: string, options?: { recursive?: boolean }): Promise<void>
+  function writeTextFile(path: string, data: string): Promise<void>
+  function remove(path: string, options?: { recursive?: boolean }): Promise<void>
+
+  interface CommandOptions {
+    args?: string[]
+    env?: Record<string, string>
+    clearEnv?: boolean
+    stdout?: "piped" | "inherit" | "null"
+    stderr?: "piped" | "inherit" | "null"
+  }
+
+  interface ChildProcess {
+    readonly stdout: ReadableStream<Uint8Array>
+    readonly status: Promise<{ success: boolean; code: number }>
+    kill(signal?: "SIGTERM" | "SIGKILL"): void
+  }
+
+  class Command {
+    constructor(command: string, options?: CommandOptions)
+    spawn(): ChildProcess
+  }
 }
 
 /**

@@ -32,8 +32,17 @@ export interface FunctionContext {
   readonly executionId: string
   /** The function or hook route being served. */
   readonly functionName: string
-  /** The project's API base URL, reachable from inside this container. */
+  /**
+   * The project's API base URL, reachable from inside this container: for calling the API from the
+   * function. Under compose it is `http://kong:8000`, a name nothing outside the stack resolves.
+   */
   readonly url: string
+  /**
+   * The project's public address, the gateway URL a browser or an app uses: for links you give to
+   * people (an email, a redirect, a URL in a response). Falls back to `url` when the deployment did
+   * not set `SUPATYPE_PUBLIC_URL`, and the worker warns once at start when it does.
+   */
+  readonly publicUrl: string
   readonly anonKey: string
   /**
    * Present only for a route the project granted it.

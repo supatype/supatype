@@ -11,7 +11,7 @@ import {
 } from "node:fs"
 import { resolve, join, relative, isAbsolute } from "node:path"
 import { spawnSync, execSync } from "node:child_process"
-import { localKongBaseUrl } from "../local-gateway.js"
+import { localKongBaseUrl, localPublicApiUrl } from "../local-gateway.js"
 import { resolveProjectApiUrl } from "../resolve-api-url.js"
 import { loadConfig, rethrowIfConfigBroken } from "../config.js"
 import { ensureBinary } from "../ensure-binary.js"
@@ -35,6 +35,7 @@ import {
   ensureFunctionsDenoTypes,
   sharedFunctionsReadmeSource,
 } from "../functions-deno-types.js"
+import { functionTemplateSource } from "../functions-template.js"
 import { error, info, plain } from "../ui/messages.js"
 import { nextSteps } from "../ui/next-steps.js"
 
@@ -156,33 +157,7 @@ function scaffoldFunction(cwd: string, name: string): void {
 
   mkdirSync(fnDir, { recursive: true })
 
-  const indexContent = `// ${name}, Supatype Edge Function
-
-import type { FunctionContext } from "../_shared/context.ts"
-
-export default async function handler(req: Request, ctx: FunctionContext): Promise<Response> {
-  const { method } = req
-  // From the context, not the environment. Per-invocation values are passed in, which is what lets
-  // the worker run your functions concurrently instead of one at a time.
-  const { url } = ctx
-
-  // Example: read request body for POST requests
-  if (method === "POST") {
-    const body = await req.json()
-    return new Response(JSON.stringify({ message: "Hello from ${name}!", received: body, url }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    })
-  }
-
-  return new Response(JSON.stringify({ message: "Hello from ${name}!", url }), {
-    status: 200,
-    headers: { "Content-Type": "application/json" },
-  })
-}
-`
-
-  writeFileSync(join(fnDir, "index.ts"), indexContent, "utf8")
+  writeFileSync(join(fnDir, "index.ts"), functionTemplateSource(name), "utf8")
 
   // Ensure _shared directory exists
   const sharedDir = resolve(functionsDir, SHARED_DIR)
@@ -324,6 +299,7 @@ async function serve(cwd: string, opts: { port: string; envFile: string }): Prom
         SUPATYPE_DENO_FUNCTIONS_DIR: functionsDir,
         SUPATYPE_SHARED_ENV_FILE: resolve(functionsDir, ENV_LOCAL),
         SUPATYPE_URL: process.env["SUPATYPE_URL"] ?? localKongBaseUrl(),
+        SUPATYPE_PUBLIC_URL: process.env["SUPATYPE_PUBLIC_URL"] ?? localPublicApiUrl(cwd),
         SUPATYPE_ANON_KEY: process.env["SUPATYPE_ANON_KEY"] ?? "",
         SUPATYPE_SERVICE_ROLE_KEY: process.env["SUPATYPE_SERVICE_ROLE_KEY"] ?? "",
       },

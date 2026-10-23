@@ -188,6 +188,32 @@ jobs:
       - name: Test the CLI
         run: pnpm --filter @supatype/cli test
 
+  # The functions worker's own tests: main.ts started as the image starts it, and a function's context
+  # read back over HTTP. Run on the Deno the image is built FROM, read out of the Dockerfile so the
+  # two cannot drift apart: a newer Deno passing would say nothing about the one that ships.
+  functions-worker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the worker image's Deno version
+        id: deno
+        run: |
+          version="$(sed -n 's/^FROM denoland\/deno:[a-z0-9]*-\([0-9][0-9.]*\)$/\1/p' packages/functions-worker/Dockerfile)"
+          if [ -z "$version" ]; then
+            echo "::error::packages/functions-worker/Dockerfile has no denoland/deno:<os>-<version> FROM line"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: ${{ steps.deno.outputs.version }}
+
+      - name: Test the functions worker
+        working-directory: packages/functions-worker
+        run: deno task test
+
   docker:
     runs-on: ubuntu-latest
     steps:

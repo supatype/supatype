@@ -524,6 +524,9 @@ export function registerDev(program: Command): void {
           ? { SUPATYPE_DENO_SERVE_SCRIPT: denoServeScriptAbs }
           : {}),
         SUPATYPE_URL: `http://localhost:${serverPort}`,
+        // Natively the server is the gateway, so the address functions call is the one a browser
+        // opens. The server passes its environment on to the Deno child that runs them.
+        SUPATYPE_PUBLIC_URL: `http://localhost:${serverPort}`,
         SUPATYPE_REALTIME_URL: realtimeUrl,
         SUPATYPE_ANON_KEY: anonKey,
         SUPATYPE_SERVICE_ROLE_KEY: serviceRoleKey,
