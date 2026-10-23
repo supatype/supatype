@@ -56,7 +56,8 @@ export interface StudioFieldAccess {
    */
   tables: TableAccessMap
   /**
-   * Set when the server's answer could not be used (not JSON, refused, or no answer at all). Then
+   * Set when the server's answer could not be used (not JSON, refused, no answer at all, or marked
+   * `fieldAccess: "unavailable"` because the server could not read its schema). Then
    * nothing is known about field rules, so a view looks for a second source rather than showing a
    * possibly withheld value as an empty, editable one. See `useMaskableColumns`.
    */
@@ -69,14 +70,27 @@ const SESSION_PATH = "/studio/session"
 const warned = new WeakSet<object>()
 
 /** One console line saying why field access is unknown, and what to check. */
-function warnUnavailable(client: object, url: string, answered: string): void {
+function warnUnavailable(client: object, url: string, cause: string): void {
   if (warned.has(client)) return
   warned.add(client)
   console.warn(
-    `Supatype Studio: GET ${url} answered ${answered}, not a JSON object, so Studio does not know this user's field access rules. ` +
-      "Values a response says may be masked show a padlock when empty and are left out of saves. " +
-      `Check that the gateway sends ${SESSION_PATH} to the Supatype server rather than to the Studio page.`,
+    `Supatype Studio: GET ${url} ${cause}, so Studio does not know this user's field access rules. ` +
+      "Values a response says may be masked show a padlock when empty and are left out of saves.",
   )
+}
+
+/**
+ * Why the session answer says nothing usable about field rules, in words for the warning, or
+ * undefined when it does. A server that predates the `fieldAccess` marker sends none, and its
+ * answer is read as before.
+ */
+function unavailableCause(answer: Record<string, unknown> | string): string | undefined {
+  if (typeof answer === "string") {
+    return `answered ${answer}, not a JSON object (check that the gateway sends ${SESSION_PATH} to the Supatype server rather than to the Studio page)`
+  }
+  if (answer["fieldAccess"] !== "unavailable") return undefined
+  const reason = answer["fieldAccessReason"]
+  return `said field access is unavailable: ${typeof reason === "string" && reason !== "" ? reason : "no reason given"}`
 }
 
 /** The session answer as an object, or what came instead, in words for the warning. */
@@ -92,8 +106,16 @@ async function fetchSession(client: SupatypeClient, url: string): Promise<Record
   return isJsonObject(json) ? json : (res.headers.get("Content-Type") ?? "a body")
 }
 
-/** The session answer as this build reads it. */
+/**
+ * The session answer as this build reads it.
+ *
+ * A server that could not read its schema says `fieldAccess: "unavailable"` and leaves the rules
+ * out, which must not read as "no rules": that is the same unknown as no answer at all.
+ */
 function accessFrom(json: Record<string, unknown>): StudioFieldAccess {
+  if (json["fieldAccess"] === "unavailable") {
+    return { resolved: false, mode: actingModeOf(json["mode"]) ?? "self", fields: {}, tables: {}, unavailable: true }
+  }
   return {
     resolved: true,
     mode: actingModeOf(json["mode"]) ?? "self",
@@ -131,9 +153,9 @@ export function useStudioFieldAccess(): StudioFieldAccess {
 
     void fetchSession(client, url).then((answer) => {
       if (cancelled) return
-      if (typeof answer !== "string") return setState(accessFrom(answer))
-      warnUnavailable(client, url, answer)
-      setState((prev) => ({ ...prev, unavailable: true }))
+      const cause = unavailableCause(answer)
+      if (cause !== undefined) warnUnavailable(client, url, cause)
+      setState(typeof answer === "string" ? (prev) => ({ ...prev, unavailable: true }) : accessFrom(answer))
     })
 
     return () => {

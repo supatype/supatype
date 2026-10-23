@@ -42,9 +42,12 @@ let container: HTMLDivElement
 let root: Root
 let warn: MockInstance<typeof console.warn>
 
+const INDEX_ANSWER = (): Response => new Response(INDEX_HTML, { headers: { "Content-Type": "text/html" } })
+let sessionAnswer: () => Response = INDEX_ANSWER
+
 function serve(): void {
   vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
-    if (input.includes("/studio/session")) return new Response(INDEX_HTML, { headers: { "Content-Type": "text/html" } })
+    if (input.includes("/studio/session")) return sessionAnswer()
     if (input.includes("/studio/auth/verify")) return Response.json({ role: "editor", permissions: { write: true } })
     if (init?.method === "PATCH") {
       const body: unknown = JSON.parse(String(init.body))
@@ -58,6 +61,7 @@ function serve(): void {
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true
   patches = []
+  sessionAnswer = INDEX_ANSWER
   warn = vi.spyOn(console, "warn").mockImplementation(() => {})
   container = document.createElement("div")
   document.body.appendChild(container)
@@ -122,5 +126,72 @@ describe("field access Studio could not read", () => {
     const about = said.filter((line) => line.includes("/studio/session"))
     expect(about).toHaveLength(1)
     expect(about[0]).toContain("text/html, not a JSON object")
+  })
+})
+
+/**
+ * The server now marks a session whose schema it could not read, rather than leaving out the
+ * access keys, which read the same as a schema with no rules. A 200 with the marker is as unknown
+ * as no answer at all.
+ */
+const NO_SCHEMA = "no schema state: push the schema first"
+
+function sessionSaying(marker: Record<string, string>): () => Response {
+  return () => Response.json({ role: "editor", mode: "self", ...marker })
+}
+
+function sessionWarnings(): string[] {
+  return warn.mock.calls.map((call) => String(call[0])).filter((line) => line.includes("/studio/session"))
+}
+
+describe("a session that marks its field access unavailable", () => {
+  beforeEach(() => {
+    sessionAnswer = sessionSaying({ fieldAccess: "unavailable", fieldAccessReason: NO_SCHEMA })
+  })
+
+  it("shows the unknown padlock on the form and leaves the column out of a save", async () => {
+    await render(<EditView model={AUTHOR} recordId="a2" onNavigate={() => {}} />)
+    expect(container.querySelector("#field-email")).toBeNull()
+    expect(container.querySelector(UNKNOWN)).not.toBeNull()
+    const save = [...container.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim() === "Save")
+    await act(async () => save?.click())
+    await settle()
+    expect(patches).toHaveLength(1)
+    expect(patches[0]).not.toHaveProperty("email")
+  })
+
+  it("shows the unknown padlock in the list", async () => {
+    await render(<ListView model={AUTHOR} onNavigate={() => {}} />)
+    expect(container.textContent).toContain("Ada")
+    expect(container.querySelector(UNKNOWN)).not.toBeNull()
+  })
+
+  it("says why once, with the server's reason", async () => {
+    await render(<EditView model={AUTHOR} recordId="a2" onNavigate={() => {}} />)
+    const about = sessionWarnings()
+    expect(about).toHaveLength(1)
+    expect(about[0]).toContain(NO_SCHEMA)
+  })
+})
+
+describe.each([
+  ["marks its field access available", { fieldAccess: "available" }],
+  ["predates the marker", {}],
+])("a session that %s", (_name, marker) => {
+  beforeEach(() => {
+    sessionAnswer = sessionSaying(marker)
+  })
+
+  it("reads as resolved with no rules: an editable input, no padlock and no warning", async () => {
+    await render(<EditView model={AUTHOR} recordId="a2" onNavigate={() => {}} />)
+    expect(container.querySelector("#field-email")).not.toBeNull()
+    expect(container.querySelector(UNKNOWN)).toBeNull()
+    expect(sessionWarnings()).toHaveLength(0)
+  })
+
+  it("shows no padlock in the list", async () => {
+    await render(<ListView model={AUTHOR} onNavigate={() => {}} />)
+    expect(container.textContent).toContain("Ada")
+    expect(container.querySelector(UNKNOWN)).toBeNull()
   })
 })
