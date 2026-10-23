@@ -677,13 +677,15 @@ interface UserRowActions {
 }
 
 function UserRow({ user, access, actions }: { user: AuthUser; access: StudioAccessView; actions: UserRowActions }): React.ReactElement {
-  // A column each on a wide screen, stacked under the email on a phone.
+  // A column each on a wide screen, stacked under the email on a phone. The email gives way first:
+  // it may wrap anywhere, so a long address narrows its own column rather than pushing Actions
+  // past the card's edge.
   const studio = <StudioAccessCell userId={user.id} {...access} />
   const status = user.disabled ? <Badge variant="red">Disabled</Badge> : <Badge variant="green">Active</Badge>
   const mfa = user.mfa_factors.length
   return (
     <tr className="border-b border-border hover:bg-accent/50 cursor-pointer" onClick={actions.open}>
-      <Td className="font-medium">
+      <Td className="font-medium [overflow-wrap:anywhere]">
         {user.email}
         <div className="md:hidden mt-1 flex flex-wrap items-center gap-2 font-normal">{studio}{status}</div>
       </Td>

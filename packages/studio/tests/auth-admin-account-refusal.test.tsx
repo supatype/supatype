@@ -144,6 +144,14 @@ describe("the users table on a phone", () => {
     expect(cells.filter((td) => !td.classList.contains("hidden"))).toHaveLength(2)
   })
 
+  // Fresh-test 3 cosmetic: at 1400px every column showed and the table ran 16px past the card, so
+  // Actions touched its right edge. The email may wrap anywhere, so its column narrows instead.
+  it("lets the email give way, so Actions keeps its padding inside the card", async () => {
+    await render("/auth/users")
+    const email = row(BOB.email).querySelector("td")
+    expect(email?.classList.contains("[overflow-wrap:anywhere]")).toBe(true)
+  })
+
   it("stacks Studio access and status under the email", async () => {
     await render("/auth/users")
     const stacked = row(ADMIN.email).querySelector(`td [class~="${NARROW_ONLY}"]`)
