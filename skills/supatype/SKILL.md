@@ -94,16 +94,20 @@ Omit `versions` in `supatype.config.ts` so Docker pulls `:latest` images.
 ## Client usage
 
 ```typescript
-import { createClient } from "@supatype/client"
-import type { Database } from "./src/lib/database"
+// The generated client, not "@supatype/client": it registers which models keep drafts.
+import { createClient } from "./supatype/generated/client"
 
-const supatype = createClient<Database>({
+const supatype = createClient({
   url: process.env.PUBLIC_SUPATYPE_URL ?? "http://localhost:18473",
   anonKey: process.env.ANON_KEY!,
 })
 
-const { data } = await supatype.from("posts").select("*")
+const { data } = await supatype.from("post").select("*")
 ```
+
+Call `createClient` with no type argument: the generated client already carries the schema's types.
+`createClient<Database>` loses the drafts typing (`update(..., { publish: true })` stops compiling)
+and makes every `rpc(...)` name `never`.
 
 Add `@supatype/client` when wiring a frontend. `supatype dev` applies schema changes locally as you save; `supatype push --env <name>` applies them elsewhere.
 
