@@ -216,12 +216,14 @@ export function createSupatypeClient(req: IncomingMessage, res: ServerResponse) 
   const urlEnv = fw === "vanilla" ? "'YOUR_SUPATYPE_URL'"     : `${envPrefix}SUPATYPE_URL!`
   const keyEnv = fw === "vanilla" ? "'YOUR_SUPATYPE_ANON_KEY'" : `${envPrefix}SUPATYPE_ANON_KEY!`
 
+  // The createClient the CLI generates, which knows the project's types and which models keep
+  // drafts. The bare one from @supatype/client does not, so drafts and RPC names lose their types.
+  const svelte = fw === "svelte"
   return {
-    filename: fw === "svelte" ? "src/lib/supatype.ts" : "utils/supatype.ts",
-    code: `import { createClient } from '@supatype/client'
-import type { Database } from './types/supatype'
+    filename: svelte ? "src/lib/supatype.ts" : "utils/supatype.ts",
+    code: `import { createClient } from '${svelte ? "../.." : ".."}/supatype/generated/client'
 
-export const supatype = createClient<Database>({
+export const supatype = createClient({
   url: ${urlEnv},
   anonKey: ${keyEnv},
 })`,
@@ -453,7 +455,7 @@ export function Posts() {
   }
   return {
     filename: "main.js",
-    code: `import { createClient } from '@supatype/client'
+    code: `import { createClient } from './supatype/generated/client'
 
 const supatype = createClient({
   url: 'YOUR_SUPATYPE_URL',

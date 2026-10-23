@@ -11,8 +11,10 @@ import { previewUrlFor } from "../lib/preview-url.js"
 import { appOrigin } from "../lib/membership-url.js"
 import type { FieldConfig, ModelConfig } from "../config.js"
 import { useAdminConfig } from "../hooks/useAdminConfig.js"
-import { splitEditFields } from "../lib/edit-field-layout.js"
-import { applyFieldAccess, lockedColumns } from "../lib/field-access-layout.js"
+import { readOnlyUnless, splitEditFields } from "../lib/edit-field-layout.js"
+import { useContentWriteOffered } from "../hooks/useContentWriteOffered.js"
+import { applyFieldAccess, lockedColumns, possiblyWithheldColumns, withPossiblyWithheld } from "../lib/field-access-layout.js"
+import { useMaskableColumns } from "../hooks/useMaskableColumns.js"
 import { isOperationOffered, useStudioFieldAccess } from "../hooks/useStudioFieldAccess.js"
 import { useRecordAccess } from "../hooks/useRecordAccess.js"
 import { useStudioCapability } from "../hooks/useStudioCapability.js"
@@ -70,9 +72,14 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
   useBooleanStartValues(model, isCreate, setValues)
   const fieldAccess = useStudioFieldAccess()
   const capability = useStudioCapability()
+  // A viewer reads records: every input read only, and nothing that writes is offered.
+  const canWrite = useContentWriteOffered()
   // What this record lets the caller do where the table-level verdict is `row`: delete it, and read
   // or write each column whose field rule reads the row.
   const recordAccess = useRecordAccess(model, recordId, fieldAccess)
+  // With no field access answer, the columns a response says may be masked: a null in one may be a
+  // withheld value, so it is neither shown as an empty input nor saved.
+  const maskable = useMaskableColumns(model.tableName, fieldAccess.unavailable === true && !isCreate)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   // The required fields a draft being saved leaves empty, while the editor is asked about them.
   const [incomplete, setIncomplete] = useState<FieldConfig[] | null>(null)
@@ -128,7 +135,9 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
     })()
   }, [client, model, recordId, formNonce])
 
-  const locked = isCreate ? [] : lockedColumns(fieldAccess, model.tableName, recordAccess.fields)
+  const locked = isCreate
+    ? []
+    : [...lockedColumns(fieldAccess, model.tableName, recordAccess.fields), ...possiblyWithheldColumns(maskable, values)]
   const { saving, persist } = useRecordPersist(model, recordId, values, refusal, locked)
 
   const handleChange = useCallback((fieldName: string, value: unknown) => {
@@ -212,8 +221,8 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
   // record withholds shows the padlock, one the caller cannot write on it becomes a disabled input,
   // and one no caller can supply is left out of a create form instead of rendered as an input
   // nobody can satisfy.
-  const accessibleMainFields = applyFieldAccess(mainFields, fieldAccess, model.tableName, isCreate, recordAccess.fields)
-  const accessibleMetaFields = applyFieldAccess(metaFields, fieldAccess, model.tableName, isCreate, recordAccess.fields)
+  const accessibleMainFields = readOnlyUnless(canWrite, withPossiblyWithheld(applyFieldAccess(mainFields, fieldAccess, model.tableName, isCreate, recordAccess.fields), maskable, values))
+  const accessibleMetaFields = readOnlyUnless(canWrite, withPossiblyWithheld(applyFieldAccess(metaFields, fieldAccess, model.tableName, isCreate, recordAccess.fields), maskable, values))
 
   const livePreviewConfig = config.livePreview?.[model.name]
   // Where this record renders, or "" when the project named no address for it. Computed once and
@@ -239,7 +248,7 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
   const awaitingFirstSave = isCreate || recordId === undefined
   const title = recordTitle(model, values, currentLocale, defaultLocale)
   const publishing =
-    model.versions?.drafts === true && capability.seesDrafts ? (
+    canWrite && model.versions?.drafts === true && capability.seesDrafts ? (
       <PublishBar
         record={{
           model,
@@ -284,10 +293,10 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
         recordSyncKey={recordId ?? "__create__"}
         slugFollowSource={recordId === undefined}
         saving={saving}
-        onSave={() => { void handleSave() }}
+        {...(canWrite && { onSave: () => { void handleSave() } })}
         isCreate={isCreate}
         {...(Object.keys(fieldErrors).length > 0 && { fieldErrors })}
-        {...(!isCreate && {
+        {...(!isCreate && canWrite && {
           onDuplicate: () => { void handleDuplicate() },
           // Two layers: the table-level verdict withdraws the control where it is settled, and
           // the per-record affordance answers where it is not.

@@ -1,6 +1,6 @@
 import React, { createContext, useContext } from "react"
 import { useStudioCapability } from "../hooks/useStudioCapability.js"
-import { offers } from "../lib/capability-offers.js"
+import { firstNeed, offersAny } from "../lib/capability-offers.js"
 import { roleRefusal, roleRefusalText } from "../lib/role-refusal.js"
 import { EmptyState } from "./EmptyState.js"
 
@@ -9,7 +9,8 @@ import { EmptyState } from "./EmptyState.js"
  * someone do, in words that finish "Your Studio role (editor) can't ...".
  */
 export interface RoleRequirement {
-  needs: string
+  /** The permission, or permissions any one of which opens it. */
+  needs: string | readonly string[]
   activity: string
 }
 
@@ -34,13 +35,13 @@ export function RoleGate({ needs, activity, children }: RoleGateProps): React.Re
   const capability = useStudioCapability()
   if (!capability.settled) return null
   const answer = { needs, activity, role: capability.role }
-  if (!offers(capability, needs)) return <RoleDenied {...answer} />
+  if (!offersAny(capability, needs)) return <RoleDenied {...answer} />
   return <RoleGateContext.Provider value={answer}>{children}</RoleGateContext.Provider>
 }
 
 /** The plain refusal a screen shows in its place. */
 export function RoleDenied({ role, needs, activity }: GateAnswer): React.ReactElement {
-  const refusal = roleRefusal(role, needs, activity)
+  const refusal = roleRefusal(role, firstNeed(needs), activity)
   return <EmptyState title={refusal.headline} description={refusal.ask} />
 }
 
@@ -50,5 +51,5 @@ export function RoleDenied({ role, needs, activity }: GateAnswer): React.ReactEl
  */
 export function useRoleRefusalText(): string {
   const gate = useContext(RoleGateContext)
-  return roleRefusalText(roleRefusal(gate?.role ?? null, gate?.needs ?? "administer", gate?.activity ?? "do this"))
+  return roleRefusalText(roleRefusal(gate?.role ?? null, firstNeed(gate?.needs ?? "administer"), gate?.activity ?? "do this"))
 }

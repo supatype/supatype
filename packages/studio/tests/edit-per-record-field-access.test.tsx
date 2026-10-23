@@ -48,7 +48,7 @@ let root: Root
 function serve(mode: ActingMode): void {
   vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
     if (input.includes("/studio/session")) return Response.json({ mode, fields: FIELDS, access: {} })
-    if (input.includes("/studio/auth/verify")) return Response.json({ role: "editor", seesDrafts: false })
+    if (input.includes("/studio/auth/verify")) return Response.json({ role: "editor", seesDrafts: false, permissions: { write: true } })
     if (init?.method === "PATCH") {
       const body: unknown = JSON.parse(String(init.body))
       if (isJsonObject(body)) patches.push(body)

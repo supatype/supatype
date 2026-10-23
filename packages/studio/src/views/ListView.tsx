@@ -29,6 +29,8 @@ import {
 import { stateLabels } from "../components/PublishBar.js"
 import { RefreshControls } from "../components/RefreshControls.js"
 import { useListFreshness } from "../hooks/useListFreshness.js"
+import { useContentWriteOffered } from "../hooks/useContentWriteOffered.js"
+import { isPossiblyWithheld } from "../lib/field-access-layout.js"
 import { listOrder, modelKeyColumns, withOrder, type ListOrder } from "../lib/list-order.js"
 
 interface ListViewProps {
@@ -44,6 +46,8 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
   const client = useAdminClient()
   const { currentLocale, defaultLocale, locales: projectLocales } = useLocale()
   const fieldAccess = useStudioFieldAccess()
+  // A viewer reads: no Create and no Delete selected, as the record editor offers them no Save.
+  const canWrite = useContentWriteOffered()
   const [rows, setRows] = useState<Record<string, unknown>[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -64,6 +68,9 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
     () => searchColumns(model.fields, model.searchFields, localeKey.split(",")),
     [model.fields, model.searchFields, localeKey],
   )
+
+  // The columns the last read said may be masked (X-Supatype-Masked-Fields).
+  const [maskedColumns, setMaskedColumns] = useState<string[]>([])
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -86,6 +93,7 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
         setError(result.error.message)
       } else {
         setRows((result.data ?? []).filter(isJsonObject))
+        setMaskedColumns((result.meta?.maskedFields ?? []).map((m) => m.column))
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load data")
@@ -95,6 +103,8 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
   }, [client, model, searchable, search, sort, page])
 
   const freshness = useListFreshness(fetchData, { viewKey: `list.${model.name}` })
+  // With no field access answer, a null in a column the read says may be masked is not shown as empty.
+  const maskable = fieldAccess.unavailable === true ? maskedColumns : []
   const rowsFieldAccess = useRowsFieldAccess(model, rows, fieldAccess)
   // The column the rows are in order of, whether the user chose it or the model did.
   const shownSort = sort ?? model.defaultSort ?? null
@@ -170,7 +180,7 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
         actions={
           // Withdrawn only on a settled deny: `row` means some records allow it, and the
           // server is what refuses either way.
-          isOperationOffered(fieldAccess, model.tableName, "create") ? (
+          canWrite && isOperationOffered(fieldAccess, model.tableName, "create") ? (
             <button
               type="button"
               className="st-btn st-btn-primary"
@@ -198,7 +208,7 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
         {selected.size > 0 && (
           <div className="st-bulk-actions">
             <span>{selected.size} selected</span>
-            {isOperationOffered(fieldAccess, model.tableName, "delete") && (
+            {canWrite && isOperationOffered(fieldAccess, model.tableName, "delete") && (
               <Button type="button" variant="destructive" onClick={() => { setConfirmingDelete(true) }}>
                 Delete selected
               </Button>
@@ -283,7 +293,9 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
                     {columns.map((col, index) => (
                       <td key={col.name} className="st-table-cell">
                         <AccessAwareCell
-                          access={cellAccess(fieldAccess, model.tableName, col.name, row[col.name], rowsFieldAccess.get(id))}
+                          access={isPossiblyWithheld(maskable, col.name, row[col.name])
+                            ? "unknown"
+                            : cellAccess(fieldAccess, model.tableName, col.name, row[col.name], rowsFieldAccess.get(id))}
                         >
                           <CellRenderer
                             value={row[col.name]}

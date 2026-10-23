@@ -8,6 +8,7 @@ import { ManualPolicyWarning, PolicyTableList, type PolicyTableActions } from ".
 import { Button } from "../../components/ui.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 import { cellText } from "../metadata-row.js"
+import type { RoleRequirement } from "../../components/RoleGate.js"
 
 type Row = Record<string, unknown>
 
@@ -29,6 +30,13 @@ function forBucket(catalogue: PolicyCatalogue, bucket: string | null): PolicyCat
   const mentions = (p: Row): boolean => cellText(p, "qual").includes(needle) || cellText(p, "with_check").includes(needle)
   return { ...catalogue, grouped: groupByTable([...catalogue.grouped.values()].flat().filter(mentions)) }
 }
+
+/**
+ * Who may open a bucket's Policies tab: whoever reads the schema, and an editor, who works with the
+ * bucket's files and reads the rules that govern them (owner decision on fresh-test C8). Changing
+ * them is still the SQL editor's roles' alone; see `sqlWrites`.
+ */
+export const STORAGE_POLICIES: RoleRequirement = { needs: ["schemaView", "write"], activity: "view access policies" }
 
 export function StoragePoliciesView(): React.ReactElement {
   // Writes go through `/studio-admin`, open to the SQL editor's roles only (RQ4, SQ2).

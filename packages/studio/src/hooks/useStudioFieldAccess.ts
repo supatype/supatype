@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import type { SupatypeClient } from "@supatype/client"
 import { actingModeOf, type ActingMode } from "../lib/acting-mode.js"
 import { isJsonObject } from "../lib/json.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
@@ -54,6 +55,51 @@ export interface StudioFieldAccess {
    * unread: so Studio offered buttons the server would refuse.
    */
   tables: TableAccessMap
+  /**
+   * Set when the server's answer could not be used (not JSON, refused, or no answer at all). Then
+   * nothing is known about field rules, so a view looks for a second source rather than showing a
+   * possibly withheld value as an empty, editable one. See `useMaskableColumns`.
+   */
+  unavailable?: true
+}
+
+const SESSION_PATH = "/studio/session"
+
+/** The clients already warned about, so a page says it once rather than once per view. */
+const warned = new WeakSet<object>()
+
+/** One console line saying why field access is unknown, and what to check. */
+function warnUnavailable(client: object, url: string, answered: string): void {
+  if (warned.has(client)) return
+  warned.add(client)
+  console.warn(
+    `Supatype Studio: GET ${url} answered ${answered}, not a JSON object, so Studio does not know this user's field access rules. ` +
+      "Values a response says may be masked show a padlock when empty and are left out of saves. " +
+      `Check that the gateway sends ${SESSION_PATH} to the Supatype server rather than to the Studio page.`,
+  )
+}
+
+/** The session answer as an object, or what came instead, in words for the warning. */
+async function fetchSession(client: SupatypeClient, url: string): Promise<Record<string, unknown> | string> {
+  let res: Response
+  try {
+    res = await fetch(url, { credentials: "include", headers: { ...studioGatewayHeaders(), ...studioAuthHeaders(client) } })
+  } catch {
+    return "nothing (the request failed)"
+  }
+  if (!res.ok) return `HTTP ${res.status}`
+  const json: unknown = await res.json().catch(() => null)
+  return isJsonObject(json) ? json : (res.headers.get("Content-Type") ?? "a body")
+}
+
+/** The session answer as this build reads it. */
+function accessFrom(json: Record<string, unknown>): StudioFieldAccess {
+  return {
+    resolved: true,
+    mode: actingModeOf(json["mode"]) ?? "self",
+    fields: normaliseFieldAccess(json["fields"]),
+    tables: normaliseTableAccess(json["access"]),
+  }
 }
 
 /**
@@ -63,9 +109,10 @@ export interface StudioFieldAccess {
  * disabled input where a column is readable but not writable, and the absence of a field
  * from a create form where no caller could supply it.
  *
- * **Fails open, deliberately.** If this cannot be read the interface behaves exactly as it
- * did before: the database still refuses what it should, and a save that fails is a far
- * better outcome than an interface that hides a field on the strength of a network error.
+ * **Fails open, deliberately, but not silently.** If this cannot be read no control is withdrawn:
+ * the database still refuses what it should, and a save that fails is a far better outcome than an
+ * interface that hides a field on the strength of a network error. The answer says `unavailable`,
+ * though, and the console says why once, so a value that may be withheld is not shown as empty.
  * That is the same reason nothing here is an authorization decision: the enforcement is the
  * security labels and the query rewrite.
  */
@@ -80,27 +127,14 @@ export function useStudioFieldAccess(): StudioFieldAccess {
 
   useEffect(() => {
     let cancelled = false
+    const url = `${membershipBase(client.url).replace(/\/admin$/, "")}${SESSION_PATH}`
 
-    void (async () => {
-      try {
-        const base = membershipBase(client.url).replace(/\/admin$/, "")
-        const res = await fetch(`${base}/studio/session`, {
-          credentials: "include",
-          headers: { ...studioGatewayHeaders(), ...studioAuthHeaders(client) },
-        })
-        if (!res.ok) return
-        const json = await res.json()
-        if (cancelled || !isJsonObject(json)) return
-        setState({
-          resolved: true,
-          mode: actingModeOf(json["mode"]) ?? "self",
-          fields: normaliseFieldAccess(json["fields"]),
-          tables: normaliseTableAccess(json["access"]),
-        })
-      } catch {
-        // Leave `resolved` false so the UI keeps its unrestricted behaviour.
-      }
-    })()
+    void fetchSession(client, url).then((answer) => {
+      if (cancelled) return
+      if (typeof answer !== "string") return setState(accessFrom(answer))
+      warnUnavailable(client, url, answer)
+      setState((prev) => ({ ...prev, unavailable: true }))
+    })
 
     return () => {
       cancelled = true

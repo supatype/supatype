@@ -40,7 +40,7 @@ let root: Root
 
 function serve(): void {
   vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
-    if (input.includes("/studio/auth/verify")) return Response.json({ role: "admin", seesDrafts: true })
+    if (input.includes("/studio/auth/verify")) return Response.json({ role: "admin", seesDrafts: true, permissions: { write: true } })
     const rpc = /\/rpc\/(\w+)/.exec(input)?.[1]
     if (rpc !== undefined) {
       writes.push(rpc)
