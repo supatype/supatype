@@ -2871,6 +2871,73 @@ function roleNameArg(arg: ts.TypeNode, rule: string, sourceFile: ts.SourceFile):
   return role
 }
 
+/**
+ * Every access rule the parser accepts, with the form it is written in. The parser's switch is
+ * typed against these names, so a rule added to one and not the other does not compile, and the
+ * unknown-rule error lists them from here. A hand-written list there had left out three.
+ */
+const ACCESS_RULE_FORMS = {
+  Public: "Public",
+  Private: "Private",
+  LoggedIn: "LoggedIn",
+  Owner: 'Owner<"field">',
+  OwnerFrom: 'OwnerFrom<"relation">',
+  Role: 'Role<"name">',
+  Any: "Any<[rule, ...]>",
+  All: "All<[rule, ...]>",
+  Not: "Not<rule>",
+  Eq: "Eq<left, right>",
+  Neq: "Neq<left, right>",
+  Gt: "Gt<left, right>",
+  Gte: "Gte<left, right>",
+  Lt: "Lt<left, right>",
+  Lte: "Lte<left, right>",
+  Like: "Like<left, right>",
+  Matches: 'Matches<"column", "pattern">',
+  IsNull: "IsNull<operand>",
+  NotNull: "NotNull<operand>",
+  Exists: "Exists<source>",
+  In: 'In<"column", source>',
+  BucketPublic: "BucketPublic",
+  BucketPrivate: "BucketPrivate",
+  BucketLoggedIn: "BucketLoggedIn",
+  BucketOwner: "BucketOwner",
+  BucketRole: 'BucketRole<"name">',
+} as const
+
+type AccessRuleName = keyof typeof ACCESS_RULE_FORMS
+
+function isAccessRuleName(ref: string): ref is AccessRuleName {
+  return Object.hasOwn(ACCESS_RULE_FORMS, ref)
+}
+
+/** The error for a rule the parser does not know, listing every rule it does. */
+function unknownAccessRuleMessage(ref: string): string {
+  const forms = Object.entries(ACCESS_RULE_FORMS)
+  const listed = (bucket: boolean): string =>
+    forms.filter(([name]) => name.startsWith("Bucket") === bucket).map(([, form]) => form).join(", ")
+  return `Unknown access rule "${ref}". Supported: ${listed(false)} (buckets also accept ${listed(true)}).`
+}
+
+/** A name that is not a built-in rule: a named alias standing for one, or an error naming it. */
+function parseAccessAlias(
+  typeNode: ts.TypeReferenceNode,
+  ref: string,
+  sourceFile: ts.SourceFile,
+  resolveCtx: ResolveContext | undefined,
+  depth: number,
+): Record<string, unknown> {
+  // Possibly parameterised, standing for a rule. Expanded before giving up, so
+  // `SiteAccess<"site_id">` works.
+  if (resolveCtx && depth < 16) {
+    const expanded = resolveAccessAliasNode(typeNode, sourceFile, resolveCtx)
+    if (expanded) return parseAccessRule(expanded, sourceFile, resolveCtx, depth + 1)
+  }
+  // Falling back to `private` here would silently deny an operation the author believed they had
+  // granted, and with deny-by-default there is no longer any need for a permissive guess.
+  throw new Error(unknownAccessRuleMessage(ref))
+}
+
 function parseAccessRule(
   typeNode: ts.TypeNode,
   sourceFile: ts.SourceFile,
@@ -2902,6 +2969,7 @@ function parseAccessRule(
   }
 
   const ref = ownerText(typeNode.typeName, sourceFile)
+  if (!isAccessRuleName(ref)) return parseAccessAlias(typeNode, ref, sourceFile, resolveCtx, depth)
   switch (ref) {
     case "Public":
     case "BucketPublic":
@@ -3083,23 +3151,8 @@ function parseAccessRule(
       }
     }
     default: {
-      // A named alias: possibly parameterised, standing for a rule. Expanded
-      // before giving up, so `SiteAccess<"site_id">` works.
-      if (resolveCtx && depth < 16) {
-        const expanded = resolveAccessAliasNode(typeNode, sourceFile, resolveCtx)
-        if (expanded) return parseAccessRule(expanded, sourceFile, resolveCtx, depth + 1)
-      }
-
-      // Falling back to `private` here would silently deny an operation the
-      // author believed they had granted, and with deny-by-default there is no
-      // longer any need for a permissive guess. Name the offending rule instead.
-      throw new Error(
-        `Unknown access rule "${ref}". Supported: Public, Private, LoggedIn, ` +
-          `Owner<"field">, OwnerFrom<"relation">, Role<"name">, ` +
-          `Any<[rule, …]>, All<[rule, …]>, Not<rule>, ` +
-          `Eq/Neq/Gt/Gte/Lt/Lte/Like<left, right>, IsNull<operand>, NotNull<operand>` +
-          ` (buckets also accept BucketPublic, BucketPrivate, BucketLoggedIn, BucketOwner, BucketRole).`,
-      )
+      const unhandled: never = ref
+      throw new Error(unknownAccessRuleMessage(unhandled))
     }
   }
 }
