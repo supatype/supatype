@@ -17,6 +17,7 @@ import {
 } from "@supatype/shared"
 import { objectAt } from "./ast-read.js"
 import { keepsDrafts } from "./model-versioning.js"
+import { fieldsWithCallerDefaults } from "./owner-default.js"
 
 export interface AstModel {
   name?: string
@@ -180,7 +181,7 @@ function modelLines(model: AstModel, models: AstModel[]): string[] {
   return [
     `    ${quoteKey(resolveTableName(model))}: {`,
     `      Row: ${indent(generateRowType(model.fields), 6)}`,
-    `      Insert: ${indent(generateInsertType(model.fields), 6)}`,
+    `      Insert: ${indent(generateInsertType(fieldsWithCallerDefaults(model)), 6)}`,
     `      Update: ${indent(generateUpdateType(model.fields), 6)}`,
     // Where `update` saves drafts and takes `{ publish: true }`.
     ...(keepsDrafts(model) ? ["      Drafts: true"] : []),

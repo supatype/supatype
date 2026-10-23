@@ -1405,6 +1405,12 @@ export default async function seed(ctx: SeedContext) {
   //   data: { display_name: "Admin" },
   // })
 
+  // A seed cannot create auth users. A field typed SupatypeAuthUserId (an owner such as
+  // comment.user_id) must name a user who already exists, or the database refuses the row.
+  // Create them first, with the auth API (client.auth.signUp) or \`supatype admin create-user\`
+  // (which also makes them Studio members), read their ids with \`supatype admin list-users\`,
+  // and use those ids here.
+
   // Times the database works out, so a fixture calendar is still ahead of whenever an
   // environment is seeded rather than fixed to whenever this file was written:
   //

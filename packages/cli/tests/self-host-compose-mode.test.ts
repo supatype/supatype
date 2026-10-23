@@ -64,11 +64,12 @@ async function run(...args: string[]): Promise<void> {
   await program.parseAsync(["node", "supatype", "self-host", "compose", ...args])
 }
 
+/** A live dev session lock, naming this project's own compose file as `supatype dev` writes it. */
 function holdDevLock(): void {
   mkdirSync(join(projectDir, ".supatype"), { recursive: true })
   writeFileSync(
     join(projectDir, ".supatype", "dev-session.json"),
-    JSON.stringify({ version: 1, composeProject: "supatype-acme", projectRef: "acme", composePath: "x", kongPort: 1, startedAt: "t", pid: process.pid }),
+    JSON.stringify({ version: 1, composeProject: "supatype-acme", projectRef: "acme", composePath: join(projectDir, ".supatype", "self-host", "docker-compose.yml"), kongPort: 1, startedAt: "t", pid: process.pid }),
   )
 }
 

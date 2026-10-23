@@ -9,6 +9,7 @@
  * into the `(req: Request) => Response` contract the worker already discovers and serves.
  */
 import { isNonEmptyObject, objectAt } from "./ast-read.js"
+import { fieldsWithCallerDefaults } from "./owner-default.js"
 import {
   astModelsOf,
   generateInsertType,
@@ -31,7 +32,8 @@ function hookedModels(ast: unknown): HookedModel[] {
       // still appear here or `FieldValidator<"products", ...>` would not compile.
       return isNonEmptyObject(platform?.["hooks"]) || isNonEmptyObject(platform?.["validate"])
     })
-    .map((model) => ({ table: resolveTableName(model), fields: model.fields }))
+    // Fields as the engine writes them: an owner auth user id defaults to the caller (C9).
+    .map((model) => ({ table: resolveTableName(model), fields: fieldsWithCallerDefaults(model) }))
     .sort((a, b) => a.table.localeCompare(b.table))
 }
 

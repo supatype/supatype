@@ -6,11 +6,11 @@
 import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { spawnSync } from "node:child_process"
-import { runDockerCompose } from "./self-host-compose.js"
+import { runDockerCompose, selfHostComposePaths } from "./self-host-compose.js"
 import { projectNameInFile } from "./project-name-override.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
 import { confirm as uiConfirm } from "./ui/confirm.js"
-import { success, warn } from "./ui/messages.js"
+import { info, success, warn } from "./ui/messages.js"
 import { isInteractive } from "./ui/interactive.js"
 import { isNumber, isOneOf, isShape, isString, optional, type Guard } from "@supatype/shared"
 import { readJsonFile } from "./json-file.js"
@@ -44,10 +44,31 @@ export function devSessionLockPath(cwd: string): string {
   return resolve(cwd, ".supatype/dev-session.json")
 }
 
+/**
+ * The lock in this project, only when it was written for this project.
+ *
+ * A folder copied while `supatype dev` runs carries the original's lock, and the copy then took itself
+ * for that dev stack: its renders came out dev, on the original's database port (C4). A lock counts
+ * only when the compose file it names, an absolute path, is this project's own. The compose project
+ * name is not compared: under `--project-name` a live session's name differs from the config's.
+ * A lock from another folder is removed with a one-line note; the original keeps its own.
+ */
 export function readDevSessionLock(cwd: string): DevSessionLock | null {
   const path = devSessionLockPath(cwd)
   if (!existsSync(path)) return null
-  return readJsonFile(path, isDevSessionLock) ?? null
+  const lock = readJsonFile(path, isDevSessionLock) ?? null
+  if (lock === null || lockBelongsTo(lock, cwd)) return lock
+  info(`Ignoring .supatype/dev-session.json: it belongs to the dev stack "${lock.composeProject}" of another folder, not this project. Removed it.`)
+  clearDevSessionLock(cwd)
+  return null
+}
+
+/** A path as compared here: resolved, and case-folded on Windows, whose paths ignore case. */
+const comparablePath = (p: string): string => (process.platform === "win32" ? resolve(p).toLowerCase() : resolve(p))
+
+/** Whether a lock was written by `supatype dev` in the project at `cwd`. */
+function lockBelongsTo(lock: DevSessionLock, cwd: string): boolean {
+  return comparablePath(lock.composePath) === comparablePath(selfHostComposePaths(cwd).composePath)
 }
 
 /**

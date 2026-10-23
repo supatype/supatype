@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { EngineError } from "../src/engine-client.js"
 import { errorMessage } from "../src/error-message.js"
+import type { RenameCandidate } from "../src/engine-client.js"
 
 /**
  * A push that would drop data needs a person's say. `supatype dev` used to push every change with
@@ -15,7 +16,7 @@ vi.mock("../src/ui/messages.js", () => ({
   warn: (line: string) => lines.push(`warn: ${line}`),
 }))
 
-const { DESTRUCTIVE_CHANGE_HINT, DestructiveChangeRefused, pushConsentingToDestructive } = await import(
+const { DESTRUCTIVE_CHANGE_HINT, PLAIN_DROP_HINT, DestructiveChangeRefused, pushConsentingToDestructive } = await import(
   "../src/destructive-consent.js"
 )
 const { destructiveRefusal } = await import("../src/push-refusal.js")
@@ -275,5 +276,34 @@ describe("the rename offer", () => {
       "Was member.name renamed to member.title? (recorded in supatype/renames.json)",
       "Apply it and lose that data?",
     ])
+  })
+})
+
+/**
+ * C10: every drop refusal began "If you renamed a field: ... this push would drop the column and its
+ * data and add an empty one", though nothing was being added. The rename hint is for a drop the
+ * engine pairs with an add in the same push; a plain drop is worded as one.
+ */
+describe("the drop refusal's wording", () => {
+  const refuse = (renameCandidates: () => Promise<RenameCandidate[]>) =>
+    pushConsentingToDestructive(
+      async () => {
+        throw refusal()
+      },
+      policy,
+      { interactive: () => false, renameCandidates },
+    ).catch((e: unknown) => errorMessage(e))
+
+  it("says a plain drop deletes the data when nothing is added in the same push", async () => {
+    const message = await refuse(async () => [])
+    expect(message).not.toContain("If you renamed a field")
+    expect(message).not.toContain("add an empty one")
+    expect(message).toContain(PLAIN_DROP_HINT)
+    expect(message).toContain("supatype push --yes")
+  })
+
+  it("keeps the rename hint when a column is added in the same push", async () => {
+    const message = await refuse(async () => [{ kind: "column", table: "author", from: "bio", to: "about" }])
+    expect(message).toContain(DESTRUCTIVE_CHANGE_HINT)
   })
 })

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react"
-import { Box } from "ink"
+import { Box, useStdin } from "ink"
 import { PromptPanel } from "../components/PromptPanel.js"
 import { CLACK_CANCEL } from "../runtime/cancel.js"
 import {
@@ -14,7 +14,23 @@ interface FlowAppProps {
   bind: (controller: FlowController) => void
 }
 
+/**
+ * Hold raw mode for as long as the flow is mounted. Without this, Ink turns raw mode off whenever
+ * no prompt is on screen (init scans Docker and ports between two prompts) and on again for the
+ * next one, and the Windows console swallows the first key typed after that switch: a port typed
+ * as 18700 was saved as 8700.
+ */
+function useHeldRawMode(): void {
+  const { isRawModeSupported, setRawMode } = useStdin()
+  useEffect(() => {
+    if (!isRawModeSupported) return undefined
+    setRawMode(true)
+    return () => setRawMode(false)
+  }, [isRawModeSupported, setRawMode])
+}
+
 export function FlowApp({ bind }: FlowAppProps): React.ReactElement {
+  useHeldRawMode()
   const [logLines, setLogLines] = useState<FlowLogLine[]>([])
   const [spinner, setSpinner] = useState<string | null>(null)
   const [prompt, setPrompt] = useState<ActiveFlowPrompt | null>(null)

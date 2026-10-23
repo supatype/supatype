@@ -20,11 +20,27 @@ import { confirm } from "./ui/confirm.js"
 import { isInteractive } from "./ui/interactive.js"
 import { plain, warn } from "./ui/messages.js"
 
-/** What a refused rename means, said with every refusal. */
+/** What a refused rename means, said when the engine pairs the drop with an add in the same push. */
 export const DESTRUCTIVE_CHANGE_HINT =
   "If you renamed a field: renames are applied only when they are recorded, so this push would drop " +
   "the column and its data and add an empty one. Rename it back, or record the rename with " +
   "`supatype rename <table>.<from> <table>.<to>`, to keep the data."
+
+/** What a refused plain drop means: nothing is added in its place. */
+export const PLAIN_DROP_HINT =
+  "This push would delete that data for good. To keep it, put the field back in your schema."
+
+/** Which refusal a person is shown: a table rewrite, a plain drop, or a drop that may be a rename. */
+type RefusalKind = "rewrite" | "drop" | "maybe-rename"
+
+/**
+ * A refused drop may be a rename when the engine pairs it with an add in the same push. Without the
+ * candidates to look at (no dep, or the diff failed) the rename hint is kept, as it was.
+ */
+async function dropRefusalKind(deps: DestructiveConsentDeps): Promise<RefusalKind> {
+  const candidates = await deps.renameCandidates?.().catch(() => undefined)
+  return candidates !== undefined && candidates.length === 0 ? "drop" : "maybe-rename"
+}
 
 /** The changes a diff would make that lose data, one line each. */
 export function destructiveLines(diff: Pick<DiffResult, "operations" | "reconcile">): string[] {
@@ -185,7 +201,7 @@ export async function pushConsentingToDestructive<T>(
     const rewrite = refusal.kind === "rewrite"
     if (rewrite) showRewrite(refusal.count, output)
     else await showDestruction(refusal.count, deps.describe)
-    const message = refusalMessage(output, policy, rewrite)
+    const message = refusalMessage(output, policy, rewrite ? "rewrite" : await dropRefusalKind(deps))
     const interactive = (deps.interactive ?? isInteractive)()
     const ask = deps.ask ?? ((question: string) => confirm(question, { default: false }))
     const renames = rewrite ? { written: 0, hint: [] } : await settleRenames(deps, interactive, ask)
@@ -221,11 +237,11 @@ function showRewrite(count: number, output: string): void {
   for (const line of list?.split("; ") ?? []) plain(`  [!] ${line}`)
 }
 
-function refusalMessage(output: string, policy: DestructiveConsentPolicy, rewrite: boolean): string {
+function refusalMessage(output: string, policy: DestructiveConsentPolicy, kind: RefusalKind): string {
   const engineLine = withoutEngineForceAdvice(
     output.split(/\r?\n/).find((line) => consentRefusal(line) !== null)?.trim() ?? output.trim(),
   )
-  if (rewrite) {
+  if (kind === "rewrite") {
     return [
       `Nothing was applied. ${engineLine}`,
       `To apply it on purpose, at a quiet time for that table, run \`${policy.apply}\`.`,
@@ -233,7 +249,7 @@ function refusalMessage(output: string, policy: DestructiveConsentPolicy, rewrit
   }
   return [
     `Nothing was applied. ${engineLine}`,
-    DESTRUCTIVE_CHANGE_HINT,
+    kind === "drop" ? PLAIN_DROP_HINT : DESTRUCTIVE_CHANGE_HINT,
     `To drop it on purpose, run \`${policy.apply}\`.`,
   ].join("\n")
 }
