@@ -19,6 +19,7 @@ import {
   ensureFunctionsDenoTypes,
   sharedFunctionsReadmeSource,
 } from "../functions-deno-types.js"
+import { functionTemplateSource } from "../functions-template.js"
 import { mergeSupatypePackageJson } from "../init-package-json.js"
 import { parseJsonObject } from "@supatype/shared"
 import { cliPackageVersion } from "../cli-package-version.js"
@@ -794,7 +795,7 @@ function scaffoldHelloFunction(
   dir: string,
   write: (rel: string, content: string) => void,
 ): void {
-  write("functions/hello/index.ts", helloFunctionTemplate())
+  write("functions/hello/index.ts", functionTemplateSource("hello"))
   if (!existsSync(join(dir, "functions/_shared/README.md"))) {
     write("functions/_shared/README.md", sharedFunctionsReadmeSource())
   }
@@ -1418,34 +1419,6 @@ export default async function seed(ctx: SeedContext) {
 }
 `
 }
-
-function helloFunctionTemplate(): string {
-  return `// hello: Supatype Edge Function
-
-import type { FunctionContext } from "../_shared/context.ts"
-
-export default async function handler(req: Request, ctx: FunctionContext): Promise<Response> {
-  const { method } = req
-  // From the context, not the environment. Per-invocation values are passed in, which is what lets
-  // the worker run your functions concurrently instead of one at a time.
-  const { url } = ctx
-
-  if (method === "POST") {
-    const body = await req.json()
-    return new Response(JSON.stringify({ message: "Hello from hello!", received: body, url }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    })
-  }
-
-  return new Response(JSON.stringify({ message: "Hello from hello!", url }), {
-    status: 200,
-    headers: { "Content-Type": "application/json" },
-  })
-}
-`
-}
-
 
 function functionsEnvLocalTemplate(): string {
   return "# Local environment variables for edge functions\n# These are NOT committed to git\n# Set production env vars via: npx supatype functions env set KEY=value\n"

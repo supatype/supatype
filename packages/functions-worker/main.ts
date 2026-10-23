@@ -90,18 +90,6 @@ function serviceRoleRoutes(): Set<string> {
 }
 
 /**
- * Take the service-role key out of the process environment, returning it for scoped re-injection.
- *
- * **Before handlers are imported**, which is the whole point: a handler's module body runs at import
- * time, so a key still in `Deno.env` then is a key any handler can copy and keep. Withholding it
- * afterwards would be theatre.
- *
- * The default is now "no admin credential". A function is a public endpoint, anyone holding the anon
- * key can invoke one, and an ambient service-role key made every one of them able to read and write
- * past every access rule in the schema. Opting in is a line in `supatype.config.ts`, which is
- * reviewable; ambient privilege is not.
- */
-/**
  * Whether a route may see the service-role key.
  *
  * **Hooks: yes.** A hook is procedural, only the API server calls it, around a write the caller was
@@ -118,6 +106,18 @@ function serviceRoleGranted(route: string): boolean {
   return serviceRoleAllowed.has(route)
 }
 
+/**
+ * Take the service-role key out of the process environment, returning it for scoped re-injection.
+ *
+ * **Before handlers are imported**, which is the whole point: a handler's module body runs at import
+ * time, so a key still in `Deno.env` then is a key any handler can copy and keep. Withholding it
+ * afterwards would be theatre.
+ *
+ * The default is now "no admin credential". A function is a public endpoint, anyone holding the anon
+ * key can invoke one, and an ambient service-role key made every one of them able to read and write
+ * past every access rule in the schema. Opting in is a line in `supatype.config.ts`, which is
+ * reviewable; ambient privilege is not.
+ */
 function withholdServiceRoleKey(): string {
   const key = Deno.env.get("SUPATYPE_SERVICE_ROLE_KEY") ?? ""
   if (key) Deno.env.delete("SUPATYPE_SERVICE_ROLE_KEY")
@@ -334,6 +334,27 @@ function stackOrigin(): string | null {
   }
 }
 
+/**
+ * The project's public address, handed to every function as `ctx.publicUrl` (see FunctionContext).
+ *
+ * Read once, at start: it never differs between invocations, and a deployment that left it unset
+ * should be told once rather than on every call. The fallback is `ctx.url`, which under compose is
+ * an in-stack name, so a link built from it would reach nobody; the warning says so.
+ */
+function resolvePublicUrl(): string {
+  const configured = (Deno.env.get("SUPATYPE_PUBLIC_URL") ?? "").trim()
+  if (configured !== "") return configured
+  const internal = Deno.env.get("SUPATYPE_URL") ?? ""
+  log(
+    "warn",
+    "SUPATYPE_PUBLIC_URL is not set, so ctx.publicUrl falls back to ctx.url " +
+      `(${internal || "unset"}), which may be an address only this stack can reach`,
+  )
+  return internal
+}
+
+const publicUrl = resolvePublicUrl()
+
 
 // `onListen` is supplied so Deno does not print its own "Listening on …" line. That line goes to
 // stderr, which this worker's patched console reports as `level: "error"`, and on cloud `level` is
@@ -378,6 +399,7 @@ Deno.serve({
     executionId: crypto.randomUUID(),
     functionName: fnName,
     url: Deno.env.get("SUPATYPE_URL") ?? "",
+    publicUrl,
     anonKey: Deno.env.get("SUPATYPE_ANON_KEY") ?? "",
     // From the closure, not the environment: the key was withheld before any handler was imported,
     // and only a route the project granted it receives it here.

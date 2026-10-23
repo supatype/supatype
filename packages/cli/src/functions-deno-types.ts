@@ -135,8 +135,17 @@ export interface FunctionContext {
   readonly executionId: string
   /** The function or hook route being served. */
   readonly functionName: string
-  /** The project's API base URL, reachable from inside the function. */
+  /**
+   * The project's API base URL, reachable from inside the function: for calling the API. Under
+   * Docker it is an in-stack name (http://kong:8000) that a browser cannot open.
+   */
   readonly url: string
+  /**
+   * For links you give to people, such as one in an email, a redirect or a response: the project's
+   * public address, the gateway URL a browser or an app uses. Falls back to url when the deployment
+   * did not set it.
+   */
+  readonly publicUrl: string
   readonly anonKey: string
   /** Present only when the project granted this route the service role. */
   readonly serviceRoleKey?: string

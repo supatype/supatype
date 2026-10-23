@@ -563,8 +563,12 @@ export function renderSelfHostCompose(
   // When TLS is on, default external URLs to https://<domain> so auth links/redirects use HTTPS.
   const externalUrlFallback = tlsEnabled ? `https://${domain}` : "http://localhost:18473"
   const siteUrlFallback = tlsEnabled ? `https://${domain}` : "http://localhost:3000"
+  // The project's public address, as a compose reference: API_EXTERNAL_URL, which `supatype dev`
+  // writes as the gateway's localhost address and a self-host operator sets to their domain. One
+  // expression for every service told its public address, so no two can disagree.
+  const publicApiUrl = `\${API_EXTERNAL_URL:-${externalUrlFallback}}`
   // OAuth providers hang their default callback off the same public URL the server is told it has.
-  const authProviderEnv = composeAuthProviderEnv(config, `\${API_EXTERNAL_URL:-${externalUrlFallback}}`)
+  const authProviderEnv = composeAuthProviderEnv(config, publicApiUrl)
   const studioHostDev = devLocal && hasStudioOverride(config)
   const appEnv = serverAppEnvForCompose(config, devLocal)
   const staticDir = staticDirForCompose(config) ?? "./dist"
@@ -576,7 +580,7 @@ export function renderSelfHostCompose(
   studio:
 ${studioService}
     environment:
-      SUPATYPE_CLOUD_JSON: '${studioRuntimeJson(config, `\${API_EXTERNAL_URL:-${externalUrlFallback}}`)}'
+      SUPATYPE_CLOUD_JSON: '${studioRuntimeJson(config, publicApiUrl)}'
     expose:
       - "3002"
 `
@@ -933,6 +937,9 @@ ${mounts.projectReadOnly}
       # In-compose loopback to Kong (not API_EXTERNAL_URL / localhost, unreachable from this container).
       SUPATYPE_URL: http://kong:8000
       SUPATYPE_INTERNAL_URL: http://kong:8000
+      # ctx.publicUrl: the address a browser or an app uses, for links a function gives to people.
+      # The same value the server is told is its own, never a name only this stack resolves.
+      SUPATYPE_PUBLIC_URL: ${publicApiUrl}
       SUPATYPE_ANON_KEY: \${ANON_KEY:-}
       # Present so the worker can hand it to hooks, which are procedural and unreachable from
       # outside: and to the public functions named below. Withheld from every other handler before
@@ -954,7 +961,7 @@ ${mounts.projectReadOnly}
       SUPATYPE_DB_URL: \${SUPATYPE_FUNCTIONS_DB_URL:-}
       STRIPE_SECRET_KEY: \${STRIPE_SECRET_KEY:-}
       STRIPE_WEBHOOK_SECRET: \${STRIPE_WEBHOOK_SECRET:-}
-      SITE_URL: \${SITE_URL:-\${API_EXTERNAL_URL:-${externalUrlFallback}}}
+      SITE_URL: \${SITE_URL:-${publicApiUrl}}
 ${dbDependency}
 ${realtimeBlock}
   control-plane:
@@ -1017,7 +1024,7 @@ ${mounts.projectState}
       SUPATYPE_POSTGREST_URL: http://postgrest:3000
       SUPATYPE_GRAPHQL_URL: http://postgrest:3000
       SUPATYPE_STORAGE_URL: http://storage:5000
-      SUPATYPE_URL: \${API_EXTERNAL_URL:-${externalUrlFallback}}
+      SUPATYPE_URL: ${publicApiUrl}
       SUPATYPE_ANON_KEY: \${ANON_KEY:-}
       SUPATYPE_SERVICE_ROLE_KEY: \${SERVICE_ROLE_KEY:-}
       SUPATYPE_SQL_DATABASE_URL: "${ownerUrl}"
@@ -1034,7 +1041,7 @@ ${realtimeServerEnv}
 ${appEnv}
       SUPATYPE_API_HOST: 0.0.0.0
       SUPATYPE_API_PORT: 9999
-      SUPATYPE_API_EXTERNAL_URL: \${API_EXTERNAL_URL:-${externalUrlFallback}}
+      SUPATYPE_API_EXTERNAL_URL: ${publicApiUrl}
       # Browser origins allowed besides the site URL: api.corsOrigins, then whatever .env adds.
       # A list saved in Studio replaces both until it is reset. Dev mode allows every origin.
       SUPATYPE_CORS_ALLOW_ORIGINS: "${corsOriginsEnv(config)}"

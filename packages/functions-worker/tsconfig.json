@@ -9,5 +9,5 @@
     "allowImportingTsExtensions": true,
     "skipLibCheck": true
   },
-  "include": ["../../ts-reset.d.ts", "main.ts", "deno.d.ts"]
+  "include": ["../../ts-reset.d.ts", "main.ts", "deno.d.ts", "tests/*.ts"]
 }

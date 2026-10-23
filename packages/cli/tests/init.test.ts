@@ -314,6 +314,8 @@ describe("scaffold()", () => {
     const hello = readFileSync(join(tmpRoot, "functions/hello/index.ts"), "utf8")
     expect(hello).toContain("ctx: FunctionContext")
     expect(hello).not.toContain("Deno.env.get")
+    // The address a browser can open, not the in-stack one a function calls the API on.
+    expect(hello).toContain("const { publicUrl } = ctx")
     const pkg = readFileSync(join(tmpRoot, "package.json"), "utf8")
     expect(pkg).toContain("supatype functions serve")
   })
