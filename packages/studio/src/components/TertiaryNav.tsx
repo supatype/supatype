@@ -3,7 +3,7 @@
 import React from "react"
 import { useNavigate, useLocation } from "react-router-dom"
 import { cn } from "../lib/utils.js"
-import { NAV_RAIL } from "./ui.js"
+import { NAV_RAIL, TextLink } from "./ui.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -288,23 +288,18 @@ export function TertiaryNav({
                 )
               }
               return (
-                <button
+                <TextLink
                   key={item.href}
-                  type="button"
+                  tone="muted"
                   onClick={() => navigate(item.href)}
                   aria-current={active ? "page" : undefined}
-                  className={cn(
-                    "relative h-10 px-3 text-[13px] transition-colors whitespace-nowrap",
-                    active
-                      ? "text-foreground font-medium"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
+                  className={cn("relative h-10 rounded-none px-3 text-[13px] whitespace-nowrap", active && "text-foreground font-medium")}
                 >
                   {item.label}
                   {active && (
                     <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
                   )}
-                </button>
+                </TextLink>
               )
             })}
           </React.Fragment>

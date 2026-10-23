@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react"
 import { cn } from "../lib/utils.js"
-import { Card, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
+import { Card, CodeBlock, Input, Select, Table, Th, Td } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { SlidePanel } from "../components/SlidePanel.js"
 import { UuidCell } from "../components/UuidCell.js"
@@ -218,7 +218,7 @@ export function LogsViewer(): React.ReactElement {
       ) : (
         <>
           <Card className="overflow-auto">
-            <table className="w-full">
+            <Table>
               <thead>
                 <tr className="border-b border-border">
                   <Th>Time</Th>
@@ -278,13 +278,13 @@ export function LogsViewer(): React.ReactElement {
                 ))}
                 {filtered.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="text-center py-8 text-muted-foreground text-sm">
+                    <Td colSpan={8} className="text-center py-8 text-muted-foreground">
                       No logs match your filters
-                    </td>
+                    </Td>
                   </tr>
                 ) : null}
               </tbody>
-            </table>
+            </Table>
           </Card>
 
           <div className="text-xs text-muted-foreground mt-2">

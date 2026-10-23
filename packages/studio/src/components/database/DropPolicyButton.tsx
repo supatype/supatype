@@ -9,9 +9,10 @@ export interface PolicyRef {
 }
 
 /**
- * How Drop looks on every row of a policy table, so the two Policies views read the same. A Drop
- * that only drafts the statement (on a schema the admin routes do not cover) uses it on a plain
- * Button: running the draft is what asks.
+ * How Drop looks on every row of a policy table, so the two Policies views read the same, and on
+ * every row of a Database list. A Drop that only drafts the statement (on a schema the admin routes
+ * do not cover, and every Drop in a Database list) uses it on a plain Button: the draft is what
+ * the user reviews before anything runs.
  */
 export const DROP_LOOK = { size: "xs", variant: "ghost", className: "text-destructive-text hover:text-destructive-text" } as const
 

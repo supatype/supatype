@@ -32,7 +32,7 @@ import {
   readJson,
   readJsonObject,
 } from "../lib/json.js"
-import { Badge, Button, Card, Checkbox, CodeBlock, ConfirmButton, Input, Pager, Select, Th, Td, type DestructiveQuestion } from "../components/ui.js"
+import { Badge, Button, Card, Checkbox, CodeBlock, ConfirmButton, Input, Pager, Select, Table, Textarea, Th, Td, type DestructiveQuestion } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { useRoleRefusalText } from "../components/RoleGate.js"
@@ -248,8 +248,9 @@ function UserForm({
         ) : null}
         <div>
           <label className="block text-[0.8rem] text-muted-foreground mb-1">User Metadata (JSON)</label>
-          <textarea
-            className="w-full px-3 py-1.5 rounded-md border border-border bg-background text-foreground text-sm font-mono focus:outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 min-h-[80px] resize-y"
+          <Textarea
+            aria-label="User metadata (JSON)"
+            className="min-h-[80px] resize-y"
             value={metadataJson}
             onChange={(e) => { setMetadataJson(e.target.value); setError(null) }}
           />
@@ -344,7 +345,7 @@ function UserDetail({
       <div className="mb-6">
         <h4 className="text-sm text-muted-foreground mb-2">Linked Identities</h4>
         <Card className="overflow-auto">
-          <table className="w-full">
+          <Table>
             <thead>
               <tr className="border-b border-border">
                 <Th>Provider</Th>
@@ -361,7 +362,7 @@ function UserDetail({
                 </tr>
               ))}
             </tbody>
-          </table>
+          </Table>
         </Card>
       </div>
 
@@ -370,7 +371,7 @@ function UserDetail({
         <div className="mb-6">
           <h4 className="text-sm text-muted-foreground mb-2">MFA Factors</h4>
           <Card className="overflow-auto">
-            <table className="w-full">
+            <Table>
               <thead>
                 <tr className="border-b border-border">
                   <Th>Type</Th>
@@ -389,7 +390,7 @@ function UserDetail({
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </Table>
           </Card>
         </div>
       ) : null}
@@ -399,7 +400,7 @@ function UserDetail({
         <h4 className="text-sm text-muted-foreground mb-2">Active Sessions ({userSessions.length})</h4>
         {userSessions.length > 0 ? (
           <Card className="overflow-auto">
-            <table className="w-full">
+            <Table>
               <thead>
                 <tr className="border-b border-border">
                   <Th>Device</Th>
@@ -424,7 +425,7 @@ function UserDetail({
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </Table>
           </Card>
         ) : (
           <p className="text-xs text-zinc-600">No active sessions</p>
@@ -1099,7 +1100,7 @@ export function AuthManagement(): React.ReactElement {
 
       {/* User list */}
       <Card className={loading ? "overflow-auto opacity-60 transition-opacity" : "overflow-auto"} aria-busy={loading}>
-        <table className="w-full">
+        <Table>
           <UserTableHead />
           <tbody>
             {filtered.map((u) => (
@@ -1115,13 +1116,13 @@ export function AuthManagement(): React.ReactElement {
             ))}
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={10} className="text-center py-8 text-muted-foreground text-sm">
+                <Td colSpan={10} className="text-center py-8 text-muted-foreground">
                   No users found
-                </td>
+                </Td>
               </tr>
             ) : null}
           </tbody>
-        </table>
+        </Table>
       </Card>
 
       {userPage ? (

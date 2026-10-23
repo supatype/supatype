@@ -37,7 +37,7 @@ describe("the slow query log", () => {
     for (let i = 0; i < 3; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
     expect(sqls.at(-1)).toMatch(/ORDER BY total_exec_time DESC/)
     const mean = Array.from(container.querySelectorAll("th")).find((th) => th.textContent?.startsWith("Mean"))
-    await act(async () => mean?.click())
+    await act(async () => mean?.querySelector("button")?.click())
     for (let i = 0; i < 3; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
     expect(sqls.at(-1)).toMatch(/ORDER BY mean_exec_time DESC/)
   })

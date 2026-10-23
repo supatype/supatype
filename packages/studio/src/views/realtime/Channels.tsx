@@ -1,5 +1,5 @@
 import React from "react"
-import { Badge, Card, Td, Th } from "../../components/ui.js"
+import { Badge, TableCard, Td, Th } from "../../components/ui.js"
 import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 import { useInspectorResource } from "../../hooks/useInspectorResource.js"
@@ -47,23 +47,9 @@ export function ChannelsTable({ data }: { data: ChannelsData }): React.ReactElem
       {data.channels.length === 0 ? (
         <EmptyState title="No channels" description="No client is subscribed to anything right now." />
       ) : (
-        <Card className="overflow-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-border">
-                <Th>Channel</Th>
-                <Th>Subscribers</Th>
-                <Th>Targets</Th>
-                <Th>Presence</Th>
-                <Th>Created</Th>
-                <Th>Last event</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.channels.map((channel) => <ChannelRow key={channel.name} channel={channel} />)}
-            </tbody>
-          </table>
-        </Card>
+        <TableCard head={<><Th>Channel</Th><Th>Subscribers</Th><Th>Targets</Th><Th>Presence</Th><Th>Created</Th><Th>Last event</Th></>}>
+          {data.channels.map((channel) => <ChannelRow key={channel.name} channel={channel} />)}
+        </TableCard>
       )}
       {data.truncated === true && <p className="text-xs text-muted-foreground">Showing the busiest 1000 channels.</p>}
     </div>

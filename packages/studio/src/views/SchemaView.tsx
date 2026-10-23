@@ -18,7 +18,7 @@ import "@xyflow/react/dist/style.css"
 import dagre, { type EdgeLabel, type GraphLabel, type NodeLabel } from "@dagrejs/dagre"
 import { cn } from "../lib/utils.js"
 import { isJsonObject } from "../lib/json.js"
-import { Badge, Button, Card, Th, Td } from "../components/ui.js"
+import { Badge, Button, Card, Input, ListButton, Table, Th, Td } from "../components/ui.js"
 import { useProjectProxy, type SchemaTable } from "../hooks/useProjectProxy.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import { EmptyState } from "../components/EmptyState.js"
@@ -443,13 +443,11 @@ function SchemaSelector({
   return (
     <div ref={wrapperRef} style={{ position: "relative", minWidth: 160, zIndex: 50 }}>
       {/* Trigger */}
-      <button
+      <Button
+        aria-haspopup="listbox"
+        aria-expanded={open}
         onClick={() => { setOpen(o => !o); setSearch("") }}
-        className={cn(
-          "flex items-center gap-2 px-3 py-1.5 rounded border text-sm font-medium transition-colors w-full",
-          "border-border bg-card hover:bg-accent text-foreground",
-          open && "border-primary/50 ring-1 ring-primary/30",
-        )}
+        className={cn("w-full gap-2 bg-card text-sm", open && "border-primary/50 ring-1 ring-primary/30")}
       >
         <span className="text-muted-foreground text-xs shrink-0">schema</span>
         <span className="font-semibold flex-1 text-left truncate">{value}</span>
@@ -459,7 +457,7 @@ function SchemaSelector({
         >
           <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
         </svg>
-      </button>
+      </Button>
 
       {/* Dropdown: absolutely positioned, escapes parent clip via z-index */}
       {open && (
@@ -479,12 +477,13 @@ function SchemaSelector({
             <svg className="w-3.5 h-3.5 text-muted-foreground shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
             </svg>
-            <input
+            <Input
               autoFocus
+              aria-label="Find schema"
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Find schema..."
-              className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/60 outline-none"
+              className="flex-1 border-0 bg-transparent px-0 py-0 placeholder:text-muted-foreground/60 focus:ring-0"
             />
           </div>
 
@@ -494,14 +493,10 @@ function SchemaSelector({
               <p className="px-3 py-2 text-xs text-muted-foreground">No schemas found</p>
             ) : (
               filtered.map(s => (
-                <button
+                <ListButton
                   key={s}
-                  className={cn(
-                    "flex items-center gap-2 w-full px-3 py-2 text-sm text-left transition-colors",
-                    s === value
-                      ? "text-foreground font-medium"
-                      : "text-foreground/80 hover:bg-accent",
-                  )}
+                  selected={s === value}
+                  className="rounded-none"
                   onClick={() => { onChange(s); setOpen(false); setSearch("") }}
                 >
                   <span className="flex-1 truncate">{s}</span>
@@ -510,7 +505,7 @@ function SchemaSelector({
                       <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                     </svg>
                   )}
-                </button>
+                </ListButton>
               ))
             )}
           </div>
@@ -611,18 +606,13 @@ export function SchemaView(): React.ReactElement {
           <div className="w-[200px] flex-shrink-0 overflow-y-auto">
             <Card className="p-1 flex flex-col gap-0.5">
               {tables.map(t => (
-                <button
+                <ListButton
                   key={t.name}
-                  className={cn(
-                    "flex items-center gap-2 w-full px-3 py-2 text-sm rounded-md transition-colors text-left",
-                    t.name === selectedTable
-                      ? "bg-accent text-foreground font-medium"
-                      : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                  )}
+                  selected={t.name === selectedTable}
                   onClick={() => { setSelectedTable(t.name); setSelectedField(null) }}
                 >
                   {t.name}
-                </button>
+                </ListButton>
               ))}
             </Card>
           </div>
@@ -637,7 +627,7 @@ export function SchemaView(): React.ReactElement {
                     <code className="text-xs text-muted-foreground">{currentTable.schema}.{currentTable.name}</code>
                   </div>
                   <Card className="overflow-auto">
-                    <table className="w-full text-sm">
+                    <Table>
                       <thead>
                         <tr className="border-b border-border">
                           <Th>Field</Th><Th>Type</Th><Th>Nullable</Th><Th>Default</Th><Th>Constraints</Th><Th>References</Th>
@@ -668,7 +658,7 @@ export function SchemaView(): React.ReactElement {
                           </tr>
                         ))}
                       </tbody>
-                    </table>
+                    </Table>
                   </Card>
                 </div>
                 {selectedField ? (

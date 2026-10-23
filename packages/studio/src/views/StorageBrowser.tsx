@@ -10,7 +10,7 @@ import { ErrorBanner } from "../components/ErrorBanner.js"
 import { cn } from "../lib/utils.js"
 import { isJsonObject } from "../lib/json.js"
 import { browserSignedUrl, resolveStorageObjectPath, storagePublicUrl } from "../lib/storage-ref.js"
-import { Button, Card, DestructiveAnswers, Dialog, Input, Select, Th, Td } from "../components/ui.js"
+import { Button, Card, Checkbox, DestructiveAnswers, Dialog, Input, Select, Table, TextLink, Th, Td } from "../components/ui.js"
 import { deleteSelection } from "../lib/storage-delete.js"
 import { IconFile, IconFileText, IconFilm, IconFolder, IconImage, IconMusic } from "../components/icons.js"
 import { UuidCell } from "../components/UuidCell.js"
@@ -333,14 +333,12 @@ function CreateBucketDialog({
           autoFocus
           onKeyDown={(e) => { if (e.key === "Enter" && name.trim()) onConfirm(name.trim(), isPublic) }}
         />
-        <label className="flex items-center gap-2 mt-3 text-sm cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={isPublic}
-            onChange={(e) => setIsPublic(e.target.checked)}
-          />
-          Public bucket (files accessible without authentication)
-        </label>
+        <Checkbox
+          className="flex gap-2 mt-3 text-sm text-foreground"
+          label="Public bucket (files accessible without authentication)"
+          checked={isPublic}
+          onChange={(e) => setIsPublic(e.target.checked)}
+        />
         <div className="flex gap-2 justify-end mt-4">
           <Button onClick={onCancel}>Cancel</Button>
           <Button variant="primary" onClick={() => { if (name.trim()) onConfirm(name.trim(), isPublic) }}>Create</Button>
@@ -716,10 +714,11 @@ export function StorageBrowser(): React.ReactElement {
             <Button variant="primary" size="sm" onClick={handleUpload}>Upload Files</Button>
           </>
         ) : null}
-        <input
+        <Input
           ref={fileInputRef}
           type="file"
           multiple
+          aria-label="Files to upload"
           className="hidden"
           onChange={(e) => { if (e.target.files) void handleFileSelect(e.target.files) }}
         />
@@ -788,12 +787,12 @@ export function StorageBrowser(): React.ReactElement {
           ) : viewMode === "list" ? (
             /* List view */
             <Card className="overflow-auto">
-              <table className="w-full">
+              <Table>
                 <thead>
                   <tr className="border-b border-border">
                     <Th className="w-8">
-                      <input
-                        type="checkbox"
+                      <Checkbox
+                        label={<span className="sr-only">Select all</span>}
                         checked={selectedIds.size === filteredFiles.length && filteredFiles.length > 0}
                         onChange={toggleSelectAll}
                       />
@@ -811,11 +810,11 @@ export function StorageBrowser(): React.ReactElement {
                     <tr className="border-b border-border hover:bg-accent/50">
                       <Td />
                       <Td>
-                        <button className="text-sm text-muted-foreground hover:text-foreground" onClick={navigateUp}>
+                        <TextLink tone="muted" aria-label="Up one folder" onClick={navigateUp}>
                           ..
-                        </button>
+                        </TextLink>
                       </Td>
-                      <td colSpan={5} />
+                      <Td colSpan={5} />
                     </tr>
                   ) : null}
                   {filteredFiles.map((f) => (
@@ -827,26 +826,20 @@ export function StorageBrowser(): React.ReactElement {
                       )}
                     >
                       <Td>
-                        <input
-                          type="checkbox"
+                        <Checkbox
+                          label={<span className="sr-only">Select {decodeStorageName(f.name)}</span>}
                           checked={selectedIds.has(f.id)}
                           onChange={() => toggleSelect(f.id)}
                         />
                       </Td>
                       <Td>
                         {f.is_folder ? (
-                          <button
-                            className="font-medium text-primary hover:underline flex items-center gap-1.5"
-                            onClick={() => navigateToFolder(f.name)}
-                          >
+                          <TextLink className="font-medium" onClick={() => navigateToFolder(f.name)}>
                             <EntryIcon file={f} />
                             {decodeStorageName(f.name)}
-                          </button>
+                          </TextLink>
                         ) : (
-                          <button
-                            className="hover:text-primary flex items-center gap-2 text-left min-w-0"
-                            onClick={() => setSelectedFile(f)}
-                          >
+                          <TextLink tone="muted" className="gap-2 text-left min-w-0 text-foreground hover:text-primary" onClick={() => setSelectedFile(f)}>
                             {f.type.startsWith("image/") && currentBucket ? (
                               <StorageImageThumbnail
                                 bucketName={selectedBucket}
@@ -861,7 +854,7 @@ export function StorageBrowser(): React.ReactElement {
                               <EntryIcon file={f} />
                             )}
                             <span className="truncate">{decodeStorageName(f.name)}</span>
-                          </button>
+                          </TextLink>
                         )}
                       </Td>
                       <Td className="text-xs text-muted-foreground">{formatBytes(f.size)}</Td>
@@ -883,16 +876,16 @@ export function StorageBrowser(): React.ReactElement {
                   ))}
                   {filteredFiles.length === 0 && path.length === 0 ? (
                     <tr>
-                      <td colSpan={7}>
+                      <Td colSpan={7}>
                         <EmptyState
                           title="This bucket is empty"
                           {...emptyBucketOffer}
                         />
-                      </td>
+                      </Td>
                     </tr>
                   ) : null}
                 </tbody>
-              </table>
+              </Table>
             </Card>
           ) : (
             /* Grid view */
@@ -915,9 +908,9 @@ export function StorageBrowser(): React.ReactElement {
                   )}
                   onClick={() => f.is_folder ? navigateToFolder(f.name) : setSelectedFile(f)}
                 >
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     className="absolute top-2 left-2"
+                    label={<span className="sr-only">Select {decodeStorageName(f.name)}</span>}
                     checked={selectedIds.has(f.id)}
                     onChange={(e) => { e.stopPropagation(); toggleSelect(f.id) }}
                     onClick={(e) => e.stopPropagation()}

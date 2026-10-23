@@ -97,7 +97,8 @@ async function search(value: string): Promise<void> {
 }
 
 function options(): string[] {
-  return Array.from(container.querySelectorAll("[role=option] .st-relation-option-label")).map((e) => e.textContent ?? "")
+  // Each option is named by its label (aria-labelledby), so this reads what a screen reader says.
+  return Array.from(container.querySelectorAll("[role=option]")).map((o) => document.getElementById(o.getAttribute("aria-labelledby") ?? "")?.textContent ?? "")
 }
 
 async function loadMore(): Promise<void> {

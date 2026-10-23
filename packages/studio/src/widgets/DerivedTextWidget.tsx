@@ -1,8 +1,11 @@
-import React, { useEffect, useLayoutEffect, useRef } from "react"
+import React from "react"
 import type { WidgetProps } from "./FieldWidget.js"
 import { readScalarFromRecord } from "./read-record-scalar.js"
 import { applyComputedTemplate, fieldNamesInComputedTemplate } from "./preview-template.js"
 import { isJsonObject, isString } from "../lib/json.js"
+import { Input, Textarea } from "../components/ui.js"
+import { CharCount, RefillButton } from "./field-parts.js"
+import { useDerivedField } from "./use-derived-field.js"
 
 function isSerializedEditorRoot(v: unknown): v is { root: object } {
   return isJsonObject(v) && typeof v.root === "object" && v.root !== null
@@ -46,140 +49,70 @@ function truncatePreview(joined: string, maxLen: number): string {
   return trimmed.slice(0, Math.max(0, maxLen - 1)).trimEnd() + "…"
 }
 
-export function DerivedTextWidget({
-  config,
-  value,
-  onChange,
-  readOnly,
-  record,
-  currentLocale,
-  defaultLocale,
-  recordSyncKey,
-  slugFollowSource = false,
-}: WidgetProps): React.ReactElement {
+/** What a derived text field is made from, read from its options. */
+interface DerivedSettings {
+  template: string | undefined
+  sources: string[]
+  multiline: boolean
+  /** The fields it reads, named on the refill button. */
+  sourceLabel: string
+  /** The most characters the joined sources are cut to: the field's own limit, or a default. */
+  previewCap: number
+}
+
+function derivedSettings(config: WidgetProps["config"]): DerivedSettings {
   const template = typeof config.options?.["template"] === "string" ? config.options["template"] : undefined
   const rawSources = config.options?.["sources"]
-  const sourcesList = Array.isArray(rawSources) ? rawSources.filter(isString) : []
+  const sources = Array.isArray(rawSources) ? rawSources.filter(isString) : []
   const multiline = config.options?.["multiline"] === true
-
   const sourceLabel = template
     ? fieldNamesInComputedTemplate(template).join(", ").trim() || "template"
-    : sourcesList.length > 0
-      ? sourcesList.join(", ")
-      : "title"
+    : sources.length > 0 ? sources.join(", ") : "title"
+  return { template, sources, multiline, sourceLabel, previewCap: config.validation?.maxLength ?? (multiline ? 2000 : 280) }
+}
 
+/** The text the field's sources make: its template filled in, or its sources joined and cut to size. */
+function derivedText(settings: DerivedSettings, from: Pick<WidgetProps, "record" | "currentLocale" | "defaultLocale">): string {
+  const { record, currentLocale, defaultLocale } = from
+  const getFieldText = (field: string): string => {
+    const v =
+      previewFromDraftField(record, field, currentLocale, defaultLocale)
+      || readScalarFromRecord(record, field, currentLocale, defaultLocale)
+    return String(v ?? "").trim()
+  }
+  if (settings.template) return applyComputedTemplate(settings.template, getFieldText)
+  const joined = (settings.sources.length > 0 ? settings.sources : ["title"])
+    .map(getFieldText)
+    .filter((t) => t.length > 0)
+    .join(" ")
+  return truncatePreview(joined, settings.previewCap)
+}
+
+/** Text made from other fields (a summary, a preview line) until the editor types their own. */
+export function DerivedTextWidget(props: WidgetProps): React.ReactElement {
+  const { config, value, readOnly } = props
+  const settings = derivedSettings(config)
+  const field = useDerivedField(derivedText(settings, props), props)
   const strValue = value === null || value === undefined ? "" : String(value)
   const declaredMax = config.validation?.maxLength
-  const previewCap = declaredMax ?? (multiline ? 2000 : 280)
-
-  const manualRef = useRef(false)
-  const onChangeRef = useRef(onChange)
-  onChangeRef.current = onChange
-
-  const derivePreview = (): string => {
-    const getFieldText = (field: string): string => {
-      const v =
-        previewFromDraftField(record, field, currentLocale, defaultLocale)
-        || readScalarFromRecord(record, field, currentLocale, defaultLocale)
-      return String(v ?? "").trim()
-    }
-    if (template) return applyComputedTemplate(template, getFieldText)
-    const concatFields = sourcesList.length > 0 ? sourcesList : ["title"]
-    const joined = concatFields
-      .map(getFieldText)
-      .filter((t) => t.length > 0)
-      .join(" ")
-    return truncatePreview(joined, previewCap)
+  const typed = {
+    id: `field-${config.name}`,
+    value: strValue,
+    readOnly,
+    required: config.required,
+    maxLength: declaredMax,
+    onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => { field.type(e.target.value) },
   }
 
-  const derived = derivePreview()
-
-  useLayoutEffect(() => {
-    manualRef.current = false
-  }, [recordSyncKey])
-
-  useEffect(() => {
-    // `readOnly` only locks the DOM input; keep syncing derived preview into form state on create so saves include it.
-    if (!slugFollowSource) return
-    if (manualRef.current) return
-    if (derived === strValue) return
-    onChangeRef.current(derived === "" ? null : derived)
-  }, [derived, slugFollowSource, strValue])
-
-  const regenerateLabel = `Refill preview from ${sourceLabel}`
-
-  const fieldId = `field-${config.name}`
-
   return (
-    <div className="st-widget-text st-widget-derived-text">
-      <div className="st-widget-slug-row">
-        {multiline ? (
-          <textarea
-            id={fieldId}
-            className="st-input st-widget-derived-text-multiline"
-            rows={5}
-            value={strValue}
-            readOnly={readOnly}
-            required={config.required}
-            onChange={(e) => {
-              manualRef.current = true
-              onChange(e.target.value === "" ? null : e.target.value)
-            }}
-            maxLength={declaredMax}
-          />
-        ) : (
-          <input
-            id={fieldId}
-            type="text"
-            className="st-input st-widget-slug-input"
-            value={strValue}
-            readOnly={readOnly}
-            required={config.required}
-            onChange={(e) => {
-              manualRef.current = true
-              onChange(e.target.value === "" ? null : e.target.value)
-            }}
-            autoComplete="off"
-            maxLength={declaredMax}
-          />
-        )}
-        {!readOnly ? (
-          <button
-            type="button"
-            className="st-btn-icon st-slug-refresh"
-            aria-label={regenerateLabel}
-            title={regenerateLabel}
-            onClick={() => {
-              manualRef.current = false
-              const next = derivePreview()
-              onChange(next === "" ? null : next)
-            }}
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
-              <path d="M21 3v5h-5" />
-              <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
-              <path d="M8 16H3v5" />
-            </svg>
-          </button>
-        ) : null}
+    <div>
+      <div className="flex w-full items-center gap-2">
+        {settings.multiline
+          ? <Textarea face="prose" className="min-w-0 flex-1" rows={5} {...typed} />
+          : <Input type="text" className="min-w-0 flex-1" autoComplete="off" {...typed} />}
+        {!readOnly ? <RefillButton label={`Refill preview from ${settings.sourceLabel}`} onRefill={field.refill} /> : null}
       </div>
-      {declaredMax !== undefined ? (
-        <span className="st-char-count">
-          {strValue.length} / {declaredMax}
-        </span>
-      ) : null}
+      {declaredMax !== undefined ? <CharCount length={strValue.length} max={declaredMax} /> : null}
     </div>
   )
 }

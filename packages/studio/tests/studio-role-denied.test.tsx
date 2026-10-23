@@ -6,7 +6,7 @@ import React from "react"
 import { MemoryRouter } from "react-router-dom"
 import { StudioCore } from "../src/StudioCore.js"
 import { isArrayOf, isRecordOf, isShape, isString } from "../src/lib/json.js"
-import { act, button, findButton, isolateEachTest, mount, settle, testClient, testConfig, testModel } from "./support.js"
+import { act, button, elementOf, findButton, isolateEachTest, mount, settle, testClient, testConfig, testModel } from "./support.js"
 
 /**
  * What a Studio role sees on a screen it cannot use: one plain sentence naming the role and what it
@@ -47,6 +47,14 @@ function serverFor(role: string): (input: string) => Promise<Response> {
     if (path.endsWith("/metadata")) return Response.json({ rows: [{ max_connections: "100", statement_timeout: "0" }] })
     return Response.json([])
   }
+}
+
+/**
+ * The Settings screen's own tabs. The nav rail also offers a "Database" button (named by its
+ * aria-label when the rail is collapsed), so the tab is looked for where the tabs are.
+ */
+function settingsTabs(page: HTMLElement): HTMLElement {
+  return elementOf(page, '[role="tablist"][aria-label="Settings sections"]', HTMLElement)
 }
 
 async function studioAs(role: string, path: string): Promise<HTMLElement> {
@@ -113,7 +121,7 @@ describe("a viewer, who reads and does not change", () => {
 
   it("reads the database settings, and is told why the credentials are not offered", async () => {
     const page = await studioAs("viewer", "/settings")
-    await act(() => button(page, "Database").click())
+    await act(() => button(settingsTabs(page), "Database").click())
     await settle(8)
     expect(text(page)).toContain("Max Connections")
     expect(text(page)).toContain("Your Studio role (viewer) can't manage the database credentials.")
@@ -122,7 +130,7 @@ describe("a viewer, who reads and does not change", () => {
 
   it("offers a developer the credentials", async () => {
     const page = await studioAs("developer", "/settings")
-    await act(() => button(page, "Database").click())
+    await act(() => button(settingsTabs(page), "Database").click())
     await settle(8)
     expect(findButton(page, "Rotate Password")).toBeDefined()
   })

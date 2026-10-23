@@ -1,5 +1,5 @@
 import React from "react"
-import { Badge, Button, Card, ConfirmButton, Dialog, Td, Th } from "../ui.js"
+import { Badge, Button, Card, ConfirmButton, Dialog, LoadingRows, Table, Td, Th } from "../ui.js"
 import { EmptyState } from "../EmptyState.js"
 import { DROP_LOOK, DropPolicyButton } from "./DropPolicyButton.js"
 import { cellText } from "../../views/metadata-row.js"
@@ -64,7 +64,7 @@ export function PolicyTableCard({ table, actions }: { table: PolicyTableData; ac
         </div>
         {actions ? <RlsToggle table={table.label} enabled={table.rlsEnabled} toggle={actions.toggleRls} /> : null}
       </div>
-      <table className="w-full text-sm table-fixed">
+      <Table className="table-fixed">
         <colgroup>
           <col className="w-[18%]" />
           <col className="w-[11%]" />
@@ -86,7 +86,7 @@ export function PolicyTableCard({ table, actions }: { table: PolicyTableData; ac
         <tbody>
           {table.policies.map((p, index) => <PolicyRow key={`${cellText(p, "policyname")}-${index}`} policy={p} actions={actions} />)}
         </tbody>
-      </table>
+      </Table>
     </Card>
   )
 }
@@ -164,9 +164,7 @@ export interface PolicyListOptions {
 
 /** Every table in the catalogue as a {@link PolicyTableCard}, with its loading and empty states. */
 export function PolicyTableList({ catalogue, options }: { catalogue: PolicyCatalogue; options: PolicyListOptions }): React.ReactElement {
-  if (catalogue.loading) {
-    return <div className="space-y-2">{[1, 2, 3].map((i) => <div key={i} className="h-10 rounded-md bg-muted animate-pulse" />)}</div>
-  }
+  if (catalogue.loading) return <LoadingRows />
   if (catalogue.grouped.size === 0) return <EmptyState title={options.empty.title} description={options.empty.description} />
   return (
     <div className="space-y-4">

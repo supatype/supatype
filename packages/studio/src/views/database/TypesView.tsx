@@ -1,143 +1,164 @@
-import React, { useState } from "react"
+import React, { useCallback, useId, useState } from "react"
 import { useProjectProxy } from "../../hooks/useProjectProxy.js"
 import { useSqlEditorOffered } from "../../hooks/useSqlEditorOffered.js"
 import { useSchemaPicker } from "../../hooks/useSchemaPicker.js"
-import { useApiQuery } from "../../hooks/useApiQuery.js"
-import { Badge, Button, Card } from "../../components/ui.js"
-import { EmptyState } from "../../components/EmptyState.js"
+import { Badge, Button, Card, Dialog, Input, PageHeader, Td, Th, tableRowClass } from "../../components/ui.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
+import { SchemaSelect } from "../../components/database/SchemaSelect.js"
+import { CatalogueTable, DropRowButton, RowActions, useCatalogueRows } from "../../components/database/CatalogueTable.js"
+import { qualifiedName } from "../../lib/sql-identifier.js"
 import { cellText } from "../metadata-row.js"
 
-export function TypesView(): React.ReactElement {
+type Row = Record<string, unknown>
+
+/** Running a type's create or drop on the schema: whether one is running, and why the last failed. */
+interface TypeWrites {
+  busy: boolean
+  error: string | null
+  /** Runs `sql`, refetching the list when it succeeds; resolves to whether it did. */
+  run: (sql: string) => Promise<boolean>
+  clearError: () => void
+}
+
+function useTypeWrites(schema: string, refetch: () => void): TypeWrites {
   const proxy = useProjectProxy()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const run = useCallback(async (sql: string): Promise<boolean> => {
+    setBusy(true)
+    setError(null)
+    try {
+      await proxy.sql(sql, schema)
+      refetch()
+      return true
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      return false
+    } finally {
+      setBusy(false)
+    }
+  }, [proxy, schema, refetch])
+  const clearError = useCallback(() => { setError(null) }, [])
+  return { busy, error, run, clearError }
+}
+
+/** The new enum's name and values as typed; kept while the form is closed, cleared once created. */
+interface EnumDraft {
+  name: string
+  values: string
+  setName: (name: string) => void
+  setValues: (values: string) => void
+  reset: () => void
+}
+
+function useEnumDraft(): EnumDraft {
+  const [name, setName] = useState("")
+  const [values, setValues] = useState("")
+  const reset = useCallback(() => { setName(""); setValues("") }, [])
+  return { name, values, setName, setValues, reset }
+}
+
+/** The CREATE TYPE statement for the draft in `schema`, or null while its name or values are blank. */
+function createEnumSql(schema: string, draft: EnumDraft): string | null {
+  if (!draft.name.trim() || !draft.values.trim()) return null
+  const vals = draft.values.split(",").map((v) => `'${v.trim().replace(/'/g, "''")}'`).join(", ")
+  return `CREATE TYPE ${qualifiedName(schema, draft.name.trim())} AS ENUM (${vals});`
+}
+
+export function TypesView(): React.ReactElement {
   // Writes go through the SQL editor's route, so only its roles are offered them (RQ4).
   const sqlWrites = useSqlEditorOffered()
-  const { schemas, schema, setSchema } = useSchemaPicker()
-  const [newEnumName, setNewEnumName] = useState("")
-  const [newEnumValues, setNewEnumValues] = useState("")
+  const picker = useSchemaPicker()
+  const { schema } = picker
   const [showCreate, setShowCreate] = useState(false)
-  const [runError, setRunError] = useState<string | null>(null)
-  const [runBusy, setRunBusy] = useState(false)
-  const [dropModal, setDropModal] = useState<string | null>(null)
-
-  const { data: types, loading, error, refetch } = useApiQuery(
-    () => proxy.metadata("types", { schema }).then((r) => r.rows),
-    [proxy, schema],
-  )
-
-  async function createEnum() {
-    if (!newEnumName.trim() || !newEnumValues.trim()) return
-    const vals = newEnumValues.split(",").map((v) => `'${v.trim().replace(/'/g, "''")}'`).join(", ")
-    setRunBusy(true)
-    setRunError(null)
-    try {
-      await proxy.sql(`CREATE TYPE ${schema}.${newEnumName.trim()} AS ENUM (${vals});`, schema)
-      setShowCreate(false)
-      setNewEnumName("")
-      setNewEnumValues("")
-      refetch()
-    } catch (e) {
-      setRunError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setRunBusy(false)
-    }
-  }
-
-  async function dropType(name: string) {
-    setRunBusy(true)
-    setRunError(null)
-    try {
-      await proxy.sql(`DROP TYPE ${schema}.${name};`, schema)
-      setDropModal(null)
-      refetch()
-    } catch (e) {
-      setRunError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setRunBusy(false)
-    }
-  }
-
+  const [dropping, setDropping] = useState<string | null>(null)
+  const { data: types, loading, error, refetch } = useCatalogueRows("types", schema)
+  const writes = useTypeWrites(schema, refetch)
+  const draft = useEnumDraft()
+  const create = <Button variant="primary" onClick={() => { setShowCreate(true) }}>Create enum</Button>
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <h1 className="text-xl font-semibold text-foreground">Types</h1>
-          <select value={schema} onChange={(e) => setSchema(e.target.value)} className="px-2 py-1 text-sm rounded-md border border-border bg-background text-foreground focus:outline-none">
-            {(schemas.length > 0 ? schemas : [schema]).map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
-        </div>
-        {sqlWrites ? (<Button variant="primary" onClick={() => setShowCreate(true)}>Create enum</Button>) : null}
-      </div>
-
+      <PageHeader title="Types" scope={<SchemaSelect picker={picker} />} action={sqlWrites ? create : null} />
       {error && <ErrorBanner message={error} />}
-
-      {showCreate && (
-        <Card className="p-4 space-y-3">
-          <h3 className="text-sm font-medium text-foreground">New enum type</h3>
-          <div className="flex gap-2">
-            <div className="flex-1">
-              <label className="block text-xs text-muted-foreground mb-1">Name</label>
-              <input value={newEnumName} onChange={(e) => setNewEnumName(e.target.value)} className="w-full px-3 py-1.5 rounded-md border border-border bg-background text-foreground text-sm focus:outline-none" placeholder="my_status" />
-            </div>
-            <div className="flex-1">
-              <label className="block text-xs text-muted-foreground mb-1">Values (comma-separated)</label>
-              <input value={newEnumValues} onChange={(e) => setNewEnumValues(e.target.value)} className="w-full px-3 py-1.5 rounded-md border border-border bg-background text-foreground text-sm focus:outline-none" placeholder="draft, published, archived" />
-            </div>
-          </div>
-          {runError && <p className="text-xs text-destructive-text">{runError}</p>}
-          <div className="flex gap-2">
-            <Button variant="primary" disabled={runBusy} onClick={() => { void createEnum() }}>{runBusy ? "Creating…" : "Create"}</Button>
-            <Button onClick={() => { setShowCreate(false); setRunError(null) }}>Cancel</Button>
-          </div>
-        </Card>
-      )}
-
-      {loading ? (
-        <div className="space-y-2">{[1, 2, 3].map((i) => <div key={i} className="h-10 rounded-md bg-muted animate-pulse" />)}</div>
-      ) : types?.length === 0 ? (
-        <EmptyState title="No types" description={`No custom types found in schema "${schema}".`} />
-      ) : (
-        <Card>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/40">
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wider">Name</th>
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wider">Kind</th>
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wider">Values</th>
-                <th className="px-4 py-2.5" />
-              </tr>
-            </thead>
-            <tbody>
-              {types?.map((row) => (
-                <tr key={cellText(row, "typname")} className="border-b border-border last:border-0">
-                  <td className="px-4 py-3 font-mono text-sm text-foreground">{cellText(row, "typname")}</td>
-                  <td className="px-4 py-3">
-                    <Badge variant={row["typtype"] === "e" ? "indigo" : "blue"}>{row["typtype"] === "e" ? "enum" : "composite"}</Badge>
-                  </td>
-                  <td className="px-4 py-3 text-xs text-muted-foreground">{(Array.isArray(row["enum_values"]) ? row["enum_values"].join(", ") : "") || "-"}</td>
-                  <td className="px-4 py-3 text-right">
-                    {sqlWrites ? (<button type="button" className="text-xs text-destructive-text hover:underline" onClick={() => setDropModal(cellText(row, "typname"))}>Drop</button>) : null}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Card>
-      )}
-
-      {dropModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-card border border-border rounded-lg p-6 w-full max-w-sm space-y-4 shadow-xl">
-            <h2 className="text-base font-semibold text-foreground">Drop type {dropModal}?</h2>
-            <p className="text-sm text-muted-foreground">This will fail if any column or function references this type.</p>
-            {runError && <p className="text-xs text-destructive-text">{runError}</p>}
-            <div className="flex justify-end gap-2">
-              <Button onClick={() => { setDropModal(null); setRunError(null) }}>Cancel</Button>
-              <Button variant="destructive" disabled={runBusy} onClick={() => { void dropType(dropModal) }}>{runBusy ? "Dropping…" : "Drop"}</Button>
-            </div>
-          </div>
-        </div>
-      )}
+      {showCreate && <EnumForm form={{ schema, draft }} writes={writes} onClose={() => { setShowCreate(false) }} />}
+      <CatalogueTable
+        list={{ rows: types, loading, empty: { title: "No types", description: `No custom types found in schema "${schema}".` } }}
+        head={<><Th>Name</Th><Th>Kind</Th><Th>Values</Th><Th /></>}
+        row={(row) => <TypeRow key={cellText(row, "typname")} row={row} onDrop={sqlWrites ? setDropping : null} />}
+      />
+      {dropping && <DropTypeDialog type={{ schema, name: dropping }} writes={writes} onClose={() => { setDropping(null) }} />}
     </div>
+  )
+}
+
+function TypeRow({ row, onDrop }: { row: Row; onDrop: ((name: string) => void) | null }): React.ReactElement {
+  const isEnum = row["typtype"] === "e"
+  const values = Array.isArray(row["enum_values"]) ? row["enum_values"].join(", ") : ""
+  return (
+    <tr className={tableRowClass(false)}>
+      <Td className="font-mono text-foreground">{cellText(row, "typname")}</Td>
+      <Td><Badge variant={isEnum ? "indigo" : "blue"}>{isEnum ? "enum" : "composite"}</Badge></Td>
+      <Td className="text-xs text-muted-foreground">{values || "-"}</Td>
+      <RowActions>{onDrop ? <DropRowButton onDrop={() => { onDrop(cellText(row, "typname")) }} /> : null}</RowActions>
+    </tr>
+  )
+}
+
+/** The new enum type form: its name, its comma-separated values, and Create. */
+function EnumForm({ form, writes, onClose }: { form: { schema: string; draft: EnumDraft }; writes: TypeWrites; onClose: () => void }): React.ReactElement {
+  const { schema, draft } = form
+  const submit = async (): Promise<void> => {
+    const sql = createEnumSql(schema, draft)
+    if (sql === null) return
+    if (await writes.run(sql)) { onClose(); draft.reset() }
+  }
+  return (
+    <Card className="p-4 space-y-3">
+      <h3 className="text-sm font-medium text-foreground">New enum type</h3>
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <LabelledInput field={{ label: "Name", placeholder: "my_status" }} value={draft.name} onChange={draft.setName} />
+        <LabelledInput field={{ label: "Values (comma-separated)", placeholder: "draft, published, archived" }} value={draft.values} onChange={draft.setValues} />
+      </div>
+      {writes.error && <p className="text-xs text-destructive-text">{writes.error}</p>}
+      <div className="flex gap-2">
+        <Button variant="primary" disabled={writes.busy} onClick={() => { void submit() }}>{writes.busy ? "Creating…" : "Create"}</Button>
+        <Button onClick={() => { onClose(); writes.clearError() }}>Cancel</Button>
+      </div>
+    </Card>
+  )
+}
+
+/** A shared {@link Input} under its label, taking an equal share of the row it sits in. */
+function LabelledInput({ field, value, onChange }: {
+  field: { label: string; placeholder: string }
+  value: string
+  onChange: (value: string) => void
+}): React.ReactElement {
+  const id = useId()
+  const { label, placeholder } = field
+  return (
+    <div className="flex-1 min-w-0">
+      <label htmlFor={id} className="block text-xs text-muted-foreground mb-1">{label}</label>
+      <Input id={id} value={value} onChange={(e) => { onChange(e.target.value) }} placeholder={placeholder} />
+    </div>
+  )
+}
+
+/** Asks before dropping a type, and shows why the drop failed when it does. */
+function DropTypeDialog({ type, writes, onClose }: { type: { schema: string; name: string }; writes: TypeWrites; onClose: () => void }): React.ReactElement {
+  const drop = async (): Promise<void> => {
+    if (await writes.run(`DROP TYPE ${qualifiedName(type.schema, type.name)};`)) onClose()
+  }
+  const actions = (
+    <>
+      <Button onClick={() => { onClose(); writes.clearError() }}>Cancel</Button>
+      <Button variant="destructive" disabled={writes.busy} onClick={() => { void drop() }}>{writes.busy ? "Dropping…" : "Drop"}</Button>
+    </>
+  )
+  return (
+    <Dialog role="alertdialog" title={`Drop type ${type.name}?`} actions={actions}>
+      <p>This will fail if any column or function references this type.</p>
+      {writes.error && <p className="text-xs text-destructive-text">{writes.error}</p>}
+    </Dialog>
   )
 }

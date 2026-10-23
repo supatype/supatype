@@ -2,6 +2,7 @@
 
 import React from "react"
 import type { AdminConfig } from "../config.js"
+import { Button } from "./ui.js"
 
 export type StudioConfigErrorKind = "network" | "not_pushed" | "signed_out" | "unknown"
 
@@ -66,21 +67,13 @@ export function StudioConfigError({
           <p className="text-sm text-muted-foreground whitespace-pre-wrap">{message}</p>
         )}
         <div className="flex flex-col sm:flex-row gap-2 justify-center pt-2">
-          <button
-            type="button"
-            onClick={onRetry}
-            className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
-          >
+          <Button type="button" variant="primary" size="md" className="justify-center" onClick={onRetry}>
             {kind === "signed_out" ? "Sign in again" : "Retry"}
-          </button>
+          </Button>
           {onTryDemo != null && demoConfig != null && (
-            <button
-              type="button"
-              onClick={() => onTryDemo(demoConfig)}
-              className="inline-flex items-center justify-center rounded-md border border-border bg-secondary px-4 py-2 text-sm font-medium text-secondary-foreground hover:bg-accent"
-            >
+            <Button type="button" size="md" className="justify-center" onClick={() => onTryDemo(demoConfig)}>
               Explore with sample data
-            </button>
+            </Button>
           )}
         </div>
         {onTryDemo != null && (

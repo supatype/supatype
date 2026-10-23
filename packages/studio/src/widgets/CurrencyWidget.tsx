@@ -1,5 +1,7 @@
 import React from "react"
 import type { WidgetProps } from "./FieldWidget.js"
+import { Input } from "../components/ui.js"
+import { FieldHint } from "./field-parts.js"
 
 /**
  * Editor for a `Currency<Code>` field, `{ amount, code }` stored as JSONB, where `amount` is a
@@ -40,29 +42,12 @@ export function CurrencyWidget({ config, value, onChange, readOnly }: WidgetProp
   const preview = formatMinorUnits(amount, code)
 
   return (
-    <div className="st-currency-widget flex flex-col gap-1">
+    <div className="flex flex-col">
       <div className="flex gap-2">
-        <input
-          id={`field-${config.name}`}
-          className="st-input flex-1 rounded-md border border-border bg-background px-3 py-2"
-          value={amount}
-          inputMode="numeric"
-          placeholder="minor units, e.g. 1050"
-          readOnly={readOnly}
-          onChange={(e) => onChange?.({ ...current, amount: e.target.value })}
-        />
-        <input
-          className="st-input w-24 rounded-md border border-border bg-background px-3 py-2 uppercase"
-          value={code}
-          placeholder="GBP"
-          maxLength={3}
-          readOnly={readOnly}
-          onChange={(e) => onChange?.({ ...current, code: e.target.value.toUpperCase() })}
-        />
+        <Input id={`field-${config.name}`} className="flex-1" value={amount} inputMode="numeric" placeholder="minor units, e.g. 1050" readOnly={readOnly} onChange={(e) => onChange({ ...current, amount: e.target.value })} />
+        <Input aria-label={`${config.label} currency code`} className="w-24 uppercase" value={code} placeholder="GBP" maxLength={3} readOnly={readOnly} onChange={(e) => onChange({ ...current, code: e.target.value.toUpperCase() })} />
       </div>
-      <p className="st-field-hint text-xs text-muted-foreground">
-        {preview !== null ? `${preview}, stored as ${amount} minor units` : "Amount in minor units"}
-      </p>
+      <FieldHint>{preview !== null ? `${preview}, stored as ${amount} minor units` : "Amount in minor units"}</FieldHint>
     </div>
   )
 }

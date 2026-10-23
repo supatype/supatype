@@ -4,9 +4,8 @@ import { useAdminConfig } from "../hooks/useAdminConfig.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import { useProjectProxy } from "../hooks/useProjectProxy.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
-import { cn } from "../lib/utils.js"
 import { type Guard, isBoolean, isJsonObject, isNumber, isShape, isString, optional, readJson, readJsonObject } from "../lib/json.js"
-import { Badge, Button, Card, CodeBlock, ConfirmButton, Input, Select, Th, Td, type DestructiveQuestion } from "../components/ui.js"
+import { Badge, Button, Card, Checkbox, CodeBlock, ConfirmButton, Input, Select, Table, Tabs, Textarea, Th, Td, type DestructiveQuestion, type TabsSpec } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ConnectionStringPanel } from "../components/database/ConnectionStringPanel.js"
 import { ApiCorsSettings } from "./ApiCorsSettings.js"
@@ -259,10 +258,7 @@ function EnvSettings(): React.ReactElement {
               <label className="block text-[0.8rem] text-muted-foreground mb-1">Value</label>
               <Input value={newValue} onChange={(e) => setNewValue(e.target.value)} placeholder="value" />
             </div>
-            <label className="flex items-center gap-1 text-xs text-muted-foreground pb-1.5">
-              <input type="checkbox" checked={newSensitive} onChange={(e) => setNewSensitive(e.target.checked)} />
-              Sensitive
-            </label>
+            <Checkbox className="pb-1.5" label="Sensitive" checked={newSensitive} onChange={(e) => setNewSensitive(e.target.checked)} />
             <Button variant="primary" onClick={handleAdd}>Add</Button>
             <Button onClick={() => setShowAddForm(false)}>Cancel</Button>
           </div>
@@ -276,7 +272,7 @@ function EnvSettings(): React.ReactElement {
         />
       ) : (
         <Card className="overflow-auto">
-          <table className="w-full">
+          <Table>
             <thead>
               <tr className="border-b border-border">
                 <Th>Key</Th>
@@ -288,11 +284,11 @@ function EnvSettings(): React.ReactElement {
             <tbody>
               {envVars.map((v) => (
                 <tr key={v.key} className="border-b border-border hover:bg-accent/50">
-                  <td className="px-3 py-2 text-sm">
+                  <Td>
                     <code className="text-primary">{v.key}</code>
                     {v.sensitive ? <Badge variant="red" className="ml-1.5 text-[0.5rem]">secret</Badge> : null}
-                  </td>
-                  <td className="px-3 py-2">
+                  </Td>
+                  <Td>
                     {editingKey === v.key ? (
                       <div className="flex gap-1">
                         <Input
@@ -310,13 +306,13 @@ function EnvSettings(): React.ReactElement {
                         {v.sensitive && !revealedKeys.has(v.key) ? "\u2022".repeat(20) : v.value}
                       </code>
                     )}
-                  </td>
-                  <td className="px-3 py-2">
+                  </Td>
+                  <Td>
                     <Badge variant={v.source === "env" ? "blue" : v.source === "config" ? "green" : "yellow"} className="text-[0.6rem]">
                       {v.source}
                     </Badge>
-                  </td>
-                  <td className="px-3 py-2">
+                  </Td>
+                  <Td>
                     <div className="flex gap-1">
                       {v.sensitive ? (
                         <Button size="xs" onClick={() => toggleReveal(v.key)}>
@@ -328,11 +324,11 @@ function EnvSettings(): React.ReactElement {
                         <Button size="xs" variant="destructive" onClick={() => handleDelete(v.key)}>Remove</Button>
                       ) : null}
                     </div>
-                  </td>
+                  </Td>
                 </tr>
               ))}
             </tbody>
-          </table>
+          </Table>
         </Card>
       )}
     </Card>
@@ -463,14 +459,8 @@ function AuthSettings(): React.ReactElement {
       <Card className="p-4">
         <h3>Auth Configuration</h3>
         <div className="flex flex-col gap-4 max-w-[500px] mt-4">
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={emailConfirmation} onChange={(e) => setEmailConfirmation(e.target.checked)} />
-            Require email confirmation
-          </label>
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={autoConfirmDev} onChange={(e) => setAutoConfirmDev(e.target.checked)} />
-            Auto-confirm in development mode
-          </label>
+          <Checkbox className="gap-2 text-sm text-foreground" label="Require email confirmation" checked={emailConfirmation} onChange={(e) => setEmailConfirmation(e.target.checked)} />
+          <Checkbox className="gap-2 text-sm text-foreground" label="Auto-confirm in development mode" checked={autoConfirmDev} onChange={(e) => setAutoConfirmDev(e.target.checked)} />
           <div>
             <label className="block text-[0.8rem] text-muted-foreground mb-1">JWT Expiry (seconds)</label>
             <Input
@@ -484,8 +474,9 @@ function AuthSettings(): React.ReactElement {
             <label className="block text-[0.8rem] text-muted-foreground mb-1">
               Redirect URLs (one per line)
             </label>
-            <textarea
-              className="w-full px-3 py-1.5 rounded-md border border-border bg-background text-foreground text-sm font-mono focus:outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 min-h-[80px] resize-y"
+            <Textarea
+              aria-label="Redirect URLs (one per line)"
+              className="py-1.5 min-h-[80px] resize-y"
               value={redirectUrls}
               onChange={(e) => setRedirectUrls(e.target.value)}
             />
@@ -740,6 +731,12 @@ const SETTINGS_TABS: SettingsTabDef[] = [
   { key: "integrations", label: "Integrations", needs: "administer", activity: "manage integrations" },
 ]
 
+/** The tab bar over the sections. */
+const SETTINGS_TAB_BAR: TabsSpec<SettingsTab> = {
+  label: "Settings sections",
+  items: SETTINGS_TABS.map((t) => ({ id: t.key, label: t.label })),
+}
+
 function SettingsTabBody({ tab, demoMode }: { tab: SettingsTab; demoMode: boolean }): React.ReactElement {
   const client = useStudioClient()
   switch (tab) {
@@ -758,21 +755,8 @@ export function Settings({ demoMode = false }: SettingsProps): React.ReactElemen
 
   return (
     <>
-      <div className="flex border-b border-border mb-4 overflow-x-auto">
-        {SETTINGS_TABS.map((t) => (
-          <button
-            key={t.key}
-            className={cn(
-              "px-4 py-2 text-sm border-b-2 transition-colors whitespace-nowrap",
-              activeTab === t.key
-                ? "text-primary border-primary"
-                : "text-muted-foreground border-transparent hover:text-foreground"
-            )}
-            onClick={() => setActiveTab(t.key)}
-          >
-            {t.label}
-          </button>
-        ))}
+      <div className="mb-4">
+        <Tabs tabs={SETTINGS_TAB_BAR} value={activeTab} onChange={setActiveTab} />
       </div>
       <RoleGate needs={tab.needs} activity={tab.activity}>
         <SettingsTabBody tab={activeTab} demoMode={demoMode} />

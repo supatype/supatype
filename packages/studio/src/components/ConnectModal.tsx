@@ -1,7 +1,7 @@
 import React, { useState } from "react"
 import { cn } from "../lib/utils.js"
 import { SlidePanel } from "./SlidePanel.js"
-import { Badge, Select } from "./ui.js"
+import { Badge, Button, Select, Tabs, type TabItem } from "./ui.js"
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard.js"
 import { ConnectionStringPanel } from "./database/ConnectionStringPanel.js"
 import { IconCheck, IconCopy } from "./icons.js"
@@ -29,15 +29,10 @@ interface ConnectModalProps {
 function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
   const { copied, copy } = useCopyToClipboard()
   return (
-    <button
-      type="button"
-      onClick={() => copy(text)}
-      className="flex items-center gap-1.5 px-2 py-1 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0"
-      aria-label="Copy to clipboard"
-    >
+    <Button type="button" size="xs" variant="ghost" className="shrink-0" onClick={() => copy(text)} aria-label="Copy to clipboard">
       {copied ? <IconCheck /> : <IconCopy />}
       {copied ? "Copied!" : label}
-    </button>
+    </Button>
   )
 }
 
@@ -626,6 +621,33 @@ function McpContent() {
   )
 }
 
+/** One way to connect as a tile: its badge, icon, name and the line under it. */
+function connectTab(t: (typeof TABS)[number], active: boolean): TabItem<Tab> {
+  const badge = t.badge ? TAB_BADGES[t.badge] : null
+  return {
+    id: t.id,
+    label: (
+      <>
+        {badge && (
+          <Badge
+            variant="outline"
+            className={cn(
+              "absolute -top-2 left-1/2 -translate-x-1/2 text-[9px] font-semibold px-1.5 py-px whitespace-nowrap",
+              badge.className,
+              badge.onlyWhenActive && !active && "opacity-0",
+            )}
+          >
+            {badge.label}
+          </Badge>
+        )}
+        <span className={cn("transition-colors", active ? "text-primary" : "")}>{t.icon}</span>
+        <span className="text-[11px] font-medium leading-tight">{t.label}</span>
+        <span className="text-[10px] text-muted-foreground leading-tight hidden sm:block">{t.subtitle}</span>
+      </>
+    ),
+  }
+}
+
 // ── Slide-in panel ────────────────────────────────────────────────────────────
 
 export function ConnectModal({ open, onClose }: ConnectModalProps): React.ReactElement {
@@ -642,38 +664,8 @@ export function ConnectModal({ open, onClose }: ConnectModalProps): React.ReactE
       width="max-w-[460px]"
     >
       {/* Tabs */}
-      <div className="grid grid-cols-3 gap-1.5 -mx-5 -mt-5 px-5 py-3 mb-4 border-b border-border">
-        {TABS.map(t => (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => setTab(t.id)}
-            className={cn(
-              "relative flex flex-col items-center gap-1 rounded-lg border px-1 py-2.5 text-center transition-colors",
-              tab === t.id
-                ? "border-primary/40 bg-primary/10 text-foreground"
-                : "border-border bg-secondary/20 text-muted-foreground hover:bg-secondary/40 hover:text-foreground",
-            )}
-          >
-            {t.badge && (
-              <Badge
-                variant="outline"
-                className={cn(
-                  "absolute -top-2 left-1/2 -translate-x-1/2 text-[9px] font-semibold px-1.5 py-px whitespace-nowrap",
-                  TAB_BADGES[t.badge].className,
-                  TAB_BADGES[t.badge].onlyWhenActive && tab !== t.id && "opacity-0",
-                )}
-              >
-                {TAB_BADGES[t.badge].label}
-              </Badge>
-            )}
-            <span className={cn("transition-colors", tab === t.id ? "text-primary" : "")}>
-              {t.icon}
-            </span>
-            <span className="text-[11px] font-medium leading-tight">{t.label}</span>
-            <span className="text-[10px] text-muted-foreground leading-tight hidden sm:block">{t.subtitle}</span>
-          </button>
-        ))}
+      <div className="-mx-5 -mt-5 px-5 py-3 mb-4 border-b border-border">
+        <Tabs tabs={{ label: "Ways to connect", look: "tile", items: TABS.map((t) => connectTab(t, tab === t.id)) }} value={tab} onChange={setTab} />
       </div>
 
       {/* Content */}

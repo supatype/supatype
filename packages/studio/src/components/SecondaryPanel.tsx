@@ -9,7 +9,7 @@ import type { AdminConfig } from "../config.js"
 import { cn } from "../lib/utils.js"
 import { isJsonObject, isShape, isString, type Guard } from "../lib/json.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
-import { Button, NAV_RAIL } from "./ui.js"
+import { Button, ListButton, NAV_RAIL } from "./ui.js"
 import { IconList } from "./icons.js"
 import { useInspectorAvailability, type InspectorAvailability } from "../hooks/useInspectorAvailability.js"
 import { useStudioCapability } from "../hooks/useStudioCapability.js"
@@ -502,22 +502,16 @@ export function SecondaryPanel({
               }
 
               return (
-                <button
+                <ListButton
                   key={item.href}
-                  type="button"
+                  selected={active}
                   onClick={() => navigate(item.href)}
                   aria-current={active ? "page" : undefined}
-                  className={cn(
-                    "flex items-center w-full px-4 py-1.5 text-left text-[13px] transition-colors",
-                    "hover:bg-accent hover:text-accent-foreground",
-                    active
-                      ? "text-foreground font-medium bg-accent/50"
-                      : "text-muted-foreground",
-                  )}
+                  className="rounded-none px-4 py-1.5 text-[13px]"
                 >
                   {/* One line per entry: a wrapped label reads as a nested item under the one above. */}
                   <span className="min-w-0 truncate" title={item.label}>{item.label}</span>
-                </button>
+                </ListButton>
               )
             })}
           </div>

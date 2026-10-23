@@ -1,5 +1,6 @@
 import React, { useEffect } from "react"
 import type { WidgetProps } from "./FieldWidget.js"
+import { Select } from "../components/ui.js"
 import { stringListOption } from "./field-options.js"
 
 function isEmptySelectValue(value: unknown): boolean {
@@ -21,20 +22,16 @@ export function SelectWidget({ config, value, onChange, readOnly }: WidgetProps)
   }, [readOnly, empty, config.required, options, onChange])
 
   return (
-    <select
+    <Select
       id={`field-${config.name}`}
-      className="st-select"
+      className="w-full"
       value={selectValue}
       onChange={(e) => { onChange(e.target.value || null) }}
       disabled={readOnly}
       required={config.required}
     >
-      {!config.required && <option value="">, Select, </option>}
-      {options.map((opt) => (
-        <option key={opt} value={opt}>
-          {opt}
-        </option>
-      ))}
-    </select>
+      {!config.required && <option value="">Select…</option>}
+      {options.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+    </Select>
   )
 }

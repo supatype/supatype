@@ -7,7 +7,7 @@ import { appOrigin } from "../lib/membership-url.js"
 import { exampleRecord } from "../lib/api-examples.js"
 import { useSendAs } from "../hooks/useSendAs.js"
 import { SendAsField } from "../components/SendAsField.js"
-import { Badge, Button, Card, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
+import { Badge, Button, Card, CodeBlock, Input, Select, Table, Textarea, Th, Td } from "../components/ui.js"
 import type { ModelConfig, FieldConfig, WidgetType } from "../config.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -424,8 +424,9 @@ function TryItPanel({
       {endpoint.method !== "GET" && endpoint.method !== "DELETE" ? (
         <div className="mb-3">
           <label className="block text-[0.7rem] text-muted-foreground uppercase mb-1">Request Body (JSON)</label>
-          <textarea
-            className="w-full px-3 py-1.5 rounded-md border border-border bg-background text-foreground text-xs font-mono focus:outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 min-h-[80px] resize-y"
+          <Textarea
+            aria-label="Request body (JSON)"
+            className="min-h-[80px] resize-y text-xs"
             value={requestBody}
             onChange={(e) => setRequestBody(e.target.value)}
           />
@@ -634,7 +635,7 @@ export function ApiDocs(): React.ReactElement {
                         <>
                           <h4 className="text-xs text-muted-foreground mb-2 uppercase">Parameters</h4>
                           <Card className="overflow-auto mb-4">
-                            <table className="w-full">
+                            <Table>
                               <thead>
                                 <tr className="border-b border-border">
                                   <Th>Name</Th>
@@ -655,7 +656,7 @@ export function ApiDocs(): React.ReactElement {
                                   </tr>
                                 ))}
                               </tbody>
-                            </table>
+                            </Table>
                           </Card>
                         </>
                       ) : null}

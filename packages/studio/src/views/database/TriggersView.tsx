@@ -1,120 +1,82 @@
 import React, { useState } from "react"
-import { useProjectProxy } from "../../hooks/useProjectProxy.js"
 import { useSqlEditorOffered } from "../../hooks/useSqlEditorOffered.js"
 import { useSchemaPicker } from "../../hooks/useSchemaPicker.js"
-import { useApiQuery } from "../../hooks/useApiQuery.js"
-import { Badge, Button, Card, CodeBlock } from "../../components/ui.js"
-import { EmptyState } from "../../components/EmptyState.js"
+import { Badge, Button, CodeBlock, PageHeader, Td, Th, tableRowClass, type BadgeVariant } from "../../components/ui.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 import { SlidePanel } from "../../components/SlidePanel.js"
+import { SchemaSelect } from "../../components/database/SchemaSelect.js"
+import { SqlDraftDialog, useSqlDraft } from "../../components/database/SqlDraftDialog.js"
+import { CatalogueTable, DropRowButton, RowActions, useCatalogueRows } from "../../components/database/CatalogueTable.js"
+import { qualifiedName, quoteIdent } from "../../lib/sql-identifier.js"
 import { cellText } from "../metadata-row.js"
 
+type Row = Record<string, unknown>
+
+const EVENT_VARIANTS: Record<string, BadgeVariant> = { INSERT: "green", UPDATE: "yellow", DELETE: "red" }
+
+const timingVariant = (t: string): BadgeVariant => t === "BEFORE" ? "yellow" : "blue"
+const eventVariant = (e: string): BadgeVariant => EVENT_VARIANTS[e] ?? "blue"
+
+/** What a row offers: open its statement, and (for the SQL editor's roles) drop it. */
+interface TriggerRowActions {
+  select: (row: Row) => void
+  /** Drafts the drop for review; null for a role that may not write. */
+  drop: ((row: Row) => void) | null
+}
+
 export function TriggersView(): React.ReactElement {
-  const proxy = useProjectProxy()
   // Writes go through the SQL editor's route, so only its roles are offered them (RQ4).
   const sqlWrites = useSqlEditorOffered()
-  const { schemas, schema, setSchema } = useSchemaPicker()
-  const [selected, setSelected] = useState<Record<string, unknown> | null>(null)
-  const [sqlModal, setSqlModal] = useState(false)
-  const [sqlText, setSqlText] = useState("")
-  const [runError, setRunError] = useState<string | null>(null)
-  const [runBusy, setRunBusy] = useState(false)
-
-  const { data: triggers, loading, error, refetch } = useApiQuery(
-    () => proxy.metadata("triggers", { schema }).then((r) => r.rows),
-    [proxy, schema],
-  )
-
-  async function runSql() {
-    setRunBusy(true)
-    setRunError(null)
-    try {
-      await proxy.sql(sqlText, schema)
-      setSqlModal(false)
-      refetch()
-    } catch (e) {
-      setRunError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setRunBusy(false)
-    }
+  const picker = useSchemaPicker()
+  const { schema } = picker
+  const [selected, setSelected] = useState<Row | null>(null)
+  const { data: triggers, loading, error, refetch } = useCatalogueRows("triggers", schema)
+  const draft = useSqlDraft(schema, refetch)
+  const drop = (row: Row): void => {
+    draft.open(`DROP TRIGGER ${quoteIdent(cellText(row, "trigger_name"))} ON ${qualifiedName(schema, cellText(row, "event_object_table"))};`)
   }
-
-  const timingVariant = (t: string) => t === "BEFORE" ? "yellow" as const : "blue" as const
-  const eventVariant = (e: string) => ({ INSERT: "green" as const, UPDATE: "yellow" as const, DELETE: "red" as const })[e] ?? "blue" as const
-
+  const actions: TriggerRowActions = { select: setSelected, drop: sqlWrites ? drop : null }
+  const template = `CREATE OR REPLACE TRIGGER my_trigger\nBEFORE INSERT ON ${quoteIdent(schema)}.my_table\nFOR EACH ROW EXECUTE FUNCTION my_function();`
+  const create = <Button variant="primary" onClick={() => { draft.open(template) }}>Create trigger</Button>
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <h1 className="text-xl font-semibold text-foreground">Triggers</h1>
-          <select value={schema} onChange={(e) => setSchema(e.target.value)} className="px-2 py-1 text-sm rounded-md border border-border bg-background text-foreground focus:outline-none">
-            {(schemas.length > 0 ? schemas : [schema]).map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
-        </div>
-        {sqlWrites ? (<Button variant="primary" onClick={() => { setSqlText(`CREATE OR REPLACE TRIGGER my_trigger\nBEFORE INSERT ON ${schema}.my_table\nFOR EACH ROW EXECUTE FUNCTION my_function();`); setSqlModal(true) }}>Create trigger</Button>) : null}
-      </div>
-
+      <PageHeader title="Triggers" scope={<SchemaSelect picker={picker} />} action={sqlWrites ? create : null} />
       {error && <ErrorBanner message={error} />}
-
-      {loading ? (
-        <div className="space-y-2">{[1, 2, 3].map((i) => <div key={i} className="h-10 rounded-md bg-muted animate-pulse" />)}</div>
-      ) : triggers?.length === 0 ? (
-        <EmptyState title="No triggers" description={`No triggers found in schema "${schema}".`} />
-      ) : (
-        <Card>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/40">
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wider">Name</th>
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wider">Table</th>
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wider">Event</th>
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wider">Orientation</th>
-                <th className="px-4 py-2.5" />
-              </tr>
-            </thead>
-            <tbody>
-              {triggers?.map((row, i) => (
-                <tr key={i} className="border-b border-border last:border-0 hover:bg-muted/20 cursor-pointer" onClick={() => setSelected(row)}>
-                  <td className="px-4 py-3 font-mono text-sm text-foreground">{cellText(row, "trigger_name")}</td>
-                  <td className="px-4 py-3 text-muted-foreground text-xs font-mono">{cellText(row, "event_object_table")}</td>
-                  <td className="px-4 py-3 flex gap-1">
-                    <Badge variant={timingVariant(cellText(row, "action_timing"))}>{cellText(row, "action_timing")}</Badge>
-                    <Badge variant={eventVariant(cellText(row, "event_manipulation"))}>{cellText(row, "event_manipulation")}</Badge>
-                  </td>
-                  <td className="px-4 py-3 text-xs text-muted-foreground">{cellText(row, "action_orientation")}</td>
-                  <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
-                    {sqlWrites ? (<button type="button" className="text-xs text-destructive-text hover:underline" onClick={() => { setSqlText(`DROP TRIGGER ${cellText(row, "trigger_name")} ON ${schema}.${cellText(row, "event_object_table")};`); setSqlModal(true) }}>Drop</button>) : null}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Card>
-      )}
-
-      <SlidePanel
-        open={selected !== null}
-        onClose={() => setSelected(null)}
-        title={selected ? cellText(selected, "trigger_name") : ""}
-        subtitle={selected ? `${cellText(selected, "action_timing")} ${cellText(selected, "event_manipulation")} on ${cellText(selected, "event_object_table")}` : undefined}
-        width="max-w-[540px]"
-      >
-        {selected && <CodeBlock>{cellText(selected, "action_statement")}</CodeBlock>}
-      </SlidePanel>
-
-      {sqlModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-card border border-border rounded-lg p-6 w-full max-w-lg space-y-4 shadow-xl">
-            <h2 className="text-base font-semibold text-foreground">SQL</h2>
-            <textarea className="w-full font-mono text-sm px-3 py-2 rounded-md border border-border bg-background text-foreground focus:outline-none min-h-[120px] resize-y" value={sqlText} onChange={(e) => setSqlText(e.target.value)} />
-            {runError && <p className="text-xs text-destructive-text">{runError}</p>}
-            <div className="flex justify-end gap-2">
-              <Button onClick={() => { setSqlModal(false); setRunError(null) }}>Cancel</Button>
-              <Button variant="primary" disabled={runBusy} onClick={() => { void runSql() }}>{runBusy ? "Running…" : "Run SQL"}</Button>
-            </div>
-          </div>
-        </div>
-      )}
+      <CatalogueTable
+        list={{ rows: triggers, loading, empty: { title: "No triggers", description: `No triggers found in schema "${schema}".` } }}
+        head={<><Th>Name</Th><Th>Table</Th><Th>Event</Th><Th>Orientation</Th><Th /></>}
+        row={(row, i) => <TriggerRow key={i} row={row} actions={actions} />}
+      />
+      <StatementPanel trigger={selected} onClose={() => { setSelected(null) }} />
+      <SqlDraftDialog draft={draft} />
     </div>
+  )
+}
+
+function TriggerRow({ row, actions }: { row: Row; actions: TriggerRowActions }): React.ReactElement {
+  const { drop } = actions
+  return (
+    <tr className={tableRowClass(true)} onClick={() => { actions.select(row) }}>
+      <Td className="font-mono text-foreground">{cellText(row, "trigger_name")}</Td>
+      <Td className="text-muted-foreground text-xs font-mono">{cellText(row, "event_object_table")}</Td>
+      <Td>
+        <span className="flex gap-1">
+          <Badge variant={timingVariant(cellText(row, "action_timing"))}>{cellText(row, "action_timing")}</Badge>
+          <Badge variant={eventVariant(cellText(row, "event_manipulation"))}>{cellText(row, "event_manipulation")}</Badge>
+        </span>
+      </Td>
+      <Td className="text-xs text-muted-foreground">{cellText(row, "action_orientation")}</Td>
+      <RowActions>{drop ? <DropRowButton onDrop={() => { drop(row) }} /> : null}</RowActions>
+    </tr>
+  )
+}
+
+/** The selected trigger's statement, in a panel over the list. */
+function StatementPanel({ trigger, onClose }: { trigger: Row | null; onClose: () => void }): React.ReactElement {
+  const on = trigger ? `${cellText(trigger, "action_timing")} ${cellText(trigger, "event_manipulation")} on ${cellText(trigger, "event_object_table")}` : undefined
+  return (
+    <SlidePanel open={trigger !== null} onClose={onClose} title={trigger ? cellText(trigger, "trigger_name") : ""} subtitle={on} width="max-w-[540px]">
+      {trigger && <CodeBlock>{cellText(trigger, "action_statement")}</CodeBlock>}
+    </SlidePanel>
   )
 }

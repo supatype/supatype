@@ -5,7 +5,7 @@ import { useAdminClient } from "../hooks/useAdminClient.js"
 import { useLocale } from "../hooks/useLocale.js"
 import { LivePreviewPane } from "../components/LivePreviewPane.js"
 import { PublishBar } from "../components/PublishBar.js"
-import { Slideover } from "../components/Slideover.js"
+import { SlidePanel } from "../components/SlidePanel.js"
 import { Button, DestructiveAnswers, Dialog } from "../components/ui.js"
 import { previewUrlFor } from "../lib/preview-url.js"
 import { appOrigin } from "../lib/membership-url.js"
@@ -321,7 +321,7 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
         loading a page nobody is looking at.
       */}
       {livePreviewConfig !== undefined && previewUrl !== "" && previewOpen && (
-        <Slideover
+        <SlidePanel
           open={previewOpen}
           onClose={() => { setPreviewOpen(false) }}
           title={`Preview: ${model.label}`}
@@ -332,7 +332,7 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
             model={model}
             awaitingFirstSave={awaitingFirstSave}
           />
-        </Slideover>
+        </SlidePanel>
       )}
     </div>
   )

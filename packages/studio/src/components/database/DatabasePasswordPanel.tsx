@@ -11,6 +11,7 @@
  */
 
 import { useState, useCallback, type FC } from "react"
+import { Button } from "../ui.js"
 
 // -- Types -------------------------------------------------------------------
 
@@ -86,20 +87,18 @@ export const DatabasePasswordPanel: FC<DatabasePasswordPanelProps> = ({
         )}
 
         <div className="flex gap-2">
-          <button
+          <Button
+            variant={confirmReset ? "destructive" : "secondary"}
+            className={confirmReset ? "" : "text-destructive-text"}
             onClick={handleResetPassword}
             disabled={resetting}
-            className="rounded border border-red-300 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
           >
             {resetting ? "Resetting..." : confirmReset ? "Confirm reset" : "Reset database password"}
-          </button>
+          </Button>
           {confirmReset && (
-            <button
-              onClick={() => setConfirmReset(false)}
-              className="rounded border border-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-800"
-            >
+            <Button onClick={() => setConfirmReset(false)}>
               Cancel
-            </button>
+            </Button>
           )}
         </div>
       </div>

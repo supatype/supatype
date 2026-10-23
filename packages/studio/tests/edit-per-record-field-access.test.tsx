@@ -110,9 +110,7 @@ describe("editing a record whose fields are restricted per record", () => {
   it("shows a column this record withholds as the padlock, with no input", async () => {
     await open("self")
     expect(input("phone")).toBeNull()
-    const phone = [...container.querySelectorAll(".st-field")].find(
-      (f) => f.querySelector(".st-field-label")?.textContent === "Phone",
-    )
+    const phone = container.querySelector("label[for=field-phone]")?.parentElement
     expect(phone?.querySelector("[aria-label='Hidden by a field access rule']")).not.toBeNull()
   })
 

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react"
 import { useAdminConfig } from "../hooks/useAdminConfig.js"
 import { useStudioClient } from "../StudioCore.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
-import { Button, Card, CodeBlock, Input } from "../components/ui.js"
+import { Button, Card, CodeBlock, Input, LoadingSettingsCard, Switch } from "../components/ui.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { cn } from "../lib/utils.js"
 import { useRoleRefusalText } from "../components/RoleGate.js"
@@ -124,12 +124,7 @@ export function GraphQLSettings(): React.ReactElement {
       )}
 
       {loading ? (
-        <Card>
-          <div className="px-4 py-3 border-b border-border"><div className="h-4 w-24 rounded bg-muted animate-pulse" /></div>
-          <div className="divide-y divide-border">
-            {[1, 2, 3].map((i) => <div key={i} className="flex justify-between px-4 py-3"><div className="h-4 w-20 rounded bg-muted animate-pulse" /><div className="h-7 w-32 rounded bg-muted animate-pulse" /></div>)}
-          </div>
-        </Card>
+        <LoadingSettingsCard rows={3} />
       ) : null}
 
       {/* Connection */}
@@ -153,23 +148,7 @@ export function GraphQLSettings(): React.ReactElement {
             <code className="text-sm font-mono bg-muted px-2 py-0.5 rounded">pg_graphql</code>
           </SettingRow>
           <SettingRow label="Introspection">
-            <button
-              type="button"
-              role="switch"
-              aria-checked={introspection}
-              onClick={() => { setIntrospection((v) => !v); setSaveError(null) }}
-              className={cn(
-                "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                introspection ? "bg-primary" : "bg-muted-foreground/30",
-              )}
-            >
-              <span
-                className={cn(
-                  "pointer-events-none block h-4 w-4 rounded-full bg-white shadow-sm transition-transform",
-                  introspection ? "translate-x-4" : "translate-x-0",
-                )}
-              />
-            </button>
+            <Switch label="Introspection" checked={introspection} onChange={(on) => { setIntrospection(on); setSaveError(null) }} />
           </SettingRow>
           <SettingRow label="Max query depth">
             <Input

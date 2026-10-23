@@ -1,13 +1,15 @@
 import React, { useState } from "react"
 import { useProjectProxy } from "../../hooks/useProjectProxy.js"
 import { useSchemaPicker } from "../../hooks/useSchemaPicker.js"
-import { useApiQuery } from "../../hooks/useApiQuery.js"
-import { Badge, Card, CodeBlock, Td, Th } from "../../components/ui.js"
-import { EmptyState } from "../../components/EmptyState.js"
+import { Badge, CodeBlock, PageHeader, Td, Th, tableRowClass } from "../../components/ui.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 import { SlidePanel } from "../../components/SlidePanel.js"
+import { SchemaSelect } from "../../components/database/SchemaSelect.js"
+import { CatalogueTable, useCatalogueRows } from "../../components/database/CatalogueTable.js"
 import { INDEX_KINDS, isOwned, useOwnedObjects } from "../../lib/owned-objects.js"
 import { cellText, cellTextOrNull } from "../metadata-row.js"
+
+type Row = Record<string, unknown>
 
 /**
  * Every index the database holds, whether or not Supatype declared it.
@@ -22,109 +24,26 @@ import { cellText, cellTextOrNull } from "../metadata-row.js"
  */
 export function IndexesView(): React.ReactElement {
   const proxy = useProjectProxy()
-  const { schemas, schema, setSchema } = useSchemaPicker()
+  const picker = useSchemaPicker()
+  const { schema } = picker
   const { owned, error: ownedError } = useOwnedObjects(proxy, schema)
-  const [selected, setSelected] = useState<Record<string, unknown> | null>(null)
-
-  const { data: indexes, loading, error } = useApiQuery(
-    () => proxy.metadata("indexes", { schema }).then((r) => r.rows),
-    [proxy, schema],
-  )
-
+  const [selected, setSelected] = useState<Row | null>(null)
+  const { data: indexes, loading, error } = useCatalogueRows("indexes", schema)
+  const isSupatype = (row: Row): boolean => isOwned(owned, INDEX_KINDS, row["table_name"], row["index_name"], row["comment"])
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3">
-        <h1 className="text-xl font-semibold text-foreground">Indexes</h1>
-        <select
-          value={schema}
-          onChange={(e) => setSchema(e.target.value)}
-          className="px-2 py-1 text-sm rounded-md border border-border bg-background text-foreground focus:outline-none"
-        >
-          {(schemas.length > 0 ? schemas : [schema]).map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
-      </div>
-
+      <PageHeader title="Indexes" scope={<SchemaSelect picker={picker} />} />
       {error && <ErrorBanner message={error} />}
       {/* Without the ledger read every badge would be missing, which reads as "nothing is Supatype's". */}
       {ownedError && <ErrorBanner message={`Could not read which objects are Supatype's: ${ownedError}`} />}
-
-      {loading ? (
-        <div className="space-y-2">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-10 rounded-md bg-muted animate-pulse" />
-          ))}
-        </div>
-      ) : indexes?.length === 0 ? (
-        <EmptyState title="No indexes" description={`No indexes found in schema "${schema}".`} />
-      ) : (
-        <Card>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border bg-muted/40">
-                  <Th className="px-4 py-2.5">Name</Th>
-                  <Th className="px-4 py-2.5">Table</Th>
-                  <Th className="px-4 py-2.5">Columns</Th>
-                  <Th className="px-4 py-2.5">Type</Th>
-                  <Th className="px-4 py-2.5">Size</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {indexes?.map((row, i) => (
-                  <tr
-                    key={i}
-                    className="border-b border-border last:border-0 hover:bg-muted/20 cursor-pointer"
-                    onClick={() => setSelected(row)}
-                  >
-                    <Td className="px-4 py-3 font-mono">
-                      {cellText(row, "index_name")}
-                      {/* Says who owns it. An index without this badge is one a push will not
-                          maintain and will not drop, which is worth knowing before editing it. */}
-                      {isOwned(owned, INDEX_KINDS, row["table_name"], row["index_name"], row["comment"]) && (
-                        <Badge variant="indigo" className="ml-2">
-                          supatype
-                        </Badge>
-                      )}
-                    </Td>
-                    <Td className="px-4 py-3 text-muted-foreground text-xs font-mono">
-                      {cellText(row, "table_name")}
-                    </Td>
-                    <Td className="px-4 py-3 text-muted-foreground text-xs font-mono">
-                      {cellTextOrNull(row, "columns") ?? "-"}
-                    </Td>
-                    <Td className="px-4 py-3">
-                      <span className="text-xs text-muted-foreground uppercase">
-                        {cellText(row, "method")}
-                      </span>
-                      {row["is_primary"] === true && (
-                        <Badge variant="indigo" className="ml-2">
-                          PK
-                        </Badge>
-                      )}
-                      {row["is_unique"] === true && row["is_primary"] !== true && (
-                        <Badge variant="green" className="ml-2">
-                          unique
-                        </Badge>
-                      )}
-                    </Td>
-                    <Td className="px-4 py-3 text-xs text-muted-foreground">
-                      {cellText(row, "size")}
-                    </Td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      )}
-
+      <CatalogueTable
+        list={{ rows: indexes, loading, empty: { title: "No indexes", description: `No indexes found in schema "${schema}".` } }}
+        head={<><Th>Name</Th><Th>Table</Th><Th>Columns</Th><Th>Type</Th><Th>Size</Th></>}
+        row={(row, i) => <IndexRow key={i} row={row} owned={isSupatype(row)} onSelect={setSelected} />}
+      />
       <SlidePanel
         open={selected !== null}
-        onClose={() => setSelected(null)}
+        onClose={() => { setSelected(null) }}
         title={selected ? cellText(selected, "index_name") : ""}
         subtitle={selected ? `on ${cellText(selected, "table_name")}` : undefined}
         width="max-w-[540px]"
@@ -132,5 +51,26 @@ export function IndexesView(): React.ReactElement {
         {selected && <CodeBlock>{cellText(selected, "definition")}</CodeBlock>}
       </SlidePanel>
     </div>
+  )
+}
+
+function IndexRow({ row, owned, onSelect }: { row: Row; owned: boolean; onSelect: (row: Row) => void }): React.ReactElement {
+  return (
+    <tr className={tableRowClass(true)} onClick={() => { onSelect(row) }}>
+      <Td className="font-mono">
+        {cellText(row, "index_name")}
+        {/* Says who owns it. An index without this badge is one a push will not maintain and will
+            not drop, which is worth knowing before editing it. */}
+        {owned && <Badge variant="indigo" className="ml-2">supatype</Badge>}
+      </Td>
+      <Td className="text-muted-foreground text-xs font-mono">{cellText(row, "table_name")}</Td>
+      <Td className="text-muted-foreground text-xs font-mono">{cellTextOrNull(row, "columns") ?? "-"}</Td>
+      <Td>
+        <span className="text-xs text-muted-foreground uppercase">{cellText(row, "method")}</span>
+        {row["is_primary"] === true && <Badge variant="indigo" className="ml-2">PK</Badge>}
+        {row["is_unique"] === true && row["is_primary"] !== true && <Badge variant="green" className="ml-2">unique</Badge>}
+      </Td>
+      <Td className="text-xs text-muted-foreground">{cellText(row, "size")}</Td>
+    </tr>
   )
 }

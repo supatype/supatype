@@ -1,7 +1,7 @@
 import React from "react"
 import type { FieldConfig, ModelConfig } from "../config.js"
 import { describeConstraint } from "../lib/evaluate-constraint.js"
-import { Badge, Card, Td, Th } from "../components/ui.js"
+import { Badge, Card, Table, Td, Th } from "../components/ui.js"
 
 /**
  * Everything constraining or indexing one model, in the terms the author wrote them.
@@ -128,7 +128,7 @@ function Section({
         <p className="px-4 py-6 text-center text-sm text-muted-foreground">{empty}</p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <Table>
             <thead>
               <tr className="border-b border-border bg-muted/40">
                 {columns.map((column) => (
@@ -137,7 +137,7 @@ function Section({
               </tr>
             </thead>
             <tbody className="divide-y divide-border">{children}</tbody>
-          </table>
+          </Table>
         </div>
       )}
 

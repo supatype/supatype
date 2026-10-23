@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useMemo } from "react"
 import { livePreviewMessage, originOf } from "@supatype/client/bindings"
 import type { ModelConfig } from "../config.js"
+import { ButtonLink, Card } from "./ui.js"
 
 interface LivePreviewPaneProps {
   /** Where this record renders, resolved by the view so both halves agree on one address. */
@@ -44,50 +45,38 @@ function usePostPreview(
   }, [iframeRef, values, modelName, targetOrigin])
 }
 
-export function LivePreviewPane({
-  previewUrl,
-  values,
-  model,
-  awaitingFirstSave,
-}: LivePreviewPaneProps): React.ReactElement {
+export function LivePreviewPane({ previewUrl, values, model, awaitingFirstSave }: LivePreviewPaneProps): React.ReactElement {
   const iframeRef = useRef<HTMLIFrameElement>(null)
   usePostPreview(iframeRef, previewUrl, model.name, values)
 
   if (awaitingFirstSave) {
     // No "Open in new tab" either: it would lead to the same page saying the same thing.
     return (
-      <div className="st-live-preview">
-        <div className="st-live-preview-header">
-          <span className="st-live-preview-label">Live Preview</span>
-        </div>
-        <div className="st-live-preview-empty">
+      <PreviewCard>
+        <div className="p-8 text-center text-sm text-muted-foreground">
           Save this {model.label.toLowerCase()} to preview it. The first save creates the record and
           its first draft, and the option to share a preview link appears with them.
         </div>
-      </div>
+      </PreviewCard>
     )
   }
 
   return (
-    <div className="st-live-preview">
-      <div className="st-live-preview-header">
-        <span className="st-live-preview-label">Live Preview</span>
-        <a
-          href={previewUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="st-btn st-btn-sm"
-        >
-          Open in new tab
-        </a>
+    <PreviewCard action={<ButtonLink size="xs" href={previewUrl} target="_blank" rel="noopener noreferrer">Open in new tab</ButtonLink>}>
+      <iframe ref={iframeRef} src={previewUrl} className="block h-[350px] w-full border-0 lg:h-[500px]" title="Live preview" sandbox="allow-scripts allow-same-origin" />
+    </PreviewCard>
+  )
+}
+
+/** The pane's frame: a "Live Preview" bar, with an action at its end when there is one, over the body. */
+function PreviewCard({ action, children }: { action?: React.ReactNode; children: React.ReactNode }): React.ReactElement {
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex items-center justify-between border-b border-border bg-secondary px-3 py-2">
+        <span className="text-xs font-semibold text-muted-foreground">Live Preview</span>
+        {action}
       </div>
-      <iframe
-        ref={iframeRef}
-        src={previewUrl}
-        className="st-live-preview-iframe"
-        title="Live preview"
-        sandbox="allow-scripts allow-same-origin"
-      />
-    </div>
+      {children}
+    </Card>
   )
 }
