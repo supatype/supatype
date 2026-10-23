@@ -138,10 +138,11 @@ function registeredDraftModels(source: string): unknown {
 }
 
 describe("generateProjectClient: models that keep drafts", () => {
+  // A model with no declared table is stored, as the engine names it, in its name in snake_case.
   it("registers each one by table, with the key its new records are read back through", () => {
     expect(registeredDraftModels(generateProjectClient(versionedAst))).toEqual({
       version: 1,
-      tables: { posts: { primaryKey: "id" }, Page: { primaryKey: "slug" } },
+      tables: { posts: { primaryKey: "id" }, page: { primaryKey: "slug" } },
     })
   })
 
@@ -155,7 +156,7 @@ describe("generateProjectClient: models that keep drafts", () => {
     const unkeyed = { models: [{ name: "Note", options: { versions: true }, fields: { body: { kind: "text" } } }] }
     expect(registeredDraftModels(generateProjectClient(unkeyed))).toEqual({
       version: 1,
-      tables: { Note: { primaryKey: "id" } },
+      tables: { note: { primaryKey: "id" } },
     })
   })
 
