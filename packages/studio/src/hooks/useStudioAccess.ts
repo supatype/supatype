@@ -2,7 +2,7 @@
 
 import type { SupatypeClient, SupatypeError } from "@supatype/client"
 import { useCallback, useEffect, useState } from "react"
-import { bodyMessage, isJsonObject } from "../lib/json.js"
+import { bodyErrorText, isJsonObject } from "../lib/json.js"
 import { studioGatewayHeaders } from "../lib/studio-gateway-headers.js"
 import { useStudioAuth } from "./useStudioAuth.js"
 
@@ -53,9 +53,7 @@ export function useStudioAccess({ apiBaseUrl, authClient }: UseStudioAccessOptio
         setPhase("ready")
         return
       }
-      const error = json["error"]
-      const msg =
-        bodyMessage(json) ?? (typeof error === "string" ? error : undefined) ?? "You don't have permission to access the admin panel"
+      const msg = bodyErrorText(json) ?? "You don't have permission to access the admin panel"
       if (res.status === 401) {
         setPhase("login")
         return
