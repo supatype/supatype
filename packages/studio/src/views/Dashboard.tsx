@@ -10,11 +10,10 @@ import { DASHBOARD_VIEW_LIMITS } from "../config.js"
 import { JumpToSearch } from "../components/JumpToSearch.js"
 import { studioRestHeaders } from "../lib/studio-auth-headers.js"
 import { type Guard, isArrayOf, isJsonObject, isNumber, isShape, isString, isUnknown, readJson } from "../lib/json.js"
-import { Link } from "react-router-dom"
 import { useLocale } from "../hooks/useLocale.js"
 import { recordLabel } from "../lib/localized-field.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
-import { ConfirmButton } from "../components/ui.js"
+import { Button, ButtonLink, ConfirmButton, IconButton, Input, Select, Skeleton, TextLink } from "../components/ui.js"
 import { authUserListPath, userListTotal } from "../lib/auth-user-search.js"
 import { firstModelWithCreatedAt, hasCreatedAt } from "../lib/model-created-at.js"
 import { RoleGate } from "../components/RoleGate.js"
@@ -97,8 +96,8 @@ export function Dashboard(): React.ReactElement {
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2">
           {views.length > 0 && (
-            <select
-              className="text-sm rounded-md border border-border bg-background px-3 py-1.5 text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            <Select
+              aria-label="Dashboard view"
               value={activeView?.id ?? ""}
               onChange={(e) => {
                 const v = views.find((x) => x.id === e.target.value)
@@ -110,15 +109,12 @@ export function Dashboard(): React.ReactElement {
                   {v.name}{v.is_default ? " (default)" : ""}
                 </option>
               ))}
-            </select>
+            </Select>
           )}
           {activeView && !activeView.is_default && (
-            <button
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-              onClick={() => void setDefaultView(activeView.id)}
-            >
+            <Button size="xs" variant="ghost" onClick={() => void setDefaultView(activeView.id)}>
               Set as default
-            </button>
+            </Button>
           )}
           {activeView && views.length > 1 && (
             <ConfirmButton
@@ -138,68 +134,54 @@ export function Dashboard(): React.ReactElement {
             <>
               {savePrompt ? (
                 <div className="flex items-center gap-2">
-                  <input
+                  <Input
                     autoFocus
-                    className="text-sm rounded-md border border-border bg-background px-3 py-1.5 text-foreground focus:outline-none focus:ring-2 focus:ring-ring w-44"
+                    aria-label="View name"
+                    className="w-44"
                     placeholder="View name…"
                     value={saveName}
                     onChange={(e) => setSaveName(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter") void handleSave() }}
                   />
-                  <button
-                    className="text-sm px-3 py-1.5 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-                    onClick={() => void handleSave()}
-                  >
+                  <Button variant="primary" onClick={() => void handleSave()}>
                     Save
-                  </button>
+                  </Button>
                   {activeView && canSaveMore && (
-                    <button
-                      className="text-sm px-3 py-1.5 rounded-md border border-border hover:bg-muted transition-colors"
-                      onClick={() => void handleSaveAs()}
-                    >
+                    <Button onClick={() => void handleSaveAs()}>
                       Save as new
-                    </button>
+                    </Button>
                   )}
-                  <button
-                    className="text-sm text-muted-foreground hover:text-foreground"
-                    onClick={() => { setSavePrompt(false); setSaveName("") }}
-                  >
+                  <Button variant="ghost" onClick={() => { setSavePrompt(false); setSaveName("") }}>
                     Cancel
-                  </button>
+                  </Button>
                 </div>
               ) : (
                 <>
-                  <button
-                    className="text-sm px-3 py-1.5 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    onClick={() => { setSaveName(activeView?.name ?? ""); setSavePrompt(true) }}
-                  >
+                  <Button variant="primary" onClick={() => { setSaveName(activeView?.name ?? ""); setSavePrompt(true) }}>
                     {activeView ? "Save changes" : "Save view"}
-                  </button>
+                  </Button>
                   {!canSaveMore && !activeView && (
                     <span className="text-xs text-muted-foreground">
                       {limitLabel} view limit reached, upgrade to save more
                     </span>
                   )}
-                  <button
-                    className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+                  <Button
+                    variant="ghost"
                     onClick={() => {
                       setDraftLayout(activeView?.layout ?? generateDefaultBlocks(config.models))
                       setEditMode(false)
                     }}
                   >
                     Cancel
-                  </button>
+                  </Button>
                 </>
               )}
             </>
           )}
           {!editMode && (
-            <button
-              className="text-sm px-3 py-1.5 rounded-md border border-border hover:bg-muted transition-colors"
-              onClick={() => setEditMode(true)}
-            >
+            <Button onClick={() => setEditMode(true)}>
               Edit dashboard
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -215,7 +197,7 @@ export function Dashboard(): React.ReactElement {
       {loading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {Array.from({ length: 4 }, (_, i) => (
-            <div key={i} className="rounded-lg border border-border bg-card p-5 animate-pulse h-24" />
+            <Skeleton key={i} className="h-24 rounded-lg border border-border bg-card" />
           ))}
         </div>
       ) : (
@@ -250,13 +232,9 @@ function DashboardBlockCard({
   return (
     <div className={`relative rounded-lg border bg-card transition-opacity ${hidden ? "opacity-40 border-dashed border-border" : "border-border"}`}>
       {editMode && (
-        <button
-          className="absolute top-3 right-3 text-muted-foreground hover:text-foreground transition-colors z-10"
-          title={hidden ? "Show block" : "Hide block"}
-          onClick={() => onToggle(block.id)}
-        >
+        <IconButton label={hidden ? "Show block" : "Hide block"} className="absolute top-2 right-2 z-10" onClick={() => onToggle(block.id)}>
           {hidden ? <EyeOffIcon /> : <EyeIcon />}
-        </button>
+        </IconButton>
       )}
       <div className={editMode ? "pr-8" : ""}>
         <BlockContent block={block} />
@@ -370,7 +348,7 @@ export function RecentBlock({ block }: { block: DashboardBlock }): React.ReactEl
             <li key={i} className="py-1.5 border-b border-border last:border-0 text-sm text-foreground">
               {href ? (
                 // A router link: a plain href left out Studio's base path and opened the app instead.
-                <Link to={href} className="hover:text-primary transition-colors truncate block">{label}</Link>
+                <TextLink to={href} tone="muted" className="block truncate text-foreground hover:text-primary">{label}</TextLink>
               ) : (
                 <span className="truncate block">{label}</span>
               )}
@@ -380,9 +358,9 @@ export function RecentBlock({ block }: { block: DashboardBlock }): React.ReactEl
         {items.length === 0 && (
           <li className="text-sm text-muted-foreground">
             {modelConfig ? (
-              <Link to={`/models/${modelConfig.name}/create`} className="hover:text-primary transition-colors">
+              <TextLink to={`/models/${modelConfig.name}/create`} tone="muted" className="text-foreground hover:text-primary">
                 Create your first {modelConfig.label} →
-              </Link>
+              </TextLink>
             ) : "No items yet"}
           </li>
         )}
@@ -490,22 +468,14 @@ export function QuickActionsBlock(): React.ReactElement {
       <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">Quick Actions</h3>
       <div className="flex flex-wrap gap-2">
         {config.globals.map((g) => (
-          <Link
-            key={g.name}
-            to={`/models/globals/${g.name}`}
-            className="text-xs px-2.5 py-1 rounded-md border border-border hover:bg-muted transition-colors text-foreground"
-          >
+          <ButtonLink key={g.name} to={`/models/globals/${g.name}`} size="xs">
             {g.label}
-          </Link>
+          </ButtonLink>
         ))}
         {creatable.map((m) => (
-          <Link
-            key={m.name}
-            to={`/models/${m.name}/create`}
-            className="text-xs px-2.5 py-1 rounded-md border border-border hover:bg-muted transition-colors text-foreground"
-          >
+          <ButtonLink key={m.name} to={`/models/${m.name}/create`} size="xs">
             + {m.label}
-          </Link>
+          </ButtonLink>
         ))}
       </div>
     </div>

@@ -5,7 +5,7 @@ import { useLocation } from "react-router-dom"
 import type { AdminConfig } from "../config.js"
 import { LocaleSwitcher } from "./LocaleSwitcher.js"
 import { SupatypeIcon } from "./SupatypeLogo.js"
-import { Badge, Button } from "./ui.js"
+import { Badge, Button, IconLink, TextLink } from "./ui.js"
 import { ConnectModal } from "./ConnectModal.js"
 import { JumpToSearch, JumpToSearchSheet } from "./JumpToSearch.js"
 import { UserAccountMenu } from "./UserAccountMenu.js"
@@ -130,26 +130,16 @@ function HeaderContext({ leftItems }: { leftItems: React.ComponentType[] | undef
 function HeaderLinks({ onConnect }: { onConnect: () => void }): React.ReactElement {
   return (
     <>
-      <button
-        type="button"
-        onClick={onConnect}
-        className="hidden sm:flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-border text-xs text-muted-foreground hover:text-foreground hover:border-foreground/30 hover:bg-accent transition-colors shrink-0 font-medium"
-      >
+      <Button type="button" onClick={onConnect} className="hidden sm:inline-flex h-7 px-2.5 shrink-0">
         <PlugIcon />
         Connect
-      </button>
-      <a href={FEEDBACK_URL} target="_blank" rel="noreferrer" className="hidden sm:block text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0">
+      </Button>
+      <TextLink tone="muted" href={FEEDBACK_URL} target="_blank" rel="noreferrer" className="hidden sm:inline-flex text-sm shrink-0">
         Feedback
-      </a>
-      <a
-        href={DOCS_URL}
-        target="_blank"
-        rel="noreferrer"
-        className="hidden sm:flex items-center justify-center w-7 h-7 rounded-full border border-border text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors shrink-0"
-        aria-label="Documentation"
-      >
+      </TextLink>
+      <IconLink label="Documentation" href={DOCS_URL} target="_blank" rel="noreferrer" className="hidden sm:inline-flex rounded-full border border-border hover:bg-transparent hover:border-foreground/30">
         <HelpIcon />
-      </a>
+      </IconLink>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="icon" aria-label="More" className="sm:hidden"><MoreIcon /></Button>

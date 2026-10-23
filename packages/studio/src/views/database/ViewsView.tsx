@@ -1,113 +1,79 @@
 import React, { useState } from "react"
-import { useProjectProxy } from "../../hooks/useProjectProxy.js"
 import { useSqlEditorOffered } from "../../hooks/useSqlEditorOffered.js"
 import { useSchemaPicker } from "../../hooks/useSchemaPicker.js"
-import { useApiQuery } from "../../hooks/useApiQuery.js"
-import { Button, Card, CodeBlock } from "../../components/ui.js"
-import { EmptyState } from "../../components/EmptyState.js"
+import { Button, CodeBlock, PageHeader, Td, Th, tableRowClass } from "../../components/ui.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 import { SlidePanel } from "../../components/SlidePanel.js"
+import { SchemaSelect } from "../../components/database/SchemaSelect.js"
+import { SqlDraftDialog, useSqlDraft, type SqlDraft } from "../../components/database/SqlDraftDialog.js"
+import { CatalogueTable, DropRowButton, RowActions, RowButton, useCatalogueRows } from "../../components/database/CatalogueTable.js"
+import { qualifiedName, quoteIdent } from "../../lib/sql-identifier.js"
 import { cellText, cellTextOrNull } from "../metadata-row.js"
 
+type Row = Record<string, unknown>
+
+/** A view by name, and the query that defines it. */
+interface ViewDef {
+  name: string
+  def: string
+}
+
+/** How a create, edit or replace draft is headed. */
+const REPLACE_TITLE = "Create / replace view"
+
+/** What a row offers: open its definition, and (for the SQL editor's roles) edit or drop it. */
+interface ViewRowActions {
+  select: (view: ViewDef) => void
+  /** Drafts an edit or a drop for review; null for a role that may not write. */
+  writes: { edit: (view: ViewDef) => void; drop: (view: ViewDef) => void } | null
+}
+
+/** The edit and drop drafts for views in `schema`. */
+function viewWrites(draft: SqlDraft, schema: string): NonNullable<ViewRowActions["writes"]> {
+  return {
+    edit: (v) => { draft.open(`CREATE OR REPLACE VIEW ${qualifiedName(schema, v.name)} AS\n${v.def}`, REPLACE_TITLE) },
+    drop: (v) => { draft.open(`DROP VIEW ${qualifiedName(schema, v.name)};`, `Drop view ${v.name}`) },
+  }
+}
+
 export function ViewsView(): React.ReactElement {
-  const proxy = useProjectProxy()
   // Writes go through the SQL editor's route, so only its roles are offered them (RQ4).
   const sqlWrites = useSqlEditorOffered()
-  const { schemas, schema, setSchema } = useSchemaPicker()
-  const [selected, setSelected] = useState<{ name: string; def: string } | null>(null)
-  const [sqlModal, setSqlModal] = useState<{ mode: "create" | "drop"; name?: string } | null>(null)
-  const [sqlText, setSqlText] = useState("")
-  const [runError, setRunError] = useState<string | null>(null)
-  const [runBusy, setRunBusy] = useState(false)
-
-  const { data: views, loading, error, refetch } = useApiQuery(
-    () => proxy.metadata("views", { schema }).then((r) => r.rows),
-    [proxy, schema],
-  )
-
-  async function runSql() {
-    setRunBusy(true)
-    setRunError(null)
-    try {
-      await proxy.sql(sqlText, schema)
-      setSqlModal(null)
-      refetch()
-    } catch (e) {
-      setRunError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setRunBusy(false)
-    }
-  }
-
+  const picker = useSchemaPicker()
+  const { schema } = picker
+  const [selected, setSelected] = useState<ViewDef | null>(null)
+  const { data: views, loading, error, refetch } = useCatalogueRows("views", schema)
+  const draft = useSqlDraft(schema, refetch)
+  const actions: ViewRowActions = { select: setSelected, writes: sqlWrites ? viewWrites(draft, schema) : null }
+  const create = <Button variant="primary" onClick={() => { draft.open(`CREATE VIEW ${quoteIdent(schema)}.new_view AS\nSELECT 1;`, REPLACE_TITLE) }}>Create view</Button>
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <h1 className="text-xl font-semibold text-foreground">Views</h1>
-          <select value={schema} onChange={(e) => setSchema(e.target.value)} className="px-2 py-1 text-sm rounded-md border border-border bg-background text-foreground focus:outline-none">
-            {(schemas.length > 0 ? schemas : [schema]).map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
-        </div>
-        {sqlWrites ? (<Button variant="primary" onClick={() => { setSqlText(`CREATE VIEW ${schema}.new_view AS\nSELECT 1;`); setSqlModal({ mode: "create" }) }}>Create view</Button>) : null}
-      </div>
-
+      <PageHeader title="Views" scope={<SchemaSelect picker={picker} />} action={sqlWrites ? create : null} />
       {error && <ErrorBanner message={error} />}
-
-      {loading ? (
-        <div className="space-y-2">{[1, 2, 3].map((i) => <div key={i} className="h-10 rounded-md bg-muted animate-pulse" />)}</div>
-      ) : views?.length === 0 ? (
-        <EmptyState title="No views" description={`No views found in schema "${schema}".`} />
-      ) : (
-        <Card>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/40">
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wider">Name</th>
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wider">Definition</th>
-                <th className="px-4 py-2.5" />
-              </tr>
-            </thead>
-            <tbody>
-              {views?.map((row) => (
-                <tr key={cellText(row, "view_name")} className="border-b border-border last:border-0 hover:bg-muted/20 cursor-pointer" onClick={() => setSelected({ name: cellText(row, "view_name"), def: cellText(row, "view_definition") })}>
-                  <td className="px-4 py-3 font-mono text-sm text-foreground">{cellText(row, "view_name")}</td>
-                  <td className="px-4 py-3 text-xs text-muted-foreground truncate max-w-[400px]">{cellTextOrNull(row, "view_definition")?.slice(0, 100)}…</td>
-                  <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
-                    <span className="flex items-center justify-end gap-3">
-                      {sqlWrites ? (<button type="button" className="text-xs text-primary hover:underline" onClick={() => { setSqlText(`CREATE OR REPLACE VIEW ${schema}.${cellText(row, "view_name")} AS\n${cellText(row, "view_definition")}`); setSqlModal({ mode: "create" }) }}>Edit</button>) : null}
-                      {sqlWrites ? (<button type="button" className="text-xs text-destructive-text hover:underline" onClick={() => { setSqlText(`DROP VIEW ${schema}.${cellText(row, "view_name")};`); setSqlModal({ mode: "drop", name: cellText(row, "view_name") }) }}>Drop</button>) : null}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Card>
-      )}
-
-      <SlidePanel
-        open={selected !== null}
-        onClose={() => setSelected(null)}
-        title={selected?.name ?? ""}
-        subtitle={`${schema}.${selected?.name ?? ""}`}
-        width="max-w-[540px]"
-      >
+      <CatalogueTable
+        list={{ rows: views, loading, empty: { title: "No views", description: `No views found in schema "${schema}".` } }}
+        head={<><Th>Name</Th><Th>Definition</Th><Th /></>}
+        row={(row) => <ViewRow key={cellText(row, "view_name")} row={row} actions={actions} />}
+      />
+      <SlidePanel open={selected !== null} onClose={() => { setSelected(null) }} title={selected?.name ?? ""} subtitle={`${schema}.${selected?.name ?? ""}`} width="max-w-[540px]">
         {selected && <CodeBlock>{selected.def}</CodeBlock>}
       </SlidePanel>
-
-      {sqlModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-card border border-border rounded-lg p-6 w-full max-w-lg space-y-4 shadow-xl">
-            <h2 className="text-base font-semibold text-foreground">{sqlModal.mode === "drop" ? `Drop view ${sqlModal.name}` : "Create / replace view"}</h2>
-            <textarea className="w-full font-mono text-sm px-3 py-2 rounded-md border border-border bg-background text-foreground focus:outline-none min-h-[120px] resize-y" value={sqlText} onChange={(e) => setSqlText(e.target.value)} />
-            {runError && <p className="text-xs text-destructive-text">{runError}</p>}
-            <div className="flex justify-end gap-2">
-              <Button onClick={() => { setSqlModal(null); setRunError(null) }}>Cancel</Button>
-              <Button variant={sqlModal.mode === "drop" ? "destructive" : "primary"} disabled={runBusy} onClick={() => { void runSql() }}>{runBusy ? "Running…" : "Run SQL"}</Button>
-            </div>
-          </div>
-        </div>
-      )}
+      <SqlDraftDialog draft={draft} />
     </div>
+  )
+}
+
+function ViewRow({ row, actions }: { row: Row; actions: ViewRowActions }): React.ReactElement {
+  const view: ViewDef = { name: cellText(row, "view_name"), def: cellText(row, "view_definition") }
+  const { writes } = actions
+  return (
+    <tr className={tableRowClass(true)} onClick={() => { actions.select(view) }}>
+      <Td className="font-mono text-foreground">{view.name}</Td>
+      <Td className="text-xs text-muted-foreground truncate max-w-[400px]">{cellTextOrNull(row, "view_definition")?.slice(0, 100)}…</Td>
+      <RowActions>
+        {writes ? <RowButton label="Edit" onClick={() => { writes.edit(view) }} /> : null}
+        {writes ? <DropRowButton onDrop={() => { writes.drop(view) }} /> : null}
+      </RowActions>
+    </tr>
   )
 }

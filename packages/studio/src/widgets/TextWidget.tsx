@@ -1,65 +1,37 @@
 import React from "react"
 import type { WidgetProps } from "./FieldWidget.js"
+import { Input, Textarea } from "../components/ui.js"
+import { CharCount } from "./field-parts.js"
 
 interface TextWidgetProps extends WidgetProps {
   multiline?: boolean
 }
 
-export function TextWidget({
-  config,
-  value,
-  onChange,
-  readOnly,
-  multiline,
-  localePlaceholder,
-}: TextWidgetProps): React.ReactElement {
+function inputType(widget: string): "email" | "url" | "text" {
+  return widget === "email" ? "email" : widget === "url" ? "url" : "text"
+}
+
+export function TextWidget({ config, value, onChange, readOnly, multiline, localePlaceholder }: TextWidgetProps): React.ReactElement {
   const strValue = value === null || value === undefined ? "" : String(value)
   const maxLength = config.validation?.maxLength
-  const minLength = config.validation?.minLength
-
-  if (multiline) {
-    return (
-      <div className="st-widget-text">
-        <textarea
-          id={`field-${config.name}`}
-          className="st-textarea"
-          value={strValue}
-          onChange={(e) => { onChange(e.target.value || null) }}
-          readOnly={readOnly}
-          required={config.required}
-          maxLength={maxLength}
-          minLength={minLength}
-          rows={6}
-          placeholder={localePlaceholder}
-        />
-        {maxLength && (
-          <span className="st-char-count">
-            {strValue.length} / {maxLength}
-          </span>
-        )}
-      </div>
-    )
+  const shared = {
+    id: `field-${config.name}`,
+    value: strValue,
+    readOnly,
+    required: config.required,
+    maxLength,
+    minLength: config.validation?.minLength,
+    placeholder: localePlaceholder,
   }
 
   return (
-    <div className="st-widget-text">
-      <input
-        id={`field-${config.name}`}
-        type={config.widget === "email" ? "email" : config.widget === "url" ? "url" : "text"}
-        className="st-input"
-        value={strValue}
-        onChange={(e) => { onChange(e.target.value || null) }}
-        readOnly={readOnly}
-        required={config.required}
-        maxLength={maxLength}
-        minLength={minLength}
-        placeholder={localePlaceholder}
-      />
-      {maxLength && (
-        <span className="st-char-count">
-          {strValue.length} / {maxLength}
-        </span>
+    <div>
+      {multiline ? (
+        <Textarea face="prose" className="min-h-[100px] resize-y" rows={6} {...shared} onChange={(e) => { onChange(e.target.value || null) }} />
+      ) : (
+        <Input type={inputType(config.widget)} {...shared} onChange={(e) => { onChange(e.target.value || null) }} />
       )}
+      {maxLength !== undefined && <CharCount length={strValue.length} max={maxLength} />}
     </div>
   )
 }

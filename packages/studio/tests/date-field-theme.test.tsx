@@ -41,8 +41,8 @@ describe("the date widget", () => {
     for (const widget of ["date", "datetime"] as const) {
       const editable = render(false, widget)
       const locked = render(true, widget)
-      expect(editable).toContain('class="st-input"')
-      expect(locked).toContain('class="st-input"')
+      expect(editable).toContain('data-ui="input"')
+      expect(locked).toContain('data-ui="input"')
       expect(locked).toContain("readOnly")
       expect(editable).not.toContain("readOnly")
     }

@@ -24,6 +24,9 @@ import { DurationWidget } from "./DurationWidget.js"
 import { GeoPointWidget } from "./GeoPointWidget.js"
 import { widgetFor } from "../lib/widget-input.js"
 import { WithheldValue } from "../components/WithheldValue.js"
+import { IconLanguages } from "../components/icons.js"
+import { cn } from "../lib/utils.js"
+import { FieldError } from "./field-parts.js"
 
 export interface WidgetProps {
   config: FieldConfig
@@ -81,117 +84,88 @@ export function normalizeDerivedPreviewFieldConfig(config: FieldConfig): FieldCo
   }
 }
 
-function TranslationIcon(): React.ReactElement {
+/** The field's name above it, starred when required and marked when translated. */
+function FieldLabel({ config, meta }: { config: FieldConfig; meta: boolean }): React.ReactElement {
   return (
-    <svg
-      className="st-field-localized-icon"
-      xmlns="http://www.w3.org/2000/svg"
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
+    <label
+      htmlFor={`field-${config.name}`}
+      className={cn("mb-1 block", meta ? "text-[0.7rem] font-medium uppercase tracking-wide text-muted-foreground" : "text-[0.8rem] font-semibold text-foreground")}
     >
-      <path d="m5 8 6 6" />
-      <path d="m4 14 6-6 2-3" />
-      <path d="M2 5h12" />
-      <path d="M7 2v3" />
-      <path d="m22 22-5-10-5 10" />
-      <path d="M14 18h6" />
-    </svg>
+      {config.label}
+      {config.required && <span className="text-destructive-text" aria-label="required"> *</span>}
+      {config.localized && (
+        <span className="ml-1 inline-flex align-middle text-primary" title="This field is translated" aria-label="Translated field">
+          <IconLanguages />
+        </span>
+      )}
+    </label>
   )
 }
 
+/**
+ * One field of a record: its label, its editor, and why it was refused when it was. A refused
+ * field's input wears the red border its own `aria-invalid` would give it.
+ */
 export function FieldWidget(props: WidgetProps): React.ReactElement {
   const derived = normalizeDerivedPreviewFieldConfig(props.config)
   const config = { ...derived, widget: widgetFor(derived, props.value) }
-  const next = { ...props, config }
-  const variant = props.variant ?? "default"
+  const meta = (props.variant ?? "default") === "meta"
+  const invalid = props.error !== undefined
 
   return (
-    <div
-      className={`st-field st-field--${config.widget}${config.required ? " st-field--required" : ""}${variant === "meta" ? " st-field--meta" : ""}${props.error !== undefined ? " st-field--invalid" : ""}`}
-    >
-      <label className="st-field-label" htmlFor={`field-${config.name}`}>
-        {config.label}
-        {config.required && <span className="st-field-required" aria-label="required"> *</span>}
-        {config.localized && (
-          <span className="st-field-localized" title="This field is translated" aria-label="Translated field">
-            <TranslationIcon />
-          </span>
-        )}
-      </label>
-      <div className="st-field-input">
+    <div className={cn(invalid && "[&_[data-ui=input]]:border-destructive [&_[data-ui=textarea]]:border-destructive")}>
+      <FieldLabel config={config} meta={meta} />
+      <div className={meta ? "mb-3" : "mb-4"}>
         {config.withheld === true || config.withheld === "unknown"
           ? <WithheldValue access={config.withheld === "unknown" ? "unknown" : "hidden"} />
-          : <WidgetRenderer {...next} />}
+          : <WidgetRenderer {...props} config={config} />}
       </div>
-      {props.error !== undefined && (
-        <p className="st-field-error" role="alert" id={`field-${config.name}-error`}>
-          {props.error}
-        </p>
-      )}
+      {invalid && <FieldError id={`field-${config.name}-error`}>{props.error}</FieldError>}
     </div>
   )
 }
 
+/** A long text field: the text widget, multi-line. */
+const TextareaWidget = (props: WidgetProps): React.ReactElement => <TextWidget {...props} multiline />
+
+/** A many-relation: the rows that point back for a has-many, otherwise the picker. */
+const ManyRelationWidget = (props: WidgetProps): React.ReactElement =>
+  isHasMany(props.config) ? <HasManyWidget {...props} /> : <RelationWidget {...props} />
+
+/** The editor for each widget name; a name not listed is edited as text. */
+const WIDGETS: Readonly<Record<string, (props: WidgetProps) => React.ReactElement>> = {
+  text: TextWidget,
+  email: TextWidget,
+  url: TextWidget,
+  uuid: TextWidget,
+  slug: SlugWidget,
+  derivedText: DerivedTextWidget,
+  textarea: TextareaWidget,
+  number: NumberWidget,
+  boolean: BooleanWidget,
+  date: DateWidget,
+  datetime: DateWidget,
+  select: SelectWidget,
+  image: ImageWidget,
+  file: FileWidget,
+  relation: RelationWidget,
+  multirelation: ManyRelationWidget,
+  richtext: RichTextWidget,
+  json: JsonWidget,
+  blocks: BlocksWidget,
+  publish: PublishWidget,
+  color: ColorWidget,
+  xml: XmlWidget,
+  code: CodeWidget,
+  currency: CurrencyWidget,
+  button: ButtonWidget,
+  duration: DurationWidget,
+  geopoint: GeoPointWidget,
+}
+
 function WidgetRenderer(props: WidgetProps): React.ReactElement {
-  switch (props.config.widget) {
-    case "text":
-    case "email":
-    case "url":
-    case "uuid":
-      return <TextWidget {...props} />
-    case "slug":
-      return <SlugWidget {...props} />
-    case "derivedText":
-      return <DerivedTextWidget {...props} />
-    case "textarea":
-      return <TextWidget {...props} multiline />
-    case "number":
-      return <NumberWidget {...props} />
-    case "boolean":
-      return <BooleanWidget {...props} />
-    case "date":
-    case "datetime":
-      return <DateWidget {...props} />
-    case "select":
-      return <SelectWidget {...props} />
-    case "image":
-      return <ImageWidget {...props} />
-    case "file":
-      return <FileWidget {...props} />
-    case "relation":
-      return <RelationWidget {...props} />
-    case "multirelation":
-      return isHasMany(props.config) ? <HasManyWidget {...props} /> : <RelationWidget {...props} />
-    case "richtext":
-      return <RichTextWidget {...props} />
-    case "json":
-      return <JsonWidget {...props} />
-    case "blocks":
-      return <BlocksWidget {...props} />
-    case "publish":
-      return <PublishWidget {...props} />
-    case "color":
-      return <ColorWidget {...props} />
-    case "xml":
-      return <XmlWidget {...props} />
-    case "code":
-      return <CodeWidget {...props} />
-    case "currency":
-      return <CurrencyWidget {...props} />
-    case "button":
-      return <ButtonWidget {...props} />
-    case "duration":
-      return <DurationWidget {...props} />
-    case "geopoint":
-      return <GeoPointWidget {...props} />
-    default:
-      return <TextWidget {...props} />
-  }
+  const name = props.config.widget
+  // Own keys only: a name such as `toString` is not a widget, and reads as text like any other.
+  const Widget = (Object.hasOwn(WIDGETS, name) ? WIDGETS[name] : undefined) ?? TextWidget
+  return <Widget {...props} />
 }

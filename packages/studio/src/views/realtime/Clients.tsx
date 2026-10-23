@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react"
-import { Badge, Card, Pager, Td, Th } from "../../components/ui.js"
+import { Badge, Pager, TableCard, Td, Th } from "../../components/ui.js"
 import { EmptyState } from "../../components/EmptyState.js"
 import { UuidCell } from "../../components/UuidCell.js"
 import { useInspectorResource } from "../../hooks/useInspectorResource.js"
@@ -52,23 +52,9 @@ export function ClientsTable({ data }: { data: ConnectionsData }): React.ReactEl
       {data.connections.length === 0 ? (
         <EmptyState title="No connected clients" description="Nothing is connected to realtime right now." />
       ) : (
-        <Card className="overflow-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-border">
-                <Th>User</Th>
-                <Th>Role</Th>
-                <Th>Connected</Th>
-                <Th>Last message</Th>
-                <Th>Channels</Th>
-                <Th>Client</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.connections.map((c) => <ClientRow key={c.id} connection={c} />)}
-            </tbody>
-          </table>
-        </Card>
+        <TableCard head={<><Th>User</Th><Th>Role</Th><Th>Connected</Th><Th>Last message</Th><Th>Channels</Th><Th>Client</Th></>}>
+          {data.connections.map((c) => <ClientRow key={c.id} connection={c} />)}
+        </TableCard>
       )}
     </div>
   )

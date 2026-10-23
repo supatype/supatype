@@ -44,9 +44,21 @@ describe("BlocksWidget", () => {
   it("names every action for a screen reader and shows no letters for them", async () => {
     const [first] = headers(await renderBlocks())
     if (!first) throw new Error("no block rendered")
-    const names = Array.from(first.querySelectorAll("button")).map((b) => b.getAttribute("aria-label"))
-    expect(names).toEqual(["Move Hero up", "Move Hero down", "Duplicate Hero", "Delete Hero"])
-    for (const b of Array.from(first.querySelectorAll("button"))) expect(b.textContent?.trim()).toBe("")
+    // Five buttons: the block's own (its type, which opens it) and the four icon-only actions.
+    const [toggle, ...actions] = Array.from(first.querySelectorAll("button"))
+    expect(toggle?.textContent).toBe("Hero")
+    expect(actions.map((b) => b.getAttribute("aria-label"))).toEqual(["Move Hero up", "Move Hero down", "Duplicate Hero", "Delete Hero"])
+    for (const b of actions) expect(b.textContent?.trim()).toBe("")
+  })
+
+  // The header was a clickable row with no button, so a block could not be opened from the keyboard.
+  it("opens a block from a disclosure button, which Enter and Space reach", async () => {
+    const [first] = headers(await renderBlocks())
+    const toggle = first?.querySelector<HTMLButtonElement>('[data-ui="disclosure-button"]')
+    if (!toggle) throw new Error("no disclosure button")
+    expect(toggle.getAttribute("aria-expanded")).toBe("false")
+    await act(() => { toggle.click() })
+    expect(toggle.getAttribute("aria-expanded")).toBe("true")
   })
 
   it("puts the block count on the row with Add block, not beside the first block", async () => {

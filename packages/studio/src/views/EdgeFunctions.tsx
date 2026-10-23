@@ -2,12 +2,11 @@ import React, { useState, useEffect, useCallback } from "react"
 import { useStudioClient } from "../StudioCore.js"
 import { useNavigate, useParams } from "react-router-dom"
 import { useApiQuery } from "../hooks/useApiQuery.js"
-import { Badge, Button, Card, ConfirmButton, Input, Th, Td, type DestructiveQuestion } from "../components/ui.js"
+import { Badge, Button, Card, Checkbox, ConfirmButton, Input, Select, Table, Tabs, Textarea, Th, Td, type DestructiveQuestion, type TabItem } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { useFunctionLogTail } from "../hooks/useFunctionLogTail.js"
 import { useInterval } from "../hooks/useTabActivity.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
-import { cn } from "../lib/utils.js"
 import {
   type Guard,
   isArrayOf,
@@ -74,6 +73,15 @@ const BUILTIN_RUNTIME_ENV_VARS: Array<{ key: string; description: string }> = [
   { key: "SUPATYPE_EXECUTION_ID", description: "Unique identifier for each invocation." },
   { key: "DENO_DEPLOYMENT_ID", description: "Version/deployment identifier for the function code." },
 ]
+
+/** The secret scopes a function's Secrets tab switches between. */
+function scopeTabs(functionName: string): Array<TabItem<"function" | "shared" | "defaults">> {
+  return [
+    { id: "function", label: `Function (${functionName})` },
+    { id: "shared", label: "Shared (all functions)" },
+    { id: "defaults", label: "Defaults (read-only)" },
+  ]
+}
 
 const TIME_RANGES = [
   { label: "15m", value: "15m" },
@@ -170,14 +178,15 @@ export function InvokeTab({
       <div className="grid gap-3 mb-4">
         <div className="flex items-center gap-2 flex-wrap">
           <label className="text-xs text-muted-foreground">Method</label>
-          <select
+          <Select
+            aria-label="Method"
             value={method}
             onChange={(e) => { const next = e.target.value; if (isHttpMethod(next)) setMethod(next) }}
-            className="rounded-md border border-border bg-background px-2 py-1 text-xs"
+            className="px-2 py-1 text-xs"
           >
             <option value="POST">POST</option>
             <option value="GET">GET</option>
-          </select>
+          </Select>
 
         </div>
 
@@ -194,11 +203,12 @@ export function InvokeTab({
         <SendAsField sendAs={sendAs} />
 
         {method === "POST" && (
-          <textarea
+          <Textarea
+            aria-label="Request body"
             value={body}
             onChange={(e) => setBody(e.target.value)}
             rows={8}
-            className="w-full rounded-md border border-border bg-background px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-ring"
+            className="text-xs"
           />
         )}
 
@@ -270,22 +280,9 @@ function LogsTab({
         <div className="flex items-center gap-1">
           {/* A time range is a question about history, and a live tail keeps none, so the control
               is hidden rather than shown doing nothing. */}
-          {!tailing &&
-            TIME_RANGES.map((tr) => (
-              <button
-                key={tr.value}
-                type="button"
-                onClick={() => setSince(tr.value)}
-                className={cn(
-                  "px-2.5 py-1 text-xs rounded transition-colors",
-                  since === tr.value
-                    ? "bg-primary text-primary-foreground"
-                    : "border border-border text-muted-foreground hover:bg-accent",
-                )}
-              >
-                {tr.label}
-              </button>
-            ))}
+          {!tailing && (
+            <Tabs tabs={{ label: "Time range", items: TIME_RANGES.map((tr) => ({ id: tr.value, label: tr.label })), look: "pill", size: "xs" }} value={since} onChange={setSince} />
+          )}
           {tailing && (
             <Badge variant={tail.state.kind === "streaming" ? "green" : "yellow"}>
               {tail.state.kind === "streaming" ? "Live" : "Connecting…"}
@@ -293,25 +290,9 @@ function LogsTab({
           )}
         </div>
         <div className="flex items-center gap-2">
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={live}
-              onChange={(e) => setLive(e.target.checked)}
-              className="rounded"
-            />
-            Live tail
-          </label>
+          <Checkbox label="Live tail" checked={live} onChange={(e) => setLive(e.target.checked)} />
           {!tailing && (
-            <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={autoRefresh}
-                onChange={(e) => setAutoRefresh(e.target.checked)}
-                className="rounded"
-              />
-              Auto-refresh
-            </label>
+            <Checkbox label="Auto-refresh" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} />
           )}
           <Button size="xs" onClick={tailing ? tail.clear : refetch}>
             {tailing ? "Clear" : "Refresh"}
@@ -346,7 +327,7 @@ function LogsTab({
 
       {logs.length > 0 && (
         <Card className="overflow-auto">
-          <table className="w-full">
+          <Table>
             <thead>
               <tr className="border-b border-border">
                 <Th>Timestamp</Th>
@@ -369,7 +350,7 @@ function LogsTab({
                 </tr>
               ))}
             </tbody>
-          </table>
+          </Table>
         </Card>
       )}
     </div>
@@ -452,43 +433,8 @@ function EnvVarsTab({
       {error && <ErrorBanner message={error} />}
 
       <div className="mb-5">
-        <div className="flex items-center gap-2 mb-2">
-          <button
-            type="button"
-            onClick={() => setScope("function")}
-            className={cn(
-              "px-2.5 py-1 text-xs rounded transition-colors",
-              scope === "function"
-                ? "bg-primary text-primary-foreground"
-                : "border border-border text-muted-foreground hover:bg-accent",
-            )}
-          >
-            Function ({functionName})
-          </button>
-          <button
-            type="button"
-            onClick={() => setScope("shared")}
-            className={cn(
-              "px-2.5 py-1 text-xs rounded transition-colors",
-              scope === "shared"
-                ? "bg-primary text-primary-foreground"
-                : "border border-border text-muted-foreground hover:bg-accent",
-            )}
-          >
-            Shared (all functions)
-          </button>
-          <button
-            type="button"
-            onClick={() => setScope("defaults")}
-            className={cn(
-              "px-2.5 py-1 text-xs rounded transition-colors",
-              scope === "defaults"
-                ? "bg-primary text-primary-foreground"
-                : "border border-border text-muted-foreground hover:bg-accent",
-            )}
-          >
-            Defaults (read-only)
-          </button>
+        <div className="mb-2">
+          <Tabs tabs={{ label: "Secret scope", items: scopeTabs(functionName), look: "pill", size: "xs" }} value={scope} onChange={setScope} />
         </div>
 
         {!showDefaults && (
@@ -523,7 +469,7 @@ function EnvVarsTab({
 
       {showDefaults ? (
         <Card className="overflow-auto">
-          <table className="w-full">
+          <Table>
             <thead>
               <tr className="border-b border-border">
                 <Th>Key</Th>
@@ -538,7 +484,7 @@ function EnvVarsTab({
                 </tr>
               ))}
             </tbody>
-          </table>
+          </Table>
         </Card>
       ) : (
         <>
@@ -556,7 +502,7 @@ function EnvVarsTab({
 
           {!loading && keys.length > 0 && (
             <Card className="overflow-auto">
-              <table className="w-full">
+              <Table>
                 <thead>
                   <tr className="border-b border-border">
                     <Th>Key</Th>
@@ -582,7 +528,7 @@ function EnvVarsTab({
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </Table>
             </Card>
           )}
         </>

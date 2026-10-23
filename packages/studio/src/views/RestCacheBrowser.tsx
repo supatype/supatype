@@ -4,7 +4,7 @@ import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import { useServerRestCacheOffered } from "../hooks/useServerRestCacheOffered.js"
 import { useInterval } from "../hooks/useTabActivity.js"
-import { Button, Card, ConfirmButton, type DestructiveQuestion } from "../components/ui.js"
+import { Badge, Button, Card, Checkbox, ConfirmButton, Input, LoadingRows, TableCard, Td, Th, type DestructiveQuestion } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { SlidePanel } from "../components/SlidePanel.js"
@@ -438,45 +438,37 @@ export function RestCacheBrowser({
             </p>
           </div>
           <div className="divide-y divide-border px-4 py-2 space-y-2">
-            <label className={cn("flex items-center gap-2 text-sm", !controls.canEnable && "text-muted-foreground")}>
-              <input
-                type="checkbox"
-                checked={tableCfg.enabled}
-                /*
-                  Disabled rather than left to fail on save. The server narrows a request it does
-                  not permit and reports the adjustment, so a tick here would survive exactly until
-                  the save came back and then untick itself, which teaches an operator that the
-                  screen is broken rather than that their schema said no.
-                */
-                disabled={!controls.canEnable}
-                onChange={(e) => setTableCfg((c) => ({ ...c, enabled: e.target.checked }))}
-              />
-              Enable server cache for this table
-            </label>
+            <Checkbox
+              className={cn("flex text-sm text-foreground", !controls.canEnable && "text-muted-foreground")}
+              label="Enable server cache for this table"
+              checked={tableCfg.enabled}
+              /*
+                Disabled rather than left to fail on save. The server narrows a request it does
+                not permit and reports the adjustment, so a tick here would survive exactly until
+                the save came back and then untick itself, which teaches an operator that the
+                screen is broken rather than that their schema said no.
+              */
+              disabled={!controls.canEnable}
+              onChange={(e) => setTableCfg((c) => ({ ...c, enabled: e.target.checked }))}
+            />
             {controls.reason.enable && (
               <p className="text-xs text-muted-foreground pl-6">{controls.reason.enable}</p>
             )}
-            <label
-              className={cn(
-                "flex items-center gap-2 text-sm",
-                (!tableCfg.enabled || !controls.canAllowPublic) && "text-muted-foreground",
-              )}
-            >
-              <input
-                type="checkbox"
-                checked={tableCfg.allow_public}
-                disabled={!tableCfg.enabled || !controls.canAllowPublic}
-                onChange={(e) => setTableCfg((c) => ({ ...c, allow_public: e.target.checked }))}
-              />
-              Allow <code className="font-mono text-xs">public</code> scope (shared across users)
-            </label>
+            <Checkbox
+              className={cn("flex text-sm text-foreground", (!tableCfg.enabled || !controls.canAllowPublic) && "text-muted-foreground")}
+              label={<>Allow <code className="font-mono text-xs">public</code> scope (shared across users)</>}
+              checked={tableCfg.allow_public}
+              disabled={!tableCfg.enabled || !controls.canAllowPublic}
+              onChange={(e) => setTableCfg((c) => ({ ...c, allow_public: e.target.checked }))}
+            />
             {controls.reason.allowPublic && tableCfg.enabled && (
               <p className="text-xs text-muted-foreground pl-6">{controls.reason.allowPublic}</p>
             )}
             <div className="flex items-center gap-2 text-sm pt-1">
               <span className="text-muted-foreground">Max TTL (seconds)</span>
-              <input
-                className="w-24 rounded border border-border bg-background px-2 py-1 text-sm font-mono"
+              <Input
+                aria-label="Max TTL (seconds)"
+                className="w-24 px-2 py-1 font-mono"
                 type="number"
                 min={0}
                 max={controls.ttlCeiling ?? undefined}
@@ -547,57 +539,31 @@ export function RestCacheBrowser({
       )}
 
       {loading ? (
-        <div className="space-y-2">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-12 rounded-md bg-muted animate-pulse" />
-          ))}
-        </div>
+        <LoadingRows rowClassName="h-12" />
       ) : entries.length === 0 ? (
         <EmptyState
           title="No cache entries"
           description={emptyCacheDescription(tableFilter, tableCfg.enabled)}
         />
       ) : (
-        <Card>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/40">
-                <th className="text-left px-4 py-2 text-xs font-medium text-muted-foreground uppercase">Table</th>
-                <th className="text-left px-4 py-2 text-xs font-medium text-muted-foreground uppercase">Scope</th>
-                <th className="text-left px-4 py-2 text-xs font-medium text-muted-foreground uppercase">Path</th>
-                <th className="text-left px-4 py-2 text-xs font-medium text-muted-foreground uppercase">TTL</th>
-                <th className="text-left px-4 py-2 text-xs font-medium text-muted-foreground uppercase">Size</th>
-              </tr>
-            </thead>
-            <tbody>
+        <TableCard head={<><Th>Table</Th><Th>Scope</Th><Th>Path</Th><Th>TTL</Th><Th>Size</Th></>}>
               {entries.map((e) => (
                 <tr
                   key={e.key}
                   className="border-b border-border hover:bg-accent/40 cursor-pointer"
                   onClick={() => void openDetail(e.key)}
                 >
-                  <td className="px-4 py-2 font-mono text-xs">{e.table ?? "-"}</td>
-                  <td className="px-4 py-2">
-                    <span
-                      className={cn(
-                        "text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded",
-                        e.scope === "public" ? "bg-blue-500/15 text-blue-400" : "bg-amber-500/15 text-amber-400",
-                      )}
-                    >
-                      {e.scope ?? "user"}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2 font-mono text-xs truncate max-w-[240px]">
+                  <Td className="font-mono text-xs">{e.table ?? "-"}</Td>
+                  <Td><Badge variant={e.scope === "public" ? "blue" : "yellow"}>{e.scope ?? "user"}</Badge></Td>
+                  <Td className="font-mono text-xs truncate max-w-[240px]">
                     {e.path}
                     {e.raw_query ? `?${e.raw_query}` : ""}
-                  </td>
-                  <td className="px-4 py-2 text-xs text-muted-foreground">{e.ttl_seconds}s</td>
-                  <td className="px-4 py-2 text-xs text-muted-foreground">{formatBytes(e.size_bytes)}</td>
+                  </Td>
+                  <Td className="text-xs text-muted-foreground">{e.ttl_seconds}s</Td>
+                  <Td className="text-xs text-muted-foreground">{formatBytes(e.size_bytes)}</Td>
                 </tr>
               ))}
-            </tbody>
-          </table>
-        </Card>
+        </TableCard>
       )}
 
       {data && (pages.page > 0 || data.cursor !== "0") && (

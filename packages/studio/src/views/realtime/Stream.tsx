@@ -1,6 +1,6 @@
 import React, { memo, useMemo, useState } from "react"
 import { useFollowLatest } from "../../hooks/useFollowLatest.js"
-import { Badge, Button, Card, CodeBlock, Input, Select } from "../../components/ui.js"
+import { Badge, Button, Card, CodeBlock, DisclosureButton, Input, Select } from "../../components/ui.js"
 import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 import { isOneOf } from "../../lib/json.js"
@@ -126,9 +126,9 @@ const StreamRowCard = memo(function StreamRowCard({ row }: { row: StreamRow }): 
   const expandable = row.kind === "change" || row.kind === "broadcast"
   return (
     <Card className="px-3 py-2">
-      <button type="button" className="flex w-full items-center gap-2 text-left" disabled={!expandable} onClick={() => setOpen((v) => !v)} aria-expanded={expandable ? open : undefined}>
+      <DisclosureButton open={expandable ? open : undefined} onClick={() => setOpen((v) => !v)}>
         <RowSummary row={row} />
-      </button>
+      </DisclosureButton>
       {open && row.kind === "change" && <ChangeDetail change={row.change} />}
       {open && row.kind === "broadcast" && <BroadcastDetail broadcast={row.broadcast} />}
     </Card>

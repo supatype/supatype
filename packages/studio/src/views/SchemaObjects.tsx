@@ -11,8 +11,7 @@
  */
 
 import React, { useEffect, useState } from "react"
-import { Link } from "react-router-dom"
-import { Badge, Card, Checkbox, Input, Pager, Select, Td, Th, type BadgeVariant } from "../components/ui.js"
+import { Badge, Card, Checkbox, Input, Pager, Select, TableCard, Td, TextLink, Th, type BadgeVariant } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
@@ -251,9 +250,9 @@ function ObjectRow({ object }: { object: ManagedObject }): React.ReactElement {
           // Named rather than blank: an adopted object has no migration until a push changes it.
           <span className="text-muted-foreground">not yet pushed</span>
         ) : (
-          <Link to={migrationLink(object.migration_id)} className="text-primary hover:underline">
+          <TextLink to={migrationLink(object.migration_id)}>
             #{object.migration_id}
-          </Link>
+          </TextLink>
         )}
       </Td>
       <Td className="text-xs text-muted-foreground">{formatTimestamp(object.updated_at)}</Td>
@@ -263,32 +262,18 @@ function ObjectRow({ object }: { object: ManagedObject }): React.ReactElement {
 
 function ObjectTable({ objects }: { objects: readonly ManagedObject[] }): React.ReactElement {
   return (
-    <Card className="overflow-auto">
-      <table className="w-full">
-        <thead>
-          <tr className="border-b border-border">
-            <Th>Kind</Th>
-            <Th>Object</Th>
-            <Th>Schema</Th>
-            <Th>Status</Th>
-            <Th>Last changed by</Th>
-            <Th>Updated at</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {objects.map((o) => (
-            <ObjectRow key={`${o.kind}:${o.schema}:${o.parent}:${o.name}`} object={o} />
-          ))}
-          {objects.length === 0 && (
-            <tr>
-              <td colSpan={6} className="text-center py-8 text-muted-foreground text-sm">
-                No objects match your filters
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </Card>
+    <TableCard head={<><Th>Kind</Th><Th>Object</Th><Th>Schema</Th><Th>Status</Th><Th>Last changed by</Th><Th>Updated at</Th></>}>
+      {objects.map((o) => (
+        <ObjectRow key={`${o.kind}:${o.schema}:${o.parent}:${o.name}`} object={o} />
+      ))}
+      {objects.length === 0 && (
+        <tr>
+          <Td colSpan={6} className="text-center py-8 text-muted-foreground">
+            No objects match your filters
+          </Td>
+        </tr>
+      )}
+    </TableCard>
   )
 }
 

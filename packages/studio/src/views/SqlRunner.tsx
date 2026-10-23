@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect } from "react"
 import { EditorView, basicSetup } from "codemirror"
-import { EditorState, Compartment } from "@codemirror/state"
+import { EditorState, Compartment, Prec, type Extension } from "@codemirror/state"
 import { keymap } from "@codemirror/view"
 import { closeCompletion } from "@codemirror/autocomplete"
 import { sql as sqlLang, PostgreSQL } from "@codemirror/lang-sql"
@@ -8,12 +8,41 @@ import { useStudioClient } from "../StudioCore.js"
 import { useProjectProxy } from "../hooks/useProjectProxy.js"
 import { cn } from "../lib/utils.js"
 import { isJsonObject, isNumber, isShape, isString, optional, safeParseJson } from "../lib/json.js"
-import { Badge, Button, Card, CodeBlock, Input, Select, Th, Td } from "../components/ui.js"
+import { Badge, Button, Card, CodeBlock, DestructiveAnswers, Dialog, DisclosureButton, Input, Select, Table, Tabs, Th, Td, type TabItem } from "../components/ui.js"
+import { destructiveStatements } from "../lib/sql-destructive.js"
+import { usePlatform } from "../hooks/usePlatform.js"
 import { ElevatedNotice } from "../components/ElevatedModeBanner.js"
 import { RoleDenied } from "../components/RoleGate.js"
 import { useStudioCapability } from "../hooks/useStudioCapability.js"
 import { sqlEditorOffered } from "../lib/sql-editor-access.js"
 import { UuidCell } from "../components/UuidCell.js"
+
+// ─── Destructive SQL ──────────────────────────────────────────────────────────
+
+/**
+ * Runs SQL straight away unless it drops, empties or overwrites something
+ * ({@link destructiveStatements}); then it asks first, naming what it destroys, and runs only on
+ * the answer. Cancel runs nothing. The text judged is the text that will run.
+ */
+function useDestructiveQuestion(run: (text: string) => void): { request: (text: string) => void; question: React.ReactNode } {
+  const { projectRef } = usePlatform()
+  const [asking, setAsking] = useState<string | null>(null)
+  const request = useCallback((text: string) => {
+    if (destructiveStatements(text).length === 0) run(text)
+    else setAsking(text)
+  }, [run])
+  const question = asking === null ? null : (
+    <Dialog
+      role="alertdialog"
+      title={`Run this SQL on ${projectRef ?? "this project"}?`}
+      actions={<DestructiveAnswers label="Run SQL" act={() => { run(asking) }} onClose={() => { setAsking(null) }} />}
+    >
+      <p>It drops, deletes or overwrites, and cannot be undone:</p>
+      <CodeBlock className="max-h-40 overflow-y-auto whitespace-pre-wrap p-2 text-xs">{destructiveStatements(asking).join(";\n")}</CodeBlock>
+    </Dialog>
+  )
+  return { request, question }
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -35,6 +64,21 @@ interface ResultTab {
   duration: number
   error: string | null
   explainPlan: ExplainNode | null
+}
+
+/** A result as its tab: a failed run marked, its label and how long it took, and its close. */
+function resultTab(tab: ResultTab, closeTab: (id: string) => void): TabItem<string> {
+  return {
+    id: tab.id,
+    label: (
+      <span className="flex items-center gap-2">
+        {tab.error ? <span className="text-destructive-text" aria-label="failed">!</span> : null}
+        <span className="truncate max-w-[150px]">{tab.label}</span>
+        <span className="text-muted-foreground">{tab.duration}ms</span>
+      </span>
+    ),
+    close: { label: `Close ${tab.label}`, onClose: () => { closeTab(tab.id) } },
+  }
 }
 
 interface ExplainNode {
@@ -87,60 +131,41 @@ function explainPlanOf(row: Record<string, unknown> | undefined): ExplainNode | 
 
 // ─── Explain Plan Visualization ───────────────────────────────────────────────
 
-function ExplainPlanTree({
-  node,
-  depth = 0,
-}: {
-  node: ExplainNode
-  depth?: number
-}): React.ReactElement {
-  const [expanded, setExpanded] = useState(true)
-  const hasChildren = node.Plans && node.Plans.length > 0
+/** One plan node's figures: its cost, its rows, its time when it ran, and a bar for its cost. */
+function PlanFigures({ node }: { node: ExplainNode }): React.ReactElement {
   const costPercent = node["Total Cost"] > 0 ? Math.min(100, (node["Total Cost"] / 10) * 100) : 0
+  return (
+    <>
+      <div className="flex gap-3 text-[0.7rem] text-muted-foreground">
+        <span>cost: {node["Total Cost"].toFixed(2)}</span>
+        <span>rows: {node["Actual Rows"] ?? node["Plan Rows"]}</span>
+        {node["Actual Total Time"] !== undefined ? <span>time: {node["Actual Total Time"].toFixed(3)}ms</span> : null}
+      </div>
+      <div className="w-[60px] h-1.5 bg-border rounded-full overflow-hidden">
+        <div className="h-full bg-primary rounded-full" style={{ width: `${costPercent}%` }} />
+      </div>
+    </>
+  )
+}
 
+/**
+ * A plan node and, while it is open, the nodes under it. Its row is a disclosure button, so a
+ * node opens and closes from the keyboard as well as the pointer; a leaf has nothing to open.
+ */
+function ExplainPlanTree({ node, depth = 0 }: { node: ExplainNode; depth?: number }): React.ReactElement {
+  const [expanded, setExpanded] = useState(true)
+  const children = node.Plans ?? []
   return (
     <div className={cn("border-l-2 border-border", depth > 0 && "ml-4")}>
-      <div
-        className="flex items-center gap-2 px-3 py-2 hover:bg-accent/50 cursor-pointer"
-        onClick={() => setExpanded(!expanded)}
-      >
-        {hasChildren ? (
-          <span className="text-zinc-500 text-xs">{expanded ? "[-]" : "[+]"}</span>
-        ) : (
-          <span className="text-zinc-600 text-xs w-[24px]" />
-        )}
-
+      <DisclosureButton open={children.length > 0 ? expanded : undefined} className="px-3 py-2" onClick={() => setExpanded(!expanded)}>
+        <span className="text-zinc-500 text-xs w-[24px]">{children.length > 0 ? (expanded ? "[-]" : "[+]") : null}</span>
         <Badge variant="indigo">{node["Node Type"]}</Badge>
-
-        {node["Relation Name"] ? (
-          <code className="text-primary text-xs">{node["Relation Name"]}</code>
-        ) : null}
-
+        {node["Relation Name"] ? <code className="text-primary text-xs">{node["Relation Name"]}</code> : null}
         <div className="flex-1" />
-
-        <div className="flex gap-3 text-[0.7rem] text-muted-foreground">
-          <span>cost: {node["Total Cost"].toFixed(2)}</span>
-          <span>rows: {node["Actual Rows"] ?? node["Plan Rows"]}</span>
-          {node["Actual Total Time"] !== undefined ? (
-            <span>time: {node["Actual Total Time"].toFixed(3)}ms</span>
-          ) : null}
-        </div>
-
-        {/* Cost bar */}
-        <div className="w-[60px] h-1.5 bg-border rounded-full overflow-hidden">
-          <div
-            className="h-full bg-primary rounded-full"
-            style={{ width: `${costPercent}%` }}
-          />
-        </div>
-      </div>
-
-      {expanded && hasChildren ? (
-        <div>
-          {node.Plans!.map((child, i) => (
-            <ExplainPlanTree key={i} node={child} depth={depth + 1} />
-          ))}
-        </div>
+        <PlanFigures node={node} />
+      </DisclosureButton>
+      {expanded && children.length > 0 ? (
+        <div>{children.map((child, i) => <ExplainPlanTree key={i} node={child} depth={depth + 1} />)}</div>
       ) : null}
     </div>
   )
@@ -216,79 +241,62 @@ interface SqlEditorControl {
   viewRef: React.MutableRefObject<EditorView | null>
 }
 
-function SqlEditor({
-  doc,
-  schema,
-  control,
-}: {
-  doc: SqlEditorDoc
-  schema: Record<string, string[]>
-  control: SqlEditorControl
-}): React.ReactElement {
+/** The latest run and change handlers, read when a key is pressed or the text changes. */
+interface SqlEditorListeners {
+  onRun: React.RefObject<() => void>
+  onChange: React.RefObject<(v: string) => void>
+}
+
+/** The SQL editor's extensions: Studio's setup and theme, SQL completion, Mod-Enter to run, and the listener. */
+function sqlEditorExtensions(completion: Compartment, listeners: SqlEditorListeners): Extension[] {
+  return [
+    basicSetup,
+    studioSqlTheme,
+    completion.of(sqlLang({ dialect: PostgreSQL, schema: {}, defaultSchema: "public" })),
+    // Highest, or basicSetup's own Mod-Enter (insert a blank line) answers first and the
+    // query never runs: the "Ctrl+Enter to run" hint under the editor did nothing.
+    Prec.highest(keymap.of([{ key: "Mod-Enter", run: (view) => runAndCloseCompletion(view, listeners.onRun.current) }])),
+    EditorView.updateListener.of((update) => {
+      if (update.docChanged) listeners.onChange.current(update.state.doc.toString())
+    }),
+  ]
+}
+
+/** Keeps the editor in step with the page: text set from outside (history), and the schema for completion. */
+function useEditorSync(viewRef: React.RefObject<EditorView | null>, synced: { value: string; schema: Record<string, string[]>; completion: Compartment }): void {
+  const { value, schema, completion } = synced
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+    const current = view.state.doc.toString()
+    if (current !== value) view.dispatch({ changes: { from: 0, to: current.length, insert: value } })
+  }, [value])
+  useEffect(() => {
+    viewRef.current?.dispatch({ effects: completion.reconfigure(sqlLang({ dialect: PostgreSQL, schema, defaultSchema: "public" })) })
+  }, [schema])
+}
+
+function SqlEditor({ doc, schema, control }: { doc: SqlEditorDoc; schema: Record<string, string[]>; control: SqlEditorControl }): React.ReactElement {
   const { value, onChange } = doc
   const { onRun, viewRef } = control
   const containerRef = useRef<HTMLDivElement>(null)
   const onRunRef = useRef(onRun)
   const onChangeRef = useRef(onChange)
-  const schemaCompartment = useRef(new Compartment())
-
+  const completion = useRef(new Compartment())
   useEffect(() => { onRunRef.current = onRun }, [onRun])
   useEffect(() => { onChangeRef.current = onChange }, [onChange])
 
-  // Create the editor once on mount
+  // Created once on mount: the ref object never changes.
   useEffect(() => {
     if (!containerRef.current) return
-    const view = new EditorView({
-      state: EditorState.create({
-        doc: value,
-        extensions: [
-          basicSetup,
-          studioSqlTheme,
-          schemaCompartment.current.of(
-            sqlLang({ dialect: PostgreSQL, schema: {}, defaultSchema: "public" })
-          ),
-          keymap.of([{
-            key: "Mod-Enter",
-            run: (view) => runAndCloseCompletion(view, onRunRef.current),
-          }]),
-          EditorView.updateListener.of((update) => {
-            if (update.docChanged) onChangeRef.current(update.state.doc.toString())
-          }),
-        ],
-      }),
-      parent: containerRef.current,
-    })
+    const extensions = sqlEditorExtensions(completion.current, { onRun: onRunRef, onChange: onChangeRef })
+    const view = new EditorView({ state: EditorState.create({ doc: value, extensions }), parent: containerRef.current })
     viewRef.current = view
     return () => { view.destroy(); viewRef.current = null }
-  }, [viewRef]) // created once: the ref object never changes
+  }, [viewRef])
+  useEditorSync(viewRef, { value, schema, completion: completion.current })
 
-  // Sync value changes from outside (e.g. loading from history)
-  useEffect(() => {
-    const view = viewRef.current
-    if (!view) return
-    const current = view.state.doc.toString()
-    if (current !== value) {
-      view.dispatch({ changes: { from: 0, to: current.length, insert: value } })
-    }
-  }, [value])
-
-  // Reconfigure schema autocomplete when schema data arrives
-  useEffect(() => {
-    const view = viewRef.current
-    if (!view) return
-    view.dispatch({
-      effects: schemaCompartment.current.reconfigure(
-        sqlLang({ dialect: PostgreSQL, schema, defaultSchema: "public" })
-      ),
-    })
-  }, [schema])
-
-  return (
-    <div
-      ref={containerRef}
-      className="rounded-md border border-border bg-background overflow-hidden"
-    />
-  )
+  return <div ref={containerRef} className="rounded-md border border-border bg-background overflow-hidden" />
 }
 
 // ─── Export Utilities ─────────────────────────────────────────────────────────
@@ -409,28 +417,28 @@ function SqlEditorView(): React.ReactElement {
     })()
   }, [introspect])
 
-  const handleRun = useCallback(async () => {
-    if (!query.trim() || running) return
+  const handleRun = useCallback(async (text: string) => {
+    if (!text.trim() || running) return
     setRunning(true)
     const start = performance.now()
 
     try {
-      const result = await sql(query)
+      const result = await sql(text)
       const elapsed = Math.round(performance.now() - start)
 
       const rows = result.rows
       const columns = rows.length > 0 ? Object.keys(rows[0]!) : []
 
       let explainPlan: ExplainNode | null = null
-      if (query.trim().toUpperCase().startsWith("EXPLAIN")) {
+      if (text.trim().toUpperCase().startsWith("EXPLAIN")) {
         explainPlan = explainPlanOf(rows[0])
       }
 
       const tabId = `tab-${Date.now()}`
       const newTab: ResultTab = {
         id: tabId,
-        label: query.trim().slice(0, 30) + (query.trim().length > 30 ? "..." : ""),
-        query: query.trim(),
+        label: text.trim().slice(0, 30) + (text.trim().length > 30 ? "..." : ""),
+        query: text.trim(),
         columns,
         rows,
         duration: elapsed,
@@ -441,7 +449,7 @@ function SqlEditorView(): React.ReactElement {
       setTabs((prev) => [...prev, newTab])
       setActiveTabId(tabId)
       setHistory((prev) => [
-        { id: `h-${Date.now()}`, query: query.trim(), timestamp: Date.now(), duration: elapsed, rows: rows.length, error: null },
+        { id: `h-${Date.now()}`, query: text.trim(), timestamp: Date.now(), duration: elapsed, rows: rows.length, error: null },
         ...prev.slice(0, 49),
       ])
     } catch (err) {
@@ -451,7 +459,7 @@ function SqlEditorView(): React.ReactElement {
       const newTab: ResultTab = {
         id: tabId,
         label: "Error",
-        query: query.trim(),
+        query: text.trim(),
         columns: [],
         rows: [],
         duration: elapsed,
@@ -461,16 +469,17 @@ function SqlEditorView(): React.ReactElement {
       setTabs((prev) => [...prev, newTab])
       setActiveTabId(tabId)
       setHistory((prev) => [
-        { id: `h-${Date.now()}`, query: query.trim(), timestamp: Date.now(), duration: elapsed, rows: 0, error: msg },
+        { id: `h-${Date.now()}`, query: text.trim(), timestamp: Date.now(), duration: elapsed, rows: 0, error: msg },
         ...prev.slice(0, 49),
       ])
     } finally {
       setRunning(false)
     }
-  }, [query, running, sql])
+  }, [running, sql])
 
   const editorRef = useRef<EditorView | null>(null)
-  const runQuery = useCallback(() => { void handleRun() }, [handleRun])
+  const confirm = useDestructiveQuestion((text) => { void handleRun(text) })
+  const runQuery = useCallback(() => { confirm.request(query) }, [confirm.request, query])
   const runFromButton = (): void => {
     const view = editorRef.current
     if (view === null) runQuery()
@@ -548,34 +557,17 @@ function SqlEditorView(): React.ReactElement {
           </div>
         </Card>
 
+        {confirm.question}
+
         {/* Result Tabs */}
         {tabs.length > 0 ? (
           <div>
             {/* Tab bar */}
-            <div className="flex border-b border-border overflow-x-auto">
-              {tabs.map((tab) => (
-                <div
-                  key={tab.id}
-                  className={cn(
-                    "flex items-center gap-2 px-3 py-2 text-xs border-b-2 cursor-pointer whitespace-nowrap",
-                    activeTabId === tab.id
-                      ? "text-foreground border-primary"
-                      : "text-muted-foreground border-transparent hover:text-foreground"
-                  )}
-                  onClick={() => setActiveTabId(tab.id)}
-                >
-                  {tab.error ? <span className="text-red-400">!</span> : null}
-                  <span className="truncate max-w-[150px]">{tab.label}</span>
-                  <span className="text-zinc-600">{tab.duration}ms</span>
-                  <button
-                    className="text-zinc-600 hover:text-foreground ml-1"
-                    onClick={(e) => { e.stopPropagation(); closeTab(tab.id) }}
-                  >
-                    x
-                  </button>
-                </div>
-              ))}
-            </div>
+            <Tabs
+              tabs={{ label: "Query results", size: "xs", items: tabs.map((tab) => resultTab(tab, closeTab)) }}
+              value={activeTabId ?? ""}
+              onChange={setActiveTabId}
+            />
 
             {/* Active tab content */}
             {activeTab ? (
@@ -620,7 +612,7 @@ function SqlEditorView(): React.ReactElement {
                           </Button>
                         </div>
                       </div>
-                      <table className="w-full">
+                      <Table>
                         <thead>
                           <tr className="border-b border-border">
                             {activeTab.columns.map((col) => (
@@ -647,7 +639,7 @@ function SqlEditorView(): React.ReactElement {
                             </tr>
                           ))}
                         </tbody>
-                      </table>
+                      </Table>
                     </Card>
                   </>
                 ) : !activeTab.error ? (

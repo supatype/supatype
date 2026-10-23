@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from "react"
 import { useSearchParams } from "react-router-dom"
 import { isMissingTable } from "../lib/database-error.js"
 import { cn } from "../lib/utils.js"
-import { Badge, Button, Card, Input, Select, Th, Td } from "../components/ui.js"
+import { Badge, Button, Card, IconButton, Input, Select, Table, Tabs, Th, Td, type TabsSpec } from "../components/ui.js"
 import { useProjectProxy, type ProjectProxy } from "../hooks/useProjectProxy.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import { EmptyState } from "../components/EmptyState.js"
@@ -526,7 +526,7 @@ function ExpandedRow({ proxy, migration, changes, colSpan }: {
 
   return (
     <tr className="bg-accent/20 border-b border-border">
-      <td colSpan={colSpan} className="px-4 py-3">
+      <Td colSpan={colSpan} className="px-4 py-3">
         <OutcomeDetails outcome={migration.outcome} />
         {baseline && (
           <p className="text-xs text-muted-foreground mb-3">
@@ -534,21 +534,8 @@ function ExpandedRow({ proxy, migration, changes, colSpan }: {
           </p>
         )}
         {(hasChanges || hasSql) && (
-          <div className="flex gap-3 mb-3 border-b border-border/40 pb-2">
-            <button
-              onClick={() => setTab("changes")}
-              className={cn("text-xs pb-1 border-b-2 transition-colors", tab === "changes" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}
-            >
-              Schema changes
-            </button>
-            {hasSql && (
-              <button
-                onClick={() => setTab("sql")}
-                className={cn("text-xs pb-1 border-b-2 transition-colors", tab === "sql" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}
-              >
-                SQL
-              </button>
-            )}
+          <div className="mb-3">
+            <Tabs tabs={detailTabs(hasSql)} value={tab} onChange={setTab} />
           </div>
         )}
         {tab === "changes" && <ChangeList changes={changes} />}
@@ -568,9 +555,15 @@ function ExpandedRow({ proxy, migration, changes, colSpan }: {
             <span>rolled back: {new Date(migration.rolled_back_at).toLocaleString()}</span>
           )}
         </div>
-      </td>
+      </Td>
     </tr>
   )
+}
+
+/** A migration's detail tabs: its schema changes, and its SQL when there is any. */
+function detailTabs(hasSql: boolean): TabsSpec<"changes" | "sql"> {
+  const items = [{ id: "changes" as const, label: "Schema changes" }, ...(hasSql ? [{ id: "sql" as const, label: "SQL" }] : [])]
+  return { label: "Migration detail", items, size: "xs" }
 }
 
 // ─── Slide-out panel ──────────────────────────────────────────────────────────
@@ -611,12 +604,9 @@ function SlideOutPanel({ proxy, migration, changes, onClose }: {
               <span className="text-xs text-muted-foreground font-mono">{migration.engine_version}</span>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="text-muted-foreground hover:text-foreground p-1 rounded transition-colors flex-shrink-0 ml-2"
-          >
+          <IconButton label="Close" onClick={onClose} className="ml-2">
             ✕
-          </button>
+          </IconButton>
         </div>
 
         {/* Meta */}
@@ -644,21 +634,8 @@ function SlideOutPanel({ proxy, migration, changes, onClose }: {
         ) : null}
 
         {/* Tabs */}
-        <div className="flex gap-4 px-5 pt-3 border-b border-border/40 flex-shrink-0">
-          <button
-            onClick={() => setTab("changes")}
-            className={cn("text-xs pb-2 border-b-2 transition-colors", tab === "changes" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}
-          >
-            Schema changes
-          </button>
-          {hasSql && (
-            <button
-              onClick={() => setTab("sql")}
-              className={cn("text-xs pb-2 border-b-2 transition-colors", tab === "sql" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}
-            >
-              SQL
-            </button>
-          )}
+        <div className="px-5 pt-3 flex-shrink-0">
+          <Tabs tabs={detailTabs(hasSql)} value={tab} onChange={setTab} />
         </div>
 
         {/* Body */}
@@ -821,7 +798,7 @@ export function MigrationHistory(): React.ReactElement {
 
       {/* Table */}
       <Card className="overflow-auto">
-        <table className="w-full">
+        <Table>
           <thead>
             <tr className="border-b border-border">
               <Th className="w-6" />
@@ -881,15 +858,15 @@ export function MigrationHistory(): React.ReactElement {
             })}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={9} className="text-center py-8 text-muted-foreground text-sm">
+                <Td colSpan={9} className="text-center py-8 text-muted-foreground">
                   {linkedId !== null
                     ? `Migration #${linkedId} not found: no tracked schema migration has that id.`
                     : "No migrations match your filters"}
-                </td>
+                </Td>
               </tr>
             )}
           </tbody>
-        </table>
+        </Table>
       </Card>
 
       <div className="text-xs text-muted-foreground mt-2">

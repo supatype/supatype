@@ -1,5 +1,6 @@
 import React from "react"
 import type { WidgetProps } from "./FieldWidget.js"
+import { Input } from "../components/ui.js"
 import { fromLocalInput, localZoneName, toLocalInput } from "../lib/local-datetime.js"
 
 export function DateWidget({ config, value, onChange, readOnly }: WidgetProps): React.ReactElement {
@@ -16,12 +17,11 @@ export function DateWidget({ config, value, onChange, readOnly }: WidgetProps): 
     typeof raw === "string" ? forInput(raw) : undefined
 
   return (
-    <input
+    <Input
       id={`field-${config.name}`}
       type={inputType}
       min={bound(config.validation?.min)}
       max={bound(config.validation?.max)}
-      className="st-input"
       value={forInput(value)}
       {...(isDatetime && { title: `Your local time (${localZoneName()})` })}
       onChange={(e) => {

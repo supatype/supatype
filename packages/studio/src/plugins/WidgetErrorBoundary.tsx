@@ -1,4 +1,5 @@
 import { Component, type ReactNode } from "react"
+import { Button, Input } from "../components/ui.js"
 
 // -- Props -------------------------------------------------------------------
 
@@ -22,7 +23,7 @@ interface WidgetErrorBoundaryState {
 
 /**
  * Error boundary that wraps plugin widgets. When a widget crashes, it shows
- * a fallback message and a plain `<input>` with the current value. A "Retry"
+ * a fallback message and a plain text input with the current value. A "Retry"
  * button re-mounts the widget by toggling a key.
  */
 export class WidgetErrorBoundary extends Component<
@@ -55,31 +56,21 @@ export class WidgetErrorBoundary extends Component<
   render(): ReactNode {
     if (this.state.hasError) {
       return (
-        <div
-          role="alert"
-          style={{
-            border: "1px solid #e5534b",
-            borderRadius: 4,
-            padding: 12,
-            background: "#2d1b1b",
-          }}
-        >
-          <p style={{ margin: "0 0 8px", color: "#e5534b" }}>
-            Plugin widget &apos;{this.props.widgetName}&apos; crashed &mdash;
-            showing default input
+        <div role="alert" className="space-y-2 rounded-md border border-destructive/50 bg-destructive/10 p-3">
+          <p className="text-sm text-destructive-text">
+            Plugin widget &apos;{this.props.widgetName}&apos; crashed, so this shows the default input.
           </p>
 
-          <input
+          <Input
             type="text"
             value={typeof this.props.value === "string" ? this.props.value : String(this.props.value ?? "")}
             onChange={this.handleFallbackChange}
             aria-label={this.props.fieldName}
-            style={{ width: "100%", marginBottom: 8, boxSizing: "border-box" }}
           />
 
-          <button type="button" onClick={this.handleRetry}>
+          <Button type="button" size="xs" onClick={this.handleRetry}>
             Retry
-          </button>
+          </Button>
         </div>
       )
     }

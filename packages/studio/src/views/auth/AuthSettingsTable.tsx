@@ -1,5 +1,5 @@
 import React from "react"
-import { Badge, Card, Td, Th } from "../../components/ui.js"
+import { Badge, Card, LoadingRows, Table, Td, Th } from "../../components/ui.js"
 import { NOT_OAUTH, type AuthSettings } from "../../hooks/useAuthSettings.js"
 
 /**
@@ -74,7 +74,7 @@ export function SettingsTable({ title, rows, cloud }: { title: string; rows: Set
     <Card>
       <h3 className="text-sm font-medium text-foreground px-4 pt-4 pb-2">{title}</h3>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <Table>
           <thead>
             <tr className="border-b border-border bg-muted/40">
               <Th className="px-4 py-2.5">Setting</Th>
@@ -95,18 +95,12 @@ export function SettingsTable({ title, rows, cloud }: { title: string; rows: Set
               </tr>
             ))}
           </tbody>
-        </table>
+        </Table>
       </div>
     </Card>
   )
 }
 
 export function SettingsLoading(): React.ReactElement {
-  return (
-    <div className="space-y-2">
-      {[1, 2, 3].map((i) => (
-        <div key={i} className="h-10 rounded-md bg-muted animate-pulse" />
-      ))}
-    </div>
-  )
+  return <LoadingRows />
 }

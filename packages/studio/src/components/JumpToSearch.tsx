@@ -9,7 +9,7 @@ import { useStudioCapability } from "../hooks/useStudioCapability.js"
 import { IconSearch, IconX } from "./icons.js"
 import { JUMP_PAGE_SIZE, liveRows, useLiveSearch, type SearchItem } from "./jump-live-search.js"
 import { SlidePanel } from "./SlidePanel.js"
-import { Button } from "./ui.js"
+import { Button, IconButton, Input, ListButton } from "./ui.js"
 
 // ─── Static route index ───────────────────────────────────────────────────────
 
@@ -128,8 +128,9 @@ function JumpResults({ results, activeIndex, onHover, onChoose, inline }: JumpRe
       {results.map((item, i) => (
         <React.Fragment key={`${item.kind}-${item.group ?? ""}-${item.href}-${i}`}>
           {i === firstLiveIndex && firstLiveIndex > 0 && <div className="border-t border-border mx-3" />}
-          <button
-            className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${i === activeIndex ? "bg-muted" : "hover:bg-muted/60"}`}
+          <ListButton
+            selected={i === activeIndex}
+            className="gap-3 rounded-none px-4 py-2.5 font-normal"
             onMouseEnter={() => onHover(i)}
             // A "More" row keeps the input focused, so the dropdown stays open for what it loads.
             onMouseDown={(e) => { if (item.kind === "more") e.preventDefault(); onChoose(item) }}
@@ -139,7 +140,7 @@ function JumpResults({ results, activeIndex, onHover, onChoose, inline }: JumpRe
               {item.description && <span className="ml-2 text-xs text-muted-foreground truncate">{item.description}</span>}
             </div>
             <span className="text-xs text-muted-foreground/60 shrink-0 font-mono">{item.category}</span>
-          </button>
+          </ListButton>
         </React.Fragment>
       ))}
     </div>
@@ -186,21 +187,21 @@ function JumpInput({ inputRef, searching, onClear, value, className, ...props }:
       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none">
         {searching ? <SpinnerIcon /> : <IconSearch />}
       </span>
-      <input
+      <Input
         ref={inputRef}
         type="text"
         value={value}
-        className={`w-full pl-9 pr-8 ${className ?? ""} rounded-lg border border-border bg-background text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow`}
+        className={`pl-9 pr-8 ${className ?? ""} rounded-lg placeholder:text-muted-foreground transition-shadow`}
         {...props}
       />
       {value && (
-        <button
-          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-          aria-label="Clear search"
+        <IconButton
+          label="Clear search"
+          className="absolute right-1 top-1/2 -translate-y-1/2"
           onMouseDown={(e) => { e.preventDefault(); onClear() }}
         >
           <IconX />
-        </button>
+        </IconButton>
       )}
     </div>
   )

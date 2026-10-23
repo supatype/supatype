@@ -1,7 +1,7 @@
 import React, { useState } from "react"
 import { useAdminConfig } from "../hooks/useAdminConfig.js"
 import { useStudioClient } from "../StudioCore.js"
-import { Button, CodeBlock } from "../components/ui.js"
+import { Button, CodeBlock, ListButton, Textarea } from "../components/ui.js"
 import { cn } from "../lib/utils.js"
 import { buildGraphqlListQuery, graphqlEndpoint, runGraphql } from "../lib/graphql-query.js"
 import { useSendAs } from "../hooks/useSendAs.js"
@@ -57,16 +57,15 @@ export function GraphQLExplorer(): React.ReactElement {
           Types
         </div>
         {config.models.map((model) => (
-          <button
+          <ListButton
             key={model.name}
-            type="button"
+            className="px-2 py-1.5"
             onClick={() =>
               setQuery(buildGraphqlListQuery(model.tableName, model.fields.slice(0, 4).map((f) => f.name)))
             }
-            className="text-left px-2 py-1.5 rounded text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors truncate"
           >
-            {model.label}
-          </button>
+            <span className="truncate">{model.label}</span>
+          </ListButton>
         ))}
         {config.models.length === 0 && (
           <p className="text-xs text-muted-foreground px-1">No models yet.</p>
@@ -76,14 +75,9 @@ export function GraphQLExplorer(): React.ReactElement {
             Auth
           </div>
           {AUTH_TABLES.map((t) => (
-            <button
-              key={t.name}
-              type="button"
-              onClick={() => setQuery(buildGraphqlListQuery(t.name, t.fields))}
-              className="text-left px-2 py-1.5 rounded text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors truncate w-full"
-            >
-              {t.label}
-            </button>
+            <ListButton key={t.name} className="px-2 py-1.5" onClick={() => setQuery(buildGraphqlListQuery(t.name, t.fields))}>
+              <span className="truncate">{t.label}</span>
+            </ListButton>
           ))}
         </div>
         <div className="mt-auto pt-2 border-t border-border">
@@ -105,11 +99,12 @@ export function GraphQLExplorer(): React.ReactElement {
           {/* Query editor */}
           <div className="flex-1 flex flex-col min-h-0">
             <div className="text-xs text-muted-foreground mb-1">Query</div>
-            <textarea
+            <Textarea
+              aria-label="Query"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               spellCheck={false}
-              className="flex-1 font-mono text-[13px] bg-muted rounded-md p-3 resize-none focus:outline-none focus:ring-1 focus:ring-primary border border-border min-h-0"
+              className="flex-1 min-h-0 resize-none bg-muted p-3 text-[13px]"
             />
           </div>
 

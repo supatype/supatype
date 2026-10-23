@@ -1,8 +1,6 @@
 import React from "react"
 import type { ModelConfig } from "../config.js"
-import { Card } from "../components/ui.js"
-import { Badge } from "../components/ui.js"
-import { cn } from "../lib/utils.js"
+import { Badge, Card, Table, Td, Th } from "../components/ui.js"
 import { useProjectProxy } from "../hooks/useProjectProxy.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 
@@ -77,7 +75,7 @@ export function ModelSchema({ model }: ModelSchemaProps): React.ReactElement {
           )}
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <Table>
             <thead>
               <tr className="border-b border-border bg-muted/40">
                 <Th>Name</Th>
@@ -131,13 +129,13 @@ export function ModelSchema({ model }: ModelSchemaProps): React.ReactElement {
               })}
               {allNames.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-6 text-center text-sm text-muted-foreground">
+                  <Td colSpan={7} className="py-6 text-center text-muted-foreground">
                     No fields defined.
-                  </td>
+                  </Td>
                 </tr>
               )}
             </tbody>
-          </table>
+          </Table>
         </div>
       </Card>
 
@@ -148,7 +146,7 @@ export function ModelSchema({ model }: ModelSchemaProps): React.ReactElement {
             <h2 className="text-sm font-semibold">Relations</h2>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <Table>
               <thead>
                 <tr className="border-b border-border bg-muted/40">
                   <Th>Field</Th>
@@ -163,7 +161,7 @@ export function ModelSchema({ model }: ModelSchemaProps): React.ReactElement {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </Table>
           </div>
         </Card>
       )}
@@ -192,16 +190,4 @@ function MetaRow({ label, value, mono }: { label: string; value: string; mono?: 
       }
     </div>
   )
-}
-
-function Th({ children }: { children: React.ReactNode }): React.ReactElement {
-  return (
-    <th className="text-left px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-      {children}
-    </th>
-  )
-}
-
-function Td({ children, className }: { children: React.ReactNode; className?: string }): React.ReactElement {
-  return <td className={cn("px-4 py-2.5", className)}>{children}</td>
 }

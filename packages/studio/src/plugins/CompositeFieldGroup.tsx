@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { getWidgetsForType } from "./WidgetRegistry.js"
 import { WidgetLoader } from "./WidgetLoader.js"
+import { Checkbox, DisclosureButton, Input } from "../components/ui.js"
 
 // -- Props -------------------------------------------------------------------
 
@@ -22,6 +23,7 @@ export interface CompositeFieldGroupProps {
 // -- Default field input -----------------------------------------------------
 
 function DefaultFieldInput(props: {
+  id: string
   name: string
   type: string
   value: unknown
@@ -39,25 +41,18 @@ function DefaultFieldInput(props: {
   }
 
   if (props.type === "boolean") {
-    return (
-      <input
-        type="checkbox"
-        checked={Boolean(props.value)}
-        onChange={handleChange}
-        aria-label={props.name}
-      />
-    )
+    return <Checkbox id={props.id} label={null} checked={Boolean(props.value)} onChange={handleChange} aria-label={props.name} />
   }
 
   return (
-    <input
+    <Input
+      id={props.id}
       type={props.type === "number" || props.type === "integer" ? "number" : "text"}
       value={typeof props.value === "string" || typeof props.value === "number"
         ? String(props.value)
         : ""}
       onChange={handleChange}
       aria-label={props.name}
-      style={{ width: "100%", boxSizing: "border-box" }}
     />
   )
 }
@@ -81,54 +76,32 @@ export function CompositeFieldGroup(
   }
 
   return (
-    <fieldset
-      style={{ border: "1px solid #333", borderRadius: 4, padding: 0 }}
-      aria-label={compositeName}
-    >
-      <legend style={{ padding: "0 8px" }}>
-        <button
-          type="button"
+    <fieldset className="rounded-md border border-border" aria-label={compositeName}>
+      <legend className="px-2">
+        {/* A group that cannot collapse has nothing to disclose, so its header claims no state. */}
+        <DisclosureButton
+          open={collapsible ? !collapsed : undefined}
           onClick={toggleCollapsed}
-          aria-expanded={!collapsed}
-          style={{
-            background: "none",
-            border: "none",
-            cursor: collapsible ? "pointer" : "default",
-            fontWeight: 600,
-            fontSize: 14,
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-          }}
+          className="w-auto gap-1.5 rounded-sm px-1 text-sm font-semibold text-foreground"
         >
           {collapsible && (
-            <span
-              aria-hidden="true"
-              style={{
-                display: "inline-block",
-                transition: "transform 150ms",
-                transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)",
-              }}
-            >
+            <span aria-hidden="true" className={collapsed ? "inline-block -rotate-90 transition-transform" : "inline-block transition-transform"}>
               &#x25BE;
             </span>
           )}
           {label}
-        </button>
+        </DisclosureButton>
       </legend>
 
       {!collapsed && (
-        <div style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 12 }}>
+        <div className="flex flex-col gap-3 px-3 py-2">
           {fields.map((field) => {
             const widgets = getWidgetsForType(field.type)
             const widget = widgets[0]
 
             return (
               <div key={field.name}>
-                <label
-                  htmlFor={`${compositeName}-${field.name}`}
-                  style={{ display: "block", marginBottom: 4, fontSize: 13 }}
-                >
+                <label htmlFor={`${compositeName}-${field.name}`} className="mb-1 block text-[13px] text-muted-foreground">
                   {field.name}
                 </label>
 
@@ -145,6 +118,7 @@ export function CompositeFieldGroup(
                   />
                 ) : (
                   <DefaultFieldInput
+                    id={`${compositeName}-${field.name}`}
                     name={field.name}
                     type={field.type}
                     value={field.value}
