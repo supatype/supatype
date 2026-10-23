@@ -17,6 +17,7 @@
  * verify before relying on it; this is the verified path.
  */
 import { readEnvValue, upsertEnvFile } from "./env-file.js"
+import { keptName } from "@supatype/shared"
 import { astModels, objectAt } from "./ast-read.js"
 
 /** One table's cache declaration, as the manifest carries it. */
@@ -55,7 +56,8 @@ export function manifestCache(ast: unknown): Record<string, ManifestCacheEntry> 
     if (typeof rows === "boolean") entry.rows = rows
     if (typeof maxTtl === "number" && Number.isFinite(maxTtl) && maxTtl >= 0) entry.maxTtl = maxTtl
 
-    if (Object.keys(entry).length > 0) out[table] = entry
+    // Keyed as Postgres keeps the name, since the server allows a table by the name it has.
+    if (Object.keys(entry).length > 0) out[keptName(table)] = entry
   }
   return out
 }

@@ -14,7 +14,7 @@ import { generateHooksModule } from "./hooks-generator.js"
 import { manifestCache } from "./model-cache.js"
 import { astModels, objectAt } from "./ast-read.js"
 import { readJsonObjectFile } from "./json-file.js"
-import { isJsonObject } from "@supatype/shared"
+import { isJsonObject, keptName } from "@supatype/shared"
 
 export interface DeclaredHook {
   model: string
@@ -61,8 +61,9 @@ function modelFunctions(ast: unknown, map: "hooks" | "validate"): ModelFunctions
       if (typeof fn === "string" && fn.length > 0) entries.push({ key, function: fn, value })
     }
     const name = model["name"]
+    // As Postgres keeps it: the worker looks hooks up by the table a write lands in.
     const table = objectAt(model, "annotations", "db")?.["tableName"]
-    out.push({ model: typeof name === "string" ? name : "?", table, entries })
+    out.push({ model: typeof name === "string" ? name : "?", table: typeof table === "string" ? keptName(table) : table, entries })
   }
   return out
 }

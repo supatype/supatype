@@ -10,8 +10,11 @@
  * The rules mirror the engine's, because the tables they describe are the ones the engine creates:
  * a `belongsTo` puts `<field>_id` on its own table (or the declared `foreignKey`) referencing the
  * target's `references` column, `id` by default; a `manyToMany` creates the `through` table (or the
- * two names sorted and joined) holding `<model>_id` for each side.
+ * two names sorted and joined) holding `<model>_id` for each side. Every table and column is named
+ * as Postgres keeps it, cut to 63 bytes as the engine cuts it; `tableName` gives the names as
+ * stated, since a junction is named from the full names and only then cut.
  */
+import { keptName } from "@supatype/shared"
 import type { AstModel } from "./augmentation-generator.js"
 
 export interface Relationship {
@@ -33,7 +36,7 @@ export function toSnakeCase(name: string): string {
   return name.replace(/([A-Z])/g, "_$1").replace(/^_/, "").toLowerCase()
 }
 
-/** The table a relation's `target` (a model name) lives in. */
+/** The table a relation's `target` (a model name) lives in, as stated. */
 function targetTable(target: string, models: AstModel[], tableName: (m: AstModel) => string): string {
   const model = models.find((m) => m.name === target)
   return model === undefined ? toSnakeCase(target) : tableName(model)
@@ -48,7 +51,7 @@ function declaredForeignKey(meta: FieldMeta): string | undefined {
 
 /** The column a `belongsTo` field occupies on its own table. */
 export function foreignKeyColumn(name: string, meta: FieldMeta): string {
-  return declaredForeignKey(meta) ?? `${toSnakeCase(name)}_id`
+  return keptName(declaredForeignKey(meta) ?? `${toSnakeCase(name)}_id`)
 }
 
 /** Every foreign key `model` holds, one per `belongsTo` field. */
@@ -62,8 +65,8 @@ export function relationshipsOf(
     .map(([name, meta]) => ({
       columns: [foreignKeyColumn(name, meta)],
       isOneToOne: meta["uniqueFk"] === true,
-      referencedRelation: targetTable(String(meta["target"]), models, tableName),
-      referencedColumns: [typeof meta["references"] === "string" ? meta["references"] : "id"],
+      referencedRelation: keptName(targetTable(String(meta["target"]), models, tableName)),
+      referencedColumns: [keptName(typeof meta["references"] === "string" ? meta["references"] : "id")],
     }))
 }
 
@@ -85,7 +88,7 @@ interface JunctionContext {
 /** A junction's name and its two models in column order, as the engine resolves them. */
 function junctionEnds(model: AstModel, meta: FieldMeta, ctx: JunctionContext): { name: string; ends: string[] } {
   const target = String(meta["target"])
-  if (typeof meta["through"] === "string") return { name: meta["through"], ends: [model.name ?? "", target] }
+  if (typeof meta["through"] === "string") return { name: keptName(meta["through"]), ends: [model.name ?? "", target] }
   // Both tables, sorted (ties by model name), as the engine names it: `post_tag` from either side
   // and either declaration order. It was one side's table plus the other side's model name, which
   // named `Post_tag` and `Tag_post`, tables the database no longer has.
@@ -93,7 +96,7 @@ function junctionEnds(model: AstModel, meta: FieldMeta, ctx: JunctionContext): {
   const other = { table: targetTable(target, ctx.models, ctx.tableName), name: target }
   const selfFirst = self.table === other.table ? compare(self.name, other.name) <= 0 : compare(self.table, other.table) < 0
   const [a, b] = selfFirst ? [self, other] : [other, self]
-  return { name: `${a.table}_${b.table}`, ends: [a.name, b.name] }
+  return { name: keptName(`${a.table}_${b.table}`), ends: [a.name, b.name] }
 }
 
 /** Byte order, as the engine's Rust `sort` compares strings, not the locale's. */
@@ -104,9 +107,9 @@ function compare(x: string, y: string): number {
 function junctionFor(model: AstModel, meta: FieldMeta, ctx: JunctionContext): JunctionTable {
   const { name, ends } = junctionEnds(model, meta, ctx)
   const sides = ends.map((side) => ({
-    column: `${toSnakeCase(side)}_id`,
+    column: keptName(`${toSnakeCase(side)}_id`),
     key: primaryKeyOf(side, ctx.models, ctx.tsOf),
-    table: targetTable(side, ctx.models, ctx.tableName),
+    table: keptName(targetTable(side, ctx.models, ctx.tableName)),
   }))
   return {
     name,

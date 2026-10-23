@@ -20,6 +20,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@supatype/shared": "workspace:*",
     "jsonwebtoken": "^9.0.0",
     "pg": "^8.13.0",
     "ws": "^8.18.0"

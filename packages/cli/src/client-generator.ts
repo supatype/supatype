@@ -23,7 +23,7 @@
  * generated has no file here to import, so the build fails rather than the app running with a
  * client that knows nothing about its schema.
  */
-import { generateClientAugmentation } from "./augmentation-generator.js"
+import { generateClientAugmentation, resolveTableName } from "./augmentation-generator.js"
 import { astModels, objectAt } from "./ast-read.js"
 import { keepsDrafts } from "./model-versioning.js"
 
@@ -122,11 +122,4 @@ function draftModelsDocument(ast: unknown): { version: number; tables: Record<st
 function primaryKeyColumn(fields: Record<string, unknown> | undefined): string {
   const keyed = Object.entries(fields ?? {}).find(([, meta]) => objectAt(meta)?.["primaryKey"] === true)
   return keyed?.[0] ?? "id"
-}
-
-/** The table a model is stored in: its declared `tableName`, else its name. */
-function resolveTableName(model: Record<string, unknown>): string {
-  const named = objectAt(model, "annotations", "db")?.["tableName"]
-  if (typeof named === "string" && named !== "") return named
-  return typeof model["name"] === "string" ? model["name"] : ""
 }
