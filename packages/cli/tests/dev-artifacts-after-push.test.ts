@@ -220,6 +220,13 @@ describe.each([
     expect(existsSync(join(cwd, CLIENT))).toBe(true)
   })
 
+  it("prints no \"Applying schema\" line of its own: the command's spinner says it once", async () => {
+    const { pushYes } = await loadPush(over)
+    await pushYes()
+    const printed = vi.mocked(console.log).mock.calls.flat().join(" ")
+    expect(printed).not.toMatch(/applying schema via compose/i)
+  })
+
   it("pushes again when a refused change is put back, so the engine can clear the refusal", async () => {
     const { devPush } = await loadPush(over)
     await devPush()

@@ -165,6 +165,20 @@ describe.each([
 })
 
 /**
+ * Fresh-user test, cosmetic: `push` said it was applying the schema three times, once from the
+ * command's spinner and twice more from the push underneath it. The spinner's line is the one kept.
+ */
+describe("what a docker push prints", () => {
+  it("does not repeat the command's own \"Applying schema\" line", async () => {
+    docker.serverMode = "dev"
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined)
+    await engineUrl(() => pushSchemaDocker(cwd, config))
+    const printed = log.mock.calls.flat().join(" ")
+    expect(printed).not.toMatch(/applying schema via compose/i)
+  })
+})
+
+/**
  * M1b: with no stack running for the project (no `supatype dev` session, no server container), the
  * derived URL used to fall back to the production port, 5432 by default, which can be a host
  * Postgres that has nothing to do with this project. Every command that derives the database from
