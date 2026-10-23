@@ -45,6 +45,7 @@ REALTIME_IMAGE="${SUPATYPE_REALTIME_IMAGE:-supatype/realtime:ci-dev}"
 source "$SCRIPT_DIR/lib/http-wait.sh"
 source "$SCRIPT_DIR/lib/e2e-project.sh"
 source "$SCRIPT_DIR/lib/env-file.sh"
+source "$SCRIPT_DIR/lib/image-build.sh"
 
 e2e_project_use "$INTEGRATION_DIR" supatype-integration
 MAILPIT_NAME="$(e2e_scoped supatype-authflows-mailpit)"
@@ -76,19 +77,6 @@ fi
 echo "==> Building storage and realtime from this checkout"
 # The two Dockerfiles do not take the same context. Storage copies a `dist/` that `pnpm build`
 # produced, from its own directory; realtime builds from source with the workspace root as context.
-#
-# An image the caller names and already has is used as it is. The release train hands over the
-# images it built from the candidate commits; rebuilding under the same tag here replaced them, so
-# this suite tested a build of its own while the train reported the train's.
-build_unless_given() {
-  local given="$1" tag="$2"
-  shift 2
-  if [[ -n "$given" ]] && docker image inspect "$tag" >/dev/null 2>&1; then
-    echo "  using $tag as given"
-    return 0
-  fi
-  docker build -q -t "$tag" "$@" >/dev/null
-}
 if [[ -z "${SUPATYPE_STORAGE_IMAGE:-}" && ! -d "$ROOT_DIR/packages/storage/dist" ]]; then
   echo "ERROR: packages/storage/dist is missing, run 'pnpm build' first"
   exit 1

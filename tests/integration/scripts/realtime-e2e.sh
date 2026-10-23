@@ -25,9 +25,15 @@ KONG_PORT="${SUPATYPE_KONG_PORT:-18473}"
 # Docker's IPv6 forwarder may accept and then reset.
 BASE_URL="${REALTIME_E2E_URL:-http://127.0.0.1:${KONG_PORT}}"
 MAX_WAIT="${REALTIME_E2E_MAX_WAIT:-300}"
+# Built from this checkout rather than pulled. The channel checks assert what the realtime service
+# in this tree does (a latecomer is told who is already present), and the published tag is the last
+# release, so pulling it failed the check on every change until a release went out.
+REALTIME_IMAGE="${SUPATYPE_REALTIME_IMAGE:-supatype/realtime:ci-dev}"
 
 source "$SCRIPT_DIR/lib/http-wait.sh"
 source "$SCRIPT_DIR/lib/e2e-project.sh"
+source "$SCRIPT_DIR/lib/env-file.sh"
+source "$SCRIPT_DIR/lib/image-build.sh"
 
 e2e_project_use "$EXAMPLE_DIR" realtime
 # Exported so `supatype dev` binds the port this script waits on, rather than the next free one.
@@ -47,6 +53,11 @@ if [[ ! -f "$CLI_BIN" ]]; then
   echo "ERROR: CLI not found at $CLI_BIN, run 'pnpm build' first"
   exit 1
 fi
+
+echo "==> Building realtime from this checkout"
+build_unless_given "${SUPATYPE_REALTIME_IMAGE:-}" "$REALTIME_IMAGE" -f "$ROOT_DIR/packages/realtime/Dockerfile" "$ROOT_DIR"
+# `supatype dev` reads a pinned service image from the project's `.env`.
+env_file_set "$EXAMPLE_DIR/.env" "SUPATYPE_REALTIME_IMAGE" "$REALTIME_IMAGE"
 
 echo "==> Bringing the stack up"
 (cd "$EXAMPLE_DIR" && exec node "$CLI_BIN" dev) &
