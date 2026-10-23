@@ -103,3 +103,15 @@ export async function readJsonObject(
 export function objectOrEmpty(value: unknown): Record<string, unknown> {
   return isJsonObject(value) ? value : {}
 }
+
+/**
+ * A refusal body's sentence: PostgREST's `message`, or the `error` (or `msg`) that the Studio proxy,
+ * the server's guards and the auth server answer with. Undefined when the body carries none.
+ */
+export function refusalText(body: Record<string, unknown>): string | undefined {
+  for (const key of ["message", "error", "msg"]) {
+    const value = body[key]
+    if (typeof value === "string" && value !== "") return value
+  }
+  return undefined
+}

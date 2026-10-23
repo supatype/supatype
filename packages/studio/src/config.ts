@@ -90,8 +90,9 @@ export interface FieldConfig {
   /**
    * Set by Studio, never by the config: a field access rule withholds this column's value from the
    * caller on the record being edited, so the form shows the padlock instead of an input.
+   * `unknown` when Studio cannot tell: the value may be withheld or may be empty.
    */
-  withheld?: boolean
+  withheld?: boolean | "unknown"
 }
 
 export interface BlockTypeConfig {

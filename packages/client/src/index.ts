@@ -17,7 +17,7 @@ import type { RealtimePayload } from "./realtime.js"
 import { subscribeToTable, type TableSubscribeOptions, type TableSubscription } from "./table-subscription.js"
 import { PostgrestError, transportFailure } from "./errors.js"
 import { createRetryFetch } from "./retry.js"
-import { isJsonObject, readJsonObject } from "./json.js"
+import { isJsonObject, readJsonObject, refusalText } from "./json.js"
 import { decodeJwtPayload } from "./jwt.js"
 import { warnIfServerlessDirectConnection } from "./fetch-with-retry.js"
 import type {
@@ -845,7 +845,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
         const body = await readJsonObject(res)
         const pgError = PostgrestError.fromResponse(
           {
-            message: typeof body["message"] === "string" ? body["message"] : undefined,
+            message: refusalText(body),
             code: typeof body["code"] === "string" ? body["code"] : undefined,
             details: typeof body["details"] === "string" ? body["details"] : undefined,
             hint: typeof body["hint"] === "string" ? body["hint"] : undefined,

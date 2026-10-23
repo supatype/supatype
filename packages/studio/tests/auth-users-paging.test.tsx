@@ -99,7 +99,7 @@ async function search(container: HTMLElement, value: string): Promise<void> {
 }
 
 function rowEmails(container: HTMLElement): string[] {
-  return Array.from(container.querySelectorAll("tbody tr td:first-child")).map((td) => td.textContent ?? "")
+  return Array.from(container.querySelectorAll("tbody tr td:first-child")).map((td) => td.firstChild?.textContent ?? "")
 }
 
 /** Picks `value` in the select that offers it. */

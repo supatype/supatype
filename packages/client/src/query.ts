@@ -9,7 +9,7 @@ import { stringifyWithBigInts } from "./exact-values.js"
 import { FilterBuilder } from "./filters.js"
 import { PostgrestErrorCodes, transportFailure } from "./errors.js"
 import { plainFetch, type FetchOptions, type RequestTransport } from "./fetch-with-retry.js"
-import { isJsonObject, isOneOf, readJsonObject } from "./json.js"
+import { isJsonObject, isOneOf, readJsonObject, refusalText } from "./json.js"
 import { decodeJwtPayload } from "./jwt.js"
 
 const DEBUG_AUTH =
@@ -85,7 +85,7 @@ function notOneRow(): SupatypeError {
  */
 function refusal(err: Record<string, unknown>, status: number): SupatypeError {
   return {
-    message: String(err["message"] ?? err["hint"] ?? "Request failed"),
+    message: refusalText(err) ?? String(err["hint"] ?? "Request failed"),
     status,
     ...(err["code"] !== undefined && { code: String(err["code"]) }),
     // A field validator's refusal names the column it refused. Kept whole rather than folded into

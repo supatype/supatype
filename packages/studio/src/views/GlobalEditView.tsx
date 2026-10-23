@@ -4,7 +4,7 @@ import { EditFormLayout } from "../components/EditFormLayout.js"
 import { useAdminClient } from "../hooks/useAdminClient.js"
 import { useLocale } from "../hooks/useLocale.js"
 import type { GlobalConfig } from "../config.js"
-import { splitEditFields } from "../lib/edit-field-layout.js"
+import { readOnlyUnless, splitEditFields } from "../lib/edit-field-layout.js"
 import { isJsonObject } from "../lib/json.js"
 import { clearRefusal, passesChecks, reportRefusal } from "../lib/write-error.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
@@ -89,7 +89,7 @@ export function GlobalEditView({ global: globalConfig }: GlobalEditViewProps): R
   }, [setValues])
   // A viewer reads the global: every input is read only and no Save is offered.
   const canWrite = useContentWriteOffered()
-  const fields = canWrite ? globalConfig.fields : globalConfig.fields.map((f) => ({ ...f, readOnly: true }))
+  const split = splitEditFields(globalConfig.fields, { primaryKey: PRIMARY_KEY, isCreate: false, timestamps: hasTimestamps(globalConfig) })
 
   if (loading) return <div className="st-global-edit st-edit-loading">Loading...</div>
 
@@ -98,7 +98,8 @@ export function GlobalEditView({ global: globalConfig }: GlobalEditViewProps): R
       <Header title={globalConfig.label} />
       {problems.error && <ErrorBanner message={problems.error} details={problems.details} />}
       <EditFormLayout
-        {...splitEditFields(fields, { primaryKey: PRIMARY_KEY, isCreate: false, timestamps: hasTimestamps(globalConfig) })}
+        mainFields={readOnlyUnless(canWrite, split.mainFields)}
+        metaFields={readOnlyUnless(canWrite, split.metaFields)}
         values={values}
         onChange={handleChange}
         primaryKey={PRIMARY_KEY}

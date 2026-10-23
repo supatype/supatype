@@ -79,7 +79,7 @@ import { ConfigurationView } from "./views/auth/ConfigurationView.js"
 import { EmailTemplatesView } from "./views/auth/EmailTemplatesView.js"
 
 // Storage sub-pages
-import { StoragePoliciesView } from "./views/storage/PoliciesView.js"
+import { STORAGE_POLICIES, StoragePoliciesView } from "./views/storage/PoliciesView.js"
 
 // ─── Studio Layout ─────────────────────────────────────────────────────────────
 
@@ -468,7 +468,7 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
               <Route path="media-storage" element={<Navigate to="/media-storage/default/files" replace />} />
               <Route path="media-storage/:bucket" element={<Navigate to="files" replace />} />
               <Route path="media-storage/:bucket/files" element={<StorageBrowser />} />
-              <Route path="media-storage/:bucket/policies" element={gated(ACCESS_POLICIES, <StoragePoliciesView />)} />
+              <Route path="media-storage/:bucket/policies" element={gated(STORAGE_POLICIES, <StoragePoliciesView />)} />
               <Route path="media-storage/policies" element={<Navigate to="/media-storage/default/policies" replace />} />
 
               {/* Authentication */}

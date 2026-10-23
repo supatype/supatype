@@ -77,3 +77,29 @@ export function lockedColumns(
       !isFieldAllowedOnRecord(access, table, column, "write", record),
   )
 }
+
+/**
+ * With no field access answer from the server: whether `column`'s `value` may be a withheld one.
+ * True for a null in a column a REST response named as possibly masked, which is then neither
+ * shown as empty nor saved, since nothing here can tell a withheld value from a missing one.
+ */
+export function isPossiblyWithheld(maskable: readonly string[], column: string, value: unknown): boolean {
+  return maskable.includes(column) && (value === null || value === undefined)
+}
+
+/** An existing record's form fields, a possibly withheld one shown as the unknown padlock. */
+export function withPossiblyWithheld(
+  fields: FieldConfig[],
+  maskable: readonly string[],
+  values: Record<string, unknown>,
+): FieldConfig[] {
+  if (maskable.length === 0) return fields
+  return fields.map((field) =>
+    isPossiblyWithheld(maskable, field.name, values[field.name]) ? { ...field, readOnly: true, withheld: "unknown" } : field,
+  )
+}
+
+/** The possibly withheld columns a save leaves out, so it cannot blank a value nobody saw. */
+export function possiblyWithheldColumns(maskable: readonly string[], values: Record<string, unknown>): string[] {
+  return maskable.filter((column) => isPossiblyWithheld(maskable, column, values[column]))
+}

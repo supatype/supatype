@@ -126,7 +126,9 @@ export function FieldWidget(props: WidgetProps): React.ReactElement {
         )}
       </label>
       <div className="st-field-input">
-        {config.withheld === true ? <WithheldValue access="hidden" /> : <WidgetRenderer {...next} />}
+        {config.withheld === true || config.withheld === "unknown"
+          ? <WithheldValue access={config.withheld === "unknown" ? "unknown" : "hidden"} />
+          : <WidgetRenderer {...next} />}
       </div>
       {props.error !== undefined && (
         <p className="st-field-error" role="alert" id={`field-${config.name}-error`}>
