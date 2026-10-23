@@ -42,6 +42,35 @@ Supatype lets developers define backend data models as TypeScript `Model<>` type
 - Realtime: a WAL-based service (`supatype/realtime`) reading logical replication; it judges every event, deletes included, against the schema's generated read rules.
 - Images: `supatype/postgres` (Postgres 17 with PostGIS, pgvector, pg_graphql and others), `supatype/server`, `supatype/realtime`, `supatype/storage`, `supatype/studio`, `supatype/functions-worker`, `supatype/schema-engine`.
 
+## Building an app: key facts
+
+Schema (https://www.supatype.com/docs/schema.html):
+- Models are `Model<Fields, Meta>` types exported from `schema/index.ts`, imported from `@supatype/types`. The table name is the type name in snake case (`BlogPost` is `blog_post`); `tableName` overrides it.
+- Fields are required unless wrapped in `Optional<>`. Plain `string`, `number` (float) and `boolean`, a union of string literals for an enum, and `Int`, `UUID`, `Timestamp`, `JSON<T>`, `RichText`, `Blocks<T>`, `Slug<"title">`, `ImageAsset<Bucket>`, `SupatypeAuthUserId`.
+- `RelatedTo<M>` adds `<field>_id`, nullable unless `{ required: true }`, `onDelete` default `"restrict"`. `HasMany` and `HasOne` add no column. `ManyToMany` makes one junction per pair, named from both tables in alphabetical order (`post_tag`).
+- Access rules per `read`, `create`, `update`, `delete`: `Public`, `LoggedIn`, `Private`, `Owner<"col">`, `OwnerFrom<"rel">`, `Role<"name">` (reads `app_metadata.role`), `Any`, `All`, `Not`, and comparisons `Eq`, `Neq`, `Gt`, `Gte`, `Lt`, `Lte`, `Like`. An operation with no rule is denied.
+- Field rules go in `access.fields`; an unreadable column comes back `null`. A model with `versions` cannot have field rules.
+- `versions: { drafts: true }`: the model's table holds the published record; drafts and history are in `<table>_versions`; direct API writes to the live row are refused.
+- `SupatypeAuthUserId` has no foreign key unless `onDelete` (`"cascade"`, `"restrict"`, `"setNull"`) is set; with an `Owner<"col">` create rule it defaults to the caller's id.
+- Renames are recorded with `supatype rename` in `supatype/renames.json`. `supatype push --yes` does not ask about renames.
+
+Client (https://www.supatype.com/docs/client.html):
+- Import `createClient` from the generated `supatype/generated/client.ts`, with no type argument. It knows which models keep drafts.
+- On a drafts model, `update` saves a draft; `update(data, { publish: true })` also publishes; `.draft()` reads drafts; `rpc("publish", { model_table, record_id }, { schema: "supatype" })` publishes.
+- Realtime: `from(table).subscribe(cb, { event })`. Functions: `functions.invoke(name, { body })`. `error` is a plain object with `message` and `code`; auth and storage calls throw on a network failure.
+
+Seeding (https://www.supatype.com/docs/seeding.html):
+- `seeds/*.ts` run alphabetically, each exporting `default async function seed({ db, expr, log }: SeedContext)` from `@supatype/cli/seed`. The builder records writes; the engine applies each file in one transaction.
+- Prefer `upsert({ where, data })` keyed by a primary or unique key. Nested `create` children under an upsert are added only when no identical child exists.
+- `RichText` accepts a plain string. `expr.default()` (`{ "$default": true }`) resets a column to its default. Relations take `{ connect: { key: value } }`.
+- Seeds cannot create sign-in users: create them with `supatype admin create-user` or the auth API, then reference their ids. Many-to-many rows go through `db.$sql`.
+
+Studio roles (https://www.supatype.com/docs/studio-roles.html):
+- Self-host roles: admin, developer, editor, viewer. Only admins give or change Studio roles, and a developer cannot change an admin's account.
+- Admins and developers work with full access (service role, no rules or masks). Editors and viewers work in Studio mode: the app's row rules are skipped, field rules and masks apply.
+- Try it, GraphQL and Invoke offer "Send as": Me (default), Anonymous, Service role (admins and developers only), or a pasted token.
+- Grant a role in Studio under Authentication > Users (Studio access), or with `supatype admin create-user --role <role>` and `supatype admin set-role`.
+
 ## Differentiators vs common alternatives
 
 | Alternative | Typical gap vs Supatype |
@@ -58,6 +87,11 @@ Supatype lets developers define backend data models as TypeScript `Model<>` type
 - This file: https://www.supatype.com/llms-full.txt
 - Licensing: https://www.supatype.com/licensing.html
 - Upgrade notes for 0.7.0: https://github.com/supatype/supatype/blob/main/UPGRADING.md
+- Docs: https://www.supatype.com/docs/
+- Schema guide: https://www.supatype.com/docs/schema.html
+- Client guide: https://www.supatype.com/docs/client.html
+- Seeding guide: https://www.supatype.com/docs/seeding.html
+- Studio roles guide: https://www.supatype.com/docs/studio-roles.html
 - VM deploy guide: https://www.supatype.com/deploy-vm-github-actions.html
 - GitHub org: https://github.com/supatype
 - Main repo: https://github.com/supatype/supatype

@@ -339,17 +339,17 @@ What each bound compiles to, by storage:
 |---|---|---|
 | `string`, `Email`, `URL`, `Slug`, `Color`, `XML`, `IPAddress`, `CIDR`, `MacAddress` | length | `char_length(col)` |
 | `RichText` | length | `char_length(_supatype.richtext_text(col))`, the plain text a reader sees |
-
-**`RichText` holds a Lexical document and accepts a plain string.** A trigger normalises a
-string into a single-paragraph document on insert and update, so the generated types read
-`RichText` and write `RichText | string`: prose can be written as prose, and a read always
-returns the document.
 | `Bytea` | length | `octet_length(col)` |
 | `string[]` and other arrays | items | `cardinality(col)` |
 | `JSON<T[]>`, `Blocks` | items | `jsonb_array_length(col)`, guarded by `jsonb_typeof` |
 | `Int`, `SmallInt`, `BigInt`, `Float`, `Decimal`, `Money` | range | direct comparison, no cast |
 | `DateTime`, `DateOnly`, `Timestamp` | range | compared as the column's own type |
 | `Duration` intervals | range | `'30 days'::interval` |
+
+**`RichText` holds a Lexical document and accepts a plain string.** A trigger normalises a
+string into a single-paragraph document on insert and update, so the generated types read
+`RichText` and write `RichText | string`: prose can be written as prose, and a read always
+returns the document.
 
 A localized field is stored as JSONB keyed by locale, and every bound above has a per-locale form, so
 a translation that runs long is rejected the same way a monolingual field would be. Studio names the
@@ -370,7 +370,7 @@ passes, so an empty optional field is absent rather than too short.
 
 **A bound is never silently ignored.** A modifier a field kind cannot honour fails the push and names
 the alternative, so `MaxLength` on an array tells you to use `MaxItems`, and a bound on an image
-points you at the bucket's `fileSizeLimit`.
+points you at the bucket's `maxSize` and `accept`.
 
 For a rule the type system cannot express, use a model `beforeChange` hook and return `{ reject }`:
 
@@ -447,7 +447,7 @@ An object that already matches what the schema would create is taken over withou
 |------|---------|---------------|
 | **Missing** | Declared, or Supatype's and dropped by hand | Creates it |
 | **Drifted** | Supatype's, changed outside Supatype | Puts it back; asks first for access rules (policies, grants, labels, RLS), and refuses without a terminal unless `--overwrite-drift` |
-| **Stale** | Supatype's, no longer declared | Drops it (tables and columns need `--force`) |
+| **Stale** | Supatype's, no longer declared | Drops it (tables and columns are asked about first; `--yes` off a terminal) |
 | **Conflicting** | Declared name held by an object Supatype did not create | Refuses until `supatype adopt`, or a rename |
 | **Unmanaged** | Not Supatype's (including columns you add to a model table) | Never touched |
 | **Released** | Taken back with `supatype adopt --release` | Never touched, whatever the schema says, until `supatype adopt --reclaim` hands it back |

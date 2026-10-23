@@ -87,8 +87,27 @@ the same parent already has the same values. That keeps a re-run seed from pilin
   are not compared, so a child that differs only in those still counts as the same child.
 - A child that matches is not updated. To change one, upsert it on its own model by a unique key.
 
-Many-to-many relations have no nested write. Their rows live in a junction table; write those
-as their own operation.
+Many-to-many relations have no nested write. Their rows live in a junction table, which `db` does
+not list, so write them with `db.$sql` in the same seed:
+
+```ts
+db.$sql(
+  `insert into post_tag (post_id, tag_id)
+   select p.id, t.id from post p, tag t
+   where p.slug = $1 and t.name = $2
+   on conflict do nothing`,
+  ["hello-world", "news"],
+)
+```
+
+## Sign-in users
+
+A seed cannot create sign-in users: they live in the auth schema, which `db` does not reach.
+Create them first with `supatype admin create-user --email <email> --role <role>` (which also
+grants a Studio role, `admin` by default), through the client's `auth.signUp`, or in Studio under
+Authentication > Users, then use their ids (`supatype admin list-users` prints them). A
+`SupatypeAuthUserId` field with `onDelete` has a foreign key, so the user must exist before the
+seed runs.
 
 ## Values the database computes
 

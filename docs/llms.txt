@@ -21,7 +21,11 @@ Contact: GitHub and Discord, linked from the site. Licensing questions: licensin
 
 ## Docs & guides
 
-- [Docs](https://www.supatype.com/docs/): Local development, self-hosting, deploying changes, upgrading
+- [Docs](https://www.supatype.com/docs/): Local development, self-hosting, deploying changes, upgrading, plus the guides below
+- [Schema](https://www.supatype.com/docs/schema.html): Models, field types, relations, access rules, field rules and masking, drafts and versions, slugs, rich text, blocks, buckets, auth user ids, renames, what a push refuses
+- [Client](https://www.supatype.com/docs/client.html): `@supatype/client` from the generated file: queries, filters, embeds, writes, drafts and publishing, auth, storage, realtime, functions, errors
+- [Seeding](https://www.supatype.com/docs/seeding.html): `seeds/*.ts`, the generated builder, create vs upsert, nested children, relations by key, `expr.default()`, sign-in users, `supatype seed`
+- [Studio roles](https://www.supatype.com/docs/studio-roles.html): Admin, developer, editor and viewer: what each can do, full access vs Studio mode, masking, Send as, drafts and publishing, granting roles
 - [Local development](https://www.supatype.com/docs/#local-dev): `supatype init` and `supatype dev` run a full local stack
 - [Self-hosting](https://www.supatype.com/docs/#self-host): Docker Compose on a server you own
 - [Upgrading](https://www.supatype.com/docs/#upgrading): Updating images and binaries, then pushing the schema
