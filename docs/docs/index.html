@@ -119,6 +119,11 @@
                 running with nothing attached, use <code>supatype self-host compose up -d</code>.
               </p>
               <p>
+                If <code>dev</code> itself is killed (its process ended, or its window closed before it
+                finished stopping), the stack can be left running. The next <code>supatype dev</code> finds it
+                and offers to stop it, and <code>supatype self-host compose down</code> stops it now.
+              </p>
+              <p>
                 The gateway serves REST at <code>/rest/v1/</code>, auth at <code>/auth/v1/</code>,
                 storage and realtime. With Docker it listens on <code>http://localhost:18473</code>
                 (init picks a free port per project and writes it to <code>.env</code>); with Native
@@ -167,10 +172,8 @@
             <div>
               <h3>Scaffold and set secrets</h3>
               <pre class="code"><span class="p">$</span> mkdir my-app &amp;&amp; cd my-app
-<span class="p">$</span> supatype init
-<span class="p">$</span> npm install
-<span class="p">$</span> supatype keys</pre>
-              <p>Set a strong <code>JWT_SECRET</code> and your public URLs in <code>.env</code>.</p>
+<span class="p">$</span> supatype init</pre>
+              <p><code>init</code> installs dependencies and writes generated secrets and API keys to <code>.env</code>. Set your public URLs there.</p>
             </div>
           </div>
 
@@ -323,8 +326,9 @@
 <span class="p">$</span> supatype self-host compose up -d</pre>
               <div class="note">
                 <span class="label">NOTE</span>
-                Point <code>DATABASE_URL</code> in the server's <code>.env</code> at the Compose Postgres on
-                <code>localhost:5432</code>, so <code>push</code> and Studio use the same database as the stack.
+                <code>supatype self-host compose up</code> points <code>DATABASE_URL</code> in <code>.env</code> at the
+                Compose Postgres on <code>SUPATYPE_DB_PORT</code> (5432 unless you set it), so <code>push</code> and
+                Studio use the same database as the stack. Leave it as it wrote it.
               </div>
             </div>
           </div>
