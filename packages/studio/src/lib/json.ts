@@ -139,3 +139,12 @@ export function bodyMessage(body: Record<string, unknown>): string | undefined {
   const message = body["message"]
   return typeof message === "string" ? message : undefined
 }
+
+/**
+ * A refusal's sentence: `message`, where a Studio API puts it beside the code in `error`, or `error`
+ * from an older server that put the sentence there.
+ */
+export function bodyErrorText(body: Record<string, unknown>): string | undefined {
+  const error = body["error"]
+  return bodyMessage(body) ?? (typeof error === "string" ? error : undefined)
+}

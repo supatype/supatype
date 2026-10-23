@@ -137,12 +137,18 @@ describe("a viewer, who reads and does not change", () => {
 })
 
 describe("the Studio proxy's 403, wherever a screen still meets one", () => {
-  it("reads as the role sentence, not the status", async () => {
+  const sentence = "Studio role \"billing\" cannot perform this request"
+  // The server answers with the code in `error` and the sentence in `message`. An older one put the
+  // sentence in `error` alone, and Studio still reads that.
+  it.each([
+    ["the code and the sentence", { error: "forbidden", message: sentence }],
+    ["the sentence in error, from an older server", { error: sentence }],
+  ])("reads as the role sentence, not the status, from %s", async (_, refusal) => {
     vi.stubGlobal("fetch", async (input: string) => {
       const path = new URL(input).pathname
       // A server that reports no role, so nothing is gated, and then refuses the cache anyway.
       if (path.endsWith("/studio/auth/verify")) return Response.json({})
-      if (path.includes("/admin/v1/")) return Response.json({ error: "Studio role \"billing\" cannot perform this request" }, { status: 403 })
+      if (path.includes("/admin/v1/")) return Response.json(refusal, { status: 403 })
       return Response.json([])
     })
     const view = await mount(

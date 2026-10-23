@@ -4,7 +4,7 @@ import { useAdminConfig } from "../hooks/useAdminConfig.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import { useProjectProxy } from "../hooks/useProjectProxy.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
-import { type Guard, isBoolean, isJsonObject, isNumber, isShape, isString, optional, readJson, readJsonObject } from "../lib/json.js"
+import { bodyErrorText, type Guard, isBoolean, isJsonObject, isNumber, isShape, isString, optional, readJson, readJsonObject } from "../lib/json.js"
 import { Badge, Button, Card, Checkbox, CodeBlock, ConfirmButton, Input, Select, Table, Tabs, Textarea, Th, Td, type DestructiveQuestion, type TabsSpec } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ConnectionStringPanel } from "../components/database/ConnectionStringPanel.js"
@@ -515,12 +515,6 @@ const isCredentialStatus: Guard<CredentialStatus> = isShape({
   message: optional(isString),
 })
 
-/** The credentials API's refusal, in its own words when it gave any. */
-function credentialError(body: Record<string, unknown>, fallback: string): string {
-  const error = body["error"]
-  return typeof error === "string" ? error : fallback
-}
-
 /** A rotation replaces the password at once, so everything still using the old one is refused. */
 const ROTATE_QUESTION: DestructiveQuestion = {
   title: "Rotate the database password?",
@@ -545,13 +539,13 @@ async function firstViewPassword(client: StudioClient, refused: string): Promise
   const res = await credentialsFetch(client, "first-view", refused, "POST")
   const data = await readJsonObject(res)
   const password = data["password"]
-  if (!res.ok || typeof password !== "string" || !password) throw new Error(credentialError(data, `first-view failed (${res.status})`))
+  if (!res.ok || typeof password !== "string" || !password) throw new Error(bodyErrorText(data) ?? `first-view failed (${res.status})`)
   return password
 }
 
 async function rotatePassword(client: StudioClient, refused: string): Promise<void> {
   const res = await credentialsFetch(client, "rotate", refused, "POST")
-  if (!res.ok) throw new Error(credentialError(await readJsonObject(res), `rotate failed (${res.status})`))
+  if (!res.ok) throw new Error(bodyErrorText(await readJsonObject(res)) ?? `rotate failed (${res.status})`)
 }
 
 interface Credentials {
