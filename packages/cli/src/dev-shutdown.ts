@@ -46,13 +46,16 @@ function watchForOrphaning(): void {
   }
 }
 
-/** SIGINT/SIGTERM hooks: call as soon as `supatype dev` starts (before compose is up). */
+/** SIGINT/SIGTERM/SIGHUP hooks: call as soon as `supatype dev` starts (before compose is up). */
 export function ensureDevShutdownHooks(): void {
   if (hooksRegistered) return
   hooksRegistered = true
 
   process.on("SIGINT", onSignal)
   process.on("SIGTERM", onSignal)
+  // A closed terminal: the console window on Windows, a hung-up terminal elsewhere. Unheard, it
+  // killed dev with no shutdown and left the whole stack running (C5).
+  process.on("SIGHUP", onSignal)
   if (process.platform === "win32") {
     process.on("SIGBREAK", onSignal)
   }
