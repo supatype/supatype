@@ -18,8 +18,9 @@ import {
  * **A column no caller can supply is dropped from a create form**, not disabled. Rendering it
  * would be an input that cannot be satisfied, and for a required column, a form that can
  * never be submitted, failing with a not-null violation that names the constraint rather than
- * the rule. `create` is a distinct verdict precisely because of this case: an ownership write
- * rule is satisfiable on update by the owner and satisfiable on insert by nobody.
+ * the rule. A `row` create verdict keeps the field: the database judges it against the new row, so
+ * a caller creating a record their rule accepts (one they own, say) can supply a value they could
+ * not read on someone else's record.
  *
  * **On an existing record, `record` answers the per-row verdicts.** A column the caller cannot
  * read on this record is withheld: its value came back as null, and an empty input would claim

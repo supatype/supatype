@@ -151,8 +151,15 @@ describe("write and create predicates", () => {
 
   // `row` is not settled, so the user is let through and the database decides.
   it("lets a row-dependent write through", () => {
-    const rowDependent = access({ posts: { secret: { read: "row", write: "row", create: "deny" } } })
+    const rowDependent = access({ posts: { secret: { read: "row", write: "row", create: "row" } } })
     expect(isFieldWritable(rowDependent, "posts", "secret")).toBe(true)
+  })
+
+  // The database judges a row-dependent rule against the new row on INSERT, so the create form
+  // asks for the value and the database decides.
+  it("lets a row-dependent create through", () => {
+    const rowDependent = access({ posts: { secret: { read: "row", write: "row", create: "row" } } })
+    expect(isFieldCreatable(rowDependent, "posts", "secret")).toBe(true)
   })
 })
 
@@ -218,22 +225,36 @@ describe("applyFieldAccess", () => {
     expect(result.find((f) => f.name === "secret")?.readOnly).toBe(true)
   })
 
-  // The case `create` exists for: an ownership write rule is satisfiable on update by the owner
-  // and satisfiable on insert by nobody.
+  // A column the caller can never supply, such as one whose write rule names a role they lack, is
+  // left off a create form rather than rendered as an input the database will refuse.
   it("omits an uncreatable field from a create form", () => {
     const result = applyFieldAccess(
       fields,
-      access({ posts: { owner_id: { read: "allow", write: "row", create: "deny" } } }),
+      access({ posts: { owner_id: { read: "allow", write: "deny", create: "deny" } } }),
       "posts",
       true,
     )
     expect(result.map((f) => f.name)).toEqual(["title", "secret"])
   })
 
+  // An ownership rule is judged against the new row on INSERT: the caller creating their own
+  // record may supply the value, so the field stays on the form, even one they cannot read on
+  // other records.
+  it("keeps a row-dependent field on a create form", () => {
+    const result = applyFieldAccess(
+      fields,
+      access({ posts: { owner_id: { read: "row", write: "row", create: "row" } } }),
+      "posts",
+      true,
+    )
+    expect(result.map((f) => f.name)).toEqual(["title", "secret", "owner_id"])
+    expect(result.find((f) => f.name === "owner_id")?.readOnly).toBeUndefined()
+  })
+
   it("keeps the same field when editing, because the owner can change it", () => {
     const result = applyFieldAccess(
       fields,
-      access({ posts: { owner_id: { read: "allow", write: "row", create: "deny" } } }),
+      access({ posts: { owner_id: { read: "allow", write: "row", create: "row" } } }),
       "posts",
       false,
     )

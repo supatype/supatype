@@ -20,8 +20,8 @@ export interface FieldAccess {
   /** The UPDATE path. */
   write: FieldVerdict
   /**
-   * The INSERT path, which is stricter: with no row yet, a write rule that reads the row
-   * cannot be satisfied by anyone, so such a column is uncreatable rather than "ask per row".
+   * The INSERT path. The database judges the write rule against the row being stored, so a rule
+   * that reads the row is `row` here too: the form asks for the value and the database decides.
    */
   create: FieldVerdict
 }
