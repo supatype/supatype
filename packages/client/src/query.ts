@@ -10,21 +10,11 @@ import { FilterBuilder } from "./filters.js"
 import { PostgrestErrorCodes, transportFailure } from "./errors.js"
 import { plainFetch, type FetchOptions, type RequestTransport } from "./fetch-with-retry.js"
 import { isJsonObject, isOneOf, readJsonObject, refusalText } from "./json.js"
-import { decodeJwtPayload } from "./jwt.js"
+import { bearerRole } from "./jwt.js"
 
 const DEBUG_AUTH =
   (typeof process !== "undefined" && process.env["NEXT_PUBLIC_SUPATYPE_DEBUG_AUTH"] === "1") ||
   (typeof process !== "undefined" && process.env["SUPATYPE_DEBUG_AUTH"] === "1")
-
-function decodeJwtRoleFromAuthHeader(headers: Record<string, string>): string | null {
-  const auth = headers["Authorization"] ?? headers["authorization"]
-  if (auth === undefined || !auth.startsWith("Bearer ")) return null
-  const token = auth.slice("Bearer ".length)
-  const parts = token.split(".")
-  if (parts.length !== 3) return null
-  const role = decodeJwtPayload(parts[1] ?? "")?.["role"]
-  return typeof role === "string" ? role : null
-}
 
 /**
  * The boundary between a parsed body and the row type the caller declared for the table.
@@ -422,7 +412,7 @@ export class QueryBuilder<TRow> extends FilterBuilder implements PromiseLike<Que
     if (!res.ok) {
       const error = await readRefusal(res, "[supatype:query] request failed", async () => ({
         url,
-        role: decodeJwtRoleFromAuthHeader(await resolveRequestHeaders()),
+        role: bearerRole(await resolveRequestHeaders()),
       }))
       return { data: null, error, count: null }
     }
@@ -625,7 +615,7 @@ export class MutationBuilder<TRow, TTables = unknown, TName extends string = str
       const error = await readRefusal(res, "[supatype:mutation] request failed", async () => ({
         url,
         method: this.method,
-        role: decodeJwtRoleFromAuthHeader(await resolveRequestHeaders()),
+        role: bearerRole(await resolveRequestHeaders()),
       }))
       return { data: null, error, count: null }
     }

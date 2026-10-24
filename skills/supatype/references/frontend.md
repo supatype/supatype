@@ -221,6 +221,15 @@ Access rules in `schema/index.ts` enforce what each role can do.
   `42501` ("posts has drafts: save a draft with supatype.create_draft or the client's update, then
   publish"); the service role and Studio's editors still write the live row.
 - **GraphQL** (`supatype.graphql`) runs as the caller, under the same access rules as REST.
+- **GraphQL JSON fields come back as values.** pg_graphql sends every json/jsonb column (rich text,
+  blocks, json) as its `JSON` scalar, a JSON-encoded string. `supatype.graphql` reads the schema
+  once per role and decodes each field of that type the query selects, through aliases, named and
+  inline fragments, nested relations and lists, so do not `JSON.parse` them. A field it cannot place
+  stays as returned (added since the schema was read, more than one operation in the document, or
+  introspection refused). Type the answer with `supatype.graphql<T>(query)`, building `T` from
+  `TableRow<"talk">` (unchecked at runtime). Variables are not encoded: a json argument still takes
+  a string. Studio's GraphQL tabs show the decoded values. Another GraphQL client can do the same
+  with the client's `GRAPHQL_SCHEMA_QUERY`, `readGraphqlSchema` and `decodeGraphqlJsonFields`.
 - **GraphQL relations use the schema's field names** (from 0.7.0, written on each push): a
   `belongsTo` field is the to-one field under its declared name, and the far model's `hasMany` or
   `hasOne` names the reverse, so `talks: HasMany<Talk>` on `Speaker` is `talks`, not

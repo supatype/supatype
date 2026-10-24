@@ -18,7 +18,8 @@ import { subscribeToTable, type TableSubscribeOptions, type TableSubscription } 
 import { PostgrestError, transportFailure } from "./errors.js"
 import { createRetryFetch } from "./retry.js"
 import { isJsonObject, readJsonObject, refusalText } from "./json.js"
-import { decodeJwtPayload } from "./jwt.js"
+import { jwtRole } from "./jwt.js"
+import { createGraphqlRunner } from "./graphql-transport.js"
 import { warnIfServerlessDirectConnection } from "./fetch-with-retry.js"
 import type {
   AnyDatabase,
@@ -127,6 +128,18 @@ export type { ErrorCodeEntry } from "./error-codes-doc.js"
 export { CONNECTION_MODES, SERVERLESS_CONNECTION_WARNING, CONNECTION_FAQ } from "./serverless-docs.js"
 export type { ConnectionModeDoc } from "./serverless-docs.js"
 export { PreviewLinkError } from "./preview.js"
+// pg_graphql sends its `JSON` scalar as a string and `graphql()` decodes it. These let another
+// GraphQL client decode the same way with the schema it reads, and Studio's explorer run its
+// send-as requests through the same runner.
+export {
+  GRAPHQL_SCHEMA_QUERY,
+  GraphqlSchemaCache,
+  decodeGraphqlJsonFields,
+  readGraphqlSchema,
+  type GraphqlJsonDecoding,
+  type GraphqlSchema,
+} from "./graphql-json.js"
+export { createGraphqlRunner, type GraphqlTransport } from "./graphql-transport.js"
 
 // ─── Table client ─────────────────────────────────────────────────────────────
 
@@ -366,13 +379,6 @@ export interface GlobalClient<TRow extends Record<string, unknown> = Record<stri
   update(data: Partial<TRow>): Promise<{ data: TRow | null; error: SupatypeError | null }>
 }
 
-function jwtRole(token: string): string | null {
-  const parts = token.split(".")
-  if (parts.length !== 3) return null
-  const role = decodeJwtPayload(parts[1] ?? "")?.["role"]
-  return typeof role === "string" ? role : null
-}
-
 /**
  * The boundary between a function's answer and the return type the generated schema declares.
  *
@@ -382,26 +388,6 @@ function jwtRole(token: string): string | null {
  */
 function isDeclaredReturn<T>(value: unknown): value is T {
   return value !== undefined
-}
-
-/** What a GraphQL endpoint's JSON answer means: its data, and the first error it reports. */
-function graphqlResult(json: unknown, res: Response): { data: unknown; error: SupatypeError | null } {
-  if (!isJsonObject(json)) {
-    return { data: null, error: { message: `GraphQL endpoint returned JSON that is not an object (HTTP ${res.status})`, status: res.status } }
-  }
-  const data = json["data"] ?? null
-  if (!res.ok) {
-    const message =
-      typeof json["message"] === "string" ? json["message"]
-      : typeof json["error"] === "string" ? json["error"]
-      : `GraphQL request failed (HTTP ${res.status})`
-    return { data, error: { message, status: res.status } }
-  }
-  const errors = json["errors"]
-  if (errors === undefined) return { data, error: null }
-  const first = Array.isArray(errors) ? errors[0] : undefined
-  const message = isJsonObject(first) && typeof first["message"] === "string" ? first["message"] : "GraphQL error"
-  return { data, error: { message } }
 }
 
 /**
@@ -574,12 +560,20 @@ export interface SupatypeClient<TDatabase extends AnyDatabase = AugmentedDatabas
   storage: StorageClient
   realtime: RealtimeClient
   functions: FunctionsClient
-  /** `options.idempotent`: retry on a transient failure, for a query that is not a mutation. */
-  graphql(
+  /**
+   * Run a GraphQL query. `options.idempotent`: retry on a transient failure, for a query that is not
+   * a mutation.
+   *
+   * Rich text, blocks and json fields come back as values, not as the JSON strings pg_graphql sends:
+   * the client reads the schema once and decodes every field typed with its `JSON` scalar, through
+   * aliases, fragments, relations and lists. `TData` names the answer's shape, typically from
+   * `TableRow<"post">`; nothing checks it at runtime.
+   */
+  graphql<TData = unknown>(
     query: string,
     variables?: Record<string, unknown> | undefined,
     options?: { idempotent?: boolean | undefined } | undefined,
-  ): Promise<{ data: unknown; error: SupatypeError | null }>
+  ): Promise<{ data: TData | null; error: SupatypeError | null }>
   /**
    * Call a Postgres function via PostgREST's `/rpc/function_name` endpoint.
    *
@@ -712,6 +706,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
     : (): Promise<void> => auth.ensureValidSession()
 
   const functions = new FunctionsClient(config.url, getAuthHeaders, doFetch, onUnauthorized)
+  const runGraphql = createGraphqlRunner({ endpoint: `${config.url}/graphql/v1`, send: doFetch, headers: getAuthHeaders, onUnauthorized })
 
   // Signing in has to reach an already-open socket.
   //
@@ -777,34 +772,13 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
      * Run a GraphQL query. Sent as a POST, so it is not retried unless `options.idempotent` says a
      * second copy is harmless, as it is for any query that is not a mutation.
      */
-    async graphql(
+    async graphql<TData = unknown>(
       query: string,
       variables?: Record<string, unknown> | undefined,
       options?: { idempotent?: boolean | undefined } | undefined,
-    ): Promise<{ data: unknown; error: SupatypeError | null }> {
-      const body: Record<string, unknown> = { query }
-      if (variables !== undefined) {
-        body["variables"] = variables
-      }
-      let res: Response
-      try {
-        res = await fetchWithOptional401Retry(
-          doFetch,
-          `${config.url}/graphql/v1`,
-          { method: "POST", body: JSON.stringify(body), ...(options?.idempotent === true && { idempotent: true }) },
-          getAuthHeaders,
-          onUnauthorized,
-        )
-      } catch (e) {
-        return { data: null, error: transportFailure(e) }
-      }
-      let json: unknown
-      try {
-        json = await res.json()
-      } catch {
-        return { data: null, error: { message: `GraphQL endpoint returned a non-JSON response (HTTP ${res.status} ${res.statusText})` } }
-      }
-      return graphqlResult(json, res)
+    ): Promise<{ data: TData | null; error: SupatypeError | null }> {
+      const { data, error } = await runGraphql(query, variables, options)
+      return { data: isDeclaredReturn<TData>(data) ? data : null, error }
     },
 
     async rpc<TFn extends FunctionNames<TDatabase>>(

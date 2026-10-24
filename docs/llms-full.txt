@@ -58,6 +58,7 @@ Client (https://www.supatype.com/docs/client.html):
 - Import `createClient` from the generated `supatype/generated/client.ts`, with no type argument. It knows which models keep drafts.
 - On a drafts model, `update` saves a draft; `update(data, { publish: true })` also publishes; `.draft()` reads drafts; `rpc("publish", { model_table, record_id }, { schema: "supatype" })` publishes.
 - Realtime: `from(table).subscribe(cb, { event })`. Functions: `functions.invoke(name, { body })`. `error` is a plain object with `message` and `code`; auth and storage calls throw on a network failure.
+- GraphQL: `graphql<T>(query, variables)`. Rich text, blocks and json fields come back as objects, not the JSON strings pg_graphql sends: the client reads the schema once per role and decodes every `JSON` scalar field the query selects, through aliases, fragments, relations and lists. A field it cannot place stays as returned.
 
 Seeding (https://www.supatype.com/docs/seeding.html):
 - `seeds/*.ts` run alphabetically, each exporting `default async function seed({ db, expr, log }: SeedContext)` from `@supatype/cli/seed`. The builder records writes; the engine applies each file in one transaction.
