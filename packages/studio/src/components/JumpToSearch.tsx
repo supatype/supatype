@@ -281,8 +281,8 @@ export function JumpToSearch({ compact = false, onDone }: JumpToSearchProps): Re
  * Jump to, at phone width: a search button that opens the search in a full-width sheet.
  *
  * In the header at 360px the inline box was squeezed to a few dozen pixels, and its results
- * dropdown took the box's width, so neither the query nor the results could be read. Supabase
- * Studio does the same on mobile: a search icon that opens its command menu in a sheet.
+ * dropdown took the box's width, so neither the query nor the results could be read. The
+ * sheet gives both the whole width of the screen, and closes once a result is chosen.
  */
 export function JumpToSearchSheet({ className }: { className?: string }): React.ReactElement {
   const [open, setOpen] = useState(false)
