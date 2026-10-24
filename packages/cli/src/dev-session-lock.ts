@@ -3,8 +3,8 @@
  * without graceful shutdown (terminal closed, kill signal, etc.).
  */
 
-import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs"
-import { join, resolve } from "node:path"
+import { existsSync, mkdirSync, realpathSync, unlinkSync, writeFileSync } from "node:fs"
+import { basename, dirname, join, resolve } from "node:path"
 import { spawnSync } from "node:child_process"
 import { runDockerCompose, selfHostComposePaths } from "./self-host-compose.js"
 import { projectNameInFile } from "./project-name-override.js"
@@ -63,8 +63,28 @@ export function readDevSessionLock(cwd: string): DevSessionLock | null {
   return null
 }
 
-/** A path as compared here: resolved, and case-folded on Windows, whose paths ignore case. */
-const comparablePath = (p: string): string => (process.platform === "win32" ? resolve(p).toLowerCase() : resolve(p))
+/**
+ * A path as compared here: with links followed, and case-folded on Windows, whose paths ignore case.
+ *
+ * Links matter because one folder has more than one spelling: on macOS the temp folder is `/var/...`
+ * and a process's cwd reports it as `/private/var/...`. Compared unresolved, a session's own lock
+ * read through the other spelling looked like a copy's and was removed. The compose file may not
+ * exist yet, so the nearest folder that does is resolved and the rest appended.
+ */
+function comparablePath(p: string): string {
+  const real = realPath(resolve(p))
+  return process.platform === "win32" ? real.toLowerCase() : real
+}
+
+/** `abs` with every link followed, as far up as the path exists. */
+function realPath(abs: string): string {
+  try {
+    return realpathSync.native(abs)
+  } catch {
+    const parent = dirname(abs)
+    return parent === abs ? abs : join(realPath(parent), basename(abs))
+  }
+}
 
 /** Whether a lock was written by `supatype dev` in the project at `cwd`. */
 function lockBelongsTo(lock: DevSessionLock, cwd: string): boolean {
