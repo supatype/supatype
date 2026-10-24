@@ -21,3 +21,17 @@ export function decodeJwtPayload(segment: string): Record<string, unknown> | nul
     return null
   }
 }
+
+/** The `role` claim of a JWT, or null when the token is not one or names no role. */
+export function jwtRole(token: string): string | null {
+  const parts = token.split(".")
+  if (parts.length !== 3) return null
+  const role = decodeJwtPayload(parts[1] ?? "")?.["role"]
+  return typeof role === "string" ? role : null
+}
+
+/** The role of the bearer token in `headers`, whichever case the header is named in, or null. */
+export function bearerRole(headers: Record<string, string>): string | null {
+  const auth = headers["Authorization"] ?? headers["authorization"]
+  return auth?.startsWith("Bearer ") === true ? jwtRole(auth.slice("Bearer ".length)) : null
+}
