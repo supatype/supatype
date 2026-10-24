@@ -336,6 +336,37 @@ describe("what the collector encodes", () => {
     const row = models["profile"]!.create({ display_name: "Alex" })
     await expect(Promise.resolve(row)).resolves.toBeDefined()
   })
+
+  /** JSON has no bigint, so a bigint param left as itself would crash the document's serialiser. */
+  it("encodes a raw statement's params the way it encodes other values", () => {
+    const collect = collector()
+    const db = collect.db()
+    const when = new Date("2026-01-01T09:00:00.000Z")
+    db.$sql("SELECT $1::bigint, $2::timestamptz, $3", [9007199254740993n, when, [1n, "a"]])
+
+    const { ir, json } = collect.finish()
+    expect(ir.operations[0]).toEqual({
+      op: "sql",
+      text: "SELECT $1::bigint, $2::timestamptz, $3",
+      params: ["9007199254740993", "2026-01-01T09:00:00.000Z", ["1", "a"]],
+    })
+    expect(json).toContain('"9007199254740993"')
+  })
+
+  /** The engine binds a value to each placeholder; an expression or a column default is not one. */
+  it("types a raw statement's params as the values a placeholder can carry", () => {
+    const collect = collector()
+    const db = collect.db()
+    const post = db["profile"]!.create({ display_name: "Alex" })
+    db.$sql("SELECT $1::uuid, $2, $3::jsonb", [post["id"]!, null, { tags: ["a"] }])
+    // @ts-expect-error a time expression is SQL, not a value; write now() in the statement
+    db.$sql("SELECT $1", [expr.now()])
+    // @ts-expect-error a column default has no meaning outside a column
+    db.$sql("SELECT $1", [expr.default()])
+    // @ts-expect-error a literal operand is still an operand; pass the plain value
+    db.$sql("SELECT $1", [{ kind: "literal", value: 1 }])
+    expect(collect.finish().ir.operations).toHaveLength(5)
+  })
 })
 
 describe("the predicate helpers", () => {

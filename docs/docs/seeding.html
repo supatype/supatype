@@ -238,6 +238,16 @@ log(`created a tag, referenced as ${String(tag.id)}`)</pre>
    on conflict do nothing`,
   ["hello-world", "news"],
 )</pre>
+              <p>The statement runs at its position in the file, after every write above it, so it can read the rows those writes made.</p>
+              <p>Each param binds by its JSON type: a string as <code>text</code>, a whole number as <code>bigint</code>, any other number as <code>double precision</code>, a boolean as <code>boolean</code>, and an object or array as <code>jsonb</code>. A column of another type needs a cast on its placeholder, such as <code>$1::uuid</code>. That includes an id taken from an earlier write, such as <code>post.id</code>, which binds as text:</p>
+              <pre class="code">const post = db.post.create({ slug: "hello-world", title: "Hello" })
+db.$sql(
+  `insert into post_tag (post_id, tag_id)
+   select $1::uuid, t.id from tag t where t.name = $2
+   on conflict do nothing`,
+  [post.id, "news"],
+)</pre>
+              <p>Pass exactly one param for each of <code>$1</code> to <code>$n</code> in the statement. A count that does not match is refused before anything runs. A param is a value, so write expressions such as <code>now()</code> in the statement itself.</p>
             </div>
           </div>
 
