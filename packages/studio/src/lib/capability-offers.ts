@@ -31,6 +31,11 @@ export function contentWriteOffered(capability: OfferedCapability): boolean {
   return offers(capability, "write")
 }
 
+/** The schema catalogue (Migration History, the schema push status): owners, admins, developers and viewers. */
+export function schemaViewOffered(capability: OfferedCapability): boolean {
+  return offers(capability, "schemaView")
+}
+
 /** The project's API keys: admins and developers. */
 export function projectKeysOffered(capability: OfferedCapability): boolean {
   return offers(capability, "manageKeys")

@@ -88,11 +88,9 @@ import { writeLocalEnvironment } from "./link.js"
 import { registerDevShutdown, waitForDevShutdown } from "./dev-shutdown.js"
 import {
   filterComposeNoise,
-  formatEnginePushMessage,
   parseEngineJsonOutput,
   parseEnginePushOutput,
-  printPushWarnings,
-  type EnginePushResult,
+  reportAppliedPush,
 } from "./engine-push-output.js"
 import { withAdminRoles } from "./studio-admin-roles.js"
 import { restoreSystemRelationTargets } from "./restore-system-relation-targets.js"
@@ -962,14 +960,17 @@ function writeSchemaAstFile(cwd: string, astJson: string): void {
   if (!existsSync(astPath)) throw new Error(`Failed to write schema AST at ${astPath}`)
 }
 
-/** Apply `ast` with the host engine binary `overrides.engine` names. Throws when it is not applied. */
+/**
+ * Apply `ast` with the host engine binary `overrides.engine` names. Throws when it is not applied.
+ * The caller says that a push is starting (push's spinner, dev's watch line), as it does for the
+ * compose engine, so this prints only the outcome.
+ */
 async function applyViaHostEngine(
   cwd: string,
   config: SupatypeProjectConfig,
   ast: ExtractedSchemaAstV2,
   opts: ComposePushOptions,
 ): Promise<void> {
-  console.log("[supatype] Applying schema via local engine (overrides.engine)...")
   await ensureEngine()
   const sources = writeSchemaSourcePushArtifacts(cwd)
   const body = {
@@ -983,8 +984,7 @@ async function applyViaHostEngine(
       schema_sources_manifest: sources.payload.manifest,
     }),
   }
-  printPushWarnings(await enginePush(cwd, body, isEnginePushResult))
-  console.log("[supatype] Schema applied.")
+  reportAppliedPush(await enginePush(cwd, body, isEnginePushResult))
 }
 
 /** Apply the AST on disk with the stack's schema-engine container. Throws when it is not applied. */
@@ -1147,8 +1147,7 @@ async function runComposeEnginePush(
 
   if (exitStatus === 0) {
     if (pushResult) {
-      console.log(`[supatype] ${formatEnginePushMessage(pushResult)}`)
-      printPushWarnings(pushResult)
+      reportAppliedPush(pushResult)
     } else {
       console.log("[supatype] Schema applied.")
     }
