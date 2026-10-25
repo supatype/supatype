@@ -962,14 +962,17 @@ function writeSchemaAstFile(cwd: string, astJson: string): void {
   if (!existsSync(astPath)) throw new Error(`Failed to write schema AST at ${astPath}`)
 }
 
-/** Apply `ast` with the host engine binary `overrides.engine` names. Throws when it is not applied. */
+/**
+ * Apply `ast` with the host engine binary `overrides.engine` names. Throws when it is not applied.
+ * The caller says that a push is starting (push's spinner, dev's watch line), as it does for the
+ * compose engine, so this prints only the outcome.
+ */
 async function applyViaHostEngine(
   cwd: string,
   config: SupatypeProjectConfig,
   ast: ExtractedSchemaAstV2,
   opts: ComposePushOptions,
 ): Promise<void> {
-  console.log("[supatype] Applying schema via local engine (overrides.engine)...")
   await ensureEngine()
   const sources = writeSchemaSourcePushArtifacts(cwd)
   const body = {

@@ -8,8 +8,15 @@ import { dockerApplyMessage } from "../src/commands/push.js"
  */
 describe("docker push apply message", () => {
   it("says the second attempt applies what --yes allowed", () => {
-    expect(dockerApplyMessage(false)).toBe("Applying schema via Docker Compose")
-    expect(dockerApplyMessage(true)).not.toBe(dockerApplyMessage(false))
-    expect(dockerApplyMessage(true)).toMatch(/destructive|rewrite/i)
+    expect(dockerApplyMessage(false, "compose")).toBe("Applying schema via Docker Compose")
+    expect(dockerApplyMessage(true, "compose")).not.toBe(dockerApplyMessage(false, "compose"))
+    expect(dockerApplyMessage(true, "compose")).toMatch(/destructive|rewrite/i)
+  })
+
+  // With `overrides.engine` the push never runs through Docker Compose: the host binary applies it.
+  it("names the host engine when overrides.engine applies the push", () => {
+    expect(dockerApplyMessage(false, "host")).toBe("Applying schema via local engine (overrides.engine)")
+    expect(dockerApplyMessage(true, "host")).toMatch(/^Applying schema via local engine \(overrides\.engine\), .*destructive/)
+    expect(dockerApplyMessage(true, "host")).not.toMatch(/compose/i)
   })
 })

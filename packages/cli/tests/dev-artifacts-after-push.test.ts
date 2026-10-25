@@ -224,7 +224,7 @@ describe.each([
     const { pushYes } = await loadPush(over)
     await pushYes()
     const printed = vi.mocked(console.log).mock.calls.flat().join(" ")
-    expect(printed).not.toMatch(/applying schema via compose/i)
+    expect(printed).not.toMatch(/applying schema/i)
   })
 
   it("pushes again when a refused change is put back, so the engine can clear the refusal", async () => {
