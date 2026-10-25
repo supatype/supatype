@@ -88,11 +88,9 @@ import { writeLocalEnvironment } from "./link.js"
 import { registerDevShutdown, waitForDevShutdown } from "./dev-shutdown.js"
 import {
   filterComposeNoise,
-  formatEnginePushMessage,
   parseEngineJsonOutput,
   parseEnginePushOutput,
-  printPushWarnings,
-  type EnginePushResult,
+  reportAppliedPush,
 } from "./engine-push-output.js"
 import { withAdminRoles } from "./studio-admin-roles.js"
 import { restoreSystemRelationTargets } from "./restore-system-relation-targets.js"
@@ -986,8 +984,7 @@ async function applyViaHostEngine(
       schema_sources_manifest: sources.payload.manifest,
     }),
   }
-  printPushWarnings(await enginePush(cwd, body, isEnginePushResult))
-  console.log("[supatype] Schema applied.")
+  reportAppliedPush(await enginePush(cwd, body, isEnginePushResult))
 }
 
 /** Apply the AST on disk with the stack's schema-engine container. Throws when it is not applied. */
@@ -1150,8 +1147,7 @@ async function runComposeEnginePush(
 
   if (exitStatus === 0) {
     if (pushResult) {
-      console.log(`[supatype] ${formatEnginePushMessage(pushResult)}`)
-      printPushWarnings(pushResult)
+      reportAppliedPush(pushResult)
     } else {
       console.log("[supatype] Schema applied.")
     }
