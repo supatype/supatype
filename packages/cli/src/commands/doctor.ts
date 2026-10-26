@@ -5,24 +5,11 @@ import { error, info, plain } from "../ui/messages.js"
 import { askConsent } from "../ui/confirm.js"
 import { isAccessKind } from "../diff-output.js"
 import { hooksPathFromProject, schemaPathFromProject, serviceRoleRoutes } from "../project-config.js"
-import { requireTargetFeatures, resolveTarget, targetSchemaDoctor, schemaPgSchema, type DeployTarget } from "../resolve-target.js"
-import { loadProjectLink } from "../link.js"
-import { resolveHostEngineDatabaseUrl } from "../dev-compose.js"
+import { requireTargetFeatures, schemaCommandTarget, targetSchemaDoctor, schemaPgSchema } from "../resolve-target.js"
+import type { DoctorItem } from "../engine-client.js"
 import { hooksReport, type HooksReport } from "../model-hooks.js"
 import { checkServiceRoleRoutes, type ServiceRoleProblems } from "../service-role-check.js"
 import { addRetiredNoCacheOption, warnIfRetiredNoCache } from "../retired-no-cache.js"
-
-export interface DoctorItem {
-  kind: string
-  table: string
-  name: string
-  fields: string[]
-  message: string
-  /** What Supatype recorded, for a drifted object. */
-  recorded?: string
-  /** What the database holds now, for a drifted or conflicting object. */
-  live?: string
-}
 
 /**
  * The engine's reconcile, sorted for an operator. The optional categories arrived with the
@@ -233,24 +220,6 @@ async function doctor(opts: DoctorOptions): Promise<void> {
   if (opts.strict && hasStrictIssues(report)) {
     process.exit(1)
   }
-}
-
-/**
- * Where `doctor` and `adopt` look: the linked environment, else the local dev database, unless
- * `--direct` or `--connection` asks for the engine subprocess. One answer for both, so `adopt` takes
- * exactly what `doctor` reported.
- */
-export async function schemaCommandTarget(
-  cwd: string,
-  config: ReturnType<typeof loadConfig>,
-  opts: { connection?: string; env?: string; direct?: boolean },
-): Promise<DeployTarget> {
-  if (opts.direct || opts.connection) {
-    return resolveTarget(cwd, { env: opts.env, direct: true, connection: opts.connection })
-  }
-  if (loadProjectLink(cwd)) return resolveTarget(cwd, { env: opts.env })
-  const connection = await resolveHostEngineDatabaseUrl(cwd, config, undefined)
-  return resolveTarget(cwd, { direct: true, connection })
 }
 
 /**

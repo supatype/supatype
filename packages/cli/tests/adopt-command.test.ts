@@ -6,14 +6,13 @@ const requireTarget = vi.hoisted(() => vi.fn(async (_target: unknown, _needs: Ar
 const confirmMock = vi.hoisted(() => vi.fn())
 
 vi.mock("../src/config.js", () => ({ loadConfig: () => ({ project: { name: "app" } }), loadSchemaAst: () => ({}) }))
-vi.mock("../src/project-config.js", () => ({ schemaPathFromProject: () => "schema" }))
+vi.mock("../src/project-config.js", () => ({ schemaPathFromProject: () => "schema", pgSchema: () => "public" }))
 vi.mock("../src/resolve-target.js", () => ({
   targetSchemaAdopt,
   requireTargetFeatures: requireTarget,
+  schemaCommandTarget: async () => ({ mode: "direct" }),
   targetCapabilities: async () => ({ features: new Set(["identity_columns"]), source: "engine" }),
-  schemaPgSchema: () => "public",
 }))
-vi.mock("../src/commands/doctor.js", () => ({ schemaCommandTarget: async () => ({ mode: "direct" }) }))
 vi.mock("../src/ui/progress.js", () => ({ withSpinner: (_: string, run: () => unknown) => run() }))
 vi.mock("../src/ui/interactive.js", () => ({ isInteractive: vi.fn(() => false) }))
 vi.mock("../src/ui/clack.js", () => ({ p: { confirm: confirmMock, cancel: vi.fn() }, isCancel: () => false, CLACK_CANCEL: Symbol() }))
@@ -70,16 +69,19 @@ describe("supatype adopt", () => {
   })
 
   it("exits 1 without adopting when it cannot ask and was not given --yes", async () => {
+    const stdout = vi.mocked(console.log)
     await adopt()
     expect(process.exitCode).toBe(1)
-    expect(stderr.mock.calls.flat().join(" ")).toContain("adopt needs --yes when not interactive")
+    // In a terminal an error is printed with the rest of the flow, on stdout.
+    expect([...stdout.mock.calls, ...stderr.mock.calls].flat().join(" ")).toContain("adopt needs --yes when not interactive")
     expect(targetSchemaAdopt.mock.calls.map((call) => call[2].yes)).toEqual([false])
   })
 
   it("adopts with --yes when it cannot ask", async () => {
     await adopt("--yes")
     expect(process.exitCode).toBeUndefined()
-    expect(targetSchemaAdopt.mock.calls.map((call) => call[2].yes)).toEqual([false, true])
+    // --yes has already agreed, so one engine call adopts.
+    expect(targetSchemaAdopt.mock.calls.map((call) => call[2].yes)).toEqual([true])
   })
 
   it("exits 0 when a person declines at the prompt", async () => {

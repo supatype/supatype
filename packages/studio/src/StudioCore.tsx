@@ -35,6 +35,7 @@ import { DataExplorer } from "./views/DataExplorer.js"
 import { SqlRunner } from "./views/SqlRunner.js"
 import { MigrationHistory } from "./views/MigrationHistory.js"
 import { SeedHistory } from "./views/SeedHistory.js"
+import { SchemaObjects } from "./views/SchemaObjects.js"
 import { StorageBrowser } from "./views/StorageBrowser.js"
 import { ApiDocs } from "./views/ApiDocs.js"
 import { RestApiSettings } from "./views/RestApiSettings.js"
@@ -413,6 +414,7 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
                 <Route path="extensions"  element={<ExtensionsView />} />
                 <Route path="sql"         element={<SqlRunner />} />
                 <Route path="migrations"  element={<MigrationHistory />} />
+                <Route path="objects"     element={<SchemaObjects />} />
                 <Route path="seeds"       element={<SeedHistory />} />
                 <Route path="wrappers"    element={<ComingSoon title="Database Wrappers" description="Connect to external data sources (Postgres FDW, S3, BigQuery, Stripe). Coming in Phase 26." />} />
                 <Route path="replication" element={<ComingSoon title="Read Replicas" description="Cross-region read replicas, publication management, replication slot monitoring. Coming in Phase 27." />} />

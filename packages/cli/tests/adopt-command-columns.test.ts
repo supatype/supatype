@@ -15,15 +15,14 @@ const confirmMock = vi.hoisted(() => vi.fn())
 const schemaPath = vi.hoisted(() => ({ value: "" }))
 
 vi.mock("../src/config.js", () => ({ loadConfig: () => ({ project: { name: "app" } }), loadSchemaAst: () => ({}) }))
-vi.mock("../src/project-config.js", () => ({ schemaPathFromProject: () => schemaPath.value }))
+vi.mock("../src/project-config.js", () => ({ schemaPathFromProject: () => schemaPath.value, pgSchema: () => "public" }))
 vi.mock("../src/resolve-target.js", () => ({
   targetSchemaAdopt,
   targetSchemaIntrospect,
+  schemaCommandTarget: async () => ({ mode: "direct" }),
   requireTargetFeatures: vi.fn(async () => undefined),
   targetCapabilities: async () => ({ features: new Set(["identity_columns"]), source: "engine" }),
-  schemaPgSchema: () => "public",
 }))
-vi.mock("../src/commands/doctor.js", () => ({ schemaCommandTarget: async () => ({ mode: "direct" }) }))
 vi.mock("../src/commands/generate.js", () => ({ regenerateTypes }))
 vi.mock("../src/ui/progress.js", () => ({ withSpinner: (_: string, run: () => unknown) => run() }))
 vi.mock("../src/ui/interactive.js", () => ({ isInteractive: vi.fn(() => false) }))
