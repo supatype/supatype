@@ -13,7 +13,7 @@ export interface PolicyRef {
  * that only drafts the statement (on a schema the admin routes do not cover) uses it on a plain
  * Button: running the draft is what asks.
  */
-export const DROP_LOOK = { size: "xs", variant: "ghost", className: "text-destructive hover:text-destructive" } as const
+export const DROP_LOOK = { size: "xs", variant: "ghost", className: "text-destructive-text hover:text-destructive-text" } as const
 
 /**
  * Drop on one row of a Policies view: the click asks first and the policy goes on the destructive

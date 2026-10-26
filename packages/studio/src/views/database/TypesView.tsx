@@ -84,7 +84,7 @@ export function TypesView(): React.ReactElement {
               <input value={newEnumValues} onChange={(e) => setNewEnumValues(e.target.value)} className="w-full px-3 py-1.5 rounded-md border border-border bg-background text-foreground text-sm focus:outline-none" placeholder="draft, published, archived" />
             </div>
           </div>
-          {runError && <p className="text-xs text-destructive">{runError}</p>}
+          {runError && <p className="text-xs text-destructive-text">{runError}</p>}
           <div className="flex gap-2">
             <Button variant="primary" disabled={runBusy} onClick={() => { void createEnum() }}>{runBusy ? "Creating…" : "Create"}</Button>
             <Button onClick={() => { setShowCreate(false); setRunError(null) }}>Cancel</Button>
@@ -116,7 +116,7 @@ export function TypesView(): React.ReactElement {
                   </td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">{(Array.isArray(row["enum_values"]) ? row["enum_values"].join(", ") : "") || "-"}</td>
                   <td className="px-4 py-3 text-right">
-                    {sqlWrites ? (<button type="button" className="text-xs text-destructive hover:underline" onClick={() => setDropModal(cellText(row, "typname"))}>Drop</button>) : null}
+                    {sqlWrites ? (<button type="button" className="text-xs text-destructive-text hover:underline" onClick={() => setDropModal(cellText(row, "typname"))}>Drop</button>) : null}
                   </td>
                 </tr>
               ))}
@@ -130,7 +130,7 @@ export function TypesView(): React.ReactElement {
           <div className="bg-card border border-border rounded-lg p-6 w-full max-w-sm space-y-4 shadow-xl">
             <h2 className="text-base font-semibold text-foreground">Drop type {dropModal}?</h2>
             <p className="text-sm text-muted-foreground">This will fail if any column or function references this type.</p>
-            {runError && <p className="text-xs text-destructive">{runError}</p>}
+            {runError && <p className="text-xs text-destructive-text">{runError}</p>}
             <div className="flex justify-end gap-2">
               <Button onClick={() => { setDropModal(null); setRunError(null) }}>Cancel</Button>
               <Button variant="destructive" disabled={runBusy} onClick={() => { void dropType(dropModal) }}>{runBusy ? "Dropping…" : "Drop"}</Button>
