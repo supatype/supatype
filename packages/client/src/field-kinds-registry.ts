@@ -1,10 +1,10 @@
 /**
  * Which columns hold values a JSON parser would destroy, told to the client by generated code.
  *
- * `supatype push` writes `supatype/client.ts` into the project. That file calls
+ * `supatype push` writes `supatype/generated/client.ts` into the project. That file calls
  * {@link registerFieldKinds} at import time and re-exports `createClient`, so an app writes
  *
- *     import { createClient } from "./supatype/client"
+ *     import { createClient } from "./supatype/generated/client"
  *
  * and the kinds arrive by the same import that brings the client. They are compiled into the same
  * bundle, so there is nothing to fetch, nothing to read from disk, and nothing that can be stale

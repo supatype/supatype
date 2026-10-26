@@ -107,13 +107,9 @@ jobs:
       # all of them without needing to know which commits what.
       - name: Generated types are up to date
         run: |
-          for dir in examples/*/; do
-            [ -f "$dir/supatype.config.ts" ] || continue
-            echo "==> $dir"
-            (cd "$dir" && node ../../packages/cli/bin/supatype.js generate)
-          done
+          bash scripts/regenerate-examples.sh
           git diff --exit-code -- examples/ \
-            || { echo "::error::Generated types are stale. Run 'supatype generate' in the example above and commit the result."; exit 1; }
+            || { echo "::error::Generated files are stale. Run 'pnpm generate:examples' and commit the result."; exit 1; }
         env:
           SUPATYPE_RELEASE_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
 
@@ -291,8 +287,36 @@ jobs:
       - name: Install Chromium
         run: pnpm --filter supatype-e2e exec playwright install --with-deps chromium
 
+      # The browser tests drive this checkout's Studio and the services from this repository it
+      # talks to, so the stack has to run those builds. Without this it pulled each one at :latest,
+      # the last published release, and the tests failed on any control the release did not have
+      # yet. Server, realtime and Postgres come from their own repositories and stay at :latest.
+      # Studio builds from the root (its Dockerfile copies the lockfile and packages/client), and
+      # storage from its own directory with the dist/ that `pnpm build` wrote above. The control
+      # plane copies the pinned engine, as in the compose smoke job.
+      - name: Build this repository's service images
+        env:
+          OWNER: ${{ github.repository_owner }}
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          docker build -t supatype/studio:ci -f packages/studio/Dockerfile .
+          docker build -t supatype/storage:ci packages/storage
+          docker build -t supatype/functions-worker:ci -f packages/functions-worker/Dockerfile packages/functions-worker
+          engine="$(bash scripts/engine-pin.sh image)"
+          docker build \
+            --build-arg ENGINE_IMAGE="$engine" \
+            -t supatype/control-plane:ci \
+            -f packages/self-host-control/Dockerfile \
+            .
+
       - name: Run the Studio UI e2e
         run: bash tests/integration/scripts/studio-ui-e2e.sh
+        env:
+          SUPATYPE_STUDIO_IMAGE: supatype/studio:ci
+          SUPATYPE_STORAGE_IMAGE: supatype/storage:ci
+          SUPATYPE_FUNCTIONS_WORKER_IMAGE: supatype/functions-worker:ci
+          SUPATYPE_CONTROL_PLANE_IMAGE: supatype/control-plane:ci
 
       - name: Upload the Playwright report on failure
         if: failure()

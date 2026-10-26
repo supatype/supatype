@@ -9,6 +9,7 @@ import {
   type HeadersProvider,
 } from "./query.js"
 import { registeredDraftModel } from "./draft-models-registry.js"
+import { GENERATED_CLIENT_IMPORT } from "./generated-client.js"
 import type { FetchOptions, RequestTransport } from "./fetch-with-retry.js"
 import { defaultQueryCache, type QueryCache } from "./query-cache.js"
 import { StorageClient } from "./storage.js"
@@ -100,7 +101,7 @@ export type { RealtimeEvent, RealtimePayload, ChannelStatus, PresenceEntry } fro
 export type { TableSubscribeOptions, TableSubscription } from "./table-subscription.js"
 export * from "./errors.js"
 
-// Called by the generated `supatype/client.ts`, which is how a project tells the client which
+// Called by the generated `supatype/generated/client.ts`, which is how a project tells the client which
 // columns hold values a JSON parser would destroy. Exported because generated code imports it;
 // applications do not call it.
 export {
@@ -257,7 +258,7 @@ class TableClient<
    * record starts as its first draft, and the rows come back read from the draft view in the shape
    * and order a plain insert returns. A plain insert asking for the row back is refused there by a
    * read rule that hides unpublished records, because Postgres checks the returned row against it
-   * before anything has made the new row visible to its author. The generated `supatype/client.ts`
+   * before anything has made the new row visible to its author. The generated `supatype/generated/client.ts`
    * says which models keep drafts; a client without it inserts as before.
    */
   insert(
@@ -313,7 +314,7 @@ class TableClient<
    * draft through `supatype.save_drafts`, merged onto its newest version as Studio saves one, all or
    * none in one call, and the drafts come back read from the draft view. Pass `{ publish: true }` to
    * publish them in the same call, so the history records the version that went live. The generated
-   * `supatype/client.ts` says which models keep drafts; elsewhere this is a plain `PATCH`, and
+   * `supatype/generated/client.ts` says which models keep drafts; elsewhere this is a plain `PATCH`, and
    * `{ publish: true }` is refused, since there is nothing to publish.
    */
   update(
@@ -338,7 +339,7 @@ class TableClient<
     const model = registeredDraftModel(this.table)
     if (model !== undefined) return { editThrough: { table: this.table, primaryKey: model.primaryKey, publish } }
     if (!publish) return undefined
-    const message = `{ publish: true } applies to a model that keeps drafts, and "${this.table}" is not one this client knows of. Import the client from the generated supatype/client.ts, which says which models keep drafts.`
+    const message = `{ publish: true } applies to a model that keeps drafts, and "${this.table}" is not one this client knows of. Import the client from the generated ${GENERATED_CLIENT_IMPORT}, which says which models keep drafts.`
     return { refusal: { message } }
   }
 

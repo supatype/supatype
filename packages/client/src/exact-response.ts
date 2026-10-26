@@ -12,6 +12,7 @@ import {
   type ExactFields,
 } from "./exact-values.js"
 import { fieldKindsAreRegistered, registeredFieldsFor } from "./field-kinds-registry.js"
+import { GENERATED_CLIENT_IMPORT } from "./generated-client.js"
 
 /**
  * Either the parsed rows, or the reason they could not be read without corrupting something.
@@ -60,7 +61,7 @@ function describe(table: string, columns: readonly string[]): string {
       `The ${which} ${named} on ${table} returned a value that JavaScript cannot hold exactly, and ` +
       `this project's generated types have not been loaded, so Supatype does not know which ` +
       `columns to keep exact. Run \`supatype push\` and import the client from the generated file:` +
-      `\n\n  import { createClient } from "./supatype/client"\n\n` +
+      `\n\n  import { createClient } from "${GENERATED_CLIENT_IMPORT}"\n\n` +
       `Reading it as a number would have silently changed the value, so it has not guessed.`
     )
   }

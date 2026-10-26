@@ -1,7 +1,7 @@
 /**
  * How the client learns which columns a JSON parser would destroy.
  *
- * The generated `supatype/client.ts` calls `registerFieldKinds` when it is imported, and an app
+ * The generated `supatype/generated/client.ts` calls `registerFieldKinds` when it is imported, and an app
  * imports `createClient` from there rather than from this package. So the kinds arrive by the same
  * import that brings the client, compiled into the same bundle, with nothing fetched and nothing
  * read from disk.
