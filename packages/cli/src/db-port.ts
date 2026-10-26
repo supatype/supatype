@@ -38,6 +38,13 @@ export const DB_PORT_ENV = "SUPATYPE_DB_PORT"
  */
 export const DEV_DB_PORT_ENV = "SUPATYPE_DEV_DB_PORT"
 
+/**
+ * The `.env` key naming the host a self-host stack's Postgres is reached at from outside the
+ * stack, for the connection strings Studio shows. A dev stack binds loopback only and has no use
+ * for it.
+ */
+export const DB_PUBLIC_HOST_ENV = "SUPATYPE_DB_PUBLIC_HOST"
+
 /** What compose binds when neither variable is set, and what `init` writes into the URL. */
 export const DEFAULT_DB_PORT = 5432
 

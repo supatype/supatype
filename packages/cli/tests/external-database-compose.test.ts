@@ -60,9 +60,10 @@ describe("external database: compose", () => {
 
   it("points every database consumer at the one URL", () => {
     const compose = renderSelfHostCompose(external())
-    // storage, realtime, control-plane, server (SUPATYPE_SQL_DATABASE_URL), and auth.
+    // storage, realtime, control-plane, server (SUPATYPE_SQL_DATABASE_URL), auth, and the server's
+    // SUPATYPE_DB_PUBLIC_URL, which Studio's connection string is built from (password removed).
     const references = compose.match(/\$\{DATABASE_URL:\?/g) ?? []
-    expect(references.length).toBe(5)
+    expect(references.length).toBe(6)
   })
 
   it("interpolates the URL rather than baking the password into the file", () => {

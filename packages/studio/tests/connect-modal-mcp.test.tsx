@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 import React, { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { ConnectModal } from "../src/components/ConnectModal.js"
+import { AdminClientContext } from "../src/hooks/useAdminClient.js"
+import { testClient } from "./support.js"
 
 /**
  * The Connect panel's MCP tab, which describes something that has not shipped.
@@ -13,11 +15,15 @@ import { ConnectModal } from "../src/components/ConnectModal.js"
  * worth holding still.
  */
 
+const CLIENT = testClient({ url: "http://localhost:8000/studio/proxy", token: "t" })
+
 let container: HTMLDivElement
 let root: Root
 
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true
+  // The Direct tab asks the server for the connection details; this suite is not about them.
+  vi.stubGlobal("fetch", async () => Response.json({ direct: null, pooler: null }))
   container = document.createElement("div")
   document.body.appendChild(container)
   root = createRoot(container)
@@ -26,12 +32,17 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount())
   container.remove()
+  vi.unstubAllGlobals()
 })
 
 /** The panel portals out of the container, so every query runs against the document. */
 function openPanel(): void {
   act(() => {
-    root.render(<ConnectModal open onClose={() => undefined} />)
+    root.render(
+      <AdminClientContext.Provider value={CLIENT}>
+        <ConnectModal open onClose={() => undefined} />
+      </AdminClientContext.Provider>,
+    )
   })
 }
 
@@ -74,9 +85,10 @@ describe("the Connect panel's MCP tab", () => {
     expect(tab("MCP").querySelector(".opacity-0")).toBeNull()
   })
 
-  it("renders no code block in that tab, where the other two do", () => {
+  it("renders no code block in that tab, where the SDK tab does", () => {
+    // The Direct tab's strings come from the server and are covered in
+    // database-connection-strings.test.tsx, so the SDK tab is the one holding a block here.
     openPanel()
-    act(() => tab("Direct").click())
     expect(document.body.querySelector("pre")).not.toBeNull()
 
     act(() => tab("MCP").click())
