@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.7.0
+
+Highlights: the Realtime Inspector; a Schema objects view; reads through a metadata catalogue; the
+SQL editor for owners, admins and developers on its own non-superuser login; a viewer role and an
+elevated/self switch; a CORS origins page; who pushed each migration; Cloud member login linking.
 
 ### Features
 
@@ -8,6 +12,10 @@
   and where each comes from (site URL, config, the platform, or saved here). Owners and admins can
   add and remove origins, which saves the list in the project's database in place of the default,
   and reset it. Dev mode is called out, since it allows every origin anyway.
+
+## 0.3.6 (2026-10-02)
+
+### Features
 
 * **seeds:** a Database > Seeds screen, reading `_supatype.seeds` the same way the migrations
   screen reads `_supatype.migrations`: through `proxy.sql`, with no new engine endpoint.

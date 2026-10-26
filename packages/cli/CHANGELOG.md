@@ -1,6 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.7.0
+
+Highlights: `adopt` takes what a push refuses, with `--key`, `--release` and `--reclaim`, and
+declares adopted columns in the schema; push asks before restoring access changed outside Supatype,
+offers to declare a rename before dropping data, and records an audit trail; `doctor --rebaseline`
+and doctor's drift view; `auth.providers` and `api.corsOrigins` in `supatype.config.ts`;
+`SUPATYPE_PROJECT_NAME` and `--project-name`; the engine's LICENSE saved beside a downloaded engine;
+every host connection uses one resolver; dev stops when the process that started it exits. For
+self-host, the gateway decides CORS, compose mounts use absolute paths, and
+`self-host compose restart` recreates one service. Upgrading from 0.3.x: read `UPGRADING.md`.
 
 ### Breaking Changes
 
@@ -10,7 +19,55 @@
   push leaves it exactly as it is, with no change and no warning. An explicit `Identity<...>` on a
   serial column converts it.
 
-### Fixes
+### Features
+
+* **schema:** identity and stored generated columns. The schema compiler reads the options form
+  (`Int<{ identity: "always" }>`, `Float<{ generated: "price * qty" }>`) and the aliases
+  (`Identity<>`, `Generated<>`, `AutoIncrement<>`) into one AST encoding (`identity: "always" |
+  "byDefault"`, `generated: { expression, stored: true }`), refusing an identity on a non-integer,
+  both at once, or either with a default. The generated client types make a generated column and an
+  identity `always` column `?: never` on insert and update; an identity `by-default` column is
+  optional on insert. `Generated<T, "<sql>">` is the supported form for a generated column, on every
+  type; there is no per-type options form to use instead.
+* **push, diff, doctor, adopt, dev, deploy:** a schema with identity or generated columns is sent only
+  to an engine that lists `identity_columns` in its capabilities (a linked target's
+  `GET <schema base>/capabilities`, the engine binary's `capabilities`, the compose engine's). Any
+  other is refused before anything is sent, naming the fields: update the engine, or declare them as
+  plain columns and make the change in the database yourself. An older engine would have dropped
+  them and pushed plain columns. A push also still refuses them on an engine pinned before 0.7.0.
+* **push:** taking a column's identity away, or its generation expression, is destructive like a
+  drop: the push lists it and asks first (`--yes` to agree without a prompt), and the engine refuses
+  it without `--force`.
+* **adopt, pull:** an identity or generated column is declared as one, from what the engine's
+  introspection now says (`Identity<number>`, `Identity<bigint, "by-default">`,
+  `SmallInt<{ identity: … }>`, `Generated<T, "<expression>">`), and a serial column as
+  `AutoIncrement<number | bigint>`, when the engine lists `identity_columns`; otherwise such a column
+  is printed to declare by hand, and a serial is declared as `ServerDefault<Int>` as before. `adopt` used to leave every NOT NULL
+  integer with no default to be declared by hand, since it could not tell an identity column from an
+  ordinary one, and declared a generated column as a plain one.
+* **adopt:** adopts only what was agreed to. After a preview and a yes at the prompt, it adopts the
+  conflicts the preview listed and nothing the database grew since; `--key kind:table.name`
+  (repeatable, engine 0.7.0+) adopts only the objects named; `--yes` alone adopts every conflict
+  there is and lists what it took. If an object it was to adopt is no longer a conflict, nothing is
+  written and it exits 1: "The database changed since the preview; run `supatype adopt` again."
+  The adopt offered by `push` and `dev` likewise takes only what it showed.
+* **adopt:** adopting a column declares it. `supatype adopt --key column:<table>.<name>` hands
+  Supatype a column added outside the schema, and the CLI then adds the field to the model whose
+  table it is (found by its table name, `tableName` included, in any schema file) and runs what
+  `supatype generate` does, so the next `supatype push` treats it as an ordinary declared field.
+  The field key is the column name and its type is one whose column is exactly the live one
+  (`Optional<…>` when nullable, `ServerDefault<…>` when the column has a default), so the push
+  changes nothing; the edit keeps the file's formatting and comments and is checked by reading the
+  schema back, or undone (only when the file is still exactly what was written). In a terminal it
+  shows the file, model and field line and asks first;
+  `--yes` edits without asking. When the model cannot be found, the type cannot be declared
+  exactly, or the edit is declined, the file is left alone and the field line to add, with the file
+  and model, is printed; the adopt has still happened and it exits 0. Other adopted kinds are not
+  fields and are unchanged.
+* **adopt:** an empty key list (adopt nothing, only release) reaches the engine binary as
+  `--adopt-none`, in one call, instead of a second preview first.
+
+### Bug Fixes
 
 * **security:** a `supatype dev` lock left behind by a dev that was killed made every later compose
   render dev. A lock now records its process and counts only while that process is alive; a stale
@@ -80,33 +137,29 @@
   endings. A NOT NULL integer column with no default may be an identity column, which no field type
   declares, so it is printed for a person rather than declared as a required field. Adopting a table
   no longer prints "add this field by hand" for the columns its model already declares.
+* **push:** declining the prompt to put back access changed outside Supatype exits 1 on every push
+  path. On a linked or self-hosted target the push said "Aborted" and exited 0, so a script could
+  not tell a kept hand edit from an applied push; the docker path already exited 1. Both now print
+  the same message and apply nothing.
+* **dev, self-host:** a project whose `POSTGRES_USER` (in the shell or `.env`) names any user
+  other than `supatype_admin`, for example `postgres`, is now refused before compose starts, on
+  the bundled database only. The bundled Postgres image runs as `supatype_admin`, and with any
+  other user the `db` container exited and `dev` waited ninety seconds to say only that the
+  database never became healthy. **Migrating:** set `POSTGRES_USER=supatype_admin` in `.env` and
+  the same user in `DATABASE_URL`. If the stack's data volume was created as the old user, either
+  create the role in it first (connected as the old user:
+  `CREATE ROLE supatype_admin WITH SUPERUSER LOGIN PASSWORD '<POSTGRES_PASSWORD>'`) or start again
+  from an empty database with `supatype dev --reset-db`. A Postgres you run yourself, as its own
+  user, belongs in `database.external.url`, which this check does not apply to.
+* **dev:** a first schema push that fails because Docker could not pull an image no longer says
+  "The engine refused the schema push" and asks for the schema to be fixed. The engine never ran,
+  so `dev` now says Docker could not pull the image, that nothing was applied, and what to do: for
+  Docker Hub's pull rate limit, `docker login` or wait; otherwise check the network and the image
+  tag. A registry that could not be reached is no longer retried as though Postgres were starting.
+
+## 0.3.6 (2026-10-02)
 
 ### Features
-
-* **schema:** identity and stored generated columns. The schema compiler reads the options form
-  (`Int<{ identity: "always" }>`, `Float<{ generated: "price * qty" }>`) and the aliases
-  (`Identity<>`, `Generated<>`, `AutoIncrement<>`) into one AST encoding (`identity: "always" |
-  "byDefault"`, `generated: { expression, stored: true }`), refusing an identity on a non-integer,
-  both at once, or either with a default. The generated client types make a generated column and an
-  identity `always` column `?: never` on insert and update; an identity `by-default` column is
-  optional on insert. `Generated<T, "<sql>">` is the supported form for a generated column, on every
-  type; there is no per-type options form to use instead.
-* **push, diff, doctor, adopt, dev, deploy:** a schema with identity or generated columns is sent only
-  to an engine that lists `identity_columns` in its capabilities (a linked target's
-  `GET <schema base>/capabilities`, the engine binary's `capabilities`, the compose engine's). Any
-  other is refused before anything is sent, naming the fields: update the engine, or declare them as
-  plain columns and make the change in the database yourself. An older engine would have dropped
-  them and pushed plain columns. A push also still refuses them on an engine pinned before 0.7.0.
-* **push:** taking a column's identity away, or its generation expression, is destructive like a
-  drop: the push lists it and asks first (`--yes` to agree without a prompt), and the engine refuses
-  it without `--force`.
-* **adopt, pull:** an identity or generated column is declared as one, from what the engine's
-  introspection now says (`Identity<number>`, `Identity<bigint, "by-default">`,
-  `SmallInt<{ identity: … }>`, `Generated<T, "<expression>">`), and a serial column as
-  `AutoIncrement<number | bigint>`, when the engine lists `identity_columns`; otherwise such a column
-  is printed to declare by hand, and a serial is declared as `ServerDefault<Int>` as before. `adopt` used to leave every NOT NULL
-  integer with no default to be declared by hand, since it could not tell an identity column from an
-  ordinary one, and declared a generated column as a plain one.
 
 * **push:** when the engine refuses tables Supatype does not manage, `supatype push` and
   `supatype dev` say which tables and that their declared access rules are not in force, and in a
@@ -115,27 +168,6 @@
   `--yes`, nothing is adopted and the command to run is printed. On a docker project adoption runs
   through the compose schema-engine, so it reaches the stack's database. The refusal is read from
   the engine's JSON reason, with its wording only as the fallback for an older engine.
-* **adopt:** adopts only what was agreed to. After a preview and a yes at the prompt, it adopts the
-  conflicts the preview listed and nothing the database grew since; `--key kind:table.name`
-  (repeatable, engine 0.7.0+) adopts only the objects named; `--yes` alone adopts every conflict
-  there is and lists what it took. If an object it was to adopt is no longer a conflict, nothing is
-  written and it exits 1: "The database changed since the preview; run `supatype adopt` again."
-  The adopt offered by `push` and `dev` likewise takes only what it showed.
-* **adopt:** adopting a column declares it. `supatype adopt --key column:<table>.<name>` hands
-  Supatype a column added outside the schema, and the CLI then adds the field to the model whose
-  table it is (found by its table name, `tableName` included, in any schema file) and runs what
-  `supatype generate` does, so the next `supatype push` treats it as an ordinary declared field.
-  The field key is the column name and its type is one whose column is exactly the live one
-  (`Optional<…>` when nullable, `ServerDefault<…>` when the column has a default), so the push
-  changes nothing; the edit keeps the file's formatting and comments and is checked by reading the
-  schema back, or undone (only when the file is still exactly what was written). In a terminal it
-  shows the file, model and field line and asks first;
-  `--yes` edits without asking. When the model cannot be found, the type cannot be declared
-  exactly, or the edit is declined, the file is left alone and the field line to add, with the file
-  and model, is printed; the adopt has still happened and it exits 0. Other adopted kinds are not
-  fields and are unchanged.
-* **adopt:** an empty key list (adopt nothing, only release) reaches the engine binary as
-  `--adopt-none`, in one call, instead of a second preview first.
 * **adopt, doctor:** `--no-cache` is hidden and does nothing but say it is no longer needed: both
   read the database live. It never worked from the CLI (Commander stores it as `cache: false` and
   the commands read `noCache`), and `doctor` would have passed it to an engine subcommand that does
@@ -190,20 +222,6 @@
 
 ### Bug Fixes
 
-* **push:** declining the prompt to put back access changed outside Supatype exits 1 on every push
-  path. On a linked or self-hosted target the push said "Aborted" and exited 0, so a script could
-  not tell a kept hand edit from an applied push; the docker path already exited 1. Both now print
-  the same message and apply nothing.
-* **dev, self-host:** a project whose `POSTGRES_USER` (in the shell or `.env`) names any user
-  other than `supatype_admin`, for example `postgres`, is now refused before compose starts, on
-  the bundled database only. The bundled Postgres image runs as `supatype_admin`, and with any
-  other user the `db` container exited and `dev` waited ninety seconds to say only that the
-  database never became healthy. **Migrating:** set `POSTGRES_USER=supatype_admin` in `.env` and
-  the same user in `DATABASE_URL`. If the stack's data volume was created as the old user, either
-  create the role in it first (connected as the old user:
-  `CREATE ROLE supatype_admin WITH SUPERUSER LOGIN PASSWORD '<POSTGRES_PASSWORD>'`) or start again
-  from an empty database with `supatype dev --reset-db`. A Postgres you run yourself, as its own
-  user, belongs in `database.external.url`, which this check does not apply to.
 * **connection:** every command that runs the engine on the host finds the database the same way,
   in seed's order: `--connection`, `database.external.url`, `connection` in the config,
   `DATABASE_URL` in the environment, `DATABASE_URL` in the project's `.env`, then the project's own
@@ -225,11 +243,6 @@
   then succeeded against an empty database. Only a database that is not reachable yet is retried
   now, and the retry only starts Postgres again. A refusal stops `dev` with the engine's message
   and exits non-zero; for unmanaged tables it names `supatype adopt` as the remedy.
-* **dev:** a first schema push that fails because Docker could not pull an image no longer says
-  "The engine refused the schema push" and asks for the schema to be fixed. The engine never ran,
-  so `dev` now says Docker could not pull the image, that nothing was applied, and what to do: for
-  Docker Hub's pull rate limit, `docker login` or wait; otherwise check the network and the image
-  tag. A registry that could not be reached is no longer retried as though Postgres were starting.
 * **generate:** the client augmentation follows the order the schema declares its models and
   columns in. It sorted alphabetically, which threw away an order the author chose and the AST
   preserved, and made it disagree with `types/database.ts` about the same table.

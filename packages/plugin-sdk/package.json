@@ -1,6 +1,6 @@
 {
   "name": "@supatype/plugin-sdk",
-  "version": "0.1.5",
+  "version": "0.7.0",
   "license": "MIT",
   "description": "Plugin SDK for building Supatype extensions, field types, composites, providers, and widgets",
   "type": "module",

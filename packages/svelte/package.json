@@ -1,6 +1,6 @@
 {
   "name": "@supatype/svelte",
-  "version": "0.1.5",
+  "version": "0.7.0",
   "license": "MIT",
   "description": "Svelte stores for Supatype, createQuery, createMutation, createAuth, createSubscription",
   "type": "module",
