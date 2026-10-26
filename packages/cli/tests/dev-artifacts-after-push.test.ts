@@ -106,7 +106,7 @@ const COMPOSE_ENGINE: Partial<SupatypeProjectConfig> = { provider: "docker" }
 async function loadPush(over: Partial<SupatypeProjectConfig>) {
   // A fresh module each test: the push remembers the last AST it applied.
   vi.resetModules()
-  const { runComposeSchemaPush } = await import("../src/dev-compose.js")
+  const { runComposeSchemaPush, schemaChangedSinceLastPush } = await import("../src/dev-compose.js")
   const { pushConsentingToDestructive, DEV_DESTRUCTIVE_POLICY } = await import("../src/destructive-consent.js")
   const { selfHostComposePaths } = await import("../src/self-host-compose.js")
   const config = projectConfig(over)
@@ -117,6 +117,8 @@ async function loadPush(over: Partial<SupatypeProjectConfig>) {
     pushYes: () => pushConsentingToDestructive(once, { yes: true, apply: "supatype push --yes" }),
     /** One push of a `dev` session, off a terminal: a destructive change is refused. */
     devPush: () => pushConsentingToDestructive(once, DEV_DESTRUCTIVE_POLICY),
+    /** What dev's watch asks when it starts: was the schema saved since the last push read it? */
+    changedSinceLastPush: () => schemaChangedSinceLastPush("schema/index.ts", cwd, config),
   }
 }
 
@@ -201,6 +203,28 @@ describe.each([
     const afterFirst = engine.pushes
     await devPush()
     expect(engine.pushes).toBe(afterFirst)
+  })
+
+  it("says so when a save has nothing to push, so dev does not look hung", async () => {
+    const { devPush } = await loadPush(over)
+    await devPush()
+    const log = vi.mocked(console.log)
+    log.mockClear()
+    await devPush()
+    expect(log.mock.calls.map((call) => String(call[0]))).toContain(
+      "[supatype] Schema unchanged since the last push, nothing to apply.",
+    )
+  })
+
+  it("knows when the schema was saved after the last push read it, applied or refused", async () => {
+    const { devPush, changedSinceLastPush } = await loadPush(over)
+    await devPush()
+    expect(changedSinceLastPush()).toBe(false)
+    schema.ast = { version: 2, models: ["a field dropped"] }
+    expect(changedSinceLastPush()).toBe(true)
+    engine.refuseAll = true
+    await expect(devPush()).rejects.toThrow(/Nothing was applied/)
+    expect(changedSinceLastPush()).toBe(false)
   })
 
   it("writes them once when the first push applies", async () => {

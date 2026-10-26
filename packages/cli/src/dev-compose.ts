@@ -37,6 +37,7 @@ import { ensureDevApiConfig } from "./ensure-dev-api-config.js"
 import { cacheSeedingNotes } from "./api-config-cache.js"
 import { refreshFunctionsContext } from "./functions-context-refresh.js"
 import { restartComposeFunctionsWorker, watchFunctionSources } from "./dev-functions-watch.js"
+import { watchDevSchema } from "./dev-schema-watch.js"
 import { DB_PORT_ENV, syncDatabaseUrlPort } from "./db-port.js"
 import { degraded } from "./strict.js"
 import { DEV_DESTRUCTIVE_POLICY, consentDepsFromDiff, pushConsentingToDestructive } from "./destructive-consent.js"
@@ -656,6 +657,8 @@ async function provisionDockerStorageBuckets(
 
 let _lastPushedAst: string | null = null
 let _lastFailedAst: string | null = null
+/** The schema the last push read, whether it applied, was refused or failed. */
+let _lastReadAst: string | null = null
 let _composePushInFlight = false
 let _composePushQueued = false
 
@@ -873,14 +876,18 @@ export async function runComposeSchemaPush(
   composeProject: string,
   opts: ComposePushOptions = {},
 ): Promise<void> {
-  const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
-  const astJson = JSON.stringify(ast)
+  const { ast, astJson } = readSchemaToPush(schemaPath, cwd, config)
+  _lastReadAst = astJson
   // Before the skip below: the schema-engine container reads the AST through its bind mount.
   writeSchemaAstFile(cwd, astJson)
   // Skipped only while nothing has failed since the last push applied. Putting a refused change
   // back yields the applied schema again, and that still has to reach the engine: the up-to-date
-  // push is what marks the refusal superseded and clears Studio's notice.
-  if (astJson === _lastPushedAst && _lastFailedAst === null) return
+  // push is what marks the refusal superseded and clears Studio's notice. Said out loud, since a
+  // save that pushes nothing otherwise ends on "pushing schema..." and looks like a hang.
+  if (astJson === _lastPushedAst && _lastFailedAst === null) {
+    console.log("[supatype] Schema unchanged since the last push, nothing to apply.")
+    return
+  }
   // Identity and generated columns only to an engine that reads them (the override's binary is
   // asked by `engineRequest`).
   if (!hasEngineOverride(config)) await requireDockerFeatures(cwd, config, identityColumnsNeed(ast))
@@ -895,6 +902,25 @@ export async function runComposeSchemaPush(
   _lastFailedAst = null
   if (astRelatesToAuthUsers(ast)) grantAuthSchemaAccess(paths, cwd, composeProject)
   await refreshSchemaArtifacts(cwd, config, ast)
+}
+
+/** The schema on disk as a push sends it, and that AST serialized for comparing pushes. */
+function readSchemaToPush(
+  schemaPath: string,
+  cwd: string,
+  config: SupatypeProjectConfig,
+): { ast: ExtractedSchemaAstV2; astJson: string } {
+  const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
+  return { ast, astJson: JSON.stringify(ast) }
+}
+
+/**
+ * Whether the schema on disk is not the one the last push read, applied or not: what dev's watch
+ * asks when it starts, so a save made while the stack was coming up is still pushed. Throws when
+ * the schema cannot be read.
+ */
+export function schemaChangedSinceLastPush(schemaPath: string, cwd: string, config: SupatypeProjectConfig): boolean {
+  return readSchemaToPush(schemaPath, cwd, config).astJson !== _lastReadAst
 }
 
 /** The AST the push sends, at `.supatype/schema.ast.json`, where both engines read it. */
@@ -1565,15 +1591,13 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   const shutdownState: {
     studioProc: StudioProc
     appProc: AppProc
-    schemaWatcher: import("node:fs").FSWatcher | null
+    schemaWatcher: { close: () => void } | null
     functionsWatcher: { close: () => void } | null
-    debounceTimer: ReturnType<typeof setTimeout> | null
   } = {
     studioProc: null,
     appProc: null,
     schemaWatcher: null,
     functionsWatcher: null,
-    debounceTimer: null,
   }
 
   registerDevShutdown(async () => {
@@ -1581,10 +1605,6 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
     shutdownState.schemaWatcher = null
     shutdownState.functionsWatcher?.close()
     shutdownState.functionsWatcher = null
-    if (shutdownState.debounceTimer) {
-      clearTimeout(shutdownState.debounceTimer)
-      shutdownState.debounceTimer = null
-    }
     console.log("[supatype] Shutting down compose...")
     await shutdownState.studioProc?.stop()
     await shutdownState.appProc?.stop()
@@ -1784,20 +1804,18 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   if (opts.watch) {
     const schemaDir = join(projectRootFromConfig(config, cwd), config.schema?.path ?? "schema/index.ts", "..")
     console.log(`[supatype] Watching ${schemaDir} for changes...`)
-    const { watch } = await import("node:fs")
-    shutdownState.schemaWatcher = watch(schemaDir, { recursive: true }, (_eventType, filename) => {
-      if (!filename?.endsWith(".ts")) return
-      if (shutdownState.debounceTimer) clearTimeout(shutdownState.debounceTimer)
-      shutdownState.debounceTimer = setTimeout(() => {
-        shutdownState.debounceTimer = null
-        console.log(`\n[supatype] Change detected in ${filename}, pushing schema...`)
+    shutdownState.schemaWatcher = watchDevSchema({
+      dir: schemaDir,
+      changedSinceLastPush: () => schemaChangedSinceLastPush(schemaPath, cwd, config),
+      push: (why) => {
+        console.log(`\n[supatype] ${why}, pushing schema...`)
         runComposeSchemaPushQueued(cwd, config, paths, schemaPath, project, pushOptions)
           .then(async () => {
             const updatedAst = loadSchemaAst(schemaPath, cwd)
             await provisionDockerStorageBuckets(updatedAst, kongPort, serviceRoleKey)
           })
           .catch(reportDevPushFailure)
-      }, 300)
+      },
     })
     // The worker imports its handlers once; without this an edited function kept its old code.
     const worker = { composePath: paths.composePath, cwd, project }
