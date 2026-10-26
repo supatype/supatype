@@ -72,16 +72,20 @@ Run `supatype push` after schema changes to refresh types.
 When Kong serves the SPA and API together, use the page origin (no CORS):
 
 ```typescript
-import { createClient } from "@supatype/client"
-import type { Database } from "../supatype/generated/database"
+// The generated client, not "@supatype/client": it registers which models keep drafts.
+import { createClient } from "../supatype/generated/client"
 
-export const supatype = createClient<Database>({
+export const supatype = createClient({
   url: typeof window !== "undefined" ? window.location.origin : "http://localhost:18473",
   anonKey: import.meta.env.VITE_SUPATYPE_ANON_KEY as string,
 })
 ```
 
-Ensure `.env` has `VITE_SUPATYPE_ANON_KEY` (copy from `ANON_KEY` after `supatype keys`). `supatype dev` may also write `PUBLIC_SUPATYPE_ANON_KEY`.
+`supatype keys` writes `VITE_SUPATYPE_ANON_KEY` to `.env`, with `PUBLIC_` and `EXPO_PUBLIC_` copies for other frameworks.
+
+Call `createClient` with no type argument: the generated client already carries the schema's types.
+`createClient<Database>` loses the drafts typing (`update(..., { publish: true })` stops compiling)
+and makes every `rpc(...)` name `never`.
 
 ## Vite config
 
@@ -196,7 +200,7 @@ Access rules in `schema/index.ts` enforce what each role can do.
   A transport failure comes back as `error.code` `NETWORK_TIMEOUT`, `NETWORK_CONNECTION_REFUSED`,
   `NETWORK_DNS_FAILURE`, `NETWORK_ERROR` or `RATE_LIMITED`.
 - **Creating on a drafts model** (`versions` with drafts). Import `createClient` from the generated
-  `supatype/client.ts`: it tells the client which models keep drafts, and `insert` (also through
+  `supatype/generated/client.ts`: it tells the client which models keep drafts, and `insert` (also through
   `useMutation` / `createMutation`) then goes through `supatype.create_record` for one record, or
   `supatype.create_records` for several, all or none in one call, and returns the rows read back
   from the draft view in the order sent, with the insert's select. A plain `POST` asking for the row
@@ -266,7 +270,7 @@ Wrap the app once, near the root, with the typed client:
 
 ```tsx
 import { SupatypeProvider } from "@supatype/react"
-import { supatype } from "./lib/supatype" // createClient<Database>(...)
+import { supatype } from "./lib/supatype" // createClient(...) from the generated client
 
 export function App() {
   return (
