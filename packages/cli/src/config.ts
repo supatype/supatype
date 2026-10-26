@@ -14,8 +14,14 @@ import { readRenameJournal, withRenameJournal } from "./rename-journal.js"
 import type { ExtractedSchemaAstV2 } from "./schema-ast-v2.js"
 import { uniqueFileToken } from "./unique-file-token.js"
 import { envReference, type EnvReference } from "./auth-providers.js"
+import { applyProjectNameOverride } from "./project-name-override.js"
 
 export type { SupatypeProjectConfig } from "./project-config.js"
+export {
+  PROJECT_NAME_ENV,
+  projectNameInFile,
+  registerProjectNameOption,
+} from "./project-name-override.js"
 
 /** Canonical project configuration shape (alias for clarity at call sites). */
 export type SupatypeConfig = SupatypeProjectConfig
@@ -128,9 +134,14 @@ function normalizeProjectJson(raw: unknown): unknown {
 
 /**
  * Load project config from `supatype.config.ts` (or .js/.mjs), merged with
- * optional `supatype.local.config.*` (gitignored overrides).
+ * optional `supatype.local.config.*` (gitignored overrides), then renamed for this run when
+ * SUPATYPE_PROJECT_NAME is set (project-name-override.ts).
  */
 export function loadConfig(cwd: string = process.cwd()): SupatypeProjectConfig {
+  return applyProjectNameOverride(loadConfigFiles(cwd))
+}
+
+function loadConfigFiles(cwd: string): SupatypeProjectConfig {
   if (existsSync(resolve(cwd, LEGACY_TOML))) {
     throw new Error(
       `Found ${LEGACY_TOML}, which is no longer supported.\n` +

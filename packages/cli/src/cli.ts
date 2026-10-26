@@ -34,6 +34,7 @@ import { registerMigrateFromV1 } from "./commands/migrate-from-v1.js"
 import { registerSelfUpdate } from "./commands/self-update.js"
 import { registerInternalCommands } from "./commands/internal.js"
 import { cliPackageVersion } from "./cli-package-version.js"
+import { registerProjectNameOption } from "./project-name-override.js"
 import { reportCliFatal } from "./ui/fatal.js"
 import { wrapProgramActionsWithChrome } from "./ui/runtime/command-chrome.js"
 
@@ -43,6 +44,7 @@ export async function run(): Promise<void> {
     .description("Supatype: type-first platform for PostgreSQL")
     .version(cliPackageVersion())
 
+  registerProjectNameOption(program)
   registerInit(program)
   registerDev(program)
   registerCache(program)

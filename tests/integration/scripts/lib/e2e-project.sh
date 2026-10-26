@@ -11,8 +11,8 @@
 # the other's stack.
 #
 # SUPATYPE_E2E_PROJECT names the project for one run. Unset, every script runs exactly as before.
-# The name reaches `supatype dev` through supatype.local.config.ts, which the CLI merges over the
-# project's config; an existing local config is kept and merged into, and restored afterwards.
+# The name reaches the CLI as SUPATYPE_PROJECT_NAME, which renames the project for the run and
+# writes nothing: no generated config to leave behind, and the project keeps its own name on disk.
 #
 # Ports are overridable already, and every script passes its own on to the CLI:
 #   SUPATYPE_KONG_PORT        the gateway (default 18473)
@@ -25,11 +25,9 @@
 #   e2e_project_use "$EXAMPLE_DIR" framework-parity     # sets E2E_COMPOSE_PROJECT
 #   cleanup() { ...; e2e_project_down; e2e_project_release; }
 
-E2E_LOCAL_CONFIG_CANDIDATES=(supatype.local.config.ts supatype.local.config.js supatype.local.config.mjs)
 E2E_PROJECT_DIR=""
-E2E_PREVIOUS_CONFIG=""
-E2E_WROTE_CONFIG="no"
 E2E_LOCK_DIR=""
+E2E_SET_NAME="no"
 
 # e2e_project_use <project-dir> <config-name> - sets E2E_PROJECT_NAME and E2E_COMPOSE_PROJECT (what
 # the CLI names the compose project), takes the directory's lock, refuses a project another
@@ -50,7 +48,8 @@ e2e_project_use() {
     return 1
   fi
   if [[ "$E2E_PROJECT_NAME" != "$default_name" ]]; then
-    e2e_write_name_override "$dir" "$E2E_PROJECT_NAME"
+    export SUPATYPE_PROJECT_NAME="$E2E_PROJECT_NAME"
+    E2E_SET_NAME="yes"
   fi
 }
 
@@ -103,31 +102,6 @@ e2e_refuse_foreign_project() {
   done <<<"$files"
 }
 
-e2e_write_name_override() {
-  local dir="$1" name="$2" candidate import_from=""
-  for candidate in "${E2E_LOCAL_CONFIG_CANDIDATES[@]}"; do
-    [[ -f "$dir/$candidate" ]] || continue
-    if [[ "$candidate" == "supatype.local.config.ts" ]]; then
-      # The file this writes has the same name, so the one already there moves aside first.
-      E2E_PREVIOUS_CONFIG="$dir/supatype.local.config.e2e-previous.ts"
-      mv "$dir/$candidate" "$E2E_PREVIOUS_CONFIG"
-      import_from="./supatype.local.config.e2e-previous.ts"
-    else
-      import_from="./$candidate"
-    fi
-    break
-  done
-  E2E_WROTE_CONFIG="yes"
-  if [[ -z "$import_from" ]]; then
-    printf 'export default { project: { name: "%s" } }\n' "$name" >"$dir/supatype.local.config.ts"
-    return 0
-  fi
-  cat >"$dir/supatype.local.config.ts" <<TS
-import previous from "${import_from}"
-export default { ...previous, project: { ...(previous.project ?? {}), name: "${name}" } }
-TS
-}
-
 # e2e_project_claimed - true while this run holds the directory, so its teardown may stop the stack.
 e2e_project_claimed() {
   [[ -n "$E2E_LOCK_DIR" ]]
@@ -144,10 +118,9 @@ e2e_project_down() {
 
 # e2e_project_release - undoes e2e_project_use. Safe to call when it never ran.
 e2e_project_release() {
-  if [[ "$E2E_WROTE_CONFIG" == "yes" ]]; then
-    rm -f "$E2E_PROJECT_DIR/supatype.local.config.ts"
-    if [[ -n "$E2E_PREVIOUS_CONFIG" ]]; then mv -f "$E2E_PREVIOUS_CONFIG" "$E2E_PROJECT_DIR/supatype.local.config.ts"; fi
-    E2E_WROTE_CONFIG="no"
+  if [[ "$E2E_SET_NAME" == "yes" ]]; then
+    unset SUPATYPE_PROJECT_NAME
+    E2E_SET_NAME="no"
   fi
   if [[ -n "$E2E_LOCK_DIR" ]]; then
     rmdir "$E2E_LOCK_DIR" 2>/dev/null || true

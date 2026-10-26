@@ -37,7 +37,7 @@ DEV_PID=""
 cleanup() {
   echo ""
   echo "==> teardown"
-  if [[ -n "$DEV_PID" ]]; then kill "$DEV_PID" 2>/dev/null || true; fi
+  stop_pid_bounded "$DEV_PID"
   e2e_project_down
   e2e_project_release
 }
@@ -49,7 +49,7 @@ if [[ ! -f "$CLI_BIN" ]]; then
 fi
 
 echo "==> Bringing the stack up"
-(cd "$EXAMPLE_DIR" && node "$CLI_BIN" dev) &
+(cd "$EXAMPLE_DIR" && exec node "$CLI_BIN" dev) &
 DEV_PID=$!
 
 ready() { dev_started "$EXAMPLE_DIR" && http_ok "$BASE_URL/auth/v1/health"; }

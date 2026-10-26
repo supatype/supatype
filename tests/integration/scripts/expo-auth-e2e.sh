@@ -53,7 +53,7 @@ cleanup() {
   echo ""
   echo "==> teardown"
   for pid in "${BG_PIDS[@]}"; do kill "$pid" 2>/dev/null || true; done
-  if [[ -n "$DEV_PID" ]]; then kill "$DEV_PID" 2>/dev/null || true; fi
+  stop_pid_bounded "$DEV_PID"
   e2e_project_down
   docker rm -f "$MAILPIT_NAME" >/dev/null 2>&1 || true
   if [[ -f "$CONFIG.e2e-bak" ]]; then mv -f "$CONFIG.e2e-bak" "$CONFIG"; fi
@@ -122,7 +122,7 @@ node "$E2E_DIR/expo-auth/spa-server.mjs" "$EXAMPLE_DIR/dist" "$WEB_PORT" &
 BG_PIDS+=("$!")
 
 echo "==> Bringing the stack up"
-(cd "$EXAMPLE_DIR" && node "$CLI_BIN" dev) &
+(cd "$EXAMPLE_DIR" && exec node "$CLI_BIN" dev) &
 DEV_PID=$!
 ready() { dev_started "$EXAMPLE_DIR" && http_ok "$BASE_URL/auth/v1/health" && http_ok "$APP_URL/"; }
 if ! wait_until "$MAX_WAIT" "$BASE_URL/auth/v1/health" ready; then

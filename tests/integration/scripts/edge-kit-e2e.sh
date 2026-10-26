@@ -43,7 +43,7 @@ FUNCTIONS_ENV_EXISTED="no"
 cleanup() {
   echo ""
   echo "==> teardown"
-  if [[ -n "$DEV_PID" ]]; then kill "$DEV_PID" 2>/dev/null || true; fi
+  stop_pid_bounded "$DEV_PID"
   e2e_project_down
   # Both hold secrets and neither is tracked, so a failure must not leave one behind.
   if [[ "$ENV_EXISTED" == "no" ]]; then rm -f "$EXAMPLE_DIR/.env"; fi
@@ -71,7 +71,7 @@ if [[ -z "$WEBHOOK_SECRET" ]]; then
 fi
 
 echo "==> Bringing the stack up (this deploys the functions)"
-(cd "$EXAMPLE_DIR" && node "$CLI_BIN" dev) &
+(cd "$EXAMPLE_DIR" && exec node "$CLI_BIN" dev) &
 DEV_PID=$!
 
 ready() { dev_started "$EXAMPLE_DIR" && http_ok "$BASE_URL/auth/v1/health"; }
