@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import type { ModelAstV2 } from "../src/schema-ast-v2.js"
 import { isArrayOf, isJsonObject, isShape, isString, optional } from "@supatype/shared"
+import { generateClientAugmentation } from "../src/augmentation-generator.js"
 import { extractSchemaAstFromTypes } from "../src/type-extractor.js"
 import { expectShape } from "./support/json.js"
 
@@ -1027,6 +1028,87 @@ export type Page = Model<{
       localized: true,
       annotations: { db: { pgType: "JSONB" } },
     })
+  })
+
+  it("keeps the element type of an array inside a block, so it is typed by element", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-block-array-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Block, Blocks, Int, Model, UUID } from "@supatype/types"
+
+export type Stats = Block<"stats", { counts: Int[]; flags: boolean[]; tags: string[] }>
+
+export type Report = Model<{
+  id: UUID
+  sections: Blocks<Stats>
+}>
+`,
+      "utf8",
+    )
+
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const isBlocks = isShape({ blocks: optional(isArrayOf(isShape({ fields: isJsonObject }))) })
+    const report = ast?.models.find((m) => m.name === "Report")
+    const fields = expectShape(report?.fields["sections"], isBlocks).blocks?.[0]?.fields
+    // The engine refuses an array with no `elementType` ("missing field `elementType`").
+    expect(fields?.["counts"]).toMatchObject({ kind: "array", elementType: "INTEGER" })
+    expect(fields?.["flags"]).toMatchObject({ kind: "array", elementType: "BOOLEAN" })
+    expect(generateClientAugmentation(ast)).toContain(
+      '({ type: "stats"; data: { counts: number[]; flags: boolean[]; tags: string[] } })[]',
+    )
+  })
+
+  it("reads the blocks of Blocks<T> through an alias naming their union", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-block-union-alias-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Block, Blocks, MaxItems, Model, UUID } from "@supatype/types"
+
+export type HeroBlock = Block<"hero", { heading: string }>
+export type ProseBlock = Block<"prose", { body: string }>
+export type PageBlock = HeroBlock | ProseBlock | Block<"divider", { thick: boolean }>
+
+export type Page = Model<{
+  id: UUID
+  body: MaxItems<Blocks<PageBlock>, 20>
+}>
+`,
+      "utf8",
+    )
+
+    const ast = extractSchemaAstFromTypes(schemaPath, dir)
+    const isBlocks = isShape({ blocks: isArrayOf(isShape({ name: isString })) })
+    const body = expectShape(ast?.models[0]?.fields["body"], isBlocks)
+    expect(body.blocks.map((b) => b.name)).toEqual(["hero", "prose", "divider"])
+  })
+
+  it("refuses a Blocks<T> member that is not a Block, rather than dropping it", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-block-not-a-block-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `
+import type { Block, Blocks, Model, UUID } from "@supatype/types"
+
+export type HeroBlock = Block<"hero", { heading: string }>
+export type Plain = { heading: string }
+
+export type Page = Model<{
+  id: UUID
+  body: Blocks<HeroBlock | Plain>
+}>
+`,
+      "utf8",
+    )
+
+    expect(() => extractSchemaAstFromTypes(schemaPath, dir)).toThrow(/"Plain" is not a Block/)
   })
 
   it("resolves type alias Nullable<T> = Optional<T>", () => {

@@ -75,6 +75,15 @@ self-host, the gateway decides CORS, compose mounts use absolute paths, and
 
 ### Bug Fixes
 
+* **schema:** `Blocks<PageBlock>`, where `PageBlock` is an alias naming a union of blocks
+  (`type PageBlock = HeroBlock | ProseBlock`), declared no blocks at all: the compiler only knew a
+  `Block<...>` written in place or an alias of one, and dropped anything else. Studio then offered
+  no block to add and both generated files typed the field as untyped entries. Aliases of unions are
+  followed now, and a member that is not a `Block` is refused with its name rather than dropped.
+* **schema:** an array inside a block (`Block<"stats", { counts: Int[] }>`) was sent without its
+  element type, so the engine refused the whole schema (``missing field `elementType` ``) and the
+  client augmentation typed every such array `string[]`. It carries the element type now, and both
+  generators type it by element (`number[]`, `boolean[]`).
 * **security:** a `supatype dev` lock left behind by a dev that was killed made every later compose
   render dev. A lock now records its process and counts only while that process is alive; a stale
   one is removed.

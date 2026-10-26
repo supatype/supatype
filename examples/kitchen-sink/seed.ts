@@ -41,19 +41,41 @@ const db = sql(
     }@127.0.0.1:5432/${process.env["POSTGRES_DB"] ?? "kitchen-sink"}?sslmode=disable`,
 )
 
+/**
+ * One paragraph of Lexical state, what Studio's rich text editor saves. A rich text column has a
+ * trigger that turns a plain string into this; a field inside a block is not a column, so nothing
+ * normalises it and the seed writes the document itself.
+ */
+function paragraph(text: string): { root: Record<string, unknown> } {
+  const node = { type: "text", version: 1, text, format: 0, detail: 0, mode: "normal", style: "" }
+  return {
+    root: {
+      type: "root", version: 1, direction: null, format: "", indent: 0,
+      children: [{ type: "paragraph", version: 1, direction: null, format: "", indent: 0, children: [node] }],
+    },
+  }
+}
+
+// Each block as Studio's editor stores it: the block's name under `type`, its fields under `data`,
+// and the localized fields as a locale map. Stored flat, beside `type`, a page edited in Studio and
+// a page seeded here would be two different shapes, and the renderer could read only one of them.
 const HERO = {
   type: "hero",
-  heading: "Kitchen Sink Conference",
-  subheading: "One schema, two front ends, every feature that ships.",
-  cta: { label: "See the talks", href: "/talks", target: "_self" },
+  data: {
+    heading: { en: "Kitchen Sink Conference", fr: "La conférence évier de cuisine" },
+    subheading: { en: "One schema, two front ends, every feature that ships." },
+    cta: { label: "See the talks", href: "/talks", target: "_self" },
+  },
 }
 
 const PROSE = {
   type: "prose",
-  body: "Two days of people explaining how their database is laid out. Catering is adequate.",
+  data: {
+    body: { en: paragraph("Two days of people explaining how their database is laid out. Catering is adequate.") },
+  },
 }
 
-const SPEAKER_GRID = { type: "speakerGrid", heading: "Speaking", limit: 6 }
+const SPEAKER_GRID = { type: "speakerGrid", data: { heading: { en: "Speaking" }, limit: 6 } }
 
 /** Both conference days, relative to today so the fixture never goes stale. */
 const DAY_ONE = new Date()

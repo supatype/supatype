@@ -3,6 +3,7 @@
 import React from "react"
 import { useLivePreview } from "@supatype/react"
 import { Blocks } from "../../blocks"
+import { localized } from "@/lib/localized"
 import type { TableRow } from "@supatype/client"
 type Page = TableRow<"page">
 
@@ -20,7 +21,7 @@ type Page = TableRow<"page">
  * Studio is served at `/studio/` on that URL. Without it, the hook trusts no sender and every
  * keystroke is ignored, rather than letting any page that frames this one repaint it.
  */
-export function LivePage({ initial, apiUrl }: { initial: Page; apiUrl: string }): React.ReactElement {
+export function LivePage({ initial, apiUrl, locale }: { initial: Page; apiUrl: string; locale: string }): React.ReactElement {
   const { data, isPreview } = useLivePreview<Page>({ initialData: initial, model: "page", studioOrigin: apiUrl })
 
   return (
@@ -30,9 +31,9 @@ export function LivePage({ initial, apiUrl }: { initial: Page; apiUrl: string })
           ? "Live: these are unsaved keystrokes from the Studio tab, not the database."
           : "Draft: this is the saved draft, not what readers see."}
       </div>
-      <h1>{typeof data.title === "string" ? data.title : "Untitled"}</h1>
+      <h1>{localized(data.title, locale) ?? "Untitled"}</h1>
       {data.summary !== null && <p className="ks-lede">{data.summary}</p>}
-      <Blocks blocks={data.body} />
+      <Blocks blocks={data.body} locale={locale} />
     </article>
   )
 }
