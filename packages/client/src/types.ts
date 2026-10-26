@@ -145,6 +145,12 @@ export interface SupatypeError {
    * for its row back, naming `supatype.create_record` and `supatype.create_records`.
    */
   hint?: string | undefined
+  /**
+   * The detail line Postgres attached, when it gave one. A unique violation names its columns and
+   * values here (`Key (slug)=(intro) already exists.`), which is how a caller learns which of the
+   * values it sent collided without parsing the message.
+   */
+  details?: string | undefined
 }
 
 /**

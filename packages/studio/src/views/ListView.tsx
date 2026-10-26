@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useCallback } from "react"
+import React, { useState, useEffect, useCallback, useMemo } from "react"
 import { Header } from "../components/Header.js"
 import { useAdminClient } from "../hooks/useAdminClient.js"
 import { useLocale } from "../hooks/useLocale.js"
-import { getLocalizedFieldValue } from "../lib/localized-field.js"
+import { defaultFirstLocales, getLocalizedFieldValue } from "../lib/localized-field.js"
 import { isJsonObject } from "../lib/json.js"
 import type { ModelConfig, FieldConfig } from "../config.js"
 import {
@@ -13,7 +13,7 @@ import {
 } from "../hooks/useStudioFieldAccess.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
 import { Badge } from "../components/ui.js"
-import { anyFieldContains } from "../lib/postgrest-search.js"
+import { anyFieldContains, searchColumns } from "../lib/postgrest-search.js"
 import {
   fetchRecordStates,
   publishableLocales,
@@ -48,6 +48,15 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
   const [page, setPage] = useState(0)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const pageSize = 25
+  // What the search box matches on: a localized field by its value in each locale, and no field
+  // `ilike` cannot read, which failed the whole search.
+  // Keyed by the codes: the locale list can be a fresh array each render, and a fresh `searchable`
+  // would refetch the list on every one.
+  const localeKey = defaultFirstLocales(defaultLocale, projectLocales).join(",")
+  const searchable = useMemo(
+    () => searchColumns(model.fields, model.searchFields, localeKey.split(",")),
+    [model.fields, model.searchFields, localeKey],
+  )
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -56,8 +65,8 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
       let query = client.from(model.tableName).select()
 
       // Every search field, on the server: it searched only the first.
-      if (search && model.searchFields.length > 0) {
-        query = query.or(anyFieldContains(model.searchFields, search))
+      if (search && searchable.length > 0) {
+        query = query.or(anyFieldContains(searchable, search))
       }
 
       if (sort) {
@@ -77,7 +86,7 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
     } finally {
       setLoading(false)
     }
-  }, [client, model.tableName, model.searchFields, search, sort, page])
+  }, [client, model.tableName, searchable, search, sort, page])
 
   useEffect(() => { void fetchData() }, [fetchData])
 
@@ -166,7 +175,7 @@ export function ListView({ model, onNavigate }: ListViewProps): React.ReactEleme
       />
 
       <div className="st-list-toolbar">
-        {model.searchFields.length > 0 && (
+        {searchable.length > 0 && (
           <input
             type="search"
             className="st-search-input"

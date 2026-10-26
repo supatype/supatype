@@ -4,6 +4,7 @@ import { useAdminClient } from "../hooks/useAdminClient.js"
 import { useAdminConfig } from "../hooks/useAdminConfig.js"
 import type { ModelConfig } from "../config.js"
 import { SQL_EDITOR_HREF, sqlEditorOffered } from "../lib/sql-editor-access.js"
+import { defaultFirstLocales } from "../lib/localized-field.js"
 import { useStudioCapability } from "../hooks/useStudioCapability.js"
 import { IconX } from "./icons.js"
 import { JUMP_PAGE_SIZE, liveRows, useLiveSearch, type SearchItem } from "./jump-live-search.js"
@@ -142,7 +143,10 @@ export function JumpToSearch({ compact = false }: JumpToSearchProps): React.Reac
   const [open, setOpen] = useState(false)
   const [activeIndex, setActiveIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
-  const live = useLiveSearch(client, config.models, query)
+  // Keyed by the codes, so a config re-read on focus does not search again for the same locales.
+  const localeKey = defaultFirstLocales(config.locale?.defaultLocale ?? "en", config.locale?.locales ?? []).join(",")
+  const locales = useMemo(() => localeKey.split(","), [localeKey])
+  const live = useLiveSearch(client, config.models, query, locales)
 
   const routeItems = useMemo(
     () => jumpTargetsFor(capability, config.models, config.globals),

@@ -11,7 +11,8 @@ import type { SupatypeClient } from "@supatype/client"
 import type { ModelConfig } from "../config.js"
 import { useDebouncedValue } from "../hooks/useDebouncedValue.js"
 import { isJsonObject } from "../lib/json.js"
-import { anyFieldContains } from "../lib/postgrest-search.js"
+import { recordLabel } from "../lib/localized-field.js"
+import { anyFieldContains, searchColumns } from "../lib/postgrest-search.js"
 import { searchAuthUsers } from "../lib/relation-auth-users.js"
 import { studioRestHeaders } from "../lib/studio-auth-headers.js"
 
@@ -75,8 +76,9 @@ function rangeTotal(res: Response, offset: number, rows: number): number {
   return offset + rows + (rows === JUMP_PAGE_SIZE ? 1 : 0)
 }
 
-function recordItem(model: ModelConfig, row: Record<string, unknown>): SearchItem {
-  const label = String(row["name"] ?? row["title"] ?? row["email"] ?? row["label"] ?? row[model.primaryKey] ?? "Record")
+function recordItem(model: ModelConfig, row: Record<string, unknown>, locales: readonly string[]): SearchItem {
+  const [locale = "en"] = locales
+  const label = recordLabel(row, model, locale, locale) ?? String(row[model.primaryKey] ?? "Record")
   return {
     label,
     description: model.label,
@@ -86,15 +88,22 @@ function recordItem(model: ModelConfig, row: Record<string, unknown>): SearchIte
   }
 }
 
-function modelSource(client: SupatypeClient, model: ModelConfig, term: string): LiveSource {
-  const fields = model.searchFields.length > 0 ? model.searchFields : ["name", "title", "email"]
+/** A model's search on the server; `locales` lead with the default, which names what is found. */
+function modelSource(client: SupatypeClient, model: ModelConfig, term: string, locales: readonly string[]): LiveSource {
+  // With no declared search fields, the usual naming columns the model has; a guessed column it
+  // lacks failed its search.
+  const names = model.searchFields.length > 0
+    ? model.searchFields
+    : ["name", "title", "email"].filter((name) => model.fields.some((f) => f.name === name))
+  const columns = searchColumns(model.fields, names, locales)
   // Quoted and escaped, so the search is read literally: it used to drop commas and parentheses
   // and read % and _ as wildcards.
-  const or = `(${anyFieldContains(fields, term)})`
+  const or = `(${anyFieldContains(columns, term)})`
   return {
     key: `model:${model.name}`,
     label: model.labelPlural,
     fetch: async (page, signal) => {
+      if (columns.length === 0) return { items: [], total: 0 }
       const offset = page * JUMP_PAGE_SIZE
       const params = new URLSearchParams({ or, select: "*", limit: String(JUMP_PAGE_SIZE), offset: String(offset) })
       const headers = studioRestHeaders(client, { Prefer: "count=exact" })
@@ -102,7 +111,7 @@ function modelSource(client: SupatypeClient, model: ModelConfig, term: string): 
       if (!res.ok) return { items: [], total: 0 }
       const body: unknown = await res.json()
       const rows = Array.isArray(body) ? body.filter(isJsonObject) : []
-      return { items: rows.map((row) => recordItem(model, row)), total: rangeTotal(res, offset, rows.length) }
+      return { items: rows.map((row) => recordItem(model, row, locales)), total: rangeTotal(res, offset, rows.length) }
     },
   }
 }
@@ -139,7 +148,12 @@ export interface LiveSearch {
 }
 
 /** The groups matching `query` once typing pauses, searched on the server. */
-export function useLiveSearch(client: SupatypeClient, models: ModelConfig[], query: string): LiveSearch {
+export function useLiveSearch(
+  client: SupatypeClient,
+  models: ModelConfig[],
+  query: string,
+  locales: readonly string[],
+): LiveSearch {
   const term = useDebouncedValue(query.trim(), SEARCH_DEBOUNCE_MS)
   const [groups, setGroups] = useState<LiveGroup[]>([])
   const [searching, setSearching] = useState(false)
@@ -148,7 +162,7 @@ export function useLiveSearch(client: SupatypeClient, models: ModelConfig[], que
   groupsRef.current = groups
 
   useEffect(() => {
-    const sources = term.length < 2 ? [] : [userSource(client, term), ...models.map((m) => modelSource(client, m, term))]
+    const sources = term.length < 2 ? [] : [userSource(client, term), ...models.map((m) => modelSource(client, m, term, locales))]
     sourcesRef.current = sources
     const controller = new AbortController()
     setSearching(sources.length > 0)
@@ -158,7 +172,7 @@ export function useLiveSearch(client: SupatypeClient, models: ModelConfig[], que
       setSearching(false)
     })
     return () => controller.abort()
-  }, [client, models, term])
+  }, [client, models, term, locales])
 
   const loadMore = useCallback((key: string) => {
     const sources = sourcesRef.current

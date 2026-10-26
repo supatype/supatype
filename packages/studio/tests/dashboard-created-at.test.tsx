@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client"
 import { MemoryRouter } from "react-router-dom"
 import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { AdminConfigContext } from "../src/hooks/useAdminConfig.js"
+import { LocaleContext } from "../src/hooks/useLocale.js"
 import type { ModelConfig } from "../src/config.js"
 import { Dashboard } from "../src/views/Dashboard.js"
 import { testClient, testConfig, testField, testModel } from "./support.js"
@@ -19,6 +20,7 @@ import { testClient, testConfig, testField, testModel } from "./support.js"
  */
 
 const CLIENT = testClient({ url: "http://localhost:8000/studio/proxy", token: "token" })
+const LOCALE = { currentLocale: "en", setLocale: () => {}, locales: [{ code: "en", label: "English" }], defaultLocale: "en" }
 
 const PROFILE = testModel({ name: "Profile", label: "Profile", labelPlural: "Profiles", tableName: "profile", fields: [testField({ name: "display_name" })] })
 const TODO = testModel({ name: "Todo", label: "Todo", labelPlural: "Todos", tableName: "todo", fields: [testField({ name: "created_at", widget: "text" })] })
@@ -49,7 +51,10 @@ async function mount(models: ModelConfig[]): Promise<void> {
       <MemoryRouter>
         <AdminConfigContext.Provider value={testConfig({ models })}>
           <AdminClientContext.Provider value={CLIENT}>
-            <Dashboard />
+            {/* The recent list names records in the current locale, as Studio's root provides. */}
+            <LocaleContext.Provider value={LOCALE}>
+              <Dashboard />
+            </LocaleContext.Provider>
           </AdminClientContext.Provider>
         </AdminConfigContext.Provider>
       </MemoryRouter>,
