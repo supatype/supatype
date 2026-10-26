@@ -20,6 +20,9 @@ import {
   type SeedRun,
 } from "../src/views/SeedHistory.js"
 
+/** The empty state's heading: what the ledger holds, not a claim about the database. */
+const EMPTY = "No recorded seed runs"
+
 function run(overrides: Partial<SeedRun> & { id: number; file: string }): SeedRun {
   return {
     ir_hash: "sha256:aaaaaaaa",
@@ -49,9 +52,22 @@ function render(props: Partial<React.ComponentProps<typeof SeedHistoryView>>): s
 describe("before anything has been seeded", () => {
   it("says so, and says what to do about it", () => {
     const html = render({ runs: [] })
-    expect(html).toContain("No seeds have run here")
+    expect(html).toContain(EMPTY)
     expect(html).toContain("supatype seed")
     expect(html).toContain("Refresh")
+  })
+
+  /**
+   * Regression: kitchen-sink was seeded with `pnpm seed`, a script that writes through `sql()`,
+   * and this screen said "No seeds have run here" over a database full of seeded rows. Only a
+   * `supatype seed` run of a default-exported seed function is recorded, so the empty state says
+   * what is recorded and what is not, rather than what is in the database.
+   */
+  it("does not claim the database was never seeded", () => {
+    const html = render({ runs: [] })
+    expect(html).not.toContain("No seeds have run here")
+    expect(html).toContain("default-exported seed function")
+    expect(html).toContain("sql()")
   })
 
   /**
@@ -60,7 +76,7 @@ describe("before anything has been seeded", () => {
    */
   it("treats a missing ledger table as empty rather than broken", () => {
     const html = render({ error: 'relation "_supatype.seeds" does not exist' })
-    expect(html).toContain("No seeds have run here")
+    expect(html).toContain(EMPTY)
     expect(html).not.toContain("does not exist")
   })
 })
@@ -69,18 +85,18 @@ describe("when the query fails", () => {
   it("shows what went wrong and offers to try again", () => {
     const html = render({ error: "connection refused" })
     expect(html).toContain("connection refused")
-    expect(html).not.toContain("No seeds have run here")
+    expect(html).not.toContain(EMPTY)
   })
 
   it("shows a missing column as the failure it is, not as a database that predates seeding", () => {
     // An older ledger without a column the query reads: the table is there, so it is not empty.
     const html = render({ error: 'column "content_hash" does not exist', errorCode: "42703" })
     expect(html).toContain("content_hash")
-    expect(html).not.toContain("No seeds have run here")
+    expect(html).not.toContain(EMPTY)
   })
 
   it("goes by the SQLSTATE, whatever language the message is in", () => {
-    expect(render({ error: "FEHLER: Relation existiert nicht", errorCode: "42P01" })).toContain("No seeds have run here")
+    expect(render({ error: "FEHLER: Relation existiert nicht", errorCode: "42P01" })).toContain(EMPTY)
   })
 })
 
@@ -90,7 +106,7 @@ describe("while it is reading", () => {
     expect(html).toContain("Loading seed runs")
     // An empty table before the first read looks exactly like a project that has never
     // seeded, which is the one thing this screen must not get wrong.
-    expect(html).not.toContain("No seeds have run here")
+    expect(html).not.toContain(EMPTY)
     expect(html).not.toContain("<table")
   })
 })

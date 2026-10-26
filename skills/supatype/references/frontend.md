@@ -207,6 +207,13 @@ Access rules in `schema/index.ts` enforce what each role can do.
   conflict does. Passing `published_at` publishes the record at once, on purpose (localized fields
   still wait for `publish`).
 - **GraphQL** (`supatype.graphql`) runs as the caller, under the same access rules as REST.
+- **GraphQL relations use the schema's field names** (from 0.7.0, written on each push): a
+  `belongsTo` field is the to-one field under its declared name, and the far model's `hasMany` or
+  `hasOne` names the reverse, so `talks: HasMany<Talk>` on `Speaker` is `talks`, not
+  `talkCollection` (still a connection, `talks { edges { node { title } } }`). An end the schema
+  does not name, an ambiguous reverse (two keys to one model with an inverse naming neither column),
+  or a name that clashes with a column keeps pg_graphql's default. `Unknown field "talks"` means
+  the project has not pushed since upgrading.
 - **Realtime status.** Signing in or out swaps the socket; every channel reports `SUBSCRIBING`
   until the new socket rejoins, then `SUBSCRIBED`. Each `from(table).subscribe()` gets its own
   channel. React's `useSubscription` returns the raw channel status and shares a channel between

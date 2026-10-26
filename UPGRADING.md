@@ -615,6 +615,63 @@ masking. Use a least-privilege role, never the admin URL. See
   against the old constants should use the client's error code constants.
 - **`headers` may be a function**, called for each request.
 
+## GraphQL relation fields use your schema's names
+
+GraphQL used to name a relation after the tables it joins, whatever the schema called it, so
+`talks: HasMany<Talk>` on `Speaker` was `talkCollection` in GraphQL, and a query for `talks`
+failed with `Unknown field "talks" on type "speaker"`. The engine now names each end of a
+relation as the schema does:
+
+- **The reverse side** (the far model's `hasMany` or `hasOne`) takes that field's name:
+  `talkCollection` becomes `talks`. A collection is still a connection (`edges { node }`).
+- **The forward side** (the model holding the key) takes the `belongsTo` field's name, exactly
+  as declared. A field declared `authorId` is now `authorId` in GraphQL too, rather than the
+  name pg_graphql made up from the table or the key column.
+
+**Applied on your next push.** Every push writes the names, one with nothing else to change
+included, so an existing project picks them up from its next `supatype push` with no schema
+change. Once written, a push leaves them alone.
+
+**Some ends keep the default name:**
+
+- an end the schema does not name;
+- an ambiguous reverse: two keys to the same model, with an inverse that names neither column,
+  so the name could land on the wrong key;
+- a name that is already a column of its table, where the field would clash;
+- on a view (tier 2), a `hasOne` reverse, which a view can only serve as a collection.
+
+Queries that use the old names stop working after the push. Before:
+
+```graphql
+query {
+  speakerCollection {
+    edges { node { name talkCollection { edges { node { title } } } } }
+  }
+}
+```
+
+After:
+
+```graphql
+query {
+  speakerCollection {
+    edges { node { name talks { edges { node { title } } } } }
+  }
+}
+```
+
+A forward field changes wherever pg_graphql's own name was not the `belongsTo` name. For a
+`Post` declaring `authorId: BelongsTo<User>`, select the author by the declared name:
+
+```graphql
+query { postCollection { edges { node { title authorId { name } } } } }
+```
+
+If a query still asks for the old name, GraphQL answers `Unknown field` with that name, which is
+the field to rename.
+
+REST is unaffected: `select()` embeds are named as before.
+
 ## PostgREST 14
 
 Every stack now runs PostgREST 14.18 (compose and native dev used 12.2.x).
