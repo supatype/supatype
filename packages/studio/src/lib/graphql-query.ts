@@ -1,4 +1,4 @@
-import { isJsonObject } from "./json.js"
+import { GraphqlSchemaCache, createGraphqlRunner, type RequestTransport } from "@supatype/client"
 
 /** The GraphQL endpoint behind a Studio client's URL. */
 export function graphqlEndpoint(clientUrl: string): string {
@@ -50,32 +50,31 @@ export function formatGraphqlClientResult(res: {
   }
 }
 
-/** The first error a GraphQL answer reports, or a plain line for a failed request that sent none. */
-function graphqlErrorOf(body: unknown, res: Response): string | null {
-  const errors = isJsonObject(body) && Array.isArray(body["errors"]) ? body["errors"] : []
-  const first: unknown = errors.find(isJsonObject)
-  const message = isJsonObject(first) ? first["message"] : undefined
-  if (typeof message === "string") return message
-  return res.ok ? null : `The request failed (HTTP ${res.status}).`
-}
+/** Schemas by endpoint and send-as identity: pg_graphql shows each role only what it may use. */
+const schemas = new GraphqlSchemaCache()
+
+/** Studio's requests carry its session cookie, which the proxy reads. */
+const withCookies: RequestTransport = (url, init) => fetch(url, { ...init, credentials: "include" })
 
 /**
  * Sends `query` to `endpoint` carrying `headers` (who it is sent as, `send-as.ts`), and formats the
- * answer as the GraphQL panels show it.
+ * answer as the GraphQL panels show it. It goes through the client's GraphQL runner, so rich text,
+ * blocks and json fields show as the values they hold, as `graphql()` returns them.
  */
 export async function runGraphql(
   endpoint: string,
   query: string,
   headers: Record<string, string>,
 ): Promise<{ result: string; error: string }> {
-  const res = await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...headers },
-    body: JSON.stringify({ query, variables: {} }),
-    credentials: "include",
-  })
-  const body: unknown = await res.json().catch(() => null)
-  const message = graphqlErrorOf(body, res)
-  const data = isJsonObject(body) ? body["data"] ?? null : null
-  return formatGraphqlClientResult({ data, error: message === null ? null : { message } })
+  const run = createGraphqlRunner(
+    {
+      endpoint,
+      send: withCookies,
+      headers: () => Promise.resolve({ "Content-Type": "application/json", ...headers }),
+      // The pasted-token and acting-mode choices change what the same bearer may see.
+      schemaKey: () => `${endpoint} ${JSON.stringify(headers)}`,
+    },
+    schemas,
+  )
+  return formatGraphqlClientResult(await run(query, {}))
 }

@@ -66,6 +66,7 @@
           <li><a href="#storage">Storage</a></li>
           <li><a href="#realtime">Realtime</a></li>
           <li><a href="#functions">Functions</a></li>
+          <li><a href="#graphql">GraphQL</a></li>
           <li><a href="#errors">Errors</a></li>
         </ul>
         <p class="group">Get started</p>
@@ -267,6 +268,25 @@ sub.unsubscribe()</pre>
 if (fnError) console.error(fnError.code, fnError.message)
 console.log(reply)</pre>
               <p>The call goes to <code>/functions/v1/hello</code> with the user's token. A JSON response is parsed. Function names and bodies are not typed.</p>
+            </div>
+          </div>
+
+          <div class="step plain" id="graphql">
+            <div>
+              <h3>GraphQL</h3>
+              <pre class="code">import type { TableRow } from "./supatype/generated/client"
+
+type Talk = TableRow&lt;"talk"&gt;
+type TalkPage = { talkCollection: { edges: { node: Pick&lt;Talk, "title" | "abstract"&gt; }[] } }
+
+const { data, error } = await supatype.graphql&lt;TalkPage&gt;(`{
+  talkCollection(first: 10) { edges { node { title abstract } } }
+}`)
+const firstParagraph = data?.talkCollection.edges[0]?.node.abstract.root.children?.[0]</pre>
+              <p>The query goes to <code>/graphql/v1</code> as the signed-in user, under the same access rules as REST. Pass variables as the second argument, and <code>{ idempotent: true }</code> as the third to retry a read on a transient failure.</p>
+              <p>Rich text, blocks and json fields come back as objects and arrays, not strings. pg_graphql types every json and jsonb column with its <code>JSON</code> scalar and sends it as a JSON-encoded string, so the client reads the schema once per role, finds each field of that type in your query, and decodes it. Aliases, named and inline fragments, nested relations and lists all decode. A field the client cannot place stays exactly as returned: one added since the schema was read (it reads the schema again on the next call), a document with more than one operation, or a schema it could not read.</p>
+              <p>The type argument names the answer's shape and is not checked at runtime. Build it from the generated <code>TableRow</code> types so <code>abstract</code> is typed as the rich text document it now is. Variables you send are not encoded: a json argument still takes a string.</p>
+              <p>Using another GraphQL client? <code>readGraphqlSchema</code> reads the <code>data</code> of an introspection answer to <code>GRAPHQL_SCHEMA_QUERY</code>, and <code>decodeGraphqlJsonFields(query, data, schema)</code> decodes an answer the same way.</p>
             </div>
           </div>
 

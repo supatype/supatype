@@ -166,6 +166,7 @@ describe("generateProjectClient: models that keep drafts", () => {
 })
 
 const CLIENT_SOURCE = resolve(dirname(fileURLToPath(import.meta.url)), "../../client/src/index.ts")
+const LEXICAL_SOURCE = resolve(dirname(fileURLToPath(import.meta.url)), "../../types/src/lexical.ts")
 
 /** Compile a generated `client.ts` against the real client source; returns its diagnostics. */
 function compileGeneratedClient(source: string): string[] {
@@ -182,7 +183,7 @@ function compileGeneratedClient(source: string): string[] {
       lib: ["lib.es2022.d.ts", "lib.dom.d.ts"],
       module: ts.ModuleKind.ESNext,
       moduleResolution: ts.ModuleResolutionKind.Bundler,
-      paths: { "@supatype/client": [CLIENT_SOURCE] },
+      paths: { "@supatype/client": [CLIENT_SOURCE], "@supatype/types/lexical": [LEXICAL_SOURCE] },
     })
     return ts
       .getPreEmitDiagnostics(program)
@@ -193,8 +194,44 @@ function compileGeneratedClient(source: string): string[] {
   }
 }
 
+/** A model with the three kinds pg_graphql sends as its `JSON` scalar: rich text, blocks and json. */
+const jsonFieldsAst = {
+  models: [
+    {
+      name: "Talk",
+      annotations: { db: { tableName: "talk" } },
+      fields: {
+        id: { kind: "uuid", required: true, primaryKey: true },
+        abstract: { kind: "richText", pgType: "JSONB", required: true },
+        body: { kind: "blocks", required: false, blocks: [{ name: "quote", fields: { text: { kind: "text", required: true } } }] },
+        meta: { kind: "json", required: false },
+      },
+    },
+  ],
+}
+
+/** An app reading those fields through `graphql()`, typed from the generated rows. */
+const GRAPHQL_USE = `
+import { createClient, type TableRow } from "@supatype/client"
+
+type Talk = TableRow<"talk">
+type TalkPage = { talkCollection: { edges: Array<{ node: Pick<Talk, "abstract" | "body" | "meta"> }> } }
+
+export async function firstWords(): Promise<string | undefined> {
+  const supatype = createClient({ url: "http://localhost:18473", anonKey: "anon" })
+  const { data } = await supatype.graphql<TalkPage>("{ talkCollection { edges { node { abstract body meta } } } }")
+  const node = data?.talkCollection.edges[0]?.node
+  const rootType: string | undefined = node?.abstract.root.type
+  return node?.body?.[0]?.data.text ?? rootType
+}
+`
+
 describe("the generated client, as TypeScript reads it", () => {
   it("compiles against the client it registers its drafts models with", () => {
     expect(compileGeneratedClient(generateProjectClient(versionedAst))).toEqual([])
+  })
+
+  it("types rich text and blocks read through graphql() as their values, not strings", () => {
+    expect(compileGeneratedClient(generateProjectClient(jsonFieldsAst) + GRAPHQL_USE)).toEqual([])
   })
 })

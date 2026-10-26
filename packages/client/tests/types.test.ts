@@ -281,3 +281,17 @@ describe("select-string inference after a write", () => {
     expectTypeOf(q).resolves.toEqualTypeOf<QueryResult<{ id: string }>>()
   })
 })
+
+// ─── graphql() ────────────────────────────────────────────────────────────────
+
+describe("graphql() answer types", () => {
+  it("is unknown when the call names no shape, as before", () => {
+    expectTypeOf(client.graphql("{ a }")).resolves.toEqualTypeOf<{ data: unknown; error: SupatypeError | null }>()
+  })
+
+  it("takes the shape the call names, so a decoded JSON field is typed as its value", () => {
+    type Answer = { postsCollection: { edges: Array<{ node: { body: { root: { type: "root" } } } }> } }
+    const answer = client.graphql<Answer>("{ postsCollection { edges { node { body } } } }")
+    expectTypeOf(answer).resolves.toEqualTypeOf<{ data: Answer | null; error: SupatypeError | null }>()
+  })
+})
