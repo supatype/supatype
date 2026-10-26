@@ -71,6 +71,33 @@ export interface ProjectProxy {
   introspect: (schema?: string) => Promise<SchemaTable[]>
   /** List schemas accessible to the current JWT role. */
   schemas: () => Promise<string[]>
+  /** Enable or disable one extension through the allow-listed admin route (SQ2). */
+  studioExtension: (name: string, enable: boolean) => Promise<void>
+  /** Switch row level security on one auth or storage table (SQ2). */
+  studioRls: (schema: StudioAdminSchema, table: string, enable: boolean) => Promise<void>
+  /** Create or drop one policy on an auth or storage table (SQ2). */
+  studioPolicy: (body: StudioPolicyWrite) => Promise<void>
+}
+
+/** The schemas whose RLS and policies Studio writes through `/studio-admin`, not the SQL editor. */
+export type StudioAdminSchema = "auth" | "storage"
+
+export function isStudioAdminSchema(schema: string): schema is StudioAdminSchema {
+  return schema === "auth" || schema === "storage"
+}
+
+export type PolicyCommand = "ALL" | "SELECT" | "INSERT" | "UPDATE" | "DELETE"
+
+/** One policy write: `create` carries the policy's shape, `drop` only names it. */
+export interface StudioPolicyWrite {
+  schema: StudioAdminSchema
+  table: string
+  op: "create" | "drop"
+  name: string
+  command?: PolicyCommand
+  roles?: string[]
+  using?: string | null
+  check?: string | null
 }
 
 /** What the SQL proxy answers: rows on success; on failure a message, and the SQLSTATE if passed on. */
@@ -96,15 +123,33 @@ export async function readSqlResponse(res: Response): Promise<SqlResult> {
   }
 }
 
-/** POST one catalogue query to `route` on the project proxy; the server binds its parameters. */
-async function postCatalogue(client: SupatypeClient, route: string, name: string, params: MetadataParams): Promise<SqlResult> {
-  const res = await fetch(`${client.url}${route}`, {
+/** POST a JSON body to `route` on the project proxy, as Studio's session. */
+function postProxy(client: SupatypeClient, route: string, body: object): Promise<Response> {
+  return fetch(`${client.url}${route}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...studioGatewayHeaders(), ...studioAuthHeaders(client) },
     credentials: "include",
-    body: JSON.stringify({ name, params }),
+    body: JSON.stringify(body),
   })
-  return readSqlResponse(res)
+}
+
+/** POST one catalogue query to `route` on the project proxy; the server binds its parameters. */
+async function postCatalogue(client: SupatypeClient, route: string, name: string, params: MetadataParams): Promise<SqlResult> {
+  return readSqlResponse(await postProxy(client, route, { name, params }))
+}
+
+/** POST one write to an allow-listed `/studio-admin` route; a refusal throws as the SQL route's do. */
+async function postStudioAdmin(client: SupatypeClient, path: string, body: object): Promise<void> {
+  await readSqlResponse(await postProxy(client, `/studio-admin/${path}`, body))
+}
+
+/** The SQ2 writes: extensions, RLS and auth/storage policies, each on its own audited route. */
+function studioAdminWrites(client: SupatypeClient): Pick<ProjectProxy, "studioExtension" | "studioRls" | "studioPolicy"> {
+  return {
+    studioExtension: (name, enable) => postStudioAdmin(client, "extensions", { name, enable }),
+    studioRls: (schema, table, enable) => postStudioAdmin(client, "rls", { schema, table, enable }),
+    studioPolicy: (body) => postStudioAdmin(client, "policies", body),
+  }
 }
 
 /** A boolean column as either host's driver hands it back. */
@@ -163,20 +208,9 @@ export function useProjectProxy(): ProjectProxy {
           "SQL proxy requires the session proxy, Studio no longer accepts a service role key in the browser",
         )
       }
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        ...studioGatewayHeaders(),
-        ...studioAuthHeaders(client),
-      }
-      const res = await fetch(`${client.url}/sql`, {
-        method: "POST",
-        headers,
-        credentials: "include",
-        body: JSON.stringify({ query, ...(schema !== undefined && { schema }) }),
-      })
-      return readSqlResponse(res)
+      return readSqlResponse(await postProxy(client, "/sql", { query, ...(schema !== undefined && { schema }) }))
     },
-    [client.url, sessionProxy],
+    [client, sessionProxy],
   )
 
   // RQ3: one named, read-only query from the server's metadata catalogue, its parameters bound
@@ -199,5 +233,7 @@ export function useProjectProxy(): ProjectProxy {
     return result.rows.map((r) => r["schema_name"] as string)
   }, [metadata])
 
-  return useMemo(() => ({ sql, metadata, introspect, schemas }), [sql, metadata, introspect, schemas])
+  const admin = useMemo(() => studioAdminWrites(client), [client])
+
+  return useMemo(() => ({ sql, metadata, introspect, schemas, ...admin }), [sql, metadata, introspect, schemas, admin])
 }

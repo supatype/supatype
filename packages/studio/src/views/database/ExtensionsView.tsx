@@ -2,12 +2,12 @@ import React, { useState } from "react"
 import { useProjectProxy } from "../../hooks/useProjectProxy.js"
 import { useSqlEditorOffered } from "../../hooks/useSqlEditorOffered.js"
 import { useApiQuery } from "../../hooks/useApiQuery.js"
-import { Badge, Button, Card } from "../../components/ui.js"
+import { Badge, Button, Card, Input } from "../../components/ui.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 
 export function ExtensionsView(): React.ReactElement {
   const proxy = useProjectProxy()
-  // Writes go through the SQL editor's route, so only its roles are offered them (RQ4).
+  // Writes go through `/studio-admin/extensions`, open to the SQL editor's roles only (RQ4, SQ2).
   const sqlWrites = useSqlEditorOffered()
   const [search, setSearch] = useState("")
   const [busy, setBusy] = useState<string | null>(null)
@@ -26,10 +26,7 @@ export function ExtensionsView(): React.ReactElement {
     setBusy(name)
     setError(null)
     try {
-      const sql = enable
-        ? `CREATE EXTENSION IF NOT EXISTS "${name}";`
-        : `DROP EXTENSION IF EXISTS "${name}";`
-      await proxy.sql(sql)
+      await proxy.studioExtension(name, enable)
       refetchInstalled()
     } catch (e) {
       setError((e as Error).message)
@@ -95,12 +92,12 @@ export function ExtensionsView(): React.ReactElement {
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-medium text-foreground">Available</h2>
-          <input
+          <Input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search extensions…"
-            className="px-3 py-1.5 text-sm rounded-md border border-border bg-background text-foreground focus:outline-none w-48"
+            className="w-48"
           />
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">

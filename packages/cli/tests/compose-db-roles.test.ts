@@ -24,15 +24,15 @@ vi.mock("node:child_process", async (importOriginal) => ({
     spawnSync(cmd, args, opts),
 }))
 
-const { grantAuthSchemaAccess, reconcileAuthenticatorPassword } = await import(
-  "../src/compose-db-roles.js"
-)
+const { grantAuthSchemaAccess, reconcileAuthenticatorPassword, reconcileSqlEditorPassword } =
+  await import("../src/compose-db-roles.js")
 
 const PROJECT_ENV = [
   "POSTGRES_USER=supatype_admin",
   "POSTGRES_PASSWORD=ks-own-password",
   "POSTGRES_DB=kitchen-sink",
   "AUTHENTICATOR_PASSWORD=ks-authenticator",
+  "SUPATYPE_SQL_EDITOR_PASSWORD=ks-sql-editor",
   "",
 ].join("\n")
 
@@ -78,6 +78,7 @@ afterEach(() => {
 describe.each([
   ["grantAuthSchemaAccess", grantAuthSchemaAccess],
   ["reconcileAuthenticatorPassword", reconcileAuthenticatorPassword],
+  ["reconcileSqlEditorPassword", reconcileSqlEditorPassword],
 ] as const)("%s", (_name, run) => {
   it("logs in as the bundled superuser, to the project's database, with its password", () => {
     run(paths(), cwd, "supatype-kitchen-sink")
@@ -129,5 +130,29 @@ describe("reconcileAuthenticatorPassword", () => {
     expect(args.join(" ")).not.toContain("ks-authenticator")
     expect(input).toContain("\\getenv pw SUPATYPE_AUTHENTICATOR_PASSWORD")
     expect(args.join(" ")).not.toContain("ALTER ROLE")
+  })
+})
+
+describe("reconcileSqlEditorPassword", () => {
+  it("hands the editor password to psql through the environment, not the command line", () => {
+    reconcileSqlEditorPassword(paths(), cwd, "supatype-kitchen-sink")
+    const { args, input, env } = psqlCall()
+
+    expect(args).toContain("SUPATYPE_SQL_EDITOR_PASSWORD")
+    expect(env["SUPATYPE_SQL_EDITOR_PASSWORD"]).toBe("ks-sql-editor")
+    expect(args.join(" ")).not.toContain("ks-sql-editor")
+    expect(input).toContain("\\getenv pw SUPATYPE_SQL_EDITOR_PASSWORD")
+    expect(input).toContain("ALTER ROLE supatype_sql_editor WITH LOGIN PASSWORD %L")
+    expect(args.join(" ")).not.toContain("ALTER ROLE")
+  })
+
+  // A volume made by an image older than the editor role has no such role, and the start must
+  // not fail on it: the statement is generated only when the role is there.
+  it("alters the role only when it exists", () => {
+    reconcileSqlEditorPassword(paths(), cwd, "supatype-kitchen-sink")
+    const { input } = psqlCall()
+
+    expect(input).toContain("WHERE EXISTS (SELECT FROM pg_roles WHERE rolname = 'supatype_sql_editor')")
+    expect(input).toContain("\\gexec")
   })
 })

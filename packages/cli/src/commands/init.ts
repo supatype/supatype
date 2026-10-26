@@ -1231,7 +1231,11 @@ POSTGRES_DB=${opts.projectName}
 #
 # Deliberately NOT the same as POSTGRES_PASSWORD: that one is yours, for direct SQL access, and
 # rotating it should never take the REST API down with it.
-AUTHENTICATOR_PASSWORD=${randomBytes(24).toString("base64url")}`)
+AUTHENTICATOR_PASSWORD=${randomBytes(24).toString("base64url")}
+
+# Studio's SQL editor connects as \`supatype_sql_editor\`, a role that is not a superuser, so a
+# query typed there runs without superuser rights. Kept apart from both passwords above.
+SUPATYPE_SQL_EDITOR_PASSWORD=${randomBytes(24).toString("base64url")}`)
 
   sections.push(`# JWT: ANON_KEY and SERVICE_ROLE_KEY are derived from this secret.
 # Changing it invalidates every issued token; re-run \`supatype keys\` afterwards.
@@ -1513,6 +1517,7 @@ function printProductionSteps(result: WizardResult): void {
   nextSteps("Secrets: generated for this project, kept in .env:", [
     "POSTGRES_PASSWORD    direct SQL access as the superuser",
     "AUTHENTICATOR_PASSWORD    PostgREST's own login; rotating the one above does not affect it",
+    "SUPATYPE_SQL_EDITOR_PASSWORD    Studio's SQL editor login, a role that is not a superuser",
     "JWT_SECRET    signs ANON_KEY and SERVICE_ROLE_KEY; changing it invalidates every token",
     "Keep .env out of version control, and use different values in production.",
   ])
