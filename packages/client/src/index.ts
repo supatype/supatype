@@ -1,13 +1,14 @@
 import { AuthClient } from "./auth.js"
 import { onIdentityChange } from "./identity.js"
 import { PreviewCredential } from "./preview.js"
-import { QueryBuilder, MutationBuilder, type HeadersProvider } from "./query.js"
+import { QueryBuilder, MutationBuilder, fetchWithOptional401Retry, type HeadersProvider } from "./query.js"
+import type { FetchOptions, RequestTransport } from "./fetch-with-retry.js"
 import { defaultQueryCache, type QueryCache } from "./query-cache.js"
 import { StorageClient } from "./storage.js"
 import { RealtimeClient } from "./realtime.js"
 import type { RealtimePayload } from "./realtime.js"
 import { subscribeToTable, type TableSubscribeOptions, type TableSubscription } from "./table-subscription.js"
-import { PostgrestError } from "./errors.js"
+import { PostgrestError, transportFailure } from "./errors.js"
 import { createRetryFetch } from "./retry.js"
 import { warnIfServerlessDirectConnection } from "./fetch-with-retry.js"
 import type {
@@ -71,7 +72,7 @@ export type AnyClient = SupatypeClient<AnyDatabase>
 export type { QueryCacheOptions, CacheStatus } from "./query-cache.js"
 export { AuthClient } from "./auth.js"
 export { onIdentityChange, type IdentitySource } from "./identity.js"
-export { QueryBuilder, MutationBuilder, type HeadersProvider } from "./query.js"
+export { QueryBuilder, MutationBuilder, type HeadersProvider, type RequestTransport } from "./query.js"
 export { QueryCache, defaultQueryCache } from "./query-cache.js"
 export { StorageClient, BucketClient } from "./storage.js"
 export type { StorageObject, TransformOptions } from "./storage.js"
@@ -114,6 +115,8 @@ class TableClient<TDef extends TableDef> {
   private readonly path: string
   private readonly getHeaders: HeadersProvider
   private readonly onUnauthorized: (() => Promise<void>) | undefined
+  /** The client's retry-aware fetch, so `timeout` and `retry` reach table requests too. */
+  private readonly send: RequestTransport
   private readonly queryCache: QueryCache
   private readonly realtime: RealtimeClient
   /**
@@ -131,7 +134,8 @@ class TableClient<TDef extends TableDef> {
     getHeaders: HeadersProvider,
     realtime: RealtimeClient,
     queryCache: QueryCache = defaultQueryCache,
-    onUnauthorized?: (() => Promise<void>) | undefined,
+    onUnauthorized: (() => Promise<void>) | undefined,
+    send: RequestTransport,
   ) {
     this.baseUrl = baseUrl
     this.table = table
@@ -140,6 +144,7 @@ class TableClient<TDef extends TableDef> {
     this.realtime = realtime
     this.onUnauthorized = onUnauthorized
     this.queryCache = queryCache
+    this.send = send
   }
 
   /**
@@ -156,8 +161,10 @@ class TableClient<TDef extends TableDef> {
    * **Read-only, and permission is not the read rule.** A draft is visible to the record's creator
    * and to the project's elevated Studio roles, or to a caller holding a signed preview link. A
    * caller who may read published content is not thereby entitled to read what has not been
-   * published. Write with the ordinary `update`, which records a new draft version; publish with
-   * `supatype.publish`.
+   * published. Write with the ordinary `update`, which records a new draft version. Publish by
+   * calling the generated `publish` database function in the `supatype` schema; there is no client
+   * method for it:
+   * `rpc("publish", { model_table: "posts", record_id: id }, { schema: "supatype" })`.
    */
   draft(): this {
     this.profile = DRAFT_SCHEMA
@@ -178,6 +185,7 @@ class TableClient<TDef extends TableDef> {
       // The profile joins the select options rather than riding a longer constructor: it is a
       // property of the request being described, like `count` and `head` beside it.
       { ...options, ...(this.profile !== undefined && { profile: this.profile }) },
+      this.send,
     )
   }
 
@@ -192,6 +200,7 @@ class TableClient<TDef extends TableDef> {
       data,
       undefined,
       this.onUnauthorized,
+      this.send,
     )
   }
 
@@ -206,6 +215,7 @@ class TableClient<TDef extends TableDef> {
       data,
       { upsert: true },
       this.onUnauthorized,
+      this.send,
     )
   }
 
@@ -218,6 +228,7 @@ class TableClient<TDef extends TableDef> {
       data,
       undefined,
       this.onUnauthorized,
+      this.send,
     )
   }
 
@@ -230,6 +241,7 @@ class TableClient<TDef extends TableDef> {
       undefined,
       undefined,
       this.onUnauthorized,
+      this.send,
     )
   }
 
@@ -341,18 +353,26 @@ export interface FunctionInvokeOptions {
   headers?: Record<string, string> | undefined
   /** Request body (JSON-serialisable) */
   body?: unknown | undefined
+  /**
+   * Retry this call on a transient failure although it is not a GET. Default: false.
+   *
+   * Only GET calls are retried otherwise: a POST that failed in flight may already have run the
+   * function, and running it again could charge a card or send an email twice. Set this when a
+   * second run is harmless.
+   */
+  idempotent?: boolean | undefined
 }
 
 class FunctionsClient {
   private readonly baseUrl: string
   private readonly getHeaders: HeadersProvider
   private readonly onUnauthorized: (() => Promise<void>) | undefined
-  private readonly doFetch: (url: string, init?: RequestInit) => Promise<Response>
+  private readonly doFetch: RequestTransport
 
   constructor(
     baseUrl: string,
     getHeaders: HeadersProvider,
-    doFetch: (url: string, init?: RequestInit) => Promise<Response>,
+    doFetch: RequestTransport,
     onUnauthorized?: (() => Promise<void>) | undefined,
   ) {
     this.baseUrl = baseUrl
@@ -382,8 +402,9 @@ class FunctionsClient {
       ...options?.headers,
     })
 
-    const fetchOpts: RequestInit = {
+    const fetchOpts: RequestInit & FetchOptions = {
       method,
+      ...(options?.idempotent === true && { idempotent: true }),
     }
 
     if (options?.body !== undefined && method !== "GET") {
@@ -391,19 +412,13 @@ class FunctionsClient {
     }
 
     try {
-      let headers = await resolveHeaders()
-      let res = await this.doFetch(
+      const res = await fetchWithOptional401Retry(
+        this.doFetch,
         `${this.baseUrl}/functions/v1/${functionName}`,
-        { ...fetchOpts, headers },
+        fetchOpts,
+        resolveHeaders,
+        this.onUnauthorized,
       )
-      if (res.status === 401 && this.onUnauthorized !== undefined) {
-        await this.onUnauthorized()
-        headers = await resolveHeaders()
-        res = await this.doFetch(
-          `${this.baseUrl}/functions/v1/${functionName}`,
-          { ...fetchOpts, headers },
-        )
-      }
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({})) as Record<string, unknown>
@@ -427,10 +442,7 @@ class FunctionsClient {
       const text = await res.text()
       return { data: text as unknown as EdgeFunctionReturns<TFn>, error: null }
     } catch (e) {
-      return {
-        data: null,
-        error: { message: e instanceof Error ? e.message : "Network error" },
-      }
+      return { data: null, error: transportFailure(e) }
     }
   }
 }
@@ -447,9 +459,11 @@ export interface SupatypeClient<TDatabase extends AnyDatabase = AugmentedDatabas
   storage: StorageClient
   realtime: RealtimeClient
   functions: FunctionsClient
+  /** `options.idempotent`: retry on a transient failure, for a query that is not a mutation. */
   graphql(
     query: string,
     variables?: Record<string, unknown> | undefined,
+    options?: { idempotent?: boolean | undefined } | undefined,
   ): Promise<{ data: unknown; error: SupatypeError | null }>
   /**
    * Call a Postgres function via PostgREST's `/rpc/function_name` endpoint.
@@ -514,6 +528,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
     storageKey: config.auth?.storageKey,
     cookiePrefix: config.auth?.cookiePrefix,
     storage: config.auth?.storage,
+    transport: doFetch,
   })
   const queryCache = config.queryCache ?? defaultQueryCache
 
@@ -555,7 +570,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
   // request carried the anon key for the life of the page. An app's per-user storage policies saw
   // `anon` rather than the caller, and through Studio's proxy the request was refused outright,
   // because an anon key carries no `sub` and the proxy requires one.
-  const storage = new StorageClient(`${config.url}/storage/v1`, getAuthHeaders)
+  const storage = new StorageClient(`${config.url}/storage/v1`, getAuthHeaders, doFetch)
 
   // The same provider the other sub-clients get, not `baseHeaders`.
   //
@@ -588,6 +603,10 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
     void realtime.reauthenticate()
   })
 
+  // One place that wires a table to this client's headers, cache, auth refresh and fetch.
+  const tableClient = <TDef extends TableDef>(table: string): TableClient<TDef> =>
+    new TableClient<TDef>(config.url, table, getAuthHeaders, realtime, queryCache, onUnauthorized, doFetch)
+
   return {
     url: config.url,
     serviceRoleKey: config.serviceRoleKey,
@@ -596,7 +615,7 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
       table: TTable,
     ): TableClient<TDatabase["public"]["Tables"][TTable]> {
       type TDef = TDatabase["public"]["Tables"][TTable]
-      return new TableClient<TDef>(config.url, table, getAuthHeaders, realtime, queryCache, onUnauthorized)
+      return tableClient<TDef>(table)
     },
 
     global<TRow extends Record<string, unknown> = Record<string, unknown>>(name: string): GlobalClient<TRow> {
@@ -604,12 +623,12 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
       type TDef = { Row: TRow; Insert: TRow; Update: Partial<TRow> }
       return {
         async get(): Promise<{ data: TRow | null; error: SupatypeError | null }> {
-          const tc = new TableClient<TDef>(config.url, tableName, getAuthHeaders, realtime, queryCache, onUnauthorized)
+          const tc = tableClient<TDef>(tableName)
           const result = await tc.select().limit(1).maybeSingle()
           return { data: result.data ?? null, error: result.error }
         },
         async update(data: Partial<TRow>): Promise<{ data: TRow | null; error: SupatypeError | null }> {
-          const tc = new TableClient<TDef>(config.url, tableName, getAuthHeaders, realtime, queryCache, onUnauthorized)
+          const tc = tableClient<TDef>(tableName)
           const result = await tc.upsert(data as TRow)
           const row = Array.isArray(result.data) ? (result.data[0] as TRow | undefined) ?? null : null
           return { data: row, error: result.error }
@@ -622,9 +641,14 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
     realtime,
     functions,
 
+    /**
+     * Run a GraphQL query. Sent as a POST, so it is not retried unless `options.idempotent` says a
+     * second copy is harmless, as it is for any query that is not a mutation.
+     */
     async graphql(
       query: string,
       variables?: Record<string, unknown> | undefined,
+      options?: { idempotent?: boolean | undefined } | undefined,
     ): Promise<{ data: unknown; error: SupatypeError | null }> {
       const body: Record<string, unknown> = { query }
       if (variables !== undefined) {
@@ -632,21 +656,15 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
       }
       let res: Response
       try {
-        res = await doFetch(`${config.url}/graphql/v1`, {
-          method: "POST",
-          headers: await getAuthHeaders(),
-          body: JSON.stringify(body),
-        })
-        if (res.status === 401 && onUnauthorized !== undefined) {
-          await onUnauthorized()
-          res = await doFetch(`${config.url}/graphql/v1`, {
-            method: "POST",
-            headers: await getAuthHeaders(),
-            body: JSON.stringify(body),
-          })
-        }
+        res = await fetchWithOptional401Retry(
+          doFetch,
+          `${config.url}/graphql/v1`,
+          { method: "POST", body: JSON.stringify(body), ...(options?.idempotent === true && { idempotent: true }) },
+          getAuthHeaders,
+          onUnauthorized,
+        )
       } catch (e) {
-        return { data: null, error: { message: e instanceof Error ? e.message : "Network error" } }
+        return { data: null, error: transportFailure(e) }
       }
       let json: Record<string, unknown>
       try {
@@ -673,40 +691,33 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
       params?: FunctionArgs<TDatabase, TFn> | undefined,
       options?: RpcOptions | undefined,
     ): Promise<RpcResult<FunctionReturns<TDatabase, TFn>>> {
-      const headers: Record<string, string> = { ...(await getAuthHeaders()) }
       const method = options?.head === true ? "HEAD" : "POST"
-
-      if (options?.count !== undefined) {
-        headers["Prefer"] = `count=${options.count}`
-      }
-      // PostgREST resolves `/rpc/<name>` against the default profile, so a function in any other
-      // schema is unreachable without this. `Content-Profile` rather than `Accept-Profile`, because
-      // an RPC call is a POST and PostgREST reads the write-side header for it.
-      if (options?.schema !== undefined) {
-        headers["Content-Profile"] = options.schema
-      }
+      // Resolved per attempt, so the resend after a 401 carries the same `Prefer` and profile as
+      // the first send. It used to rebuild only `Prefer` and drop the schema.
+      const rpcHeaders = async (): Promise<Record<string, string>> => ({
+        ...(await getAuthHeaders()),
+        ...(options?.count !== undefined && { Prefer: `count=${options.count}` }),
+        // PostgREST resolves `/rpc/<name>` against the default profile, so a function in any other
+        // schema is unreachable without this. `Content-Profile` rather than `Accept-Profile`,
+        // because an RPC call is a POST and PostgREST reads the write-side header for it.
+        ...(options?.schema !== undefined && { "Content-Profile": options.schema }),
+      })
 
       let res: Response
       try {
-        res = await doFetch(`${config.url}/rest/v1/rpc/${fn}`, {
-          method,
-          headers,
-          ...(params !== undefined && method !== "HEAD" && { body: JSON.stringify(params) }),
-        })
-        if (res.status === 401 && onUnauthorized !== undefined) {
-          await onUnauthorized()
-          const retryHeaders: Record<string, string> = { ...(await getAuthHeaders()) }
-          if (options?.count !== undefined) {
-            retryHeaders["Prefer"] = `count=${options.count}`
-          }
-          res = await doFetch(`${config.url}/rest/v1/rpc/${fn}`, {
+        res = await fetchWithOptional401Retry(
+          doFetch,
+          `${config.url}/rest/v1/rpc/${fn}`,
+          {
             method,
-            headers: retryHeaders,
             ...(params !== undefined && method !== "HEAD" && { body: JSON.stringify(params) }),
-          })
-        }
+            ...(options?.idempotent === true && { idempotent: true }),
+          },
+          rpcHeaders,
+          onUnauthorized,
+        )
       } catch (e) {
-        return { data: null, error: { message: e instanceof Error ? e.message : "Network error" } }
+        return { data: null, error: transportFailure(e) }
       }
 
       if (!res.ok) {
