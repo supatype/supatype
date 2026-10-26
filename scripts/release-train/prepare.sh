@@ -31,7 +31,11 @@ done
 record_train_image_ids
 
 train_log "build the candidate CLI and workspace"
-(cd "$TRAIN_SUPATYPE_DIR" && pnpm install --frozen-lockfile && pnpm build) >/dev/null
+# Large downloads drop on a weak connection, so retry them patiently. TRAIN_NETWORK_CONCURRENCY
+# lowers how many download at once when the connection keeps resetting.
+pnpm_net=(--fetch-retries 8 --fetch-timeout 300000 --network-concurrency "${TRAIN_NETWORK_CONCURRENCY:-16}")
+train_quiet "pnpm install" pnpm --dir "$TRAIN_SUPATYPE_DIR" install --frozen-lockfile "${pnpm_net[@]}"
+train_quiet "pnpm build" pnpm --dir "$TRAIN_SUPATYPE_DIR" build
 bash "$SCRIPT_DIR/overlay.sh" "$HARNESS" "$TRAIN_SUPATYPE_DIR"
 
 latest="$(curl -fsS https://releases.supatype.com/engine/latest.json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).version))')"
@@ -44,6 +48,6 @@ docker tag "$(train_image engine)" "supatype/schema-engine:v$latest"
 train_log "engine resolution: cache $latest and supatype/schema-engine:v$latest are the train's engine"
 
 if [[ "${TRAIN_INSTALL_BROWSER:-1}" == 1 ]]; then
-  (cd "$TRAIN_SUPATYPE_DIR" && pnpm --filter supatype-e2e exec playwright install --with-deps chromium) >/dev/null
+  train_quiet "browser install" pnpm --dir "$TRAIN_SUPATYPE_DIR" --filter supatype-e2e exec playwright install --with-deps chromium
 fi
 train_log "ready"

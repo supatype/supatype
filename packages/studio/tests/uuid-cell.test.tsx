@@ -1,12 +1,11 @@
 // @vitest-environment jsdom
-import React, { act } from "react"
-import { createRoot, type Root } from "react-dom/client"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import React from "react"
+import { describe, expect, it, vi } from "vitest"
 import { UuidCell } from "../src/components/UuidCell.js"
 import { isUuid, shortUuid } from "../src/lib/uuid.js"
-import { renderBrowser, settle } from "./data-browser-support.js"
+import { renderBrowser } from "./data-browser-support.js"
 import { renderList } from "./list-view-support.js"
-import { testField, testModel } from "./support.js"
+import { act, isolateEachTest, mount, settle, testField, testModel } from "./support.js"
 
 /**
  * A UUID in a table cell is 36 characters of noise that pushes every other column off the screen.
@@ -18,22 +17,11 @@ import { testField, testModel } from "./support.js"
 const ID = "0191f2a4-7c3e-7b10-9d2e-5a8c1e43f9a2"
 const OWNER = "6b1d0c9e-2f4a-4e8b-b7d1-90ac3e5f1b77"
 
-let root: Root | null = null
-let container: HTMLElement
+isolateEachTest()
 
-afterEach(() => {
-  act(() => root?.unmount())
-  root = null
-  container?.remove()
-  vi.unstubAllGlobals()
-})
-
-async function render(node: React.ReactElement): Promise<void> {
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true
-  container = document.createElement("div")
-  document.body.appendChild(container)
-  root = createRoot(container)
-  await act(async () => { root!.render(node) })
+/** Mounts `node` and returns the container it rendered into. */
+async function render(node: React.ReactElement): Promise<HTMLElement> {
+  return (await mount(node)).container
 }
 
 /** The copy button for `id`, found by the name a screen reader hears. */
@@ -59,7 +47,7 @@ describe("isUuid and shortUuid", () => {
 
 describe("UuidCell", () => {
   it("shows the tail, with the whole value on hover", async () => {
-    await render(<UuidCell value={ID} />)
+    const container = await render(<UuidCell value={ID} />)
     expect(container.textContent).toContain("…3f9a2")
     expect(container.textContent).not.toContain(ID)
     expect(container.querySelector(`[title="${ID}"]`)?.textContent).toBe("…3f9a2")
@@ -69,7 +57,7 @@ describe("UuidCell", () => {
     const writes: string[] = []
     vi.stubGlobal("navigator", { clipboard: { writeText: async (text: string) => { writes.push(text) } } })
     const rowClicks = vi.fn()
-    await render(<div onClick={rowClicks}><UuidCell value={ID} /></div>)
+    const container = await render(<div onClick={rowClicks}><UuidCell value={ID} /></div>)
     await act(async () => { copyButton(container, ID).click() })
     expect(writes).toEqual([ID])
     expect(rowClicks).not.toHaveBeenCalled()
@@ -77,14 +65,14 @@ describe("UuidCell", () => {
   })
 
   it("is a real button, so the keyboard reaches it", async () => {
-    await render(<UuidCell value={ID} />)
+    const container = await render(<UuidCell value={ID} />)
     const btn = copyButton(container, ID)
     expect(btn.tagName).toBe("BUTTON")
     expect(btn.getAttribute("type")).toBe("button")
   })
 
   it("leaves a value that is not a UUID as it is", async () => {
-    await render(<UuidCell value="p1" />)
+    const container = await render(<UuidCell value="p1" />)
     expect(container.textContent).toBe("p1")
     expect(container.querySelector("button")).toBeNull()
   })
@@ -97,31 +85,23 @@ describe("model list cells", () => {
       listColumns: ["title", "owner"],
     })
     const list = await renderList(model, [{ id: ID, title: "First", owner: OWNER }])
-    try {
-      const table = list.container.querySelector("tbody")!
-      expect(table.textContent).toContain("…f1b77")
-      expect(table.textContent).not.toContain(OWNER)
-      expect(copyButton(table, OWNER)).toBeTruthy()
-    } finally {
-      list.unmount()
-    }
+    const table = list.container.querySelector("tbody")!
+    expect(table.textContent).toContain("…f1b77")
+    expect(table.textContent).not.toContain(OWNER)
+    expect(copyButton(table, OWNER)).toBeTruthy()
   })
 })
 
 describe("data browser cells", () => {
   it("shortens a UUID primary key and a foreign key, keeping the foreign key a link", async () => {
     const browser = await renderBrowser({ rows: [{ id: ID, owner_id: OWNER, body: "hello" }], columns: uuidColumns() })
-    try {
-      await settle()
-      const body = browser.container.querySelector("tbody")!
-      expect(body.textContent).toContain("…3f9a2")
-      expect(body.textContent).toContain("…f1b77")
-      expect(body.textContent).not.toContain(ID)
-      expect(copyButton(body, ID)).toBeTruthy()
-      expect(body.querySelector(`button[title="View in users: ${OWNER}"]`)?.textContent).toBe("…f1b77")
-    } finally {
-      browser.unmount()
-    }
+    await settle()
+    const body = browser.container.querySelector("tbody")!
+    expect(body.textContent).toContain("…3f9a2")
+    expect(body.textContent).toContain("…f1b77")
+    expect(body.textContent).not.toContain(ID)
+    expect(copyButton(body, ID)).toBeTruthy()
+    expect(body.querySelector(`button[title="View in users: ${OWNER}"]`)?.textContent).toBe("…f1b77")
   })
 })
 

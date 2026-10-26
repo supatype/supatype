@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import React, { act } from "react"
-import { createRoot, type Root } from "react-dom/client"
+import { describe, expect, it, vi } from "vitest"
+import React from "react"
 import { MemoryRouter } from "react-router-dom"
 import { renderToStaticMarkup } from "react-dom/server"
 import { StudioCore } from "../src/StudioCore.js"
@@ -14,7 +13,7 @@ import { Broadcast } from "../src/views/realtime/Broadcast.js"
 import { Stream } from "../src/views/realtime/Stream.js"
 import { INITIAL_STREAM } from "../src/hooks/useRealtimeStream.js"
 import type { InspectorApi } from "../src/views/realtime/InspectorTab.js"
-import { testClient, testConfig } from "./support.js"
+import { act, elementOf, isolateEachTest, mount, settle, testClient, testConfig } from "./support.js"
 
 /**
  * ST-3: the Realtime Inspector, built from the shared Studio components, shown only where this
@@ -53,96 +52,76 @@ function backend(b: Backend): (url: string) => Promise<Response> {
   }
 }
 
-let root: Root | null = null
-let container: HTMLElement
-
-async function settle(): Promise<void> {
-  for (let i = 0; i < 5; i++) await act(async () => {})
-}
-
-async function studioAt(path: string, platform: PlatformContext, b: Backend): Promise<string> {
+/** Studio at `path` against backend `b`, settled; returns the container it rendered into. */
+async function studioAt(path: string, platform: PlatformContext, b: Backend): Promise<HTMLElement> {
   vi.stubGlobal("fetch", backend(b))
-  container = document.createElement("div")
-  root = createRoot(container)
-  await act(async () =>
-    root!.render(
-      <MemoryRouter initialEntries={[path]}>
-        <StudioCore
-          config={CONFIG}
-          client={CLIENT}
-          {...(platform.platformUrl !== undefined && { platformUrl: platform.platformUrl })}
-          {...(platform.projectRef !== undefined && { projectRef: platform.projectRef })}
-        />
-      </MemoryRouter>,
-    ),
+  const { container } = await mount(
+    <MemoryRouter initialEntries={[path]}>
+      <StudioCore
+        config={CONFIG}
+        client={CLIENT}
+        {...(platform.platformUrl !== undefined && { platformUrl: platform.platformUrl })}
+        {...(platform.projectRef !== undefined && { projectRef: platform.projectRef })}
+      />
+    </MemoryRouter>,
   )
   await settle()
-  return container.innerHTML
+  return container
 }
 
 /** The page body, without the nav's own labels. */
-function main(): string {
+function main(container: HTMLElement): string {
   return container.querySelector("main")?.innerHTML ?? ""
 }
 
-beforeEach(() => {
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true
-})
-
-afterEach(() => {
-  if (root) act(() => root!.unmount())
-  root = null
-  vi.unstubAllGlobals()
-})
+isolateEachTest()
 
 describe.each([
   ["self-host", SELF_HOST],
   ["cloud", CLOUD],
 ])("the Inspector on %s", (_name, platform) => {
   it("shows the channels when the control plane serves the Inspector", async () => {
-    await studioAt("/realtime", platform, { role: "developer", realtimeInspect: true, inspector: 200 })
-    expect(main()).toContain("room:lobby")
-    expect(main()).not.toContain("coming soon")
+    const container = await studioAt("/realtime", platform, { role: "developer", realtimeInspect: true, inspector: 200 })
+    expect(main(container)).toContain("room:lobby")
+    expect(main(container)).not.toContain("coming soon")
   })
 
   it("says it is coming soon when the control plane does not serve it", async () => {
-    await studioAt("/realtime", platform, { role: "admin", realtimeInspect: true, inspector: 404 })
-    expect(main()).toContain("coming soon")
-    expect(main()).not.toContain("Supatype Cloud")
+    const container = await studioAt("/realtime", platform, { role: "admin", realtimeInspect: true, inspector: 404 })
+    expect(main(container)).toContain("coming soon")
+    expect(main(container)).not.toContain("Supatype Cloud")
   })
 
 })
 
 describe("realtime turned off", () => {
   it("explains it on self-host, where a project can run without realtime", async () => {
-    await studioAt("/realtime/channels", SELF_HOST, { role: "admin", realtimeInspect: true, inspector: 501 })
-    expect(main()).toContain("Realtime is off for this project")
-    expect(main()).toContain("database.external.realtime")
+    const container = await studioAt("/realtime/channels", SELF_HOST, { role: "admin", realtimeInspect: true, inspector: 501 })
+    expect(main(container)).toContain("Realtime is off for this project")
+    expect(main(container)).toContain("database.external.realtime")
   })
 
   it("never tells a Cloud project realtime is outside its plan, since every plan has it", async () => {
-    await studioAt("/realtime/channels", CLOUD, { role: "admin", realtimeInspect: true, inspector: 501 })
-    expect(main()).not.toContain("plan")
-    expect(main()).not.toContain("Realtime is off for this project")
+    const container = await studioAt("/realtime/channels", CLOUD, { role: "admin", realtimeInspect: true, inspector: 501 })
+    expect(main(container)).not.toContain("plan")
+    expect(main(container)).not.toContain("Realtime is off for this project")
   })
 })
 
 describe("roles", () => {
   it("hides the nav item and refuses the page for a role without realtimeInspect", async () => {
-    const html = await studioAt("/realtime", SELF_HOST, { role: "editor", realtimeInspect: false, inspector: 403 })
+    const container = await studioAt("/realtime", SELF_HOST, { role: "editor", realtimeInspect: false, inspector: 403 })
     const nav = container.querySelector('[aria-label="Studio navigation"]')?.innerHTML ?? ""
     expect(nav).not.toContain('title="Realtime"')
     expect(nav).toContain('title="Edge Functions"')
-    expect(main()).toContain("not available to your role")
-    expect(html).not.toContain("room:lobby")
+    expect(main(container)).toContain("not available to your role")
+    expect(container.innerHTML).not.toContain("room:lobby")
   })
 })
 
 describe("the stream", () => {
   it("shows a redacted column as redacted, never as null", async () => {
     vi.stubGlobal("fetch", async () => new Promise<Response>(() => {}))
-    container = document.createElement("div")
-    root = createRoot(container)
     const state = {
       ...INITIAL_STREAM,
       rows: [{
@@ -154,8 +133,8 @@ describe("the stream", () => {
         },
       }],
     }
-    await act(async () => root!.render(<StreamRows state={state} />))
-    await act(async () => container.querySelector("button")!.click())
+    const { container } = await mount(<StreamRows state={state} />)
+    await act(() => elementOf(container, "button", HTMLButtonElement).click())
     expect(container.textContent).toContain('"salary": redacted')
     expect(container.textContent).not.toContain('"salary": null')
     expect(container.textContent).toContain('"id": 1')
@@ -183,9 +162,7 @@ describe("controls", () => {
   it("builds every form control from the shared primitives", async () => {
     vi.stubGlobal("fetch", async () => new Promise<Response>(() => {}))
     const api: InspectorApi = { mode: "self-host", fetch: () => new Promise<Response>(() => {}) }
-    container = document.createElement("div")
-    root = createRoot(container)
-    await act(async () => root!.render(<><Stream api={api} /><Broadcast api={api} /></>))
+    const { container } = await mount(<><Stream api={api} /><Broadcast api={api} /></>)
     const controls = [...container.querySelectorAll("select, textarea, input")]
     expect(controls.length).toBeGreaterThanOrEqual(7)
     for (const control of controls) expect(control.getAttribute("data-ui")).not.toBeNull()
