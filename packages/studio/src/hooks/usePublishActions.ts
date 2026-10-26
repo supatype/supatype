@@ -36,7 +36,8 @@ export interface PublishActions {
   cancelSchedule: () => void
   /** Return the draft to the published version, and the form with it. */
   discard: () => void
-  unpublish: () => void
+  /** Withdraw every locale, or the ones named. */
+  unpublish: (locales?: string[]) => void
 }
 
 type Step = (id: string) => Promise<{ error: string | null }>
@@ -156,8 +157,8 @@ function bindActions(
     discard: () => {
       perform("none", discardTo === null ? [] : [(id) => restoreVersion(client, model, id, discardTo)], true)
     },
-    unpublish: () => {
-      perform("snapshot", [(id) => unpublish(client, model, id)])
+    unpublish: (locales) => {
+      perform("snapshot", [(id) => unpublish(client, model, id, locales)])
     },
   }
 }

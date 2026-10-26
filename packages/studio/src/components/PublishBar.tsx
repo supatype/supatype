@@ -4,7 +4,7 @@ import { IconHistory } from "./icons.js"
 import { PublishSplitButton } from "./PublishMenu.js"
 import { SharePreview } from "./SharePreview.js"
 import { useAdminClient } from "../hooks/useAdminClient.js"
-import { useLocale } from "../hooks/useLocale.js"
+import { useLocale, type LocaleState as LocaleContextValue } from "../hooks/useLocale.js"
 import { usePublishActions, type PublishActions, type RecordEditor } from "../hooks/usePublishActions.js"
 import { formatTimestamp } from "../lib/utils.js"
 import { describePanel, type PanelModel, type RecordStatus } from "../lib/publish-panel.js"
@@ -76,23 +76,16 @@ function usePublishingState(model: ModelConfig, recordId: string | undefined, co
  * differ, which is the only time the badge cannot say it alone.
  */
 export function PublishBar({ record, editor, seesDrafts, onNavigate }: PublishBarProps): React.ReactElement | null {
-  const { locales: projectLocales } = useLocale()
-  const codes = projectLocales.map((l) => l.code).join(",")
+  const locale = useLocale()
+  const codes = locale.locales.map((l) => l.code).join(",")
   const { model, recordId } = record
   const state = usePublishingState(model, recordId, codes, editor.savedAt)
   const actions = usePublishActions({ model, recordId, state }, editor)
 
   if (model.versions === null || !model.versions.drafts || !seesDrafts) return null
 
-  const locales = localesFor(model, codes)
-  const wholeRecord = locales.length === 1 && locales[0] === WHOLE_RECORD
-  const creating = recordId === undefined
-  const panel = describePanel({ locales, wholeRecord, state, dirty: editor.dirty, creating })
-  const labelOf = (code: string): string => projectLocales.find((l) => l.code === code)?.label ?? code
   const view: PanelView = {
-    panel,
-    title: record.title,
-    locales: locales.map((code) => ({ code, label: labelOf(code), state: state?.locales[code] ?? "absent" })),
+    ...panelOf({ title: record.title, creating: recordId === undefined, dirty: editor.dirty, state, locale }, localesFor(model, codes)),
     busy: actions.busy || editor.saving,
     saving: editor.saving,
     error: actions.error,
@@ -106,6 +99,31 @@ export function PublishBar({ record, editor, seesDrafts, onNavigate }: PublishBa
       {recordId !== undefined && <PublishLinks record={{ ...record, recordId }} onHistory={toHistory} />}
     </>
   )
+}
+
+interface PanelSource {
+  title: string
+  creating: boolean
+  dirty: boolean
+  state: PublishingState | null
+  /** The project's languages, and the one the editor is showing. */
+  locale: Pick<LocaleContextValue, "locales" | "currentLocale">
+}
+
+/**
+ * The panel and its language rows, from the record and the language the editor is showing: on a
+ * localized model the main button publishes that one language and names it. A language the record
+ * does not publish under is not passed on, so the main button publishes every language instead.
+ */
+function panelOf({ title, creating, dirty, state, locale }: PanelSource, locales: string[]): Pick<PanelView, "panel" | "title" | "locales"> {
+  const labelOf = (code: string): string => locale.locales.find((l) => l.code === code)?.label ?? code
+  const current = locale.currentLocale
+  const editing = locales.includes(current) ? { code: current, label: labelOf(current) } : null
+  return {
+    panel: describePanel({ locales, state, dirty, creating, editing }),
+    title,
+    locales: locales.map((code) => ({ code, label: labelOf(code), state: state?.locales[code] ?? "absent" })),
+  }
 }
 
 /** What the panel shows, already derived. */
@@ -203,9 +221,9 @@ function LocaleRows({ view, onPublish }: { view: PanelView; onPublish: (code: st
             {stateLabels[state].short}
           </Badge>
           <span className="flex-1" />
-          {view.panel.rowPublish && state !== "live" && (
+          {view.panel.rowPublish.includes(code) && (
             <Button size="xs" variant="ghost" disabled={view.busy} onClick={() => { onPublish(code) }}>
-              Publish {code}
+              {`Publish in ${label}`}
             </Button>
           )}
         </div>

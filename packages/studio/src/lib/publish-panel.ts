@@ -10,42 +10,62 @@ import { publishingSummary, type LocaleState, type PublishingState } from "./pub
 /** The one status a record has, as the badge at the top of the panel names it. */
 export type RecordStatus = "draft" | "published" | "scheduled" | "partial"
 
+/** A language, by its code and by the name an editor knows it by. */
+export interface Language {
+  code: string
+  label: string
+}
+
 export interface PanelInput {
   locales: string[]
-  /** A model with no localized field publishes as a whole and never shows language rows. */
-  wholeRecord: boolean
   state: PublishingState | null
   /** The form holds edits nobody has saved. Publishing saves them first. */
   dirty: boolean
   /** The record does not exist yet: the first save or publish creates it. */
   creating: boolean
+  /**
+   * The language the editor is showing, which must be one of `locales`. Null when the record
+   * publishes as a whole, or the editor shows a language the record does not publish under.
+   */
+  editing: Language | null
 }
 
 export interface PanelMenu {
   /** A time is set, so the menu changes or cancels it rather than setting one. */
   scheduled: boolean
-  canSchedule: boolean
+  /** Some language has something to publish: "Publish all languages" and Schedule. */
+  canPublishAll: boolean
   canDiscard: boolean
-  canUnpublish: boolean
+  /** Unpublish the whole record, every language at once. */
+  canUnpublishAll: boolean
+  /** "Unpublish in {language}": the language on screen is live. */
+  canUnpublishOne: boolean
 }
 
 export interface PanelModel {
   status: RecordStatus
-  /** Something differs from what is live: a saved edit waiting, or unsaved edits to a live record. */
-  changed: boolean
   /** "Live since" or "Goes live", with the time. */
   since: { label: string; at: string } | null
+  /**
+   * The language on screen, which the main button publishes and "Unpublish in" withdraws. Null
+   * when the main button publishes every language and the menu has no per-language items.
+   */
+  language: Language | null
+  /** What is on screen differs from what is live: a saved edit waiting, or unsaved edits to it. */
+  changed: boolean
+  /** The main button. */
   primary: { label: string; disabled: boolean }
+  /** The line under the controls, about what is on screen. It also explains a greyed main button. */
   note: string | null
   /** Offer a way to the history, where the waiting edit can be compared with what is live. */
   viewChanges: boolean
   /** Languages are in different states, so each gets a row. */
   localeRows: boolean
   /**
-   * Each row not live offers its own Publish. Not when only one language is waiting: the main
-   * button already says "Publish fr", and a second control for the same act reads as a different one.
+   * The rows that offer their own Publish: languages not live, less the one on screen, which the
+   * main button already names. A second control for the same act reads as a different one.
    */
-  rowPublish: boolean
+  rowPublish: string[]
   menu: PanelMenu
 }
 
@@ -57,15 +77,30 @@ const STATUS: Record<ReturnType<typeof publishingSummary>, RecordStatus> = {
   absent: "draft",
 }
 
-/** Each locale's state, or never published while nothing has loaded. */
-function statesOf(input: PanelInput): LocaleState[] {
-  return input.locales.map((l) => input.state?.locales[l] ?? "absent")
+/** Some locales of the record, summarised once for everything the panel says about them. */
+interface Scope {
+  states: LocaleState[]
+  status: RecordStatus
+  /** The world reads any of them now, whatever is waiting on top of it. */
+  readable: boolean
+  /** They differ from what is live: a saved edit waiting, or unsaved edits to a live one. */
+  changed: boolean
+  /** They hold anything to publish: an edit waiting, an unsaved one, or a locale not live. */
+  publishable: boolean
 }
 
-/** Whether the panel has anything it could publish: an edit waiting, an unsaved one, or a locale not live. */
-function hasSomethingToPublish(input: PanelInput, states: LocaleState[]): boolean {
-  if (input.creating || input.dirty) return true
-  return input.state !== null && states.some((s) => s !== "live")
+function scopeOf(input: PanelInput, locales: string[]): Scope {
+  const states = locales.map((l) => input.state?.locales[l] ?? "absent")
+  const liveAt = input.state?.liveAt ?? {}
+  const readable = locales.some((l) => l in liveAt)
+  const waiting = input.state !== null && states.some((s) => s !== "live")
+  return {
+    states,
+    status: STATUS[publishingSummary(input.state, locales)],
+    readable,
+    changed: states.includes("pending") || (input.dirty && readable),
+    publishable: input.creating || input.dirty || waiting,
+  }
 }
 
 function sinceOf(status: RecordStatus, state: PublishingState | null): PanelModel["since"] {
@@ -83,69 +118,54 @@ function sinceOf(status: RecordStatus, state: PublishingState | null): PanelMode
 }
 
 /**
- * The languages Publish would put live: those not live now, or every one when unsaved edits are
- * saved first, since those make a new version every language is behind.
+ * What the main button will do, in words. In a language it is named, as Payload's "Publish in
+ * {locale}" does, so nobody publishes a language they were not looking at.
  */
-function languagesToPublish(input: PanelInput, states: LocaleState[]): string[] {
-  if (input.dirty) return input.locales
-  return input.locales.filter((_, i) => states[i] !== "live")
+function primaryLabel(scope: Scope, language: Language | null): string {
+  const act = scope.status === "scheduled" ? "Publish now" : scope.changed ? "Publish changes" : "Publish"
+  return language === null ? act : `${act} in ${language.label}`
 }
 
-/**
- * What the main button will do, in words. With languages in different states it names them
- * ("Publish fr", "Publish 2 languages"), as Payload's "Publish in {locale}" does: "Publish all"
- * read as every language on a record where only one was waiting.
- */
-function primaryLabel(status: RecordStatus, changed: boolean, languages: string[] | null): string {
-  if (status === "scheduled") return "Publish now"
-  if (languages !== null && languages.length > 0) {
-    return languages.length === 1 ? `Publish ${languages[0] ?? ""}` : `Publish ${String(languages.length)} languages`
-  }
-  return changed ? "Publish changes" : "Publish"
+function noteOf(scope: Scope): string | null {
+  if (scope.status === "draft") return "Not on the live site yet."
+  if (scope.status === "scheduled") return "Change or cancel the schedule from the menu."
+  if (scope.status === "partial") return null
+  return scope.changed ? "The live site still shows the published version." : "Live, no changes to publish."
 }
 
-function noteOf(status: RecordStatus, changed: boolean): string | null {
-  if (status === "draft") return "Not on the live site yet."
-  if (status === "scheduled") return "Change or cancel the schedule from the menu."
-  if (status === "partial") return null
-  return changed ? "The live site still shows the published version." : "Live, no changes to publish."
-}
-
-/** Whether the world reads any of the record now, whatever is waiting on top of it. */
-function isReadable(input: PanelInput): boolean {
-  const liveAt = input.state?.liveAt ?? {}
-  return input.locales.some((l) => l in liveAt)
-}
-
-function menuOf(input: PanelInput, status: RecordStatus, changed: boolean, publishable: boolean): PanelMenu {
-  const readable = isReadable(input)
+/** The menu: per-language acts on `onScreen`, the rest on the whole record. */
+function menuOf(input: PanelInput, whole: Scope, onScreen: Scope | null): PanelMenu {
   // A saved edit can be discarded only back to one published version; unsaved edits always can.
   const discardable = input.dirty || (input.state?.discardTo ?? null) !== null
   return {
-    scheduled: status === "scheduled",
-    canSchedule: publishable,
-    canDiscard: !input.creating && changed && discardable,
-    canUnpublish: !input.creating && readable,
+    scheduled: whole.status === "scheduled",
+    canPublishAll: whole.publishable,
+    canDiscard: !input.creating && whole.changed && discardable,
+    canUnpublishAll: !input.creating && whole.readable,
+    canUnpublishOne: !input.creating && onScreen !== null && onScreen.readable,
   }
 }
 
-/** The whole panel, from the record's state. */
+/**
+ * The whole panel, from the record's state. The badge and the whole-record menu items read every
+ * language; the main button, the Changed flag and the note read the language on screen.
+ */
 export function describePanel(input: PanelInput): PanelModel {
-  const states = statesOf(input)
-  const status = STATUS[publishingSummary(input.state, input.locales)]
-  const changed = states.includes("pending") || (input.dirty && isReadable(input))
-  const localeRows = !input.wholeRecord && new Set(states).size > 1
-  const publishable = hasSomethingToPublish(input, states)
-  const languages = localeRows ? languagesToPublish(input, states) : null
+  const language = input.editing
+  const whole = scopeOf(input, input.locales)
+  const onScreen = language === null ? null : scopeOf(input, [language.code])
+  const shown = onScreen ?? whole
+  const localeRows = new Set(whole.states).size > 1
   return {
-    status,
-    changed,
-    since: sinceOf(status, input.state),
-    primary: { label: primaryLabel(status, changed, languages), disabled: !publishable },
-    note: noteOf(status, changed),
-    viewChanges: status === "published" && states.includes("pending"),
+    status: whole.status,
+    since: sinceOf(whole.status, input.state),
+    language,
+    changed: shown.changed,
+    primary: { label: primaryLabel(shown, language), disabled: !shown.publishable },
+    note: noteOf(shown),
+    viewChanges: shown.status === "published" && shown.states.includes("pending"),
     localeRows,
-    rowPublish: localeRows && (languages?.length ?? 0) > 1,
-    menu: menuOf(input, status, changed, publishable),
+    rowPublish: localeRows ? input.locales.filter((l, i) => whole.states[i] !== "live" && l !== language?.code) : [],
+    menu: menuOf(input, whole, onScreen),
   }
 }

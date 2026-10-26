@@ -68,7 +68,7 @@ export function useApiQuery<T>(
         setLoading(false)
       }
     }
-  }, deps) // eslint-disable-line react-hooks/exhaustive-deps
+  }, deps)
 
   useEffect(() => {
     void execute()
