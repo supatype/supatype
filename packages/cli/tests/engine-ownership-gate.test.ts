@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import {
   assertSupported,
   capabilityRefusal,
@@ -138,6 +138,13 @@ describe("identityColumnsNeed()", () => {
 })
 
 describe("targetSchemaPush() against a server", () => {
+  // Loaded before any test stubs `fetch`: its import graph reaches Ink, whose layout engine fetches
+  // its own WebAssembly from a `data:` URL as it loads, and that call would land in a stub that
+  // counts the requests sent to the server.
+  beforeAll(async () => {
+    await import("../src/resolve-target.js")
+  })
+
   afterEach(async () => {
     vi.unstubAllGlobals()
     vi.restoreAllMocks()

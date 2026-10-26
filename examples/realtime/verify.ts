@@ -16,6 +16,11 @@ import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { createClient } from "./supatype/generated/client"
 
+/**
+ * From `.env`, which `pnpm verify` loads with `--env-file-if-exists`. 18473 is the first port
+ * `supatype dev` tries, not this project's: each project writes the one it got to its own `.env`,
+ * and defaulting to 18473 without reading it tests whichever other stack holds that port.
+ */
 const KONG_PORT = process.env.SUPATYPE_KONG_PORT ?? "18473"
 const URL = process.env.SUPATYPE_URL ?? `http://127.0.0.1:${KONG_PORT}`
 const DEADLINE_MS = Number(process.env.REALTIME_VERIFY_DEADLINE_MS ?? 30_000)

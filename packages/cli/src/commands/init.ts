@@ -180,9 +180,8 @@ export function registerInit(program: Command): void {
           generateKeys: true,
         }
         if (result.provider === "docker") {
-          const { findNextFreePort } = await import("../dev-ports.js")
-          const { COMPOSE_DEV_KONG_PORT } = await import("../project-config.js")
-          result.kongPort = await findNextFreePort(COMPOSE_DEV_KONG_PORT)
+          const { chooseInitKongPort } = await import("../dev-ports.js")
+          result.kongPort = await chooseInitKongPort()
         }
         if (!opts.admin && opts.adminEmail && opts.adminPassword) {
           result.adminEmail = opts.adminEmail

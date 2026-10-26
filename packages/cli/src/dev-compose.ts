@@ -104,7 +104,14 @@ import {
 import { devPushConsentingToDrift } from "./drift-consent.js"
 import { capabilitiesCache, rememberCapabilitiesSync, type CapabilitiesCache } from "@supatype/shared"
 import { waitForDatabaseAfterUp } from "./dev-db-ready.js"
-import { hostComposeDbUrl, resolveHostDatabaseUrl } from "./host-database.js"
+import {
+  DERIVED_DSN_SOURCE,
+  hostComposeDbUrl,
+  requireRunningStack,
+  resolveHostDatabaseUrl,
+  stackHostDbUrl,
+} from "./host-database.js"
+import { studioUrlAt } from "./local-stack.js"
 import {
   grantAuthSchemaAccess,
   privatizeTableDefaults,
@@ -145,14 +152,14 @@ export function composeDbUrl(cwd: string): string {
 /**
  * The database URL to hand a tool, from wherever it happens to run.
  *
- * The compose helpers below describe the `db` *container*, on the host at
- * `SUPATYPE_DEV_DB_PORT`, or in-network at `db:5432`. Neither exists for a project pointed at an
- * external database, and passing one produced "pool timed out while waiting for an open connection",
- * a message with nothing in it about the URL being wrong.
+ * The compose helpers below describe the `db` *container*, on the host at the port the stack's
+ * layout publishes (`stackHostDbUrl`), or in-network at `db:5432`. Neither exists for a project
+ * pointed at an external database, and passing one produced "pool timed out while waiting for an
+ * open connection", a message with nothing in it about the URL being wrong.
  */
 function projectDatabaseUrl(cwd: string, config: SupatypeProjectConfig, inNetwork = false): string {
   if (usesExternalDatabase(config)) return connectionString(config)
-  return inNetwork ? composeDbUrl(cwd) : hostComposeDbUrl(cwd)
+  return inNetwork ? composeDbUrl(cwd) : stackHostDbUrl(cwd, config.project.name)
 }
 
 /**
@@ -176,8 +183,9 @@ export async function ensureDockerDbPublishedForHostEngine(
 
   const project = composeProjectName(config.project.name)
   // A standalone stack already publishes its database (SUPATYPE_DB_PORT), and its .env is the
-  // operator's: only a dev stack gets the dev port and the dev values (SH1).
-  const mode = composeRenderMode(cwd, config.project.name)
+  // operator's: only a dev stack gets the dev port and the dev values (SH1). With no stack running
+  // the URL the engine is handed cannot be derived, so refuse before starting anything (M1b).
+  const mode = requireRunningStack(cwd, config.project.name)
   if (mode === "dev") await prepareDevComposeEnv(cwd, config, project, await resolveKongPort(cwd, project))
 
   const paths = writeSelfHostCompose(cwd, config, { devLocal: mode === "dev" })
@@ -210,12 +218,15 @@ export async function resolveHostEngineDatabaseUrl(
   config: SupatypeProjectConfig,
   explicit?: string,
 ): Promise<string> {
-  // Published first, when this project's Postgres is the local docker one, so the URL below
-  // reaches something. The URL itself comes from the one resolver every host-side command uses.
-  if (usesLocalDockerEngineDb(config, explicit)) {
+  // The URL comes from the one resolver every host-side command uses. It is resolved first so a
+  // derived URL with no stack running refuses before anything starts (M1b), and a DATABASE_URL
+  // someone set is used without one. Then, when it is this project's local docker Postgres, the
+  // database is published so the URL reaches something.
+  const resolved = resolveHostDatabaseUrl(cwd, config, { connection: explicit, allowDerived: true })
+  if (resolved.source === DERIVED_DSN_SOURCE && usesLocalDockerEngineDb(config, explicit)) {
     await ensureDockerDbPublishedForHostEngine(cwd, config)
   }
-  return resolveHostDatabaseUrl(cwd, config, { connection: explicit, allowDerived: true }).dsn
+  return resolved.dsn
 }
 
 /**
@@ -1354,8 +1365,13 @@ export async function pushSchemaDocker(
   }
   const project = composeProjectName(config.project.name)
   // The stack's own mode, never dev by default: a push to a production stack used to render it as
-  // dev and recreate it that way, and write dev values over the operator's .env (SH1).
-  const mode = composeRenderMode(cwd, config.project.name)
+  // dev and recreate it that way, and write dev values over the operator's .env (SH1). A host
+  // engine is handed the database derived from the running stack, so with none running it refuses
+  // before anything starts (M1b).
+  const hostEngineDerivesDb = hasEngineOverride(config) && !usesExternalDatabase(config)
+  const mode = hostEngineDerivesDb
+    ? requireRunningStack(cwd, config.project.name)
+    : composeRenderMode(cwd, config.project.name)
   const kongPort = await resolveKongPort(cwd, project)
   if (mode === "dev") await prepareDevComposeEnv(cwd, config, project, kongPort)
   const gatewayPort = composeGatewayHostPort(config, mode, kongPort)
@@ -1711,7 +1727,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
   if (resolveProxyDevScript(config) !== null) {
     links.push({ label: "App", url: `http://localhost:${kongPort}/` })
   }
-  links.push({ label: "Studio", url: `http://localhost:${kongPort}/studio/` })
+  links.push({ label: "Studio", url: studioUrlAt(`http://localhost:${kongPort}`) })
 
   const hints: string[] = []
   if (existsSync(join(cwd, "seed.ts"))) {

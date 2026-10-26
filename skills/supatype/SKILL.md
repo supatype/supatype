@@ -83,7 +83,7 @@ Omit `versions` in `supatype.config.ts` so Docker pulls `:latest` images.
 
 ## Core facts
 
-- **Default provider:** `"docker"` in scaffolded `supatype.config.ts`
+- **Default provider:** `"docker"`, scaffolded in `supatype.config.ts` and used when no provider is set
 - **Native alternative:** `provider: "native"`: host Postgres :5432, supatype-server :54321
 - **Schema API:** `@supatype/types` `Model<>` types, not `@supatype/schema`
 - **Config:** `supatype.config.ts` + `defineConfig`; TOML unsupported

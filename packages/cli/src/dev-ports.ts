@@ -51,6 +51,85 @@ export function portHeldByComposeProject(port: number, project: string): boolean
   return composeProjectOwnsPort(result.stdout, project)
 }
 
+/**
+ * What Docker says about every compose container, running or stopped, so the question "which ports
+ * are other Supatype stacks configured with" can be answered by a test without Docker.
+ */
+export interface ComposePortReader {
+  /** One `<container id> <compose project>` line per container, or null when Docker cannot be asked. */
+  listContainers: () => string | null
+  /** One `HostConfig.PortBindings` JSON object per line for `ids`, or null when Docker cannot be asked. */
+  portBindings: (ids: readonly string[]) => string | null
+}
+
+function dockerOutput(args: readonly string[]): string | null {
+  const result = spawnSync("docker", [...args], { encoding: "utf8" })
+  return result.status === 0 && typeof result.stdout === "string" ? result.stdout : null
+}
+
+export const dockerComposePortReader: ComposePortReader = {
+  listContainers: () =>
+    dockerOutput([
+      "ps", "-a",
+      "--filter", "label=com.docker.compose.project",
+      "--format", '{{.ID}} {{.Label "com.docker.compose.project"}}',
+    ]),
+  portBindings: (ids) => dockerOutput(["inspect", "-f", "{{json .HostConfig.PortBindings}}", ...ids]),
+}
+
+/** Host ports in one container's `HostConfig.PortBindings` JSON; none for anything unreadable. */
+function hostPortsFromBindings(line: string): number[] {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(line)
+  } catch {
+    return []
+  }
+  if (parsed === null || typeof parsed !== "object") return []
+  return Object.values(parsed).flatMap((bindings: unknown) =>
+    Array.isArray(bindings) ? bindings.map(hostPortOf).filter(isValidHostPort) : [],
+  )
+}
+
+function hostPortOf(binding: unknown): number {
+  if (binding === null || typeof binding !== "object" || !("HostPort" in binding)) return Number.NaN
+  return Number(binding.HostPort)
+}
+
+/**
+ * Container ids of Supatype compose projects (`supatype-*`) other than `ownProject`, from
+ * `listContainers` output.
+ */
+function supatypeContainerIds(listing: string, ownProject: string | undefined): string[] {
+  return listing.split("\n").flatMap((line) => {
+    const [id, project] = line.trim().split(/\s+/)
+    return id && project?.startsWith("supatype-") && project !== ownProject ? [id] : []
+  })
+}
+
+/**
+ * Every host port a Supatype compose project on this machine is configured to publish, whether
+ * its containers are running or stopped (M2). `ownProject`'s containers are left out: a project's
+ * own ports are its to keep (M2b).
+ *
+ * A stopped container holds no port, so asking the OS says it is free; handing it to a new project
+ * makes the two clash the first time both run. Empty when Docker is absent or does not answer:
+ * this only narrows a choice, and nothing should fail for want of it.
+ */
+export function reservedComposePorts(
+  reader: ComposePortReader = dockerComposePortReader,
+  ownProject?: string,
+): Set<number> {
+  const ids = supatypeContainerIds(reader.listContainers() ?? "", ownProject)
+  if (ids.length === 0) return new Set()
+  return new Set((reader.portBindings(ids) ?? "").split("\n").flatMap(hostPortsFromBindings))
+}
+
+/** The Kong port a new project gets: the first from the default that is free and no stack claims. */
+export async function chooseInitKongPort(reader: ComposePortReader = dockerComposePortReader): Promise<number> {
+  return findNextFreePort(COMPOSE_DEV_KONG_PORT, reservedComposePorts(reader))
+}
+
 export function isValidHostPort(port: number): boolean {
   return Number.isInteger(port) && port >= MIN_PORT && port <= MAX_PORT
 }
@@ -60,10 +139,17 @@ export function parseHostPortInput(raw: string): number | null {
   return isValidHostPort(port) ? port : null
 }
 
-/** Next free TCP port on 127.0.0.1 starting at `start`. */
-export async function findNextFreePort(start: number): Promise<number> {
+const NO_PORTS: ReadonlySet<number> = new Set()
+
+/** True when `port` is bound on this machine now, or `reserved` holds it for a stack that is not. */
+async function portTaken(port: number, reserved: ReadonlySet<number>): Promise<boolean> {
+  return reserved.has(port) || (await isPortInUse(port))
+}
+
+/** Next free TCP port on 127.0.0.1 starting at `start`, skipping any in `reserved`. */
+export async function findNextFreePort(start: number, reserved: ReadonlySet<number> = NO_PORTS): Promise<number> {
   let port = Math.max(MIN_PORT, start)
-  while (port <= MAX_PORT && (await isPortInUse(port))) port++
+  while (port <= MAX_PORT && (await portTaken(port, reserved))) port++
   if (port > MAX_PORT) {
     throw new Error(`No free local port found in range ${start}–${MAX_PORT}.`)
   }
@@ -100,8 +186,9 @@ async function promptPortConflict(
   cwd: string,
   blockedPort: number,
   reason: "in_use" | "init",
+  reserved: ReadonlySet<number> = NO_PORTS,
 ): Promise<number> {
-  const port = await promptPortConflictWithoutPersist(blockedPort, reason)
+  const port = await promptPortConflictWithoutPersist(blockedPort, reason, reserved)
   persistKongPort(cwd, port)
   return port
 }
@@ -118,6 +205,8 @@ export interface EnsureKongPortOptions {
   composeProject?: string
   /** The environment Docker Compose will read. Defaults to `process.env`. */
   env?: NodeJS.ProcessEnv
+  /** Where the ports other Supatype stacks are configured with are read. Defaults to Docker. */
+  portReader?: ComposePortReader
 }
 
 /**
@@ -170,22 +259,28 @@ export async function ensureKongPort(
     return promptPortConflict(cwd, persisted, "in_use")
   }
 
-  const preferred = COMPOSE_DEV_KONG_PORT
-  const port =
-    (await isPortInUse(preferred))
-      ? interactive && context === "init"
-        ? await promptPortConflict(cwd, preferred, "init")
-        : await findNextFreePort(preferred)
-      : preferred
-
-  return port
+  const reserved = reservedComposePorts(opts.portReader, opts.composeProject)
+  return firstRunKongPort(cwd, interactive && context === "init", reserved)
 }
 
-/** Wizard / init: pick a Kong port without writing `.env` (scaffold writes it). */
-export async function promptKongPortChoice(): Promise<number> {
-  const freeDefault = (await isPortInUse(COMPOSE_DEV_KONG_PORT))
-    ? await findNextFreePort(COMPOSE_DEV_KONG_PORT)
-    : COMPOSE_DEV_KONG_PORT
+/**
+ * The Kong port for a project with none set: the default unless the OS has it bound or another
+ * Supatype stack is configured with it (M2b), then the next port that is neither, or the init
+ * prompt's choice.
+ */
+async function firstRunKongPort(cwd: string, prompt: boolean, reserved: ReadonlySet<number>): Promise<number> {
+  const preferred = COMPOSE_DEV_KONG_PORT
+  if (!(await portTaken(preferred, reserved))) return preferred
+  return prompt ? promptPortConflict(cwd, preferred, "init", reserved) : findNextFreePort(preferred, reserved)
+}
+
+/**
+ * Wizard / init: pick a Kong port without writing `.env` (scaffold writes it). Neither the default
+ * offered nor a port typed in may be one another Supatype stack is configured with (M2).
+ */
+export async function promptKongPortChoice(reader: ComposePortReader = dockerComposePortReader): Promise<number> {
+  const reserved = reservedComposePorts(reader)
+  const freeDefault = await findNextFreePort(COMPOSE_DEV_KONG_PORT, reserved)
 
   const value = await p.text({
     message: "Local API gateway port (Kong)",
@@ -204,8 +299,8 @@ export async function promptKongPortChoice(): Promise<number> {
   }
 
   const port = parseHostPortInput(value)!
-  if (await isPortInUse(port)) {
-    return promptPortConflictWithoutPersist(port, "init")
+  if (await portTaken(port, reserved)) {
+    return promptPortConflictWithoutPersist(port, "init", reserved)
   }
   return port
 }
@@ -213,11 +308,12 @@ export async function promptKongPortChoice(): Promise<number> {
 async function promptPortConflictWithoutPersist(
   blockedPort: number,
   reason: "in_use" | "init",
+  reserved: ReadonlySet<number> = NO_PORTS,
 ): Promise<number> {
-  const suggested = await findNextFreePort(blockedPort + 1)
+  const suggested = await findNextFreePort(blockedPort + 1, reserved)
   const headline =
     reason === "init"
-      ? `Port ${blockedPort} is already in use on this machine.`
+      ? `Port ${blockedPort} is in use on this machine, or another Supatype stack is configured with it.`
       : `Port ${blockedPort} is in use, another Supatype project or service may already be bound to it.`
 
   const choice = await p.select<"suggested" | "custom" | "cancel">({
@@ -261,7 +357,7 @@ async function promptPortConflictWithoutPersist(
     process.exit(1)
   }
 
-  if (await isPortInUse(port)) {
+  if (await portTaken(port, reserved)) {
     fatalError(`Port ${port} is still in use.`, [
       "Pick another port or stop the service using it.",
       "Check Docker Desktop for other Supatype stacks.",

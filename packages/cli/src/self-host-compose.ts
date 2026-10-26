@@ -17,6 +17,7 @@ import { buildKongDeclarative } from "./kong-config.js"
 import { keyspaceInPostgres } from "./cache-provider.js"
 import { STUDIO_DEV_PORT } from "./studio-dev-server.js"
 import { readEnvFile, readEnvValue } from "./env-file.js"
+import { composeDbPublish } from "./db-port.js"
 import { upKeepingKongCurrent } from "./compose-kong.js"
 import { composeAuthProviderEnv } from "./auth-providers.js"
 import {
@@ -201,6 +202,14 @@ export function composePullNeedsIgnoreFailures(
  */
 export function publishesDbToHost(config: SupatypeProjectConfig): boolean {
   return !usesExternalDatabase(config)
+}
+
+/** The `db` service's `ports:` block, from the definition host-side commands read the port from. */
+function composeDbPortsBlock(devLocal: boolean): string {
+  const { envKey, defaultPort, bindAddress } = composeDbPublish(devLocal)
+  return `    ports:
+      - "${bindAddress}\${${envKey}:-${defaultPort}}:5432"
+`
 }
 
 /**
@@ -556,16 +565,7 @@ ${studioService}
   //
   // This exposes nothing new: the dev port below is bound to `127.0.0.1`, so it is reachable from
   // this machine and from nowhere else.
-  const publishDbToHost = publishesDbToHost(config)
-  const dbPorts = publishDbToHost
-    ? devLocal
-      ? `    ports:
-      - "127.0.0.1:\${SUPATYPE_DEV_DB_PORT:-54329}:5432"
-`
-      : `    ports:
-      - "\${SUPATYPE_DB_PORT:-5432}:5432"
-`
-    : ""
+  const dbPorts = publishesDbToHost(config) ? composeDbPortsBlock(devLocal) : ""
   // Host ports, every one of them overridable.
   //
   // Kong's has been `${SUPATYPE_KONG_PORT:-18473}` for as long as `supatype dev` has picked a free

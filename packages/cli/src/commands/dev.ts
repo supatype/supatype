@@ -2,8 +2,8 @@
  * supatype dev: start local Postgres, apply schema, run supatype-server.
  *
  * Runtime provider (top-level `provider` or legacy `database.provider`):
- *   native: host Postgres + host server + host engine (default)
- *   docker: full self-host Compose stack (Kong :18473); see dev-compose.ts
+ *   docker: full self-host Compose stack (Kong :18473); see dev-compose.ts (default)
+ *   native: host Postgres + host server + host engine
  *
  * Edge functions (when a functions/ dir exists): Deno is resolved from the CDN cache
  * (auto-download on miss). Self-host/cloud Docker stacks use supatype-server in-container;

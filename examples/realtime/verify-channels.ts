@@ -13,6 +13,7 @@ import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { createClient } from "./supatype/generated/client"
 
+/** From `.env`, which `pnpm verify:channels` loads (see verify.ts). */
 const KONG_PORT = process.env.SUPATYPE_KONG_PORT ?? "18473"
 const URL = process.env.SUPATYPE_URL ?? `http://127.0.0.1:${KONG_PORT}`
 const DEADLINE_MS = Number(process.env.REALTIME_VERIFY_DEADLINE_MS ?? 30_000)
@@ -22,7 +23,7 @@ function anonKey(): string {
   if (fromEnv) return fromEnv
   const env = readFileSync(resolve(import.meta.dirname, ".env"), "utf8")
   const match = env.match(/^ANON_KEY=(.*)$/m)
-  if (!match) throw new Error("no ANON_KEY in .env — run `supatype dev` first")
+  if (!match) throw new Error("no ANON_KEY in .env: run `supatype dev` first")
   return match[1].trim().replace(/^"|"$/g, "")
 }
 

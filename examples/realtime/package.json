@@ -8,10 +8,10 @@
     "dev": "supatype dev",
     "push": "supatype push --yes",
     "keys": "supatype keys --write",
-    "verify": "tsx verify.ts",
+    "verify": "tsx --env-file-if-exists=.env verify.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "verify:channels": "tsx verify-channels.ts",
-    "verify:filter": "tsx verify-filter.ts"
+    "verify:channels": "tsx --env-file-if-exists=.env verify-channels.ts",
+    "verify:filter": "tsx --env-file-if-exists=.env verify-filter.ts"
   },
   "dependencies": {
     "@supatype/cli": "workspace:*",

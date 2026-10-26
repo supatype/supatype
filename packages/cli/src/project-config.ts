@@ -14,7 +14,7 @@ import { STUDIO_ROLES, type StudioRole } from "./studio-roles.js"
 export interface SupatypeProjectConfig {
   /**
    * Runtime stack for local dev and `supatype update`.
-   * "native" = host binaries (default). "docker" = self-host Compose stack.
+   * "docker" = self-host Compose stack (default). "native" = host binaries.
    * Falls back to `database.provider` when omitted (deprecated).
    */
   provider?: "native" | "docker"
@@ -858,9 +858,14 @@ export function selfHostTlsEnabled(
   return Boolean(tls.email?.trim())
 }
 
-/** Resolved runtime provider (`config.provider` ?? `database.provider` ?? native). */
+/**
+ * Resolved runtime provider (`config.provider` ?? `database.provider` ?? docker).
+ *
+ * Docker is the default: `init` scaffolds `provider: "docker"`, and a config with no provider line
+ * runs the same stack. Native is opt-in with `provider: "native"`.
+ */
 export function resolveRuntimeProvider(cfg: SupatypeProjectConfig): "native" | "docker" {
-  return cfg.provider ?? cfg.database.provider ?? "native"
+  return cfg.provider ?? cfg.database.provider ?? "docker"
 }
 
 /**
