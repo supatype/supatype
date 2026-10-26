@@ -4,8 +4,8 @@
  *
  * "The examples cover everything" is a claim that decays the day after someone checks it. This
  * makes it checkable: every name a package exports is either imported by an example, or listed
- * below with a reason. A new export with no example fails this, which is the point — the gap is
- * found when it is cheap, by whoever added it.
+ * below with a reason. A new export with no example shows up here, which is the point: the gap
+ * is found when it is cheap, by whoever added it.
  *
  * **Imports, not grep.** Matching a bare word would count `Optional` in a comment and miss
  * `client.storage.from(...)` entirely. This reads each example's import statements and records
@@ -20,7 +20,7 @@
  * structurally rather than import (`UseQueryOptions`), classes you get off the client rather than
  * construct (`BucketClient`), utilities exported for tests (`fetchWithRetry`). Worse, demanding an
  * example for every exotic primitive would force exactly the forty-field `Kitchen` model the
- * kitchen sink argues against — a field has to have an honest reason to exist.
+ * kitchen sink argues against. A field has to have an honest reason to exist.
  *
  * What *is* gated is that this file's output stays current: CI regenerates `examples/COVERAGE.md`
  * and fails if it differs from what is committed. Add an export and the numbers move, so the gap
@@ -168,13 +168,13 @@ lines.push(
   "## Names no example imports",
   "",
   "Ancillary types (`…Options`, `…Result`), client-owned classes and test-only utilities are",
-  "excluded — you receive those rather than reaching for them. What is left is vocabulary: each",
+  "excluded, because you receive those rather than reaching for them. What is left is vocabulary: each",
   "either deserves an example or deserves saying why not.",
   "",
 )
 for (const row of rows) {
   if (row.missing.length === 0) continue
-  lines.push(`**\`${row.spec}\`** — ${row.missing.map((n) => `\`${n}\``).join(", ")}`, "")
+  lines.push(`**\`${row.spec}\`**: ${row.missing.map((n) => `\`${n}\``).join(", ")}`, "")
 }
 
 const report = lines.join("\n") + "\n"
