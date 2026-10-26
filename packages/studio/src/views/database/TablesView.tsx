@@ -2,15 +2,20 @@ import React, { useCallback, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import type { AdminConfig } from "../../config.js"
 import { useAdminConfig } from "../../hooks/useAdminConfig.js"
+import { useApiQuery } from "../../hooks/useApiQuery.js"
 import { useProjectProxy } from "../../hooks/useProjectProxy.js"
 import { useSqlEditorOffered } from "../../hooks/useSqlEditorOffered.js"
 import { useSchemaPicker } from "../../hooks/useSchemaPicker.js"
-import { useApiQuery } from "../../hooks/useApiQuery.js"
-import { Button, Card } from "../../components/ui.js"
-import { EmptyState } from "../../components/EmptyState.js"
+import { Button, PageHeader, Table, Td, Th, tableRowClass } from "../../components/ui.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 import { SlidePanel } from "../../components/SlidePanel.js"
+import { SchemaSelect } from "../../components/database/SchemaSelect.js"
+import { SqlDraftDialog, useSqlDraft, type SqlDraft } from "../../components/database/SqlDraftDialog.js"
+import { CatalogueTable, DropRowButton, RowActions, RowButton, useCatalogueRows } from "../../components/database/CatalogueTable.js"
+import { qualifiedName, quoteIdent } from "../../lib/sql-identifier.js"
 import { cellNumber, cellText, cellTextOrNull } from "../metadata-row.js"
+
+type Row = Record<string, unknown>
 
 function formatBytes(b: number): string {
   if (b < 1024) return `${b} B`
@@ -29,170 +34,105 @@ function modelNameForTable(admin: AdminConfig, physicalTable: string): string | 
   return m?.name ?? null
 }
 
-export function TablesView(): React.ReactElement {
+/** Browse data for a table: its model's data view when a model maps it, else the raw data browser. */
+function useBrowseData(): (physicalTable: string) => void {
   const admin = useAdminConfig()
-  const proxy = useProjectProxy()
-  // Writes go through the SQL editor's route, so only its roles are offered them (RQ4).
-  const sqlWrites = useSqlEditorOffered()
   const navigate = useNavigate()
-  const { schemas, schema, setSchema } = useSchemaPicker()
-  const [selectedTable, setSelectedTable] = useState<string | null>(null)
-  const [sqlModal, setSqlModal] = useState<{ mode: "create" | "drop"; table?: string } | null>(null)
-  const [sqlText, setSqlText] = useState("")
-  const [runError, setRunError] = useState<string | null>(null)
-  const [runBusy, setRunBusy] = useState(false)
-
-  const { data: tables, loading, error, refetch } = useApiQuery(
-    () => proxy.metadata("tables", { schema }).then((r) => r.rows),
-    [proxy, schema],
-  )
-  const { data: columns } = useApiQuery(
-    () => selectedTable ? proxy.metadata("columns", { schema, table: selectedTable }).then((r) => r.rows) : Promise.resolve([]),
-    [proxy, schema, selectedTable],
-  )
-
-  const browseDataPath = useCallback(
+  return useCallback(
     (physicalTable: string) => {
       const modelName = modelNameForTable(admin, physicalTable)
-      return modelName !== null ? `/models/${modelName}/data` : `/data?table=${encodeURIComponent(physicalTable)}`
+      navigate(modelName !== null ? `/models/${modelName}/data` : `/data?table=${encodeURIComponent(physicalTable)}`)
     },
-    [admin],
+    [admin, navigate],
   )
+}
 
-  async function runSql() {
-    setRunBusy(true)
-    setRunError(null)
-    try {
-      await proxy.sql(sqlText, schema)
-      setSqlModal(null)
-      refetch()
-    } catch (e) {
-      setRunError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setRunBusy(false)
-    }
-  }
+/** What a row offers: open its columns, browse its data, and (for the SQL editor's roles) drop it. */
+interface TableRowActions {
+  select: (table: string) => void
+  browse: (table: string) => void
+  /** Drafts the drop for review; null for a role that may not write. */
+  drop: ((table: string) => void) | null
+}
 
+export function TablesView(): React.ReactElement {
+  // Writes go through the SQL editor's route, so only its roles are offered them (RQ4).
+  const sqlWrites = useSqlEditorOffered()
+  const picker = useSchemaPicker()
+  const { schema } = picker
+  const [selectedTable, setSelectedTable] = useState<string | null>(null)
+  const { data: tables, loading, error, refetch } = useCatalogueRows("tables", schema)
+  const draft = useSqlDraft(schema, refetch)
+  const browse = useBrowseData()
+  const actions: TableRowActions = { select: setSelectedTable, browse, drop: sqlWrites ? (t) => { draftDrop(draft, schema, t) } : null }
+  const create = <Button variant="primary" onClick={() => { draftCreate(draft, schema) }}>Create table</Button>
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <h1 className="text-xl font-semibold text-foreground">Tables</h1>
-          <select
-            value={schema}
-            onChange={(e) => setSchema(e.target.value)}
-            className="px-2 py-1 text-sm rounded-md border border-border bg-background text-foreground focus:outline-none"
-          >
-            {(schemas.length > 0 ? schemas : [schema]).map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
-        </div>
-        {sqlWrites ? (
-          <Button
-            variant="primary"
-            onClick={() => {
-              setSqlText(`CREATE TABLE ${schema}.new_table (\n  id bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY\n);`)
-              setSqlModal({ mode: "create" })
-            }}
-          >
-            Create table
-          </Button>
-        ) : null}
-      </div>
-
+      <PageHeader title="Tables" scope={<SchemaSelect picker={picker} />} action={sqlWrites ? create : null} />
       {error && <ErrorBanner message={error} />}
-
-      {loading ? (
-        <div className="space-y-2">
-          {[1, 2, 3].map((i) => <div key={i} className="h-10 rounded-md bg-muted animate-pulse" />)}
-        </div>
-      ) : tables?.length === 0 ? (
-        <EmptyState title="No tables" description={`No tables found in schema "${schema}".`} />
-      ) : (
-        <Card>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/40">
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wider">Name</th>
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wider">Rows (est.)</th>
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wider">Size</th>
-                <th className="px-4 py-2.5" />
-              </tr>
-            </thead>
-            <tbody>
-              {tables?.map((row) => (
-                <tr
-                  key={cellText(row, "table_name")}
-                  className="border-b border-border last:border-0 hover:bg-muted/20 cursor-pointer"
-                  onClick={() => setSelectedTable(cellText(row, "table_name"))}
-                >
-                  <td className="px-4 py-3 font-mono text-sm text-foreground">{cellText(row, "table_name")}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{cellNumber(row, "row_estimate").toLocaleString()}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{formatBytes(cellNumber(row, "bytes"))}</td>
-                  <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
-                    <span className="flex items-center justify-end gap-3">
-                      <button type="button" className="text-xs text-primary hover:underline" onClick={() => navigate(browseDataPath(cellText(row, "table_name")))}>Browse data</button>
-                      {sqlWrites ? (<button type="button" className="text-xs text-destructive-text hover:underline" onClick={() => { setSqlText(`DROP TABLE ${schema}.${cellText(row, "table_name")};`); setSqlModal({ mode: "drop", table: cellText(row, "table_name") }) }}>Drop</button>) : null}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Card>
-      )}
-
-      {/* Column details panel */}
-      <SlidePanel
-        open={selectedTable !== null}
-        onClose={() => setSelectedTable(null)}
-        title={selectedTable ?? ""}
-        subtitle={`${schema}.${selectedTable ?? ""}`}
-        width="max-w-[420px]"
-      >
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border text-xs text-muted-foreground">
-              <th className="text-left pb-2">Column</th>
-              <th className="text-left pb-2">Type</th>
-              <th className="text-left pb-2">Nullable</th>
-              <th className="text-left pb-2">Default</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(columns ?? []).map((col) => (
-              <tr key={cellText(col, "column_name")} className="border-b border-border last:border-0">
-                <td className="py-2 font-mono text-xs text-foreground">{cellText(col, "column_name")}</td>
-                <td className="py-2 text-xs text-muted-foreground">{cellText(col, "udt_name")}</td>
-                <td className="py-2 text-xs">{col["is_nullable"] === "YES" ? "✓" : "-"}</td>
-                <td className="py-2 text-xs text-muted-foreground font-mono truncate max-w-[100px]">{cellTextOrNull(col, "column_default") ?? "-"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </SlidePanel>
-
-      {/* SQL modal */}
-      {sqlModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-card border border-border rounded-lg p-6 w-full max-w-lg space-y-4 shadow-xl">
-            <h2 className="text-base font-semibold text-foreground">
-              {sqlModal.mode === "drop" ? `Drop table ${sqlModal.table}` : "Create table"}
-            </h2>
-            <textarea
-              className="w-full font-mono text-sm px-3 py-2 rounded-md border border-border bg-background text-foreground focus:outline-none min-h-[120px] resize-y"
-              value={sqlText}
-              onChange={(e) => setSqlText(e.target.value)}
-            />
-            {runError && <p className="text-xs text-destructive-text">{runError}</p>}
-            <div className="flex justify-end gap-2">
-              <Button onClick={() => { setSqlModal(null); setRunError(null) }}>Cancel</Button>
-              <Button variant={sqlModal.mode === "drop" ? "destructive" : "primary"} disabled={runBusy} onClick={() => { void runSql() }}>
-                {runBusy ? "Running…" : "Run SQL"}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      <CatalogueTable
+        list={{ rows: tables, loading, empty: { title: "No tables", description: `No tables found in schema "${schema}".` } }}
+        head={<><Th>Name</Th><Th>Rows (est.)</Th><Th>Size</Th><Th /></>}
+        row={(row) => <TableRow key={cellText(row, "table_name")} row={row} actions={actions} />}
+      />
+      <ColumnsPanel schema={schema} table={selectedTable} onClose={() => { setSelectedTable(null) }} />
+      <SqlDraftDialog draft={draft} />
     </div>
+  )
+}
+
+function draftCreate(draft: SqlDraft, schema: string): void {
+  draft.open(`CREATE TABLE ${quoteIdent(schema)}.new_table (\n  id bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY\n);`, "Create table")
+}
+
+function draftDrop(draft: SqlDraft, schema: string, table: string): void {
+  draft.open(`DROP TABLE ${qualifiedName(schema, table)};`, `Drop table ${table}`)
+}
+
+function TableRow({ row, actions }: { row: Row; actions: TableRowActions }): React.ReactElement {
+  const name = cellText(row, "table_name")
+  const { drop } = actions
+  return (
+    <tr className={tableRowClass(true)} onClick={() => { actions.select(name) }}>
+      <Td className="font-mono text-foreground">{name}</Td>
+      <Td className="text-muted-foreground">{cellNumber(row, "row_estimate").toLocaleString()}</Td>
+      <Td className="text-muted-foreground">{formatBytes(cellNumber(row, "bytes"))}</Td>
+      <RowActions>
+        <RowButton label="Browse data" onClick={() => { actions.browse(name) }} />
+        {drop ? <DropRowButton onDrop={() => { drop(name) }} /> : null}
+      </RowActions>
+    </tr>
+  )
+}
+
+/** The selected table's columns, in a panel over the list. */
+function ColumnsPanel({ schema, table, onClose }: { schema: string; table: string | null; onClose: () => void }): React.ReactElement {
+  const proxy = useProjectProxy()
+  const { data: columns } = useApiQuery(
+    () => table ? proxy.metadata("columns", { schema, table }).then((r) => r.rows) : Promise.resolve([]),
+    [proxy, schema, table],
+  )
+  return (
+    <SlidePanel open={table !== null} onClose={onClose} title={table ?? ""} subtitle={`${schema}.${table ?? ""}`} width="max-w-[420px]">
+      <Table>
+        <thead>
+          <tr className="border-b border-border"><Th>Column</Th><Th>Type</Th><Th>Nullable</Th><Th>Default</Th></tr>
+        </thead>
+        <tbody>
+          {(columns ?? []).map((col) => <ColumnRow key={cellText(col, "column_name")} col={col} />)}
+        </tbody>
+      </Table>
+    </SlidePanel>
+  )
+}
+
+function ColumnRow({ col }: { col: Row }): React.ReactElement {
+  return (
+    <tr className={tableRowClass(false)}>
+      <Td className="font-mono text-xs text-foreground">{cellText(col, "column_name")}</Td>
+      <Td className="text-xs text-muted-foreground">{cellText(col, "udt_name")}</Td>
+      <Td className="text-xs">{col["is_nullable"] === "YES" ? "✓" : "-"}</Td>
+      <Td className="text-xs text-muted-foreground font-mono truncate max-w-[100px]">{cellTextOrNull(col, "column_default") ?? "-"}</Td>
+    </tr>
   )
 }

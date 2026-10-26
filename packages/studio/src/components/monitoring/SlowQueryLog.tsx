@@ -5,7 +5,10 @@
  * The host app provides a `onRunQuery` callback to execute SQL.
  */
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useState, type ReactElement } from "react"
+import { Button, DisclosureButton, LoadingRows, TableCard, Td, TextLink, Th, tableRowClass } from "../ui.js"
+import { EmptyState } from "../EmptyState.js"
+import { ErrorBanner } from "../ErrorBanner.js"
 
 // -- Types -------------------------------------------------------------------
 
@@ -145,108 +148,103 @@ export function SlowQueryLog({
     }
   }
 
-  const sortIndicator = (field: SortField) => {
-    if (field !== sortField) return ""
-    return sortDirection === "desc" ? " \u2193" : " \u2191"
-  }
-
-  if (loading) {
-    return <div className="slow-query-log slow-query-log--loading">Loading slow queries...</div>
-  }
-
-  if (error) {
-    return (
-      <div className="slow-query-log slow-query-log--error">
-        <p>Failed to load slow queries: {error}</p>
-        <button onClick={() => void fetchSlowQueries()}>Retry</button>
-      </div>
-    )
-  }
-
+  if (loading) return <LoadingRows />
+  if (error) return <ErrorBanner message={`Failed to load slow queries: ${error}`} onRetry={() => void fetchSlowQueries()} />
   if (queries.length === 0) {
-    return (
-      <div className="slow-query-log slow-query-log--empty">
-        <p>
-          No slow queries found (threshold: {formatDuration(minDurationMs)}).
-        </p>
-        <p>
-          Queries exceeding <code>log_min_duration_statement</code> will appear here.
-        </p>
-      </div>
-    )
+    const threshold = formatDuration(minDurationMs)
+    return <EmptyState title="No slow queries" description={`No slow queries found (threshold: ${threshold}). Queries exceeding log_min_duration_statement will appear here.`} />
   }
 
+  const sort: SortState = { field: sortField, direction: sortDirection, onSort: handleSort }
+  const toggle = (id: string): void => { setExpandedQueryId((prev) => (prev === id ? null : id)) }
   return (
-    <div className="slow-query-log">
-      <div className="slow-query-log__header">
-        <h3>Slow Query Log</h3>
-        <span className="slow-query-log__count">
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <h3 className="text-sm font-medium text-foreground">Slow Query Log</h3>
+        <span className="text-xs text-muted-foreground">
           {queries.length} {queries.length === 1 ? "query" : "queries"} above {formatDuration(minDurationMs)}
         </span>
-        <button
-          className="slow-query-log__refresh"
-          onClick={() => void fetchSlowQueries()}
-        >
-          Refresh
-        </button>
+        <Button size="xs" className="ml-auto" onClick={() => void fetchSlowQueries()}>Refresh</Button>
       </div>
+      <TableCard head={<SlowQueryHead sort={sort} />}>
+        {sortedQueries.map((q) => (
+          <SlowQueryRow key={q.queryId} query={q} expanded={expandedQueryId === q.queryId} onToggle={() => { toggle(q.queryId) }} />
+        ))}
+      </TableCard>
+    </div>
+  )
+}
 
-      <table className="slow-query-log__table">
-        <thead>
-          <tr>
-            <th>Query</th>
-            <th className="slow-query-log__sortable" onClick={() => handleSort("totalTimeMs")}>
-              Total Time{sortIndicator("totalTimeMs")}
-            </th>
-            <th className="slow-query-log__sortable" onClick={() => handleSort("meanTimeMs")}>
-              Mean{sortIndicator("meanTimeMs")}
-            </th>
-            <th className="slow-query-log__sortable" onClick={() => handleSort("maxTimeMs")}>
-              Max{sortIndicator("maxTimeMs")}
-            </th>
-            <th className="slow-query-log__sortable" onClick={() => handleSort("calls")}>
-              Calls{sortIndicator("calls")}
-            </th>
-            <th className="slow-query-log__sortable" onClick={() => handleSort("rows")}>
-              Rows{sortIndicator("rows")}
-            </th>
-            <th>Time %</th>
-          </tr>
-        </thead>
-        <tbody>
-          {sortedQueries.map((q) => (
-            <tr
-              key={q.queryId}
-              className={expandedQueryId === q.queryId ? "slow-query-log__row--expanded" : ""}
-              onClick={() =>
-                setExpandedQueryId((prev) => (prev === q.queryId ? null : q.queryId))
-              }
-            >
-              <td className="slow-query-log__query">
-                {expandedQueryId === q.queryId ? (
-                  <pre>{q.query}</pre>
-                ) : (
-                  <code>{truncateQuery(q.query)}</code>
-                )}
-              </td>
-              <td>{formatDuration(q.totalTimeMs)}</td>
-              <td>{formatDuration(q.meanTimeMs)}</td>
-              <td>{formatDuration(q.maxTimeMs)}</td>
-              <td>{q.calls.toLocaleString()}</td>
-              <td>{q.rows.toLocaleString()}</td>
-              <td>
-                <div className="slow-query-log__bar">
-                  <div
-                    className="slow-query-log__bar-fill"
-                    style={{ width: `${Math.min(q.timePct, 100)}%` }}
-                  />
-                  <span>{q.timePct.toFixed(1)}%</span>
-                </div>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+// -- Table parts -------------------------------------------------------------
+
+/** Which column the log is sorted by, which way, and how a header changes it. */
+interface SortState {
+  field: SortField
+  direction: SortDirection
+  onSort: (field: SortField) => void
+}
+
+/** The sortable columns, in order, with their headings. */
+const SORTABLE: Array<[SortField, string]> = [
+  ["totalTimeMs", "Total Time"],
+  ["meanTimeMs", "Mean"],
+  ["maxTimeMs", "Max"],
+  ["calls", "Calls"],
+  ["rows", "Rows"],
+]
+
+function SlowQueryHead({ sort }: { sort: SortState }): ReactElement {
+  return (
+    <>
+      <Th>Query</Th>
+      {SORTABLE.map(([field, label]) => <SortHeader key={field} field={field} label={label} sort={sort} />)}
+      <Th>Time %</Th>
+    </>
+  )
+}
+
+/** A column heading that sorts by its column, saying which way it is sorted (`aria-sort`). */
+function SortHeader({ field, label, sort }: { field: SortField; label: string; sort: SortState }): ReactElement {
+  const active = field === sort.field
+  const arrow = active ? (sort.direction === "desc" ? " ↓" : " ↑") : ""
+  return (
+    <Th aria-sort={active ? (sort.direction === "desc" ? "descending" : "ascending") : "none"}>
+      <TextLink tone="muted" className="uppercase tracking-wider" onClick={() => { sort.onSort(field) }}>{label}{arrow}</TextLink>
+    </Th>
+  )
+}
+
+/**
+ * One statement and its timings. The whole row toggles the full statement, as it always has; the
+ * statement cell is also a disclosure button, so a keyboard reaches the same toggle (its click
+ * bubbles to the row, which does the toggling).
+ */
+function SlowQueryRow({ query: q, expanded, onToggle }: { query: SlowQuery; expanded: boolean; onToggle: () => void }): ReactElement {
+  return (
+    <tr className={tableRowClass(true)} onClick={onToggle}>
+      <Td className="font-mono text-xs">
+        <DisclosureButton open={expanded} className="items-start">
+          {expanded ? <pre className="whitespace-pre-wrap break-words">{q.query}</pre> : <code>{truncateQuery(q.query)}</code>}
+        </DisclosureButton>
+      </Td>
+      <Td>{formatDuration(q.totalTimeMs)}</Td>
+      <Td>{formatDuration(q.meanTimeMs)}</Td>
+      <Td>{formatDuration(q.maxTimeMs)}</Td>
+      <Td>{q.calls.toLocaleString()}</Td>
+      <Td>{q.rows.toLocaleString()}</Td>
+      <Td><TimeShare pct={q.timePct} /></Td>
+    </tr>
+  )
+}
+
+/** This statement's share of all database time, as a bar and a figure. */
+function TimeShare({ pct }: { pct: number }): ReactElement {
+  return (
+    <div className="flex items-center gap-2">
+      <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
+        <div className="h-full bg-primary" style={{ width: `${Math.min(pct, 100)}%` }} />
+      </div>
+      <span className="text-xs text-muted-foreground">{pct.toFixed(1)}%</span>
     </div>
   )
 }

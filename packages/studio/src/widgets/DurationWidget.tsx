@@ -3,6 +3,7 @@ import type { WidgetProps } from "./FieldWidget.js"
 import { Input } from "../components/ui.js"
 import { durationMsOf, formatDuration, parseDuration } from "../lib/duration.js"
 import { useFieldDraft } from "./use-field-draft.js"
+import { FieldError } from "./field-parts.js"
 
 /**
  * Editor for a `Duration` field, stored as `{ ms }`: one text box that reads `1h 30m`, `90m`,
@@ -35,7 +36,7 @@ export function DurationWidget({ config, value, onChange, readOnly }: WidgetProp
   const errorId = `field-${config.name}-duration-error`
 
   return (
-    <div className="st-duration-widget flex flex-col gap-1">
+    <div className="flex flex-col">
       <Input
         id={`field-${config.name}`}
         value={draft}
@@ -48,7 +49,7 @@ export function DurationWidget({ config, value, onChange, readOnly }: WidgetProp
         // Once the editor leaves the box, show what was understood: `90m` becomes `1h 30m`.
         onBlur={() => { if (parsed.ok && parsed.ms !== null) setDraft(formatDuration(parsed.ms)) }}
       />
-      {problem !== null && <p className="st-field-error" id={errorId} role="alert">{problem}</p>}
+      {problem !== null && <FieldError id={errorId}>{problem}</FieldError>}
     </div>
   )
 }

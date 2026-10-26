@@ -1,75 +1,43 @@
-import React, { useState, useRef } from "react"
-import { useAdminClient } from "../hooks/useAdminClient.js"
+import React, { useRef } from "react"
 import type { WidgetProps } from "./FieldWidget.js"
-import { parseStorageRef } from "../lib/storage-ref.js"
+import { parseStorageRef, type StorageRef } from "../lib/storage-ref.js"
 import { stringOption } from "./field-options.js"
+import { Button, DropZone, FileInput } from "../components/ui.js"
+import { firstFileOf, useFieldUpload } from "./use-field-upload.js"
 
-export function FileWidget({ config, value, onChange, readOnly }: WidgetProps): React.ReactElement {
-  const client = useAdminClient()
-  const fileRef = useRef<HTMLInputElement>(null)
-  const [uploading, setUploading] = useState(false)
-
-  const bucket = stringOption(config, "bucket") ?? "files"
-  const storageRef = parseStorageRef(value, bucket)
-
-  const handleUpload = async (file: File) => {
-    setUploading(true)
-    try {
-      const path = `${config.name}/${Date.now()}-${file.name}`
-      const result = await client.storage.from(bucket).upload(path, file, {
-        contentType: file.type,
-        upsert: true,
-      })
-      if (result.error) {
-        console.error("Upload failed:", result.error.message)
-      } else {
-        onChange({ bucket, path, mimeType: file.type, size: file.size })
-      }
-    } catch (err) {
-      console.error("Upload failed:", err instanceof Error ? err.message : err)
-    } finally {
-      setUploading(false)
-    }
-  }
-
+/** The stored file: its name and size, and Remove unless read only. */
+function StoredFile({ file, onRemove }: { file: StorageRef; onRemove: (() => void) | null }): React.ReactElement {
   return (
-    <div className="st-file-widget">
-      {storageRef ? (
-        <div className="st-file-info">
-          <span className="st-file-name">{storageRef.path.split("/").pop()}</span>
-          {storageRef.size && <span className="st-file-size">({formatSize(storageRef.size)})</span>}
-          {!readOnly && (
-            <button type="button" className="st-btn st-btn-sm" onClick={() => { onChange(null) }}>
-              Remove
-            </button>
-          )}
-        </div>
-      ) : (
-        <div className="st-file-upload">
-          {uploading ? (
-            <span>Uploading...</span>
-          ) : (
-            <button
-              type="button"
-              className="st-btn st-btn-sm"
-              onClick={() => { fileRef.current?.click() }}
-              disabled={readOnly}
-            >
-              Choose file
-            </button>
-          )}
-          <input
-            ref={fileRef}
-            type="file"
-            className="st-hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0]
-              if (file) void handleUpload(file)
-            }}
-          />
-        </div>
+    <div className="flex items-center gap-2">
+      <span className="text-[0.85rem] font-medium">{file.path.split("/").pop()}</span>
+      {file.size ? <span className="text-xs text-muted-foreground">({formatSize(file.size)})</span> : null}
+      {onRemove !== null && (
+        <Button type="button" size="xs" onClick={onRemove}>
+          Remove
+        </Button>
       )}
     </div>
+  )
+}
+
+export function FileWidget({ config, value, onChange, readOnly }: WidgetProps): React.ReactElement {
+  const fileRef = useRef<HTMLInputElement>(null)
+  const bucket = stringOption(config, "bucket") ?? "files"
+  const storageRef = parseStorageRef(value, bucket)
+  const { uploading, upload } = useFieldUpload({ field: config.name, bucket }, onChange)
+
+  if (storageRef) return <StoredFile file={storageRef} onRemove={readOnly ? null : () => { onChange(null) }} />
+  return (
+    <DropZone className="p-4">
+      {uploading ? (
+        <span>Uploading...</span>
+      ) : (
+        <Button type="button" size="xs" onClick={() => { fileRef.current?.click() }} disabled={readOnly}>
+          Choose file
+        </Button>
+      )}
+      <FileInput ref={fileRef} aria-label={`${config.label} file`} onFiles={firstFileOf(upload)} />
+    </DropZone>
   )
 }
 

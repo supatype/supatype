@@ -1,6 +1,6 @@
 import React, { useState } from "react"
 import type { ModelConfig, FieldConfig } from "../config.js"
-import { Button, Card, CodeBlock, Input } from "../components/ui.js"
+import { Button, Card, CodeBlock, DisclosureButton, Input, Textarea } from "../components/ui.js"
 import { useStudioClient } from "../StudioCore.js"
 import { cn } from "../lib/utils.js"
 import { useSendAs } from "../hooks/useSendAs.js"
@@ -249,8 +249,9 @@ function TryItPanel({ ep, baseUrl, onClose }: { ep: Endpoint; baseUrl: string; o
       {ep.method !== "GET" && ep.method !== "DELETE" && (
         <div className="mb-3">
           <label className="block text-[0.7rem] text-muted-foreground uppercase mb-1">Request Body (JSON)</label>
-          <textarea
-            className="w-full px-3 py-1.5 rounded-md border border-border bg-background text-foreground text-xs font-mono focus:outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 min-h-[80px] resize-y"
+          <Textarea
+            aria-label="Request body (JSON)"
+            className="min-h-[80px] resize-y text-xs"
             value={requestBody}
             onChange={(e) => setRequestBody(e.target.value)}
           />
@@ -293,11 +294,7 @@ function EndpointCard({ ep, open, onToggle, baseUrl }: { ep: Endpoint; open: boo
 
   return (
     <div className="border border-border/70 rounded-lg overflow-hidden">
-      <button
-        type="button"
-        onClick={onToggle}
-        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-accent/40 transition-colors text-left"
-      >
+      <DisclosureButton open={open} onClick={onToggle} className="gap-3 px-4 py-3">
         <span
           className={cn(
             "font-mono text-[11px] font-bold w-14 shrink-0 text-center px-1.5 py-0.5 rounded",
@@ -309,8 +306,8 @@ function EndpointCard({ ep, open, onToggle, baseUrl }: { ep: Endpoint; open: boo
         </span>
         <span className="font-mono text-[12px] text-muted-foreground flex-1 min-w-0 truncate">{ep.path}</span>
         <span className="text-sm font-medium text-foreground shrink-0">{ep.summary}</span>
-        <span className="text-muted-foreground/40 ml-2 shrink-0 text-xs">{open ? "▲" : "▼"}</span>
-      </button>
+        <span className="text-muted-foreground/40 ml-2 shrink-0 text-xs" aria-hidden>{open ? "▲" : "▼"}</span>
+      </DisclosureButton>
       {open && (
         <div className="border-t border-border/60 px-4 pb-4 pt-3 space-y-4 bg-muted/20">
           <p className="text-sm text-muted-foreground">{ep.description}</p>

@@ -24,8 +24,13 @@ export function lastOrder(reads: readonly URL[]): string | null {
 /**
  * `model`'s list, whose every read answers with `rows`: none by default. Settling runs on the
  * virtual clock, so the file calls `isolateEachTest()`, which also unmounts it after the test.
+ * `onNavigate` hears where the list sends the reader, a record it opens or Create.
  */
-export async function renderList(model: ModelConfig, rows: Array<Record<string, unknown>> = []): Promise<ListHarness> {
+export async function renderList(
+  model: ModelConfig,
+  rows: Array<Record<string, unknown>> = [],
+  onNavigate: (path: string) => void = () => undefined,
+): Promise<ListHarness> {
   const reads: URL[] = []
   vi.stubGlobal("fetch", async (raw: string) => {
     const url = new URL(raw)
@@ -37,7 +42,7 @@ export async function renderList(model: ModelConfig, rows: Array<Record<string, 
       <AdminConfigContext.Provider value={testConfig({ models: [model] })}>
         <AdminClientContext.Provider value={testClient({ url: PROXY, token: "token" })}>
           <LocaleContext.Provider value={{ currentLocale: "en", setLocale: () => undefined, locales: [], defaultLocale: "en" }}>
-            <ListView model={model} onNavigate={() => undefined} />
+            <ListView model={model} onNavigate={onNavigate} />
           </LocaleContext.Provider>
         </AdminClientContext.Provider>
       </AdminConfigContext.Provider>

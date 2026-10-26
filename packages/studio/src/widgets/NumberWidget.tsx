@@ -1,40 +1,33 @@
 import React from "react"
 import type { WidgetProps } from "./FieldWidget.js"
+import { Input } from "../components/ui.js"
 import { stringOption } from "./field-options.js"
 
-export function NumberWidget({ config, value, onChange, readOnly }: WidgetProps): React.ReactElement {
-  const min = config.validation?.min
-  const max = config.validation?.max
-  const isCurrency = Boolean(config.options?.["currency"])
-  const step = stringOption(config, "step") ?? (isCurrency ? "0.01" : undefined)
+/** A money amount: the number box between a display-only `$` and a note saying it is one. */
+function MoneyFrame({ children }: { children: React.ReactNode }): React.ReactElement {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-base text-muted-foreground" aria-hidden>$</span>
+      {children}
+      <span className="text-[0.7rem] text-muted-foreground">Stored as decimal; currency symbol is display-only</span>
+    </div>
+  )
+}
 
+export function NumberWidget({ config, value, onChange, readOnly }: WidgetProps): React.ReactElement {
+  const isCurrency = Boolean(config.options?.["currency"])
   const input = (
-    <input
+    <Input
       id={`field-${config.name}`}
       type="number"
-      className="st-input"
       value={value === null || value === undefined ? "" : String(value)}
-      onChange={(e) => {
-        const v = e.target.value
-        onChange(v === "" ? null : Number(v))
-      }}
+      onChange={(e) => { onChange(e.target.value === "" ? null : Number(e.target.value)) }}
       readOnly={readOnly}
       required={config.required}
-      min={min}
-      max={max}
-      step={step}
+      min={config.validation?.min}
+      max={config.validation?.max}
+      step={stringOption(config, "step") ?? (isCurrency ? "0.01" : undefined)}
     />
   )
-
-  if (isCurrency) {
-    return (
-      <div className="st-money-widget">
-        <span className="st-money-symbol" aria-hidden>$</span>
-        {input}
-        <span className="st-money-hint">Stored as decimal; currency symbol is display-only</span>
-      </div>
-    )
-  }
-
-  return input
+  return isCurrency ? <MoneyFrame>{input}</MoneyFrame> : input
 }

@@ -21,7 +21,7 @@
  */
 
 import React, { useMemo } from "react"
-import { Badge, Card, Td, Th } from "../components/ui.js"
+import { Badge, Card, TableCard, Td, Th } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
@@ -202,26 +202,11 @@ function RunRow({ run }: { run: SeedRunRow }): React.ReactElement {
 
 function RunTable({ runs }: { runs: readonly SeedRunRow[] }): React.ReactElement {
   return (
-    <Card className="overflow-auto">
-      <table className="w-full">
-        <thead>
-          <tr className="border-b border-border">
-            <Th>File</Th>
-            <Th>Status</Th>
-            <Th>Rows written</Th>
-            <Th>Applied at</Th>
-            <Th>Duration</Th>
-            <Th>Document</Th>
-            <Th>Engine</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {runs.map((run) => (
-            <RunRow key={run.id} run={run} />
-          ))}
-        </tbody>
-      </table>
-    </Card>
+    <TableCard head={<><Th>File</Th><Th>Status</Th><Th>Rows written</Th><Th>Applied at</Th><Th>Duration</Th><Th>Document</Th><Th>Engine</Th></>}>
+      {runs.map((run) => (
+        <RunRow key={run.id} run={run} />
+      ))}
+    </TableCard>
   )
 }
 

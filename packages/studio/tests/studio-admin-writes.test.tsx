@@ -167,12 +167,12 @@ describe("Auth policies on a schema the admin routes do not cover", () => {
   it("drafts the drop as SQL, and asks before running it", async () => {
     await render(<AuthPoliciesView />, catalogue("public", "todos"))
     await press("Drop")
-    expect(document.body.querySelector("textarea")?.value).toBe("DROP POLICY owner_read ON public.todos;")
+    expect(document.body.querySelector("textarea")?.value).toBe('DROP POLICY "owner_read" ON "public"."todos";')
     await press("Run SQL")
     expect(asking()).toContain("Run this SQL on public?")
     expect(writes()).toEqual([])
     await press("Run on public")
-    expect(writes()).toEqual([{ path: "/sql", body: { query: "DROP POLICY owner_read ON public.todos;", schema: "public" } }])
+    expect(writes()).toEqual([{ path: "/sql", body: { query: 'DROP POLICY "owner_read" ON "public"."todos";', schema: "public" } }])
   })
 
   it("runs nothing when the question is cancelled", async () => {
@@ -182,6 +182,16 @@ describe("Auth policies on a schema the admin routes do not cover", () => {
     await press("Cancel", elementOf(document.body, '[role="alertdialog"]', HTMLElement))
     expect(asking()).toBeNull()
     expect(writes()).toEqual([])
+  })
+
+  it("runs a drafted new policy straight after review: creating is not destructive", async () => {
+    await render(<AuthPoliciesView />, catalogue("public", "todos"))
+    await press("Create policy")
+    await press("I understand, continue")
+    expect(document.body.querySelector("textarea")?.value).toMatch(/^CREATE POLICY my_policy ON "public".my_table/)
+    await press("Run SQL")
+    expect(asking()).toBeNull()
+    expect(writes().map((c) => c.path)).toEqual(["/sql"])
   })
 
   it("still switches RLS through the SQL editor's route", async () => {

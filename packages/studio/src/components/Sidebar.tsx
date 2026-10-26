@@ -7,6 +7,7 @@ import type { SidebarSection } from "../types.js"
 import { cn } from "../lib/utils.js"
 import { offers, userAdministrationOffered, type OfferedCapability } from "../lib/capability-offers.js"
 import { Icon, IconChevronRight, IconSettings } from "./icons.js"
+import { ListButton } from "./ui.js"
 
 // ─── Nav definition ───────────────────────────────────────────────────────────
 
@@ -124,16 +125,15 @@ interface SidebarItemProps extends ItemContext {
 function SidebarItem({ icon, label, href, active, expanded, onNavigate, marker = true }: SidebarItemProps): React.ReactElement {
   return (
     <div className="px-1">
-      <button
-        type="button"
+      <ListButton
+        selected={active}
         title={!expanded ? label : undefined}
+        aria-label={!expanded ? label : undefined}
         onClick={() => onNavigate(href)}
         aria-current={active ? "page" : undefined}
         className={cn(
-          "flex items-center w-full rounded-md transition-colors",
-          "hover:bg-accent hover:text-accent-foreground",
+          "font-normal",
           expanded ? "gap-2.5 px-2 py-1.5" : "justify-center p-2",
-          active ? "bg-accent text-foreground" : "text-muted-foreground",
           marker && "border-l-2",
           marker && (active ? "border-l-primary" : "border-l-transparent"),
         )}
@@ -145,7 +145,7 @@ function SidebarItem({ icon, label, href, active, expanded, onNavigate, marker =
             <span className="shrink-0 opacity-30"><IconChevronRight /></span>
           </>
         )}
-      </button>
+      </ListButton>
     </div>
   )
 }

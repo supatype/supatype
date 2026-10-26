@@ -1,6 +1,6 @@
 import React, { useState } from "react"
 import { useStudioClient } from "../../StudioCore.js"
-import { Badge, Button, Card, ConfirmButton, Input, Textarea, type DestructiveQuestion } from "../../components/ui.js"
+import { Badge, Button, Card, ConfirmButton, Input, Skeleton, Textarea, type DestructiveQuestion } from "../../components/ui.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 import { useEmailTemplate, type EmailTemplateState } from "../../hooks/useEmailTemplate.js"
 
@@ -139,8 +139,8 @@ export function EmailTemplatesView(): React.ReactElement {
 
         {state.loading ? (
           <div className="space-y-2">
-            <div className="h-8 rounded-md bg-muted animate-pulse" />
-            <div className="h-48 rounded-md bg-muted animate-pulse" />
+            <Skeleton className="h-8" />
+            <Skeleton className="h-48" />
           </div>
         ) : preview ? (
           <Preview state={state} />

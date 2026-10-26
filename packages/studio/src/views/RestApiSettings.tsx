@@ -3,7 +3,7 @@ import { useAdminConfig } from "../hooks/useAdminConfig.js"
 import { useServerRestCacheOffered } from "../hooks/useServerRestCacheOffered.js"
 import { useStudioClient } from "../StudioCore.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
-import { Button, Card, CodeBlock, Input } from "../components/ui.js"
+import { Button, Card, CodeBlock, Input, LoadingSettingsCard, TextLink } from "../components/ui.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { cn } from "../lib/utils.js"
 import { useRoleRefusalText } from "../components/RoleGate.js"
@@ -134,12 +134,7 @@ export function RestApiSettings(): React.ReactElement {
       )}
 
       {loading ? (
-        <Card>
-          <div className="px-4 py-3 border-b border-border"><div className="h-4 w-24 rounded bg-muted animate-pulse" /></div>
-          <div className="divide-y divide-border">
-            {[1, 2].map((i) => <div key={i} className="flex justify-between px-4 py-3"><div className="h-4 w-20 rounded bg-muted animate-pulse" /><div className="h-7 w-32 rounded bg-muted animate-pulse" /></div>)}
-          </div>
-        </Card>
+        <LoadingSettingsCard rows={2} />
       ) : null}
 
       {/* Connection */}
@@ -219,7 +214,7 @@ export function RestApiSettings(): React.ReactElement {
             A table is cacheable only where its model declares{" "}
             <code className="font-mono">cache</code>. Within that, enable it per table under each
             model&apos;s Cache tab, or manage entries under{" "}
-            <a href="/api/rest/cache" className="text-primary hover:underline">API → REST → Cache</a>.
+            <TextLink href="/api/rest/cache">API → REST → Cache</TextLink>.
           </p>
           {/*
             Named, not counted. "3 tables declare a cache" leaves someone opening models one at a

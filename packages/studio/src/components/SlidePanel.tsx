@@ -1,7 +1,8 @@
-import React, { useEffect } from "react"
+import React from "react"
 import { createPortal } from "react-dom"
 import { cn } from "../lib/utils.js"
 import { IconX } from "./icons.js"
+import { IconButton, useEscapeKey } from "./ui.js"
 
 interface SlidePanelProps {
   open: boolean
@@ -13,67 +14,42 @@ interface SlidePanelProps {
   children: React.ReactNode
 }
 
-export function SlidePanel({
-  open,
-  onClose,
-  title,
-  subtitle,
-  width = "max-w-[480px]",
-  children,
-}: SlidePanelProps): React.ReactElement {
-  useEffect(() => {
-    if (!open) return
-    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose() }
-    document.addEventListener("keydown", handler)
-    return () => document.removeEventListener("keydown", handler)
-  }, [open, onClose])
+/** The panel's title, the line under it when there is one, and Close. */
+function PanelHeader({ title, subtitle, onClose }: { title: string; subtitle?: string | undefined; onClose: () => void }): React.ReactElement {
+  return (
+    <div className="flex items-start justify-between px-5 pt-5 pb-4 border-b border-border shrink-0">
+      <div className="min-w-0 pr-3">
+        <h2 className="text-sm font-semibold text-foreground truncate">{title}</h2>
+        {subtitle && <p className="text-xs text-muted-foreground mt-0.5 break-all font-mono">{subtitle}</p>}
+      </div>
+      <IconButton label="Close panel" onClick={onClose} className="-mr-1">
+        <IconX />
+      </IconButton>
+    </div>
+  )
+}
 
+export function SlidePanel({ open, onClose, title, subtitle, width = "max-w-[480px]", children }: SlidePanelProps): React.ReactElement {
+  useEscapeKey(onClose, open)
   return createPortal(
     <div className={cn("fixed inset-0 z-50", !open && "pointer-events-none")}>
-      {/* Backdrop */}
       <div
-        className={cn(
-          "absolute inset-0 bg-black/50 backdrop-blur-sm transition-opacity duration-300",
-          open ? "opacity-100" : "opacity-0",
-        )}
+        className={cn("absolute inset-0 bg-black/50 backdrop-blur-sm transition-opacity duration-300", open ? "opacity-100" : "opacity-0")}
         onClick={onClose}
         aria-hidden
       />
-
-      {/* Panel */}
       <div
         role="dialog"
         aria-modal={open}
+        aria-label={title}
         className={cn(
-          "absolute right-0 top-0 h-full w-full flex flex-col",
-          "bg-background border-l border-border shadow-2xl",
-          "transition-transform duration-300 ease-in-out",
+          "absolute right-0 top-0 h-full w-full flex flex-col bg-background border-l border-border shadow-2xl transition-transform duration-300 ease-in-out",
           width,
           open ? "translate-x-0" : "translate-x-full",
         )}
       >
-        {/* Header */}
-        <div className="flex items-start justify-between px-5 pt-5 pb-4 border-b border-border shrink-0">
-          <div className="min-w-0 pr-3">
-            <h2 className="text-sm font-semibold text-foreground truncate">{title}</h2>
-            {subtitle && (
-              <p className="text-xs text-muted-foreground mt-0.5 break-all font-mono">{subtitle}</p>
-            )}
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex items-center justify-center w-7 h-7 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors -mr-1"
-            aria-label="Close panel"
-          >
-            <IconX />
-          </button>
-        </div>
-
-        {/* Scrollable body */}
-        <div className="flex-1 overflow-y-auto p-5">
-          {children}
-        </div>
+        <PanelHeader title={title} subtitle={subtitle} onClose={onClose} />
+        <div className="flex-1 overflow-y-auto p-5">{children}</div>
       </div>
     </div>,
     document.body,

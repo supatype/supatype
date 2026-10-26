@@ -3,7 +3,7 @@ import { formatTimestamp } from "../lib/utils.js"
 import { Header } from "../components/Header.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
-import { Badge, Button, Card, Td, Th } from "../components/ui.js"
+import { Badge, Button, Card, Table, Td, Th } from "../components/ui.js"
 import { useAdminClient } from "../hooks/useAdminClient.js"
 import { useLocale } from "../hooks/useLocale.js"
 import type { ModelConfig } from "../config.js"
@@ -28,8 +28,8 @@ interface VersionHistoryProps {
  * A record's history, and what can be done with it.
  *
  * This view existed before anything wrote a version: it read `{table}_versions` with the right
- * column names, swallowed the error when the table was absent — which it always was, because
- * nothing created it — and restored by `PATCH`ing the live table, which is the one thing restoring
+ * column names, swallowed the error when the table was absent (which it always was, because
+ * nothing created it), and restored by `PATCH`ing the live table, which is the one thing restoring
  * must not do. It now reads real rows, and the two acts it offers are the generated functions.
  *
  * **Restore brings a version back as a draft.** Nothing goes live without publishing, so restoring
@@ -121,7 +121,7 @@ export function VersionHistory({
         />
       ) : (
         <Card className="overflow-x-auto">
-          <table className="w-full">
+          <Table>
             <thead className="border-b border-border">
               <tr>
                 <Th>Version</Th>
@@ -147,7 +147,7 @@ export function VersionHistory({
                       for as long as it existed and rendered "Invalid Date" for every row. */}
                   <Td className="text-muted-foreground">{formatTimestamp(version.created_at)}</Td>
                   <Td className="text-muted-foreground font-mono text-xs">
-                    {version.created_by ?? "—"}
+                    {version.created_by ?? "-"}
                   </Td>
                   <Td className="text-right space-x-2">
                     <Button
@@ -179,7 +179,7 @@ export function VersionHistory({
                 </tr>
               ))}
             </tbody>
-          </table>
+          </Table>
         </Card>
       )}
 
@@ -253,7 +253,7 @@ function VersionDiff({
       <div className="px-3 py-2 border-b border-border text-sm font-medium">
         v{version.version} compared with the newest, v{against.version}
       </div>
-      <table className="w-full">
+      <Table>
         <thead className="border-b border-border">
           <tr>
             <Th>Field</Th>
@@ -275,13 +275,13 @@ function VersionDiff({
             )
           })}
         </tbody>
-      </table>
+      </Table>
     </Card>
   )
 }
 
 function formatValue(value: unknown): string {
-  if (value === null || value === undefined) return "—"
+  if (value === null || value === undefined) return "-"
   if (typeof value === "object") return JSON.stringify(value).slice(0, 120)
   return String(value)
 }

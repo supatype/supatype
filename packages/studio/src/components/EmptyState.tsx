@@ -1,4 +1,5 @@
 import React from "react"
+import { Button } from "./ui.js"
 
 export interface EmptyStateProps {
   title: string
@@ -39,13 +40,9 @@ export function EmptyState({
         </p>
       ) : null}
       {action && actionLabel ? (
-        <button
-          type="button"
-          onClick={action}
-          className="px-3 py-1.5 text-xs font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-        >
+        <Button type="button" variant="primary" onClick={action}>
           {actionLabel}
-        </button>
+        </Button>
       ) : null}
     </div>
   )

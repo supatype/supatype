@@ -1,5 +1,5 @@
 import React from "react"
-import { CodeBlock } from "./ui.js"
+import { Button, CodeBlock } from "./ui.js"
 
 export interface ErrorBannerProps {
   message: string
@@ -30,13 +30,15 @@ export function ErrorBanner({ message, details, onRetry }: ErrorBannerProps): Re
         </svg>
         <span data-ui="error-banner-message" className="text-sm text-destructive-text flex-1">{message}</span>
         {onRetry ? (
-          <button
+          <Button
             type="button"
+            size="xs"
+            variant="ghost"
             onClick={onRetry}
-            className="px-2.5 py-1 text-xs font-medium rounded-md border border-destructive/30 text-destructive-text hover:bg-destructive/10 transition-colors shrink-0"
+            className="shrink-0 border border-destructive/30 text-destructive-text hover:text-destructive-text hover:bg-destructive/10"
           >
             Retry
-          </button>
+          </Button>
         ) : null}
       </div>
       {details ? <ErrorDetails details={details} /> : null}

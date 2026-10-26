@@ -4,7 +4,8 @@ import { sql as sqlLang } from "@codemirror/lang-sql"
 import { xml as xmlLang } from "@codemirror/lang-xml"
 import type { Extension } from "@codemirror/state"
 import type { WidgetProps } from "./FieldWidget.js"
-import { CodeMirrorEditor } from "./CodeMirrorEditor.js"
+import { FramedCodeEditor } from "./CodeMirrorEditor.js"
+import { FieldHint } from "./field-parts.js"
 
 /**
  * Editor for a `Code<Lang>` field, `{ lang, source }` stored as JSONB.
@@ -38,27 +39,11 @@ export function CodeWidget({ config, value, onChange, readOnly }: WidgetProps): 
   const extensions = highlighters[lang.toLowerCase()] ?? []
 
   return (
-    <div className="st-code-widget">
-      <div className="st-json-editor rounded-md border border-border bg-background overflow-hidden">
-        <CodeMirrorEditor
-          id={`field-${config.name}`}
-          value={source}
-          onChange={(next) => {
-            // `lang` is carried through unchanged: it comes from the schema, and dropping it here
-            // would rewrite the row's shape on every keystroke.
-            onChange?.({ ...current, source: next })
-          }}
-          readOnly={readOnly}
-          extensions={extensions}
-          minHeight="180px"
-        />
-      </div>
-      {lang !== "" && (
-        <p className="st-field-hint text-xs text-muted-foreground mt-1">
-          {lang}
-          {extensions.length === 0 && ", no highlighter for this language"}
-        </p>
-      )}
+    <div>
+      {/* `lang` is carried through unchanged: it comes from the schema, and dropping it here
+          would rewrite the row's shape on every keystroke. */}
+      <FramedCodeEditor id={`field-${config.name}`} value={source} onChange={(next) => { onChange({ ...current, source: next }) }} readOnly={readOnly} extensions={extensions} />
+      {lang !== "" && <FieldHint>{lang}{extensions.length === 0 && ", no highlighter for this language"}</FieldHint>}
     </div>
   )
 }

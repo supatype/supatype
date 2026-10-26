@@ -12,6 +12,7 @@ import {
   type LatLngDraft,
 } from "../lib/geo-point.js"
 import { useFieldDraft } from "./use-field-draft.js"
+import { FieldError, FieldHint } from "./field-parts.js"
 
 /**
  * Editor for a `GeoPoint` field (`geography(Point, 4326)`): a latitude box and a longitude box,
@@ -99,14 +100,14 @@ export function GeoPointWidget({ config, value, onChange, readOnly }: WidgetProp
   const state = { invalid: !checked.ok, describedBy: checked.ok ? undefined : messageId, readOnly, required: config.required }
 
   return (
-    <div className="st-geopoint-widget flex flex-col gap-1">
+    <div className="flex flex-col">
       <div className="flex gap-2">
         <Coordinate box={{ id: `field-${config.name}`, label: "Latitude", value: draft.lat }} state={state} onChange={setLat} />
         <Coordinate box={{ id: `field-${config.name}-lng`, label: "Longitude", value: draft.lng }} state={state} onChange={setLng} />
       </div>
-      {!checked.ok && <p className="st-field-error" id={messageId} role="alert">{checked.message}</p>}
+      {!checked.ok && <FieldError id={messageId}>{checked.message}</FieldError>}
       {checked.ok && checked.point !== null && (
-        <p className="st-field-hint text-xs text-muted-foreground">{formatGeoPoint(checked.point)}</p>
+        <FieldHint>{formatGeoPoint(checked.point)}</FieldHint>
       )}
     </div>
   )

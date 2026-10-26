@@ -7,7 +7,7 @@ import { ErrorBanner } from "../components/ErrorBanner.js"
 import { SlidePanel } from "../components/SlidePanel.js"
 import { cn } from "../lib/utils.js"
 import { isJsonObject } from "../lib/json.js"
-import { Badge, Button, Card, CodeBlock, ConfirmButton, Input, Select, Th, Td, type DestructiveQuestion } from "../components/ui.js"
+import { Badge, Button, Card, Checkbox, CodeBlock, ConfirmButton, Input, ListButton, Select, Table, Textarea, TextLink, Th, Td, type DestructiveQuestion } from "../components/ui.js"
 import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
 import { browseTotal, countModeFor, totalLabel } from "../lib/browse-paging.js"
 import { listOrder, tableKeyColumns, withOrder, type ListOrder } from "../lib/list-order.js"
@@ -121,12 +121,9 @@ function JsonTreeNode({ data, depth = 0 }: { data: unknown; depth?: number }): R
     if (data.length === 0) return <span className="text-zinc-500">[]</span>
     return (
       <span>
-        <button
-          className="text-zinc-500 hover:text-foreground"
-          onClick={() => setExpanded(!expanded)}
-        >
+        <TextLink tone="muted" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
           {expanded ? "[-]" : `[${data.length} items]`}
-        </button>
+        </TextLink>
         {expanded ? (
           <div className="ml-4">
             {data.map((item, i) => (
@@ -146,12 +143,9 @@ function JsonTreeNode({ data, depth = 0 }: { data: unknown; depth?: number }): R
     if (entries.length === 0) return <span className="text-zinc-500">{"{}"}</span>
     return (
       <span>
-        <button
-          className="text-zinc-500 hover:text-foreground"
-          onClick={() => setExpanded(!expanded)}
-        >
+        <TextLink tone="muted" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
           {expanded ? "{-}" : `{${entries.length} keys}`}
-        </button>
+        </TextLink>
         {expanded ? (
           <div className="ml-4">
             {entries.map(([key, val]) => (
@@ -351,8 +345,9 @@ function NewRecordForm({
                 <option value="false">false</option>
               </Select>
             ) : col.type === "jsonb" || col.type === "json" ? (
-              <textarea
-                className="w-full px-3 py-1.5 rounded-md border border-border bg-background text-foreground text-sm font-mono focus:outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 min-h-[80px] resize-y"
+              <Textarea
+                aria-label={col.name}
+                className="min-h-[80px] resize-y"
                 placeholder="{}"
                 value={values[col.name] ?? ""}
                 onChange={(e) => setValues((prev) => ({ ...prev, [col.name]: e.target.value }))}
@@ -797,17 +792,10 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
           />
           <Card className="p-1.5 flex flex-col gap-0.5 max-h-[calc(100vh-200px)] overflow-y-auto">
             {filteredTables.map((t) => (
-              <button
-                key={t.name}
-                className={cn(
-                  "flex items-center gap-2 w-full px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground rounded-md transition-colors",
-                  t.name === selectedTable && "bg-accent text-foreground font-medium"
-                )}
-                onClick={() => handleSelectTable(t.name)}
-              >
+              <ListButton key={t.name} selected={t.name === selectedTable} onClick={() => handleSelectTable(t.name)}>
                 <span className="truncate">{t.name}</span>
                 <span className="ml-auto text-zinc-600 text-[0.7rem] flex-shrink-0">{t.row_count}</span>
-              </button>
+              </ListButton>
             ))}
           </Card>
         </div>
@@ -935,15 +923,14 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
           </div>
         ) : viewMode === "table" ? (
           <Card className="overflow-auto">
-            <table className="w-full">
+            <Table>
               <thead>
                 <tr className="border-b border-border">
                   <Th className="w-8">
-                    <input
-                      type="checkbox"
+                    <Checkbox
+                      label={<span className="sr-only">Select all rows</span>}
                       checked={selectedIds.size === rows.length && rows.length > 0}
                       onChange={toggleSelectAll}
-                      className="rounded border-border"
                     />
                   </Th>
                   {columns.map((col) => (
@@ -976,11 +963,10 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
                       )}
                     >
                       <Td>
-                        <input
-                          type="checkbox"
+                        <Checkbox
+                          label={<span className="sr-only">Select row</span>}
                           checked={selectedIds.has(rowId)}
                           onChange={() => toggleSelectRow(rowId)}
-                          className="rounded border-border"
                         />
                       </Td>
                       {columns.map((col) => (
@@ -1053,13 +1039,13 @@ export function DataExplorer({ initialTable }: { initialTable?: string }): React
                 })}
                 {rows.length === 0 ? (
                   <tr>
-                    <td colSpan={columns.length + 2} className="text-center py-8 text-muted-foreground text-sm">
+                    <Td colSpan={columns.length + 2} className="text-center py-8 text-muted-foreground">
                       No records found
-                    </td>
+                    </Td>
                   </tr>
                 ) : null}
               </tbody>
-            </table>
+            </Table>
           </Card>
         ) : (
           <CodeBlock>{JSON.stringify(rows, null, 2)}</CodeBlock>

@@ -1,6 +1,6 @@
 import React, { useState } from "react"
 import type { ModelConfig } from "../config.js"
-import { Button } from "../components/ui.js"
+import { Button, ListButton, Textarea } from "../components/ui.js"
 import { useStudioClient } from "../StudioCore.js"
 import { cn } from "../lib/utils.js"
 import {
@@ -142,19 +142,9 @@ export function ModelGraphQLDocs({ model }: Props): React.ReactElement {
           Operations
         </div>
         {operations.map((op, i) => (
-          <button
-            key={op.label}
-            type="button"
-            onClick={() => selectOp(i)}
-            className={cn(
-              "text-left px-2 py-1.5 rounded text-sm transition-colors",
-              selectedOp === i
-                ? "bg-accent text-foreground font-medium"
-                : "text-muted-foreground hover:bg-accent hover:text-foreground",
-            )}
-          >
+          <ListButton key={op.label} selected={selectedOp === i} className="px-2 py-1.5" onClick={() => selectOp(i)}>
             {op.label}
-          </button>
+          </ListButton>
         ))}
         <div className="mt-auto pt-2 border-t border-border/60 text-[10px] text-muted-foreground/60 px-1 font-mono break-all">
           POST /graphql/v1
@@ -175,11 +165,12 @@ export function ModelGraphQLDocs({ model }: Props): React.ReactElement {
         <div className="flex gap-3 flex-1 min-h-0">
           <div className="flex-1 flex flex-col min-h-0">
             <div className="text-xs text-muted-foreground mb-1">Query</div>
-            <textarea
+            <Textarea
+              aria-label="Query"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               spellCheck={false}
-              className="flex-1 font-mono text-[13px] bg-muted rounded-md p-3 resize-none focus:outline-none focus:ring-1 focus:ring-primary border border-border min-h-0"
+              className="flex-1 min-h-0 resize-none bg-muted p-3 text-[13px]"
             />
           </div>
           <div className="flex-1 flex flex-col min-h-0">

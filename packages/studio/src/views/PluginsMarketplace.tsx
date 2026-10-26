@@ -2,9 +2,8 @@ import React, { useState } from "react"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import { useDebouncedValue } from "../hooks/useDebouncedValue.js"
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard.js"
-import { Badge, Button, Card, Pager } from "../components/ui.js"
+import { Badge, Button, Card, IconButton, Input, Pager, Skeleton, Tabs, TextLink, type TabsSpec } from "../components/ui.js"
 import { IconCheck, IconCopy } from "../components/icons.js"
-import { cn } from "../lib/utils.js"
 import { type Guard, isArrayOf, isNumber, isShape, isString, optional, readJson } from "../lib/json.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -61,6 +60,14 @@ const CATEGORY_LABELS: Record<PluginCategory, string> = {
   widget: "Widgets",
 }
 
+/** The category filter, as segmented tabs. */
+const CATEGORY_TABS: TabsSpec<PluginCategory> = {
+  label: "Plugin category",
+  items: CATEGORIES.map((id) => ({ id, label: CATEGORY_LABELS[id] })),
+  look: "pill",
+  size: "xs",
+}
+
 const CATEGORY_KEYWORDS: Record<Exclude<PluginCategory, "all">, string> = {
   field: "supatype-plugin-field",
   composite: "supatype-plugin-composite",
@@ -76,14 +83,14 @@ function detectCategory(keywords: string[]): Exclude<PluginCategory, "all"> | nu
 
 function SkeletonCard(): React.ReactElement {
   return (
-    <Card className="p-4 animate-pulse">
+    <Card className="p-4">
       <div className="flex items-start justify-between mb-3">
-        <div className="h-4 w-32 bg-accent rounded" />
-        <div className="h-5 w-12 bg-accent rounded-full" />
+        <Skeleton className="h-4 w-32 bg-accent rounded" />
+        <Skeleton className="h-5 w-12 bg-accent rounded-full" />
       </div>
-      <div className="h-3 w-full bg-accent rounded mb-1.5" />
-      <div className="h-3 w-3/4 bg-accent rounded mb-4" />
-      <div className="h-8 w-full bg-accent rounded" />
+      <Skeleton className="h-3 w-full bg-accent rounded mb-1.5" />
+      <Skeleton className="h-3 w-3/4 bg-accent rounded mb-4" />
+      <Skeleton className="h-8 w-full bg-accent rounded" />
     </Card>
   )
 }
@@ -94,14 +101,9 @@ function CopyButton({ text }: { text: string }): React.ReactElement {
   const { copied, copy } = useCopyToClipboard()
 
   return (
-    <button
-      type="button"
-      onClick={() => copy(text)}
-      className="shrink-0 p-1 rounded hover:bg-accent transition-colors text-muted-foreground hover:text-foreground"
-      title="Copy to clipboard"
-    >
+    <IconButton label="Copy to clipboard" onClick={() => copy(text)}>
       {copied ? <span className="text-green-400"><IconCheck size={13} /></span> : <IconCopy size={13} />}
-    </button>
+    </IconButton>
   )
 }
 
@@ -149,14 +151,9 @@ function PluginCard({ pkg }: { pkg: NpmPackage }): React.ReactElement {
         <CopyButton text={installCmd} />
       </div>
 
-      <a
-        href={pkg.links.npm}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-[11px] text-primary hover:underline"
-      >
+      <TextLink href={pkg.links.npm} target="_blank" rel="noopener noreferrer" className="text-[11px]">
         View on npm
-      </a>
+      </TextLink>
     </Card>
   )
 }
@@ -207,35 +204,17 @@ export function PluginsMarketplace(): React.ReactElement {
             <circle cx="11" cy="11" r="8" />
             <line x1="21" y1="21" x2="16.65" y2="16.65" />
           </svg>
-          <input
+          <Input
             type="text"
+            aria-label="Search plugins"
             placeholder="Search plugins..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className={cn(
-              "w-full pl-8 pr-3 py-1.5 text-sm rounded-md border border-border bg-background",
-              "focus:outline-none focus:ring-2 focus:ring-ring",
-            )}
+            className="pl-8"
           />
         </div>
 
-        <div className="flex gap-1">
-          {CATEGORIES.map((cat) => (
-            <button
-              key={cat}
-              type="button"
-              onClick={() => setCategory(cat)}
-              className={cn(
-                "px-3 py-1.5 text-xs rounded-md transition-colors",
-                category === cat
-                  ? "bg-primary text-primary-foreground"
-                  : "border border-border text-muted-foreground hover:bg-accent",
-              )}
-            >
-              {CATEGORY_LABELS[cat]}
-            </button>
-          ))}
-        </div>
+        <Tabs tabs={CATEGORY_TABS} value={category} onChange={setCategory} />
       </div>
 
       {/* Error */}
