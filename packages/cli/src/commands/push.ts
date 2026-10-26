@@ -36,6 +36,7 @@ import {
 } from "../diff-output.js"
 import { printPushWarnings } from "../engine-push-output.js"
 import { askToOverwrite, pushConsentingToDrift } from "../drift-consent.js"
+import { pushConsentingToDestructive } from "../destructive-consent.js"
 import { adoptKeysNeed, type FeatureNeed } from "../engine-ownership-gate.js"
 import { pushOfferingAdoption, targetAdoptionSteps } from "../adopt-walkthrough.js"
 import { signJwt } from "../jwt.js"
@@ -66,7 +67,7 @@ import {
 import { confirm, logSkippedConfirm } from "../ui/confirm.js"
 import { info, plain } from "../ui/messages.js"
 import { withSpinner } from "../ui/progress.js"
-import { writeGeneratedTypes } from "../type-generation.js"
+import { projectOutputPaths, writeGeneratedTypes } from "../type-generation.js"
 import { isInteractive } from "../ui/interactive.js"
 
 const DEV_JWT_SECRET = "super-secret-jwt-token-with-at-least-32-characters-long"
@@ -119,23 +120,7 @@ export function registerPush(program: Command): void {
           await pushViaTarget(cwd, config, localTarget, ast, pgSchema, run)
           return
         }
-        const { dockerAdoptionSteps, pushSchemaDocker, requireDockerFeatures } = await import("../dev-compose.js")
-        const gate = () => requireDockerFeatures(cwd, config, [OVERWRITE_DRIFT])
-        if (run.overwriteDrift) await gate()
-        await pushOfferingAdoption(
-          // No diff is read first on this path, so the engine's refusal is where drift shows up.
-          () =>
-            pushConsentingToDrift(
-              (overwriteDrift) =>
-                withSpinner("Applying schema via Docker Compose", () =>
-                  pushSchemaDocker(cwd, config, { overwriteDrift }),
-                ),
-              run,
-              { beforeOverwrite: gate },
-            ),
-          dockerAdoptionSteps(cwd, config),
-          { yes: opts.yes ?? false, retry: "supatype push" },
-        )
+        await pushDocker(cwd, config, run)
         return
       }
 
@@ -149,6 +134,33 @@ export function registerPush(program: Command): void {
 }
 
 const OVERWRITE_DRIFT: FeatureNeed = { feature: "overwrite_drift", flag: "--overwrite-drift" }
+
+/**
+ * `supatype push` on a docker project with no local control plane. No diff is read first on this
+ * path, so the engine's refusals are where drift, unmanaged tables and lost data show up, and each
+ * is asked about here. The push used to be forced, so a change that dropped a column applied with
+ * no question asked; now it needs a yes in a terminal, or `--yes`.
+ */
+async function pushDocker(cwd: string, config: SupatypeProjectConfig, run: PushRun): Promise<void> {
+  const { describeDockerDestruction, dockerAdoptionSteps, pushSchemaDocker, requireDockerFeatures } =
+    await import("../dev-compose.js")
+  const gate = () => requireDockerFeatures(cwd, config, [OVERWRITE_DRIFT])
+  if (run.overwriteDrift) await gate()
+  const applying = (overwriteDrift: boolean) =>
+    pushConsentingToDestructive(
+      (force) =>
+        withSpinner("Applying schema via Docker Compose", () =>
+          pushSchemaDocker(cwd, config, { overwriteDrift, force }),
+        ),
+      { yes: run.yes, apply: "supatype push --yes" },
+      { describe: () => describeDockerDestruction(cwd, config) },
+    )
+  await pushOfferingAdoption(
+    () => pushConsentingToDrift(applying, run, { beforeOverwrite: gate }),
+    dockerAdoptionSteps(cwd, config),
+    { yes: run.yes, retry: "supatype push" },
+  )
+}
 
 /** How this push was asked to treat what needs a person's say. */
 export interface PushRun {
@@ -394,19 +406,14 @@ async function generateTypesLocal(ast: unknown, config: SupatypeProjectConfig): 
     )
   }
 
-  if (!config.output?.types && !config.output?.client) return
   // The CLI writes these, it does not ask the engine to. Passing types_path and client_path and
   // reading only `message` meant the generated TypeScript was printed to the terminal and no file
-  // was ever created, so `push` reported success and produced nothing.
-  const written = await withSpinner("Generating types", async () => {
-    const messages = await writeGeneratedTypes({
-      cwd,
-      ast,
-      typesPath: config.output?.types,
-      clientPath: config.output?.client,
-    })
-    return messages
-  })
+  // was ever created, so `push` reported success and produced nothing. Written at the default
+  // paths when `output` is not set: a client left describing the old schema compiles against
+  // columns that no longer exist.
+  const written = await withSpinner("Generating types", () =>
+    writeGeneratedTypes({ cwd, ast, ...projectOutputPaths(config.output) }),
+  )
   for (const message of written) info(message)
 }
 

@@ -270,6 +270,14 @@ describe("endpointToArgs() for /push", () => {
       "--overwrite-drift",
     )
   })
+
+  it("is never interactive, forced or not: the binary's stdin is a pipe nobody writes to", () => {
+    // Unforced, the binary asked "Continue and apply these changes?" on that pipe, read nothing,
+    // and failed with "Aborted" instead of the refusal the CLI asks the person about.
+    expect(endpointToArgs("/push", { database_url: "postgres://x" }, "req.json")).toContain("--non-interactive")
+    expect(endpointToArgs("/push", { database_url: "postgres://x" }, "req.json")).not.toContain("--force")
+    expect(endpointToArgs("/push", body, "req.json")).toEqual(expect.arrayContaining(["--force", "--non-interactive"]))
+  })
 })
 
 describe("--overwrite-drift on every push path", () => {
@@ -322,5 +330,16 @@ describe("--overwrite-drift on every push path", () => {
     )
     expect(refusal).toContain("policy posts.posts_select")
     expect(refusal).toContain("USING (false)")
+  })
+})
+
+describe("the compose push and --force", () => {
+  it("never forces unless the push was told to, so the engine refuses a change that drops data", async () => {
+    const { composeEnginePushArgs } = await import("../src/dev-compose.js")
+    expect(composeEnginePushArgs("postgres://db", null)).not.toContain("--force")
+    expect(composeEnginePushArgs("postgres://db", null, { force: false })).not.toContain("--force")
+    expect(composeEnginePushArgs("postgres://db", null, { force: true })).toContain("--force")
+    // The engine in a container has no terminal to ask on, whichever way the push goes.
+    expect(composeEnginePushArgs("postgres://db", null)).toContain("--non-interactive")
   })
 })

@@ -79,12 +79,25 @@ describe("an engine refusal on the first attempt", () => {
     expect(outcome).toMatchObject({ kind: "refused", reason: "unmanaged-tables" })
   })
 
-  it("treats any other engine error as a refusal too", async () => {
+  it("names a change that would drop data as its own refusal, so dev can keep running", async () => {
     const s = steps([DESTRUCTIVE, DESTRUCTIVE, DESTRUCTIVE])
 
     const outcome = await pushInitialSchema(s)
 
-    expect(outcome).toEqual({ kind: "refused", reason: "engine", message: DESTRUCTIVE })
+    expect(outcome).toEqual({ kind: "refused", reason: "destructive", message: DESTRUCTIVE })
+    expect(s.push).toHaveBeenCalledTimes(1)
+    expect(s.recoverDatabase).not.toHaveBeenCalled()
+    // A refusal the person was told about is not a failure to diagnose from the database logs.
+    expect(s.dumpLogs).not.toHaveBeenCalled()
+  })
+
+  it("treats any other engine error as a refusal too", async () => {
+    const other = "Error: relation \"orders\" has no column \"total\""
+    const s = steps([other, other, other])
+
+    const outcome = await pushInitialSchema(s)
+
+    expect(outcome).toEqual({ kind: "refused", reason: "engine", message: other })
     expect(s.push).toHaveBeenCalledTimes(1)
     expect(s.recoverDatabase).not.toHaveBeenCalled()
   })
