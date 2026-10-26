@@ -2,11 +2,14 @@ import { existsSync, readdirSync } from "node:fs"
 import { join } from "node:path"
 import { route, sendJson } from "../http.js"
 import type { RouteHandler } from "../http.js"
+import { assertProject } from "../project.js"
 
 export function registerStatusRoute(
   routes: Array<{ method: string; pattern: RegExp; handler: RouteHandler }>,
 ): void {
   route(routes, "GET", "/projects/:ref/status", async (ctx) => {
+    // Every other route refuses another project's ref; this one used to answer it as its own.
+    assertProject(ctx.params["ref"]!)
     const projectRoot = process.env["SUPATYPE_PROJECT_ROOT"] ?? "/project"
     const functionsRoot = process.env["SUPATYPE_FUNCTIONS_ROOT"] ?? join(projectRoot, "functions")
     const deploymentsDir = process.env["SUPATYPE_DEPLOYMENTS_DIR"] ?? join(projectRoot, ".supatype", "deployments")
@@ -26,7 +29,7 @@ export function registerStatusRoute(
 
     sendJson(ctx.res, 200, {
       data: {
-        projectRef: process.env["SUPATYPE_PROJECT_REF"] ?? ctx.params["ref"],
+        projectRef: ctx.params["ref"],
         environment: "production",
         functions,
         deploymentId,

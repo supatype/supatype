@@ -46,10 +46,11 @@ http_header() {
 }
 
 # dev_started <project dir> - true once `supatype dev` in that project has finished starting. It
-# writes its session lock (.supatype/dev-session.json) only after the stack is up and Kong has been
-# reloaded after every `docker compose up` it ran, the services pinned in .env recreated included.
-# The gateway answers well before that, and a request in flight through Kong during a reload can be
-# dropped, so a suite that starts dev waits for this as well as for the gateway.
+# writes its session lock (.supatype/dev-session.json) only after the stack is up and every service
+# pinned in .env has been recreated. The gateway answers well before that. Kong itself is no longer
+# reloaded during a dev start unless one of its upstreams moved to a new address (the server rebuilt
+# from overrides.server, say), and a reload closes idle keep-alive connections, so a suite that
+# starts dev still waits for this as well as for the gateway.
 dev_started() {
   [[ -f "$1/.supatype/dev-session.json" ]]
 }

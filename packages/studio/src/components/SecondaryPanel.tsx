@@ -9,6 +9,7 @@ import type { AdminConfig } from "../config.js"
 import { cn } from "../lib/utils.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { Button, NAV_RAIL } from "./ui.js"
+import { useInspectorAvailability, type InspectorAvailability } from "../hooks/useInspectorAvailability.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -157,18 +158,39 @@ const STATIC_SECTIONS: Record<string, SectionDef> = {
       },
     ],
   },
-  realtime: {
-    title: "Realtime",
-    groups: [
-      {
-        label: "Coming Soon",
+}
+
+/**
+ * Realtime: the Inspector once this deployment's control plane serves it, "coming soon" until then;
+ * settings are a later release either way.
+ */
+export function buildRealtimeSection(availability: InspectorAvailability): SectionDef {
+  const settings: NavItem = { label: "Settings", href: "/realtime/settings", unavailable: { note: "Realtime settings are coming soon" } }
+  if (availability === "ready") {
+    return {
+      title: "Realtime",
+      groups: [{
         items: [
-          { label: "Inspector", href: "/realtime/inspector", unavailable: { note: "The Realtime Inspector is coming soon" } },
-          { label: "Settings",  href: "/realtime/settings", unavailable: { note: "Realtime settings are coming soon" } },
+          {
+            label: "Inspector",
+            href: "/realtime/channels",
+            activeWhen: (p) => p === "/realtime" || /^\/realtime\/(channels|clients|stream|broadcast)$/.test(p),
+          },
+          settings,
         ],
-      },
-    ],
-  },
+      }],
+    }
+  }
+  return {
+    title: "Realtime",
+    groups: [{
+      label: "Coming Soon",
+      items: [
+        { label: "Inspector", href: "/realtime", unavailable: { note: "The Realtime Inspector is coming soon" } },
+        settings,
+      ],
+    }],
+  }
 }
 
 // ─── Section detection ────────────────────────────────────────────────────────
@@ -268,6 +290,7 @@ export function SecondaryPanel({
   const search = location.search
 
   const sectionId = getSectionId(path)
+  const { availability: realtimeAvailability } = useInspectorAvailability({ enabled: sectionId === "realtime" })
 
   const adminFetch = React.useCallback(
     (adminPath: string, init?: RequestInit) =>
@@ -366,6 +389,8 @@ export function SecondaryPanel({
     }
   } else if (sectionId === "settings") {
     section = buildSettingsSection()
+  } else if (sectionId === "realtime") {
+    section = buildRealtimeSection(realtimeAvailability)
   } else {
     section = STATIC_SECTIONS[sectionId] ?? { title: "", groups: [] }
   }

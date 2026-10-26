@@ -6,6 +6,8 @@ import { registerSchemaRoutes } from "./routes/schema.js"
 import { registerFunctionRoutes } from "./routes/functions.js"
 import { registerDeploymentRoutes } from "./routes/deployments.js"
 import { registerStatusRoute } from "./routes/status.js"
+import { registerRealtimeRoutes } from "./routes/realtime.js"
+import { registerProjectRoute } from "./routes/project.js"
 import { CONTROL_PLANE_SECRET_ENV, controlPlaneSecretFromEnv, secretCheck } from "./auth.js"
 
 const routes: Array<{ method: string; pattern: RegExp; handler: RouteHandler }> = []
@@ -14,6 +16,8 @@ registerSchemaRoutes(routes)
 registerFunctionRoutes(routes)
 registerDeploymentRoutes(routes)
 registerStatusRoute(routes)
+registerRealtimeRoutes(routes)
+registerProjectRoute(routes)
 
 /**
  * The control plane's HTTP server, answering only requests that present `secret`.

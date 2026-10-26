@@ -1,6 +1,24 @@
 import type { WebSocket } from "ws"
 import type { JwtClaims } from "./auth.js"
 import type { Subscription, PresenceEntry } from "./types.js"
+import {
+  summariseChannels,
+  summariseConnection,
+  type ChannelSummary,
+  type ConnectionSummary,
+} from "./channel-summary.js"
+
+/** The SDK and version a client named on its socket URL (`?client=supatype-js/0.4.1`). */
+export interface ClientIdentity {
+  name: string
+  version: string | null
+}
+
+/** What a connection said about itself when it connected, for the inspector. */
+export interface ConnectionMeta {
+  client: ClientIdentity | null
+  userAgent: string | null
+}
 
 /** Represents a connected WebSocket client. */
 export interface ConnectedClient {
@@ -10,6 +28,44 @@ export interface ConnectedClient {
   presence: Map<string, PresenceEntry>
   /** Project ref this client belongs to (multi-tenant mode). */
   projectRef: string | null
+  /** When the socket connected, in epoch milliseconds. */
+  connectedAt: number
+  /** When the client last sent a frame, in epoch milliseconds, or null. */
+  lastMessageAt: number | null
+  client: ClientIdentity | null
+  userAgent: string | null
+}
+
+const CLIENT_NAME_MAX = 64
+const CLIENT_VERSION_MAX = 32
+const USER_AGENT_MAX = 256
+
+/**
+ * `name/version` from the socket URL's `client` parameter, or a bare name, bounded.
+ *
+ * Client-supplied, so it is cut to a length that cannot bloat a listing, and it is only ever shown,
+ * never trusted.
+ */
+export function parseClientParam(raw: string | null): ClientIdentity | null {
+  const value = raw?.trim() ?? ""
+  if (value === "") return null
+  const slash = value.indexOf("/")
+  const name = (slash === -1 ? value : value.slice(0, slash)).slice(0, CLIENT_NAME_MAX)
+  const version = slash === -1 ? "" : value.slice(slash + 1).slice(0, CLIENT_VERSION_MAX)
+  return { name, version: version === "" ? null : version }
+}
+
+/** The user agent a socket connected with, bounded like the client name, or null. */
+export function boundedUserAgent(raw: string | undefined): string | null {
+  const value = raw?.trim() ?? ""
+  return value === "" ? null : value.slice(0, USER_AGENT_MAX)
+}
+
+/** One page of connections for the inspector. */
+export interface ConnectionPage {
+  total: number
+  connections: ConnectionSummary[]
+  next: string | null
 }
 
 /** A message that reaches a channel's other members rather than reading from the database. */
@@ -60,12 +116,90 @@ export class ChannelManager {
   /** All connected clients, keyed by a unique connection ID. */
   private clients = new Map<string, ConnectedClient>()
   private nextId = 0
+  /** When each channel last carried an event, per project, in epoch milliseconds. */
+  private lastEvents = new Map<string | null, Map<string, number>>()
 
   /** Register a new WebSocket connection. Returns a connection ID. */
-  addClient(ws: WebSocket, claims: JwtClaims | null, projectRef?: string | null): string {
+  addClient(
+    ws: WebSocket,
+    claims: JwtClaims | null,
+    projectRef?: string | null,
+    meta: ConnectionMeta = { client: null, userAgent: null },
+  ): string {
     const id = String(++this.nextId)
-    this.clients.set(id, { ws, claims, subscriptions: new Map(), presence: new Map(), projectRef: projectRef ?? null })
+    this.clients.set(id, {
+      ws,
+      claims,
+      subscriptions: new Map(),
+      presence: new Map(),
+      projectRef: projectRef ?? null,
+      connectedAt: Date.now(),
+      lastMessageAt: null,
+      client: meta.client,
+      userAgent: meta.userAgent,
+    })
     return id
+  }
+
+  /** Note that a client just sent a frame. */
+  noteMessage(id: string): void {
+    const client = this.clients.get(id)
+    if (client) client.lastMessageAt = Date.now()
+  }
+
+  /** Note that `channel` just carried a change, a broadcast or a presence event. */
+  touchChannel(channel: string, projectRef: string | null): void {
+    let events = this.lastEvents.get(projectRef)
+    if (!events) {
+      events = new Map()
+      this.lastEvents.set(projectRef, events)
+    }
+    events.set(channel, Date.now())
+  }
+
+  /**
+   * Every channel with a live subscription in `projectRef`, busiest first, at most 1000.
+   *
+   * A channel exists only as the subscriptions held under its name, so this is the sum of every
+   * connection's. Last-event times for channels nobody holds any more are dropped here, which is
+   * what keeps that map from growing with every name ever used.
+   */
+  listChannels(projectRef: string | null): { channels: ChannelSummary[]; truncated: boolean } {
+    const events = this.lastEvents.get(projectRef) ?? new Map<string, number>()
+    const listed = summariseChannels(this.clientsOf(projectRef), events)
+    for (const name of events.keys()) {
+      if (!listed.names.has(name)) events.delete(name)
+    }
+    return { channels: listed.channels, truncated: listed.truncated }
+  }
+
+  /** Connections in `projectRef`, oldest first, `limit` at a time after the id `after`. */
+  listConnections(opts: { limit: number; after: string | null; projectRef: string | null }): ConnectionPage {
+    const all = [...this.clientsOf(opts.projectRef)].sort((a, b) => Number(a[0]) - Number(b[0]))
+    const after = opts.after === null ? -Infinity : Number(opts.after)
+    const remaining = all.filter(([id]) => Number(id) > after)
+    const page = remaining.slice(0, opts.limit)
+    const more = remaining.length > page.length
+    return {
+      total: all.length,
+      connections: page.map(([id, client]) => summariseConnection(id, client)),
+      next: more ? (page[page.length - 1]?.[0] ?? null) : null,
+    }
+  }
+
+  /** Connections in `projectRef` (single-tenant: every connection, all of which carry null). */
+  connectionCount(projectRef: string | null): number {
+    let count = 0
+    for (const client of this.clients.values()) {
+      if (client.projectRef === projectRef) count++
+    }
+    return count
+  }
+
+  private *clientsOf(projectRef: string | null): Generator<[string, ConnectedClient]> {
+    for (const entry of this.clients) {
+      if (entry[1].projectRef === projectRef) yield entry
+    }
   }
 
   /** Remove a client and clean up subscriptions. */
@@ -89,7 +223,7 @@ export class ChannelManager {
   subscribe(clientId: string, sub: Subscription): void {
     const client = this.clients.get(clientId)
     if (client) {
-      client.subscriptions.set(sub.channel, sub)
+      client.subscriptions.set(sub.channel, { ...sub, createdAt: sub.createdAt ?? Date.now() })
     }
   }
 
@@ -213,11 +347,7 @@ export class ChannelManager {
 
   /** Count connections for a specific project (multi-tenant mode). */
   getProjectConnectionCount(projectRef: string): number {
-    let count = 0
-    for (const client of this.clients.values()) {
-      if (client.projectRef === projectRef) count++
-    }
-    return count
+    return this.connectionCount(projectRef)
   }
 
   /** Set the project ref for a client. */

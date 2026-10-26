@@ -18,6 +18,38 @@ function subcommand() {
 
 const cmd = subcommand()
 
+/**
+ * CL3: a migration with no sources to return, or a rollback with nothing to undo. `MOCK_ENGINE_REFUSE`
+ * names the reason; the engine prints it as a JSON line on stdout, with a sentence on stderr worded
+ * unlike the one callers used to match, so a caller that still matched words would miss it.
+ * `MOCK_ENGINE_WORDS_ONLY=1` is an engine from before the reasons: the old sentence on stderr alone.
+ */
+const nothingToReturn = {
+  no_schema_snapshot: {
+    now: "Migration 20240101_test recorded no schema sources to return",
+    before: "Migration 20240101_test has no schema snapshot",
+  },
+  no_applied_migration: {
+    now: "There is no applied migration to undo",
+    before: "no_applied_migration: No applied migration to roll back",
+  },
+  no_rollback_sql: {
+    now: "The latest migration recorded no undo SQL",
+    before: "no_rollback_sql: Migration has no rollback SQL (metadata-only push?)",
+  },
+}
+const refusal = nothingToReturn[process.env["MOCK_ENGINE_REFUSE"] ?? ""]
+if (refusal !== undefined) {
+  if (process.env["MOCK_ENGINE_WORDS_ONLY"] === "1") {
+    console.error(`Error: ${refusal.before}`)
+  } else {
+    const reason = process.env["MOCK_ENGINE_REFUSE"]
+    console.log(JSON.stringify({ status: "refused", reason, message: refusal.now }))
+    console.error(`Error: ${refusal.now}`)
+  }
+  process.exit(1)
+}
+
 if (cmd === "migrations" && args.includes("--name")) {
   const nameIdx = args.indexOf("--name")
   const name = args[nameIdx + 1] ?? "unknown"

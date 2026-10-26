@@ -22,8 +22,57 @@ Local `supatype dev` does **not** use this image; the CLI starts an in-process D
 | `SUPATYPE_INTERNAL_URL` | no | Same as `SUPATYPE_URL` in Compose (`http://kong:8000`) |
 | `SUPATYPE_ANON_KEY`, `SUPATYPE_SERVICE_ROLE_KEY` | no | Injected per invocation when set |
 | `SITE_URL` | no | Public site URL for browser-facing links (not the same as `SUPATYPE_URL`) |
+| `SUPATYPE_DB_URL` | no | Handed to every function as `ctx.dbUrl`. Off by default; Compose sets it from the project's `SUPATYPE_FUNCTIONS_DB_URL`. See [Direct database access](#direct-database-access-ctxdburl) |
 
 Per-function env files: `{root}/.env.{name}.local`; shared: `{root}/.env.local`.
+
+## Direct database access (`ctx.dbUrl`)
+
+A function can be given a raw Postgres connection URL as `ctx.dbUrl`. It is **off by default**: the
+field is undefined unless the operator sets `SUPATYPE_FUNCTIONS_DB_URL` in the project's `.env`.
+Compose passes that value to this worker as `SUPATYPE_DB_URL`, and when the URL names the stack's
+`db` service the worker also joins the `functions-db` network so it can reach Postgres. It is a
+separate variable from the project's `DATABASE_URL` on purpose, so handing functions a database
+connection is a decision rather than a default.
+
+What it is not: a request through the API. It connects as whatever role the URL names, so it
+**bypasses the schema's row rules and field masking**. With the admin URL
+(`supatype_admin`, the one in `DATABASE_URL`) a function reads and writes every row and every
+column of every table, whatever the schema says. Every function in the project receives it, and a
+function is a public endpoint.
+
+Use a least-privilege role granted only what the functions need, never the admin URL:
+
+```sql
+-- Run once as the admin, e.g. psql "$DATABASE_URL"
+CREATE ROLE functions_reader LOGIN PASSWORD 'a-long-random-password';
+GRANT USAGE ON SCHEMA public TO functions_reader;
+GRANT SELECT ON public.orders TO functions_reader;
+```
+
+```bash
+# .env (the host is the compose service name, `db`)
+SUPATYPE_FUNCTIONS_DB_URL=postgresql://functions_reader:a-long-random-password@db:5432/my-project
+```
+
+Then re-render and restart the stack (`supatype self-host compose render` and `up -d`, or restart
+`supatype dev`). In the function, treat the URL as a credential: never return it or log it.
+
+```ts
+import postgres from "npm:postgres@3.4.5"
+import type { FunctionContext } from "../_shared/context.ts"
+
+export default async function handler(_req: Request, ctx: FunctionContext): Promise<Response> {
+  if (ctx.dbUrl === undefined) return new Response("No database URL configured", { status: 501 })
+  const sql = postgres(ctx.dbUrl, { max: 1 })
+  try {
+    const [row] = await sql`select count(*)::int as orders from public.orders`
+    return Response.json(row)
+  } finally {
+    await sql.end()
+  }
+}
+```
 
 ## Build
 

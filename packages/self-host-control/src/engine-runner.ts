@@ -288,18 +288,22 @@ export function resetEngineCapabilities(): void {
   capabilities.answers.clear()
 }
 
+/** A refusal the engine named: its reason, its sentence, and whatever else it names. */
+export type EngineRefusal = { reason: string; message: string } & Record<string, unknown>
+
 /**
- * A refusal the caller can act on, as the engine's own HTTP server answers it (409 with `reason`),
- * or undefined for any other failure.
+ * Refusals an engine from before CL3 reported only in words, by the reason a current engine names
+ * each with. A rollback's sentence already led with its reason; a missing snapshot's did not.
  */
-export function engineRefusal(
-  err: unknown,
-): ({ reason: string; message: string } & Record<string, unknown>) | undefined {
-  if (!(err instanceof EngineRunError)) return undefined
-  // What anyhow prints after the log lines: `Error: <the refusal, possibly several lines>`.
-  const at = err.stderr.indexOf("Error: ")
-  const message = at === -1 ? undefined : err.stderr.slice(at + "Error: ".length).trim()
-  for (const line of err.stdout.split(/\r?\n/)) {
+const REFUSALS_BY_WORDING: ReadonlyArray<{ reason: string; said: RegExp }> = [
+  { reason: "no_schema_snapshot", said: /has no schema snapshot/ },
+  { reason: "no_applied_migration", said: /^no_applied_migration: /m },
+  { reason: "no_rollback_sql", said: /^no_rollback_sql: /m },
+]
+
+/** The JSON refusal line on the engine's stdout, with `message` as its sentence. */
+function refusalOnStdout(stdout: string, message: string): EngineRefusal | undefined {
+  for (const line of stdout.split(/\r?\n/)) {
     const candidate = line.trim()
     if (!candidate.startsWith("{")) continue
     try {
@@ -307,16 +311,36 @@ export function engineRefusal(
       // Whatever the refusal names (`tables`, `objects`, a rebaseline's `unseen` and `gone`) is
       // passed on as the engine sent it, so a refusal added later needs no change here.
       const { status, reason, message: _said, ...details } = parsed
-      if (status === "refused" && typeof reason === "string") {
-        return { ...details, reason, message: message ?? err.message }
-      }
+      if (status === "refused" && typeof reason === "string") return { ...details, reason, message }
     } catch {
       /* not this line */
     }
   }
-  // The wording from before the engine named the refusal on stdout, read as the CLI reads it.
-  const busy = engineBusySentence(err.stderr)
-  return busy === undefined ? undefined : { reason: ENGINE_BUSY, message: busy }
+  return undefined
+}
+
+/** A refusal an engine from before the reasons reported only on stderr, read by its wording. */
+function refusalByWording(stderr: string, message: string | undefined): EngineRefusal | undefined {
+  // Read as the CLI reads it.
+  const busy = engineBusySentence(stderr)
+  if (busy !== undefined) return { reason: ENGINE_BUSY, message: busy }
+  // Only the refusal's own sentence, never the log lines before it.
+  if (message === undefined) return undefined
+  const known = REFUSALS_BY_WORDING.find(({ said }) => said.test(message))
+  return known === undefined ? undefined : { reason: known.reason, message }
+}
+
+/**
+ * A refusal the caller can act on, as the engine's own HTTP server answers it (409 with `reason`),
+ * or undefined for any other failure. By the reason the engine prints, and failing that by the
+ * wording of an engine from before it printed one.
+ */
+export function engineRefusal(err: unknown): EngineRefusal | undefined {
+  if (!(err instanceof EngineRunError)) return undefined
+  // What anyhow prints after the log lines: `Error: <the refusal, possibly several lines>`.
+  const at = err.stderr.indexOf("Error: ")
+  const message = at === -1 ? undefined : err.stderr.slice(at + "Error: ".length).trim()
+  return refusalOnStdout(err.stdout, message ?? err.message) ?? refusalByWording(err.stderr, message)
 }
 
 export function databaseUrlFromEnv(): string {

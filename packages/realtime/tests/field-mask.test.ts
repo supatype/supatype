@@ -3,11 +3,13 @@ import {
   CatalogMismatch,
   filterIsMaskSafe,
   maskRecord,
+  maskRecordWithReport,
   parseMaskLabel,
   parseRecordedColumns,
   parsePredicateRef,
   quotePredicateRef,
   recordedReadMasks,
+  redactRestricted,
 } from "../src/field-mask.js"
 
 // A masked column reaching a subscriber is the gap this module exists to close: logical
@@ -208,5 +210,58 @@ describe("recordedReadMasks", () => {
 
   it("masks a column whose predicate does not parse, unconditionally", () => {
     expect(recordedReadMasks(recorded, "public", "appraisal").get("garbled")).toBeNull()
+  })
+})
+
+describe("maskRecordWithReport", () => {
+  const verdicts = new Map<string, boolean | null>([["salary", false], ["ssn", true]])
+
+  it("reports each column it nulled", () => {
+    const { record, redacted } = maskRecordWithReport(
+      { id: 1, salary: 100, ssn: "123" },
+      ["salary", "ssn"],
+      verdicts,
+    )
+    expect(record).toEqual({ id: 1, salary: null, ssn: "123" })
+    expect(redacted).toEqual(["salary"])
+  })
+
+  it("does not report a column the record lacks, or one the verdict allows", () => {
+    const { redacted } = maskRecordWithReport({ id: 1, ssn: "123" }, ["salary", "ssn"], verdicts)
+    expect(redacted).toEqual([])
+  })
+
+  it("reports nothing for no record", () => {
+    expect(maskRecordWithReport(null, ["salary"], verdicts)).toEqual({ record: null, redacted: [] })
+  })
+
+  it("leaves maskRecord's output exactly as it was", () => {
+    const record = { id: 1, salary: 100 }
+    expect(maskRecord(record, ["salary"], verdicts)).toEqual(
+      maskRecordWithReport(record, ["salary"], verdicts).record,
+    )
+  })
+})
+
+describe("redactRestricted", () => {
+  it("nulls every restricted column, whatever any subscriber's verdict was", () => {
+    const { oldRecord, newRecord, redacted } = redactRestricted(
+      { old: { id: 1, salary: 5 }, new: { id: 1, salary: 6, title: "t" } },
+      new Set(["salary", "ssn"]),
+    )
+    expect(newRecord).toEqual({ id: 1, salary: null, title: "t" })
+    expect(oldRecord).toEqual({ id: 1, salary: null })
+    expect(redacted).toEqual({ old: ["salary"], new: ["salary"] })
+  })
+
+  it("redacts every column when the catalog is unknown", () => {
+    const { newRecord, redacted } = redactRestricted({ old: null, new: { id: 1, title: "t" } }, new Set(["*"]))
+    expect(newRecord).toEqual({ id: null, title: null })
+    expect(redacted.new).toEqual(["id", "title"])
+  })
+
+  it("lists a column a subscriber already received masked as redacted too", () => {
+    const { redacted } = redactRestricted({ old: null, new: { id: 1, salary: null } }, new Set(["salary"]))
+    expect(redacted.new).toEqual(["salary"])
   })
 })

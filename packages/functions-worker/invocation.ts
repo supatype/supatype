@@ -7,8 +7,8 @@ import { AsyncLocalStorage } from "node:async_hooks"
  *
  * The worker used to deliver this through `Deno.env`: it set `SUPATYPE_SERVICE_ROLE_KEY` and the
  * rest before calling the handler and restored them afterwards. `Deno.env` is process-global, so
- * two concurrent invocations would read each other's values — including a service-role key granted
- * to one route and not the other. The defence was a lock held across the *whole* handler, so the
+ * two concurrent invocations would read each other's values, a service-role key granted to one
+ * route and not the other among them. The defence was a lock held across the *whole* handler, so the
  * worker executed exactly one invocation at a time.
  *
  * That is a throughput property nobody chose: a function waiting two seconds on a third-party API
@@ -42,6 +42,16 @@ export interface FunctionContext {
    * not granted it cannot reach it by reading `Deno.env` either.
    */
   readonly serviceRoleKey?: string
+  /**
+   * A raw Postgres connection URL. Off by default: present only when the operator sets
+   * `SUPATYPE_FUNCTIONS_DB_URL`, which compose hands this worker as `SUPATYPE_DB_URL` (and joins it
+   * to the `functions-db` network when the URL names the stack's `db`).
+   *
+   * It connects as whatever role the URL names and is not a request through the API, so row rules
+   * and field masking do not apply to it. The operator should give it a least-privilege role
+   * granted only what the functions need, never the admin URL. A credential: never returned or
+   * logged.
+   */
   readonly dbUrl?: string
   readonly region: string
   /** Values from `.env` and `.env.<function>.local`, which are per-route rather than per-call. */

@@ -42,7 +42,7 @@ export function readBody(req: IncomingMessage): Promise<unknown> {
       try {
         resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")))
       } catch {
-        reject(new Error("Invalid JSON body"))
+        reject(badRequest("Invalid JSON body"))
       }
     })
     req.on("error", reject)

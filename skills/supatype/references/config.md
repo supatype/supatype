@@ -87,6 +87,9 @@ SUPATYPE_CONTROL_PLANE_SECRET= # generated: only the server and the control plan
 ANON_KEY=           # from: supatype keys
 SERVICE_ROLE_KEY=   # from: supatype keys; also the token for the self-host /platform/v1 API
 SITE_URL=http://localhost:18473
+# Optional, off by default: a raw database URL handed to every function as ctx.dbUrl. It bypasses
+# row rules and field masking, so use a least-privilege role, never the admin URL (self-host.md).
+# SUPATYPE_FUNCTIONS_DB_URL=postgresql://functions_reader:<password>@db:5432/my-project
 VITE_SUPATYPE_ANON_KEY=   # copy from ANON_KEY for Vite builds / dev
 
 # Written by supatype dev (docker):

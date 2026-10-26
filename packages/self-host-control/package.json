@@ -11,10 +11,12 @@
     "test": "node --import tsx/esm --test tests/*.test.ts"
   },
   "dependencies": {
-    "@supatype/shared": "workspace:*"
+    "@supatype/shared": "workspace:*",
+    "pg": "^8.13.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/pg": "^8",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
   }

@@ -19,7 +19,7 @@ import { buildKongDeclarative } from "./kong-config.js"
 import { keyspaceInPostgres } from "./cache-provider.js"
 import { STUDIO_DEV_PORT } from "./studio-dev-server.js"
 import { readEnvFile, readEnvValue } from "./env-file.js"
-import { reloadKong } from "./compose-kong.js"
+import { upKeepingKongCurrent } from "./compose-kong.js"
 import { CONTROL_PLANE_SECRET_ENV, ensureControlPlaneSecret } from "./local-secrets.js"
 import { fieldMaskingTierFromProject, type FieldMaskingTier } from "./field-masking-tier.js"
 import { readRecordedTier } from "./recorded-field-masking-tier.js"
@@ -644,8 +644,13 @@ ${dbDependencyClause}      seaweedfs:
     image: \${SUPATYPE_REALTIME_IMAGE:-supatype/realtime:latest}
     expose:
       - "4000"
+      - "4001"
     environment:
       PORT: "4000"
+      # The Studio inspector's admin API, for the control plane only: the gateway routes every
+      # path under /realtime/v1 to 4000, so this is a port nothing routes to, never published,
+      # and it answers only the service-role key.
+      ADMIN_PORT: "4001"
       DATABASE_URL: "${ownerUrl}"
       JWT_SECRET: \${JWT_SECRET:?JWT_SECRET is missing from .env}
       SLOT_NAME: supatype_realtime
@@ -665,6 +670,8 @@ ${dbDependency}`
 `
     : ""
   const realtimeServerEnv = realtime ? "      SUPATYPE_REALTIME_URL: http://realtime:4000" : ""
+  // Absent when realtime is off, which is how the control plane knows to answer the inspector 501.
+  const realtimeControlPlaneEnv = realtime ? "      REALTIME_ADMIN_URL: http://realtime:4001\n" : ""
 
   // pg_keyspace registers background workers and requests shared memory at
   // postmaster start, so it has to be in `shared_preload_libraries` -- there is
@@ -887,7 +894,9 @@ ${realtimeBlock}
       # Every request must present this, and only the server is given it. The functions worker runs
       # user code and is kept off this network (SC3); the secret stays as defence in depth.
       ${CONTROL_PLANE_SECRET_REQUIRED}
-${dbDependency}
+      # What the control plane presents to realtime's admin API for the Studio inspector.
+      SUPATYPE_SERVICE_ROLE_KEY: \${SERVICE_ROLE_KEY:?SERVICE_ROLE_KEY is missing from .env}
+${realtimeControlPlaneEnv}${dbDependency}
   server:
     image: \${SUPATYPE_SERVER_IMAGE:-\${SUPATYPE_AUTH_IMAGE:-supatype/server:latest}}
     # host.docker.internal is a Docker Desktop name. On Linux it does not resolve unless it is
@@ -1327,17 +1336,19 @@ export function runDockerCompose(
     ? { ...process.env, COMPOSE_PROGRESS: "quiet" }
     : process.env
   const stdio = options?.quiet ? "pipe" : "inherit"
-  const result = spawnSync("docker", composeArgs, {
-    stdio,
-    cwd: projectRoot,
-    env,
-    ...(options?.quiet ? { encoding: "utf8" as const } : {}),
-  })
-  // Whatever `up` created or recreated keeps its name but not its address, and Kong would go on
-  // sending to the old one (EXT-N1), so a running Kong looks its upstreams up again.
-  if (result.status === 0 && args[0] === "up" && composeProject !== undefined) {
-    reloadKong(projectRoot, { project: composeProject, composePath })
-  }
+  const runCompose = () =>
+    spawnSync("docker", composeArgs, {
+      stdio,
+      cwd: projectRoot,
+      env,
+      ...(options?.quiet ? { encoding: "utf8" as const } : {}),
+    })
+  // Whatever `up` created or recreated keeps its name but not its address, and a Kong that was
+  // already running would go on sending to the old one (EXT-N1), so that Kong is reloaded.
+  const result =
+    args[0] === "up" && composeProject !== undefined
+      ? upKeepingKongCurrent(projectRoot, { project: composeProject, composePath }, runCompose)
+      : runCompose()
   if (options?.quiet && result.status !== 0) {
     const detail = [result.stderr, result.stdout]
       .filter((s): s is string => typeof s === "string" && s.trim() !== "")

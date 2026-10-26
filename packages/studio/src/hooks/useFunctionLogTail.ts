@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react"
+import { parseSseEvents, sseJson } from "../lib/sse-reader.js"
 
 /** One structured line as the worker writes it. */
 export interface FunctionLogLine {
@@ -32,33 +33,21 @@ export interface FunctionLogTail {
  * be cut anywhere, and a parser that assumes one chunk is one event drops lines under load and only
  * under load.
  *
- * `retry:` and comment lines are part of the protocol rather than content, and a line that is not
- * JSON is skipped rather than allowed to end the tail.
- *
- * Those two guards overlap for any real stream: a non-`data:` field fails to parse anyway, because
- * slicing five characters off it does not leave JSON. The prefix check is kept because it states
- * the intent, not because the `catch` could not cover it.
+ * `retry:` and comment lines are part of the protocol rather than content (the shared reader in
+ * `lib/sse-reader.ts` drops them), and a line that is not JSON is skipped rather than allowed to end
+ * the tail.
  */
 export function parseTailEvents(
   buffered: string,
   functionName: string,
 ): { lines: FunctionLogLine[]; rest: string } {
-  const events = buffered.split("\n\n")
-  const rest = events.pop() ?? ""
+  const { events, rest } = parseSseEvents(buffered)
   const lines: FunctionLogLine[] = []
-
   for (const event of events) {
-    for (const raw of event.split("\n")) {
-      if (!raw.startsWith("data:")) continue
-      try {
-        const line = JSON.parse(raw.slice(5).trim()) as FunctionLogLine
-        // The stream carries every function's lines, and the worker's own. This tab is about one
-        // function, so the rest would read as somebody else's output.
-        if (line.function === functionName) lines.push(line)
-      } catch {
-        // A truncated or non-JSON line is not worth taking the tail down for.
-      }
-    }
+    const line = sseJson<FunctionLogLine>(event)
+    // The stream carries every function's lines, and the worker's own. This tab is about one
+    // function, so the rest would read as somebody else's output.
+    if (line !== null && line.function === functionName) lines.push(line)
   }
   return { lines, rest }
 }
