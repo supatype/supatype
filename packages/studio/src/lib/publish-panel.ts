@@ -28,6 +28,8 @@ export interface PanelInput {
    * publishes as a whole, or the editor shows a language the record does not publish under.
    */
   editing: Language | null
+  /** Each language's name by its code, for the note's list of those still to publish. */
+  labels: Readonly<Record<string, string>>
 }
 
 export interface PanelMenu {
@@ -126,11 +128,26 @@ function primaryLabel(scope: Scope, language: Language | null): string {
   return language === null ? act : `${act} in ${language.label}`
 }
 
-function noteOf(scope: Scope): string | null {
-  if (scope.status === "draft") return "Not on the live site yet."
+/**
+ * The line under the controls, about the language on screen and named for it. When that language
+ * has nothing to publish it also names the others that do, since the greyed main button and "no
+ * changes" read as if nothing were left anywhere while another language was still a draft.
+ */
+function noteOf(input: PanelInput, scope: Scope): string | null {
+  const name = input.editing?.label
+  if (scope.status === "draft") return name === undefined ? "Not on the live site yet." : `Not on the live site in ${name} yet.`
   if (scope.status === "scheduled") return "Change or cancel the schedule from the menu."
   if (scope.status === "partial") return null
-  return scope.changed ? "The live site still shows the published version." : "Live, no changes to publish."
+  if (scope.changed) return `The live site still shows the published version${name === undefined ? "" : ` in ${name}`}.`
+  if (name === undefined) return "Live, no changes to publish."
+  const waiting = stillToPublish(input)
+  return `Live in ${name}, no changes to publish.${waiting.length === 0 ? "" : ` Still to publish: ${waiting.join(", ")}.`}`
+}
+
+/** The names of the languages other than the one on screen that are not live as saved. */
+function stillToPublish(input: PanelInput): string[] {
+  const others = input.locales.filter((l) => l !== input.editing?.code && (input.state?.locales[l] ?? "absent") !== "live")
+  return others.map((l) => input.labels[l] ?? l)
 }
 
 /** The menu: per-language acts on `onScreen`, the rest on the whole record. */
@@ -162,7 +179,7 @@ export function describePanel(input: PanelInput): PanelModel {
     language,
     changed: shown.changed,
     primary: { label: primaryLabel(shown, language), disabled: !shown.publishable },
-    note: noteOf(shown),
+    note: noteOf(input, shown),
     viewChanges: shown.status === "published" && shown.states.includes("pending"),
     localeRows,
     rowPublish: localeRows ? input.locales.filter((l, i) => whole.states[i] !== "live" && l !== language?.code) : [],

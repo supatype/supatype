@@ -119,8 +119,9 @@ function panelOf({ title, creating, dirty, state, locale }: PanelSource, locales
   const labelOf = (code: string): string => locale.locales.find((l) => l.code === code)?.label ?? code
   const current = locale.currentLocale
   const editing = locales.includes(current) ? { code: current, label: labelOf(current) } : null
+  const labels = Object.fromEntries(locales.map((code) => [code, labelOf(code)]))
   return {
-    panel: describePanel({ locales, state, dirty, creating, editing }),
+    panel: describePanel({ locales, state, dirty, creating, editing, labels }),
     title,
     locales: locales.map((code) => ({ code, label: labelOf(code), state: state?.locales[code] ?? "absent" })),
   }
