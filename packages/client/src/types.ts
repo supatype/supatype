@@ -426,7 +426,8 @@ export interface SupatypeClientConfig {
    */
   previewCode?: string | undefined
   /**
-   * Extra headers merged into every request (e.g. Studio `X-Supatype-Environment`).
+   * Extra headers merged into every request (e.g. Studio `X-Supatype-Environment`). A function is
+   * read on every request, for a header that changes for the life of the client.
    */
-  headers?: Record<string, string> | undefined
+  headers?: Record<string, string> | (() => Record<string, string>) | undefined
 }

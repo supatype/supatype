@@ -17,7 +17,6 @@ import {
   mapSeedRow,
   rowsWrittenSummary,
   SeedHistoryView,
-  SEEDS_LIST_SQL,
   type SeedRun,
 } from "../src/views/SeedHistory.js"
 
@@ -260,16 +259,5 @@ describe("reading the ledger row", () => {
   it("summarises what was written, and says nothing when nothing was", () => {
     expect(rowsWrittenSummary({ Organiser: 2, Event: 5 })).toBe("Organiser 2, Event 5")
     expect(rowsWrittenSummary({})).toBe("")
-  })
-})
-
-describe("how it reads the ledger", () => {
-  /** A table, through the proxy, exactly as the migrations screen reads its own. */
-  it("asks for the newest runs first, with no new engine endpoint", () => {
-    expect(SEEDS_LIST_SQL).toContain("_supatype.seeds")
-    expect(SEEDS_LIST_SQL).toContain("ORDER BY applied_at DESC")
-    // Cast, because the column is TIMESTAMPTZ and the proxy would otherwise hand back
-    // whatever its driver decided a timestamp is.
-    expect(SEEDS_LIST_SQL).toContain("applied_at::TEXT")
   })
 })

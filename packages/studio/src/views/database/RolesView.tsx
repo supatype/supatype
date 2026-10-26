@@ -4,20 +4,15 @@ import { useApiQuery } from "../../hooks/useApiQuery.js"
 import { Badge, Card } from "../../components/ui.js"
 import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
-
-const LIST_QUERY = `
-  SELECT rolname, rolsuper, rolinherit, rolcreaterole, rolcreatedb,
-         rolcanlogin, rolreplication, rolbypassrls, rolconnlimit, rolvaliduntil
-  FROM pg_roles
-  WHERE rolname NOT LIKE 'pg_%'
-  ORDER BY rolname
-`
+import { useStudioCapability } from "../../hooks/useStudioCapability.js"
+import { SQL_EDITOR_HREF, sqlEditorOffered } from "../../lib/sql-editor-access.js"
 
 export function RolesView(): React.ReactElement {
   const proxy = useProjectProxy()
+  const capability = useStudioCapability()
 
   const { data: roles, loading, error } = useApiQuery(
-    () => proxy.sql(LIST_QUERY).then((r) => r.rows),
+    () => proxy.metadata("roles").then((r) => r.rows),
     [proxy],
   )
 
@@ -25,12 +20,11 @@ export function RolesView(): React.ReactElement {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold text-foreground">Roles</h1>
-        <a
-          href="/database/sql"
-          className="text-xs text-primary hover:underline"
-        >
-          Manage roles in SQL Runner →
-        </a>
+        {sqlEditorOffered(capability) ? (
+          <a href={SQL_EDITOR_HREF} className="text-xs text-primary hover:underline">
+            Manage roles in SQL Runner →
+          </a>
+        ) : null}
       </div>
 
       {error && <ErrorBanner message={error} />}

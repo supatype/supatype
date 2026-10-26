@@ -7,7 +7,6 @@ import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 import { SlidePanel } from "../../components/SlidePanel.js"
 import { CONSTRAINT_KINDS, isOwned, useOwnedObjects } from "../../lib/owned-objects.js"
-import { sqlText } from "../../lib/sql.js"
 
 /**
  * Every constraint the database enforces, whether or not Supatype declared it.
@@ -20,20 +19,6 @@ import { sqlText } from "../../lib/sql.js"
  * `NOT NULL` is excluded: PG18 records it here as `contype = 'n'`, but it is a column property that
  * the table view already shows, and listing it once per nullable-less column drowns everything else.
  */
-const LIST_QUERY = (schema: string): string => `
-  SELECT t.relname AS table_name, c.conname AS name,
-         CASE c.contype WHEN 'p' THEN 'PRIMARY KEY' WHEN 'f' THEN 'FOREIGN KEY'
-                        WHEN 'u' THEN 'UNIQUE' WHEN 'c' THEN 'CHECK'
-                        WHEN 'x' THEN 'EXCLUDE' ELSE c.contype::text END AS type,
-         pg_get_constraintdef(c.oid) AS definition,
-         obj_description(c.oid, 'pg_constraint') AS comment
-  FROM pg_constraint c
-  JOIN pg_class t ON t.oid = c.conrelid
-  JOIN pg_namespace n ON n.oid = t.relnamespace
-  WHERE n.nspname = ${sqlText(schema)} AND c.contype <> 'n'
-  ORDER BY t.relname, c.conname
-`
-
 const TYPE_VARIANT: Record<string, "indigo" | "blue" | "green" | "yellow"> = {
   "PRIMARY KEY": "indigo",
   "FOREIGN KEY": "blue",
@@ -48,7 +33,7 @@ export function ConstraintsView(): React.ReactElement {
   const [selected, setSelected] = useState<Record<string, unknown> | null>(null)
 
   const { data: constraints, loading, error } = useApiQuery(
-    () => proxy.sql(LIST_QUERY(schema)).then((r) => r.rows),
+    () => proxy.metadata("constraints", { schema }).then((r) => r.rows),
     [proxy, schema],
   )
 

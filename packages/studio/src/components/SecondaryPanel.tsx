@@ -10,6 +10,8 @@ import { cn } from "../lib/utils.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { Button, NAV_RAIL } from "./ui.js"
 import { useInspectorAvailability, type InspectorAvailability } from "../hooks/useInspectorAvailability.js"
+import { useStudioCapability } from "../hooks/useStudioCapability.js"
+import { SQL_EDITOR_HREF, sqlEditorOffered } from "../lib/sql-editor-access.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -160,6 +162,16 @@ const STATIC_SECTIONS: Record<string, SectionDef> = {
   },
 }
 
+/** The Database section, without the SQL editor for a role that is not offered it (RX1). */
+export function databaseSectionFor(capability: { role: string | null; permissions: Record<string, boolean> }): SectionDef {
+  const section = STATIC_SECTIONS["database"]!
+  if (sqlEditorOffered(capability)) return section
+  return {
+    ...section,
+    groups: section.groups.map((group) => ({ ...group, items: group.items.filter((item) => item.href !== SQL_EDITOR_HREF) })),
+  }
+}
+
 /**
  * Realtime: the Inspector once this deployment's control plane serves it, "coming soon" until then;
  * settings are a later release either way.
@@ -291,6 +303,7 @@ export function SecondaryPanel({
 
   const sectionId = getSectionId(path)
   const { availability: realtimeAvailability } = useInspectorAvailability({ enabled: sectionId === "realtime" })
+  const capability = useStudioCapability()
 
   const adminFetch = React.useCallback(
     (adminPath: string, init?: RequestInit) =>
@@ -392,7 +405,7 @@ export function SecondaryPanel({
   } else if (sectionId === "realtime") {
     section = buildRealtimeSection(realtimeAvailability)
   } else {
-    section = STATIC_SECTIONS[sectionId] ?? { title: "", groups: [] }
+    section = sectionId === "database" ? databaseSectionFor(capability) : (STATIC_SECTIONS[sectionId] ?? { title: "", groups: [] })
   }
 
   return (

@@ -1,7 +1,11 @@
 {
-  "version": 1,
+  "version": 2,
   "roles": ["owner", "admin", "developer", "editor", "billing", "viewer"],
   "selfHostRoles": ["admin", "developer", "editor", "viewer"],
+  "notes": {
+    "sqlEditor": "The SQL editor runs as the project's owning role, so row level security does not apply to it: whoever holds sqlEditor can read and change every row (owner decision RX1).",
+    "elevatedSql": "Acting as the service role for data requests (the elevated mode), which only these roles may switch to."
+  },
   "permissions": {
     "read": ["owner", "admin", "developer", "editor", "viewer"],
     "write": ["owner", "admin", "developer", "editor"],
