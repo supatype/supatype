@@ -2,7 +2,7 @@
  * Admin REST cache API client for CLI commands.
  */
 
-import { readEnvValue } from "./env-file.js"
+import { configuredServiceRoleKey } from "./dev-api-keys.js"
 import { resolveProjectApiUrl } from "./resolve-api-url.js"
 
 export interface RestCacheEntrySummary {
@@ -30,13 +30,11 @@ export interface RestCacheDetail extends RestCacheEntrySummary {
 }
 
 function serviceRoleKey(cwd: string): string {
-  const key =
-    readEnvValue(cwd, "SUPATYPE_SERVICE_ROLE_KEY", "").trim() ||
-    readEnvValue(cwd, "SERVICE_ROLE_KEY", "").trim()
-  if (!key) {
+  const key = configuredServiceRoleKey(cwd)
+  if (key === undefined) {
     throw new Error("SERVICE_ROLE_KEY not found in .env, run supatype dev or supatype keys")
   }
-  return key.trim()
+  return key
 }
 
 function adminHeaders(cwd: string): Record<string, string> {
@@ -70,7 +68,7 @@ function formatCacheApiError(
   // than the deployment it is pointed at.
   if (status === 503 && (trimmed.includes("keyspace") || trimmed.includes("valkey"))) {
     return (
-      "No cache server is configured — server-side REST caching needs one. " +
+      "No cache server is configured, and server-side REST caching needs one. " +
       "`supatype dev` starts it for you; on a self-hosted stack, check the `db` or `valkey` service."
     )
   }
