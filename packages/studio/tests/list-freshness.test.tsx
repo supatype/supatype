@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
-import { act } from "react"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { button, renderBrowser, settle } from "./data-browser-support.js"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { renderBrowser } from "./data-browser-support.js"
 import { renderList } from "./list-view-support.js"
-import { testModel } from "./support.js"
+import { act, advance, button, isolateEachTest, settle, testModel, unmount } from "./support.js"
 
 /**
  * Lists fetched once when their filter, sort or page changed and never again, so a row added
@@ -12,18 +11,14 @@ import { testModel } from "./support.js"
  * requests on a hidden tab.
  */
 
-let unmount: (() => void) | null = null
+isolateEachTest("setInterval", "clearInterval", "Date")
 
 beforeEach(() => {
-  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] })
   window.localStorage.clear()
 })
 
 afterEach(() => {
-  unmount?.()
-  unmount = null
   setVisibility("visible")
-  vi.useRealTimers()
 })
 
 function setVisibility(state: DocumentVisibilityState): void {
@@ -41,7 +36,7 @@ async function chooseAutoRefresh(container: HTMLElement, ms: string): Promise<vo
 }
 
 async function pass(ms: number): Promise<void> {
-  await act(async () => { vi.advanceTimersByTime(ms) })
+  await advance(ms, 1)
   await settle()
 }
 
@@ -53,7 +48,6 @@ async function fire(target: EventTarget, type: string): Promise<void> {
 describe("the Refresh button", () => {
   it("fetches a model's list again", async () => {
     const list = await renderList(testModel())
-    unmount = list.unmount
     const before = list.reads.length
     await act(async () => button(list.container, "Refresh").click())
     await settle()
@@ -62,7 +56,6 @@ describe("the Refresh button", () => {
 
   it("fetches the data browser's rows again", async () => {
     const browser = await renderBrowser()
-    unmount = browser.unmount
     const before = browser.reads.length
     await act(async () => button(browser.container, "Refresh").click())
     await settle()
@@ -73,7 +66,6 @@ describe("the Refresh button", () => {
 describe("coming back to the tab", () => {
   it("refetches a list older than a minute and leaves a fresh one alone", async () => {
     const list = await renderList(testModel())
-    unmount = list.unmount
     const before = list.reads.length
     await pass(30_000)
     await fire(window, "focus")
@@ -87,7 +79,6 @@ describe("coming back to the tab", () => {
 describe("auto-refresh", () => {
   it("refetches on its period and not while the tab is hidden", async () => {
     const list = await renderList(testModel())
-    unmount = list.unmount
     await chooseAutoRefresh(list.container, "10000")
     const before = list.reads.length
     await pass(10_000)
@@ -105,21 +96,18 @@ describe("auto-refresh", () => {
   it("is remembered for each list", async () => {
     const first = await renderList(testModel())
     await chooseAutoRefresh(first.container, "30000")
-    first.unmount()
+    unmount(first)
     const again = await renderList(testModel())
-    unmount = again.unmount
     const select = again.container.querySelector<HTMLSelectElement>("select[aria-label='Auto-refresh']")
     expect(select?.value).toBe("30000")
     const other = testModel({ name: "page", tableName: "page" })
-    again.unmount()
+    unmount(again)
     const otherList = await renderList(other)
-    unmount = otherList.unmount
     expect(otherList.container.querySelector<HTMLSelectElement>("select[aria-label='Auto-refresh']")?.value).toBe("off")
   })
 
   it("holds off while a cell in the data browser is being edited", async () => {
     const browser = await renderBrowser()
-    unmount = browser.unmount
     await chooseAutoRefresh(browser.container, "10000")
     const cell = browser.container.querySelector("tbody td:nth-child(3)")
     if (!cell) throw new Error("no body cell")
