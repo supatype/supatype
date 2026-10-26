@@ -110,7 +110,8 @@ test("rows are keyed by their primary key, not the first column (M06)", () => {
   for (const stranger of [run.refs.strangerTicket, run.refs.otherTicket]) expect(codes).not.toContain(stranger)
 })
 
+// A withheld event is logged only at REALTIME_LOG_LEVEL=debug, which masking-e2e.sh sets (R2).
 test("realtime logs why it dropped an event (T2-N9)", () => {
   fenced("b:note")
-  expect(realtimeLogs()).toMatch(/drop/i)
+  expect(realtimeLogs()).toMatch(/dropped \w+ on \S+ for role \w+: .*not visible to subscriber/)
 })

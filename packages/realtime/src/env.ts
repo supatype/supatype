@@ -1,3 +1,18 @@
+/**
+ * How much the service says. `info` (the default) logs what an operator should act on; `debug` adds
+ * one line per change withheld from a subscriber by its access rules, which on a busy table is a
+ * line per event per subscriber.
+ */
+export type LogLevel = "debug" | "info"
+
+/** `REALTIME_LOG_LEVEL`, case and surrounding space ignored. Anything else stops the service. */
+export function parseLogLevel(raw: string | undefined): LogLevel {
+  const value = (raw ?? "").trim().toLowerCase()
+  if (value === "" || value === "info") return "info"
+  if (value === "debug") return "debug"
+  throw new Error(`REALTIME_LOG_LEVEL must be "debug" or "info", got "${raw}"`)
+}
+
 /** Environment configuration for the realtime service. */
 export interface RealtimeEnv {
   port: number
@@ -16,6 +31,8 @@ export interface RealtimeEnv {
   publicationName: string
   replicationPollInterval: number
   secureChannels: boolean
+  /** `REALTIME_LOG_LEVEL`: see {@link LogLevel}. */
+  logLevel: LogLevel
 
   // ─── Multi-tenant (cloud mode) ────────────────────────────────────
   /** When true, this instance serves multiple projects on a shared Postgres. */
@@ -51,6 +68,7 @@ export function loadEnv(): RealtimeEnv {
     publicationName: process.env["PUBLICATION_NAME"] ?? "supatype_realtime",
     replicationPollInterval: Number(process.env["REPLICATION_POLL_INTERVAL"] ?? "100"),
     secureChannels: process.env["SECURE_CHANNELS"] !== "false",
+    logLevel: parseLogLevel(process.env["REALTIME_LOG_LEVEL"]),
 
     // Multi-tenant settings
     multiTenant: process.env["MULTI_TENANT"] === "true",

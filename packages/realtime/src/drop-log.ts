@@ -1,7 +1,9 @@
 import type { ChangeEvent } from "./types.js"
+import type { LogLevel } from "./env.js"
 
 /**
- * One line per change a subscriber did not receive, and why.
+ * One line per change a subscriber did not receive, and why: always when realtime could not decide,
+ * and at `REALTIME_LOG_LEVEL=debug` also when the access rules withheld it.
  *
  * Realtime used to drop events silently, so "my subscriber hears nothing" could not be told apart
  * from "nothing happened". The line names the table, the operation, the subscriber's role and the
@@ -29,9 +31,14 @@ export function formatDrop(drop: DroppedChange): string {
   )
 }
 
-export function logDrop(drop: DroppedChange, severity: DropSeverity): void {
+/**
+ * A failure is logged at warn whatever the level. A denial only at `debug`: it is the normal case,
+ * one line per event per subscriber who may not see it, and at the default level it would bury the
+ * failures among lines that need no action.
+ */
+export function logDrop(drop: DroppedChange, severity: DropSeverity, level: LogLevel): void {
   if (severity === "failed") console.warn(formatDrop(drop))
-  else console.log(formatDrop(drop))
+  else if (level === "debug") console.debug(formatDrop(drop))
 }
 
 /**

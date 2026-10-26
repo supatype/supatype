@@ -25,10 +25,15 @@ export function ownedTable(name: string, columns: string, extra = ""): string {
     ${extra}`
 }
 
-/** The row predicate the engine emits for the same rule. */
-export function readPredicate(table: string): string {
+/**
+ * The row predicate the engine emits for the same rule. From 0.7 it takes a second, defaulted
+ * parameter that keeps it out of GraphQL (CT3); `rowOnly` is the shape an older engine left, the
+ * table's row alone, which a database it last pushed still has.
+ */
+export function readPredicate(table: string, opts: { rowOnly?: boolean } = {}): string {
+  const outOfGraphql = opts.rowOnly === true ? "" : `, "not_in_graphql" boolean DEFAULT NULL`
   return `
-    CREATE OR REPLACE FUNCTION public.can_read_${table}(${table} public.${table})
+    CREATE OR REPLACE FUNCTION public.can_read_${table}(${table} public.${table}${outOfGraphql})
       RETURNS boolean LANGUAGE sql STABLE AS $$
         SELECT ${OWNER_RULE} FROM (SELECT ($1).*) AS ${table};
       $$;`

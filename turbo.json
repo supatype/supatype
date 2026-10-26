@@ -25,6 +25,7 @@
         "SLOT_NAME",
         "REPLICATION_POLL_INTERVAL",
         "SECURE_CHANNELS",
+        "REALTIME_LOG_LEVEL",
         "SMTP_HOST",
         "SMTP_PORT",
         "SMTP_USER",

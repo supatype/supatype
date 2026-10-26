@@ -38,3 +38,26 @@ export type Payslip = Model<{
     fields: { amount: { read: OwnerFrom<"owner"> } }
   }
 }>
+
+/**
+ * Two field rules whose predicate names are the same once cut to Postgres's 63-byte identifier
+ * limit, so the engine gives one of them a number (`..._1`). Which column gets the number is the
+ * engine's choice, so realtime has to be told rather than rebuild it. `..._alpha`: the row's owner
+ * only; `..._beta`: admin only, so a swapped mapping shows as the wrong column delivered.
+ */
+export type Appraisal = Model<{
+  id: SupatypeAuthUserId
+  manager_review_notes_for_the_quarterly_appraisal_alpha: Optional<string>
+  manager_review_notes_for_the_quarterly_appraisal_beta: Optional<string>
+}, {
+  access: {
+    read: LoggedIn
+    create: Owner<"id">
+    update: Owner<"id">
+    delete: Owner<"id">
+    fields: {
+      manager_review_notes_for_the_quarterly_appraisal_alpha: { read: Owner<"id"> }
+      manager_review_notes_for_the_quarterly_appraisal_beta: { read: Role<"admin"> }
+    }
+  }
+}>

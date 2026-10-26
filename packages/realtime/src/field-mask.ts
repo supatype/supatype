@@ -13,7 +13,9 @@ import type { TableCatalog } from "./table-catalog.js"
  * It does so from the same source of truth as the API: the engine-generated
  * `can_read_<table>__<column>` predicates. Under tier 1 the security labels the engine writes
  * name them, and the predicate a subscriber is judged by is the exact function the planner
- * rewrite calls. Under tier 2 there are no labels, and the same predicates are found by name.
+ * rewrite calls. Under tier 2 there are no labels; the engine records which predicate decides each
+ * column in `_supatype.schema_state` instead, and only a database last pushed by an engine before
+ * 0.7.0, which records nothing, leaves realtime to find them by name.
  */
 
 /**
@@ -152,6 +154,67 @@ export function parseMaskLabel(label: string): MaskLabel | null {
 export type ReadMasks = Map<string, PredicateRef | null>
 
 /**
+ * One entry of `capabilities.fieldMasking.columns` in `_supatype.schema_state`, which the engine
+ * writes at every push from 0.7.0: the predicates that decide one column, named as a label names
+ * them (`public."can_read_<t>__<col>"`). Only `read` matters here.
+ */
+export interface RecordedFieldPredicate {
+  table: string
+  column: string
+  read?: string | null
+}
+
+function isRecordedFieldPredicate(entry: unknown): entry is RecordedFieldPredicate {
+  if (typeof entry !== "object" || entry === null) return false
+  const { table, column, read } = entry as Record<string, unknown>
+  const readIsNameOrAbsent = read === null || read === undefined || typeof read === "string"
+  return typeof table === "string" && typeof column === "string" && readIsNameOrAbsent
+}
+
+/**
+ * The recorded mapping, checked. `null` when there is none, from an engine before 0.7.0. One that
+ * is there but not in this shape cannot be trusted to name every masked column, so it fails closed.
+ */
+export function parseRecordedColumns(raw: unknown): RecordedFieldPredicate[] | null {
+  if (raw == null) return null
+  if (!Array.isArray(raw) || !raw.every(isRecordedFieldPredicate)) {
+    throw new CatalogMismatch("the recorded field predicate mapping is not in a shape realtime reads")
+  }
+  return raw
+}
+
+/**
+ * One table's read masks from the recorded mapping. Entries whose predicate lives in another
+ * schema belong to a same-named table there. A predicate that does not parse masks its column
+ * unconditionally, as an unparseable label does.
+ */
+export function recordedReadMasks(
+  columns: readonly RecordedFieldPredicate[],
+  schema: string,
+  table: string,
+): ReadMasks {
+  const masks: ReadMasks = new Map()
+  for (const entry of columns) {
+    if (entry.table !== table || entry.read == null) continue
+    const ref = parsePredicateRef(entry.read)
+    if (ref?.schema !== undefined && ref.schema !== schema) continue
+    masks.set(entry.column, ref && { schema, name: ref.name })
+  }
+  return masks
+}
+
+/** What the engine recorded at its last push: the tier, and under tier 2 the mapping if it wrote one. */
+interface RecordedMasking {
+  tier: MaskingTier
+  columns: RecordedFieldPredicate[] | null
+}
+
+const RECORDED_MASKING_SQL = `
+  SELECT capabilities->'fieldMasking'->>'tier' AS tier,
+         capabilities->'fieldMasking'->'columns' AS columns
+    FROM _supatype.schema_state`
+
+/**
  * Which columns of which tables carry a read restriction, cached.
  *
  * Read on its own connection, deliberately: the catalog lookup must not happen inside the
@@ -163,7 +226,9 @@ export type ReadMasks = Map<string, PredicateRef | null>
  */
 export class FieldMaskCatalog {
   private cache: TtlCache<ReadMasks>
-  private tiers: TtlCache<MaskingTier>
+  private recorded: TtlCache<RecordedMasking>
+  /** Tables already reported as masked by the naming rule, so each is reported once. */
+  private guessed = new Set<string>()
 
   constructor(
     private pool: pg.Pool,
@@ -171,53 +236,84 @@ export class FieldMaskCatalog {
     ttlMs = 30_000,
   ) {
     this.cache = new TtlCache(ttlMs)
-    this.tiers = new TtlCache(ttlMs)
+    this.recorded = new TtlCache(ttlMs)
   }
 
   invalidate(): void {
     this.cache.clear()
-    this.tiers.clear()
+    this.recorded.clear()
   }
 
   /**
    * The database's masking tier. One answer for the whole database: the engine decides it per
    * push, from whether `supatype_mask` is installed, and grants every model table accordingly.
    */
-  tier(): Promise<MaskingTier> {
-    return this.tiers.get("", () => this.loadTier())
+  async tier(): Promise<MaskingTier> {
+    return (await this.recordedMasking()).tier
   }
 
   /**
-   * The read-restricted columns of a table and the predicate each is judged by: from the
-   * security labels under tier 1, from the generated predicates' names under tier 2. Callers
-   * only see `ReadMasks`.
+   * The read-restricted columns of a table and the predicate each is judged by. Callers only see
+   * `ReadMasks`; where they come from is {@link loadMasks}.
    */
   async readMasks(schema: string, table: string): Promise<ReadMasks> {
-    const tier = await this.tier()
-    return this.cache.get(`${tier}:${schema}.${table}`, () =>
-      tier === "views" ? this.loadFromPredicates(schema, table) : this.loadFromLabels(schema, table),
+    const recorded = await this.recordedMasking()
+    return this.cache.get(`${recorded.tier}:${schema}.${table}`, () =>
+      this.loadMasks(recorded, schema, table),
     )
   }
 
-  private async loadTier(): Promise<MaskingTier> {
+  private recordedMasking(): Promise<RecordedMasking> {
+    return this.recorded.get("", () => this.loadRecorded())
+  }
+
+  /**
+   * Tier 1 reads the security labels, which are what `supatype_mask` enforces on the API. Tier 2
+   * reads the mapping the engine recorded, and rebuilds names by the naming rule only when the
+   * engine that last pushed recorded none.
+   */
+  private async loadMasks(recorded: RecordedMasking, schema: string, table: string): Promise<ReadMasks> {
+    if (recorded.tier === "extension") return this.loadFromLabels(schema, table)
+    if (recorded.columns) return recordedReadMasks(recorded.columns, schema, table)
+    this.reportGuess(schema, table)
+    return this.loadFromPredicates(schema, table)
+  }
+
+  private reportGuess(schema: string, table: string): void {
+    const key = `${schema}.${table}`
+    if (this.guessed.has(key)) return
+    this.guessed.add(key)
+    console.warn(
+      `[realtime] ${key}: the engine that last pushed recorded no field predicate mapping (engines ` +
+        `before 0.7.0), so its field predicates are matched to columns by the naming rule, and a ` +
+        `predicate the engine had to number withholds the table's changes`,
+    )
+  }
+
+  private async loadRecorded(): Promise<RecordedMasking> {
     const state = await this.pool.query<{ recorded: boolean }>(
       `SELECT to_regclass('_supatype.schema_state') IS NOT NULL AS recorded`,
     )
     // No engine state at all: nothing revoked the tables, so the tier-1 path is the one that works.
-    if (state.rows[0]?.recorded !== true) return "extension"
-    const recorded = await this.pool.query<{ tier: string | null }>(
-      `SELECT capabilities->'fieldMasking'->>'tier' AS tier FROM _supatype.schema_state`,
-    )
-    return VIEW_TIERS.has(recorded.rows[0]?.tier ?? "") ? "views" : "extension"
+    if (state.rows[0]?.recorded !== true) return { tier: "extension", columns: null }
+    const result = await this.pool.query<{ tier: string | null; columns: unknown }>(RECORDED_MASKING_SQL)
+    const row = result.rows[0]
+    // Tier 1 reads labels, so a mapping it has no use for is not allowed to fail it.
+    return VIEW_TIERS.has(row?.tier ?? "")
+      ? { tier: "views", columns: parseRecordedColumns(row?.columns) }
+      : { tier: "extension", columns: null }
   }
 
   /**
-   * Tier 2's mask list: every column with a generated `can_read_<table>__<column>(<table>)`.
+   * Tier 2's mask list by the naming rule: every column with a generated
+   * `can_read_<table>__<column>(<table>)`. The fallback for a database last pushed by an engine
+   * before 0.7.0, which records no mapping.
    *
    * Looked up in the table's own schema, taking the table's row type, returning boolean: the
    * signature the engine emits, so a same-named function elsewhere is never picked up. A field
-   * predicate that cannot be tied to exactly one column stops the table (fail closed) rather
-   * than leaving a restricted column unmasked.
+   * predicate that cannot be tied to exactly one column (one the engine numbered because two
+   * columns' names clip to the same 63 bytes) stops the table (fail closed) rather than leaving a
+   * restricted column unmasked.
    */
   private async loadFromPredicates(schema: string, table: string): Promise<ReadMasks> {
     const [shape, predicates] = await Promise.all([
