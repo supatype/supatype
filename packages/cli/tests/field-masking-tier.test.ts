@@ -8,7 +8,13 @@ import {
   nativeMaskLibraryPresent,
   schemaHasFieldRules,
 } from "../src/field-masking-tier.js"
-import { apiSchemaList, validateProjectConfig, type SupatypeProjectConfig } from "../src/project-config.js"
+import {
+  apiSchemaList,
+  postgrestSchemaEnv,
+  validateProjectConfig,
+  type SupatypeProjectConfig,
+} from "../src/project-config.js"
+import { renderSelfHostCompose } from "../src/self-host-compose.js"
 
 /**
  * Which mechanism will enforce per-column rules, decided without touching the database.
@@ -180,5 +186,37 @@ describe("nativeMaskLibraryPresent", () => {
     expect(fieldMaskingTier(project({ provider: "native" }), withRules, false)).toBe("views")
     // Still nothing to enforce when no column is masked.
     expect(fieldMaskingTier(project({ provider: "native" }), withoutRules, true)).toBe("none")
+  })
+})
+
+/**
+ * pg_graphql reflects what is on the search path PostgREST gives it. Under tier 2 that has to be the
+ * masked `api` views, never the base tables: with `public` there, GraphQL reflected tables the API
+ * roles cannot read for end users and handed service_role the unmasked rows (F64). Decided by the
+ * same tier as `PGRST_DB_SCHEMA`, so the two cannot disagree.
+ */
+describe("the GraphQL search path", () => {
+  it("is api under tier 2 and public otherwise", () => {
+    const cfg = project({ provider: "native" })
+    expect(postgrestSchemaEnv(cfg, { tier: "views" })).toEqual({
+      PGRST_DB_SCHEMA: "api, supatype, graphql_public, auth",
+      PGRST_DB_EXTRA_SEARCH_PATH: "api,extensions",
+    })
+    for (const tier of ["extension", "none", undefined] as const) {
+      expect(postgrestSchemaEnv(cfg, { tier }).PGRST_DB_EXTRA_SEARCH_PATH, String(tier)).toBe(
+        "public,extensions",
+      )
+    }
+  })
+
+  it("follows the tier into the compose file", () => {
+    const cfg = project({ provider: "docker" })
+    const views = renderSelfHostCompose(cfg, process.cwd(), { fieldMaskingTier: "views" })
+    expect(views).toContain("PGRST_DB_EXTRA_SEARCH_PATH: api,extensions")
+    expect(views).not.toContain("PGRST_DB_EXTRA_SEARCH_PATH: public,extensions")
+    for (const fieldMaskingTier of ["extension", "none"] as const) {
+      const compose = renderSelfHostCompose(cfg, process.cwd(), { fieldMaskingTier })
+      expect(compose, fieldMaskingTier).toContain("PGRST_DB_EXTRA_SEARCH_PATH: public,extensions")
+    }
   })
 })

@@ -7,10 +7,11 @@ import {
   readdirSync,
   rmSync,
 } from "node:fs"
-import { join } from "node:path"
+import { dirname, isAbsolute, join, relative, resolve } from "node:path"
 import { randomUUID } from "node:crypto"
-import { route, sendJson } from "../http.js"
+import { badRequest, HttpError, route, sendJson } from "../http.js"
 import type { RouteHandler } from "../http.js"
+import { assertProject, projectRoot } from "../project.js"
 
 interface DeploymentMeta {
   id: string
@@ -20,8 +21,47 @@ interface DeploymentMeta {
   finalizedAt?: string
 }
 
-function projectRoot(): string {
-  return process.env["SUPATYPE_PROJECT_ROOT"] ?? "/project"
+interface DeploymentFile {
+  path: string
+  content: string
+  encoding?: string
+}
+
+/** What `randomUUID().slice(0, 8)` produces, so an id can only ever name a directory of its own. */
+const DEPLOYMENT_ID = /^[0-9a-f]{8}$/
+
+/** `id` when it is a deployment id; a 400 otherwise. */
+function checkedId(id: unknown): string {
+  if (typeof id !== "string" || !DEPLOYMENT_ID.test(id)) {
+    throw badRequest(`Invalid deployment id ${JSON.stringify(id)}`)
+  }
+  return id
+}
+
+/** `path` resolved under `root`, refused when it is empty or would land anywhere outside it. */
+function fileInside(root: string, path: unknown): string {
+  if (typeof path !== "string" || path === "" || isAbsolute(path)) {
+    throw badRequest(`Invalid file path ${JSON.stringify(path)}`)
+  }
+  const target = resolve(root, path)
+  const rel = relative(resolve(root), target)
+  if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) {
+    throw badRequest(`File path ${JSON.stringify(path)} resolves outside the deployment`)
+  }
+  return target
+}
+
+/** Write every file of a deployment, after checking all of their paths first. */
+function writeDeploymentFiles(dest: string, files: DeploymentFile[]): void {
+  const targets = files.map((file) => ({ file, target: fileInside(dest, file.path) }))
+  mkdirSync(dest, { recursive: true })
+  for (const { file, target } of targets) {
+    mkdirSync(dirname(target), { recursive: true })
+    const buf = file.encoding === "base64"
+      ? Buffer.from(file.content, "base64")
+      : Buffer.from(file.content, "utf8")
+    writeFileSync(target, buf)
+  }
 }
 
 function deploymentsDir(): string {
@@ -96,26 +136,42 @@ function promoteDeploymentToStatic(id: string, meta: DeploymentMeta): void {
   writeFileSync(currentPath(), id, "utf8")
 }
 
+/** Mark the current live deployment as previous, then serve `id` in its place. */
+function makeLive(id: string, meta: DeploymentMeta): void {
+  const liveId = currentLiveId()
+  if (liveId && liveId !== id) {
+    const liveMeta = readMeta(liveId)
+    if (liveMeta && liveMeta.preview !== true) {
+      writeMeta(liveId, { ...liveMeta, status: "previous" })
+    }
+  }
+  promoteDeploymentToStatic(id, meta)
+}
+
+/** The deployment a rollback goes to: the one named by `to`, else the latest previous one. */
+function rollbackTarget(to: unknown): DeploymentMeta {
+  if (to === undefined || to === null || to === "") {
+    const previous = findPreviousDeployment()
+    if (!previous) throw new HttpError(404, "no_previous", "No previous deployment to roll back to")
+    return previous
+  }
+  const id = checkedId(to)
+  const meta = readMeta(id)
+  if (!meta || meta.preview === true) {
+    throw new HttpError(404, "not_found", `Deployment ${id} not found`)
+  }
+  return meta
+}
+
 export function registerDeploymentRoutes(
   routes: Array<{ method: string; pattern: RegExp; handler: RouteHandler }>,
 ): void {
   route(routes, "POST", "/projects/:ref/deployments", async (ctx) => {
-    const body = ctx.body as {
-      files?: Array<{ path: string; content: string; encoding?: string }>
-      preview?: boolean
-    }
+    assertProject(ctx.params["ref"]!)
+    const body = ctx.body as { files?: DeploymentFile[]; preview?: boolean }
     const id = randomUUID().slice(0, 8)
     const dest = join(deploymentsDir(), id, "files")
-    mkdirSync(dest, { recursive: true })
-
-    for (const file of body.files ?? []) {
-      const target = join(dest, file.path)
-      mkdirSync(join(target, ".."), { recursive: true })
-      const buf = file.encoding === "base64"
-        ? Buffer.from(file.content, "base64")
-        : Buffer.from(file.content, "utf8")
-      writeFileSync(target, buf)
-    }
+    writeDeploymentFiles(dest, body.files ?? [])
 
     writeMeta(id, {
       id,
@@ -128,41 +184,9 @@ export function registerDeploymentRoutes(
   })
 
   route(routes, "POST", "/projects/:ref/deployments/rollback", async (ctx) => {
-    const body = ctx.body as { to?: string }
-    let previous: DeploymentMeta | null
-
-    if (body.to) {
-      const meta = readMeta(body.to)
-      if (!meta || meta.preview === true) {
-        sendJson(ctx.res, 404, {
-          error: "not_found",
-          message: `Deployment ${body.to} not found`,
-        })
-        return
-      }
-      previous = meta
-    } else {
-      previous = findPreviousDeployment()
-    }
-
-    if (!previous) {
-      sendJson(ctx.res, 404, {
-        error: "no_previous",
-        message: "No previous deployment to roll back to",
-      })
-      return
-    }
-
-    const liveId = currentLiveId()
-    if (liveId && liveId !== previous.id) {
-      const liveMeta = readMeta(liveId)
-      if (liveMeta && liveMeta.preview !== true) {
-        writeMeta(liveId, { ...liveMeta, status: "previous" })
-      }
-    }
-
-    promoteDeploymentToStatic(previous.id, previous)
-
+    assertProject(ctx.params["ref"]!)
+    const previous = rollbackTarget((ctx.body as { to?: unknown }).to)
+    makeLive(previous.id, previous)
     sendJson(ctx.res, 200, {
       data: {
         version: previous.id,
@@ -172,27 +196,19 @@ export function registerDeploymentRoutes(
   })
 
   route(routes, "POST", "/projects/:ref/deployments/:id/finalize", async (ctx) => {
-    const id = ctx.params["id"]!
+    assertProject(ctx.params["ref"]!)
+    const id = checkedId(ctx.params["id"])
     const meta = readMeta(id)
     if (!meta) {
       sendJson(ctx.res, 404, { error: "not_found", message: "Deployment not found" })
       return
     }
-
-    const liveId = currentLiveId()
-    if (liveId && liveId !== id) {
-      const liveMeta = readMeta(liveId)
-      if (liveMeta && liveMeta.preview !== true) {
-        writeMeta(liveId, { ...liveMeta, status: "previous" })
-      }
-    }
-
-    promoteDeploymentToStatic(id, meta)
-
+    makeLive(id, meta)
     sendJson(ctx.res, 200, { data: { id, status: "live" } })
   })
 
   route(routes, "GET", "/projects/:ref/deployments/current", async (ctx) => {
+    assertProject(ctx.params["ref"]!)
     const liveId = currentLiveId()
     if (!liveId) {
       sendJson(ctx.res, 200, { data: null })
@@ -202,6 +218,7 @@ export function registerDeploymentRoutes(
   })
 
   route(routes, "GET", "/projects/:ref/deployments", async (ctx) => {
+    assertProject(ctx.params["ref"]!)
     sendJson(ctx.res, 200, { data: listDeploymentMetas() })
   })
 }

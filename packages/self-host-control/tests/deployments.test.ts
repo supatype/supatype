@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert"
-import { mkdtempSync, readFileSync, rmSync, existsSync } from "node:fs"
+import { mkdtempSync, readFileSync, readdirSync, rmSync, existsSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { test, describe, before, after } from "node:test"
@@ -30,6 +30,7 @@ describe("deployments rollback", () => {
   before(async () => {
     tmp = mkdtempSync(join(tmpdir(), "sh-deploy-test-"))
     process.env["SUPATYPE_PROJECT_ROOT"] = tmp
+    process.env["SUPATYPE_PROJECT_REF"] = PROJECT
     process.env["SUPATYPE_DEPLOYMENTS_DIR"] = join(tmp, ".supatype", "deployments")
     process.env["SUPATYPE_STATIC_ROOT"] = join(tmp, "dist")
 
@@ -46,6 +47,7 @@ describe("deployments rollback", () => {
     server.close()
     rmSync(tmp, { recursive: true, force: true })
     delete process.env["SUPATYPE_PROJECT_ROOT"]
+    delete process.env["SUPATYPE_PROJECT_REF"]
     delete process.env["SUPATYPE_DEPLOYMENTS_DIR"]
     delete process.env["SUPATYPE_STATIC_ROOT"]
   })
@@ -152,5 +154,75 @@ describe("deployments rollback", () => {
     process.env["SUPATYPE_PROJECT_ROOT"] = tmp
     process.env["SUPATYPE_DEPLOYMENTS_DIR"] = join(tmp, ".supatype", "deployments")
     process.env["SUPATYPE_STATIC_ROOT"] = join(tmp, "dist")
+  })
+})
+
+describe("deployments refuse paths and refs outside the project", () => {
+  let baseUrl: string
+  let server: ReturnType<typeof createControlPlaneServer>
+  let tmp: string
+
+  before(async () => {
+    // The project is one level down, so a file path that climbs out of it still lands inside `tmp`.
+    tmp = mkdtempSync(join(tmpdir(), "sh-deploy-escape-"))
+    const projectDir = join(tmp, "proj")
+    process.env["SUPATYPE_PROJECT_ROOT"] = projectDir
+    process.env["SUPATYPE_PROJECT_REF"] = PROJECT
+    process.env["SUPATYPE_DEPLOYMENTS_DIR"] = join(projectDir, ".supatype", "deployments")
+    process.env["SUPATYPE_STATIC_ROOT"] = join(projectDir, "dist")
+
+    server = createControlPlaneServer()
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", () => resolve())
+    })
+    const addr = server.address()
+    const port = typeof addr === "object" && addr ? addr.port : 0
+    baseUrl = `http://127.0.0.1:${port}`
+  })
+
+  after(() => {
+    server.close()
+    rmSync(tmp, { recursive: true, force: true })
+    delete process.env["SUPATYPE_PROJECT_ROOT"]
+    delete process.env["SUPATYPE_PROJECT_REF"]
+    delete process.env["SUPATYPE_DEPLOYMENTS_DIR"]
+    delete process.env["SUPATYPE_STATIC_ROOT"]
+  })
+
+  for (const path of ["../../../../escape.txt", "/abs/escape.txt", "assets/../../../../../escape.txt", ""]) {
+    test(`a file path ${JSON.stringify(path)} is refused and nothing escapes`, async () => {
+      const res = await request(baseUrl, "POST", `/projects/${PROJECT}/deployments`, {
+        files: [{ path, content: "x", encoding: "utf8" }],
+      })
+      assert.equal(res.status, 400)
+      assert.ok(!existsSync(join(tmp, "escape.txt")))
+      assert.ok(!existsSync(join(tmp, "proj", "escape.txt")))
+    })
+  }
+
+  test("a nested file path inside the deployment is still accepted", async () => {
+    const res = await request(baseUrl, "POST", `/projects/${PROJECT}/deployments`, {
+      files: [{ path: "assets/app.js", content: "x", encoding: "utf8" }],
+    })
+    assert.equal(res.status, 201)
+    const id = (res.json.data as { id: string }).id
+    assert.ok(existsSync(join(tmp, "proj", ".supatype", "deployments", id, "files", "assets", "app.js")))
+  })
+
+  test("a rollback target that is not a deployment id is refused", async () => {
+    const res = await request(baseUrl, "POST", `/projects/${PROJECT}/deployments/rollback`, {
+      to: "../../..",
+    })
+    assert.equal(res.status, 400)
+  })
+
+  test("another project's ref is refused", async () => {
+    const deployments = join(tmp, "proj", ".supatype", "deployments")
+    const before = existsSync(deployments) ? readdirSync(deployments) : []
+    const res = await request(baseUrl, "POST", `/projects/someone-else/deployments`, {
+      files: [{ path: "index.html", content: "x", encoding: "utf8" }],
+    })
+    assert.equal(res.status, 404)
+    assert.deepEqual(existsSync(deployments) ? readdirSync(deployments) : [], before)
   })
 })
