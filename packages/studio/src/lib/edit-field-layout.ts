@@ -76,3 +76,12 @@ export function getLocalizedFieldPlaceholder(
     defaultLocale,
   )
 }
+
+/**
+ * `fields` as a caller who may not write content (a viewer) gets them: every input read only.
+ * Applied after `splitEditFields`, so a reader's form keeps the writer's layout rather than moving
+ * every read-only field into the sidebar.
+ */
+export function readOnlyUnless(canWrite: boolean, fields: FieldConfig[]): FieldConfig[] {
+  return canWrite ? fields : fields.map((f) => ({ ...f, readOnly: true }))
+}

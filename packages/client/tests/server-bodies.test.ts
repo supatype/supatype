@@ -117,3 +117,23 @@ describe("applyRowChange", () => {
     expect(applyRowChange([{ title: "no id" }], change("UPDATE"))).toEqual([{ title: "no id" }])
   })
 })
+
+describe("a refusal worded under `error`", () => {
+  // The Studio proxy and the server's guards answer `{ "error": "..." }`. The RPC path read only
+  // `message` and said "PostgREST error"; the table path said "Request failed".
+  const REFUSED = 'Studio role "viewer" cannot perform this request'
+
+  it("keeps the sentence on an RPC call", async () => {
+    vi.stubGlobal("fetch", fetchReturning({ error: REFUSED }, 403))
+    const client = createClient({ url: "http://api.test", anonKey: "anon", auth: { persistSession: false } })
+    const { error } = await client.rpc("create_draft", {})
+    expect(error?.message).toBe(REFUSED)
+  })
+
+  it("keeps the sentence on a table write", async () => {
+    vi.stubGlobal("fetch", fetchReturning({ error: REFUSED }, 403))
+    const client = createClient({ url: "http://api.test", anonKey: "anon", auth: { persistSession: false } })
+    const { error } = await client.from("posts").update({ title: "x" }).eq("id", 1)
+    expect(error?.message).toBe(REFUSED)
+  })
+})

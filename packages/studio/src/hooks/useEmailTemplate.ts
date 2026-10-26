@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import type { SupatypeClient } from "@supatype/client"
 import { isJsonObject, readJsonObject } from "../lib/json.js"
+import { authRefusalText } from "../lib/auth-refusal.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { studioGatewayHeaders } from "../lib/studio-gateway-headers.js"
 
@@ -42,15 +43,10 @@ export function templateFromResponse(raw: unknown): EmailTemplate {
   return { subject: text("subject"), content: text("content") || text("body"), savedAt }
 }
 
-/** The server's own reason for refusing a request (`msg`), or the status when it gives none. */
+/** The server's own reason for refusing a request, or the status when it gives none. */
 export async function refusalMessage(res: Response, action: string): Promise<string> {
   // A body that is not JSON reads as `{}`: the status is all there is to say.
-  const body = await readJsonObject(res)
-  for (const key of ["msg", "message", "error_description"]) {
-    const value = body[key]
-    if (typeof value === "string" && value !== "") return value
-  }
-  return `${action} failed: ${res.status}`
+  return authRefusalText(await readJsonObject(res)) ?? `${action} failed: ${res.status}`
 }
 
 /** Send one request for the template and answer with what the server says is now in force. */

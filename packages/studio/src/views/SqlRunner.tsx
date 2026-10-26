@@ -194,26 +194,40 @@ const studioSqlTheme = EditorView.theme({
 
 // ─── SQL Editor ───────────────────────────────────────────────────────────────
 
-/** Mod-Enter: close the autocomplete list, which otherwise stays open over the editor, then run. */
+/**
+ * Close the autocomplete list, which otherwise stays open over the editor, then run. Both ways of
+ * running come here: Mod-Enter in the editor and the Run Query button beside it.
+ */
 export function runAndCloseCompletion(view: EditorView, run: () => void): boolean {
   closeCompletion(view)
   run()
   return true
 }
 
-function SqlEditor({
-  value,
-  onChange,
-  onRun,
-  schema,
-}: {
+/** The query text and its setter. */
+interface SqlEditorDoc {
   value: string
   onChange: (v: string) => void
+}
+
+/** How the page runs the query, and where it keeps the editor so its own Run button can close the list. */
+interface SqlEditorControl {
   onRun: () => void
+  viewRef: React.MutableRefObject<EditorView | null>
+}
+
+function SqlEditor({
+  doc,
+  schema,
+  control,
+}: {
+  doc: SqlEditorDoc
   schema: Record<string, string[]>
+  control: SqlEditorControl
 }): React.ReactElement {
+  const { value, onChange } = doc
+  const { onRun, viewRef } = control
   const containerRef = useRef<HTMLDivElement>(null)
-  const viewRef = useRef<EditorView | null>(null)
   const onRunRef = useRef(onRun)
   const onChangeRef = useRef(onChange)
   const schemaCompartment = useRef(new Compartment())
@@ -246,7 +260,7 @@ function SqlEditor({
     })
     viewRef.current = view
     return () => { view.destroy(); viewRef.current = null }
-  }, []) // intentionally empty, editor created once
+  }, [viewRef]) // created once: the ref object never changes
 
   // Sync value changes from outside (e.g. loading from history)
   useEffect(() => {
@@ -455,6 +469,14 @@ function SqlEditorView(): React.ReactElement {
     }
   }, [query, running, sql])
 
+  const editorRef = useRef<EditorView | null>(null)
+  const runQuery = useCallback(() => { void handleRun() }, [handleRun])
+  const runFromButton = (): void => {
+    const view = editorRef.current
+    if (view === null) runQuery()
+    else runAndCloseCompletion(view, runQuery)
+  }
+
   const closeTab = (tabId: string) => {
     setTabs((prev) => prev.filter((t) => t.id !== tabId))
     if (activeTabId === tabId) {
@@ -506,10 +528,9 @@ function SqlEditorView(): React.ReactElement {
         {/* SQL Editor */}
         <Card className="p-4">
           <SqlEditor
-            value={query}
-            onChange={setQuery}
-            onRun={() => void handleRun()}
+            doc={{ value: query, onChange: setQuery }}
             schema={sqlSchema}
+            control={{ onRun: runQuery, viewRef: editorRef }}
           />
 
           <div className="flex justify-between items-center mt-3">
@@ -520,7 +541,7 @@ function SqlEditorView(): React.ReactElement {
               <Button size="sm" onClick={() => setShowHistory(!showHistory)}>
                 History ({history.length})
               </Button>
-              <Button size="sm" variant="primary" onClick={() => void handleRun()} disabled={running}>
+              <Button size="sm" variant="primary" onClick={runFromButton} disabled={running}>
                 {running ? "Running..." : "Run Query"}
               </Button>
             </div>

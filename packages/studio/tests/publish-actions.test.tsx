@@ -79,7 +79,7 @@ function urlOf(input: string | URL | Request): string {
 function serve(served: Served): void {
   vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
     const url = urlOf(input)
-    if (url.includes("/studio/auth/verify")) return Response.json({ role: "admin", seesDrafts: true })
+    if (url.includes("/studio/auth/verify")) return Response.json({ role: "admin", seesDrafts: true, permissions: { write: true } })
     const rpc = /\/rpc\/(\w+)/.exec(url)
     if (rpc !== null) {
       const body = typeof init?.body === "string" ? safeParseJson(init.body) : null

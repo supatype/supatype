@@ -14,13 +14,13 @@ import {
 } from "../lib/auth-user-search.js"
 import { useStudioMembers } from "../hooks/useStudioMembers.js"
 import { useStudioCapability } from "../hooks/useStudioCapability.js"
-import { userAdministrationOffered } from "../lib/capability-offers.js"
+import { userAdministrationOffered, adminAccountChangeOffered, ADMIN_ACCOUNT_LOCKED } from "../lib/capability-offers.js"
+import { authRefusalText } from "../lib/auth-refusal.js"
 import { useAuthSettings } from "../hooks/useAuthSettings.js"
 import { StudioAccessCell } from "../components/StudioAccessCell.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import {
   type Guard,
-  bodyMessage,
   isArrayOf,
   isJsonObject,
   isShape,
@@ -266,11 +266,12 @@ function UserForm({
 
 // ─── User Detail View ─────────────────────────────────────────────────────────
 
+/**
+ * The drawer's actions. The account ones are null on a Studio admin's account when the caller is
+ * not an admin: the server refuses them, so they are not offered.
+ */
 interface UserDetailActions {
-  onToggleDisable: () => void
-  onEdit: () => void
-  onDelete: () => void
-  onRevokeSession: (sessionId: string) => void
+  account: UserAccountActions | null
   /** Undefined when the viewer may not administer users, so the action is not offered. */
   onConfirmEmail: (() => void) | undefined
   /**
@@ -278,6 +279,14 @@ interface UserDetailActions {
    * sessions is scrolled to its bottom to reach them, out of sight of its top.
    */
   refusal: string | null
+}
+
+/** What may be done to one user's account from the drawer. */
+interface UserAccountActions {
+  onToggleDisable: () => void
+  onEdit: () => void
+  onDelete: () => void
+  onRevokeSession: (sessionId: string) => void
 }
 
 function UserDetail({
@@ -289,7 +298,7 @@ function UserDetail({
   sessions: AuthSession[]
   actions: UserDetailActions
 }): React.ReactElement {
-  const { onToggleDisable, onEdit, onDelete, onRevokeSession, onConfirmEmail, refusal } = actions
+  const { account, onConfirmEmail, refusal } = actions
   const userSessions = sessions.filter((s) => s.user_id === user.id)
 
   return (
@@ -406,9 +415,11 @@ function UserDetail({
                     <Td className="font-mono text-xs">{s.ip || "-"}</Td>
                     <Td className="text-xs text-muted-foreground">{new Date(s.updated_at).toLocaleString()}</Td>
                     <Td>
-                      <ConfirmButton size="xs" variant="destructive" ask={REVOKE_QUESTION} act={() => onRevokeSession(s.id)}>
-                        Revoke
-                      </ConfirmButton>
+                      {account ? (
+                        <ConfirmButton size="xs" variant="destructive" ask={REVOKE_QUESTION} act={() => account.onRevokeSession(s.id)}>
+                          Revoke
+                        </ConfirmButton>
+                      ) : null}
                     </Td>
                   </tr>
                 ))}
@@ -422,13 +433,17 @@ function UserDetail({
 
       {/* Actions */}
       {refusal !== null ? <RefusalNotice message={refusal} /> : null}
-      <div data-user-actions="" className="flex gap-2 flex-wrap">
-        <Button onClick={onEdit}>Edit User</Button>
-        {!user.confirmed && onConfirmEmail ? <Button onClick={onConfirmEmail}>Confirm email</Button> : null}
-        <UserBanToggle user={user} toggle={onToggleDisable} />
-        {/* No Impersonate action until Studio can run its own editors as the user (IMP1). */}
-        <DeleteUserAction email={user.email} onDelete={onDelete} />
-      </div>
+      {account ? (
+        <div data-user-actions="" className="flex gap-2 flex-wrap">
+          <Button onClick={account.onEdit}>Edit User</Button>
+          {!user.confirmed && onConfirmEmail ? <Button onClick={onConfirmEmail}>Confirm email</Button> : null}
+          <UserBanToggle user={user} toggle={account.onToggleDisable} />
+          {/* No Impersonate action until Studio can run its own editors as the user (IMP1). */}
+          <DeleteUserAction email={user.email} onDelete={account.onDelete} />
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">{ADMIN_ACCOUNT_LOCKED}</p>
+      )}
     </div>
   )
 }
@@ -593,12 +608,6 @@ const isUserList = isShape({ users: isArrayOf(isAuthUserResponse) })
 const isSessionList = isShape({ sessions: isArrayOf(isAuthSessionResponse) })
 const isCreatedUser = isShape({ id: optional(isUnknown) })
 
-/** The auth server's refusal, in its own words when it gave any. */
-function authErrorMessage(body: Record<string, unknown>): string {
-  const msg = body["msg"]
-  return (typeof msg === "string" ? msg : bodyMessage(body)) ?? "Auth API error"
-}
-
 /**
  * How a user signs in. A password user made outside the sign-up flow (`supatype admin create-user`)
  * has no identity row, so a user with an email and no identity signs in with email.
@@ -638,6 +647,69 @@ export function mapAuthUser(raw: AuthUserResponse): AuthUser {
   }
 }
 
+// ─── User list rows ───────────────────────────────────────────────────────────
+
+/** On a phone only Email and Actions are columns; these step aside below `md`. */
+const WIDE_ONLY = "hidden md:table-cell"
+
+/** The users table's header. Studio access is Studio's own namespace, kept apart from the app role. */
+function UserTableHead(): React.ReactElement {
+  const wide = ["Role", "Studio access", "Providers", "Confirmed", "Status", "MFA", "Last Sign-in", "Created"]
+  return (
+    <thead>
+      <tr className="border-b border-border">
+        <Th>Email</Th>
+        {wide.map((label) => <Th key={label} className={WIDE_ONLY}>{label}</Th>)}
+        <Th>Actions</Th>
+      </tr>
+    </thead>
+  )
+}
+
+/** Who may change Studio access, for the Studio access cell. */
+type StudioAccessView = Omit<React.ComponentProps<typeof StudioAccessCell>, "userId">
+
+/** What a row's buttons do; `toggle` is null where the account may not be changed. */
+interface UserRowActions {
+  open: () => void
+  toggle: (() => void) | null
+}
+
+function UserRow({ user, access, actions }: { user: AuthUser; access: StudioAccessView; actions: UserRowActions }): React.ReactElement {
+  // A column each on a wide screen, stacked under the email on a phone.
+  const studio = <StudioAccessCell userId={user.id} {...access} />
+  const status = user.disabled ? <Badge variant="red">Disabled</Badge> : <Badge variant="green">Active</Badge>
+  const mfa = user.mfa_factors.length
+  return (
+    <tr className="border-b border-border hover:bg-accent/50 cursor-pointer" onClick={actions.open}>
+      <Td className="font-medium">
+        {user.email}
+        <div className="md:hidden mt-1 flex flex-wrap items-center gap-2 font-normal">{studio}{status}</div>
+      </Td>
+      <Td className={WIDE_ONLY}><Badge variant={user.role === "admin" ? "indigo" : "green"}>{user.role}</Badge></Td>
+      <Td className={WIDE_ONLY}>{studio}</Td>
+      <Td className={WIDE_ONLY}>
+        <div className="flex gap-1">
+          {user.providers.map((p) => <Badge key={p.provider} variant="blue" className="text-[0.6rem]">{p.provider}</Badge>)}
+        </div>
+      </Td>
+      <Td className={WIDE_ONLY}>{user.confirmed ? "Yes" : <span className="text-yellow-400">Pending</span>}</Td>
+      <Td className={WIDE_ONLY}>{status}</Td>
+      <Td className={WIDE_ONLY}>
+        {mfa > 0 ? <Badge variant="indigo">{mfa} factor{mfa !== 1 ? "s" : ""}</Badge> : <span className="text-zinc-600 text-xs">None</span>}
+      </Td>
+      <Td className={`${WIDE_ONLY} text-xs text-muted-foreground`}>{user.last_sign_in ? new Date(user.last_sign_in).toLocaleDateString() : "Never"}</Td>
+      <Td className={`${WIDE_ONLY} text-xs text-muted-foreground`}>{new Date(user.created_at).toLocaleDateString()}</Td>
+      <Td>
+        <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+          {actions.toggle !== null ? <UserBanToggle compact user={user} toggle={actions.toggle} /> : null}
+          <Button size="xs" onClick={actions.open} title="View details">View</Button>
+        </div>
+      </Td>
+    </tr>
+  )
+}
+
 // ─── The user list, a page at a time ─────────────────────────────────────────
 
 /** The auth server's own default page size (`defaultPerPage` in its pagination.go). */
@@ -665,7 +737,7 @@ const NO_USERS: UserPage = { users: [], page: 0, total: 0 }
 
 /** `res` when the auth server accepted the request; its refusal, in its own words, when not. */
 async function acceptedResponse(res: Response): Promise<Response> {
-  if (!res.ok) throw new Error(authErrorMessage(await readJsonObject(res)))
+  if (!res.ok) throw new Error(authRefusalText(await readJsonObject(res)) ?? `The auth server refused the request (HTTP ${res.status}).`)
   return res
 }
 
@@ -760,6 +832,9 @@ export function AuthManagement(): React.ReactElement {
     : []
   // The same reading the auth Configuration page shows, so the form's default cannot disagree with it.
   const { settings: authSettings } = useAuthSettings()
+  // Whether the caller may change this user's account: not an admin's, unless the caller is one.
+  const accountOffered = (userId: string): boolean =>
+    adminAccountChangeOffered(studioAccess, studioMembers.roleFor(userId))
   const createOptions: CreateUserOptions = {
     studioRoles: grantableStudioRoles,
     autoConfirmDefault: authSettings?.mailer_autoconfirm ?? null,
@@ -1025,79 +1100,18 @@ export function AuthManagement(): React.ReactElement {
       {/* User list */}
       <Card className={loading ? "overflow-auto opacity-60 transition-opacity" : "overflow-auto"} aria-busy={loading}>
         <table className="w-full">
-          <thead>
-            <tr className="border-b border-border">
-              <Th>Email</Th>
-              <Th>Role</Th>
-              {/* Studio's own namespace, kept visibly apart from the application
-                  role above: conflating them is how granting an app role could
-                  hand out admin UI access. */}
-              <Th>Studio access</Th>
-              <Th>Providers</Th>
-              <Th>Confirmed</Th>
-              <Th>Status</Th>
-              <Th>MFA</Th>
-              <Th>Last Sign-in</Th>
-              <Th>Created</Th>
-              <Th>Actions</Th>
-            </tr>
-          </thead>
+          <UserTableHead />
           <tbody>
             {filtered.map((u) => (
-              <tr
+              <UserRow
                 key={u.id}
-                className="border-b border-border hover:bg-accent/50 cursor-pointer"
-                onClick={() => openUser(u)}
-              >
-                <Td className="font-medium">{u.email}</Td>
-                <Td>
-                  <Badge variant={u.role === "admin" ? "indigo" : "green"}>
-                    {u.role}
-                  </Badge>
-                </Td>
-                <Td>
-                  <StudioAccessCell
-                    userId={u.id}
-                    members={studioMembers}
-                    currentUserId={studioAccess.userId}
-                    canManage={studioAccess.canManageMembers}
-                  />
-                </Td>
-                <Td>
-                  <div className="flex gap-1">
-                    {u.providers.map((p) => (
-                      <Badge key={p.provider} variant="blue" className="text-[0.6rem]">{p.provider}</Badge>
-                    ))}
-                  </div>
-                </Td>
-                <Td>
-                  {u.confirmed ? "Yes" : <span className="text-yellow-400">Pending</span>}
-                </Td>
-                <Td>
-                  {u.disabled
-                    ? <Badge variant="red">Disabled</Badge>
-                    : <Badge variant="green">Active</Badge>
-                  }
-                </Td>
-                <Td>
-                  {u.mfa_factors.length > 0
-                    ? <Badge variant="indigo">{u.mfa_factors.length} factor{u.mfa_factors.length !== 1 ? "s" : ""}</Badge>
-                    : <span className="text-zinc-600 text-xs">None</span>
-                  }
-                </Td>
-                <Td className="text-xs text-muted-foreground">
-                  {u.last_sign_in ? new Date(u.last_sign_in).toLocaleDateString() : "Never"}
-                </Td>
-                <Td className="text-xs text-muted-foreground">{new Date(u.created_at).toLocaleDateString()}</Td>
-                <Td>
-                  <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-                    <UserBanToggle compact user={u} toggle={() => runAction(() => handleToggleDisable(u.id))} />
-                    <Button size="xs" onClick={() => openUser(u)} title="View details">
-                      View
-                    </Button>
-                  </div>
-                </Td>
-              </tr>
+                user={u}
+                access={{ members: studioMembers, currentUserId: studioAccess.userId, canManage: studioAccess.canManageMembers }}
+                actions={{
+                  open: () => openUser(u),
+                  toggle: accountOffered(u.id) ? () => runAction(() => handleToggleDisable(u.id)) : null,
+                }}
+              />
             ))}
             {filtered.length === 0 ? (
               <tr>
@@ -1135,10 +1149,12 @@ export function AuthManagement(): React.ReactElement {
             user={selectedUser}
             sessions={sessions}
             actions={{
-              onToggleDisable: () => runAction(() => handleToggleDisable(selectedUser.id)),
-              onEdit: () => setEditingUser(selectedUser),
-              onDelete: () => runAction(() => handleDeleteUser(selectedUser.id)),
-              onRevokeSession: (id) => runAction(() => handleRevokeSession(id)),
+              account: accountOffered(selectedUser.id) ? {
+                onToggleDisable: () => runAction(() => handleToggleDisable(selectedUser.id)),
+                onEdit: () => setEditingUser(selectedUser),
+                onDelete: () => runAction(() => handleDeleteUser(selectedUser.id)),
+                onRevokeSession: (id) => runAction(() => handleRevokeSession(id)),
+              } : null,
               // Both hosts gate the whole auth admin API on `manageUsers`.
               onConfirmEmail: userAdministrationOffered(studioAccess)
                 ? () => runAction(() => handleConfirmEmail(selectedUser.id))
