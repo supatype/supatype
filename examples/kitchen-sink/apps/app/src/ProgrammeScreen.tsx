@@ -2,6 +2,7 @@ import React from "react"
 import { useQuery } from "@supatype/react"
 import { Avatar, Badge, EmptyState, PageHeader, ProvesNote, Row, Skeleton, Note } from "./components/ui.js"
 import { localized } from "./lib/localized.js"
+import { headshotUrl } from "./lib/headshot.js"
 import type { TableRow } from "@supatype/client"
 
 type Talk = TableRow<"talk">
@@ -141,7 +142,7 @@ function Slot({
         <div className="ks-slot__meta">
           {speaker && (
             <Row gap={7}>
-              <Avatar name={speaker.name} src={headshotUrl(speaker)} size={24} />
+              <Avatar name={speaker.name} src={headshotUrl(speaker, 24)} size={24} />
               <span className="ks-small">{speaker.name}</span>
             </Row>
           )}
@@ -155,15 +156,6 @@ function Slot({
       </div>
     </article>
   )
-}
-
-/**
- * A public bucket's object is reachable by URL alone, which is what `accessMode: "public"` means.
- * The reference the column carries already holds that URL, so there is nothing to sign.
- */
-function headshotUrl(speaker: Speaker): string | null {
-  const asset = speaker.headshot as { url?: string } | null
-  return typeof asset?.url === "string" && asset.url !== "" ? asset.url : null
 }
 
 function formatDay(day: string): string {

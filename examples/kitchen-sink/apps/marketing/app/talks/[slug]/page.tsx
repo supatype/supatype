@@ -3,7 +3,7 @@ import type { Metadata } from "next"
 import { headers } from "next/headers"
 import { RichText } from "@supatype/react"
 import { createClient } from "@/lib/supatype-server"
-import { localized, publicImageUrl } from "@/lib/localized"
+import { localized } from "@/lib/localized"
 import type { TableRow } from "@supatype/client"
 type Talk = TableRow<"talk">
 type Speaker = TableRow<"speaker">
@@ -39,7 +39,10 @@ export async function generateMetadata({
     .limit(1)
   const speaker = (speakers as Speaker[] | null)?.[0]
 
-  const image = publicImageUrl(speaker?.headshot, { width: 1200, height: 630, resize: "cover", format: "webp" })
+  // A public bucket answers without a session, which is what a crawler fetching the og:image has.
+  const image = supatype.storage.publicUrl(speaker?.headshot, {
+    transform: { width: 1200, height: 630, resize: "cover", format: "webp" },
+  })
 
   return {
     title: talk.title,
